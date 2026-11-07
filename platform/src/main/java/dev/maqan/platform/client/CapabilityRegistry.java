@@ -30,6 +30,8 @@ public final class CapabilityRegistry {
             new Capability("maqan.atlas.worlds", "WORLDS", "Worlds", "◇",
                     "maqan_galactic_navigator",
                     "com.maqan.galacticnavigator.client.NavigatorScreen", 20),
+            new Capability("worldforge.map", "POLITICS", "World map", "⌖",
+                    "worldforge", "dev.worldforge.mod.client.MapScreen", 25),
 
             new Capability("worldforge.realms.politics", "POLITICS", "Politics", "♜",
                     "wf_realms", "dev.worldforge.mod.client.MapScreen", 30),
