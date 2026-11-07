@@ -111,6 +111,34 @@ Support keyboard navigation, focus indicators, screen-reader names for icon-only
 11. Every meaningful change must pass Windows x64 build and tests before being called complete.
 12. The platform shell is optional; Atlas and WorldForge remain independently installable.
 
+## 10A. Genre-specific interaction references
+
+The global shell must retain one visual identity while matching the information architecture and interaction priorities of the genre.
+
+### RTS — Warcraft III as the usability reference
+- Battlefield/map is the dominant canvas.
+- Bottom command area groups selected-unit portraits, selection count, command grid, abilities, cooldowns and contextual orders.
+- Minimap and resource/status strip remain compact and readable.
+- Selection groups, rally points, formations, attack/move/patrol/hold/guard and contextual right-click actions are first-class concepts.
+- Unit selection must not close inspectors or other panels. Commands are contextual capabilities supplied by the RTS provider.
+- Avoid copying Warcraft III's visual skin; borrow its clarity, command hierarchy and low-friction tactical interaction.
+
+### Politics — Crusader Kings III as the information architecture reference
+- Political map modes for realms, vassals, claims, culture, faith, diplomacy and control.
+- Realm/character/dynasty inspector with titles, succession, relationships, court and relevant actions.
+- Chronicle/event feed and time controls are accessible without replacing the map.
+- Context-sensitive actions depend on character, title, realm, relationship and provider capabilities.
+- Borrow the layered strategic information model, not its parchment/gold styling.
+
+### Settlements — Manor Lords as the spatial management reference
+- Settlement map and terrain remain dominant.
+- Building placement, plots, roads, services, production chains and logistics are map-first interactions.
+- Household/population, workforce, stockpiles, resources, needs and seasonal production are inspectable in compact panels.
+- Construction tools and placement previews are contextual; they must not turn the screen into a wall of permanent buttons.
+- Borrow its grounded spatial readability and settlement-scale planning, not its rustic visual skin.
+
+These are interaction and information-architecture references only. MAQAN retains the dark, restrained, futuristic visual language and its own icons, typography, panel geometry and motion.
+
 ## 11. Implementation sequence
 
 **Foundation:** theme tokens, capability registry, navigation registry, shared selection context, panel descriptors and layout persistence.
