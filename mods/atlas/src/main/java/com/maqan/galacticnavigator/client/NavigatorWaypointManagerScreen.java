@@ -32,7 +32,7 @@ public final class NavigatorWaypointManagerScreen extends Screen {
             NavigatorWaypoint w=all.get(i);
             int row=i-scroll, y=top+row*rowH;
             int index=i;
-            addRenderableWidget(Button.builder(Component.literal((w.visible?"\\u25CF ":"\\u25CB ")+shortName(w.name)),
+            addRenderableWidget(Button.builder(Component.literal((w.visible?"* ":"o ")+shortName(w.name)),
                     b->{NavigatorWaypoint fresh=find(w.id);if(fresh!=null){fresh.visible=!fresh.visible;NavigatorWaypointStore.update(fresh);}rebuildWidgets();})
                     .bounds(left,y,166,21).build());
             addRenderableWidget(Button.builder(Component.literal("EDIT"),
