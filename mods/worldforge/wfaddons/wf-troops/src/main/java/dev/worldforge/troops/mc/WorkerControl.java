@@ -24,9 +24,15 @@ final class WorkerControl {
         return false;
     }
 
+    static boolean mayControl(ServerPlayer p, Colony colony) {
+        return p.hasPermissions(2) || p.server.isSingleplayerOwner(p.getGameProfile())
+                || (colony != null && p.getUUID().toString().equals(colony.owner));
+    }
+
     static String command(ServerPlayer p, OrderPacket o) {
         ServerLevel lv = p.serverLevel();
         int done = 0;
+        boolean denied = false;
         String where = "";
         for (String id : o.ids()) {
             Entity e;
@@ -38,6 +44,7 @@ final class WorkerControl {
             if (!(e instanceof WFWorker w)) continue;
             Colony c = SettleMod.colony(w.colonyId);
             if (c == null || w.worker() == null) continue;
+            if (!mayControl(p, c)) { denied = true; continue; }
             if (o.action() == OrderPacket.RELEASE) {
                 try { c.s.unassign(w.workerId); done++; } catch (RuntimeException ignored) {}
                 continue;
@@ -56,7 +63,10 @@ final class WorkerControl {
                 where = ex.getMessage();
             }
         }
-        if (done == 0) return o.action() == OrderPacket.RELEASE ? "Рабочие не выбраны" : where.isEmpty() ? "Здесь нет здания своего поселения" : where;
+        if (done == 0) {
+            if (denied) return "Это поселение не ваше: приказы рабочим отдаёт его правитель";
+            return o.action() == OrderPacket.RELEASE ? "Рабочие не выбраны" : where.isEmpty() ? "Здесь нет здания своего поселения" : where;
+        }
         return o.action() == OrderPacket.RELEASE ? "Освобождено рабочих: " + done : "Отправлено в «" + where + "»: " + done;
     }
 }
