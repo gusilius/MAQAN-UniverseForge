@@ -71,6 +71,13 @@ public class RtsTest {
         ControlGroups cg = new ControlGroups();
         sel.set(List.of(1, 2, 3));
         cg.assign(1, sel);
+        sel.set(List.of(4));
+        cg.capture(1, sel, true);
+        ok(cg.size(1) == 4, "Shift+Ctrl capture adds to existing group");
+        cg.capture(1, sel, false);
+        ok(cg.size(1) == 1 && cg.members(1).contains(4), "Ctrl capture replaces group");
+        sel.set(List.of(1, 2, 3));
+        cg.assign(1, sel);
         sel.clear();
         ok(cg.recall(1, sel, s, 1000, false) == ControlGroups.Result.SELECTED && sel.size() == 3, "группа 1 вызвана");
         ok(cg.recall(1, sel, s, 1200, false) == ControlGroups.Result.CENTER, "двойное нажатие: камера");

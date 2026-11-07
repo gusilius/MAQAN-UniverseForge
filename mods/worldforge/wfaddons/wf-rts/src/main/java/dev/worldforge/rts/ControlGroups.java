@@ -23,6 +23,11 @@ public final class ControlGroups {
 
     private static void check(int n) { if (n < 1 || n > COUNT) throw new IllegalArgumentException("Группа 1.." + COUNT + ": " + n); }
 
+    /** Ctrl+цифра заменяет состав группы; Shift+Ctrl+цифра добавляет выбранное к существующей группе. */
+    public void capture(int n, Selection sel, boolean additive) {
+        if (additive) add(n, sel); else assign(n, sel);
+    }
+
     /** Ctrl+цифра: группа становится копией выбора (пустой выбор очищает группу). */
     public void assign(int n, Selection sel) {
         check(n);

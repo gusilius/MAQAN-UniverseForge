@@ -320,7 +320,7 @@ public class RtsHud extends Screen {
     private void selectionPanel(GuiGraphics g, int x, int y, int w, int h, int mx, int my) {
         if (sel.isEmpty()) {
             g.drawString(font, "Ничего не выбрано", x, y, WFUi.MUTED);
-            String[] help = {"ЛКМ - выбрать, рамка на миникарте - несколько", "ПКМ - приказ (рабочего на здание, строителя на стройку)", "Ctrl+1..9 - запомнить группу, 1..9 - вызвать", "Q W E R / A S D F / Z X C V - клетки приказов", ". - свободные рабочие, P - приоритеты работ"};
+            String[] help = {"ЛКМ - выбрать, рамка на миникарте - несколько", "ПКМ - приказ (рабочего на здание, строителя на стройку)", "Ctrl+1..9 - сохранить, Shift+Ctrl+1..9 - дополнить группу", "1..9 - вызвать, Shift+1..9 - добавить к выбору", "Q W E R / A S D F / Z X C V - клетки приказов", ". - свободные рабочие, P - приоритеты работ"};
             int yy = y + 16;
             for (String l : help) { g.drawString(font, l, x, yy, WFUi.MUTED); yy += 11; }
             groupsRow(g, x, y + h - 14, mx, my);
@@ -543,10 +543,11 @@ public class RtsHud extends Screen {
         }
         if (key >= 49 && key <= 57) {                                      // 1..9
             int n = key - 48;
-            if (ctrl) { groups.assign(n, sel); say("Группа " + n + ": " + groups.size(n)); }
-            else if (shift) groups.add(n, sel);
-            else {
-                ControlGroups.Result r = groups.recall(n, sel, s, System.currentTimeMillis(), false);
+            if (ctrl) {
+                groups.capture(n, sel, shift);
+                say((shift ? "Группа " + n + " дополнена: " : "Группа " + n + ": ") + groups.size(n));
+            } else {
+                ControlGroups.Result r = groups.recall(n, sel, s, System.currentTimeMillis(), shift);
                 if (r == ControlGroups.Result.EMPTY) say("Группа " + n + " пуста");
                 else if (r == ControlGroups.Result.CENTER) say("Камера: центр группы " + describeCenter());
             }
