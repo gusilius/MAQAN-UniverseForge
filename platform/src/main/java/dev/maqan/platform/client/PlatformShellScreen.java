@@ -351,7 +351,12 @@ public final class PlatformShellScreen extends Screen {
     }
 
     @Override public boolean mouseDragged(double mx,double my,int button,double dx,double dy) {
-        if(button!=0) return super.mouseDragged(mx,my,button,dx,dy);
+        if(button!=0) {
+            boolean handled = super.mouseDragged(mx,my,button,dx,dy);
+            if (profile == Profile.COSMOS && embeddedView != null)
+                handled = embeddedView.mouseDragged(mx,my,button,dx,dy) || handled;
+            return handled;
+        }
         if(draggingPanel!=null) {
             Panel p=panels.get(draggingPanel);
             p.x=(int)mx-pointerOffsetX; p.y=(int)my-pointerOffsetY;
@@ -422,8 +427,4 @@ public final class PlatformShellScreen extends Screen {
         resizeEmbeddedView();
     }
 
-    private void drawAmbientGrid(GuiGraphics g) {
-        for(int x=48;x<width;x+=48) g.fill(x,35,x+1,height,0x102B5266);
-        for(int y=35;y<height;y+=48) g.fill(44,y,width,y+1,0x102B5266);
-    }
 }
