@@ -252,28 +252,28 @@ public class NavigatorScreen extends Screen {
         toolsButton.setTooltip(Tooltip.create(Component.literal("Atlas tools and visual settings")));
         if (embeddedInMaqan) closeButton.visible = false;
 
-        int menuX = width - 286;
+        int menuX = width - 134;
         int menuY = height < 390 ? 42 : 68;
         toolsMenuAnchorY = menuY;
         focusButton = addToolButton("FOCUS", () -> focusSelected(), menuX, menuY);
         centerButton = addToolButton("CENTER VIEW", () -> {
             panX = 0; panY = 0; zoom = 1.0; cameraYaw = 0.55; cameraPitch = 0.38; cameraTargetId = null;
-        }, menuX + 78, menuY);
+        }, menuX + 36, menuY);
         filterButton = addToolButton("FILTER: ALL", () -> {
             bodyFilter = (bodyFilter + 1) % 17;
             filterButton.setMessage(Component.literal("FILTER: " + filterName()));
             listScroll = 0;
-        }, menuX + 156, menuY);
+        }, menuX + 72, menuY);
         mapModeButton = addToolButton("MAP: HYBRID", () -> {
             mapMode = (mapMode + 1) % 3;
             mapModeButton.setMessage(Component.literal(mapModeName()));
         }, menuX, menuY + 26);
         listButton = addToolButton("LIST −", () -> {
             showList = !showList; NavigatorPreferences.setShowListPanel(showList); listButton.setMessage(Component.literal(showList ? "LIST −" : "LIST +"));
-        }, menuX + 78, menuY + 26);
+        }, menuX + 36, menuY + 26);
         infoButton = addToolButton("INFO −", () -> {
             showInfo = !showInfo; NavigatorPreferences.setShowInfoPanel(showInfo); infoButton.setMessage(Component.literal(showInfo ? "INFO −" : "INFO +"));
-        }, menuX + 156, menuY + 26);
+        }, menuX + 72, menuY + 26);
         addToolButton("RELOAD DATA", () -> {
             if (minecraft != null) minecraft.reloadResourcePacks();
         }, menuX, menuY + 48);
@@ -292,17 +292,17 @@ public class NavigatorScreen extends Screen {
             NavigatorPreferences.setSpeedMode("manual");
             NavigatorPreferences.setRotationSpeed(NavigatorPreferences.rotationSpeed() + 0.05);
             refreshSpeedButtons();
-        }, menuX + 78, menuY + 92);
+        }, menuX + 36, menuY + 92);
         orbitMinusButton = addToolButton("ORB −", () -> {
             NavigatorPreferences.setSpeedMode("manual");
             NavigatorPreferences.setOrbitSpeed(NavigatorPreferences.orbitSpeed() - 0.05);
             refreshSpeedButtons();
-        }, menuX + 78, menuY + 114);
+        }, menuX + 36, menuY + 114);
         orbitPlusButton = addToolButton("ORB +", () -> {
             NavigatorPreferences.setSpeedMode("manual");
             NavigatorPreferences.setOrbitSpeed(NavigatorPreferences.orbitSpeed() + 0.05);
             refreshSpeedButtons();
-        }, menuX + 156, menuY + 114);
+        }, menuX + 72, menuY + 114);
         atlasModeButton = addToolButton("ATLAS: SYSTEM", () -> {
             atlasMode = (atlasMode + 1) % 6;
             sectorPath = null;
@@ -313,26 +313,26 @@ public class NavigatorScreen extends Screen {
             listScroll = 0;
             panX = 0; panY = 0; zoom = 1.0;
             refreshButtons();
-        }, menuX + 78, menuY + 136, 118);
+        }, menuX + 36, menuY + 136, 118);
         atlasLayerButtons.clear();
         atlasLayerButtons.add(addToolButton("ORBITS ON", () -> {
             NavigatorPreferences.toggleAtlasOrbits(); refreshAtlasLayerButtons();
         }, menuX, menuY + 158, 88));
         atlasLayerButtons.add(addToolButton("LABELS ON", () -> {
             NavigatorPreferences.toggleAtlasLabels(); refreshAtlasLayerButtons();
-        }, menuX + 96, menuY + 158, 88));
+        }, menuX + 36, menuY + 158, 88));
         atlasLayerButtons.add(addToolButton("SECTORS ON", () -> {
             NavigatorPreferences.toggleAtlasSectors(); refreshAtlasLayerButtons();
-        }, menuX + 190, menuY + 158, 88));
+        }, menuX + 72, menuY + 158, 88));
         atlasLayerButtons.add(addToolButton("GUIDES ON", () -> {
             NavigatorPreferences.toggleAtlasGuides(); refreshAtlasLayerButtons();
         }, menuX, menuY + 180, 88));
         atlasLayerButtons.add(addToolButton("LINKS OFF", () -> {
             NavigatorPreferences.toggleAtlasSectorLinks(); refreshAtlasLayerButtons();
-        }, menuX + 96, menuY + 180, 88));
+        }, menuX + 36, menuY + 180, 88));
         atlasLayerButtons.add(addToolButton("PACKS OFF", () -> {
             NavigatorPreferences.toggleAtlasPacks(); refreshAtlasLayerButtons();
-        }, menuX + 190, menuY + 180, 88));
+        }, menuX + 72, menuY + 180, 88));
         atlasLayerButtons.add(addToolButton("ROUTES ON", () -> {
             NavigatorPreferences.toggleAtlasRoutes(); refreshAtlasLayerButtons();
         }, menuX, menuY + 202, 88));
@@ -342,31 +342,31 @@ public class NavigatorScreen extends Screen {
         }, menuX, menuY + 224, 88);
         atlasScaleButton = addToolButton("BODY SIZE: 1.00x", () -> {
             NavigatorPreferences.cycleAtlasScale(); refreshAtlasVisualButtons();
-        }, menuX + 96, menuY + 224, 88);
+        }, menuX + 36, menuY + 224, 88);
         atlasTextureButton = addToolButton("TEXTURES ON", () -> {
             NavigatorPreferences.toggleAtlasTextures(); refreshAtlasVisualButtons();
-        }, menuX + 190, menuY + 224, 88);
+        }, menuX + 72, menuY + 224, 88);
         atlasGlowButton = addToolButton("STAR GLOW ON", () -> {
             NavigatorPreferences.toggleAtlasStarGlow(); refreshAtlasVisualButtons();
         }, menuX, menuY + 246, 88);
         Button atlasSpacingButton = addToolButton("ORBIT GAP", () -> {
             NavigatorPreferences.cycleAtlasOrbitSpacing(); refreshAtlasVisualButtons();
-        }, menuX + 96, menuY + 246, 88);
+        }, menuX + 36, menuY + 246, 88);
         addToolButton("ROUTE PLAN", () -> {
             if (minecraft != null) MaqanScreenHost.open(minecraft, new NavigatorTravelScreen(this));
-        }, menuX + 190, menuY + 246, 88);
+        }, menuX + 72, menuY + 246, 88);
         addToolButton("SPACE MOTION", () -> {
             if (minecraft != null) MaqanScreenHost.open(minecraft, new CosmicOrbitSettingsScreen(this));
         }, menuX, menuY + 268, 118);
         addToolButton("PLAYER MARKER", () -> {
             if (minecraft != null) MaqanScreenHost.open(minecraft, new NavigatorPlayerMarkerScreen(this));
-        }, menuX + 122, menuY + 268, 156);
+        }, menuX + 36, menuY + 268, 156);
         addToolButton("WAYPOINTS", () -> {
             if (minecraft != null) MaqanScreenHost.open(minecraft, new NavigatorWaypointManagerScreen(this));
         }, menuX, menuY + 290, 136);
         addToolButton("NEW MARKER", () -> {
             if (minecraft != null) MaqanScreenHost.open(minecraft, new NavigatorWaypointEditorScreen(this));
-        }, menuX + 142, menuY + 290, 136);
+        }, menuX + 36, menuY + 290, 136);
         addToolButton("SURFACE MAP", () -> {
             if (minecraft != null && minecraft.level != null)
                 MaqanScreenHost.open(minecraft, new NavigatorSurfaceMapScreen(minecraft.level.dimension().location().toString(), this));
@@ -437,35 +437,82 @@ public class NavigatorScreen extends Screen {
     }
 
     private Button addToolButton(String label, Runnable action, int x, int y, int buttonWidth) {
-        Button button = addRenderableWidget(Button.builder(Component.literal(label), b -> action.run())
-                .bounds(x, y, buttonWidth, 20).build());
+        Button button = addRenderableWidget(Button.builder(Component.literal(toolIcon(label)), b -> action.run())
+                .bounds(x, y, 26, 20).build());
+        button.setTooltip(Tooltip.create(Component.literal(label)));
         toolButtons.add(button);
         return button;
     }
 
+    private String toolIcon(String label) {
+        String key = label.toUpperCase(Locale.ROOT);
+        if (key.startsWith("FOCUS")) return "⌖";
+        if (key.startsWith("CENTER")) return "◎";
+        if (key.startsWith("FILTER")) return "▽";
+        if (key.startsWith("MAP:")) return "▣";
+        if (key.startsWith("LIST")) return "☷";
+        if (key.startsWith("INFO")) return "◈";
+        if (key.startsWith("RELOAD")) return "↻";
+        if (key.startsWith("SPEED")) return "⏵";
+        if (key.startsWith("ROT −")) return "↶";
+        if (key.startsWith("ROT +")) return "↷";
+        if (key.startsWith("ORB −")) return "⤺";
+        if (key.startsWith("ORB +")) return "⤻";
+        if (key.startsWith("ATLAS:")) return "✧";
+        if (key.startsWith("ORBITS")) return "◌";
+        if (key.startsWith("LABELS")) return "Aa";
+        if (key.startsWith("SECTORS")) return "▧";
+        if (key.startsWith("GUIDES")) return "⊞";
+        if (key.startsWith("LINKS")) return "⌁";
+        if (key.startsWith("PACKS")) return "▤";
+        if (key.startsWith("ROUTES") || key.startsWith("ROUTE PLAN")) return "⇢";
+        if (key.startsWith("DETAIL")) return "◉";
+        if (key.startsWith("BODY SIZE")) return "◫";
+        if (key.startsWith("TEXTURES")) return "▦";
+        if (key.startsWith("STAR GLOW")) return "✦";
+        if (key.startsWith("ORBIT GAP")) return "↔";
+        if (key.startsWith("SPACE MOTION")) return "⟳";
+        if (key.startsWith("PLAYER MARKER")) return "⌖";
+        if (key.startsWith("WAYPOINTS")) return "⚑";
+        if (key.startsWith("NEW MARKER")) return "＋";
+        if (key.startsWith("SURFACE MAP")) return "▥";
+        return "◇";
+    }
+
     private void refreshAtlasLayerButtons() {
         if (atlasLayerButtons.size() < 5) return;
-        atlasLayerButtons.get(0).setMessage(Component.literal("ORBITS " + (NavigatorPreferences.atlasOrbits() ? "ON" : "OFF")));
-        atlasLayerButtons.get(1).setMessage(Component.literal("LABELS " + (NavigatorPreferences.atlasLabels() ? "ON" : "OFF")));
-        atlasLayerButtons.get(2).setMessage(Component.literal("SECTORS " + (NavigatorPreferences.atlasSectors() ? "ON" : "OFF")));
-        atlasLayerButtons.get(3).setMessage(Component.literal("GUIDES " + (NavigatorPreferences.atlasGuides() ? "ON" : "OFF")));
-        atlasLayerButtons.get(4).setMessage(Component.literal("LINKS " + (NavigatorPreferences.atlasSectorLinks() ? "ON" : "OFF")));
-        if (atlasLayerButtons.size() > 5)
-            atlasLayerButtons.get(5).setMessage(Component.literal("PACKS " + (NavigatorPreferences.atlasPacks() ? "ON" : "OFF")));
-        if (atlasLayerButtons.size() > 6)
-            atlasLayerButtons.get(6).setMessage(Component.literal("ROUTES " + (NavigatorPreferences.atlasRoutes() ? "ON" : "OFF")));
+        String[] icons = {"◌", "Aa", "▧", "⊞", "⌁", "▤", "⇢"};
+        String[] names = {"Orbits", "Labels", "Sectors", "Guides", "Sector links", "Datapack labels", "Routes"};
+        boolean[] enabled = {NavigatorPreferences.atlasOrbits(), NavigatorPreferences.atlasLabels(),
+                NavigatorPreferences.atlasSectors(), NavigatorPreferences.atlasGuides(),
+                NavigatorPreferences.atlasSectorLinks(), NavigatorPreferences.atlasPacks(),
+                NavigatorPreferences.atlasRoutes()};
+        for (int i = 0; i < atlasLayerButtons.size() && i < icons.length; i++) {
+            atlasLayerButtons.get(i).setMessage(Component.literal(icons[i]));
+            atlasLayerButtons.get(i).setTooltip(Tooltip.create(Component.literal(
+                    names[i] + (enabled[i] ? " · ON" : " · OFF"))));
+        }
     }
 
     private void refreshAtlasVisualButtons() {
         if (atlasDetailButton == null) return;
-        atlasDetailButton.setMessage(Component.literal("DETAIL: " + NavigatorPreferences.atlasDetailName()));
-        atlasScaleButton.setMessage(Component.literal("BODY SIZE: " + NavigatorPreferences.atlasScaleName()));
-        atlasTextureButton.setMessage(Component.literal("TEXTURES " + (NavigatorPreferences.atlasTextures() ? "ON" : "OFF")));
-        atlasGlowButton.setMessage(Component.literal("STAR GLOW " + (NavigatorPreferences.atlasStarGlow() ? "ON" : "OFF")));
-        for (Button button : atlasVisualButtons) {
-            if (button.getMessage().getString().startsWith("ORBIT GAP")
-                    || button.getMessage().getString().startsWith("GAP:"))
-                button.setMessage(Component.literal("GAP: " + NavigatorPreferences.atlasOrbitSpacingName()));
+        atlasDetailButton.setMessage(Component.literal("◉"));
+        atlasDetailButton.setTooltip(Tooltip.create(Component.literal(
+                "Detail · " + NavigatorPreferences.atlasDetailName())));
+        atlasScaleButton.setMessage(Component.literal("◫"));
+        atlasScaleButton.setTooltip(Tooltip.create(Component.literal(
+                "Body size · " + NavigatorPreferences.atlasScaleName())));
+        atlasTextureButton.setMessage(Component.literal("▦"));
+        atlasTextureButton.setTooltip(Tooltip.create(Component.literal(
+                "Textures · " + (NavigatorPreferences.atlasTextures() ? "ON" : "OFF"))));
+        atlasGlowButton.setMessage(Component.literal("✦"));
+        atlasGlowButton.setTooltip(Tooltip.create(Component.literal(
+                "Star glow · " + (NavigatorPreferences.atlasStarGlow() ? "ON" : "OFF"))));
+        if (atlasVisualButtons.size() > 4) {
+            Button spacing = atlasVisualButtons.get(4);
+            spacing.setMessage(Component.literal("↔"));
+            spacing.setTooltip(Tooltip.create(Component.literal(
+                    "Orbit spacing · " + NavigatorPreferences.atlasOrbitSpacingName())));
         }
     }
 
@@ -1313,9 +1360,9 @@ public class NavigatorScreen extends Screen {
         if (toolsOpen) {
             int menuTop = toolsMenuTop();
             int toolsBottom = toolsMenuBottom();
-            g.fill(width - 292, menuTop, width - 8, toolsBottom, 0xD9080D1B);
-            g.fill(width - 292, menuTop, width - 8, menuTop + 1, 0x805F7399);
-            g.fill(width - 293, menuTop + 1, width - 292, toolsBottom, 0x503B4966);
+            g.fill(width - 140, menuTop, width - 8, toolsBottom, 0xD9080D1B);
+            g.fill(width - 140, menuTop, width - 8, menuTop + 1, 0x805F7399);
+            g.fill(width - 141, menuTop + 1, width - 140, toolsBottom, 0x503B4966);
             g.fill(width - 8, menuTop + 1, width - 7, toolsBottom, 0x503B4966);
         }
         super.render(g, mx, my, partial);
