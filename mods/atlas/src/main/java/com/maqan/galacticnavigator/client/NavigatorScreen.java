@@ -322,7 +322,7 @@ public class NavigatorScreen extends Screen {
             selectedId = null;
             selectedNodeId = null;
             listScroll = 0;
-            panX = 0; panY = 0; zoom = 1.0;
+            // Preserve camera position and zoom when changing Atlas emphasis.
             refreshButtons();
         }, menuX + 36, menuY + 136, 118);
         atlasLayerButtons.clear();
