@@ -348,23 +348,23 @@ public class NavigatorScreen extends Screen {
             NavigatorPreferences.cycleAtlasOrbitSpacing(); refreshAtlasVisualButtons();
         }, menuX + 96, menuY + 246, 88);
         addToolButton("ROUTE PLAN", () -> {
-            if (minecraft != null) minecraft.setScreen(new NavigatorTravelScreen(this));
+            if (minecraft != null) MaqanScreenHost.open(minecraft, new NavigatorTravelScreen(this));
         }, menuX + 190, menuY + 246, 88);
         addToolButton("SPACE MOTION", () -> {
-            if (minecraft != null) minecraft.setScreen(new CosmicOrbitSettingsScreen(this));
+            if (minecraft != null) MaqanScreenHost.open(minecraft, new CosmicOrbitSettingsScreen(this));
         }, menuX, menuY + 268, 118);
         addToolButton("PLAYER MARKER", () -> {
-            if (minecraft != null) minecraft.setScreen(new NavigatorPlayerMarkerScreen(this));
+            if (minecraft != null) MaqanScreenHost.open(minecraft, new NavigatorPlayerMarkerScreen(this));
         }, menuX + 122, menuY + 268, 156);
         addToolButton("WAYPOINTS", () -> {
-            if (minecraft != null) minecraft.setScreen(new NavigatorWaypointManagerScreen(this));
+            if (minecraft != null) MaqanScreenHost.open(minecraft, new NavigatorWaypointManagerScreen(this));
         }, menuX, menuY + 290, 136);
         addToolButton("NEW MARKER", () -> {
-            if (minecraft != null) minecraft.setScreen(new NavigatorWaypointEditorScreen(this));
+            if (minecraft != null) MaqanScreenHost.open(minecraft, new NavigatorWaypointEditorScreen(this));
         }, menuX + 142, menuY + 290, 136);
         addToolButton("SURFACE MAP", () -> {
             if (minecraft != null && minecraft.level != null)
-                minecraft.setScreen(new NavigatorSurfaceMapScreen(minecraft.level.dimension().location().toString(), this));
+                MaqanScreenHost.open(minecraft, new NavigatorSurfaceMapScreen(minecraft.level.dimension().location().toString(), this));
         }, menuX, menuY + 312, 136);
         atlasVisualButtons.add(atlasDetailButton);
         atlasVisualButtons.add(atlasScaleButton);
@@ -498,7 +498,7 @@ public class NavigatorScreen extends Screen {
         String systemId = GalaxyCatalog.text(body, "system_id", universe);
         String bodyId = GalaxyCatalog.text(body, "catalog_id", target);
         String bodyName = GalaxyCatalog.text(body, "name", node.label);
-        minecraft.setScreen(new CosmicBodyOrbitSettingsScreen(this, systemId, bodyId, bodyName));
+        MaqanScreenHost.open(minecraft, new CosmicBodyOrbitSettingsScreen(this, systemId, bodyId, bodyName));
     }
 
     private void cycleUniverse() {
@@ -1509,7 +1509,7 @@ public class NavigatorScreen extends Screen {
             String bodyName = GalaxyCatalog.text(body, "name", node.label);
             contextOpen = false;
             if (minecraft != null)
-                minecraft.setScreen(new CosmicBodyOrbitSettingsScreen(this, systemId, bodyId, bodyName));
+                MaqanScreenHost.open(minecraft, new CosmicBodyOrbitSettingsScreen(this, systemId, bodyId, bodyName));
             return;
         }
         contextOpen = false;
