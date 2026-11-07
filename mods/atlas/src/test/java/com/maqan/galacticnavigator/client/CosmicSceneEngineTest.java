@@ -176,6 +176,81 @@ class CosmicSceneEngineTest {
     }
 
     @Test
+    void coordinateResolverCombinesOnlyCompatibleCanonicalFrames() {
+        JsonObject systemData = new JsonObject();
+        systemData.add("universe_system_pos", new com.google.gson.JsonArray());
+        systemData.getAsJsonArray("universe_system_pos").add(100);
+        systemData.getAsJsonArray("universe_system_pos").add(20);
+        systemData.getAsJsonArray("universe_system_pos").add(-50);
+
+        CosmicSceneEngine.SceneBody planet = new CosmicSceneEngine.SceneBody(
+                "earth", "Earth", "planet", "star",
+                new CosmicSceneEngine.Vector3(10, 5, -2),
+                CosmicSceneEngine.PlacementSource.DATAPACK, new JsonObject());
+        CosmicSceneEngine.SceneSystem system = new CosmicSceneEngine.SceneSystem(
+                "sol", "Sol", "g", "Galaxy", "s", "Sector",
+                new CosmicSceneEngine.Vector3(100, 20, -50),
+                CosmicSceneEngine.PlacementSource.DATAPACK, List.of(planet), systemData);
+        CosmicSceneEngine.SceneSnapshot snapshot = new CosmicSceneEngine.SceneSnapshot(
+                "u", "Universe", 1, 0, List.of(), List.of(), List.of(system),
+                1, 1, 0, 0);
+
+        CosmicSceneEngine.PositionResult resolved = snapshot.bodyUniversePosition("sol", "earth")
+                .orElseThrow();
+        assertEquals(CosmicSceneEngine.PositionFrame.UNIVERSE, resolved.frame());
+        assertTrue(resolved.canonical());
+        assertEquals(new CosmicSceneEngine.Vector3(110, 25, -52), resolved.position());
+        assertEquals(CosmicSceneEngine.PositionFrame.SYSTEM_LOCAL,
+                snapshot.bodySystemPosition("sol", "earth").orElseThrow().frame());
+    }
+
+    @Test
+    void coordinateResolverNeverPromotesGalaxyOrSchematicCoordinatesToUniverse() {
+        JsonObject galaxyData = new JsonObject();
+        galaxyData.add("galaxy_system_pos", new com.google.gson.JsonArray());
+        galaxyData.getAsJsonArray("galaxy_system_pos").add(40);
+        galaxyData.getAsJsonArray("galaxy_system_pos").add(0);
+        galaxyData.getAsJsonArray("galaxy_system_pos").add(70);
+        CosmicSceneEngine.SceneBody planet = new CosmicSceneEngine.SceneBody(
+                "planet", "Planet", "planet", "",
+                new CosmicSceneEngine.Vector3(5, 0, 0),
+                CosmicSceneEngine.PlacementSource.DATAPACK, new JsonObject());
+        CosmicSceneEngine.SceneSystem galaxyPlaced = new CosmicSceneEngine.SceneSystem(
+                "galaxy-system", "Galaxy System", "g", "Galaxy", "s", "Sector",
+                new CosmicSceneEngine.Vector3(40, 0, 70),
+                CosmicSceneEngine.PlacementSource.DATAPACK, List.of(planet), galaxyData);
+        CosmicSceneEngine.SceneSystem schematic = new CosmicSceneEngine.SceneSystem(
+                "schematic", "Schematic", "g", "Galaxy", "s", "Sector",
+                new CosmicSceneEngine.Vector3(1, 0, 1),
+                CosmicSceneEngine.PlacementSource.SCHEMATIC, List.of(planet), new JsonObject());
+        CosmicSceneEngine.SceneSnapshot snapshot = new CosmicSceneEngine.SceneSnapshot(
+                "u", "Universe", 1, 0, List.of(), List.of(),
+                List.of(galaxyPlaced, schematic), 2, 1, 1, 0);
+
+        assertEquals(CosmicSceneEngine.PositionFrame.GALAXY,
+                snapshot.bodyPosition("galaxy-system", "planet").orElseThrow().frame());
+        assertTrue(snapshot.bodyUniversePosition("galaxy-system", "planet").isEmpty());
+        assertTrue(snapshot.bodyPosition("schematic", "planet").isEmpty());
+    }
+
+    @Test
+    void coordinateResolverRejectsUnplacedAndNonFiniteBodyCoordinates() {
+        CosmicSceneEngine.SceneBody unplaced = new CosmicSceneEngine.SceneBody(
+                "unknown", "Unknown", "planet", "",
+                new CosmicSceneEngine.Vector3(Double.NaN, 0, 0),
+                CosmicSceneEngine.PlacementSource.UNPLACED, new JsonObject());
+        CosmicSceneEngine.SceneSystem system = new CosmicSceneEngine.SceneSystem(
+                "sol", "Sol", "g", "Galaxy", "s", "Sector",
+                new CosmicSceneEngine.Vector3(10, 0, 0),
+                CosmicSceneEngine.PlacementSource.DATAPACK, List.of(unplaced), new JsonObject());
+        CosmicSceneEngine.SceneSnapshot snapshot = new CosmicSceneEngine.SceneSnapshot(
+                "u", "Universe", 1, 0, List.of(), List.of(), List.of(system),
+                1, 1, 0, 0);
+        assertTrue(snapshot.bodySystemPosition("sol", "unknown").isEmpty());
+        assertTrue(snapshot.bodyUniversePosition("sol", "unknown").isEmpty());
+    }
+
+    @Test
     void placementVectorsRejectNonFiniteCoordinates() {
         assertTrue(new CosmicSceneEngine.Vector3(1, 2, 3).finite());
         assertFalse(new CosmicSceneEngine.Vector3(Double.NaN, 0, 0).finite());
