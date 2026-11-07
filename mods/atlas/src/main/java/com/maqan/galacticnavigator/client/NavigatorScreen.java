@@ -226,7 +226,6 @@ public class NavigatorScreen extends Screen {
         int left = embeddedInMaqan ? 54 : 14;
         int barY = embeddedInMaqan ? 58 : 42;
         int searchWidth = Math.max(48, Math.min(210, width - (width < 440 ? 245 : 310)));
-        boolean compactToolbar = width < 440;
         search = new EditBox(font, left, barY, searchWidth, 20, Component.literal("Search MAQAN catalogue"));
         search.setHint(Component.literal("Search systems and planets"));
         search.setValue(previousSearch);
@@ -243,7 +242,7 @@ public class NavigatorScreen extends Screen {
                 .bounds(x, barY, 26, 20).build());
         x += 30;
         openButton = addRenderableWidget(Button.builder(Component.literal("↗"), b -> openSelected())
-                .bounds(x, barY, compactToolbar ? 34 : 48, 20).build());
+                .bounds(x, barY, 26, 20).build());
         toolsButton = addRenderableWidget(Button.builder(Component.literal("⚙"), b -> {
             toolsOpen = !toolsOpen;
             if (toolsOpen) { contextOpen = false; systemPickerOpen = false; }
@@ -388,7 +387,7 @@ public class NavigatorScreen extends Screen {
         refreshSpeedButtons();
 
         int footerGap = 6;
-        int travelWidth = 66;
+        int travelWidth = 28;
         int footerX = 14;
         if (width < 560) {
             int dimensionY = height - 48;
