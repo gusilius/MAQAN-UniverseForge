@@ -2,6 +2,7 @@ package dev.worldforge.settle.mc;
 
 import com.mojang.logging.LogUtils;
 import dev.worldforge.mod.Json;
+import dev.worldforge.settle.Building;
 import dev.worldforge.settle.Defs;
 import dev.worldforge.settle.Settlement;
 import net.minecraft.core.BlockPos;
