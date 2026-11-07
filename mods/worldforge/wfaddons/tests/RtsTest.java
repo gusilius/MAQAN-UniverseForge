@@ -246,6 +246,10 @@ public class RtsTest {
         ok(sanitized.rects(g).stream().noneMatch(rect -> rect.kind == Selection.Rect.WORKER && rect.id == badMapWorker.id), "рабочий с некорректными координатами не попадает в выбор карты");
         badMapWorker.x = oldMapX; badMapWorker.z = oldMapZ;
         Building b0 = g.buildings.get(0);
+        // Invalid entries are skipped by rects() and must not shift hit-test indices.
+        g.buildings.add(0, null);
+        ok(mv.pick(g, mv.sx(b0.x), mv.sy(b0.z)).kind == Target.Kind.BUILDING, "миникарта: пропуск повреждённой записи не ломает hit-test");
+        g.buildings.remove(0);
         ok(mv.pick(g, mv.sx(b0.x), mv.sy(b0.z)).kind == Target.Kind.BUILDING, "миникарта: здание под точкой");
         Worker mw = g.workers.get(0);
         Target wt = mv.pick(g, mv.sx(mw.x), mv.sy(mw.z));
