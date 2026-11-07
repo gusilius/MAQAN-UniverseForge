@@ -63,6 +63,26 @@ class WorldForgeMapGeometryTest {
     }
 
     @Test
+    void labelPointStaysInsideConcaveTerritoryInsteadOfUsingOutsideCentroid() {
+        List<WorldForgeMapGeometry.Point> uShape = List.of(
+                new WorldForgeMapGeometry.Point(1, 1),
+                new WorldForgeMapGeometry.Point(9, 1),
+                new WorldForgeMapGeometry.Point(9, 9),
+                new WorldForgeMapGeometry.Point(6, 9),
+                new WorldForgeMapGeometry.Point(6, 4),
+                new WorldForgeMapGeometry.Point(4, 4),
+                new WorldForgeMapGeometry.Point(4, 9),
+                new WorldForgeMapGeometry.Point(1, 9));
+
+        WorldForgeMapGeometry.Point label =
+                WorldForgeMapGeometry.interiorLabelPoint(uShape, 0, 0, 10, 10);
+
+        assertTrue(label.x() >= 1 && label.x() <= 4
+                || label.x() >= 6 && label.x() <= 9);
+        assertTrue(label.y() >= 1 && label.y() <= 9);
+    }
+
+    @Test
     void degenerateAndOutsidePolygonsAreHandledSafely() {
         assertTrue(WorldForgeMapGeometry.clipPolygon(List.of(
                 new WorldForgeMapGeometry.Point(-5, -5),
