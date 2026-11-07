@@ -26,6 +26,7 @@ public final class NavigatorWorldForgeMapStore {
     private static final int MAX_TERRITORIES = 10_000;
     private static final int MAX_FEATURES = 50_000;
     private static final int MAX_VERTICES_PER_TERRITORY = 4_096;
+    private static final int MAX_RINGS_PER_TERRITORY = 1_024;
 
     private static volatile WorldForgeMapSnapshot snapshot;
     private static volatile String status = "WorldForge snapshot not loaded";
@@ -119,14 +120,23 @@ public final class NavigatorWorldForgeMapStore {
             territory.dimension_id = required(territory.dimension_id, "territory.dimension_id");
             if (!territoryIds.add(territory.id))
                 throw new IllegalArgumentException("Duplicate territory id: " + territory.id);
-            if (territory.vertices == null || territory.vertices.size() < 3
-                    || territory.vertices.size() > MAX_VERTICES_PER_TERRITORY)
-                throw new IllegalArgumentException("Invalid vertex count for territory " + territory.id);
-            territory.fill_alpha = Math.max(0, Math.min(160, territory.fill_alpha));
-            for (WorldForgeMapSnapshot.Vertex vertex : territory.vertices) {
-                if (vertex == null || !finite(vertex.x) || !finite(vertex.y) || !finite(vertex.z))
-                    throw new IllegalArgumentException("Non-finite territory vertex: " + territory.id);
+            if (territory.vertices == null) territory.vertices = new ArrayList<>();
+            if (territory.rings == null) territory.rings = new ArrayList<>();
+            if (territory.rings.isEmpty() && territory.vertices.size() >= 3)
+                territory.rings.add(territory.vertices);
+            if (territory.rings.isEmpty() || territory.rings.size() > MAX_RINGS_PER_TERRITORY)
+                throw new IllegalArgumentException("Invalid ring count for territory " + territory.id);
+            for (List<WorldForgeMapSnapshot.Vertex> ring : territory.rings) {
+                if (ring == null || ring.size() < 3 || ring.size() > MAX_VERTICES_PER_TERRITORY)
+                    throw new IllegalArgumentException("Invalid vertex count for territory " + territory.id);
+                for (WorldForgeMapSnapshot.Vertex vertex : ring)
+                    if (vertex == null || !finite(vertex.x) || !finite(vertex.y) || !finite(vertex.z))
+                        throw new IllegalArgumentException("Non-finite territory vertex: " + territory.id);
             }
+            territory.fill_alpha = Math.max(0, Math.min(160, territory.fill_alpha));
+            if (territory.attributes == null) territory.attributes = new java.util.LinkedHashMap<>();
+            if (territory.attributes.size() > 64)
+                throw new IllegalArgumentException("Too many attributes on territory " + territory.id);
         }
 
         Set<String> featureIds = new HashSet<>();

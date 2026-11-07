@@ -224,33 +224,35 @@ public final class NavigatorSurfaceMapScreen extends Screen {
                 NavigatorWorldForgeMapStore.features(dimension);
         int drawnTerritories=0,drawnFeatures=0;
         for(WorldForgeMapSnapshot.Territory territory:territories){
-            if(territory.vertices==null||territory.vertices.size()<3)continue;
-            List<WorldForgeMapGeometry.Point> points=new ArrayList<>(territory.vertices.size());
-            for(WorldForgeMapSnapshot.Vertex vertex:territory.vertices){
-                double[] projected=project(vertex.x/16.0,vertex.z/16.0,cell,
-                        left,top,right,bottom,player);
-                points.add(new WorldForgeMapGeometry.Point(projected[0],projected[1]));
+            List<List<WorldForgeMapGeometry.Point>> rings=new ArrayList<>();
+            List<List<WorldForgeMapSnapshot.Vertex>> sourceRings=territory.rings;
+            if(sourceRings==null||sourceRings.isEmpty()){
+                if(territory.vertices!=null&&!territory.vertices.isEmpty())sourceRings=List.of(territory.vertices);
             }
-            List<WorldForgeMapGeometry.Point> clipped=WorldForgeMapGeometry.clipPolygon(
-                    points,left,top,right,bottom);
-            if(clipped.size()<3)continue;
+            if(sourceRings==null)continue;
+            for(List<WorldForgeMapSnapshot.Vertex> sourceRing:sourceRings){
+                if(sourceRing==null||sourceRing.size()<3)continue;
+                List<WorldForgeMapGeometry.Point> points=new ArrayList<>(sourceRing.size());
+                for(WorldForgeMapSnapshot.Vertex vertex:sourceRing){
+                    double[] projected=project(vertex.x/16.0,vertex.z/16.0,cell,left,top,right,bottom,player);
+                    points.add(new WorldForgeMapGeometry.Point(projected[0],projected[1]));
+                }
+                List<WorldForgeMapGeometry.Point> clipped=WorldForgeMapGeometry.clipPolygon(points,left,top,right,bottom);
+                if(clipped.size()>=3)rings.add(clipped);
+            }
+            if(rings.isEmpty())continue;
             int color=territory.id.equals(selectedWorldForgeEntityId)
                     ?0xFF65E6FF:(territory.color==0?0xFF69B8E8:(territory.color|0xFF000000));
             int alpha=Math.max(0,Math.min(160,territory.fill_alpha));
-            if(alpha>0){
-                int fill=(alpha<<24)|(color&0x00FFFFFF);
-                for(WorldForgeMapGeometry.Span span:WorldForgeMapGeometry.scanlineSpans(
-                        clipped,left,top,right,bottom))
-                    g.fill(span.xStart(),span.y(),span.xEndExclusive(),span.y()+1,fill);
-            }
-            for(int i=0;i<clipped.size();i++){
-                WorldForgeMapGeometry.Point a=clipped.get(i);
-                WorldForgeMapGeometry.Point b=clipped.get((i+1)%clipped.size());
+            if(alpha>0)for(WorldForgeMapGeometry.Span span:
+                    WorldForgeMapGeometry.scanlineSpans(rings,left,top,right,bottom))
+                g.fill(span.xStart(),span.y(),span.xEndExclusive(),span.y()+1,(alpha<<24)|(color&0x00FFFFFF));
+            for(List<WorldForgeMapGeometry.Point> ring:rings)for(int i=0;i<ring.size();i++){
+                WorldForgeMapGeometry.Point a=ring.get(i),b=ring.get((i+1)%ring.size());
                 drawLine(g,(int)Math.round(a.x()),(int)Math.round(a.y()),
                         (int)Math.round(b.x()),(int)Math.round(b.y()),color);
             }
-            WorldForgeMapGeometry.Point label=WorldForgeMapGeometry.interiorLabelPoint(
-                    clipped,left,top,right,bottom);
+            WorldForgeMapGeometry.Point label=WorldForgeMapGeometry.interiorLabelPoint(rings,left,top,right,bottom);
             if(insideMap(label.x(),label.y(),left,top,right,bottom))
                 g.drawString(font,territory.name,(int)Math.round(label.x())+3,
                         (int)Math.round(label.y())-font.lineHeight/2,color,false);
@@ -309,21 +311,33 @@ public final class NavigatorSurfaceMapScreen extends Screen {
                 NavigatorWorldForgeMapStore.territories(dimension);
         for(int index=territories.size()-1;index>=0;index--){
             WorldForgeMapSnapshot.Territory territory=territories.get(index);
-            if(territory.vertices==null||territory.vertices.size()<3)continue;
-            List<WorldForgeMapGeometry.Point> polygon=new ArrayList<>(territory.vertices.size());
-            for(WorldForgeMapSnapshot.Vertex vertex:territory.vertices){
-                double[] point=project(vertex.x/16.0,vertex.z/16.0,cell,left,top,right,bottom,player);
-                polygon.add(new WorldForgeMapGeometry.Point(point[0],point[1]));
+            List<List<WorldForgeMapGeometry.Point>> rings=new ArrayList<>();
+            List<List<WorldForgeMapSnapshot.Vertex>> sourceRings=territory.rings;
+            if(sourceRings==null||sourceRings.isEmpty()){
+                if(territory.vertices!=null&&!territory.vertices.isEmpty())sourceRings=List.of(territory.vertices);
             }
-            if(!WorldForgeMapGeometry.containsPoint(polygon,mouseX,mouseY))continue;
+            if(sourceRings==null)continue;
+            for(List<WorldForgeMapSnapshot.Vertex> sourceRing:sourceRings){
+                if(sourceRing==null||sourceRing.size()<3)continue;
+                List<WorldForgeMapGeometry.Point> ring=new ArrayList<>(sourceRing.size());
+                for(WorldForgeMapSnapshot.Vertex vertex:sourceRing){
+                    double[] point=project(vertex.x/16.0,vertex.z/16.0,cell,left,top,right,bottom,player);
+                    ring.add(new WorldForgeMapGeometry.Point(point[0],point[1]));
+                }
+                rings.add(ring);
+            }
+            if(!WorldForgeMapGeometry.containsPointRings(rings,mouseX,mouseY))continue;
             selectedWorldForgeEntityId=territory.id;
             List<String> context=new ArrayList<>();
-            addContext(context,"realm",territory.realm_id);
+            addContext(context,"realm",territory.realm_name);
             addContext(context,"government",territory.government);
             addContext(context,"administrative title",territory.administrative_title_id);
             addContext(context,"control",territory.control_status);
+            addContext(context,"race",territory.race_id);
+            addContext(context,"culture",territory.culture_id);
+            if(territory.attributes!=null)addContext(context,"ruler",territory.attributes.get("realm_ruler"));
             NavigatorPlatformSelectionBridge.publish("worldforge:territory/"+territory.id,
-                    "territory",territory.name,dimension,String.join(" · ",context));
+                    "province",territory.name,dimension,String.join(" · ",context));
             return true;
         }
         return false;

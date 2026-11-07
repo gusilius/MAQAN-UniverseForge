@@ -45,6 +45,8 @@ public final class WorldForgeMapSnapshot {
         public int color,fill_alpha=38;
         /** Legacy single contour retained for existing snapshot producers. */
         public List<Vertex> vertices=new ArrayList<>();
+        public List<List<Vertex>> rings=new ArrayList<>();
+        public Map<String,String> attributes=new LinkedHashMap<>();
         /** Outer contours, islands and holes; renderer uses even-odd fill. */
         public List<List<Vertex>> rings=new ArrayList<>();
         public Map<String,String> attributes=new LinkedHashMap<>();

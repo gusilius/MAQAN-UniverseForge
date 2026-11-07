@@ -46,8 +46,69 @@ public final class WorldForgeSnapshotExporter {
                 ? (MapChunkGenerator) rawGenerator : null;
 
         if (map.titles != null) {
+            Map<Integer, List<List<WorldForgeProvinceContourBuilder.Point>>> contours =
+                    WorldForgeProvinceContourBuilder.build(map.titles.pixels(), map.titles.w, map.titles.h);
+            for (TitleData.Title province : map.titles.allTitles()) {
+                if (province == null || province.tier != 0) continue;
+                List<List<WorldForgeProvinceContourBuilder.Point>> provinceRings = contours.get(province.id);
+                if (provinceRings == null || provinceRings.isEmpty()) continue;
+                TitleData.Realm realm = map.titles.realmOf(province);
+                Map<String, String> attrs = new LinkedHashMap<>();
+                attrs.put("map_id", map.name);
+                attrs.put("province_numeric_id", Integer.toString(province.id));
+                attrs.put("area_blocks", Long.toString(province.areaBlocks));
+                attrs.put("area_pct", Double.toString(province.areaPct));
+                attrs.put("neighbors", joinIds(map.titles, province.neighbors));
+                attrs.put("parent_title_id", province.parent > 0 && map.titles.get(province.parent) != null
+                        ? map.titles.get(province.parent).key : "");
+                copyProperties(attrs, "title.", province.props);
+
+                Map<String, Object> territory = new LinkedHashMap<>();
+                territory.put("id", "worldforge:" + map.name + ":province:" + province.key);
+                territory.put("name", safe(province.name));
+                territory.put("realm_id", realm == null ? "" : safe(realm.id));
+                territory.put("realm_name", realm == null ? "" : safe(realm.name));
+                territory.put("dimension_id", dimensionId);
+                territory.put("administrative_title_id", safe(province.key));
+                territory.put("color", province.rgb);
+                territory.put("fill_alpha", 38);
+                if (realm != null) {
+                    territory.put("government", stringProperty(realm.props, "government"));
+                    territory.put("control_status", stringProperty(realm.props, "control_status"));
+                    territory.put("race_id", stringProperty(realm.props, "race"));
+                    territory.put("culture_id", stringProperty(realm.props, "culture"));
+                    attrs.put("realm_ruler", safe(realm.ruler));
+                    attrs.put("realm_relation", safe(realm.relation));
+                    attrs.put("realm_overlord_id", safe(realm.overlordId));
+                    copyProperties(attrs, "realm.", realm.props);
+                }
+                territory.put("attributes", attrs);
+                List<Object> rings = new ArrayList<>();
+                for (List<WorldForgeProvinceContourBuilder.Point> ring : provinceRings) {
+                    List<Object> vertices = new ArrayList<>();
+                    for (WorldForgeProvinceContourBuilder.Point point : ring) {
+                        double x = (point.x() - map.titles.w * 0.5) * map.titles.bpp;
+                        double z = (point.z() - map.titles.h * 0.5) * map.titles.bpp;
+                        int y = generator == null ? map.seaLevel
+                                : generator.surfaceAt((int) Math.round(x), (int) Math.round(z)).getY();
+                        Map<String, Object> vertex = new LinkedHashMap<>();
+                        vertex.put("x", x);
+                        vertex.put("y", y);
+                        vertex.put("z", z);
+                        vertices.add(vertex);
+                    }
+                    rings.add(vertices);
+                }
+                territory.put("rings", rings);
+                territory.put("vertices", rings.get(0));
+                territories.add(territory);
+            }
+
+            // Keep higher-level titles as selectable map features, linked to the province layer.
             for (TitleData.Title title : map.titles.allTitles()) {
-                if (title == null || title.key == null || title.key.isBlank()) continue;
+                if (title == null || title.tier == 0 || title.key == null || title.key.isBlank()) continue;
+                BlockPos capital = generator == null ? new BlockPos(title.capX, map.seaLevel, title.capZ)
+                        : generator.surfaceAt(title.capX, title.capZ);
                 Map<String, String> attrs = new LinkedHashMap<>();
                 attrs.put("map_id", map.name);
                 attrs.put("title_id", title.key);
@@ -60,37 +121,21 @@ public final class WorldForgeSnapshotExporter {
                 attrs.put("children", joinIds(map.titles, title.children));
                 attrs.put("neighbors", joinIds(map.titles, title.neighbors));
                 copyProperties(attrs, "title.", title.props);
-
                 String realmId = "";
-                String realmName = "";
-                if (title.tier == 0) {
+                if (title.tier == 1) {
                     TitleData.Realm realm = map.titles.realmOf(title);
                     if (realm != null) {
-                        realmId = realm.id == null ? "" : realm.id;
-                        realmName = realm.name == null ? "" : realm.name;
+                        realmId = safe(realm.id);
+                        attrs.put("realm_name", safe(realm.name));
                         attrs.put("realm_ruler", safe(realm.ruler));
-                        attrs.put("realm_relation", safe(realm.relation));
                         attrs.put("realm_overlord_id", safe(realm.overlordId));
+                        attrs.put("realm_relation", safe(realm.relation));
                         copyProperties(attrs, "realm.", realm.props);
                     }
                 }
-                BlockPos capital = generator == null
-                        ? new BlockPos(title.capX, map.seaLevel, title.capZ)
-                        : generator.surfaceAt(title.capX, title.capZ);
-                Map<String, Object> feature = feature(
-                        "worldforge:" + map.name + ":title:" + title.key,
-                        title.tier == 0 ? "province" : "administrative_title",
-                        title.name, dimensionId, title.capX, capital.getY(), title.capZ,
-                        title.rgb, realmId, "", attrs);
-                if (!realmName.isBlank()) attrs.put("realm_name", realmName);
-                if (title.tier == 0) {
-                    TitleData.Realm realm = map.titles.realmOf(title);
-                    if (realm != null) {
-                        feature.put("race_id", stringProperty(realm.props, "race"));
-                        feature.put("culture_id", stringProperty(realm.props, "culture"));
-                    }
-                }
-                features.add(feature);
+                features.add(feature("worldforge:" + map.name + ":title:" + title.key,
+                        "administrative_title", title.name, dimensionId, title.capX, capital.getY(),
+                        title.capZ, title.rgb, realmId, "", attrs));
             }
         }
 
