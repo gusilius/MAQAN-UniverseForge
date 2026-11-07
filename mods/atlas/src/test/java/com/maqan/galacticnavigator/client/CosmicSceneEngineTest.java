@@ -82,6 +82,43 @@ class CosmicSceneEngineTest {
     }
 
     @Test
+    void spatialHashFindsBoundaryNeighboursAndExcludesUnplacedSystems() {
+        CosmicSceneEngine.SceneSystem left = new CosmicSceneEngine.SceneSystem(
+                "left", "Left", "g", "Galaxy", "s", "Sector",
+                new CosmicSceneEngine.Vector3(255.5, 0, 0),
+                CosmicSceneEngine.PlacementSource.DATAPACK, List.of(), new JsonObject());
+        CosmicSceneEngine.SceneSystem right = new CosmicSceneEngine.SceneSystem(
+                "right", "Right", "g", "Galaxy", "s", "Sector",
+                new CosmicSceneEngine.Vector3(256.5, 0, 0),
+                CosmicSceneEngine.PlacementSource.DATAPACK, List.of(), new JsonObject());
+        CosmicSceneEngine.SceneSystem unplaced = new CosmicSceneEngine.SceneSystem(
+                "unplaced", "Unplaced", "g", "Galaxy", "s", "Sector",
+                CosmicSceneEngine.Vector3.ZERO,
+                CosmicSceneEngine.PlacementSource.UNPLACED, List.of(), new JsonObject());
+        CosmicSceneEngine.SceneSnapshot snapshot = new CosmicSceneEngine.SceneSnapshot(
+                "u", "Universe", 1, 0, List.of(), List.of(),
+                List.of(left, right, unplaced), 0, 2, 0, 1);
+
+        assertEquals(List.of(left, right), snapshot.systemsWithin(
+                new CosmicSceneEngine.Vector3(256, 0, 0), 1));
+        assertTrue(snapshot.systemsWithin(CosmicSceneEngine.Vector3.ZERO, 0).isEmpty());
+    }
+
+    @Test
+    void spatialHashLargeRadiusFallsBackWithoutLosingResults() {
+        CosmicSceneEngine.SceneSystem distant = new CosmicSceneEngine.SceneSystem(
+                "distant", "Distant", "g", "Galaxy", "s", "Sector",
+                new CosmicSceneEngine.Vector3(1_000_000, -2_000_000, 3_000_000),
+                CosmicSceneEngine.PlacementSource.DATAPACK, List.of(), new JsonObject());
+        CosmicSceneEngine.SceneSnapshot snapshot = new CosmicSceneEngine.SceneSnapshot(
+                "u", "Universe", 1, 0, List.of(), List.of(),
+                List.of(distant), 0, 1, 0, 0);
+
+        assertEquals(List.of(distant), snapshot.systemsWithin(
+                CosmicSceneEngine.Vector3.ZERO, 10_000_000));
+    }
+
+    @Test
     void placementVectorsRejectNonFiniteCoordinates() {
         assertTrue(new CosmicSceneEngine.Vector3(1, 2, 3).finite());
         assertFalse(new CosmicSceneEngine.Vector3(Double.NaN, 0, 0).finite());
