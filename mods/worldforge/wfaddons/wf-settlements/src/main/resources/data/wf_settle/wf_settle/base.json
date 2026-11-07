@@ -5,7 +5,8 @@
     "stone": "Камень",
     "food": "Еда",
     "iron": "Железо",
-    "tools": "Инструменты"
+    "tools": "Инструменты",
+    "cloth": "Ткань"
   },
   "professions": {
     "lumberjack": {
@@ -183,31 +184,6 @@
       "jobs": {
         "guard": 2
       }
-    },
-    "barracks": {
-      "name": "Казармы",
-      "category": "military",
-      "cost": {
-        "wood": 45,
-        "planks": 20,
-        "stone": 25,
-        "tools": 4
-      },
-      "work": 100,
-      "size": [
-        9,
-        7
-      ],
-      "blueprint": "wf_settle:barracks",
-      "requires": [
-        "sawmill"
-      ],
-      "jobs": {
-        "trainer": 1,
-        "guard": 2
-      },
-      "upkeep": 1.5,
-      "safety": 2
     },
     "archery_range": {
       "name": "Стрельбище",
