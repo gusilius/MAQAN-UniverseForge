@@ -275,7 +275,7 @@ public class TroopsMod {
         e.getDispatcher().register(Commands.literal("wftroops")
                 .then(Commands.literal("types").executes(c -> {
                     for (TroopDefs.Unit u : DEFS.units.values())
-                        c.getSource().sendSuccess(() -> Component.literal(u.id() + ": " + u.name() + " [" + u.role() + "] " + u.cost() + " зол."), false);
+                        c.getSource().sendSuccess(() -> Component.literal(u.id() + ": " + u.name() + " [" + u.role() + "] " + u.cost() + " зол. | здание: " + DEFS.recruitmentBuilding(u)), false);
                     return 1;
                 }))
                 .then(Commands.literal("raise")
@@ -316,46 +316,97 @@ public class TroopsMod {
     /** Наём отряда: платит игрок золотыми самородками (оператор в творческом режиме - бесплатно) или казна государства (realm, только оператор). */
     private static int raise(CommandSourceStack src, String type, int n, String realm) {
         ServerPlayer p;
-        try {
-            p = src.getPlayerOrException();
-        } catch (Exception ex) {
-            src.sendFailure(Component.literal("Только для игрока"));
+        try { p = src.getPlayerOrException(); }
+        catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
+
+        TroopDefs.Unit unit = DEFS.units.get(type);
+        if (unit == null) { src.sendFailure(Component.literal("Нет такого типа: " + type)); return 0; }
+        if (!ModList.get().isLoaded("wf_settle")) {
+            src.sendFailure(Component.literal("Для найма требуется wf_settle и построенное военное здание."));
             return 0;
         }
-        TroopDefs.Unit u = DEFS.units.get(type);
-        if (u == null) { src.sendFailure(Component.literal("Нет такого типа: " + type)); return 0; }
-        int cost = u.cost() * n;
-        if (!realm.isEmpty()) {
-            if (!TreasuryApi.spend(realm, cost, "Наём: " + u.name())) { src.sendFailure(Component.literal("В казне " + realm + " не хватает золота: нужно " + cost)); return 0; }
-        } else if (!p.isCreative()) {
-            int have = 0;
-            for (var st : p.getInventory().items) if (st.is(Items.GOLD_NUGGET)) have += st.getCount();
-            if (have < cost) { src.sendFailure(Component.literal("Нужно " + cost + " золотых самородков, есть " + have)); return 0; }
-            int left = cost;
-            for (var st : p.getInventory().items) if (left > 0 && st.is(Items.GOLD_NUGGET)) { int take = Math.min(left, st.getCount()); st.shrink(take); left -= take; }
-        }
-        ServerLevel lv = p.serverLevel();
-        List<String> ids = new ArrayList<>();
-        List<TroopEntity> made = new ArrayList<>();
-        List<Formations.Slot> slots = Formations.slots(Formations.Type.BLOCK, n, 1.6);
-        List<double[]> pos = Formations.place(slots, p.getX(), p.getZ(), p.getYRot() + 180);
+
         String owner = p.getUUID().toString();
-        for (int i = 0; i < n; i++) {
-            TroopEntity t = TROOP.get().create(lv);
-            if (t == null) continue;
-            int x = (int) Math.floor(pos.get(i)[0]), z = (int) Math.floor(pos.get(i)[1]);
-            int y = lv.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
-            t.moveTo(pos.get(i)[0], y, pos.get(i)[1], p.getYRot(), 0);
-            t.setup(u, owner);
-            t.realm = realm;
-            made.add(t);
-            ids.add(t.getUUID().toString());
+        ServerLevel level = p.serverLevel();
+        String requiredBuilding = DEFS.recruitmentBuilding(unit);
+        dev.worldforge.settle.mc.SettleMod.RecruitmentSite site =
+                dev.worldforge.settle.mc.SettleMod.recruitmentSite(level, owner, requiredBuilding, p.getX(), p.getZ());
+        if (site == null) {
+            src.sendFailure(Component.literal("Нет доступного готового здания «" + requiredBuilding
+                    + "» с назначенным военным инструктором в радиусе 128 блоков."));
+            return 0;
         }
-        Squads.Squad s = SQUADS.create(owner, null, ids);
-        s.realm = realm; s.cx = p.getX(); s.cz = p.getZ();
-        for (TroopEntity t : made) { t.setSquadId(s.id); lv.addFreshEntity(t); }
-        src.sendSuccess(() -> Component.literal("Нанят " + s.name + ": " + made.size() + " × " + u.name() + " за " + cost), false);
-        return made.size();
+
+        Map<String, Integer> totalSupply = new LinkedHashMap<>();
+        for (var entry : DEFS.recruitmentCost(unit).entrySet()) {
+            long total = (long) entry.getValue() * n;
+            if (total > Integer.MAX_VALUE) { src.sendFailure(Component.literal("Слишком большой заказ")); return 0; }
+            totalSupply.put(entry.getKey(), (int) total);
+        }
+        if (!site.colony().s.canPay(totalSupply)) {
+            src.sendFailure(Component.literal("В поселении «" + site.colony().s.name
+                    + "» не хватает материалов и припасов для найма: " + totalSupply));
+            return 0;
+        }
+
+        int goldCost = Math.multiplyExact(unit.cost(), n);
+        if (!realm.isEmpty() && !TreasuryApi.spend(realm, goldCost, "Наём: " + unit.name())) {
+            src.sendFailure(Component.literal("В казне " + realm + " не хватает золота: нужно " + goldCost));
+            return 0;
+        }
+        if (realm.isEmpty() && !p.isCreative()) {
+            int have = 0;
+            for (var stack : p.getInventory().items) if (stack.is(Items.GOLD_NUGGET)) have += stack.getCount();
+            if (have < goldCost) {
+                src.sendFailure(Component.literal("Нужно " + goldCost + " золотых самородков, есть " + have));
+                return 0;
+            }
+        }
+
+        List<Formations.Slot> slots = Formations.slots(Formations.Type.BLOCK, n, 1.6);
+        List<double[]> positions = Formations.place(slots, site.spawn().getX() + 0.5, site.spawn().getZ() + 0.5, p.getYRot() + 180);
+        List<TroopEntity> recruits = new ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            TroopEntity troop = TROOP.get().create(level);
+            if (troop == null) {
+                src.sendFailure(Component.literal("Не удалось подготовить всех новобранцев; ресурсы не списаны."));
+                return 0;
+            }
+            int x = (int) Math.floor(positions.get(i)[0]), z = (int) Math.floor(positions.get(i)[1]);
+            int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+            troop.moveTo(positions.get(i)[0], y, positions.get(i)[1], p.getYRot(), 0);
+            troop.setup(unit, owner);
+            troop.realm = realm.isEmpty() ? site.colony().s.id : realm;
+            recruits.add(troop);
+        }
+
+        if (!dev.worldforge.settle.mc.SettleMod.payRecruitment(site, totalSupply)) {
+            src.sendFailure(Component.literal("Склад изменился во время найма; ресурсы и отряд не созданы."));
+            return 0;
+        }
+        if (realm.isEmpty() && !p.isCreative()) {
+            int left = goldCost;
+            for (var stack : p.getInventory().items) if (left > 0 && stack.is(Items.GOLD_NUGGET)) {
+                int take = Math.min(left, stack.getCount());
+                stack.shrink(take);
+                left -= take;
+            }
+        }
+
+        List<String> ids = new ArrayList<>();
+        for (TroopEntity troop : recruits) ids.add(troop.getUUID().toString());
+        Squads.Squad squad = SQUADS.create(owner, null, ids);
+        squad.realm = recruits.get(0).realm;
+        squad.cx = site.spawn().getX();
+        squad.cz = site.spawn().getZ();
+        for (TroopEntity troop : recruits) {
+            troop.setSquadId(squad.id);
+            level.addFreshEntity(troop);
+        }
+        src.sendSuccess(() -> Component.literal("Из «" + site.building().def.name + "» выпущен отряд «"
+                + squad.name + "»: " + recruits.size() + " × " + unit.name() + "; золото "
+                + goldCost + ", снабжение " + totalSupply), false);
+        return recruits.size();
     }
 
     /** Призыв из армии wf-army: люди снимаются с армии, 1 солдат = Muster.SCALE человек; государство армии платит жалованье. */
