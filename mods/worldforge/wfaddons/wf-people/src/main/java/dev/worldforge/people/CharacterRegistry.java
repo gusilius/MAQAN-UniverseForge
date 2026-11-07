@@ -88,8 +88,23 @@ public final class CharacterRegistry {
 
     public void marry(String a, String b) {
         Character x = require(a), y = require(b);
+        if (x == y) throw new IllegalArgumentException("Персонаж не может вступить в брак с самим собой");
+        if (!x.alive || !y.alive) throw new IllegalStateException("Умерший персонаж не может вступить в брак");
+        clearDeceasedSpouse(x);
+        clearDeceasedSpouse(y);
+        if (!x.spouse.isEmpty()) throw new IllegalStateException(x.name + " уже состоит в браке");
+        if (!y.spouse.isEmpty()) throw new IllegalStateException(y.name + " уже состоит в браке");
         x.spouse = y.id;
         y.spouse = x.id;
+    }
+
+    /** A deceased or missing spouse does not permanently prevent remarriage. */
+    private void clearDeceasedSpouse(Character character) {
+        if (character.spouse.isEmpty()) return;
+        Character spouse = byId.get(character.spouse);
+        if (spouse != null && spouse.alive) return;
+        if (spouse != null && character.id.equals(spouse.spouse)) spouse.spouse = "";
+        character.spouse = "";
     }
 
     public Character addChild(Character father, Character mother, String name, String gender, int year) {

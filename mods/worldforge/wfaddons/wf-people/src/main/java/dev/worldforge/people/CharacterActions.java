@@ -98,7 +98,9 @@ public final class CharacterActions {
         if (!actorOk) mw = "У вас нет живого персонажа";
         else if (!target.alive) mw = deadWhy;
         else if (self) mw = selfWhy;
-        else if (!target.spouse.isEmpty()) mw = target.name + " уже в браке";
+        else if (isCurrentlyMarried(reg, actor)) mw = actor.name + " уже состоит в браке";
+        else if (isCurrentlyMarried(reg, target)) mw = target.name + " уже состоит в браке";
+        else if (!isAdult(actor, year)) mw = actor.name + " ещё не достиг " + MARRIAGE_AGE + " лет";
         else if (!isAdult(target, year)) mw = target.name + " ещё не достиг " + MARRIAGE_AGE + " лет";
         else if (!mayDiplomacy(defs, actor)) mw = "Нужна роль с правом дипломатии";
         out.add(new Action("marry", "Устроить брак", mw == null, mw));
@@ -113,6 +115,12 @@ public final class CharacterActions {
         else if (!isAdult(target, year)) gw = target.name + " ещё слишком молод";
         out.add(new Action("grant", "Пожаловать титул", gw == null, gw));
         return out;
+    }
+
+    private static boolean isCurrentlyMarried(CharacterRegistry reg, Character character) {
+        if (character == null || character.spouse == null || character.spouse.isEmpty()) return false;
+        Character spouse = reg.get(character.spouse);
+        return spouse != null && spouse.alive;
     }
 
     /** Варианты назначения для подменю: роли государств, где actor вправе назначать. Занятые и неподходящие даны с причиной. */
