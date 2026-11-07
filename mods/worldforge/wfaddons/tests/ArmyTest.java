@@ -57,6 +57,7 @@ public class ArmyTest {
         e.raise(A, "archer", 20);
         ok(e.gold(A) < g0, "профессионалы стоят золота");
         ok(fails(() -> e.raise(A, "knight", 100_000)), "не хватает золота");
+        ok(fails(() -> e.hire("missing_realm", "cavalry", 10)), "нельзя нанимать войско государству без земель");
         Army merc = e.hire(A, "cavalry", 10);
         ok(merc.mercenary && merc != ar, "наёмники отдельной армией");
         ok(e.armiesOf(A).size() == 2 && ar.count("archer") == 20, "армии: войско и наёмники");

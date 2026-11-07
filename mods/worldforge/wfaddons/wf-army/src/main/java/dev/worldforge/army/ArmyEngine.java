@@ -137,10 +137,12 @@ public final class ArmyEngine {
         UnitType u = types.get(type);
         if (u == null) throw new TitleEditor.EditException("Нет типа отряда " + type);
         if (n <= 0) throw new TitleEditor.EditException("Нужно положительное число");
+        int cap = capital(realm);
+        if (cap == 0) throw new TitleEditor.EditException("У государства нет земель для размещения наёмников");
         double c = Math.max(1, cost(type, n, true));
         if (gold(realm) < c) throw new TitleEditor.EditException("Не хватает золота: " + (int) gold(realm) + " из " + Math.ceil(c));
         gold.put(realm, gold(realm) - c);
-        Army a = armyAt(realm, capital(realm), true);
+        Army a = armyAt(realm, cap, true);
         a.add(type, n);
         say(realmName(realm) + " нанимает " + n + " " + u.name.toLowerCase() + " (наёмники)");
         return a;
