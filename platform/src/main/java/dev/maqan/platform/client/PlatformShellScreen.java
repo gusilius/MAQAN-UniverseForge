@@ -1,6 +1,6 @@
 package dev.maqan.platform.client;
 
-import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.logging.LogUtils;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
@@ -8,11 +8,15 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraftforge.fml.ModList;
 
+import org.slf4j.Logger;
+
+import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
 import java.util.List;
 
 /** First functional pass of the shared MAQAN desktop shell. Gameplay data stays in its owning mod. */
 public final class PlatformShellScreen extends Screen {
+    private static final Logger LOGGER = LogUtils.getLogger();
     private static final int BG = 0xF0080D14, BAR = 0xF0101823, PANEL = 0xE5101923;
     private static final int EDGE = 0xFF34495B, CYAN = 0xFF69CDE2, GOLD = 0xFF69CDE2;
     private String workspace = "ATLAS";
@@ -29,23 +33,53 @@ public final class PlatformShellScreen extends Screen {
     @Override protected void init() {
         controls.clear();
         int top = 8;
-        addButton("ATLAS", 12, top, 82, () -> workspace = "ATLAS");
-        addButton("WORLDFORGE", 98, top, 112, () -> workspace = "WORLDFORGE");
+        addButton("ATLAS", 12, top, 82, this::openAtlas);
+        addButton("WORLDFORGE", 98, top, 112, this::openWorldForge);
         addButton("WORKSPACE", 216, top, 94, () -> workspace = "WORKSPACE");
         addButton(leftOpen ? "‹" : "›", 8, 44, 24, () -> { leftOpen = !leftOpen; rebuildShellControls(); });
         addButton(rightOpen ? "›" : "‹", width - 32, 44, 24, () -> { rightOpen = !rightOpen; rebuildShellControls(); });
-        String[] dock = {"NAV", "MAP", "ECON", "POLITICS", "ARMY", "JOURNAL"};
+        String[] dock = {"NAV", "WORLD MAP"};
         int dw = Math.min(76, Math.max(48, (width - 40) / dock.length));
         int total = dw * dock.length;
         int start = (width - total) / 2;
         for (int i = 0; i < dock.length; i++) {
             final String item = dock[i];
-            addButton(item, start + i * dw, height - 34, dw - 4, () -> { windowOpen = true; workspace = item.equals("NAV") || item.equals("MAP") ? "ATLAS" : "WORLDFORGE"; });
+            addButton(item, start + i * dw, height - 34, dw - 4, item.equals("NAV") ? this::openAtlas : this::openWorldForge);
         }
         addButton("×", width - 32, 8, 24, this::onClose);
     }
 
     private void rebuildShellControls() { clearWidgets(); init(); }
+
+    private void openAtlas() {
+        workspace = "ATLAS";
+        openModule("maqan_galactic_navigator",
+                "com.maqan.galacticnavigator.client.NavigatorScreen");
+    }
+
+    private void openWorldForge() {
+        workspace = "WORLDFORGE";
+        openModule("worldforge", "dev.worldforge.mod.client.MapScreen");
+    }
+
+    /**
+     * Platform has no compile-time dependency on either gameplay mod. This keeps
+     * all three jars independently installable while allowing real screen handoff.
+     */
+    private void openModule(String modId, String screenClass) {
+        if (!ModList.get().isLoaded(modId)) {
+            windowOpen = true;
+            return;
+        }
+        try {
+            Class<?> type = Class.forName(screenClass);
+            Object instance = type.getDeclaredConstructor().newInstance();
+            if (instance instanceof Screen screen) Minecraft.getInstance().setScreen(screen);
+            else LOGGER.error("MAQAN module {} screen {} is not a Minecraft Screen", modId, screenClass);
+        } catch (ReflectiveOperationException | LinkageError error) {
+            LOGGER.error("Unable to open MAQAN module screen {} for {}", screenClass, modId, error);
+        }
+    }
 
     private void addButton(String label, int x, int y, int w, Runnable action) {
         Button b = Button.builder(Component.literal(label), button -> action.run())
@@ -108,9 +142,9 @@ public final class PlatformShellScreen extends Screen {
         g.drawString(font, "×", x + windowW - 16, y + 9, 0xFFEAF4FC, false);
         g.drawString(font, "Integration surface", x + 14, y + 46, GOLD, false);
         boolean installed = ModList.get().isLoaded(workspace.equals("ATLAS") ? "maqan_galactic_navigator" : "worldforge");
-        g.drawString(font, installed ? "Module detected — adapter connection is the next integration step." : "Install the corresponding gameplay mod to enable this workspace.", x + 14, y + 68, 0xFFB6C7D7, false);
+        g.drawString(font, installed ? "Module available. Use its workspace tab to open the native interface." : "Module not installed. Add its independent mod jar to enable this workspace.", x + 14, y + 68, 0xFFB6C7D7, false);
         g.drawString(font, "The shell does not fabricate map or simulation data.", x + 14, y + 92, 0xFF8297AA, false);
-        g.drawString(font, "Window controls and workspace state are local to this session.", x + 14, y + 110, 0xFF8297AA, false);
+        g.drawString(font, "Press P from a module screen to return to the MAQAN shell.", x + 14, y + 110, 0xFF8297AA, false);
         g.fill(x + windowW - 12, y + windowH - 12, x + windowW - 4, y + windowH - 4, EDGE);
     }
 
