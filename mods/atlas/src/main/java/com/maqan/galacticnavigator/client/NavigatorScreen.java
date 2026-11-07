@@ -4429,19 +4429,27 @@ public class NavigatorScreen extends Screen {
                     return true;
                 }
             }
+            Map.Entry<String, Point> nearestHit = null;
+            double nearestDistance = Double.MAX_VALUE;
             for (Map.Entry<String, Point> entry : mapPoints.entrySet()) {
                 Point p = entry.getValue();
-                if (Math.hypot(x - p.x, y - p.y) <= Math.max(12, p.radius + 5)) {
-                    Node n = findNode(entry.getKey());
-                    if (n != null) {
-                        long now = System.currentTimeMillis();
-                        boolean doubleClick = entry.getKey().equals(lastClickedId) && now - lastClickTime < 360;
-                        if (level == 3) selectBody(entry.getKey()); else selectNode(n);
-                        if (doubleClick && level < 3) openSelected();
-                        lastClickedId = entry.getKey(); lastClickTime = now;
-                    }
-                    return true;
+                double distance = Math.hypot(x - p.x, y - p.y);
+                if (distance <= Math.max(8, p.radius + 5) && distance < nearestDistance) {
+                    nearestHit = entry;
+                    nearestDistance = distance;
                 }
+            }
+            if (nearestHit != null) {
+                Node n = findNode(nearestHit.getKey());
+                if (n != null) {
+                    long now = System.currentTimeMillis();
+                    boolean doubleClick = nearestHit.getKey().equals(lastClickedId)
+                            && now - lastClickTime < 360;
+                    if (level == 3) selectBody(nearestHit.getKey()); else selectNode(n);
+                    if (doubleClick && level < 3) openSelected();
+                    lastClickedId = nearestHit.getKey(); lastClickTime = now;
+                }
+                return true;
             }
             if (x >= mapL && x <= mapR && y >= mapT && y <= mapB) {
                 mapPanDragging = true;
