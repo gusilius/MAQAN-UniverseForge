@@ -73,13 +73,13 @@ public final class NavigatorWaypointEditorScreen extends Screen {
                     NavigatorWaypoint.Scope.LOCAL,NavigatorWaypoint.Category.PERSONAL,
                     group.getValue(),"◆",0xFF62D9F2,px,py,pz,true,false,note.getValue());
             NavigatorWaypointStore.add(waypoint);
-            if(minecraft!=null)minecraft.setScreen(new NavigatorWaypointManagerScreen(parent));
+            if(minecraft!=null)MaqanScreenHost.open(minecraft, new NavigatorWaypointManagerScreen(parent));
         } catch(Exception exception) {
             if(minecraft!=null) minecraft.player.displayClientMessage(
                     Component.literal("Invalid waypoint: "+exception.getMessage()),true);
         }
     }
-    @Override public void onClose(){if(minecraft!=null)minecraft.setScreen(parent);else super.onClose();}
+    @Override public void onClose(){if(minecraft!=null)MaqanScreenHost.back(minecraft, parent);else super.onClose();}
     @Override public void render(GuiGraphics g,int mx,int my,float partial) {
         MaqanUiTheme.backdrop(g,width,height);
         g.drawCenteredString(font,"CREATE WAYPOINT",width/2,Math.max(22,height/2-142),0xFF62D9F2);
