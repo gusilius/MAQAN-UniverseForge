@@ -4080,7 +4080,7 @@ public class NavigatorScreen extends Screen {
         // The global MAQAN rail owns the first 44 pixels. Recompute the existing
         // Atlas layout in the remaining width instead of letting map/list content
         // sit underneath the shared navigation.
-        int railReserve = embeddedInMaqan ? 36 : 0;
+        int railReserve = embeddedInMaqan ? 48 : 0;
         int layoutWidth = Math.max(120, width - railReserve);
         int[] nativeLayout = com.maqan.galacticnavigator.navigation.NavigatorNativeBridge.computePanelLayout(
                 layoutWidth, height, showList, showInfo, NavigatorPreferences.listPanelWidth(),
