@@ -12,17 +12,17 @@ public final class WFUi {
     private WFUi() {}
 
     // ---- цвета
-    public static final int BG = 0xFF0C0B0A;          // фон экрана вокруг карты
-    public static final int PANEL = 0xFF1A1712;       // выпуклая поверхность
-    public static final int INSET = 0xFF0F0D0A;       // вдавленная поверхность (поля, нажатые кнопки, полосы)
-    public static final int HI = 0xFF5A4A2C;          // светлая грань скоса
-    public static final int LO = 0xFF050404;          // тёмная грань скоса
+    public static final int BG = 0xFF080D14;          // фон экрана вокруг карты
+    public static final int PANEL = 0xFF101923;       // выпуклая поверхность
+    public static final int INSET = 0xFF0B121A;       // вдавленная поверхность (поля, нажатые кнопки, полосы)
+    public static final int HI = 0xFF34495B;          // светлая грань скоса
+    public static final int LO = 0xFF060A10;          // тёмная грань скоса
     public static final int EDGE = 0xFF000000;        // внешний контур
-    public static final int TX = 0xFFE8DEC8;          // основной текст
-    public static final int MUTED = 0xFFA39A86;       // второстепенный текст
-    public static final int OFF = 0xFF675F52;         // недоступное
-    public static final int GOLD = 0xFFE2B861;        // акцент: заголовки, выбранное
-    public static final int GOLD_DIM = 0xFFB08A3E;    // подзаголовки разделов
+    public static final int TX = 0xFFE8EEF5;          // основной текст
+    public static final int MUTED = 0xFF8292A5;       // второстепенный текст
+    public static final int OFF = 0xFF556474;         // недоступное
+    public static final int GOLD = 0xFF69CDE2;        // акцент: заголовки, выбранное
+    public static final int GOLD_DIM = 0xFF477F91;    // подзаголовки разделов
     public static final int GOOD = 0xFF67B85C;        // союз, готово, прибыль
     public static final int BAD = 0xFFD9503A;         // война, нехватка, потеря
     public static final int INFO = 0xFF5AA0D8;        // подчинённые, сведения
@@ -36,79 +36,67 @@ public final class WFUi {
 
     /** Вертикальный градиент построчно (работает и в игре, и в предпросмотре). */
     public static void gradient(GuiGraphics g, int x, int y, int w, int h, int top, int bottom) {
-        for (int i = 0; i < h; i++) g.fill(x, y + i, x + w, y + i + 1, mix(top, bottom, h <= 1 ? 0 : i / (double) (h - 1)));
+        if (w <= 0 || h <= 0) return;
+        g.fill(x, y, x + w, y + h, top);
     }
 
     /** Угловые украшения: золотые уголки с ромбом. */
     public static void corners(GuiGraphics g, int x, int y, int w, int h, int c) {
-        int L = 7;
-        g.fill(x, y, x + L, y + 1, c); g.fill(x, y, x + 1, y + L, c);
-        g.fill(x + w - L, y, x + w, y + 1, c); g.fill(x + w - 1, y, x + w, y + L, c);
-        g.fill(x, y + h - 1, x + L, y + h, c); g.fill(x, y + h - L, x + 1, y + h, c);
-        g.fill(x + w - L, y + h - 1, x + w, y + h, c); g.fill(x + w - 1, y + h - L, x + w, y + h, c);
-        g.fill(x + 2, y + 2, x + 4, y + 4, c); g.fill(x + w - 4, y + 2, x + w - 2, y + 4, c);
-        g.fill(x + 2, y + h - 4, x + 4, y + h - 2, c); g.fill(x + w - 4, y + h - 4, x + w - 2, y + h - 2, c);
+        // Intentionally empty: the shared MAQAN visual language uses clean geometry.
     }
 
     /** Рамка. inset = вдавленная (врезка): тёмная, с тонкой линией. Выпуклая - градиентная панель с тёмно-золотым кантом. */
     public static void bevel(GuiGraphics g, int x, int y, int w, int h, boolean inset) {
+        if (w <= 0 || h <= 0) return;
         g.fill(x - 1, y - 1, x + w + 1, y + h + 1, EDGE);
-        if (inset) {
-            g.fill(x, y, x + w, y + h, INSET);
-            g.fill(x, y, x + w, y + 1, 0xFF000000); g.fill(x, y, x + 1, y + h, 0xFF000000);
-            g.fill(x, y + h - 1, x + w, y + h, 0xFF2C2418); g.fill(x + w - 1, y, x + w, y + h, 0xFF2C2418);
-        } else {
-            gradient(g, x, y, w, h, 0xFF211C15, 0xFF14110D);
-            g.fill(x, y, x + w, y + 1, 0xFF4A3C24); g.fill(x, y + h - 1, x + w, y + h, 0xFF4A3C24);
-            g.fill(x, y, x + 1, y + h, 0xFF4A3C24); g.fill(x + w - 1, y, x + w, y + h, 0xFF4A3C24);
-            g.fill(x + 1, y + 1, x + w - 1, y + 2, 0x18FFFFFF);
-        }
+        g.fill(x, y, x + w, y + h, inset ? INSET : PANEL);
+        g.fill(x, y, x + w, y + 1, HI);
+        g.fill(x, y + h - 1, x + w, y + h, LO);
     }
 
     /** Панель окна: тёмный фон, двойной золотой кант, угловые украшения, заголовок с линией. Содержимое начинается с y + 20. */
     public static void panel(GuiGraphics g, Font f, int x, int y, int w, int h, String title) {
-        g.fill(x - 2, y - 2, x + w + 2, y + h + 2, EDGE);
-        gradient(g, x, y, w, h, 0xFF1C1813, 0xFF100E0B);
-        g.fill(x, y, x + w, y + 1, 0xFF6A5530); g.fill(x, y + h - 1, x + w, y + h, 0xFF6A5530);
-        g.fill(x, y, x + 1, y + h, 0xFF6A5530); g.fill(x + w - 1, y, x + w, y + h, 0xFF6A5530);
-        g.fill(x + 3, y + 3, x + w - 3, y + 4, 0xFF2E2515); g.fill(x + 3, y + h - 4, x + w - 3, y + h - 3, 0xFF2E2515);
-        g.fill(x + 3, y + 3, x + 4, y + h - 3, 0xFF2E2515); g.fill(x + w - 4, y + 3, x + w - 3, y + h - 3, 0xFF2E2515);
-        corners(g, x + 1, y + 1, w - 2, h - 2, GOLD_DIM);
+        if (w <= 0 || h <= 0) return;
+        g.fill(x, y, x + w, y + h, PANEL);
+        g.fill(x, y, x + w, y + 1, HI);
+        g.fill(x, y + h - 1, x + w, y + h, LO);
         if (title == null) return;
         String clock = ClientClock.known() ? ClientClock.date() + "  " + ClientClock.speed() : "";
         int cw = clock.isEmpty() ? 0 : f.width(clock) + 12;
-        g.drawString(f, f.plainSubstrByWidth(title.toUpperCase(), w - 22 - cw), x + 10, y + 7, GOLD);
+        g.drawString(f, f.plainSubstrByWidth(title.toUpperCase(java.util.Locale.ROOT), Math.max(0, w - 22 - cw)), x + 10, y + 7, GOLD);
         if (!clock.isEmpty()) g.drawString(f, clock, x + w - 10 - f.width(clock), y + 7, ClientClock.paused() ? BAD : MUTED);
-        g.fill(x + 8, y + 18, x + w - 8, y + 19, 0xFF4A3C24);
-        g.fill(x + w / 2 - 10, y + 17, x + w / 2 + 10, y + 20, GOLD_DIM);
-        g.fill(x + w / 2 - 2, y + 16, x + w / 2 + 2, y + 21, GOLD);
+        g.fill(x + 8, y + 18, x + w - 8, y + 19, HI);
     }
 
     /** Полупрозрачная панель поверх мира (диалоги): тёмный фон и золотая планка сверху. */
     public static void overlay(GuiGraphics g, int x, int y, int w, int h) {
+        if (w <= 0 || h <= 0) return;
         g.fill(x - 1, y - 1, x + w + 1, y + h + 1, EDGE);
         g.fill(x, y, x + w, y + h, SCRIM);
-        g.fill(x, y, x + w, y + 1, GOLD_DIM); g.fill(x, y + h - 1, x + w, y + h, 0xFF4A3C24);
-        corners(g, x, y, w, h, GOLD_DIM);
+        g.fill(x, y, x + w, y + 1, GOLD);
+        g.fill(x, y + h - 1, x + w, y + h, LO);
     }
 
     public static boolean over(int mx, int my, int x, int y, int w, int h) { return mx >= x && mx < x + w && my >= y && my < y + h; }
 
     /** Кнопка. on - включена (золотой кант и текст). */
     public static void button(GuiGraphics g, Font f, int x, int y, int w, int h, String label, boolean enabled, boolean on, boolean hover) {
-        g.fill(x - 1, y - 1, x + w + 1, y + h + 1, EDGE);
-        gradient(g, x, y, w, h, on ? 0xFF3A2E18 : enabled ? 0xFF2A241A : 0xFF171410, on ? 0xFF241C0E : enabled ? 0xFF181410 : 0xFF110F0C);
-        int edge = on ? GOLD : enabled ? 0xFF6A5530 : 0xFF2C2618;
-        g.fill(x, y, x + w, y + 1, edge); g.fill(x, y + h - 1, x + w, y + h, edge); g.fill(x, y, x + 1, y + h, edge); g.fill(x + w - 1, y, x + w, y + h, edge);
-        if (hover && enabled) g.fill(x + 1, y + 1, x + w - 1, y + h - 1, 0x22E2B861);
-        String t = f.plainSubstrByWidth(label, w - 6);
+        if (w <= 0 || h <= 0) return;
+        int fill = !enabled ? INSET : on ? 0xFF1B3442 : hover ? 0xFF1A2B38 : PANEL;
+        g.fill(x, y, x + w, y + h, fill);
+        g.fill(x, y, x + w, y + 1, on || hover ? GOLD : HI);
+        if (on || hover) g.fill(x, y + 1, x + 2, y + h - 1, GOLD);
+        g.fill(x, y + h - 1, x + w, y + h, LO);
+        String t = f.plainSubstrByWidth(label, Math.max(0, w - 6));
         g.drawString(f, t, x + (w - f.width(t)) / 2, y + (h - 8) / 2 + 1, !enabled ? OFF : on ? GOLD : TX);
     }
 
     /** Заголовок раздела внутри панели (мелкий, золотисто-тёмный, прописными). Возвращает высоту. */
     public static int section(GuiGraphics g, Font f, int x, int y, String s) {
-        g.drawString(f, s.toUpperCase(), x, y, GOLD);
-        g.fill(x + f.width(s.toUpperCase()) + 6, y + 4, x + f.width(s.toUpperCase()) + 46, y + 5, 0xFF4A3C24);
+        String label = s.toUpperCase(java.util.Locale.ROOT);
+        g.drawString(f, label, x, y, GOLD);
+        int line = x + f.width(label) + 8;
+        g.fill(line, y + 4, line + 32, y + 5, HI);
         return 13;
     }
 
@@ -141,8 +129,9 @@ public final class WFUi {
     /** Цветной значок-метка (должность, статус). Возвращает ширину. */
     public static int badge(GuiGraphics g, Font f, int x, int y, String text, int color) {
         int w = f.width(text) + 8;
-        g.fill(x, y, x + w, y + 11, (color & 0x00FFFFFF) | 0xFF000000);
-        g.fill(x + 1, y + 1, x + w - 1, y + 10, mix(0xFF14110D, 0xFF000000 | color, 0.28));
+        int tint = (color & 0x00FFFFFF) | 0xB0000000;
+        g.fill(x, y, x + w, y + 11, tint);
+        g.fill(x, y, x + w, y + 1, color);
         g.drawString(f, text, x + 4, y + 2, TX);
         return w;
     }
@@ -150,7 +139,8 @@ public final class WFUi {
     /** Клавиша: «1», «Tab». Возвращает ширину. */
     public static int key(GuiGraphics g, Font f, int x, int y, String k) {
         int w = Math.max(11, f.width(k) + 6);
-        bevel(g, x, y, w, 11, false);
+        g.fill(x, y, x + w, y + 11, INSET);
+        g.fill(x, y, x + w, y + 1, HI);
         g.drawString(f, k, x + (w - f.width(k)) / 2, y + 2, MUTED);
         return w;
     }
@@ -177,12 +167,12 @@ public final class WFUi {
         for (int i = 0; i < labels.length; i++) {
             int w = f.width(labels[i]) + 20;
             boolean on = i == active;
-            g.fill(cx, y, cx + w, y + 15, on ? 0xFF241D11 : 0xFF14110D);
-            if (!on && over(mx, my, cx, y, w, 15)) g.fill(cx, y, cx + w, y + 15, 0x18E2B861);
-            g.fill(cx, y, cx + w, y + 1, on ? 0xFF6A5530 : 0xFF2C2618);
-            g.fill(cx, y, cx + 1, y + 15, on ? 0xFF6A5530 : 0xFF2C2618); g.fill(cx + w - 1, y, cx + w, y + 15, on ? 0xFF6A5530 : 0xFF2C2618);
-            if (on) { g.fill(cx + 1, y + 13, cx + w - 1, y + 15, GOLD); g.fill(cx + w / 2 - 3, y + 11, cx + w / 2 + 3, y + 13, GOLD); }
-            g.drawString(f, labels[i], cx + 10, y + 4, on ? GOLD : MUTED);
+            boolean hover = over(mx, my, cx, y, w, 18);
+            if (on) g.fill(cx, y, cx + w, y + 18, 0x302A7185);
+            else if (hover) g.fill(cx, y, cx + w, y + 18, 0x182A7185);
+            g.fill(cx, y, cx + w, y + 1, on ? GOLD : HI);
+            if (on) g.fill(cx + 4, y + 16, cx + w - 4, y + 18, GOLD);
+            g.drawString(f, labels[i], cx + 10, y + 5, on ? GOLD : MUTED);
             cx += w + 2;
         }
         return cx;
@@ -205,15 +195,16 @@ public final class WFUi {
         for (String l : lines) w = Math.max(w, f.width(l.startsWith("!") ? l.substring(1) : l));
         w += 12;
         int h = lines.size() * 10 + 8;
-        int x = Math.min(mx + 10, screenW - w - 2), y = Math.min(my + 10, screenH - h - 2);
-        if (x < 2) x = 2;
-        if (y < 2) y = 2;
-        bevel(g, x, y, w, h, false);
-        g.fill(x + 2, y + 2, x + w - 2, y + h - 2, 0xFF17181D);
+        int x = Math.max(2, Math.min(mx + 10, screenW - w - 2));
+        int y = Math.max(2, Math.min(my + 10, screenH - h - 2));
+        g.fill(x, y, x + w, y + h, EDGE);
+        g.fill(x + 1, y + 1, x + w - 1, y + h - 1, PANEL);
+        g.fill(x + 1, y + 1, x + w - 1, y + 2, GOLD);
         for (int i = 0; i < lines.size(); i++) {
-            String l = lines.get(i);
-            boolean bad = l.startsWith("!");
-            g.drawString(f, bad ? l.substring(1) : l, x + 6, y + 5 + i * 10, bad ? BAD : i == 0 ? GOLD : TX);
+            String line = lines.get(i);
+            boolean bad = line.startsWith("!");
+            g.drawString(f, bad ? line.substring(1) : line, x + 6, y + 5 + i * 10,
+                    bad ? BAD : i == 0 ? GOLD : TX);
         }
     }
 
