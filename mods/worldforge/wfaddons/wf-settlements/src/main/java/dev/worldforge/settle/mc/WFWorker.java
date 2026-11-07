@@ -111,7 +111,9 @@ public class WFWorker extends PathfinderMob {
             Building b = wk.building == 0 ? null : c.s.building(wk.building);
             BlockPos target;
             boolean working = false;
-            if (b != null) {
+            if (wk.manualOrder) {
+                target = new BlockPos(c.cx + (int) Math.floor(wk.orderX), w.getBlockY(), c.cz + (int) Math.floor(wk.orderZ));
+            } else if (b != null) {
                 target = c.workPoint(w.level(), b);
                 working = b.state == Building.State.BUILDING ? b.status.startsWith("строится") : "работает".equals(b.status);
             } else {
