@@ -121,6 +121,11 @@ public final class PlatformShellScreen extends Screen {
             panels.get("timeline").visible = false;
             panels.get("tools").visible = false;
         }
+        if (!profileAvailable(profile)) {
+            for (Profile candidate : Profile.values()) {
+                if (profileAvailable(candidate)) { profile = candidate; break; }
+            }
+        }
         if (profile == Profile.COSMOS) ensureAtlasView();
         if (embeddedView != null) embeddedView.init(Minecraft.getInstance(), width, height);
         Screen providerView = providerViews.get(profile);
@@ -201,6 +206,7 @@ public final class PlatformShellScreen extends Screen {
         g.fill(34, 9, 35, 25, EDGE);
         int x = Math.max(178, width / 2 - 112);
         for (Profile p : Profile.values()) {
+            if (!profileAvailable(p)) continue;
             boolean active = p == profile;
             g.fill(x, 5, x + 48, 29, active ? 0x553B9FB5 : 0x00101924);
             if (active) g.fill(x, 28, x + 48, 30, CYAN);
@@ -285,7 +291,7 @@ public final class PlatformShellScreen extends Screen {
 
     private void drawNavigationPanel(GuiGraphics g, Panel p) {
         int y=p.y+38;
-        List<CapabilityRegistry.Capability> capabilities=CapabilityRegistry.all();
+        List<CapabilityRegistry.Capability> capabilities=CapabilityRegistry.available();
         for(CapabilityRegistry.Capability c:capabilities) {
             if (!domainVisible(c.domain())) continue;
             boolean installed=ModList.get().isLoaded(c.providerModId());
@@ -298,6 +304,22 @@ public final class PlatformShellScreen extends Screen {
             y+=21;
             if(y>p.y+p.h-14) break;
         }
+    }
+
+    private boolean profileAvailable(Profile candidate) {
+        return switch (candidate) {
+            case COSMOS -> !CapabilityRegistry.inDomain("COSMOS").isEmpty()
+                    || !CapabilityRegistry.inDomain("WORLDS").isEmpty();
+            case POLITICS -> !CapabilityRegistry.inDomain("POLITICS").isEmpty()
+                    || !CapabilityRegistry.inDomain("SOCIETY").isEmpty()
+                    || !CapabilityRegistry.inDomain("ECONOMY").isEmpty();
+            case SETTLEMENTS -> !CapabilityRegistry.inDomain("SETTLEMENTS").isEmpty()
+                    || !CapabilityRegistry.inDomain("SOCIETY").isEmpty()
+                    || !CapabilityRegistry.inDomain("ECONOMY").isEmpty()
+                    || !CapabilityRegistry.inDomain("CREATION").isEmpty();
+            case RTS -> !CapabilityRegistry.inDomain("TACTICAL").isEmpty()
+                    || !CapabilityRegistry.inDomain("ARMY").isEmpty();
+        };
     }
 
     private boolean domainVisible(String domain) {
@@ -375,6 +397,7 @@ public final class PlatformShellScreen extends Screen {
         if(my<34) {
             int x=Math.max(178,width/2-112);
             for(Profile p:Profile.values()) {
+                if (!profileAvailable(p)) continue;
                 if(mx>=x&&mx<x+48) { setProfile(p); return true; }
                 x+=52;
             }
@@ -426,7 +449,7 @@ public final class PlatformShellScreen extends Screen {
             }
             if(p.id.equals("navigation")) {
                 int y=p.y+38;
-                for(CapabilityRegistry.Capability c:CapabilityRegistry.all()) {
+                for(CapabilityRegistry.Capability c:CapabilityRegistry.available()) {
                     if(!domainVisible(c.domain())) continue;
                     if(my>=y-4&&my<y+17) {
                         selectedCapabilityId=c.id(); selectedDomain=c.domain();
