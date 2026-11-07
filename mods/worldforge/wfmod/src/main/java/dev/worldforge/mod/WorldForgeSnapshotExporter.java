@@ -48,8 +48,7 @@ public final class WorldForgeSnapshotExporter {
 
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("schema_version", 1);
-        String dimensionId = level.dimension().location().toString();
-        root.put("world_id", server.getWorldData().getLevelName() + "@" + dimensionId + "#" + map.name);
+        root.put("world_id", server.getWorldData().getLevelName());
         root.put("generated_at", Instant.now().toString());
 
         List<Object> territories = new ArrayList<>();
@@ -59,10 +58,38 @@ public final class WorldForgeSnapshotExporter {
         root.put("features", features);
         root.put("political_boundaries", politicalBoundaries);
 
-        ChunkGenerator rawGenerator = level.getChunkSource().getGenerator();
-        MapChunkGenerator generator = rawGenerator instanceof MapChunkGenerator
-                ? (MapChunkGenerator) rawGenerator : null;
+        int exportedMaps = 0;
+        for (ServerLevel candidate : server.getAllLevels()) {
+            ChunkGenerator candidateGenerator = candidate.getChunkSource().getGenerator();
+            if (!(candidateGenerator instanceof MapChunkGenerator mapGenerator)) continue;
+            MapData candidateMap = mapGenerator.data();
+            if (candidateMap == null) continue;
+            appendMap(server, candidate, candidateMap, territories, features, politicalBoundaries);
+            exportedMaps++;
+        }
+        if (exportedMaps == 0)
+            throw new IllegalStateException("No loaded WorldForge map dimensions are available");
 
+        Path output = FMLPaths.CONFIGDIR.get().resolve("maqan").resolve("worldforge")
+                .resolve("map_snapshot.json");
+        Files.createDirectories(output.getParent());
+        Path temporary = output.resolveSibling(output.getFileName() + ".tmp");
+        Files.writeString(temporary, Json.write(root), StandardCharsets.UTF_8);
+        try {
+            Files.move(temporary, output, StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.ATOMIC_MOVE);
+        } catch (IOException atomicMoveUnsupported) {
+            Files.move(temporary, output, StandardCopyOption.REPLACE_EXISTING);
+        }
+        return output;
+    }
+
+    /** Appends one currently loaded WorldForge dimension to the shared world snapshot. */
+    private static void appendMap(MinecraftServer server, ServerLevel level, MapData map,
+            List<Object> territories, List<Object> features, List<Object> politicalBoundaries) {
+        String dimensionId = level.dimension().location().toString();
+        MapChunkGenerator generator = (MapChunkGenerator) level.getChunkSource().getGenerator();
+        
         if (map.titles != null) {
             Map<Integer, List<List<WorldForgeProvinceContourBuilder.Point>>> contours =
                     WorldForgeProvinceContourBuilder.build(map.titles.pixels(), map.titles.w, map.titles.h);
@@ -80,7 +107,7 @@ public final class WorldForgeSnapshotExporter {
                 attrs.put("parent_title_id", province.parent > 0 && map.titles.get(province.parent) != null
                         ? map.titles.get(province.parent).key : "");
                 copyProperties(attrs, "title.", province.props);
-
+        
                 Map<String, Object> territory = new LinkedHashMap<>();
                 territory.put("id", "worldforge:" + map.name + ":province:" + province.key);
                 territory.put("name", safe(province.name));
@@ -121,7 +148,7 @@ public final class WorldForgeSnapshotExporter {
                 territory.put("vertices", rings.get(0));
                 territories.add(territory);
             }
-
+        
             // Aggregate the authoritative province raster by its resolved realm LUT.
             // This creates real state borders without maintaining a second political model.
             List<TitleData.Realm> realmList = map.titles.realmList();
@@ -182,7 +209,7 @@ public final class WorldForgeSnapshotExporter {
                 boundary.put("rings", rings);
                 politicalBoundaries.add(boundary);
             }
-
+        
             // Keep higher-level titles as selectable map features, linked to the province layer.
             for (TitleData.Title title : map.titles.allTitles()) {
                 if (title == null || title.tier == 0 || title.key == null || title.key.isBlank()) continue;
@@ -217,7 +244,7 @@ public final class WorldForgeSnapshotExporter {
                         title.capZ, title.rgb, realmId, "", attrs));
             }
         }
-
+        
         if (map.regions != null) {
             for (RegionData.Region region : map.regions.list) {
                 if (region == null) continue;
@@ -236,15 +263,16 @@ public final class WorldForgeSnapshotExporter {
                         region.capZ, region.rgb, "", "", attrs));
             }
         }
-
+        
         for (Contributor contributor : CONTRIBUTORS) {
             try {
                 contributor.contribute(server, level, map, features);
             } catch (RuntimeException ex) {
-                System.err.println("WorldForge Atlas snapshot contributor failed: " + ex);
+                throw new IllegalStateException("WorldForge Atlas snapshot contributor failed in "
+                        + dimensionId, ex);
             }
         }
-
+        
         for (Markers.Marker marker : EditorManager.markers(server, map).list()) {
             if (marker == null || marker.id == null || marker.id.isBlank()) continue;
             BlockPos pos = generator == null
@@ -258,20 +286,8 @@ public final class WorldForgeSnapshotExporter {
                     "marker", marker.name, dimensionId, marker.x, pos.getY(), marker.z,
                     marker.rgb, "", safe(marker.type), attrs));
         }
-
-        Path output = FMLPaths.CONFIGDIR.get().resolve("maqan").resolve("worldforge")
-                .resolve("map_snapshot.json");
-        Files.createDirectories(output.getParent());
-        Path temporary = output.resolveSibling(output.getFileName() + ".tmp");
-        Files.writeString(temporary, Json.write(root), StandardCharsets.UTF_8);
-        try {
-            Files.move(temporary, output, StandardCopyOption.REPLACE_EXISTING,
-                    StandardCopyOption.ATOMIC_MOVE);
-        } catch (IOException atomicMoveUnsupported) {
-            Files.move(temporary, output, StandardCopyOption.REPLACE_EXISTING);
-        }
-        return output;
-    }
+        
+            }
 
     private static Map<String, Object> feature(String id, String kind, String name,
             String dimension, double x, double y, double z, int color,
