@@ -109,7 +109,7 @@ public final class WorldForgeSnapshotExporter {
                 copyProperties(attrs, "title.", province.props);
         
                 Map<String, Object> territory = new LinkedHashMap<>();
-                territory.put("id", "worldforge:" + map.name + ":province:" + province.key);
+                territory.put("id", "worldforge:" + dimensionId + ":" + map.name + ":province:" + province.key);
                 territory.put("name", safe(province.name));
                 territory.put("realm_id", realm == null ? "" : safe(realm.id));
                 territory.put("realm_name", realm == null ? "" : safe(realm.name));
@@ -180,7 +180,7 @@ public final class WorldForgeSnapshotExporter {
                 attrs.put("title_keys", String.join(",", realm.titleKeys));
                 copyProperties(attrs, "realm.", realm.props);
                 Map<String, Object> boundary = new LinkedHashMap<>();
-                boundary.put("id", "worldforge:" + map.name + ":realm:" + realm.id);
+                boundary.put("id", "worldforge:" + dimensionId + ":" + map.name + ":realm:" + realm.id);
                 boundary.put("name", safe(realm.name));
                 boundary.put("realm_id", safe(realm.id));
                 boundary.put("dimension_id", dimensionId);
@@ -238,7 +238,7 @@ public final class WorldForgeSnapshotExporter {
                         copyProperties(attrs, "realm.", realm.props);
                     }
                 }
-                features.add(feature("worldforge:" + map.name + ":title:" + title.key,
+                features.add(feature("worldforge:" + dimensionId + ":" + map.name + ":title:" + title.key,
                         "administrative_title", title.name, dimensionId, title.capX, capital.getY(),
                         title.capZ, title.rgb, realmId, "", attrs));
             }
@@ -255,7 +255,7 @@ public final class WorldForgeSnapshotExporter {
                 attrs.put("area_pct", Double.toString(region.areaPct));
                 attrs.put("neighbors", join(region.neighbors));
                 copyProperties(attrs, "region.", region.props);
-                features.add(feature("worldforge:" + map.name + ":region:" + region.id,
+                features.add(feature("worldforge:" + dimensionId + ":" + map.name + ":region:" + region.id,
                         "region_capital", region.name, dimensionId, region.capX, capital.getY(),
                         region.capZ, region.rgb, "", "", attrs));
             }
@@ -277,7 +277,7 @@ public final class WorldForgeSnapshotExporter {
             attrs.put("map_id", map.name);
             attrs.put("marker_type", safe(marker.type));
             attrs.put("description", safe(marker.desc));
-            features.add(feature("worldforge:" + map.name + ":marker:" + marker.id,
+            features.add(feature("worldforge:" + dimensionId + ":" + map.name + ":marker:" + marker.id,
                     "marker", marker.name, dimensionId, marker.x, pos.getY(), marker.z,
                     marker.rgb, "", safe(marker.type), attrs));
         }
