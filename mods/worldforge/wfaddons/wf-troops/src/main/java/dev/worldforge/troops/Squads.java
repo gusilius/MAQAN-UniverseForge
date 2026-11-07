@@ -33,8 +33,16 @@ public final class Squads {
     private int counter = 1;
 
     public Squad create(String owner, String name, Collection<String> members) {
-        Squad s = new Squad("s" + counter++, name == null || name.isBlank() ? "Отряд " + (counter - 1) : name, owner);
-        for (String m : members) { remove(m); if (s.members.size() < MAX_SIZE) s.members.add(m); }
+        if (owner == null || owner.isBlank()) throw new IllegalArgumentException("owner is required");
+        if (members == null) throw new IllegalArgumentException("members are required");
+        int id = counter++;
+        Squad s = new Squad("s" + id, name == null || name.isBlank() ? "Отряд " + id : name, owner);
+        Set<String> unique = new LinkedHashSet<>();
+        for (String member : members) {
+            if (member == null || member.isBlank() || !unique.add(member) || s.members.size() >= MAX_SIZE) continue;
+            remove(member);
+            s.members.add(member);
+        }
         s.initial = s.members.size();
         squads.put(s.id, s);
         return s;
@@ -85,17 +93,38 @@ public final class Squads {
     }
 
     public Squad split(Squad from, Collection<String> units) {
+        if (from == null || units == null || !squads.containsKey(from.id)) return null;
+        int oldCurrent = from.members.size(), oldInitial = Math.max(oldCurrent, from.initial);
+        double oldMorale = from.morale;
         Squad n = create(from.owner, from.name + " (часть)", units);
-        from.initial = Math.max(from.members.size(), from.initial - n.members.size()); n.morale = from.morale; n.routed = from.routed; n.realm = from.realm; n.formation = from.formation; n.stance = from.stance; n.cx = from.cx; n.cz = from.cz; n.yaw = from.yaw;
+        int moved = n.members.size();
+        if (moved == 0) { squads.remove(n.id); return null; }
+        int movedInitial = Math.max(moved, (int) Math.round(oldInitial * moved / (double) Math.max(1, oldCurrent)));
+        n.initial = movedInitial;
+        from.initial = Math.max(from.members.size(), oldInitial - movedInitial);
+        n.morale = oldMorale; n.routed = from.routed; n.realm = from.realm;
+        n.formation = from.formation; n.stance = from.stance; n.cx = from.cx; n.cz = from.cz; n.yaw = from.yaw;
         return n;
     }
 
     public boolean merge(String aId, String bId) {
         Squad a = squads.get(aId), b = squads.get(bId);
-        if (a == null || b == null || a == b || !a.owner.equals(b.owner)) return false;
-        for (String m : new ArrayList<>(b.members)) if (a.members.size() < MAX_SIZE) { b.members.remove(m); a.members.add(m); }
-        a.initial = Math.min(MAX_SIZE, a.initial + b.initial);
-        a.morale = Math.min(a.morale, b.morale);
+        if (a == null || b == null || a == b || !a.owner.equals(b.owner) || a.members.size() >= MAX_SIZE) return false;
+        int oldASize = a.members.size(), oldBSize = b.members.size();
+        int oldBInitial = Math.max(oldBSize, b.initial);
+        double oldMorale = a.morale;
+        int moved = 0;
+        for (String member : new ArrayList<>(b.members)) {
+            if (a.members.size() >= MAX_SIZE) break;
+            b.members.remove(member);
+            a.members.add(member);
+            moved++;
+        }
+        if (moved == 0) return false;
+        int movedInitial = Math.max(moved, (int) Math.round(oldBInitial * moved / (double) Math.max(1, oldBSize)));
+        a.initial = Math.min(1_000_000, Math.max(oldASize + moved, a.initial) + movedInitial);
+        b.initial = Math.max(b.members.size(), oldBInitial - movedInitial);
+        a.morale = (oldMorale * oldASize + b.morale * moved) / Math.max(1, oldASize + moved);
         if (b.members.isEmpty()) squads.remove(b.id);
         return true;
     }

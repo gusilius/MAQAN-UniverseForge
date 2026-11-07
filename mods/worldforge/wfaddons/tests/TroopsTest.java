@@ -63,6 +63,17 @@ public class TroopsTest {
         sq.remove("u0");
         check(!big.members.contains("u0"), "смерть удаляет из отряда");
         check(sq.merge(s1.id, mix.id), "слияние");
+        Squads duplicateInput = new Squads();
+        Squads.Squad uniqueSquad = duplicateInput.create("p1", "Unique", Arrays.asList("x", "x", "", null, "y"));
+        check(uniqueSquad.members.equals(List.of("x", "y")), "создание отряда удаляет дубликаты и пустые UUID");
+        Squads partialMerge = new Squads();
+        Squads.Squad receiver = partialMerge.create("p1", "Receiver", java.util.stream.IntStream.range(0, 39).mapToObj(i -> "r" + i).toList());
+        Squads.Squad donor = partialMerge.create("p1", "Donor", List.of("d1", "d2", "d3"));
+        donor.initial = 6;
+        check(partialMerge.merge(receiver.id, donor.id) && receiver.members.size() == 40
+                && donor.members.equals(List.of("d2", "d3")) && receiver.initial == 41 && donor.initial == 4,
+                "частичное слияние переносит только доступных бойцов и пропорциональные потери");
+        check(!partialMerge.merge(receiver.id, donor.id), "слияние полного отряда отклоняется без потери бойцов");
         String json = sq.toJson();
         Squads sq2 = new Squads();
         sq2.fromJson(json);
