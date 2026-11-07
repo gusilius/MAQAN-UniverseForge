@@ -187,13 +187,23 @@ public final class OriginDefs {
                 if (!classes.containsKey(x)) p.add("Класс " + c.id() + ": нет второго предка " + x);
                 else if (classes.get(x).tier() >= c.tier()) p.add("Класс " + c.id() + ": ступень должна быть выше предка " + x);
             }
-            for (String x : c.reqProf().keySet()) if (!professions.containsKey(x)) p.add("Класс " + c.id() + ": нет профессии " + x);
+            for (var req : c.reqProf().entrySet()) {
+                Profession required = professions.get(req.getKey());
+                if (required == null) p.add("Класс " + c.id() + ": нет профессии " + req.getKey());
+                else if (req.getValue() < 0 || req.getValue() >= required.ranks().size())
+                    p.add("Класс " + c.id() + ": требуемый ранг вне диапазона профессии " + req.getKey());
+            }
         }
         for (String rid : extraPerks.keySet()) if (!races.containsKey(rid)) p.add("race_perks: нет расы " + rid);
         for (Synergy y : synergies.values()) {
             for (String r : y.races()) if (!races.containsKey(r)) p.add("Переплетение " + y.id() + ": нет расы " + r);
             for (String c : y.classes()) if (!classes.containsKey(c)) p.add("Переплетение " + y.id() + ": нет класса " + c);
-            for (String x : y.profs().keySet()) if (!professions.containsKey(x)) p.add("Переплетение " + y.id() + ": нет профессии " + x);
+            for (var req : y.profs().entrySet()) {
+                Profession required = professions.get(req.getKey());
+                if (required == null) p.add("Переплетение " + y.id() + ": нет профессии " + req.getKey());
+                else if (req.getValue() < 0 || req.getValue() >= required.ranks().size())
+                    p.add("Переплетение " + y.id() + ": ранг вне диапазона профессии " + req.getKey());
+            }
             if (y.races().isEmpty() && y.classes().isEmpty() && y.profs().isEmpty() && y.flags().isEmpty()) p.add("Переплетение " + y.id() + ": нет условий");
         }
         for (Profession pr : professions.values()) {
@@ -205,7 +215,13 @@ public final class OriginDefs {
             }
             for (String x : pr.reqClasses()) if (!classes.containsKey(x)) p.add("Профессия " + pr.id() + ": нет класса " + x);
             for (String r : pr.reqRaces()) if (!races.containsKey(r)) p.add("Профессия " + pr.id() + ": нет расы " + r);
-            for (int i = 1; i < pr.ranks().size(); i++) if (pr.ranks().get(i).xp() <= pr.ranks().get(i - 1).xp()) p.add("Профессия " + pr.id() + ": опыт рангов должен расти");
+            if (pr.wage() < 0) p.add("Профессия " + pr.id() + ": жалованье не может быть отрицательным");
+            if (pr.ranks().get(0).xp() != 0) p.add("Профессия " + pr.id() + ": первый ранг должен начинаться с 0 XP");
+            for (int i = 0; i < pr.ranks().size(); i++) {
+                if (pr.ranks().get(i).xp() < 0) p.add("Профессия " + pr.id() + ": отрицательный порог XP");
+                if (i > 0 && pr.ranks().get(i).xp() <= pr.ranks().get(i - 1).xp())
+                    p.add("Профессия " + pr.id() + ": опыт рангов должен расти");
+            }
         }
         return p;
     }
