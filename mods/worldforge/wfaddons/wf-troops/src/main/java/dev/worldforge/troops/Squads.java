@@ -256,7 +256,8 @@ public final class Squads {
             s.routed = Boolean.TRUE.equals(e.get("routed"));
             if (e.get("queue") instanceof List<?> orders) {
                 for (Object rawOrder : orders) {
-                    if (s.queue.size() >= 64 || !(rawOrder instanceof Map<?, ?> orderData)) break;
+                    if (s.queue.size() >= 64) break;
+                    if (!(rawOrder instanceof Map<?, ?> orderData)) continue;
                     Kind kind;
                     try { kind = Kind.valueOf(String.valueOf(orderData.get("kind"))); }
                     catch (RuntimeException ignored) { continue; }

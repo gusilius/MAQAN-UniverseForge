@@ -99,6 +99,10 @@ public class TroopsTest {
                 && orderRestored.get(ordered.id).current().x() == 12.5
                 && orderRestored.get(ordered.id).queue.peekLast().target().endsWith("0001"),
                 "сохранение и восстановление очереди приказов отряда");
+        Squads damagedOrders = new Squads();
+        damagedOrders.fromJson("{\\"squads\\":[{\\"id\\":\\"s1\\",\\"owner\\":\\"p1\\",\\"members\\":[\\"u1\\"],\\"queue\\":[null,7,{\\"kind\\":\\"UNKNOWN\\"},{\\"kind\\":\\"MOVE\\",\\"x\\":4,\\"z\\":5}]}]}");
+        check(damagedOrders.get("s1").queue.size() == 1 && damagedOrders.get("s1").current().x() == 4,
+                "повреждённая команда не скрывает последующие корректные команды");
 
         // выделение
         UnitSelection sel = new UnitSelection();
