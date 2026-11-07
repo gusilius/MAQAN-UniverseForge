@@ -629,13 +629,13 @@ public class GenesisScreen extends Screen {
     }
 
     @Override
-    public boolean mouseClicked(double mx, double my, double b) {
+    public boolean mouseClicked(double mx, double my, int b) {
         lastMx = (int) mx;
         if (b == 0) {
-            if (nameBox != null && nameBox.visible && nameBox.mouseClicked(mx, my, (int) b)) { setFocused(nameBox); return true; }
+            if (nameBox != null && nameBox.visible && nameBox.mouseClicked(mx, my, b)) { setFocused(nameBox); return true; }
             for (int i = hits.size() - 1; i >= 0; i--) { Hit h = hits.get(i); if (WFUi.over((int) mx, (int) my, h.x, h.y, h.w, h.h) && h.run != null) { h.run.run(); return true; } }
         }
-        return super.mouseClicked(mx, my, (int) b);
+        return super.mouseClicked(mx, my, b);
     }
 
     @Override
