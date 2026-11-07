@@ -381,6 +381,27 @@ public final class PlatformShellScreen extends Screen {
         return handled;
     }
 
+    @Override public boolean keyReleased(int keyCode,int scanCode,int modifiers) {
+        boolean handled = super.keyReleased(keyCode,scanCode,modifiers);
+        if (profile == Profile.COSMOS && embeddedView != null)
+            handled = embeddedView.keyReleased(keyCode,scanCode,modifiers) || handled;
+        return handled;
+    }
+
+    @Override public boolean charTyped(char codePoint,int modifiers) {
+        boolean handled = super.charTyped(codePoint,modifiers);
+        if (profile == Profile.COSMOS && embeddedView != null)
+            handled = embeddedView.charTyped(codePoint,modifiers) || handled;
+        return handled;
+    }
+
+    @Override public boolean mouseScrolled(double mouseX,double mouseY,double delta) {
+        boolean handled = super.mouseScrolled(mouseX,mouseY,delta);
+        if (profile == Profile.COSMOS && embeddedView != null)
+            handled = embeddedView.mouseScrolled(mouseX,mouseY,delta) || handled;
+        return handled;
+    }
+
     @Override public boolean keyPressed(int keyCode,int scanCode,int modifiers) {
         // P is owned by PlatformClient's global KeyMapping; handling it here as
         // well would close and immediately reopen the shell during the same tick.
