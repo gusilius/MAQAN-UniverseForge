@@ -134,7 +134,7 @@ public class PeopleTest {
         back.fromJson(js);
         ok(back.size() == reg.size() && back.toJson().equals(js), "сохранение и загрузка без потерь (" + back.size() + " человек)");
         boolean registryViewReadOnly = false;
-        try { back.all().clear(); } catch (UnsupportedOperationException expected) { registryViewReadOnly = true; }
+        try { back.all().clear(); } catch (UnsupportedOperationException readOnlyFailure) { registryViewReadOnly = true; }
         ok(registryViewReadOnly && back.size() == reg.size(),
                 "публичная коллекция персонажей не позволяет обходить операции реестра");
         String invalidAliveJson = js.replaceFirst("\\\"alive\\\":(?:true|false)", "\\\"alive\\\":\\\"yes\\\"");
