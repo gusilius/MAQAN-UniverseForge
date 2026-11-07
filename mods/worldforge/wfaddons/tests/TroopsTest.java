@@ -12,6 +12,17 @@ public class TroopsTest {
         TroopDefs d = new TroopDefs();
         d.load(Files.readString(Path.of("wf-troops/src/main/resources/data/wf_troops/wf_troops/units.json")));
         check(d.units.size() == 23, "23 боевых архетипа " + d.units.size());
+        check(d.recruitmentBuildings.size() == d.units.size()
+                && d.units.values().stream().allMatch(u -> !d.recruitmentCost(u).isEmpty()),
+                "каждый архетип имеет здание создания и стоимость снабжения");
+        check("archery_range".equals(d.recruitmentBuilding(d.units.get("longbowman")))
+                && "stable".equals(d.recruitmentBuilding(d.units.get("horse_archer")))
+                && "siege_workshop".equals(d.recruitmentBuilding(d.units.get("trebuchet")))
+                && "barracks".equals(d.recruitmentBuilding(d.units.get("footman"))),
+                "стрелки, конница, осадные и линейные войска привязаны к профильным зданиям");
+        check(d.recruitmentCost(d.units.get("knight")).getOrDefault("iron", 0) > 0
+                && d.recruitmentCost(d.units.get("field_medic")).getOrDefault("cloth", 0) > 0,
+                "экипировка элитных и вспомогательных войск расходует профильные ресурсы");
         check(d.units.get("halberdier") != null && d.units.get("greatsword") != null
                 && d.units.get("longbowman") != null && d.units.get("lancer") != null,
                 "добавлены специализированные пехотные и стрелковые ветви");
