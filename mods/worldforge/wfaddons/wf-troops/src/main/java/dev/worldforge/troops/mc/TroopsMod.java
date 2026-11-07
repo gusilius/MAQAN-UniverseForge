@@ -313,7 +313,7 @@ public class TroopsMod {
                 })));
     }
 
-    /** Наём отряда: платит игрок золотыми самородками (оператор в творческом режиме - бесплатно) или казна государства (realm, только оператор). */
+    /** Наём только из завершённого и укомплектованного профильного здания; списывает снабжение поселения и золото игрока/казны. */
     private static int raise(CommandSourceStack src, String type, int n, String realm) {
         ServerPlayer p;
         try { p = src.getPlayerOrException(); }
