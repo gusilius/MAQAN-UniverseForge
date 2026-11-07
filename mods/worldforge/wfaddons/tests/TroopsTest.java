@@ -89,6 +89,26 @@ public class TroopsTest {
         check(!UnitSelection.isBox(10, 10, 12, 13) && UnitSelection.isBox(10, 10, 40, 40), "малая рамка - клик");
         sel.saveGroup(1); sel.clear();
         check(sel.recallGroup(1, Set.of("a", "c")) && sel.selected().equals(Set.of("a", "c")), "группа 1, павшие убраны");
+        UnitSelection clockSelection = new UnitSelection();
+        clockSelection.click(sc, 100, 100, false, 1000);
+        clockSelection.click(sc, 100, 100, false, 900);
+        check(clockSelection.selected().equals(Set.of("a")), "откат системного времени не считается двойным кликом");
+        List<UnitSelection.Screen> mixedScreens = Arrays.asList(
+                new UnitSelection.Screen("valid", "worker", 10, 10, 5, true),
+                new UnitSelection.Screen("bad-x", "worker", Double.NaN, 10, 5, true),
+                new UnitSelection.Screen("bad-radius", "worker", 10, 10, Double.POSITIVE_INFINITY, true),
+                new UnitSelection.Screen("", "worker", 10, 10, 5, true),
+                null);
+        UnitSelection guardedSelection = new UnitSelection();
+        check(guardedSelection.click(mixedScreens, 10, 10, false, 10)
+                && guardedSelection.selected().equals(Set.of("valid")), "выбор игнорирует повреждённые и пустые экранные сущности");
+        check(!guardedSelection.click(mixedScreens, Double.NaN, 10, false, 11)
+                && guardedSelection.selected().equals(Set.of("valid")), "некорректная позиция курсора не меняет выбор");
+        guardedSelection.set(Arrays.asList("valid", null, "", "valid"));
+        check(guardedSelection.selected().equals(Set.of("valid")), "установка выбора фильтрует пустые идентификаторы");
+        guardedSelection.saveGroup(1);
+        guardedSelection.retain(Set.of());
+        check(guardedSelection.recallGroup(1, Set.of("valid")) == false, "очистка живых сущностей очищает и состав групп");
 
         // проекция
         double[] vp = Projection.mul(Projection.perspective(70, 16 / 9.0, 0.05, 512), Projection.view(0, 30));
