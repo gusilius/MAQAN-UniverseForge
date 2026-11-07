@@ -231,25 +231,11 @@ public final class NavigatorSurfaceMapScreen extends Screen {
             }
             if(maxX<left||minX>right||maxZ<top||minZ>bottom)continue;
             int color=territory.color==0?0xFF69B8E8:(territory.color|0xFF000000);
-            int alpha=Math.max(0,Math.min(160,territory.fill_alpha));
-            int fill=(alpha<<24)|(color&0x00FFFFFF);
-            // A restrained translucent vertex fill and crisp border keep terrain legible.
-            for(int i=1;i<points.size()-1;i++){
-                double[] a=points.get(0),b=points.get(i),d=points.get(i+1);
-                if(insideMap(a[0],a[1],left,top,right,bottom)
-                        &&insideMap(b[0],b[1],left,top,right,bottom)
-                        &&insideMap(d[0],d[1],left,top,right,bottom)){
-                    g.fill((int)Math.floor(Math.min(a[0],Math.min(b[0],d[0]))),
-                            (int)Math.floor(Math.min(a[1],Math.min(b[1],d[1]))),
-                            (int)Math.ceil(Math.max(a[0],Math.max(b[0],d[0]))),
-                            (int)Math.ceil(Math.max(a[1],Math.max(b[1],d[1]))),fill);
-                }
-            }
+            // Draw only the polygon boundary here: a bounding rectangle is not a polygon fill.
+            // This keeps arbitrary WorldForge territory shapes faithful and avoids false claims.
             for(int i=0;i<points.size();i++){
                 double[] a=points.get(i),b=points.get((i+1)%points.size());
-                if(segmentTouchesMap(a[0],a[1],b[0],b[1],left,top,right,bottom))
-                    drawLine(g,(int)Math.round(a[0]),(int)Math.round(a[1]),
-                            (int)Math.round(b[0]),(int)Math.round(b[1]),color);
+                drawClippedLine(g,a[0],a[1],b[0],b[1],left,top,right,bottom,color);
             }
             double[] label=points.get(0);
             if(insideMap(label[0],label[1],left,top,right,bottom))
@@ -271,10 +257,33 @@ public final class NavigatorSurfaceMapScreen extends Screen {
                     +drawnFeatures+" FEATURES",left+8,top+8,0xFF9BD7F1,false);
     }
 
-    private static boolean segmentTouchesMap(double x1,double y1,double x2,double y2,
-                                             int left,int top,int right,int bottom){
-        return !(Math.max(x1,x2)<left||Math.min(x1,x2)>right
-                ||Math.max(y1,y2)<top||Math.min(y1,y2)>bottom);
+    private static void drawClippedLine(GuiGraphics g,double x1,double y1,double x2,double y2,
+                                         int left,int top,int right,int bottom,int color){
+        // Cohen-Sutherland clipping prevents off-map political borders leaking into UI panels.
+        int c1=outCode(x1,y1,left,top,right,bottom),c2=outCode(x2,y2,left,top,right,bottom);
+        while(true){
+            if((c1|c2)==0){
+                drawLine(g,(int)Math.round(x1),(int)Math.round(y1),
+                        (int)Math.round(x2),(int)Math.round(y2),color);
+                return;
+            }
+            if((c1&c2)!=0)return;
+            int out=c1!=0?c1:c2;
+            double x=0,y=0;
+            if((out&8)!=0){x=x1+(x2-x1)*(bottom-y1)/(y2-y1);y=bottom;}
+            else if((out&4)!=0){x=x1+(x2-x1)*(top-y1)/(y2-y1);y=top;}
+            else if((out&2)!=0){y=y1+(y2-y1)*(right-x1)/(x2-x1);x=right;}
+            else {y=y1+(y2-y1)*(left-x1)/(x2-x1);x=left;}
+            if(out==c1){x1=x;y1=y;c1=outCode(x1,y1,left,top,right,bottom);}
+            else{x2=x;y2=y;c2=outCode(x2,y2,left,top,right,bottom);}
+        }
+    }
+
+    private static int outCode(double x,double y,int left,int top,int right,int bottom){
+        int code=0;
+        if(x<left)code|=1;else if(x>right)code|=2;
+        if(y<top)code|=4;else if(y>bottom)code|=8;
+        return code;
     }
 
     private record TerrainPixel(double depth,int x,int y,int color) {}
