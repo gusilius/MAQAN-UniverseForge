@@ -408,8 +408,8 @@ public class SettleMod {
             if (person == null || !person.alive) {
                 person = registry.create(worker.name, "", culture, "m", colony.s.year());
                 worker.person = person.id;
-                registry.appoint(person.id, "settlement_worker", place);
             }
+            if (!person.has("settlement_worker", place)) registry.appoint(person.id, "settlement_worker", place);
             if (person.culture == null || person.culture.isBlank()) person.culture = culture;
             person.props.put("wf_unit_kind", "worker");
             person.props.put("wf_settlement_id", colony.s.id);
