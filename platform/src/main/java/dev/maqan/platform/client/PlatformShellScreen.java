@@ -331,7 +331,8 @@ public final class PlatformShellScreen extends Screen {
     }
 
     @Override public boolean keyPressed(int keyCode,int scanCode,int modifiers) {
-        if(keyCode==GLFW.GLFW_KEY_P) { onClose(); return true; }
+        // P is owned by PlatformClient's global KeyMapping; handling it here as
+        // well would close and immediately reopen the shell during the same tick.
         if(keyCode==GLFW.GLFW_KEY_ESCAPE) { onClose(); return true; }
         return super.keyPressed(keyCode,scanCode,modifiers);
     }
