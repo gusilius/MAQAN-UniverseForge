@@ -269,7 +269,7 @@ public final class CosmicHorizonsScanner {
                 // solar-system catalogue. Dimension-only sky_data files are not
                 // promoted into standalone star systems.
                 JsonObject skyData = object(source, "sky_data");
-                if (!bodies.isEmpty()) {
+                if (bodies.size() > 0) {
                     for (Map.Entry<String, JsonElement> skyEntry : skyData.entrySet()) {
                         if (!skyEntry.getValue().isJsonObject()) continue;
                         String skyId = skyEntry.getKey();
