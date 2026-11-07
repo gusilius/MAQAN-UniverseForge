@@ -5,16 +5,12 @@ on:
     branches: [main]
     paths:
       - "mods/**"
-      - "platform/**"
       - "shared/**"
-      - "build-logic/**"
   pull_request:
     branches: [main]
     paths:
       - "mods/**"
-      - "platform/**"
       - "shared/**"
-      - "build-logic/**"
   workflow_dispatch:
 
 permissions:
