@@ -122,7 +122,7 @@ public final class Squads {
         }
         if (moved == 0) return false;
         int movedInitial = Math.max(moved, (int) Math.round(oldBInitial * moved / (double) Math.max(1, oldBSize)));
-        a.initial = Math.min(1_000_000, Math.max(oldASize + moved, a.initial) + movedInitial);
+        a.initial = Math.min(1_000_000, Math.max(oldASize + moved, a.initial + movedInitial));
         b.initial = Math.max(b.members.size(), oldBInitial - movedInitial);
         a.morale = (oldMorale * oldASize + b.morale * moved) / Math.max(1, oldASize + moved);
         if (b.members.isEmpty()) squads.remove(b.id);
