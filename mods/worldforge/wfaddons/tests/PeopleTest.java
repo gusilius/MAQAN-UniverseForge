@@ -76,7 +76,7 @@ public class PeopleTest {
         ok(sp != null && sp.spouse.equals(ruler.id) && !sp.house.equals(ruler.house), "супруг из другого дома");
         Character unmarried = reg.create("Тестовый дворянин", "test_house", "test_culture", "m", 270);
         CharacterActions.Action marriage = CharacterActions.available(reg, defs, ruler, unmarried, 300)
-                .stream().filter(a -> a.id.equals("marry")).findFirst().orElseThrow();
+                .stream().filter(action -> action.id.equals("marry")).findFirst().orElseThrow();
         ok(!marriage.enabled && marriage.reason.contains("брак"),
                 "состоящий в браке инициатор не может заключить второй брак");
         Character widower = reg.create("Вдовец", "test_house", "test_culture", "m", 260);
