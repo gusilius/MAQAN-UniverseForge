@@ -204,6 +204,7 @@ public final class SettleCommands {
         ServerLevel lv = s.getLevel();
         BlockPos p = BlockPos.containing(s.getPosition());
         Colony c = SettleMod.found(lv, name.trim(), p);
+        if (s.getEntity() instanceof net.minecraft.server.level.ServerPlayer player) c.owner = player.getUUID().toString();
         s.sendSuccess(() -> Component.literal("Основано поселение " + c.s.name + " (" + c.s.id + ") в " + c.cx + ", " + c.cz + ": 4 рабочих, дерево 60, еда 40, камень 10"), true);
         return 1;
     }
