@@ -123,7 +123,7 @@ public class PeopleTest {
         String beforeBadLoad = back.toJson();
         String duplicateIdJson = js.replace("\"id\":\"c2\"", "\"id\":\"c1\"");
         boolean duplicateRejected = false;
-        try { back.fromJson(duplicateIdJson); } catch (IllegalArgumentException expected) { duplicateRejected = true; }
+        try { back.fromJson(duplicateIdJson); } catch (IllegalArgumentException invalidSave) { duplicateRejected = true; }
         ok(duplicateRejected && back.toJson().equals(beforeBadLoad),
                 "дублирующийся ID отклоняется без потери действующего реестра");
         String staleCounterJson = js.replaceFirst("\"next\":\\d+", "\"next\":1");
