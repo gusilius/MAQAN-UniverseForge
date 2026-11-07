@@ -244,6 +244,8 @@ public final class ArmyEngine {
     // ------------------------------------------------------------------ ход времени
 
     public void tick(double days) {
+        if (!Double.isFinite(days) || days <= 0) return;
+        if (days > 3650) throw new IllegalArgumentException("За один вызов можно обработать не более 3650 игровых дней");
         long target = war.day + (long) Math.floor(days);
         while (war.day < target) {
             if (war.day % 30 == 0) invalidate();

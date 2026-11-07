@@ -47,6 +47,16 @@ public class ArmyTest {
         System.out.println("пара: " + A + " (" + e.baroniesOf(A).size() + " баронств) против " + B + " (" + e.baroniesOf(B).size() + ")");
         ok(e.baroniesOf(A).size() > 3 && e.baroniesOf(B).size() > 3, "у государств есть баронства");
         ok(e.capital(A) != 0, "есть столица");
+        long dayBeforeInvalidTicks = e.war.day;
+        e.tick(Double.NaN);
+        e.tick(Double.POSITIVE_INFINITY);
+        e.tick(Double.NEGATIVE_INFINITY);
+        e.tick(-1);
+        e.tick(0);
+        ok(e.war.day == dayBeforeInvalidTicks, "невалидный шаг времени армии не двигает календарь");
+        boolean oversizedTickRejected = false;
+        try { e.tick(3651); } catch (IllegalArgumentException ex) { oversizedTickRejected = true; }
+        ok(oversizedTickRejected && e.war.day == dayBeforeInvalidTicks, "чрезмерный шаг времени отклоняется без зависания");
 
         // набор
         double p0 = e.pool(A);
