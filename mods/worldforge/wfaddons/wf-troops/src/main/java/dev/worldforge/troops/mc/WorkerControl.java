@@ -43,13 +43,17 @@ final class WorkerControl {
                 continue;
             }
             Building b = c.buildingAt((int) Math.floor(o.x()), (int) Math.floor(o.z()));
-            if (b == null) continue;
             try {
-                c.s.assign(w.workerId, b.uid);
-                where = b.def.name;
+                if (b == null) {
+                    c.s.moveTo(w.workerId, o.x() - c.cx, o.z() - c.cz);
+                    where = "точку назначения";
+                } else {
+                    c.s.assign(w.workerId, b.uid);
+                    where = b.def.name;
+                }
                 done++;
             } catch (RuntimeException ex) {
-                where = ex.getMessage();                       // здание заполнено / не подходит профессия
+                where = ex.getMessage();
             }
         }
         if (done == 0) return o.action() == OrderPacket.RELEASE ? "Рабочие не выбраны" : where.isEmpty() ? "Здесь нет здания своего поселения" : where;
