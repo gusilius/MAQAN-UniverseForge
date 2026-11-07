@@ -374,7 +374,7 @@ public final class PlatformShellScreen extends Screen {
         return switch(profile) {
             case COSMOS -> domain.equals("COSMOS") || domain.equals("WORLDS");
             case POLITICS -> domain.equals("POLITICS") || domain.equals("SOCIETY") || domain.equals("ECONOMY");
-            case SETTLEMENTS -> domain.equals("SETTLEMENTS") || domain.equals("SOCIETY") || domain.equals("ECONOMY");
+            case SETTLEMENTS -> domain.equals("SETTLEMENTS") || domain.equals("SOCIETY") || domain.equals("ECONOMY") || domain.equals("CREATION");
             case RTS -> domain.equals("TACTICAL") || domain.equals("ARMY") || domain.equals("SETTLEMENTS");
         };
     }
@@ -499,7 +499,7 @@ public final class PlatformShellScreen extends Screen {
                 int top = navigationViewportTop(p);
                 int bottom = navigationViewportBottom(p);
                 if (my >= top && my < bottom) {
-                    int row = (int) ((my - top) / 21);
+                    int row = (int) ((my - (p.y + 34)) / 21);
                     int index = navigationScroll + row;
                     List<CapabilityRegistry.Capability> capabilities = navigationCapabilities();
                     if (index >= 0 && index < capabilities.size()) {
@@ -682,8 +682,8 @@ public final class PlatformShellScreen extends Screen {
     }
 
     @Override public boolean keyPressed(int keyCode,int scanCode,int modifiers) {
-        // P is owned by PlatformClient's global KeyMapping; handling it here as
-        // well would close and immediately reopen the shell during the same tick.
+        // The global workspace toggle is F10 (not P): WorldForge progress and
+        // other provider screens retain their own P shortcut bindings.
         if(keyCode==GLFW.GLFW_KEY_ESCAPE) { if(settingsVisible){settingsVisible=false;return true;} onClose(); return true; }
         boolean handled = super.keyPressed(keyCode,scanCode,modifiers);
         if (activeView() != null)

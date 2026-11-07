@@ -17,7 +17,7 @@ import org.lwjgl.glfw.GLFW;
 @Mod.EventBusSubscriber(modid = MaqanPlatform.MOD_ID, value = Dist.CLIENT, bus = Mod.EventBusSubscriber.Bus.MOD)
 public final class PlatformClient {
     private static final KeyMapping OPEN = new KeyMapping(
-            "key.maqan_platform.open", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_P, "key.categories.maqan");
+            "key.maqan_platform.open", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_F10, "key.categories.maqan");
     private PlatformClient() { }
 
     @SubscribeEvent
