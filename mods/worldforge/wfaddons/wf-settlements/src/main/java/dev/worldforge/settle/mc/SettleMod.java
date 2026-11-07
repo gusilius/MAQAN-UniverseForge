@@ -265,6 +265,12 @@ public class SettleMod {
         return site != null && site.colony().s.spend(cost);
     }
 
+    /** Rolls back a just-paid recruitment batch if its second payment leg fails. */
+    public static void refundRecruitment(RecruitmentSite site, java.util.Map<String, Integer> cost) {
+        if (site == null || cost == null) return;
+        for (var entry : cost.entrySet()) site.colony().s.add(entry.getKey(), entry.getValue());
+    }
+
     /** Закладывает поселение: 4 рабочих, склад дерево 60 / еда 40 / камень 10. */
     public static Colony found(ServerLevel lv, String name, BlockPos p) {
         String base = name.toLowerCase(Locale.ROOT).replaceAll("[^\\p{L}\\p{N}]+", "_").replaceAll("^_+|_+$", "");
