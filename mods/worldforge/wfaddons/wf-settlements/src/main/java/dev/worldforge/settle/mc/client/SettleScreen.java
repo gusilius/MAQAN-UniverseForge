@@ -33,7 +33,7 @@ public class SettleScreen extends Screen {
         this.cmd = cmd;
     }
 
-    public void setModel(Settlement n) { this.s = n; }
+    public void setModel(Settlement n) { this.s = n; mapZoom = 1.0; mapPanX = 0; mapPanY = 0; }
 
     private java.util.List<dev.worldforge.settle.CityRow> cities = new ArrayList<>();
     private String citySort = "pop";
@@ -502,6 +502,9 @@ public class SettleScreen extends Screen {
     }
 
 
+    private static double visibleGridSpanX(double scale, int width) { return width / Math.max(0.0001, scale); }
+    private static double visibleGridSpanZ(double scale, int height) { return height / Math.max(0.0001, scale); }
+
     // ------------------------------------------------------------------ Карта поселения
     // План строится только по авторитетным координатам зданий и жителей из Settlement.
     // Рельеф и дороги не рисуются искусственно: для них пока нет соответствующих данных карты.
@@ -534,6 +537,7 @@ public class SettleScreen extends Screen {
         double rawStep = 48.0 / Math.max(0.0001, scale);
         double gridStep = Math.pow(2.0, Math.round(Math.log(rawStep) / Math.log(2.0)));
         gridStep = Math.max(4.0, Math.min(256.0, gridStep));
+        while ((visibleGridSpanX(scale, cw) / gridStep) > 180 || (visibleGridSpanZ(scale, h) / gridStep) > 180) gridStep *= 2.0;
         double visibleMinX = (x + 2 - originX) / scale, visibleMaxX = (x + cw - 2 - originX) / scale;
         double visibleMinZ = (top + 2 - originY) / scale, visibleMaxZ = (top + h - 2 - originY) / scale;
         double firstGridX = Math.ceil(visibleMinX / gridStep) * gridStep;
