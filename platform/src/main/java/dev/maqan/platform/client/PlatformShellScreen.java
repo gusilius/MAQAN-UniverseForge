@@ -10,6 +10,7 @@ import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -63,6 +64,7 @@ public final class PlatformShellScreen extends Screen {
     private boolean inspectorVisible = true;
     private boolean timelineVisible = true;
     private Screen embeddedView;
+    private final Map<Profile, Screen> providerViews = new EnumMap<>(Profile.class);
     private boolean embeddedViewReady;
     private boolean settingsVisible;
     private boolean ambientGrid = true;
@@ -70,6 +72,37 @@ public final class PlatformShellScreen extends Screen {
     private int previewLayer = 0;
 
     public PlatformShellScreen() { super(Component.literal("MAQAN")); }
+
+    public PlatformShellScreen(String capabilityId) {
+        this();
+        CapabilityRegistry.Capability capability = CapabilityRegistry.all().stream()
+                .filter(c -> c.id().equals(capabilityId)).findFirst().orElse(null);
+        if (capability != null) {
+            selectedCapabilityId = capability.id();
+            selectedDomain = capability.domain();
+            profile = profileForDomain(capability.domain());
+        }
+    }
+
+    private static Profile profileForDomain(String domain) {
+        return switch (domain) {
+            case "POLITICS" -> Profile.POLITICS;
+            case "SETTLEMENTS", "SOCIETY", "ECONOMY", "CREATION" -> Profile.SETTLEMENTS;
+            case "TACTICAL", "ARMY" -> Profile.RTS;
+            default -> Profile.COSMOS;
+        };
+    }
+
+    /** Called reflectively by optional provider mods to mount their existing view in MAQAN. */
+    public static void openProviderView(String providerModId, Screen view) {
+        Minecraft mc = Minecraft.getInstance();
+        CapabilityRegistry.Capability capability = CapabilityRegistry.all().stream()
+                .filter(c -> c.providerModId().equals(providerModId)).findFirst().orElse(null);
+        String capabilityId = capability == null ? "worldforge.realms.politics" : capability.id();
+        PlatformShellScreen shell = new PlatformShellScreen(capabilityId);
+        shell.showEmbeddedView(view);
+        mc.setScreen(shell);
+    }
 
     @Override public boolean isPauseScreen() { return false; }
 
@@ -113,18 +146,21 @@ public final class PlatformShellScreen extends Screen {
         embeddedViewReady = true;
     }
 
-    /** Host a provider-owned view without replacing the global MAQAN Screen. */
+    /** Host a provider-owned view inside its matching global workspace. */
     public void showEmbeddedView(Screen view) {
         if (view == null) return;
-        if (embeddedView != null && embeddedView != view) embeddedView.removed();
-        profile = Profile.COSMOS;
-        embeddedView = view;
+        Screen previous = providerViews.put(profile, view);
+        if (previous != null && previous != view) previous.removed();
         try {
             view.init(Minecraft.getInstance(), width, height);
             embeddedViewReady = true;
         } catch (RuntimeException error) {
             LOGGER.error("Unable to initialize embedded MAQAN view {}", view.getClass().getName(), error);
         }
+    }
+
+    private Screen activeView() {
+        return profile == Profile.COSMOS ? embeddedView : providerViews.get(profile);
     }
 
     private void clampPanels() {
@@ -137,8 +173,9 @@ public final class PlatformShellScreen extends Screen {
     }
 
     @Override public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
-        if (profile == Profile.COSMOS && embeddedView != null) {
-            embeddedView.render(g, mouseX, mouseY, partialTick);
+        Screen view = activeView();
+        if (view != null) {
+            view.render(g, mouseX, mouseY, partialTick);
         } else {
             g.fill(0, 0, width, height, BG);
             WorkspacePreviewRenderer.render(g, font, width, height, profile.name(), previewLayer, mouseX, mouseY, ambientGrid);
@@ -288,8 +325,8 @@ public final class PlatformShellScreen extends Screen {
     }
 
     @Override public boolean mouseClicked(double mx,double my,int button) {
-        if(button!=0) return profile == Profile.COSMOS && embeddedView != null
-                ? embeddedView.mouseClicked(mx,my,button) : super.mouseClicked(mx,my,button);
+        if(button!=0) return activeView() != null
+                ? activeView().mouseClicked(mx,my,button) : super.mouseClicked(mx,my,button);
         if(my<34) {
             int x=Math.max(178,width/2-112);
             for(Profile p:Profile.values()) {
@@ -359,8 +396,8 @@ public final class PlatformShellScreen extends Screen {
             }
             return true;
         }
-        return profile == Profile.COSMOS && embeddedView != null
-                ? embeddedView.mouseClicked(mx,my,button) : true;
+        return activeView() != null
+                ? activeView().mouseClicked(mx,my,button) : true;
     }
 
     private void invokeAtlasRailAction(String methodName) {
@@ -433,37 +470,37 @@ public final class PlatformShellScreen extends Screen {
             clampPanels(); return true;
         }
         boolean handled = super.mouseDragged(mx,my,button,dx,dy);
-        if (profile == Profile.COSMOS && embeddedView != null)
-            handled = embeddedView.mouseDragged(mx,my,button,dx,dy) || handled;
+        if (activeView() != null)
+            handled = activeView().mouseDragged(mx,my,button,dx,dy) || handled;
         return handled;
     }
 
     @Override public boolean mouseReleased(double mx,double my,int button) {
         if(button==0) { draggingPanel=null; resizingPanel=null; }
         boolean handled = super.mouseReleased(mx,my,button);
-        if (profile == Profile.COSMOS && embeddedView != null)
-            handled = embeddedView.mouseReleased(mx,my,button) || handled;
+        if (activeView() != null)
+            handled = activeView().mouseReleased(mx,my,button) || handled;
         return handled;
     }
 
     @Override public boolean keyReleased(int keyCode,int scanCode,int modifiers) {
         boolean handled = super.keyReleased(keyCode,scanCode,modifiers);
-        if (profile == Profile.COSMOS && embeddedView != null)
-            handled = embeddedView.keyReleased(keyCode,scanCode,modifiers) || handled;
+        if (activeView() != null)
+            handled = activeView().keyReleased(keyCode,scanCode,modifiers) || handled;
         return handled;
     }
 
     @Override public boolean charTyped(char codePoint,int modifiers) {
         boolean handled = super.charTyped(codePoint,modifiers);
-        if (profile == Profile.COSMOS && embeddedView != null)
-            handled = embeddedView.charTyped(codePoint,modifiers) || handled;
+        if (activeView() != null)
+            handled = activeView().charTyped(codePoint,modifiers) || handled;
         return handled;
     }
 
     @Override public boolean mouseScrolled(double mouseX,double mouseY,double delta) {
         boolean handled = super.mouseScrolled(mouseX,mouseY,delta);
-        if (profile == Profile.COSMOS && embeddedView != null)
-            handled = embeddedView.mouseScrolled(mouseX,mouseY,delta) || handled;
+        if (activeView() != null)
+            handled = activeView().mouseScrolled(mouseX,mouseY,delta) || handled;
         return handled;
     }
 
@@ -472,19 +509,22 @@ public final class PlatformShellScreen extends Screen {
         // well would close and immediately reopen the shell during the same tick.
         if(keyCode==GLFW.GLFW_KEY_ESCAPE) { if(settingsVisible){settingsVisible=false;return true;} onClose(); return true; }
         boolean handled = super.keyPressed(keyCode,scanCode,modifiers);
-        if (profile == Profile.COSMOS && embeddedView != null)
-            handled = embeddedView.keyPressed(keyCode,scanCode,modifiers) || handled;
+        if (activeView() != null)
+            handled = activeView().keyPressed(keyCode,scanCode,modifiers) || handled;
         return handled;
     }
 
     @Override public void onClose() {
         if (embeddedView != null) embeddedView.removed();
+        for (Screen view : providerViews.values()) view.removed();
+        providerViews.clear();
         Minecraft.getInstance().setScreen(null);
     }
 
     @Override public void resize(Minecraft minecraft, int width, int height) {
         super.resize(minecraft, width, height);
         resizeEmbeddedView();
+        for (Screen view : providerViews.values()) view.init(minecraft, width, height);
     }
 
 }
