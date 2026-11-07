@@ -18,6 +18,7 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import java.util.List;
+import java.util.Map;
 
 /** Fog-of-war map: only chunks explicitly recorded while the player occupied them are rendered. */
 public final class NavigatorSurfaceMapScreen extends Screen {
