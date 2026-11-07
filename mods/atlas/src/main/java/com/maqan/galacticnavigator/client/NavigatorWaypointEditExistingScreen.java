@@ -36,9 +36,9 @@ public final class NavigatorWaypointEditExistingScreen extends Screen {
             value.y=Double.parseDouble(y.getValue());value.z=Double.parseDouble(z.getValue());
             value.group=group.getValue();value.note=note.getValue();
             NavigatorWaypointStore.update(value);
-            minecraft.setScreen(new NavigatorWaypointManagerScreen(parent));
+            MaqanScreenHost.open(minecraft, new NavigatorWaypointManagerScreen(parent));
         }catch(Exception ex){minecraft.player.displayClientMessage(Component.literal("Invalid waypoint: "+ex.getMessage()),true);}
     }
-    @Override public void onClose(){if(minecraft!=null)minecraft.setScreen(parent);else super.onClose();}
+    @Override public void onClose(){if(minecraft!=null)MaqanScreenHost.back(minecraft, parent);else super.onClose();}
     @Override public void render(GuiGraphics g,int mx,int my,float partial){renderBackground(g);g.drawCenteredString(font,"EDIT WAYPOINT",width/2,Math.max(22,height/2-124),0xFF62D9F2);super.render(g,mx,my,partial);}
 }
