@@ -2536,6 +2536,7 @@ public class NavigatorScreen extends Screen {
                                         int color, Node galaxy, boolean galaxyArtwork,
                                         int mouseX, int mouseY) {
         Node hoveredSystem = null;
+        Node hoveredBody = null;
         if (galaxyArtwork) {
             SolarSystemRenderer.orbit(g, cx, cy, radius * 1.08, radius * .58, 0x285D658E, 1);
             SolarSystemRenderer.orbit(g, cx, cy, radius * .72, radius * .38, 0x355D658E, 1);
@@ -2656,6 +2657,14 @@ public class NavigatorScreen extends Screen {
                         new Point(px, py, bodyRadius + 4));
                 drawAtlasBodyVisual(g, px, py, bodyRadius, data,
                         bodyFallbackColor(data, kindColor("planet")));
+                if (Math.hypot(mouseX - px, mouseY - py) <= bodyRadius + 5) {
+                    String bodyKind = isStarData(data) ? "star"
+                            : value(data, "kind", "display_type", "type", "classification")
+                                    .toLowerCase(Locale.ROOT);
+                    hoveredBody = new Node(systemEntry.getKey() + "::" + entry.getKey(),
+                            value(data, "name", entry.getKey()), "atlas_body:" + bodyKind,
+                            List.of(entry));
+                }
             }
             // Moons orbit their actual parent planet, not the system star. If a
             // datapack omits parent metadata, use the only unambiguous planet only.
@@ -2694,6 +2703,10 @@ public class NavigatorScreen extends Screen {
                         new Point(mx, my, moonRadius + 4));
                 drawAtlasBodyVisual(g, mx, my, moonRadius, moon.getValue(),
                         bodyFallbackColor(moon.getValue(), kindColor("moon")));
+                if (Math.hypot(mouseX - mx, mouseY - my) <= moonRadius + 5)
+                    hoveredBody = new Node(systemEntry.getKey() + "::" + moon.getKey(),
+                            value(moon.getValue(), "name", moon.getKey()), "atlas_body:moon",
+                            List.of(moon));
             }
             if (detail == 2 && radius >= 48 && count <= 18) {
                 String systemName = GalaxyCatalog.text(systemEntry.getValue(), "name", systemEntry.getKey());
@@ -2703,7 +2716,7 @@ public class NavigatorScreen extends Screen {
                 hoveredSystem = systemNode;
         }
         g.fill(cx - 2, cy - 2, cx + 3, cy + 3, 0xFFFFE8B8);
-        return hoveredSystem;
+        return hoveredBody != null ? hoveredBody : hoveredSystem;
     }
 
     /** Dedicated close-up planet scene with a large rotating body and source-positioned satellites. */
@@ -4434,7 +4447,11 @@ public class NavigatorScreen extends Screen {
             for (Map.Entry<String, Point> entry : mapPoints.entrySet()) {
                 Point p = entry.getValue();
                 double distance = Math.hypot(x - p.x, y - p.y);
-                if (distance <= Math.max(8, p.radius + 5) && distance < nearestDistance) {
+                boolean bodyHit = entry.getKey().contains("::");
+                boolean nearestIsSystem = nearestHit != null && !nearestHit.getKey().contains("::");
+                if (distance <= Math.max(8, p.radius + 5)
+                        && (distance < nearestDistance || (Math.abs(distance - nearestDistance) < 0.001
+                        && bodyHit && nearestIsSystem))) {
                     nearestHit = entry;
                     nearestDistance = distance;
                 }
