@@ -244,7 +244,8 @@ public final class NavigatorSurfaceMapScreen extends Screen {
                 drawLine(g,(int)Math.round(a.x()),(int)Math.round(a.y()),
                         (int)Math.round(b.x()),(int)Math.round(b.y()),color);
             }
-            WorldForgeMapGeometry.Point label=WorldForgeMapGeometry.centroid(clipped);
+            WorldForgeMapGeometry.Point label=WorldForgeMapGeometry.interiorLabelPoint(
+                    clipped,left,top,right,bottom);
             if(insideMap(label.x(),label.y(),left,top,right,bottom))
                 g.drawString(font,territory.name,(int)Math.round(label.x())+3,
                         (int)Math.round(label.y())-font.lineHeight/2,color,false);
