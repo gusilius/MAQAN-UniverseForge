@@ -227,7 +227,7 @@ public class TroopEntity extends PathfinderMob {
             if (m.level().isClientSide) return;
             if (m.cooldown > 0) m.cooldown--;
             TroopDefs.Unit d = m.def;
-            boolean ranged = d != null && (d.role().equals("ranged") || d.role().equals("siege") && d.range() >= 6);
+            boolean ranged = d != null && d.range() >= 6 && (d.role().equals("ranged") || d.role().equals("cavalry") || d.role().equals("siege"));
             double reach = d == null ? 2.5 : d.range();
             LivingEntity forced = m.forcedTarget();
             if (forced != null) target = forced;
