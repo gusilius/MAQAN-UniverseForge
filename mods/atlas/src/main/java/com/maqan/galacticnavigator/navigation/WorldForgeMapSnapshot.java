@@ -1,7 +1,10 @@
 package com.maqan.galacticnavigator.navigation;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Versioned, renderer-neutral import format for WorldForge map exports.
@@ -13,6 +16,45 @@ public final class WorldForgeMapSnapshot {
     public String generated_at;
     public List<Territory> territories = new ArrayList<>();
     public List<Feature> features = new ArrayList<>();
+
+    private transient Map<String, List<Territory>> territoriesByDimension = Map.of();
+    private transient Map<String, List<Feature>> featuresByDimension = Map.of();
+
+    /** Rebuilds immutable dimension lookup tables after validation/deserialization. */
+    public void rebuildIndexes() {
+        Map<String, List<Territory>> territoryGroups = new LinkedHashMap<>();
+        if (territories != null) for (Territory territory : territories) {
+            if (territory == null || territory.dimension_id == null
+                    || territory.dimension_id.isBlank()) continue;
+            territoryGroups.computeIfAbsent(territory.dimension_id, ignored -> new ArrayList<>())
+                    .add(territory);
+        }
+        Map<String, List<Feature>> featureGroups = new LinkedHashMap<>();
+        if (features != null) for (Feature feature : features) {
+            if (feature == null || feature.dimension_id == null
+                    || feature.dimension_id.isBlank()) continue;
+            featureGroups.computeIfAbsent(feature.dimension_id, ignored -> new ArrayList<>())
+                    .add(feature);
+        }
+        territoriesByDimension = freeze(territoryGroups);
+        featuresByDimension = freeze(featureGroups);
+    }
+
+    public List<Territory> territoriesInDimension(String dimensionId) {
+        if (dimensionId == null || dimensionId.isBlank()) return List.of();
+        return territoriesByDimension.getOrDefault(dimensionId, List.of());
+    }
+
+    public List<Feature> featuresInDimension(String dimensionId) {
+        if (dimensionId == null || dimensionId.isBlank()) return List.of();
+        return featuresByDimension.getOrDefault(dimensionId, List.of());
+    }
+
+    private static <T> Map<String, List<T>> freeze(Map<String, List<T>> source) {
+        Map<String, List<T>> result = new LinkedHashMap<>();
+        source.forEach((key, value) -> result.put(key, List.copyOf(value)));
+        return Collections.unmodifiableMap(result);
+    }
 
     public static final class Vertex {
         public double x;
