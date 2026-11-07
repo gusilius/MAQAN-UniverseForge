@@ -77,9 +77,28 @@ class WorldForgeMapGeometryTest {
         WorldForgeMapGeometry.Point label =
                 WorldForgeMapGeometry.interiorLabelPoint(uShape, 0, 0, 10, 10);
 
-        assertTrue(label.x() >= 1 && label.x() <= 4
-                || label.x() >= 6 && label.x() <= 9);
-        assertTrue(label.y() >= 1 && label.y() <= 9);
+        assertTrue(isInsideOrOnBoundary(uShape, label),
+                () -> "Label point must remain inside the concave polygon: " + label);
+    }
+
+    private static boolean isInsideOrOnBoundary(
+            List<WorldForgeMapGeometry.Point> polygon, WorldForgeMapGeometry.Point point) {
+        boolean inside = false;
+        for (int i = 0, j = polygon.size() - 1; i < polygon.size(); j = i++) {
+            WorldForgeMapGeometry.Point a = polygon.get(j);
+            WorldForgeMapGeometry.Point b = polygon.get(i);
+            double cross = (point.x() - a.x()) * (b.y() - a.y())
+                    - (point.y() - a.y()) * (b.x() - a.x());
+            if (Math.abs(cross) < 1.0e-9
+                    && point.x() >= Math.min(a.x(), b.x()) - 1.0e-9
+                    && point.x() <= Math.max(a.x(), b.x()) + 1.0e-9
+                    && point.y() >= Math.min(a.y(), b.y()) - 1.0e-9
+                    && point.y() <= Math.max(a.y(), b.y()) + 1.0e-9) return true;
+            if ((a.y() > point.y()) != (b.y() > point.y())
+                    && point.x() < (b.x() - a.x()) * (point.y() - a.y())
+                    / (b.y() - a.y()) + a.x()) inside = !inside;
+        }
+        return inside;
     }
 
     @Test
