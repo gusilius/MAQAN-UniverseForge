@@ -6,90 +6,53 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Versioned, renderer-neutral import format for WorldForge map exports.
- * Coordinates are Minecraft block coordinates in an explicitly named dimension.
- */
+/** Versioned, renderer-neutral WorldForge map snapshot. */
 public final class WorldForgeMapSnapshot {
     public int schema_version;
     public String world_id;
     public String generated_at;
     public List<Territory> territories = new ArrayList<>();
     public List<Feature> features = new ArrayList<>();
+    private transient Map<String,List<Territory>> territoriesByDimension = Map.of();
+    private transient Map<String,List<Feature>> featuresByDimension = Map.of();
 
-    private transient Map<String, List<Territory>> territoriesByDimension = Map.of();
-    private transient Map<String, List<Feature>> featuresByDimension = Map.of();
-
-    /** Rebuilds immutable dimension lookup tables after validation/deserialization. */
     public void rebuildIndexes() {
-        Map<String, List<Territory>> territoryGroups = new LinkedHashMap<>();
-        if (territories != null) for (Territory territory : territories) {
-            if (territory == null || territory.dimension_id == null
-                    || territory.dimension_id.isBlank()) continue;
-            territoryGroups.computeIfAbsent(territory.dimension_id, ignored -> new ArrayList<>())
-                    .add(territory);
-        }
-        Map<String, List<Feature>> featureGroups = new LinkedHashMap<>();
-        if (features != null) for (Feature feature : features) {
-            if (feature == null || feature.dimension_id == null
-                    || feature.dimension_id.isBlank()) continue;
-            featureGroups.computeIfAbsent(feature.dimension_id, ignored -> new ArrayList<>())
-                    .add(feature);
-        }
-        territoriesByDimension = freeze(territoryGroups);
-        featuresByDimension = freeze(featureGroups);
+        Map<String,List<Territory>> tg=new LinkedHashMap<>();
+        if(territories!=null) for(Territory t:territories)
+            if(t!=null&&t.dimension_id!=null&&!t.dimension_id.isBlank())
+                tg.computeIfAbsent(t.dimension_id,k->new ArrayList<>()).add(t);
+        Map<String,List<Feature>> fg=new LinkedHashMap<>();
+        if(features!=null) for(Feature f:features)
+            if(f!=null&&f.dimension_id!=null&&!f.dimension_id.isBlank())
+                fg.computeIfAbsent(f.dimension_id,k->new ArrayList<>()).add(f);
+        territoriesByDimension=freeze(tg); featuresByDimension=freeze(fg);
     }
-
-    public List<Territory> territoriesInDimension(String dimensionId) {
-        if (dimensionId == null || dimensionId.isBlank()) return List.of();
-        return territoriesByDimension.getOrDefault(dimensionId, List.of());
+    public List<Territory> territoriesInDimension(String id) {
+        return id==null||id.isBlank()?List.of():territoriesByDimension.getOrDefault(id,List.of());
     }
-
-    public List<Feature> featuresInDimension(String dimensionId) {
-        if (dimensionId == null || dimensionId.isBlank()) return List.of();
-        return featuresByDimension.getOrDefault(dimensionId, List.of());
+    public List<Feature> featuresInDimension(String id) {
+        return id==null||id.isBlank()?List.of():featuresByDimension.getOrDefault(id,List.of());
     }
-
-    private static <T> Map<String, List<T>> freeze(Map<String, List<T>> source) {
-        Map<String, List<T>> result = new LinkedHashMap<>();
-        source.forEach((key, value) -> result.put(key, List.copyOf(value)));
-        return Collections.unmodifiableMap(result);
+    private static <T> Map<String,List<T>> freeze(Map<String,List<T>> src) {
+        Map<String,List<T>> out=new LinkedHashMap<>();
+        src.forEach((k,v)->out.put(k,List.copyOf(v)));
+        return Collections.unmodifiableMap(out);
     }
-
-    public static final class Vertex {
-        public double x;
-        public double y;
-        public double z;
-    }
-
+    public static final class Vertex { public double x,y,z; }
     public static final class Territory {
-        public String id;
-        public String name;
-        public String realm_id;
-        public String realm_name;
-        public String government;
-        public String dimension_id;
-        public String administrative_title_id;
-        public String control_status;
-        public int color;
-        public int fill_alpha = 38;
-        public List<Vertex> vertices = new ArrayList<>();
+        public String id,name,realm_id,realm_name,government,dimension_id,administrative_title_id,
+                control_status,race_id,culture_id;
+        public int color,fill_alpha=38;
+        /** Legacy single contour retained for existing snapshot producers. */
+        public List<Vertex> vertices=new ArrayList<>();
+        /** Outer contours, islands and holes; renderer uses even-odd fill. */
+        public List<List<Vertex>> rings=new ArrayList<>();
+        public Map<String,String> attributes=new LinkedHashMap<>();
     }
-
     public static final class Feature {
-        public String id;
-        public String kind;
-        public String name;
-        public String dimension_id;
-        public double x;
-        public double y;
-        public double z;
-        public String realm_id;
-        public String territory_id;
-        public String race_id;
-        public String culture_id;
-        public String subtype;
+        public String id,kind,name,dimension_id,realm_id,territory_id,race_id,culture_id,subtype;
+        public double x,y,z;
         public int color;
-        public java.util.Map<String, String> attributes = new java.util.LinkedHashMap<>();
+        public Map<String,String> attributes=new LinkedHashMap<>();
     }
 }
