@@ -121,7 +121,7 @@ public class PeopleTest {
         ok(back.get("c" + (reg.size() + 1)) != null, "счётчик id продолжается после загрузки");
         // Повреждённый снимок не должен очищать уже загруженный реестр.
         String beforeBadLoad = back.toJson();
-        String duplicateIdJson = js.replace("\\"id\\":\\"c2\\"", "\\"id\\":\\"c1\\"");
+        String duplicateIdJson = js.replace("\\\"id\\":\\\"c2\\\"", "\\\"id\\":\\\"c1\\\"");
         boolean duplicateRejected = false;
         try { back.fromJson(duplicateIdJson); } catch (IllegalArgumentException expected) { duplicateRejected = true; }
         ok(duplicateRejected && back.toJson().equals(beforeBadLoad),
@@ -130,7 +130,7 @@ public class PeopleTest {
         CharacterRegistry staleCounter = new CharacterRegistry();
         staleCounter.fromJson(staleCounterJson);
         Character afterStaleCounter = staleCounter.create("После загрузки", "", "", "m", 1);
-        ok(staleCounter.get(afterStaleCounter.id) == afterStaleCounter && !js.contains("\\"id\\":\\"" + afterStaleCounter.id + "\\""),
+        ok(staleCounter.get(afterStaleCounter.id) == afterStaleCounter && !js.contains("\\\"id\\":\\\"" + afterStaleCounter.id + "\\\""),
                 "устаревший счётчик автоматически продолжает последовательность ID");
 
 
