@@ -35,8 +35,6 @@ public final class PlatformShellScreen extends Screen {
         controls.clear();
         int top = 8;
         addButton("☰", 10, top, 28, () -> { navigationOpen = !navigationOpen; rebuildShellControls(); });
-        addButton("⌖", 44, top, 28, this::openAtlas);
-        addButton("▦", 78, top, 28, this::openWorldForge);
         addButton(leftOpen ? "‹" : "›", 8, 44, 24, () -> { leftOpen = !leftOpen; rebuildShellControls(); });
         addButton(rightOpen ? "›" : "‹", width - 32, 44, 24, () -> { rightOpen = !rightOpen; rebuildShellControls(); });
         if (navigationOpen && leftOpen) {
