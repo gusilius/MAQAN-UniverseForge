@@ -10,7 +10,7 @@ import java.util.*;
  * Приказы как в RTS: {@link #place}, {@link #assign}, {@link #setProfession}, {@link #setPriority}, {@link #cancel}.
  */
 public final class Settlement {
-    public static final double BASE_CAP = 100, EAT = 0.02, GROW_EVERY = 45, STARVE_EVERY = 30, MAX_STEP = 2;
+    public static final double BASE_CAP = 100, EAT = 0.02, GROW_EVERY = 45, STARVE_EVERY = 30, MAX_STEP = 2, MAX_TICK = 86400;
     public static final int BASE_HOUSING = 4, LOG_MAX = 60;
     /** Скорость рабочего (блоков в секунду), точка появления новых жителей, пороги настроения. */
     public static final double WORKER_SPEED = 2.5, SPAWN_X = -16, SPAWN_Z = 0, LEAVE_EVERY = 20;
@@ -360,6 +360,8 @@ public final class Settlement {
     // ------------------------------------------------------------------ шаг симуляции
 
     public void tick(double dt) {
+        if (!Double.isFinite(dt) || dt <= 0) return;
+        if (dt > MAX_TICK) throw new IllegalArgumentException("За один вызов можно обработать не более " + (int) MAX_TICK + " секунд симуляции");
         while (dt > 0) {
             double step = Math.min(dt, MAX_STEP);
             step(step);

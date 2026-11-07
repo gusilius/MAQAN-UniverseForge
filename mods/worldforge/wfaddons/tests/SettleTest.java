@@ -31,6 +31,16 @@ public class SettleTest {
         ok(d.validate().stream().noneMatch(m -> !m.startsWith("Предупреждение")), "набор данных без ошибок: " + d.validate());
 
         Settlement s = fresh(d, 4);
+        String unchanged = s.toJson();
+        s.tick(Double.NaN);
+        s.tick(Double.POSITIVE_INFINITY);
+        s.tick(Double.NEGATIVE_INFINITY);
+        s.tick(-1);
+        s.tick(0);
+        ok(s.toJson().equals(unchanged), "невалидный шаг времени не меняет поселение");
+        boolean oversizedRejected = false;
+        try { s.tick(Settlement.MAX_TICK + 1); } catch (IllegalArgumentException ex) { oversizedRejected = true; }
+        ok(oversizedRejected && s.toJson().equals(unchanged), "чрезмерный шаг времени отклоняется до симуляции");
         Building h = s.place("house", 0, 0);
         s.tick(1);
         ok(h.state == Building.State.BUILDING && s.amount("wood") == 80, "стройка началась, материалы списаны");
