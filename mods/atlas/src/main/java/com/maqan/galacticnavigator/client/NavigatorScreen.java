@@ -158,6 +158,20 @@ public class NavigatorScreen extends Screen {
     private record RouteConnection(String target, RouteKind kind) {}
     private record RouteLegendHit(int filter, Rect bounds) {}
 
+    private boolean embeddedInMaqan;
+
+    /** Marks this existing Atlas view as hosted by the MAQAN global workspace. */
+    public void setEmbeddedInMaqan(boolean embedded) {
+        embeddedInMaqan = embedded;
+        if (embedded && closeButton != null) closeButton.visible = false;
+    }
+
+    @Override
+    public void onClose() {
+        if (embeddedInMaqan) return;
+        super.onClose();
+    }
+
     public NavigatorScreen() { super(Component.literal("MAQAN Galactic Navigator")); }
 
     @Override
@@ -217,6 +231,7 @@ public class NavigatorScreen extends Screen {
         }).bounds(width - (compactToolbar ? 76 : 112), barY, compactToolbar ? 30 : 66, 20).build());
         closeButton = addRenderableWidget(Button.builder(Component.literal("×"), b -> onClose())
                 .bounds(width - 40, barY, 26, 20).build());
+        if (embeddedInMaqan) closeButton.visible = false;
 
         int menuX = width - 286;
         int menuY = height < 390 ? 42 : 68;
