@@ -672,40 +672,17 @@ public class NavigatorScreen extends Screen {
                 refreshButtons();
                 return;
             }
-            if ("galaxy".equals(node.kind)) {
-                galaxyPath = node.id;
-                sectorPath = null;
-                atlasMode = 1;
-                selectedId = null;
-                selectedNodeId = null;
-                listScroll = 0;
-                panX = 0; panY = 0; zoom = 1.0;
+            if ("galaxy".equals(node.kind) || "sector".equals(node.kind)
+                    || GalaxyCatalog.universes().contains(node.id)) {
+                // Keep one continuous spatial canvas. Double-clicking a group or
+                // system moves the camera deeper into the same map instead of
+                // replacing the universe view with a separate hierarchy screen.
+                double factor = "galaxy".equals(node.kind) ? 3.2
+                        : "sector".equals(node.kind) ? 3.0 : 4.0;
+                zoomToAtlasNode(node.id, factor);
                 refreshButtons();
                 return;
             }
-            if ("sector".equals(node.kind)) {
-                sectorPath = node.id;
-                atlasMode = 1;
-                selectedId = null;
-                selectedNodeId = null;
-                listScroll = 0;
-                panX = 0; panY = 0; zoom = 1.0;
-                refreshButtons();
-                return;
-            }
-            // In atlas modes, the selected data-derived system becomes the active system.
-            if (atlasMode > 0 && GalaxyCatalog.universes().contains(node.id)) universe = node.id;
-            // Cosmic Horizons cosmic_data entries are star systems, not galaxy records.
-            // Open the selected active system directly instead of inventing galaxy/sector layers.
-            level = 3;
-            galaxyPath = null;
-            sectorPath = null;
-            systemPath = null;
-            selectedNodeId = null;
-            selectedId = null;
-            listScroll = 0;
-            refreshButtons();
-            return;
         } else if (level == 1) sectorPath = node.id;
         else if (level == 2) systemPath = node.id;
         else {
@@ -807,6 +784,20 @@ public class NavigatorScreen extends Screen {
         int centerY = (mapT + mapB) / 2;
         panX += centerX - point.x;
         panY += centerY - point.y;
+    }
+
+    /** Focus a selected object without replacing the global map with another screen. */
+    private void zoomToAtlasNode(String id, double factor) {
+        Point point = id == null ? null : mapPoints.get(id);
+        if (point == null) return;
+        int centerX = (mapL + mapR) / 2;
+        int centerY = (mapT + mapB) / 2;
+        panX += centerX - point.x;
+        panY += centerY - point.y;
+        zoom = Math.max(.025, Math.min(64.0, zoom * factor));
+        selectedNodeId = id;
+        selectedId = null;
+        infoScroll = 0;
     }
 
     private void refreshButtons() {
