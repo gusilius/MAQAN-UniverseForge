@@ -72,7 +72,7 @@ public final class NavigatorPlayerMarkerScreen extends Screen {
     }
     private static String onOff(boolean value){return value?"ON":"OFF";}
     private static void refresh(Button button,String value){button.setMessage(Component.literal(value));}
-    @Override public void onClose(){if(minecraft!=null)minecraft.setScreen(parent);else super.onClose();}
+    @Override public void onClose(){if(minecraft!=null)MaqanScreenHost.back(minecraft, parent);else super.onClose();}
     @Override public void render(GuiGraphics g,int mx,int my,float partial){
         MaqanUiTheme.backdrop(g,width,height);
         g.drawCenteredString(font,"PLAYER POSITION MARKER",width/2,Math.max(8,height/2-144),0xFF65D8F2);
