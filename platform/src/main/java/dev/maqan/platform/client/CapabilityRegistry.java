@@ -102,4 +102,15 @@ public final class CapabilityRegistry {
     public static boolean isAvailable(String capabilityId) {
         return available().stream().anyMatch(capability -> capability.id().equals(capabilityId));
     }
+
+    /** Resolve the most specific registered view for a provider screen. */
+    public static Capability forProvider(String providerModId, String screenClass) {
+        return DECLARED.stream()
+                .filter(c -> c.providerModId().equals(providerModId))
+                .filter(c -> c.screenClass().equals(screenClass))
+                .findFirst()
+                .orElseGet(() -> DECLARED.stream()
+                        .filter(c -> c.providerModId().equals(providerModId))
+                        .findFirst().orElse(null));
+    }
 }

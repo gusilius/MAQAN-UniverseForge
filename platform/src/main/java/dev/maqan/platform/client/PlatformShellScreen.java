@@ -94,12 +94,27 @@ public final class PlatformShellScreen extends Screen {
 
     /** Build a MAQAN host for an existing provider screen without changing Minecraft's screen mid-event. */
     public static PlatformShellScreen wrapProviderView(String providerModId, Screen view) {
-        CapabilityRegistry.Capability capability = CapabilityRegistry.all().stream()
-                .filter(c -> c.providerModId().equals(providerModId)).findFirst().orElse(null);
-        String capabilityId = capability == null ? "worldforge.realms.politics" : capability.id();
+        CapabilityRegistry.Capability capability = CapabilityRegistry.forProvider(providerModId, view.getClass().getName());
+        String capabilityId = capability == null ? "worldforge.map" : capability.id();
         PlatformShellScreen shell = new PlatformShellScreen(capabilityId);
-        shell.showEmbeddedView(view);
+        shell.attachProviderView(capability, view);
         return shell;
+    }
+
+    /** Mounts a provider screen into this live shell without replacing the shared workspace. */
+    public boolean attachProviderView(String providerModId, Screen view) {
+        return attachProviderView(CapabilityRegistry.forProvider(providerModId, view.getClass().getName()), view);
+    }
+
+    private boolean attachProviderView(CapabilityRegistry.Capability capability, Screen view) {
+        if (capability == null || view == null) return false;
+        setProfile(profileForDomain(capability.domain()));
+        selectedDomain = capability.domain();
+        selectedCapabilityId = capability.id();
+        Screen previous = providerViews.put(capability.id(), view);
+        if (previous != null && previous != view) previous.removed();
+        if (width > 0 && height > 0) view.init(Minecraft.getInstance(), width, height);
+        return true;
     }
 
     /** Optional providers may call this directly when opening a view outside ScreenEvent.Opening. */
@@ -521,7 +536,28 @@ public final class PlatformShellScreen extends Screen {
         selectedDomain = capability.domain();
         selectedCapabilityId = capability.id();
         Screen view = activeView();
-        if (view != null) view.init(Minecraft.getInstance(), width, height);
+        if (view != null) {
+            view.init(Minecraft.getInstance(), width, height);
+            return;
+        }
+        String command = switch (capability.id()) {
+            case "worldforge.settlements" -> "wfsettle view panel";
+            case "worldforge.rts" -> "wfsettle view hud";
+            case "worldforge.origins" -> "wforigin";
+            case "worldforge.progress" -> "wfprog";
+            case "worldforge.forms" -> "wfform";
+            case "worldforge.quests" -> "wfquest";
+            case "worldforge.orders" -> "wforders";
+            case "worldforge.relations" -> "wfrel";
+            case "worldforge.court" -> "wfcourt";
+            case "worldforge.trade" -> "wftrade";
+            case "worldforge.army" -> "wfarmy screen";
+            case "worldforge.war" -> "wfwar screen";
+            default -> null;
+        };
+        Minecraft mc = Minecraft.getInstance();
+        if (command != null && mc.player != null && mc.player.connection != null)
+            mc.player.connection.sendCommand(command);
     }
 
     @Override public boolean mouseDragged(double mx,double my,int button,double dx,double dy) {

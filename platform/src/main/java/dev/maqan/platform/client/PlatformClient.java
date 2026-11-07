@@ -40,6 +40,12 @@ public final class PlatformClient {
             String packageRoot = className.substring("dev.worldforge.".length()).split("\\.")[0];
             String providerModId = packageRoot.equals("mod") ? "worldforge" : "wf_" + packageRoot;
             if (!ModList.get().isLoaded(providerModId) && !providerModId.equals("worldforge")) return;
+            Minecraft mc = Minecraft.getInstance();
+            if (mc.screen instanceof PlatformShellScreen shell
+                    && shell.attachProviderView(providerModId, next)) {
+                event.setNewScreen(shell);
+                return;
+            }
             event.setNewScreen(PlatformShellScreen.wrapProviderView(providerModId, next));
         }
 
