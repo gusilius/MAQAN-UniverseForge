@@ -81,6 +81,29 @@ class WorldForgeMapGeometryTest {
                 () -> "Label point must remain inside the concave polygon: " + label);
     }
 
+    @Test
+    void evenOddRingsPreserveIslandsAndHoles() {
+        List<WorldForgeMapGeometry.Point> outer = List.of(
+                new WorldForgeMapGeometry.Point(0,0), new WorldForgeMapGeometry.Point(10,0),
+                new WorldForgeMapGeometry.Point(10,10), new WorldForgeMapGeometry.Point(0,10));
+        List<WorldForgeMapGeometry.Point> hole = List.of(
+                new WorldForgeMapGeometry.Point(3,3), new WorldForgeMapGeometry.Point(7,3),
+                new WorldForgeMapGeometry.Point(7,7), new WorldForgeGeometryPoint(3,7));
+        List<WorldForgeMapGeometry.Point> island = List.of(
+                new WorldForgeMapGeometry.Point(4,4), new WorldForgeMapGeometry.Point(6,4),
+                new WorldForgeMapGeometry.Point(6,6), new WorldForgeMapGeometry.Point(4,6));
+        List<List<WorldForgeMapGeometry.Point>> rings = List.of(outer,hole,island);
+        assertTrue(WorldForgeMapGeometry.containsPointRings(rings,1,1));
+        assertFalse(WorldForgeMapGeometry.containsPointRings(rings,3.5,3.5));
+        assertTrue(WorldForgeMapGeometry.containsPointRings(rings,5,5));
+        assertTrue(WorldForgeMapGeometry.containsPointRings(rings,3,5));
+        List<WorldForgeMapGeometry.Span> spans =
+                WorldForgeMapGeometry.scanlineSpansRings(rings,0,0,10,10);
+        assertTrue(spans.stream().anyMatch(s->s.y()==1&&s.xStart()<=1&&s.xEndExclusive()>=9));
+        assertFalse(spans.stream().anyMatch(s->s.y()==3&&s.xStart()<=4&&s.xEndExclusive()>4));
+        assertTrue(spans.stream().anyMatch(s->s.y()==4&&s.xStart()<=5&&s.xEndExclusive()>5));
+    }
+
     private static boolean isInsideOrOnBoundary(
             List<WorldForgeMapGeometry.Point> polygon, WorldForgeMapGeometry.Point point) {
         boolean inside = false;

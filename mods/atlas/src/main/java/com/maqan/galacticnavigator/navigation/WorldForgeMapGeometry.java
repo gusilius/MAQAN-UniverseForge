@@ -40,11 +40,11 @@ public final class WorldForgeMapGeometry {
     }
 
     public static List<Span> scanlineSpans(List<Point> polygon,int left,int top,int right,int bottom) {
-        return scanlineSpans(List.of(polygon),left,top,right,bottom);
+        return scanlineSpansRings(List.of(polygon),left,top,right,bottom);
     }
 
     /** Even-odd fill supports independent islands and holes without guessing ring winding. */
-    public static List<Span> scanlineSpans(List<List<Point>> rings,int left,int top,int right,int bottom) {
+    public static List<Span> scanlineSpansRings(List<List<Point>> rings,int left,int top,int right,int bottom) {
         if(rings==null||rings.isEmpty()||right<=left||bottom<=top)return List.of();
         List<List<Point>> clippedRings=new ArrayList<>();
         double minY=Double.POSITIVE_INFINITY,maxY=Double.NEGATIVE_INFINITY;
@@ -76,10 +76,10 @@ public final class WorldForgeMapGeometry {
     }
 
     public static Point interiorLabelPoint(List<Point> polygon,int left,int top,int right,int bottom) {
-        return interiorLabelPoint(List.of(polygon),left,top,right,bottom);
+        return interiorLabelPointRings(List.of(polygon),left,top,right,bottom);
     }
-    public static Point interiorLabelPoint(List<List<Point>> rings,int left,int top,int right,int bottom) {
-        Span widest=scanlineSpans(rings,left,top,right,bottom).stream()
+    public static Point interiorLabelPointRings(List<List<Point>> rings,int left,int top,int right,int bottom) {
+        Span widest=scanlineSpansRings(rings,left,top,right,bottom).stream()
                 .max(Comparator.comparingInt(s->s.xEndExclusive-s.xStart)).orElse(null);
         if(widest!=null)return new Point((widest.xStart+widest.xEndExclusive)/2.0,widest.y+0.5);
         return rings==null||rings.isEmpty()?new Point(0,0):centroid(rings.get(0));

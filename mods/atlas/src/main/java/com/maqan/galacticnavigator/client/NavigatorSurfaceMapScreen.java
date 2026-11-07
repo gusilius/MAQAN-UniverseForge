@@ -245,14 +245,14 @@ public final class NavigatorSurfaceMapScreen extends Screen {
                     ?0xFF65E6FF:(territory.color==0?0xFF69B8E8:(territory.color|0xFF000000));
             int alpha=Math.max(0,Math.min(160,territory.fill_alpha));
             if(alpha>0)for(WorldForgeMapGeometry.Span span:
-                    WorldForgeMapGeometry.scanlineSpans(rings,left,top,right,bottom))
+                    WorldForgeMapGeometry.scanlineSpansRings(rings,left,top,right,bottom))
                 g.fill(span.xStart(),span.y(),span.xEndExclusive(),span.y()+1,(alpha<<24)|(color&0x00FFFFFF));
             for(List<WorldForgeMapGeometry.Point> ring:rings)for(int i=0;i<ring.size();i++){
                 WorldForgeMapGeometry.Point a=ring.get(i),b=ring.get((i+1)%ring.size());
                 drawLine(g,(int)Math.round(a.x()),(int)Math.round(a.y()),
                         (int)Math.round(b.x()),(int)Math.round(b.y()),color);
             }
-            WorldForgeMapGeometry.Point label=WorldForgeMapGeometry.interiorLabelPoint(rings,left,top,right,bottom);
+            WorldForgeMapGeometry.Point label=WorldForgeMapGeometry.interiorLabelPointRings(rings,left,top,right,bottom);
             if(insideMap(label.x(),label.y(),left,top,right,bottom))
                 g.drawString(font,territory.name,(int)Math.round(label.x())+3,
                         (int)Math.round(label.y())-font.lineHeight/2,color,false);
