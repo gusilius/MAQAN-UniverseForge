@@ -203,7 +203,7 @@ public class NavigatorScreen extends Screen {
         // Compact MAQAN command bar. Secondary controls live in a tools popover,
         // keeping the star map clear without removing any functionality.
         int left = 14;
-        int barY = 42;
+        int barY = embeddedInMaqan ? 58 : 42;
         int searchWidth = Math.max(48, Math.min(210, width - (width < 440 ? 245 : 310)));
         boolean compactToolbar = width < 440;
         search = new EditBox(font, left, barY, searchWidth, 20, Component.literal("Search MAQAN catalogue"));
@@ -1224,17 +1224,22 @@ public class NavigatorScreen extends Screen {
     @Override
     public void render(GuiGraphics g, int mx, int my, float partial) {
         com.maqan.galacticnavigator.navigation.MaqanAnimationClock.beginFrame();
-        renderBackground(g);
-        if (!com.maqan.galacticnavigator.navigation.NavigatorNativeBridge.renderChrome(g, font, width, height, partial, 0)) drawCosmicBackdrop(g);
-
-        MaqanUiTheme.panel(g,12,4,width-12,38);
-        g.fill(0, 38, width, 39, 0x665D7895);
-        g.fill(14, 37, 54, 39, CYAN);
-        g.drawString(font, "MAQAN", 16, 7, TEXT, false);
-        g.drawString(font, "GALACTIC NAVIGATOR", 64, 7, CYAN, false);
-        drawBreadcrumbs(g, mx, my);
+        if (embeddedInMaqan) {
+            drawCosmicBackdrop(g);
+            drawBreadcrumbs(g, mx, my);
+        } else {
+            renderBackground(g);
+            if (!com.maqan.galacticnavigator.navigation.NavigatorNativeBridge.renderChrome(g, font, width, height, partial, 0)) drawCosmicBackdrop(g);
+            MaqanUiTheme.panel(g,12,4,width-12,38);
+            g.fill(0, 38, width, 39, 0x665D7895);
+            g.fill(14, 37, 54, 39, CYAN);
+            g.drawString(font, "MAQAN", 16, 7, TEXT, false);
+            g.drawString(font, "GALACTIC NAVIGATOR", 64, 7, CYAN, false);
+            drawBreadcrumbs(g, mx, my);
+        }
 
         layoutPanels();
+        if (embeddedInMaqan) mapT = Math.max(mapT, 84);
         boolean useList = showList && width >= 620 && listR > listL;
         boolean useInfo = showInfo && width >= 850 && infoR > infoL;
         int bodyTop = mapT;
@@ -1554,7 +1559,7 @@ public class NavigatorScreen extends Screen {
         }
 
         int x = 16;
-        int y = 17;
+        int y = embeddedInMaqan ? 38 : 17;
         int maxX = width - 16;
         for (int i = 0; i < segments.size(); i++) {
             String[] segment = segments.get(i);
