@@ -90,7 +90,7 @@ public class TroopsTest {
         String escaped = damaged.create("p1", "Guard \"North\\Wing\n", List.of("u4")).name;
         Squads escapedRoundTrip = new Squads();
         escapedRoundTrip.fromJson(damaged.toJson());
-        check(escaped.equals(escapedRoundTrip.get("s2").name), "сериализация и обратная загрузка экранируют кавычки, слеши и переводы строк");
+        check(escaped.equals(escapedRoundTrip.get("s4").name), "сериализация и обратная загрузка экранируют кавычки, слеши и переводы строк");
         Squads orderPersistence = new Squads();
         Squads.Squad ordered = orderPersistence.create("p1", "Persistent", List.of("unit-a"));
         orderPersistence.command(ordered.id, Squads.Order.move(12.5, -7.25), false);
