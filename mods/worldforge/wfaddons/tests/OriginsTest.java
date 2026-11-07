@@ -137,6 +137,14 @@ public class OriginsTest {
         OriginDefs badDefs = new OriginDefs();
         badDefs.load("{\"classes\":[{\"id\":\"a\",\"tier\":1},{\"id\":\"b\",\"tier\":2,\"from\":\"a\",\"also_from\":[\"zz\"],\"req_prof\":{\"nope\":1}}],\"professions\":[{\"id\":\"p\",\"ranks\":[{\"xp\":0}],\"req_classes\":[\"qq\"]}]}");
         ok(badDefs.validate().size() == 3, "проверка данных ловит неизвестные связи: " + badDefs.validate());
+        OriginDefs duplicateDefs = new OriginDefs();
+        duplicateDefs.load("{\"races\":[{\"id\":\"human\",\"name\":\"Human\"}]}");
+        boolean duplicateRaceRejected = false;
+        try { duplicateDefs.load("{\"races\":[{\"id\":\"human\",\"name\":\"Overwritten\"}]}"); }
+        catch (IllegalArgumentException duplicate) { duplicateRaceRejected = true; }
+        ok(duplicateRaceRejected && duplicateDefs.races.size() == 1
+                && duplicateDefs.races.get("human").name().equals("Human"),
+                "повторное определение расы отклоняется без частичной перезаписи датапака");
         // специализации: взаимоисключающие, по классам
         Origins o6 = new Origins(d); o6.hooks = new Origins.Hooks() {};
         String M = "p:m";
