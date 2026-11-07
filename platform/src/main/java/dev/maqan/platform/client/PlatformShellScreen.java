@@ -19,7 +19,8 @@ public final class PlatformShellScreen extends Screen {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final int BG = 0xF0080D14, BAR = 0xF0101823, PANEL = 0xE5101923;
     private static final int EDGE = 0xFF34495B, CYAN = 0xFF69CDE2, GOLD = 0xFF69CDE2;
-    private String workspace = "ATLAS";
+    private String workspace = "COSMOS";
+    private boolean navigationOpen = true;
     private boolean leftOpen = true, rightOpen = true;
     private boolean windowOpen = true, dragging = false;
     private int windowX = 330, windowY = 142, windowW = 330, windowH = 210;
@@ -33,20 +34,45 @@ public final class PlatformShellScreen extends Screen {
     @Override protected void init() {
         controls.clear();
         int top = 8;
-        addButton("ATLAS", 12, top, 82, this::openAtlas);
-        addButton("WORLDFORGE", 98, top, 112, this::openWorldForge);
-        addButton("WORKSPACE", 216, top, 94, () -> workspace = "WORKSPACE");
+        addButton("☰", 10, top, 28, () -> { navigationOpen = !navigationOpen; rebuildShellControls(); });
+        addButton("⌖", 44, top, 28, this::openAtlas);
+        addButton("▦", 78, top, 28, this::openWorldForge);
         addButton(leftOpen ? "‹" : "›", 8, 44, 24, () -> { leftOpen = !leftOpen; rebuildShellControls(); });
         addButton(rightOpen ? "›" : "‹", width - 32, 44, 24, () -> { rightOpen = !rightOpen; rebuildShellControls(); });
-        String[] dock = {"NAV", "WORLD MAP"};
-        int dw = Math.min(76, Math.max(48, (width - 40) / dock.length));
-        int total = dw * dock.length;
-        int start = (width - total) / 2;
-        for (int i = 0; i < dock.length; i++) {
-            final String item = dock[i];
-            addButton(item, start + i * dw, height - 34, dw - 4, item.equals("NAV") ? this::openAtlas : this::openWorldForge);
+        if (navigationOpen && leftOpen) {
+            java.util.LinkedHashMap<String, CapabilityRegistry.Capability> domains = new java.util.LinkedHashMap<>();
+            for (CapabilityRegistry.Capability capability : CapabilityRegistry.available())
+                domains.putIfAbsent(capability.domain(), capability);
+            int y = 84;
+            for (var entry : domains.entrySet()) {
+                CapabilityRegistry.Capability capability = entry.getValue();
+                addButton(domainIcon(capability.domain()), 10, y, 28,
+                        () -> openCapability(capability));
+                y += 30;
+                if (y > height - 66) break;
+            }
         }
         addButton("×", width - 32, 8, 24, this::onClose);
+    }
+
+    private static String domainIcon(String domain) {
+        return switch (domain) {
+            case "COSMOS" -> "◎";
+            case "WORLDS" -> "◇";
+            case "POLITICS" -> "♜";
+            case "SETTLEMENTS" -> "⌂";
+            case "SOCIETY" -> "♙";
+            case "ECONOMY" -> "◈";
+            case "ARMY" -> "⚔";
+            case "TACTICAL" -> "⌖";
+            case "CREATION" -> "✳";
+            default -> "·";
+        };
+    }
+
+    private void openCapability(CapabilityRegistry.Capability capability) {
+        workspace = capability.domain();
+        openModule(capability.providerModId(), capability.screenClass());
     }
 
     private void rebuildShellControls() { clearWidgets(); init(); }
@@ -100,12 +126,19 @@ public final class PlatformShellScreen extends Screen {
         if (leftOpen) {
             g.fill(0, 36, 190, height - 42, PANEL);
             g.fill(188, 36, 190, height - 42, EDGE);
-            g.drawString(font, "EXPLORER", 14, 52, GOLD, false);
-            g.drawString(font, "WORKSPACES", 14, 76, 0xFF91A7BA, false);
-            g.drawString(font, "Atlas", 22, 96, workspace.equals("ATLAS") ? CYAN : 0xFFE2EAF2, false);
-            g.drawString(font, "WorldForge", 22, 114, workspace.equals("WORLDFORGE") ? CYAN : 0xFFE2EAF2, false);
-            g.drawString(font, "Tools and maps", 22, 144, 0xFF91A7BA, false);
-            g.drawString(font, "Favorites", 22, 162, 0xFF91A7BA, false);
+            g.drawString(font, "MAQAN", 14, 52, GOLD, false);
+            g.drawString(font, "ACTIVE CAPABILITIES", 14, 72, 0xFF91A7BA, false);
+            int rowY = 94;
+            java.util.LinkedHashMap<String, CapabilityRegistry.Capability> domains = new java.util.LinkedHashMap<>();
+            for (CapabilityRegistry.Capability capability : CapabilityRegistry.available())
+                domains.putIfAbsent(capability.domain(), capability);
+            for (var entry : domains.entrySet()) {
+                String domain = entry.getKey();
+                g.drawString(font, domainIcon(domain), 16, rowY, workspace.equals(domain) ? CYAN : 0xFFE2EAF2, false);
+                g.drawString(font, domain, 38, rowY, workspace.equals(domain) ? CYAN : 0xFFB5C4D2, false);
+                rowY += 18;
+            }
+            if (domains.isEmpty()) g.drawString(font, "No MAQAN modules detected", 14, 96, 0xFF8195A8, false);
         }
         if (rightOpen) {
             g.fill(width - 210, 36, width, height - 42, PANEL);
@@ -114,9 +147,9 @@ public final class PlatformShellScreen extends Screen {
             g.drawString(font, "No object selected", width - 194, 76, 0xFFB5C4D2, false);
             g.drawString(font, "Select an object in an", width - 194, 94, 0xFF8195A8, false);
             g.drawString(font, "Atlas or WorldForge view.", width - 194, 106, 0xFF8195A8, false);
-            g.drawString(font, "MODULE STATUS", width - 194, 142, GOLD, false);
-            statusLine(g, "Atlas", "maqan_galactic_navigator", width - 194, 162);
-            statusLine(g, "WorldForge", "worldforge", width - 194, 180);
+            g.drawString(font, "CAPABILITY PROVIDERS", width - 194, 142, GOLD, false);
+            g.drawString(font, "Atlas", width - 194, 162, ModList.get().isLoaded("maqan_galactic_navigator") ? 0xFF7ED6AA : 0xFF8A98A8, false);
+            g.drawString(font, "WorldForge", width - 194, 180, ModList.get().isLoaded("worldforge") ? 0xFF7ED6AA : 0xFF8A98A8, false);
         }
         g.fill(0, height - 42, width, height, BAR);
         g.fill(0, height - 43, width, height - 41, EDGE);
