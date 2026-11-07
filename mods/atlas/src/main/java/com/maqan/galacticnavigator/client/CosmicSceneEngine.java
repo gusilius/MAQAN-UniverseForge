@@ -150,10 +150,52 @@ public final class CosmicSceneEngine {
         }
     }
 
+    private record CatalogSystem(String id, JsonObject data,
+                                 List<Map.Entry<String, JsonObject>> bodies) {}
+
     private static long revision;
     private static JsonObject lastRoot;
+    private static List<CatalogSystem> cachedCatalog = List.of();
+    private static Map<String, CatalogSystem> cachedSystems = Map.of();
 
     private CosmicSceneEngine() {}
+
+    /**
+     * GalaxyCatalog publishes replacement roots on resource reload. Build the
+     * structural index once per root; per-frame captures reuse its immutable
+     * entry lists and only refresh time-dependent positions.
+     */
+    private static void refreshCatalogIndex(JsonObject root) {
+        if (root == lastRoot) return;
+        lastRoot = root;
+        revision++;
+        List<CatalogSystem> systems = new ArrayList<>();
+        Map<String, CatalogSystem> byId = new LinkedHashMap<>();
+        if (root != null && root.has("universes") && root.get("universes").isJsonObject()) {
+            JsonObject universes = root.getAsJsonObject("universes");
+            for (Map.Entry<String, JsonElement> systemEntry : universes.entrySet()) {
+                if (!systemEntry.getValue().isJsonObject()) continue;
+                String id = systemEntry.getKey();
+                JsonObject data = systemEntry.getValue().getAsJsonObject();
+                List<Map.Entry<String, JsonObject>> bodies = new ArrayList<>();
+                JsonElement rawBodies = data.get("planets");
+                if (rawBodies != null && rawBodies.isJsonObject()) {
+                    for (Map.Entry<String, JsonElement> bodyEntry
+                            : rawBodies.getAsJsonObject().entrySet()) {
+                        if (bodyEntry.getValue().isJsonObject()) {
+                            bodies.add(new AbstractMap.SimpleImmutableEntry<>(
+                                    bodyEntry.getKey(), bodyEntry.getValue().getAsJsonObject()));
+                        }
+                    }
+                }
+                CatalogSystem indexed = new CatalogSystem(id, data, List.copyOf(bodies));
+                systems.add(indexed);
+                byId.put(id, indexed);
+            }
+        }
+        cachedCatalog = List.copyOf(systems);
+        cachedSystems = Collections.unmodifiableMap(byId);
+    }
 
     /**
      * Captures all currently loaded systems in the active universe. No system
@@ -161,20 +203,23 @@ public final class CosmicSceneEngine {
      */
     public static synchronized SceneSnapshot capture(String universeId, double gameTime) {
         JsonObject root = GalaxyCatalog.ROOT;
-        if (root != lastRoot) {
-            lastRoot = root;
-            revision++;
-        }
-        JsonObject universe = GalaxyCatalog.universe(universeId);
+        refreshCatalogIndex(root);
+        CatalogSystem selectedCatalog = cachedSystems.get(universeId);
+        JsonObject universe = selectedCatalog == null ? new JsonObject() : selectedCatalog.data();
         String universeName = GalaxyCatalog.text(universe, "name", universeId);
         List<SceneSystem> systems = new ArrayList<>();
         int bodyCount = 0, datapack = 0, schematic = 0, unplaced = 0;
 
-        for (String systemId : GalaxyCatalog.universes()) {
-            JsonObject systemData = GalaxyCatalog.universe(systemId);
-            if (!belongsToUniverse(systemId, systemData, universeId, universe)) continue;
-            List<SceneBody> bodies = new ArrayList<>();
-            for (Map.Entry<String, JsonObject> entry : GalaxyCatalog.objects(systemId)) {
+        List<Map.Entry<String, JsonObject>> selectedBodies = selectedCatalog == null
+                ? List.of() : selectedCatalog.bodies();
+        for (CatalogSystem catalogSystem : cachedCatalog) {
+            String systemId = catalogSystem.id();
+            JsonObject systemData = catalogSystem.data();
+            List<Map.Entry<String, JsonObject>> sourceBodies = catalogSystem.bodies();
+            if (!belongsToUniverse(systemData, sourceBodies, universeId, universe,
+                    selectedBodies)) continue;
+            List<SceneBody> bodies = new ArrayList<>(sourceBodies.size());
+            for (Map.Entry<String, JsonObject> entry : sourceBodies) {
                 JsonObject source = entry.getValue();
                 String bodyId = GalaxyCatalog.text(source, "catalog_id", entry.getKey());
                 String kind = firstText(source, "kind", "display_type", "type");
@@ -195,10 +240,10 @@ public final class CosmicSceneEngine {
             if (placement == null) placement = Vector3.ZERO;
             if (placementSource == PlacementSource.DATAPACK) datapack++;
             else unplaced++;
-            String galaxyId = groupValue(systemId, systemData, "galaxy_id", "galaxy");
-            String galaxyName = groupLabel(systemId, systemData, galaxyId, "galaxy_name", "galaxy");
-            String sectorId = groupValue(systemId, systemData, "sector_id", "sector");
-            String sectorName = groupLabel(systemId, systemData, sectorId, "sector_name", "sector");
+            String galaxyId = groupValue(sourceBodies, systemData, "galaxy_id", "galaxy");
+            String galaxyName = groupLabel(sourceBodies, systemData, galaxyId, "galaxy_name", "galaxy");
+            String sectorId = groupValue(sourceBodies, systemData, "sector_id", "sector");
+            String sectorName = groupLabel(sourceBodies, systemData, sectorId, "sector_name", "sector");
             systems.add(new SceneSystem(systemId,
                     GalaxyCatalog.text(systemData, "name", systemId),
                     galaxyId, galaxyName, sectorId, sectorName, placement,
@@ -226,11 +271,13 @@ public final class CosmicSceneEngine {
                 galaxies, sectors, systems, bodyCount, datapack, schematic, unplaced);
     }
 
-    private static boolean belongsToUniverse(String systemId, JsonObject system,
-                                             String selectedId, JsonObject selectedUniverse) {
+    private static boolean belongsToUniverse(JsonObject system,
+                                             List<Map.Entry<String, JsonObject>> systemBodies,
+                                             String selectedId, JsonObject selectedUniverse,
+                                             List<Map.Entry<String, JsonObject>> selectedBodies) {
         String explicit = firstText(system, "universe_id", "universe", "cosmos_id");
         if (explicit.isBlank()) {
-            for (Map.Entry<String, JsonObject> body : GalaxyCatalog.objects(systemId)) {
+            for (Map.Entry<String, JsonObject> body : systemBodies) {
                 explicit = firstText(body.getValue(), "universe_id", "universe", "cosmos_id");
                 if (!explicit.isBlank()) break;
             }
@@ -238,7 +285,7 @@ public final class CosmicSceneEngine {
         if (explicit.isBlank()) return true;
         String selectedGroup = firstText(selectedUniverse, "universe_id", "universe", "cosmos_id");
         if (selectedGroup.isBlank()) {
-            for (Map.Entry<String, JsonObject> body : GalaxyCatalog.objects(selectedId)) {
+            for (Map.Entry<String, JsonObject> body : selectedBodies) {
                 selectedGroup = firstText(body.getValue(), "universe_id", "universe", "cosmos_id");
                 if (!selectedGroup.isBlank()) break;
             }
@@ -334,21 +381,22 @@ public final class CosmicSceneEngine {
         return result;
     }
 
-    private static String groupValue(String systemId, JsonObject system, String... keys) {
+    private static String groupValue(List<Map.Entry<String, JsonObject>> bodies,
+                                     JsonObject system, String... keys) {
         String value = firstText(system, keys);
         if (!value.isBlank()) return value;
-        for (Map.Entry<String, JsonObject> body : GalaxyCatalog.objects(systemId)) {
+        for (Map.Entry<String, JsonObject> body : bodies) {
             value = firstText(body.getValue(), keys);
             if (!value.isBlank()) return value;
         }
         return "__unassigned";
     }
 
-    private static String groupLabel(String systemId, JsonObject system, String fallback,
-                                      String... keys) {
+    private static String groupLabel(List<Map.Entry<String, JsonObject>> bodies,
+                                     JsonObject system, String fallback, String... keys) {
         String label = firstText(system, keys);
         if (!label.isBlank()) return label;
-        for (Map.Entry<String, JsonObject> body : GalaxyCatalog.objects(systemId)) {
+        for (Map.Entry<String, JsonObject> body : bodies) {
             label = firstText(body.getValue(), keys);
             if (!label.isBlank()) return label;
         }
