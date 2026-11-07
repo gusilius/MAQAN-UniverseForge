@@ -95,7 +95,7 @@ public final class CosmicHorizonsScanner {
                     String id = entry.getKey();
                     body.addProperty("id", id);
                     body.addProperty("name", string(body, "name", id));
-                    body.addProperty("kind", normalizeKind(string(body, "type", ""), "", ""));
+                    body.addProperty("kind", normalizeKind(fancy(body.get("type"), ""), "", ""));
                     body.addProperty("system", systemName);
                     body.addProperty("system_id", systemKey);
                     if (!attached.isEmpty() && !body.has("dimension"))
@@ -181,9 +181,13 @@ public final class CosmicHorizonsScanner {
                             if (!body.has(field)) copyIfPresent(visual, body, field);
                         }
 
-                        String physicalKind = string(body, "kind", string(body, "type", ""));
+                        String physicalKind = string(body, "kind", fancy(body.get("type"), ""));
                         String displayType = fancy(visual.get("type"), "");
                         String classification = fancy(visual.get("category"), "");
+                        // Cosmic Horizons commonly separates stellar objects into their own
+                        // GUI category (not every star has a primitive type field).
+                        if (classification.isBlank() && isStellarCategory(categoryId))
+                            classification = "star";
                         for (String field : new String[]{"texture_id", "texture", "texture_location",
                                 "planet_texture", "scale", "ponder_scale",
                                 "nebula_color", "nebula_density", "nebula_radius", "nebula_type",
@@ -288,6 +292,13 @@ public final class CosmicHorizonsScanner {
         int suffix = 2;
         while (used.has(preferred + " #" + suffix)) suffix++;
         return preferred + " #" + suffix;
+    }
+
+    private static boolean isStellarCategory(String categoryId) {
+        String key = categoryId == null ? "" : categoryId.trim().toLowerCase(Locale.ROOT)
+                .replace('-', '_').replace(' ', '_');
+        return Set.of("star", "stars", "stellar", "stellar_bodies", "sun", "suns",
+                "solar", "solar_bodies").contains(key);
     }
 
     private static String normalizeKind(String physicalKind, String classification, String displayType) {
