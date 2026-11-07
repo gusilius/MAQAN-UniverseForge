@@ -27,9 +27,13 @@ public final class MapView {
         for (Worker w : s.workers) { x0 = Math.min(x0, w.x); x1 = Math.max(x1, w.x); z0 = Math.min(z0, w.z); z1 = Math.max(z1, w.z); }
         x0 -= 6; x1 += 6; z0 -= 6; z1 += 6;
         double spanX = Math.max(48, x1 - x0), spanZ = Math.max(48, z1 - z0);
-        double sc = Math.min(pw / spanX, ph / spanZ);
+        // A minimized/resized GUI can briefly report a zero-sized viewport. Keep
+        // the world-to-screen transform finite until the next valid layout pass.
+        int safePw = Math.max(1, pw), safePh = Math.max(1, ph);
+        double sc = Math.min(safePw / spanX, safePh / spanZ);
+        if (!Double.isFinite(sc) || sc <= 0) sc = 1.0 / 48.0;
         double cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
-        return new MapView(px, py, pw, ph, cx - pw / sc / 2, cz - ph / sc / 2, sc);
+        return new MapView(px, py, pw, ph, cx - safePw / sc / 2, cz - safePh / sc / 2, sc);
     }
 
     public int sx(double x) { return px + (int) Math.round((x - minX) * scale); }

@@ -600,7 +600,17 @@ public final class NavigatorSurfaceMapScreen extends Screen {
         return super.mouseDragged(x,y,button,dx,dy);
     }
     @Override public boolean mouseScrolled(double x,double y,double delta){
-        zoom=Math.max(0.35,Math.min(4.0,zoom*(delta>0?1.15:1.0/1.15)));
+        if (delta == 0) return false;
+        int left=18,top=74,right=width-18,bottom=height-48;
+        if (!insideMap(x,y,left,top,right,bottom)) return super.mouseScrolled(x,y,delta);
+        double factor=delta>0?1.15:1.0/1.15;
+        double nextZoom=Math.max(0.35,Math.min(4.0,zoom*factor));
+        if (nextZoom==zoom) return true;
+        double centerX=(left+right)/2.0,centerY=(top+bottom)/2.0;
+        // Preserve the world point beneath the cursor while changing scale.
+        panX=x-centerX-(x-centerX-panX)*(nextZoom/zoom);
+        panY=y-centerY-(y-centerY-panY)*(nextZoom/zoom);
+        zoom=nextZoom;
         return true;
     }
     @Override public void onClose(){if(minecraft!=null)MaqanScreenHost.back(minecraft, parent);else super.onClose();}

@@ -233,6 +233,10 @@ public class RtsTest {
         ok(wp.get(w1, "smith") == 3 && wp.best(g, w1).equals("builder"), "Dispatch и best");
 
         // ---- карта
+        MapView collapsed = MapView.fit(g, 0, 0, 0, 0);
+        ok(Double.isFinite(collapsed.scale) && collapsed.scale > 0, "свёрнутая миникарта сохраняет конечный положительный масштаб");
+        MapView narrow = MapView.fit(g, 0, 0, -20, 100);
+        ok(Double.isFinite(narrow.scale) && narrow.scale > 0, "некорректная ширина миникарты не создаёт бесконечный масштаб");
         MapView mv = MapView.fit(g, 0, 0, 120, 100);
         Building b0 = g.buildings.get(0);
         ok(mv.pick(g, mv.sx(b0.x), mv.sy(b0.z)).kind == Target.Kind.BUILDING, "миникарта: здание под точкой");
