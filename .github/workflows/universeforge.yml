@@ -123,20 +123,7 @@ jobs:
       - name: Compile and run WorldForge logic tests
         working-directory: mods/worldforge/wfaddons
         shell: bash
-        run: |
-          set -euo pipefail
-          OUT="$RUNNER_TEMP/worldforge-tests"
-          mkdir -p "$OUT"
-          mapfile -t SOURCES < <(find wf-* -path '*/src/main/java/*' -name '*.java' ! -path '*/mc/*')
-          javac -proc:none -encoding UTF-8 -d "$OUT" -sourcepath ../wfmod/src/main/java "${SOURCES[@]}" tests/*.java
-          failed=0
-          for source in tests/*.java; do
-            test_name="$(basename "$source" .java)"
-            echo "== $test_name"
-            java -Dstdout.encoding=UTF-8 -cp "$OUT" "dev.worldforge.tests.$test_name" ../testdata/game_of_thrones_datapack.zip | tee "$RUNNER_TEMP/$test_name.log" || failed=1
-            if grep -q "^FAIL" "$RUNNER_TEMP/$test_name.log"; then failed=1; fi
-          done
-          test "$failed" -eq 0
+        run: bash tools/test-all.sh ../wfmod
 
   worldforge-native:
     name: WorldForge simulation native core (Windows x64)
