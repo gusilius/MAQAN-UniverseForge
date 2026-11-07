@@ -1825,10 +1825,28 @@ public class NavigatorScreen extends Screen {
                 List.of(new AbstractMap.SimpleImmutableEntry<>(id, o)));
     }
 
+    private void drawBodyTypeLegend(GuiGraphics g, int mouseX, int mouseY) {
+        if (mapR - mapL < 190) return;
+        int y = mapT + 13;
+        int starX = mapR - 70, planetX = mapR - 46, moonX = mapR - 22;
+        drawRadialGlow(g, starX, y, 5, 0x55FFD878, 0xFFFFD878);
+        drawDisc(g, starX, y, 2, 0xFFFFF4D0, 0xFFFFD878);
+        g.fill(planetX - 3, y - 3, planetX + 4, y + 4, 0xFF63BBD7);
+        g.fill(planetX - 2, y - 2, planetX + 1, y - 1, 0xFFDAF7FF);
+        drawDisc(g, moonX, y, 2, 0xFFE6EEF5, 0xFF9DAFBE);
+        if (Math.hypot(mouseX - starX, mouseY - y) <= 8)
+            g.renderTooltip(font, Component.literal("STAR · stellar body"), mouseX, mouseY);
+        else if (Math.hypot(mouseX - planetX, mouseY - y) <= 8)
+            g.renderTooltip(font, Component.literal("PLANET · cuboid body"), mouseX, mouseY);
+        else if (Math.hypot(mouseX - moonX, mouseY - y) <= 8)
+            g.renderTooltip(font, Component.literal("MOON · natural satellite"), mouseX, mouseY);
+    }
+
     private Node drawMap(GuiGraphics g, int mx, int my, List<Node> nodes) {
         g.drawString(font, bodyViewId != null ? "PLANET / SATELLITE VIEW" :
                 level == 3 ? "STAR SYSTEM" : atlasMode > 0 ? atlasModeName() + " ATLAS" : levelTitle(),
                 mapL + 10, mapT + 8, TEXT, false);
+        drawBodyTypeLegend(g, mx, my);
         if (nodes.isEmpty()) {
             int cx = (mapL + mapR) / 2;
             int cy = (mapT + mapB) / 2;
