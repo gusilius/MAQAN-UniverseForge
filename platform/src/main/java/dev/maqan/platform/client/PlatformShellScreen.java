@@ -65,6 +65,8 @@ public final class PlatformShellScreen extends Screen {
     private Screen embeddedView;
     private boolean embeddedViewReady;
     private boolean settingsVisible;
+    private boolean ambientGrid = true;
+    private boolean panelShadows = true;
     private int previewLayer = 0;
 
     public PlatformShellScreen() { super(Component.literal("MAQAN")); }
@@ -139,7 +141,7 @@ public final class PlatformShellScreen extends Screen {
             embeddedView.render(g, mouseX, mouseY, partialTick);
         } else {
             g.fill(0, 0, width, height, BG);
-            WorkspacePreviewRenderer.render(g, font, width, height, profile.name(), previewLayer, mouseX, mouseY);
+            WorkspacePreviewRenderer.render(g, font, width, height, profile.name(), previewLayer, mouseX, mouseY, ambientGrid);
         }
         drawTopBar(g, mouseX, mouseY);
         drawRail(g, mouseX, mouseY);
@@ -185,23 +187,26 @@ public final class PlatformShellScreen extends Screen {
     }
 
     private void drawSettings(GuiGraphics g, int mx, int my) {
-        int w=224,h=132,x=52,y=Math.max(42,height-h-12);
+        int w=224,h=146,x=52,y=Math.max(42,height-h-12);
         g.fill(x+3,y+4,x+w+3,y+h+4,0x80000000);
         g.fill(x,y,x+w,y+h,SURFACE);
         g.fill(x,y,x+w,y+26,SURFACE_ALT);
         g.drawString(font,"⚙",x+10,y+9,CYAN,false);
         g.drawString(font,"WORKSPACE",x+28,y+9,TEXT,false);
         g.drawCenteredString(font,"×",x+w-15,y+8,MUTED);
-        g.drawString(font,"Interface layout",x+12,y+43,TEXT,false);
-        g.drawString(font,"Floating panels · compact mode",x+12,y+61,MUTED,false);
-        g.drawString(font,"Provider data is never simulated",x+12,y+81,MUTED,false);
-        g.drawString(font,"MAQAN / UI CORE",x+12,y+108,CYAN,false);
+        g.drawString(font,"Background grid",x+12,y+42,TEXT,false);
+        g.drawString(font,ambientGrid?"✓":"—",x+w-26,y+42,ambientGrid?CYAN:MUTED,false);
+        g.drawString(font,"Panel shadows",x+12,y+66,TEXT,false);
+        g.drawString(font,panelShadows?"✓":"—",x+w-26,y+66,panelShadows?CYAN:MUTED,false);
+        g.fill(x+10,y+91,x+w-10,y+92,EDGE);
+        g.drawString(font,"Panels remain draggable and resizable",x+12,y+103,MUTED,false);
+        g.drawString(font,"MAQAN / UI CORE",x+12,y+126,CYAN,false);
         if(mx>=x+w-28&&my>=y&&my<y+26) g.renderTooltip(font,Component.literal("Close settings"),mx,my);
     }
 
     private void drawPanel(GuiGraphics g, Panel p, int mouseX, int mouseY) {
         int visibleH = p.minimized ? 26 : p.h;
-        g.fill(p.x+3,p.y+4,p.x+p.w+3,p.y+visibleH+4,0x70000000);
+        if (panelShadows) g.fill(p.x+3,p.y+4,p.x+p.w+3,p.y+visibleH+4,0x70000000);
         g.fill(p.x,p.y,p.x+p.w,p.y+visibleH,SURFACE);
         g.fill(p.x,p.y,p.x+p.w,p.y+26,SURFACE_ALT);
         g.fill(p.x,p.y+25,p.x+p.w,p.y+26,EDGE);
@@ -309,9 +314,11 @@ public final class PlatformShellScreen extends Screen {
             return true;
         }
         if(settingsVisible) {
-            int sx=52,sy=Math.max(42,height-144);
+            int sx=52,sy=Math.max(42,height-158);
             if(mx>=sx+196&&my>=sy&&my<sy+26) { settingsVisible=false; return true; }
-            if(mx>=sx&&mx<=sx+224&&my>=sy&&my<=sy+132) return true;
+            if(mx>=sx&&mx<=sx+224&&my>=sy+32&&my<sy+59) { ambientGrid=!ambientGrid; return true; }
+            if(mx>=sx&&mx<=sx+224&&my>=sy+59&&my<sy+86) { panelShadows=!panelShadows; return true; }
+            if(mx>=sx&&mx<=sx+224&&my>=sy&&my<=sy+146) return true;
         }
         if(profile==Profile.COSMOS && embeddedView==null && my>=40&&my<68 && mx>=54&&mx<270) {
             int x=58;
