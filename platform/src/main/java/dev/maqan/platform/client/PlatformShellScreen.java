@@ -69,6 +69,7 @@ public final class PlatformShellScreen extends Screen {
     private boolean ambientGrid = true;
     private boolean panelShadows = true;
     private int previewLayer = 0;
+    private int navigationScroll;
 
     public PlatformShellScreen() { super(Component.literal("MAQAN")); }
 
@@ -303,20 +304,53 @@ public final class PlatformShellScreen extends Screen {
         };
     }
 
+    private List<CapabilityRegistry.Capability> navigationCapabilities() {
+        return CapabilityRegistry.available().stream()
+                .filter(c -> domainVisible(c.domain()))
+                .toList();
+    }
+
+    private int navigationViewportTop(Panel p) { return p.y + 31; }
+    private int navigationViewportBottom(Panel p) { return p.y + p.h - 9; }
+    private int navigationVisibleRows(Panel p) {
+        return Math.max(1, (navigationViewportBottom(p) - navigationViewportTop(p)) / 21);
+    }
+    private int navigationMaxScroll(Panel p) {
+        return Math.max(0, navigationCapabilities().size() - navigationVisibleRows(p));
+    }
+
     private void drawNavigationPanel(GuiGraphics g, Panel p) {
-        int y=p.y+38;
-        List<CapabilityRegistry.Capability> capabilities=CapabilityRegistry.available();
-        for(CapabilityRegistry.Capability c:capabilities) {
-            if (!domainVisible(c.domain())) continue;
-            boolean installed=ModList.get().isLoaded(c.providerModId());
-            boolean active=c.id().equals(selectedCapabilityId);
-            if(active) g.fill(p.x+6,y-4,p.x+p.w-6,y+17,0x333B9FB5);
-            g.drawString(font,c.icon(),p.x+12,y,installed?CYAN:0xFF536879,false);
-            g.drawString(font,c.label(),p.x+34,y,installed?TEXT:0xFF718496,false);
-            g.fill(p.x+p.w-17,y+3,p.x+p.w-12,y+8,installed?0xFF62D69C:0xFF53616D);
-            if(installed && active) g.fill(p.x+6,y+15,p.x+p.w-6,y+16,CYAN);
-            y+=21;
-            if(y>p.y+p.h-14) break;
+        List<CapabilityRegistry.Capability> capabilities = navigationCapabilities();
+        navigationScroll = Math.max(0, Math.min(navigationScroll, navigationMaxScroll(p)));
+        int top = navigationViewportTop(p);
+        int bottom = navigationViewportBottom(p);
+        g.enableScissor(p.x + 5, top, p.x + p.w - 5, bottom);
+        for (int row = 0; row < navigationVisibleRows(p); row++) {
+            int index = navigationScroll + row;
+            if (index >= capabilities.size()) break;
+            CapabilityRegistry.Capability c = capabilities.get(index);
+            int y = p.y + 38 + row * 21;
+            boolean installed = ModList.get().isLoaded(c.providerModId());
+            boolean active = c.id().equals(selectedCapabilityId);
+            if (active) g.fill(p.x + 6, y - 4, p.x + p.w - 6, y + 17, 0x333B9FB5);
+            g.drawString(font, c.icon(), p.x + 12, y, installed ? CYAN : 0xFF536879, false);
+            g.drawString(font, c.label(), p.x + 34, y, installed ? TEXT : 0xFF718496, false);
+            g.fill(p.x + p.w - 17, y + 3, p.x + p.w - 12, y + 8,
+                    installed ? 0xFF62D69C : 0xFF53616D);
+            if (installed && active) g.fill(p.x + 6, y + 15, p.x + p.w - 6, y + 16, CYAN);
+        }
+        g.disableScissor();
+        if (capabilities.size() > navigationVisibleRows(p)) {
+            int trackX = p.x + p.w - 5;
+            int trackTop = top + 2;
+            int trackBottom = bottom - 2;
+            int trackHeight = Math.max(1, trackBottom - trackTop);
+            int thumbHeight = Math.max(16, trackHeight * navigationVisibleRows(p) / capabilities.size());
+            int travel = Math.max(0, trackHeight - thumbHeight);
+            int thumbY = trackTop + (navigationMaxScroll(p) == 0 ? 0
+                    : travel * navigationScroll / navigationMaxScroll(p));
+            g.fill(trackX, trackTop, trackX + 2, trackBottom, 0x554A6579);
+            g.fill(trackX, thumbY, trackX + 2, thumbY + thumbHeight, CYAN);
         }
     }
 
@@ -462,14 +496,16 @@ public final class PlatformShellScreen extends Screen {
                 return true;
             }
             if(p.id.equals("navigation")) {
-                int y=p.y+38;
-                for(CapabilityRegistry.Capability c:CapabilityRegistry.available()) {
-                    if(!domainVisible(c.domain())) continue;
-                    if(my>=y-4&&my<y+17) {
-                        openCapability(c);
-                        return true;
+                int top = navigationViewportTop(p);
+                int bottom = navigationViewportBottom(p);
+                if (my >= top && my < bottom) {
+                    int row = (int) ((my - top) / 21);
+                    int index = navigationScroll + row;
+                    List<CapabilityRegistry.Capability> capabilities = navigationCapabilities();
+                    if (index >= 0 && index < capabilities.size()) {
+                        openCapability(capabilities.get(index));
                     }
-                    y+=21;
+                    return true;
                 }
             }
             return true;
@@ -489,6 +525,7 @@ public final class PlatformShellScreen extends Screen {
 
     private void setProfile(Profile next) {
         profile=next;
+        navigationScroll = 0;
         selectedCapabilityId = switch (next) {
             case COSMOS -> "maqan.atlas.cosmos";
             case POLITICS -> "worldforge.realms.politics";
@@ -628,6 +665,16 @@ public final class PlatformShellScreen extends Screen {
     }
 
     @Override public boolean mouseScrolled(double mouseX,double mouseY,double delta) {
+        Panel nav = panels.get("navigation");
+        if (nav != null && nav.visible && !nav.minimized
+                && mouseX >= nav.x && mouseX <= nav.x + nav.w
+                && mouseY >= navigationViewportTop(nav)
+                && mouseY < navigationViewportBottom(nav)
+                && !navigationCapabilities().isEmpty()) {
+            int direction = delta > 0 ? -1 : 1;
+            navigationScroll = Math.max(0, Math.min(navigationMaxScroll(nav), navigationScroll + direction * 2));
+            return true;
+        }
         boolean handled = super.mouseScrolled(mouseX,mouseY,delta);
         if (activeView() != null)
             handled = activeView().mouseScrolled(mouseX,mouseY,delta) || handled;
