@@ -1157,9 +1157,14 @@ public class NavigatorScreen extends Screen {
         JsonObject data = entry.getValue();
         String name = value(data, "name", "display_name");
         if (name.isEmpty()) name = entry.getKey();
-        String kind = value(data, "kind");
-        output.add(new Node(entry.getKey(), name, kind.isEmpty() ? "planet" : kind,
-                List.of(entry), Math.min(depth, 8)));
+        String kind = value(data, "kind", "display_type", "type", "classification").trim();
+        String normalizedKind = kind.toLowerCase(Locale.ROOT);
+        // Keep object identity data-driven and consistent across the catalogue,
+        // orbital hierarchy, labels and parent resolution.
+        if (isStarData(data)) kind = "star";
+        else if (normalizedKind.contains("moon") || normalizedKind.contains("satellite")) kind = "moon";
+        else if (normalizedKind.isEmpty()) kind = "planet";
+        output.add(new Node(entry.getKey(), name, kind, List.of(entry), Math.min(depth, 8)));
         for (Entry<String, JsonObject> child : children.getOrDefault(entry.getKey(), List.of()))
             appendBodyTree(child, depth + 1, children, visited, output);
     }
