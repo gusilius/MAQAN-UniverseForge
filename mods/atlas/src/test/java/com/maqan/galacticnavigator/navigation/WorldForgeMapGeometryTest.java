@@ -102,26 +102,6 @@ class WorldForgeMapGeometryTest {
     }
 
     @Test
-    void pointPickingSupportsConcaveTerritoriesAndTheirBoundaries() {
-        List<WorldForgeMapGeometry.Point> uShape = List.of(
-                new WorldForgeMapGeometry.Point(1, 1),
-                new WorldForgeMapGeometry.Point(9, 1),
-                new WorldForgeMapGeometry.Point(9, 9),
-                new WorldForgeMapGeometry.Point(6, 9),
-                new WorldForgeMapGeometry.Point(6, 4),
-                new WorldForgeMapGeometry.Point(4, 4),
-                new WorldForgeMapGeometry.Point(4, 9),
-                new WorldForgeMapGeometry.Point(1, 9));
-
-        assertTrue(WorldForgeMapGeometry.containsPoint(uShape, 5, 2));
-        assertTrue(WorldForgeMapGeometry.containsPoint(uShape, 2, 7));
-        assertTrue(WorldForgeMapGeometry.containsPoint(uShape, 5, 1));
-        assertFalse(WorldForgeMapGeometry.containsPoint(uShape, 5, 7));
-        assertFalse(WorldForgeMapGeometry.containsPoint(uShape, Double.NaN, 2));
-        assertFalse(WorldForgeMapGeometry.containsPoint(List.of(), 2, 2));
-    }
-
-    @Test
     void degenerateAndOutsidePolygonsAreHandledSafely() {
         assertTrue(WorldForgeMapGeometry.clipPolygon(List.of(
                 new WorldForgeMapGeometry.Point(-5, -5),

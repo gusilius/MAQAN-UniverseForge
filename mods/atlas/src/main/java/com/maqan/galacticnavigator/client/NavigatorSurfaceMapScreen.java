@@ -7,7 +7,6 @@ import com.maqan.galacticnavigator.navigation.NavigatorPlayerPositionTracker;
 import com.maqan.galacticnavigator.navigation.NavigatorWaypoint;
 import com.maqan.galacticnavigator.navigation.NavigatorWaypointStore;
 import com.maqan.galacticnavigator.navigation.NavigatorWorldForgeMapStore;
-import com.maqan.galacticnavigator.navigation.NavigatorPlatformSelectionBridge;
 import com.maqan.galacticnavigator.navigation.WorldForgeMapSnapshot;
 import com.maqan.galacticnavigator.navigation.WorldForgeMapGeometry;
 import com.maqan.galacticnavigator.navigation.SurfaceTerrainProjection;
@@ -37,7 +36,6 @@ public final class NavigatorSurfaceMapScreen extends Screen {
     private ExploredSurfaceRoutePlanner.Mode routeMode=ExploredSurfaceRoutePlanner.Mode.WALK;
     private ExploredSurfaceRoutePlanner.Result surfaceRoute;
     private String selectedWaypointId="";
-    private String selectedWorldForgeEntityId="";
     private int routeStartX=Integer.MIN_VALUE,routeStartZ=Integer.MIN_VALUE;
     private static final int BACKGROUND=0xF0060B16;
 
@@ -153,8 +151,7 @@ public final class NavigatorSurfaceMapScreen extends Screen {
         }
 
         if(!underground&&terrain3D) renderTerrain3D(g,chunks,mapLeft,mapTop,mapRight,mapBottom,cell);
-        if(!underground&&!terrain3D)
-            renderWorldForgeOverlay(g,cell,mapLeft,mapTop,mapRight,mapBottom,player);
+        if(!underground) renderWorldForgeOverlay(g,cell,mapLeft,mapTop,mapRight,mapBottom,player);
 
         if(!underground&&surfaceRoute!=null&&surfaceRoute.found()){
             List<ExploredSurfaceRoutePlanner.Point> routePoints=surfaceRoute.points();
@@ -234,8 +231,7 @@ public final class NavigatorSurfaceMapScreen extends Screen {
             List<WorldForgeMapGeometry.Point> clipped=WorldForgeMapGeometry.clipPolygon(
                     points,left,top,right,bottom);
             if(clipped.size()<3)continue;
-            int color=territory.id.equals(selectedWorldForgeEntityId)
-                    ?0xFF65E6FF:(territory.color==0?0xFF69B8E8:(territory.color|0xFF000000));
+            int color=territory.color==0?0xFF69B8E8:(territory.color|0xFF000000);
             int alpha=Math.max(0,Math.min(160,territory.fill_alpha));
             if(alpha>0){
                 int fill=(alpha<<24)|(color&0x00FFFFFF);
@@ -261,8 +257,7 @@ public final class NavigatorSurfaceMapScreen extends Screen {
                     left,top,right,bottom,player);
             if(!insideMap(projected[0],projected[1],left,top,right,bottom))continue;
             int x=(int)Math.round(projected[0]),y=(int)Math.round(projected[1]);
-            int color=feature.id.equals(selectedWorldForgeEntityId)
-                    ?0xFF65E6FF:(feature.color==0?0xFFFFC66D:(feature.color|0xFF000000));
+            int color=feature.color==0?0xFFFFC66D:(feature.color|0xFF000000);
             g.fill(x-4,y-4,x+5,y+5,0xDD07101A);
             g.fill(x-2,y-2,x+3,y+3,color);
             drawnFeatures++;
@@ -270,67 +265,6 @@ public final class NavigatorSurfaceMapScreen extends Screen {
         if(drawnTerritories>0||drawnFeatures>0)
             g.drawString(font,"WORLDFORGE  ·  "+drawnTerritories+" TERRITORIES  ·  "
                     +drawnFeatures+" FEATURES",left+8,top+8,0xFF9BD7F1,false);
-    }
-
-
-    /** Selects an imported WorldForge feature or territory and publishes its identity to MAQAN Inspector. */
-    private boolean selectWorldForgeAt(double mouseX,double mouseY) {
-        if(underground||terrain3D)return false;
-        int left=18,top=74,right=width-18,bottom=height-48;
-        if(!insideMap(mouseX,mouseY,left,top,right,bottom))return false;
-        WorldForgeMapSnapshot snapshot=NavigatorWorldForgeMapStore.current();
-        if(snapshot==null)return false;
-        NavigatorPlayerPosition player=NavigatorPlayerPositionTracker.current();
-        double cell=18.0*zoom;
-
-        // POI markers take priority over territory fills.
-        WorldForgeMapSnapshot.Feature nearest=null;
-        double bestDistance=64.0;
-        for(WorldForgeMapSnapshot.Feature feature:NavigatorWorldForgeMapStore.features(dimension)){
-            double[] point=project(feature.x/16.0,feature.z/16.0,cell,left,top,right,bottom,player);
-            double dx=point[0]-mouseX,dy=point[1]-mouseY,distance=dx*dx+dy*dy;
-            if(distance<=bestDistance){bestDistance=distance;nearest=feature;}
-        }
-        if(nearest!=null){
-            selectedWorldForgeEntityId=nearest.id;
-            List<String> context=new ArrayList<>();
-            addContext(context,"kind",nearest.kind);
-            addContext(context,"subtype",nearest.subtype);
-            addContext(context,"realm",nearest.realm_id);
-            addContext(context,"territory",nearest.territory_id);
-            addContext(context,"race",nearest.race_id);
-            addContext(context,"culture",nearest.culture_id);
-            NavigatorPlatformSelectionBridge.publish("worldforge:feature/"+nearest.id,
-                    nearest.kind,nearest.name,dimension,String.join(" · ",context));
-            return true;
-        }
-
-        List<WorldForgeMapSnapshot.Territory> territories=
-                NavigatorWorldForgeMapStore.territories(dimension);
-        for(int index=territories.size()-1;index>=0;index--){
-            WorldForgeMapSnapshot.Territory territory=territories.get(index);
-            if(territory.vertices==null||territory.vertices.size()<3)continue;
-            List<WorldForgeMapGeometry.Point> polygon=new ArrayList<>(territory.vertices.size());
-            for(WorldForgeMapSnapshot.Vertex vertex:territory.vertices){
-                double[] point=project(vertex.x/16.0,vertex.z/16.0,cell,left,top,right,bottom,player);
-                polygon.add(new WorldForgeMapGeometry.Point(point[0],point[1]));
-            }
-            if(!WorldForgeMapGeometry.containsPoint(polygon,mouseX,mouseY))continue;
-            selectedWorldForgeEntityId=territory.id;
-            List<String> context=new ArrayList<>();
-            addContext(context,"realm",territory.realm_id);
-            addContext(context,"government",territory.government);
-            addContext(context,"administrative title",territory.administrative_title_id);
-            addContext(context,"control",territory.control_status);
-            NavigatorPlatformSelectionBridge.publish("worldforge:territory/"+territory.id,
-                    "territory",territory.name,dimension,String.join(" · ",context));
-            return true;
-        }
-        return false;
-    }
-
-    private static void addContext(List<String> target,String label,String value){
-        if(value!=null&&!value.isBlank())target.add(label+": "+value.trim());
     }
 
     private record TerrainPixel(double depth,int x,int y,int color) {}
@@ -482,7 +416,6 @@ public final class NavigatorSurfaceMapScreen extends Screen {
     @Override public boolean mouseClicked(double x,double y,int button){
         if(super.mouseClicked(x,y,button))return true;
         if(button==1&&selectWaypointAt(x,y))return true;
-        if(button==0&&selectWorldForgeAt(x,y))return true;
         if((button==0||button==2)&&x>=18&&x<=width-18&&y>=74&&y<=height-48){
             dragging=true;dragX=x;dragY=y;cameraDrag=button==2;return true;
         }

@@ -1431,22 +1431,30 @@ public class NavigatorScreen extends Screen {
         if (openButton != null) openButton.active = selectedNodeId != null;
     }
 
-    /** Publish Atlas identity through the shared optional Platform bridge. */
+    /** Publish Atlas identity to the optional MAQAN shell without linking Platform at compile time. */
     private void publishPlatformSelection(Node node) {
-        if (node == null) {
-            com.maqan.galacticnavigator.navigation.NavigatorPlatformSelectionBridge.clear();
-            return;
+        try {
+            Class<?> bridge = Class.forName("dev.maqan.platform.client.PlatformSelectionContext");
+            if (node == null) {
+                bridge.getMethod("clear", String.class).invoke(null, "maqan_galactic_navigator");
+                return;
+            }
+            String entityId = node.id;
+            String systemId = "";
+            int separator = entityId.indexOf("::");
+            if (separator > 0) systemId = entityId.substring(0, separator);
+            else if (GalaxyCatalog.universes().contains(entityId)) systemId = entityId;
+            String type = node.kind == null ? "object" : node.kind.replace("atlas_body:", "");
+            String summary = node.entries.isEmpty() ? "" : value(node.first(),
+                    "dimension", "dimension_id", "attached_dimension_id");
+            bridge.getMethod("publish", String.class, String.class, String.class,
+                    String.class, String.class, String.class).invoke(null,
+                    "maqan_galactic_navigator", entityId, type, node.label, systemId, summary);
+        } catch (ClassNotFoundException ignored) {
+            // Atlas remains fully functional when the optional MAQAN Platform is absent.
+        } catch (ReflectiveOperationException | LinkageError error) {
+            // Selection inside Atlas must never fail because an optional host is unavailable.
         }
-        String entityId = node.id;
-        String systemId = "";
-        int separator = entityId.indexOf("::");
-        if (separator > 0) systemId = entityId.substring(0, separator);
-        else if (GalaxyCatalog.universes().contains(entityId)) systemId = entityId;
-        String type = node.kind == null ? "object" : node.kind.replace("atlas_body:", "");
-        String summary = node.entries.isEmpty() ? "" : value(node.first(),
-                "dimension", "dimension_id", "attached_dimension_id");
-        com.maqan.galacticnavigator.navigation.NavigatorPlatformSelectionBridge.publish(
-                entityId, type, node.label, systemId, summary);
     }
 
     private void selectBody(String id) {

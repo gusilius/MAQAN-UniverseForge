@@ -29,7 +29,12 @@ public final class NavigatorWorldForgeMapStore {
 
     private static volatile WorldForgeMapSnapshot snapshot;
     private static volatile String status = "WorldForge snapshot not loaded";
+    /** Timestamp of the last successfully validated and published snapshot. */
     private static volatile long lastLoadedAt;
+    /** Timestamp of the most recent reload attempt, successful or not. */
+    private static volatile long lastAttemptAt;
+    /** True when the last reload attempt failed or the source file disappeared. */
+    private static volatile boolean stale;
 
     private NavigatorWorldForgeMapStore() {}
 
@@ -41,10 +46,13 @@ public final class NavigatorWorldForgeMapStore {
 
     /** Reloads the optional snapshot. Invalid input is rejected as a whole, never partially trusted. */
     public static synchronized boolean reload() {
+        lastAttemptAt = System.currentTimeMillis();
         Path path = file();
         if (!Files.isRegularFile(path)) {
-            status = "No WorldForge map snapshot";
-            lastLoadedAt = System.currentTimeMillis();
+            stale = snapshot != null;
+            status = stale
+                    ? "WorldForge snapshot missing; keeping last known-good data"
+                    : "No WorldForge map snapshot";
             return false;
         }
         try {
@@ -58,21 +66,29 @@ public final class NavigatorWorldForgeMapStore {
             validate(parsed);
             parsed.rebuildIndexes();
             snapshot = parsed;
+            stale = false;
             status = "WorldForge · " + parsed.features.size() + " objects · "
                     + parsed.territories.size() + " territories";
             lastLoadedAt = System.currentTimeMillis();
             return true;
         } catch (Exception error) {
             // Keep the last known-good snapshot available during transient or malformed updates.
-            status = "WorldForge snapshot rejected; keeping previous data: " + safeMessage(error);
-            lastLoadedAt = System.currentTimeMillis();
+            stale = snapshot != null;
+            status = stale
+                    ? "WorldForge snapshot rejected; keeping last known-good data: " + safeMessage(error)
+                    : "WorldForge snapshot rejected: " + safeMessage(error);
             return false;
         }
     }
 
     public static WorldForgeMapSnapshot current() { return snapshot; }
     public static String status() { return status; }
+    /** Last successful import time; remains unchanged when reload fails. */
     public static long lastLoadedAt() { return lastLoadedAt; }
+    /** Last reload attempt time, regardless of its outcome. */
+    public static long lastAttemptAt() { return lastAttemptAt; }
+    /** Whether the displayed snapshot is retained from an earlier successful import. */
+    public static boolean isStale() { return stale; }
 
     public static List<WorldForgeMapSnapshot.Territory> territories(String dimensionId) {
         WorldForgeMapSnapshot value = snapshot;
