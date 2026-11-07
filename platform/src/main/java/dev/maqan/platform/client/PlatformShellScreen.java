@@ -13,8 +13,8 @@ import java.util.List;
 
 /** First functional pass of the shared MAQAN desktop shell. Gameplay data stays in its owning mod. */
 public final class PlatformShellScreen extends Screen {
-    private static final int BG = 0xF0080E18, BAR = 0xF0101A28, PANEL = 0xE5122030;
-    private static final int EDGE = 0xFF29445A, CYAN = 0xFF65D8F2, GOLD = 0xFFE0B66C;
+    private static final int BG = 0xF0080D14, BAR = 0xF0101823, PANEL = 0xE5101923;
+    private static final int EDGE = 0xFF34495B, CYAN = 0xFF69CDE2, GOLD = 0xFF69CDE2;
     private String workspace = "ATLAS";
     private boolean leftOpen = true, rightOpen = true;
     private boolean windowOpen = true, dragging = false;
