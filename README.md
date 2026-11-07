@@ -1,42 +1,50 @@
 # MAQAN UniverseForge
 
-MAQAN UniverseForge is a multi-mod ecosystem built around two independently installable Minecraft mods:
+**A modular Minecraft ecosystem repository.** Atlas and WorldForge are separate Forge mods that can be built, installed, updated, and tested independently.
 
-- **Atlas** — cosmic geography, star systems, orbital mechanics, planetary navigation and travel.
-- **WorldForge** — a living-world simulation for settlements, populations, economies, realms, dynasties, diplomacy, armies and warfare.
-- **MAQAN Platform** — an optional shared desktop-style shell mod; gameplay modules remain independently installable.
+## Repository map
 
-The shared MAQAN platform experience is a desktop-style workspace shell. It is a presentation and integration layer, not a monolithic gameplay mod. Atlas and WorldForge retain independent mod IDs, lifecycle, configuration, saves, dependencies and release artifacts.
+- `mods/atlas` — Atlas: cosmic catalogue, system/galaxy visualization, orbital simulation, route planning, surface-map workspace, Cosmic Horizons integration.
+- `mods/worldforge/wfmod` — WorldForge core: world map, realms/titles/borders, shared APIs, event and simulation infrastructure.
+- `mods/worldforge/wfaddons/wf-*` — independent WorldForge gameplay addons.
+- `shared/contracts` — versioned, optional cross-mod contracts. No gameplay ownership is moved here.
+- `shared/identifiers` — stable ecosystem identifiers.
+- `shared/utilities` — dependency-free helpers only.
+- `docs` — architecture and integration decisions.
 
-## Product direction
+## Independence guarantees
 
-MAQAN is designed as a strategy and simulation platform rather than a collection of Minecraft-style screens.
+1. Atlas keeps mod id `maqan_galactic_navigator` to preserve existing installs and saved configuration compatibility.
+2. WorldForge core keeps mod id `worldforge`; addons retain their own mod ids.
+3. Atlas and WorldForge have separate Forge builds and output JARs.
+4. WorldForge addons remain independently installable and communicate through the existing core APIs / soft integration.
+5. No Atlas dependency is introduced into WorldForge, and no WorldForge dependency is introduced into Atlas.
+6. Shared contracts are optional and versioned; they do not become a mandatory monolithic runtime.
 
-Its interface combines:
-- a desktop shell with workspace tabs, global clock, notifications and settings;
-- persistent bottom Dock and independently retractable left/right sidebars;
-- movable, resizable, dockable and groupable tool windows;
-- context-sensitive object inspectors;
-- an Atlas spatial workspace with universe-to-orbit navigation;
-- WorldForge management surfaces inspired by the simulation depth of Manor Lords, Crusader Kings III and Mount & Blade II: Bannerlord.
+## Requirements
 
-## Non-negotiable architecture rules
+- Minecraft 1.20.1
+- Java 17
+- Gradle 8.x
+- Forge versions are intentionally preserved per project for now: Atlas `47.4.28`; WorldForge `47.3.0`. Do not unify these without compatibility testing.
 
-1. Atlas and WorldForge remain separate mods and produce separate JARs.
-2. Either mod must work when installed alone.
-3. Shared code is limited to stable contracts, identifiers and small utilities.
-4. WorldForge owns civilization, settlement, population, economy, politics and military simulation.
-5. Atlas owns cosmic spatial data, stars, systems, celestial bodies, orbits and travel.
-6. The UI must expose real system state; it must not fabricate data or present decorative controls as functional.
-7. Existing modules, addons, data packs and gameplay capabilities must be preserved during migration.
+## Build
 
-## Documentation
+Run from this repository root:
 
-- [Platform UX architecture](docs/PLATFORM_UX_ARCHITECTURE.md)
-- [WorldForge management surfaces](docs/WORLDFORGE_GAMEPLAY_SURFACES.md)
-- [Atlas spatial workspace](docs/ATLAS_SPATIAL_WORKSPACE.md)
-- [Cross-mod integration contracts](docs/INTEGRATION_CONTRACTS.md)
+```bash
+gradle buildAtlas
+gradle buildWorldForgeCore
+gradle buildWorldForgeAddons
+gradle buildEcosystem
+```
 
-## Status
+`buildWorldForgeAddons` uses the addon's existing dependency-order builder. The root project orchestrates builds; it does not merge their mod IDs or classpaths.
 
-The repository is the destination for the clean-history consolidation. The architecture documents define the target experience; they do not claim that the UI or gameplay systems described are already implemented.
+## Windows target
+
+The current CI target is Windows x64 only (`windows-latest`, Java 17, Rust MSVC). Atlas and WorldForge remain separate Forge projects and produce separate JARs.
+
+## Important
+
+A successful Gradle build is not an in-game compatibility test. Validate Atlas against the exact Cosmic Horizons build and active datapacks, then test both mods together and separately in clean Forge instances.
