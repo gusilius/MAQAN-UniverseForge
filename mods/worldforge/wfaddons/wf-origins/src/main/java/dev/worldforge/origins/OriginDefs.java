@@ -46,8 +46,26 @@ public final class OriginDefs {
         return m;
     }
 
-    @SuppressWarnings("unchecked")
     public void load(String json) {
+        // A malformed data file must not leave half of its definitions installed.
+        OriginDefs staged = new OriginDefs();
+        staged.races.putAll(races);
+        staged.classes.putAll(classes);
+        staged.professions.putAll(professions);
+        staged.synergies.putAll(synergies);
+        for (var e : extraPerks.entrySet()) staged.extraPerks.put(e.getKey(), new TreeMap<>(e.getValue()));
+        for (var e : extraPerkNames.entrySet()) staged.extraPerkNames.put(e.getKey(), new LinkedHashMap<>(e.getValue()));
+        staged.loadInto(json);
+        races.clear(); races.putAll(staged.races);
+        classes.clear(); classes.putAll(staged.classes);
+        professions.clear(); professions.putAll(staged.professions);
+        synergies.clear(); synergies.putAll(staged.synergies);
+        extraPerks.clear(); extraPerks.putAll(staged.extraPerks);
+        extraPerkNames.clear(); extraPerkNames.putAll(staged.extraPerkNames);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void loadInto(String json) {
         Object root = Json.parse(json);
         if (!(root instanceof Map)) throw new IllegalArgumentException("Нужен объект JSON");
         Map<String, Object> m = (Map<String, Object>) root;
@@ -70,6 +88,7 @@ public final class OriginDefs {
     public void addSynergy(Map<String, Object> y) {
         String id = str(y.get("id"), "");
         if (id.isEmpty()) throw new IllegalArgumentException("У переплетения нет id");
+        if (synergies.containsKey(id)) throw new IllegalArgumentException("Повторный id переплетения: " + id);
         synergies.put(id, new Synergy(id, str(y.get("name"), id), str(y.get("desc"), ""), strs(y.get("races")), strs(y.get("classes")), ints(y.get("profs")), strs(y.get("flags")), mods(y.get("mods"))));
     }
 
@@ -77,6 +96,7 @@ public final class OriginDefs {
     public void addRace(Map<String, Object> r) {
         String id = str(r.get("id"), "");
         if (id.isEmpty()) throw new IllegalArgumentException("У расы нет id");
+        if (races.containsKey(id)) throw new IllegalArgumentException("Повторный id расы: " + id);
         Map<String, String> innate = new LinkedHashMap<>();
         if (r.get("innate") instanceof Map<?, ?> im) for (var e : im.entrySet()) innate.put(String.valueOf(e.getKey()), String.valueOf(e.getValue()));
         TreeMap<Integer, Map<String, Double>> perks = new TreeMap<>();
@@ -94,6 +114,7 @@ public final class OriginDefs {
     public void addClass(Map<String, Object> c) {
         String id = str(c.get("id"), "");
         if (id.isEmpty()) throw new IllegalArgumentException("У класса нет id");
+        if (classes.containsKey(id)) throw new IllegalArgumentException("Повторный id класса: " + id);
         TreeMap<Integer, Map<String, Double>> perks = new TreeMap<>();
         Map<String, String> pn = new LinkedHashMap<>();
         if (c.get("perks") instanceof Map<?, ?> pm) for (var e : pm.entrySet()) {
@@ -111,6 +132,7 @@ public final class OriginDefs {
     public void addProfession(Map<String, Object> p) {
         String id = str(p.get("id"), "");
         if (id.isEmpty()) throw new IllegalArgumentException("У профессии нет id");
+        if (professions.containsKey(id)) throw new IllegalArgumentException("Повторный id профессии: " + id);
         List<Rank> ranks = new ArrayList<>();
         if (p.get("ranks") instanceof List<?> l) for (Object o : l) { Map<String, Object> r = (Map<String, Object>) o; ranks.add(new Rank(str(r.get("name"), "Ранг"), num(r.get("xp"), 0), mods(r.get("mods")))); }
         if (ranks.isEmpty()) throw new IllegalArgumentException(id + ": нужен хотя бы один ранг");
