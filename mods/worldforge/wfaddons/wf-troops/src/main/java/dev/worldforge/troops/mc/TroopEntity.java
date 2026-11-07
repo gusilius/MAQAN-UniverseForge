@@ -106,7 +106,16 @@ public class TroopEntity extends PathfinderMob {
     public TroopDefs.Unit def() { return def; }
     public int combatXp() { return combatXp; }
     public int veteranRank() { return TroopProgression.rank(combatXp); }
-    public void awardCombatXp(int amount) { combatXp = TroopProgression.addXp(combatXp, amount); }
+    public void awardCombatXp(int amount) {
+        int before = veteranRank();
+        combatXp = TroopProgression.addXp(combatXp, amount);
+        if (veteranRank() > before && def != null) {
+            float oldHealth = getHealth();
+            double oldMax = getMaxHealth();
+            setup(def, ownerId());
+            setHealth((float) Math.min(getMaxHealth(), oldHealth + Math.max(0, getMaxHealth() - oldMax)));
+        }
+    }
 
     /** Применяет тип: здоровье, урон, скорость, броня, снаряжение. */
     public void setup(TroopDefs.Unit u, String owner) {
@@ -159,7 +168,7 @@ public class TroopEntity extends PathfinderMob {
         if (u != null) {
             float hp = getHealth();
             setup(u, t.getString("wf_owner"));
-            setHealth(Math.min(hp <= 0 ? (float) u.hp() : hp, (float) u.hp()));
+            setHealth((float) Math.min(hp <= 0 ? getMaxHealth() : hp, getMaxHealth()));
         } else entityData.set(OWNER, t.getString("wf_owner"));
         entityData.set(SQUAD, t.getString("wf_squad"));
     }
