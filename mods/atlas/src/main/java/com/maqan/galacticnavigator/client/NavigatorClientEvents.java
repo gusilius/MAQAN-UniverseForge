@@ -50,8 +50,10 @@ public final class NavigatorClientEvents {
 
         if (NavigatorScreen.OPEN_SURFACE_MAP_KEY.consumeClick() && minecraft.screen == null
                 && NavigatorPlayerPositionTracker.current()!=null) {
-            minecraft.setScreen(new NavigatorSurfaceMapScreen(
-                    NavigatorPlayerPositionTracker.current().dimensionId()));
+            NavigatorScreen parent = new NavigatorScreen();
+            parent.setEmbeddedInMaqan(true);
+            openMaqanWorkspace(minecraft, new NavigatorSurfaceMapScreen(
+                    NavigatorPlayerPositionTracker.current().dimensionId(), parent));
         }
 
         if (NavigatorScreen.CREATE_WAYPOINT_KEY.consumeClick() && minecraft.screen == null
@@ -69,19 +71,27 @@ public final class NavigatorClientEvents {
      * Atlas keeps its standalone entry point only for installations without Platform.
      */
     private static void openMaqanWorkspace(Minecraft minecraft) {
+        openMaqanWorkspace(minecraft, null);
+    }
+
+    private static void openMaqanWorkspace(Minecraft minecraft,
+            net.minecraft.client.gui.screens.Screen initialView) {
         if (net.minecraftforge.fml.ModList.get().isLoaded("maqan_platform")) {
             try {
                 Class<?> type = Class.forName("dev.maqan.platform.client.PlatformShellScreen");
                 Object instance = type.getDeclaredConstructor().newInstance();
                 if (instance instanceof net.minecraft.client.gui.screens.Screen screen) {
                     minecraft.setScreen(screen);
+                    if (initialView != null)
+                        type.getMethod("showEmbeddedView", net.minecraft.client.gui.screens.Screen.class)
+                                .invoke(instance, initialView);
                     return;
                 }
             } catch (ReflectiveOperationException | LinkageError error) {
                 MaqanGalacticNavigator.LOGGER.error("Unable to open MAQAN global workspace", error);
             }
         }
-        minecraft.setScreen(new NavigatorScreen());
+        minecraft.setScreen(initialView == null ? new NavigatorScreen() : initialView);
     }
 
     private static void updateDeathWaypoint(Minecraft minecraft) {
