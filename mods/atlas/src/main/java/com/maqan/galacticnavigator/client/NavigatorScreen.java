@@ -1673,8 +1673,17 @@ public class NavigatorScreen extends Screen {
         Node node = contextNodeId == null ? null : findNode(contextNodeId);
         if (node == null) { contextOpen = false; return; }
         if (action == 0) {
-            if (level == 3) { selectedId = node.id; selectedNodeId = node.id; cameraTargetId = node.id; }
-            else { selectedNodeId = node.id; focusSelected(); }
+            if (node.kind != null && node.kind.startsWith("atlas_body:")) {
+                selectBody(node.id);
+                focusSelected();
+            } else if (level == 3) {
+                selectedId = node.id;
+                selectedNodeId = node.id;
+                cameraTargetId = node.id;
+            } else {
+                selectNode(node);
+                focusSelected();
+            }
         } else if (action == 1) {
             selectedNodeId = node.id;
             if (level == 3) {
@@ -1698,12 +1707,17 @@ public class NavigatorScreen extends Screen {
                 yInput.setValue(data.get("origin_y").getAsString());
                 zInput.setValue(data.get("origin_z").getAsString());
             }
-        } else if (action == 3 && level == 3) {
-            selectBody(node.id);
+        } else if (action == 3 && (level == 3
+                || (node.kind != null && node.kind.startsWith("atlas_body:")))) {
             JsonObject body = node.first();
-            String systemId = GalaxyCatalog.text(body, "system_id", universe);
-            String bodyId = GalaxyCatalog.text(body, "catalog_id", node.id);
+            String targetId = node.id;
+            int separator = targetId.indexOf("::");
+            String systemId = separator > 0 ? targetId.substring(0, separator)
+                    : GalaxyCatalog.text(body, "system_id", universe);
+            String localBodyId = separator > 0 ? targetId.substring(separator + 2) : targetId;
+            String bodyId = GalaxyCatalog.text(body, "catalog_id", localBodyId);
             String bodyName = GalaxyCatalog.text(body, "name", node.label);
+            if (level == 3) selectBody(localBodyId);
             contextOpen = false;
             if (minecraft != null)
                 MaqanScreenHost.open(minecraft, new CosmicBodyOrbitSettingsScreen(this, systemId, bodyId, bodyName));
