@@ -88,7 +88,7 @@ class WorldForgeMapGeometryTest {
                 new WorldForgeMapGeometry.Point(10,10), new WorldForgeMapGeometry.Point(0,10));
         List<WorldForgeMapGeometry.Point> hole = List.of(
                 new WorldForgeMapGeometry.Point(3,3), new WorldForgeMapGeometry.Point(7,3),
-                new WorldForgeMapGeometry.Point(7,7), new WorldForgeGeometryPoint(3,7));
+                new WorldForgeMapGeometry.Point(7,7), new WorldForgeMapGeometry.Point(3,7));
         List<WorldForgeMapGeometry.Point> island = List.of(
                 new WorldForgeMapGeometry.Point(4,4), new WorldForgeMapGeometry.Point(6,4),
                 new WorldForgeMapGeometry.Point(6,6), new WorldForgeMapGeometry.Point(4,6));
