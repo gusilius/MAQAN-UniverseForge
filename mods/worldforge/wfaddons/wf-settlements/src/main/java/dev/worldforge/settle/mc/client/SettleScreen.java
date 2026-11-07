@@ -21,7 +21,7 @@ import java.util.function.Consumer;
  */
 public class SettleScreen extends Screen {
     private static final int W = 640, H = 400;
-    private static final String[] TABS = {"Обзор", "Здания", "Люди", "Строить", "Торговля", "Бюджет", "Города", "Журнал"};
+    private static final String[] TABS = {"Обзор", "Здания", "Люди", "Строить", "Торговля", "Бюджет", "Города", "Журнал", "Карта"};
     private Settlement s;
     private final Consumer<String> cmd;
     private int tab, selWorker, selBuilding, scroll, cat;
@@ -42,6 +42,9 @@ public class SettleScreen extends Screen {
     public void setCities(java.util.List<dev.worldforge.settle.CityRow> c) { this.cities = c; }
 
     private int refresh;
+    private double mapZoom = 1.0, mapPanX, mapPanY;
+    private boolean mapDragging;
+    private int mapLastX, mapLastY;
 
     @Override
     public void tick() {
@@ -76,7 +79,8 @@ public class SettleScreen extends Screen {
             case 4 -> trade(g, cx, top, cw, h, mx, my);
             case 5 -> budget(g, cx, top, cw, h, mx, my);
             case 6 -> cities(g, cx, top, cw, h, mx, my);
-            default -> journal(g, cx, top, cw, h);
+            case 7 -> journal(g, cx, top, cw, h);
+            case 8 -> settlementMap(g, cx, top, cw, h, mx, my);
         }
         for (int i = hits.size() - 1; i >= 0; i--) {
             Object[] hh = hits.get(i);
@@ -497,6 +501,110 @@ public class SettleScreen extends Screen {
         if (sug.isEmpty()) g.drawString(font, "Сейчас разницы в ценах нет.", sx + 4, sy + 2, WFUi.MUTED);
     }
 
+
+    // ------------------------------------------------------------------ Карта поселения
+    // План строится только по авторитетным координатам зданий и жителей из Settlement.
+    // Рельеф и дороги не рисуются искусственно: для них пока нет соответствующих данных карты.
+    private void settlementMap(GuiGraphics g, int x, int top, int cw, int h, int mx, int my) {
+        double minX = -24, maxX = 24, minZ = -24, maxZ = 24;
+        for (Building b : s.buildings) {
+            minX = Math.min(minX, b.x - b.def.sizeX / 2.0);
+            maxX = Math.max(maxX, b.x + b.def.sizeX / 2.0);
+            minZ = Math.min(minZ, b.z - b.def.sizeZ / 2.0);
+            maxZ = Math.max(maxZ, b.z + b.def.sizeZ / 2.0);
+        }
+        for (Worker w : s.workers) {
+            minX = Math.min(minX, w.x); maxX = Math.max(maxX, w.x);
+            minZ = Math.min(minZ, w.z); maxZ = Math.max(maxZ, w.z);
+        }
+        minX -= 10; maxX += 10; minZ -= 10; maxZ += 10;
+        double spanX = Math.max(48, maxX - minX), spanZ = Math.max(48, maxZ - minZ);
+        double baseScale = Math.min((cw - 24.0) / spanX, (h - 24.0) / spanZ);
+        double scale = Math.max(0.02, baseScale * mapZoom);
+        double worldCenterX = (minX + maxX) / 2.0, worldCenterZ = (minZ + maxZ) / 2.0;
+        double centerScreenX = x + cw / 2.0, centerScreenY = top + h / 2.0;
+        double originX = centerScreenX + mapPanX - worldCenterX * scale;
+        double originY = centerScreenY + mapPanY - worldCenterZ * scale;
+
+        WFUi.bevel(g, x, top, cw, h, true);
+        g.enableScissor(x + 2, top + 2, x + cw - 2, top + h - 2);
+        g.fill(x + 2, top + 2, x + cw - 2, top + h - 2, 0xFF17231F);
+
+        // Масштабируемая координатная сетка помогает читать план и соотносить его с координатами мира.
+        double rawStep = 48.0 / Math.max(0.0001, scale);
+        double gridStep = Math.pow(2.0, Math.round(Math.log(rawStep) / Math.log(2.0)));
+        gridStep = Math.max(4.0, Math.min(256.0, gridStep));
+        double visibleMinX = (x + 2 - originX) / scale, visibleMaxX = (x + cw - 2 - originX) / scale;
+        double visibleMinZ = (top + 2 - originY) / scale, visibleMaxZ = (top + h - 2 - originY) / scale;
+        double firstGridX = Math.ceil(visibleMinX / gridStep) * gridStep;
+        double firstGridZ = Math.ceil(visibleMinZ / gridStep) * gridStep;
+        for (double wx = firstGridX; wx <= visibleMaxX; wx += gridStep) {
+            int sx = (int) Math.round(originX + wx * scale);
+            g.fill(sx, top + 2, sx + 1, top + h - 2, 0x332F5147);
+        }
+        for (double wz = firstGridZ; wz <= visibleMaxZ; wz += gridStep) {
+            int sy = (int) Math.round(originY + wz * scale);
+            g.fill(x + 2, sy, x + cw - 2, sy + 1, 0x332F5147);
+        }
+
+        // Центральные оси и отметка исходной точки поселения.
+        int axisX = (int) Math.round(originX), axisY = (int) Math.round(originY);
+        g.fill(axisX, top + 2, axisX + 1, top + h - 2, 0x665D8D78);
+        g.fill(x + 2, axisY, x + cw - 2, axisY + 1, 0x665D8D78);
+
+        for (Building b : s.buildings) {
+            int bw = Math.max(6, (int) Math.round(b.def.sizeX * scale));
+            int bh = Math.max(6, (int) Math.round(b.def.sizeZ * scale));
+            int bx = (int) Math.round(originX + b.x * scale - bw / 2.0);
+            int by = (int) Math.round(originY + b.z * scale - bh / 2.0);
+            boolean selected = b.uid == selBuilding;
+            int fill = b.state == Building.State.DONE ? 0xFF496D58
+                    : b.state == Building.State.BUILDING ? 0xFF9A713B : 0xFF625C4A;
+            g.fill(bx, by, bx + bw, by + bh, fill);
+            g.renderOutline(bx, by, bw, bh, selected ? WFUi.GOLD : 0xFFB7C5B7);
+            if (bw >= 34 && bh >= 15) {
+                String label = font.plainSubstrByWidth(b.def.name, Math.max(12, bw - 6));
+                g.drawCenteredString(font, label, bx + bw / 2, by + (bh - 8) / 2, 0xFFF0F1E8);
+            }
+            final int uid = b.uid;
+            hit(bx - 3, by - 3, bw + 6, bh + 6, () -> {
+                selBuilding = uid;
+                tab = 1;
+                scroll = Math.max(0, s.buildings.indexOf(s.building(uid)));
+            }, b.def.name, List.of("Координаты: " + b.x + ", " + b.z,
+                    "Состояние: " + b.state, "Приоритет: " + b.priority,
+                    "Нажмите, чтобы открыть здание"));
+        }
+
+        for (Worker w : s.workers) {
+            int wx = (int) Math.round(originX + w.x * scale);
+            int wy = (int) Math.round(originY + w.z * scale);
+            boolean selected = w.id == selWorker;
+            int color = selected ? WFUi.GOLD : w.moving ? 0xFF7ED7C1 : 0xFFE4D8B4;
+            g.fill(wx - 3, wy - 3, wx + 4, wy + 4, 0xFF0A100E);
+            g.fill(wx - 2, wy - 2, wx + 3, wy + 3, color);
+            final int workerId = w.id;
+            hit(wx - 5, wy - 5, 10, 10, () -> {
+                selWorker = workerId;
+                tab = 2;
+                scroll = Math.max(0, s.workers.indexOf(s.worker(workerId)));
+            }, w.name, List.of("Профессия: " + s.defs.professionName(w.profession),
+                    "Статус: " + (w.status.isBlank() ? "работает" : w.status),
+                    "Координаты: " + Math.round(w.x) + ", " + Math.round(w.z),
+                    "Нажмите, чтобы открыть жителя"));
+        }
+        g.disableScissor();
+
+        String heading = "ПЛАН ПОСЕЛЕНИЯ";
+        g.drawString(font, heading, x + 8, top + 7, WFUi.GOLD);
+        String stats = s.buildings.size() + " зданий  ·  " + s.workers.size() + " жителей";
+        g.drawString(font, stats, x + cw - 8 - font.width(stats), top + 7, WFUi.MUTED);
+        String hint = "Колесо — масштаб  ·  ЛКМ + перетаскивание — перемещение  ·  Выберите здание или жителя";
+        g.drawString(font, font.plainSubstrByWidth(hint, cw - 16), x + 8, top + h - 12, WFUi.MUTED);
+        String zoomLabel = Math.round(mapZoom * 100) + "%";
+        g.drawString(font, zoomLabel, x + cw - 8 - font.width(zoomLabel), top + h - 12, WFUi.GOLD_DIM);
+    }
+
     // ------------------------------------------------------------------ Журнал
 
     private void journal(GuiGraphics g, int x, int top, int cw, int h) {
@@ -516,14 +624,57 @@ public class SettleScreen extends Screen {
         if (button == 0) {
             for (int i = hits.size() - 1; i >= 0; i--) {
                 Object[] h = hits.get(i);
-                if (WFUi.over((int) mx, (int) my, (int) h[0], (int) h[1], (int) h[2], (int) h[3]) && h[4] != null) { ((Runnable) h[4]).run(); return true; }
+                if (WFUi.over((int) mx, (int) my, (int) h[0], (int) h[1], (int) h[2], (int) h[3]) && h[4] != null) {
+                    ((Runnable) h[4]).run();
+                    mapDragging = false;
+                    return true;
+                }
+            }
+        }
+        if (tab == 8 && button == 0) {
+            int x = (width - W) / 2 + 10, top = (height - H) / 2 + 44, cw = W - 20, h = H - 54;
+            if (WFUi.over((int) mx, (int) my, x, top, cw, h)) {
+                mapDragging = true;
+                mapLastX = (int) mx;
+                mapLastY = (int) my;
+                return true;
             }
         }
         return super.mouseClicked(mx, my, button);
     }
 
     @Override
+    public boolean mouseDragged(double mx, double my, int button, double dx, double dy) {
+        if (mapDragging && tab == 8 && button == 0) {
+            mapPanX += mx - mapLastX;
+            mapPanY += my - mapLastY;
+            mapLastX = (int) mx;
+            mapLastY = (int) my;
+            return true;
+        }
+        return super.mouseDragged(mx, my, button, dx, dy);
+    }
+
+    @Override
+    public boolean mouseReleased(double mx, double my, int button) {
+        if (button == 0) mapDragging = false;
+        return super.mouseReleased(mx, my, button);
+    }
+
+    @Override
     public boolean mouseScrolled(double mx, double my, double d) {
+        if (tab == 8) {
+            int x = (width - W) / 2 + 10, top = (height - H) / 2 + 44, cw = W - 20, h = H - 54;
+            if (WFUi.over((int) mx, (int) my, x, top, cw, h)) {
+                double next = Math.max(0.5, Math.min(4.0, mapZoom * Math.exp(d * 0.18)));
+                double ratio = next / mapZoom;
+                double cx = x + cw / 2.0, cy = top + h / 2.0;
+                mapPanX = (mx - cx) - (mx - cx - mapPanX) * ratio;
+                mapPanY = (my - cy) - (my - cy - mapPanY) * ratio;
+                mapZoom = next;
+                return true;
+            }
+        }
         scroll = Math.max(0, scroll - (int) Math.signum(d) * (tab == 3 ? 2 : 1));
         return true;
     }
