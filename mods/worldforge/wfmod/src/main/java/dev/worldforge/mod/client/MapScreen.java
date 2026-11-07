@@ -581,6 +581,7 @@ public class MapScreen extends Screen {
                 TitleData.Realm r = MapTextures.titles.realmOf(MapTextures.titles.get(prov));
                 if (MapImages.isDip(ClientState.mode) && r != null && !ClientState.mode.equals(MapImages.DIP + r.id)) setMode(MapImages.DIP + r.id, true);
                 panel.onSelected(prov);
+                centerOnProvince(prov);
             } else {
                 selected = 0;
                 selLabel = -1;
