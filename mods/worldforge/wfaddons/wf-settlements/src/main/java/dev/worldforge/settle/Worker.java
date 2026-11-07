@@ -9,6 +9,9 @@ public final class Worker {
     public double x = Settlement.SPAWN_X, z = Settlement.SPAWN_Z;   // положение для показа (блоки от центра поселения)
     public java.util.Map<String, Integer> jobPrio;                   // приоритеты работ 0..4 (null - по умолчанию), см. Settlement.workPriority
     public boolean moving;                                            // шёл в последнем шаге (не сохраняется)
+    /** Ручной приказ RTS: удерживать назначенную точку. */
+    public boolean manualOrder;
+    public double orderX, orderZ;
 
     Worker(int id, String name) { this.id = id; this.name = name; }
 }
