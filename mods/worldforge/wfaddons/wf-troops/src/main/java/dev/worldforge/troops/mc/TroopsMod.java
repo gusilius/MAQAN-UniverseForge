@@ -483,7 +483,9 @@ public class TroopsMod {
             }
         }
 
-        // Prepare every spawn position before touching army manpower or settlement stock.
+        // Prepare all physical soldiers before touching army manpower or settlement stock.
+        List<TroopEntity> allPrepared = new ArrayList<>();
+        for (List<TroopEntity> batch : batches.values()) allPrepared.addAll(batch);
         for (var entry : batches.entrySet()) {
             var site = sites.get(entry.getKey());
             List<TroopEntity> batch = entry.getValue();
@@ -495,16 +497,6 @@ public class TroopsMod {
                 int x = (int) Math.floor(positions.get(i)[0]), z = (int) Math.floor(positions.get(i)[1]);
                 int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
                 troop.moveTo(positions.get(i)[0], y, positions.get(i)[1], player.getYRot(), 0);
-            }
-        }
-
-        ArmyLink.take(found.army(), plan.menTaken());
-        for (var entry : supplies.entrySet()) {
-            if (!dev.worldforge.settle.mc.SettleMod.payRecruitment(sites.get(entry.getKey()), entry.getValue())) {
-                // Defensive rollback: this should not occur on the single server thread after the preflight checks.
-                ArmyLink.give(armyId, plan.menTaken());
-                src.sendFailure(Component.literal("Склад изменился во время призыва; люди возвращены в армию."));
-                return 0;
             }
         }
 
@@ -520,10 +512,29 @@ public class TroopsMod {
             squad.cz = site.spawn().getZ();
             for (TroopEntity troop : batch) {
                 troop.setSquadId(squad.id);
-                level.addFreshEntity(troop);
+                if (!level.addFreshEntity(troop)) {
+                    discardPrepared(allPrepared);
+                    src.sendFailure(Component.literal("Мир отклонил создание призванных солдат; армия и склады не изменены."));
+                    return 0;
+                }
             }
             total += batch.size();
         }
+
+        ArmyLink.take(found.army(), plan.menTaken());
+        List<String> paidBuildings = new ArrayList<>();
+        for (var entry : supplies.entrySet()) {
+            if (!dev.worldforge.settle.mc.SettleMod.payRecruitment(sites.get(entry.getKey()), entry.getValue())) {
+                for (String paid : paidBuildings)
+                    dev.worldforge.settle.mc.SettleMod.refundRecruitment(sites.get(paid), supplies.get(paid));
+                ArmyLink.give(armyId, plan.menTaken());
+                discardPrepared(allPrepared);
+                src.sendFailure(Component.literal("Склад изменился во время призыва; люди возвращены в армию, отряд удалён."));
+                return 0;
+            }
+            paidBuildings.add(entry.getKey());
+        }
+
         int recruited = total;
         src.sendSuccess(() -> Component.literal("Из военных зданий поселения призвано " + recruited
                 + " солдат армии " + armyId + " (оставшиеся люди: " + found.army().men() + ")"), false);
