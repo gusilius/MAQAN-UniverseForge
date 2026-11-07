@@ -259,7 +259,7 @@ public class NavigatorScreen extends Screen {
         if (embeddedInMaqan) closeButton.visible = false;
 
         int menuX = width - 134;
-        int menuY = height < 390 ? 42 : 68;
+        int menuY = height < 440 ? 42 : 68;
         toolsMenuAnchorY = menuY;
         focusButton = addToolButton("FOCUS", () -> focusSelected(), menuX, menuY);
         centerButton = addToolButton("CENTER VIEW", () -> {
