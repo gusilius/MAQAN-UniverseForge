@@ -75,7 +75,7 @@ public final class NavigatorSurfaceMapScreen extends Screen {
             selectedWaypointId="";surfaceRoute=null;routeStartX=routeStartZ=Integer.MIN_VALUE;
         }).bounds(482,48,96,20).build());
         addRenderableWidget(Button.builder(Component.literal("OPEN 3D PLANET MAP"),
-                b->minecraft.setScreen(new NavigatorTerrain3DScreen(dimension,this)))
+                b->MaqanScreenHost.open(minecraft, new NavigatorTerrain3DScreen(dimension,this)))
                 .bounds(Math.max(18,width-190),height-68,172,20).build());
         updateDepthButtons();
     }
@@ -373,5 +373,5 @@ public final class NavigatorSurfaceMapScreen extends Screen {
         zoom=Math.max(0.35,Math.min(4.0,zoom*(delta>0?1.15:1.0/1.15)));
         return true;
     }
-    @Override public void onClose(){if(minecraft!=null)minecraft.setScreen(parent);else super.onClose();}
+    @Override public void onClose(){if(minecraft!=null)MaqanScreenHost.back(minecraft, parent);else super.onClose();}
 }
