@@ -257,6 +257,8 @@ public final class PlatformShellScreen extends Screen {
         if(mx<44) {
             int index=(int)((my-44)/38);
             if(index==0) { navRailVisible=!navRailVisible; panels.get("navigation").visible=navRailVisible; return true; }
+            if(index==1 && profile==Profile.COSMOS) { invokeAtlasRailAction("toggleListPanel"); return true; }
+            if(index==2 && profile==Profile.COSMOS) { invokeAtlasRailAction("toggleInfoPanel"); return true; }
             if(index==1) { inspectorVisible=!inspectorVisible; panels.get("inspector").visible=inspectorVisible; return true; }
             if(index==2) { timelineVisible=!timelineVisible; panels.get("timeline").visible=timelineVisible; return true; }
             if(index==3) { Panel p=panels.get("tools"); p.visible=!p.visible; return true; }
@@ -293,6 +295,15 @@ public final class PlatformShellScreen extends Screen {
         }
         return embeddedView != null && profile == Profile.COSMOS
                 ? embeddedView.mouseClicked(mx, my, button) : true;
+    }
+
+    private void invokeAtlasRailAction(String methodName) {
+        if (embeddedView == null) return;
+        try {
+            embeddedView.getClass().getMethod(methodName).invoke(embeddedView);
+        } catch (ReflectiveOperationException error) {
+            LOGGER.error("Atlas workspace action {} is unavailable", methodName, error);
+        }
     }
 
     private void setProfile(Profile next) {
