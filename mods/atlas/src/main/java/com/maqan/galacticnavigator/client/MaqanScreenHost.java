@@ -43,7 +43,7 @@ public final class MaqanScreenHost {
         } catch (ReflectiveOperationException | LinkageError error) {
             // Preserve the current global shell rather than unexpectedly replacing it
             // with a legacy screen if a mismatched Platform version is installed.
-            com.maqan.galacticnavigator.MaqanGalacticNavigator.LOGGER.error(
+            com.mojang.logging.LogUtils.getLogger().error(
                     "Unable to route Atlas view {} through MAQAN Platform", view.getClass().getName(), error);
         }
     }
