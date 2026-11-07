@@ -531,10 +531,17 @@ public final class PlatformShellScreen extends Screen {
     }
 
     @Override public void onClose() {
-        if (embeddedView != null) embeddedView.removed();
+        Minecraft.getInstance().setScreen(null);
+    }
+
+    @Override public void removed() {
+        if (embeddedView != null) {
+            embeddedView.removed();
+            embeddedView = null;
+        }
         for (Screen view : providerViews.values()) view.removed();
         providerViews.clear();
-        Minecraft.getInstance().setScreen(null);
+        super.removed();
     }
 
     @Override public void resize(Minecraft minecraft, int width, int height) {
