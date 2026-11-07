@@ -13,8 +13,10 @@ public final class WorldForgeMapSnapshot {
     public String generated_at;
     public List<Territory> territories = new ArrayList<>();
     public List<Feature> features = new ArrayList<>();
+    public List<PoliticalBoundary> political_boundaries = new ArrayList<>();
     private transient Map<String,List<Territory>> territoriesByDimension = Map.of();
     private transient Map<String,List<Feature>> featuresByDimension = Map.of();
+    private transient Map<String,List<PoliticalBoundary>> boundariesByDimension = Map.of();
 
     public void rebuildIndexes() {
         Map<String,List<Territory>> tg=new LinkedHashMap<>();
@@ -33,6 +35,9 @@ public final class WorldForgeMapSnapshot {
     public List<Feature> featuresInDimension(String id) {
         return id==null||id.isBlank()?List.of():featuresByDimension.getOrDefault(id,List.of());
     }
+    public List<PoliticalBoundary> boundariesInDimension(String id) {
+        return id==null||id.isBlank()?List.of():boundariesByDimension.getOrDefault(id,List.of());
+    }
     private static <T> Map<String,List<T>> freeze(Map<String,List<T>> src) {
         Map<String,List<T>> out=new LinkedHashMap<>();
         src.forEach((k,v)->out.put(k,List.copyOf(v)));
@@ -46,6 +51,13 @@ public final class WorldForgeMapSnapshot {
         /** Legacy single contour retained for existing snapshot producers. */
         public List<Vertex> vertices=new ArrayList<>();
         /** Outer contours, islands and holes; renderer uses even-odd fill. */
+        public List<List<Vertex>> rings=new ArrayList<>();
+        public Map<String,String> attributes=new LinkedHashMap<>();
+    }
+    public static final class PoliticalBoundary {
+        public String id,name,realm_id,dimension_id,overlord_id,relation,ruler;
+        public List<String> subjects=new ArrayList<>();
+        public int color;
         public List<List<Vertex>> rings=new ArrayList<>();
         public Map<String,String> attributes=new LinkedHashMap<>();
     }

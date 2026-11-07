@@ -33,11 +33,13 @@ public final class NavigatorSurfaceMapScreen extends Screen {
     private double cameraYaw=Math.toRadians(35),cameraPitch=Math.toRadians(48),terrainHeightScale=0.055;
     private boolean cameraDrag;
     private Button viewModeButton;
-    private Button layerButton,depthDownButton,depthUpButton,routeModeButton,clearRouteButton;
+    private Button layerButton,depthDownButton,depthUpButton,routeModeButton,clearRouteButton,politicalLayerButton;
     private ExploredSurfaceRoutePlanner.Mode routeMode=ExploredSurfaceRoutePlanner.Mode.WALK;
     private ExploredSurfaceRoutePlanner.Result surfaceRoute;
     private String selectedWaypointId="";
     private String selectedWorldForgeEntityId="";
+    /** 0 provinces, 1 realms, 2 both, 3 political overlays hidden. */
+    private int politicalLayer;
     private int routeStartX=Integer.MIN_VALUE,routeStartZ=Integer.MIN_VALUE;
     private static final int BACKGROUND=0xF0060B16;
 
@@ -80,6 +82,15 @@ public final class NavigatorSurfaceMapScreen extends Screen {
         clearRouteButton=addRenderableWidget(Button.builder(Component.literal("CLEAR ROUTE"),b->{
             selectedWaypointId="";surfaceRoute=null;routeStartX=routeStartZ=Integer.MIN_VALUE;
         }).bounds(482,48,96,20).build());
+        politicalLayerButton=addRenderableWidget(Button.builder(Component.literal("POLITICAL: PROVINCES"),b->{
+            politicalLayer=(politicalLayer+1)%4;
+            b.setMessage(Component.literal(switch(politicalLayer){
+                case 0 -> "POLITICAL: PROVINCES";
+                case 1 -> "POLITICAL: REALMS";
+                case 2 -> "POLITICAL: BOTH";
+                default -> "POLITICAL: OFF";
+            }));
+        }).bounds(586,48,154,20).build());
         addRenderableWidget(Button.builder(Component.literal("OPEN 3D PLANET MAP"),
                 b->MaqanScreenHost.open(minecraft, new NavigatorTerrain3DScreen(dimension,this)))
                 .bounds(Math.max(18,width-190),height-68,172,20).build());
@@ -218,12 +229,50 @@ public final class NavigatorSurfaceMapScreen extends Screen {
                                          NavigatorPlayerPosition player){
         WorldForgeMapSnapshot snapshot=NavigatorWorldForgeMapStore.current();
         if(snapshot==null)return;
+        if(politicalLayer==1||politicalLayer==2){
+            WorldForgeMapSnapshot.PoliticalBoundary nearestBoundary=null;
+            double nearestDistance=36.0;
+            for(WorldForgeMapSnapshot.PoliticalBoundary boundary:NavigatorWorldForgeMapStore.boundaries(dimension)){
+                for(List<WorldForgeMapSnapshot.Vertex> sourceRing:boundary.rings){
+                    if(sourceRing==null||sourceRing.size()<2)continue;
+                    List<WorldForgeMapGeometry.Point> ring=new ArrayList<>(sourceRing.size());
+                    for(WorldForgeMapSnapshot.Vertex vertex:sourceRing){
+                        double[] point=project(vertex.x/16.0,vertex.z/16.0,cell,left,top,right,bottom,player);
+                        ring.add(new WorldForgeMapGeometry.Point(point[0],point[1]));
+                    }
+                    for(int i=0;i<ring.size();i++){
+                        var a=ring.get(i);var b=ring.get((i+1)%ring.size());
+                        double distance=segmentDistanceSquared(mouseX,mouseY,a.x(),a.y(),b.x(),b.y());
+                        if(distance<=nearestDistance){nearestDistance=distance;nearestBoundary=boundary;}
+                    }
+                }
+            }
+            if(nearestBoundary!=null){
+                selectedWorldForgeEntityId=nearestBoundary.id;
+                List<String> context=new ArrayList<>();
+                addContext(context,"realm id",nearestBoundary.realm_id);
+                addContext(context,"ruler",nearestBoundary.ruler);
+                addContext(context,"relation",nearestBoundary.relation);
+                addContext(context,"overlord",nearestBoundary.overlord_id);
+                if(nearestBoundary.subjects!=null)addContext(context,"subjects",String.join(", ",nearestBoundary.subjects));
+                if(nearestBoundary.attributes!=null){
+                    addContext(context,"government",nearestBoundary.attributes.get("realm.government"));
+                    addContext(context,"race",nearestBoundary.attributes.get("realm.race"));
+                    addContext(context,"culture",nearestBoundary.attributes.get("realm.culture"));
+                }
+                NavigatorPlatformSelectionBridge.publish("worldforge:realm/"+nearestBoundary.realm_id,
+                        "realm",nearestBoundary.name,dimension,String.join(" · ",context));
+                return true;
+            }
+        }
+        if(politicalLayer==1)return false;
+
         List<WorldForgeMapSnapshot.Territory> territories=
                 NavigatorWorldForgeMapStore.territories(dimension);
         List<WorldForgeMapSnapshot.Feature> features=
                 NavigatorWorldForgeMapStore.features(dimension);
         int drawnTerritories=0,drawnFeatures=0;
-        for(WorldForgeMapSnapshot.Territory territory:territories){
+        if(politicalLayer==0||politicalLayer==2)for(WorldForgeMapSnapshot.Territory territory:territories){
             List<List<WorldForgeMapGeometry.Point>> rings=new ArrayList<>();
             List<List<WorldForgeMapSnapshot.Vertex>> sourceRings=territory.rings;
             if(sourceRings==null||sourceRings.isEmpty()){
@@ -258,6 +307,28 @@ public final class NavigatorSurfaceMapScreen extends Screen {
                         (int)Math.round(label.y())-font.lineHeight/2,color,false);
             drawnTerritories++;
         }
+        int drawnRealms=0;
+        if(politicalLayer==1||politicalLayer==2)for(WorldForgeMapSnapshot.PoliticalBoundary boundary:
+                NavigatorWorldForgeMapStore.boundaries(dimension)){
+            int color=boundary.id.equals(selectedWorldForgeEntityId)?0xFFFFD36A:
+                    (boundary.color==0?0xFFFFD36A:(boundary.color|0xFF000000));
+            for(List<WorldForgeMapSnapshot.Vertex> sourceRing:boundary.rings){
+                if(sourceRing==null||sourceRing.size()<3)continue;
+                List<WorldForgeMapGeometry.Point> ring=new ArrayList<>(sourceRing.size());
+                for(WorldForgeMapSnapshot.Vertex vertex:sourceRing){
+                    double[] point=project(vertex.x/16.0,vertex.z/16.0,cell,left,top,right,bottom,player);
+                    ring.add(new WorldForgeMapGeometry.Point(point[0],point[1]));
+                }
+                List<WorldForgeMapGeometry.Point> clipped=WorldForgeMapGeometry.clipPolygon(
+                        ring,left,top,right,bottom);
+                for(int i=0;i<clipped.size();i++){
+                    WorldForgeMapGeometry.Point a=clipped.get(i),b=clipped.get((i+1)%clipped.size());
+                    drawLine(g,(int)Math.round(a.x()),(int)Math.round(a.y()),
+                            (int)Math.round(b.x()),(int)Math.round(b.y()),color);
+                }
+            }
+            drawnRealms++;
+        }
         for(WorldForgeMapSnapshot.Feature feature:features){
             double[] projected=project(feature.x/16.0,feature.z/16.0,cell,
                     left,top,right,bottom,player);
@@ -269,9 +340,9 @@ public final class NavigatorSurfaceMapScreen extends Screen {
             g.fill(x-2,y-2,x+3,y+3,color);
             drawnFeatures++;
         }
-        if(drawnTerritories>0||drawnFeatures>0)
-            g.drawString(font,"WORLDFORGE  ·  "+drawnTerritories+" TERRITORIES  ·  "
-                    +drawnFeatures+" FEATURES",left+8,top+8,0xFF9BD7F1,false);
+        if(drawnTerritories>0||drawnFeatures>0||drawnRealms>0)
+            g.drawString(font,"WORLDFORGE  ·  "+drawnTerritories+" PROVINCES  ·  "
+                    +drawnRealms+" REALMS  ·  "+drawnFeatures+" FEATURES",left+8,top+8,0xFF9BD7F1,false);
     }
 
 
@@ -341,6 +412,14 @@ public final class NavigatorSurfaceMapScreen extends Screen {
             return true;
         }
         return false;
+    }
+
+    private static double segmentDistanceSquared(double px,double py,double ax,double ay,double bx,double by){
+        double dx=bx-ax,dy=by-ay,length=dx*dx+dy*dy;
+        if(length<=1e-12){double x=px-ax,y=py-ay;return x*x+y*y;}
+        double t=Math.max(0.0,Math.min(1.0,((px-ax)*dx+(py-ay)*dy)/length));
+        double x=px-(ax+t*dx),y=py-(ay+t*dy);
+        return x*x+y*y;
     }
 
     private static void addContext(List<String> target,String label,String value){

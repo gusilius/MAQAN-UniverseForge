@@ -38,6 +38,30 @@ class WorldForgeMapSnapshotTest {
     }
 
     @Test
+    void indexesPoliticalBoundariesSeparatelyFromProvinceTerritories() {
+        WorldForgeMapSnapshot snapshot = new WorldForgeMapSnapshot();
+        WorldForgeMapSnapshot.Territory province = new WorldForgeMapSnapshot.Territory();
+        province.id = "province:north";
+        province.dimension_id = "minecraft:overworld";
+        snapshot.territories = List.of(province);
+
+        WorldForgeMapSnapshot.PoliticalBoundary realm = new WorldForgeMapSnapshot.PoliticalBoundary();
+        realm.id = "realm:north";
+        realm.realm_id = "north";
+        realm.name = "Northern Realm";
+        realm.dimension_id = "minecraft:overworld";
+        snapshot.political_boundaries = List.of(realm);
+        snapshot.features = List.of();
+        snapshot.rebuildIndexes();
+
+        assertEquals(List.of(province), snapshot.territoriesInDimension("minecraft:overworld"));
+        assertEquals(List.of(realm), snapshot.boundariesInDimension("minecraft:overworld"));
+        assertTrue(snapshot.boundariesInDimension("minecraft:the_nether").isEmpty());
+        assertThrows(UnsupportedOperationException.class,
+                () -> snapshot.boundariesInDimension("minecraft:overworld").clear());
+    }
+
+    @Test
     void dimensionIndexesAreImmutableAndIgnoreUnboundRecords() {
         WorldForgeMapSnapshot snapshot = new WorldForgeMapSnapshot();
         WorldForgeMapSnapshot.Territory unbound = new WorldForgeMapSnapshot.Territory();

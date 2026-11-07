@@ -37,8 +37,10 @@ public final class WorldForgeSnapshotExporter {
 
         List<Object> territories = new ArrayList<>();
         List<Object> features = new ArrayList<>();
+        List<Object> politicalBoundaries = new ArrayList<>();
         root.put("territories", territories);
         root.put("features", features);
+        root.put("political_boundaries", politicalBoundaries);
 
         ChunkGenerator rawGenerator = level.getChunkSource().getGenerator();
         MapChunkGenerator generator = rawGenerator instanceof MapChunkGenerator
@@ -101,6 +103,67 @@ public final class WorldForgeSnapshotExporter {
                 territory.put("rings", rings);
                 territory.put("vertices", rings.get(0));
                 territories.add(territory);
+            }
+
+            // Aggregate the authoritative province raster by its resolved realm LUT.
+            // This creates real state borders without maintaining a second political model.
+            List<TitleData.Realm> realmList = map.titles.realmList();
+            int[] realmLut = map.titles.realmLut();
+            if (realmList.size() > 65_535)
+                throw new IllegalStateException("WorldForge realm count exceeds contour label capacity");
+            short[] realmPixels = new short[map.titles.w * map.titles.h];
+            short[] provincePixels = map.titles.pixels();
+            for (int i = 0; i < provincePixels.length; i++) {
+                int provinceId = provincePixels[i] & 0xFFFF;
+                int realmIndex = provinceId > 0 && provinceId < realmLut.length
+                        ? realmLut[provinceId] : 0;
+                realmPixels[i] = (short) realmIndex;
+            }
+            Map<Integer, List<List<WorldForgeProvinceContourBuilder.Point>>> realmContours =
+                    WorldForgeProvinceContourBuilder.build(realmPixels, map.titles.w, map.titles.h);
+            for (int realmIndex = 0; realmIndex < realmList.size(); realmIndex++) {
+                TitleData.Realm realm = realmList.get(realmIndex);
+                if (realm == null || realm.id == null || realm.id.isBlank()) continue;
+                List<List<WorldForgeProvinceContourBuilder.Point>> realmRings =
+                        realmContours.get(realmIndex + 1);
+                if (realmRings == null || realmRings.isEmpty()) continue;
+                Map<String, String> attrs = new LinkedHashMap<>();
+                attrs.put("map_id", map.name);
+                attrs.put("relation", safe(realm.relation));
+                attrs.put("overlord_id", safe(realm.overlordId));
+                attrs.put("subjects", String.join(",", realm.subjectIds));
+                attrs.put("area_blocks", Long.toString(realm.areaBlocks));
+                attrs.put("title_keys", String.join(",", realm.titleKeys));
+                copyProperties(attrs, "realm.", realm.props);
+                Map<String, Object> boundary = new LinkedHashMap<>();
+                boundary.put("id", "worldforge:" + map.name + ":realm:" + realm.id);
+                boundary.put("name", safe(realm.name));
+                boundary.put("realm_id", safe(realm.id));
+                boundary.put("dimension_id", dimensionId);
+                boundary.put("overlord_id", safe(realm.overlordId));
+                boundary.put("relation", safe(realm.relation));
+                boundary.put("ruler", safe(realm.ruler));
+                boundary.put("subjects", new ArrayList<>(realm.subjectIds));
+                boundary.put("color", realm.rgb & 0xFFFFFF);
+                boundary.put("attributes", attrs);
+                List<Object> rings = new ArrayList<>();
+                for (List<WorldForgeProvinceContourBuilder.Point> ring : realmRings) {
+                    List<Object> vertices = new ArrayList<>();
+                    for (WorldForgeProvinceContourBuilder.Point point : ring) {
+                        double x = (point.x() - map.titles.w * 0.5) * map.titles.bpp;
+                        double z = (point.z() - map.titles.h * 0.5) * map.titles.bpp;
+                        int y = generator == null ? map.seaLevel
+                                : generator.surfaceAt((int) Math.round(x), (int) Math.round(z)).getY();
+                        Map<String, Object> vertex = new LinkedHashMap<>();
+                        vertex.put("x", x);
+                        vertex.put("y", y);
+                        vertex.put("z", z);
+                        vertices.add(vertex);
+                    }
+                    rings.add(vertices);
+                }
+                boundary.put("rings", rings);
+                politicalBoundaries.add(boundary);
             }
 
             // Keep higher-level titles as selectable map features, linked to the province layer.
