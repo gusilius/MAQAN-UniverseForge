@@ -4,6 +4,7 @@ MAQAN UniverseForge is a multi-mod ecosystem built around two independently inst
 
 - **Atlas** — cosmic geography, star systems, orbital mechanics, planetary navigation and travel.
 - **WorldForge** — a living-world simulation for settlements, populations, economies, realms, dynasties, diplomacy, armies and warfare.
+- **MAQAN Platform** — an optional shared desktop-style shell mod; gameplay modules remain independently installable.
 
 The shared MAQAN platform experience is a desktop-style workspace shell. It is a presentation and integration layer, not a monolithic gameplay mod. Atlas and WorldForge retain independent mod IDs, lifecycle, configuration, saves, dependencies and release artifacts.
 

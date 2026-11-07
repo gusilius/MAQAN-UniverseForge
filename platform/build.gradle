@@ -1,0 +1,13 @@
+plugins { id 'eclipse'; id 'idea'; id 'maven-publish'; id 'net.minecraftforge.gradle' version '[6.0,6.2)' }
+version = '0.1.0-alpha.1'
+group = 'dev.maqan.platform'
+archivesBaseName = 'maqan-platform'
+java.toolchain.languageVersion = JavaLanguageVersion.of(17)
+minecraft {
+    mappings channel: 'official', version: '1.20.1'
+    runs {
+        client { workingDirectory project.file('run'); property 'forge.logging.console.level', 'info'; mods { maqan_platform { source sourceSets.main } } }
+        server { workingDirectory project.file('run'); property 'forge.logging.console.level', 'info'; mods { maqan_platform { source sourceSets.main } } }
+    }
+}
+dependencies { minecraft 'net.minecraftforge:forge:1.20.1-47.4.28' }

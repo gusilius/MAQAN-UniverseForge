@@ -117,6 +117,10 @@ jobs:
         working-directory: mods/atlas
         run: gradle --no-daemon build
 
+      - name: Build MAQAN Platform shell mod (Windows x64)
+        working-directory: platform
+        run: gradle --no-daemon build
+
       - name: Run WorldForge logic tests
         working-directory: mods/worldforge/wfaddons
         env:
@@ -156,6 +160,14 @@ jobs:
         with:
           name: maqan-atlas-windows-x64
           path: mods/atlas/build/libs/*.jar
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload MAQAN Platform JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: maqan-platform-windows-x64
+          path: platform/build/libs/*.jar
           if-no-files-found: error
           retention-days: 30
 
