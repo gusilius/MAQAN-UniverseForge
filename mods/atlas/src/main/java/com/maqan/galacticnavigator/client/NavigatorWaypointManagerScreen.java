@@ -17,7 +17,7 @@ public final class NavigatorWaypointManagerScreen extends Screen {
     @Override protected void init() {
         int left=width/2-145;
         addRenderableWidget(Button.builder(Component.literal("NEW WAYPOINT"),
-                b->minecraft.setScreen(new NavigatorWaypointEditorScreen(this)))
+                b->MaqanScreenHost.open(minecraft, new NavigatorWaypointEditorScreen(this)))
                 .bounds(left,36,140,20).build());
         addRenderableWidget(Button.builder(Component.literal("CLEAR TEMPORARY"),
                 b->{NavigatorWaypointStore.clearTemporary();rebuildWidgets();})
@@ -36,7 +36,7 @@ public final class NavigatorWaypointManagerScreen extends Screen {
                     b->{NavigatorWaypoint fresh=find(w.id);if(fresh!=null){fresh.visible=!fresh.visible;NavigatorWaypointStore.update(fresh);}rebuildWidgets();})
                     .bounds(left,y,166,21).build());
             addRenderableWidget(Button.builder(Component.literal("EDIT"),
-                    b->minecraft.setScreen(new NavigatorWaypointEditExistingScreen(this,w.id)))
+                    b->MaqanScreenHost.open(minecraft, new NavigatorWaypointEditExistingScreen(this,w.id)))
                     .bounds(left+171,y,54,21).build());
             addRenderableWidget(Button.builder(Component.literal("×"),
                     b->{NavigatorWaypointStore.remove(w.id);rebuildWidgets();})
@@ -49,7 +49,7 @@ public final class NavigatorWaypointManagerScreen extends Screen {
     }
     private static NavigatorWaypoint find(String id){return NavigatorWaypointStore.all().stream().filter(w->w.id.equals(id)).findFirst().orElse(null);}
     private static String shortName(String value){return value.length()>20?value.substring(0,19)+"…":value;}
-    @Override public void onClose(){if(minecraft!=null)minecraft.setScreen(parent);else super.onClose();}
+    @Override public void onClose(){if(minecraft!=null)MaqanScreenHost.back(minecraft, parent);else super.onClose();}
     @Override public void render(GuiGraphics g,int mx,int my,float partial){
         MaqanUiTheme.backdrop(g,width,height);g.drawCenteredString(font,"WAYPOINT MANAGER",width/2,15,0xFF62D9F2);
         List<NavigatorWaypoint> all=NavigatorWaypointStore.all();
