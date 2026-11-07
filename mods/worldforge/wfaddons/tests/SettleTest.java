@@ -155,6 +155,21 @@ public class SettleTest {
         Settlement cap = fresh(d, 0);
         ok(cap.add("wood", 1000) == 0 || cap.amount("wood") <= 100, "склад ограничен");
 
+        Settlement manual = fresh(d, 1);
+        Worker commanded = manual.workers.get(0);
+        manual.moveTo(commanded.id, 12.5, -7.25);
+        ok(commanded.manualOrder && commanded.building == 0 && manual.targetOf(commanded)[0] == 12.5,
+                "приказ RTS задаёт индивидуальную точку и снимает назначение здания");
+        manual.auto = true; manual.tick(1);
+        ok(commanded.manualOrder && commanded.building == 0, "автораспределение не перехватывает рабочего с ручным приказом");
+        Settlement manualBack = Settlement.fromJson(manual.toJson(), d);
+        Worker restoredCommand = manualBack.worker(commanded.id);
+        ok(restoredCommand.manualOrder && restoredCommand.orderX == 12.5 && restoredCommand.orderZ == -7.25,
+                "ручной приказ рабочего сохраняется и восстанавливается");
+        boolean badMoveRejected = false;
+        try { manual.moveTo(commanded.id, Double.NaN, 0); } catch (Settlement.OrderException expectedMove) { badMoveRejected = true; }
+        ok(badMoveRejected && commanded.manualOrder, "некорректные координаты не сбрасывают действующий приказ");
+
         // детерминизм и сохранение
         Settlement x = fresh(d, 5), y = fresh(d, 5);
         for (Settlement t : new Settlement[]{x, y}) { t.place("house", 0, 0); t.place("lumber_camp", 10, 0); t.place("farm", 20, 0); t.tick(500); }
