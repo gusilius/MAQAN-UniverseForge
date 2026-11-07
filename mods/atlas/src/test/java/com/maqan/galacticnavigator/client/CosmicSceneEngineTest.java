@@ -306,6 +306,31 @@ class CosmicSceneEngineTest {
     }
 
     @Test
+    void orbitalSnapshotDefensivelyCopiesPositionsAndRejectsInvalidVectors() {
+        double[] earthPosition = new double[]{1, 2, 3};
+        double[] invalidPosition = new double[]{Double.NaN, 0, 0};
+        java.util.Map<String, double[]> source = new java.util.LinkedHashMap<>();
+        source.put("earth", earthPosition);
+        source.put("invalid", invalidPosition);
+        NativeOrbitalSimulation.OrbitalSnapshot snapshot =
+                new NativeOrbitalSimulation.OrbitalSnapshot(
+                        "sol", 120.0, 2400.0, true, source);
+
+        earthPosition[0] = 99;
+        assertArrayEquals(new double[]{1, 2, 3},
+                snapshot.position("earth").orElseThrow());
+        assertTrue(snapshot.position("invalid").isEmpty());
+        double[] returned = snapshot.position("earth").orElseThrow();
+        returned[1] = 99;
+        assertArrayEquals(new double[]{1, 2, 3},
+                snapshot.position("earth").orElseThrow());
+        assertEquals("sol", snapshot.systemId());
+        assertEquals(120.0, snapshot.gameTime());
+        assertEquals(2400.0, snapshot.simulationTicks());
+        assertTrue(snapshot.orbitalMotionEnabled());
+    }
+
+    @Test
     void placementVectorsRejectNonFiniteCoordinates() {
         assertTrue(new CosmicSceneEngine.Vector3(1, 2, 3).finite());
         assertFalse(new CosmicSceneEngine.Vector3(Double.NaN, 0, 0).finite());
