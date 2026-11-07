@@ -135,6 +135,13 @@ public final class Settlement {
         return true;
     }
 
+    /** Atomic resource withdrawal used by recruitment and other settlement services. */
+    public boolean spend(Map<String, Integer> cost) {
+        if (cost == null || !canPay(cost)) return false;
+        pay(cost);
+        return true;
+    }
+
     private void pay(Map<String, Integer> cost) {
         for (Map.Entry<String, Integer> e : cost.entrySet()) {
             stock.put(e.getKey(), amount(e.getKey()) - e.getValue());
