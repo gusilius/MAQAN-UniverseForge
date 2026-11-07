@@ -58,6 +58,9 @@ public final class CosmicSceneEngine {
         }
     }
 
+    private static final double SPATIAL_CELL_SIZE = 256.0;
+    private static final long MAX_SPATIAL_BUCKETS_PER_QUERY = 4096L;
+
     public record SceneSnapshot(String universeId, String universeName, long catalogRevision,
                                 double gameTime, List<SceneGalaxy> galaxies,
                                 List<SceneSector> sectors, List<SceneSystem> systems,
@@ -66,7 +69,8 @@ public final class CosmicSceneEngine {
                                 Map<String, SceneSystem> systemIndex,
                                 Map<String, Map<String, SceneBody>> bodyIndex,
                                 Map<String, List<SceneSystem>> galaxyIndex,
-                                Map<String, List<SceneSystem>> sectorIndex) {
+                                Map<String, List<SceneSystem>> sectorIndex,
+                                Map<String, List<SceneSystem>> spatialCellIndex) {
         public SceneSnapshot {
             galaxies = List.copyOf(galaxies);
             sectors = List.copyOf(sectors);
@@ -76,6 +80,7 @@ public final class CosmicSceneEngine {
             Map<String, Map<String, SceneBody>> bodiesBySystem = new LinkedHashMap<>();
             Map<String, List<SceneSystem>> byGalaxy = new LinkedHashMap<>();
             Map<String, List<SceneSystem>> bySector = new LinkedHashMap<>();
+            Map<String, List<SceneSystem>> bySpatialCell = new LinkedHashMap<>();
             for (SceneSystem system : systems) {
                 if (system == null || system.id() == null || system.id().isBlank()) continue;
                 byId.putIfAbsent(system.id(), system);
@@ -87,11 +92,19 @@ public final class CosmicSceneEngine {
                 bodiesBySystem.put(system.id(), Collections.unmodifiableMap(bodyMap));
                 byGalaxy.computeIfAbsent(normalizeGroup(system.galaxyId()), ignored -> new ArrayList<>()).add(system);
                 bySector.computeIfAbsent(normalizeGroup(system.sectorId()), ignored -> new ArrayList<>()).add(system);
+                if (system.placementSource() != PlacementSource.UNPLACED
+                        && system.universePosition() != null && system.universePosition().finite()) {
+                    Vector3 position = system.universePosition();
+                    String cell = spatialCellKey(position.x(), position.y(), position.z());
+                    if (cell != null)
+                        bySpatialCell.computeIfAbsent(cell, ignored -> new ArrayList<>()).add(system);
+                }
             }
             systemIndex = Collections.unmodifiableMap(byId);
             bodyIndex = Collections.unmodifiableMap(bodiesBySystem);
             galaxyIndex = immutableGroups(byGalaxy);
             sectorIndex = immutableGroups(bySector);
+            spatialCellIndex = immutableGroups(bySpatialCell);
         }
 
         /** Backwards-compatible constructor for callers that only provide scene data. */
@@ -102,7 +115,7 @@ public final class CosmicSceneEngine {
                              int schematicSystems, int unplacedSystems) {
             this(universeId, universeName, catalogRevision, gameTime, galaxies, sectors, systems,
                     bodyCount, datapackPlacedSystems, schematicSystems, unplacedSystems,
-                    Map.of(), Map.of(), Map.of(), Map.of());
+                    Map.of(), Map.of(), Map.of(), Map.of(), Map.of());
         }
 
         public Optional<SceneSystem> system(String id) {
@@ -121,13 +134,49 @@ public final class CosmicSceneEngine {
             return sectorIndex.getOrDefault(normalizeGroup(sectorId), List.of());
         }
 
-        /** Returns only placed systems whose global scene position lies within radius. */
+        /**
+         * Returns systems inside a sphere using a uniform 3D spatial hash.
+         * Very large query volumes fall back to a linear scan to avoid iterating
+         * millions of empty cells. Unplaced systems are never treated as origin.
+         */
         public List<SceneSystem> systemsWithin(Vector3 center, double radius) {
             if (center == null || !center.finite() || !Double.isFinite(radius) || radius < 0)
                 return List.of();
             double radiusSquared = radius * radius;
+            if (!Double.isFinite(radiusSquared)) return systemsWithinLinear(center, radiusSquared);
+
+            long minX = cellCoordinate(center.x() - radius);
+            long maxX = cellCoordinate(center.x() + radius);
+            long minY = cellCoordinate(center.y() - radius);
+            long maxY = cellCoordinate(center.y() + radius);
+            long minZ = cellCoordinate(center.z() - radius);
+            long maxZ = cellCoordinate(center.z() + radius);
+            double bucketCount = ((double) maxX - minX + 1)
+                    * ((double) maxY - minY + 1) * ((double) maxZ - minZ + 1);
+            if (!Double.isFinite(bucketCount) || bucketCount > MAX_SPATIAL_BUCKETS_PER_QUERY)
+                return systemsWithinLinear(center, radiusSquared);
+
+            LinkedHashSet<SceneSystem> candidates = new LinkedHashSet<>();
+            for (long x = minX; x <= maxX; x++) {
+                for (long y = minY; y <= maxY; y++) {
+                    for (long z = minZ; z <= maxZ; z++) {
+                        List<SceneSystem> bucket = spatialCellIndex.get(cellKey(x, y, z));
+                        if (bucket != null) candidates.addAll(bucket);
+                    }
+                }
+            }
+            return filterWithin(candidates, center, radiusSquared);
+        }
+
+        private List<SceneSystem> systemsWithinLinear(Vector3 center, double radiusSquared) {
+            return filterWithin(systems, center, radiusSquared);
+        }
+
+        private static List<SceneSystem> filterWithin(Collection<SceneSystem> candidates,
+                                                       Vector3 center, double radiusSquared) {
             List<SceneSystem> matches = new ArrayList<>();
-            for (SceneSystem system : systems) {
+            for (SceneSystem system : candidates) {
+                if (system.placementSource() == PlacementSource.UNPLACED) continue;
                 Vector3 position = system.universePosition();
                 if (position == null || !position.finite()) continue;
                 double dx = position.x() - center.x();
@@ -136,6 +185,22 @@ public final class CosmicSceneEngine {
                 if (dx * dx + dy * dy + dz * dz <= radiusSquared) matches.add(system);
             }
             return List.copyOf(matches);
+        }
+
+        private static long cellCoordinate(double coordinate) {
+            double cell = Math.floor(coordinate / SPATIAL_CELL_SIZE);
+            if (cell <= Long.MIN_VALUE) return Long.MIN_VALUE;
+            if (cell >= Long.MAX_VALUE) return Long.MAX_VALUE;
+            return (long) cell;
+        }
+
+        private static String spatialCellKey(double x, double y, double z) {
+            if (!Double.isFinite(x) || !Double.isFinite(y) || !Double.isFinite(z)) return null;
+            return cellKey(cellCoordinate(x), cellCoordinate(y), cellCoordinate(z));
+        }
+
+        private static String cellKey(long x, long y, long z) {
+            return x + ":" + y + ":" + z;
         }
 
         private static String normalizeGroup(String value) {
