@@ -64,6 +64,8 @@ public final class PlatformShellScreen extends Screen {
     private boolean timelineVisible = true;
     private Screen embeddedView;
     private boolean embeddedViewReady;
+    private boolean settingsVisible;
+    private int previewLayer = 3;
 
     public PlatformShellScreen() { super(Component.literal("MAQAN")); }
 
@@ -71,19 +73,16 @@ public final class PlatformShellScreen extends Screen {
 
     @Override protected void init() {
         if (panels.isEmpty()) {
-            panels.put("navigation", new Panel("navigation", "NAVIGATION", 54, 44, 224, Math.max(180, height - 170)));
-            panels.put("inspector", new Panel("inspector", "INSPECTOR", width - 270, 44, 252, Math.max(180, height - 170)));
-            panels.put("timeline", new Panel("timeline", "TIMELINE", 292, height - 116, Math.max(260, width - 590), 92));
-            panels.put("tools", new Panel("tools", "COMMANDS", Math.max(290, width / 2 - 150), 100, 300, 180));
-            panels.get("tools").visible = false;
-        }
-        ensureAtlasView();
-        if (profile == Profile.COSMOS) {
+            panels.put("navigation", new Panel("navigation", "NAVIGATION", 52, 52, 218, 286));
+            panels.put("inspector", new Panel("inspector", "INSPECTOR", width - 252, 52, 236, 230));
+            panels.put("timeline", new Panel("timeline", "TIMELINE", Math.max(220, width / 2 - 180), height - 116, 360, 82));
+            panels.put("tools", new Panel("tools", "COMMANDS", Math.max(220, width / 2 - 145), 82, 290, 180));
             panels.get("navigation").visible = false;
             panels.get("inspector").visible = false;
             panels.get("timeline").visible = false;
-            navRailVisible = inspectorVisible = timelineVisible = false;
+            panels.get("tools").visible = false;
         }
+        ensureAtlasView();
         clampPanels();
     }
 
@@ -140,48 +139,64 @@ public final class PlatformShellScreen extends Screen {
             embeddedView.render(g, mouseX, mouseY, partialTick);
         } else {
             g.fill(0, 0, width, height, BG);
-            drawAmbientGrid(g);
+            WorkspacePreviewRenderer.render(g, font, width, height, profile.name(), previewLayer, mouseX, mouseY);
         }
-        drawTopBar(g);
-        drawRail(g);
-        // Back-to-front panel order. The central work surface is never replaced by a click.
+        drawTopBar(g, mouseX, mouseY);
+        drawRail(g, mouseX, mouseY);
         for (Panel p : panels.values()) if (p.visible) drawPanel(g, p, mouseX, mouseY);
+        if (settingsVisible) drawSettings(g, mouseX, mouseY);
         super.render(g, mouseX, mouseY, partialTick);
     }
 
-    private void drawTopBar(GuiGraphics g) {
+    private void drawTopBar(GuiGraphics g, int mx, int my) {
         g.fill(0, 0, width, 34, SURFACE_ALT);
         g.fill(0, 33, width, 35, EDGE);
-        g.drawString(font, "MAQAN", 14, 13, TEXT, false);
-        g.drawString(font, "UNIVERSE PLATFORM", 78, 13, MUTED, false);
-        int x = Math.max(250, width / 2 - 116);
+        g.drawString(font, "M", 15, 12, CYAN, false);
+        g.fill(34, 9, 35, 25, EDGE);
+        int x = Math.max(178, width / 2 - 112);
         for (Profile p : Profile.values()) {
             boolean active = p == profile;
             g.fill(x, 5, x + 48, 29, active ? 0x553B9FB5 : 0x00101924);
             if (active) g.fill(x, 28, x + 48, 30, CYAN);
             g.drawCenteredString(font, p.icon, x + 24, 8, active ? CYAN : MUTED);
+            if (mx >= x && mx < x + 48 && my >= 5 && my < 30)
+                g.renderTooltip(font, Component.literal(p.label), mx, my);
             x += 52;
         }
-        g.drawString(font, profile.label, width - 120, 13, CYAN, false);
+        g.drawString(font, embeddedView != null && profile == Profile.COSMOS ? "ATLAS" : "WORKSPACE", 46, 13, MUTED, false);
+        if (mx >= 8 && mx < 30 && my < 34) g.renderTooltip(font, Component.literal("MAQAN workspace"), mx, my);
     }
 
-    private void drawRail(GuiGraphics g) {
+    private void drawRail(GuiGraphics g, int mx, int my) {
         g.fill(0, 35, 44, height, SURFACE_ALT);
         g.fill(43, 35, 44, height, EDGE);
-        String[] icons = {"☰", "◈", "⌕", "▤"};
+        String[] icons = {"☷", "◈", "⌕", "◷"};
+        String[] tips = {"Module catalogue", "Object inspector", "Command palette", "Timeline"};
+        boolean[] active = {panels.get("navigation").visible, panels.get("inspector").visible,
+                panels.get("tools").visible, panels.get("timeline").visible};
         for (int i=0;i<icons.length;i++) {
-            int y=48+i*38;
-            boolean active = (i==0 && navRailVisible) || (i==1 && inspectorVisible) || (i==2 && timelineVisible);
-            if (active) g.fill(5,y-4,39,y+26,0x443A9FB5);
-            g.drawCenteredString(font, icons[i], 22, y+3, active ? CYAN : MUTED);
+            int y=49+i*40;
+            if (active[i]) g.fill(5,y-5,39,y+25,0x443A9FB5);
+            g.drawCenteredString(font, icons[i], 22, y+3, active[i] ? CYAN : MUTED);
+            if(mx<44 && my>=y-5 && my<y+25) g.renderTooltip(font, Component.literal(tips[i]), mx, my);
         }
-        g.drawCenteredString(font, "⚙", 22, height-25, MUTED);
+        g.drawCenteredString(font, "⚙", 22, height-25, settingsVisible ? CYAN : MUTED);
+        if(mx<44 && my>=height-42) g.renderTooltip(font, Component.literal("Workspace settings"), mx, my);
     }
 
-    private void drawAmbientGrid(GuiGraphics g) {
-        int left = 44, right = width - 1, top = 35, bottom = height - 1;
-        for (int x=left+24;x<right;x+=48) g.fill(x,top,x+1,bottom,0x102B5266);
-        for (int y=top+24;y<bottom;y+=48) g.fill(left,y,right,y+1,0x102B5266);
+    private void drawSettings(GuiGraphics g, int mx, int my) {
+        int w=224,h=132,x=52,y=Math.max(42,height-h-12);
+        g.fill(x+3,y+4,x+w+3,y+h+4,0x80000000);
+        g.fill(x,y,x+w,y+h,SURFACE);
+        g.fill(x,y,x+w,y+26,SURFACE_ALT);
+        g.drawString(font,"⚙",x+10,y+9,CYAN,false);
+        g.drawString(font,"WORKSPACE",x+28,y+9,TEXT,false);
+        g.drawCenteredString(font,"×",x+w-15,y+8,MUTED);
+        g.drawString(font,"Interface layout",x+12,y+43,TEXT,false);
+        g.drawString(font,"Floating panels · compact mode",x+12,y+61,MUTED,false);
+        g.drawString(font,"Provider data is never simulated",x+12,y+81,MUTED,false);
+        g.drawString(font,"MAQAN / UI CORE",x+12,y+108,CYAN,false);
+        if(mx>=x+w-28&&my>=y&&my<y+26) g.renderTooltip(font,Component.literal("Close settings"),mx,my);
     }
 
     private void drawPanel(GuiGraphics g, Panel p, int mouseX, int mouseY) {
@@ -190,36 +205,50 @@ public final class PlatformShellScreen extends Screen {
         g.fill(p.x,p.y,p.x+p.w,p.y+visibleH,SURFACE);
         g.fill(p.x,p.y,p.x+p.w,p.y+26,SURFACE_ALT);
         g.fill(p.x,p.y+25,p.x+p.w,p.y+26,EDGE);
-        g.drawString(font,p.title,p.x+10,p.y+9,TEXT,false);
+        String icon = panelIcon(p.id);
+        g.drawString(font,icon,p.x+9,p.y+8,CYAN,false);
         int bx=p.x+p.w-64;
         g.drawCenteredString(font,p.pinned?"◆":"◇",bx+8,p.y+8,p.pinned?CYAN:MUTED);
         g.drawCenteredString(font,p.minimized?"+":"–",bx+28,p.y+7,MUTED);
-        g.drawCenteredString(font,p.pinned?"":"×",bx+48,p.y+7,MUTED);
+        g.drawCenteredString(font,"×",bx+48,p.y+7,MUTED);
+        if(mouseX>=p.x&&mouseX<=p.x+26&&mouseY>=p.y&&mouseY<=p.y+26)
+            g.renderTooltip(font,Component.literal(p.title),mouseX,mouseY);
         if (p.minimized) return;
         switch (p.id) {
             case "navigation" -> drawNavigationPanel(g,p);
             case "inspector" -> drawInspectorPanel(g,p);
             case "timeline" -> drawTimelinePanel(g,p);
             case "tools" -> drawCommandPanel(g,p);
-            default -> g.drawString(font,"Workspace panel",p.x+12,p.y+40,MUTED,false);
+            default -> {}
         }
         g.fill(p.x+p.w-7,p.y+p.h-7,p.x+p.w-2,p.y+p.h-2,0xFF426174);
     }
 
+    private String panelIcon(String id) {
+        return switch(id) {
+            case "navigation" -> "☷";
+            case "inspector" -> "◈";
+            case "timeline" -> "◷";
+            case "tools" -> "⌘";
+            default -> "◇";
+        };
+    }
+
     private void drawNavigationPanel(GuiGraphics g, Panel p) {
-        g.drawString(font,"AVAILABLE MODULE VIEWS",p.x+10,p.y+37,MUTED,false);
-        int y=p.y+55;
-        List<CapabilityRegistry.Capability> capabilities=CapabilityRegistry.available();
+        int y=p.y+38;
+        List<CapabilityRegistry.Capability> capabilities=CapabilityRegistry.all();
         for(CapabilityRegistry.Capability c:capabilities) {
             if (!domainVisible(c.domain())) continue;
-            boolean active=c.domain().equals(selectedDomain);
-            if(active) g.fill(p.x+6,y-4,p.x+p.w-6,y+15,0x333B9FB5);
-            g.drawString(font,c.icon(),p.x+12,y,CYAN,false);
-            g.drawString(font,c.label(),p.x+34,y,active?TEXT:0xFFB8C7D5,false);
+            boolean installed=ModList.get().isLoaded(c.providerModId());
+            boolean active=c.id().equals(selectedCapabilityId);
+            if(active) g.fill(p.x+6,y-4,p.x+p.w-6,y+17,0x333B9FB5);
+            g.drawString(font,c.icon(),p.x+12,y,installed?CYAN:0xFF536879,false);
+            g.drawString(font,c.label(),p.x+34,y,installed?TEXT:0xFF718496,false);
+            g.fill(p.x+p.w-17,y+3,p.x+p.w-12,y+8,installed?0xFF62D69C:0xFF53616D);
+            if(installed && active) g.fill(p.x+6,y+15,p.x+p.w-6,y+16,CYAN);
             y+=21;
-            if(y>p.y+p.h-18) break;
+            if(y>p.y+p.h-14) break;
         }
-        if(capabilities.isEmpty()) g.drawString(font,"No compatible MAQAN providers",p.x+10,y,MUTED,false);
     }
 
     private boolean domainVisible(String domain) {
@@ -232,51 +261,55 @@ public final class PlatformShellScreen extends Screen {
     }
 
     private void drawInspectorPanel(GuiGraphics g, Panel p) {
-        g.drawString(font,"SELECTION",p.x+10,p.y+38,MUTED,false);
-        g.drawString(font,"No entity selected",p.x+10,p.y+59,TEXT,false);
-        g.drawString(font,"Select a world object or unit",p.x+10,p.y+78,MUTED,false);
-        g.drawString(font,"to inspect its properties.",p.x+10,p.y+91,MUTED,false);
-        g.fill(p.x+8,p.y+108,p.x+p.w-8,p.y+109,EDGE);
-        g.drawString(font,"CONTEXT ACTIONS",p.x+10,p.y+121,MUTED,false);
-        g.drawString(font,"Actions are supplied by modules",p.x+10,p.y+142,MUTED,false);
-        g.drawString(font,"when a compatible entity is active.",p.x+10,p.y+155,MUTED,false);
+        g.drawString(font,"◇",p.x+12,p.y+40,CYAN,false);
+        g.drawString(font,"NO SELECTION",p.x+30,p.y+40,TEXT,false);
+        g.fill(p.x+10,p.y+59,p.x+p.w-10,p.y+60,EDGE);
+        g.drawString(font,"Select an object to inspect",p.x+12,p.y+75,MUTED,false);
+        g.drawString(font,"Properties and actions appear here.",p.x+12,p.y+91,MUTED,false);
     }
 
     private void drawTimelinePanel(GuiGraphics g, Panel p) {
-        g.drawString(font,"SIMULATION / EVENT TIMELINE",p.x+10,p.y+37,MUTED,false);
-        g.drawString(font,"Provider-owned time controls and events appear here.",p.x+10,p.y+57,TEXT,false);
-        int lineY=p.y+p.h-18;
+        int lineY=p.y+p.h-22;
+        g.drawString(font,"◷",p.x+12,p.y+38,CYAN,false);
+        g.drawString(font,"SIMULATION TIMELINE",p.x+30,p.y+38,MUTED,false);
         g.fill(p.x+12,lineY,p.x+p.w-12,lineY+1,0x664A6579);
         g.fill(p.x+28,lineY-3,p.x+34,lineY+3,CYAN);
     }
 
     private void drawCommandPanel(GuiGraphics g, Panel p) {
-        g.drawString(font,"COMMAND PALETTE",p.x+12,p.y+43,CYAN,false);
-        g.drawString(font,"Search and invoke commands registered by",p.x+12,p.y+68,TEXT,false);
-        g.drawString(font,"the currently loaded MAQAN modules.",p.x+12,p.y+84,TEXT,false);
-        g.drawString(font,"No provider commands are fabricated.",p.x+12,p.y+112,MUTED,false);
+        g.drawString(font,"⌘",p.x+12,p.y+42,CYAN,false);
+        g.drawString(font,"Command registry",p.x+30,p.y+42,TEXT,false);
+        g.drawString(font,"Commands appear when providers register them.",p.x+12,p.y+67,MUTED,false);
     }
 
     @Override public boolean mouseClicked(double mx,double my,int button) {
-        if(button!=0) return profile == Profile.COSMOS && embeddedView != null ? embeddedView.mouseClicked(mx,my,button) : super.mouseClicked(mx,my,button);
+        if(button!=0) return profile == Profile.COSMOS && embeddedView != null
+                ? embeddedView.mouseClicked(mx,my,button) : super.mouseClicked(mx,my,button);
         if(my<34) {
-            int x=Math.max(250,width/2-116);
+            int x=Math.max(178,width/2-112);
             for(Profile p:Profile.values()) {
                 if(mx>=x&&mx<x+48) { setProfile(p); return true; }
                 x+=52;
             }
-            if(mx<70) { navRailVisible=!navRailVisible; panels.get("navigation").visible=navRailVisible; return true; }
             return true;
         }
         if(mx<44) {
-            int index=(int)((my-44)/38);
-            if(index==0) { navRailVisible=!navRailVisible; panels.get("navigation").visible=navRailVisible; return true; }
-            if(index==1 && profile==Profile.COSMOS) { invokeAtlasRailAction("toggleListPanel"); return true; }
-            if(index==2 && profile==Profile.COSMOS) { invokeAtlasRailAction("toggleInfoPanel"); return true; }
-            if(index==1) { inspectorVisible=!inspectorVisible; panels.get("inspector").visible=inspectorVisible; return true; }
-            if(index==2) { timelineVisible=!timelineVisible; panels.get("timeline").visible=timelineVisible; return true; }
-            if(index==3) { Panel p=panels.get("tools"); p.visible=!p.visible; return true; }
+            if(my>=height-44) { settingsVisible=!settingsVisible; return true; }
+            int index=(int)((my-44)/40);
+            if(index==0) { panels.get("navigation").visible=!panels.get("navigation").visible; return true; }
+            if(index==1) { panels.get("inspector").visible=!panels.get("inspector").visible; return true; }
+            if(index==2) { panels.get("tools").visible=!panels.get("tools").visible; return true; }
+            if(index==3) { panels.get("timeline").visible=!panels.get("timeline").visible; return true; }
             return true;
+        }
+        if(settingsVisible) {
+            int sx=52,sy=Math.max(42,height-144);
+            if(mx>=sx+196&&my>=sy&&my<sy+26) { settingsVisible=false; return true; }
+            if(mx>=sx&&mx<=sx+224&&my>=sy&&my<=sy+132) return true;
+        }
+        if(profile==Profile.COSMOS && embeddedView==null && my>=40&&my<68 && mx>=54&&mx<270) {
+            int x=58;
+            for(int i=0;i<4;i++,x+=52) if(mx>=x&&mx<x+44) { previewLayer=i; return true; }
         }
         List<Panel> reverse=new ArrayList<>(panels.values());
         java.util.Collections.reverse(reverse);
@@ -297,18 +330,24 @@ public final class PlatformShellScreen extends Screen {
                 return true;
             }
             if(p.id.equals("navigation")) {
-                int y=p.y+55;
-                for(CapabilityRegistry.Capability c:CapabilityRegistry.available()) {
+                int y=p.y+38;
+                for(CapabilityRegistry.Capability c:CapabilityRegistry.all()) {
                     if(!domainVisible(c.domain())) continue;
-                    if(my>=y-4&&my<y+16) { selectedDomain=c.domain(); openCapability(c); return true; }
+                    if(my>=y-4&&my<y+17) {
+                        selectedCapabilityId=c.id(); selectedDomain=c.domain();
+                        if(c.id().equals("maqan.atlas.cosmos") || c.id().equals("maqan.atlas.worlds")) setProfile(Profile.COSMOS);
+                        else if(c.domain().equals("POLITICS")) setProfile(Profile.POLITICS);
+                        else if(c.domain().equals("SETTLEMENTS")) setProfile(Profile.SETTLEMENTS);
+                        else if(c.domain().equals("TACTICAL") || c.domain().equals("ARMY")) setProfile(Profile.RTS);
+                        return true;
+                    }
                     y+=21;
                 }
             }
-            // Clicking a panel body selects/focuses it; it never dismisses the workspace.
             return true;
         }
-        return embeddedView != null && profile == Profile.COSMOS
-                ? embeddedView.mouseClicked(mx, my, button) : true;
+        return profile == Profile.COSMOS && embeddedView != null
+                ? embeddedView.mouseClicked(mx,my,button) : true;
     }
 
     private void invokeAtlasRailAction(String methodName) {
@@ -368,7 +407,6 @@ public final class PlatformShellScreen extends Screen {
      * embedded workspace views while their existing domain logic stays provider-owned.
      */
     private void openCapability(CapabilityRegistry.Capability capability) {
-        if(!ModList.get().isLoaded(capability.providerModId())) return;
         selectedDomain=capability.domain();
         selectedCapabilityId=capability.id();
         // Keep this Screen alive. A provider must register an embedded view adapter
@@ -435,7 +473,7 @@ public final class PlatformShellScreen extends Screen {
     @Override public boolean keyPressed(int keyCode,int scanCode,int modifiers) {
         // P is owned by PlatformClient's global KeyMapping; handling it here as
         // well would close and immediately reopen the shell during the same tick.
-        if(keyCode==GLFW.GLFW_KEY_ESCAPE) { onClose(); return true; }
+        if(keyCode==GLFW.GLFW_KEY_ESCAPE) { if(settingsVisible){settingsVisible=false;return true;} onClose(); return true; }
         boolean handled = super.keyPressed(keyCode,scanCode,modifiers);
         if (profile == Profile.COSMOS && embeddedView != null)
             handled = embeddedView.keyPressed(keyCode,scanCode,modifiers) || handled;
