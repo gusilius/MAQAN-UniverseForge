@@ -27,7 +27,8 @@ public final class CharacterRegistry {
 
     public Character get(String id) { return byId.get(id); }
 
-    public Collection<Character> all() { return byId.values(); }
+    /** Read-only view: callers must use registry operations so lifecycle events cannot be bypassed. */
+    public Collection<Character> all() { return Collections.unmodifiableCollection(byId.values()); }
 
     public int size() { return byId.size(); }
 
@@ -177,7 +178,9 @@ public final class CharacterRegistry {
             Object birth = m.get("birth");
             if (!(birth instanceof Number birthNumber)) throw new IllegalArgumentException("Нет года рождения: " + id);
             c.birthYear = birthNumber.intValue();
-            c.alive = Boolean.TRUE.equals(m.get("alive"));
+            Object alive = m.get("alive");
+            if (!(alive instanceof Boolean)) throw new IllegalArgumentException("Некорректный статус жизни персонажа " + id);
+            c.alive = (Boolean) alive;
             c.father = optionalString(m, "father");
             c.mother = optionalString(m, "mother");
             c.spouse = optionalString(m, "spouse");
