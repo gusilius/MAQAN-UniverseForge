@@ -117,14 +117,14 @@ public final class Squads {
             char c = value.charAt(i);
             switch (c) {
                 case '"' -> out.append("\\\"");
-                case '\\\\' -> out.append("\\\\\\\\");
-                case '\\b' -> out.append("\\\\b");
-                case '\\f' -> out.append("\\\\f");
-                case '\\n' -> out.append("\\\\n");
-                case '\\r' -> out.append("\\\\r");
-                case '\\t' -> out.append("\\\\t");
+                case '\\' -> out.append("\\\\");
+                case '\b' -> out.append("\\b");
+                case '\f' -> out.append("\\f");
+                case '\n' -> out.append("\\n");
+                case '\r' -> out.append("\\r");
+                case '\t' -> out.append("\\t");
                 default -> {
-                    if (c < 0x20) out.append(String.format("\\\\u%04x", (int) c));
+                    if (c < 0x20) out.append(String.format("\\u%04x", (int) c));
                     else out.append(c);
                 }
             }
@@ -139,38 +139,38 @@ public final class Squads {
             if (!first) b.append(',');
             first = false;
             Order o = s.current();
-            b.append("{\\"id\\":").append(jsonString(s.id))
-                    .append(",\\"name\\":").append(jsonString(s.name))
-                    .append(",\\"n\\":").append(s.members.size())
-                    .append(",\\"formation\\":").append(jsonString(s.formation.title))
-                    .append(",\\"stance\\":").append(jsonString(s.stance.title))
-                    .append(",\\"order\\":").append(jsonString(o == null ? "Ожидает" : o.kind().title)).append('}');
+            b.append("{\"id\":").append(jsonString(s.id))
+                    .append(",\"name\":").append(jsonString(s.name))
+                    .append(",\"n\":").append(s.members.size())
+                    .append(",\"formation\":").append(jsonString(s.formation.title))
+                    .append(",\"stance\":").append(jsonString(s.stance.title))
+                    .append(",\"order\":").append(jsonString(o == null ? "Ожидает" : o.kind().title)).append('}');
         }
         return b.append(']').toString();
     }
 
     // ---- сохранение ----
     public String toJson() {
-        StringBuilder b = new StringBuilder("{\\"v\\":\\"wf-squads/1\\",\\"counter\\":")
-                .append(Math.max(1, counter)).append(",\\"squads\\":[");
+        StringBuilder b = new StringBuilder("{\"v\":\"wf-squads/1\",\"counter\":")
+                .append(Math.max(1, counter)).append(",\"squads\":[");
         boolean first = true;
         for (Squad s : squads.values()) {
             if (s == null) continue;
             if (!first) b.append(',');
             first = false;
-            b.append("{\\"id\\":").append(jsonString(s.id))
-                    .append(",\\"name\\":").append(jsonString(s.name))
-                    .append(",\\"owner\\":").append(jsonString(s.owner))
-                    .append(",\\"realm\\":").append(jsonString(s.realm))
-                    .append(",\\"formation\\":").append(jsonString(s.formation.name()))
-                    .append(",\\"stance\\":").append(jsonString(s.stance.name()))
-                    .append(",\\"initial\\":").append(Math.max(s.members.size(), s.initial))
-                    .append(",\\"morale\\":").append(Double.isFinite(s.morale) ? Math.max(0, Math.min(1, s.morale)) : 1.0)
-                    .append(",\\"routed\\":").append(s.routed)
-                    .append(",\\"cx\\":").append(Double.isFinite(s.cx) ? s.cx : 0)
-                    .append(",\\"cz\\":").append(Double.isFinite(s.cz) ? s.cz : 0)
-                    .append(",\\"yaw\\":").append(Double.isFinite(s.yaw) ? s.yaw : 0)
-                    .append(",\\"members\\":[");
+            b.append("{\"id\":").append(jsonString(s.id))
+                    .append(",\"name\":").append(jsonString(s.name))
+                    .append(",\"owner\":").append(jsonString(s.owner))
+                    .append(",\"realm\":").append(jsonString(s.realm))
+                    .append(",\"formation\":").append(jsonString(s.formation.name()))
+                    .append(",\"stance\":").append(jsonString(s.stance.name()))
+                    .append(",\"initial\":").append(Math.max(s.members.size(), s.initial))
+                    .append(",\"morale\":").append(Double.isFinite(s.morale) ? Math.max(0, Math.min(1, s.morale)) : 1.0)
+                    .append(",\"routed\":").append(s.routed)
+                    .append(",\"cx\":").append(Double.isFinite(s.cx) ? s.cx : 0)
+                    .append(",\"cz\":").append(Double.isFinite(s.cz) ? s.cz : 0)
+                    .append(",\"yaw\":").append(Double.isFinite(s.yaw) ? s.yaw : 0)
+                    .append(",\"members\":[");
             for (int i = 0; i < s.members.size(); i++) {
                 if (i > 0) b.append(',');
                 b.append(jsonString(s.members.get(i)));
