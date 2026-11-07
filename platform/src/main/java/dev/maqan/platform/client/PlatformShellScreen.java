@@ -112,6 +112,20 @@ public final class PlatformShellScreen extends Screen {
         embeddedViewReady = true;
     }
 
+    /** Host a provider-owned view without replacing the global MAQAN Screen. */
+    public void showEmbeddedView(Screen view) {
+        if (view == null) return;
+        if (embeddedView != null && embeddedView != view) embeddedView.removed();
+        profile = Profile.COSMOS;
+        embeddedView = view;
+        try {
+            view.init(Minecraft.getInstance(), width, height);
+            embeddedViewReady = true;
+        } catch (RuntimeException error) {
+            LOGGER.error("Unable to initialize embedded MAQAN view {}", view.getClass().getName(), error);
+        }
+    }
+
     private void clampPanels() {
         for (Panel p : panels.values()) {
             p.w = Math.max(150, Math.min(p.w, width - 24));
