@@ -83,11 +83,14 @@ public class TroopsTest {
 
         Squads damaged = new Squads();
         damaged.fromJson("{\"counter\":2,\"squads\":[null,7,{\"id\":\"s1\",\"name\":\"bad\",\"owner\":\"p1\",\"members\":[\"u1\",\"u1\",null,\"u2\",7],\"cx\":1e999,\"morale\":-4},{\"id\":\"s2\",\"name\":\"\"},{\"id\":\"s3\",\"owner\":\"p1\",\"members\":[\"u1\",\"u3\"]}]}");
-        check(damaged.all().size() == 1 && damaged.get("s1").members.equals(List.of("u1", "u2"))
+        check(damaged.all().size() == 2 && damaged.get("s1").members.equals(List.of("u1", "u2"))
+                && damaged.get("s3").members.equals(List.of("u3"))
                 && damaged.get("s1").cx == 0 && damaged.get("s1").morale == 0,
-                "загрузка повреждённых отрядов фильтрует записи, UUID и нечисловые значения");
+                "загрузка повреждённых отрядов фильтрует записи и дубли UUID, сохраняя неповреждённые бойцовские записи");
         String escaped = damaged.create("p1", "Guard \"North\\Wing\n", List.of("u4")).name;
-        check(dev.worldforge.mod.Json.parse(damaged.toJson()) instanceof Map && escaped.contains("North"), "сериализация отрядов экранирует строки и остаётся валидным JSON");
+        Squads escapedRoundTrip = new Squads();
+        escapedRoundTrip.fromJson(damaged.toJson());
+        check(escaped.equals(escapedRoundTrip.get("s2").name), "сериализация и обратная загрузка экранируют кавычки, слеши и переводы строк");
         Squads orderPersistence = new Squads();
         Squads.Squad ordered = orderPersistence.create("p1", "Persistent", List.of("unit-a"));
         orderPersistence.command(ordered.id, Squads.Order.move(12.5, -7.25), false);
