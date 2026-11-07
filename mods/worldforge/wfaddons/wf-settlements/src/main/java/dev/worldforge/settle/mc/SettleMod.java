@@ -225,6 +225,41 @@ public class SettleMod {
         return best;
     }
 
+    /** Validated completed recruitment building owned by the player and staffed by a trainer. */
+    public record RecruitmentSite(Colony colony, Building building, BlockPos spawn) {}
+
+    public static RecruitmentSite recruitmentSite(ServerLevel level, String owner, String buildingId,
+                                                   double playerX, double playerZ) {
+        String dimension = level.dimension().location().toString();
+        Colony bestColony = null;
+        Building bestBuilding = null;
+        double bestDistance = 128.0 * 128.0;
+        for (Colony colony : COLONIES.values()) {
+            if (!dimension.equals(colony.dim)) continue;
+            if (!colony.owner.isEmpty() && !colony.owner.equals(owner)) continue;
+            for (Building building : colony.s.buildings) {
+                if (!building.def.id.equals(buildingId) || building.state != Building.State.DONE || building.paused) continue;
+                boolean staffed = colony.s.assigned(building.uid).stream()
+                        .anyMatch(worker -> "trainer".equals(worker.profession));
+                if (!staffed) continue;
+                double x = colony.worldX(building), z = colony.worldZ(building);
+                double distance = (x - playerX) * (x - playerX) + (z - playerZ) * (z - playerZ);
+                if (distance < bestDistance) {
+                    bestDistance = distance;
+                    bestColony = colony;
+                    bestBuilding = building;
+                }
+            }
+        }
+        if (bestColony == null) return null;
+        return new RecruitmentSite(bestColony, bestBuilding, bestColony.workPoint(level, bestBuilding));
+    }
+
+    /** Deducts materials only after the caller has prepared the whole recruit batch. */
+    public static boolean payRecruitment(RecruitmentSite site, java.util.Map<String, Integer> cost) {
+        return site != null && site.colony().s.spend(cost);
+    }
+
     /** Закладывает поселение: 4 рабочих, склад дерево 60 / еда 40 / камень 10. */
     public static Colony found(ServerLevel lv, String name, BlockPos p) {
         String base = name.toLowerCase(Locale.ROOT).replaceAll("[^\\p{L}\\p{N}]+", "_").replaceAll("^_+|_+$", "");
