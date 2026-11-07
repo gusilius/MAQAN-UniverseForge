@@ -317,6 +317,11 @@ public final class CosmicHorizonsScanner {
                 universe.addProperty("dimension", attached);
                 universe.add("planet_data", physical.deepCopy());
                 universe.add("gui_data", gui.deepCopy());
+                universe.add("sky_data", skyData.deepCopy());
+                JsonObject dimensionData = object(source, "dimensional_data");
+                JsonObject atmosphereData = object(dimensionData, "atmospheric_data");
+                universe.addProperty("travel_to_dimension",
+                        string(atmosphereData, "travel_to", ""));
                 universe.add("gui_categories", gui.deepCopy());
                 for (String field : new String[]{"universe_id", "universe", "cosmos_id",
                         "galaxy_id", "galaxy_name", "galaxy", "sector_id", "sector_name", "sector",
@@ -330,6 +335,59 @@ public final class CosmicHorizonsScanner {
                 universes.add(systemKey, universe);
             } catch (RuntimeException ignored) {
                 // Match Cosmic Horizons' behavior: skip malformed cosmic_data entries.
+            }
+        }
+        // Cosmic Horizons stores the visible Sun in a planet dimension's
+        // sky_data, while that dimension points back to its solar system through
+        // dimensional_data.atmospheric_data.travel_to. Reattach that star to the
+        // unique matching system instead of treating the dimension as a system.
+        Map<String, List<JsonObject>> systemsByDimension = new HashMap<>();
+        for (Map.Entry<String, JsonElement> entry : universes.entrySet()) {
+            if (!entry.getValue().isJsonObject()) continue;
+            JsonObject system = entry.getValue().getAsJsonObject();
+            JsonObject bodies = object(system, "planets");
+            String dimension = string(system, "dimension", "");
+            if (!bodies.isEmpty() && !dimension.isBlank())
+                systemsByDimension.computeIfAbsent(dimension, ignored -> new ArrayList<>()).add(system);
+        }
+        for (Map.Entry<String, JsonElement> entry : universes.entrySet()) {
+            if (!entry.getValue().isJsonObject()) continue;
+            JsonObject dimension = entry.getValue().getAsJsonObject();
+            JsonObject sky = object(dimension, "sky_data");
+            if (sky.isEmpty()) continue;
+            String destination = string(dimension, "travel_to_dimension", "");
+            List<JsonObject> targets = systemsByDimension.get(destination);
+            if (destination.isBlank() || targets == null || targets.size() != 1) continue;
+            JsonObject targetBodies = object(targets.get(0), "planets");
+            for (Map.Entry<String, JsonElement> skyEntry : sky.entrySet()) {
+                if (!skyEntry.getValue().isJsonObject()) continue;
+                String id = skyEntry.getKey();
+                String normalizedId = id.toLowerCase(Locale.ROOT);
+                JsonObject visual = skyEntry.getValue().getAsJsonObject();
+                String type = string(visual, "type", "").toLowerCase(Locale.ROOT);
+                boolean star = normalizedId.equals("sun") || normalizedId.equals("sol")
+                        || normalizedId.contains("star") || normalizedId.contains("stellar")
+                        || !string(visual, "stellar_class", string(visual, "spectral_class", "")).isBlank()
+                        || Set.of("star", "sun", "stellar", "yellow dwarf", "red dwarf",
+                                "white dwarf", "red giant", "blue giant", "neutron star").contains(type);
+                if (!star || targetBodies.has(id)) continue;
+                JsonObject body = visual.deepCopy();
+                body.addProperty("id", id);
+                body.addProperty("catalog_id", id);
+                body.addProperty("name", string(body, "name", normalizedId.equals("sun") ? "Sun" : id));
+                body.addProperty("kind", "star");
+                body.addProperty("type", "star");
+                body.addProperty("system", string(targets.get(0), "name", "Star system"));
+                body.addProperty("system_id", string(targets.get(0), "name", ""));
+                if (!body.has("x") && !body.has("xpos")) body.addProperty("x", 0.0);
+                if (!body.has("y") && !body.has("ypos")) body.addProperty("y", 0.0);
+                if (!body.has("z") && !body.has("zpos")) body.addProperty("z", 0.0);
+                if (!body.has("map_pos")) {
+                    JsonArray origin = new JsonArray();
+                    origin.add(0.0); origin.add(0.0); origin.add(0.0);
+                    body.add("map_pos", origin);
+                }
+                targetBodies.add(id, body);
             }
         }
         return root;
