@@ -72,6 +72,21 @@ Atlas continues to own its catalogue, navigation, orbital simulation, routes, ma
 waypoints, territories and travel handoff. The Platform owns presentation and workspace
 composition only. No duplicate ownership or invented spatial data.
 
+## WorldForge screen migration
+
+Every legacy WorldForge screen opened through Minecraft's client screen lifecycle is
+intercepted by the Platform and hosted inside the matching MAQAN workspace. This includes
+the core political map and addon screens for settlements, army, war, court, relations,
+people, trade, quests, dialogue, origins, progress, forms, troops, orders and genesis.
+Provider screens temporarily remain as compatibility views/controllers so existing input
+and command semantics continue to work; they no longer replace the global MAQAN shell.
+
+This interception is a migration bridge, not the final visual replacement. Each domain
+must progressively move its data presentation and controls into shared MAQAN panel
+components. The final state removes legacy full-screen layouts while retaining provider
+logic, network messages, permissions, persistence and simulation. Do not delete provider
+screens or domain code until an equivalent shared view adapter is implemented and tested.
+
 ## Implementation status discipline
 
 A successful Gradle compile is not proof that the game launches or that every interaction
