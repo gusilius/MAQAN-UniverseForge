@@ -63,6 +63,7 @@ public class NavigatorScreen extends Screen {
     private Button unifiedSceneButton;
     private boolean unifiedSceneMode;
     private int savedSceneLevel, savedSceneAtlasMode, savedSceneListScroll, savedSceneInfoScroll;
+    private int savedSceneMapMode, savedSceneBodyFilter, savedSceneInfoTab, savedSceneRouteFilter;
     private String savedSceneUniverse, savedSceneGalaxyPath, savedSceneSectorPath, savedSceneSystemPath;
     private String savedSceneSelectedId, savedSceneSelectedNodeId, savedSceneBodyViewId;
     private double savedSceneZoom, savedScenePanX, savedScenePanY, savedSceneCameraYaw, savedSceneCameraPitch;
@@ -746,6 +747,10 @@ public class NavigatorScreen extends Screen {
             savedSceneBodyViewId = bodyViewId;
             savedSceneListScroll = listScroll;
             savedSceneInfoScroll = infoScroll;
+            savedSceneMapMode = mapMode;
+            savedSceneBodyFilter = bodyFilter;
+            savedSceneInfoTab = infoTab;
+            savedSceneRouteFilter = routeFilter;
             savedSceneZoom = zoom;
             savedScenePanX = panX;
             savedScenePanY = panY;
@@ -776,6 +781,10 @@ public class NavigatorScreen extends Screen {
             bodyViewId = savedSceneBodyViewId;
             listScroll = savedSceneListScroll;
             infoScroll = savedSceneInfoScroll;
+            mapMode = savedSceneMapMode;
+            bodyFilter = savedSceneBodyFilter;
+            infoTab = savedSceneInfoTab;
+            routeFilter = savedSceneRouteFilter;
             zoom = savedSceneZoom;
             panX = savedScenePanX;
             panY = savedScenePanY;
@@ -1390,7 +1399,34 @@ public class NavigatorScreen extends Screen {
         selectedNodeId = node == null ? null : node.id;
         selectedId = null;
         infoScroll = 0;
+        publishPlatformSelection(node);
         if (openButton != null) openButton.active = selectedNodeId != null;
+    }
+
+    /** Publish Atlas identity to the optional MAQAN shell without linking Platform at compile time. */
+    private void publishPlatformSelection(Node node) {
+        try {
+            Class<?> bridge = Class.forName("dev.maqan.platform.client.PlatformSelectionContext");
+            if (node == null) {
+                bridge.getMethod("clear", String.class).invoke(null, "maqan_galactic_navigator");
+                return;
+            }
+            String entityId = node.id;
+            String systemId = "";
+            int separator = entityId.indexOf("::");
+            if (separator > 0) systemId = entityId.substring(0, separator);
+            else if (GalaxyCatalog.universes().contains(entityId)) systemId = entityId;
+            String type = node.kind == null ? "object" : node.kind.replace("atlas_body:", "");
+            String summary = node.entries.isEmpty() ? "" : value(node.first(),
+                    "dimension", "dimension_id", "attached_dimension_id");
+            bridge.getMethod("publish", String.class, String.class, String.class,
+                    String.class, String.class, String.class).invoke(null,
+                    "maqan_galactic_navigator", entityId, type, node.label, systemId, summary);
+        } catch (ClassNotFoundException ignored) {
+            // Atlas remains fully functional when the optional MAQAN Platform is absent.
+        } catch (ReflectiveOperationException | LinkageError error) {
+            // Selection inside Atlas must never fail because an optional host is unavailable.
+        }
     }
 
     private void selectBody(String id) {
@@ -1401,6 +1437,7 @@ public class NavigatorScreen extends Screen {
         selectedId = id;
         selectedNodeId = id;
         infoScroll = 0;
+        publishPlatformSelection(bodyNode(id));
         JsonObject o = findObject(id);
         if (o != null) {
             setTravelInput(dimensionInput, o, "", "travel_dimension", "dimension",
