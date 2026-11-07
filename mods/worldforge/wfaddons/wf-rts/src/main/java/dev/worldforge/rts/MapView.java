@@ -69,17 +69,13 @@ public final class MapView {
         for (Building b : s.buildings) {
             if (b == null || b.def == null || !validWorldPoint(b.x, b.z)
                     || !Double.isFinite(b.def.sizeX) || !Double.isFinite(b.def.sizeZ)) continue;
-            l.add(buildingRect(b));
+            int w = Math.max(4, (int) Math.min(1_000_000, Math.round(b.def.sizeX * scale)));
+            int h = Math.max(4, (int) Math.min(1_000_000, Math.round(b.def.sizeZ * scale)));
+            l.add(new Selection.Rect(Selection.Rect.BUILDING, b.uid, sx(b.x) - w / 2, sy(b.z) - h / 2, w, h));
         }
         for (Worker w : s.workers) if (w != null && validWorldPoint(w.x, w.z))
             l.add(new Selection.Rect(Selection.Rect.WORKER, w.id, sx(w.x) - 2, sy(w.z) - 2, 5, 5));
         return l;
-    }
-
-    private Selection.Rect buildingRect(Building b) {
-        int w = Math.max(4, (int) Math.min(1_000_000, Math.round(b.def.sizeX * scale)));
-        int h = Math.max(4, (int) Math.min(1_000_000, Math.round(b.def.sizeZ * scale)));
-        return new Selection.Rect(Selection.Rect.BUILDING, b.uid, sx(b.x) - w / 2, sy(b.z) - h / 2, w, h);
     }
 
     /** Что под точкой миникарты: рабочие (радиус 4 px) важнее зданий, иначе земля. Координаты земли - целые блоки. */
@@ -93,15 +89,10 @@ public final class MapView {
         }
         int gx = (int) Math.round(wx(sx)), gz = (int) Math.round(wz(sy));
         if (best != null) return Target.worker(best.id, gx, gz);
-        // The rendered rectangle list filters invalid entries; never index it with the unfiltered buildings list.
+        List<Selection.Rect> rs = rects(s);
         for (int i = s.buildings.size() - 1; i >= 0; i--) {
-            Building b = s.buildings.get(i);
-            if (b == null || b.def == null || !validWorldPoint(b.x, b.z)
-                    || !Double.isFinite(b.def.sizeX) || !Double.isFinite(b.def.sizeZ)
-                    || b.def.sizeX <= 0 || b.def.sizeZ <= 0) continue;
-            Selection.Rect r = buildingRect(b);
-            if (sx >= r.x && sx <= r.x + r.w && sy >= r.y && sy <= r.y + r.h)
-                return Target.building(b.uid, gx, gz);
+            Selection.Rect r = rs.get(i);
+            if (sx >= r.x && sx <= r.x + r.w && sy >= r.y && sy <= r.y + r.h) return Target.building(r.id, gx, gz);
         }
         return Target.ground(gx, gz);
     }

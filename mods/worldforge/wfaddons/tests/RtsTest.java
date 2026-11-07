@@ -136,8 +136,8 @@ public class RtsTest {
         Building lc = s.buildings.get(1);
         sel.selectBuilding(lc.uid);
         c = CommandCard.menu(CommandCard.ROOT, sel, s);
-        ok(c.title.equals("Здание") && c.byId("prio+") != null && c.byId("prio-") != null && c.byId("demolish") != null && c.byId("fill") != null && c.byId("upgrade") != null, "здание: приоритет, снос, рабочие, улучшить");
-        ok(!c.byId("upgrade").enabled, "улучшение - заглушка");
+        ok(c.title.equals("Здание") && c.byId("prio+") != null && c.byId("prio-") != null && c.byId("demolish") != null && c.byId("fill") != null, "здание: приоритет, снос и управление рабочими");
+        ok(c.byId("upgrade") == null, "не показываем неработающее улучшение как доступный приказ");
         int p0 = lc.priority;
         Orders.Result r = CommandCard.execute(c.byId("prio+"), sel, s);
         ok(r.commands.equals(List.of("wfsettle priority " + lc.uid + " " + (p0 + 1))), "приоритет+ -> команда: " + r.commands);
@@ -264,7 +264,7 @@ public class RtsTest {
         Worker lj = s.workers.stream().filter(w -> w.profession.equals("lumberjack")).findFirst().get();
         ok(Look.state(s, idleW) == Look.WorkerState.IDLE, "свободный - IDLE");
         ok(Look.glyph(d, "lumberjack").equals("Д") && Look.glyph(d, "unknown_prof").equals("U"), "знаки профессий");
-        ok(lj.building != 0 || true, "ok");
+        ok(lj != null && lj.profession.equals("lumberjack"), "проверка профессии не маскирует ошибку безусловным true");
 
         System.out.println(fails == 0 ? "ALL OK" : fails + " FAILED");
         if (fails > 0) System.exit(1);
