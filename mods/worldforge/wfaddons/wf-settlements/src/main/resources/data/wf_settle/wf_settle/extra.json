@@ -142,7 +142,8 @@
       "jobs": {
         "trainer": 1
       },
-      "upkeep": 0.8
+      "upkeep": 0.8,
+      "safety": 1
     },
     "stable": {
       "name": "Конюшня",
@@ -165,7 +166,8 @@
       "jobs": {
         "trainer": 1
       },
-      "upkeep": 1.2
+      "upkeep": 1.2,
+      "safety": 1
     },
     "siege_workshop": {
       "name": "Осадная мастерская",
@@ -191,7 +193,8 @@
         "trainer": 2,
         "smith": 1
       },
-      "upkeep": 2
+      "upkeep": 2,
+      "safety": 2
     }
   }
 }
