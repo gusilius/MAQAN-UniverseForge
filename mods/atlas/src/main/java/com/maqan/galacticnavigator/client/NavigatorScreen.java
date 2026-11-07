@@ -269,10 +269,10 @@ public class NavigatorScreen extends Screen {
             mapModeButton.setMessage(Component.literal("▣")); mapModeButton.setTooltip(Tooltip.create(Component.literal(mapModeName())));
         }, menuX, menuY + 26);
         listButton = addToolButton("LIST −", () -> {
-            showList = !showList; NavigatorPreferences.setShowListPanel(showList); listButton.setMessage(Component.literal(showList ? "LIST −" : "LIST +"));
+            showList = !showList; NavigatorPreferences.setShowListPanel(showList); listButton.setMessage(Component.literal("☷")); listButton.setTooltip(Tooltip.create(Component.literal(showList ? "Hide catalogue" : "Show catalogue")));
         }, menuX + 36, menuY + 26);
         infoButton = addToolButton("INFO −", () -> {
-            showInfo = !showInfo; NavigatorPreferences.setShowInfoPanel(showInfo); infoButton.setMessage(Component.literal(showInfo ? "INFO −" : "INFO +"));
+            showInfo = !showInfo; NavigatorPreferences.setShowInfoPanel(showInfo); infoButton.setMessage(Component.literal("◈")); infoButton.setTooltip(Tooltip.create(Component.literal(showInfo ? "Hide inspector" : "Show inspector")));
         }, menuX + 72, menuY + 26);
         addToolButton("RELOAD DATA", () -> {
             if (minecraft != null) minecraft.reloadResourcePacks();
@@ -400,7 +400,7 @@ public class NavigatorScreen extends Screen {
             zInput.setValue(previousZ);
             footerX += coordWidth + footerGap;
             int travelX = Math.min(footerX, width - travelWidth - 14);
-            travelButton = addRenderableWidget(Button.builder(Component.literal("TRAVEL"), b -> requestTeleport())
+            travelButton = addRenderableWidget(Button.builder(Component.literal("⇢"), b -> requestTeleport())
                     .bounds(travelX, footerY, travelWidth, 18).build());
         } else {
             int footerY = height - 24;
@@ -423,7 +423,8 @@ public class NavigatorScreen extends Screen {
             travelButton = addRenderableWidget(Button.builder(Component.literal("TRAVEL"), b -> requestTeleport())
                     .bounds(travelX, footerY, travelWidth, 18).build());
         }
-        dimensionInput.setMaxLength(256);
+        if (travelButton != null) travelButton.setTooltip(Tooltip.create(Component.literal("Travel to dimension and coordinates")));
+                dimensionInput.setMaxLength(256);
         dimensionInput.setHint(Component.literal("dimension:destination"));
         dimensionInput.setValue(previousDimension);
         addRenderableWidget(dimensionInput);
