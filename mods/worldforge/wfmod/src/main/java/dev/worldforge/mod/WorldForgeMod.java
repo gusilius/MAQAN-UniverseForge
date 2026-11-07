@@ -222,11 +222,8 @@ public class WorldForgeMod {
         }
         try {
             Path output = WorldForgeSnapshotExporter.export(source.getServer(), level, generator.data());
-            int count = (generator.data().titles == null ? 0 : generator.data().titles.allTitles().size())
-                    + (generator.data().regions == null ? 0 : generator.data().regions.list.size())
-                    + EditorManager.markers(source.getServer(), generator.data()).list().size();
-            source.sendSuccess(() -> Component.literal("Atlas snapshot exported: " + count
-                    + " map entities · " + output), true);
+            source.sendSuccess(() -> Component.literal(
+                    "Atlas snapshot exported for all loaded WorldForge dimensions · " + output), true);
             return 1;
         } catch (IOException | RuntimeException error) {
             LOGGER.error("WorldForge: Atlas snapshot export failed", error);

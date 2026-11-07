@@ -213,8 +213,7 @@ public final class WorldForgeSnapshotExporter {
             // Keep higher-level titles as selectable map features, linked to the province layer.
             for (TitleData.Title title : map.titles.allTitles()) {
                 if (title == null || title.tier == 0 || title.key == null || title.key.isBlank()) continue;
-                BlockPos capital = generator == null ? new BlockPos(title.capX, map.seaLevel, title.capZ)
-                        : generator.surfaceAt(title.capX, title.capZ);
+                BlockPos capital = generator.surfaceAt(title.capX, title.capZ);
                 Map<String, String> attrs = new LinkedHashMap<>();
                 attrs.put("map_id", map.name);
                 attrs.put("title_id", title.key);
@@ -248,9 +247,7 @@ public final class WorldForgeSnapshotExporter {
         if (map.regions != null) {
             for (RegionData.Region region : map.regions.list) {
                 if (region == null) continue;
-                BlockPos capital = generator == null
-                        ? new BlockPos(region.capX, map.seaLevel, region.capZ)
-                        : generator.surfaceAt(region.capX, region.capZ);
+                BlockPos capital = generator.surfaceAt(region.capX, region.capZ);
                 Map<String, String> attrs = new LinkedHashMap<>();
                 attrs.put("map_id", map.name);
                 attrs.put("region_numeric_id", Integer.toString(region.id));
@@ -275,9 +272,7 @@ public final class WorldForgeSnapshotExporter {
         
         for (Markers.Marker marker : EditorManager.markers(server, map).list()) {
             if (marker == null || marker.id == null || marker.id.isBlank()) continue;
-            BlockPos pos = generator == null
-                    ? new BlockPos(marker.x, map.seaLevel, marker.z)
-                    : generator.surfaceAt(marker.x, marker.z);
+            BlockPos pos = generator.surfaceAt(marker.x, marker.z);
             Map<String, String> attrs = new LinkedHashMap<>();
             attrs.put("map_id", map.name);
             attrs.put("marker_type", safe(marker.type));
@@ -286,8 +281,7 @@ public final class WorldForgeSnapshotExporter {
                     "marker", marker.name, dimensionId, marker.x, pos.getY(), marker.z,
                     marker.rgb, "", safe(marker.type), attrs));
         }
-        
-            }
+    }
 
     private static Map<String, Object> feature(String id, String kind, String name,
             String dimension, double x, double y, double z, int color,
