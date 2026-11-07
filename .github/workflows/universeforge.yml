@@ -6,6 +6,7 @@ on:
     paths:
       - ".github/workflows/universeforge.yml"
       - "mods/**"
+      - "platform/**"
       - "shared/**"
       - "build-logic/**"
   pull_request:
