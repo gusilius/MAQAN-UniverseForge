@@ -1,0 +1,524 @@
+{
+ "synergies": [
+  {
+   "id": "dwarf_smith",
+   "name": "Горновой род",
+   "desc": "Гном у наковальни: металл слушается.",
+   "mods": {
+    "craft_quality_pct": 6
+   },
+   "races": [
+    "dwarf"
+   ],
+   "profs": {
+    "smith": 1
+   }
+  },
+  {
+   "id": "dwarf_miner",
+   "name": "Дитя недр",
+   "desc": "Гном-горняк чует жилы.",
+   "mods": {
+    "mining_speed_pct": 8,
+    "gold_find_pct": 4
+   },
+   "races": [
+    "dwarf"
+   ],
+   "profs": {
+    "miner": 1
+   }
+  },
+  {
+   "id": "elf_archer",
+   "name": "Лесной лучник",
+   "desc": "Эльф-следопыт: каждая стрела в цель.",
+   "mods": {
+    "ranged_dmg_pct": 6,
+    "crit_pct": 2
+   },
+   "races": [
+    "elf"
+   ],
+   "classes": [
+    "ranger"
+   ]
+  },
+  {
+   "id": "elf_scholar",
+   "name": "Хранитель памяти",
+   "desc": "Эльф-книжник помнит всё.",
+   "mods": {
+    "xp_gain_pct": 5,
+    "heal_pct": 3
+   },
+   "races": [
+    "elf"
+   ],
+   "classes": [
+    "scholar"
+   ]
+  },
+  {
+   "id": "orc_warrior",
+   "name": "Дитя орды",
+   "desc": "Орк-воин: ярость и слитый строй.",
+   "mods": {
+    "melee_dmg_pct": 6,
+    "levy_pct": 4
+   },
+   "races": [
+    "orc"
+   ],
+   "classes": [
+    "warrior"
+   ]
+  },
+  {
+   "id": "halfling_merchant",
+   "name": "Рука на кошельке",
+   "desc": "Полурослик-торговец: везёт и выгодно.",
+   "mods": {
+    "trade_profit_pct": 6,
+    "luck": 1
+   },
+   "races": [
+    "halfling"
+   ],
+   "profs": {
+    "merchant": 1
+   }
+  },
+  {
+   "id": "halfling_farmer",
+   "name": "Хозяин очага",
+   "desc": "Полурослик-земледелец.",
+   "mods": {
+    "farm_yield_pct": 8,
+    "health_regen": 0.02
+   },
+   "races": [
+    "halfling"
+   ],
+   "profs": {
+    "farmer": 1
+   }
+  },
+  {
+   "id": "goblin_alchemist",
+   "name": "Взрывное дело",
+   "desc": "Гоблин-алхимик: ни одного целого лабораторного стекла.",
+   "mods": {
+    "craft_quality_pct": 4,
+    "crit_pct": 3
+   },
+   "races": [
+    "goblin"
+   ],
+   "profs": {
+    "alchemist": 1
+   }
+  },
+  {
+   "id": "goblin_thief",
+   "name": "Пальцы-пружины",
+   "desc": "Гоблин-вор.",
+   "mods": {
+    "stealth_pct": 6,
+    "gold_find_pct": 6
+   },
+   "races": [
+    "goblin"
+   ],
+   "profs": {
+    "thief": 1
+   }
+  },
+  {
+   "id": "saurian_hunter",
+   "name": "Болотный охотник",
+   "desc": "Ящер-охотник: терпение и меткость.",
+   "mods": {
+    "ranged_dmg_pct": 5,
+    "stealth_pct": 4
+   },
+   "races": [
+    "saurian"
+   ],
+   "profs": {
+    "hunter": 1
+   }
+  },
+  {
+   "id": "fae_healer",
+   "name": "Рощёвый целитель",
+   "desc": "Сильф-лекарь: лечит одним прикосновением.",
+   "mods": {
+    "heal_pct": 10
+   },
+   "races": [
+    "fae"
+   ],
+   "profs": {
+    "healer": 1
+   }
+  },
+  {
+   "id": "fae_courtier",
+   "name": "Очарованный двор",
+   "desc": "Сильф при дворе.",
+   "mods": {
+    "opinion": 4,
+    "intrigue_bonus": 1
+   },
+   "races": [
+    "fae"
+   ],
+   "classes": [
+    "courtier"
+   ]
+  },
+  {
+   "id": "shadekin_rogue",
+   "name": "Дитя теней",
+   "desc": "Теневой плут.",
+   "mods": {
+    "stealth_pct": 8,
+    "crit_pct": 3,
+    "spy_success_pct": 4
+   },
+   "races": [
+    "shadekin"
+   ],
+   "classes": [
+    "rogue"
+   ]
+  },
+  {
+   "id": "giant_warrior",
+   "name": "Колосс в бою",
+   "desc": "Великан-воин.",
+   "mods": {
+    "melee_dmg_pct": 6,
+    "max_health": 12
+   },
+   "races": [
+    "giant"
+   ],
+   "classes": [
+    "warrior"
+   ]
+  },
+  {
+   "id": "giant_miner",
+   "name": "Горная глыба",
+   "desc": "Великан в шахте.",
+   "mods": {
+    "mining_speed_pct": 10,
+    "carry": 8
+   },
+   "races": [
+    "giant"
+   ],
+   "profs": {
+    "miner": 1
+   }
+  },
+  {
+   "id": "beastkin_ranger",
+   "name": "Охотник-побратим",
+   "desc": "Зверолюд-следопыт.",
+   "mods": {
+    "stealth_pct": 5,
+    "move_speed_pct": 3
+   },
+   "races": [
+    "beastkin"
+   ],
+   "classes": [
+    "ranger"
+   ]
+  },
+  {
+   "id": "triton_merchant",
+   "name": "Купец побережья",
+   "desc": "Тритон-торговец.",
+   "mods": {
+    "trade_profit_pct": 6,
+    "fish_pct": 6
+   },
+   "races": [
+    "triton"
+   ],
+   "profs": {
+    "merchant": 1
+   }
+  },
+  {
+   "id": "triton_fisher",
+   "name": "Хозяин течений",
+   "desc": "Тритон-рыбак.",
+   "mods": {
+    "fish_pct": 14
+   },
+   "races": [
+    "triton"
+   ],
+   "profs": {
+    "fisher": 1
+   }
+  },
+  {
+   "id": "construct_smith",
+   "name": "Мастер собственной шестерни",
+   "desc": "Рукотворный-кузнец чинит и себя.",
+   "mods": {
+    "craft_quality_pct": 5,
+    "health_regen": 0.02
+   },
+   "races": [
+    "construct"
+   ],
+   "profs": {
+    "smith": 1
+   }
+  },
+  {
+   "id": "construct_guard",
+   "name": "Неподвижный страж",
+   "desc": "Рукотворный в страже.",
+   "mods": {
+    "armor": 2,
+    "resist_pct": 4
+   },
+   "races": [
+    "construct"
+   ],
+   "profs": {
+    "guard": 1
+   }
+  },
+  {
+   "id": "human_noble",
+   "name": "Благородная кровь",
+   "desc": "Человек-придворный.",
+   "mods": {
+    "opinion": 2,
+    "tax_pct": 2
+   },
+   "races": [
+    "human"
+   ],
+   "classes": [
+    "courtier"
+   ]
+  },
+  {
+   "id": "northman_berserk",
+   "name": "Северная ярость",
+   "desc": "Северянин-берсерк.",
+   "mods": {
+    "melee_dmg_pct": 6,
+    "max_health": 8
+   },
+   "races": [
+    "northman"
+   ],
+   "classes": [
+    "berserker"
+   ]
+  },
+  {
+   "id": "smith_knight",
+   "name": "Кованый рыцарь",
+   "desc": "Рыцарь, который сам кует доспехи.",
+   "mods": {
+    "armor": 2,
+    "craft_quality_pct": 4
+   },
+   "classes": [
+    "knight"
+   ],
+   "profs": {
+    "smith": 1
+   }
+  },
+  {
+   "id": "ranger_hunter",
+   "name": "Следопыт-зверолов",
+   "desc": "Следопыт-охотник.",
+   "mods": {
+    "ranged_dmg_pct": 4,
+    "luck": 0.5
+   },
+   "classes": [
+    "ranger"
+   ],
+   "profs": {
+    "hunter": 1
+   }
+  },
+  {
+   "id": "physician_healer",
+   "name": "Врачебное дело",
+   "desc": "Врач-лекарь.",
+   "mods": {
+    "heal_pct": 8
+   },
+   "classes": [
+    "physician"
+   ],
+   "profs": {
+    "healer": 1
+   }
+  },
+  {
+   "id": "scholar_scribe",
+   "name": "Усердный писец",
+   "desc": "Учёный-писарь.",
+   "mods": {
+    "xp_gain_pct": 4,
+    "tax_pct": 2
+   },
+   "classes": [
+    "scholar"
+   ],
+   "profs": {
+    "scribe": 1
+   }
+  },
+  {
+   "id": "rogue_merchant",
+   "name": "Тёмный торг",
+   "desc": "Плут-торговец.",
+   "mods": {
+    "trade_profit_pct": 5,
+    "gold_find_pct": 4
+   },
+   "classes": [
+    "rogue"
+   ],
+   "profs": {
+    "merchant": 1
+   }
+  },
+  {
+   "id": "guardian_guard",
+   "name": "Верный страж",
+   "desc": "Хранитель-стражник.",
+   "mods": {
+    "armor": 2,
+    "levy_pct": 3
+   },
+   "classes": [
+    "guardian"
+   ],
+   "profs": {
+    "guard": 1
+   }
+  },
+  {
+   "id": "courtier_merchant",
+   "name": "Торговый двор",
+   "desc": "Придворный-купец.",
+   "mods": {
+    "trade_profit_pct": 4,
+    "opinion": 2
+   },
+   "classes": [
+    "courtier"
+   ],
+   "profs": {
+    "merchant": 1
+   }
+  },
+  {
+   "id": "master_craft",
+   "name": "Мастер на все руки",
+   "desc": "Две основные профессии на звании «мастер».",
+   "mods": {
+    "craft_quality_pct": 5,
+    "xp_gain_pct": 3
+   },
+   "profs": {
+    "smith": 2,
+    "mason": 2
+   }
+  },
+  {
+   "id": "vampire_noble",
+   "name": "Ночной двор",
+   "desc": "Вампир при дворе.",
+   "mods": {
+    "opinion": 3,
+    "intrigue_bonus": 2
+   },
+   "classes": [
+    "courtier"
+   ],
+   "flags": [
+    "form:vampire"
+   ]
+  },
+  {
+   "id": "werewolf_hunter",
+   "name": "Зов луны",
+   "desc": "Оборотень-охотник.",
+   "mods": {
+    "ranged_dmg_pct": 4,
+    "move_speed_pct": 4
+   },
+   "classes": [
+    "ranger"
+   ],
+   "flags": [
+    "form:werewolf"
+   ]
+  },
+  {
+   "id": "dragon_knight",
+   "name": "Рыцарь-змей",
+   "desc": "Драконья кровь у рыцаря.",
+   "mods": {
+    "armor": 3,
+    "melee_dmg_pct": 6
+   },
+   "classes": [
+    "knight"
+   ],
+   "flags": [
+    "form:dragon_blood"
+   ]
+  },
+  {
+   "id": "zombie_smith",
+   "name": "Неутомимый кузнец",
+   "desc": "Мёртвым не нужен отдых.",
+   "mods": {
+    "craft_quality_pct": 4,
+    "max_health": 6
+   },
+   "profs": {
+    "smith": 1
+   },
+   "flags": [
+    "form:zombie"
+   ]
+  },
+  {
+   "id": "cursed_scholar",
+   "name": "Книга проклятий",
+   "desc": "Проклятый учёный видит дальше.",
+   "mods": {
+    "xp_gain_pct": 6,
+    "luck": -0.5
+   },
+   "classes": [
+    "scholar"
+   ],
+   "flags": [
+    "form:cursed_blood"
+   ]
+  }
+ ]
+}

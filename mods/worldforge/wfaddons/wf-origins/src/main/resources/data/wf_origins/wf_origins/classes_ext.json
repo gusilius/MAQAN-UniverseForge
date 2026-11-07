@@ -1,0 +1,926 @@
+{
+ "classes": [
+  {
+   "id": "duelist",
+   "name": "Дуэлянт",
+   "desc": "Один на один быстрее и точнее любого рыцаря.",
+   "tier": 2,
+   "from": "warrior",
+   "min_level": 15,
+   "mods": {
+    "crit_pct": 4,
+    "dodge_pct": 4,
+    "melee_dmg_pct": 3
+   },
+   "archetype": "warrior",
+   "req_stat": {
+    "agility": 10
+   },
+   "perks": {
+    "20": {
+     "name": "Выпад",
+     "mods": {
+      "crit_pct": 3
+     }
+    }
+   }
+  },
+  {
+   "id": "sellsword",
+   "name": "Наёмник",
+   "desc": "Служит тому, кто платит: знает цену крови и золоту.",
+   "tier": 2,
+   "from": "warrior",
+   "min_level": 15,
+   "mods": {
+    "gold_find_pct": 6,
+    "melee_dmg_pct": 3,
+    "max_health": 4
+   },
+   "archetype": "warrior",
+   "req_stat": {
+    "martial": 8
+   },
+   "perks": {
+    "20": {
+     "name": "Контракт",
+     "mods": {
+      "discount_pct": 3
+     }
+    }
+   },
+   "req_prof": {
+    "soldier": 1
+   }
+  },
+  {
+   "id": "legionary",
+   "name": "Легионер",
+   "desc": "Строй, щит и дисциплина.",
+   "tier": 2,
+   "from": "warrior",
+   "min_level": 15,
+   "mods": {
+    "armor": 3,
+    "levy_pct": 5,
+    "max_health": 4
+   },
+   "archetype": "warrior",
+   "req_stat": {
+    "vitality": 8
+   },
+   "perks": {
+    "20": {
+     "name": "Черепаха",
+     "mods": {
+      "armor": 2
+     }
+    }
+   },
+   "req_prof": {
+    "guard": 1
+   }
+  },
+  {
+   "id": "blademaster",
+   "name": "Мастер клинка",
+   "desc": "Дуэль доведена до искусства.",
+   "tier": 3,
+   "from": "duelist",
+   "min_level": 30,
+   "mods": {
+    "crit_pct": 6,
+    "melee_dmg_pct": 8,
+    "dodge_pct": 4
+   },
+   "req_stat": {
+    "agility": 14,
+    "martial": 10
+   },
+   "perks": {
+    "35": {
+     "name": "Танец стали",
+     "mods": {
+      "crit_pct": 4
+     }
+    }
+   },
+   "exclusive": "stance"
+  },
+  {
+   "id": "iron_wall",
+   "name": "Железная стена",
+   "desc": "Не бьёт первым, но и не падает.",
+   "tier": 3,
+   "from": "legionary",
+   "min_level": 30,
+   "mods": {
+    "armor": 6,
+    "max_health": 12,
+    "thorns": 1
+   },
+   "req_stat": {
+    "vitality": 14
+   },
+   "perks": {
+    "35": {
+     "name": "Несокрушимый",
+     "mods": {
+      "resist_pct": 6
+     }
+    }
+   },
+   "exclusive": "stance"
+  },
+  {
+   "id": "reaver",
+   "name": "Опустошитель",
+   "desc": "Берсерк, пьяный от крови.",
+   "tier": 3,
+   "from": "berserker",
+   "min_level": 30,
+   "mods": {
+    "melee_dmg_pct": 14,
+    "max_health": 8,
+    "armor": -2
+   },
+   "req_stat": {
+    "might": 14
+   },
+   "exclusive": "oath"
+  },
+  {
+   "id": "wolfsworn",
+   "name": "Волчий присягнувший",
+   "desc": "Клятва стае: сражается рядом с побратимами.",
+   "tier": 3,
+   "from": "berserker",
+   "min_level": 30,
+   "mods": {
+    "levy_pct": 8,
+    "melee_dmg_pct": 8,
+    "opinion": 2
+   },
+   "req_stat": {
+    "might": 12,
+    "diplomacy": 6
+   },
+   "exclusive": "oath"
+  },
+  {
+   "id": "oath_mercy",
+   "name": "Рыцарь милосердия",
+   "desc": "Клятва щадить побеждённых и защищать слабых.",
+   "tier": 3,
+   "from": "knight",
+   "min_level": 30,
+   "mods": {
+    "heal_pct": 8,
+    "opinion": 4,
+    "armor": 3
+   },
+   "req_stat": {
+    "spirit": 10
+   },
+   "perks": {
+    "35": {
+     "name": "Рука помощи",
+     "mods": {
+      "health_regen": 0.03
+     }
+    }
+   },
+   "exclusive": "oath",
+   "req_flags": [
+    "quest:kind_heart"
+   ]
+  },
+  {
+   "id": "oath_vengeance",
+   "name": "Рыцарь возмездия",
+   "desc": "Клятва не оставлять обиды без ответа.",
+   "tier": 3,
+   "from": "knight",
+   "min_level": 30,
+   "mods": {
+    "melee_dmg_pct": 10,
+    "crit_pct": 3,
+    "opinion": -2
+   },
+   "req_stat": {
+    "might": 12
+   },
+   "exclusive": "oath"
+  },
+  {
+   "id": "paragon",
+   "name": "Образец рыцарства",
+   "desc": "Легенда, которой клянутся оруженосцы.",
+   "tier": 4,
+   "from": "champion",
+   "min_level": 50,
+   "mods": {
+    "melee_dmg_pct": 12,
+    "armor": 6,
+    "levy_pct": 8,
+    "opinion": 4,
+    "max_health": 14
+   },
+   "req_stat": {
+    "might": 18,
+    "martial": 14
+   },
+   "perks": {
+    "55": {
+     "name": "Знамя отваги",
+     "mods": {
+      "levy_pct": 6
+     }
+    }
+   }
+  },
+  {
+   "id": "grand_marshal",
+   "name": "Великий маршал",
+   "desc": "Командует армиями державы.",
+   "tier": 4,
+   "from": "warlord",
+   "min_level": 50,
+   "mods": {
+    "levy_pct": 20,
+    "opinion": 4,
+    "melee_dmg_pct": 6
+   },
+   "req_stat": {
+    "martial": 20
+   },
+   "also_from": [
+    "champion"
+   ]
+  },
+  {
+   "id": "avatar_of_war",
+   "name": "Воплощение войны",
+   "desc": "Там, где он идёт, битвы не заканчиваются.",
+   "tier": 4,
+   "from": "reaver",
+   "min_level": 50,
+   "mods": {
+    "melee_dmg_pct": 22,
+    "max_health": 20,
+    "crit_pct": 6
+   },
+   "req_stat": {
+    "might": 20
+   },
+   "also_from": [
+    "wolfsworn"
+   ]
+  },
+  {
+   "id": "battle_surgeon",
+   "name": "Полевой хирург",
+   "desc": "Воин, умеющий и резать, и зашивать.",
+   "tier": 3,
+   "from": "knight",
+   "min_level": 30,
+   "mods": {
+    "heal_pct": 14,
+    "max_health": 8,
+    "armor": 2
+   },
+   "req_stat": {
+    "learning": 10
+   },
+   "also_from": [
+    "physician",
+    "bulwark"
+   ],
+   "req_prof": {
+    "healer": 2
+   }
+  },
+  {
+   "id": "sentinel",
+   "name": "Часовой",
+   "desc": "Видит всё и не спит.",
+   "tier": 2,
+   "from": "guardian",
+   "min_level": 15,
+   "mods": {
+    "armor": 3,
+    "dodge_pct": 3,
+    "stealth_pct": -2
+   },
+   "archetype": "guardian",
+   "req_stat": {
+    "agility": 8
+   },
+   "perks": {
+    "20": {
+     "name": "Бдительность",
+     "mods": {
+      "crit_pct": 2
+     }
+    }
+   },
+   "req_prof": {
+    "guard": 1
+   }
+  },
+  {
+   "id": "fortress_lord",
+   "name": "Владыка крепости",
+   "desc": "Держит стены и казну гарнизона.",
+   "tier": 3,
+   "from": "bulwark",
+   "min_level": 30,
+   "mods": {
+    "armor": 6,
+    "levy_pct": 10,
+    "tax_pct": 3,
+    "max_health": 10
+   },
+   "req_stat": {
+    "stewardship": 10,
+    "vitality": 12
+   }
+  },
+  {
+   "id": "shield_captain",
+   "name": "Капитан щита",
+   "desc": "Выводит стражу и ополчение в стройный отряд.",
+   "tier": 3,
+   "from": "bulwark",
+   "min_level": 30,
+   "mods": {
+    "armor": 5,
+    "levy_pct": 12,
+    "opinion": 2
+   },
+   "req_stat": {
+    "martial": 10
+   },
+   "also_from": [
+    "sentinel"
+   ]
+  },
+  {
+   "id": "living_bastion",
+   "name": "Живой бастион",
+   "desc": "Лучше любой стены.",
+   "tier": 4,
+   "from": "fortress_lord",
+   "min_level": 50,
+   "mods": {
+    "armor": 10,
+    "max_health": 30,
+    "resist_pct": 10,
+    "thorns": 2
+   },
+   "req_stat": {
+    "vitality": 20
+   },
+   "also_from": [
+    "shield_captain",
+    "iron_wall"
+   ]
+  },
+  {
+   "id": "skirmisher",
+   "name": "Застрельщик",
+   "desc": "Бьёт издалека и отходит.",
+   "tier": 2,
+   "from": "ranger",
+   "min_level": 15,
+   "mods": {
+    "ranged_dmg_pct": 6,
+    "move_speed_pct": 4,
+    "dodge_pct": 3
+   },
+   "archetype": "ranger",
+   "req_stat": {
+    "agility": 10
+   },
+   "perks": {
+    "20": {
+     "name": "Отход",
+     "mods": {
+      "move_speed_pct": 3
+     }
+    }
+   }
+  },
+  {
+   "id": "beastmaster",
+   "name": "Повелитель зверей",
+   "desc": "Звери идут за ним по своей воле.",
+   "tier": 3,
+   "from": "warden",
+   "min_level": 30,
+   "mods": {
+    "opinion": 2,
+    "carry": 8,
+    "health_regen": 0.03,
+    "ranged_dmg_pct": 4
+   },
+   "req_stat": {
+    "spirit": 10
+   }
+  },
+  {
+   "id": "pathwarden",
+   "name": "Страж троп",
+   "desc": "Знает каждую тропу и каждый брод.",
+   "tier": 3,
+   "from": "warden",
+   "min_level": 30,
+   "mods": {
+    "move_speed_pct": 8,
+    "stealth_pct": 8,
+    "luck": 1
+   },
+   "req_stat": {
+    "agility": 12
+   },
+   "also_from": [
+    "skirmisher"
+   ]
+  },
+  {
+   "id": "horse_archer",
+   "name": "Конный лучник",
+   "desc": "Стреляет на скаку.",
+   "tier": 3,
+   "from": "marksman",
+   "min_level": 30,
+   "mods": {
+    "ranged_dmg_pct": 12,
+    "move_speed_pct": 6,
+    "crit_pct": 3
+   },
+   "req_stat": {
+    "agility": 14
+   },
+   "also_from": [
+    "skirmisher"
+   ]
+  },
+  {
+   "id": "wild_legend",
+   "name": "Легенда дикого края",
+   "desc": "О нём слагают песни в лесах.",
+   "tier": 4,
+   "from": "pathwarden",
+   "min_level": 50,
+   "mods": {
+    "stealth_pct": 12,
+    "ranged_dmg_pct": 14,
+    "move_speed_pct": 10,
+    "luck": 2
+   },
+   "req_stat": {
+    "agility": 18,
+    "spirit": 14
+   },
+   "also_from": [
+    "beastmaster",
+    "deadeye"
+   ]
+  },
+  {
+   "id": "apothecary",
+   "name": "Аптекарь",
+   "desc": "Настои и мази на любой случай.",
+   "tier": 2,
+   "from": "scholar",
+   "min_level": 15,
+   "mods": {
+    "heal_pct": 8,
+    "craft_quality_pct": 4
+   },
+   "archetype": "scholar",
+   "req_stat": {
+    "intellect": 9
+   },
+   "perks": {
+    "20": {
+     "name": "Крепкий настой",
+     "mods": {
+      "heal_pct": 4
+     }
+    }
+   },
+   "req_prof": {
+    "alchemist": 1
+   }
+  },
+  {
+   "id": "loremaster",
+   "name": "Знаток преданий",
+   "desc": "Помнит всё, что было записано.",
+   "tier": 2,
+   "from": "scholar",
+   "min_level": 15,
+   "mods": {
+    "xp_gain_pct": 8,
+    "opinion": 1,
+    "tax_pct": 2
+   },
+   "archetype": "scholar",
+   "req_stat": {
+    "learning": 10
+   },
+   "perks": {
+    "20": {
+     "name": "Память веков",
+     "mods": {
+      "xp_gain_pct": 3
+     }
+    }
+   },
+   "req_prof": {
+    "scribe": 1
+   }
+  },
+  {
+   "id": "savant",
+   "name": "Мудрец",
+   "desc": "Знание - его власть.",
+   "tier": 3,
+   "from": "loremaster",
+   "min_level": 30,
+   "mods": {
+    "xp_gain_pct": 14,
+    "craft_quality_pct": 6,
+    "opinion": 2
+   },
+   "req_stat": {
+    "learning": 14,
+    "intellect": 10
+   },
+   "exclusive": "lore"
+  },
+  {
+   "id": "inventor",
+   "name": "Изобретатель",
+   "desc": "Придумывает машины и ломает старые правила.",
+   "tier": 3,
+   "from": "artificer",
+   "min_level": 30,
+   "mods": {
+    "craft_quality_pct": 12,
+    "build_speed_pct": 8,
+    "luck": 1
+   },
+   "req_stat": {
+    "intellect": 14
+   },
+   "exclusive": "lore"
+  },
+  {
+   "id": "poison_master",
+   "name": "Мастер ядов",
+   "desc": "Знает, чем лечат и чем убивают.",
+   "tier": 3,
+   "from": "apothecary",
+   "min_level": 30,
+   "mods": {
+    "crit_pct": 4,
+    "spy_success_pct": 6,
+    "heal_pct": 6
+   },
+   "req_stat": {
+    "intellect": 12
+   },
+   "also_from": [
+    "assassin"
+   ],
+   "exclusive": "alch"
+  },
+  {
+   "id": "grand_healer",
+   "name": "Великий целитель",
+   "desc": "Возвращает с порога смерти.",
+   "tier": 3,
+   "from": "apothecary",
+   "min_level": 30,
+   "mods": {
+    "heal_pct": 20,
+    "health_regen": 0.05,
+    "opinion": 3
+   },
+   "req_stat": {
+    "spirit": 12
+   },
+   "exclusive": "alch"
+  },
+  {
+   "id": "sage_of_ages",
+   "name": "Мудрец веков",
+   "desc": "Живая библиотека державы.",
+   "tier": 4,
+   "from": "savant",
+   "min_level": 50,
+   "mods": {
+    "xp_gain_pct": 22,
+    "craft_quality_pct": 10,
+    "tax_pct": 4,
+    "opinion": 4
+   },
+   "req_stat": {
+    "learning": 20
+   },
+   "also_from": [
+    "inventor",
+    "archmage_scribe"
+   ]
+  },
+  {
+   "id": "envoy",
+   "name": "Посол",
+   "desc": "Говорит от имени державы.",
+   "tier": 2,
+   "from": "courtier",
+   "min_level": 15,
+   "mods": {
+    "opinion": 4,
+    "intrigue_bonus": 1,
+    "discount_pct": 3
+   },
+   "archetype": "courtier",
+   "req_stat": {
+    "diplomacy": 10
+   },
+   "perks": {
+    "20": {
+     "name": "Дипломатическая неприкосновенность",
+     "mods": {
+      "opinion": 2
+     }
+    }
+   }
+  },
+  {
+   "id": "merchant_prince",
+   "name": "Торговый князь",
+   "desc": "Купеческая империя на одном имени.",
+   "tier": 2,
+   "from": "courtier",
+   "min_level": 15,
+   "mods": {
+    "trade_profit_pct": 8,
+    "discount_pct": 5,
+    "tax_pct": 3
+   },
+   "archetype": "courtier",
+   "req_stat": {
+    "stewardship": 8
+   },
+   "perks": {
+    "20": {
+     "name": "Кредит",
+     "mods": {
+      "trade_profit_pct": 3
+     }
+    }
+   },
+   "req_prof": {
+    "merchant": 1
+   }
+  },
+  {
+   "id": "treasurer",
+   "name": "Казначей",
+   "desc": "Каждая монета на счету.",
+   "tier": 2,
+   "from": "courtier",
+   "min_level": 15,
+   "mods": {
+    "tax_pct": 8,
+    "trade_profit_pct": 3,
+    "opinion": -1
+   },
+   "archetype": "courtier",
+   "req_stat": {
+    "stewardship": 10
+   },
+   "req_prof": {
+    "scribe": 1
+   }
+  },
+  {
+   "id": "grand_vizier",
+   "name": "Великий визирь",
+   "desc": "Правая рука правителя.",
+   "tier": 3,
+   "from": "chancellor",
+   "min_level": 30,
+   "mods": {
+    "tax_pct": 8,
+    "opinion": 4,
+    "levy_pct": 4,
+    "intrigue_bonus": 1
+   },
+   "req_stat": {
+    "stewardship": 14,
+    "diplomacy": 12
+   },
+   "exclusive": "court"
+  },
+  {
+   "id": "grand_envoy",
+   "name": "Верховный посол",
+   "desc": "Заключает союзы и расторгает войны.",
+   "tier": 3,
+   "from": "envoy",
+   "min_level": 30,
+   "mods": {
+    "opinion": 8,
+    "discount_pct": 6,
+    "intrigue_bonus": 2
+   },
+   "req_stat": {
+    "diplomacy": 14
+   },
+   "also_from": [
+    "chancellor"
+   ],
+   "exclusive": "court"
+  },
+  {
+   "id": "trade_magnate",
+   "name": "Магнат",
+   "desc": "Деньги решают всё.",
+   "tier": 3,
+   "from": "merchant_prince",
+   "min_level": 30,
+   "mods": {
+    "trade_profit_pct": 14,
+    "discount_pct": 8,
+    "tax_pct": 4
+   },
+   "req_stat": {
+    "stewardship": 14
+   },
+   "also_from": [
+    "treasurer"
+   ],
+   "exclusive": "court"
+  },
+  {
+   "id": "kingmaker",
+   "name": "Делатель королей",
+   "desc": "Не носит короны, но короны носят по его воле.",
+   "tier": 4,
+   "from": "grand_vizier",
+   "min_level": 50,
+   "mods": {
+    "opinion": 10,
+    "intrigue_bonus": 3,
+    "tax_pct": 8,
+    "levy_pct": 8
+   },
+   "req_stat": {
+    "diplomacy": 20,
+    "intrigue": 14
+   },
+   "also_from": [
+    "grand_envoy",
+    "trade_magnate"
+   ]
+  },
+  {
+   "id": "smuggler",
+   "name": "Контрабандист",
+   "desc": "Ночные тропы и тайные склады.",
+   "tier": 2,
+   "from": "rogue",
+   "min_level": 15,
+   "mods": {
+    "gold_find_pct": 8,
+    "trade_profit_pct": 4,
+    "stealth_pct": 4
+   },
+   "archetype": "rogue",
+   "req_stat": {
+    "agility": 8
+   },
+   "perks": {
+    "20": {
+     "name": "Двойное дно",
+     "mods": {
+      "carry": 6
+     }
+    }
+   },
+   "req_prof": {
+    "merchant": 1
+   }
+  },
+  {
+   "id": "trickster",
+   "name": "Обманщик",
+   "desc": "Языком добьётся большего, чем ножом.",
+   "tier": 2,
+   "from": "rogue",
+   "min_level": 15,
+   "mods": {
+    "opinion": 3,
+    "luck": 1,
+    "stealth_pct": 3
+   },
+   "archetype": "rogue",
+   "req_stat": {
+    "intrigue": 8
+   },
+   "perks": {
+    "20": {
+     "name": "Подмена",
+     "mods": {
+      "spy_success_pct": 4
+     }
+    }
+   }
+  },
+  {
+   "id": "nightblade",
+   "name": "Ночной клинок",
+   "desc": "Бесшумная смерть.",
+   "tier": 3,
+   "from": "assassin",
+   "min_level": 30,
+   "mods": {
+    "crit_pct": 10,
+    "stealth_pct": 10,
+    "melee_dmg_pct": 6
+   },
+   "req_stat": {
+    "agility": 14
+   },
+   "exclusive": "shadow"
+  },
+  {
+   "id": "whisperer",
+   "name": "Шепчущий",
+   "desc": "Знает чужие секреты раньше, чем их хозяева.",
+   "tier": 3,
+   "from": "spymaster",
+   "min_level": 30,
+   "mods": {
+    "spy_success_pct": 12,
+    "intrigue_bonus": 3,
+    "opinion": 2
+   },
+   "req_stat": {
+    "intrigue": 14
+   },
+   "also_from": [
+    "trickster"
+   ],
+   "exclusive": "shadow"
+  },
+  {
+   "id": "guildmaster_thief",
+   "name": "Глава воровского братства",
+   "desc": "Город живёт по его правилам.",
+   "tier": 3,
+   "from": "smuggler",
+   "min_level": 30,
+   "mods": {
+    "gold_find_pct": 14,
+    "stealth_pct": 8,
+    "tax_pct": -4,
+    "opinion": 2
+   },
+   "req_stat": {
+    "intrigue": 12
+   },
+   "also_from": [
+    "trickster"
+   ],
+   "exclusive": "shadow"
+  },
+  {
+   "id": "phantom",
+   "name": "Призрак",
+   "desc": "О нём не знает никто, а он знает всё.",
+   "tier": 4,
+   "from": "nightblade",
+   "min_level": 50,
+   "mods": {
+    "stealth_pct": 20,
+    "crit_pct": 12,
+    "dodge_pct": 8,
+    "spy_success_pct": 8
+   },
+   "req_stat": {
+    "agility": 20
+   },
+   "also_from": [
+    "whisperer",
+    "shadow_master"
+   ]
+  }
+ ]
+}
