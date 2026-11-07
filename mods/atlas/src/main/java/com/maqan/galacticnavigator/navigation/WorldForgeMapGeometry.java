@@ -102,6 +102,33 @@ public final class WorldForgeMapGeometry {
         return centroid(clipped.isEmpty() ? polygon : clipped);
     }
 
+    /**
+     * Tests a point against a simple polygon. Boundary points count as inside,
+     * which makes map picking agree with the visible territory outline.
+     */
+    public static boolean containsPoint(List<Point> polygon, double x, double y) {
+        if (polygon == null || polygon.size() < 3 || !Double.isFinite(x) || !Double.isFinite(y))
+            return false;
+        boolean inside = false;
+        for (int i = 0, j = polygon.size() - 1; i < polygon.size(); j = i++) {
+            Point a = polygon.get(j), b = polygon.get(i);
+            if (a == null || b == null || !Double.isFinite(a.x) || !Double.isFinite(a.y)
+                    || !Double.isFinite(b.x) || !Double.isFinite(b.y)) return false;
+            double dx = b.x - a.x, dy = b.y - a.y;
+            double cross = (x - a.x) * dy - (y - a.y) * dx;
+            double scale = Math.max(1.0, Math.abs(dx) + Math.abs(dy));
+            if (Math.abs(cross) <= 1.0e-9 * scale
+                    && x >= Math.min(a.x, b.x) - 1.0e-9
+                    && x <= Math.max(a.x, b.x) + 1.0e-9
+                    && y >= Math.min(a.y, b.y) - 1.0e-9
+                    && y <= Math.max(a.y, b.y) + 1.0e-9) return true;
+            if ((a.y > y) != (b.y > y)
+                    && x < (b.x - a.x) * (y - a.y) / (b.y - a.y) + a.x)
+                inside = !inside;
+        }
+        return inside;
+    }
+
     /** Area-weighted polygon centroid; falls back to the vertex mean for degenerate shapes. */
     public static Point centroid(List<Point> polygon) {
         if (polygon == null || polygon.isEmpty()) return new Point(0, 0);
