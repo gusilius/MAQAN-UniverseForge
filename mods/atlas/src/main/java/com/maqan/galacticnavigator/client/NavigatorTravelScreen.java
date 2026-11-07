@@ -209,7 +209,7 @@ public final class NavigatorTravelScreen extends Screen {
     }
 
     @Override public void onClose() {
-        if (minecraft != null) minecraft.setScreen(parent);
+        if (minecraft != null) MaqanScreenHost.back(minecraft, parent);
     }
 
     @Override public void render(GuiGraphics g, int mouseX, int mouseY, float partial) {
