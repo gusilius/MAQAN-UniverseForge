@@ -23,7 +23,24 @@ import java.util.Map;
  * are transferred as independent rings so islands and holes remain intact.
  */
 public final class WorldForgeSnapshotExporter {
+    @FunctionalInterface
+    public interface Contributor {
+        void contribute(MinecraftServer server, ServerLevel level, MapData map, List<Object> features);
+    }
+
+    private static final java.util.concurrent.CopyOnWriteArrayList<Contributor> CONTRIBUTORS =
+            new java.util.concurrent.CopyOnWriteArrayList<>();
+
     private WorldForgeSnapshotExporter() {}
+
+    /** Optional addon extension point; contributors append records to the existing Atlas feature collection. */
+    public static void registerContributor(Contributor contributor) {
+        if (contributor != null && !CONTRIBUTORS.contains(contributor)) CONTRIBUTORS.add(contributor);
+    }
+
+    public static void unregisterContributor(Contributor contributor) {
+        CONTRIBUTORS.remove(contributor);
+    }
 
     public static Path export(MinecraftServer server, ServerLevel level, MapData map) throws IOException {
         if (server == null || level == null || map == null)
@@ -217,6 +234,14 @@ public final class WorldForgeSnapshotExporter {
                 features.add(feature("worldforge:" + map.name + ":region:" + region.id,
                         "region_capital", region.name, dimensionId, region.capX, capital.getY(),
                         region.capZ, region.rgb, "", "", attrs));
+            }
+        }
+
+        for (Contributor contributor : CONTRIBUTORS) {
+            try {
+                contributor.contribute(server, level, map, features);
+            } catch (RuntimeException ex) {
+                System.err.println("WorldForge Atlas snapshot contributor failed: " + ex);
             }
         }
 

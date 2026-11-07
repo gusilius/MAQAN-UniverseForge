@@ -80,6 +80,7 @@ public class SettleMod {
     private static long ticks;
 
     public SettleMod() {
+        dev.worldforge.mod.WorldForgeSnapshotExporter.registerContributor(SettleMod::appendAtlasFeatures);
         IEventBus bus = FMLJavaModLoadingContext.get().getModEventBus();
         ITEMS.register(bus);
         ENTITIES.register(bus);
@@ -96,6 +97,78 @@ public class SettleMod {
 
     private void tabs(BuildCreativeModeTabContentsEvent e) {
         if (e.getTabKey() == CreativeModeTabs.TOOLS_AND_UTILITIES) e.accept(WAND);
+    }
+
+    // ------------------------------------------------------------------ Atlas snapshot integration
+
+    /** Adds live settlement and building locations to the same WorldForge snapshot used by Atlas. */
+    private static void appendAtlasFeatures(MinecraftServer server, ServerLevel level,
+            dev.worldforge.mod.MapData map, List<Object> features) {
+        String dimension = level.dimension().location().toString();
+        for (Colony colony : COLONIES.values()) {
+            if (colony == null || !dimension.equals(colony.dim) || colony.s == null) continue;
+            dev.worldforge.mod.TitleData.Title province = map.provinceAt(colony.cx, colony.cz);
+            dev.worldforge.mod.TitleData.Realm realm = province == null || map.titles == null
+                    ? null : map.titles.realmOf(province);
+            String realmId = realm == null ? "" : realm.id;
+            int y = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+                    colony.cx, colony.cz);
+            Map<String, String> attrs = new java.util.LinkedHashMap<>();
+            attrs.put("population", Integer.toString(colony.s.workers.size()));
+            attrs.put("housing", Integer.toString(colony.s.housing()));
+            attrs.put("settlement_type", colony.s.typeId == null ? "" : colony.s.typeId);
+            attrs.put("owner_assigned", Boolean.toString(colony.owner != null && !colony.owner.isBlank()));
+            attrs.put("realm_id", realmId);
+            attrs.put("province_id", province == null ? "" : province.key);
+            attrs.put("year", Integer.toString(colony.s.year()));
+            attrs.put("season", colony.s.seasonName());
+            attrs.put("approval", Integer.toString(colony.s.approval()));
+            attrs.put("tax_level", Integer.toString(colony.s.taxLevel));
+            attrs.put("wealth", Double.toString(colony.s.wealth()));
+            attrs.put("buildings", Integer.toString(colony.s.buildings.size()));
+            attrs.put("map_id", map.name);
+            features.add(atlasFeature("worldforge:settlement:" + dimension + ":" + colony.s.id,
+                    "settlement", colony.s.name, dimension, colony.cx, y, colony.cz,
+                    realmId, colony.s.typeId, attrs));
+
+            for (dev.worldforge.settle.Building building : colony.s.buildings) {
+                if (building == null || building.def == null) continue;
+                int x = colony.worldX(building), z = colony.worldZ(building);
+                int by = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,x,z);
+                Map<String, String> buildingAttrs = new java.util.LinkedHashMap<>();
+                buildingAttrs.put("settlement_id", colony.s.id);
+                buildingAttrs.put("building_uid", Integer.toString(building.uid));
+                buildingAttrs.put("building_state", building.state == null ? "" : building.state.name().toLowerCase(java.util.Locale.ROOT));
+                buildingAttrs.put("progress", Double.toString(building.progress));
+                buildingAttrs.put("paused", Boolean.toString(building.paused));
+                buildingAttrs.put("workers", Integer.toString(colony.s.assigned(building.uid).size()));
+                buildingAttrs.put("realm_id", realmId);
+                buildingAttrs.put("province_id", province == null ? "" : province.key);
+                buildingAttrs.put("map_id", map.name);
+                features.add(atlasFeature("worldforge:settlement:" + dimension + ":" + colony.s.id
+                                + ":building:" + building.uid,
+                        "settlement_building", building.def.name, dimension, x, by, z,
+                        realmId, building.def.id, buildingAttrs));
+            }
+        }
+    }
+
+    private static Map<String, Object> atlasFeature(String id, String kind, String name,
+            String dimension, double x, double y, double z, String realmId,
+            String subtype, Map<String, String> attributes) {
+        Map<String, Object> value = new java.util.LinkedHashMap<>();
+        value.put("id", id);
+        value.put("kind", kind);
+        value.put("name", name == null ? "" : name);
+        value.put("dimension_id", dimension);
+        value.put("x", x);
+        value.put("y", y);
+        value.put("z", z);
+        value.put("realm_id", realmId);
+        value.put("subtype", subtype == null ? "" : subtype);
+        value.put("color", 0xD6B56D);
+        value.put("attributes", attributes);
+        return value;
     }
 
     // ------------------------------------------------------------------ доступ
