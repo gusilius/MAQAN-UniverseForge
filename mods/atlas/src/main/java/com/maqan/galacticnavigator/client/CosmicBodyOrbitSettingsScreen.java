@@ -149,7 +149,7 @@ public final class CosmicBodyOrbitSettingsScreen extends Screen {
     @Override
     public void onClose() {
         CosmicOrbitSettings.save();
-        if (minecraft != null) minecraft.setScreen(parentScreen);
+        if (minecraft != null) MaqanScreenHost.back(minecraft, parentScreen);
     }
 
     @Override
