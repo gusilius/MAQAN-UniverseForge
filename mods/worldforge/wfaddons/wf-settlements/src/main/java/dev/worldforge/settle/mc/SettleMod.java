@@ -111,6 +111,10 @@ public class SettleMod {
             dev.worldforge.mod.TitleData.Realm realm = province == null || map.titles == null
                     ? null : map.titles.realmOf(province);
             String realmId = realm == null ? "" : realm.id;
+            String raceId = realm == null ? "" : propertyString(realm.props, "race");
+            String cultureId = realm == null ? "" : propertyString(realm.props, "culture");
+            String provinceFeatureId = province == null ? "" :
+                    "worldforge:" + map.name + ":province:" + province.key;
             int y = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
                     colony.cx, colony.cz);
             Map<String, String> attrs = new java.util.LinkedHashMap<>();
@@ -127,9 +131,13 @@ public class SettleMod {
             attrs.put("wealth", Double.toString(colony.s.wealth()));
             attrs.put("buildings", Integer.toString(colony.s.buildings.size()));
             attrs.put("map_id", map.name);
-            features.add(atlasFeature("worldforge:settlement:" + dimension + ":" + colony.s.id,
+            Map<String, Object> settlementFeature = atlasFeature("worldforge:settlement:" + dimension + ":" + colony.s.id,
                     "settlement", colony.s.name, dimension, colony.cx, y, colony.cz,
-                    realmId, colony.s.typeId, attrs));
+                    realmId, colony.s.typeId, attrs);
+            settlementFeature.put("territory_id", provinceFeatureId);
+            settlementFeature.put("race_id", raceId);
+            settlementFeature.put("culture_id", cultureId);
+            features.add(settlementFeature);
 
             for (dev.worldforge.settle.Building building : colony.s.buildings) {
                 if (building == null || building.def == null) continue;
@@ -145,12 +153,22 @@ public class SettleMod {
                 buildingAttrs.put("realm_id", realmId);
                 buildingAttrs.put("province_id", province == null ? "" : province.key);
                 buildingAttrs.put("map_id", map.name);
-                features.add(atlasFeature("worldforge:settlement:" + dimension + ":" + colony.s.id
+                Map<String, Object> buildingFeature = atlasFeature("worldforge:settlement:" + dimension + ":" + colony.s.id
                                 + ":building:" + building.uid,
                         "settlement_building", building.def.name, dimension, x, by, z,
-                        realmId, building.def.id, buildingAttrs));
+                        realmId, building.def.id, buildingAttrs);
+                buildingFeature.put("territory_id", provinceFeatureId);
+                buildingFeature.put("race_id", raceId);
+                buildingFeature.put("culture_id", cultureId);
+                features.add(buildingFeature);
             }
         }
+    }
+
+    private static String propertyString(Map<String, Object> properties, String key) {
+        if (properties == null) return "";
+        Object value = properties.get(key);
+        return value == null ? "" : String.valueOf(value);
     }
 
     private static Map<String, Object> atlasFeature(String id, String kind, String name,

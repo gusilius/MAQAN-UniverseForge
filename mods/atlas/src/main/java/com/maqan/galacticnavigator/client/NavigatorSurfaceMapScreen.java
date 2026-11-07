@@ -335,6 +335,13 @@ public final class NavigatorSurfaceMapScreen extends Screen {
             addContext(context,"territory",nearest.territory_id);
             addContext(context,"race",nearest.race_id);
             addContext(context,"culture",nearest.culture_id);
+            if(nearest.attributes!=null){
+                int included=0;
+                for(Map.Entry<String,String> entry:nearest.attributes.entrySet()){
+                    if(included++>=16)break;
+                    addContext(context,entry.getKey(),entry.getValue());
+                }
+            }
             NavigatorPlatformSelectionBridge.publish("worldforge:feature/"+nearest.id,
                     nearest.kind,nearest.name,dimension,String.join(" · ",context));
             return true;
