@@ -159,8 +159,11 @@ public class SettleTest {
         Settlement x = fresh(d, 5), y = fresh(d, 5);
         for (Settlement t : new Settlement[]{x, y}) { t.place("house", 0, 0); t.place("lumber_camp", 10, 0); t.place("farm", 20, 0); t.tick(500); }
         ok(x.toJson().equals(y.toJson()), "две одинаковые симуляции совпадают");
+        if (!x.workers.isEmpty()) x.workers.get(0).person = "c-person-roundtrip";
         Settlement r = Settlement.fromJson(x.toJson(), d);
-        ok(r.toJson().equals(x.toJson()), "сохранение и загрузка без потерь");
+        ok(r.toJson().equals(x.toJson()), "сохранение и загрузка без потерь, включая ссылку на личность");
+        ok(!r.workers.isEmpty() && r.workers.get(0).person.equals("c-person-roundtrip"),
+                "ссылка рабочего на CharacterRegistry сохраняется как стабильный foreign key");
         x.tick(100); r.tick(100);
         ok(x.toJson().equals(r.toJson()), "после загрузки симуляция идёт так же");
 

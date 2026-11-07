@@ -5,6 +5,9 @@ import dev.worldforge.mod.Json;
 import dev.worldforge.settle.Building;
 import dev.worldforge.settle.Defs;
 import dev.worldforge.settle.Settlement;
+import dev.worldforge.people.Character;
+import dev.worldforge.people.CharacterRegistry;
+import dev.worldforge.people.mc.PeopleMod;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -379,6 +382,45 @@ public class SettleMod {
         Blueprints.clearCache();
     }
 
+    /**
+     * Bridges settlement workers to the authoritative person registry.
+     * Worker.person is the durable foreign key; profession/building remain settlement-owned state.
+     * The optional wf_people addon remains optional and no duplicate character registry is created here.
+     */
+    private static void syncPeople(Colony colony) {
+        if (!net.minecraftforge.fml.ModList.get().isLoaded("wf_people") || colony == null || colony.s == null) return;
+        dev.worldforge.mod.MapData ownerMap = null;
+        dev.worldforge.mod.TitleData.Title province = null;
+        for (dev.worldforge.mod.MapData map : dev.worldforge.mod.WorldForgeMod.loadedMaps().values()) {
+            if (map.titles == null) continue;
+            dev.worldforge.mod.TitleData.Title candidate = map.provinceAt(colony.cx, colony.cz);
+            if (candidate != null) { ownerMap = map; province = candidate; break; }
+        }
+        if (ownerMap == null) return;
+        CharacterRegistry registry = PeopleMod.registry(ownerMap);
+        if (registry == null) return;
+        dev.worldforge.mod.TitleData.Realm realm = ownerMap.titles.realmOf(province);
+        String race = realm == null ? "" : propertyString(realm.props, "race");
+        String culture = realm == null ? "" : propertyString(realm.props, "culture");
+        String place = "settlement:" + colony.s.id;
+        for (dev.worldforge.settle.Worker worker : colony.s.workers) {
+            Character person = worker.person == null || worker.person.isBlank() ? null : registry.get(worker.person);
+            if (person == null || !person.alive) {
+                person = registry.create(worker.name, "", culture, "m", colony.s.year());
+                worker.person = person.id;
+                registry.appoint(person.id, "settlement_worker", place);
+            }
+            if (person.culture == null || person.culture.isBlank()) person.culture = culture;
+            person.props.put("wf_unit_kind", "worker");
+            person.props.put("wf_settlement_id", colony.s.id);
+            person.props.put("wf_worker_id", worker.id);
+            person.props.put("wf_profession", worker.profession == null ? "laborer" : worker.profession);
+            person.props.put("wf_building_uid", worker.building);
+            person.props.put("wf_race_id", race);
+            person.props.put("wf_culture_id", culture);
+        }
+    }
+
     @SubscribeEvent
     public void onTick(TickEvent.ServerTickEvent e) {
         if (e.phase != TickEvent.Phase.END || DEFS == null) return;
@@ -391,6 +433,7 @@ public class SettleMod {
                 if (speed <= 0) break;
                 try {
                     c.s.tick(speed);                                   // 1 секунда симуляции = 20 тиков
+                    syncPeople(c);
                     if (ticks % (STEP_TICKS * 10) == 0) { c.s.types = TYPES; String rid = realmOf(c); c.s.refreshType(c.s.workers.size(), rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.terrain(rid), rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.races(rid)); }
                 } catch (RuntimeException ex) {
                     LOGGER.error("wf_settle: ошибка симуляции поселения {}: {}", c.s.id, ex.toString());
