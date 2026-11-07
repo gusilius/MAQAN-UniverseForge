@@ -1,13 +1,19 @@
 # MAQAN UniverseForge
 
-**A modular Minecraft ecosystem repository.** Atlas and WorldForge are separate Forge mods that can be built, installed, updated, and tested independently.
+**A modular MAQAN platform and Minecraft ecosystem repository.** MAQAN is designed as one shared application platform with a common interface and independently owned workspaces. Atlas and WorldForge remain separate Forge mods and build artifacts.
+
+## Platform architecture
+
+- `docs/architecture/MAQAN_PLATFORM.md` — authoritative concept for the shared MAQAN shell, design system, navigation, workspace lifecycle, selection, panels and module boundaries.
+- `docs/architecture/ATLAS_WORKSPACE.md` — Atlas integration contract and the additive Unified Cosmic Scene mode.
+- The shared shell owns global UI. Modules contribute workspace content and domain capabilities; modules must not create competing application shells.
 
 ## Repository map
 
-- `mods/atlas` — Atlas: cosmic catalogue, system/galaxy visualization, orbital simulation, route planning, surface-map workspace, Cosmic Horizons integration.
-- `mods/worldforge/wfmod` — WorldForge core: world map, realms/titles/borders, shared APIs, event and simulation infrastructure.
+- `mods/atlas` — Atlas domain: cosmic catalogue, Cosmic Horizons integration, orbital simulation, route planning, surface maps and spatial visualization. It is hosted as a MAQAN workspace.
+- `mods/worldforge/wfmod` — WorldForge core: world map, realms/titles/borders, shared APIs, event and simulation infrastructure. It is hosted through the same platform workspace contract.
 - `mods/worldforge/wfaddons/wf-*` — independent WorldForge gameplay addons.
-- `shared/contracts` — versioned, optional cross-mod contracts. No gameplay ownership is moved here.
+- `shared/contracts` — versioned, optional cross-mod data/API contracts. No gameplay ownership is moved here.
 - `shared/identifiers` — stable ecosystem identifiers.
 - `shared/utilities` — dependency-free helpers only.
 - `docs` — architecture and integration decisions.
@@ -18,8 +24,9 @@
 2. WorldForge core keeps mod id `worldforge`; addons retain their own mod ids.
 3. Atlas and WorldForge have separate Forge builds and output JARs.
 4. WorldForge addons remain independently installable and communicate through the existing core APIs / soft integration.
-5. No Atlas dependency is introduced into WorldForge, and no WorldForge dependency is introduced into Atlas.
+5. No direct Atlas ↔ WorldForge dependency is introduced.
 6. Shared contracts are optional and versioned; they do not become a mandatory monolithic runtime.
+7. A shared MAQAN interface does not merge module data, simulation engines, mod IDs, classpaths or build outputs.
 
 ## Requirements
 
