@@ -1,0 +1,257 @@
+{
+ "doctrines": [
+  {
+   "id": "martial",
+   "name": "Военное дело",
+   "desc": "Армии, дисциплина, осады.",
+   "color": 12077642,
+   "nodes": [
+    {
+     "id": "drill",
+     "name": "Муштра",
+     "cost": 4,
+     "mods": {
+      "levy_pct": 4,
+      "melee_dmg_pct": 2
+     }
+    },
+    {
+     "id": "levy",
+     "name": "Созыв ополчения",
+     "cost": 8,
+     "requires": [
+      "drill"
+     ],
+     "mods": {
+      "levy_pct": 8
+     }
+    },
+    {
+     "id": "cavalry",
+     "name": "Конные дружины",
+     "cost": 12,
+     "requires": [
+      "drill"
+     ],
+     "min_level": 2,
+     "req_gov": [
+      "monarchy",
+      "military"
+     ],
+     "mods": {
+      "move_speed_pct": 4,
+      "melee_dmg_pct": 5
+     }
+    },
+    {
+     "id": "siege",
+     "name": "Осадное искусство",
+     "cost": 16,
+     "requires": [
+      "levy"
+     ],
+     "min_level": 3,
+     "mods": {
+      "siege_pct": 15
+     }
+    },
+    {
+     "id": "standing_army",
+     "name": "Постоянная армия",
+     "cost": 24,
+     "requires": [
+      "levy",
+      "cavalry"
+     ],
+     "min_level": 3,
+     "mods": {
+      "levy_pct": 10,
+      "upkeep_pct": 8
+     }
+    }
+   ]
+  },
+  {
+   "id": "economy",
+   "name": "Хозяйство",
+   "desc": "Налоги, ремёсла и торговля.",
+   "color": 14067771,
+   "nodes": [
+    {
+     "id": "tools",
+     "name": "Железные орудия",
+     "cost": 4,
+     "mods": {
+      "food_pct": 5,
+      "mining_speed_pct": 5
+     }
+    },
+    {
+     "id": "roads",
+     "name": "Дороги",
+     "cost": 8,
+     "requires": [
+      "tools"
+     ],
+     "mods": {
+      "trade_pct": 8,
+      "move_speed_pct": 2
+     }
+    },
+    {
+     "id": "markets",
+     "name": "Рынки",
+     "cost": 10,
+     "requires": [
+      "roads"
+     ],
+     "min_level": 2,
+     "mods": {
+      "tax_pct": 4,
+      "discount_pct": 2
+     }
+    },
+    {
+     "id": "guild_charters",
+     "name": "Гильдейские грамоты",
+     "cost": 14,
+     "requires": [
+      "markets"
+     ],
+     "min_level": 3,
+     "mods": {
+      "craft_quality_pct": 8,
+      "tax_pct": 2
+     }
+    },
+    {
+     "id": "banking",
+     "name": "Банковское дело",
+     "cost": 22,
+     "requires": [
+      "guild_charters"
+     ],
+     "min_level": 3,
+     "req_gov": [
+      "republic",
+      "monarchy"
+     ],
+     "mods": {
+      "tax_pct": 8,
+      "trade_pct": 10
+     }
+    }
+   ]
+  },
+  {
+   "id": "lore",
+   "name": "Знание и вера",
+   "desc": "Школы, храмы, мудрость.",
+   "color": 4881080,
+   "nodes": [
+    {
+     "id": "scribes",
+     "name": "Писцы",
+     "cost": 4,
+     "mods": {
+      "xp_gain_pct": 2
+     }
+    },
+    {
+     "id": "schools",
+     "name": "Школы",
+     "cost": 10,
+     "requires": [
+      "scribes"
+     ],
+     "min_level": 2,
+     "mods": {
+      "xp_gain_pct": 4,
+      "doctrine_pct": 8
+     }
+    },
+    {
+     "id": "hospitals",
+     "name": "Лечебницы",
+     "cost": 12,
+     "requires": [
+      "scribes"
+     ],
+     "min_level": 2,
+     "mods": {
+      "heal_pct": 10,
+      "health_regen": 0.03
+     }
+    },
+    {
+     "id": "university",
+     "name": "Университет",
+     "cost": 22,
+     "requires": [
+      "schools"
+     ],
+     "min_level": 3,
+     "mods": {
+      "xp_gain_pct": 6,
+      "doctrine_pct": 12
+     }
+    }
+   ]
+  },
+  {
+   "id": "statecraft",
+   "name": "Управление",
+   "desc": "Двор, право, порядок.",
+   "color": 9063096,
+   "nodes": [
+    {
+     "id": "courts",
+     "name": "Суды",
+     "cost": 6,
+     "mods": {
+      "opinion": 1,
+      "tax_pct": 2
+     }
+    },
+    {
+     "id": "bureaucracy",
+     "name": "Приказы",
+     "cost": 12,
+     "requires": [
+      "courts"
+     ],
+     "min_level": 2,
+     "mods": {
+      "tax_pct": 5,
+      "doctrine_pct": 6
+     }
+    },
+    {
+     "id": "spies",
+     "name": "Тайная служба",
+     "cost": 14,
+     "requires": [
+      "courts"
+     ],
+     "min_level": 2,
+     "mods": {
+      "spy_success_pct": 15
+     }
+    },
+    {
+     "id": "diplomacy_corps",
+     "name": "Посольства",
+     "cost": 18,
+     "requires": [
+      "bureaucracy"
+     ],
+     "min_level": 3,
+     "mods": {
+      "opinion": 3,
+      "discount_pct": 3
+     }
+    }
+   ]
+  }
+ ]
+}

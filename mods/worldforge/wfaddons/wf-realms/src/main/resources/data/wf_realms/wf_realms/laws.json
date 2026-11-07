@@ -1,0 +1,121 @@
+{
+ "laws": [
+  {
+   "id": "conscription",
+   "name": "Воинская повинность",
+   "desc": "Как набирают армию.",
+   "cooldown_days": 60,
+   "options": [
+    {
+     "id": "volunteers",
+     "name": "Добровольцы",
+     "mods": {
+      "levy_pct": -4,
+      "opinion": 1
+     }
+    },
+    {
+     "id": "levy",
+     "name": "Ополчение",
+     "mods": {
+      "levy_pct": 4
+     }
+    },
+    {
+     "id": "conscript",
+     "name": "Всеобщий призыв",
+     "min_level": 2,
+     "mods": {
+      "levy_pct": 12,
+      "opinion": -3
+     }
+    }
+   ]
+  },
+  {
+   "id": "taxation",
+   "name": "Налоги",
+   "desc": "Тяжесть податей.",
+   "cooldown_days": 30,
+   "options": [
+    {
+     "id": "low",
+     "name": "Лёгкие",
+     "mods": {
+      "tax_pct": -6,
+      "opinion": 2
+     }
+    },
+    {
+     "id": "normal",
+     "name": "Обычные",
+     "mods": {}
+    },
+    {
+     "id": "heavy",
+     "name": "Тяжёлые",
+     "mods": {
+      "tax_pct": 10,
+      "opinion": -3
+     }
+    }
+   ]
+  },
+  {
+   "id": "trade_policy",
+   "name": "Торговая политика",
+   "desc": "Пошлины и свобода торговли.",
+   "cooldown_days": 45,
+   "options": [
+    {
+     "id": "closed",
+     "name": "Закрытые границы",
+     "mods": {
+      "trade_pct": -10,
+      "defense_pct": 4
+     }
+    },
+    {
+     "id": "tariffs",
+     "name": "Пошлины",
+     "mods": {
+      "tax_pct": 3,
+      "trade_pct": -2
+     }
+    },
+    {
+     "id": "free",
+     "name": "Свободная торговля",
+     "mods": {
+      "trade_pct": 10,
+      "tax_pct": -2
+     }
+    }
+   ]
+  },
+  {
+   "id": "faith",
+   "name": "Вера",
+   "desc": "Отношение к чужим верованиям.",
+   "cooldown_days": 90,
+   "options": [
+    {
+     "id": "state",
+     "name": "Государственная вера",
+     "mods": {
+      "opinion": 2,
+      "heal_pct": 3
+     }
+    },
+    {
+     "id": "tolerant",
+     "name": "Терпимость",
+     "mods": {
+      "opinion": 1,
+      "xp_gain_pct": 2
+     }
+    }
+   ]
+  }
+ ]
+}

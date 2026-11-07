@@ -1,0 +1,461 @@
+{
+ "quests": [
+  {
+   "id": "mo_caravan",
+   "name": "Караван гильдии",
+   "category": "trade",
+   "giver": {
+    "org": "merchants_guild",
+    "min_rank": 0
+   },
+   "text": "{giver}: «Новичок, начни с малого: собери {count} железных слитков для каравана.»",
+   "steps": [
+    {
+     "type": "fetch",
+     "item": "iron_ingot",
+     "count": [
+      8,
+      16
+     ],
+     "text": "Собрать {count} × железа для каравана",
+     "scale": "level"
+    }
+   ],
+   "reward": {
+    "xp": 50,
+    "gold": 36,
+    "influence": {
+     "merchants_guild": 3
+    }
+   },
+   "weight": 10,
+   "cooldown": -1
+  },
+  {
+   "id": "mo_route",
+   "name": "Новый путь",
+   "category": "trade",
+   "giver": {
+    "org": "merchants_guild",
+    "min_rank": 1
+   },
+   "text": "{giver}: «Разведай торговый путь в {place} и вернись с рассказом.»",
+   "steps": [
+    {
+     "type": "reach",
+     "place": "{neighbor}",
+     "text": "Разведать маршрут"
+    },
+    {
+     "type": "talk",
+     "role": "steward",
+     "text": "Отчитаться управляющему"
+    }
+   ],
+   "reward": {
+    "xp": 95,
+    "gold": 70,
+    "influence": {
+     "merchants_guild": 6
+    }
+   },
+   "weight": 10,
+   "cooldown": 20
+  },
+  {
+   "id": "mo_monopoly",
+   "name": "Монополия",
+   "category": "trade",
+   "giver": {
+    "org": "merchants_guild",
+    "min_rank": 2
+   },
+   "text": "{giver}: «Хотите, чтобы соль шла через нас? Тогда принесите {count} золотых слитков в залог.»",
+   "steps": [
+    {
+     "type": "fetch",
+     "item": "gold_ingot",
+     "count": [
+      6,
+      12
+     ],
+     "text": "Внести залог: {count} × золотой слиток"
+    }
+   ],
+   "reward": {
+    "xp": 200,
+    "gold": 150,
+    "influence": {
+     "merchants_guild": 12
+    }
+   },
+   "weight": 8,
+   "cooldown": 40
+  },
+  {
+   "id": "kn_squire",
+   "name": "Оруженосец",
+   "category": "military",
+   "giver": {
+    "org": "knights_shield",
+    "min_rank": 0
+   },
+   "text": "{giver}: «Оруженосец, докажи отвагу: {count} врагов, и меч твой.»",
+   "steps": [
+    {
+     "type": "kill",
+     "mob": "hostile",
+     "count": [
+      8,
+      14
+     ],
+     "text": "Победить {count} × врагов",
+     "scale": "level"
+    }
+   ],
+   "reward": {
+    "xp": 70,
+    "gold": 40,
+    "influence": {
+     "knights_shield": 3
+    }
+   },
+   "weight": 10,
+   "cooldown": -1
+  },
+  {
+   "id": "kn_vigil",
+   "name": "Ночное бдение",
+   "category": "military",
+   "giver": {
+    "org": "knights_shield",
+    "min_rank": 1
+   },
+   "text": "{giver}: «Рыцарь проводит ночь в бдении. Подожди и подумай, чему служишь.»",
+   "steps": [
+    {
+     "type": "wait",
+     "days": 2,
+     "text": "Провести бдение"
+    },
+    {
+     "type": "kill",
+     "mob": "hostile",
+     "count": [
+      10,
+      16
+     ],
+     "text": "Победить {count} × врагов",
+     "scale": "level"
+    }
+   ],
+   "reward": {
+    "xp": 120,
+    "gold": 70,
+    "influence": {
+     "knights_shield": 6
+    }
+   },
+   "weight": 8,
+   "cooldown": 25
+  },
+  {
+   "id": "th_pickpocket",
+   "name": "Лёгкие пальцы",
+   "category": "crime",
+   "giver": {
+    "org": "thieves_guild",
+    "min_rank": 0
+   },
+   "text": "{giver}: «Принеси {count} золотых самородков - только чтобы никто не видел, откуда.»",
+   "steps": [
+    {
+     "type": "fetch",
+     "item": "gold_nugget",
+     "count": [
+      16,
+      32
+     ],
+     "text": "Принести {count} × золотых самородков",
+     "scale": "level"
+    }
+   ],
+   "reward": {
+    "xp": 60,
+    "gold": 40,
+    "influence": {
+     "thieves_guild": 3
+    }
+   },
+   "weight": 10,
+   "cooldown": -1
+  },
+  {
+   "id": "th_heist",
+   "name": "Большое дело",
+   "category": "crime",
+   "giver": {
+    "org": "thieves_guild",
+    "min_rank": 2
+   },
+   "text": "{giver}: «Есть дельце. Как возьмёмся?»",
+   "steps": [
+    {
+     "type": "choice",
+     "options": [
+      {
+       "id": "quiet",
+       "text": "Тихо, через крышу",
+       "flags": [
+        "heist:quiet"
+       ],
+       "mult": 1.2
+      },
+      {
+       "id": "loud",
+       "text": "Громко, через ворота",
+       "flags": [
+        "heist:loud"
+       ],
+       "mult": 1.6
+      },
+      {
+       "id": "sell",
+       "text": "Продать наводку страже",
+       "flags": [
+        "heist:betray"
+       ],
+       "mult": 0.6,
+       "rep": {
+        "watch": 4
+       }
+      }
+     ],
+     "text": "Выбрать способ ограбления"
+    },
+    {
+     "type": "fetch",
+     "item": "gold_ingot",
+     "count": [
+      3,
+      6
+     ],
+     "text": "Вынести {count} × золотой слиток"
+    }
+   ],
+   "reward": {
+    "xp": 180,
+    "gold": 140,
+    "influence": {
+     "thieves_guild": 10
+    }
+   },
+   "weight": 6,
+   "cooldown": 40
+  },
+  {
+   "id": "sm_ore",
+   "name": "Руда для горна",
+   "category": "trade",
+   "giver": {
+    "org": "smiths_guild",
+    "min_rank": 0
+   },
+   "text": "{giver}: «Горн остыл. Принеси {count} железной руды.»",
+   "steps": [
+    {
+     "type": "fetch",
+     "item": "raw_iron",
+     "count": [
+      16,
+      32
+     ],
+     "text": "Принести {count} × железной руды",
+     "scale": "level"
+    }
+   ],
+   "reward": {
+    "xp": 48,
+    "gold": 34,
+    "influence": {
+     "smiths_guild": 3
+    }
+   },
+   "weight": 10,
+   "cooldown": -1
+  },
+  {
+   "id": "sm_masterwork",
+   "name": "Шедевр мастера",
+   "category": "trade",
+   "giver": {
+    "org": "smiths_guild",
+    "min_rank": 2
+   },
+   "text": "{giver}: «Хочешь стать мастером? Принеси {count} железных слитков и угля - покажем, на что ты способен.»",
+   "steps": [
+    {
+     "type": "fetch",
+     "item": "iron_ingot",
+     "count": [
+      32,
+      48
+     ],
+     "text": "Принести {count} × железных слитков"
+    },
+    {
+     "type": "fetch",
+     "item": "coal",
+     "count": [
+      16,
+      32
+     ],
+     "text": "Принести {count} × угля"
+    }
+   ],
+   "reward": {
+    "xp": 190,
+    "gold": 110,
+    "influence": {
+     "smiths_guild": 10
+    }
+   },
+   "weight": 8,
+   "cooldown": 40
+  },
+  {
+   "id": "sc_books",
+   "name": "Редкие книги",
+   "category": "research",
+   "giver": {
+    "org": "scholars_order",
+    "min_rank": 0
+   },
+   "text": "{giver}: «Библиотеке нужны {count} книг. Не спрашивай, откуда.»",
+   "steps": [
+    {
+     "type": "fetch",
+     "item": "book",
+     "count": [
+      2,
+      5
+     ],
+     "text": "Принести {count} × книг",
+     "scale": "level"
+    }
+   ],
+   "reward": {
+    "xp": 60,
+    "gold": 40,
+    "influence": {
+     "scholars_order": 3
+    }
+   },
+   "weight": 10,
+   "cooldown": -1
+  },
+  {
+   "id": "sc_ruins",
+   "name": "Руины предтеч",
+   "category": "research",
+   "giver": {
+    "org": "scholars_order",
+    "min_rank": 1
+   },
+   "text": "{giver}: «В руинах ({place}) надписи. Срисуй их и вернись живым.»",
+   "steps": [
+    {
+     "type": "reach",
+     "place": "{neighbor}",
+     "text": "Добраться до руин"
+    },
+    {
+     "type": "kill",
+     "mob": "skeleton",
+     "count": [
+      6,
+      12
+     ],
+     "text": "Отбиться от {count} × скелетов",
+     "scale": "level"
+    }
+   ],
+   "reward": {
+    "xp": 130,
+    "gold": 80,
+    "influence": {
+     "scholars_order": 7
+    }
+   },
+   "weight": 8,
+   "cooldown": 25
+  },
+  {
+   "id": "wa_patrol",
+   "name": "Ночной дозор",
+   "category": "military",
+   "giver": {
+    "org": "night_watch",
+    "min_rank": 0
+   },
+   "text": "{giver}: «Дозор нужен каждую ночь. Побей {count} тварей за стеной.»",
+   "steps": [
+    {
+     "type": "kill",
+     "mob": "hostile",
+     "count": [
+      8,
+      16
+     ],
+     "text": "Победить {count} × врагов за стеной",
+     "scale": "level"
+    }
+   ],
+   "reward": {
+    "xp": 65,
+    "gold": 40,
+    "influence": {
+     "night_watch": 3
+    }
+   },
+   "weight": 10,
+   "cooldown": -1
+  },
+  {
+   "id": "wa_ranger",
+   "name": "Лазутчик за стеной",
+   "category": "military",
+   "giver": {
+    "org": "night_watch",
+    "min_rank": 1
+   },
+   "text": "{giver}: «Нужны вести из-за стены ({place}). Сходишь?»",
+   "steps": [
+    {
+     "type": "reach",
+     "place": "{neighbor}",
+     "text": "Выйти за стену"
+    },
+    {
+     "type": "kill",
+     "mob": "hostile",
+     "count": [
+      6,
+      10
+     ],
+     "text": "Вернуться, расчистив путь: {count} × врагов",
+     "scale": "level"
+    }
+   ],
+   "reward": {
+    "xp": 115,
+    "gold": 70,
+    "influence": {
+     "night_watch": 6
+    }
+   },
+   "weight": 8,
+   "cooldown": 25
+  }
+ ]
+}

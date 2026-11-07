@@ -1,0 +1,47 @@
+{
+ "id": "vassal_grain",
+ "weight": 3,
+ "who": "ruler",
+ "cooldown_years": 5,
+ "title": "Голодный год у вассалов",
+ "text": "Вассалы {realm} просят зерна из амбаров: урожай пал.",
+ "cond": {
+  "vassals": true
+ },
+ "options": [
+  {
+   "text": "Раздать зерно (-25 золота)",
+   "ai": 3,
+   "effects": [
+    {
+     "op": "gold",
+     "value": -25
+    },
+    {
+     "op": "opinion",
+     "who": "vassals",
+     "value": 15,
+     "years": 8,
+     "label": "Хлеб в голодный год"
+    },
+    {
+     "op": "trait",
+     "add": "generous"
+    }
+   ]
+  },
+  {
+   "text": "Отказать",
+   "ai": 2,
+   "effects": [
+    {
+     "op": "opinion",
+     "who": "vassals",
+     "value": -12,
+     "years": 8,
+     "label": "Отказали в хлебе"
+    }
+   ]
+  }
+ ]
+}

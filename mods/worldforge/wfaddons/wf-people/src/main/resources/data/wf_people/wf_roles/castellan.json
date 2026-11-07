@@ -1,0 +1,1 @@
+{"id": "castellan", "name": "Кастелян", "per": "county", "count": 1, "dialogue": "wf_people:castellan", "noble": true, "unlocks": ["garrison"], "council": {"attr": "stewardship", "effects": {"fort_days": 0.5, "unrest_pct": -1.0}}}

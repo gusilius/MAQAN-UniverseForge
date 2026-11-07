@@ -1,0 +1,1 @@
+package net.minecraft.client.player; public class LocalPlayer { public net.minecraft.client.multiplayer.ClientPacketListener connection; public double getX(){return 0;} public double getZ(){return 0;} public boolean hasPermissions(int n){return true;} public boolean isCreative(){return true;} }

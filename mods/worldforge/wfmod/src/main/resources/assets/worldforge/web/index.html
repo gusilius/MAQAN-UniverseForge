@@ -1,0 +1,888 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WorldForge: карта</title>
+<style>
+/* Оформление: структура и режимы как в картах Paradox (CK3), материалы как в интерфейсе Minecraft:
+   панель режимов - «хотбар», подсказки - как предметы, рамки со скосом, тень под текстом. */
+:root{
+  --bg:#0b0e14;
+  --stone:#2a2a2f;--stone2:#1d1d21;--hi:#5d5d66;--lo:#0c0c0e;
+  --gold:#f0c85a;--gold2:#a8842a;--tx:#ecebe4;--mut:#a6a8b3;--ok:#7be06a;
+  --font:"Minecraft","Press Start 2P",ui-monospace,"Cascadia Mono","SF Mono",Consolas,"Liberation Mono",monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--tx);font:13px/1.45 var(--font);overflow:hidden;-webkit-font-smoothing:none;font-smooth:never}
+.sh{text-shadow:1px 1px 0 #000}
+/* рамка со скосом: светлый верх-лево, тёмный низ-право */
+.bev{background:var(--stone);border:2px solid;border-color:var(--hi) var(--lo) var(--lo) var(--hi);box-shadow:0 0 0 2px #000,0 6px 18px rgba(0,0,0,.55)}
+.bev.in{background:var(--stone2);border-color:var(--lo) var(--hi) var(--hi) var(--lo);box-shadow:none}
+
+#view{position:absolute;inset:0;cursor:grab;touch-action:none}
+#view.drag{cursor:grabbing}
+canvas#cv{position:absolute;inset:0;width:100%;height:100%;image-rendering:auto}
+
+/* верх слева: табличка с названием мира */
+#plate{position:absolute;left:14px;top:14px;padding:8px 16px 8px 12px;z-index:6;display:flex;align-items:center;gap:10px;max-width:46vw}
+#plate .nm{font-size:15px;color:var(--gold);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#plate .sb{font-size:11px;color:var(--mut)}
+#plate canvas{image-rendering:pixelated;width:28px;height:28px;flex:none}
+
+/* верх справа: поиск и кнопки */
+#tools{position:absolute;right:14px;top:14px;z-index:6;display:flex;gap:6px;align-items:center}
+#search{background:var(--stone2);color:var(--tx);border:2px solid;border-color:var(--lo) var(--hi) var(--hi) var(--lo);padding:7px 10px;font:inherit;width:220px;outline:none;box-shadow:0 0 0 2px #000}
+#search:focus{border-color:#000 var(--gold) var(--gold) #000}
+.tb{width:38px;height:38px;display:grid;place-items:center;cursor:pointer;background:var(--stone);border:2px solid;border-color:var(--hi) var(--lo) var(--lo) var(--hi);box-shadow:0 0 0 2px #000;color:var(--tx);padding:0;position:relative}
+.tb:hover{background:#3a3a42}
+.tb:active,.tb.on{background:var(--stone2);border-color:var(--lo) var(--hi) var(--hi) var(--lo)}
+.tb.on{color:var(--gold)}
+.tb svg{width:20px;height:20px;shape-rendering:crispEdges;fill:currentColor}
+.tb[data-tip]:hover::after{content:attr(data-tip);position:absolute;top:46px;right:0;white-space:nowrap;background:rgba(16,0,16,.95);border:2px solid #2a0a60;padding:3px 7px;color:#fff;font-size:12px;z-index:20;text-shadow:1px 1px 0 #000;pointer-events:none}
+
+/* низ по центру: «хотбар» режимов карты */
+#hotbar{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);z-index:6;display:flex;gap:4px;padding:5px;max-width:96vw;overflow-x:auto}
+.slot{width:54px;height:54px;flex:none;position:relative;cursor:pointer;background:var(--stone2);border:2px solid;border-color:var(--lo) var(--hi) var(--hi) var(--lo);display:grid;place-items:center;padding:0;color:var(--tx);font:inherit}
+.slot canvas{width:32px;height:32px;image-rendering:pixelated}
+.slot .n{position:absolute;left:3px;top:1px;font-size:10px;color:var(--mut);text-shadow:1px 1px 0 #000}
+.slot:hover{background:#2c2c34}
+.slot.on{outline:3px solid #fff;outline-offset:1px;background:#33333c;z-index:2}
+.slot.on::after{content:"";position:absolute;inset:-5px;border:2px solid #000;pointer-events:none}
+#modeName{position:absolute;left:50%;bottom:92px;transform:translateX(-50%);z-index:6;background:rgba(16,0,16,.92);border:2px solid #2a0a60;padding:3px 12px;color:#fff;white-space:nowrap;text-shadow:1px 1px 0 #000;pointer-events:none;opacity:0;transition:opacity .25s}
+#modeName.show{opacity:1}
+
+/* низ слева: координаты, низ справа: масштаб */
+#coords:empty{display:none}
+#coords{position:absolute;left:14px;bottom:16px;z-index:6;padding:5px 10px;font-size:12px;color:var(--mut)}
+#coords b{color:var(--tx);font-weight:normal}
+#scale{position:absolute;right:14px;bottom:16px;z-index:6;padding:6px 10px 5px;font-size:11px;color:var(--mut);text-align:right;min-width:90px}
+#scale i{display:block;height:6px;border:2px solid var(--tx);border-top:0;margin:3px 0 0 auto}
+#compass{position:absolute;right:14px;bottom:70px;z-index:5;width:54px;height:54px;image-rendering:pixelated;opacity:.9}
+
+/* подсказка при наведении: как у предмета Minecraft */
+#tip{position:absolute;pointer-events:none;background:rgba(16,0,16,.95);border:2px solid #2a0a60;box-shadow:0 0 0 2px #100010;padding:6px 10px;z-index:30;display:none;max-width:320px;font-size:12px}
+#tip .h{color:#fff;font-size:13px;margin-bottom:2px}
+#tip .t{color:#aaa}
+#tip .t b{color:#fff;font-weight:normal}
+.cd{display:inline-block;width:9px;height:9px;border:1px solid #000;margin-right:5px;vertical-align:-1px}
+
+/* карточка титула (слева) */
+
+#drawer .hd{display:flex;gap:12px;padding:12px 12px 10px;align-items:center;border-bottom:2px solid #000}
+#drawer .hd svg{width:44px;height:52px;flex:none;filter:drop-shadow(2px 2px 0 #000)}
+#drawer h2{margin:0;font-size:16px;color:var(--gold);font-weight:normal;line-height:1.2}
+#drawer .sub{color:var(--mut);font-size:11px;margin-top:3px}
+#drawer .bd{padding:8px 12px 12px}
+#drawer .sec{color:var(--gold2);font-size:11px;margin:10px 0 3px;text-transform:uppercase;letter-spacing:.08em}
+#drawer .row{display:flex;gap:8px;align-items:center;padding:2px 0}
+#drawer .k{color:var(--mut);width:104px;flex:none;font-size:11px}
+#drawer a{color:var(--tx);cursor:pointer;text-decoration:underline dotted}
+#drawer a:hover{color:var(--gold)}
+#drawer .tree{border-left:2px solid #000;margin-left:5px;padding-left:10px}
+#drawer .btns{display:flex;gap:6px;margin-top:12px;flex-wrap:wrap}
+.btn{background:var(--stone);border:2px solid;border-color:var(--hi) var(--lo) var(--lo) var(--hi);box-shadow:0 0 0 2px #000;color:var(--tx);font:inherit;font-size:11px;padding:5px 9px;cursor:pointer}
+.btn:hover{background:#3a3a42;color:var(--gold)}
+.btn:active{background:var(--stone2);border-color:var(--lo) var(--hi) var(--hi) var(--lo)}
+
+/* список титулов (слева, под карточкой скрывается) */
+#list{padding:2px}
+#list .hd{color:var(--gold);padding:4px 6px 6px;border-bottom:2px solid #000;margin-bottom:4px}
+#list .it{display:flex;gap:8px;align-items:center;padding:3px 6px;cursor:pointer}
+#list .it:hover{background:#3a3a42}
+#list .sw{width:12px;height:12px;border:1px solid #000;flex:none}
+#list .ar{margin-left:auto;color:var(--mut);font-size:11px}
+
+/* слои (справа) */
+#layers{padding:2px}
+#layers h3{margin:0 0 6px;font-size:12px;color:var(--gold);font-weight:normal;text-transform:uppercase;letter-spacing:.08em}
+.tg{display:flex;align-items:center;gap:8px;margin:5px 0;cursor:pointer;user-select:none}
+.tg .box{width:16px;height:16px;background:var(--stone2);border:2px solid;border-color:var(--lo) var(--hi) var(--hi) var(--lo);display:grid;place-items:center;flex:none}
+.tg input{display:none}
+.tg input:checked+.box::after{content:"";width:8px;height:8px;background:var(--ok)}
+.rg{margin:8px 0 2px}
+.rg label{display:flex;justify-content:space-between;color:var(--mut);font-size:11px}
+input[type=range]{width:100%;accent-color:var(--gold);margin:3px 0}
+#help{position:absolute;inset:0;z-index:40;display:none;place-items:center;background:rgba(0,0,0,.55)}
+#help .bev{padding:16px 22px;max-width:520px}
+#help h3{margin:0 0 8px;color:var(--gold);font-weight:normal}
+#help kbd{background:var(--stone2);border:2px solid;border-color:var(--lo) var(--hi) var(--hi) var(--lo);padding:0 6px;margin-right:6px}
+#toast{position:absolute;left:50%;top:18px;transform:translateX(-50%);z-index:50;background:rgba(16,0,16,.95);border:2px solid #2a0a60;padding:5px 12px;display:none}
+/* обзорная миниатюра с рамкой вида (как обзор в CK3) */
+#ovw{position:absolute;right:14px;bottom:56px;z-index:6;padding:5px;display:block}
+#ovw canvas{display:block;image-rendering:auto;cursor:pointer;border:2px solid;border-color:var(--lo) var(--hi) var(--hi) var(--lo)}
+#compass{right:auto;bottom:auto;left:auto}
+/* легенда режима */
+#legend{position:absolute;left:14px;bottom:58px;width:230px;max-height:34vh;overflow:auto;z-index:5;display:none;padding:8px 10px}
+#legend .hd{color:var(--gold);font-size:12px;text-transform:uppercase;letter-spacing:.08em;margin-bottom:5px;padding-bottom:4px;border-bottom:2px solid #000}
+#legend .it{display:flex;align-items:center;gap:7px;padding:2px 0;cursor:pointer;font-size:12px}
+#legend .it:hover{color:var(--gold)}
+#legend .sw{width:14px;height:14px;border:2px solid #000;flex:none}
+#legend .ar{margin-left:auto;color:var(--mut);font-size:11px}
+
+/* боковая панель: рейка вкладок справа и выезжающий ящик слева от неё */
+#rail{position:absolute;right:14px;top:66px;z-index:8;display:flex;flex-direction:column;gap:6px}
+#rail .tb{width:40px;height:40px}
+#rail .tb.on{background:var(--stone2);color:var(--gold);box-shadow:0 0 0 2px #000,-4px 0 0 2px var(--gold2)}
+#drawer{position:absolute;right:64px;top:66px;width:350px;bottom:285px;z-index:7;display:flex;flex-direction:column;transform:translateX(calc(100% + 80px));opacity:0;pointer-events:none;transition:transform .22s ease,opacity .18s}
+#drawer.open{transform:none;opacity:1;pointer-events:auto}
+#drawer .dh{display:flex;align-items:center;padding:7px 10px 6px;border-bottom:2px solid #000;color:var(--gold);font-size:13px;text-transform:uppercase;letter-spacing:.08em}
+#drawer .dh span{flex:1}
+#drawer .pane{display:none;overflow:auto;padding:10px 12px 14px;flex:1;min-height:0}
+#drawer .pane.on{display:block}
+.empty{color:var(--mut);padding:14px 2px;line-height:1.5}
+.chipl{display:inline-block;padding:0 6px;border:2px solid #000;background:var(--stone2);color:var(--mut);font-size:10px;margin-left:6px;vertical-align:1px}
+.chipl.op{color:var(--gold)}
+.tr{padding:2px 0}
+.tr .nm{cursor:pointer}
+.tr .nm:hover{color:var(--gold)}
+.tr.cur>.nm{color:var(--gold)}
+.tr .ch{border-left:2px solid #000;margin-left:6px;padding-left:10px}
+.act{padding:6px 0;border-bottom:2px solid #000}
+.act .hn{color:var(--mut);font-size:11px;margin-top:2px}
+.kv{display:flex;gap:8px;padding:2px 0}
+.kv .k{color:var(--mut);width:110px;flex:none;font-size:11px}
+.kv .v{word-break:break-word}
+/* разделители групп в хотбаре */
+.sep{width:6px;flex:none;align-self:stretch;background:linear-gradient(90deg,#000 0 2px,var(--hi) 2px 4px,transparent 4px);opacity:.7;margin:0 2px}
+.slot .g{position:absolute;right:3px;bottom:1px;font-size:9px;color:var(--gold);text-shadow:1px 1px 0 #000}
+@media (max-width:760px){#search{width:130px}#drawer{width:calc(100% - 130px);bottom:130px}#ovw{display:none}#legend{display:none!important}#coords{display:none}.slot{width:44px;height:44px}.slot canvas{width:26px;height:26px}#modeName{bottom:80px}}
+.ph{display:flex;gap:12px;align-items:center;padding-bottom:8px;border-bottom:2px solid #000}
+.ph svg{width:44px;height:52px;flex:none;filter:drop-shadow(2px 2px 0 #000)}
+.ph h2{margin:0;font-size:16px;color:var(--gold);font-weight:normal;line-height:1.2}
+.ph .sub{color:var(--mut);font-size:11px;margin-top:3px}
+#drawer .sec{color:var(--gold2);font-size:11px;margin:12px 0 3px;text-transform:uppercase;letter-spacing:.08em}
+#drawer a{color:var(--tx);cursor:pointer;text-decoration:underline dotted}
+#drawer a:hover{color:var(--gold)}
+.mk{display:flex;gap:8px;align-items:center;padding:3px 2px;cursor:pointer}
+.mk:hover{background:#3a3a42}
+.mk .co{margin-left:auto;color:var(--mut);font-size:11px}
+</style>
+</head>
+<body>
+<div id="view"><canvas id="cv"></canvas></div>
+
+<div id="plate" class="bev sh"><canvas id="plateIcon" width="12" height="12"></canvas><div><div class="nm" id="ttl">WorldForge</div><div class="sb" id="sub">карта мира</div></div></div>
+
+<div id="tools">
+  <input id="search" placeholder="Поиск: титул, государство, метка" autocomplete="off">
+  <button class="tb" id="bLayers" data-tip="Слои (L)"><svg viewBox="0 0 10 10"><path d="M5 1l5 2.5L5 6 0 3.5zM1 5.2l4 2 4-2 1 .6L5 8.2 0 5.8zM1 7.4l4 2 4-2 1 .6L5 10.4 0 8z"/></svg></button>
+  <button class="tb" id="bList" data-tip="Список титулов (G)"><svg viewBox="0 0 10 10"><path d="M0 1h2v2H0zM3 1h7v2H3zM0 4h2v2H0zM3 4h7v2H3zM0 7h2v2H0zM3 7h7v2H3z"/></svg></button>
+  <button class="tb" id="bRuler" data-tip="Линейка (R)"><svg viewBox="0 0 10 10"><path d="M0 6l6-6 4 4-6 6zM2 6l1 1 1-1-1-1zM4 4l1 1 1-1-1-1z" fill-rule="evenodd"/></svg></button>
+  <button class="tb" id="bPng" data-tip="Сохранить PNG"><svg viewBox="0 0 10 10"><path d="M4 0h2v4h2L5 7 2 4h2zM0 8h10v2H0z"/></svg></button>
+  <button class="tb" id="bHelp" data-tip="Клавиши (?)"><svg viewBox="0 0 10 10"><path d="M3 0h4v1h1v3H7v1H5v1h2v1H4V5h1V4h2V1H3v1H1V1h2zM4 8h2v2H4z"/></svg></button>
+</div>
+
+<div id="rail"></div>
+<div id="drawer" class="bev"><div class="dh"><span id="dTitle">Титул</span><button id="cardX" class="btn" style="padding:0 8px">×</button></div>
+  <div class="pane" id="pTitle"><div id="cardC"></div></div>
+  <div class="pane" id="pRealm"></div>
+  <div class="pane" id="pDip"></div>
+  <div class="pane" id="pList"><div id="list"></div></div>
+  <div class="pane" id="pLayers"><div id="layers"><h3>Слои карты</h3>
+  <label class="tg"><input type="checkbox" data-k="labels" checked><span class="box"></span>Названия</label>
+  <label class="tg"><input type="checkbox" data-k="prov"><span class="box"></span>Границы провинций</label>
+  <label class="tg"><input type="checkbox" data-k="relief" checked><span class="box"></span>Рельеф под заливкой</label>
+  <label class="tg"><input type="checkbox" data-k="markers" checked><span class="box"></span>Метки</label>
+  <label class="tg"><input type="checkbox" data-k="players" checked><span class="box"></span>Игроки</label>
+  <label class="tg"><input type="checkbox" data-k="grid"><span class="box"></span>Сетка координат</label>
+  <label class="tg"><input type="checkbox" data-k="capitals"><span class="box"></span>Столицы</label>
+  <div class="rg"><label><span>Прозрачность заливки</span><span id="fillV">100%</span></label><input type="range" id="fillA" min="0" max="100" value="100"></div>
+  <div class="rg"><label><span>Размер подписей</span><span id="lblV">100%</span></label><input type="range" id="lblS" min="60" max="160" value="100"></div></div></div>
+  <div class="pane" id="pMarks"></div>
+</div>
+<div id="tip"></div>
+
+<div id="ovw" class="bev"><canvas id="ov"></canvas></div>
+<div id="legend" class="bev sh"></div>
+<div id="modeName" class="sh"></div>
+<div id="hotbar" class="bev in"></div>
+<div id="coords" class="bev sh"></div>
+<div id="scale" class="bev sh" style="bottom:16px"><span id="scaleT"></span><i id="scaleB"></i></div>
+<div id="toast" class="sh"></div>
+<div id="help" onclick="this.style.display='none'"><div class="bev sh"><h3>Управление</h3>
+<div><kbd>1</kbd>…<kbd>9</kbd> режим карты &nbsp; <kbd>F</kbd> вписать карту</div>
+<div><kbd>L</kbd> слои &nbsp; <kbd>G</kbd> список &nbsp; <kbd>R</kbd> линейка</div>
+<div><kbd>ЛКМ</kbd> выбрать титул &nbsp; перетаскивание - двигать</div>
+<div><kbd>Колесо</kbd> масштаб &nbsp; <kbd>+</kbd><kbd>-</kbd> масштаб</div>
+<div><kbd>Esc</kbd> закрыть карточку</div>
+<div style="color:var(--mut);margin-top:8px">Подписи крупных держав видны издалека, мелких - при приближении.</div></div></div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const view = $("view"), cv = $("cv"), ctx = cv.getContext("2d");
+let info, titles = {}, tlist = [], realms = [], realmIdx = {}, prov, terrainData, W, H, maxId = 0;
+let terrainCv = null, fillCv = null, provCv = null;
+let mode = "terrain", lab = null, version = -1;
+let cam = {x: 0, y: 0, z: 1}, fitZ = 1, sel = null, hover = null, markers = [], players = [];
+let layers = {labels: true, prov: false, relief: true, markers: true, players: true, grid: false, capitals: false};
+let fillAlpha = 1, lblScale = 1, ovl = null;
+const TYPE_ICON = {city: "🏙", castle: "🏰", port: "⚓", ruin: "🏚", camp: "⛺", temple: "⛪", mine: "⛏", other: "📍"};
+const EDGE = [30, 20, 12];
+const initHash = location.hash;
+
+async function jget(u) { const r = await fetch(u); if (!r.ok) throw new Error(u + " " + r.status); return r.json(); }
+async function bget(u) { const r = await fetch(u); if (!r.ok) throw new Error(u + " " + r.status); return new Uint8Array(await r.arrayBuffer()); }
+function loadImg(u) { return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = u; }); }
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c])); }
+function hex(c) { return [parseInt(c.substr(1, 2), 16), parseInt(c.substr(3, 2), 16), parseInt(c.substr(5, 2), 16)]; }
+function toast(t) { const e = $("toast"); e.textContent = t; e.style.display = "block"; clearTimeout(toast.h); toast.h = setTimeout(() => e.style.display = "none", 1800); }
+
+// ---------- пиксельные значки режимов (12x12) ----------
+const PAL = {k: "#14100c", w: "#e8e2d0", g: "#8d8d96", d: "#55555e", G: "#4f9d3a", L: "#7ed05a", b: "#8a5a2b", B: "#5a98ff", y: "#f0c85a", Y: "#b8902a", r: "#c4413a", R: "#8f2a26", o: "#e08a2e", p: "#a35bd8", s: "#d9c28a"};
+const ICONS = {
+  terrain: ["............", ".........yy.", "........yyyy", "...w.....yy.", "..wgw.......", "..wggw..w...", ".wggggwwgw..", ".gggggdgggw.", "GLGGGGGGGGGG", "GGGGGGGGGGGG", "bGGGGGGGGGGb", "............"],
+  t0: ["............", ".....kk.....", "....krrk....", "...krrrrk...", "..krrrrrrk..", ".krrrrrrrrk.", "..kssssssk..", "..kssbbssk..", "..kssbbssk..", "..kkkkkkkk..", "............", "............"],
+  t1: ["............", "..k.k..k.k..", "..kgkkkkgk..", "..kggggggk..", "...kgggggk..", "...kgkkggk..", "...kgkkggk..", "...kgggggk..", "..kkkkkkkkk.", "............", "............", "............"],
+  t2: ["............", "..kkkkkkkk..", ".kBBBkRRRRk.", ".kBBBkRRRRk.", ".kBBBkRRRRk.", ".kkkkkkkkkk.", ".kRRRRkBBBk.", "..kRRRkBBk..", "...kRRkBk...", "....kkkk....", "............", "............"],
+  t3: ["............", "..k..kk..k..", ".kyk.kyk.kyk", ".kyykkyykyyk", ".kyyyyyyyyk.", ".kyyyyyyyyk.", ".kYYYYYYYYk.", ".kkkkkkkkkk.", "............", "............", "............", "............"],
+  t4: ["....kyyk....", "...kyyyyk...", "..k.kyyk.k..", ".kyk.kk.kyk.", ".kyykyykyyk.", ".kyyyyyyyyk.", ".kyrykkyryk.", ".kyyyyyyyyk.", ".kYYYYYYYYk.", ".kkkkkkkkkk.", "............", "............"],
+  prop: ["............", "..kkkkkkkk..", ".kBBBBBBBBk.", ".kBBBBBBBBk.", ".kBBByyBBBk.", ".kBBByyBBBk.", ".kBBBBBBBBk.", ".kBBBBBBBBk.", "..kBBBBBBk..", "...kBBBBk...", "....kBBk....", ".....kk....."],
+  dip: ["............", ".kk......kk.", ".kBBk..kRRk.", ".kBBkyykRRk.", ".kBBBkkRRRk.", "..kBBkRRk...", "...kkyykk...", "....kyyk....", ".....kk.....", "............", "............", "............"],
+  realms: ["............", ".kk.........", ".krkkkkkkk..", ".krrrrrrrrk.", ".krrBrBrrrk.", ".krrrrrrrrk.", ".krrrrrrrk..", ".kkkkkkkk...", ".kb.........", ".kb.........", ".kb.........", ".kk........."]
+};
+function iconCanvas(key, size) {
+  const rows = ICONS[key] || ICONS.t0, c = document.createElement("canvas"); c.width = 12; c.height = 12; const x = c.getContext("2d");
+  rows.forEach((row, j) => { for (let i = 0; i < 12; i++) { const ch = row[i]; if (ch && ch !== "." && PAL[ch]) { x.fillStyle = PAL[ch]; x.fillRect(i, j, 1, 1); } } });
+  return c;
+}
+function drawIconInto(cnv, key) { const x = cnv.getContext("2d"); x.clearRect(0, 0, 12, 12); x.drawImage(iconCanvas(key), 0, 0); }
+function iconKey(k) { if (k === "terrain" || k === "realms") return k; if (k === "diplo") return "dip"; if (isProp(k)) return "prop"; const i = (window.tiers || []).findIndex(t => t.key === k); return "t" + Math.min(4, Math.max(0, i)); }
+
+// ---------- геральдика: щит из цвета титула ----------
+function hashStr(s) { let h = 2166136261; for (const c of String(s)) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return h >>> 0; }
+function shade(c, k) { const [r, g, b] = hex(c); const f = v => Math.max(0, Math.min(255, Math.round(v * k))); return "#" + [f(r), f(g), f(b)].map(v => v.toString(16).padStart(2, "0")).join(""); }
+let shieldN = 0;
+function shield(color, seed) {
+  const h = hashStr(seed), a = color, b = (h & 1) ? shade(color, .5) : "#e8e2d0", ch = (h >> 1) % 6, id = "s" + h + "_" + (shieldN++);
+  const p = ["", "<rect x='0' y='16' width='40' height='12' fill='" + b + "'/>", "<path d='M0 0h40v8L0 34z' fill='" + b + "'/>", "<rect x='16' y='0' width='8' height='60' fill='" + b + "'/><rect x='0' y='14' width='40' height='8' fill='" + b + "'/>",
+    "<path d='M0 36L20 18l20 18v10L20 28 0 46z' fill='" + b + "'/>", "<rect x='20' y='0' width='20' height='60' fill='" + b + "'/>"][ch];
+  return "<svg viewBox='0 0 40 48' shape-rendering='crispEdges'><defs><clipPath id='" + id + "'><path d='M2 2h36v24c0 12-10 18-18 22C12 44 2 38 2 26z'/></clipPath></defs>" +
+    "<path d='M0 0h40v26c0 13-10 19-20 22C10 45 0 39 0 26z' fill='#000'/><g clip-path='url(#" + id + ")'><rect width='40' height='48' fill='" + a + "'/>" + p + "</g></svg>";
+}
+
+// ---------- загрузка ----------
+async function loadAll() {
+  info = await jget("api/info");
+  W = info.w; H = info.h;
+  $("ttl").textContent = info.name; $("sub").textContent = W + "×" + H + " px · " + Math.round(W * info.bpp / 1000) + "×" + Math.round(H * info.bpp / 1000) + " км";
+  document.title = "WorldForge: " + info.name;
+  const [tj, rj, pb, img] = await Promise.all([jget("api/titles.json"), jget("api/realms.json"), bget("api/provinces.bin"), loadImg("api/terrain.png?v=" + info.version)]);
+  prov = new Uint16Array(pb.buffer, pb.byteOffset, W * H);
+  titles = {}; tlist = tj.titles; maxId = 0; tj.titles.forEach(t => { titles[t.id] = t; if (t.id > maxId) maxId = t.id; });
+  window.tiers = tj.tiers; propCache = {}; Object.keys(itemCache).forEach(k => delete itemCache[k]);
+  realms = rj.realms; realmIdx = {}; realms.forEach((r, i) => realmIdx[r.id] = i + 1);
+  window.relTypes = rj.relation_types || {}; window.propDefs = rj.prop_defs || {};
+  try { actionsList = await jget("api/actions.json"); } catch (e) { actionsList = []; }
+  terrainCv = document.createElement("canvas"); terrainCv.width = W; terrainCv.height = H;
+  const x = terrainCv.getContext("2d"); x.drawImage(img, 0, 0); terrainData = x.getImageData(0, 0, W, H).data;
+  version = info.version; rl = null; provCv = null; statsP = null; keyIdx = null;
+  buildHotbar();
+  closeCardOnly();
+  setMode(mode in modeKeys() ? mode : "terrain", true);
+  loadDyn();
+}
+const PROP_NAMES = {culture: "Культуры", religion: "Религии", faith: "Религии", terrain: "Ландшафт", race: "Народы", people: "Народы", house: "Дома", dynasty: "Династии", development: "Развитие", climate: "Климат"};
+function propKeys() {
+  const ks = {}, add = p => { for (const k in p) if (k !== "allies" && k !== "enemies" && p[k] !== "" && p[k] != null && typeof p[k] !== "object") ks[k] = 1; };
+  (tlist || []).forEach(t => add(t.props || {})); (realms || []).forEach(r => add(r.props || {}));
+  return Object.keys(ks).sort();
+}
+const isRealmish = m => m === "realms" || m === "diplo";
+// ---------- дипломатия: отношения государств к выбранному (то же, что api/Diplomacy.java) ----------
+const REL = {self: ["Выбранное", "#f0c85a"], overlord: ["Сюзерены", "#b06be0"], subject: ["Подчинённые", "#4aa8ff"], sibling: ["Вассалы того же сюзерена", "#86c9e8"],
+  ally: ["Союзники", "#4fcf5a"], enemy: ["Враги", "#e04a4a"], neighbor: ["Соседи", "#b8b8c4"], none: ["Прочие", "#55555e"]};
+let dipFocus = null, adjCache = null;
+function realmAdj() {
+  if (adjCache && adjCache.v === version) return adjCache.a;
+  const lut = realmLut(), a = {};
+  tlist.forEach(t => { if (t.tier !== 0) return; const ra = lut[t.id]; if (!ra) return; (t.neighbors || []).forEach(n => { const rb = lut[n]; if (rb && rb !== ra) { (a[ra] = a[ra] || new Set()).add(rb); (a[rb] = a[rb] || new Set()).add(ra); } }); });
+  adjCache = {v: version, a}; return a;
+}
+function idList(r, k) { const v = (r.props || {})[k]; return v == null ? [] : String(v).split(/[,;\s]+/).filter(Boolean); }
+function realmById(id) { return id && realmIdx[id] ? realms[realmIdx[id] - 1] : null; }
+function above(top, low) { let g = 0; for (let c = realmById(low.overlord); c && g++ < 64; c = realmById(c.overlord)) if (c === top) return true; return false; }
+function relOf(f, o, adj) {
+  if (!f || !o) return "none"; if (f === o) return "self";
+  if (idList(f, "enemies").includes(o.id) || idList(o, "enemies").includes(f.id)) return "enemy";
+  if (idList(f, "allies").includes(o.id) || idList(o, "allies").includes(f.id)) return "ally";
+  if (above(o, f)) return "overlord"; if (above(f, o)) return "subject";
+  if (f.overlord && f.overlord === o.overlord) return "sibling";
+  const n = adj[realmIdx[f.id]]; if (n && n.has(realmIdx[o.id])) return "neighbor"; return "none";
+}
+function modeKeys() { const o = {terrain: 1}; (window.tiers || []).forEach(t => o[t.key] = 1); o.realms = 1; o.diplo = 1; propKeys().forEach(k => o["p:" + k] = 1); return o; }
+const isProp = m => m.startsWith("p:");
+// значение свойства с наследованием вверх по иерархии (барон -> граф -> герцог ...)
+let propCache = {};
+function propDefName(k) { const d = (window.propDefs || {})[k]; return d && d.name ? String(d.name) : null; }
+function propInfo(key) {
+  if (propCache[key] && propCache[key].v === version) return propCache[key];
+  const vals = [], idx = {}, lut = new Int32Array(maxId + 1), cnt = [0], rlut = realmLut();
+  tlist.forEach(p => {
+    if (p.tier !== 0) return; let cur = p.id, g = 0, val = null;
+    while (cur && titles[cur] && g++ < 32) { const pv = (titles[cur].props || {})[key]; if (pv !== undefined && pv !== null && pv !== "" && typeof pv !== "object") { val = String(pv); break; } cur = titles[cur].parent; }
+    if (val === null) { const rr = rlut[p.id] ? realms[rlut[p.id] - 1] : null, pv = rr && (rr.props || {})[key]; if (pv !== undefined && pv !== null && pv !== "" && typeof pv !== "object") val = String(pv); }
+    if (val === null) return;
+    if (!(val in idx)) { vals.push(val); idx[val] = vals.length; cnt[vals.length] = 0; }
+    lut[p.id] = idx[val]; cnt[idx[val]] += p.area_blocks || 1;
+  });
+  const order = vals.map((v, i) => i).sort((a, b) => hashStr(key + ":" + vals[a]) - hashStr(key + ":" + vals[b])), cols = new Array(vals.length);
+  order.forEach((vi, k) => { cols[vi] = hsl((k * 137.508 + hashStr(key) % 360) % 360, 58 + (k % 3) * 8, 48 + (k % 2) * 8); });
+  const def = (window.propDefs || {})[key];
+  if (def && Array.isArray(def.order)) {                                  // порядок значений из prop_defs идёт первым
+    const pre = def.order.map(String).filter(v => v in idx), nv = pre.concat(vals.filter(v => !pre.includes(v))), remap = [0];
+    vals.forEach((v, i) => remap[i + 1] = nv.indexOf(v) + 1);
+    for (let i = 0; i < lut.length; i++) if (lut[i]) lut[i] = remap[lut[i]];
+    const oc = cnt.slice(), ocol = cols.slice(), ov = vals.slice();
+    vals.length = 0; nv.forEach((v, i) => { vals.push(v); cnt[i + 1] = oc[ov.indexOf(v) + 1]; cols[i] = ocol[ov.indexOf(v)]; });
+  }
+  if (def && def.colors) vals.forEach((v, i) => { const c = def.colors[v]; if (/^#[0-9a-fA-F]{6}$/.test(c || "")) cols[i] = c.toLowerCase(); });
+  return propCache[key] = {v: version, vals, lut, cols, cnt};
+}
+function hsl(h, s, l) { s /= 100; l /= 100; const a = s * Math.min(l, 1 - l), f = n => { const k = (n + h / 30) % 12; return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); }; return "#" + [f(0), f(8), f(4)].map(x => Math.round(x * 255).toString(16).padStart(2, "0")).join(""); }
+function modeName(k) { if (k === "terrain") return "Рельеф"; if (k === "realms") return "Государства"; if (k === "diplo") return "Дипломатия"; if (isProp(k)) return propDefName(k.slice(2)) || PROP_NAMES[k.slice(2)] || k.slice(2); const t = tiers.find(t => t.key === k); return t ? t.name : k; }
+function buildHotbar() {
+  const box = $("hotbar"); box.innerHTML = "";
+  let prevG = null;
+  Object.keys(modeKeys()).forEach((k, i) => {
+    const g = k === "terrain" ? 0 : isProp(k) ? 3 : k === "realms" || k === "diplo" ? 2 : 1;
+    if (prevG !== null && g !== prevG) { const sp = document.createElement("div"); sp.className = "sep"; box.appendChild(sp); } prevG = g;
+    const b = document.createElement("button"); b.className = "slot"; b.dataset.k = k;
+    const c = document.createElement("canvas"); c.width = 12; c.height = 12; drawIconInto(c, iconKey(k)); b.appendChild(c);
+    const n = document.createElement("span"); n.className = "n"; n.textContent = i + 1; b.appendChild(n);
+    if (isProp(k)) { const gl = document.createElement("span"); gl.className = "g"; gl.textContent = modeName(k).slice(0, 3); b.appendChild(gl); }
+    b.title = modeName(k); b.onclick = () => setMode(k); box.appendChild(b);
+  });
+}
+
+// ---------- метки: id титула нужного уровня или номер государства ----------
+let rl = null;
+function realmLut() {
+  const holder = {}, keyOf = {}; tlist.forEach(t => keyOf[t.key] = t);
+  realms.forEach((r, i) => r.titles.forEach(k => { const t = keyOf[k]; if (t) holder[t.id] = i + 1; }));
+  const lut = new Int32Array(maxId + 1);
+  tlist.forEach(p => { if (p.tier !== 0) return; let cur = p.id, g = 0; while (cur && titles[cur] && g++ < 32) { if (holder[cur]) { lut[p.id] = holder[cur]; break; } cur = titles[cur].parent; } });
+  return lut;
+}
+function tierLut(ti) {
+  const lut = new Int32Array(maxId + 1);
+  tlist.forEach(p => { if (p.tier !== 0) return; let cur = p.id, g = 0; while (cur && titles[cur] && titles[cur].tier < ti && g++ < 16) cur = titles[cur].parent; if (cur && titles[cur] && titles[cur].tier === ti) lut[p.id] = cur; });
+  return lut;
+}
+function topOfRealm() { const n = realms.length + 1, t = new Int32Array(n); for (let i = 1; i < n; i++) { let c = i, g = 0; while (realms[c - 1].overlord && realmIdx[realms[c - 1].overlord] && g++ < 32) c = realmIdx[realms[c - 1].overlord]; t[i] = c; } return t; }
+function lutFor(m) { if (isProp(m)) return propInfo(m.slice(2)).lut; return m === "realms" || m === "diplo" ? realmLut() : tierLut(tiers.findIndex(t => t.key === m)); }
+function applyLut(l) { const a = new Int32Array(W * H); for (let i = 0; i < a.length; i++) { const p = prov[i]; a[i] = p && p < l.length ? l[p] : 0; } return a; }
+function labelsFor(m) { return applyLut(lutFor(m)); }
+function edges(a, thick) {
+  const e = new Uint8Array(W * H);
+  for (let z = 0; z < H; z++) for (let x = 0; x < W; x++) {
+    const i = z * W + x, v = a[i];
+    if (x + 1 < W) { const b = a[i + 1]; if (v !== b && (v || b)) { e[i] = 1; if (thick) e[i + 1] = 1; } }
+    if (z + 1 < H) { const b = a[i + W]; if (v !== b && (v || b)) { e[i] = 1; if (thick) e[i + W] = 1; } }
+  }
+  return e;
+}
+function pattern(k, x, y) { if (k === "dots") return x % 11 < 4 && y % 11 < 4; if (k === "cross") return ((x - y) % 14 + 14) % 14 < 4 || (x + y) % 14 < 4; return (x + y) % 14 < 7; }
+
+// затемнение внутри области у границы, как «свечение» границ в CK3 (то же, что MapImages.innerGlow в моде)
+function innerGlow(d, a, depth, strength) {
+  const inf = depth + 1, dist = new Uint8Array(W * H);
+  for (let z = 0, i = 0; z < H; z++) for (let x = 0; x < W; x++, i++) { const v = a[i]; dist[i] = (x === 0 || z === 0 || x === W - 1 || z === H - 1 || a[i - 1] !== v || a[i + 1] !== v || a[i - W] !== v || a[i + W] !== v) ? 0 : inf; }
+  for (let z = 0, i = 0; z < H; z++) for (let x = 0; x < W; x++, i++) { let q = dist[i]; if (x > 0 && a[i - 1] === a[i]) q = Math.min(q, dist[i - 1] + 1); if (z > 0 && a[i - W] === a[i]) q = Math.min(q, dist[i - W] + 1); dist[i] = Math.min(q, inf); }
+  for (let z = H - 1; z >= 0; z--) for (let x = W - 1; x >= 0; x--) {
+    const i = z * W + x; let q = dist[i];
+    if (x < W - 1 && a[i + 1] === a[i]) q = Math.min(q, dist[i + 1] + 1); if (z < H - 1 && a[i + W] === a[i]) q = Math.min(q, dist[i + W] + 1);
+    dist[i] = Math.min(q, inf);
+    if (a[i] && q < depth) { const k = 1 - q / depth, t = strength * k * k, o = i * 4; d[o] = d[o] * (1 - t) + EDGE[0] * t; d[o + 1] = d[o + 1] * (1 - t) + EDGE[1] * t; d[o + 2] = d[o + 2] * (1 - t) + EDGE[2] * t; }
+  }
+}
+
+function renderMode(m) {
+  const out = new ImageData(W, H), d = out.data, t = terrainData;
+  if (m === "terrain") { lab = null; return null; }
+  lab = labelsFor(m);
+  const isR = isRealmish(m), isD = m === "diplo" && !!dipFocus, isP = isProp(m), pi = isP ? propInfo(m.slice(2)) : null, n = isR ? realms.length + 1 : isP ? pi.vals.length + 1 : maxId + 1;
+  const col = new Array(n), over = new Int32Array(n), pat = new Array(n);
+  const dFocus = isD ? realmById(dipFocus) : null, dAdj = isD ? realmAdj() : null;
+  if (isR) realms.forEach((r, i) => { col[i + 1] = hex(isD && dFocus ? REL[relOf(dFocus, r, dAdj)][1] : r.color); if (!isD && r.overlord && realmIdx[r.overlord]) { over[i + 1] = realmIdx[r.overlord]; pat[i + 1] = (relTypes[r.relation] || {}).pattern || "stripes"; } });
+  else if (isP) pi.cols.forEach((c, i) => col[i + 1] = hex(c));
+  else tlist.forEach(x => col[x.id] = hex(x.color));
+  const al = isR ? 0.66 : 0.62;
+  for (let z = 0, i = 0; z < H; z++) for (let x = 0; x < W; x++, i++) {
+    const l = lab[i], o = i * 4;
+    let r = t[o], g = t[o + 1], b = t[o + 2];
+    if (l) {
+      let c = col[l]; if (isR && over[l] && pattern(pat[l], x, z)) c = col[over[l]];
+      const gy = (r + g + b) / 3; r = Math.min(255, (gy * .45 + r * .55) * .92 + 18); g = Math.min(255, (gy * .45 + g * .55) * .92 + 18); b = Math.min(255, (gy * .45 + b * .55) * .92 + 18);
+      r = r * (1 - al) + c[0] * al; g = g * (1 - al) + c[1] * al; b = b * (1 - al) + c[2] * al;
+    }
+    d[o] = r; d[o + 1] = g; d[o + 2] = b; d[o + 3] = 255;
+  }
+  const dark = (e, a) => { for (let i = 0; i < e.length; i++) if (e[i]) { const o = i * 4; d[o] = d[o] * (1 - a) + EDGE[0] * a; d[o + 1] = d[o + 1] * (1 - a) + EDGE[1] * a; d[o + 2] = d[o + 2] * (1 - a) + EDGE[2] * a; } };
+  if (isR) {
+    const top = new Int32Array(W * H), tp = topOfRealm(); for (let i = 0; i < top.length; i++) top[i] = lab[i] ? tp[lab[i]] : 0;
+    innerGlow(d, lab, 3, .22); innerGlow(d, top, 7, .45);
+    dark(edges(lab, false), .45); dark(edges(top, true), .7);
+  } else if (isP) {
+    innerGlow(d, lab, 4, .3);
+    dark(edges(labelsFor(tiers[Math.min(1, tiers.length - 1)].key), false), .22);
+    dark(edges(lab, true), .75);
+  } else {
+    const ti = tiers.findIndex(x => x.key === m);
+    innerGlow(d, lab, ti > 0 ? 6 : 3, ti > 0 ? .42 : .25);
+    if (ti > 0) dark(edges(labelsFor(tiers[ti - 1].key), false), .35);
+    dark(edges(lab, true), ti > 0 ? .85 : .6);
+  }
+  return out;
+}
+function provEdgeCanvas() {
+  if (provCv) return provCv;
+  const e = edges(prov, false), id = new ImageData(W, H), d = id.data;
+  for (let i = 0; i < e.length; i++) if (e[i]) { const o = i * 4; d[o] = 20; d[o + 1] = 14; d[o + 2] = 8; d[o + 3] = 95; }
+  provCv = document.createElement("canvas"); provCv.width = W; provCv.height = H; provCv.getContext("2d").putImageData(id, 0, 0); return provCv;
+}
+
+let modeToastT = null;
+function setMode(m, keep) {
+  mode = m; sel = null; hover = null; ovl = null; closeCardOnly();
+  document.querySelectorAll(".slot").forEach(b => b.classList.toggle("on", b.dataset.k === m));
+  const id = renderMode(m);
+  if (id) { fillCv = document.createElement("canvas"); fillCv.width = W; fillCv.height = H; fillCv.getContext("2d").putImageData(id, 0, 0); } else fillCv = null;
+  if (!keep || cam.z === 1 && cam.x === 0) fit();
+  const mn = $("modeName"); mn.textContent = modeName(m); mn.classList.add("show"); clearTimeout(modeToastT); modeToastT = setTimeout(() => mn.classList.remove("show"), 1400);
+  if (drawerOpen && curTab === "list") fillList(); buildLegend(); buildOverview(); writeHash(); draw();
+}
+function fit() { const r = view.getBoundingClientRect(), z = Math.min(r.width / W, (r.height - 40) / H); fitZ = z; cam = {z, x: (r.width - W * z) / 2, y: (r.height - H * z) / 2 - 10}; }
+
+// ---------- статистика для подписей (по провинциям, складывается в любой уровень) ----------
+let statsP = null, keyIdx = null;
+function provStats() {
+  if (statsP) return statsP;
+  const n = maxId + 1, s = {n: new Float64Array(n), sx: new Float64Array(n), sy: new Float64Array(n), xx: new Float64Array(n), xy: new Float64Array(n), yy: new Float64Array(n)};
+  for (let z = 0, i = 0; z < H; z++) for (let x = 0; x < W; x++, i++) { const p = prov[i]; if (!p || p >= n) continue; s.n[p]++; s.sx[p] += x; s.sy[p] += z; s.xx[p] += x * x; s.xy[p] += x * z; s.yy[p] += z * z; }
+  return statsP = s;
+}
+const itemCache = {};
+function itemsFor(kind, lut, size, nameOf, rank, capOf) {
+  const key = kind; if (itemCache[key] && itemCache[key].v === version) return itemCache[key].a;
+  const s = provStats(), agg = {n: new Float64Array(size), sx: new Float64Array(size), sy: new Float64Array(size), xx: new Float64Array(size), xy: new Float64Array(size), yy: new Float64Array(size)};
+  for (let p = 1; p < s.n.length && p < lut.length; p++) { const l = lut[p]; if (!l || !s.n[p]) continue; agg.n[l] += s.n[p]; agg.sx[l] += s.sx[p]; agg.sy[l] += s.sy[p]; agg.xx[l] += s.xx[p]; agg.xy[l] += s.xy[p]; agg.yy[l] += s.yy[p]; }
+  const out = [];
+  for (let l = 1; l < size; l++) {
+    const n = agg.n[l]; if (n < 30) continue;
+    const cx = agg.sx[l] / n, cy = agg.sy[l] / n, vx = agg.xx[l] / n - cx * cx, vy = agg.yy[l] / n - cy * cy, c = agg.xy[l] / n - cx * cy;
+    const tr = vx + vy, df = Math.sqrt(Math.max(0, (vx - vy) * (vx - vy) / 4 + c * c)), l1 = tr / 2 + df, l2 = Math.max(0.01, tr / 2 - df);
+    let ang = 0.5 * Math.atan2(2 * c, vx - vy);
+    let px = cx, py = cy;
+    const ip = prov[Math.round(cy) * W + Math.round(cx)];
+    if (!ip || !lut[ip] || lut[ip] !== l) { const cp = capOf(l); if (cp) { px = cp[0]; py = cp[1]; ang *= 0.3; } }
+    out.push({name: nameOf(l), x: px, y: py, ang: Math.max(-0.62, Math.min(0.62, ang)), major: 3.4 * Math.sqrt(l1), minor: 3.0 * Math.sqrt(l2), rank, l, area: n});
+  }
+  itemCache[key] = {v: version, a: out}; return out;
+}
+function capPx(t) { return t && t.capital ? [t.capital.nx * W, t.capital.ny * H] : null; }
+function tierItems(ti) {
+  const lut = tierLut(ti), pre = /^(Баронство|Графство|Герцогство|Королевство|Империя) /;
+  return itemsFor("tier" + ti, lut, maxId + 1, l => titles[l].name.replace(pre, ""), ti, l => capPx(titles[l]));
+}
+function propItems(key) {
+  const pi = propInfo(key);
+  return itemsFor("prop:" + key, pi.lut, pi.vals.length + 1, l => pi.vals[l - 1], 10, l => null);
+}
+function realmItems(group) {
+  const base = realmLut(), tp = topOfRealm(), lut = group ? base.map(v => v ? tp[v] : 0) : base;
+  const topT = r => { let top = null; r.titles.forEach(k => { const t = tlist.find(t => t.key === k); if (t && (!top || t.tier > top.tier)) top = t; }); return top; };
+  return itemsFor(group ? "realmG" : "realm", lut, realms.length + 1, l => realms[l - 1].name, group ? 20 : 10, l => capPx(topT(realms[l - 1])));
+}
+
+// ---------- легенда режима ----------
+function buildLegend() {
+  const L = $("legend"); let items = [], title = modeName(mode);
+  if (isProp(mode)) { const pi = propInfo(mode.slice(2)); items = pi.vals.map((v, i) => ({n: v, c: pi.cols[i], a: pi.cnt[i + 1], f: () => { const t = tlist.find(x => x.tier === 0 && pi.lut[x.id] === i + 1); if (t) focusTitle(t); }})); }
+  else if (mode === "realms") { const tp = topOfRealm(); items = realms.filter((r, i) => tp[i + 1] === i + 1).map(r => ({n: r.name, c: r.color, a: r.area_blocks, f: () => { const t = tlist.find(x => x.key === r.titles[0]); if (t) focusTitle(t); }})); title = "Державы"; }
+  else if (mode === "diplo") {
+    const f = realmById(dipFocus); title = f ? "Отношения: " + f.name : "Дипломатия";
+    if (f) { const adj = realmAdj(), agg = {}; realms.forEach(r => { const k = relOf(f, r, adj); (agg[k] = agg[k] || {n: 0, a: 0}); agg[k].n++; agg[k].a += r.area_blocks || 0; });
+      items = Object.keys(REL).filter(k => agg[k] && k !== "none").map(k => ({n: REL[k][0] + " · " + agg[k].n, c: REL[k][1], a: agg[k].a, f: () => {}})); }
+    else { L.innerHTML = "<div class='hd'>Дипломатия</div><div class='empty' style='padding:4px 0'>Выберите государство на карте: земли окрасятся по отношению к нему.</div>"; L.style.display = "block"; document.body.classList.add("lg"); return; }
+  }
+  if (!items.length) { L.style.display = "none"; document.body.classList.remove("lg"); return; }
+  items.sort((a, b) => b.a - a.a);
+  L.innerHTML = "<div class='hd'>" + esc(title) + "</div>";
+  items.slice(0, 40).forEach(it => { const d = document.createElement("div"); d.className = "it"; d.innerHTML = "<span class='sw' style='background:" + it.c + "'></span><span>" + esc(it.n) + "</span><span class='ar'>" + Math.round(it.a / 1e6 * 10) / 10 + " млн</span>"; d.onclick = it.f; L.appendChild(d); });
+  L.style.display = "block"; document.body.classList.add("lg");
+}
+// обзор: уменьшенная копия текущего режима с рамкой видимой области
+let ovBase = null;
+function buildOverview() {
+  const c = $("ov"), w = Math.min(200, Math.max(120, innerWidth * 0.14)), h = Math.round(w * H / W); c.width = w; c.height = h; c.style.width = w + "px"; c.style.height = h + "px";
+  ovBase = document.createElement("canvas"); ovBase.width = w; ovBase.height = h; const x = ovBase.getContext("2d"); x.imageSmoothingQuality = "high"; x.drawImage(fillCv || terrainCv, 0, 0, w, h);
+  drawOverview();
+}
+function drawOverview() {
+  const c = $("ov"); if (!ovBase) return; const x = c.getContext("2d"), r = view.getBoundingClientRect(), sx = c.width / W, sy = c.height / H;
+  x.clearRect(0, 0, c.width, c.height); x.drawImage(ovBase, 0, 0);
+  const vx = Math.max(0, -cam.x / cam.z) * sx, vy = Math.max(0, -cam.y / cam.z) * sy, vx2 = Math.min(W, (r.width - cam.x) / cam.z) * sx, vy2 = Math.min(H, (r.height - cam.y) / cam.z) * sy;
+  x.fillStyle = "rgba(0,0,0,.28)"; x.fillRect(0, 0, c.width, c.height); x.drawImage(ovBase, vx, vy, vx2 - vx, vy2 - vy, vx, vy, vx2 - vx, vy2 - vy);
+  x.strokeStyle = "#000"; x.lineWidth = 3; x.strokeRect(vx + .5, vy + .5, Math.max(2, vx2 - vx - 1), Math.max(2, vy2 - vy - 1)); x.strokeStyle = "#f0f0f0"; x.lineWidth = 1; x.strokeRect(vx + .5, vy + .5, Math.max(2, vx2 - vx - 1), Math.max(2, vy2 - vy - 1));
+}
+(function () {
+  const c = $("ov"); let down = false;
+  const go = e => { const b = c.getBoundingClientRect(), px = (e.clientX - b.left) / b.width * W, py = (e.clientY - b.top) / b.height * H, r = view.getBoundingClientRect(); cam.x = r.width / 2 - px * cam.z; cam.y = r.height / 2 - py * cam.z; draw(); };
+  c.addEventListener("pointerdown", e => { down = true; c.setPointerCapture(e.pointerId); go(e); });
+  c.addEventListener("pointermove", e => { if (down) go(e); });
+  c.addEventListener("pointerup", () => { down = false; writeHash(); });
+})();
+let bgPat = null;
+function background(r) {
+  if (!bgPat) { const t = document.createElement("canvas"); t.width = t.height = 32; const x = t.getContext("2d"); x.fillStyle = "#12141b"; x.fillRect(0, 0, 32, 32); let sd = 7; for (let i = 0; i < 90; i++) { sd = (sd * 1103515245 + 12345) & 0x7fffffff; const px = sd % 32; sd = (sd * 1103515245 + 12345) & 0x7fffffff; const py = sd % 32; x.fillStyle = (i & 1) ? "#171a22" : "#0e1016"; x.fillRect(px, py, 2, 2); } bgPat = ctx.createPattern(t, "repeat"); }
+  ctx.fillStyle = bgPat; ctx.fillRect(0, 0, r.width, r.height);
+}
+
+// ---------- рисование ----------
+function resize() { const r = view.getBoundingClientRect(), dpr = devicePixelRatio || 1; cv.width = r.width * dpr; cv.height = r.height * dpr; draw(); }
+function draw() {
+  if (!terrainCv) return;
+  const dpr = devicePixelRatio || 1; ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const r = view.getBoundingClientRect(); background(r);
+  ctx.imageSmoothingEnabled = cam.z < 1.5; ctx.imageSmoothingQuality = "high";
+  const dw = W * cam.z, dh = H * cam.z;
+  ctx.save(); ctx.shadowColor = "rgba(0,0,0,.65)"; ctx.shadowBlur = 28; ctx.shadowOffsetY = 6; ctx.fillStyle = "#000"; ctx.fillRect(cam.x, cam.y, dw, dh); ctx.restore();
+  if (fillCv && layers.relief) { ctx.drawImage(terrainCv, cam.x, cam.y, dw, dh); ctx.globalAlpha = fillAlpha; ctx.drawImage(fillCv, cam.x, cam.y, dw, dh); ctx.globalAlpha = 1; }
+  else ctx.drawImage(fillCv || terrainCv, cam.x, cam.y, dw, dh);
+  if (layers.prov && cam.z > fitZ * 1.2) { ctx.globalAlpha = Math.min(1, (cam.z / fitZ - 1.2) * 0.8); ctx.drawImage(provEdgeCanvas(), cam.x, cam.y, dw, dh); ctx.globalAlpha = 1; }
+  if (ovl) { ctx.imageSmoothingEnabled = false; ctx.drawImage(ovl.c, cam.x + ovl.x * cam.z, cam.y + ovl.y * cam.z, ovl.w * cam.z, ovl.h * cam.z); }
+  if (layers.grid) drawGrid(r);
+  if (layers.labels && (mode !== "terrain" || false)) drawLabels();
+  if (layers.capitals && mode !== "terrain") drawCapitals();
+  if (layers.markers) drawMarkers();
+  if (layers.players) drawPlayers();
+  // рамка карты: чёрный кант и светлый скос, как у слота
+  ctx.lineWidth = 3; ctx.strokeStyle = "#000"; ctx.strokeRect(cam.x - 1.5, cam.y - 1.5, dw + 3, dh + 3); ctx.lineWidth = 1; ctx.strokeStyle = "rgba(240,200,90,.55)"; ctx.strokeRect(cam.x - 4.5, cam.y - 4.5, dw + 9, dh + 9);
+  drawScale(); drawOverview();
+}
+function toScreen(px, py) { return [cam.x + px * cam.z, cam.y + py * cam.z]; }
+function blockToPx(bx, bz) { return [bx / info.bpp + W / 2, bz / info.bpp + H / 2]; }
+function plain(ctx2, s, x, y, ls) { ctx2.letterSpacing = ls + "px"; ctx2.strokeText(s, x, y); ctx2.fillText(s, x, y); }
+
+function drawLabels() {
+  const top = tiers.length - 1, ti = tiers.findIndex(t => t.key === mode);
+  const src = [];
+  if (isRealmish(mode)) { src.push(...realmItems(true), ...realmItems(false)); }
+  else if (isProp(mode)) { src.push(...propItems(mode.slice(2))); }
+  else { for (let k = top; k >= ti; k--) src.push(...tierItems(k)); }
+  const taken = [], items = [];
+  const base = 0.5 * lblScale;
+  for (const it of src) {
+    const textLen = it.name.length * 0.62;                         // длина в «em»
+    const maxAcross = it.minor * cam.z * 0.62;                      // по ширине области
+    const maxAlong = it.major * cam.z * 0.86 / Math.max(1, textLen);
+    let size = Math.min(maxAcross * 1.1, maxAlong * 1.55) * base * 2;
+    
+    // крупные подписи гаснут, когда приблизились (их место занимают мелкие), мелкие появляются при size >= 10
+    if (size < 10) continue;
+    let alpha = 1;
+    const cap = isProp(mode) ? 26 : 15 + it.rank * 4 + (isRealmish(mode) ? 0 : 6);
+    if (it.rank >= (isRealmish(mode) || isProp(mode) ? 10 : ti + 1)) { if (size > cap * 5) continue; if (size > cap * 2.6) alpha = 1 - (size - cap * 2.6) / (cap * 2.4); }
+    size = Math.min(size, cap * 1.9 * lblScale);
+    items.push({it, size, alpha});
+  }
+  items.sort((a, b) => b.it.rank - a.it.rank || b.it.area - a.it.area);
+  ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.lineJoin = "round";
+  for (const {it, size, alpha} of items) {
+    const [sx, sy] = toScreen(it.x, it.y);
+    if (sx < -200 || sy < -100 || sx > cv.width + 200 || sy > cv.height + 100) continue;
+    const upper = it.rank >= 1 || isRealmish(mode) || isProp(mode);
+    const s = upper ? it.name.toUpperCase() : it.name;
+    ctx.font = (upper ? "700 " : "600 ") + size + "px Georgia,'Times New Roman',serif";
+    ctx.letterSpacing = "0px"; const w0 = ctx.measureText(s).width, along = it.major * cam.z * 0.84;
+    const ls = upper ? Math.max(0, Math.min(size * 1.4, (along - w0) / Math.max(1, s.length))) : 0;
+    const w = w0 + ls * s.length, hh = size * 0.62;
+    const cs = Math.cos(it.ang), sn = Math.sin(it.ang);
+    const ex = Math.abs(w / 2 * cs) + Math.abs(hh * sn), ey = Math.abs(w / 2 * sn) + Math.abs(hh * cs);
+    const box = [sx - ex, sy - ey, sx + ex, sy + ey];
+    if (taken.some(b => !(box[2] < b[0] || box[0] > b[2] || box[3] < b[1] || box[1] > b[3]))) continue; taken.push(box);
+    ctx.save(); ctx.translate(sx, sy); ctx.rotate(it.ang); ctx.globalAlpha = alpha * (upper ? 0.93 : 1);
+    ctx.lineWidth = Math.max(2, size / 5); ctx.strokeStyle = "rgba(24,16,8,.82)"; ctx.fillStyle = upper ? "#fbf3d6" : "#f4ecd2";
+    ctx.letterSpacing = ls + "px"; ctx.translate(ls / 2, 0); ctx.strokeText(s, 0, 0); ctx.fillText(s, 0, 0);
+    ctx.restore();
+  }
+  ctx.letterSpacing = "0px"; ctx.globalAlpha = 1;
+}
+function drawCapitals() {
+  const ti = tiers.findIndex(t => t.key === mode); const lvl = isRealmish(mode) || isProp(mode) ? tiers.length - 1 : ti; if (cam.z < fitZ * 1.3) return;
+  tlist.forEach(t => { if (t.tier !== lvl || !t.capital) return; const [sx, sy] = toScreen(t.capital.nx * W, t.capital.ny * H); ctx.fillStyle = "#fff"; ctx.strokeStyle = "#000"; ctx.lineWidth = 2; ctx.fillRect(sx - 3, sy - 3, 6, 6); ctx.strokeRect(sx - 3, sy - 3, 6, 6); });
+}
+function drawMarkers() {
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  for (const m of markers) {
+    const [px, py] = blockToPx(m.x, m.z), [sx, sy] = toScreen(px, py); if (sx < -20 || sy < -20 || sx > cv.width + 20 || sy > cv.height + 20) continue;
+    ctx.fillStyle = "#1d1d21"; ctx.strokeStyle = "#000"; ctx.lineWidth = 2; ctx.fillRect(sx - 11, sy - 11, 22, 22); ctx.strokeRect(sx - 11, sy - 11, 22, 22);
+    ctx.fillStyle = "#5d5d66"; ctx.fillRect(sx - 10, sy - 10, 20, 2); ctx.fillRect(sx - 10, sy - 10, 2, 20);
+    ctx.font = "14px system-ui,'Segoe UI Emoji',sans-serif"; ctx.fillStyle = "#fff"; ctx.fillText(TYPE_ICON[m.type] || "📍", sx, sy + 1);
+    if (cam.z > fitZ * 1.6) { ctx.font = "12px " + getComputedStyle(document.body).fontFamily; ctx.lineWidth = 3; ctx.strokeStyle = "rgba(10,10,14,.9)"; ctx.strokeText(m.name, sx, sy + 20); ctx.fillStyle = "#fff"; ctx.fillText(m.name, sx, sy + 20); }
+  }
+}
+function drawPlayers() {
+  for (const p of players) {
+    const [px, py] = blockToPx(p.x, p.z), [sx, sy] = toScreen(px, py);
+    ctx.fillStyle = "#000"; ctx.fillRect(sx - 7, sy - 7, 14, 14); ctx.fillStyle = "#c98a5a"; ctx.fillRect(sx - 6, sy - 6, 12, 12); ctx.fillStyle = "#5a3a22"; ctx.fillRect(sx - 6, sy - 6, 12, 4);
+    ctx.fillStyle = "#2a2a6a"; ctx.fillRect(sx - 4, sy - 1, 3, 3); ctx.fillRect(sx + 1, sy - 1, 3, 3);
+    ctx.font = "12px " + getComputedStyle(document.body).fontFamily; ctx.textAlign = "center"; ctx.lineWidth = 3; ctx.strokeStyle = "rgba(10,10,14,.9)"; ctx.strokeText(p.name, sx, sy - 14); ctx.fillStyle = "#fff"; ctx.fillText(p.name, sx, sy - 14);
+  }
+}
+function niceStep(v) { const p = Math.pow(10, Math.floor(Math.log10(v))), f = v / p; return (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * p; }
+function drawGrid(r) {
+  const step = niceStep(110 / (cam.z / info.bpp)), spx = step / info.bpp;
+  const x0 = Math.floor((-cam.x / cam.z - W / 2) * info.bpp / step) * step, z0 = Math.floor((-cam.y / cam.z - H / 2) * info.bpp / step) * step;
+  ctx.lineWidth = 1; ctx.strokeStyle = "rgba(255,255,255,.22)"; ctx.fillStyle = "rgba(255,255,255,.75)"; ctx.font = "10px " + getComputedStyle(document.body).fontFamily; ctx.textAlign = "left"; ctx.textBaseline = "top";
+  for (let bx = x0; ; bx += step) { const [sx] = toScreen(bx / info.bpp + W / 2, 0); if (sx > r.width) break; ctx.beginPath(); ctx.moveTo(Math.round(sx) + .5, 0); ctx.lineTo(Math.round(sx) + .5, r.height); ctx.stroke(); ctx.fillText(bx, sx + 3, 70); }
+  for (let bz = z0; ; bz += step) { const [, sy] = toScreen(0, bz / info.bpp + H / 2); if (sy > r.height) break; ctx.beginPath(); ctx.moveTo(0, Math.round(sy) + .5); ctx.lineTo(r.width, Math.round(sy) + .5); ctx.stroke(); ctx.fillText(bz, 6, sy + 3); }
+}
+function drawScale() {
+  const per = cam.z / info.bpp, target = 110, step = niceStep(target / per), px = step * per;
+  $("scaleT").textContent = step >= 1000 ? (step / 1000) + " км" : step + " бл."; $("scaleB").style.width = px + "px";
+}
+function drawCompass() {
+  if (!$("compass")) return; const c = $("compass").getContext("2d"); c.clearRect(0, 0, 27, 27); c.fillStyle = "#000"; c.fillRect(12, 2, 3, 23); c.fillRect(2, 12, 23, 3);
+  c.fillStyle = "#c4413a"; c.fillRect(12, 3, 3, 9); c.fillStyle = "#e8e2d0"; c.fillRect(12, 15, 3, 9); c.fillStyle = "#e8e2d0"; c.fillRect(3, 13, 21, 1); c.fillStyle = "#f0c85a"; c.fillRect(1, 0, 0, 0);
+  c.fillStyle = "#fff"; c.font = "bold 8px monospace"; c.fillText("N", 11, 9);
+}
+
+// ---------- наведение и выбор ----------
+function pxAt(ev) { const r = view.getBoundingClientRect(); return [Math.floor((ev.clientX - r.left - cam.x) / cam.z), Math.floor((ev.clientY - r.top - cam.y) / cam.z)]; }
+function provAt(x, y) { return x >= 0 && y >= 0 && x < W && y < H ? prov[y * W + x] : 0; }
+function chainOf(p) { const out = []; for (let c = titles[p], g = 0; c && g < 16; c = titles[c.parent], g++) out.push(c); return out; }
+function realmOf(p) { if (!rl) rl = realmLut(); return p < rl.length && rl[p] ? realms[rl[p] - 1] : null; }
+function overlordChain(r) { const o = []; for (let c = r, g = 0; c && g < 16; g++) { o.push(c); c = c.overlord ? realms[realmIdx[c.overlord] - 1] : null; } return o; }
+function labelAtPx(x, y) { if (!lab) return 0; return x >= 0 && y >= 0 && x < W && y < H ? lab[y * W + x] : 0; }
+function setOvl(l) {
+  if (!l || !lab) { ovl = null; return; }
+  let x0 = W, y0 = H, x1 = -1, y1 = -1; for (let z = 0; z < H; z++) for (let x = 0; x < W; x++) if (lab[z * W + x] === l) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (z < y0) y0 = z; if (z > y1) y1 = z; }
+  if (x1 < 0) { ovl = null; return; }
+  const w = x1 - x0 + 1, h = y1 - y0 + 1, c = document.createElement("canvas"); c.width = w; c.height = h; const id = new ImageData(w, h), d = id.data;
+  for (let z = y0; z <= y1; z++) for (let x = x0; x <= x1; x++) { if (lab[z * W + x] !== l) continue; const edge = x === 0 || z === 0 || x === W - 1 || z === H - 1 || lab[z * W + x - 1] !== l || lab[z * W + x + 1] !== l || lab[(z - 1) * W + x] !== l || lab[(z + 1) * W + x] !== l; const o = ((z - y0) * w + x - x0) * 4; if (edge) { d[o] = 255; d[o + 1] = 240; d[o + 2] = 160; d[o + 3] = 255; } else { d[o] = d[o + 1] = d[o + 2] = 255; d[o + 3] = 70; } }
+  c.getContext("2d").putImageData(id, 0, 0); ovl = {c, x: x0, y: y0, w, h};
+}
+function describe(p) {
+  const ch = chainOf(p), r = realmOf(p); let s = "<div class='h'>" + esc(ch[0].name) + "</div><div class='t'>";
+  for (let i = 1; i < ch.length; i++) s += "<span class='cd' style='background:" + ch[i].color + "'></span>" + tiers[ch[i].tier].name + ": <b>" + esc(ch[i].name) + "</b><br>";
+  if (r) s += "<span class='cd' style='background:" + r.color + "'></span>Государство: <b>" + esc(r.name) + "</b><br>";
+  if (isProp(mode)) { const pi = propInfo(mode.slice(2)), v = pi.lut[p]; if (v) s += "<span class='cd' style='background:" + pi.cols[v - 1] + "'></span>" + esc(modeName(mode)) + ": <b>" + esc(pi.vals[v - 1]) + "</b>"; }
+  return s + "</div>";
+}
+let dragging = null, moved = false, rulerOn = false;
+view.addEventListener("pointerdown", e => { dragging = {x: e.clientX, y: e.clientY, cx: cam.x, cy: cam.y}; moved = false; view.setPointerCapture(e.pointerId); });
+view.addEventListener("pointermove", e => {
+  if (!info) return;
+  const [bx, bz] = bpx(e); $("coords").innerHTML = "X <b>" + bx + "</b>  Z <b>" + bz + "</b>";
+  if (dragging) { const dx = e.clientX - dragging.x, dy = e.clientY - dragging.y; if (Math.abs(dx) + Math.abs(dy) > 3) { moved = true; view.classList.add("drag"); } cam.x = dragging.cx + dx; cam.y = dragging.cy + dy; draw(); $("tip").style.display = "none"; return; }
+  const [x, y] = pxAt(e), p = provAt(x, y), tip = $("tip");
+  if (!p || !titles[p]) { tip.style.display = "none"; if (hover) { hover = null; if (!sel) { ovl = null; draw(); } } return; }
+  const l = labelAtPx(x, y); if (l !== hover && !sel) { hover = l; setOvl(l); draw(); }
+  tip.innerHTML = describe(p); tip.style.display = "block"; tip.style.left = Math.min(innerWidth - 340, e.clientX + 16) + "px"; tip.style.top = Math.min(innerHeight - 140, e.clientY + 16) + "px";
+});
+view.addEventListener("pointerup", e => { view.classList.remove("drag"); if (!dragging) return; dragging = null; if (!moved && !rulerOn) { const [x, y] = pxAt(e), p = provAt(x, y); if (p && titles[p]) select(p, labelAtPx(x, y)); else closePanel(); } if (moved) writeHash(); });
+view.addEventListener("pointerleave", () => { $("tip").style.display = "none"; });
+view.addEventListener("wheel", e => { e.preventDefault(); zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.0015)); }, {passive: false});
+function zoomAt(cx, cy, k) { const r = view.getBoundingClientRect(), mx = cx - r.left, my = cy - r.top, nz = Math.max(fitZ * 0.5, Math.min(30, cam.z * k)); cam.x = mx - (mx - cam.x) * nz / cam.z; cam.y = my - (my - cam.y) * nz / cam.z; cam.z = nz; draw(); }
+addEventListener("resize", resize);
+addEventListener("keydown", e => {
+  if (e.target.tagName === "INPUT" && e.target.type !== "range" && e.target.type !== "checkbox") return;
+  const k = Object.keys(modeKeys())[parseInt(e.key) - 1]; if (k) { setMode(k, true); return; }
+  const r = view.getBoundingClientRect();
+  if (e.key === "Escape") { closePanel(); closeDrawer(); $("help").style.display = "none"; }
+  else if (e.key === "Tab") { e.preventDefault(); drawerOpen ? closeDrawer() : openTab(curTab); }
+  else if (e.key === "f" || e.key === "F" || e.key === "0") { fit(); draw(); writeHash(); }
+  else if (e.key === "l" || e.key === "L") $("bLayers").click();
+  else if (e.key === "g" || e.key === "G") $("bList").click();
+  else if (e.key === "r" || e.key === "R") $("bRuler").click();
+  else if (e.key === "?") $("help").style.display = "grid";
+  else if (e.key === "+" || e.key === "=") zoomAt(r.left + r.width / 2, r.top + r.height / 2, 1.3);
+  else if (e.key === "-") zoomAt(r.left + r.width / 2, r.top + r.height / 2, 1 / 1.3);
+  else if (e.key.startsWith("Arrow")) { const s = 80; if (e.key === "ArrowLeft") cam.x += s; if (e.key === "ArrowRight") cam.x -= s; if (e.key === "ArrowUp") cam.y += s; if (e.key === "ArrowDown") cam.y -= s; draw(); e.preventDefault(); }
+});
+
+// ---------- карточка титула ----------
+// боковая панель: рейка вкладок + выезжающий ящик
+const TABS = [
+  {k: "title", name: "Титул", pane: "pTitle", svg: "<path d='M1 0h8v5c0 2.5-2 4-4 5-2-1-4-2.5-4-5z'/>"},
+  {k: "realm", name: "Государство", pane: "pRealm", svg: "<path d='M1 0h1v10H1zM3 1h6l-2 2 2 2H3z'/>"},
+  {k: "dip", name: "Дипломатия", pane: "pDip", svg: "<path d='M0 1h4v4H0zM6 1h4v4H6zM2 6h2v2H2zM6 6h2v2H6zM4 3h2v1H4zM3 8h4v2H3z'/>"},
+  {k: "list", name: "Список", pane: "pList", svg: "<path d='M0 1h2v2H0zM3 1h7v2H3zM0 4h2v2H0zM3 4h7v2H3zM0 7h2v2H0zM3 7h7v2H3z'/>"},
+  {k: "layers", name: "Слои карты", pane: "pLayers", svg: "<path d='M5 1l5 2.5L5 6 0 3.5zM1 5.2l4 2 4-2 1 .6L5 8.2 0 5.8zM1 7.4l4 2 4-2 1 .6L5 10.4 0 8z'/>"},
+  {k: "marks", name: "Метки и игроки", pane: "pMarks", svg: "<path d='M5 0C3 0 1.5 1.5 1.5 3.5 1.5 6 5 10 5 10s3.5-4 3.5-6.5C8.5 1.5 7 0 5 0zM5 2.5a1 1 0 110 2 1 1 0 010-2z'/>"}
+];
+let curTab = "title", drawerOpen = false;
+(function () { const r = $("rail"); TABS.forEach(t => { const b = document.createElement("button"); b.className = "tb"; b.dataset.k = t.k; b.dataset.tip = t.name; b.innerHTML = "<svg viewBox='0 0 10 10'>" + t.svg + "</svg>"; b.onclick = () => (drawerOpen && curTab === t.k) ? closeDrawer() : openTab(t.k); r.appendChild(b); }); })();
+function openTab(k) {
+  curTab = k; drawerOpen = true; const t = TABS.find(x => x.k === k);
+  document.querySelectorAll("#rail .tb").forEach(b => b.classList.toggle("on", b.dataset.k === k));
+  document.querySelectorAll("#drawer .pane").forEach(p => p.classList.toggle("on", p.id === t.pane));
+  $("dTitle").textContent = t.name; $("drawer").classList.add("open");
+  $("bLayers").classList.toggle("on", k === "layers"); $("bList").classList.toggle("on", k === "list");
+  if (k === "list") fillList(); if (k === "marks") fillMarks();
+}
+function closeDrawer() { drawerOpen = false; $("drawer").classList.remove("open"); document.querySelectorAll("#rail .tb").forEach(b => b.classList.remove("on")); $("bLayers").classList.remove("on"); $("bList").classList.remove("on"); }
+const NOSEL = "<div class='empty'>Выберите землю на карте: здесь появятся сведения о титуле, государстве и отношениях.</div>";
+function closeCardOnly() { $("cardC").innerHTML = NOSEL; $("pRealm").innerHTML = NOSEL; $("pDip").innerHTML = dipHtml(dipFocus ? realmById(dipFocus) : null); wireDip(); }
+function select(p, l) { sel = p; setOvl(l); const r = realmOf(p); if (r && dipFocus !== r.id) { dipFocus = r.id; if (mode === "diplo") rebuildFill(); } draw(); showCard(p); }
+function closePanel() { sel = null; closeCardOnly(); ovl = null; draw(); }
+$("cardX").onclick = () => { closePanel(); closeDrawer(); };
+function rebuildFill() { const id = renderMode(mode); if (id) { fillCv = document.createElement("canvas"); fillCv.width = W; fillCv.height = H; fillCv.getContext("2d").putImageData(id, 0, 0); } buildLegend(); buildOverview(); draw(); }
+function relLabel(r) { return ((relTypes[r.relation] || {}).label) || "Сюзерен"; }
+function realmLink(r) { return "<a data-r='" + esc(r.id) + "'>" + chip(r.color) + esc(r.name) + "</a>"; }
+function focusRealm(r) { const t = tlist.find(x => x.key === r.titles[0]); if (t) focusTitle(t); }
+function propLabel(k) { return propDefName(k) || PROP_NAMES[k] || k; }
+function chip(c) { return "<span class='cd' style='background:" + c + "'></span>"; }
+function showCard(p) {
+  const ch = chainOf(p), r = realmOf(p), pr = titles[p];
+  const top = r ? overlordChain(r).slice(-1)[0] : null;
+  let h = "<div class='hd'>" + shield(r ? r.color : pr.color, r ? r.id : pr.key) + "<div><h2>" + esc(pr.name) + "</h2><div class='sub'>" + tiers[pr.tier].name + " · " + Math.round(pr.area_blocks / 1000) + " тыс. блоков²</div></div></div><div class='bd'>";
+  h += "<div class='sec'>Иерархия</div><div class='tree'>";
+  for (let i = ch.length - 1; i >= 0; i--) h += "<div class='row'>" + chip(ch[i].color) + "<span class='k' style='width:92px'>" + tiers[ch[i].tier].name + "</span>" + (i === 0 ? "<b>" + esc(ch[i].name) + "</b>" : "<a data-t='" + ch[i].id + "'>" + esc(ch[i].name) + "</a>") + "</div>";
+  h += "</div>";
+  h += "<div class='sec'>Государство</div>";
+  if (r) {
+    h += "<div class='row'>" + chip(r.color) + "<b>" + esc(r.name) + "</b></div>";
+    if (r.ruler) h += "<div class='row'><span class='k'>Правитель</span>" + esc(r.ruler) + "</div>";
+    overlordChain(r).slice(1).forEach(o => { h += "<div class='row'><span class='k'>" + esc(((relTypes[r.relation] || {}).label) || "Сюзерен") + "</span>" + chip(o.color) + esc(o.name) + "</div>"; });
+    const subj = realms.filter(x => x.overlord === r.id); if (subj.length) h += "<div class='row'><span class='k'>Подчинённые</span><span>" + subj.map(s => esc(s.name) + " (" + esc(((relTypes[s.relation] || {}).label) || "") + ")").join(", ") + "</span></div>";
+  } else h += "<div class='row' style='color:var(--mut)'>нет (ничья земля)</div>";
+  h += "<div class='sec'>Сведения</div><div class='row'><span class='k'>Соседей</span>" + pr.neighbors.length + "</div>";
+  if (pr.capital) { const cx = Math.round((pr.capital.nx * W - W / 2) * info.bpp), cz = Math.round((pr.capital.ny * H - H / 2) * info.bpp); h += "<div class='row'><span class='k'>Столица</span>X " + cx + " Z " + cz + "</div>"; }
+  h += "<div class='btns'><button class='btn' id='cFocus'>Показать</button><button class='btn' id='cTp'>Копировать /tp</button></div></div>";
+  $("cardC").innerHTML = h; realmPane(p); $("pDip").innerHTML = dipHtml(r); wireDip();
+  if (!drawerOpen || !["title", "realm", "dip"].includes(curTab)) openTab("title");
+  $("cardC").querySelectorAll("a[data-t]").forEach(a => a.onclick = () => focusTitle(titles[a.dataset.t]));
+  $("cFocus").onclick = () => focusTitle(pr);
+  $("cTp").onclick = () => { if (!pr.capital) return; const cx = Math.round((pr.capital.nx * W - W / 2) * info.bpp), cz = Math.round((pr.capital.ny * H - H / 2) * info.bpp); const t = "/worldforge tpxz " + cx + " " + cz; (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => toast("Скопировано: " + t), () => toast(t)); };
+}
+function wireLinks(root) { root.querySelectorAll("a[data-r]").forEach(a => a.onclick = () => { const r = realmById(a.dataset.r); if (r) focusRealm(r); }); }
+function realmPane(p) {
+  const box = $("pRealm"), r = p ? realmOf(p) : null;
+  if (!r) { box.innerHTML = "<div class='empty'>У этой земли нет государства.</div>"; return; }
+  let h = "<div style='display:flex;gap:12px;align-items:center;margin-bottom:8px'>" + shield(r.color, r.id).replace("<svg", "<svg style='width:44px;height:52px;flex:none;filter:drop-shadow(2px 2px 0 #000)'") + "<div><div style='font-size:16px;color:var(--gold);line-height:1.2'>" + esc(r.name) + "</div><div style='color:var(--mut);font-size:11px;margin-top:3px'>" + (realmById(r.overlord) ? esc(relLabel(r)) + " · " + esc(realmById(r.overlord).name) : "Независимое государство") + "</div></div></div>";
+  const kv = (k, v) => "<div class='kv'><span class='k'>" + k + "</span><span class='v'>" + v + "</span></div>";
+  h += kv("Правитель", r.ruler ? esc(r.ruler) : "<span style='color:var(--mut)'>не назначен</span>");
+  h += kv("Площадь", Math.round((r.area_blocks || 0) / 1000) + " тыс. блоков²");
+  Object.keys(r.props || {}).forEach(k => {
+    const v = r.props[k]; if (v === null || typeof v === "object" || v === "") return;
+    if (k === "allies" || k === "enemies") { const ls = idList(r, k).map(realmById).filter(Boolean); h += kv(k === "allies" ? "Союзники" : "Воюет с", ls.length ? ls.map(realmLink).join(", ") : esc(String(v))); }
+    else h += kv(esc(propLabel(k)), esc(String(v)));
+  });
+  h += "<div class='sec' style='color:var(--gold2);font-size:11px;margin:12px 0 3px;text-transform:uppercase;letter-spacing:.08em'>Титулы</div>";
+  (r.titles || []).forEach(k => { const t = tlist.find(x => x.key === k); if (t) h += "<div class='row'>" + chip(t.color) + "<span class='k' style='width:92px'>" + tiers[t.tier].name + "</span><a data-t='" + t.id + "'>" + esc(t.name) + "</a></div>"; });
+  const subj = realms.filter(x => x.overlord === r.id);
+  if (subj.length) { h += "<div class='sec' style='color:var(--gold2);font-size:11px;margin:12px 0 3px;text-transform:uppercase;letter-spacing:.08em'>Подчинённые · " + subj.length + "</div>"; subj.forEach(x => h += "<div class='row'>" + realmLink(x) + "<span class='chipl'>" + esc(relLabel(x)) + "</span></div>"); }
+  h += "<div class='btns'><button class='btn' id='rDip'>Дипломатический слой</button><button class='btn' id='rFocus'>Показать</button></div>";
+  box.innerHTML = h; wireLinks(box);
+  box.querySelectorAll("a[data-t]").forEach(a => a.onclick = () => focusTitle(titles[a.dataset.t]));
+  $("rDip").onclick = () => { dipFocus = r.id; setMode("diplo"); sel = p; showCard(p); };
+  $("rFocus").onclick = () => focusRealm(r);
+}
+let actionsList = [];
+function dipHtml(r) {
+  if (!r) return "<div class='empty'>Выберите государство на карте. Здесь будут дерево подчинения, правила отношений и действия сервера.</div>";
+  let top = r, g = 0; while (realmById(top.overlord) && g++ < 32) top = realmById(top.overlord);
+  const kids = {}; realms.forEach(x => { if (x.overlord) (kids[x.overlord] = kids[x.overlord] || []).push(x); });
+  const node = (x, d) => "<div class='tr" + (x === r ? " cur" : "") + "'><span class='nm' data-r='" + esc(x.id) + "'>" + chip(x.color) + esc(x.name) + "</span>" + (x.overlord ? "<span class='chipl'>" + esc(relLabel(x)) + "</span>" : "") +
+    (d < 8 && kids[x.id] ? "<div class='ch'>" + kids[x.id].map(c => node(c, d + 1)).join("") + "</div>" : "") + "</div>";
+  const sech = t => "<div class='sec' style='color:var(--gold2);font-size:11px;margin:12px 0 3px;text-transform:uppercase;letter-spacing:.08em'>" + t + "</div>";
+  let h = sech("Дерево подчинения") + node(top, 0);
+  const adj = realmAdj(), cnt = {}; realms.forEach(x => { const k = relOf(r, x, adj); cnt[k] = (cnt[k] || 0) + 1; });
+  h += sech("Отношения: " + esc(r.name));
+  Object.keys(REL).filter(k => k !== "none" && cnt[k]).forEach(k => h += "<div class='kv'><span class='k'><span class='cd' style='background:" + REL[k][1] + "'></span>" + REL[k][0] + "</span><span class='v'>" + cnt[k] + "</span></div>");
+  const en = idList(r, "enemies").map(realmById).filter(Boolean), al = idList(r, "allies").map(realmById).filter(Boolean);
+  if (en.length) h += "<div class='kv'><span class='k'>Воюет с</span><span class='v'>" + en.map(realmLink).join(", ") + "</span></div>";
+  if (al.length) h += "<div class='kv'><span class='k'>Союзники</span><span class='v'>" + al.map(realmLink).join(", ") + "</span></div>";
+  h += sech("Виды отношений");
+  Object.keys(relTypes).forEach(k => { const t = relTypes[k]; h += "<div class='kv'><span class='k'>" + esc(t.label || k) + "</span><span class='v' style='font-size:11px;color:var(--mut)'>дань " + Math.round((t.tribute || 0) * 100) + "% · ополчение " + Math.round((t.levy || 0) * 100) + "%" + (t.can_declare_war ? " · может воевать" : "") + "</span></div>"; });
+  h += sech("Действия сервера");
+  if (!actionsList.length) h += "<div class='empty' style='padding:4px 0'>Нет зарегистрированных действий.</div>";
+  actionsList.forEach(a => { const cmdTarget = a.scope === "realm" ? r.id : a.scope === "title" ? (sel && titles[sel] ? titles[sel].id : 0) : "-"; const cmd = "/wfaction run " + a.id + " " + cmdTarget + (a.params.length ? " " + a.params.map(p => "<" + p + ">").join(" | ") : "");
+    h += "<div class='act'><div>" + esc(a.label) + "<span class='chipl" + (a.perm === "op" ? " op" : "") + "'>" + (a.perm === "op" ? "оператор" : "все") + "</span></div>" + (a.hint ? "<div class='hn'>" + esc(a.hint) + "</div>" : "") + "<div style='margin-top:4px'><button class='btn' data-cmd='" + esc(cmd) + "'>Копировать команду</button></div></div>"; });
+  return h;
+}
+function wireDip() {
+  const box = $("pDip"); wireLinks(box);
+  box.querySelectorAll(".nm[data-r]").forEach(n => n.onclick = () => { const x = realmById(n.dataset.r); if (x) focusRealm(x); });
+  box.querySelectorAll("button[data-cmd]").forEach(b => b.onclick = () => { const t = b.dataset.cmd; (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => toast("Скопировано: " + t), () => toast(t)); });
+}
+function fillMarks() {
+  const box = $("pMarks"); let h = "";
+  const sech = t => "<div class='sec' style='color:var(--gold2);font-size:11px;margin:4px 0 3px;text-transform:uppercase;letter-spacing:.08em'>" + t + "</div>";
+  h += sech("Метки · " + markers.length);
+  if (!markers.length) h += "<div class='empty' style='padding:4px 0'>Меток нет. На сервере: /worldforge marker add</div>";
+  markers.forEach((m, i) => h += "<div class='tr'><span class='nm' data-m='" + i + "'>" + (TYPE_ICON[m.type] || "📍") + " " + esc(m.name) + "</span><span class='chipl'>" + esc(m.type) + "</span></div>");
+  h += sech("Игроки · " + players.length).replace("margin:4px", "margin:12px");
+  players.forEach((p, i) => h += "<div class='tr'><span class='nm' data-p='" + i + "'>" + esc(p.name) + "</span><span class='chipl'>" + Math.round(p.x) + ", " + Math.round(p.z) + "</span></div>");
+  box.innerHTML = h;
+  box.querySelectorAll("[data-m]").forEach(n => n.onclick = () => { const m = markers[n.dataset.m], [px, py] = blockToPx(m.x, m.z); flyTo(px, py, Math.max(cam.z, fitZ * 4)); });
+  box.querySelectorAll("[data-p]").forEach(n => n.onclick = () => { const m = players[n.dataset.p], [px, py] = blockToPx(m.x, m.z); flyTo(px, py, Math.max(cam.z, fitZ * 4)); });
+}
+function flyTo(px, py, z) { const r = view.getBoundingClientRect(), a = {x: cam.x, y: cam.y, z: cam.z}, tz = z, tx = r.width / 2 - px * tz, ty = r.height / 2 - py * tz, t0 = performance.now(); (function step(t) { const k = Math.min(1, (t - t0) / 380), e = 1 - Math.pow(1 - k, 3); cam.z = a.z + (tz - a.z) * e; cam.x = a.x + (tx - a.x) * e; cam.y = a.y + (ty - a.y) * e; draw(); if (k < 1) requestAnimationFrame(step); else writeHash(); })(t0); }
+function focusTitle(t) { if (t.capital) flyTo(t.capital.nx * W, t.capital.ny * H, Math.max(cam.z, fitZ * 3)); }
+$("search").addEventListener("keydown", e => { if (e.key !== "Enter") return; const q = e.target.value.trim().toLowerCase(); if (!q) return;
+  const t = tlist.find(t => t.name.toLowerCase() === q) || tlist.find(t => t.name.toLowerCase().includes(q));
+  const r = realms.find(r => r.name.toLowerCase().includes(q)); const m = markers.find(m => m.name.toLowerCase().includes(q));
+  if (m) { const [px, py] = blockToPx(m.x, m.z); flyTo(px, py, Math.max(cam.z, fitZ * 4)); }
+  else if (t) focusTitle(t); else if (r) { const tt = tlist.find(x => x.key === r.titles[0]); if (tt) focusTitle(tt); } else toast("Ничего не найдено"); });
+
+// ---------- динамические данные и обновление после правок ----------
+async function loadActions() { try { actionsList = await jget("api/actions.json"); } catch (e) { actionsList = []; } }
+async function loadDyn() { await loadActions(); try { markers = (await jget("api/markers.json")).markers; } catch (e) {} try { players = (await jget("api/players.json")).players; } catch (e) {} draw(); }
+async function poll() {
+  try {
+    const v = parseInt(await (await fetch("api/version")).text());
+    if (version >= 0 && v !== version) { await loadAll(); toast("Карта обновлена"); }
+    else { markers = (await jget("api/markers.json")).markers; players = (await jget("api/players.json")).players; draw(); }
+  } catch (e) { $("coords").textContent = "нет связи с сервером"; }
+}
+
+// ---------- слои, список, линейка, PNG ----------
+function bpx(ev) { const [x, y] = pxAt(ev); return [Math.round((x + 0.5 - W / 2) * info.bpp), Math.round((y + 0.5 - H / 2) * info.bpp)]; }
+$("bLayers").onclick = () => (drawerOpen && curTab === "layers") ? closeDrawer() : openTab("layers");
+document.querySelectorAll("#layers input[type=checkbox]").forEach(i => i.onchange = () => { layers[i.dataset.k] = i.checked; draw(); });
+$("fillA").oninput = e => { fillAlpha = e.target.value / 100; $("fillV").textContent = e.target.value + "%"; draw(); };
+$("lblS").oninput = e => { lblScale = e.target.value / 100; $("lblV").textContent = e.target.value + "%"; draw(); };
+
+function fillList() {
+  const box = $("list"); let items = [];
+  if (mode === "terrain") { box.innerHTML = "<div class='hd'>Список</div><div style='color:var(--mut);padding:6px'>Выберите режим политической карты</div>"; return; }
+  if (isProp(mode)) { const pi = propInfo(mode.slice(2)); items = pi.vals.map((v, i) => ({n: v, c: pi.cols[i], a: pi.cnt[i + 1], f: () => { const t = tlist.find(x => x.tier === 0 && pi.lut[x.id] === i + 1); if (t) focusTitle(t); }})); }
+  else if (isRealmish(mode)) items = realms.map(r => ({n: r.name, c: r.color, a: r.area_blocks, f: () => { const t = tlist.find(x => x.key === r.titles[0]); if (t) focusTitle(t); }}));
+  else { const ti = tiers.findIndex(t => t.key === mode); items = tlist.filter(t => t.tier === ti).map(t => ({n: t.name, c: t.color, a: t.area_blocks, f: () => focusTitle(t)})); }
+  items.sort((a, b) => b.a - a.a);
+  box.innerHTML = "<div class='hd'>" + esc(modeName(mode)) + " · " + items.length + "</div>";
+  items.slice(0, 500).forEach(it => { const d = document.createElement("div"); d.className = "it"; d.innerHTML = "<span class='sw' style='background:" + it.c + "'></span><span>" + esc(it.n) + "</span><span class='ar'>" + Math.round(it.a / 1e6 * 10) / 10 + " млн</span>"; d.onclick = it.f; box.appendChild(d); });
+}
+$("bList").onclick = () => (drawerOpen && curTab === "list") ? closeDrawer() : openTab("list");
+
+let ruler = null;
+$("bRuler").onclick = () => { rulerOn = !rulerOn; ruler = null; $("bRuler").classList.toggle("on", rulerOn); view.style.cursor = rulerOn ? "crosshair" : ""; draw(); };
+view.addEventListener("click", e => { if (!rulerOn || moved) return; const [x, y] = pxAt(e); if (!ruler || ruler.b) ruler = {a: [x, y]}; else ruler.b = [x, y]; draw(); }, true);
+const _draw = draw; draw = function () {
+  _draw(); if (!ruler) return; ctx.save(); ctx.setTransform(devicePixelRatio || 1, 0, 0, devicePixelRatio || 1, 0, 0);
+  const pts = [ruler.a, ruler.b].filter(Boolean).map(p => toScreen(p[0] + .5, p[1] + .5)); ctx.strokeStyle = "#ffd24a"; ctx.fillStyle = "#ffd24a"; ctx.lineWidth = 2;
+  pts.forEach(p => { ctx.fillRect(p[0] - 4, p[1] - 4, 8, 8); });
+  if (pts.length === 2) { ctx.setLineDash([6, 4]); ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); ctx.lineTo(pts[1][0], pts[1][1]); ctx.stroke(); ctx.setLineDash([]);
+    const dx = (ruler.b[0] - ruler.a[0]) * info.bpp, dz = (ruler.b[1] - ruler.a[1]) * info.bpp, d = Math.hypot(dx, dz), mins = d / 4.3 / 60;
+    const t = Math.round(d) + " блоков (" + (d / 1000).toFixed(2) + " км), пешком ≈ " + (mins < 90 ? Math.round(mins) + " мин" : (mins / 60).toFixed(1) + " ч");
+    ctx.font = "13px " + getComputedStyle(document.body).fontFamily; ctx.textAlign = "center"; ctx.lineWidth = 4; ctx.strokeStyle = "rgba(10,10,14,.9)"; const mx = (pts[0][0] + pts[1][0]) / 2, my = (pts[0][1] + pts[1][1]) / 2 - 12; ctx.strokeText(t, mx, my); ctx.fillStyle = "#fff"; ctx.fillText(t, mx, my); }
+  ctx.restore();
+};
+$("bPng").onclick = () => { const c = document.createElement("canvas"); c.width = W; c.height = H; const x = c.getContext("2d"); x.drawImage(fillCv || terrainCv, 0, 0); const a = document.createElement("a"); a.download = (info.name + "_" + mode + ".png").replace(/[^\w.-]/g, "_"); a.href = c.toDataURL("image/png"); a.click(); };
+$("bHelp").onclick = () => { $("help").style.display = "grid"; };
+
+function writeHash() { if (!info) return; const r = view.getBoundingClientRect(), cx = ((r.width / 2 - cam.x) / cam.z - W / 2) * info.bpp, cz = ((r.height / 2 - cam.y) / cam.z - H / 2) * info.bpp; history.replaceState(null, "", "#" + mode + "," + Math.round(cx) + "," + Math.round(cz) + "," + cam.z.toFixed(2)); }
+function readHash() { const h = initHash.slice(1).split(","); if (h.length < 4 || !(h[0] in modeKeys())) return false; const z = parseFloat(h[3]); if (!(z > 0)) return false; setMode(h[0], true); const r = view.getBoundingClientRect(); cam.z = z; cam.x = r.width / 2 - ((parseFloat(h[1]) / info.bpp) + W / 2) * z; cam.y = r.height / 2 - ((parseFloat(h[2]) / info.bpp) + H / 2) * z; draw(); return true; }
+let hashT = null; ["wheel"].forEach(ev => view.addEventListener(ev, () => { clearTimeout(hashT); hashT = setTimeout(writeHash, 400); }));
+
+drawIconInto($("plateIcon"), "terrain");
+let first = true;
+loadAll().then(() => { resize(); if (first) { first = false; readHash(); } setInterval(poll, 3000); }).catch(e => { $("coords").textContent = "ошибка: " + e.message; });
+</script>
+</body>
+</html>

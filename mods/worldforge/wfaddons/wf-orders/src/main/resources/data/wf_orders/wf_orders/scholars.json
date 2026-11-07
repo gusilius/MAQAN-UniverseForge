@@ -1,0 +1,87 @@
+{
+  "id": "scholars_order",
+  "name": "Орден учёных",
+  "kind": "order",
+  "color": 6078632,
+  "power": 30,
+  "treasury": 600,
+  "join_gold": 25,
+  "dues": 1,
+  "desc": "Книжники, лекари и хронисты. Хранят знания, лечат и пишут историю.",
+  "rivals": [],
+  "liked": [
+    "scholar",
+    "patient",
+    "just"
+  ],
+  "disliked": [
+    "wroth"
+  ],
+  "ranks": [
+    {
+      "id": "novice",
+      "name": "Послушник",
+      "influence": 0,
+      "perks": {}
+    },
+    {
+      "id": "acolyte",
+      "name": "Адепт",
+      "influence": 30,
+      "perks": {
+        "learning_bonus": 1
+      }
+    },
+    {
+      "id": "maester",
+      "name": "Мейстер",
+      "influence": 100,
+      "perks": {
+        "learning_bonus": 2,
+        "tax_relief_pct": 2
+      }
+    },
+    {
+      "id": "archmaester",
+      "name": "Архимейстер",
+      "influence": 260,
+      "perks": {
+        "learning_bonus": 4
+      }
+    }
+  ],
+  "missions": [
+    {
+      "id": "books",
+      "text": "Библиотеке нужны книги: {n} шт.",
+      "type": "fetch",
+      "item": "book",
+      "min": 2,
+      "max": 6,
+      "reward": 30,
+      "influence": 12
+    },
+    {
+      "id": "herbs",
+      "text": "Лекарям нужны ягоды: {n} шт.",
+      "type": "fetch",
+      "item": "sweet_berries",
+      "min": 12,
+      "max": 32,
+      "reward": 20,
+      "influence": 8
+    }
+  ],
+  "petitions": [
+    {
+      "id": "grant",
+      "name": "Грант на исследования",
+      "desc": "80 золота.",
+      "cost": 20,
+      "min_rank": 1,
+      "kind": "gold",
+      "amount": 80,
+      "cooldown": 20
+    }
+  ]
+}

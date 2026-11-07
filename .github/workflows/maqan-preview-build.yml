@@ -1,0 +1,47 @@
+name: MAQAN Platform + Atlas Preview
+run-name: Preview validation · ${{ github.ref_name }}
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-preview:
+    name: Windows x64 · Platform + Atlas
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 8.8 (ForgeGradle 6 compatible)
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.8'
+
+      - name: Build MAQAN Platform
+        run: gradle --no-daemon -p platform clean build
+
+      - name: Test and build Atlas
+        run: gradle --no-daemon -p mods/atlas clean test build
+
+      - name: Publish preview JARs
+        uses: actions/upload-artifact@v4
+        with:
+          name: maqan-platform-atlas-preview
+          if-no-files-found: error
+          path: |
+            platform/build/libs/*.jar
+            mods/atlas/build/libs/*.jar

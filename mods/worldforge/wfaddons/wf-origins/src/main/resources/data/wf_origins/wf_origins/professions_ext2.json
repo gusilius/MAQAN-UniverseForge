@@ -1,0 +1,407 @@
+{
+ "professions": [
+  {
+   "id": "exorcist",
+   "name": "Экзорцист",
+   "desc": "Изгоняет нечисть и снимает порчу.",
+   "wage": 7,
+   "ranks": [
+    {
+     "name": "Служка",
+     "xp": 0,
+     "mods": {}
+    },
+    {
+     "name": "Изгоняющий",
+     "xp": 200,
+     "mods": {
+      "resist_pct": 3,
+      "heal_pct": 3
+     }
+    },
+    {
+     "name": "Экзорцист",
+     "xp": 800,
+     "mods": {
+      "resist_pct": 3,
+      "heal_pct": 3
+     }
+    },
+    {
+     "name": "Великий экзорцист",
+     "xp": 2500,
+     "mods": {
+      "resist_pct": 3,
+      "heal_pct": 3
+     }
+    }
+   ],
+   "group": "service",
+   "workplace": "chapel",
+   "req_stat": {
+    "spirit": 6
+   }
+  },
+  {
+   "id": "gravedigger",
+   "name": "Могильщик",
+   "desc": "Знает кладбище лучше живых.",
+   "wage": 4,
+   "ranks": [
+    {
+     "name": "Подмастерье",
+     "xp": 0,
+     "mods": {}
+    },
+    {
+     "name": "Могильщик",
+     "xp": 200,
+     "mods": {
+      "stealth_pct": 2,
+      "resist_pct": 2
+     }
+    },
+    {
+     "name": "Смотритель погоста",
+     "xp": 800,
+     "mods": {
+      "stealth_pct": 2,
+      "resist_pct": 2
+     }
+    },
+    {
+     "name": "Хранитель склепа",
+     "xp": 2500,
+     "mods": {
+      "stealth_pct": 2,
+      "resist_pct": 2
+     }
+    }
+   ],
+   "group": "service",
+   "workplace": "chapel"
+  },
+  {
+   "id": "beastmaster_p",
+   "name": "Зверовод",
+   "desc": "Приручает и выращивает зверей.",
+   "wage": 5,
+   "ranks": [
+    {
+     "name": "Подпасок",
+     "xp": 0,
+     "mods": {}
+    },
+    {
+     "name": "Зверовод",
+     "xp": 200,
+     "mods": {
+      "carry": 3,
+      "luck": 0.3
+     }
+    },
+    {
+     "name": "Мастер зверинца",
+     "xp": 800,
+     "mods": {
+      "carry": 3,
+      "luck": 0.3
+     }
+    },
+    {
+     "name": "Хозяин зверей",
+     "xp": 2500,
+     "mods": {
+      "carry": 3,
+      "luck": 0.3
+     }
+    }
+   ],
+   "group": "farm",
+   "workplace": "stables"
+  },
+  {
+   "id": "jeweler_p",
+   "name": "Ювелир-огранщик",
+   "desc": "Камни и металлы высшей пробы.",
+   "wage": 8,
+   "ranks": [
+    {
+     "name": "Подмастерье",
+     "xp": 0,
+     "mods": {}
+    },
+    {
+     "name": "Огранщик",
+     "xp": 200,
+     "mods": {
+      "craft_quality_pct": 4,
+      "gold_find_pct": 2
+     }
+    },
+    {
+     "name": "Мастер камня",
+     "xp": 800,
+     "mods": {
+      "craft_quality_pct": 4,
+      "gold_find_pct": 2
+     }
+    },
+    {
+     "name": "Придворный ювелир",
+     "xp": 2500,
+     "mods": {
+      "craft_quality_pct": 4,
+      "gold_find_pct": 2
+     }
+    }
+   ],
+   "group": "craft",
+   "workplace": "workshop",
+   "req_stat": {
+    "agility": 5
+   }
+  },
+  {
+   "id": "blood_alchemist",
+   "name": "Алхимик крови",
+   "desc": "Работает с кровью, ядом и эликсирами жизни.",
+   "wage": 12,
+   "ranks": [
+    {
+     "name": "Подмастерье",
+     "xp": 0,
+     "mods": {}
+    },
+    {
+     "name": "Кровавый алхимик",
+     "xp": 200,
+     "mods": {
+      "heal_pct": 4,
+      "crit_pct": 2
+     }
+    },
+    {
+     "name": "Мастер эликсиров",
+     "xp": 800,
+     "mods": {
+      "heal_pct": 4,
+      "crit_pct": 2
+     }
+    },
+    {
+     "name": "Хранитель красной книги",
+     "xp": 2500,
+     "mods": {
+      "heal_pct": 4,
+      "crit_pct": 2
+     }
+    }
+   ],
+   "from": "alchemist",
+   "min_rank": 2,
+   "exclusive": "alch"
+  },
+  {
+   "id": "rune_smith",
+   "name": "Рунный кузнец",
+   "desc": "Руны, что держат металл и порчу.",
+   "wage": 11,
+   "ranks": [
+    {
+     "name": "Подмастерье",
+     "xp": 0,
+     "mods": {}
+    },
+    {
+     "name": "Рунный кузнец",
+     "xp": 200,
+     "mods": {
+      "weapon_dmg_pct": 3,
+      "resist_pct": 3
+     }
+    },
+    {
+     "name": "Мастер рун",
+     "xp": 800,
+     "mods": {
+      "weapon_dmg_pct": 3,
+      "resist_pct": 3
+     }
+    },
+    {
+     "name": "Легенда рун",
+     "xp": 2500,
+     "mods": {
+      "weapon_dmg_pct": 3,
+      "resist_pct": 3
+     }
+    }
+   ],
+   "from": "smith",
+   "min_rank": 2,
+   "exclusive": "smithtype"
+  },
+  {
+   "id": "silversmith",
+   "name": "Серебряных дел мастер",
+   "desc": "Серебряные клинки и обереги против нечисти.",
+   "wage": 10,
+   "ranks": [
+    {
+     "name": "Подмастерье",
+     "xp": 0,
+     "mods": {}
+    },
+    {
+     "name": "Серебряник",
+     "xp": 200,
+     "mods": {
+      "weapon_dmg_pct": 2,
+      "crit_pct": 1,
+      "resist_pct": 2
+     }
+    },
+    {
+     "name": "Мастер серебра",
+     "xp": 800,
+     "mods": {
+      "weapon_dmg_pct": 2,
+      "crit_pct": 1,
+      "resist_pct": 2
+     }
+    },
+    {
+     "name": "Хранитель серебра",
+     "xp": 2500,
+     "mods": {
+      "weapon_dmg_pct": 2,
+      "crit_pct": 1,
+      "resist_pct": 2
+     }
+    }
+   ],
+   "from": "smith",
+   "min_rank": 2,
+   "exclusive": "smithtype"
+  },
+  {
+   "id": "grave_scholar",
+   "name": "Книжник теней",
+   "desc": "Собирает запретные книги.",
+   "wage": 9,
+   "ranks": [
+    {
+     "name": "Копиист",
+     "xp": 0,
+     "mods": {}
+    },
+    {
+     "name": "Книжник",
+     "xp": 200,
+     "mods": {
+      "xp_gain_pct": 4,
+      "spy_success_pct": 2
+     }
+    },
+    {
+     "name": "Хранитель запретного",
+     "xp": 800,
+     "mods": {
+      "xp_gain_pct": 4,
+      "spy_success_pct": 2
+     }
+    },
+    {
+     "name": "Архивариус теней",
+     "xp": 2500,
+     "mods": {
+      "xp_gain_pct": 4,
+      "spy_success_pct": 2
+     }
+    }
+   ],
+   "from": "scribe",
+   "min_rank": 2,
+   "exclusive": "scribetype"
+  },
+  {
+   "id": "caravan_guard",
+   "name": "Караванный страж",
+   "desc": "Бережёт чужие грузы от разбойников.",
+   "wage": 9,
+   "ranks": [
+    {
+     "name": "Подручный",
+     "xp": 0,
+     "mods": {}
+    },
+    {
+     "name": "Караванный страж",
+     "xp": 200,
+     "mods": {
+      "armor": 1,
+      "trade_profit_pct": 1
+     }
+    },
+    {
+     "name": "Старший страж",
+     "xp": 800,
+     "mods": {
+      "armor": 1,
+      "trade_profit_pct": 1
+     }
+    },
+    {
+     "name": "Начальник охраны",
+     "xp": 2500,
+     "mods": {
+      "armor": 1,
+      "trade_profit_pct": 1
+     }
+    }
+   ],
+   "from": "guard",
+   "min_rank": 2
+  },
+  {
+   "id": "sea_pilot",
+   "name": "Лоцман",
+   "desc": "Проводит корабли мимо рифов.",
+   "wage": 9,
+   "ranks": [
+    {
+     "name": "Юнга",
+     "xp": 0,
+     "mods": {}
+    },
+    {
+     "name": "Лоцман",
+     "xp": 200,
+     "mods": {
+      "move_speed_pct": 2,
+      "fish_pct": 4
+     }
+    },
+    {
+     "name": "Мастер фарватера",
+     "xp": 800,
+     "mods": {
+      "move_speed_pct": 2,
+      "fish_pct": 4
+     }
+    },
+    {
+     "name": "Адмиральский лоцман",
+     "xp": 2500,
+     "mods": {
+      "move_speed_pct": 2,
+      "fish_pct": 4
+     }
+    }
+   ],
+   "from": "fisher",
+   "min_rank": 2
+  }
+ ]
+}

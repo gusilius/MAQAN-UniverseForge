@@ -1,0 +1,124 @@
+{
+  "id": "merchants_guild",
+  "name": "Гильдия торговцев",
+  "kind": "guild",
+  "color": 14263361,
+  "power": 55,
+  "treasury": 900,
+  "join_gold": 40,
+  "dues": 2,
+  "desc": "Купцы, менялы и владельцы караванов. Платят за товары и новости, ценят деньги и честную сделку.",
+  "rivals": [
+    "thieves_guild"
+  ],
+  "liked": [
+    "greedy",
+    "shrewd",
+    "diligent"
+  ],
+  "disliked": [
+    "cruel",
+    "lazy"
+  ],
+  "ranks": [
+    {
+      "id": "apprentice",
+      "name": "Ученик",
+      "influence": 0,
+      "perks": {
+        "discount_pct": 2
+      }
+    },
+    {
+      "id": "trader",
+      "name": "Торговец",
+      "influence": 40,
+      "perks": {
+        "discount_pct": 5
+      }
+    },
+    {
+      "id": "factor",
+      "name": "Фактор",
+      "influence": 120,
+      "perks": {
+        "discount_pct": 8,
+        "tax_relief_pct": 3
+      }
+    },
+    {
+      "id": "master",
+      "name": "Мастер гильдии",
+      "influence": 300,
+      "perks": {
+        "discount_pct": 12,
+        "tax_relief_pct": 6
+      }
+    }
+  ],
+  "missions": [
+    {
+      "id": "grain",
+      "text": "Склады пусты. Доставьте {n} пшеницы.",
+      "type": "fetch",
+      "item": "wheat",
+      "min": 16,
+      "max": 48,
+      "reward": 30,
+      "influence": 10
+    },
+    {
+      "id": "iron",
+      "text": "Кузнецам нужен металл: {n} железных слитков.",
+      "type": "fetch",
+      "item": "iron_ingot",
+      "min": 6,
+      "max": 20,
+      "reward": 40,
+      "influence": 12
+    },
+    {
+      "id": "invest",
+      "text": "Вложите {n} золота в общий караван.",
+      "type": "gold",
+      "min": 30,
+      "max": 90,
+      "reward": 36,
+      "influence": 12,
+      "min_rank": 1
+    },
+    {
+      "id": "escort",
+      "text": "Охраняйте дороги: убейте {n} разбойников и чудовищ.",
+      "type": "deed",
+      "item": "kill_hostile",
+      "min": 8,
+      "max": 20,
+      "reward": 50,
+      "influence": 15
+    }
+  ],
+  "petitions": [
+    {
+      "id": "loan",
+      "name": "Ссуда из казны",
+      "desc": "100 золота без процентов.",
+      "cost": 20,
+      "min_rank": 1,
+      "kind": "gold",
+      "amount": 100,
+      "cooldown": 20
+    },
+    {
+      "id": "low_tax",
+      "name": "Низкие налоги в вашем государстве",
+      "desc": "Гильдия просит вас о мягкой налоговой политике.",
+      "cost": 25,
+      "min_rank": 2,
+      "kind": "action",
+      "action": "econ_tax",
+      "args": "0",
+      "cooldown": 30
+    }
+  ]
+}

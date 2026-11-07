@@ -1,0 +1,106 @@
+package dev.worldforge.war;
+
+import dev.worldforge.mod.TitleData;
+import dev.worldforge.mod.TitleEditor;
+import dev.worldforge.mod.api.ActionResult;
+import dev.worldforge.mod.api.MapAction;
+import dev.worldforge.mod.api.WorldForgeApi;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.function.Function;
+
+/** Регистрирует действия карты: объявить войну, мир, союз. Права проверяет {@link WarEngine.Authority} (по умолчанию - оператор или правитель). */
+public final class WarActions {
+    private WarActions() {}
+
+    /** engine: по редактору карты возвращает движок войн этой карты (null - не запущен). */
+    public static void register(Function<TitleEditor, WarEngine> engine) {
+        reg("war_declare", "Объявить войну", List.of("id цели", "повод", "id титулов-целей через запятую"), "Повод: conquest, subjugation, tribute_war, humiliation, betrayal. Для conquest укажите id титулов цели",
+                "war", (e, c) -> {
+                    List<Integer> goals = new ArrayList<>();
+                    if (c.args.size() > 2 && !c.args.get(2).isBlank()) {
+                        for (String p : c.args.get(2).split("[,;\\s]+")) {
+                            if (p.isBlank()) continue;
+                            TitleData.Title t = c.data().findTitle(p);
+                            if (t == null) return ActionResult.fail("Нет титула " + p);
+                            goals.add(t.id);
+                        }
+                    }
+                    String target = c.arg(0, "id цели"), cb = c.args.size() > 1 && !c.args.get(1).isBlank() ? c.args.get(1).trim() : "conquest";
+                    TitleData.Realm t = c.data().findRealm(target);
+                    if (t == null) return ActionResult.fail("Нет государства " + target);
+                    War w = e.declare(c.realmId, t.id, cb, goals);
+                    return ActionResult.ok("Война #" + w.id + ": " + c.realm().name + " против " + t.name);
+                });
+        reg("war_independence", "Война за независимость", List.of(), "Подданный восстаёт против сюзерена", "war", (e, c) -> {
+            TitleData.Realm r = c.realm();
+            if (r.overlordId == null) return ActionResult.fail(r.name + " и так независимо");
+            War w = e.declare(r.id, r.overlordId, "independence", List.of());
+            return ActionResult.ok("Война #" + w.id + ": восстание " + r.name);
+        });
+        reg("war_peace_white", "Предложить белый мир", List.of("номер войны"), "Мир без условий; противник должен принять", "peace", (e, c) -> {
+            e.offerPeace(num(c.arg(0, "номер войны")), c.realmId, true);
+            return ActionResult.ok("Белый мир предложен");
+        });
+        reg("war_peace_demand", "Выдвинуть условия мира", List.of("номер войны"), "Нужно достаточно очков войны для целей", "peace", (e, c) -> {
+            e.offerPeace(num(c.arg(0, "номер войны")), c.realmId, false);
+            return ActionResult.ok("Условия предъявлены");
+        });
+        reg("war_peace_accept", "Принять мир", List.of("номер войны"), "Принять предложение противника", "peace", (e, c) -> {
+            e.acceptPeace(num(c.arg(0, "номер войны")), c.realmId);
+            return ActionResult.ok("Мир заключён");
+        });
+        reg("war_enforce", "Навязать мир", List.of("номер войны"), "Если очков хватает на цели, мир заключается сразу", "peace", (e, c) -> {
+            e.enforce(num(c.arg(0, "номер войны")), c.realmId);
+            return ActionResult.ok("Мир навязан");
+        });
+        reg("war_surrender", "Капитулировать", List.of("номер войны"), "Противник получает цели войны", "peace", (e, c) -> {
+            e.surrender(num(c.arg(0, "номер войны")), c.realmId);
+            return ActionResult.ok("Капитуляция");
+        });
+        reg("ally", "Заключить союз", List.of("id государства"), "Союзники вступают в войны друг друга", "alliance", (e, c) -> {
+            TitleData.Realm t = c.data().findRealm(c.arg(0, "id государства"));
+            if (t == null) return ActionResult.fail("Нет такого государства");
+            e.ally(c.realmId, t.id);
+            return ActionResult.ok("Союз: " + c.realm().name + " и " + t.name);
+        });
+        reg("ally_break", "Разорвать союз", List.of("id государства"), "", "alliance", (e, c) -> {
+            TitleData.Realm t = c.data().findRealm(c.arg(0, "id государства"));
+            if (t == null) return ActionResult.fail("Нет такого государства");
+            e.breakAlliance(c.realmId, t.id);
+            return ActionResult.ok("Союз разорван");
+        });
+        WorldForgeApi.addGuard((action, ctx) -> {
+            String cap = CAPS.get(action.id);
+            if (cap == null) return null;
+            WarEngine e = engine.apply(ctx.editor);
+            if (e == null) return "Движок войн не запущен";
+            if (ctx.realmId == null) return "Не выбрано государство";
+            return e.authority.may(ctx.actor, ctx.operator, ctx.realmId, cap) ? null : "У вас нет полномочий: " + cap + " для этого государства";
+        });
+        ENGINE = engine;
+    }
+
+    private interface Body { ActionResult run(WarEngine e, dev.worldforge.mod.api.ActionContext c); }
+
+    private static final java.util.Map<String, String> CAPS = new java.util.HashMap<>();
+    private static Function<TitleEditor, WarEngine> ENGINE;
+
+    private static void reg(String id, String label, List<String> params, String hint, String cap, Body body) {
+        CAPS.put(id, cap);
+        WorldForgeApi.registerAction(new MapAction(id, label, MapAction.Scope.REALM, MapAction.Perm.ANY, params, hint, ctx -> {
+            WarEngine e = ENGINE == null ? null : ENGINE.apply(ctx.editor);
+            if (e == null) return ActionResult.fail("Движок войн не запущен");
+            try {
+                return body.run(e, ctx);
+            } catch (TitleEditor.EditException ex) {
+                return ActionResult.fail(ex.getMessage());
+            }
+        }));
+    }
+
+    private static int num(String s) {
+        try { return Integer.parseInt(s.trim().replace("#", "")); } catch (NumberFormatException e) { throw new TitleEditor.EditException("Нужен номер войны: " + s); }
+    }
+}

@@ -1,0 +1,3 @@
+package com.mojang.blaze3d.vertex; import java.awt.Graphics2D; import java.awt.geom.AffineTransform; import java.util.ArrayDeque;
+public class PoseStack { public Graphics2D g; ArrayDeque<AffineTransform> st=new ArrayDeque<>(); public void pushPose(){ st.push(g.getTransform()); } public void popPose(){ g.setTransform(st.pop()); }
+ public void translate(float a,float b,float c){ g.translate(a,b);} public void translate(double a,double b,double c){ g.translate(a,b);} public void scale(float a,float b,float c){ g.scale(a,b);} }

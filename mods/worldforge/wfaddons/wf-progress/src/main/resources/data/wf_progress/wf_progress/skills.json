@@ -1,0 +1,823 @@
+{
+ "skills": [
+  {
+   "id": "swordsmanship",
+   "name": "Фехтование",
+   "group": "combat",
+   "desc": "Урон мечом и шанс критического удара.",
+   "max": 8,
+   "cost": [
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    3,
+    3
+   ],
+   "per_rank": {
+    "melee_dmg_pct": 3,
+    "crit_pct": 0.5
+   },
+   "requires": {}
+  },
+  {
+   "id": "axe_mastery",
+   "name": "Топоры",
+   "group": "combat",
+   "desc": "Тяжёлые удары: урон и броня противника хуже защищает.",
+   "max": 8,
+   "cost": [
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    3,
+    3
+   ],
+   "per_rank": {
+    "melee_dmg_pct": 3.5
+   },
+   "requires": {}
+  },
+  {
+   "id": "spear_mastery",
+   "name": "Копья",
+   "group": "combat",
+   "desc": "Длинные выпады, защита от кавалерии.",
+   "max": 8,
+   "cost": [
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    3,
+    3
+   ],
+   "per_rank": {
+    "melee_dmg_pct": 2.5,
+    "dodge_pct": 0.4
+   },
+   "requires": {}
+  },
+  {
+   "id": "archery",
+   "name": "Стрельба из лука",
+   "group": "combat",
+   "desc": "Урон и дальность дальнего боя.",
+   "max": 8,
+   "cost": [
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    3,
+    3
+   ],
+   "per_rank": {
+    "ranged_dmg_pct": 4,
+    "crit_pct": 0.4
+   },
+   "requires": {}
+  },
+  {
+   "id": "shield_wall",
+   "name": "Щитовой строй",
+   "group": "combat",
+   "desc": "Броня и отражение урона.",
+   "max": 8,
+   "cost": [
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    3,
+    3
+   ],
+   "per_rank": {
+    "armor": 0.8,
+    "thorns": 0.2
+   },
+   "requires": {
+    "attr": {
+     "might": 6
+    }
+   }
+  },
+  {
+   "id": "armor_mastery",
+   "name": "Ношение доспехов",
+   "group": "combat",
+   "desc": "Тяжёлая броня не замедляет.",
+   "max": 8,
+   "cost": [
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    3,
+    3
+   ],
+   "per_rank": {
+    "armor": 0.6,
+    "move_speed_pct": 0.3
+   },
+   "requires": {
+    "attr": {
+     "vitality": 6
+    }
+   }
+  },
+  {
+   "id": "tactics",
+   "name": "Тактика",
+   "group": "combat",
+   "desc": "Командуйте войском: больше ополчения.",
+   "max": 8,
+   "cost": [
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    3,
+    3
+   ],
+   "per_rank": {
+    "levy_pct": 2
+   },
+   "requires": {
+    "attr": {
+     "martial": 7
+    }
+   }
+  },
+  {
+   "id": "athletics",
+   "name": "Атлетика",
+   "group": "survival",
+   "desc": "Бег и прыжки, носите больше.",
+   "max": 8,
+   "cost": [
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    3,
+    3
+   ],
+   "per_rank": {
+    "move_speed_pct": 0.8,
+    "carry": 2
+   },
+   "requires": {}
+  },
+  {
+   "id": "hunting",
+   "name": "Охота",
+   "group": "survival",
+   "desc": "Добыча и урон по зверям.",
+   "max": 8,
+   "cost": [
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    3,
+    3
+   ],
+   "per_rank": {
+    "melee_dmg_pct": 1,
+    "luck": 0.3
+   },
+   "requires": {}
+  },
+  {
+   "id": "foraging",
+   "name": "Собирательство",
+   "group": "survival",
+   "desc": "Находите больше трав и ягод.",
+   "max": 8,
+   "cost": [
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    3,
+    3
+   ],
+   "per_rank": {
+    "luck": 0.4,
+    "health_regen": 0.02
+   },
+   "requires": {}
+  },
+  {
+   "id": "first_aid",
+   "name": "Первая помощь",
+   "group": "survival",
+   "desc": "Лечение лучше и быстрее.",
+   "max": 8,
+   "cost": [
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    3,
+    3
+   ],
+   "per_rank": {
+    "heal_pct": 6,
+    "health_regen": 0.03
+   },
+   "requires": {}
+  },
+  {
+   "id": "stealth",
+   "name": "Скрытность",
+   "group": "survival",
+   "desc": "Вас сложнее заметить.",
+   "max": 8,
+   "cost": [
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    3,
+    3
+   ],
+   "per_rank": {
+    "stealth_pct": 4
+   },
+   "requires": {
+    "attr": {
+     "agility": 6
+    }
+   }
+  },
+  {
+   "id": "lockpicking",
+   "name": "Взлом",
+   "group": "survival",
+   "desc": "Замки и ловушки.",
+   "max": 8,
+   "cost": [
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    3,
+    3
+   ],
+   "per_rank": {
+    "luck": 0.3,
+    "stealth_pct": 1.5
+   },
+   "requires": {
+    "attr": {
+     "agility": 7
+    }
+   }
+  },
+  {
+   "id": "mining",
+   "name": "Горное дело",
+   "group": "craft",
+   "desc": "Быстрее добыча руды.",
+   "max": 8,
+   "cost": [
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    3,
+    3
+   ],
+   "per_rank": {
+    "mining_speed_pct": 5
+   },
+   "requires": {}
+  },
+  {
+   "id": "smithing",
+   "name": "Кузнечное дело",
+   "group": "craft",
+   "desc": "Лучше оружие и броня, которые вы куёте.",
+   "max": 8,
+   "cost": [
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    3,
+    3
+   ],
+   "per_rank": {
+    "craft_quality_pct": 4
+   },
+   "requires": {
+    "attr": {
+     "might": 5
+    }
+   }
+  },
+  {
+   "id": "carpentry",
+   "name": "Плотницкое дело",
+   "group": "craft",
+   "desc": "Постройки и мебель дешевле и лучше.",
+   "max": 8,
+   "cost": [
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    3,
+    3
+   ],
+   "per_rank": {
+    "craft_quality_pct": 3
+   },
+   "requires": {}
+  },
+  {
+   "id": "farming",
+   "name": "Земледелие",
+   "group": "craft",
+   "desc": "Урожаи богаче.",
+   "max": 8,
+   "cost": [
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    3,
+    3
+   ],
+   "per_rank": {
+    "luck": 0.2,
+    "tax_pct": 0.6
+   },
+   "requires": {}
+  },
+  {
+   "id": "alchemy",
+   "name": "Алхимия",
+   "group": "craft",
+   "desc": "Зелья крепче.",
+   "max": 8,
+   "cost": [
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    3,
+    3
+   ],
+   "per_rank": {
+    "craft_quality_pct": 3,
+    "heal_pct": 3
+   },
+   "requires": {
+    "attr": {
+     "intellect": 7
+    }
+   }
+  },
+  {
+   "id": "cooking",
+   "name": "Кулинария",
+   "group": "craft",
+   "desc": "Еда лечит лучше.",
+   "max": 8,
+   "cost": [
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    3,
+    3
+   ],
+   "per_rank": {
+    "health_regen": 0.04,
+    "heal_pct": 2
+   },
+   "requires": {}
+  },
+  {
+   "id": "haggling",
+   "name": "Торговля",
+   "group": "social",
+   "desc": "Скидки у купцов.",
+   "max": 8,
+   "cost": [
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    3,
+    3
+   ],
+   "per_rank": {
+    "discount_pct": 2.5
+   },
+   "requires": {
+    "attr": {
+     "diplomacy": 5
+    }
+   }
+  },
+  {
+   "id": "persuasion",
+   "name": "Убеждение",
+   "group": "social",
+   "desc": "Люди охотнее соглашаются.",
+   "max": 8,
+   "cost": [
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    3,
+    3
+   ],
+   "per_rank": {
+    "opinion": 2
+   },
+   "requires": {}
+  },
+  {
+   "id": "leadership",
+   "name": "Лидерство",
+   "group": "social",
+   "desc": "Подчинённые стараются лучше.",
+   "max": 8,
+   "cost": [
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    3,
+    3
+   ],
+   "per_rank": {
+    "levy_pct": 1.5,
+    "opinion": 1
+   },
+   "requires": {
+    "attr": {
+     "martial": 6
+    }
+   }
+  },
+  {
+   "id": "intimidation",
+   "name": "Устрашение",
+   "group": "social",
+   "desc": "Бойтесь меня. Расположение падает, уступки растут.",
+   "max": 8,
+   "cost": [
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    3,
+    3
+   ],
+   "per_rank": {
+    "opinion": -1,
+    "melee_dmg_pct": 1
+   },
+   "requires": {}
+  },
+  {
+   "id": "etiquette",
+   "name": "Этикет",
+   "group": "social",
+   "desc": "При дворе вас любят.",
+   "max": 8,
+   "cost": [
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    3,
+    3
+   ],
+   "per_rank": {
+    "opinion": 2,
+    "discount_pct": 0.5
+   },
+   "requires": {
+    "attr": {
+     "diplomacy": 6
+    }
+   }
+  },
+  {
+   "id": "espionage",
+   "name": "Шпионаж",
+   "group": "social",
+   "desc": "Шпионы работают чище.",
+   "max": 8,
+   "cost": [
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    3,
+    3
+   ],
+   "per_rank": {
+    "spy_success_pct": 4
+   },
+   "requires": {
+    "attr": {
+     "intrigue": 6
+    }
+   }
+  },
+  {
+   "id": "oratory",
+   "name": "Красноречие",
+   "group": "social",
+   "desc": "Речь увлекает толпу.",
+   "max": 8,
+   "cost": [
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    3,
+    3
+   ],
+   "per_rank": {
+    "opinion": 1.5,
+    "xp_gain_pct": 0.5
+   },
+   "requires": {}
+  },
+  {
+   "id": "logistics",
+   "name": "Логистика",
+   "group": "realm",
+   "desc": "Армии снабжаются лучше.",
+   "max": 8,
+   "cost": [
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    3,
+    3
+   ],
+   "per_rank": {
+    "levy_pct": 1.5,
+    "carry": 1
+   },
+   "requires": {
+    "attr": {
+     "stewardship": 6
+    }
+   }
+  },
+  {
+   "id": "tax_collection",
+   "name": "Сбор налогов",
+   "group": "realm",
+   "desc": "Больше дохода от земель.",
+   "max": 8,
+   "cost": [
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    3,
+    3
+   ],
+   "per_rank": {
+    "tax_pct": 3
+   },
+   "requires": {
+    "attr": {
+     "stewardship": 6
+    }
+   }
+  },
+  {
+   "id": "fortification",
+   "name": "Фортификация",
+   "group": "realm",
+   "desc": "Крепче стены и гарнизоны.",
+   "max": 8,
+   "cost": [
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    3,
+    3
+   ],
+   "per_rank": {
+    "armor": 0.5,
+    "levy_pct": 0.8
+   },
+   "requires": {
+    "attr": {
+     "martial": 6
+    }
+   }
+  },
+  {
+   "id": "siegecraft",
+   "name": "Осадное дело",
+   "group": "realm",
+   "desc": "Быстрее берёте замки.",
+   "max": 8,
+   "cost": [
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    3,
+    3
+   ],
+   "per_rank": {
+    "melee_dmg_pct": 1,
+    "levy_pct": 1
+   },
+   "requires": {
+    "attr": {
+     "martial": 8
+    },
+    "skill": {
+     "tactics": 2
+    }
+   }
+  },
+  {
+   "id": "statecraft",
+   "name": "Государственное дело",
+   "group": "realm",
+   "desc": "Дипломатия государств, меньше мятежей.",
+   "max": 8,
+   "cost": [
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    3,
+    3
+   ],
+   "per_rank": {
+    "opinion": 1.5,
+    "tax_pct": 1
+   },
+   "requires": {
+    "attr": {
+     "diplomacy": 8
+    }
+   }
+  },
+  {
+   "id": "law",
+   "name": "Право",
+   "group": "realm",
+   "desc": "Законы работают на вас.",
+   "max": 8,
+   "cost": [
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    3,
+    3
+   ],
+   "per_rank": {
+    "tax_pct": 1.5,
+    "opinion": 1
+   },
+   "requires": {
+    "attr": {
+     "learning": 6
+    }
+   }
+  },
+  {
+   "id": "scholarship",
+   "name": "Учёность",
+   "group": "realm",
+   "desc": "Читайте быстрее, учитесь быстрее.",
+   "max": 8,
+   "cost": [
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    3,
+    3
+   ],
+   "per_rank": {
+    "xp_gain_pct": 1.5
+   },
+   "requires": {
+    "attr": {
+     "learning": 5
+    }
+   }
+  },
+  {
+   "id": "medicine",
+   "name": "Медицина",
+   "group": "realm",
+   "desc": "Лечите других.",
+   "max": 8,
+   "cost": [
+    1,
+    1,
+    1,
+    2,
+    2,
+    2,
+    3,
+    3
+   ],
+   "per_rank": {
+    "heal_pct": 5,
+    "health_regen": 0.05
+   },
+   "requires": {
+    "attr": {
+     "learning": 7
+    },
+    "skill": {
+     "first_aid": 3
+    }
+   }
+  }
+ ]
+}
