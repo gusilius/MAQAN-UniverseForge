@@ -10,6 +10,7 @@ import net.minecraft.client.KeyMapping;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import com.mojang.blaze3d.platform.InputConstants;
@@ -227,7 +228,7 @@ public class NavigatorScreen extends Screen {
 
         int x = left + searchWidth + 6;
         int systemWidth = compactToolbar ? 54 : 88;
-        universeButton = addRenderableWidget(Button.builder(Component.literal(compactToolbar ? "SYS ▾" : "SYSTEM ▾"), b -> {
+        universeButton = addRenderableWidget(Button.builder(Component.literal("◎"), b -> {
             systemPickerOpen = !systemPickerOpen;
             if (systemPickerOpen) { contextOpen = false; toolsOpen = false; updateToolVisibility(); }
         }).bounds(x, barY, systemWidth, 20).build());
@@ -235,16 +236,20 @@ public class NavigatorScreen extends Screen {
         backButton = addRenderableWidget(Button.builder(Component.literal("‹"), b -> goBack())
                 .bounds(x, barY, 26, 20).build());
         x += 30;
-        openButton = addRenderableWidget(Button.builder(Component.literal(compactToolbar ? "GO" : "OPEN"), b -> openSelected())
+        openButton = addRenderableWidget(Button.builder(Component.literal("↗"), b -> openSelected())
                 .bounds(x, barY, compactToolbar ? 34 : 48, 20).build());
-        toolsButton = addRenderableWidget(Button.builder(Component.literal(compactToolbar ? "⚙" : "TOOLS  ⚙"), b -> {
+        toolsButton = addRenderableWidget(Button.builder(Component.literal("⚙"), b -> {
             toolsOpen = !toolsOpen;
             if (toolsOpen) { contextOpen = false; systemPickerOpen = false; }
             updateToolVisibility();
-            b.setMessage(Component.literal(toolsOpen ? "TOOLS  ×" : "TOOLS  ⚙"));
+            b.setMessage(Component.literal(toolsOpen ? "×" : "⚙"));
         }).bounds(width - (compactToolbar ? 76 : 112), barY, compactToolbar ? 30 : 66, 20).build());
         closeButton = addRenderableWidget(Button.builder(Component.literal("×"), b -> onClose())
                 .bounds(width - 40, barY, 26, 20).build());
+        universeButton.setTooltip(Tooltip.create(Component.literal("Select star system")));
+        backButton.setTooltip(Tooltip.create(Component.literal("Back to previous spatial layer")));
+        openButton.setTooltip(Tooltip.create(Component.literal("Open selected object")));
+        toolsButton.setTooltip(Tooltip.create(Component.literal("Atlas tools and visual settings")));
         if (embeddedInMaqan) closeButton.visible = false;
 
         int menuX = width - 286;
@@ -727,8 +732,7 @@ public class NavigatorScreen extends Screen {
                     : GalaxyCatalog.text(GalaxyCatalog.universe(universe), "name", universe);
             List<String> systems = GalaxyCatalog.universes();
             int index = systems.indexOf(universe);
-            universeButton.setMessage(Component.literal(systems.isEmpty() ? "SYS ▾" :
-                    "SYS " + (index + 1) + "/" + systems.size() + " ▾"));
+            universeButton.setMessage(Component.literal("◎"));
             universeButton.active = systems.size() > 1;
         }
         if (backButton != null) backButton.active = level > 0 || galaxyPath != null;
