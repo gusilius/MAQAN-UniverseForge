@@ -57,6 +57,14 @@ public class ArmyTest {
         boolean oversizedTickRejected = false;
         try { e.tick(3651); } catch (IllegalArgumentException ex) { oversizedTickRejected = true; }
         ok(oversizedTickRejected && e.war.day == dayBeforeInvalidTicks, "чрезмерный шаг времени отклоняется без зависания");
+        ArmyEngine clock = fresh(a[0], ids); clock.ai = false;
+        long clockStart = clock.war.day;
+        clock.tick(0.4);
+        ok(clock.war.day == clockStart, "дробный шаг меньше суток пока не продвигает день");
+        ArmyEngine clockReload = new ArmyEngine(clock.war);
+        clockReload.fromJson(clock.toJson());
+        clockReload.tick(0.6);
+        ok(clock.war.day == clockStart + 1, "дробные шаги накапливаются и сохраняются между загрузками");
 
         // набор
         double p0 = e.pool(A);

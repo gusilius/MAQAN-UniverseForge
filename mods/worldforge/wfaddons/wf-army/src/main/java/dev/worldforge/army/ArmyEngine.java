@@ -29,6 +29,8 @@ public final class ArmyEngine {
     public final List<String> events = new ArrayList<>();
     public boolean ai = true;
     private int nextArmy = 1;
+    /** Дробная часть суток между вызовами tick; сохраняется, чтобы частые малые шаги не терялись. */
+    private double dayAccumulator;
     private Map<String, List<Integer>> baronyCache = new HashMap<>();
 
     public ArmyEngine(WarEngine war) { this.war = war; war.driver = this::tick; }
@@ -246,7 +248,11 @@ public final class ArmyEngine {
     public void tick(double days) {
         if (!Double.isFinite(days) || days <= 0) return;
         if (days > 3650) throw new IllegalArgumentException("За один вызов можно обработать не более 3650 игровых дней");
-        long target = war.day + (long) Math.floor(days);
+        dayAccumulator += days;
+        long wholeDays = (long) Math.floor(dayAccumulator);
+        if (wholeDays <= 0) return;
+        dayAccumulator -= wholeDays;
+        long target = war.day + wholeDays;
         while (war.day < target) {
             if (war.day % 30 == 0) invalidate();
             upkeep();
@@ -637,6 +643,7 @@ public final class ArmyEngine {
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("format", "wf-army/1");
         root.put("next", nextArmy);
+        root.put("dayAccumulator", dayAccumulator);
         root.put("gold", new LinkedHashMap<String, Object>(gold));
         root.put("pool", new LinkedHashMap<String, Object>(pool));
         root.put("humans", new ArrayList<Object>(humans)); root.put("pacts", new ArrayList<Object>(pacts)); root.put("eco", eco.save());
@@ -662,6 +669,8 @@ public final class ArmyEngine {
         if (!"wf-army/1".equals(root.get("format"))) throw new IllegalArgumentException("Неверный формат армий");
         armies.clear(); sieges.clear(); pacts.clear(); gold.clear(); pool.clear(); humans.clear();
         nextArmy = ((Number) root.get("next")).intValue();
+        Object savedAccumulator = root.get("dayAccumulator");
+        dayAccumulator = savedAccumulator instanceof Number n && Double.isFinite(n.doubleValue()) && n.doubleValue() >= 0 && n.doubleValue() < 1 ? n.doubleValue() : 0;
         for (Map.Entry<String, Object> e : ((Map<String, Object>) root.get("gold")).entrySet()) gold.put(e.getKey(), ((Number) e.getValue()).doubleValue());
         for (Map.Entry<String, Object> e : ((Map<String, Object>) root.get("pool")).entrySet()) pool.put(e.getKey(), ((Number) e.getValue()).doubleValue());
         for (Object o : (List<Object>) root.get("humans")) humans.add((String) o);
