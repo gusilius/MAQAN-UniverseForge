@@ -216,7 +216,7 @@ public class NavigatorScreen extends Screen {
 
         // Compact MAQAN command bar. Secondary controls live in a tools popover,
         // keeping the star map clear without removing any functionality.
-        int left = 14;
+        int left = embeddedInMaqan ? 54 : 14;
         int barY = embeddedInMaqan ? 58 : 42;
         int searchWidth = Math.max(48, Math.min(210, width - (width < 440 ? 245 : 310)));
         boolean compactToolbar = width < 440;
@@ -1572,7 +1572,7 @@ public class NavigatorScreen extends Screen {
             segments.add(new String[]{atlasModeName() + " ATLAS", "atlas"});
         }
 
-        int x = 16;
+        int x = embeddedInMaqan ? 54 : 16;
         int y = embeddedInMaqan ? 38 : 17;
         int maxX = width - 16;
         for (int i = 0; i < segments.size(); i++) {
@@ -3985,26 +3985,31 @@ public class NavigatorScreen extends Screen {
     private int toolsMenuBottom() { return Math.min(height - 2, toolsMenuTop() + 336); }
 
     private void layoutPanels() {
+        // The global MAQAN rail owns the first 44 pixels. Recompute the existing
+        // Atlas layout in the remaining width instead of letting map/list content
+        // sit underneath the shared navigation.
+        int railReserve = embeddedInMaqan ? 36 : 0;
+        int layoutWidth = Math.max(120, width - railReserve);
         int[] nativeLayout = com.maqan.galacticnavigator.navigation.NavigatorNativeBridge.computePanelLayout(
-                width, height, showList, showInfo, NavigatorPreferences.listPanelWidth(),
+                layoutWidth, height, showList, showInfo, NavigatorPreferences.listPanelWidth(),
                 NavigatorPreferences.infoPanelWidth(), NavigatorPreferences.panelOrder());
         if (nativeLayout != null) {
             mapT = nativeLayout[0]; mapB = nativeLayout[1];
-            listL = nativeLayout[2]; listR = nativeLayout[3];
-            infoL = nativeLayout[4]; infoR = nativeLayout[5];
-            mapL = nativeLayout[6]; mapR = nativeLayout[7];
+            listL = nativeLayout[2] + railReserve; listR = nativeLayout[3] + railReserve;
+            infoL = nativeLayout[4] + railReserve; infoR = nativeLayout[5] + railReserve;
+            mapL = nativeLayout[6] + railReserve; mapR = nativeLayout[7] + railReserve;
             return;
         }
-        int[] fallback = WorkspaceLayout.compute(width, height, NavigatorPreferences.workspace());
+        int[] fallback = WorkspaceLayout.compute(layoutWidth, height, NavigatorPreferences.workspace());
         if (fallback == null) {
             mapT = mapB = 0;
             listL = listR = infoL = infoR = mapL = mapR = 0;
             return;
         }
         mapT = fallback[0]; mapB = fallback[1];
-        listL = fallback[2]; listR = fallback[3];
-        infoL = fallback[4]; infoR = fallback[5];
-        mapL = fallback[6]; mapR = fallback[7];
+        listL = fallback[2] + railReserve; listR = fallback[3] + railReserve;
+        infoL = fallback[4] + railReserve; infoR = fallback[5] + railReserve;
+        mapL = fallback[6] + railReserve; mapR = fallback[7] + railReserve;
     }
 
     private String panelAt(double x, double y) {
