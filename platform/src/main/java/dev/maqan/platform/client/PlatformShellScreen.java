@@ -32,8 +32,8 @@ public final class PlatformShellScreen extends Screen {
         addButton("ATLAS", 12, top, 82, () -> workspace = "ATLAS");
         addButton("WORLDFORGE", 98, top, 112, () -> workspace = "WORLDFORGE");
         addButton("WORKSPACE", 216, top, 94, () -> workspace = "WORKSPACE");
-        addButton(leftOpen ? "‹" : "›", 8, 44, 24, () -> { leftOpen = !leftOpen; rebuildWidgets(); });
-        addButton(rightOpen ? "›" : "‹", width - 32, 44, 24, () -> { rightOpen = !rightOpen; rebuildWidgets(); });
+        addButton(leftOpen ? "‹" : "›", 8, 44, 24, () -> { leftOpen = !leftOpen; rebuildShellControls(); });
+        addButton(rightOpen ? "›" : "‹", width - 32, 44, 24, () -> { rightOpen = !rightOpen; rebuildShellControls(); });
         String[] dock = {"NAV", "MAP", "ECON", "POLITICS", "ARMY", "JOURNAL"};
         int dw = Math.min(76, Math.max(48, (width - 40) / dock.length));
         int total = dw * dock.length;
@@ -45,7 +45,7 @@ public final class PlatformShellScreen extends Screen {
         addButton("×", width - 32, 8, 24, this::onClose);
     }
 
-    private void rebuildWidgets() { clearWidgets(); init(); }
+    private void rebuildShellControls() { clearWidgets(); init(); }
 
     private void addButton(String label, int x, int y, int w, Runnable action) {
         Button b = Button.builder(Component.literal(label), button -> action.run())
