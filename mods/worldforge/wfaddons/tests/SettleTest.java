@@ -3,6 +3,7 @@ package dev.worldforge.tests;
 import dev.worldforge.settle.*;
 
 import java.nio.file.*;
+import java.util.*;
 
 public class SettleTest {
     static int fails;
@@ -29,6 +30,26 @@ public class SettleTest {
     public static void main(String[] a) throws Exception {
         Defs d = defs();
         ok(d.validate().stream().noneMatch(m -> !m.startsWith("Предупреждение")), "набор данных без ошибок: " + d.validate());
+
+        Flow flow = new Flow();
+        flow.record(1, "wood", 5, true);
+        double validFlow = flow.perMinute(2, "wood", true);
+        flow.record(Double.NaN, "wood", 100, true);
+        flow.record(Double.POSITIVE_INFINITY, "wood", 100, true);
+        flow.record(2, "wood", Double.NaN, true);
+        flow.record(2, "wood", Double.POSITIVE_INFINITY, true);
+        flow.record(2, "wood", -1, true);
+        flow.record(2, "", 100, true);
+        ok(flow.perMinute(2, "wood", true) == validFlow, "невалидные события не портят статистику производства");
+        ok(flow.perMinute(Double.NaN, "wood", true) == 0 && flow.perMinute(Double.POSITIVE_INFINITY, "wood", true) == 0, "некорректное время запроса статистики безопасно");
+        List<Object> corruptedFlow = new ArrayList<>();
+        corruptedFlow.add(Map.of("t", 1L, "r", "wood", "p", Double.NaN, "c", 2.0));
+        corruptedFlow.add(Map.of("t", 2L, "r", "stone", "p", 3.0, "c", -1.0));
+        corruptedFlow.add("broken-entry");
+        corruptedFlow.add(Map.of("t", 3L, "r", "food", "p", 4.0, "c", 1.0));
+        Flow restoredFlow = new Flow();
+        restoredFlow.load(corruptedFlow);
+        ok(restoredFlow.resources().equals(Set.of("food")) && restoredFlow.perMinute(4, "food", true) > 0, "загрузка статистики пропускает повреждённые записи");
 
         Settlement s = fresh(d, 4);
         String unchanged = s.toJson();
