@@ -110,6 +110,28 @@ public final class Squads {
         if (o.kind() == Kind.PATROL) s.queue.addLast(new Order(Kind.PATROL, s.cx, s.cz, ""));     // патруль зацикливается: вернуться на старт
     }
 
+    private static String jsonString(String value) {
+        if (value == null) value = "";
+        StringBuilder out = new StringBuilder(value.length() + 2).append('"');
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            switch (c) {
+                case '"' -> out.append("\\\"");
+                case '\\\\' -> out.append("\\\\\\\\");
+                case '\\b' -> out.append("\\\\b");
+                case '\\f' -> out.append("\\\\f");
+                case '\\n' -> out.append("\\\\n");
+                case '\\r' -> out.append("\\\\r");
+                case '\\t' -> out.append("\\\\t");
+                default -> {
+                    if (c < 0x20) out.append(String.format("\\\\u%04x", (int) c));
+                    else out.append(c);
+                }
+            }
+        }
+        return out.append('"').toString();
+    }
+
     public String viewJson(String owner) {
         StringBuilder b = new StringBuilder("[");
         boolean first = true;
@@ -117,49 +139,103 @@ public final class Squads {
             if (!first) b.append(',');
             first = false;
             Order o = s.current();
-            b.append("{\"id\":\"").append(s.id).append("\",\"name\":\"").append(s.name.replace("\"", "'")).append("\",\"n\":").append(s.members.size())
-                    .append(",\"formation\":\"").append(s.formation.title).append("\",\"stance\":\"").append(s.stance.title).append("\",\"order\":\"")
-                    .append(o == null ? "Ожидает" : o.kind().title).append("\"}");
+            b.append("{\\"id\\":").append(jsonString(s.id))
+                    .append(",\\"name\\":").append(jsonString(s.name))
+                    .append(",\\"n\\":").append(s.members.size())
+                    .append(",\\"formation\\":").append(jsonString(s.formation.title))
+                    .append(",\\"stance\\":").append(jsonString(s.stance.title))
+                    .append(",\\"order\\":").append(jsonString(o == null ? "Ожидает" : o.kind().title)).append('}');
         }
         return b.append(']').toString();
     }
 
     // ---- сохранение ----
     public String toJson() {
-        StringBuilder b = new StringBuilder("{\"v\":\"wf-squads/1\",\"counter\":").append(counter).append(",\"squads\":[");
+        StringBuilder b = new StringBuilder("{\\"v\\":\\"wf-squads/1\\",\\"counter\\":")
+                .append(Math.max(1, counter)).append(",\\"squads\\":[");
         boolean first = true;
         for (Squad s : squads.values()) {
+            if (s == null) continue;
             if (!first) b.append(',');
             first = false;
-            b.append("{\"id\":\"").append(s.id).append("\",\"name\":\"").append(s.name.replace("\\", "").replace("\"", "'")).append("\",\"owner\":\"").append(s.owner)
-                    .append("\",\"realm\":\"").append(s.realm).append("\",\"formation\":\"").append(s.formation).append("\",\"stance\":\"").append(s.stance)
-                    .append("\",\"initial\":").append(s.initial).append(",\"morale\":").append(s.morale).append(",\"routed\":").append(s.routed).append(",\"cx\":").append(s.cx).append(",\"cz\":").append(s.cz).append(",\"yaw\":").append(s.yaw).append(",\"members\":[");
-            for (int i = 0; i < s.members.size(); i++) b.append(i > 0 ? "," : "").append('"').append(s.members.get(i)).append('"');
+            b.append("{\\"id\\":").append(jsonString(s.id))
+                    .append(",\\"name\\":").append(jsonString(s.name))
+                    .append(",\\"owner\\":").append(jsonString(s.owner))
+                    .append(",\\"realm\\":").append(jsonString(s.realm))
+                    .append(",\\"formation\\":").append(jsonString(s.formation.name()))
+                    .append(",\\"stance\\":").append(jsonString(s.stance.name()))
+                    .append(",\\"initial\\":").append(Math.max(s.members.size(), s.initial))
+                    .append(",\\"morale\\":").append(Double.isFinite(s.morale) ? Math.max(0, Math.min(1, s.morale)) : 1.0)
+                    .append(",\\"routed\\":").append(s.routed)
+                    .append(",\\"cx\\":").append(Double.isFinite(s.cx) ? s.cx : 0)
+                    .append(",\\"cz\\":").append(Double.isFinite(s.cz) ? s.cz : 0)
+                    .append(",\\"yaw\\":").append(Double.isFinite(s.yaw) ? s.yaw : 0)
+                    .append(",\\"members\\":[");
+            for (int i = 0; i < s.members.size(); i++) {
+                if (i > 0) b.append(',');
+                b.append(jsonString(s.members.get(i)));
+            }
             b.append("]}");
         }
         return b.append("]}").toString();
     }
 
+    /** Повреждённые записи пропускаются; одна плохая запись не уничтожает все сохранённые отряды. */
     @SuppressWarnings("unchecked")
     public void fromJson(String json) {
         squads.clear();
-        Object root = dev.worldforge.mod.Json.parse(json);
-        if (!(root instanceof Map)) return;
-        Map<String, Object> m = (Map<String, Object>) root;
-        counter = m.get("counter") instanceof Number n ? n.intValue() : 1;
-        if (m.get("squads") instanceof List<?> l) for (Object o : l) {
-            Map<String, Object> e = (Map<String, Object>) o;
-            Squad s = new Squad(String.valueOf(e.get("id")), String.valueOf(e.get("name")), String.valueOf(e.get("owner")));
-            s.realm = String.valueOf(e.getOrDefault("realm", ""));
-            try { s.formation = Formations.Type.valueOf(String.valueOf(e.get("formation"))); } catch (Exception ignored) {}
-            try { s.stance = Stance.valueOf(String.valueOf(e.get("stance"))); } catch (Exception ignored) {}
-            s.cx = e.get("cx") instanceof Number n ? n.doubleValue() : 0; s.cz = e.get("cz") instanceof Number n ? n.doubleValue() : 0; s.yaw = e.get("yaw") instanceof Number n ? n.doubleValue() : 0;
-            s.initial = e.get("initial") instanceof Number n ? n.intValue() : 0;
-            s.morale = e.get("morale") instanceof Number n ? n.doubleValue() : 1.0;
-            s.routed = Boolean.TRUE.equals(e.get("routed"));
-            if (e.get("members") instanceof List<?> ms) for (Object x : ms) s.members.add(String.valueOf(x));
-            if (s.initial < s.members.size()) s.initial = s.members.size();
-            squads.put(s.id, s);
+        counter = 1;
+        Object root;
+        try {
+            root = dev.worldforge.mod.Json.parse(json == null ? "" : json);
+        } catch (RuntimeException ex) {
+            return;
         }
+        if (!(root instanceof Map<?, ?> raw)) return;
+        Object rawCounter = raw.get("counter");
+        if (rawCounter instanceof Number n && n.doubleValue() >= 1 && n.doubleValue() <= Integer.MAX_VALUE)
+            counter = Math.max(1, n.intValue());
+        if (!(raw.get("squads") instanceof List<?> entries)) return;
+
+        Set<String> seenIds = new HashSet<>();
+        Set<String> seenMembers = new HashSet<>();
+        for (Object value : entries) {
+            if (!(value instanceof Map<?, ?> e)) continue;
+            String id = e.get("id") instanceof String v ? v.trim() : "";
+            String owner = e.get("owner") instanceof String v ? v.trim() : "";
+            if (id.isEmpty() || owner.isEmpty() || !seenIds.add(id)) continue;
+            String name = e.get("name") instanceof String v && !v.isBlank() ? v : "Отряд";
+            Squad s = new Squad(id, name, owner);
+            s.realm = e.get("realm") instanceof String v ? v : "";
+            try { s.formation = Formations.Type.valueOf(String.valueOf(e.get("formation"))); } catch (RuntimeException ignored) {}
+            try { s.stance = Stance.valueOf(String.valueOf(e.get("stance"))); } catch (RuntimeException ignored) {}
+            s.cx = finiteNumber(e.get("cx"), 0);
+            s.cz = finiteNumber(e.get("cz"), 0);
+            s.yaw = finiteNumber(e.get("yaw"), 0);
+            s.morale = Math.max(0, Math.min(1, finiteNumber(e.get("morale"), 1)));
+            s.routed = Boolean.TRUE.equals(e.get("routed"));
+            if (e.get("members") instanceof List<?> members) {
+                for (Object member : members) {
+                    if (!(member instanceof String unit) || unit.isBlank() || !seenMembers.add(unit)) continue;
+                    if (s.members.size() >= MAX_SIZE) break;
+                    s.members.add(unit);
+                }
+            }
+            if (s.members.isEmpty()) continue;
+            int requestedInitial = e.get("initial") instanceof Number n
+                    ? Math.max(0, Math.min(1_000_000, n.intValue())) : s.members.size();
+            s.initial = Math.max(s.members.size(), requestedInitial);
+            squads.put(s.id, s);
+            if (id.matches("s[0-9]+")) {
+                try { counter = Math.max(counter, Math.addExact(Integer.parseInt(id.substring(1)), 1)); }
+                catch (RuntimeException ignored) {}
+            }
+        }
+    }
+
+    private static double finiteNumber(Object value, double fallback) {
+        if (!(value instanceof Number n)) return fallback;
+        double result = n.doubleValue();
+        return Double.isFinite(result) ? result : fallback;
     }
 }
