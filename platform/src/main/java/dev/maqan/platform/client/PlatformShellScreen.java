@@ -1,6 +1,7 @@
 package dev.maqan.platform.client;
 
 import com.mojang.logging.LogUtils;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
@@ -61,6 +62,8 @@ public final class PlatformShellScreen extends Screen {
     private boolean navRailVisible = true;
     private boolean inspectorVisible = true;
     private boolean timelineVisible = true;
+    private Screen embeddedView;
+    private boolean embeddedViewReady;
 
     public PlatformShellScreen() { super(Component.literal("MAQAN")); }
 
@@ -74,7 +77,39 @@ public final class PlatformShellScreen extends Screen {
             panels.put("tools", new Panel("tools", "COMMANDS", Math.max(290, width / 2 - 150), 100, 300, 180));
             panels.get("tools").visible = false;
         }
+        ensureAtlasView();
+        if (profile == Profile.COSMOS) {
+            panels.get("navigation").visible = false;
+            panels.get("inspector").visible = false;
+            panels.get("timeline").visible = false;
+            navRailVisible = inspectorVisible = timelineVisible = false;
+        }
         clampPanels();
+    }
+
+    private void ensureAtlasView() {
+        if (embeddedView != null || !ModList.get().isLoaded("maqan_galactic_navigator")) return;
+        try {
+            Class<?> type = Class.forName("com.maqan.galacticnavigator.client.NavigatorScreen");
+            Object instance = type.getDeclaredConstructor().newInstance();
+            if (!(instance instanceof Screen screen)) return;
+            try {
+                type.getMethod("setEmbeddedInMaqan", boolean.class).invoke(instance, true);
+            } catch (ReflectiveOperationException ignored) {
+                LOGGER.warn("Atlas version does not expose embedded hosting mode; using its existing screen.");
+            }
+            embeddedView = screen;
+            embeddedView.init(Minecraft.getInstance(), width, height);
+            embeddedViewReady = true;
+        } catch (ReflectiveOperationException | LinkageError error) {
+            LOGGER.error("Unable to mount the existing Atlas screen inside MAQAN", error);
+        }
+    }
+
+    private void resizeEmbeddedView() {
+        if (embeddedView == null) return;
+        embeddedView.init(Minecraft.getInstance(), width, height);
+        embeddedViewReady = true;
     }
 
     private void clampPanels() {
@@ -87,8 +122,12 @@ public final class PlatformShellScreen extends Screen {
     }
 
     @Override public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
-        g.fill(0, 0, width, height, BG);
-        drawAmbientGrid(g);
+        if (profile == Profile.COSMOS && embeddedView != null) {
+            embeddedView.render(g, mouseX, mouseY, partialTick);
+        } else {
+            g.fill(0, 0, width, height, BG);
+            drawAmbientGrid(g);
+        }
         drawTopBar(g);
         drawRail(g);
         // Back-to-front panel order. The central work surface is never replaced by a click.
@@ -205,7 +244,7 @@ public final class PlatformShellScreen extends Screen {
     }
 
     @Override public boolean mouseClicked(double mx,double my,int button) {
-        if(button!=0) return super.mouseClicked(mx,my,button);
+        if(button!=0) return profile == Profile.COSMOS && embeddedView != null ? embeddedView.mouseClicked(mx,my,button) : super.mouseClicked(mx,my,button);
         if(my<34) {
             int x=Math.max(250,width/2-116);
             for(Profile p:Profile.values()) {
@@ -252,11 +291,13 @@ public final class PlatformShellScreen extends Screen {
             // Clicking a panel body selects/focuses it; it never dismisses the workspace.
             return true;
         }
-        return true;
+        return embeddedView != null && profile == Profile.COSMOS
+                ? embeddedView.mouseClicked(mx, my, button) : true;
     }
 
     private void setProfile(Profile next) {
         profile=next;
+        if (next == Profile.COSMOS) ensureAtlasView();
         selectedDomain=switch(next) {
             case COSMOS -> "COSMOS";
             case POLITICS -> "POLITICS";
@@ -288,6 +329,10 @@ public final class PlatformShellScreen extends Screen {
             nav.x=54; nav.y=44; nav.w=224; nav.h=Math.max(180,height-170);
             inspector.x=width-270; inspector.y=44; inspector.w=252; inspector.h=Math.max(180,height-170);
             timeline.x=292; timeline.y=height-116; timeline.w=Math.max(220,width-590); timeline.h=92;
+        }
+        if (next == Profile.COSMOS) {
+            nav.visible = inspector.visible = timeline.visible = false;
+            navRailVisible = inspectorVisible = timelineVisible = false;
         }
         clampPanels();
     }
@@ -322,22 +367,39 @@ public final class PlatformShellScreen extends Screen {
             p.h=Math.max(54,resizeStartH+(int)my-resizeStartY);
             clampPanels(); return true;
         }
-        return super.mouseDragged(mx,my,button,dx,dy);
+        boolean handled = super.mouseDragged(mx,my,button,dx,dy);
+        if (profile == Profile.COSMOS && embeddedView != null)
+            handled = embeddedView.mouseDragged(mx,my,button,dx,dy) || handled;
+        return handled;
     }
 
     @Override public boolean mouseReleased(double mx,double my,int button) {
         if(button==0) { draggingPanel=null; resizingPanel=null; }
-        return super.mouseReleased(mx,my,button);
+        boolean handled = super.mouseReleased(mx,my,button);
+        if (profile == Profile.COSMOS && embeddedView != null)
+            handled = embeddedView.mouseReleased(mx,my,button) || handled;
+        return handled;
     }
 
     @Override public boolean keyPressed(int keyCode,int scanCode,int modifiers) {
         // P is owned by PlatformClient's global KeyMapping; handling it here as
         // well would close and immediately reopen the shell during the same tick.
         if(keyCode==GLFW.GLFW_KEY_ESCAPE) { onClose(); return true; }
-        return super.keyPressed(keyCode,scanCode,modifiers);
+        boolean handled = super.keyPressed(keyCode,scanCode,modifiers);
+        if (profile == Profile.COSMOS && embeddedView != null)
+            handled = embeddedView.keyPressed(keyCode,scanCode,modifiers) || handled;
+        return handled;
     }
 
-    @Override public void onClose() { Minecraft.getInstance().setScreen(null); }
+    @Override public void onClose() {
+        if (embeddedView != null) embeddedView.removed();
+        Minecraft.getInstance().setScreen(null);
+    }
+
+    @Override public void resize(Minecraft minecraft, int width, int height) {
+        super.resize(minecraft, width, height);
+        resizeEmbeddedView();
+    }
 
     private void drawAmbientGrid(GuiGraphics g) {
         for(int x=48;x<width;x+=48) g.fill(x,35,x+1,height,0x102B5266);
