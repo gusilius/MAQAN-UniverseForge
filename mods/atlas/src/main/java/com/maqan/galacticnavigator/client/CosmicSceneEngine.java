@@ -157,13 +157,16 @@ public final class CosmicSceneEngine {
                 return systemsWithinLinear(center, radiusSquared);
 
             LinkedHashSet<SceneSystem> candidates = new LinkedHashSet<>();
-            for (long x = minX; x <= maxX; x++) {
-                for (long y = minY; y <= maxY; y++) {
-                    for (long z = minZ; z <= maxZ; z++) {
+            for (long x = minX; ; x++) {
+                for (long y = minY; ; y++) {
+                    for (long z = minZ; ; z++) {
                         List<SceneSystem> bucket = spatialCellIndex.get(cellKey(x, y, z));
                         if (bucket != null) candidates.addAll(bucket);
+                        if (z == maxZ) break;
                     }
+                    if (y == maxY) break;
                 }
+                if (x == maxX) break;
             }
             return filterWithin(candidates, center, radiusSquared);
         }
