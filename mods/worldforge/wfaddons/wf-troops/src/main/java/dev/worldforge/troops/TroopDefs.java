@@ -17,6 +17,12 @@ public final class TroopDefs {
     public final Map<String, Unit> units = new LinkedHashMap<>();
     /** Соответствие типов армии wf-army типам солдат (секция "army_map"); пусто - Muster.defaultMap(). */
     public final Map<String, String> armyMap = new LinkedHashMap<>();
+    /** Реальные производственные здания и расход материалов для найма каждого архетипа. */
+    public final Map<String, String> recruitmentBuildings = new LinkedHashMap<>();
+    public final Map<String, Map<String, Integer>> recruitmentCosts = new LinkedHashMap<>();
+
+    public String recruitmentBuilding(String unitId) { return recruitmentBuildings.getOrDefault(unitId, "barracks"); }
+    public Map<String, Integer> recruitmentCost(String unitId) { return recruitmentCosts.getOrDefault(unitId, Map.of()); }
 
     private static double dbl(Object o, double d) { return o instanceof Number n ? n.doubleValue() : d; }
     private static String str(Object o, String d) { return o == null ? d : String.valueOf(o); }
@@ -37,6 +43,17 @@ public final class TroopDefs {
         units.put(id, new Unit(id, str(u.get("name"), id), str(u.get("role"), "melee"), dbl(u.get("hp"), 20), dbl(u.get("dmg"), 3), dbl(u.get("range"), 2), dbl(u.get("speed"), 1),
                 dbl(u.get("armor"), 0), dbl(u.get("sight"), 24), (int) dbl(u.get("cost"), 10), dbl(u.get("upkeep"), 0.2),
                 str(u.get("weapon"), ""), str(u.get("head"), ""), str(u.get("chest"), ""), str(u.get("legs"), ""), str(u.get("feet"), ""), str(u.get("desc"), ""), dbl(u.get("aura"), 0), dbl(u.get("heal"), 0), dbl(u.get("siege"), 0)));
+        String building = str(u.get("recruitment_building"), "");
+        if (!building.isEmpty()) recruitmentBuildings.put(id, building);
+        if (u.get("recruitment_cost") instanceof Map<?, ?> raw) {
+            Map<String, Integer> cost = new LinkedHashMap<>();
+            for (var e : raw.entrySet()) {
+                int amount = e.getValue() instanceof Number n ? n.intValue() : -1;
+                if (amount < 0) throw new IllegalArgumentException(id + ": неверная стоимость ресурса " + e.getKey());
+                if (amount > 0) cost.put(String.valueOf(e.getKey()), amount);
+            }
+            recruitmentCosts.put(id, Map.copyOf(cost));
+        }
     }
 
     public List<String> validate() {
