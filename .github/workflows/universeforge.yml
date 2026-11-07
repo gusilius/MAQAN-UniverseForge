@@ -47,7 +47,10 @@ jobs:
       - name: Stage Windows native library
         shell: pwsh
         run: |
-          $nativeDir = "mods/atlas/build/native-libs/maqan-native-windows-x86_64"
+          # Embed the native library in the JAR at the exact resource path
+          # consumed by NavigatorNativeBridge. Staging under build/ before
+          # "clean build" would be deleted by Gradle's clean task.
+          $nativeDir = "mods/atlas/src/main/resources/maqan-native-windows-x86_64"
           New-Item -ItemType Directory -Force -Path $nativeDir | Out-Null
           Copy-Item "mods/atlas/native/maqan-core/target/x86_64-pc-windows-msvc/release/maqan_core.dll" "$nativeDir/maqan_core.dll" -Force
       - uses: gradle/actions/setup-gradle@v4
