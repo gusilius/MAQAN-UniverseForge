@@ -350,10 +350,6 @@ public class TroopsMod {
         }
 
         int goldCost = Math.multiplyExact(unit.cost(), n);
-        if (!realm.isEmpty() && !TreasuryApi.spend(realm, goldCost, "Наём: " + unit.name())) {
-            src.sendFailure(Component.literal("В казне " + realm + " не хватает золота: нужно " + goldCost));
-            return 0;
-        }
         if (realm.isEmpty() && !p.isCreative()) {
             int have = 0;
             for (var stack : p.getInventory().items) if (stack.is(Items.GOLD_NUGGET)) have += stack.getCount();
@@ -382,6 +378,11 @@ public class TroopsMod {
 
         if (!dev.worldforge.settle.mc.SettleMod.payRecruitment(site, totalSupply)) {
             src.sendFailure(Component.literal("Склад изменился во время найма; ресурсы и отряд не созданы."));
+            return 0;
+        }
+        if (!realm.isEmpty() && !TreasuryApi.spend(realm, goldCost, "Наём: " + unit.name())) {
+            dev.worldforge.settle.mc.SettleMod.refundRecruitment(site, totalSupply);
+            src.sendFailure(Component.literal("В казне " + realm + " не хватает золота: нужно " + goldCost));
             return 0;
         }
         if (realm.isEmpty() && !p.isCreative()) {
