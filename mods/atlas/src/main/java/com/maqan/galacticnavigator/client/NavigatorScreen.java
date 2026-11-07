@@ -172,6 +172,20 @@ public class NavigatorScreen extends Screen {
         super.onClose();
     }
 
+    /** Workspace rail action: reveal/hide Atlas' existing catalogue panel. */
+    public void toggleListPanel() {
+        showList = !showList;
+        NavigatorPreferences.setShowListPanel(showList);
+        if (listButton != null) listButton.setMessage(Component.literal(showList ? "LIST −" : "LIST +"));
+    }
+
+    /** Workspace rail action: reveal/hide Atlas' existing object dossier. */
+    public void toggleInfoPanel() {
+        showInfo = !showInfo;
+        NavigatorPreferences.setShowInfoPanel(showInfo);
+        if (infoButton != null) infoButton.setMessage(Component.literal(showInfo ? "INFO −" : "INFO +"));
+    }
+
     public NavigatorScreen() { super(Component.literal("MAQAN Galactic Navigator")); }
 
     @Override
