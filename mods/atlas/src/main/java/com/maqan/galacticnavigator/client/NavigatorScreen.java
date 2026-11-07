@@ -2494,6 +2494,12 @@ public class NavigatorScreen extends Screen {
                 int py = cy + (int)Math.round(Math.sin(angle) * orbitY);
                 bodyScreenPositions.put(body.id, new Point(px, py, bodyRadius));
                 drawAtlasBodyVisual(g, px, py, bodyRadius, body.first(), kindColor(body.kind));
+                String qualifiedBodyId = system.id + "::" + body.id;
+                mapPoints.put(qualifiedBodyId, new Point(px, py, bodyRadius + 5));
+                if (Math.hypot(mx - px, my - py) <= bodyRadius + 5) {
+                    hovered = new Node(qualifiedBodyId, body.label, "atlas_body:" + body.kind,
+                            body.entries);
+                }
             }
             for (int moonIndex = 0; moonIndex < moons.size(); moonIndex++) {
                 Node moon = moons.get(moonIndex);
@@ -2523,13 +2529,23 @@ public class NavigatorScreen extends Screen {
                             moonOrbit, moonOrbit * .68, 0x668CA8B8, 1);
                 int mxp = parentPoint.x() + (int)Math.round(Math.cos(moonAngle) * moonOrbit);
                 int myp = parentPoint.y() + (int)Math.round(Math.sin(moonAngle) * moonOrbit * .68);
-                drawAtlasBodyVisual(g, mxp, myp, Math.max(3, bodyRadius - 3),
-                        moon.first(), kindColor("moon"));
+                int moonRadius = Math.max(3, bodyRadius - 3);
+                drawAtlasBodyVisual(g, mxp, myp, moonRadius, moon.first(), kindColor("moon"));
+                String qualifiedMoonId = system.id + "::" + moon.id;
+                mapPoints.put(qualifiedMoonId, new Point(mxp, myp, moonRadius + 5));
+                if (Math.hypot(mx - mxp, my - myp) <= moonRadius + 5) {
+                    hovered = new Node(qualifiedMoonId, moon.label, "atlas_body:moon", moon.entries);
+                }
             }
             if (star != null) {
                 int starRadius = Math.max(7, Math.min(13,
                         (int)Math.round(radius / 4.5 * NavigatorPreferences.atlasScale())));
                 drawAtlasBodyVisual(g, cx, cy, starRadius, star.first(), kindColor("star"));
+                String qualifiedStarId = system.id + "::" + star.id;
+                mapPoints.put(qualifiedStarId, new Point(cx, cy, starRadius + 6));
+                if (Math.hypot(mx - cx, my - cy) <= starRadius + 6) {
+                    hovered = new Node(qualifiedStarId, star.label, "atlas_body:star", star.entries);
+                }
             } else {
                 drawRadialGlow(g, cx, cy, Math.max(8, radius / 2), 0x66E8B9FF, 0xFFE8D8FF);
                 drawDisc(g, cx, cy, 5, 0xFFFFF2D6, 0xFFFFDCA0);
@@ -2542,7 +2558,7 @@ public class NavigatorScreen extends Screen {
             int hitRadius = Math.max(14, radius + 7);
             mapPoints.put(system.id, new Point(cx, cy, hitRadius));
             boolean hit = Math.hypot(mx - cx, my - cy) <= hitRadius + 5;
-            if (hit) hovered = system;
+            if (hit && hovered == null) hovered = system;
             if (NavigatorPreferences.atlasLabels())
                 g.drawCenteredString(font, trim(system.label, Math.max(48, radius * 7)),
                         cx, cy + radius + 7, active ? GOLD : TEXT);
