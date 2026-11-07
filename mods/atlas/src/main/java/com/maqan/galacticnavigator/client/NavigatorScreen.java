@@ -2207,38 +2207,51 @@ public class NavigatorScreen extends Screen {
                 continue;
             }
 
-            List<Node> planets = new ArrayList<>();
+            List<Node> primaryBodies = new ArrayList<>();
+            List<Node> moons = new ArrayList<>();
+            Map<String, Node> primaryById = new HashMap<>();
             Node star = null;
             for (Entry<String, JsonObject> entry : system.entries) {
                 JsonObject data = entry.getValue();
-                String kind = value(data, "kind", "display_type", "type").toLowerCase(Locale.ROOT);
+                String kind = value(data, "kind", "display_type", "type", "classification")
+                        .toLowerCase(Locale.ROOT);
                 Node body = new Node(entry.getKey(), value(data, "name", entry.getKey()),
-                        kind, List.of(entry));
+                        kind.isBlank() ? "planet" : kind, List.of(entry));
                 if (isStarNode(body)) {
                     if (star == null || (!hasTextureId(star.first()) && hasTextureId(body.first()))) star = body;
-                } else planets.add(body);
+                } else if (kind.contains("moon") || kind.contains("satellite")) {
+                    moons.add(body);
+                } else {
+                    primaryBodies.add(body);
+                    primaryById.put(body.id, body);
+                    String catalogId = value(data, "id", "catalog_id");
+                    if (!catalogId.isBlank()) primaryById.put(catalogId, body);
+                }
             }
 
-            // Atlas overview keeps every planet visible; detail controls labels and
-            // secondary metadata rather than silently truncating the system.
-            // Use the same authoritative orbital simulation and game-time sample as
-            // the in-world sky. The atlas no longer invents fixed/hash-based phases.
+            // Render every primary body on its stellar orbit, then render moons
+            // around the parent planet resolved from explicit catalogue metadata.
             double sceneTime = minecraft != null && minecraft.level != null
                     ? minecraft.level.getGameTime() + minecraft.getFrameTime() : 0.0;
             double[] starPosition = star == null ? new double[]{0, 0, 0}
                     : atlasPosition(system.id, star.first(), sceneTime);
-            List<double[]> bodyPositions = new ArrayList<>(planets.size());
+            Map<String, double[]> bodyPositions = new HashMap<>();
+            Map<String, Point> bodyScreenPositions = new HashMap<>();
             double maxOrbitDistance = 0.0;
-            for (Node planet : planets) {
-                double[] position = atlasPosition(system.id, planet.first(), sceneTime);
-                bodyPositions.add(position);
+            for (Node body : primaryBodies) {
+                double[] position = atlasPosition(system.id, body.first(), sceneTime);
+                bodyPositions.put(body.id, position);
                 maxOrbitDistance = Math.max(maxOrbitDistance, Math.hypot(
                         position[0] - starPosition[0], position[2] - starPosition[2]));
             }
             boolean authoredOrbitalGeometry = maxOrbitDistance > 1.0E-6
                     && Double.isFinite(maxOrbitDistance);
-            for (int i = 0; i < planets.size(); i++) {
-                double[] position = bodyPositions.get(i);
+            int bodyRadius = Math.max(6, Math.min(15,
+                    (int)Math.round(radius / (NavigatorPreferences.atlasDetail() == 2 ? 7.0 : 8.0)
+                            * NavigatorPreferences.atlasScale())));
+            for (int i = 0; i < primaryBodies.size(); i++) {
+                Node body = primaryBodies.get(i);
+                double[] position = bodyPositions.get(body.id);
                 double dx = position[0] - starPosition[0];
                 double dz = position[2] - starPosition[2];
                 double distance = Math.hypot(dx, dz);
@@ -2254,18 +2267,42 @@ public class NavigatorScreen extends Screen {
                         ? Math.atan2(dz, dx) : i * 2.399963229728653;
                 int px = cx + (int)Math.round(Math.cos(angle) * orbit);
                 int py = cy + (int)Math.round(Math.sin(angle) * orbitY);
-                int bodyRadius = Math.max(6, Math.min(15,
-                        (int)Math.round(radius / (NavigatorPreferences.atlasDetail() == 2 ? 7.0 : 8.0)
-                                * NavigatorPreferences.atlasScale())));
-                drawAtlasBodyVisual(g, px, py, bodyRadius,
-                        planets.get(i).first(), kindColor(planets.get(i).kind));
+                bodyScreenPositions.put(body.id, new Point(px, py, bodyRadius));
+                drawAtlasBodyVisual(g, px, py, bodyRadius, body.first(), kindColor(body.kind));
+            }
+            for (int moonIndex = 0; moonIndex < moons.size(); moonIndex++) {
+                Node moon = moons.get(moonIndex);
+                String parentId = orbitalParentReference(moon.first());
+                Node parent = parentId.isBlank() ? null : primaryById.get(parentId);
+                if (parent == null && parentId.isBlank() && primaryBodies.size() == 1
+                        && primaryBodies.get(0).kind.toLowerCase(Locale.ROOT).contains("planet"))
+                    parent = primaryBodies.get(0);
+                if (parent == null) continue;
+                Point parentPoint = bodyScreenPositions.get(parent.id);
+                double[] moonPosition = atlasPosition(system.id, moon.first(), sceneTime);
+                double[] parentPosition = bodyPositions.get(parent.id);
+                if (parentPoint == null || parentPosition == null) continue;
+                double mdx = moonPosition[0] - parentPosition[0];
+                double mdz = moonPosition[2] - parentPosition[2];
+                double moonDistance = Math.hypot(mdx, mdz);
+                double moonOrbit = Math.max(3.0, Math.min(Math.max(4.0, radius * .22),
+                        moonDistance > 1.0E-6 ? radius * (.07 + .12 * moonDistance /
+                                Math.max(1.0, maxOrbitDistance)) : radius * .12));
+                double moonAngle = moonDistance > 1.0E-6 ? Math.atan2(mdz, mdx)
+                        : moonIndex * 2.399963229728653;
+                if (NavigatorPreferences.atlasOrbits())
+                    SolarSystemRenderer.orbit(g, parentPoint.x(), parentPoint.y(),
+                            moonOrbit, moonOrbit * .68, 0x668CA8B8, 1);
+                int mxp = parentPoint.x() + (int)Math.round(Math.cos(moonAngle) * moonOrbit);
+                int myp = parentPoint.y() + (int)Math.round(Math.sin(moonAngle) * moonOrbit * .68);
+                drawAtlasBodyVisual(g, mxp, myp, Math.max(3, bodyRadius - 3),
+                        moon.first(), kindColor("moon"));
             }
             if (star != null) {
                 int starRadius = Math.max(7, Math.min(13,
                         (int)Math.round(radius / 4.5 * NavigatorPreferences.atlasScale())));
                 drawAtlasBodyVisual(g, cx, cy, starRadius, star.first(), kindColor("star"));
-            }
-            else {
+            } else {
                 drawRadialGlow(g, cx, cy, Math.max(8, radius / 2), 0x66E8B9FF, 0xFFE8D8FF);
                 drawDisc(g, cx, cy, 5, 0xFFFFF2D6, 0xFFFFDCA0);
             }
