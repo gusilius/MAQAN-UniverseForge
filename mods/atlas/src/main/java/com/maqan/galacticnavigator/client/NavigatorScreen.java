@@ -2623,7 +2623,12 @@ public class NavigatorScreen extends Screen {
                 if (parent == null && !parentId.isBlank()
                         && !ambiguousPlanetDimensions.contains(parentId))
                     parent = planetByDimension.get(parentId);
-                if (parent == null && parentId.isBlank() && planets.size() == 1) parent = planets.get(0);
+                if (parent == null && parentId.isBlank() && planets.size() == 1) {
+                    JsonObject onlyBody = planets.get(0).getValue();
+                    String onlyKind = value(onlyBody, "kind", "display_type", "type", "classification")
+                            .toLowerCase(Locale.ROOT);
+                    if (onlyKind.isBlank() || onlyKind.contains("planet")) parent = planets.get(0);
+                }
                 if (parent == null) continue;
                 Point parentPoint = planetScreenPositions.get(parent.getKey());
                 if (parentPoint == null) continue;
