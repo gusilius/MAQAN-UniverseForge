@@ -355,7 +355,7 @@ public final class PlatformShellScreen extends Screen {
         g.drawString(font, trimInspector(selected.entityId(), p.w - 24),
                 left, p.y + 130, TEXT, false);
         if (!selected.worldId().isBlank()) {
-            g.drawString(font, "SYSTEM", left, p.y + 149, MUTED, false);
+            g.drawString(font, "WORLD / SYSTEM", left, p.y + 149, MUTED, false);
             g.drawString(font, trimInspector(selected.worldId(), p.w - 24),
                     left, p.y + 161, TEXT, false);
         }
