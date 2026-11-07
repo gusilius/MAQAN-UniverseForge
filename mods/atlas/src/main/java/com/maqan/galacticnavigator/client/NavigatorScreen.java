@@ -809,8 +809,12 @@ public class NavigatorScreen extends Screen {
     private boolean atlasSystemMatchesFilter(List<Entry<String, JsonObject>> bodies) {
         if (bodyFilter == 0) return true;
         for (Entry<String, JsonObject> entry : bodies) {
-            String kind = value(entry.getValue(), "kind", "display_type", "type")
+            JsonObject data = entry.getValue();
+            String kind = value(data, "kind", "display_type", "type", "classification")
                     .toLowerCase(Locale.ROOT);
+            if (isStarData(data)) kind = "star";
+            else if (kind.contains("moon") || kind.contains("satellite")) kind = "moon";
+            else if (kind.isBlank()) kind = "planet";
             boolean matches = switch (bodyFilter) {
                 case 1 -> kind.contains("planet");
                 case 2 -> kind.contains("moon") || kind.contains("satellite");
