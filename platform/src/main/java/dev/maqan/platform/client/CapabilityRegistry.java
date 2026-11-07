@@ -71,6 +71,14 @@ public final class CapabilityRegistry {
 
     private CapabilityRegistry() {}
 
+    /** Full interface catalogue; entries remain visible when their provider is absent. */
+    public static List<Capability> all() {
+        return DECLARED.stream()
+                .sorted(Comparator.comparingInt(Capability::order)
+                        .thenComparing(Capability::label))
+                .toList();
+    }
+
     /** Returns only capabilities whose provider mod is installed and enabled. */
     public static List<Capability> available() {
         ModList mods = ModList.get();
