@@ -263,6 +263,54 @@ public final class CosmicHorizonsScanner {
                     }
                 }
 
+                // Cosmic Horizons also declares the luminous Sun in sky_data,
+                // separate from planet_data/gui_data. Preserve that stellar object
+                // as the central body when this same resource describes a populated
+                // solar-system catalogue. Dimension-only sky_data files are not
+                // promoted into standalone star systems.
+                JsonObject skyData = object(source, "sky_data");
+                if (!bodies.isEmpty()) {
+                    for (Map.Entry<String, JsonElement> skyEntry : skyData.entrySet()) {
+                        if (!skyEntry.getValue().isJsonObject()) continue;
+                        String skyId = skyEntry.getKey();
+                        String skyKey = skyId.toLowerCase(Locale.ROOT);
+                        JsonObject skyBody = skyEntry.getValue().getAsJsonObject().deepCopy();
+                        String skyType = string(skyBody, "type", "").toLowerCase(Locale.ROOT);
+                        String stellarClass = string(skyBody, "stellar_class",
+                                string(skyBody, "spectral_class", ""));
+                        boolean stellar = skyKey.equals("sun") || skyKey.equals("sol")
+                                || skyKey.contains("star") || skyKey.contains("stellar")
+                                || !stellarClass.isBlank()
+                                || Set.of("star", "sun", "stellar", "yellow dwarf", "red dwarf",
+                                        "white dwarf", "red giant", "blue giant", "neutron star")
+                                        .contains(skyType);
+                        if (!stellar || bodies.has(skyId)) continue;
+                        skyBody.addProperty("id", skyId);
+                        skyBody.addProperty("catalog_id", skyId);
+                        skyBody.addProperty("name", string(skyBody, "name",
+                                skyKey.equals("sun") ? "Sun" : skyId));
+                        skyBody.addProperty("kind", "star");
+                        skyBody.addProperty("type", "star");
+                        skyBody.addProperty("system", systemName);
+                        skyBody.addProperty("system_id", systemKey);
+                        if (!attached.isEmpty() && !skyBody.has("dimension"))
+                            skyBody.addProperty("dimension", attached);
+                        // A stellar body without an authored orbital position is
+                        // the central origin, not an invented distant coordinate.
+                        if (!hasCoordinate(skyBody, "x", "xpos")
+                                && !hasCoordinate(skyBody, "y", "ypos")
+                                && !hasCoordinate(skyBody, "z", "zpos")) {
+                            skyBody.addProperty("x", 0.0);
+                            skyBody.addProperty("y", 0.0);
+                            skyBody.addProperty("z", 0.0);
+                            JsonArray origin = new JsonArray();
+                            origin.add(0.0); origin.add(0.0); origin.add(0.0);
+                            skyBody.add("map_pos", origin);
+                        }
+                        bodies.add(skyId, skyBody);
+                    }
+                }
+
                 JsonObject universe = new JsonObject();
                 universe.addProperty("name", systemName);
                 universe.addProperty("kind", "star system");
@@ -357,6 +405,11 @@ public final class CosmicHorizonsScanner {
         if (element.isJsonPrimitive()) return element.getAsString();
         if (element.isJsonObject()) return string(element.getAsJsonObject(), "text", fallback);
         return fallback;
+    }
+
+    private static boolean hasCoordinate(JsonObject object, String... keys) {
+        for (String key : keys) if (object.has(key) && object.get(key).isJsonPrimitive()) return true;
+        return false;
     }
 
     private static void copyCoordinate(JsonObject object, String from, String to) {
