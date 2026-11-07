@@ -5,7 +5,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [feature/atlas-unified-cosmic-scene]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
