@@ -424,7 +424,10 @@ public final class PlatformShellScreen extends Screen {
 
     private void setProfile(Profile next) {
         profile=next;
-        if (next == Profile.COSMOS) ensureAtlasView();
+        if (next == Profile.COSMOS) {
+            ensureAtlasView();
+            if (embeddedView != null) embeddedView.init(Minecraft.getInstance(), width, height);
+        }
         selectedDomain=switch(next) {
             case COSMOS -> "COSMOS";
             case POLITICS -> "POLITICS";
