@@ -70,7 +70,12 @@ public final class CosmicSceneEngine {
                                 Map<String, Map<String, SceneBody>> bodyIndex,
                                 Map<String, List<SceneSystem>> galaxyIndex,
                                 Map<String, List<SceneSystem>> sectorIndex,
-                                Map<String, List<SceneSystem>> spatialCellIndex) {
+                                Map<String, List<SceneSystem>> spatialCellIndex,
+                                Map<String, Map<String, SceneBody>> parentBodyIndex,
+                                Map<String, Map<String, List<SceneBody>>> childBodyIndex,
+                                Map<String, List<SceneBody>> rootBodyIndex,
+                                Map<String, Set<String>> unresolvedParentIndex,
+                                Map<String, Set<String>> cyclicBodyIndex) {
         public SceneSnapshot {
             galaxies = List.copyOf(galaxies);
             sectors = List.copyOf(sectors);
@@ -105,6 +110,78 @@ public final class CosmicSceneEngine {
             galaxyIndex = immutableGroups(byGalaxy);
             sectorIndex = immutableGroups(bySector);
             spatialCellIndex = immutableGroups(bySpatialCell);
+
+            Map<String, Map<String, SceneBody>> parentsBySystem = new LinkedHashMap<>();
+            Map<String, Map<String, List<SceneBody>>> childrenBySystem = new LinkedHashMap<>();
+            Map<String, List<SceneBody>> rootsBySystem = new LinkedHashMap<>();
+            Map<String, Set<String>> unresolvedBySystem = new LinkedHashMap<>();
+            Map<String, Set<String>> cyclesBySystem = new LinkedHashMap<>();
+            for (SceneSystem system : systems) {
+                if (system == null || system.id() == null) continue;
+                Map<String, SceneBody> bodies = bodyIndex.getOrDefault(system.id(), Map.of());
+                Map<String, SceneBody> resolvedParents = new LinkedHashMap<>();
+                Map<String, List<SceneBody>> children = new LinkedHashMap<>();
+                List<SceneBody> roots = new ArrayList<>();
+                Set<String> unresolved = new LinkedHashSet<>();
+                Map<String, String> foldedIds = new HashMap<>();
+                bodies.keySet().forEach(id -> foldedIds.putIfAbsent(
+                        id.toLowerCase(Locale.ROOT), id));
+
+                for (SceneBody body : bodies.values()) {
+                    String parentId = body.parentId() == null ? "" : body.parentId().trim();
+                    if (parentId.isEmpty()) {
+                        roots.add(body);
+                        continue;
+                    }
+                    String resolvedId = bodies.containsKey(parentId)
+                            ? parentId : foldedIds.get(parentId.toLowerCase(Locale.ROOT));
+                    if (resolvedId == null) {
+                        unresolved.add(body.id());
+                        continue;
+                    }
+                    SceneBody parent = bodies.get(resolvedId);
+                    resolvedParents.put(body.id(), parent);
+                    children.computeIfAbsent(resolvedId, ignored -> new ArrayList<>()).add(body);
+                }
+
+                Set<String> cyclic = findCycles(bodies.keySet(), resolvedParents);
+                Map<String, List<SceneBody>> immutableChildren = new LinkedHashMap<>();
+                children.forEach((id, list) -> immutableChildren.put(id, List.copyOf(list)));
+                parentsBySystem.put(system.id(), Collections.unmodifiableMap(resolvedParents));
+                childrenBySystem.put(system.id(), Collections.unmodifiableMap(immutableChildren));
+                rootsBySystem.put(system.id(), List.copyOf(roots));
+                unresolvedBySystem.put(system.id(), Collections.unmodifiableSet(unresolved));
+                cyclesBySystem.put(system.id(), Collections.unmodifiableSet(cyclic));
+            }
+            parentBodyIndex = Collections.unmodifiableMap(parentsBySystem);
+            childBodyIndex = Collections.unmodifiableMap(childrenBySystem);
+            rootBodyIndex = Collections.unmodifiableMap(rootsBySystem);
+            unresolvedParentIndex = Collections.unmodifiableMap(unresolvedBySystem);
+            cyclicBodyIndex = Collections.unmodifiableMap(cyclesBySystem);
+        }
+
+        private static Set<String> findCycles(Set<String> bodyIds,
+                                              Map<String, SceneBody> parents) {
+            Set<String> completed = new HashSet<>();
+            Set<String> cycles = new LinkedHashSet<>();
+            for (String start : bodyIds) {
+                if (completed.contains(start)) continue;
+                List<String> path = new ArrayList<>();
+                Map<String, Integer> pathPositions = new HashMap<>();
+                String current = start;
+                while (current != null && !completed.contains(current)) {
+                    Integer cycleStart = pathPositions.putIfAbsent(current, path.size());
+                    if (cycleStart != null) {
+                        cycles.addAll(path.subList(cycleStart, path.size()));
+                        break;
+                    }
+                    path.add(current);
+                    SceneBody parent = parents.get(current);
+                    current = parent == null ? null : parent.id();
+                }
+                completed.addAll(path);
+            }
+            return cycles;
         }
 
         /** Backwards-compatible constructor for callers that only provide scene data. */
@@ -115,6 +192,7 @@ public final class CosmicSceneEngine {
                              int schematicSystems, int unplacedSystems) {
             this(universeId, universeName, catalogRevision, gameTime, galaxies, sectors, systems,
                     bodyCount, datapackPlacedSystems, schematicSystems, unplacedSystems,
+                    Map.of(), Map.of(), Map.of(), Map.of(), Map.of(),
                     Map.of(), Map.of(), Map.of(), Map.of(), Map.of());
         }
 
@@ -132,6 +210,33 @@ public final class CosmicSceneEngine {
 
         public List<SceneSystem> systemsInSector(String sectorId) {
             return sectorIndex.getOrDefault(normalizeGroup(sectorId), List.of());
+        }
+
+        /** Stable body identity is scoped to its owning star system. */
+        public static String bodyKey(String systemId, String bodyId) {
+            return (systemId == null ? "" : systemId) + "::" + (bodyId == null ? "" : bodyId);
+        }
+
+        public Optional<SceneBody> parentBody(String systemId, String bodyId) {
+            return Optional.ofNullable(parentBodyIndex
+                    .getOrDefault(systemId, Map.of()).get(bodyId));
+        }
+
+        public List<SceneBody> childBodies(String systemId, String bodyId) {
+            return childBodyIndex.getOrDefault(systemId, Map.of())
+                    .getOrDefault(bodyId, List.of());
+        }
+
+        public List<SceneBody> rootBodies(String systemId) {
+            return rootBodyIndex.getOrDefault(systemId, List.of());
+        }
+
+        public boolean hasUnresolvedParent(String systemId, String bodyId) {
+            return unresolvedParentIndex.getOrDefault(systemId, Set.of()).contains(bodyId);
+        }
+
+        public boolean isInParentCycle(String systemId, String bodyId) {
+            return cyclicBodyIndex.getOrDefault(systemId, Set.of()).contains(bodyId);
         }
 
         /**
