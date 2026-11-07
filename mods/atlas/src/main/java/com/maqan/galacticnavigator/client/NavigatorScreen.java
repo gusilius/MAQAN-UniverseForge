@@ -2496,6 +2496,10 @@ public class NavigatorScreen extends Screen {
                 drawAtlasBodyVisual(g, px, py, bodyRadius, body.first(), kindColor(body.kind));
                 String qualifiedBodyId = system.id + "::" + body.id;
                 mapPoints.put(qualifiedBodyId, new Point(px, py, bodyRadius + 5));
+                if (qualifiedBodyId.equals(selectedNodeId) || qualifiedBodyId.equals(selectedId)) {
+                    SolarSystemRenderer.orbit(g, px, py, bodyRadius + 7, (bodyRadius + 7) * .72,
+                            0xCC69CDE2, 1);
+                }
                 if (Math.hypot(mx - px, my - py) <= bodyRadius + 5) {
                     hovered = new Node(qualifiedBodyId, body.label, "atlas_body:" + body.kind,
                             body.entries);
@@ -2533,6 +2537,10 @@ public class NavigatorScreen extends Screen {
                 drawAtlasBodyVisual(g, mxp, myp, moonRadius, moon.first(), kindColor("moon"));
                 String qualifiedMoonId = system.id + "::" + moon.id;
                 mapPoints.put(qualifiedMoonId, new Point(mxp, myp, moonRadius + 5));
+                if (qualifiedMoonId.equals(selectedNodeId) || qualifiedMoonId.equals(selectedId)) {
+                    SolarSystemRenderer.orbit(g, mxp, myp, moonRadius + 7, (moonRadius + 7) * .72,
+                            0xCC69CDE2, 1);
+                }
                 if (Math.hypot(mx - mxp, my - myp) <= moonRadius + 5) {
                     hovered = new Node(qualifiedMoonId, moon.label, "atlas_body:moon", moon.entries);
                 }
@@ -2543,6 +2551,10 @@ public class NavigatorScreen extends Screen {
                 drawAtlasBodyVisual(g, cx, cy, starRadius, star.first(), kindColor("star"));
                 String qualifiedStarId = system.id + "::" + star.id;
                 mapPoints.put(qualifiedStarId, new Point(cx, cy, starRadius + 6));
+                if (qualifiedStarId.equals(selectedNodeId) || qualifiedStarId.equals(selectedId)) {
+                    SolarSystemRenderer.orbit(g, cx, cy, starRadius + 9, (starRadius + 9) * .72,
+                            0xCC69CDE2, 1);
+                }
                 if (Math.hypot(mx - cx, my - cy) <= starRadius + 6) {
                     hovered = new Node(qualifiedStarId, star.label, "atlas_body:star", star.entries);
                 }
