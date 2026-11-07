@@ -46,7 +46,7 @@ public final class NavigatorClientEvents {
         }
 
         if (NavigatorScreen.OPEN_KEY.consumeClick() && minecraft.screen == null)
-            minecraft.setScreen(new NavigatorScreen());
+            openMaqanWorkspace(minecraft);
 
         if (NavigatorScreen.OPEN_SURFACE_MAP_KEY.consumeClick() && minecraft.screen == null
                 && NavigatorPlayerPositionTracker.current()!=null) {
@@ -62,6 +62,26 @@ public final class NavigatorClientEvents {
                     NavigatorWaypoint.Scope.LOCAL,NavigatorWaypoint.Category.PERSONAL,
                     "Personal","◆",0xFF62D9F2,p.x(),p.y(),p.z(),true,false,""));
         }
+    }
+
+    /**
+     * The optional Platform owns the only global UI when installed.
+     * Atlas keeps its standalone entry point only for installations without Platform.
+     */
+    private static void openMaqanWorkspace(Minecraft minecraft) {
+        if (net.minecraftforge.fml.ModList.get().isLoaded("maqan_platform")) {
+            try {
+                Class<?> type = Class.forName("dev.maqan.platform.client.PlatformShellScreen");
+                Object instance = type.getDeclaredConstructor().newInstance();
+                if (instance instanceof net.minecraft.client.gui.screens.Screen screen) {
+                    minecraft.setScreen(screen);
+                    return;
+                }
+            } catch (ReflectiveOperationException | LinkageError error) {
+                MaqanGalacticNavigator.LOGGER.error("Unable to open MAQAN global workspace", error);
+            }
+        }
+        minecraft.setScreen(new NavigatorScreen());
     }
 
     private static void updateDeathWaypoint(Minecraft minecraft) {
