@@ -122,6 +122,8 @@ public final class PlatformShellScreen extends Screen {
             panels.get("tools").visible = false;
         }
         ensureAtlasView();
+        Screen providerView = providerViews.get(profile);
+        if (providerView != null) providerView.init(Minecraft.getInstance(), width, height);
         clampPanels();
     }
 
@@ -150,17 +152,11 @@ public final class PlatformShellScreen extends Screen {
         embeddedViewReady = true;
     }
 
-    /** Host a provider-owned view inside its matching global workspace. */
+    /** Queue a provider-owned view; Minecraft initializes it after the host gets its viewport. */
     public void showEmbeddedView(Screen view) {
         if (view == null) return;
         Screen previous = providerViews.put(profile, view);
         if (previous != null && previous != view) previous.removed();
-        try {
-            view.init(Minecraft.getInstance(), width, height);
-            embeddedViewReady = true;
-        } catch (RuntimeException error) {
-            LOGGER.error("Unable to initialize embedded MAQAN view {}", view.getClass().getName(), error);
-        }
     }
 
     private Screen activeView() {
@@ -328,6 +324,12 @@ public final class PlatformShellScreen extends Screen {
         g.drawString(font,"Commands appear when providers register them.",p.x+12,p.y+67,MUTED,false);
     }
 
+    @Override public void tick() {
+        super.tick();
+        Screen view = activeView();
+        if (view != null) view.tick();
+    }
+
     @Override public boolean mouseClicked(double mx,double my,int button) {
         if(button!=0) return activeView() != null
                 ? activeView().mouseClicked(mx,my,button) : super.mouseClicked(mx,my,button);
@@ -454,8 +456,8 @@ public final class PlatformShellScreen extends Screen {
     @Override public boolean mouseDragged(double mx,double my,int button,double dx,double dy) {
         if(button!=0) {
             boolean handled = super.mouseDragged(mx,my,button,dx,dy);
-            if (profile == Profile.COSMOS && embeddedView != null)
-                handled = embeddedView.mouseDragged(mx,my,button,dx,dy) || handled;
+            if (activeView() != null)
+                handled = activeView().mouseDragged(mx,my,button,dx,dy) || handled;
             return handled;
         }
         if(draggingPanel!=null) {
