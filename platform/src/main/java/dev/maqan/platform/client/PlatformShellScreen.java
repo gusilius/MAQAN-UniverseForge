@@ -73,7 +73,7 @@ public final class PlatformShellScreen extends Screen {
 
     @Override protected void init() {
         if (panels.isEmpty()) {
-            panels.put("navigation", new Panel("navigation", "NAVIGATION", 52, 52, 218, 286));
+            panels.put("navigation", new Panel("navigation", "NAVIGATION", 52, 50, 230, Math.min(440, Math.max(220, height - 60))));
             panels.put("inspector", new Panel("inspector", "INSPECTOR", width - 252, 52, 236, 230));
             panels.put("timeline", new Panel("timeline", "TIMELINE", Math.max(220, width / 2 - 180), height - 116, 360, 82));
             panels.put("tools", new Panel("tools", "COMMANDS", Math.max(220, width / 2 - 145), 82, 290, 180));
@@ -381,27 +381,13 @@ public final class PlatformShellScreen extends Screen {
             case SETTLEMENTS -> { nav.title="SETTLEMENT LAYERS"; inspector.title="BUILDING / HOUSEHOLD"; timeline.title="PRODUCTION"; }
             case RTS -> { nav.title="UNITS / FORMATIONS"; inspector.title="UNIT COMMAND"; timeline.title="ORDERS / BATTLE LOG"; }
         }
-        if(next==Profile.RTS) {
-            nav.x=54; nav.y=44; nav.w=190; nav.h=Math.max(180,height-90);
-            inspector.x=width-246; inspector.y=44; inspector.w=228; inspector.h=Math.max(180,height-90);
-            timeline.x=248; timeline.y=height-112; timeline.w=Math.max(220,width-510); timeline.h=88;
-        } else if(next==Profile.POLITICS) {
-            nav.x=54; nav.y=44; nav.w=250; nav.h=Math.max(180,height-170);
-            inspector.x=width-292; inspector.y=44; inspector.w=274; inspector.h=Math.max(180,height-170);
-            timeline.x=320; timeline.y=height-116; timeline.w=Math.max(220,width-640); timeline.h=92;
-        } else if(next==Profile.SETTLEMENTS) {
-            nav.x=54; nav.y=44; nav.w=214; nav.h=Math.max(180,height-170);
-            inspector.x=width-280; inspector.y=44; inspector.w=262; inspector.h=Math.max(180,height-170);
-            timeline.x=284; timeline.y=height-116; timeline.w=Math.max(220,width-590); timeline.h=92;
-        } else {
-            nav.x=54; nav.y=44; nav.w=224; nav.h=Math.max(180,height-170);
-            inspector.x=width-270; inspector.y=44; inspector.w=252; inspector.h=Math.max(180,height-170);
-            timeline.x=292; timeline.y=height-116; timeline.w=Math.max(220,width-590); timeline.h=92;
-        }
-        if (next == Profile.COSMOS) {
-            nav.visible = inspector.visible = timeline.visible = false;
-            navRailVisible = inspectorVisible = timelineVisible = false;
-        }
+        // One shared compact panel geometry across all workspace modes.
+        // The selected mode changes panel content, never the overall interaction model.
+        nav.x=52; nav.y=50; nav.w=230; nav.h=Math.min(440,Math.max(220,height-60));
+        inspector.x=width-250; inspector.y=50; inspector.w=232;
+        inspector.h=Math.min(260,Math.max(180,height-60));
+        timeline.x=Math.max(220,width/2-180); timeline.y=height-104;
+        timeline.w=Math.min(360,Math.max(220,width-260)); timeline.h=82;
         clampPanels();
     }
 
