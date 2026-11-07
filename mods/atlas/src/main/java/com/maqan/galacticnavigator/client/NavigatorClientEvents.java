@@ -88,7 +88,7 @@ public final class NavigatorClientEvents {
                     return;
                 }
             } catch (ReflectiveOperationException | LinkageError error) {
-                MaqanGalacticNavigator.LOGGER.error("Unable to open MAQAN global workspace", error);
+                com.mojang.logging.LogUtils.getLogger().error("Unable to open MAQAN global workspace", error);
             }
         }
         minecraft.setScreen(initialView == null ? new NavigatorScreen() : initialView);
