@@ -46,6 +46,14 @@ public class TroopsTest {
                 && overrideDefs.validate().stream().anyMatch(x -> x.contains("footman") && x.contains("здание найма"))
                 && overrideDefs.validate().stream().anyMatch(x -> x.contains("footman") && x.contains("стоимость найма")),
                 "переопределение архетипа не наследует устаревшие здание и стоимость найма");
+        String beforeMalformedOverride = overrideDefs.units.get("footman").name();
+        boolean malformedOverrideRejected = false;
+        try {
+            overrideDefs.load("{\\"units\\":[{\\"id\\":\\"new_unit\\",\\"role\\":\\"melee\\"},{");
+        } catch (RuntimeException expected) { malformedOverrideRejected = true; }
+        check(malformedOverrideRejected && !overrideDefs.units.containsKey("new_unit")
+                && overrideDefs.units.get("footman").name().equals(beforeMalformedOverride),
+                "ошибочный JSON не оставляет частично применённые архетипы");
         check(TroopProgression.rank(0) == 0 && TroopProgression.rank(100) == 1
                 && TroopProgression.rank(300) == 2 && TroopProgression.rank(700) == 3
                 && TroopProgression.rank(1500) == 4, "пять ступеней индивидуальной военной выучки");

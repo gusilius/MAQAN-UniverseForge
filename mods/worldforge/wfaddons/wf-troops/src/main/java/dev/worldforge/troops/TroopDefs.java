@@ -29,10 +29,39 @@ public final class TroopDefs {
 
     @SuppressWarnings("unchecked")
     public void load(String json) {
+        // Parse each datapack/world override into an isolated delta first. A malformed
+        // file must not leave half of its archetypes or recruitment rules in the live registry.
         Object root = Json.parse(json);
-        if (!(root instanceof Map)) throw new IllegalArgumentException("Нужен объект JSON");
-        if (((Map<String, Object>) root).get("units") instanceof List<?> l) for (Object o : l) add((Map<String, Object>) o);
-        if (((Map<String, Object>) root).get("army_map") instanceof Map<?, ?> am) for (var e : am.entrySet()) armyMap.put(String.valueOf(e.getKey()), String.valueOf(e.getValue()));
+        if (!(root instanceof Map<?, ?> raw)) throw new IllegalArgumentException("Нужен объект JSON");
+        TroopDefs staged = new TroopDefs();
+        Object rawUnits = raw.get("units");
+        if (rawUnits != null) {
+            if (!(rawUnits instanceof List<?> list)) throw new IllegalArgumentException("units должен быть массивом");
+            for (Object value : list) {
+                if (!(value instanceof Map<?, ?> entry)) throw new IllegalArgumentException("Некорректный архетип войска");
+                staged.add((Map<String, Object>) entry);
+            }
+        }
+        Object rawArmyMap = raw.get("army_map");
+        if (rawArmyMap != null) {
+            if (!(rawArmyMap instanceof Map<?, ?> map)) throw new IllegalArgumentException("army_map должен быть объектом");
+            for (var entry : map.entrySet()) {
+                String key = String.valueOf(entry.getKey());
+                String value = String.valueOf(entry.getValue());
+                if (key.isBlank() || value.isBlank()) throw new IllegalArgumentException("Пустая запись army_map");
+                staged.armyMap.put(key, value);
+            }
+        }
+        for (String id : staged.units.keySet()) {
+            recruitmentBuildings.remove(id);
+            recruitmentCosts.remove(id);
+        }
+        units.putAll(staged.units);
+        for (String id : staged.units.keySet()) {
+            if (staged.recruitmentBuildings.containsKey(id)) recruitmentBuildings.put(id, staged.recruitmentBuildings.get(id));
+            if (staged.recruitmentCosts.containsKey(id)) recruitmentCosts.put(id, staged.recruitmentCosts.get(id));
+        }
+        armyMap.putAll(staged.armyMap);
     }
 
     public Map<String, String> armyTypes() { return armyMap.isEmpty() ? Muster.defaultMap() : armyMap; }
