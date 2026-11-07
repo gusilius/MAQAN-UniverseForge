@@ -62,18 +62,91 @@ public final class CosmicSceneEngine {
                                 double gameTime, List<SceneGalaxy> galaxies,
                                 List<SceneSector> sectors, List<SceneSystem> systems,
                                 int bodyCount, int datapackPlacedSystems,
-                                int schematicSystems, int unplacedSystems) {
+                                int schematicSystems, int unplacedSystems,
+                                Map<String, SceneSystem> systemIndex,
+                                Map<String, Map<String, SceneBody>> bodyIndex,
+                                Map<String, List<SceneSystem>> galaxyIndex,
+                                Map<String, List<SceneSystem>> sectorIndex) {
         public SceneSnapshot {
             galaxies = List.copyOf(galaxies);
             sectors = List.copyOf(sectors);
             systems = List.copyOf(systems);
+
+            Map<String, SceneSystem> byId = new LinkedHashMap<>();
+            Map<String, Map<String, SceneBody>> bodiesBySystem = new LinkedHashMap<>();
+            Map<String, List<SceneSystem>> byGalaxy = new LinkedHashMap<>();
+            Map<String, List<SceneSystem>> bySector = new LinkedHashMap<>();
+            for (SceneSystem system : systems) {
+                if (system == null || system.id() == null || system.id().isBlank()) continue;
+                byId.putIfAbsent(system.id(), system);
+                Map<String, SceneBody> bodyMap = new LinkedHashMap<>();
+                for (SceneBody body : system.bodies()) {
+                    if (body != null && body.id() != null && !body.id().isBlank())
+                        bodyMap.putIfAbsent(body.id(), body);
+                }
+                bodiesBySystem.put(system.id(), Collections.unmodifiableMap(bodyMap));
+                byGalaxy.computeIfAbsent(normalizeGroup(system.galaxyId()), ignored -> new ArrayList<>()).add(system);
+                bySector.computeIfAbsent(normalizeGroup(system.sectorId()), ignored -> new ArrayList<>()).add(system);
+            }
+            systemIndex = Collections.unmodifiableMap(byId);
+            bodyIndex = Collections.unmodifiableMap(bodiesBySystem);
+            galaxyIndex = immutableGroups(byGalaxy);
+            sectorIndex = immutableGroups(bySector);
         }
+
+        /** Backwards-compatible constructor for callers that only provide scene data. */
+        public SceneSnapshot(String universeId, String universeName, long catalogRevision,
+                             double gameTime, List<SceneGalaxy> galaxies,
+                             List<SceneSector> sectors, List<SceneSystem> systems,
+                             int bodyCount, int datapackPlacedSystems,
+                             int schematicSystems, int unplacedSystems) {
+            this(universeId, universeName, catalogRevision, gameTime, galaxies, sectors, systems,
+                    bodyCount, datapackPlacedSystems, schematicSystems, unplacedSystems,
+                    Map.of(), Map.of(), Map.of(), Map.of());
+        }
+
         public Optional<SceneSystem> system(String id) {
-            return systems.stream().filter(s -> s.id().equals(id)).findFirst();
+            return Optional.ofNullable(systemIndex.get(id));
         }
+
         public Optional<SceneBody> body(String systemId, String bodyId) {
-            return system(systemId).stream().flatMap(s -> s.bodies().stream())
-                    .filter(b -> b.id().equals(bodyId)).findFirst();
+            return Optional.ofNullable(bodyIndex.getOrDefault(systemId, Map.of()).get(bodyId));
+        }
+
+        public List<SceneSystem> systemsInGalaxy(String galaxyId) {
+            return galaxyIndex.getOrDefault(normalizeGroup(galaxyId), List.of());
+        }
+
+        public List<SceneSystem> systemsInSector(String sectorId) {
+            return sectorIndex.getOrDefault(normalizeGroup(sectorId), List.of());
+        }
+
+        /** Returns only placed systems whose global scene position lies within radius. */
+        public List<SceneSystem> systemsWithin(Vector3 center, double radius) {
+            if (center == null || !center.finite() || !Double.isFinite(radius) || radius < 0)
+                return List.of();
+            double radiusSquared = radius * radius;
+            List<SceneSystem> matches = new ArrayList<>();
+            for (SceneSystem system : systems) {
+                Vector3 position = system.universePosition();
+                if (position == null || !position.finite()) continue;
+                double dx = position.x() - center.x();
+                double dy = position.y() - center.y();
+                double dz = position.z() - center.z();
+                if (dx * dx + dy * dy + dz * dz <= radiusSquared) matches.add(system);
+            }
+            return List.copyOf(matches);
+        }
+
+        private static String normalizeGroup(String value) {
+            return value == null || value.isBlank() ? "__unassigned" : value;
+        }
+
+        private static Map<String, List<SceneSystem>> immutableGroups(
+                Map<String, List<SceneSystem>> source) {
+            Map<String, List<SceneSystem>> result = new LinkedHashMap<>();
+            source.forEach((key, value) -> result.put(key, List.copyOf(value)));
+            return Collections.unmodifiableMap(result);
         }
     }
 
