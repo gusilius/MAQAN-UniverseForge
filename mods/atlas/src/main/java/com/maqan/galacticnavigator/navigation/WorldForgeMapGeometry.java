@@ -91,6 +91,17 @@ public final class WorldForgeMapGeometry {
         return List.copyOf(spans);
     }
 
+    /** Finds a stable interior label point using the widest clipped scanline span. */
+    public static Point interiorLabelPoint(List<Point> polygon, int left, int top, int right, int bottom) {
+        Span widest = scanlineSpans(polygon, left, top, right, bottom).stream()
+                .max(Comparator.comparingInt(span -> span.xEndExclusive - span.xStart))
+                .orElse(null);
+        if (widest != null)
+            return new Point((widest.xStart + widest.xEndExclusive) / 2.0, widest.y + 0.5);
+        List<Point> clipped = clipPolygon(polygon, left, top, right, bottom);
+        return centroid(clipped.isEmpty() ? polygon : clipped);
+    }
+
     /** Area-weighted polygon centroid; falls back to the vertex mean for degenerate shapes. */
     public static Point centroid(List<Point> polygon) {
         if (polygon == null || polygon.isEmpty()) return new Point(0, 0);
