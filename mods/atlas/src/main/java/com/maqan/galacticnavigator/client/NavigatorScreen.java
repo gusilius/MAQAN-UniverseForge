@@ -882,8 +882,8 @@ public class NavigatorScreen extends Screen {
             if (separator > 0) point = mapPoints.get(id.substring(0, separator));
         }
         if (point == null) return;
-        int centerX = (mapL + mapR) / 2;
-        int centerY = (mapT + mapB) / 2;
+        int centerX = atlasCameraCenterX();
+        int centerY = atlasCameraCenterY();
         panX += centerX - point.x;
         panY += centerY - point.y;
         zoom = Math.max(.025, Math.min(64.0, zoom * factor));
