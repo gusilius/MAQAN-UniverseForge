@@ -629,7 +629,7 @@ public final class NavigatorTerrain3DScreen extends Screen {
 
     @Override
     public void onClose() {
-        if (minecraft != null) minecraft.setScreen(parent);
+        if (minecraft != null) MaqanScreenHost.back(minecraft, parent);
         else super.onClose();
     }
 }
