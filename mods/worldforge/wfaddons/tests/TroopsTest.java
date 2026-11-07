@@ -49,7 +49,7 @@ public class TroopsTest {
         String beforeMalformedOverride = overrideDefs.units.get("footman").name();
         boolean malformedOverrideRejected = false;
         try {
-            overrideDefs.load("{\\"units\\":[{\\"id\\":\\"new_unit\\",\\"role\\":\\"melee\\"},{");
+            overrideDefs.load("{\"units\":[{\"id\":\"new_unit\",\"role\":\"melee\"},{");
         } catch (RuntimeException expected) { malformedOverrideRejected = true; }
         check(malformedOverrideRejected && !overrideDefs.units.containsKey("new_unit")
                 && overrideDefs.units.get("footman").name().equals(beforeMalformedOverride),
