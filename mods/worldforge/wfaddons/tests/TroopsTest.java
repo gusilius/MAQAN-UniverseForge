@@ -88,6 +88,17 @@ public class TroopsTest {
                 "загрузка повреждённых отрядов фильтрует записи, UUID и нечисловые значения");
         String escaped = damaged.create("p1", "Guard \\"North\\\\Wing\\n", List.of("u4")).name;
         check(dev.worldforge.mod.Json.parse(damaged.toJson()) instanceof Map, "сериализация отрядов экранирует строки и остаётся валидным JSON");
+        Squads orderPersistence = new Squads();
+        Squads.Squad ordered = orderPersistence.create("p1", "Persistent", List.of("unit-a"));
+        orderPersistence.command(ordered.id, Squads.Order.move(12.5, -7.25), false);
+        orderPersistence.command(ordered.id, new Squads.Order(Squads.Kind.ATTACK, 0, 0, "00000000-0000-0000-0000-000000000001"), true);
+        Squads orderRestored = new Squads();
+        orderRestored.fromJson(orderPersistence.toJson());
+        check(orderRestored.get(ordered.id).queue.size() == 2
+                && orderRestored.get(ordered.id).current().kind() == Squads.Kind.MOVE
+                && orderRestored.get(ordered.id).current().x() == 12.5
+                && orderRestored.get(ordered.id).queue.peekLast().target().endsWith("0001"),
+                "сохранение и восстановление очереди приказов отряда");
 
         // выделение
         UnitSelection sel = new UnitSelection();

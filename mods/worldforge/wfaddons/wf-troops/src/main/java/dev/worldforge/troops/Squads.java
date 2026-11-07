@@ -199,7 +199,18 @@ public final class Squads {
                     .append(",\"cx\":").append(Double.isFinite(s.cx) ? s.cx : 0)
                     .append(",\"cz\":").append(Double.isFinite(s.cz) ? s.cz : 0)
                     .append(",\"yaw\":").append(Double.isFinite(s.yaw) ? s.yaw : 0)
-                    .append(",\"members\":[");
+                    .append(",\"queue\":[");
+            boolean firstOrder = true;
+            for (Order order : s.queue) {
+                if (order == null || order.kind() == Kind.STOP) continue;
+                if (!firstOrder) b.append(',');
+                firstOrder = false;
+                b.append("{\"kind\":").append(jsonString(order.kind().name()))
+                        .append(",\"x\":").append(Double.isFinite(order.x()) ? order.x() : 0)
+                        .append(",\"z\":").append(Double.isFinite(order.z()) ? order.z() : 0)
+                        .append(",\"target\":").append(jsonString(order.target())).append('}');
+            }
+            b.append("],\"members\":[");
             for (int i = 0; i < s.members.size(); i++) {
                 if (i > 0) b.append(',');
                 b.append(jsonString(s.members.get(i)));
@@ -243,6 +254,19 @@ public final class Squads {
             s.yaw = finiteNumber(e.get("yaw"), 0);
             s.morale = Math.max(0, Math.min(1, finiteNumber(e.get("morale"), 1)));
             s.routed = Boolean.TRUE.equals(e.get("routed"));
+            if (e.get("queue") instanceof List<?> orders) {
+                for (Object rawOrder : orders) {
+                    if (s.queue.size() >= 64 || !(rawOrder instanceof Map<?, ?> orderData)) break;
+                    Kind kind;
+                    try { kind = Kind.valueOf(String.valueOf(orderData.get("kind"))); }
+                    catch (RuntimeException ignored) { continue; }
+                    if (kind == Kind.STOP) continue;
+                    double x = finiteNumber(orderData.get("x"), 0);
+                    double z = finiteNumber(orderData.get("z"), 0);
+                    String target = orderData.get("target") instanceof String v ? v : "";
+                    s.queue.addLast(new Order(kind, x, z, target));
+                }
+            }
             if (e.get("members") instanceof List<?> members) {
                 for (Object member : members) {
                     if (!(member instanceof String unit) || unit.isBlank() || !seenMembers.add(unit)) continue;
