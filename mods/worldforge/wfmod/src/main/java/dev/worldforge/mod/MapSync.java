@@ -141,7 +141,8 @@ public final class MapSync {
         try (DataInputStream i = new DataInputStream(new InflaterInputStream(new ByteArrayInputStream(data)))) {
             if (i.readInt() != MAGIC + 1) throw new IOException("Неверный формат дельты");
             int version = i.readInt(), n = i.readInt();
-            // Work on a private copy: malformed metadata must never partially mutate the published state.\n            short[] px = s.titles.pixels().clone();
+            // Work on a private copy: malformed metadata must never partially mutate the published state.
+            short[] px = s.titles.pixels().clone();
             if (n < 0 || n > px.length) throw new IOException("Недопустимое число изменений: " + n);
             Set<Integer> changed = new HashSet<>();
             for (int k = 0; k < n; k++) {
