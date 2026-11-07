@@ -89,10 +89,18 @@ public final class MapView {
         }
         int gx = (int) Math.round(wx(sx)), gz = (int) Math.round(wz(sy));
         if (best != null) return Target.worker(best.id, gx, gz);
-        List<Selection.Rect> rs = rects(s);
+        // Do not index rects(s) by the original building index: rects() deliberately
+        // filters malformed entries, so a null/invalid building shifts every later hit target.
         for (int i = s.buildings.size() - 1; i >= 0; i--) {
-            Selection.Rect r = rs.get(i);
-            if (sx >= r.x && sx <= r.x + r.w && sy >= r.y && sy <= r.y + r.h) return Target.building(r.id, gx, gz);
+            Building building = s.buildings.get(i);
+            if (building == null || building.def == null || !validWorldPoint(building.x, building.z)
+                    || !Double.isFinite(building.def.sizeX) || !Double.isFinite(building.def.sizeZ)
+                    || building.def.sizeX <= 0 || building.def.sizeZ <= 0) continue;
+            int w = Math.max(4, (int) Math.min(1_000_000, Math.round(building.def.sizeX * scale)));
+            int h = Math.max(4, (int) Math.min(1_000_000, Math.round(building.def.sizeZ * scale)));
+            int left = sx(building.x) - w / 2, top = sy(building.z) - h / 2;
+            if (sx >= left && sx <= left + w && sy >= top && sy <= top + h)
+                return Target.building(building.uid, gx, gz);
         }
         return Target.ground(gx, gz);
     }
