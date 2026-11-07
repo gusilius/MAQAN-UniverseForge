@@ -10,7 +10,6 @@ import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 
 import java.util.ArrayList;
-import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -64,7 +63,7 @@ public final class PlatformShellScreen extends Screen {
     private boolean inspectorVisible = true;
     private boolean timelineVisible = true;
     private Screen embeddedView;
-    private final Map<Profile, Screen> providerViews = new EnumMap<>(Profile.class);
+    private final Map<String, Screen> providerViews = new LinkedHashMap<>();
     private boolean embeddedViewReady;
     private boolean settingsVisible;
     private boolean ambientGrid = true;
@@ -128,7 +127,7 @@ public final class PlatformShellScreen extends Screen {
         }
         if (profile == Profile.COSMOS) ensureAtlasView();
         if (embeddedView != null) embeddedView.init(Minecraft.getInstance(), width, height);
-        Screen providerView = providerViews.get(profile);
+        Screen providerView = providerViews.get(selectedCapabilityId);
         if (providerView != null) providerView.init(Minecraft.getInstance(), width, height);
         clampPanels();
     }
@@ -166,13 +165,13 @@ public final class PlatformShellScreen extends Screen {
             if (width > 0 && height > 0) embeddedView.init(Minecraft.getInstance(), width, height);
             return;
         }
-        Screen previous = providerViews.put(profile, view);
+        Screen previous = providerViews.put(selectedCapabilityId, view);
         if (previous != null && previous != view) previous.removed();
         if (width > 0 && height > 0) view.init(Minecraft.getInstance(), width, height);
     }
 
     private Screen activeView() {
-        return profile == Profile.COSMOS ? embeddedView : providerViews.get(profile);
+        return profile == Profile.COSMOS ? embeddedView : providerViews.get(selectedCapabilityId);
     }
 
     private void clampPanels() {
@@ -452,11 +451,7 @@ public final class PlatformShellScreen extends Screen {
                 for(CapabilityRegistry.Capability c:CapabilityRegistry.available()) {
                     if(!domainVisible(c.domain())) continue;
                     if(my>=y-4&&my<y+17) {
-                        selectedCapabilityId=c.id(); selectedDomain=c.domain();
-                        if(c.id().equals("maqan.atlas.cosmos") || c.id().equals("maqan.atlas.worlds")) setProfile(Profile.COSMOS);
-                        else if(c.domain().equals("POLITICS")) setProfile(Profile.POLITICS);
-                        else if(c.domain().equals("SETTLEMENTS")) setProfile(Profile.SETTLEMENTS);
-                        else if(c.domain().equals("TACTICAL") || c.domain().equals("ARMY")) setProfile(Profile.RTS);
+                        openCapability(c);
                         return true;
                     }
                     y+=21;
@@ -479,9 +474,18 @@ public final class PlatformShellScreen extends Screen {
 
     private void setProfile(Profile next) {
         profile=next;
+        selectedCapabilityId = switch (next) {
+            case COSMOS -> "maqan.atlas.cosmos";
+            case POLITICS -> "worldforge.realms.politics";
+            case SETTLEMENTS -> "worldforge.settlements";
+            case RTS -> "worldforge.rts";
+        };
         if (next == Profile.COSMOS) {
             ensureAtlasView();
             if (embeddedView != null) embeddedView.init(Minecraft.getInstance(), width, height);
+        } else {
+            Screen view = providerViews.get(selectedCapabilityId);
+            if (view != null) view.init(Minecraft.getInstance(), width, height);
         }
         selectedDomain=switch(next) {
             case COSMOS -> "COSMOS";
@@ -512,10 +516,12 @@ public final class PlatformShellScreen extends Screen {
      * embedded workspace views while their existing domain logic stays provider-owned.
      */
     private void openCapability(CapabilityRegistry.Capability capability) {
-        selectedDomain=capability.domain();
-        selectedCapabilityId=capability.id();
-        // Keep this Screen alive. A provider must register an embedded view adapter
-        // before its existing standalone screen can be retired.
+        Profile target = profileForDomain(capability.domain());
+        setProfile(target);
+        selectedDomain = capability.domain();
+        selectedCapabilityId = capability.id();
+        Screen view = activeView();
+        if (view != null) view.init(Minecraft.getInstance(), width, height);
     }
 
     @Override public boolean mouseDragged(double mx,double my,int button,double dx,double dy) {
