@@ -26,8 +26,10 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Gradle
+      - name: Set up Gradle 8.8 (ForgeGradle 6 compatible)
         uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.8'
 
       - name: Build MAQAN Platform
         run: gradle --no-daemon -p platform clean build
