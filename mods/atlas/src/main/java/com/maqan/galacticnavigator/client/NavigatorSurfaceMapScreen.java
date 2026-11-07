@@ -229,44 +229,6 @@ public final class NavigatorSurfaceMapScreen extends Screen {
                                          NavigatorPlayerPosition player){
         WorldForgeMapSnapshot snapshot=NavigatorWorldForgeMapStore.current();
         if(snapshot==null)return;
-        if(politicalLayer==1||politicalLayer==2){
-            WorldForgeMapSnapshot.PoliticalBoundary nearestBoundary=null;
-            double nearestDistance=36.0;
-            for(WorldForgeMapSnapshot.PoliticalBoundary boundary:NavigatorWorldForgeMapStore.boundaries(dimension)){
-                for(List<WorldForgeMapSnapshot.Vertex> sourceRing:boundary.rings){
-                    if(sourceRing==null||sourceRing.size()<2)continue;
-                    List<WorldForgeMapGeometry.Point> ring=new ArrayList<>(sourceRing.size());
-                    for(WorldForgeMapSnapshot.Vertex vertex:sourceRing){
-                        double[] point=project(vertex.x/16.0,vertex.z/16.0,cell,left,top,right,bottom,player);
-                        ring.add(new WorldForgeMapGeometry.Point(point[0],point[1]));
-                    }
-                    for(int i=0;i<ring.size();i++){
-                        var a=ring.get(i);var b=ring.get((i+1)%ring.size());
-                        double distance=segmentDistanceSquared(mouseX,mouseY,a.x(),a.y(),b.x(),b.y());
-                        if(distance<=nearestDistance){nearestDistance=distance;nearestBoundary=boundary;}
-                    }
-                }
-            }
-            if(nearestBoundary!=null){
-                selectedWorldForgeEntityId=nearestBoundary.id;
-                List<String> context=new ArrayList<>();
-                addContext(context,"realm id",nearestBoundary.realm_id);
-                addContext(context,"ruler",nearestBoundary.ruler);
-                addContext(context,"relation",nearestBoundary.relation);
-                addContext(context,"overlord",nearestBoundary.overlord_id);
-                if(nearestBoundary.subjects!=null)addContext(context,"subjects",String.join(", ",nearestBoundary.subjects));
-                if(nearestBoundary.attributes!=null){
-                    addContext(context,"government",nearestBoundary.attributes.get("realm.government"));
-                    addContext(context,"race",nearestBoundary.attributes.get("realm.race"));
-                    addContext(context,"culture",nearestBoundary.attributes.get("realm.culture"));
-                }
-                NavigatorPlatformSelectionBridge.publish("worldforge:realm/"+nearestBoundary.realm_id,
-                        "realm",nearestBoundary.name,dimension,String.join(" · ",context));
-                return true;
-            }
-        }
-        if(politicalLayer==1)return false;
-
         List<WorldForgeMapSnapshot.Territory> territories=
                 NavigatorWorldForgeMapStore.territories(dimension);
         List<WorldForgeMapSnapshot.Feature> features=
@@ -377,6 +339,44 @@ public final class NavigatorSurfaceMapScreen extends Screen {
                     nearest.kind,nearest.name,dimension,String.join(" · ",context));
             return true;
         }
+
+        if(politicalLayer==1||politicalLayer==2){
+            WorldForgeMapSnapshot.PoliticalBoundary nearestBoundary=null;
+            double nearestDistance=36.0;
+            for(WorldForgeMapSnapshot.PoliticalBoundary boundary:NavigatorWorldForgeMapStore.boundaries(dimension)){
+                for(List<WorldForgeMapSnapshot.Vertex> sourceRing:boundary.rings){
+                    if(sourceRing==null||sourceRing.size()<2)continue;
+                    List<WorldForgeMapGeometry.Point> ring=new ArrayList<>(sourceRing.size());
+                    for(WorldForgeMapSnapshot.Vertex vertex:sourceRing){
+                        double[] point=project(vertex.x/16.0,vertex.z/16.0,cell,left,top,right,bottom,player);
+                        ring.add(new WorldForgeMapGeometry.Point(point[0],point[1]));
+                    }
+                    for(int i=0;i<ring.size();i++){
+                        var a=ring.get(i);var b=ring.get((i+1)%ring.size());
+                        double distance=segmentDistanceSquared(mouseX,mouseY,a.x(),a.y(),b.x(),b.y());
+                        if(distance<=nearestDistance){nearestDistance=distance;nearestBoundary=boundary;}
+                    }
+                }
+            }
+            if(nearestBoundary!=null){
+                selectedWorldForgeEntityId=nearestBoundary.id;
+                List<String> context=new ArrayList<>();
+                addContext(context,"realm id",nearestBoundary.realm_id);
+                addContext(context,"ruler",nearestBoundary.ruler);
+                addContext(context,"relation",nearestBoundary.relation);
+                addContext(context,"overlord",nearestBoundary.overlord_id);
+                if(nearestBoundary.subjects!=null)addContext(context,"subjects",String.join(", ",nearestBoundary.subjects));
+                if(nearestBoundary.attributes!=null){
+                    addContext(context,"government",nearestBoundary.attributes.get("realm.government"));
+                    addContext(context,"race",nearestBoundary.attributes.get("realm.race"));
+                    addContext(context,"culture",nearestBoundary.attributes.get("realm.culture"));
+                }
+                NavigatorPlatformSelectionBridge.publish("worldforge:realm/"+nearestBoundary.realm_id,
+                        "realm",nearestBoundary.name,dimension,String.join(" · ",context));
+                return true;
+            }
+        }
+        if(politicalLayer==1)return false;
 
         List<WorldForgeMapSnapshot.Territory> territories=
                 NavigatorWorldForgeMapStore.territories(dimension);
