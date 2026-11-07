@@ -177,14 +177,20 @@ public class NavigatorScreen extends Screen {
     public void toggleListPanel() {
         showList = !showList;
         NavigatorPreferences.setShowListPanel(showList);
-        if (listButton != null) listButton.setMessage(Component.literal("☷")); listButton.setTooltip(Tooltip.create(Component.literal(showList ? "Hide catalogue" : "Show catalogue")));
+        if (listButton != null) {
+            listButton.setMessage(Component.literal("☷"));
+            listButton.setTooltip(Tooltip.create(Component.literal(showList ? "Hide catalogue" : "Show catalogue")));
+        }
     }
 
     /** Workspace rail action: reveal/hide Atlas' existing object dossier. */
     public void toggleInfoPanel() {
         showInfo = !showInfo;
         NavigatorPreferences.setShowInfoPanel(showInfo);
-        if (infoButton != null) infoButton.setMessage(Component.literal("◈")); infoButton.setTooltip(Tooltip.create(Component.literal(showInfo ? "Hide inspector" : "Show inspector")));
+        if (infoButton != null) {
+            infoButton.setMessage(Component.literal("◈"));
+            infoButton.setTooltip(Tooltip.create(Component.literal(showInfo ? "Hide inspector" : "Show inspector")));
+        }
     }
 
     public NavigatorScreen() { super(Component.literal("MAQAN Galactic Navigator")); }
@@ -420,11 +426,12 @@ public class NavigatorScreen extends Screen {
             zInput.setValue(previousZ);
             footerX += coordWidth + footerGap;
             int travelX = Math.min(footerX, width - travelWidth - 14);
-            travelButton = addRenderableWidget(Button.builder(Component.literal("TRAVEL"), b -> requestTeleport())
+            travelButton = addRenderableWidget(Button.builder(Component.literal("⇢"), b -> requestTeleport())
                     .bounds(travelX, footerY, travelWidth, 18).build());
         }
-        if (travelButton != null) travelButton.setTooltip(Tooltip.create(Component.literal("Travel to dimension and coordinates")));
-                dimensionInput.setMaxLength(256);
+        if (travelButton != null)
+            travelButton.setTooltip(Tooltip.create(Component.literal("Travel to dimension and coordinates")));
+        dimensionInput.setMaxLength(256);
         dimensionInput.setHint(Component.literal("dimension:destination"));
         dimensionInput.setValue(previousDimension);
         addRenderableWidget(dimensionInput);
