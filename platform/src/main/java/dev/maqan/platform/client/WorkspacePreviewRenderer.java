@@ -17,8 +17,8 @@ final class WorkspacePreviewRenderer {
     private WorkspacePreviewRenderer() {}
 
     static void render(GuiGraphics g, Font font, int width, int height,
-                       String mode, int layer, int mouseX, int mouseY) {
-        drawGrid(g, width, height);
+                       String mode, int layer, int mouseX, int mouseY, boolean gridVisible) {
+        if (gridVisible) drawGrid(g, width, height);
         if ("COSMOS".equals(mode)) drawCosmos(g, font, width, height, layer, mouseX, mouseY);
         else if ("POLITICS".equals(mode)) drawPolitics(g, font, width, height, mouseX, mouseY);
         else if ("SETTLEMENTS".equals(mode)) drawSettlements(g, font, width, height, mouseX, mouseY);
