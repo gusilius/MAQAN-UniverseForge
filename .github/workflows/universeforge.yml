@@ -21,7 +21,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: universeforge-windows-final-${{ github.ref }}
+  group: universeforge-windows-quality-gate-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
