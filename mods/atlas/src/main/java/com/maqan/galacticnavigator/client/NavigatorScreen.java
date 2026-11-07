@@ -578,8 +578,11 @@ public class NavigatorScreen extends Screen {
         if (node == null) node = findNode(target);
         if (node == null || node.entries.isEmpty()) return;
         JsonObject body = node.first();
-        String systemId = GalaxyCatalog.text(body, "system_id", universe);
-        String bodyId = GalaxyCatalog.text(body, "catalog_id", target);
+        int separator = target.indexOf("::");
+        String systemId = separator > 0 ? target.substring(0, separator)
+                : GalaxyCatalog.text(body, "system_id", universe);
+        String localBodyId = separator > 0 ? target.substring(separator + 2) : target;
+        String bodyId = GalaxyCatalog.text(body, "catalog_id", localBodyId);
         String bodyName = GalaxyCatalog.text(body, "name", node.label);
         MaqanScreenHost.open(minecraft, new CosmicBodyOrbitSettingsScreen(this, systemId, bodyId, bodyName));
     }
