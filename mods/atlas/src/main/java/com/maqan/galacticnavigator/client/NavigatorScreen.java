@@ -1723,7 +1723,7 @@ public class NavigatorScreen extends Screen {
             int indent = Math.min(8, n.depth) * 8;
             String prefix = n.depth > 0 ? "› " : "";
             g.drawString(font, trim(prefix + n.label, rect.w - 18 - indent), listL + 10 + indent, y + 2, active ? GOLD : TEXT, false);
-            String relation = value(n.first(), "parent", "parent_dimension_id", "satellite_of");
+            String relation = orbitalParentReference(n.first());
             String parentLabel = relation;
             if (!relation.isEmpty()) {
                 JsonObject parent = findObject(relation);
@@ -1756,8 +1756,13 @@ public class NavigatorScreen extends Screen {
     private Node bodyNode(String id) {
         JsonObject o = findObject(id);
         if (o == null) return null;
-        return new Node(id, value(o, "name").isEmpty() ? id : value(o, "name"),
-                value(o, "kind").isEmpty() ? "body" : value(o, "kind"),
+        String kind = value(o, "kind", "display_type", "type", "classification")
+                .trim().toLowerCase(Locale.ROOT);
+        if (isStarData(o)) kind = "star";
+        else if (kind.contains("moon") || kind.contains("satellite")) kind = "moon";
+        else if (kind.isBlank()) kind = "planet";
+        return new Node(id, value(o, "name", "display_name").isEmpty() ? id
+                : value(o, "name", "display_name"), kind,
                 List.of(new AbstractMap.SimpleImmutableEntry<>(id, o)));
     }
 
