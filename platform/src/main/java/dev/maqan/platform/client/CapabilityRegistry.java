@@ -86,7 +86,9 @@ public final class CapabilityRegistry {
         ModList mods = ModList.get();
         List<Capability> result = new ArrayList<>();
         for (Capability capability : DECLARED) {
-            if (mods.isLoaded(capability.providerModId())) result.add(capability);
+            // A capability without a real embedded screen is not exposed as a clickable route.
+            // Command-only providers remain usable through their own commands until a synced UI exists.
+            if (mods.isLoaded(capability.providerModId()) && !capability.screenClass().isBlank()) result.add(capability);
         }
         result.sort(Comparator.comparingInt(Capability::order)
                 .thenComparing(Capability::label));
