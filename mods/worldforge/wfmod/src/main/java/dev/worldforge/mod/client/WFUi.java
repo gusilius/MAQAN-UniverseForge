@@ -30,14 +30,27 @@ public final class WFUi {
     public static final int SCRIM = 0xEE100E0B;       // полупрозрачная тёмная панель поверх мира
 
     private static int mix(int a, int b, double t) {
-        int ar = a >> 16 & 255, ag = a >> 8 & 255, ab = a & 255, br = b >> 16 & 255, bg = b >> 8 & 255, bb = b & 255;
-        return 0xFF000000 | (int) (ar + (br - ar) * t) << 16 | (int) (ag + (bg - ag) * t) << 8 | (int) (ab + (bb - ab) * t);
+        t = Math.max(0.0, Math.min(1.0, t));
+        int aa = a >>> 24, ar = a >> 16 & 255, ag = a >> 8 & 255, ab = a & 255;
+        int ba = b >>> 24, br = b >> 16 & 255, bg = b >> 8 & 255, bb = b & 255;
+        int alpha = (int) Math.round(aa + (ba - aa) * t);
+        int red = (int) Math.round(ar + (br - ar) * t);
+        int green = (int) Math.round(ag + (bg - ag) * t);
+        int blue = (int) Math.round(ab + (bb - ab) * t);
+        return alpha << 24 | red << 16 | green << 8 | blue;
     }
 
-    /** Вертикальный градиент построчно (работает и в игре, и в предпросмотре). */
+    /** Вертикальный градиент построчно с интерполяцией alpha/RGB. */
     public static void gradient(GuiGraphics g, int x, int y, int w, int h, int top, int bottom) {
         if (w <= 0 || h <= 0) return;
-        g.fill(x, y, x + w, y + h, top);
+        if (h == 1) {
+            g.fill(x, y, x + w, y + 1, top);
+            return;
+        }
+        for (int row = 0; row < h; row++) {
+            int color = mix(top, bottom, row / (double) (h - 1));
+            g.fill(x, y + row, x + w, y + row + 1, color);
+        }
     }
 
     /** Угловые украшения: золотые уголки с ромбом. */
@@ -152,11 +165,13 @@ public final class WFUi {
     }
 
     public static void scrollbar(GuiGraphics g, int x, int y, int h, int contentH, int offset) {
+        if (h <= 0 || contentH <= h) return;
         int max = contentH - h;
-        if (max <= 0) return;
-        int bh = Math.max(14, h * h / contentH), bpos = y + (int) ((h - bh) * (offset / (double) max));
+        int thumbHeight = Math.max(Math.min(14, h), h * h / contentH);
+        int clampedOffset = Math.max(0, Math.min(max, offset));
+        int thumbY = y + (int) Math.round((h - thumbHeight) * (clampedOffset / (double) max));
         g.fill(x, y, x + 2, y + h, LO);
-        g.fill(x, bpos, x + 2, bpos + bh, HI);
+        g.fill(x, thumbY, x + 2, thumbY + thumbHeight, HI);
     }
 
     // ------------------------------------------------------------------ расширения для RTS-панелей и окон
@@ -182,7 +197,7 @@ public final class WFUi {
         int cx = x;
         for (int i = 0; i < labels.length; i++) {
             int w = f.width(labels[i]) + 20;
-            if (over(mx, my, cx, y, w, 15)) return i;
+            if (over(mx, my, cx, y, w, 18)) return i;
             cx += w + 2;
         }
         return -1;
@@ -476,7 +491,8 @@ public final class WFUi {
         int w = f.width(title), h = 14 + lines.size() * 10 + 4;
         for (String l : lines) w = Math.max(w, f.width(l.length() > 0 && "+-".indexOf(l.charAt(0)) >= 0 ? l.substring(1) : l) + 4);
         w += 16;
-        int x = Math.min(mx + 12, screenW - w - 4), y = Math.min(my + 12, screenH - h - 4);
+        int x = Math.max(2, Math.min(mx + 12, screenW - w - 4));
+        int y = Math.max(2, Math.min(my + 12, screenH - h - 4));
         bevel(g, x, y, w, h, false);
         g.fill(x + 1, y + 1, x + w - 1, y + h - 1, 0xF0181A20);
         g.drawString(f, title, x + 8, y + 5, GOLD);
