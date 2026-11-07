@@ -310,11 +310,43 @@ public final class PlatformShellScreen extends Screen {
     }
 
     private void drawInspectorPanel(GuiGraphics g, Panel p) {
-        g.drawString(font,"◇",p.x+12,p.y+40,CYAN,false);
-        g.drawString(font,"NO SELECTION",p.x+30,p.y+40,TEXT,false);
-        g.fill(p.x+10,p.y+59,p.x+p.w-10,p.y+60,EDGE);
-        g.drawString(font,"Select an object to inspect",p.x+12,p.y+75,MUTED,false);
-        g.drawString(font,"Properties and actions appear here.",p.x+12,p.y+91,MUTED,false);
+        PlatformSelectionContext.Selection selected = PlatformSelectionContext.current();
+        if (selected == null) {
+            g.drawString(font,"◇",p.x+12,p.y+40,CYAN,false);
+            g.drawString(font,"NO SELECTION",p.x+30,p.y+40,TEXT,false);
+            g.fill(p.x+10,p.y+59,p.x+p.w-10,p.y+60,EDGE);
+            g.drawString(font,"Select an object in a workspace",p.x+12,p.y+75,MUTED,false);
+            g.drawString(font,"Its identity and context appear here.",p.x+12,p.y+91,MUTED,false);
+            return;
+        }
+        int left = p.x + 12;
+        int right = p.x + p.w - 12;
+        g.drawString(font, "◇ " + selected.entityType().toUpperCase(java.util.Locale.ROOT),
+                left, p.y + 40, CYAN, false);
+        g.drawString(font, trimInspector(selected.displayName(), p.w - 24),
+                left, p.y + 59, TEXT, false);
+        g.fill(left, p.y + 75, right, p.y + 76, EDGE);
+        g.drawString(font, "SOURCE", left, p.y + 87, MUTED, false);
+        g.drawString(font, trimInspector(selected.providerId(), p.w - 24),
+                left, p.y + 99, TEXT, false);
+        g.drawString(font, "IDENTITY", left, p.y + 118, MUTED, false);
+        g.drawString(font, trimInspector(selected.entityId(), p.w - 24),
+                left, p.y + 130, TEXT, false);
+        if (!selected.worldId().isBlank()) {
+            g.drawString(font, "SYSTEM", left, p.y + 149, MUTED, false);
+            g.drawString(font, trimInspector(selected.worldId(), p.w - 24),
+                    left, p.y + 161, TEXT, false);
+        }
+        if (!selected.summary().isBlank()) {
+            g.drawString(font, "DIMENSION / CONTEXT", left, p.y + 180, MUTED, false);
+            g.drawString(font, trimInspector(selected.summary(), p.w - 24),
+                    left, p.y + 192, TEXT, false);
+        }
+    }
+
+    private String trimInspector(String value, int maxWidth) {
+        if (value == null || value.isBlank()) return "—";
+        return font.plainSubstrByWidth(value, Math.max(16, maxWidth));
     }
 
     private void drawTimelinePanel(GuiGraphics g, Panel p) {
