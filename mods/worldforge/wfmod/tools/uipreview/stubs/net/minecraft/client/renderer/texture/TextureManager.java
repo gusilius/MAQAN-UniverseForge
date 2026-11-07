@@ -1,0 +1,4 @@
+package net.minecraft.client.renderer.texture; import net.minecraft.resources.ResourceLocation; import java.util.*; import java.awt.image.BufferedImage;
+public class TextureManager { public static final Map<String,BufferedImage> TEX=new HashMap<>();
+ public void register(ResourceLocation r,AbstractTexture t){ var n=t.n; BufferedImage b=new BufferedImage(n.w,n.h,BufferedImage.TYPE_INT_ARGB); for(int i=0;i<n.px.length;i++){ int a=n.px[i]; int argb=(a&0xFF00FF00)|((a&0xFF)<<16)|((a>>16)&0xFF); b.setRGB(i%n.w,i/n.w,argb);} TEX.put(r.toString(),b);} 
+ public void release(ResourceLocation r){ TEX.remove(r.toString()); } }

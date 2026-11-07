@@ -1,0 +1,1 @@
+package net.minecraft.network.chat; public class Style { public static final Style EMPTY=new Style(); public Style withColor(int c){return this;} public Style withBold(Boolean b){return this;} }

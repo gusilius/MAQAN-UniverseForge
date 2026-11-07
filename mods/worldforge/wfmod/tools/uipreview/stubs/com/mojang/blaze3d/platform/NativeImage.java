@@ -1,0 +1,1 @@
+package com.mojang.blaze3d.platform; public class NativeImage { public final int w,h; public final int[] px; public NativeImage(int w,int h,boolean b){this.w=w;this.h=h;px=new int[w*h];} public void setPixelRGBA(int x,int y,int c){ px[y*w+x]=c; } }
