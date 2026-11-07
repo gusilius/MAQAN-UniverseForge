@@ -44,7 +44,12 @@ public final class UnitSelection {
     public boolean click(List<Screen> all, double mx, double my, boolean shift, long nowMs) {
         if (all == null || !Double.isFinite(mx) || !Double.isFinite(my) || nowMs < 0) return false;
         Screen hit = nearest(all, mx, my);
-        if (hit == null) { if (!shift) selected.clear(); return false; }
+        if (hit == null) {
+            lastClick = "";
+            lastClickMs = 0;
+            if (!shift) selected.clear();
+            return false;
+        }
         if (hit.id().equals(lastClick) && nowMs >= lastClickMs && nowMs - lastClickMs <= DOUBLE_MS) {
             if (!shift) selected.clear();
             for (Screen s : all) if (valid(s) && s.visible() && s.type().equals(hit.type())) selected.add(s.id());
@@ -72,10 +77,11 @@ public final class UnitSelection {
                 && (Math.abs(x2 - x1) > 5 || Math.abs(y2 - y1) > 5);
     }
 
-    public void saveGroup(int n) { if (n >= 0 && n <= 9) groups.put(n, new ArrayList<>(selected)); }
+    public void saveGroup(int n) { if (n >= 1 && n <= 9) groups.put(n, new ArrayList<>(selected)); }
 
     /** Вызов группы; fallback - тех, кого уже нет в живых (alive), выкидываем. */
     public boolean recallGroup(int n, Set<String> alive) {
+        if (n < 1 || n > 9 || alive == null) return false;
         List<String> g = groups.get(n);
         if (g == null) return false;
         g.retainAll(alive);

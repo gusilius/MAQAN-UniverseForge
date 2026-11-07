@@ -85,8 +85,15 @@ public class TroopsTest {
         sel.click(sc, 100, 100, false, 9000); sel.click(sc, 100, 100, false, 9200);
         check(sel.selected().equals(Set.of("a", "b")), "двойной клик - все того же типа на экране (невидимых нет) " + sel.selected());
         check(!sel.click(sc, 700, 700, false, 20000) && sel.selected().isEmpty(), "клик в пустоту снимает выбор");
+        UnitSelection missReset = new UnitSelection();
+        missReset.click(sc, 100, 100, false, 0);
+        missReset.click(sc, 700, 700, false, 100);
+        missReset.click(sc, 100, 100, false, 200);
+        check(missReset.selected().equals(Set.of("a")), "клик в пустоту сбрасывает последовательность двойного клика");
         check(sel.box(sc, 50, 50, 350, 250, false) == 3, "рамка");
         check(!UnitSelection.isBox(10, 10, 12, 13) && UnitSelection.isBox(10, 10, 40, 40), "малая рамка - клик");
+        sel.saveGroup(0);
+        check(!sel.recallGroup(0, Set.of("a", "c")), "нулевая группа не используется");
         sel.saveGroup(1); sel.clear();
         check(sel.recallGroup(1, Set.of("a", "c")) && sel.selected().equals(Set.of("a", "c")), "группа 1, павшие убраны");
         UnitSelection clockSelection = new UnitSelection();

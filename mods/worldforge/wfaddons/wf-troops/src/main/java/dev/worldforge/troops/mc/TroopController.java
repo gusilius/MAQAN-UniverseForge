@@ -16,6 +16,12 @@ final class TroopController {
 
     static final double SPACING = 1.7;
 
+    private static UUID safeUuid(String value) {
+        if (value == null || value.isBlank()) return null;
+        try { return UUID.fromString(value); }
+        catch (IllegalArgumentException ignored) { return null; }
+    }
+
     static void step(MinecraftServer server) {
         for (Squads.Squad s : new ArrayList<>(TroopsMod.SQUADS.all())) {
             List<TroopEntity> alive = new ArrayList<>();
@@ -63,12 +69,14 @@ final class TroopController {
                     if (sum / alive.size() < 3.0 && far == false || sum / alive.size() < 2.2) TroopsMod.SQUADS.completeCurrent(s.id);
                 }
                 case ATTACK -> {
-                    Entity target = TroopsMod.find(UUID.fromString(o.target().isEmpty() ? new UUID(0, 0).toString() : o.target()));
+                    UUID targetId = safeUuid(o.target());
+                    Entity target = targetId == null ? null : TroopsMod.find(targetId);
                     if (!(target instanceof net.minecraft.world.entity.LivingEntity le) || !le.isAlive()) { TroopsMod.SQUADS.completeCurrent(s.id); break; }
                     for (TroopEntity t : alive) { t.hasDest = false; t.forced = target.getUUID(); t.engage = TroopEntity.Engage.FULL; }
                 }
                 case FOLLOW, GUARD -> {
-                    Entity target = TroopsMod.find(UUID.fromString(o.target().isEmpty() ? s.owner : o.target()));
+                    UUID targetId = safeUuid(o.target().isEmpty() ? s.owner : o.target());
+                    Entity target = targetId == null ? null : TroopsMod.find(targetId);
                     if (target == null) { TroopsMod.SQUADS.completeCurrent(s.id); break; }
                     List<Formations.Slot> slots = Formations.slots(s.formation, alive.size(), SPACING);
                     double yaw = target.getYRot() + 180;
