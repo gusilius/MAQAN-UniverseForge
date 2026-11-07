@@ -251,6 +251,61 @@ class CosmicSceneEngineTest {
     }
 
     @Test
+    void worldBindingKeepsAttachedTravelAndUnlockDimensionsDistinct() {
+        JsonObject bodyData = new JsonObject();
+        bodyData.addProperty("dimension", "worlds:earth");
+        bodyData.addProperty("travel_dimension", "worlds:earth_orbit");
+        bodyData.addProperty("category_unlocking_dimension", "worlds:solar_system");
+        JsonObject systemData = new JsonObject();
+        systemData.addProperty("travel_to_dimension", "worlds:solar_system");
+
+        CosmicSceneEngine.SceneBody earth = new CosmicSceneEngine.SceneBody(
+                "earth", "Earth", "planet", "sun",
+                new CosmicSceneEngine.Vector3(1, 0, 0),
+                CosmicSceneEngine.PlacementSource.DATAPACK, bodyData);
+        CosmicSceneEngine.SceneSystem system = new CosmicSceneEngine.SceneSystem(
+                "sol", "Sol", "g", "Galaxy", "s", "Sector",
+                CosmicSceneEngine.Vector3.ZERO, CosmicSceneEngine.PlacementSource.DATAPACK,
+                List.of(earth), systemData);
+        CosmicSceneEngine.SceneSnapshot snapshot = new CosmicSceneEngine.SceneSnapshot(
+                "u", "Universe", 1, 0, List.of(), List.of(), List.of(system),
+                1, 1, 0, 0);
+
+        CosmicSceneEngine.WorldBinding binding =
+                snapshot.worldBinding("sol", "earth").orElseThrow();
+        assertEquals("worlds:earth", binding.attachedDimensionId());
+        assertEquals("worlds:earth_orbit", binding.travelDimensionId());
+        assertEquals("worlds:solar_system", binding.unlockingDimensionId());
+        assertEquals("worlds:solar_system", binding.systemTravelDimensionId());
+        assertTrue(binding.hasAttachedWorld());
+        assertTrue(binding.hasTravelDestination());
+        assertTrue(binding.hasUnlockingDimension());
+    }
+
+    @Test
+    void worldBindingDoesNotInventDimensionRolesOrTreatSystemDimensionAsBodyIdentity() {
+        CosmicSceneEngine.SceneBody body = new CosmicSceneEngine.SceneBody(
+                "planet", "Planet", "planet", "",
+                CosmicSceneEngine.Vector3.ZERO, CosmicSceneEngine.PlacementSource.DATAPACK,
+                new JsonObject());
+        CosmicSceneEngine.SceneSystem system = new CosmicSceneEngine.SceneSystem(
+                "system", "System", "g", "Galaxy", "s", "Sector",
+                CosmicSceneEngine.Vector3.ZERO, CosmicSceneEngine.PlacementSource.DATAPACK,
+                List.of(body), new JsonObject());
+        CosmicSceneEngine.SceneSnapshot snapshot = new CosmicSceneEngine.SceneSnapshot(
+                "u", "Universe", 1, 0, List.of(), List.of(), List.of(system),
+                1, 1, 0, 0);
+
+        CosmicSceneEngine.WorldBinding binding =
+                snapshot.worldBinding("system", "planet").orElseThrow();
+        assertEquals("", binding.attachedDimensionId());
+        assertEquals("", binding.travelDimensionId());
+        assertEquals("", binding.unlockingDimensionId());
+        assertEquals("", binding.systemTravelDimensionId());
+        assertTrue(snapshot.worldBinding("system", "missing").isEmpty());
+    }
+
+    @Test
     void placementVectorsRejectNonFiniteCoordinates() {
         assertTrue(new CosmicSceneEngine.Vector3(1, 2, 3).finite());
         assertFalse(new CosmicSceneEngine.Vector3(Double.NaN, 0, 0).finite());
