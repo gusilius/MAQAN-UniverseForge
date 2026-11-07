@@ -1392,7 +1392,7 @@ public class NavigatorScreen extends Screen {
             int rowBottom = rowY + rowH;
             if (active) g.fill(x + 3, rowY, x + w - 3, rowBottom, 0xFF25465A);
             g.drawString(font, trim(label, w - 42), x + 10, rowY + 6, active ? GOLD : TEXT, false);
-            g.drawString(font, active ? "●" : "○", x + w - 22, rowY + 6, active ? CYAN : MUTED, false);
+            g.drawString(font, active ? "\u25CF" : "\u25CB", x + w - 22, rowY + 6, active ? CYAN : MUTED, false);
             rowY += rowH;
         }
         if (systems.size() > maxRows)
