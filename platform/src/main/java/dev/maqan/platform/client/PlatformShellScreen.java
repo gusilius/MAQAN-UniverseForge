@@ -3,210 +3,343 @@ package dev.maqan.platform.client;
 import com.mojang.logging.LogUtils;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraftforge.fml.ModList;
-
+import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 
 import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
-/** First functional pass of the shared MAQAN desktop shell. Gameplay data stays in its owning mod. */
+/**
+ * MAQAN's shared workspace shell. It owns presentation and layout only;
+ * simulation, world data and actions remain in their provider mods.
+ */
 public final class PlatformShellScreen extends Screen {
     private static final Logger LOGGER = LogUtils.getLogger();
-    private static final int BG = 0xF0080D14, BAR = 0xF0101823, PANEL = 0xE5101923;
-    private static final int EDGE = 0xFF34495B, CYAN = 0xFF69CDE2, GOLD = 0xFF69CDE2;
-    private String workspace = "COSMOS";
-    private boolean navigationOpen = true;
-    private boolean leftOpen = true, rightOpen = true;
-    private boolean windowOpen = true, dragging = false;
-    private int windowX = 330, windowY = 142, windowW = 330, windowH = 210;
-    private int dragX, dragY;
-    private final List<Button> controls = new ArrayList<>();
+    private static final int BG = 0xF0060B12;
+    private static final int SURFACE = 0xE8101924;
+    private static final int SURFACE_ALT = 0xF014202D;
+    private static final int EDGE = 0x883B5265;
+    private static final int TEXT = 0xFFE7F0F8;
+    private static final int MUTED = 0xFF91A5B7;
+    private static final int CYAN = 0xFF69CDE2;
 
-    public PlatformShellScreen() { super(Component.literal("MAQAN Platform")); }
+    private enum Profile {
+        COSMOS("◎", "COSMOS", "maqan.atlas.cosmos"),
+        POLITICS("♜", "POLITICS", "worldforge.realms.politics"),
+        SETTLEMENTS("⌂", "SETTLEMENTS", "worldforge.settlements"),
+        RTS("⌖", "RTS", "worldforge.rts");
+
+        final String icon, label, capability;
+        Profile(String icon, String label, String capability) {
+            this.icon = icon; this.label = label; this.capability = capability;
+        }
+    }
+
+    private static final class Panel {
+        final String id;
+        String title;
+        int x, y, w, h;
+        boolean visible = true, minimized, pinned;
+        String dock = "FLOAT";
+        Panel(String id, String title, int x, int y, int w, int h) {
+            this.id=id; this.title=title; this.x=x; this.y=y; this.w=w; this.h=h;
+        }
+        int bodyHeight() { return minimized ? 0 : h - 26; }
+    }
+
+    private final Map<String, Panel> panels = new LinkedHashMap<>();
+    private Profile profile = Profile.COSMOS;
+    private String selectedDomain = "COSMOS";
+    private String draggingPanel;
+    private String resizingPanel;
+    private int pointerOffsetX, pointerOffsetY, resizeStartX, resizeStartY, resizeStartW, resizeStartH;
+    private boolean navRailVisible = true;
+    private boolean inspectorVisible = true;
+    private boolean timelineVisible = true;
+
+    public PlatformShellScreen() { super(Component.literal("MAQAN")); }
 
     @Override public boolean isPauseScreen() { return false; }
 
     @Override protected void init() {
-        controls.clear();
-        int top = 8;
-        addButton("☰", 10, top, 28, () -> { navigationOpen = !navigationOpen; rebuildShellControls(); });
-        addButton(leftOpen ? "‹" : "›", 8, 44, 24, () -> { leftOpen = !leftOpen; rebuildShellControls(); });
-        addButton(rightOpen ? "›" : "‹", width - 32, 44, 24, () -> { rightOpen = !rightOpen; rebuildShellControls(); });
-        if (navigationOpen && leftOpen) {
-            java.util.LinkedHashMap<String, CapabilityRegistry.Capability> domains = new java.util.LinkedHashMap<>();
-            for (CapabilityRegistry.Capability capability : CapabilityRegistry.available())
-                domains.putIfAbsent(capability.domain(), capability);
-            int y = 84;
-            for (var entry : domains.entrySet()) {
-                CapabilityRegistry.Capability capability = entry.getValue();
-                addButton(domainIcon(capability.domain()), 10, y, 28,
-                        () -> openCapability(capability));
-                y += 30;
-                if (y > height - 66) break;
-            }
+        if (panels.isEmpty()) {
+            panels.put("navigation", new Panel("navigation", "NAVIGATION", 54, 44, 224, Math.max(180, height - 170)));
+            panels.put("inspector", new Panel("inspector", "INSPECTOR", width - 270, 44, 252, Math.max(180, height - 170)));
+            panels.put("timeline", new Panel("timeline", "TIMELINE", 292, height - 116, Math.max(260, width - 590), 92));
+            panels.put("tools", new Panel("tools", "COMMANDS", Math.max(290, width / 2 - 150), 100, 300, 180));
+            panels.get("tools").visible = false;
         }
-        addButton("×", width - 32, 8, 24, this::onClose);
+        clampPanels();
     }
 
-    private static String domainIcon(String domain) {
-        return switch (domain) {
-            case "COSMOS" -> "◎";
-            case "WORLDS" -> "◇";
-            case "POLITICS" -> "♜";
-            case "SETTLEMENTS" -> "⌂";
-            case "SOCIETY" -> "♙";
-            case "ECONOMY" -> "◈";
-            case "ARMY" -> "⚔";
-            case "TACTICAL" -> "⌖";
-            case "CREATION" -> "✳";
-            default -> "·";
-        };
-    }
-
-    private void openCapability(CapabilityRegistry.Capability capability) {
-        workspace = capability.domain();
-        openModule(capability.providerModId(), capability.screenClass());
-    }
-
-    private void rebuildShellControls() { clearWidgets(); init(); }
-
-    private void openAtlas() {
-        workspace = "ATLAS";
-        openModule("maqan_galactic_navigator",
-                "com.maqan.galacticnavigator.client.NavigatorScreen");
-    }
-
-    private void openWorldForge() {
-        workspace = "WORLDFORGE";
-        openModule("worldforge", "dev.worldforge.mod.client.MapScreen");
-    }
-
-    /**
-     * Platform has no compile-time dependency on either gameplay mod. This keeps
-     * all three jars independently installable while allowing real screen handoff.
-     */
-    private void openModule(String modId, String screenClass) {
-        if (!ModList.get().isLoaded(modId)) {
-            windowOpen = true;
-            return;
+    private void clampPanels() {
+        for (Panel p : panels.values()) {
+            p.w = Math.max(150, Math.min(p.w, width - 24));
+            p.h = Math.max(54, Math.min(p.h, height - 48));
+            p.x = Math.max(44, Math.min(p.x, width - p.w - 8));
+            p.y = Math.max(38, Math.min(p.y, height - (p.minimized ? 26 : p.h) - 8));
         }
-        try {
-            Class<?> type = Class.forName(screenClass);
-            Object instance = type.getDeclaredConstructor().newInstance();
-            if (instance instanceof Screen screen) Minecraft.getInstance().setScreen(screen);
-            else LOGGER.error("MAQAN module {} screen {} is not a Minecraft Screen", modId, screenClass);
-        } catch (ReflectiveOperationException | LinkageError error) {
-            LOGGER.error("Unable to open MAQAN module screen {} for {}", screenClass, modId, error);
-        }
-    }
-
-    private void addButton(String label, int x, int y, int w, Runnable action) {
-        Button b = Button.builder(Component.literal(label), button -> action.run())
-                .bounds(x, y, w, 20).build();
-        controls.add(b);
-        addRenderableWidget(b);
     }
 
     @Override public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         g.fill(0, 0, width, height, BG);
-        drawGrid(g);
-        g.fill(0, 0, width, 34, BAR);
-        g.fill(0, 33, width, 35, EDGE);
-        g.drawString(font, "MAQAN", 14, 18, 0xFFEAF4FC, false);
-        g.drawString(font, "UNIVERSE PLATFORM  /  " + workspace, 82, 18, CYAN, false);
-        g.drawString(font, "SESSION  •  LOCAL", width - 150, 18, 0xFF91A7BA, false);
-
-        if (leftOpen) {
-            g.fill(0, 36, 190, height - 42, PANEL);
-            g.fill(188, 36, 190, height - 42, EDGE);
-            g.drawString(font, "MAQAN", 14, 52, GOLD, false);
-            g.drawString(font, "ACTIVE CAPABILITIES", 14, 72, 0xFF91A7BA, false);
-            int rowY = 94;
-            java.util.LinkedHashMap<String, CapabilityRegistry.Capability> domains = new java.util.LinkedHashMap<>();
-            for (CapabilityRegistry.Capability capability : CapabilityRegistry.available())
-                domains.putIfAbsent(capability.domain(), capability);
-            for (var entry : domains.entrySet()) {
-                String domain = entry.getKey();
-                g.drawString(font, domainIcon(domain), 16, rowY, workspace.equals(domain) ? CYAN : 0xFFE2EAF2, false);
-                g.drawString(font, domain, 38, rowY, workspace.equals(domain) ? CYAN : 0xFFB5C4D2, false);
-                rowY += 18;
-            }
-            if (domains.isEmpty()) g.drawString(font, "No MAQAN modules detected", 14, 96, 0xFF8195A8, false);
-        }
-        if (rightOpen) {
-            g.fill(width - 210, 36, width, height - 42, PANEL);
-            g.fill(width - 212, 36, width - 210, height - 42, EDGE);
-            g.drawString(font, "CONTEXT", width - 194, 52, GOLD, false);
-            g.drawString(font, "No object selected", width - 194, 76, 0xFFB5C4D2, false);
-            g.drawString(font, "Select an object in an", width - 194, 94, 0xFF8195A8, false);
-            g.drawString(font, "Atlas or WorldForge view.", width - 194, 106, 0xFF8195A8, false);
-            g.drawString(font, "CAPABILITY PROVIDERS", width - 194, 142, GOLD, false);
-            g.drawString(font, "Atlas", width - 194, 162, ModList.get().isLoaded("maqan_galactic_navigator") ? 0xFF7ED6AA : 0xFF8A98A8, false);
-            g.drawString(font, "WorldForge", width - 194, 180, ModList.get().isLoaded("worldforge") ? 0xFF7ED6AA : 0xFF8A98A8, false);
-        }
-        g.fill(0, height - 42, width, height, BAR);
-        g.fill(0, height - 43, width, height - 41, EDGE);
-        if (windowOpen) renderToolWindow(g, mouseX, mouseY);
+        drawAmbientGrid(g);
+        drawTopBar(g);
+        drawRail(g);
+        // Back-to-front panel order. The central work surface is never replaced by a click.
+        for (Panel p : panels.values()) if (p.visible) drawPanel(g, p, mouseX, mouseY);
         super.render(g, mouseX, mouseY, partialTick);
     }
 
-    private void statusLine(GuiGraphics g, String label, String modId, int x, int y) {
-        boolean present = ModList.get().isLoaded(modId);
-        g.drawString(font, label, x, y, 0xFFDCE6EF, false);
-        g.drawString(font, present ? "DETECTED" : "NOT INSTALLED", x + 86, y, present ? 0xFF7ED6AA : 0xFF8A98A8, false);
+    private void drawTopBar(GuiGraphics g) {
+        g.fill(0, 0, width, 34, SURFACE_ALT);
+        g.fill(0, 33, width, 35, EDGE);
+        g.drawString(font, "MAQAN", 14, 13, TEXT, false);
+        g.drawString(font, "UNIVERSE PLATFORM", 78, 13, MUTED, false);
+        int x = Math.max(250, width / 2 - 116);
+        for (Profile p : Profile.values()) {
+            boolean active = p == profile;
+            g.fill(x, 5, x + 48, 29, active ? 0x553B9FB5 : 0x00101924);
+            if (active) g.fill(x, 28, x + 48, 30, CYAN);
+            g.drawCenteredString(font, p.icon, x + 24, 8, active ? CYAN : MUTED);
+            x += 52;
+        }
+        g.drawString(font, profile.label, width - 120, 13, CYAN, false);
     }
 
-    private void renderToolWindow(GuiGraphics g, int mouseX, int mouseY) {
-        int x = Math.max(200, Math.min(windowX, width - windowW - 220));
-        int y = Math.max(48, Math.min(windowY, height - windowH - 54));
-        windowX = x; windowY = y;
-        g.fill(x + 4, y + 5, x + windowW + 4, y + windowH + 5, 0x88000000);
-        g.fill(x, y, x + windowW, y + windowH, PANEL);
-        g.fill(x, y, x + windowW, y + 26, BAR);
-        g.fill(x, y + 25, x + windowW, y + 27, CYAN);
-        g.drawString(font, workspace.equals("ATLAS") ? "ATLAS  /  SPATIAL WORKSPACE" : "WORLDFORGE  /  WORLD MANAGEMENT", x + 12, y + 9, 0xFFEAF4FC, false);
-        g.drawString(font, "×", x + windowW - 16, y + 9, 0xFFEAF4FC, false);
-        g.drawString(font, "Integration surface", x + 14, y + 46, GOLD, false);
-        boolean installed = ModList.get().isLoaded(workspace.equals("ATLAS") ? "maqan_galactic_navigator" : "worldforge");
-        g.drawString(font, installed ? "Module available. Use its workspace tab to open the native interface." : "Module not installed. Add its independent mod jar to enable this workspace.", x + 14, y + 68, 0xFFB6C7D7, false);
-        g.drawString(font, "The shell does not fabricate map or simulation data.", x + 14, y + 92, 0xFF8297AA, false);
-        g.drawString(font, "Press P from a module screen to return to the MAQAN shell.", x + 14, y + 110, 0xFF8297AA, false);
-        g.fill(x + windowW - 12, y + windowH - 12, x + windowW - 4, y + windowH - 4, EDGE);
+    private void drawRail(GuiGraphics g) {
+        g.fill(0, 35, 44, height, SURFACE_ALT);
+        g.fill(43, 35, 44, height, EDGE);
+        String[] icons = {"☰", "◈", "⌕", "▤"};
+        for (int i=0;i<icons.length;i++) {
+            int y=48+i*38;
+            boolean active = (i==0 && navRailVisible) || (i==1 && inspectorVisible) || (i==2 && timelineVisible);
+            if (active) g.fill(5,y-4,39,y+26,0x443A9FB5);
+            g.drawCenteredString(font, icons[i], 22, y+3, active ? CYAN : MUTED);
+        }
+        g.drawCenteredString(font, "⚙", 22, height-25, MUTED);
     }
 
-    private void drawGrid(GuiGraphics g) {
-        for (int x = 0; x < width; x += 32) g.fill(x, 35, x + 1, height - 42, 0x182A526B);
-        for (int y = 35; y < height - 42; y += 32) g.fill(0, y, width, y + 1, 0x182A526B);
+    private void drawAmbientGrid(GuiGraphics g) {
+        int left = 44, right = width - 1, top = 35, bottom = height - 1;
+        for (int x=left+24;x<right;x+=48) g.fill(x,top,x+1,bottom,0x102B5266);
+        for (int y=top+24;y<bottom;y+=48) g.fill(left,y,right,y+1,0x102B5266);
     }
 
-    @Override public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        if (button == 0 && windowOpen && mouseX >= windowX && mouseX <= windowX + windowW
-                && mouseY >= windowY && mouseY <= windowY + 26) {
-            if (mouseX >= windowX + windowW - 24) { windowOpen = false; return true; }
-            dragging = true; dragX = (int) mouseX - windowX; dragY = (int) mouseY - windowY;
+    private void drawPanel(GuiGraphics g, Panel p, int mouseX, int mouseY) {
+        int visibleH = p.minimized ? 26 : p.h;
+        g.fill(p.x+3,p.y+4,p.x+p.w+3,p.y+visibleH+4,0x70000000);
+        g.fill(p.x,p.y,p.x+p.w,p.y+visibleH,SURFACE);
+        g.fill(p.x,p.y,p.x+p.w,p.y+26,SURFACE_ALT);
+        g.fill(p.x,p.y+25,p.x+p.w,p.y+26,EDGE);
+        g.drawString(font,p.title,p.x+10,p.y+9,TEXT,false);
+        int bx=p.x+p.w-64;
+        g.drawCenteredString(font,p.pinned?"◆":"◇",bx+8,p.y+8,p.pinned?CYAN:MUTED);
+        g.drawCenteredString(font,p.minimized?"+":"–",bx+28,p.y+7,MUTED);
+        g.drawCenteredString(font,p.pinned?"":"×",bx+48,p.y+7,MUTED);
+        if (p.minimized) return;
+        switch (p.id) {
+            case "navigation" -> drawNavigationPanel(g,p);
+            case "inspector" -> drawInspectorPanel(g,p);
+            case "timeline" -> drawTimelinePanel(g,p);
+            case "tools" -> drawCommandPanel(g,p);
+            default -> g.drawString(font,"Workspace panel",p.x+12,p.y+40,MUTED,false);
+        }
+        g.fill(p.x+p.w-7,p.y+p.h-7,p.x+p.w-2,p.y+p.h-2,0xFF426174);
+    }
+
+    private void drawNavigationPanel(GuiGraphics g, Panel p) {
+        g.drawString(font,"AVAILABLE MODULE VIEWS",p.x+10,p.y+37,MUTED,false);
+        int y=p.y+55;
+        List<CapabilityRegistry.Capability> capabilities=CapabilityRegistry.available();
+        for(CapabilityRegistry.Capability c:capabilities) {
+            if (!domainVisible(c.domain())) continue;
+            boolean active=c.domain().equals(selectedDomain);
+            if(active) g.fill(p.x+6,y-4,p.x+p.w-6,y+15,0x333B9FB5);
+            g.drawString(font,c.icon(),p.x+12,y,CYAN,false);
+            g.drawString(font,c.label(),p.x+34,y,active?TEXT:0xFFB8C7D5,false);
+            y+=21;
+            if(y>p.y+p.h-18) break;
+        }
+        if(capabilities.isEmpty()) g.drawString(font,"No compatible MAQAN providers",p.x+10,y,MUTED,false);
+    }
+
+    private boolean domainVisible(String domain) {
+        return switch(profile) {
+            case COSMOS -> domain.equals("COSMOS") || domain.equals("WORLDS");
+            case POLITICS -> domain.equals("POLITICS") || domain.equals("SOCIETY") || domain.equals("ECONOMY");
+            case SETTLEMENTS -> domain.equals("SETTLEMENTS") || domain.equals("SOCIETY") || domain.equals("ECONOMY");
+            case RTS -> domain.equals("TACTICAL") || domain.equals("ARMY") || domain.equals("SETTLEMENTS");
+        };
+    }
+
+    private void drawInspectorPanel(GuiGraphics g, Panel p) {
+        g.drawString(font,"SELECTION",p.x+10,p.y+38,MUTED,false);
+        g.drawString(font,"No entity selected",p.x+10,p.y+59,TEXT,false);
+        g.drawString(font,"Select a world object or unit",p.x+10,p.y+78,MUTED,false);
+        g.drawString(font,"to inspect its properties.",p.x+10,p.y+91,MUTED,false);
+        g.fill(p.x+8,p.y+108,p.x+p.w-8,p.y+109,EDGE);
+        g.drawString(font,"CONTEXT ACTIONS",p.x+10,p.y+121,MUTED,false);
+        g.drawString(font,"Actions are supplied by modules",p.x+10,p.y+142,MUTED,false);
+        g.drawString(font,"when a compatible entity is active.",p.x+10,p.y+155,MUTED,false);
+    }
+
+    private void drawTimelinePanel(GuiGraphics g, Panel p) {
+        g.drawString(font,"SIMULATION / EVENT TIMELINE",p.x+10,p.y+37,MUTED,false);
+        g.drawString(font,"Provider-owned time controls and events appear here.",p.x+10,p.y+57,TEXT,false);
+        int lineY=p.y+p.h-18;
+        g.fill(p.x+12,lineY,p.x+p.w-12,lineY+1,0x664A6579);
+        g.fill(p.x+28,lineY-3,p.x+34,lineY+3,CYAN);
+    }
+
+    private void drawCommandPanel(GuiGraphics g, Panel p) {
+        g.drawString(font,"COMMAND PALETTE",p.x+12,p.y+43,CYAN,false);
+        g.drawString(font,"Search and invoke commands registered by",p.x+12,p.y+68,TEXT,false);
+        g.drawString(font,"the currently loaded MAQAN modules.",p.x+12,p.y+84,TEXT,false);
+        g.drawString(font,"No provider commands are fabricated.",p.x+12,p.y+112,MUTED,false);
+    }
+
+    @Override public boolean mouseClicked(double mx,double my,int button) {
+        if(button!=0) return super.mouseClicked(mx,my,button);
+        if(my<34) {
+            int x=Math.max(250,width/2-116);
+            for(Profile p:Profile.values()) {
+                if(mx>=x&&mx<x+48) { setProfile(p); return true; }
+                x+=52;
+            }
+            if(mx<70) { navRailVisible=!navRailVisible; panels.get("navigation").visible=navRailVisible; return true; }
             return true;
         }
-        return super.mouseClicked(mouseX, mouseY, button);
-    }
-
-    @Override public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
-        if (dragging && button == 0) {
-            windowX = (int) mouseX - this.dragX;
-            windowY = (int) mouseY - this.dragY;
+        if(mx<44) {
+            int index=(int)((my-44)/38);
+            if(index==0) { navRailVisible=!navRailVisible; panels.get("navigation").visible=navRailVisible; return true; }
+            if(index==1) { inspectorVisible=!inspectorVisible; panels.get("inspector").visible=inspectorVisible; return true; }
+            if(index==2) { timelineVisible=!timelineVisible; panels.get("timeline").visible=timelineVisible; return true; }
+            if(index==3) { Panel p=panels.get("tools"); p.visible=!p.visible; return true; }
             return true;
         }
-        return super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
+        List<Panel> reverse=new ArrayList<>(panels.values());
+        java.util.Collections.reverse(reverse);
+        for(Panel p:reverse) {
+            if(!p.visible) continue;
+            int ph=p.minimized?26:p.h;
+            if(mx<p.x||mx>p.x+p.w||my<p.y||my>p.y+ph) continue;
+            if(my<=p.y+26) {
+                int bx=p.x+p.w-64;
+                if(mx>=bx&&mx<bx+16) { p.pinned=!p.pinned; return true; }
+                if(mx>=bx+18&&mx<bx+38) { p.minimized=!p.minimized; return true; }
+                if(mx>=bx+38&&mx<bx+58) { if(!p.pinned) p.visible=false; return true; }
+                draggingPanel=p.id; pointerOffsetX=(int)mx-p.x; pointerOffsetY=(int)my-p.y;
+                return true;
+            }
+            if(!p.minimized&&mx>=p.x+p.w-12&&my>=p.y+p.h-12) {
+                resizingPanel=p.id; resizeStartX=(int)mx; resizeStartY=(int)my; resizeStartW=p.w; resizeStartH=p.h;
+                return true;
+            }
+            if(p.id.equals("navigation")) {
+                int y=p.y+55;
+                for(CapabilityRegistry.Capability c:CapabilityRegistry.available()) {
+                    if(!domainVisible(c.domain())) continue;
+                    if(my>=y-4&&my<y+16) { selectedDomain=c.domain(); openCapability(c); return true; }
+                    y+=21;
+                }
+            }
+            // Clicking a panel body selects/focuses it; it never dismisses the workspace.
+            return true;
+        }
+        return true;
     }
 
-    @Override public boolean mouseReleased(double mouseX, double mouseY, int button) {
-        if (button == 0) dragging = false;
-        return super.mouseReleased(mouseX, mouseY, button);
+    private void setProfile(Profile next) {
+        profile=next;
+        selectedDomain=switch(next) {
+            case COSMOS -> "COSMOS";
+            case POLITICS -> "POLITICS";
+            case SETTLEMENTS -> "SETTLEMENTS";
+            case RTS -> "TACTICAL";
+        };
+        Panel nav=panels.get("navigation"), inspector=panels.get("inspector"), timeline=panels.get("timeline");
+        nav.visible=true; inspector.visible=true; timeline.visible=true;
+        navRailVisible=inspectorVisible=timelineVisible=true;
+        switch(next) {
+            case COSMOS -> { nav.title="COSMIC CATALOGUE"; inspector.title="BODY INSPECTOR"; timeline.title="ORBIT / TIME"; }
+            case POLITICS -> { nav.title="REALMS & DIPLOMACY"; inspector.title="CHARACTER / REALM"; timeline.title="DYNASTY / CHRONICLE"; }
+            case SETTLEMENTS -> { nav.title="SETTLEMENT LAYERS"; inspector.title="BUILDING / HOUSEHOLD"; timeline.title="PRODUCTION"; }
+            case RTS -> { nav.title="UNITS / FORMATIONS"; inspector.title="UNIT COMMAND"; timeline.title="ORDERS / BATTLE LOG"; }
+        }
+        if(next==Profile.RTS) {
+            nav.x=54; nav.y=44; nav.w=190; nav.h=Math.max(180,height-90);
+            inspector.x=width-246; inspector.y=44; inspector.w=228; inspector.h=Math.max(180,height-90);
+            timeline.x=248; timeline.y=height-112; timeline.w=Math.max(220,width-510); timeline.h=88;
+        } else if(next==Profile.POLITICS) {
+            nav.x=54; nav.y=44; nav.w=250; nav.h=Math.max(180,height-170);
+            inspector.x=width-292; inspector.y=44; inspector.w=274; inspector.h=Math.max(180,height-170);
+            timeline.x=320; timeline.y=height-116; timeline.w=Math.max(220,width-640); timeline.h=92;
+        } else if(next==Profile.SETTLEMENTS) {
+            nav.x=54; nav.y=44; nav.w=214; nav.h=Math.max(180,height-170);
+            inspector.x=width-280; inspector.y=44; inspector.w=262; inspector.h=Math.max(180,height-170);
+            timeline.x=284; timeline.y=height-116; timeline.w=Math.max(220,width-590); timeline.h=92;
+        } else {
+            nav.x=54; nav.y=44; nav.w=224; nav.h=Math.max(180,height-170);
+            inspector.x=width-270; inspector.y=44; inspector.w=252; inspector.h=Math.max(180,height-170);
+            timeline.x=292; timeline.y=height-116; timeline.w=Math.max(220,width-590); timeline.h=92;
+        }
+        clampPanels();
     }
 
-    private static void drawGridPlaceholder() { }
+    private void openCapability(CapabilityRegistry.Capability capability) {
+        if(!ModList.get().isLoaded(capability.providerModId())) return;
+        try {
+            Class<?> type=Class.forName(capability.screenClass());
+            Object instance=type.getDeclaredConstructor().newInstance();
+            if(instance instanceof Screen screen) Minecraft.getInstance().setScreen(screen);
+            else LOGGER.error("MAQAN provider {} returned a non-screen view {}",capability.id(),capability.screenClass());
+        } catch(ReflectiveOperationException|LinkageError error) {
+            LOGGER.error("Unable to open MAQAN capability {} from {}",capability.id(),capability.providerModId(),error);
+        }
+    }
+
+    @Override public boolean mouseDragged(double mx,double my,int button,double dx,double dy) {
+        if(button!=0) return super.mouseDragged(mx,my,button,dx,dy);
+        if(draggingPanel!=null) {
+            Panel p=panels.get(draggingPanel);
+            p.x=(int)mx-pointerOffsetX; p.y=(int)my-pointerOffsetY;
+            if(p.x<=48) p.dock="LEFT";
+            else if(p.x+p.w>=width-12) p.dock="RIGHT";
+            else if(p.y+p.h>=height-12) p.dock="BOTTOM";
+            else p.dock="FLOAT";
+            clampPanels(); return true;
+        }
+        if(resizingPanel!=null) {
+            Panel p=panels.get(resizingPanel);
+            p.w=Math.max(160,resizeStartW+(int)mx-resizeStartX);
+            p.h=Math.max(54,resizeStartH+(int)my-resizeStartY);
+            clampPanels(); return true;
+        }
+        return super.mouseDragged(mx,my,button,dx,dy);
+    }
+
+    @Override public boolean mouseReleased(double mx,double my,int button) {
+        if(button==0) { draggingPanel=null; resizingPanel=null; }
+        return super.mouseReleased(mx,my,button);
+    }
+
+    @Override public boolean keyPressed(int keyCode,int scanCode,int modifiers) {
+        if(keyCode==GLFW.GLFW_KEY_P) { onClose(); return true; }
+        if(keyCode==GLFW.GLFW_KEY_ESCAPE) { onClose(); return true; }
+        return super.keyPressed(keyCode,scanCode,modifiers);
+    }
+
+    @Override public void onClose() { Minecraft.getInstance().setScreen(null); }
+
+    private void drawAmbientGrid(GuiGraphics g) {
+        for(int x=48;x<width;x+=48) g.fill(x,35,x+1,height,0x102B5266);
+        for(int y=35;y<height;y+=48) g.fill(44,y,width,y+1,0x102B5266);
+    }
 }
