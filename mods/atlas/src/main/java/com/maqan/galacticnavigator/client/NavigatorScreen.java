@@ -2801,10 +2801,14 @@ public class NavigatorScreen extends Screen {
                 int px = sx + (int)Math.round(Math.cos(planetAngle) * orbit);
                 int py = sy + (int)Math.round(Math.sin(planetAngle) * orbit * .68);
                 planetScreenPositions.put(entry.getKey(), new Point(px, py, bodyRadius));
-                mapPoints.put(systemEntry.getKey() + "::" + entry.getKey(),
-                        new Point(px, py, bodyRadius + 4));
+                String qualifiedPlanetId = systemEntry.getKey() + "::" + entry.getKey();
+                mapPoints.put(qualifiedPlanetId, new Point(px, py, bodyRadius + 4));
                 drawAtlasBodyVisual(g, px, py, bodyRadius, data,
                         bodyFallbackColor(data, kindColor("planet")));
+                if (qualifiedPlanetId.equals(selectedNodeId) || qualifiedPlanetId.equals(selectedId)) {
+                    SolarSystemRenderer.orbit(g, px, py, bodyRadius + 5, (bodyRadius + 5) * .72,
+                            0xCC69CDE2, 1);
+                }
                 if (Math.hypot(mouseX - px, mouseY - py) <= bodyRadius + 5) {
                     String bodyKind = isStarData(data) ? "star"
                             : value(data, "kind", "display_type", "type", "classification")
@@ -2847,10 +2851,14 @@ public class NavigatorScreen extends Screen {
                 int mx = parentPoint.x() + (int)Math.round(Math.cos(moonAngle) * moonOrbit);
                 int my = parentPoint.y() + (int)Math.round(Math.sin(moonAngle) * moonOrbit * .68);
                 int moonRadius = Math.max(2, Math.min(7, bodyRadius - 1));
-                mapPoints.put(systemEntry.getKey() + "::" + moon.getKey(),
-                        new Point(mx, my, moonRadius + 4));
+                String qualifiedMoonId = systemEntry.getKey() + "::" + moon.getKey();
+                mapPoints.put(qualifiedMoonId, new Point(mx, my, moonRadius + 4));
                 drawAtlasBodyVisual(g, mx, my, moonRadius, moon.getValue(),
                         bodyFallbackColor(moon.getValue(), kindColor("moon")));
+                if (qualifiedMoonId.equals(selectedNodeId) || qualifiedMoonId.equals(selectedId)) {
+                    SolarSystemRenderer.orbit(g, mx, my, moonRadius + 5, (moonRadius + 5) * .72,
+                            0xCC69CDE2, 1);
+                }
                 if (Math.hypot(mouseX - mx, mouseY - my) <= moonRadius + 5)
                     hoveredBody = new Node(systemEntry.getKey() + "::" + moon.getKey(),
                             value(moon.getValue(), "name", moon.getKey()), "atlas_body:moon",
