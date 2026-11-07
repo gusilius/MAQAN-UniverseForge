@@ -119,6 +119,63 @@ class CosmicSceneEngineTest {
     }
 
     @Test
+    void hierarchyResolverBuildsRootsParentsAndChildren() {
+        CosmicSceneEngine.SceneBody star = new CosmicSceneEngine.SceneBody(
+                "star", "Star", "star", "",
+                CosmicSceneEngine.Vector3.ZERO, CosmicSceneEngine.PlacementSource.DATAPACK,
+                new JsonObject());
+        CosmicSceneEngine.SceneBody planet = new CosmicSceneEngine.SceneBody(
+                "planet", "Planet", "planet", "star",
+                new CosmicSceneEngine.Vector3(10, 0, 0), CosmicSceneEngine.PlacementSource.DATAPACK,
+                new JsonObject());
+        CosmicSceneEngine.SceneBody moon = new CosmicSceneEngine.SceneBody(
+                "moon", "Moon", "moon", "PLANET",
+                new CosmicSceneEngine.Vector3(12, 0, 0), CosmicSceneEngine.PlacementSource.DATAPACK,
+                new JsonObject());
+        CosmicSceneEngine.SceneSystem system = new CosmicSceneEngine.SceneSystem(
+                "sol", "Sol", "g", "Galaxy", "s", "Sector",
+                CosmicSceneEngine.Vector3.ZERO, CosmicSceneEngine.PlacementSource.DATAPACK,
+                List.of(star, planet, moon), new JsonObject());
+        CosmicSceneEngine.SceneSnapshot snapshot = new CosmicSceneEngine.SceneSnapshot(
+                "u", "Universe", 1, 0, List.of(), List.of(), List.of(system),
+                3, 1, 0, 0);
+
+        assertEquals(List.of(star), snapshot.rootBodies("sol"));
+        assertSame(star, snapshot.parentBody("sol", "planet").orElseThrow());
+        assertSame(planet, snapshot.parentBody("sol", "moon").orElseThrow());
+        assertEquals(List.of(planet), snapshot.childBodies("sol", "star"));
+        assertEquals(List.of(moon), snapshot.childBodies("sol", "planet"));
+        assertEquals("sol::moon", CosmicSceneEngine.SceneSnapshot.bodyKey("sol", "moon"));
+        assertFalse(snapshot.hasUnresolvedParent("sol", "moon"));
+        assertFalse(snapshot.isInParentCycle("sol", "moon"));
+    }
+
+    @Test
+    void hierarchyResolverReportsMissingParentsAndCyclesWithoutDroppingBodies() {
+        CosmicSceneEngine.SceneBody a = new CosmicSceneEngine.SceneBody(
+                "a", "A", "planet", "b", CosmicSceneEngine.Vector3.ZERO,
+                CosmicSceneEngine.PlacementSource.DATAPACK, new JsonObject());
+        CosmicSceneEngine.SceneBody b = new CosmicSceneEngine.SceneBody(
+                "b", "B", "moon", "a", CosmicSceneEngine.Vector3.ZERO,
+                CosmicSceneEngine.PlacementSource.DATAPACK, new JsonObject());
+        CosmicSceneEngine.SceneBody orphan = new CosmicSceneEngine.SceneBody(
+                "orphan", "Orphan", "moon", "missing", CosmicSceneEngine.Vector3.ZERO,
+                CosmicSceneEngine.PlacementSource.DATAPACK, new JsonObject());
+        CosmicSceneEngine.SceneSystem system = new CosmicSceneEngine.SceneSystem(
+                "sol", "Sol", "g", "Galaxy", "s", "Sector",
+                CosmicSceneEngine.Vector3.ZERO, CosmicSceneEngine.PlacementSource.DATAPACK,
+                List.of(a, b, orphan), new JsonObject());
+        CosmicSceneEngine.SceneSnapshot snapshot = new CosmicSceneEngine.SceneSnapshot(
+                "u", "Universe", 1, 0, List.of(), List.of(), List.of(system),
+                3, 1, 0, 0);
+
+        assertTrue(snapshot.isInParentCycle("sol", "a"));
+        assertTrue(snapshot.isInParentCycle("sol", "b"));
+        assertTrue(snapshot.hasUnresolvedParent("sol", "orphan"));
+        assertEquals(3, snapshot.system("sol").orElseThrow().bodies().size());
+    }
+
+    @Test
     void placementVectorsRejectNonFiniteCoordinates() {
         assertTrue(new CosmicSceneEngine.Vector3(1, 2, 3).finite());
         assertFalse(new CosmicSceneEngine.Vector3(Double.NaN, 0, 0).finite());
