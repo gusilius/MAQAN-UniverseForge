@@ -1,7 +1,6 @@
 package dev.maqan.platform.client;
 
 import com.mojang.logging.LogUtils;
-import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
@@ -9,7 +8,6 @@ import net.minecraftforge.fml.ModList;
 import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 
-import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -56,6 +54,7 @@ public final class PlatformShellScreen extends Screen {
     private final Map<String, Panel> panels = new LinkedHashMap<>();
     private Profile profile = Profile.COSMOS;
     private String selectedDomain = "COSMOS";
+    private String selectedCapabilityId = "maqan.atlas.cosmos";
     private String draggingPanel;
     private String resizingPanel;
     private int pointerOffsetX, pointerOffsetY, resizeStartX, resizeStartY, resizeStartW, resizeStartH;
@@ -293,16 +292,17 @@ public final class PlatformShellScreen extends Screen {
         clampPanels();
     }
 
+    /**
+     * Selects a route inside the MAQAN workspace. Provider screens are deliberately
+     * never opened as independent Minecraft screens: their UI is migrated into
+     * embedded workspace views while their existing domain logic stays provider-owned.
+     */
     private void openCapability(CapabilityRegistry.Capability capability) {
         if(!ModList.get().isLoaded(capability.providerModId())) return;
-        try {
-            Class<?> type=Class.forName(capability.screenClass());
-            Object instance=type.getDeclaredConstructor().newInstance();
-            if(instance instanceof Screen screen) Minecraft.getInstance().setScreen(screen);
-            else LOGGER.error("MAQAN provider {} returned a non-screen view {}",capability.id(),capability.screenClass());
-        } catch(ReflectiveOperationException|LinkageError error) {
-            LOGGER.error("Unable to open MAQAN capability {} from {}",capability.id(),capability.providerModId(),error);
-        }
+        selectedDomain=capability.domain();
+        selectedCapabilityId=capability.id();
+        // Keep this Screen alive. A provider must register an embedded view adapter
+        // before its existing standalone screen can be retired.
     }
 
     @Override public boolean mouseDragged(double mx,double my,int button,double dx,double dy) {
