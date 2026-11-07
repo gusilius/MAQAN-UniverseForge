@@ -177,14 +177,14 @@ public class NavigatorScreen extends Screen {
     public void toggleListPanel() {
         showList = !showList;
         NavigatorPreferences.setShowListPanel(showList);
-        if (listButton != null) listButton.setMessage(Component.literal(showList ? "LIST −" : "LIST +"));
+        if (listButton != null) listButton.setMessage(Component.literal("☷")); listButton.setTooltip(Tooltip.create(Component.literal(showList ? "Hide catalogue" : "Show catalogue")));
     }
 
     /** Workspace rail action: reveal/hide Atlas' existing object dossier. */
     public void toggleInfoPanel() {
         showInfo = !showInfo;
         NavigatorPreferences.setShowInfoPanel(showInfo);
-        if (infoButton != null) infoButton.setMessage(Component.literal(showInfo ? "INFO −" : "INFO +"));
+        if (infoButton != null) infoButton.setMessage(Component.literal("◈")); infoButton.setTooltip(Tooltip.create(Component.literal(showInfo ? "Hide inspector" : "Show inspector")));
     }
 
     public NavigatorScreen() { super(Component.literal("MAQAN Galactic Navigator")); }
@@ -261,12 +261,12 @@ public class NavigatorScreen extends Screen {
         }, menuX + 36, menuY);
         filterButton = addToolButton("FILTER: ALL", () -> {
             bodyFilter = (bodyFilter + 1) % 17;
-            filterButton.setMessage(Component.literal("FILTER: " + filterName()));
+            filterButton.setMessage(Component.literal("▽")); filterButton.setTooltip(Tooltip.create(Component.literal("Filter: " + filterName())));
             listScroll = 0;
         }, menuX + 72, menuY);
         mapModeButton = addToolButton("MAP: HYBRID", () -> {
             mapMode = (mapMode + 1) % 3;
-            mapModeButton.setMessage(Component.literal(mapModeName()));
+            mapModeButton.setMessage(Component.literal("▣")); mapModeButton.setTooltip(Tooltip.create(Component.literal(mapModeName())));
         }, menuX, menuY + 26);
         listButton = addToolButton("LIST −", () -> {
             showList = !showList; NavigatorPreferences.setShowListPanel(showList); listButton.setMessage(Component.literal(showList ? "LIST −" : "LIST +"));
@@ -527,17 +527,22 @@ public class NavigatorScreen extends Screen {
 
     private void refreshSpeedButtons() {
         if (speedButton == null) return;
-        speedButton.setMessage(Component.literal("SPEED: " +
+        speedButton.setMessage(Component.literal("⏵"));
+        speedButton.setTooltip(Tooltip.create(Component.literal("Motion: " +
                 (NavigatorPreferences.automatic() ? "AUTO" :
-                        NavigatorPreferences.paused() ? "PAUSED" : "MANUAL")));
-        rotationMinusButton.setMessage(Component.literal(String.format(Locale.ROOT,
-                "ROT − %.2f", NavigatorPreferences.rotationSpeed())));
-        rotationPlusButton.setMessage(Component.literal(String.format(Locale.ROOT,
-                "ROT + %.2f", NavigatorPreferences.rotationSpeed())));
-        orbitMinusButton.setMessage(Component.literal(String.format(Locale.ROOT,
-                "ORB − %.2f", NavigatorPreferences.orbitSpeed())));
-        orbitPlusButton.setMessage(Component.literal(String.format(Locale.ROOT,
-                "ORB + %.2f", NavigatorPreferences.orbitSpeed())));
+                        NavigatorPreferences.paused() ? "PAUSED" : "MANUAL"))));
+        rotationMinusButton.setMessage(Component.literal("↶"));
+        rotationMinusButton.setTooltip(Tooltip.create(Component.literal(String.format(Locale.ROOT,
+                "Decrease axial rotation · %.2f", NavigatorPreferences.rotationSpeed()))));
+        rotationPlusButton.setMessage(Component.literal("↷"));
+        rotationPlusButton.setTooltip(Tooltip.create(Component.literal(String.format(Locale.ROOT,
+                "Increase axial rotation · %.2f", NavigatorPreferences.rotationSpeed()))));
+        orbitMinusButton.setMessage(Component.literal("⤺"));
+        orbitMinusButton.setTooltip(Tooltip.create(Component.literal(String.format(Locale.ROOT,
+                "Decrease orbital speed · %.2f", NavigatorPreferences.orbitSpeed()))));
+        orbitPlusButton.setMessage(Component.literal("⤻"));
+        orbitPlusButton.setTooltip(Tooltip.create(Component.literal(String.format(Locale.ROOT,
+                "Increase orbital speed · %.2f", NavigatorPreferences.orbitSpeed()))));
     }
 
     private void openNavigatorSettings() {
@@ -780,7 +785,7 @@ public class NavigatorScreen extends Screen {
             universeButton.active = !systems.isEmpty();
         }
         if (backButton != null) backButton.active = level > 0 || galaxyPath != null;
-        if (atlasModeButton != null) atlasModeButton.setMessage(Component.literal("ATLAS: " + atlasModeName()));
+        if (atlasModeButton != null) { atlasModeButton.setMessage(Component.literal("✧")); atlasModeButton.setTooltip(Tooltip.create(Component.literal("Atlas layer: " + atlasModeName()))); }
         if (openButton != null) openButton.active = selectedNodeId != null || selectedId != null;
         if (focusButton != null) focusButton.active = selectedNodeId != null || selectedId != null;
     }
@@ -4201,7 +4206,7 @@ public class NavigatorScreen extends Screen {
             }
         }
         if (toolsOpen) {
-            boolean insideMenu = x >= width - 292 && x <= width - 8
+            boolean insideMenu = x >= width - 140 && x <= width - 8
                     && y >= toolsMenuTop() && y <= toolsMenuBottom();
             boolean onToggle = toolsButton != null && x >= toolsButton.getX()
                     && x <= toolsButton.getX() + toolsButton.getWidth()
@@ -4209,7 +4214,7 @@ public class NavigatorScreen extends Screen {
             if (!insideMenu && !onToggle) {
                 toolsOpen = false;
                 updateToolVisibility();
-                if (toolsButton != null) toolsButton.setMessage(Component.literal("TOOLS  ⚙"));
+                if (toolsButton != null) toolsButton.setMessage(Component.literal("⚙"));
                 return true;
             }
             if (button != 0 && insideMenu) return true;
