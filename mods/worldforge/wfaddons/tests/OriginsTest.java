@@ -145,6 +145,19 @@ public class OriginsTest {
         ok(duplicateRaceRejected && duplicateDefs.races.size() == 1
                 && duplicateDefs.races.get("human").name().equals("Human"),
                 "повторное определение расы отклоняется без частичной перезаписи датапака");
+        OriginDefs replacementSource = new OriginDefs();
+        replacementSource.load("{\\"races\\":[{\\"id\\":\\"elf\\",\\"name\\":\\"Elf\\"}]}");
+        duplicateDefs.replaceWith(replacementSource);
+        ok(duplicateDefs.races.size() == 1 && duplicateDefs.races.containsKey("elf")
+                && !duplicateDefs.races.containsKey("human"),
+                "перезагрузка определений заменяет удалённые записи, не накапливая устаревшие расы");
+        OriginDefs invalidReplacement = new OriginDefs();
+        invalidReplacement.load("{\\"races\\":[{\\"id\\":\\"child\\",\\"parent\\":\\"missing\\"}]}");
+        boolean invalidReplacementRejected = false;
+        try { duplicateDefs.replaceWith(invalidReplacement); } catch (IllegalArgumentException expected) { invalidReplacementRejected = true; }
+        ok(invalidReplacementRejected && duplicateDefs.races.containsKey("elf")
+                && !duplicateDefs.races.containsKey("child"),
+                "некорректный набор не заменяет последнюю корректную версию");
         // специализации: взаимоисключающие, по классам
         Origins o6 = new Origins(d); o6.hooks = new Origins.Hooks() {};
         String M = "p:m";

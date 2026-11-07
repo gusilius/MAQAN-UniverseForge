@@ -46,6 +46,21 @@ public final class OriginDefs {
         return m;
     }
 
+    /** Atomically replace all datapack definitions after a complete reload has been parsed and validated. */
+    public void replaceWith(OriginDefs source) {
+        Objects.requireNonNull(source, "source");
+        List<String> problems = source.validate();
+        if (!problems.isEmpty()) throw new IllegalArgumentException("Некорректные определения происхождения: " + String.join("; ", problems));
+        races.clear(); races.putAll(source.races);
+        classes.clear(); classes.putAll(source.classes);
+        professions.clear(); professions.putAll(source.professions);
+        synergies.clear(); synergies.putAll(source.synergies);
+        extraPerks.clear();
+        for (var entry : source.extraPerks.entrySet()) extraPerks.put(entry.getKey(), new TreeMap<>(entry.getValue()));
+        extraPerkNames.clear();
+        for (var entry : source.extraPerkNames.entrySet()) extraPerkNames.put(entry.getKey(), new LinkedHashMap<>(entry.getValue()));
+    }
+
     public void load(String json) {
         // A malformed data file must not leave half of its definitions installed.
         OriginDefs staged = new OriginDefs();
