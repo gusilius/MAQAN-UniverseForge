@@ -119,6 +119,20 @@ public class PeopleTest {
         ok(back.size() == reg.size() && back.toJson().equals(js), "сохранение и загрузка без потерь (" + back.size() + " человек)");
         back.create("Новый", "", "", "m", 1);
         ok(back.get("c" + (reg.size() + 1)) != null, "счётчик id продолжается после загрузки");
+        // Повреждённый снимок не должен очищать уже загруженный реестр.
+        String beforeBadLoad = back.toJson();
+        String duplicateIdJson = js.replace("\\"id\\":\\"c2\\"", "\\"id\\":\\"c1\\"");
+        boolean duplicateRejected = false;
+        try { back.fromJson(duplicateIdJson); } catch (IllegalArgumentException expected) { duplicateRejected = true; }
+        ok(duplicateRejected && back.toJson().equals(beforeBadLoad),
+                "дублирующийся ID отклоняется без потери действующего реестра");
+        String staleCounterJson = js.replaceFirst("\\"next\\":\\\\d+", "\\"next\\":1");
+        CharacterRegistry staleCounter = new CharacterRegistry();
+        staleCounter.fromJson(staleCounterJson);
+        Character afterStaleCounter = staleCounter.create("После загрузки", "", "", "m", 1);
+        ok(staleCounter.get(afterStaleCounter.id) == afterStaleCounter && !js.contains("\\"id\\":\\"" + afterStaleCounter.id + "\\""),
+                "устаревший счётчик автоматически продолжает последовательность ID");
+
 
         // диалог с персонажем
         DialogueBridge.register();
