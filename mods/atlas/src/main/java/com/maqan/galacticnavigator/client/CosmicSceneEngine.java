@@ -19,6 +19,15 @@ public final class CosmicSceneEngine {
     public enum SceneLevel { UNIVERSE, GALAXY, SECTOR, SYSTEM, BODY }
     public enum PositionFrame { SYSTEM_LOCAL, GALAXY, UNIVERSE, SCHEMATIC, UNKNOWN }
 
+    /** Explicitly separates a body's attached world from its travel destination. */
+    public record WorldBinding(String systemId, String bodyId, String attachedDimensionId,
+                               String travelDimensionId, String unlockingDimensionId,
+                               String systemTravelDimensionId) {
+        public boolean hasAttachedWorld() { return !attachedDimensionId.isBlank(); }
+        public boolean hasTravelDestination() { return !travelDimensionId.isBlank(); }
+        public boolean hasUnlockingDimension() { return !unlockingDimensionId.isBlank(); }
+    }
+
     /** A coordinate together with its frame and whether it is canonical source data. */
     public record PositionResult(Vector3 position, PositionFrame frame, boolean canonical) {
         public PositionResult {
@@ -298,6 +307,37 @@ public final class CosmicSceneEngine {
 
         public boolean isInParentCycle(String systemId, String bodyId) {
             return cyclicBodyIndex.getOrDefault(systemId, Set.of()).contains(bodyId);
+        }
+
+        /**
+         * Resolves dimension roles without treating an attached dimension as a
+         * unique system identifier or silently substituting a travel destination.
+         */
+        public Optional<WorldBinding> worldBinding(String systemId, String bodyId) {
+            SceneBody body = bodyIndex.getOrDefault(systemId, Map.of()).get(bodyId);
+            SceneSystem system = systemIndex.get(systemId);
+            if (body == null || system == null) return Optional.empty();
+            JsonObject bodyData = body.sourceData();
+            JsonObject systemData = system.sourceData();
+            String attached = firstNonBlank(bodyData, "dimension", "dimension_id",
+                    "attached_dimension_id", "attached_dimention_id");
+            String travel = firstNonBlank(bodyData, "travel_dimension");
+            String unlocking = firstNonBlank(bodyData,
+                    "category_unlocking_dimension", "unlocking_dimension");
+            String systemTravel = firstNonBlank(systemData, "travel_to_dimension", "travel_to");
+            return Optional.of(new WorldBinding(systemId, bodyId, attached, travel,
+                    unlocking, systemTravel));
+        }
+
+        private static String firstNonBlank(JsonObject source, String... keys) {
+            for (String key : keys) {
+                if (source == null || !source.has(key) || source.get(key).isJsonNull()) continue;
+                try {
+                    String value = source.get(key).getAsString().trim();
+                    if (!value.isBlank()) return value;
+                } catch (RuntimeException ignored) { }
+            }
+            return "";
         }
 
         /**
