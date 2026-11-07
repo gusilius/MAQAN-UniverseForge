@@ -126,7 +126,7 @@ public class PeopleTest {
         try { back.fromJson(duplicateIdJson); } catch (IllegalArgumentException expected) { duplicateRejected = true; }
         ok(duplicateRejected && back.toJson().equals(beforeBadLoad),
                 "дублирующийся ID отклоняется без потери действующего реестра");
-        String staleCounterJson = js.replaceFirst("\\"next\\":\\\\d+", "\\"next\\":1");
+        String staleCounterJson = js.replaceFirst("\"next\":\\d+", "\"next\":1");
         CharacterRegistry staleCounter = new CharacterRegistry();
         staleCounter.fromJson(staleCounterJson);
         Character afterStaleCounter = staleCounter.create("После загрузки", "", "", "m", 1);
