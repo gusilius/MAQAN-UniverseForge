@@ -11,7 +11,15 @@ public class TroopsTest {
     public static void main(String[] a) throws Exception {
         TroopDefs d = new TroopDefs();
         d.load(Files.readString(Path.of("wf-troops/src/main/resources/data/wf_troops/wf_troops/units.json")));
-        check(d.units.size() == 14, "14 юнитов " + d.units.size());
+        check(d.units.size() == 23, "23 боевых архетипа " + d.units.size());
+        check(d.units.get("halberdier") != null && d.units.get("greatsword") != null
+                && d.units.get("longbowman") != null && d.units.get("lancer") != null,
+                "добавлены специализированные пехотные и стрелковые ветви");
+        check(d.units.get("horse_archer").role().equals("cavalry") && d.units.get("horse_archer").range() >= 6,
+                "конный лучник сохраняет кавалерийскую классификацию и дальний бой");
+        check(d.units.get("banner_guard").aura() > 0 && d.units.get("field_medic").heal() > 0
+                && d.units.get("ballista").siege() > 0 && d.units.get("trebuchet").siege() > d.units.get("ballista").siege(),
+                "знаменосцы, медики и осадные специализации имеют отдельные параметры");
         check(d.validate().isEmpty(), "валидация " + d.validate());
         TroopDefs bad = new TroopDefs();
         bad.add(new HashMap<>(Map.of("id", "x", "role", "wizard", "hp", 0)));
