@@ -2413,8 +2413,16 @@ public class NavigatorScreen extends Screen {
             int cx = (int)Math.round(centerScreenX + (baseX - centerScreenX) * viewScale + panX);
             int cy = (int)Math.round(centerScreenY + (baseY - centerScreenY) * viewScale + panY);
             boolean active = system.id.equals(selectedNodeId) || system.id.equals(universe);
-            int radius = ("galaxy".equals(system.kind) || "sector".equals(system.kind))
-                    ? glyphRadius : Math.max(30, Math.min(180, (int)Math.round(glyphRadius * 2.25)));
+            boolean clusterNode = "galaxy".equals(system.kind) || "sector".equals(system.kind);
+            int radius = clusterNode ? glyphRadius
+                    : Math.max(30, Math.min(180, (int)Math.round(glyphRadius * 2.25)));
+            int cullRadius = clusterNode ? Math.max(24, Math.min(190, glyphRadius + 16)) : radius;
+            // Keep off-screen nodes addressable for focus/search, but do not build
+            // their expensive miniature solar systems until they enter the viewport.
+            mapPoints.put(system.id, new Point(cx, cy, cullRadius + 5));
+            int overscan = Math.max(220, Math.min(720, cullRadius * 2 + 100));
+            if (cx < mapL - overscan || cx > mapR + overscan
+                    || cy < mapT - overscan || cy > mapB + overscan) continue;
             if ("galaxy".equals(system.kind) || "sector".equals(system.kind)) {
                 int galaxyRadius = Math.max(24, Math.min(190, glyphRadius + 16));
                 boolean activeGalaxy = system.id.equals(galaxyPath) || system.id.equals(sectorPath)
@@ -2422,7 +2430,6 @@ public class NavigatorScreen extends Screen {
                 Node hoveredMiniature = drawSystemClusterGlyph(g, cx, cy, galaxyRadius,
                         system.id.hashCode(), activeGalaxy ? GOLD : 0xFF78B9D4,
                         system, "galaxy".equals(system.kind), mx, my);
-                mapPoints.put(system.id, new Point(cx, cy, galaxyRadius + 5));
                 boolean hit = Math.hypot(mx - cx, my - cy) <= galaxyRadius + 10;
                 if (hoveredMiniature != null) hovered = hoveredMiniature;
                 else if (hit) hovered = system;
@@ -2582,7 +2589,6 @@ public class NavigatorScreen extends Screen {
             }
 
             int hitRadius = Math.max(14, radius + 7);
-            mapPoints.put(system.id, new Point(cx, cy, hitRadius));
             boolean hit = Math.hypot(mx - cx, my - cy) <= hitRadius + 5;
             if (hit && hovered == null) hovered = system;
             if (NavigatorPreferences.atlasLabels())
