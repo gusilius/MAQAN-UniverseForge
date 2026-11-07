@@ -297,8 +297,9 @@ public final class CosmicHorizonsScanner {
     private static boolean isStellarCategory(String categoryId) {
         String key = categoryId == null ? "" : categoryId.trim().toLowerCase(Locale.ROOT)
                 .replace('-', '_').replace(' ', '_');
-        return Set.of("star", "stars", "stellar", "stellar_bodies", "sun", "suns",
-                "solar", "solar_bodies").contains(key);
+        return key.equals("star") || key.equals("stars") || key.equals("sun")
+                || key.equals("suns") || key.equals("solar") || key.equals("solar_bodies")
+                || key.contains("stellar") || key.startsWith("star_") || key.endsWith("_stars");
     }
 
     private static String normalizeKind(String physicalKind, String classification, String displayType) {
