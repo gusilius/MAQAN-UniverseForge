@@ -58,6 +58,15 @@ public class NavigatorScreen extends Screen {
     // 0 = one system, 1 = systems in the active galaxy, 2 = systems in the active universe.
     private int atlasMode = 3;
     private Button atlasModeButton;
+    // Additive workspace mode: show every indexed system on the existing canvas,
+    // then restore the user's previous hierarchy and camera state on exit.
+    private Button unifiedSceneButton;
+    private boolean unifiedSceneMode;
+    private int savedSceneLevel, savedSceneAtlasMode, savedSceneListScroll, savedSceneInfoScroll;
+    private String savedSceneUniverse, savedSceneGalaxyPath, savedSceneSectorPath, savedSceneSystemPath;
+    private String savedSceneSelectedId, savedSceneSelectedNodeId, savedSceneBodyViewId;
+    private double savedSceneZoom, savedScenePanX, savedScenePanY, savedSceneCameraYaw, savedSceneCameraPitch;
+    private String savedSceneCameraTargetId;
     private Button atlasDetailButton, atlasScaleButton, atlasTextureButton, atlasGlowButton;
     private double cameraYaw = 0.55;
     private double cameraPitch = 0.38;
@@ -255,6 +264,10 @@ public class NavigatorScreen extends Screen {
         backButton.setTooltip(Tooltip.create(Component.literal("Back to previous spatial layer")));
         openButton.setTooltip(Tooltip.create(Component.literal("Open selected object")));
         toolsButton.setTooltip(Tooltip.create(Component.literal("Atlas tools and visual settings")));
+        unifiedSceneButton = addRenderableWidget(Button.builder(Component.literal("✦"),
+                b -> toggleUnifiedSceneMode())
+                .bounds(width - 108, barY, 26, 20).build());
+        unifiedSceneButton.setTooltip(Tooltip.create(Component.literal("Open unified cosmic scene")));
         if (embeddedInMaqan) closeButton.visible = false;
 
         int menuX = width - 134;
@@ -565,8 +578,11 @@ public class NavigatorScreen extends Screen {
         if (node == null) node = findNode(target);
         if (node == null || node.entries.isEmpty()) return;
         JsonObject body = node.first();
-        String systemId = GalaxyCatalog.text(body, "system_id", universe);
-        String bodyId = GalaxyCatalog.text(body, "catalog_id", target);
+        int separator = target.indexOf("::");
+        String systemId = separator > 0 ? target.substring(0, separator)
+                : GalaxyCatalog.text(body, "system_id", universe);
+        String localBodyId = separator > 0 ? target.substring(separator + 2) : target;
+        String bodyId = GalaxyCatalog.text(body, "catalog_id", localBodyId);
         String bodyName = GalaxyCatalog.text(body, "name", node.label);
         MaqanScreenHost.open(minecraft, new CosmicBodyOrbitSettingsScreen(this, systemId, bodyId, bodyName));
     }
@@ -717,6 +733,59 @@ public class NavigatorScreen extends Screen {
         };
     }
 
+    private void toggleUnifiedSceneMode() {
+        if (!unifiedSceneMode) {
+            savedSceneLevel = level;
+            savedSceneAtlasMode = atlasMode;
+            savedSceneUniverse = universe;
+            savedSceneGalaxyPath = galaxyPath;
+            savedSceneSectorPath = sectorPath;
+            savedSceneSystemPath = systemPath;
+            savedSceneSelectedId = selectedId;
+            savedSceneSelectedNodeId = selectedNodeId;
+            savedSceneBodyViewId = bodyViewId;
+            savedSceneListScroll = listScroll;
+            savedSceneInfoScroll = infoScroll;
+            savedSceneZoom = zoom;
+            savedScenePanX = panX;
+            savedScenePanY = panY;
+            savedSceneCameraYaw = cameraYaw;
+            savedSceneCameraPitch = cameraPitch;
+            savedSceneCameraTargetId = cameraTargetId;
+
+            unifiedSceneMode = true;
+            level = 0;
+            atlasMode = 5; // All indexed systems, independent of the active hierarchy path.
+            galaxyPath = sectorPath = systemPath = null;
+            selectedId = selectedNodeId = bodyViewId = cameraTargetId = null;
+            listScroll = infoScroll = 0;
+            panX = panY = 0.0;
+            zoom = 1.0;
+            cameraYaw = 0.55;
+            cameraPitch = 0.38;
+        } else {
+            unifiedSceneMode = false;
+            level = savedSceneLevel;
+            atlasMode = savedSceneAtlasMode;
+            universe = savedSceneUniverse;
+            galaxyPath = savedSceneGalaxyPath;
+            sectorPath = savedSceneSectorPath;
+            systemPath = savedSceneSystemPath;
+            selectedId = savedSceneSelectedId;
+            selectedNodeId = savedSceneSelectedNodeId;
+            bodyViewId = savedSceneBodyViewId;
+            listScroll = savedSceneListScroll;
+            infoScroll = savedSceneInfoScroll;
+            zoom = savedSceneZoom;
+            panX = savedScenePanX;
+            panY = savedScenePanY;
+            cameraYaw = savedSceneCameraYaw;
+            cameraPitch = savedSceneCameraPitch;
+            cameraTargetId = savedSceneCameraTargetId;
+        }
+        refreshButtons();
+    }
+
     private String atlasModeName() {
         return switch (atlasMode) {
             case 1 -> sectorPath == null ? "GALAXY" : "SECTOR SYSTEMS";
@@ -807,7 +876,16 @@ public class NavigatorScreen extends Screen {
             universeButton.active = !systems.isEmpty();
         }
         if (backButton != null) backButton.active = level > 0 || galaxyPath != null || sectorPath != null;
-        if (atlasModeButton != null) { atlasModeButton.setMessage(Component.literal("✧")); atlasModeButton.setTooltip(Tooltip.create(Component.literal("Atlas layer: " + atlasModeName()))); }
+        if (atlasModeButton != null) {
+            atlasModeButton.setMessage(Component.literal("✧"));
+            atlasModeButton.setTooltip(Tooltip.create(Component.literal("Atlas layer: " + atlasModeName())));
+            atlasModeButton.active = !unifiedSceneMode;
+        }
+        if (unifiedSceneButton != null) {
+            unifiedSceneButton.setMessage(Component.literal(unifiedSceneMode ? "✧" : "✦"));
+            unifiedSceneButton.setTooltip(Tooltip.create(Component.literal(unifiedSceneMode
+                    ? "Return to previous Atlas view" : "Open unified cosmic scene")));
+        }
         if (openButton != null) openButton.active = selectedNodeId != null || selectedId != null;
         if (focusButton != null) focusButton.active = selectedNodeId != null || selectedId != null;
     }
@@ -1282,10 +1360,14 @@ public class NavigatorScreen extends Screen {
     }
 
     private void selectNode(Node node) {
-        selectedNodeId = node.id;
+        if (node != null && node.kind != null && node.kind.startsWith("atlas_body:")) {
+            selectBody(node.id);
+            return;
+        }
+        selectedNodeId = node == null ? null : node.id;
         selectedId = null;
         infoScroll = 0;
-        if (openButton != null) openButton.active = true;
+        if (openButton != null) openButton.active = selectedNodeId != null;
     }
 
     private void selectBody(String id) {
@@ -1332,8 +1414,20 @@ public class NavigatorScreen extends Screen {
     }
 
     private JsonObject findObject(String id) {
-        for (Entry<String, JsonObject> e : GalaxyCatalog.objects(universe))
-            if (e.getKey().equals(id)) return e.getValue();
+        if (id == null || id.isBlank()) return null;
+        // Global-scene body selections are qualified as systemId::bodyId.
+        // Resolve against that owning system instead of whichever system the
+        // previous hierarchy view happened to have active.
+        int separator = id.indexOf("::");
+        if (separator > 0) {
+            String systemId = id.substring(0, separator);
+            String bodyId = id.substring(separator + 2);
+            for (Entry<String, JsonObject> entry : GalaxyCatalog.objects(systemId))
+                if (entry.getKey().equals(bodyId)) return entry.getValue();
+            return null;
+        }
+        for (Entry<String, JsonObject> entry : GalaxyCatalog.objects(universe))
+            if (entry.getKey().equals(id)) return entry.getValue();
         return null;
     }
 
@@ -1418,6 +1512,7 @@ public class NavigatorScreen extends Screen {
         drawButtonSkin(g, backButton);
         drawButtonSkin(g, openButton);
         drawButtonSkin(g, toolsButton);
+        drawButtonSkin(g, unifiedSceneButton);
         drawButtonSkin(g, closeButton);
         drawButtonSkin(g, travelButton);
         for (Button button : toolButtons) drawButtonSkin(g, button);
@@ -1878,7 +1973,8 @@ public class NavigatorScreen extends Screen {
 
     private Node drawMap(GuiGraphics g, int mx, int my, List<Node> nodes) {
         g.drawString(font, bodyViewId != null ? "PLANET / SATELLITE VIEW" :
-                level == 3 ? "STAR SYSTEM" : atlasMode > 0 ? atlasModeName() + " ATLAS" : levelTitle(),
+                level == 3 ? "STAR SYSTEM" : unifiedSceneMode ? "UNIFIED COSMIC SCENE"
+                        : atlasMode > 0 ? atlasModeName() + " ATLAS" : levelTitle(),
                 mapL + 10, mapT + 8, TEXT, false);
         drawBodyTypeLegend(g, mx, my);
         if (nodes.isEmpty()) {
@@ -2576,6 +2672,7 @@ public class NavigatorScreen extends Screen {
                             * NavigatorPreferences.atlasOrbitSpacing())));
             double bodyLodScale = Math.max(.8, Math.min(2.8, Math.pow(Math.max(.025, zoom), .24)));
             JsonObject star = null;
+            String starBodyId = null;
             List<Entry<String, JsonObject>> planets = new ArrayList<>();
             List<Entry<String, JsonObject>> moons = new ArrayList<>();
             Map<String, Entry<String, JsonObject>> planetById = new HashMap<>();
@@ -2586,7 +2683,10 @@ public class NavigatorScreen extends Screen {
                 String kind = value(data, "kind", "display_type", "type", "classification")
                         .toLowerCase(Locale.ROOT);
                 if (isStarData(data) || kind.contains("star")) {
-                    if (star == null || (!hasTextureId(star) && hasTextureId(data))) star = data;
+                    if (star == null || (!hasTextureId(star) && hasTextureId(data))) {
+                        star = data;
+                        starBodyId = body.getKey();
+                    }
                 } else if (kind.contains("moon") || kind.contains("satellite")) {
                     moons.add(body);
                 } else {
@@ -2607,6 +2707,21 @@ public class NavigatorScreen extends Screen {
                         Math.min(10.0, perSystemBudget * .22) * NavigatorPreferences.atlasScale()
                                 * bodyLodScale)));
                 drawAtlasBodyVisual(g, sx, sy, starRadius, star, kindColor("star"));
+                // Cosmic Horizons stars are selectable catalogue entities, not decorative
+                // center lights. Their qualified IDs remain unique across the global scene.
+                if (starBodyId != null) {
+                    String qualifiedStarId = systemEntry.getKey() + "::" + starBodyId;
+                    mapPoints.put(qualifiedStarId, new Point(sx, sy, starRadius + 5));
+                    if (Math.hypot(mouseX - sx, mouseY - sy) <= starRadius + 5) {
+                        hoveredBody = new Node(qualifiedStarId,
+                                value(star, "name", starBodyId), "atlas_body:star",
+                                List.of(new AbstractMap.SimpleImmutableEntry<>(starBodyId, star)));
+                    }
+                    if (qualifiedStarId.equals(selectedNodeId)) {
+                        SolarSystemRenderer.orbit(g, sx, sy, starRadius + 8,
+                                (starRadius + 8) * .72, 0xCC69CDE2, 1);
+                    }
+                }
             } else {
                 drawRadialGlow(g, sx, sy, 7, 0x558EA6D8, 0xFFE7EAF5);
                 drawDisc(g, sx, sy, 4, 0xFFFFF4E0, 0xFFE2D9F2);
@@ -4108,7 +4223,7 @@ public class NavigatorScreen extends Screen {
     private boolean isPlanetNode(Node node) {
         if (node == null || node.entries.size() != 1) return false;
         String kind = node.kind == null ? "" : node.kind.toLowerCase(Locale.ROOT);
-        return kind.equals("planet");
+        return kind.equals("planet") || kind.equals("atlas_body:planet");
     }
 
     private List<InfoField> buildInfoFields(JsonObject object, int tab) {
