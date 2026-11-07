@@ -105,7 +105,7 @@ public final class CosmicOrbitSettingsScreen extends Screen {
     @Override
     public void onClose() {
         CosmicOrbitSettings.save();
-        if (minecraft != null) minecraft.setScreen(parent);
+        if (minecraft != null) MaqanScreenHost.back(minecraft, parent);
     }
 
     @Override
