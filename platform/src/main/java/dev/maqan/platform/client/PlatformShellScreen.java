@@ -65,7 +65,7 @@ public final class PlatformShellScreen extends Screen {
     private Screen embeddedView;
     private boolean embeddedViewReady;
     private boolean settingsVisible;
-    private int previewLayer = 3;
+    private int previewLayer = 0;
 
     public PlatformShellScreen() { super(Component.literal("MAQAN")); }
 
