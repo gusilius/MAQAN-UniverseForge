@@ -18,10 +18,9 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Exports the authoritative WorldForge map metadata into Atlas' versioned,
- * renderer-neutral snapshot format. Geometry is deliberately not fabricated:
- * political titles are exported at their real capitals until polygon contours
- * can be transferred without losing islands or holes.
+ * Exports authoritative WorldForge province contours and political metadata
+ * into Atlas' versioned, renderer-neutral snapshot format. Raster boundaries
+ * are transferred as independent rings so islands and holes remain intact.
  */
 public final class WorldForgeSnapshotExporter {
     private WorldForgeSnapshotExporter() {}

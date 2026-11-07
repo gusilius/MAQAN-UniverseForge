@@ -40,7 +40,7 @@ public final class WorldForgeMapGeometry {
     }
 
     public static List<Span> scanlineSpans(List<Point> polygon,int left,int top,int right,int bottom) {
-        return scanlineSpansRings(List.of(polygon),left,top,right,bottom);
+        return scanlineSpansRings(singleRing(polygon),left,top,right,bottom);
     }
 
     /** Even-odd fill supports independent islands and holes without guessing ring winding. */
@@ -76,7 +76,7 @@ public final class WorldForgeMapGeometry {
     }
 
     public static Point interiorLabelPoint(List<Point> polygon,int left,int top,int right,int bottom) {
-        return interiorLabelPointRings(List.of(polygon),left,top,right,bottom);
+        return interiorLabelPointRings(singleRing(polygon),left,top,right,bottom);
     }
     public static Point interiorLabelPointRings(List<List<Point>> rings,int left,int top,int right,int bottom) {
         Span widest=scanlineSpansRings(rings,left,top,right,bottom).stream()
@@ -84,8 +84,11 @@ public final class WorldForgeMapGeometry {
         if(widest!=null)return new Point((widest.xStart+widest.xEndExclusive)/2.0,widest.y+0.5);
         return rings==null||rings.isEmpty()?new Point(0,0):centroid(rings.get(0));
     }
+    private static List<List<Point>> singleRing(List<Point> polygon) {
+        return polygon == null ? List.of() : List.of(polygon);
+    }
     public static boolean containsPoint(List<Point> polygon,double x,double y) {
-        return containsPointRings(List.of(polygon),x,y);
+        return containsPointRings(singleRing(polygon),x,y);
     }
     /** Boundary counts as selected; nested rings toggle interior/exterior using even-odd topology. */
     public static boolean containsPointRings(List<List<Point>> rings,double x,double y) {
