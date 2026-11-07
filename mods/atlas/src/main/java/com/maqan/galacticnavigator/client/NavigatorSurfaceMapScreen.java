@@ -6,6 +6,8 @@ import com.maqan.galacticnavigator.navigation.NavigatorPlayerPosition;
 import com.maqan.galacticnavigator.navigation.NavigatorPlayerPositionTracker;
 import com.maqan.galacticnavigator.navigation.NavigatorWaypoint;
 import com.maqan.galacticnavigator.navigation.NavigatorWaypointStore;
+import com.maqan.galacticnavigator.navigation.NavigatorWorldForgeMapStore;
+import com.maqan.galacticnavigator.navigation.WorldForgeMapSnapshot;
 import com.maqan.galacticnavigator.navigation.SurfaceTerrainProjection;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -41,6 +43,7 @@ public final class NavigatorSurfaceMapScreen extends Screen {
         super(Component.literal("MAQAN · Surface Map"));
         this.parent=parent;
         this.dimension=dimension==null?"":dimension;
+        NavigatorWorldForgeMapStore.reload();
         NavigatorPlayerPosition p=NavigatorPlayerPositionTracker.current();
         if(p!=null&&this.dimension.equals(p.dimensionId())){
             centerChunkX=((int)Math.floor(p.x()))>>4;
@@ -147,6 +150,7 @@ public final class NavigatorSurfaceMapScreen extends Screen {
         }
 
         if(!underground&&terrain3D) renderTerrain3D(g,chunks,mapLeft,mapTop,mapRight,mapBottom,cell);
+        if(!underground) renderWorldForgeOverlay(g,cell,mapLeft,mapTop,mapRight,mapBottom,player);
 
         if(!underground&&surfaceRoute!=null&&surfaceRoute.found()){
             List<ExploredSurfaceRoutePlanner.Point> routePoints=surfaceRoute.points();
@@ -205,6 +209,74 @@ public final class NavigatorSurfaceMapScreen extends Screen {
         super.render(g,mouseX,mouseY,partialTick);
         MaqanUiTheme.skinWidgets(this,g,font);
     }
+    /** Renders the last validated WorldForge export in its own Minecraft dimension frame. */
+    private void renderWorldForgeOverlay(GuiGraphics g,double cell,int left,int top,int right,int bottom,
+                                         NavigatorPlayerPosition player){
+        WorldForgeMapSnapshot snapshot=NavigatorWorldForgeMapStore.current();
+        if(snapshot==null)return;
+        List<WorldForgeMapSnapshot.Territory> territories=
+                NavigatorWorldForgeMapStore.territories(dimension);
+        List<WorldForgeMapSnapshot.Feature> features=
+                NavigatorWorldForgeMapStore.features(dimension);
+        int drawnTerritories=0,drawnFeatures=0;
+        for(WorldForgeMapSnapshot.Territory territory:territories){
+            if(territory.vertices==null||territory.vertices.size()<3)continue;
+            List<double[]> points=new ArrayList<>(territory.vertices.size());
+            double minX=Double.POSITIVE_INFINITY,minZ=Double.POSITIVE_INFINITY;
+            double maxX=Double.NEGATIVE_INFINITY,maxZ=Double.NEGATIVE_INFINITY;
+            for(WorldForgeMapSnapshot.Vertex vertex:territory.vertices){
+                double[] point=project(vertex.x/16.0,vertex.z/16.0,cell,left,top,right,bottom,player);
+                points.add(point);minX=Math.min(minX,point[0]);maxX=Math.max(maxX,point[0]);
+                minZ=Math.min(minZ,point[1]);maxZ=Math.max(maxZ,point[1]);
+            }
+            if(maxX<left||minX>right||maxZ<top||minZ>bottom)continue;
+            int color=territory.color==0?0xFF69B8E8:(territory.color|0xFF000000);
+            int alpha=Math.max(0,Math.min(160,territory.fill_alpha));
+            int fill=(alpha<<24)|(color&0x00FFFFFF);
+            // A restrained translucent vertex fill and crisp border keep terrain legible.
+            for(int i=1;i<points.size()-1;i++){
+                double[] a=points.get(0),b=points.get(i),d=points.get(i+1);
+                if(insideMap(a[0],a[1],left,top,right,bottom)
+                        &&insideMap(b[0],b[1],left,top,right,bottom)
+                        &&insideMap(d[0],d[1],left,top,right,bottom)){
+                    g.fill((int)Math.floor(Math.min(a[0],Math.min(b[0],d[0]))),
+                            (int)Math.floor(Math.min(a[1],Math.min(b[1],d[1]))),
+                            (int)Math.ceil(Math.max(a[0],Math.max(b[0],d[0]))),
+                            (int)Math.ceil(Math.max(a[1],Math.max(b[1],d[1]))),fill);
+                }
+            }
+            for(int i=0;i<points.size();i++){
+                double[] a=points.get(i),b=points.get((i+1)%points.size());
+                if(segmentTouchesMap(a[0],a[1],b[0],b[1],left,top,right,bottom))
+                    drawLine(g,(int)Math.round(a[0]),(int)Math.round(a[1]),
+                            (int)Math.round(b[0]),(int)Math.round(b[1]),color);
+            }
+            double[] label=points.get(0);
+            if(insideMap(label[0],label[1],left,top,right,bottom))
+                g.drawString(font,territory.name,(int)Math.round(label[0])+3,
+                        (int)Math.round(label[1])-10,color,false);
+            drawnTerritories++;
+        }
+        for(WorldForgeMapSnapshot.Feature feature:features){
+            double[] point=project(feature.x/16.0,feature.z/16.0,cell,left,top,right,bottom,player);
+            if(!insideMap(point[0],point[1],left,top,right,bottom))continue;
+            int x=(int)Math.round(point[0]),y=(int)Math.round(point[1]);
+            int color=feature.color==0?0xFFFFC66D:(feature.color|0xFF000000);
+            g.fill(x-4,y-4,x+5,y+5,0xDD07101A);
+            g.fill(x-2,y-2,x+3,y+3,color);
+            drawnFeatures++;
+        }
+        if(drawnTerritories>0||drawnFeatures>0)
+            g.drawString(font,"WORLDFORGE  ·  "+drawnTerritories+" TERRITORIES  ·  "
+                    +drawnFeatures+" FEATURES",left+8,top+8,0xFF9BD7F1,false);
+    }
+
+    private static boolean segmentTouchesMap(double x1,double y1,double x2,double y2,
+                                             int left,int top,int right,int bottom){
+        return !(Math.max(x1,x2)<left||Math.min(x1,x2)>right
+                ||Math.max(y1,y2)<top||Math.min(y1,y2)>bottom);
+    }
+
     private record TerrainPixel(double depth,int x,int y,int color) {}
     private void renderTerrain3D(GuiGraphics g,List<NavigatorExplorationStore.ExploredChunk> chunks,
                                  int left,int top,int right,int bottom,double cell){
