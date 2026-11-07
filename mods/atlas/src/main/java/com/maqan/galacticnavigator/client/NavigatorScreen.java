@@ -58,6 +58,15 @@ public class NavigatorScreen extends Screen {
     // 0 = one system, 1 = systems in the active galaxy, 2 = systems in the active universe.
     private int atlasMode = 3;
     private Button atlasModeButton;
+    // Additive workspace mode: show every indexed system on the existing canvas,
+    // then restore the user's previous hierarchy and camera state on exit.
+    private Button unifiedSceneButton;
+    private boolean unifiedSceneMode;
+    private int savedSceneLevel, savedSceneAtlasMode, savedSceneListScroll, savedSceneInfoScroll;
+    private String savedSceneUniverse, savedSceneGalaxyPath, savedSceneSectorPath, savedSceneSystemPath;
+    private String savedSceneSelectedId, savedSceneSelectedNodeId, savedSceneBodyViewId;
+    private double savedSceneZoom, savedScenePanX, savedScenePanY, savedSceneCameraYaw, savedSceneCameraPitch;
+    private String savedSceneCameraTargetId;
     private Button atlasDetailButton, atlasScaleButton, atlasTextureButton, atlasGlowButton;
     private double cameraYaw = 0.55;
     private double cameraPitch = 0.38;
@@ -255,6 +264,10 @@ public class NavigatorScreen extends Screen {
         backButton.setTooltip(Tooltip.create(Component.literal("Back to previous spatial layer")));
         openButton.setTooltip(Tooltip.create(Component.literal("Open selected object")));
         toolsButton.setTooltip(Tooltip.create(Component.literal("Atlas tools and visual settings")));
+        unifiedSceneButton = addRenderableWidget(Button.builder(Component.literal("✦"),
+                b -> toggleUnifiedSceneMode())
+                .bounds(width - 108, barY, 26, 20).build());
+        unifiedSceneButton.setTooltip(Tooltip.create(Component.literal("Open unified cosmic scene")));
         if (embeddedInMaqan) closeButton.visible = false;
 
         int menuX = width - 134;
@@ -717,6 +730,59 @@ public class NavigatorScreen extends Screen {
         };
     }
 
+    private void toggleUnifiedSceneMode() {
+        if (!unifiedSceneMode) {
+            savedSceneLevel = level;
+            savedSceneAtlasMode = atlasMode;
+            savedSceneUniverse = universe;
+            savedSceneGalaxyPath = galaxyPath;
+            savedSceneSectorPath = sectorPath;
+            savedSceneSystemPath = systemPath;
+            savedSceneSelectedId = selectedId;
+            savedSceneSelectedNodeId = selectedNodeId;
+            savedSceneBodyViewId = bodyViewId;
+            savedSceneListScroll = listScroll;
+            savedSceneInfoScroll = infoScroll;
+            savedSceneZoom = zoom;
+            savedScenePanX = panX;
+            savedScenePanY = panY;
+            savedSceneCameraYaw = cameraYaw;
+            savedSceneCameraPitch = cameraPitch;
+            savedSceneCameraTargetId = cameraTargetId;
+
+            unifiedSceneMode = true;
+            level = 0;
+            atlasMode = 5; // All indexed systems, independent of the active hierarchy path.
+            galaxyPath = sectorPath = systemPath = null;
+            selectedId = selectedNodeId = bodyViewId = cameraTargetId = null;
+            listScroll = infoScroll = 0;
+            panX = panY = 0.0;
+            zoom = 1.0;
+            cameraYaw = 0.55;
+            cameraPitch = 0.38;
+        } else {
+            unifiedSceneMode = false;
+            level = savedSceneLevel;
+            atlasMode = savedSceneAtlasMode;
+            universe = savedSceneUniverse;
+            galaxyPath = savedSceneGalaxyPath;
+            sectorPath = savedSceneSectorPath;
+            systemPath = savedSceneSystemPath;
+            selectedId = savedSceneSelectedId;
+            selectedNodeId = savedSceneSelectedNodeId;
+            bodyViewId = savedSceneBodyViewId;
+            listScroll = savedSceneListScroll;
+            infoScroll = savedSceneInfoScroll;
+            zoom = savedSceneZoom;
+            panX = savedScenePanX;
+            panY = savedScenePanY;
+            cameraYaw = savedSceneCameraYaw;
+            cameraPitch = savedSceneCameraPitch;
+            cameraTargetId = savedSceneCameraTargetId;
+        }
+        refreshButtons();
+    }
+
     private String atlasModeName() {
         return switch (atlasMode) {
             case 1 -> sectorPath == null ? "GALAXY" : "SECTOR SYSTEMS";
@@ -807,7 +873,16 @@ public class NavigatorScreen extends Screen {
             universeButton.active = !systems.isEmpty();
         }
         if (backButton != null) backButton.active = level > 0 || galaxyPath != null || sectorPath != null;
-        if (atlasModeButton != null) { atlasModeButton.setMessage(Component.literal("✧")); atlasModeButton.setTooltip(Tooltip.create(Component.literal("Atlas layer: " + atlasModeName()))); }
+        if (atlasModeButton != null) {
+            atlasModeButton.setMessage(Component.literal("✧"));
+            atlasModeButton.setTooltip(Tooltip.create(Component.literal("Atlas layer: " + atlasModeName())));
+            atlasModeButton.active = !unifiedSceneMode;
+        }
+        if (unifiedSceneButton != null) {
+            unifiedSceneButton.setMessage(Component.literal(unifiedSceneMode ? "✧" : "✦"));
+            unifiedSceneButton.setTooltip(Tooltip.create(Component.literal(unifiedSceneMode
+                    ? "Return to previous Atlas view" : "Open unified cosmic scene")));
+        }
         if (openButton != null) openButton.active = selectedNodeId != null || selectedId != null;
         if (focusButton != null) focusButton.active = selectedNodeId != null || selectedId != null;
     }
@@ -1418,6 +1493,7 @@ public class NavigatorScreen extends Screen {
         drawButtonSkin(g, backButton);
         drawButtonSkin(g, openButton);
         drawButtonSkin(g, toolsButton);
+        drawButtonSkin(g, unifiedSceneButton);
         drawButtonSkin(g, closeButton);
         drawButtonSkin(g, travelButton);
         for (Button button : toolButtons) drawButtonSkin(g, button);
@@ -1878,7 +1954,8 @@ public class NavigatorScreen extends Screen {
 
     private Node drawMap(GuiGraphics g, int mx, int my, List<Node> nodes) {
         g.drawString(font, bodyViewId != null ? "PLANET / SATELLITE VIEW" :
-                level == 3 ? "STAR SYSTEM" : atlasMode > 0 ? atlasModeName() + " ATLAS" : levelTitle(),
+                level == 3 ? "STAR SYSTEM" : unifiedSceneMode ? "UNIFIED COSMIC SCENE"
+                        : atlasMode > 0 ? atlasModeName() + " ATLAS" : levelTitle(),
                 mapL + 10, mapT + 8, TEXT, false);
         drawBodyTypeLegend(g, mx, my);
         if (nodes.isEmpty()) {
