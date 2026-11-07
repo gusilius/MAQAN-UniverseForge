@@ -104,6 +104,12 @@ public final class NavigatorWorldForgeMapStore {
         return value.featuresInDimension(dimensionId);
     }
 
+    public static List<WorldForgeMapSnapshot.PoliticalBoundary> boundaries(String dimensionId) {
+        WorldForgeMapSnapshot value = snapshot;
+        if (value == null || value.political_boundaries == null) return Collections.emptyList();
+        return value.boundariesInDimension(dimensionId);
+    }
+
     private static void validate(WorldForgeMapSnapshot value) {
         if (value == null) throw new IllegalArgumentException("Empty JSON document");
         if (value.schema_version != 1)
