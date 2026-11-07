@@ -2296,6 +2296,8 @@ public class NavigatorScreen extends Screen {
             List<Node> primaryBodies = new ArrayList<>();
             List<Node> moons = new ArrayList<>();
             Map<String, Node> primaryById = new HashMap<>();
+            Map<String, Node> primaryByDimension = new HashMap<>();
+            Set<String> ambiguousPrimaryDimensions = new HashSet<>();
             Node star = null;
             for (Entry<String, JsonObject> entry : system.entries) {
                 JsonObject data = entry.getValue();
@@ -2312,6 +2314,11 @@ public class NavigatorScreen extends Screen {
                     primaryById.put(body.id, body);
                     String catalogId = value(data, "id", "catalog_id");
                     if (!catalogId.isBlank()) primaryById.put(catalogId, body);
+                    String dimensionId = value(data, "dimension", "dimension_id", "attached_dimension_id");
+                    if (!dimensionId.isBlank()) {
+                        if (primaryByDimension.putIfAbsent(dimensionId, body) != null)
+                            ambiguousPrimaryDimensions.add(dimensionId);
+                    }
                 }
             }
 
@@ -2360,6 +2367,9 @@ public class NavigatorScreen extends Screen {
                 Node moon = moons.get(moonIndex);
                 String parentId = orbitalParentReference(moon.first());
                 Node parent = parentId.isBlank() ? null : primaryById.get(parentId);
+                if (parent == null && !parentId.isBlank()
+                        && !ambiguousPrimaryDimensions.contains(parentId))
+                    parent = primaryByDimension.get(parentId);
                 if (parent == null && parentId.isBlank() && primaryBodies.size() == 1
                         && primaryBodies.get(0).kind.toLowerCase(Locale.ROOT).contains("planet"))
                     parent = primaryBodies.get(0);
@@ -2531,6 +2541,8 @@ public class NavigatorScreen extends Screen {
             List<Entry<String, JsonObject>> planets = new ArrayList<>();
             List<Entry<String, JsonObject>> moons = new ArrayList<>();
             Map<String, Entry<String, JsonObject>> planetById = new HashMap<>();
+            Map<String, Entry<String, JsonObject>> planetByDimension = new HashMap<>();
+            Set<String> ambiguousPlanetDimensions = new HashSet<>();
             for (Entry<String, JsonObject> body : bodies) {
                 JsonObject data = body.getValue();
                 String kind = value(data, "kind", "display_type", "type", "classification")
@@ -2545,6 +2557,11 @@ public class NavigatorScreen extends Screen {
                     planetById.put(body.getKey(), body);
                     String catalogId = value(data, "id", "catalog_id");
                     if (!catalogId.isBlank()) planetById.put(catalogId, body);
+                    String dimensionId = value(data, "dimension", "dimension_id", "attached_dimension_id");
+                    if (!dimensionId.isBlank()) {
+                        if (planetByDimension.putIfAbsent(dimensionId, body) != null)
+                            ambiguousPlanetDimensions.add(dimensionId);
+                    }
                 }
             }
             if (star != null) {
@@ -2596,6 +2613,9 @@ public class NavigatorScreen extends Screen {
                 Entry<String, JsonObject> moon = moons.get(moonIndex);
                 String parentId = orbitalParentReference(moon.getValue());
                 Entry<String, JsonObject> parent = parentId.isBlank() ? null : planetById.get(parentId);
+                if (parent == null && !parentId.isBlank()
+                        && !ambiguousPlanetDimensions.contains(parentId))
+                    parent = planetByDimension.get(parentId);
                 if (parent == null && parentId.isBlank() && planets.size() == 1) parent = planets.get(0);
                 if (parent == null) continue;
                 Point parentPoint = planetScreenPositions.get(parent.getKey());
