@@ -4,8 +4,8 @@
 
 Atlas — самостоятельный космический мод экосистемы MAQAN UniverseForge и специализированное рабочее пространство общей платформы MAQAN. Исторический mod id `maqan_galactic_navigator` и Java package сохранены ради совместимости существующих установок, конфигураций и миров.
 
-**Архитектура общей оболочки:** [MAQAN Platform](../../../docs/architecture/MAQAN_PLATFORM.md).  
-**Архитектура Atlas Workspace и Unified Cosmic Scene:** [Atlas Workspace](../../../docs/architecture/ATLAS_WORKSPACE.md).
+**Архитектура общей оболочки:** [MAQAN Platform](../../docs/architecture/MAQAN_PLATFORM.md).  
+**Архитектура Atlas Workspace и Unified Cosmic Scene:** [Atlas Workspace](../../docs/architecture/ATLAS_WORKSPACE.md).
 
 ## Граница ответственности
 
