@@ -227,7 +227,7 @@ public class NavigatorScreen extends Screen {
         addRenderableWidget(search);
 
         int x = left + searchWidth + 6;
-        int systemWidth = compactToolbar ? 54 : 88;
+        int systemWidth = 26;
         universeButton = addRenderableWidget(Button.builder(Component.literal("◎"), b -> {
             systemPickerOpen = !systemPickerOpen;
             if (systemPickerOpen) { contextOpen = false; toolsOpen = false; updateToolVisibility(); }
@@ -243,7 +243,7 @@ public class NavigatorScreen extends Screen {
             if (toolsOpen) { contextOpen = false; systemPickerOpen = false; }
             updateToolVisibility();
             b.setMessage(Component.literal(toolsOpen ? "×" : "⚙"));
-        }).bounds(width - (compactToolbar ? 76 : 112), barY, compactToolbar ? 30 : 66, 20).build());
+        }).bounds(width - 76, barY, 30, 20).build());
         closeButton = addRenderableWidget(Button.builder(Component.literal("×"), b -> onClose())
                 .bounds(width - 40, barY, 26, 20).build());
         universeButton.setTooltip(Tooltip.create(Component.literal("Select star system")));
@@ -728,12 +728,9 @@ public class NavigatorScreen extends Screen {
 
     private void refreshButtons() {
         if (universeButton != null) {
-            String label = universe.isEmpty() ? "EMPTY CATALOG"
-                    : GalaxyCatalog.text(GalaxyCatalog.universe(universe), "name", universe);
             List<String> systems = GalaxyCatalog.universes();
-            int index = systems.indexOf(universe);
             universeButton.setMessage(Component.literal("◎"));
-            universeButton.active = systems.size() > 1;
+            universeButton.active = !systems.isEmpty();
         }
         if (backButton != null) backButton.active = level > 0 || galaxyPath != null;
         if (atlasModeButton != null) atlasModeButton.setMessage(Component.literal("ATLAS: " + atlasModeName()));
