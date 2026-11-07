@@ -43,7 +43,9 @@ public final class PlatformClient {
             Minecraft mc = Minecraft.getInstance();
             if (mc.screen instanceof PlatformShellScreen shell
                     && shell.attachProviderView(providerModId, next)) {
-                event.setNewScreen(shell);
+                // Opening is cancellable: retain the current shell instance and
+                // mount the provider view without closing/removing the shell.
+                event.setCanceled(true);
                 return;
             }
             event.setNewScreen(PlatformShellScreen.wrapProviderView(providerModId, next));
