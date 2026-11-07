@@ -6,11 +6,15 @@ on:
     paths:
       - "mods/**"
       - "shared/**"
+      - "platform/**"
+      - ".github/workflows/**"
   pull_request:
     branches: [main]
     paths:
       - "mods/**"
       - "shared/**"
+      - "platform/**"
+      - ".github/workflows/**"
   workflow_dispatch:
 
 permissions:
