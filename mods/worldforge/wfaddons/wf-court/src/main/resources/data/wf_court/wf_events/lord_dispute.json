@@ -1,0 +1,51 @@
+{
+ "id": "lord_dispute",
+ "weight": 3,
+ "who": "ruler",
+ "cooldown_years": 4,
+ "title": "Спор двух рыцарей",
+ "text": "Два рыцаря {realm} не поделили межу и ждут суда {name}.",
+ "cond": {},
+ "options": [
+  {
+   "text": "Судить по закону",
+   "ai": 3,
+   "effects": [
+    {
+     "op": "trait",
+     "add": "just"
+    },
+    {
+     "op": "stat",
+     "attr": "stewardship",
+     "delta": 1
+    }
+   ]
+  },
+  {
+   "text": "Отдать землю тому, кто заплатит",
+   "ai": 2,
+   "effects": [
+    {
+     "op": "gold",
+     "value": 20
+    },
+    {
+     "op": "trait",
+     "add": "greedy"
+    }
+   ]
+  },
+  {
+   "text": "Пусть решит поединок",
+   "ai": 1,
+   "effects": [
+    {
+     "op": "stat",
+     "attr": "martial",
+     "delta": 1
+    }
+   ]
+  }
+ ]
+}

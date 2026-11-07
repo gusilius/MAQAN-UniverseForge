@@ -1,0 +1,99 @@
+{
+ "terrains": [
+  {
+   "id": "plains",
+   "name": "Равнины",
+   "biomes": [
+    "plains",
+    "meadow",
+    "savanna"
+   ],
+   "mods": {
+    "tax_pct": 8,
+    "food_pct": 10
+   }
+  },
+  {
+   "id": "forest",
+   "name": "Леса",
+   "biomes": [
+    "forest",
+    "taiga",
+    "dark_forest",
+    "birch_forest"
+   ],
+   "mods": {
+    "wood_pct": 15,
+    "stealth_pct": 4
+   }
+  },
+  {
+   "id": "mountains",
+   "name": "Горы",
+   "biomes": [
+    "windswept_hills",
+    "jagged_peaks",
+    "stony_peaks",
+    "frozen_peaks"
+   ],
+   "mods": {
+    "mining_speed_pct": 15,
+    "defense_pct": 12,
+    "food_pct": -8
+   }
+  },
+  {
+   "id": "coast",
+   "name": "Побережье",
+   "biomes": [
+    "beach",
+    "ocean",
+    "stony_shore"
+   ],
+   "mods": {
+    "trade_pct": 12,
+    "fish_pct": 15
+   }
+  },
+  {
+   "id": "desert",
+   "name": "Пустыня",
+   "biomes": [
+    "desert",
+    "badlands"
+   ],
+   "mods": {
+    "trade_pct": 6,
+    "food_pct": -12,
+    "defense_pct": 4
+   }
+  },
+  {
+   "id": "tundra",
+   "name": "Тундра",
+   "biomes": [
+    "snowy_plains",
+    "ice_spikes",
+    "frozen_ocean"
+   ],
+   "mods": {
+    "resist_pct": 4,
+    "food_pct": -10,
+    "defense_pct": 6
+   }
+  },
+  {
+   "id": "swamp",
+   "name": "Болота",
+   "biomes": [
+    "swamp",
+    "mangrove_swamp"
+   ],
+   "mods": {
+    "defense_pct": 8,
+    "food_pct": -4,
+    "herb_pct": 10
+   }
+  }
+ ]
+}

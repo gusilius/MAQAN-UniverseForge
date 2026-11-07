@@ -1,0 +1,35 @@
+{
+ "id": "hunt_accident",
+ "weight": 1,
+ "who": "ruler",
+ "cooldown_years": 10,
+ "title": "Несчастный случай на охоте",
+ "text": "Лошадь {name} споткнулась на скаку. Лекарь качает головой.",
+ "cond": {
+  "trait": "brave",
+  "min_age": 30
+ },
+ "options": [
+  {
+   "text": "Положиться на судьбу",
+   "ai": 1,
+   "effects": [
+    {
+     "op": "stat",
+     "attr": "stewardship",
+     "delta": -1
+    }
+   ]
+  },
+  {
+   "text": "Позвать лучших лекарей (-30 золота)",
+   "ai": 3,
+   "effects": [
+    {
+     "op": "gold",
+     "value": -30
+    }
+   ]
+  }
+ ]
+}
