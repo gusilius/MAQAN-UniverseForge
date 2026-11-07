@@ -112,7 +112,13 @@ public class WFWorker extends PathfinderMob {
             BlockPos target;
             boolean working = false;
             if (wk.manualOrder) {
-                target = new BlockPos(c.cx + (int) Math.floor(wk.orderX), w.getBlockY(), c.cz + (int) Math.floor(wk.orderZ));
+                int tx = c.cx + (int) Math.floor(wk.orderX);
+                int tz = c.cz + (int) Math.floor(wk.orderZ);
+                BlockPos probe = new BlockPos(tx, w.getBlockY(), tz);
+                int ty = w.level().hasChunkAt(probe)
+                        ? w.level().getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, tx, tz)
+                        : w.getBlockY();
+                target = new BlockPos(tx, ty, tz);
             } else if (b != null) {
                 target = c.workPoint(w.level(), b);
                 working = b.state == Building.State.BUILDING ? b.status.startsWith("строится") : "работает".equals(b.status);
