@@ -1,0 +1,21 @@
+modLoader="javafml"
+loaderVersion="[47,)"
+license="All Rights Reserved"
+[[mods]]
+modId="maqan_galactic_navigator"
+version="1.0.0-alpha.3"
+displayName="MAQAN Atlas"
+authors="MAQAN"
+description="""MAQAN Atlas: cosmic atlas, orbital simulation, spatial navigation and Cosmic Horizons integration."""
+[[dependencies.maqan_galactic_navigator]]
+modId="forge"
+mandatory=true
+versionRange="[47.4.28,)"
+ordering="NONE"
+side="BOTH"
+[[dependencies.maqan_galactic_navigator]]
+modId="minecraft"
+mandatory=true
+versionRange="[1.20.1,1.20.2)"
+ordering="NONE"
+side="BOTH"

@@ -1,0 +1,28 @@
+plugins { id 'eclipse'; id 'idea'; id 'maven-publish'; id 'net.minecraftforge.gradle' version '[6.0,6.2)' }
+version = '1.0.0-alpha.3'
+group = 'com.maqan.galacticnavigator'
+base { archivesName = 'maqan-atlas' }
+java.toolchain.languageVersion = JavaLanguageVersion.of(17)
+minecraft { mappings channel: 'official', version: '1.20.1'
+ runs { client { workingDirectory project.file('run'); property 'forge.logging.console.level','info'; mods { maqan_galactic_navigator { source sourceSets.main } } } }
+}
+repositories { }
+dependencies {
+    minecraft 'net.minecraftforge:forge:1.20.1-47.4.28'
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+}
+
+tasks.withType(Test).configureEach {
+    useJUnitPlatform()
+}
+
+
+// Native UI libraries are embedded as resources when supplied by the build pipeline.
+// Local development can also place the matching library under build/native-libs.
+sourceSets {
+    main {
+        resources {
+            srcDir("$buildDir/native-libs")
+        }
+    }
+}
