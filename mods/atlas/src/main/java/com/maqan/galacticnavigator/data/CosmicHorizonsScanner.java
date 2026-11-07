@@ -347,14 +347,14 @@ public final class CosmicHorizonsScanner {
             JsonObject system = entry.getValue().getAsJsonObject();
             JsonObject bodies = object(system, "planets");
             String dimension = string(system, "dimension", "");
-            if (!bodies.isEmpty() && !dimension.isBlank())
+            if (bodies.size() > 0 && !dimension.isBlank())
                 systemsByDimension.computeIfAbsent(dimension, ignored -> new ArrayList<>()).add(system);
         }
         for (Map.Entry<String, JsonElement> entry : universes.entrySet()) {
             if (!entry.getValue().isJsonObject()) continue;
             JsonObject dimension = entry.getValue().getAsJsonObject();
             JsonObject sky = object(dimension, "sky_data");
-            if (sky.isEmpty()) continue;
+            if (sky.size() == 0) continue;
             String destination = string(dimension, "travel_to_dimension", "");
             List<JsonObject> targets = systemsByDimension.get(destination);
             if (destination.isBlank() || targets == null || targets.size() != 1) continue;
