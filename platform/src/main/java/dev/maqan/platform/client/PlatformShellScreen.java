@@ -540,6 +540,22 @@ public final class PlatformShellScreen extends Screen {
             view.init(Minecraft.getInstance(), width, height);
             return;
         }
+        // Some providers expose a complete no-argument screen (for example the
+        // WorldForge political map). Mount that real screen instead of a preview.
+        if (capability.screenClass() != null && !capability.screenClass().isBlank()) {
+            try {
+                Class<?> type = Class.forName(capability.screenClass());
+                if (Screen.class.isAssignableFrom(type)) {
+                    Object instance = type.getDeclaredConstructor().newInstance();
+                    if (instance instanceof Screen providerScreen
+                            && attachProviderView(capability, providerScreen)) return;
+                }
+            } catch (NoSuchMethodException ignored) {
+                // Data-driven screens need a server payload; request them below.
+            } catch (ReflectiveOperationException | LinkageError error) {
+                LOGGER.warn("Unable to create provider view for {}", capability.id(), error);
+            }
+        }
         String command = switch (capability.id()) {
             case "worldforge.settlements" -> "wfsettle view panel";
             case "worldforge.rts" -> "wfsettle view hud";
