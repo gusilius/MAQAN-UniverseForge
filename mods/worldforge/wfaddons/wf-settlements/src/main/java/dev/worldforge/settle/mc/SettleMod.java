@@ -240,6 +240,10 @@ public class SettleMod {
             if (!colony.owner.isEmpty() && !colony.owner.equals(owner)) continue;
             for (Building building : colony.s.buildings) {
                 if (!building.def.id.equals(buildingId) || building.state != Building.State.DONE || building.paused) continue;
+                Colony.Site physicalSite = colony.sites.get(building.uid);
+                if (physicalSite == null) continue; // A simulated building is not a recruitment facility until its world structure exists.
+                Blueprints.Plan plan = Blueprints.get(level, building.def);
+                if (plan == null || physicalSite.placed < plan.blocks().size()) continue;
                 boolean staffed = colony.s.assigned(building.uid).stream()
                         .anyMatch(worker -> "trainer".equals(worker.profession));
                 if (!staffed) continue;
