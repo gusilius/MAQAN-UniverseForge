@@ -451,5 +451,5 @@ public final class Origins {
         }
         builds.clear();
         builds.putAll(loaded);
-    }}
+    }
 }
