@@ -840,6 +840,18 @@ public class NavigatorScreen extends Screen {
         return false;
     }
 
+    /** Camera target matching the actual drawable center of the Atlas overview canvas. */
+    private int atlasCameraCenterX() {
+        return (mapL + mapR) / 2;
+    }
+
+    private int atlasCameraCenterY() {
+        int center = (mapT + mapB) / 2;
+        // drawAtlasOverview reserves an asymmetric 34px header / 40px footer,
+        // so its spatial origin sits three pixels above the panel midpoint.
+        return level == 0 && atlasMode > 0 ? center - 3 : center;
+    }
+
     private void focusSelected() {
         String id = selectedId != null ? selectedId : selectedNodeId;
         Point point = id == null ? null : mapPoints.get(id);
@@ -856,8 +868,8 @@ public class NavigatorScreen extends Screen {
             panX = 0; panY = 0;
             return;
         }
-        int centerX = (mapL + mapR) / 2;
-        int centerY = (mapT + mapB) / 2;
+        int centerX = atlasCameraCenterX();
+        int centerY = atlasCameraCenterY();
         panX += centerX - point.x;
         panY += centerY - point.y;
     }
@@ -4765,8 +4777,8 @@ public class NavigatorScreen extends Screen {
             if (Double.isFinite(factor)) {
                 zoom = Math.max(.025, Math.min(64.0, zoom * factor));
                 double ratio = zoom / oldZoom;
-                double anchorX = x - (mapL + mapR) * .5;
-                double anchorY = y - (mapT + mapB) * .5;
+                double anchorX = x - atlasCameraCenterX();
+                double anchorY = y - atlasCameraCenterY();
                 panX = anchorX - (anchorX - panX) * ratio;
                 panY = anchorY - (anchorY - panY) * ratio;
             }
