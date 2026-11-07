@@ -10,6 +10,23 @@ MAQAN is a persistent, modular, futuristic command environment for exploring and
 
 The interface language is restrained, cinematic and spatial: deep near-black/navy surfaces, subtle separators, restrained cyan focus/selection, semantic status colors, crisp typography, quiet motion and large uninterrupted work surfaces. The map, simulation and selected world object are the visual focus. Avoid ornamental frames, bevels, gold trim, excessive stars, noisy gradients and permanently visible text-button toolbars.
 
+## 1A. Hard scope boundary: replace the interfaces, preserve the systems
+
+This is a UI unification and replacement project, not a gameplay rewrite and not a launcher that forwards users to old module screens.
+
+- MAQAN Platform is the one and only player-facing interface when installed.
+- Atlas, WorldForge and addons contribute their existing information, controls and actions as sections, panels, tabs, overlays and contextual tools inside that one workspace.
+- Do not open a provider's legacy `Screen` as a separate top-level Minecraft screen from the global navigation.
+- Do not create separate Atlas, Politics, RTS or Settlement menus. They are workspaces/profiles inside the same shell.
+- Preserve all existing gameplay logic, simulation, network messages, commands, storage formats, algorithms, permissions and domain APIs. No changes to those systems are in scope unless strictly required to expose an existing action to the unified UI.
+- Refactoring a screen's presentation code into an embeddable view/controller is allowed. Rewriting the action behind a button, changing simulation behavior, or simplifying/removing a feature is not.
+- Migrate existing UI functionality rather than replacing it with placeholder cards or invented sample data. A feature is not complete until its existing controls and behavior are reachable from the global workspace.
+- Existing standalone screens are temporary migration sources only. Their functions must be accounted for in the global UI before their standalone entry points are retired.
+- All pointer and keyboard interactions must stay within the global workspace. Selecting a tab, object, panel or action must not dismiss or replace the workspace.
+- If Platform is absent, modules may retain their standalone fallback for compatibility. When Platform is present, the global workspace owns navigation.
+
+The immediate task order is therefore: inventory current screens and actions; define shared view embedding/input contracts; migrate existing UI surfaces without touching their domain logic; route all module entry points into the workspace; then remove duplicate standalone navigation after parity is verified.
+
 ## 2. One entry point, contextual navigation
 
 - A single MAQAN launcher/command button opens the global navigation surface.
