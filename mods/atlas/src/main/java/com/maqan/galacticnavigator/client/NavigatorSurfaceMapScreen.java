@@ -209,7 +209,7 @@ public final class NavigatorSurfaceMapScreen extends Screen {
         super.render(g,mouseX,mouseY,partialTick);
         MaqanUiTheme.skinWidgets(this,g,font);
     }
-    /** Renders the last validated WorldForge export in its own Minecraft dimension frame. */
+    /** Renders validated political and settlement layers from the active WorldForge dimension. */
     private void renderWorldForgeOverlay(GuiGraphics g,double cell,int left,int top,int right,int bottom,
                                          NavigatorPlayerPosition player){
         WorldForgeMapSnapshot snapshot=NavigatorWorldForgeMapStore.current();
@@ -221,32 +221,40 @@ public final class NavigatorSurfaceMapScreen extends Screen {
         int drawnTerritories=0,drawnFeatures=0;
         for(WorldForgeMapSnapshot.Territory territory:territories){
             if(territory.vertices==null||territory.vertices.size()<3)continue;
-            List<double[]> points=new ArrayList<>(territory.vertices.size());
-            double minX=Double.POSITIVE_INFINITY,minZ=Double.POSITIVE_INFINITY;
-            double maxX=Double.NEGATIVE_INFINITY,maxZ=Double.NEGATIVE_INFINITY;
+            List<WorldForgeMapGeometry.Point> points=new ArrayList<>(territory.vertices.size());
             for(WorldForgeMapSnapshot.Vertex vertex:territory.vertices){
-                double[] point=project(vertex.x/16.0,vertex.z/16.0,cell,left,top,right,bottom,player);
-                points.add(point);minX=Math.min(minX,point[0]);maxX=Math.max(maxX,point[0]);
-                minZ=Math.min(minZ,point[1]);maxZ=Math.max(maxZ,point[1]);
+                double[] projected=project(vertex.x/16.0,vertex.z/16.0,cell,
+                        left,top,right,bottom,player);
+                points.add(new WorldForgeMapGeometry.Point(projected[0],projected[1]));
             }
-            if(maxX<left||minX>right||maxZ<top||minZ>bottom)continue;
+            List<WorldForgeMapGeometry.Point> clipped=WorldForgeMapGeometry.clipPolygon(
+                    points,left,top,right,bottom);
+            if(clipped.size()<3)continue;
             int color=territory.color==0?0xFF69B8E8:(territory.color|0xFF000000);
-            // Draw only the polygon boundary here: a bounding rectangle is not a polygon fill.
-            // This keeps arbitrary WorldForge territory shapes faithful and avoids false claims.
-            for(int i=0;i<points.size();i++){
-                double[] a=points.get(i),b=points.get((i+1)%points.size());
-                drawClippedLine(g,a[0],a[1],b[0],b[1],left,top,right,bottom,color);
+            int alpha=Math.max(0,Math.min(160,territory.fill_alpha));
+            if(alpha>0){
+                int fill=(alpha<<24)|(color&0x00FFFFFF);
+                for(WorldForgeMapGeometry.Span span:WorldForgeMapGeometry.scanlineSpans(
+                        clipped,left,top,right,bottom))
+                    g.fill(span.xStart(),span.y(),span.xEndExclusive(),span.y()+1,fill);
             }
-            double[] label=points.get(0);
-            if(insideMap(label[0],label[1],left,top,right,bottom))
-                g.drawString(font,territory.name,(int)Math.round(label[0])+3,
-                        (int)Math.round(label[1])-10,color,false);
+            for(int i=0;i<clipped.size();i++){
+                WorldForgeMapGeometry.Point a=clipped.get(i);
+                WorldForgeMapGeometry.Point b=clipped.get((i+1)%clipped.size());
+                drawLine(g,(int)Math.round(a.x()),(int)Math.round(a.y()),
+                        (int)Math.round(b.x()),(int)Math.round(b.y()),color);
+            }
+            WorldForgeMapGeometry.Point label=WorldForgeMapGeometry.centroid(clipped);
+            if(insideMap(label.x(),label.y(),left,top,right,bottom))
+                g.drawString(font,territory.name,(int)Math.round(label.x())+3,
+                        (int)Math.round(label.y())-font.lineHeight/2,color,false);
             drawnTerritories++;
         }
         for(WorldForgeMapSnapshot.Feature feature:features){
-            double[] point=project(feature.x/16.0,feature.z/16.0,cell,left,top,right,bottom,player);
-            if(!insideMap(point[0],point[1],left,top,right,bottom))continue;
-            int x=(int)Math.round(point[0]),y=(int)Math.round(point[1]);
+            double[] projected=project(feature.x/16.0,feature.z/16.0,cell,
+                    left,top,right,bottom,player);
+            if(!insideMap(projected[0],projected[1],left,top,right,bottom))continue;
+            int x=(int)Math.round(projected[0]),y=(int)Math.round(projected[1]);
             int color=feature.color==0?0xFFFFC66D:(feature.color|0xFF000000);
             g.fill(x-4,y-4,x+5,y+5,0xDD07101A);
             g.fill(x-2,y-2,x+3,y+3,color);
@@ -255,35 +263,6 @@ public final class NavigatorSurfaceMapScreen extends Screen {
         if(drawnTerritories>0||drawnFeatures>0)
             g.drawString(font,"WORLDFORGE  ·  "+drawnTerritories+" TERRITORIES  ·  "
                     +drawnFeatures+" FEATURES",left+8,top+8,0xFF9BD7F1,false);
-    }
-
-    private static void drawClippedLine(GuiGraphics g,double x1,double y1,double x2,double y2,
-                                         int left,int top,int right,int bottom,int color){
-        // Cohen-Sutherland clipping prevents off-map political borders leaking into UI panels.
-        int c1=outCode(x1,y1,left,top,right,bottom),c2=outCode(x2,y2,left,top,right,bottom);
-        while(true){
-            if((c1|c2)==0){
-                drawLine(g,(int)Math.round(x1),(int)Math.round(y1),
-                        (int)Math.round(x2),(int)Math.round(y2),color);
-                return;
-            }
-            if((c1&c2)!=0)return;
-            int out=c1!=0?c1:c2;
-            double x=0,y=0;
-            if((out&8)!=0){x=x1+(x2-x1)*(bottom-y1)/(y2-y1);y=bottom;}
-            else if((out&4)!=0){x=x1+(x2-x1)*(top-y1)/(y2-y1);y=top;}
-            else if((out&2)!=0){y=y1+(y2-y1)*(right-x1)/(x2-x1);x=right;}
-            else {y=y1+(y2-y1)*(left-x1)/(x2-x1);x=left;}
-            if(out==c1){x1=x;y1=y;c1=outCode(x1,y1,left,top,right,bottom);}
-            else{x2=x;y2=y;c2=outCode(x2,y2,left,top,right,bottom);}
-        }
-    }
-
-    private static int outCode(double x,double y,int left,int top,int right,int bottom){
-        int code=0;
-        if(x<left)code|=1;else if(x>right)code|=2;
-        if(y<top)code|=4;else if(y>bottom)code|=8;
-        return code;
     }
 
     private record TerrainPixel(double depth,int x,int y,int color) {}
