@@ -1407,8 +1407,20 @@ public class NavigatorScreen extends Screen {
     }
 
     private JsonObject findObject(String id) {
-        for (Entry<String, JsonObject> e : GalaxyCatalog.objects(universe))
-            if (e.getKey().equals(id)) return e.getValue();
+        if (id == null || id.isBlank()) return null;
+        // Global-scene body selections are qualified as systemId::bodyId.
+        // Resolve against that owning system instead of whichever system the
+        // previous hierarchy view happened to have active.
+        int separator = id.indexOf("::");
+        if (separator > 0) {
+            String systemId = id.substring(0, separator);
+            String bodyId = id.substring(separator + 2);
+            for (Entry<String, JsonObject> entry : GalaxyCatalog.objects(systemId))
+                if (entry.getKey().equals(bodyId)) return entry.getValue();
+            return null;
+        }
+        for (Entry<String, JsonObject> entry : GalaxyCatalog.objects(universe))
+            if (entry.getKey().equals(id)) return entry.getValue();
         return null;
     }
 
