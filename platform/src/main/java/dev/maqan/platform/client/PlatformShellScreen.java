@@ -296,6 +296,12 @@ public final class PlatformShellScreen extends Screen {
         if(mx<44) {
             if(my>=height-44) { settingsVisible=!settingsVisible; return true; }
             int index=(int)((my-44)/40);
+            if(index==0 && profile==Profile.COSMOS && embeddedView!=null) {
+                invokeAtlasRailAction("toggleListPanel"); return true;
+            }
+            if(index==1 && profile==Profile.COSMOS && embeddedView!=null) {
+                invokeAtlasRailAction("toggleInfoPanel"); return true;
+            }
             if(index==0) { panels.get("navigation").visible=!panels.get("navigation").visible; return true; }
             if(index==1) { panels.get("inspector").visible=!panels.get("inspector").visible; return true; }
             if(index==2) { panels.get("tools").visible=!panels.get("tools").visible; return true; }
@@ -369,8 +375,6 @@ public final class PlatformShellScreen extends Screen {
             case RTS -> "TACTICAL";
         };
         Panel nav=panels.get("navigation"), inspector=panels.get("inspector"), timeline=panels.get("timeline");
-        nav.visible=true; inspector.visible=true; timeline.visible=true;
-        navRailVisible=inspectorVisible=timelineVisible=true;
         switch(next) {
             case COSMOS -> { nav.title="COSMIC CATALOGUE"; inspector.title="BODY INSPECTOR"; timeline.title="ORBIT / TIME"; }
             case POLITICS -> { nav.title="REALMS & DIPLOMACY"; inspector.title="CHARACTER / REALM"; timeline.title="DYNASTY / CHRONICLE"; }
