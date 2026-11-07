@@ -376,12 +376,28 @@ public class TroopsMod {
             recruits.add(troop);
         }
 
+        List<String> ids = new ArrayList<>();
+        for (TroopEntity troop : recruits) ids.add(troop.getUUID().toString());
+        Squads.Squad squad = SQUADS.create(owner, null, ids);
+        squad.realm = recruits.get(0).realm;
+        squad.cx = site.spawn().getX();
+        squad.cz = site.spawn().getZ();
+        for (TroopEntity troop : recruits) {
+            troop.setSquadId(squad.id);
+            if (!level.addFreshEntity(troop)) {
+                discardPrepared(recruits);
+                src.sendFailure(Component.literal("Мир отклонил создание новобранцев; платежи не списаны."));
+                return 0;
+            }
+        }
         if (!dev.worldforge.settle.mc.SettleMod.payRecruitment(site, totalSupply)) {
-            src.sendFailure(Component.literal("Склад изменился во время найма; ресурсы и отряд не созданы."));
+            discardPrepared(recruits);
+            src.sendFailure(Component.literal("Склад изменился во время найма; отряд удалён, ресурсы не списаны."));
             return 0;
         }
         if (!realm.isEmpty() && !TreasuryApi.spend(realm, goldCost, "Наём: " + unit.name())) {
             dev.worldforge.settle.mc.SettleMod.refundRecruitment(site, totalSupply);
+            discardPrepared(recruits);
             src.sendFailure(Component.literal("В казне " + realm + " не хватает золота: нужно " + goldCost));
             return 0;
         }
@@ -392,17 +408,6 @@ public class TroopsMod {
                 stack.shrink(take);
                 left -= take;
             }
-        }
-
-        List<String> ids = new ArrayList<>();
-        for (TroopEntity troop : recruits) ids.add(troop.getUUID().toString());
-        Squads.Squad squad = SQUADS.create(owner, null, ids);
-        squad.realm = recruits.get(0).realm;
-        squad.cx = site.spawn().getX();
-        squad.cz = site.spawn().getZ();
-        for (TroopEntity troop : recruits) {
-            troop.setSquadId(squad.id);
-            level.addFreshEntity(troop);
         }
         src.sendSuccess(() -> Component.literal("Из «" + site.building().def.name + "» выпущен отряд «"
                 + squad.name + "»: " + recruits.size() + " × " + unit.name() + "; золото "
@@ -551,6 +556,13 @@ public class TroopsMod {
         int men = back;
         src.sendSuccess(() -> Component.literal("Вернулось в армии людей: " + men), false);
         return gone.size();
+    }
+
+    private static void discardPrepared(List<TroopEntity> troops) {
+        for (TroopEntity troop : troops) {
+            onDeath(troop);
+            troop.discard();
+        }
     }
 
     static Entity find(UUID id) {
