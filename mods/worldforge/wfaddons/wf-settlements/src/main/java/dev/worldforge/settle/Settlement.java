@@ -281,6 +281,7 @@ public final class Settlement {
             if (assignedWith(uid, "builder") >= b.def.builders && w.building != uid) throw new OrderException("На стройке уже максимум строителей (" + b.def.builders + ")");
         }
         w.building = uid;
+        w.manualOrder = false;
         w.status = "";
     }
 
@@ -288,7 +289,17 @@ public final class Settlement {
         Worker w = worker(workerId);
         if (w == null) throw new OrderException("Нет рабочего " + workerId);
         w.building = 0;
+        w.manualOrder = false;
         w.status = "свободен";
+    }
+
+    /** Прямой приказ RTS; координаты относительно центра поселения. */
+    public void moveTo(int workerId, double x, double z) {
+        Worker w = worker(workerId);
+        if (w == null) throw new OrderException("Нет рабочего " + workerId);
+        if (!Double.isFinite(x) || !Double.isFinite(z) || Math.abs(x) > 100000 || Math.abs(z) > 100000)
+            throw new OrderException("Некорректная точка приказа");
+        w.building = 0; w.manualOrder = true; w.orderX = x; w.orderZ = z; w.status = "приказ: движение";
     }
 
     public void setProfession(int workerId, String profession) {
@@ -297,6 +308,7 @@ public final class Settlement {
         if (!defs.professions.containsKey(profession)) throw new OrderException("Нет профессии " + profession);
         w.profession = profession;
         w.building = 0;
+        w.manualOrder = false;
         w.status = "свободен";
     }
 
@@ -450,7 +462,7 @@ public final class Settlement {
 
     private void autoAssign() {
         List<Worker> idle = new ArrayList<>();
-        for (Worker w : workers) if (w.building == 0) idle.add(w);
+        for (Worker w : workers) if (w.building == 0 && !w.manualOrder) idle.add(w);
         idle.sort(Comparator.comparingInt(w -> w.id));
         for (Worker w : idle) {
             if (w.profession.equals("builder") || w.profession.equals("laborer")) {
@@ -484,7 +496,7 @@ public final class Settlement {
             Worker pick = null;
             int bestStaff = 1;
             for (Worker w : workers) {
-                if (w.building == 0 || w.profession.equals("builder")) continue;
+                if (w.building == 0 || w.manualOrder || w.profession.equals("builder")) continue;
                 Building from = building(w.building);
                 if (from == null || from.state != Building.State.DONE) continue;
                 int staff = assigned(from.uid).size();
@@ -712,6 +724,7 @@ public final class Settlement {
 
     /** Куда идёт рабочий: у здания - точка внутри его площадки (у каждого своя), свободный - у центра поселения. {x, z}. */
     public double[] targetOf(Worker w) {
+        if (w.manualOrder) return new double[]{w.orderX, w.orderZ};
         Building b = w.building == 0 ? null : building(w.building);
         double a = w.id * 2.399963;
         if (b == null) {
@@ -934,6 +947,7 @@ public final class Settlement {
         for (Worker w : workers) {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", w.id); m.put("name", w.name); m.put("profession", w.profession); m.put("person", w.person); m.put("building", w.building); m.put("status", w.status); m.put("x", w.x); m.put("z", w.z);
+            m.put("manual_order", w.manualOrder); m.put("order_x", w.orderX); m.put("order_z", w.orderZ);
             if (w.jobPrio != null) m.put("prio", new LinkedHashMap<String, Object>(w.jobPrio));
             ws.add(m);
         }
@@ -988,6 +1002,9 @@ public final class Settlement {
             w.profession = (String) m.get("profession"); w.person = (String) m.get("person"); w.building = ((Number) m.get("building")).intValue(); w.status = (String) m.get("status");
             if (m.get("x") instanceof Number nx) w.x = nx.doubleValue();
             if (m.get("z") instanceof Number nz) w.z = nz.doubleValue();
+            w.manualOrder = Boolean.TRUE.equals(m.get("manual_order"));
+            if (m.get("order_x") instanceof Number ox) w.orderX = ox.doubleValue();
+            if (m.get("order_z") instanceof Number oz) w.orderZ = oz.doubleValue();
             if (m.get("prio") instanceof Map<?, ?> pm) { w.jobPrio = new TreeMap<>(); for (var e : pm.entrySet()) w.jobPrio.put(String.valueOf(e.getKey()), ((Number) e.getValue()).intValue()); }
             if (w.building != 0 && s.building(w.building) == null) w.building = 0;
             s.workers.add(w);
