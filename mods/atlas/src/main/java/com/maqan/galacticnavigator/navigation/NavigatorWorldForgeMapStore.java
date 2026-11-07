@@ -43,7 +43,6 @@ public final class NavigatorWorldForgeMapStore {
     public static synchronized boolean reload() {
         Path path = file();
         if (!Files.isRegularFile(path)) {
-            snapshot = null;
             status = "No WorldForge map snapshot";
             lastLoadedAt = System.currentTimeMillis();
             return false;
@@ -57,14 +56,15 @@ public final class NavigatorWorldForgeMapStore {
                 parsed = GSON.fromJson(reader, WorldForgeMapSnapshot.class);
             }
             validate(parsed);
+            parsed.rebuildIndexes();
             snapshot = parsed;
             status = "WorldForge · " + parsed.features.size() + " objects · "
                     + parsed.territories.size() + " territories";
             lastLoadedAt = System.currentTimeMillis();
             return true;
         } catch (Exception error) {
-            snapshot = null;
-            status = "WorldForge snapshot rejected: " + safeMessage(error);
+            // Keep the last known-good snapshot available during transient or malformed updates.
+            status = "WorldForge snapshot rejected; keeping previous data: " + safeMessage(error);
             lastLoadedAt = System.currentTimeMillis();
             return false;
         }
@@ -77,19 +77,13 @@ public final class NavigatorWorldForgeMapStore {
     public static List<WorldForgeMapSnapshot.Territory> territories(String dimensionId) {
         WorldForgeMapSnapshot value = snapshot;
         if (value == null || value.territories == null) return Collections.emptyList();
-        List<WorldForgeMapSnapshot.Territory> result = new ArrayList<>();
-        for (WorldForgeMapSnapshot.Territory territory : value.territories)
-            if (territory != null && dimensionId.equals(territory.dimension_id)) result.add(territory);
-        return Collections.unmodifiableList(result);
+        return value.territoriesInDimension(dimensionId);
     }
 
     public static List<WorldForgeMapSnapshot.Feature> features(String dimensionId) {
         WorldForgeMapSnapshot value = snapshot;
         if (value == null || value.features == null) return Collections.emptyList();
-        List<WorldForgeMapSnapshot.Feature> result = new ArrayList<>();
-        for (WorldForgeMapSnapshot.Feature feature : value.features)
-            if (feature != null && dimensionId.equals(feature.dimension_id)) result.add(feature);
-        return Collections.unmodifiableList(result);
+        return value.featuresInDimension(dimensionId);
     }
 
     private static void validate(WorldForgeMapSnapshot value) {
