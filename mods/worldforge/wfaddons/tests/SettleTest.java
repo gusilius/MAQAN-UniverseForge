@@ -41,6 +41,14 @@ public class SettleTest {
                 && d.buildings.get("stable").requires.contains("barracks")
                 && d.buildings.get("siege_workshop").requires.contains("smithy"),
                 "специализированные военные здания имеют технологические зависимости");
+        Settlement supply = fresh(d, 0);
+        double supplyWood = supply.amount("wood"), supplyStone = supply.amount("stone");
+        ok(!supply.spend(Map.of("wood", 10, "stone", 999))
+                && supply.amount("wood") == supplyWood && supply.amount("stone") == supplyStone,
+                "нехватка одного ресурса не списывает частично остальные");
+        ok(supply.spend(Map.of("wood", 10, "stone", 5))
+                && supply.amount("wood") == supplyWood - 10 && supply.amount("stone") == supplyStone - 5,
+                "снабжение военного найма списывается одной атомарной операцией");
 
         Flow flow = new Flow();
         flow.record(1, "wood", 5, true);
