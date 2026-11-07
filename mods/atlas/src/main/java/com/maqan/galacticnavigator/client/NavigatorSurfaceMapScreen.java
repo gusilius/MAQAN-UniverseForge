@@ -8,6 +8,7 @@ import com.maqan.galacticnavigator.navigation.NavigatorWaypoint;
 import com.maqan.galacticnavigator.navigation.NavigatorWaypointStore;
 import com.maqan.galacticnavigator.navigation.NavigatorWorldForgeMapStore;
 import com.maqan.galacticnavigator.navigation.WorldForgeMapSnapshot;
+import com.maqan.galacticnavigator.navigation.WorldForgeMapGeometry;
 import com.maqan.galacticnavigator.navigation.SurfaceTerrainProjection;
 import java.util.ArrayList;
 import java.util.Comparator;
