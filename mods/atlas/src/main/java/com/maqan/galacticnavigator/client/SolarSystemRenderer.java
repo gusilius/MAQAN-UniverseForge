@@ -33,8 +33,11 @@ public final class SolarSystemRenderer {
                              int color, int thickness) {
         if (!NavigatorPreferences.orbitsVisible() || !Double.isFinite(rx) || !Double.isFinite(ry)
                 || rx < 2 || ry < 2 || thickness <= 0) return;
-        int segments = Math.max(96, Math.min(512,
-                (int)(Math.PI * 2.0 * Math.max(rx, ry) / 2.0)));
+        // Use geometry-adaptive tessellation: tiny orbital glyphs do not need
+        // 96 vertices, while large map-scale ellipses remain smooth without
+        // allocating hundreds of vertices for every body on every frame.
+        int segments = Math.max(24, Math.min(256,
+                (int)Math.ceil(Math.PI * 2.0 * Math.max(rx, ry) / 2.0)));
         double[] xs = new double[segments];
         double[] ys = new double[segments];
         for (int i = 0; i < segments; i++) {
@@ -48,7 +51,8 @@ public final class SolarSystemRenderer {
     public static void ring(GuiGraphics g, int cx, int cy, double rx, double ry,
                             double rotation, int color) {
         if (!Double.isFinite(rx) || !Double.isFinite(ry) || rx < 3 || ry < 1) return;
-        int segments = Math.max(96, Math.min(512, (int)(Math.PI * 2.0 * rx / 2.0)));
+        int segments = Math.max(24, Math.min(256,
+                (int)Math.ceil(Math.PI * 2.0 * rx / 2.0)));
         double cos = Math.cos(rotation), sin = Math.sin(rotation);
         double[] xs = new double[segments];
         double[] ys = new double[segments];
