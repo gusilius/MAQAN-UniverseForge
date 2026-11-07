@@ -114,7 +114,7 @@ public class SettleMod {
             String raceId = realm == null ? "" : propertyString(realm.props, "race");
             String cultureId = realm == null ? "" : propertyString(realm.props, "culture");
             String provinceFeatureId = province == null ? "" :
-                    "worldforge:" + dimensionId + ":" + map.name + ":province:" + province.key;
+                    "worldforge:" + dimension + ":" + map.name + ":province:" + province.key;
             int y = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
                     colony.cx, colony.cz);
             Map<String, String> attrs = new java.util.LinkedHashMap<>();
