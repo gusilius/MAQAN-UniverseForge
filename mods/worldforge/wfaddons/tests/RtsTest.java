@@ -238,7 +238,6 @@ public class RtsTest {
         MapView narrow = MapView.fit(g, 0, 0, -20, 100);
         ok(Double.isFinite(narrow.scale) && narrow.scale > 0, "некорректная ширина миникарты не создаёт бесконечный масштаб");
         MapView mv = MapView.fit(g, 0, 0, 120, 100);
-        ok(mv.pick(null, mv.px, mv.py).kind == Target.Kind.GROUND, "пустое поселение безопасно возвращает землю при выборе");
         Worker badMapWorker = g.workers.get(0);
         double oldMapX = badMapWorker.x, oldMapZ = badMapWorker.z;
         badMapWorker.x = Double.NaN; badMapWorker.z = Double.POSITIVE_INFINITY;

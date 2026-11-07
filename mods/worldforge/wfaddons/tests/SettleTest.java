@@ -81,8 +81,10 @@ public class SettleTest {
         ok(throwsOrder(() -> s.place("granary", 30, 30)), "амбар требует лесопилку");
         ok(throwsOrder(() -> s.place("house", 1, 1)), "нельзя строить поверх другого здания");
         ok(throwsOrder(() -> s.place("nope", 50, 50)), "неизвестное здание отклоняется");
-        s.place("sawmill", 20, 20);
-        ok(throwsOrder(() -> s.cancel(lc.uid)), "нельзя снести лесной лагерь, пока от него зависит лесопилка");
+        Building mill = s.place("sawmill", 20, 20);
+        s.tick(60);
+        ok(mill.state == Building.State.DONE, "лесопилка действительно построена перед проверкой зависимости");
+        ok(throwsOrder(() -> s.cancel(lc.uid)), "нельзя снести лесной лагерь, пока от него зависит построенная лесопилка");
 
         // отмена с возвратом
         Settlement c = fresh(d, 0);
