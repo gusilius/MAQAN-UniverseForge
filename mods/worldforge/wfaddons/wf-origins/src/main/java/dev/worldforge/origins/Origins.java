@@ -212,7 +212,8 @@ public final class Origins {
         Build b = build(owner);
         if (!b.prof.containsKey(id) || units <= 0) return -1;
         int before = rank(owner, id);
-        b.prof.merge(id, units, Integer::sum);
+        long earned = (long) b.prof.get(id) + (long) units;
+        b.prof.put(id, (int) Math.min(Integer.MAX_VALUE, earned));
         int after = rank(owner, id);
         return after > before ? after : -1;
     }
