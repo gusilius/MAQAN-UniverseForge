@@ -121,7 +121,7 @@ public final class PlatformShellScreen extends Screen {
             panels.get("timeline").visible = false;
             panels.get("tools").visible = false;
         }
-        ensureAtlasView();
+        if (profile == Profile.COSMOS) ensureAtlasView();
         if (embeddedView != null) embeddedView.init(Minecraft.getInstance(), width, height);
         Screen providerView = providerViews.get(profile);
         if (providerView != null) providerView.init(Minecraft.getInstance(), width, height);
