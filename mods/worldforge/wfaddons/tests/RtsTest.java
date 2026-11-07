@@ -243,7 +243,7 @@ public class RtsTest {
         badMapWorker.x = Double.NaN; badMapWorker.z = Double.POSITIVE_INFINITY;
         MapView sanitized = MapView.fit(g, 0, 0, 120, 100);
         ok(Double.isFinite(sanitized.minX) && Double.isFinite(sanitized.minZ) && Double.isFinite(sanitized.scale), "повреждённые координаты рабочего не ломают карту поселения");
-        ok(sanitized.rects(g).stream().noneMatch(r -> r.kind == Selection.Rect.WORKER && r.id == badMapWorker.id), "рабочий с некорректными координатами не попадает в выбор карты");
+        ok(sanitized.rects(g).stream().noneMatch(rect -> rect.kind == Selection.Rect.WORKER && rect.id == badMapWorker.id), "рабочий с некорректными координатами не попадает в выбор карты");
         badMapWorker.x = oldMapX; badMapWorker.z = oldMapZ;
         Building b0 = g.buildings.get(0);
         ok(mv.pick(g, mv.sx(b0.x), mv.sy(b0.z)).kind == Target.Kind.BUILDING, "миникарта: здание под точкой");
