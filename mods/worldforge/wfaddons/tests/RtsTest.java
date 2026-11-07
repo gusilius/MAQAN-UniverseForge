@@ -209,7 +209,7 @@ public class RtsTest {
         ok(r.ok && r.commands.equals(List.of("wfsettle assign 3 " + farm.uid)), "здание выбрано, ПКМ по рабочему -> назначить");
         q.set(List.of(3));
         r = Orders.rightClick(q, g, Target.ground(0, 0), null);
-        ok(r.ok && r.commands.equals(List.of("wfsettle move 1 0.0 0.0", "wfsettle move 2 0.0 0.0")),
+        ok(r.ok && r.commands.equals(List.of("wfsettle move 3 0.0 0.0")),
                 "ПКМ по земле выдаёт выбранным рабочим приказы движения");
         r = Orders.rightClick(q, g, Target.ground(-20, 20), "house");
         ok(r.ok && r.commands.equals(List.of("wfsettle build house -20 20")), "ПКМ по земле при размещении -> build");
