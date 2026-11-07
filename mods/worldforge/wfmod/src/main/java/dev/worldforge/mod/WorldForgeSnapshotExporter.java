@@ -134,8 +134,7 @@ public final class WorldForgeSnapshotExporter {
                     for (WorldForgeProvinceContourBuilder.Point point : ring) {
                         double x = (point.x() - map.titles.w * 0.5) * map.titles.bpp;
                         double z = (point.z() - map.titles.h * 0.5) * map.titles.bpp;
-                        int y = generator == null ? map.seaLevel
-                                : generator.surfaceAt((int) Math.round(x), (int) Math.round(z)).getY();
+                        int y = generator.surfaceAt((int) Math.round(x), (int) Math.round(z)).getY();
                         Map<String, Object> vertex = new LinkedHashMap<>();
                         vertex.put("x", x);
                         vertex.put("y", y);
@@ -196,8 +195,7 @@ public final class WorldForgeSnapshotExporter {
                     for (WorldForgeProvinceContourBuilder.Point point : ring) {
                         double x = (point.x() - map.titles.w * 0.5) * map.titles.bpp;
                         double z = (point.z() - map.titles.h * 0.5) * map.titles.bpp;
-                        int y = generator == null ? map.seaLevel
-                                : generator.surfaceAt((int) Math.round(x), (int) Math.round(z)).getY();
+                        int y = generator.surfaceAt((int) Math.round(x), (int) Math.round(z)).getY();
                         Map<String, Object> vertex = new LinkedHashMap<>();
                         vertex.put("x", x);
                         vertex.put("y", y);
