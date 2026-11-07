@@ -2574,7 +2574,7 @@ public class NavigatorScreen extends Screen {
             int miniOrbit = Math.max(3, Math.min(116, (int)Math.round(
                     Math.min(radius * .46, perSystemBudget * (detail == 0 ? .75 : 1.15))
                             * NavigatorPreferences.atlasOrbitSpacing())));
-            double bodyLodScale = Math.max(.8, Math.min(2.8, Math.pow(viewScale, .24)));
+            double bodyLodScale = Math.max(.8, Math.min(2.8, Math.pow(Math.max(.025, zoom), .24)));
             JsonObject star = null;
             List<Entry<String, JsonObject>> planets = new ArrayList<>();
             List<Entry<String, JsonObject>> moons = new ArrayList<>();
