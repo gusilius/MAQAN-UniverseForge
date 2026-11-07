@@ -122,6 +122,7 @@ public final class PlatformShellScreen extends Screen {
             panels.get("tools").visible = false;
         }
         ensureAtlasView();
+        if (embeddedView != null) embeddedView.init(Minecraft.getInstance(), width, height);
         Screen providerView = providerViews.get(profile);
         if (providerView != null) providerView.init(Minecraft.getInstance(), width, height);
         clampPanels();
@@ -139,8 +140,6 @@ public final class PlatformShellScreen extends Screen {
                 LOGGER.warn("Atlas version does not expose embedded hosting mode; using its existing screen.");
             }
             embeddedView = screen;
-            embeddedView.init(Minecraft.getInstance(), width, height);
-            embeddedViewReady = true;
         } catch (ReflectiveOperationException | LinkageError error) {
             LOGGER.error("Unable to mount the existing Atlas screen inside MAQAN", error);
         }
@@ -152,11 +151,19 @@ public final class PlatformShellScreen extends Screen {
         embeddedViewReady = true;
     }
 
-    /** Queue a provider-owned view; Minecraft initializes it after the host gets its viewport. */
+    /** Route Atlas views and WorldForge views into their respective shared workspace slots. */
     public void showEmbeddedView(Screen view) {
         if (view == null) return;
+        if (profile == Profile.COSMOS) {
+            Screen previous = embeddedView;
+            embeddedView = view;
+            if (previous != null && previous != view) previous.removed();
+            if (width > 0 && height > 0) embeddedView.init(Minecraft.getInstance(), width, height);
+            return;
+        }
         Screen previous = providerViews.put(profile, view);
         if (previous != null && previous != view) previous.removed();
+        if (width > 0 && height > 0) view.init(Minecraft.getInstance(), width, height);
     }
 
     private Screen activeView() {
