@@ -25,6 +25,26 @@ public final class ClientSetup {
         MinecraftForge.EVENT_BUS.register(new ClientSetup());
     }
 
+    /**
+     * Route the legacy WorldForge map hotkey into the single MAQAN workspace
+     * whenever Platform is installed. Keep the old standalone map only as a
+     * compatibility fallback for installations without the optional Platform mod.
+     */
+    private static boolean openMaqanWorkspace(Minecraft mc) {
+        if (!net.minecraftforge.fml.ModList.get().isLoaded("maqan_platform")) return false;
+        try {
+            Class<?> type = Class.forName("dev.maqan.platform.client.PlatformShellScreen");
+            Object instance = type.getDeclaredConstructor().newInstance();
+            if (instance instanceof net.minecraft.client.gui.screens.Screen screen) {
+                mc.setScreen(screen);
+                return true;
+            }
+        } catch (ReflectiveOperationException | LinkageError error) {
+            dev.worldforge.mod.WorldForgeMod.LOGGER.error("Unable to open MAQAN global workspace", error);
+        }
+        return false;
+    }
+
     private static void keys(RegisterKeyMappingsEvent e) {
         e.register(OPEN);
         e.register(MINI);
@@ -40,6 +60,7 @@ public final class ClientSetup {
         Minecraft mc = Minecraft.getInstance();
         while (OPEN.consumeClick()) {
             if (mc.player == null || mc.screen != null) continue;
+            if (openMaqanWorkspace(mc)) continue;
             if (ClientState.state == null) {
                 mc.player.displayClientMessage(Component.literal("На этой планете нет политической карты"), true);
             } else {
