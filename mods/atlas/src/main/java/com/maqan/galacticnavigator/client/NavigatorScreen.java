@@ -1183,51 +1183,11 @@ public class NavigatorScreen extends Screen {
         input.setValue(supplied.isEmpty() ? fallback : supplied);
     }
 
-    /** Deep-space atlas backdrop: near-black space, restrained nebula clouds and layered stars. */
+    /** Quiet near-black workspace canvas. Spatial data and celestial models provide the visual focus. */
     private void drawCosmicBackdrop(GuiGraphics g) {
-        g.fill(0, 0, width, height, 0xFF03040A);
-        // Broad, low-contrast nebula structures. No flat blue wash or opaque colour panels.
-        nebula(g, width * .16, height * .40, width * .40, height * .30, 0x101E1744);
-        nebula(g, width * .72, height * .67, width * .38, height * .28, 0x101B254F);
-        nebula(g, width * .53, height * .18, width * .30, height * .22, 0x0C4B1C3B);
-        nebula(g, width * .88, height * .20, width * .24, height * .30, 0x0C193D4C);
-        // Deterministic star distribution with a few brighter foreground stars.
-        for (int i = 0; i < 520; i++) {
-            int sx = Math.floorMod(i * 197 + i * i * 13 + 31, Math.max(1, width));
-            int sy = Math.floorMod(i * 113 + i * i * 7 + 17, Math.max(1, height));
-            int alpha = 0x32 + (i % 6) * 9;
-            int shade = 170 + (i * 29 % 86);
-            int color = (alpha << 24) | (shade << 16) | (shade << 8) | Math.min(255, shade + 5);
-            int size = i % 47 == 0 ? 2 : 1;
-            g.fill(sx, sy, sx + size, sy + size, color);
-            if (i % 47 == 0) {
-                g.fill(sx - 2, sy, sx + 4, sy + 1, 0x388FA7C8);
-                g.fill(sx, sy - 2, sx + 1, sy + 4, 0x388FA7C8);
-            }
-        }
-        // A subtle galactic dust lane, not a fabricated map or object layer.
-        for (int i = 0; i < 80; i++) {
-            double t = i / 79.0;
-            int sx = (int)(width * (.08 + .84 * t));
-            int sy = (int)(height * (.78 - .42 * t + Math.sin(t * Math.PI * 3) * .035));
-            int spread = 1 + (i % 3);
-            g.fill(sx, sy - spread, sx + 1, sy + spread, 0x182C365A);
-        }
-    }
-
-    private void nebula(GuiGraphics g, double cx, double cy, double rx, double ry, int tint) {
-        int rows = 34;
-        int rgb = tint & 0x00FFFFFF;
-        int baseAlpha = (tint >>> 24) & 255;
-        for (int row = 0; row < rows; row++) {
-            double v = -1.0 + 2.0 * row / (rows - 1);
-            double shape = Math.sqrt(Math.max(0.0, 1.0 - v * v));
-            int half = (int)(rx * shape);
-            int alpha = Math.max(1, (int)(baseAlpha * shape * (.35 + .65 * Math.sin((row + 1) * .31))));
-            int color = (alpha << 24) | rgb;
-            int y = (int)(cy + v * ry);
-            g.fill((int)cx - half, y, (int)cx + half, y + 1, color);
-        }
+        g.fill(0, 0, width, height, MaqanUiTheme.BACKGROUND);
+        int horizon = Math.max(1, Math.min(height - 1, (int) (height * 0.115f)));
+        g.fill(0, horizon, width, horizon + 1, 0x183B6175);
     }
 
     /** Read live positions from MAQAN's N-body simulation, falling back to authored CH coordinates. */
