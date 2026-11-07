@@ -26,7 +26,6 @@ concurrency:
 
 jobs:
   import-and-build:
-    # The import commit itself must not recursively start another import/build run.
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -86,58 +85,25 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Test and build Atlas native core (all hosted platforms)
-        strategy:
-          fail-fast: false
-          matrix:
-            include:
-              - os: ubuntu-latest
-                artifact: linux-x86_64
-                library: mods/atlas/native/maqan-core/target/release/libmaqan_core.so
-              - os: windows-latest
-                artifact: windows-x86_64
-                library: mods/atlas/native/maqan-core/target/release/maqan_core.dll
-              - os: macos-latest
-                artifact: macos
-                library: mods/atlas/native/maqan-core/target/release/libmaqan_core.dylib
-        runs-on: ${{ matrix.os }}
-        steps:
-          - uses: actions/checkout@v4
-          - uses: actions/checkout@v4
-            with:
-              path: _workflow_source
-          - uses: dtolnay/rust-toolchain@stable
-          - name: Fetch imported Atlas files
-            run: |
-              git clone https://github.com/gusilius/MAQAN-UniverseForge.git _universeforge
-              cd _universeforge
-              git checkout ${{ github.sha }}
-              cp -a mods/atlas "${GITHUB_WORKSPACE}/mods/"
-            shell: bash
-          - name: Test Rust core
-            working-directory: mods/atlas/native/maqan-core
-            run: cargo test --locked
-          - name: Build Rust core
-            working-directory: mods/atlas/native/maqan-core
-            run: cargo build --release --locked
-          - uses: actions/upload-artifact@v4
-            with:
-              name: atlas-native-${{ matrix.artifact }}
-              path: ${{ matrix.library }}
-              if-no-files-found: error
-              retention-days: 14
+      - name: Test Atlas native core
+        working-directory: mods/atlas/native/maqan-core
+        run: cargo test --locked
+
+      - name: Build Atlas native core
+        working-directory: mods/atlas/native/maqan-core
+        run: cargo build --release --locked
 
       - name: Set up Gradle for Atlas
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.8"
 
-      - name: Download native libraries for Atlas
-        uses: actions/download-artifact@v4
-        with:
-          pattern: atlas-native-*
-          path: mods/atlas/build/native-libs
-          merge-multiple: true
+      - name: Install Atlas native library resource
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p mods/atlas/build/native-libs
+          cp mods/atlas/native/maqan-core/target/release/libmaqan_core.so mods/atlas/build/native-libs/
 
       - name: Build Atlas Forge mod
         working-directory: mods/atlas
@@ -176,7 +142,7 @@ jobs:
       - name: Upload Atlas JAR
         uses: actions/upload-artifact@v4
         with:
-          name: maqan-atlas
+          name: maqan-atlas-linux
           path: mods/atlas/build/libs/*.jar
           if-no-files-found: error
           retention-days: 30
