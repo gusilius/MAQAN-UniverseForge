@@ -56,7 +56,7 @@ public class NavigatorScreen extends Screen {
     private boolean showInfo = NavigatorPreferences.showInfoPanel();
     private int mapMode = 1; // 0 = 2D, 1 = Hybrid, 2 = perspective 3D
     // 0 = one system, 1 = systems in the active galaxy, 2 = systems in the active universe.
-    private int atlasMode = 2;
+    private int atlasMode = 3;
     private Button atlasModeButton;
     private Button atlasDetailButton, atlasScaleButton, atlasTextureButton, atlasGlowButton;
     private double cameraYaw = 0.55;
@@ -309,7 +309,13 @@ public class NavigatorScreen extends Screen {
             refreshSpeedButtons();
         }, menuX + 72, menuY + 114);
         atlasModeButton = addToolButton("ATLAS: SYSTEM", () -> {
-            atlasMode = (atlasMode + 1) % 6;
+            atlasMode = switch (atlasMode) {
+                case 3 -> 1; // Universe → active galaxy
+                case 1 -> 4; // Galaxy → sectors
+                case 4 -> 2; // Sector layer → all universe systems
+                case 2 -> 5; // Universe systems → full datapack catalogue
+                default -> 3; // Return to the universe galaxy layer
+            };
             sectorPath = null;
             if (atlasMode != 1 && atlasMode != 4) galaxyPath = null;
             systemPath = null;
@@ -718,9 +724,9 @@ public class NavigatorScreen extends Screen {
 
     private String atlasModeName() {
         return switch (atlasMode) {
-            case 1 -> "GALAXY";
-            case 2 -> "UNIVERSE";
-            case 3 -> "GALAXIES";
+            case 1 -> sectorPath == null ? "GALAXY" : "SECTOR SYSTEMS";
+            case 2 -> "UNIVERSE SYSTEMS";
+            case 3 -> "UNIVERSE";
             case 4 -> "SECTORS";
             case 5 -> "DATAPACK";
             default -> "SYSTEM";
@@ -1684,6 +1690,7 @@ public class NavigatorScreen extends Screen {
         switch (action) {
             case "root", "atlas" -> {
                 resetPath();
+                atlasMode = 3;
                 refreshButtons();
             }
             case "galaxy" -> {
