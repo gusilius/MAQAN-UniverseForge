@@ -72,7 +72,7 @@ public class OriginsTest {
         o2.fromJson(o.toJson());
         ok(o2.build(P).history.equals(o.build(P).history) && o2.build(P).prof.equals(o.build(P).prof) && o2.mods(P).equals(o.mods(P)), "save/load сохраняет историю, профессии и рассчитанные бонусы");
         String validOriginsSave = o.toJson();
-        String corruptOriginsSave = validOriginsSave.replace("\\"race\\":\\"orc\\"", "\\"race\\":\\"unknown_race\\"");
+        String corruptOriginsSave = validOriginsSave.replace("\"race\":\"orc\"", "\"race\":\"unknown_race\"");
         boolean invalidOriginsRejected = false;
         try { o2.fromJson(corruptOriginsSave); } catch (IllegalArgumentException invalidSave) { invalidOriginsRejected = true; }
         ok(invalidOriginsRejected && o2.toJson().equals(validOriginsSave),
