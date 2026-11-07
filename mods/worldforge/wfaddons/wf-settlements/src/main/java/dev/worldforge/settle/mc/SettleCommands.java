@@ -67,6 +67,16 @@ public final class SettleCommands {
                                     col.s.assign(w, uid);
                                     return "Рабочий #" + w + " отправлен в здание #" + uid;
                                 })))))
+                .then(Commands.literal("move").requires(SettleCommands::op)
+                        .then(Commands.argument("worker", IntegerArgumentType.integer(1))
+                                .then(Commands.argument("x", com.mojang.brigadier.arguments.DoubleArgumentType.doubleArg(-100000, 100000))
+                                        .then(Commands.argument("z", com.mojang.brigadier.arguments.DoubleArgumentType.doubleArg(-100000, 100000)).executes(c -> order(c, col -> {
+                                            int w = IntegerArgumentType.getInteger(c, "worker");
+                                            double x = com.mojang.brigadier.arguments.DoubleArgumentType.getDouble(c, "x");
+                                            double z = com.mojang.brigadier.arguments.DoubleArgumentType.getDouble(c, "z");
+                                            col.s.moveTo(w, x, z);
+                                            return "Рабочий #" + w + " получил приказ перемещения";
+                                        }))))))
                 .then(Commands.literal("unassign").requires(SettleCommands::op)
                         .then(Commands.argument("worker", IntegerArgumentType.integer(1)).executes(c -> order(c, col -> {
                             int w = IntegerArgumentType.getInteger(c, "worker");
