@@ -27,7 +27,13 @@ public final class WorldForgeMapSnapshot {
         if(features!=null) for(Feature f:features)
             if(f!=null&&f.dimension_id!=null&&!f.dimension_id.isBlank())
                 fg.computeIfAbsent(f.dimension_id,k->new ArrayList<>()).add(f);
-        territoriesByDimension=freeze(tg); featuresByDimension=freeze(fg);
+        Map<String,List<PoliticalBoundary>> bg=new LinkedHashMap<>();
+        if(political_boundaries!=null) for(PoliticalBoundary b:political_boundaries)
+            if(b!=null&&b.dimension_id!=null&&!b.dimension_id.isBlank())
+                bg.computeIfAbsent(b.dimension_id,k->new ArrayList<>()).add(b);
+        territoriesByDimension=freeze(tg);
+        featuresByDimension=freeze(fg);
+        boundariesByDimension=freeze(bg);
     }
     public List<Territory> territoriesInDimension(String id) {
         return id==null||id.isBlank()?List.of():territoriesByDimension.getOrDefault(id,List.of());
