@@ -26,3 +26,6 @@ sourceSets {
         }
     }
 }
+
+// Keep source literals deterministic across Linux and Windows runners.
+tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8' }
