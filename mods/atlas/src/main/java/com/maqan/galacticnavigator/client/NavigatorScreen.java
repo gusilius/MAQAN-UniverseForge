@@ -68,6 +68,7 @@ public class NavigatorScreen extends Screen {
     private String savedSceneSelectedId, savedSceneSelectedNodeId, savedSceneBodyViewId;
     private double savedSceneZoom, savedScenePanX, savedScenePanY, savedSceneCameraYaw, savedSceneCameraPitch;
     private String savedSceneCameraTargetId;
+    private String pendingAtlasFocusId;
     private Button atlasDetailButton, atlasScaleButton, atlasTextureButton, atlasGlowButton;
     private double cameraYaw = 0.55;
     private double cameraPitch = 0.38;
@@ -684,6 +685,8 @@ public class NavigatorScreen extends Screen {
                 selectedId = bodyId;
                 selectedNodeId = node.id;
                 cameraTargetId = bodyId;
+                publishPlatformSelection(bodyNode(bodyId));
+                pendingAtlasFocusId = null;
                 panX = 0; panY = 0; zoom = 1.0;
                 listScroll = 0;
                 refreshButtons();
@@ -763,6 +766,8 @@ public class NavigatorScreen extends Screen {
             atlasMode = 5; // All indexed systems, independent of the active hierarchy path.
             galaxyPath = sectorPath = systemPath = null;
             selectedId = selectedNodeId = bodyViewId = cameraTargetId = null;
+            publishPlatformSelection(null);
+            pendingAtlasFocusId = null;
             listScroll = infoScroll = 0;
             panX = panY = 0.0;
             zoom = 1.0;
@@ -791,6 +796,10 @@ public class NavigatorScreen extends Screen {
             cameraYaw = savedSceneCameraYaw;
             cameraPitch = savedSceneCameraPitch;
             cameraTargetId = savedSceneCameraTargetId;
+            pendingAtlasFocusId = null;
+            Node restored = selectedId != null ? bodyNode(selectedId)
+                    : selectedNodeId != null ? findNode(selectedNodeId) : null;
+            publishPlatformSelection(restored);
         }
         refreshButtons();
     }
@@ -850,6 +859,15 @@ public class NavigatorScreen extends Screen {
     }
 
     /** Camera target matching the actual drawable center of the Atlas overview canvas. */
+    private void completePendingAtlasFocus() {
+        if (pendingAtlasFocusId == null) return;
+        Point target = mapPoints.get(pendingAtlasFocusId);
+        if (target == null) return;
+        panX += atlasCameraCenterX() - target.x;
+        panY += atlasCameraCenterY() - target.y;
+        pendingAtlasFocusId = null;
+    }
+
     private int atlasCameraCenterX() {
         return (mapL + mapR) / 2;
     }
@@ -867,11 +885,16 @@ public class NavigatorScreen extends Screen {
         // A selected body may belong to a system currently culled outside the
         // viewport. Center its owning system first; the next frame restores the
         // body's exact screen target and the normal focus action can refine it.
+        boolean focusViaSystem = false;
         if (point == null && unifiedSceneMode && id != null) {
             int separator = id.indexOf("::");
-            if (separator > 0) point = mapPoints.get(id.substring(0, separator));
+            if (separator > 0) {
+                point = mapPoints.get(id.substring(0, separator));
+                focusViaSystem = point != null;
+            }
         }
         if (point == null) return;
+        if (focusViaSystem) pendingAtlasFocusId = id;
         if (level == 3 && mapMode == 2 && selectedId != null) {
             cameraTargetId = selectedId;
             panX = 0; panY = 0;
@@ -886,11 +909,16 @@ public class NavigatorScreen extends Screen {
     /** Focus a selected object without replacing the global map with another screen. */
     private void zoomToAtlasNode(String id, double factor) {
         Point point = id == null ? null : mapPoints.get(id);
+        boolean focusViaSystem = false;
         if (point == null && unifiedSceneMode && id != null) {
             int separator = id.indexOf("::");
-            if (separator > 0) point = mapPoints.get(id.substring(0, separator));
+            if (separator > 0) {
+                point = mapPoints.get(id.substring(0, separator));
+                focusViaSystem = point != null;
+            }
         }
         if (point == null) return;
+        if (focusViaSystem) pendingAtlasFocusId = id;
         int centerX = atlasCameraCenterX();
         int centerY = atlasCameraCenterY();
         panX += centerX - point.x;
@@ -1543,6 +1571,7 @@ public class NavigatorScreen extends Screen {
         g.enableScissor(mapL + 3, mapT + 3, mapR - 3, mapB - 3);
         hoveredNode = drawMap(g, mx, my, nodes);
         g.disableScissor();
+        completePendingAtlasFocus();
         if (hoveredNode == null) hoveredNode = listHover;
         if (hoveredNode != null && (pinnedNode == null || !hoveredNode.id.equals(pinnedNode.id)))
             drawHoverCard(g, hoveredNode, mx, my);
