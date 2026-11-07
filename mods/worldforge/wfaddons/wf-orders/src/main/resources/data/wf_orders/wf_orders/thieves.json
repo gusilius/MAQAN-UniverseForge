@@ -1,0 +1,99 @@
+{
+  "id": "thieves_guild",
+  "name": "Гильдия воров",
+  "kind": "guild",
+  "color": 8150184,
+  "power": 40,
+  "treasury": 500,
+  "join_gold": 60,
+  "dues": 3,
+  "desc": "Тени в каждом городе. Знают всё про всех и берут свою долю. Враги стражи и Ордена Щита.",
+  "rivals": [
+    "merchants_guild",
+    "knights_shield"
+  ],
+  "liked": [
+    "shrewd",
+    "ambitious",
+    "greedy"
+  ],
+  "disliked": [
+    "just",
+    "brave"
+  ],
+  "ranks": [
+    {
+      "id": "pickpocket",
+      "name": "Карманник",
+      "influence": 0,
+      "perks": {}
+    },
+    {
+      "id": "burglar",
+      "name": "Домушник",
+      "influence": 40,
+      "perks": {
+        "intrigue_bonus": 1
+      }
+    },
+    {
+      "id": "fixer",
+      "name": "Фиксер",
+      "influence": 130,
+      "perks": {
+        "intrigue_bonus": 2
+      }
+    },
+    {
+      "id": "shadow",
+      "name": "Хозяин теней",
+      "influence": 320,
+      "perks": {
+        "intrigue_bonus": 4
+      }
+    }
+  ],
+  "missions": [
+    {
+      "id": "fence",
+      "text": "Сбыть краденое: передайте {n} золотых слитков.",
+      "type": "fetch",
+      "item": "gold_ingot",
+      "min": 2,
+      "max": 8,
+      "reward": 50,
+      "influence": 14
+    },
+    {
+      "id": "protection",
+      "text": "Соберите дань: внесите {n} золота в общак.",
+      "type": "gold",
+      "min": 20,
+      "max": 60,
+      "reward": 24,
+      "influence": 10
+    },
+    {
+      "id": "scare",
+      "text": "Припугните стражу: убейте {n} врагов в ночи.",
+      "type": "deed",
+      "item": "kill_hostile",
+      "min": 6,
+      "max": 14,
+      "reward": 36,
+      "influence": 12
+    }
+  ],
+  "petitions": [
+    {
+      "id": "payout",
+      "name": "Доля из общака",
+      "desc": "120 золота.",
+      "cost": 30,
+      "min_rank": 1,
+      "kind": "gold",
+      "amount": 120,
+      "cooldown": 25
+    }
+  ]
+}
