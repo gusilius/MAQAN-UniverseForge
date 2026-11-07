@@ -93,15 +93,19 @@ public final class PlatformShellScreen extends Screen {
         };
     }
 
-    /** Called reflectively by optional provider mods to mount their existing view in MAQAN. */
-    public static void openProviderView(String providerModId, Screen view) {
-        Minecraft mc = Minecraft.getInstance();
+    /** Build a MAQAN host for an existing provider screen without changing Minecraft's screen mid-event. */
+    public static PlatformShellScreen wrapProviderView(String providerModId, Screen view) {
         CapabilityRegistry.Capability capability = CapabilityRegistry.all().stream()
                 .filter(c -> c.providerModId().equals(providerModId)).findFirst().orElse(null);
         String capabilityId = capability == null ? "worldforge.realms.politics" : capability.id();
         PlatformShellScreen shell = new PlatformShellScreen(capabilityId);
         shell.showEmbeddedView(view);
-        mc.setScreen(shell);
+        return shell;
+    }
+
+    /** Optional providers may call this directly when opening a view outside ScreenEvent.Opening. */
+    public static void openProviderView(String providerModId, Screen view) {
+        Minecraft.getInstance().setScreen(wrapProviderView(providerModId, view));
     }
 
     @Override public boolean isPauseScreen() { return false; }
