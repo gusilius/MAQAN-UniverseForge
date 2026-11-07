@@ -603,6 +603,9 @@ public final class PlatformShellScreen extends Screen {
             case "worldforge.quests" -> "wfquest";
             case "worldforge.orders" -> "wforders";
             case "worldforge.relations" -> "wfrel";
+            // Reputation currently exposes a server-authoritative command, not a client screen.
+            // Keep the shell entry actionable without fabricating a local reputation view.
+            case "worldforge.reputation" -> "wfrep show";
             case "worldforge.court" -> "wfcourt";
             case "worldforge.trade" -> "wftrade";
             case "worldforge.army" -> "wfarmy screen";
