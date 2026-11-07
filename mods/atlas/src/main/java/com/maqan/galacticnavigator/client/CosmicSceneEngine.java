@@ -17,6 +17,15 @@ import java.util.*;
 public final class CosmicSceneEngine {
     public enum PlacementSource { DATAPACK, SCHEMATIC, UNPLACED }
     public enum SceneLevel { UNIVERSE, GALAXY, SECTOR, SYSTEM, BODY }
+    public enum PositionFrame { SYSTEM_LOCAL, GALAXY, UNIVERSE, SCHEMATIC, UNKNOWN }
+
+    /** A coordinate together with its frame and whether it is canonical source data. */
+    public record PositionResult(Vector3 position, PositionFrame frame, boolean canonical) {
+        public PositionResult {
+            Objects.requireNonNull(position, "position");
+            Objects.requireNonNull(frame, "frame");
+        }
+    }
 
     public record Vector3(double x, double y, double z) {
         public static final Vector3 ZERO = new Vector3(0, 0, 0);
@@ -220,6 +229,58 @@ public final class CosmicSceneEngine {
         public Optional<SceneBody> parentBody(String systemId, String bodyId) {
             return Optional.ofNullable(parentBodyIndex
                     .getOrDefault(systemId, Map.of()).get(bodyId));
+        }
+
+        /** Position in the body's owning star-system frame, as supplied by the live orbital simulation. */
+        public Optional<PositionResult> bodySystemPosition(String systemId, String bodyId) {
+            SceneBody body = bodyIndex.getOrDefault(systemId, Map.of()).get(bodyId);
+            if (body == null || body.localPosition() == null || !body.localPosition().finite()
+                    || body.positionSource() == PlacementSource.UNPLACED) return Optional.empty();
+            return Optional.of(new PositionResult(body.localPosition(),
+                    PositionFrame.SYSTEM_LOCAL, body.positionSource() == PlacementSource.DATAPACK));
+        }
+
+        /**
+         * Returns the authored system origin with its real coordinate frame.
+         * galaxy_system_pos is intentionally NOT promoted to universe coordinates.
+         */
+        public Optional<PositionResult> systemPosition(String systemId) {
+            SceneSystem system = systemIndex.get(systemId);
+            if (system == null || system.universePosition() == null
+                    || !system.universePosition().finite()
+                    || system.placementSource() == PlacementSource.UNPLACED) return Optional.empty();
+            if (system.placementSource() == PlacementSource.SCHEMATIC)
+                return Optional.of(new PositionResult(system.universePosition(),
+                        PositionFrame.SCHEMATIC, false));
+            JsonObject source = system.sourceData();
+            if (source.has("universe_system_pos") || source.has("map_pos_global"))
+                return Optional.of(new PositionResult(system.universePosition(),
+                        PositionFrame.UNIVERSE, true));
+            if (source.has("galaxy_system_pos"))
+                return Optional.of(new PositionResult(system.universePosition(),
+                        PositionFrame.GALAXY, true));
+            return Optional.empty();
+        }
+
+        /** Adds system-local body coordinates to the authored system origin only when frames agree. */
+        public Optional<PositionResult> bodyPosition(String systemId, String bodyId) {
+            Optional<PositionResult> local = bodySystemPosition(systemId, bodyId);
+            Optional<PositionResult> origin = systemPosition(systemId);
+            if (local.isEmpty() || origin.isEmpty()) return Optional.empty();
+            PositionResult base = origin.get();
+            if (base.frame() != PositionFrame.UNIVERSE && base.frame() != PositionFrame.GALAXY)
+                return Optional.empty();
+            Vector3 offset = local.get().position();
+            Vector3 point = new Vector3(base.position().x() + offset.x(),
+                    base.position().y() + offset.y(), base.position().z() + offset.z());
+            if (!point.finite()) return Optional.empty();
+            return Optional.of(new PositionResult(point, base.frame(),
+                    base.canonical() && local.get().canonical()));
+        }
+
+        public Optional<PositionResult> bodyUniversePosition(String systemId, String bodyId) {
+            return bodyPosition(systemId, bodyId)
+                    .filter(position -> position.frame() == PositionFrame.UNIVERSE);
         }
 
         public List<SceneBody> childBodies(String systemId, String bodyId) {
