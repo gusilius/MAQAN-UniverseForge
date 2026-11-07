@@ -1,1 +1,0 @@
-package com.mojang.blaze3d.platform; public class Window { public int getScreenWidth(){return 0;} public int getScreenHeight(){return 0;} }

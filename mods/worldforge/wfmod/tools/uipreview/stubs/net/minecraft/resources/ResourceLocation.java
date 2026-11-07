@@ -1,1 +1,0 @@
-package net.minecraft.resources; public class ResourceLocation { final String s; public ResourceLocation(String a,String b){s=a+":"+b;} public String toString(){return s;} }

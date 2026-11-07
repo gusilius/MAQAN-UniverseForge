@@ -1,2 +1,0 @@
-package net.minecraft.client; import net.minecraft.client.player.LocalPlayer; import net.minecraft.client.renderer.texture.TextureManager;
-public class Minecraft { static Minecraft I=new Minecraft(); public static Minecraft getInstance(){return I;} public LocalPlayer player; public MouseHandler mouseHandler; public com.mojang.blaze3d.platform.Window getWindow(){return null;} TextureManager tm=new TextureManager(); public TextureManager getTextureManager(){return tm;} public void execute(Runnable r){ r.run(); } }

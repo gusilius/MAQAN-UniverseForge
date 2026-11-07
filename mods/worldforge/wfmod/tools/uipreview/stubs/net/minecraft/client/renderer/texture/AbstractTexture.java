@@ -1,1 +1,0 @@
-package net.minecraft.client.renderer.texture; public abstract class AbstractTexture { public com.mojang.blaze3d.platform.NativeImage n; }

@@ -1,1 +1,0 @@
-{"id":"ruler","name":"Правитель","per":"realm","count":1,"dialogue":"wf_people:ruler","noble":true,"family":true,"ruler":true,"unlocks":["war","diplomacy","appoint"]}

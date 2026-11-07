@@ -1,1 +1,0 @@
-{"id": "chancellor", "name": "Канцлер", "per": "realm", "count": 1, "dialogue": "wf_people:chancellor", "noble": true, "unlocks": ["diplomacy"], "council": {"attr": "diplomacy", "effects": {"vassal_opinion": 0.5, "ai_accept": 1.0}}}

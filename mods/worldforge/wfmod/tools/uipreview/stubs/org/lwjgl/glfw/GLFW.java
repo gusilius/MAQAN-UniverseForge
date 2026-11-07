@@ -1,1 +1,0 @@
-package org.lwjgl.glfw; public class GLFW { public static final int GLFW_KEY_TAB = 258; public static final int GLFW_KEY_ENTER=257,GLFW_KEY_KP_ENTER=335,GLFW_KEY_ESCAPE=256,GLFW_KEY_1=49,GLFW_KEY_9=57,GLFW_KEY_C=67,GLFW_KEY_B=66,GLFW_KEY_DELETE=261; }

@@ -1,7 +1,0 @@
-{
-  "factions": [
-    {"id": "realm:north", "name": "Север"},
-    {"id": "house:stark", "name": "Дом Старк", "parent": "realm:north", "factor": 0.5},
-    {"id": "faction:merchants_guild", "name": "Гильдия торговцев"}
-  ]
-}
