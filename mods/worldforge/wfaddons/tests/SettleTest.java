@@ -13,6 +13,8 @@ public class SettleTest {
     static Defs defs() throws Exception {
         Defs d = new Defs();
         d.add(Files.readString(Path.of("wf-settlements/src/main/resources/data/wf_settle/wf_settle/base.json")));
+        d.add(Files.readString(Path.of("wf-settlements/src/main/resources/data/wf_settle/wf_settle/economy.json")));
+        d.add(Files.readString(Path.of("wf-settlements/src/main/resources/data/wf_settle/wf_settle/extra.json")));
         return d;
     }
 
@@ -30,6 +32,15 @@ public class SettleTest {
     public static void main(String[] a) throws Exception {
         Defs d = defs();
         ok(d.validate().stream().noneMatch(m -> !m.startsWith("Предупреждение")), "набор данных без ошибок: " + d.validate());
+        ok(d.professions.containsKey("trainer") && d.buildings.get("barracks").jobs.getOrDefault("trainer", 0) == 1,
+                "казармы требуют рабочего-инструктора");
+        ok(d.buildings.get("archery_range") != null && d.buildings.get("stable") != null
+                && d.buildings.get("siege_workshop") != null,
+                "стрельбище, конюшня и осадная мастерская загружаются из датапака");
+        ok(d.buildings.get("archery_range").requires.contains("barracks")
+                && d.buildings.get("stable").requires.contains("barracks")
+                && d.buildings.get("siege_workshop").requires.contains("smithy"),
+                "специализированные военные здания имеют технологические зависимости");
 
         Flow flow = new Flow();
         flow.record(1, "wood", 5, true);
