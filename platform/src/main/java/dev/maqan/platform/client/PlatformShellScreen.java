@@ -373,9 +373,9 @@ public final class PlatformShellScreen extends Screen {
     private boolean domainVisible(String domain) {
         return switch(profile) {
             case COSMOS -> domain.equals("COSMOS") || domain.equals("WORLDS");
-            case POLITICS -> domain.equals("POLITICS") || domain.equals("SOCIETY") || domain.equals("ECONOMY");
+            case POLITICS -> domain.equals("POLITICS") || domain.equals("SOCIETY") || domain.equals("ECONOMY") || domain.equals("ARMY");
             case SETTLEMENTS -> domain.equals("SETTLEMENTS") || domain.equals("SOCIETY") || domain.equals("ECONOMY") || domain.equals("CREATION");
-            case RTS -> domain.equals("TACTICAL") || domain.equals("ARMY") || domain.equals("SETTLEMENTS");
+            case RTS -> domain.equals("TACTICAL") || domain.equals("ARMY") || domain.equals("SETTLEMENTS") || domain.equals("ECONOMY");
         };
     }
 
