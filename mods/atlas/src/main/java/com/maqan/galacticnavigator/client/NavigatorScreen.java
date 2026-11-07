@@ -843,6 +843,13 @@ public class NavigatorScreen extends Screen {
     private void focusSelected() {
         String id = selectedId != null ? selectedId : selectedNodeId;
         Point point = id == null ? null : mapPoints.get(id);
+        // A selected body may belong to a system currently culled outside the
+        // viewport. Center its owning system first; the next frame restores the
+        // body's exact screen target and the normal focus action can refine it.
+        if (point == null && unifiedSceneMode && id != null) {
+            int separator = id.indexOf("::");
+            if (separator > 0) point = mapPoints.get(id.substring(0, separator));
+        }
         if (point == null) return;
         if (level == 3 && mapMode == 2 && selectedId != null) {
             cameraTargetId = selectedId;
@@ -858,6 +865,10 @@ public class NavigatorScreen extends Screen {
     /** Focus a selected object without replacing the global map with another screen. */
     private void zoomToAtlasNode(String id, double factor) {
         Point point = id == null ? null : mapPoints.get(id);
+        if (point == null && unifiedSceneMode && id != null) {
+            int separator = id.indexOf("::");
+            if (separator > 0) point = mapPoints.get(id.substring(0, separator));
+        }
         if (point == null) return;
         int centerX = (mapL + mapR) / 2;
         int centerY = (mapT + mapB) / 2;
