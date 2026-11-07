@@ -70,7 +70,14 @@ public class OriginsTest {
         // сохранение
         Origins o2 = new Origins(d);
         o2.fromJson(o.toJson());
-        ok(o2.build(P).history.equals(o.build(P).history) && o2.build(P).prof.equals(o.build(P).prof) && o2.mods(P).equals(o.mods(P)) || true, "save/load");
+        ok(o2.build(P).history.equals(o.build(P).history) && o2.build(P).prof.equals(o.build(P).prof) && o2.mods(P).equals(o.mods(P)), "save/load сохраняет историю, профессии и рассчитанные бонусы");
+        String validOriginsSave = o.toJson();
+        String corruptOriginsSave = validOriginsSave.replace("\\"race\\":\\"orc\\"", "\\"race\\":\\"unknown_race\\"");
+        boolean invalidOriginsRejected = false;
+        try { o2.fromJson(corruptOriginsSave); } catch (IllegalArgumentException invalidSave) { invalidOriginsRejected = true; }
+        ok(invalidOriginsRejected && o2.toJson().equals(validOriginsSave),
+                "неизвестная раса отклоняется без очистки действующего прогресса");
+
         ok(o.viewJson(P).contains("champion") || o.viewJson(P).contains("professions"), "viewJson");
 
         // подрасы и специализации профессий
@@ -93,7 +100,7 @@ public class OriginsTest {
         Origins o4 = new Origins(d); o4.hooks = new Origins.Hooks() {};
         o4.setRace("p:r", "high_elf");
         boolean elfOk = d.classes.values().stream().anyMatch(c -> c.reqRaces().contains("elf"));
-        ok(!elfOk || o4.options("p:r").keySet().stream().noneMatch(c -> !d.raceOk("high_elf", c.reqRaces())) || true, "расовые требования классов учитывают подрасу");
+        ok(o4.options("p:r").entrySet().stream().allMatch(e -> d.raceOk("high_elf", e.getKey().reqRaces()) || e.getValue() != null), "несовместимые классы для подрасы явно заблокированы");
 
         // глубина и широта: расширенные данные
         ok(d.races.size() >= 33 && d.classes.size() >= 60 && d.professions.size() >= 50, "широта: рас " + d.races.size() + ", классов " + d.classes.size() + ", профессий " + d.professions.size());
