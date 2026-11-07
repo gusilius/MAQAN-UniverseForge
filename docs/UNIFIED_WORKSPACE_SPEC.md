@@ -53,10 +53,11 @@ with spheres.
 The Atlas opens at universe scale. Every spatial layer must retain navigable context and
 show miniature system structures where applicable:
 
-1. Universe: systems represented as compact orbital miniatures.
-2. Galaxy: galaxy artwork with its constituent systems and their miniature stars,
-   planets and orbital paths.
-3. Sector: sector grouping with constituent system miniatures and orbital paths.
+1. Universe: galaxy artwork and galaxy groups, each containing miniature star systems
+   with visible stars, planets and orbital paths.
+2. Galaxy: the selected galaxy's star systems and their miniature orbital structures.
+3. Sector: sector groupings inside the selected galaxy, each with miniature systems.
+   Selecting a sector reveals the systems assigned to it.
 4. Star system: star, planets, moons and other catalogued objects with their real
    parent relationships, orbit paths, positions and motion.
 
