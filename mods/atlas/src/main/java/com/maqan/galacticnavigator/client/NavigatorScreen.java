@@ -654,6 +654,24 @@ public class NavigatorScreen extends Screen {
         if (node == null) return;
         beginAtlasTransition(false);
         if (level == 0) {
+            if (node.kind.startsWith("atlas_body:")) {
+                int separator = node.id.indexOf("::");
+                if (separator < 1) return;
+                universe = node.id.substring(0, separator);
+                String bodyId = node.id.substring(separator + 2);
+                level = 3;
+                galaxyPath = null;
+                sectorPath = null;
+                systemPath = null;
+                bodyViewId = bodyId;
+                selectedId = bodyId;
+                selectedNodeId = node.id;
+                cameraTargetId = bodyId;
+                panX = 0; panY = 0; zoom = 1.0;
+                listScroll = 0;
+                refreshButtons();
+                return;
+            }
             if ("galaxy".equals(node.kind)) {
                 galaxyPath = node.id;
                 sectorPath = null;
@@ -1242,9 +1260,27 @@ public class NavigatorScreen extends Screen {
     private Node findNode(String id) {
         if (id == null || id.isBlank()) return null;
         for (Node n : currentNodes()) if (n.id.equals(id)) return n;
+        // A qualified miniature-body ID allows direct selection from the global
+        // universe/galaxy/sector canvas without switching the active system first.
+        int separator = id.indexOf("::");
+        if (separator > 0) {
+            String systemId = id.substring(0, separator);
+            String bodyId = id.substring(separator + 2);
+            if (GalaxyCatalog.universes().contains(systemId)) {
+                for (Entry<String, JsonObject> body : GalaxyCatalog.objects(systemId)) {
+                    if (!body.getKey().equals(bodyId)) continue;
+                    JsonObject data = body.getValue();
+                    String kind = value(data, "kind", "display_type", "type", "classification")
+                            .trim().toLowerCase(Locale.ROOT);
+                    if (isStarData(data)) kind = "star";
+                    else if (kind.contains("moon") || kind.contains("satellite")) kind = "moon";
+                    else if (kind.isBlank()) kind = "planet";
+                    return new Node(id, value(data, "name", bodyId), "atlas_body:" + kind,
+                            List.of(body));
+                }
+            }
+        }
         // Galaxy/sector glyphs contain individually selectable miniature systems.
-        // They are not necessarily members of the current overview node list, so
-        // resolve them directly from the active Cosmic Horizons catalogue.
         JsonObject system = GalaxyCatalog.universe(id);
         List<Entry<String, JsonObject>> bodies = GalaxyCatalog.objects(id);
         if (!bodies.isEmpty()) {
@@ -2189,10 +2225,12 @@ public class NavigatorScreen extends Screen {
         // Keep miniature systems legible across the full navigation range. The map
         // footprint grows more slowly than camera zoom so deep zoom does not turn
         // every distant system into an enormous overlapping marker.
-        double glyphScale = Math.max(.45, Math.min(4.0, Math.sqrt(viewScale)));
+        // One continuous camera: miniature system geometry grows with zoom rather
+        // than being replaced by a different screen at each hierarchy level.
+        double glyphScale = Math.max(.45, Math.min(7.0, Math.pow(viewScale, .42)));
         int glyphRadius = Math.max(7, Math.min(24,
                 (int)(Math.min(areaWidth, areaHeight) / Math.sqrt(nodes.size() + 1.0) * .22)));
-        glyphRadius = Math.max(5, (int)(glyphRadius * glyphScale));
+        glyphRadius = Math.max(5, Math.min(160, (int)Math.round(glyphRadius * glyphScale)));
 
         // Subtle galactic reference rings make this read as one navigable map.
         int guideRadius = Math.min(areaWidth, areaHeight) / 3;
@@ -2275,9 +2313,9 @@ public class NavigatorScreen extends Screen {
             int cy = (int)Math.round(centerScreenY + (baseY - centerScreenY) * viewScale + panY);
             boolean active = system.id.equals(selectedNodeId) || system.id.equals(universe);
             int radius = ("galaxy".equals(system.kind) || "sector".equals(system.kind))
-                    ? glyphRadius : Math.max(30, Math.min(62, (int)Math.round(glyphRadius * 2.25)));
+                    ? glyphRadius : Math.max(30, Math.min(180, (int)Math.round(glyphRadius * 2.25)));
             if ("galaxy".equals(system.kind) || "sector".equals(system.kind)) {
-                int galaxyRadius = Math.max(24, Math.min(86, glyphRadius + 16));
+                int galaxyRadius = Math.max(24, Math.min(190, glyphRadius + 16));
                 boolean activeGalaxy = system.id.equals(galaxyPath) || system.id.equals(sectorPath)
                         || system.id.equals(selectedNodeId);
                 Node hoveredMiniature = drawSystemClusterGlyph(g, cx, cy, galaxyRadius,
@@ -2541,9 +2579,10 @@ public class NavigatorScreen extends Screen {
                     "star system", systemBodies);
             int systemHitRadius = Math.max(5, Math.min(12, (int)Math.round(perSystemBudget * .42)));
             mapPoints.put(systemNode.id, new Point(sx, sy, systemHitRadius));
-            int miniOrbit = Math.max(3, Math.min(52, (int)Math.round(
+            int miniOrbit = Math.max(3, Math.min(116, (int)Math.round(
                     Math.min(radius * .46, perSystemBudget * (detail == 0 ? .75 : 1.15))
                             * NavigatorPreferences.atlasOrbitSpacing())));
+            double bodyLodScale = Math.max(.8, Math.min(2.8, Math.pow(viewScale, .24)));
             JsonObject star = null;
             List<Entry<String, JsonObject>> planets = new ArrayList<>();
             List<Entry<String, JsonObject>> moons = new ArrayList<>();
@@ -2572,8 +2611,9 @@ public class NavigatorScreen extends Screen {
                 }
             }
             if (star != null) {
-                int starRadius = Math.max(2, Math.min(7, (int)Math.round(
-                        Math.min(6.0, perSystemBudget * .22) * NavigatorPreferences.atlasScale())));
+                int starRadius = Math.max(2, Math.min(14, (int)Math.round(
+                        Math.min(10.0, perSystemBudget * .22) * NavigatorPreferences.atlasScale()
+                                * bodyLodScale)));
                 drawAtlasBodyVisual(g, sx, sy, starRadius, star, kindColor("star"));
             } else {
                 drawRadialGlow(g, sx, sy, 7, 0x558EA6D8, 0xFFE7EAF5);
@@ -2593,8 +2633,9 @@ public class NavigatorScreen extends Screen {
                         p[0] - starPosition[0], p[2] - starPosition[2]));
             }
             boolean hasOrbitalData = maxDistance > 1.0E-6 && Double.isFinite(maxDistance);
-            int bodyRadius = Math.max(2, Math.min(6, (int)Math.round(
-                    Math.min(5.0, perSystemBudget * .18) * NavigatorPreferences.atlasScale())));
+            int bodyRadius = Math.max(2, Math.min(12, (int)Math.round(
+                    Math.min(8.0, perSystemBudget * .18) * NavigatorPreferences.atlasScale()
+                            * bodyLodScale)));
             for (int planet = 0; planet < planets.size(); planet++) {
                 Entry<String, JsonObject> entry = planets.get(planet);
                 JsonObject data = entry.getValue();
@@ -2611,6 +2652,8 @@ public class NavigatorScreen extends Screen {
                 int px = sx + (int)Math.round(Math.cos(planetAngle) * orbit);
                 int py = sy + (int)Math.round(Math.sin(planetAngle) * orbit * .68);
                 planetScreenPositions.put(entry.getKey(), new Point(px, py, bodyRadius));
+                mapPoints.put(systemEntry.getKey() + "::" + entry.getKey(),
+                        new Point(px, py, bodyRadius + 4));
                 drawAtlasBodyVisual(g, px, py, bodyRadius, data,
                         bodyFallbackColor(data, kindColor("planet")));
             }
@@ -2646,7 +2689,9 @@ public class NavigatorScreen extends Screen {
                             moonOrbit, moonOrbit * .68, 0x668CA8B8, 1);
                 int mx = parentPoint.x() + (int)Math.round(Math.cos(moonAngle) * moonOrbit);
                 int my = parentPoint.y() + (int)Math.round(Math.sin(moonAngle) * moonOrbit * .68);
-                int moonRadius = Math.max(2, Math.min(4, bodyRadius - 1));
+                int moonRadius = Math.max(2, Math.min(7, bodyRadius - 1));
+                mapPoints.put(systemEntry.getKey() + "::" + moon.getKey(),
+                        new Point(mx, my, moonRadius + 4));
                 drawAtlasBodyVisual(g, mx, my, moonRadius, moon.getValue(),
                         bodyFallbackColor(moon.getValue(), kindColor("moon")));
             }
