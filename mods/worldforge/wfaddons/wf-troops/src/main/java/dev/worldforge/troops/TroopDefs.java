@@ -48,6 +48,10 @@ public final class TroopDefs {
     public void add(Map<String, Object> u) {
         String id = str(u.get("id"), "");
         if (id.isEmpty()) throw new IllegalArgumentException("Тип солдата без id");
+        // An override replaces the whole archetype, including its recruitment metadata.
+        // Do not silently inherit a stale building/cost from the previous definition.
+        recruitmentBuildings.remove(id);
+        recruitmentCosts.remove(id);
         units.put(id, new Unit(id, str(u.get("name"), id), str(u.get("role"), "melee"), dbl(u.get("hp"), 20), dbl(u.get("dmg"), 3), dbl(u.get("range"), 2), dbl(u.get("speed"), 1),
                 dbl(u.get("armor"), 0), dbl(u.get("sight"), 24), (int) dbl(u.get("cost"), 10), dbl(u.get("upkeep"), 0.2),
                 str(u.get("weapon"), ""), str(u.get("head"), ""), str(u.get("chest"), ""), str(u.get("legs"), ""), str(u.get("feet"), ""), str(u.get("desc"), ""), dbl(u.get("aura"), 0), dbl(u.get("heal"), 0), dbl(u.get("siege"), 0)));

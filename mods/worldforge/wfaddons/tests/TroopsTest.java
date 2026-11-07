@@ -32,6 +32,20 @@ public class TroopsTest {
                 && d.units.get("ballista").siege() > 0 && d.units.get("trebuchet").siege() > d.units.get("ballista").siege(),
                 "знаменосцы, медики и осадные специализации имеют отдельные параметры");
         check(d.validate().isEmpty(), "валидация " + d.validate());
+        TroopDefs overrideDefs = new TroopDefs();
+        overrideDefs.load(Files.readString(Path.of("wf-troops/src/main/resources/data/wf_troops/wf_troops/units.json")));
+        Map<String, Object> incompleteOverride = new LinkedHashMap<>();
+        incompleteOverride.put("id", "footman");
+        incompleteOverride.put("name", "Пехотинец без снабжения");
+        incompleteOverride.put("role", "melee");
+        incompleteOverride.put("hp", 25);
+        incompleteOverride.put("speed", 1);
+        overrideDefs.add(incompleteOverride);
+        check(!overrideDefs.recruitmentBuildings.containsKey("footman")
+                && !overrideDefs.recruitmentCosts.containsKey("footman")
+                && overrideDefs.validate().stream().anyMatch(x -> x.contains("footman") && x.contains("здание найма"))
+                && overrideDefs.validate().stream().anyMatch(x -> x.contains("footman") && x.contains("стоимость найма")),
+                "переопределение архетипа не наследует устаревшие здание и стоимость найма");
         check(TroopProgression.rank(0) == 0 && TroopProgression.rank(100) == 1
                 && TroopProgression.rank(300) == 2 && TroopProgression.rank(700) == 3
                 && TroopProgression.rank(1500) == 4, "пять ступеней индивидуальной военной выучки");
