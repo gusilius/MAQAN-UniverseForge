@@ -376,7 +376,7 @@ public class TroopsMod {
             int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
             troop.moveTo(positions.get(i)[0], y, positions.get(i)[1], p.getYRot(), 0);
             troop.setup(unit, owner);
-            troop.realm = realm.isEmpty() ? site.colony().s.id : realm;
+            troop.realm = realm.isEmpty() ? dev.worldforge.settle.mc.SettleMod.realmOf(site.colony()) : realm;
             recruits.add(troop);
         }
 
