@@ -68,10 +68,21 @@ public final class TroopDefs {
         List<String> e = new ArrayList<>();
         for (Unit u : units.values()) {
             if (!ROLES.contains(u.role())) e.add(u.id() + ": неизвестная роль " + u.role());
-            if (u.hp() <= 0) e.add(u.id() + ": здоровье должно быть больше нуля");
-            if (u.speed() <= 0 || u.speed() > 3) e.add(u.id() + ": скорость от 0 до 3");
+            if (!Double.isFinite(u.hp()) || u.hp() <= 0) e.add(u.id() + ": здоровье должно быть конечным и больше нуля");
+            if (!Double.isFinite(u.dmg()) || u.dmg() < 0) e.add(u.id() + ": урон должен быть конечным и неотрицательным");
+            if (!Double.isFinite(u.range()) || u.range() < 0) e.add(u.id() + ": дальность должна быть конечной и неотрицательной");
+            if (!Double.isFinite(u.speed()) || u.speed() <= 0 || u.speed() > 3) e.add(u.id() + ": скорость должна быть конечной и от 0 до 3");
+            if (!Double.isFinite(u.armor()) || u.armor() < 0) e.add(u.id() + ": броня должна быть конечной и неотрицательной");
+            if (!Double.isFinite(u.sight()) || u.sight() < 0) e.add(u.id() + ": обзор должен быть конечным и неотрицательным");
+            if (!Double.isFinite(u.upkeep()) || u.upkeep() < 0) e.add(u.id() + ": содержание должно быть конечным и неотрицательным");
+            if (!Double.isFinite(u.aura()) || u.aura() < 0 || !Double.isFinite(u.heal()) || u.heal() < 0
+                    || !Double.isFinite(u.siege()) || u.siege() < 0)
+                e.add(u.id() + ": параметры поддержки и осады должны быть конечными и неотрицательными");
             if (u.role().equals("ranged") && u.range() < 6) e.add(u.id() + ": у стрелка дальность меньше 6");
             if (u.cost() < 0) e.add(u.id() + ": цена не может быть отрицательной");
+            if (!recruitmentBuildings.containsKey(u.id())) e.add(u.id() + ": не указано здание найма");
+            if (!recruitmentCosts.containsKey(u.id()) || recruitmentCosts.get(u.id()).isEmpty())
+                e.add(u.id() + ": не указана стоимость найма");
         }
         if (units.isEmpty()) e.add("нет типов солдат");
         for (var m : armyMap.entrySet()) if (!units.containsKey(m.getValue())) e.add("army_map: нет солдата " + m.getValue() + " для " + m.getKey());

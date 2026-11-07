@@ -48,6 +48,16 @@ public class TroopsTest {
         TroopDefs bad = new TroopDefs();
         bad.add(new HashMap<>(Map.of("id", "x", "role", "wizard", "hp", 0)));
         check(bad.validate().size() >= 2, "ошибки данных");
+        TroopDefs incompleteRecruitment = new TroopDefs();
+        incompleteRecruitment.add(new HashMap<>(Map.of("id", "unassigned", "role", "melee", "hp", 20, "speed", 1)));
+        check(incompleteRecruitment.validate().stream().anyMatch(x -> x.contains("здание найма"))
+                && incompleteRecruitment.validate().stream().anyMatch(x -> x.contains("стоимость найма")),
+                "валидация отклоняет архетипы без здания и стоимости найма");
+        TroopDefs nonFinite = new TroopDefs();
+        nonFinite.add(new HashMap<>(Map.of("id", "nan_unit", "role", "melee", "hp", Double.NaN, "speed", Double.POSITIVE_INFINITY)));
+        check(nonFinite.validate().stream().anyMatch(x -> x.contains("здоровье"))
+                && nonFinite.validate().stream().anyMatch(x -> x.contains("скорость")),
+                "валидация отклоняет NaN и бесконечные характеристики");
 
         // строи
         for (Formations.Type t : Formations.Type.values()) {
