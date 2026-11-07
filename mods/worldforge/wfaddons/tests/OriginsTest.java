@@ -66,6 +66,9 @@ public class OriginsTest {
         Origins.Build n1 = o.assign("n:a", 7, "smith", 30), n2 = o.assign("n:b", 7, "smith", 30), n3 = o.assign("n:c", 8, "craft", 3);
         ok(n1.race.equals(n2.race) && n1.history.equals(n2.history), "NPC детерминированы по сиду");
         ok(n1.prof.containsKey("smith") && !n1.history.isEmpty(), "NPC 30 уровня: профессия и класс " + n1.history);
+        Origins.Build n1Again = o.assign("n:a", 999, "trade", 55);
+        ok(n1Again == n1 && n1Again.history.equals(n1.history) && n1Again.prof.equals(n1.prof),
+                "повторное назначение NPC не перезаписывает его развитие");
         ok(n3.history.isEmpty(), "новичок без класса");
         // сохранение
         Origins o2 = new Origins(d);
