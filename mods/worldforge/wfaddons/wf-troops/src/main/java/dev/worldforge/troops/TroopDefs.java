@@ -37,6 +37,14 @@ public final class TroopDefs {
 
     public Map<String, String> armyTypes() { return armyMap.isEmpty() ? Muster.defaultMap() : armyMap; }
 
+    public String recruitmentBuilding(Unit unit) {
+        return recruitmentBuilding(unit.id());
+    }
+
+    public Map<String, Integer> recruitmentCost(Unit unit) {
+        return recruitmentCost(unit.id());
+    }
+
     public void add(Map<String, Object> u) {
         String id = str(u.get("id"), "");
         if (id.isEmpty()) throw new IllegalArgumentException("Тип солдата без id");
@@ -67,6 +75,15 @@ public final class TroopDefs {
         }
         if (units.isEmpty()) e.add("нет типов солдат");
         for (var m : armyMap.entrySet()) if (!units.containsKey(m.getValue())) e.add("army_map: нет солдата " + m.getValue() + " для " + m.getKey());
+        Set<String> validRecruitmentBuildings = Set.of("barracks", "archery_range", "stable", "siege_workshop");
+        for (var eCost : recruitmentCosts.entrySet()) {
+            if (!units.containsKey(eCost.getKey())) e.add("recruitment_cost: нет типа войска " + eCost.getKey());
+            for (var resource : eCost.getValue().entrySet())
+                if (resource.getValue() < 0) e.add(eCost.getKey() + ": отрицательная стоимость " + resource.getKey());
+        }
+        for (var entry : recruitmentBuildings.entrySet())
+            if (!units.containsKey(entry.getKey()) || !validRecruitmentBuildings.contains(entry.getValue()))
+                e.add(entry.getKey() + ": неизвестное здание найма " + entry.getValue());
         return e;
     }
 }
