@@ -52,6 +52,18 @@ public final class MapView {
                 && Math.abs(x) <= 30_000_000 && Math.abs(z) <= 30_000_000;
     }
 
+    private static boolean validBuilding(Building b) {
+        return b != null && b.def != null && validWorldPoint(b.x, b.z)
+                && Double.isFinite(b.def.sizeX) && Double.isFinite(b.def.sizeZ)
+                && b.def.sizeX > 0 && b.def.sizeZ > 0;
+    }
+
+    private Selection.Rect buildingRect(Building b) {
+        int w = Math.max(4, (int) Math.min(1_000_000, Math.round(b.def.sizeX * scale)));
+        int h = Math.max(4, (int) Math.min(1_000_000, Math.round(b.def.sizeZ * scale)));
+        return new Selection.Rect(Selection.Rect.BUILDING, b.uid, sx(b.x) - w / 2, sy(b.z) - h / 2, w, h);
+    }
+
     public int sx(double x) { return px + (int) Math.round((x - minX) * scale); }
 
     public int sy(double z) { return py + (int) Math.round((z - minZ) * scale); }
@@ -67,11 +79,8 @@ public final class MapView {
         List<Selection.Rect> l = new ArrayList<>();
         if (s == null) return l;
         for (Building b : s.buildings) {
-            if (b == null || b.def == null || !validWorldPoint(b.x, b.z)
-                    || !Double.isFinite(b.def.sizeX) || !Double.isFinite(b.def.sizeZ)) continue;
-            int w = Math.max(4, (int) Math.min(1_000_000, Math.round(b.def.sizeX * scale)));
-            int h = Math.max(4, (int) Math.min(1_000_000, Math.round(b.def.sizeZ * scale)));
-            l.add(new Selection.Rect(Selection.Rect.BUILDING, b.uid, sx(b.x) - w / 2, sy(b.z) - h / 2, w, h));
+            if (!validBuilding(b)) continue;
+            l.add(buildingRect(b));
         }
         for (Worker w : s.workers) if (w != null && validWorldPoint(w.x, w.z))
             l.add(new Selection.Rect(Selection.Rect.WORKER, w.id, sx(w.x) - 2, sy(w.z) - 2, 5, 5));
@@ -89,10 +98,15 @@ public final class MapView {
         }
         int gx = (int) Math.round(wx(sx)), gz = (int) Math.round(wz(sy));
         if (best != null) return Target.worker(best.id, gx, gz);
-        List<Selection.Rect> rs = rects(s);
+        if (s == null) return Target.ground(gx, gz);
+        // Iterate source buildings directly. rects() deliberately filters malformed entries,
+        // so indexing its compact result with the original list index is unsafe.
         for (int i = s.buildings.size() - 1; i >= 0; i--) {
-            Selection.Rect r = rs.get(i);
-            if (sx >= r.x && sx <= r.x + r.w && sy >= r.y && sy <= r.y + r.h) return Target.building(r.id, gx, gz);
+            Building b = s.buildings.get(i);
+            if (!validBuilding(b)) continue;
+            Selection.Rect r = buildingRect(b);
+            if (sx >= r.x && sx <= r.x + r.w && sy >= r.y && sy <= r.y + r.h)
+                return Target.building(b.uid, gx, gz);
         }
         return Target.ground(gx, gz);
     }
