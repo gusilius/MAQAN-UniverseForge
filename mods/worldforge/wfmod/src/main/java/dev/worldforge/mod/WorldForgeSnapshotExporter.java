@@ -48,7 +48,7 @@ public final class WorldForgeSnapshotExporter {
         if (map.titles != null) {
             for (TitleData.Title title : map.titles.allTitles()) {
                 if (title == null || title.key == null || title.key.isBlank()) continue;
-                Map<String, Object> attrs = new LinkedHashMap<>();
+                Map<String, String> attrs = new LinkedHashMap<>();
                 attrs.put("map_id", map.name);
                 attrs.put("title_id", title.key);
                 attrs.put("numeric_id", Integer.toString(title.id));
@@ -82,7 +82,14 @@ public final class WorldForgeSnapshotExporter {
                         title.tier == 0 ? "province" : "administrative_title",
                         title.name, dimensionId, title.capX, capital.getY(), title.capZ,
                         title.rgb, realmId, "", attrs);
-                if (!realmName.isBlank()) feature.put("realm_name", realmName);
+                if (!realmName.isBlank()) attrs.put("realm_name", realmName);
+                if (title.tier == 0) {
+                    TitleData.Realm realm = map.titles.realmOf(title);
+                    if (realm != null) {
+                        feature.put("race_id", stringProperty(realm.props, "race"));
+                        feature.put("culture_id", stringProperty(realm.props, "culture"));
+                    }
+                }
                 features.add(feature);
             }
         }
@@ -179,6 +186,12 @@ public final class WorldForgeSnapshotExporter {
             target.put(prefix + entry.getKey(), entry.getValue() instanceof String
                     ? (String) entry.getValue() : Json.write(entry.getValue()));
         }
+    }
+
+    private static String stringProperty(Map<String, Object> properties, String key) {
+        if (properties == null) return "";
+        Object value = properties.get(key);
+        return value instanceof String ? (String) value : "";
     }
 
     private static String safe(String value) {
