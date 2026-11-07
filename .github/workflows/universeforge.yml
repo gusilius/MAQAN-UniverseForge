@@ -1,4 +1,4 @@
-name: MAQAN UniverseForge — import and build
+name: MAQAN UniverseForge — Windows build
 
 on:
   push:
@@ -27,8 +27,11 @@ concurrency:
 jobs:
   import-and-build:
     if: github.actor != 'github-actions[bot]'
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout UniverseForge
         uses: actions/checkout@v4
@@ -36,44 +39,48 @@ jobs:
           fetch-depth: 0
 
       - name: Fetch pinned Atlas source
-        shell: bash
         run: |
           set -euo pipefail
-          mkdir -p _imports/atlas
+          mkdir -p _imports/atlas mods/atlas
           git -C _imports/atlas init
           git -C _imports/atlas remote add origin https://github.com/gusilius/MAQAN-Galactic-Navigator.git
           git -C _imports/atlas fetch --depth=1 origin 8ba7f02abb469f035fe6c1dd56bdd647f5fd14ef
           git -C _imports/atlas checkout --detach FETCH_HEAD
+          git -C _imports/atlas archive HEAD | tar -x -C mods/atlas
 
       - name: Fetch pinned WorldForge source
-        shell: bash
         run: |
           set -euo pipefail
-          mkdir -p _imports/worldforge
+          mkdir -p _imports/worldforge mods/worldforge
           git -C _imports/worldforge init
           git -C _imports/worldforge remote add origin https://github.com/gusilius/MAQAN-WorldForge.git
           git -C _imports/worldforge fetch --depth=1 origin f169f2ccda035eefdd259b08d4a8ba4dda48b5be
           git -C _imports/worldforge checkout --detach FETCH_HEAD
+          git -C _imports/worldforge archive HEAD | tar -x -C mods/worldforge
 
-      - name: Import both projects without flattening their internals
-        shell: bash
+      - name: Verify imported project boundaries
         run: |
           set -euo pipefail
-          mkdir -p mods/atlas mods/worldforge
-          rsync -a --delete --exclude=.git _imports/atlas/ mods/atlas/
-          rsync -a --delete --exclude=.git _imports/worldforge/ mods/worldforge/
           test -f mods/atlas/build.gradle
           test -f mods/atlas/native/maqan-core/Cargo.toml
+          test -f mods/atlas/src/main/java/com/maqan/galacticnavigator/client/NavigatorScreen.java
           test -f mods/worldforge/wfmod/build.gradle
-          test -d mods/worldforge/wfaddons
+          test -f mods/worldforge/wfaddons/tools/build-all.sh
+          test -d mods/worldforge/wfaddons/wf-genesis
+          test -d mods/worldforge/wfaddons/wf-origins
+          test -d mods/worldforge/wfaddons/wf-settlements
+
+      - name: Commit imported source snapshots
+        run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add mods/atlas mods/worldforge
           if ! git diff --cached --quiet; then
-            git commit -m "Import Atlas and WorldForge source projects"
+            git commit -m "Import pinned Atlas and WorldForge source snapshots"
             git push
           else
-            echo "Pinned source snapshots are already imported."
+            echo "Pinned source snapshots already present."
           fi
 
       - name: Set up JDK 17
@@ -82,30 +89,31 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Rust
+      - name: Set up Rust MSVC toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
 
-      - name: Test Atlas native core
+      - name: Test Atlas native core (Windows x64)
         working-directory: mods/atlas/native/maqan-core
-        run: cargo test --locked
+        run: cargo test --locked --target x86_64-pc-windows-msvc
 
-      - name: Build Atlas native core
+      - name: Build Atlas native core (Windows x64)
         working-directory: mods/atlas/native/maqan-core
-        run: cargo build --release --locked
+        run: cargo build --release --locked --target x86_64-pc-windows-msvc
+
+      - name: Stage Atlas native DLL in the resource path expected by Java
+        run: |
+          set -euo pipefail
+          mkdir -p mods/atlas/build/native-libs/maqan-native-windows-x86_64
+          cp mods/atlas/native/maqan-core/target/x86_64-pc-windows-msvc/release/maqan_core.dll mods/atlas/build/native-libs/maqan-native-windows-x86_64/maqan_core.dll
 
       - name: Set up Gradle for Atlas
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.8"
 
-      - name: Install Atlas native library resource
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p mods/atlas/build/native-libs
-          cp mods/atlas/native/maqan-core/target/release/libmaqan_core.so mods/atlas/build/native-libs/
-
-      - name: Build Atlas Forge mod
+      - name: Build Atlas Forge mod (Windows x64)
         working-directory: mods/atlas
         run: gradle --no-daemon build
 
@@ -113,21 +121,26 @@ jobs:
         working-directory: mods/worldforge/wfaddons
         env:
           JAVA_TOOL_OPTIONS: -Dfile.encoding=UTF-8
-        shell: bash
         run: |
           set -euo pipefail
-          OUT=/tmp/worldforge-tests
+          OUT="$RUNNER_TEMP/worldforge-tests"
           mkdir -p "$OUT"
-          javac -proc:none -encoding UTF-8 -d "$OUT" -sourcepath ../wfmod/src/main/java \
-            $(find wf-*/src/main/java -name '*.java' -not -path '*/mc/*') tests/*.java
+          find wf-* -path '*/src/main/java/*.java' -prune -o -name '*.java' -print >/dev/null || true
+          mapfile -t SOURCES < <(find wf-* -path '*/src/main/java/*' -name '*.java' ! -path '*/mc/*')
+          javac -proc:none -encoding UTF-8 -d "$OUT" -sourcepath ../wfmod/src/main/java "${SOURCES[@]}" tests/*.java
           failed=0
           for source in tests/*.java; do
             test_name="$(basename "$source" .java)"
             echo "== $test_name"
-            java -Dstdout.encoding=UTF-8 -cp "$OUT" "dev.worldforge.tests.$test_name" ../testdata/game_of_thrones_datapack.zip | tee "/tmp/$test_name.log" || failed=1
-            if grep -q "^FAIL" "/tmp/$test_name.log"; then failed=1; fi
+            java -Dstdout.encoding=UTF-8 -cp "$OUT" "dev.worldforge.tests.$test_name" ../testdata/game_of_thrones_datapack.zip | tee "$RUNNER_TEMP/$test_name.log" || failed=1
+            if grep -q "^FAIL" "$RUNNER_TEMP/$test_name.log"; then failed=1; fi
           done
           test "$failed" -eq 0
+
+      - name: Set up Python for WorldForge build ordering
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
       - name: Set up Gradle for WorldForge
         uses: gradle/actions/setup-gradle@v4
@@ -136,13 +149,12 @@ jobs:
 
       - name: Build WorldForge core and addons
         working-directory: mods/worldforge/wfaddons
-        shell: bash
         run: bash tools/build-all.sh ../wfmod
 
-      - name: Upload Atlas JAR
+      - name: Upload Atlas Windows JAR
         uses: actions/upload-artifact@v4
         with:
-          name: maqan-atlas-linux
+          name: maqan-atlas-windows-x64
           path: mods/atlas/build/libs/*.jar
           if-no-files-found: error
           retention-days: 30
@@ -150,7 +162,7 @@ jobs:
       - name: Upload WorldForge JARs
         uses: actions/upload-artifact@v4
         with:
-          name: maqan-worldforge
+          name: maqan-worldforge-windows
           path: mods/worldforge/wfaddons/dist/*.jar
           if-no-files-found: error
           retention-days: 30
