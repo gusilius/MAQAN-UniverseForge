@@ -543,6 +543,7 @@ public final class PlatformShellScreen extends Screen {
         String command = switch (capability.id()) {
             case "worldforge.settlements" -> "wfsettle view panel";
             case "worldforge.rts" -> "wfsettle view hud";
+            case "worldforge.genesis" -> "wfgenesis";
             case "worldforge.origins" -> "wforigin";
             case "worldforge.progress" -> "wfprog";
             case "worldforge.forms" -> "wfform";
