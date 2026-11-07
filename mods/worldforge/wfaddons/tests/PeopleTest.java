@@ -133,6 +133,15 @@ public class PeopleTest {
         CharacterRegistry back = new CharacterRegistry();
         back.fromJson(js);
         ok(back.size() == reg.size() && back.toJson().equals(js), "сохранение и загрузка без потерь (" + back.size() + " человек)");
+        boolean registryViewReadOnly = false;
+        try { back.all().clear(); } catch (UnsupportedOperationException expected) { registryViewReadOnly = true; }
+        ok(registryViewReadOnly && back.size() == reg.size(),
+                "публичная коллекция персонажей не позволяет обходить операции реестра");
+        String invalidAliveJson = js.replaceFirst("\\\"alive\\\":(?:true|false)", "\\\"alive\\\":\\\"yes\\\"");
+        boolean invalidAliveRejected = false;
+        try { back.fromJson(invalidAliveJson); } catch (IllegalArgumentException invalidSave) { invalidAliveRejected = true; }
+        ok(invalidAliveRejected && back.toJson().equals(js),
+                "неверный тип alive отклоняется без повреждения действующего реестра");
         back.create("Новый", "", "", "m", 1);
         ok(back.get("c" + (reg.size() + 1)) != null, "счётчик id продолжается после загрузки");
         // Повреждённый снимок не должен очищать уже загруженный реестр.
