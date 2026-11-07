@@ -1357,10 +1357,14 @@ public class NavigatorScreen extends Screen {
     }
 
     private void selectNode(Node node) {
-        selectedNodeId = node.id;
+        if (node != null && node.kind != null && node.kind.startsWith("atlas_body:")) {
+            selectBody(node.id);
+            return;
+        }
+        selectedNodeId = node == null ? null : node.id;
         selectedId = null;
         infoScroll = 0;
-        if (openButton != null) openButton.active = true;
+        if (openButton != null) openButton.active = selectedNodeId != null;
     }
 
     private void selectBody(String id) {
@@ -2665,6 +2669,7 @@ public class NavigatorScreen extends Screen {
                             * NavigatorPreferences.atlasOrbitSpacing())));
             double bodyLodScale = Math.max(.8, Math.min(2.8, Math.pow(Math.max(.025, zoom), .24)));
             JsonObject star = null;
+            String starBodyId = null;
             List<Entry<String, JsonObject>> planets = new ArrayList<>();
             List<Entry<String, JsonObject>> moons = new ArrayList<>();
             Map<String, Entry<String, JsonObject>> planetById = new HashMap<>();
@@ -2675,7 +2680,10 @@ public class NavigatorScreen extends Screen {
                 String kind = value(data, "kind", "display_type", "type", "classification")
                         .toLowerCase(Locale.ROOT);
                 if (isStarData(data) || kind.contains("star")) {
-                    if (star == null || (!hasTextureId(star) && hasTextureId(data))) star = data;
+                    if (star == null || (!hasTextureId(star) && hasTextureId(data))) {
+                        star = data;
+                        starBodyId = body.getKey();
+                    }
                 } else if (kind.contains("moon") || kind.contains("satellite")) {
                     moons.add(body);
                 } else {
@@ -2696,6 +2704,21 @@ public class NavigatorScreen extends Screen {
                         Math.min(10.0, perSystemBudget * .22) * NavigatorPreferences.atlasScale()
                                 * bodyLodScale)));
                 drawAtlasBodyVisual(g, sx, sy, starRadius, star, kindColor("star"));
+                // Cosmic Horizons stars are selectable catalogue entities, not decorative
+                // center lights. Their qualified IDs remain unique across the global scene.
+                if (starBodyId != null) {
+                    String qualifiedStarId = systemEntry.getKey() + "::" + starBodyId;
+                    mapPoints.put(qualifiedStarId, new Point(sx, sy, starRadius + 5));
+                    if (Math.hypot(mouseX - sx, mouseY - sy) <= starRadius + 5) {
+                        hoveredBody = new Node(qualifiedStarId,
+                                value(star, "name", starBodyId), "atlas_body:star",
+                                List.of(new AbstractMap.SimpleImmutableEntry<>(starBodyId, star)));
+                    }
+                    if (qualifiedStarId.equals(selectedNodeId)) {
+                        SolarSystemRenderer.orbit(g, sx, sy, starRadius + 8,
+                                (starRadius + 8) * .72, 0xCC69CDE2, 1);
+                    }
+                }
             } else {
                 drawRadialGlow(g, sx, sy, 7, 0x558EA6D8, 0xFFE7EAF5);
                 drawDisc(g, sx, sy, 4, 0xFFFFF4E0, 0xFFE2D9F2);
@@ -4197,7 +4220,7 @@ public class NavigatorScreen extends Screen {
     private boolean isPlanetNode(Node node) {
         if (node == null || node.entries.size() != 1) return false;
         String kind = node.kind == null ? "" : node.kind.toLowerCase(Locale.ROOT);
-        return kind.equals("planet");
+        return kind.equals("planet") || kind.equals("atlas_body:planet");
     }
 
     private List<InfoField> buildInfoFields(JsonObject object, int tab) {
