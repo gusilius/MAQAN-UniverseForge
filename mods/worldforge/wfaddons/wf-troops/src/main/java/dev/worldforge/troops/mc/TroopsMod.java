@@ -416,7 +416,7 @@ public class TroopsMod {
             return 0;
         }
         ServerPlayer player;
-        try { player = src.getSource().getPlayerOrException(); }
+        try { player = src.getPlayerOrException(); }
         catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
         ArmyLink.Found found = ArmyLink.find(armyId);
         if (found == null) { src.sendFailure(Component.literal("Нет армии " + armyId)); return 0; }
@@ -518,9 +518,10 @@ public class TroopsMod {
             }
             total += batch.size();
         }
-        src.sendSuccess(() -> Component.literal("Из военных зданий поселения призвано " + total
+        int recruited = total;
+        src.sendSuccess(() -> Component.literal("Из военных зданий поселения призвано " + recruited
                 + " солдат армии " + armyId + " (оставшиеся люди: " + found.army().men() + ")"), false);
-        return total;
+        return recruited;
     }
 
     /** Выжившие призванные солдаты игрока возвращаются в свои армии; павшие потеряны. */
