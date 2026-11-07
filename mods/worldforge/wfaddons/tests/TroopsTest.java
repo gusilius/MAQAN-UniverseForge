@@ -21,6 +21,19 @@ public class TroopsTest {
                 && d.units.get("ballista").siege() > 0 && d.units.get("trebuchet").siege() > d.units.get("ballista").siege(),
                 "знаменосцы, медики и осадные специализации имеют отдельные параметры");
         check(d.validate().isEmpty(), "валидация " + d.validate());
+        check(TroopProgression.rank(0) == 0 && TroopProgression.rank(100) == 1
+                && TroopProgression.rank(300) == 2 && TroopProgression.rank(700) == 3
+                && TroopProgression.rank(1500) == 4, "пять ступеней индивидуальной военной выучки");
+        check(TroopProgression.addXp(99, 1) == 100
+                && TroopProgression.addXp(TroopProgression.MAX_XP - 1, 100) == TroopProgression.MAX_XP,
+                "боевой опыт повышает ранг и безопасно ограничивается");
+        check(TroopProgression.damageMultiplier(4) > TroopProgression.damageMultiplier(0)
+                && TroopProgression.healthMultiplier(4) > TroopProgression.healthMultiplier(0)
+                && TroopProgression.armorBonus(4) > TroopProgression.armorBonus(0),
+                "ветеранские ранги повышают боевые характеристики");
+        boolean negativeXpRejected = false;
+        try { TroopProgression.addXp(0, -1); } catch (IllegalArgumentException expected) { negativeXpRejected = true; }
+        check(negativeXpRejected, "отрицательный боевой опыт отклоняется");
         TroopDefs bad = new TroopDefs();
         bad.add(new HashMap<>(Map.of("id", "x", "role", "wizard", "hp", 0)));
         check(bad.validate().size() >= 2, "ошибки данных");
