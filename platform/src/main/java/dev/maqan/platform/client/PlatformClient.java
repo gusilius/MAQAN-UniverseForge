@@ -28,7 +28,8 @@ public final class PlatformClient {
             if (event.phase != TickEvent.Phase.END) return;
             Minecraft mc = Minecraft.getInstance();
             while (OPEN.consumeClick()) {
-                if (mc.screen == null) mc.setScreen(new PlatformShellScreen());
+                if (mc.screen instanceof PlatformShellScreen) mc.setScreen(null);
+                else mc.setScreen(new PlatformShellScreen());
             }
         }
     }
