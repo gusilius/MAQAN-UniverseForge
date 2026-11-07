@@ -797,7 +797,7 @@ public class NavigatorScreen extends Screen {
             universeButton.setMessage(Component.literal("◎"));
             universeButton.active = !systems.isEmpty();
         }
-        if (backButton != null) backButton.active = level > 0 || galaxyPath != null;
+        if (backButton != null) backButton.active = level > 0 || galaxyPath != null || sectorPath != null;
         if (atlasModeButton != null) { atlasModeButton.setMessage(Component.literal("✧")); atlasModeButton.setTooltip(Tooltip.create(Component.literal("Atlas layer: " + atlasModeName()))); }
         if (openButton != null) openButton.active = selectedNodeId != null || selectedId != null;
         if (focusButton != null) focusButton.active = selectedNodeId != null || selectedId != null;
