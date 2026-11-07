@@ -4427,7 +4427,7 @@ public class NavigatorScreen extends Screen {
     @Override
     public boolean mouseScrolled(double x, double y, double delta) {
         if (contextOpen) return true;
-        if (toolsOpen && x >= width - 292 && x <= width - 8
+        if (toolsOpen && x >= width - 140 && x <= width - 8
                 && y >= toolsMenuTop() && y <= toolsMenuBottom()) return true;
         if (delta == 0.0) return false;
         if (systemPickerOpen) {
