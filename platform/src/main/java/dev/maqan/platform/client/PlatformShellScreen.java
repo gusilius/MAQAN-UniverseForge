@@ -139,8 +139,10 @@ public final class PlatformShellScreen extends Screen {
             panels.put("inspector", new Panel("inspector", "INSPECTOR", width - 252, 52, 236, 230));
             panels.put("timeline", new Panel("timeline", "TIMELINE", Math.max(220, width / 2 - 180), height - 116, 360, 82));
             panels.put("tools", new Panel("tools", "COMMANDS", Math.max(220, width / 2 - 145), 82, 290, 180));
-            panels.get("navigation").visible = false;
-            panels.get("inspector").visible = false;
+            // A new workspace opens ready to navigate and inspect; secondary
+            // panels stay opt-in so the world/map remains visually dominant.
+            panels.get("navigation").visible = true;
+            panels.get("inspector").visible = true;
             panels.get("timeline").visible = false;
             panels.get("tools").visible = false;
         }
@@ -563,8 +565,8 @@ public final class PlatformShellScreen extends Screen {
         if(settingsVisible) {
             int sx=52,sy=Math.max(42,height-158);
             if(mx>=sx+196&&my>=sy&&my<sy+26) { settingsVisible=false; return true; }
-            if(mx>=sx&&mx<=sx+224&&my>=sy+32&&my<sy+59) { ambientGrid=!ambientGrid; return true; }
-            if(mx>=sx&&mx<=sx+224&&my>=sy+59&&my<sy+86) { panelShadows=!panelShadows; return true; }
+            if(mx>=sx&&mx<=sx+224&&my>=sy+32&&my<sy+59) { ambientGrid=!ambientGrid; saveWorkspaceState(); return true; }
+            if(mx>=sx&&mx<=sx+224&&my>=sy+59&&my<sy+86) { panelShadows=!panelShadows; saveWorkspaceState(); return true; }
             if(mx>=sx&&mx<=sx+224&&my>=sy&&my<=sy+146) return true;
         }
         if(profile==Profile.COSMOS && embeddedView==null && my>=40&&my<68 && mx>=54&&mx<270) {
@@ -618,6 +620,7 @@ public final class PlatformShellScreen extends Screen {
     }
 
     private void setProfile(Profile next) {
+        if (profile != next) PlatformSelectionContext.clear(null);
         profile=next;
         navigationScroll = 0;
         selectedCapabilityId = switch (next) {
