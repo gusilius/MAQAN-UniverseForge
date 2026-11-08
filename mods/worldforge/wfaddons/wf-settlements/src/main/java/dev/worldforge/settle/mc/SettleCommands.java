@@ -58,6 +58,7 @@ public final class SettleCommands {
                         .then(Commands.argument("uid", IntegerArgumentType.integer(1)).executes(c -> order(c, col -> {
                             int uid = IntegerArgumentType.getInteger(c, "uid");
                             col.s.cancel(uid);
+                            col.map.removeBuilding(uid);
                             return "Отменено здание #" + uid;
                         }))))
                 .then(Commands.literal("assign").requires(SettleCommands::op)
