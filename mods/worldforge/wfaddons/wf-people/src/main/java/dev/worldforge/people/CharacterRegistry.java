@@ -9,7 +9,7 @@ import java.util.*;
  * и спрашивают, что разрешает должность ({@link #unlocked}), не зная ничего о ролях друг друга.
  */
 public final class CharacterRegistry {
-    public enum LifecycleKind { BORN, MARRIED, POST_APPOINTED, POST_DISMISSED, PROFESSION_CHANGED,
+    public enum LifecycleKind { BORN, CHILD_BORN, MARRIED, POST_APPOINTED, POST_DISMISSED, PROFESSION_CHANGED,
         HIRED, FIRED, MIGRATED, DUTY_ASSIGNED, DUTY_REMOVED, DIED, RESTORED }
 
     public record LifecycleEvent(LifecycleKind kind, String characterId, String from, String to, int year) { }
@@ -224,7 +224,9 @@ public final class CharacterRegistry {
         return false;
     }
 
-    public void marry(String a, String b) {
+    public void marry(String a, String b) { marry(a, b, 0); }
+
+    public void marry(String a, String b, int year) {
         Character x = require(a), y = require(b);
         if (x == y) throw new IllegalArgumentException("Персонаж не может вступить в брак с самим собой");
         if (!x.alive || !y.alive) throw new IllegalStateException("Умерший персонаж не может вступить в брак");
@@ -234,8 +236,8 @@ public final class CharacterRegistry {
         if (!y.spouse.isEmpty()) throw new IllegalStateException(y.name + " уже состоит в браке");
         x.spouse = y.id;
         y.spouse = x.id;
-        emit(x, LifecycleKind.MARRIED, "", y.id, 0);
-        emit(y, LifecycleKind.MARRIED, "", x.id, 0);
+        emit(x, LifecycleKind.MARRIED, "", y.id, year);
+        emit(y, LifecycleKind.MARRIED, "", x.id, year);
     }
 
     /** A deceased or missing spouse does not permanently prevent remarriage. */
@@ -253,6 +255,7 @@ public final class CharacterRegistry {
         c.mother = mother.id;
         father.children.add(c.id);
         mother.children.add(c.id);
+        emit(c, LifecycleKind.CHILD_BORN, father.id, mother.id, year);
         return c;
     }
 
