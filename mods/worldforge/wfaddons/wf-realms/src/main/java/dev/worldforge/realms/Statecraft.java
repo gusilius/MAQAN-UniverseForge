@@ -156,17 +156,17 @@ public final class Statecraft {
         String namespace = (mapName == null ? "map" : mapName.trim()).replaceAll("[^A-Za-z0-9_.-]", "_");
         if (namespace.isEmpty()) namespace = "map";
         Map<Integer, String> ids = new LinkedHashMap<>();
-        Map<Integer, String> realmsByTitle = new HashMap<>();
+        Map<String, TitleData.Title> sourceByKey = new HashMap<>();
+        for (TitleData.Title title : data.allTitles()) sourceByKey.put(title.key, title);
         int imported = 0;
         for (TitleData.Realm realm : data.realmList()) {
             String realmId = clean(realm.id, "realm id");
             for (String key : realm.titleKeys) {
-                TitleData.Title source = data.title(key);
+                TitleData.Title source = sourceByKey.get(key);
                 if (source == null) continue;
                 String id = "map:" + UUID.nameUUIDFromBytes((namespace + "|" + key)
                         .getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 ids.put(source.id, id);
-                realmsByTitle.put(source.id, realmId);
                 if (!titles.containsKey(id)) {
                     int tier = Math.max(0, Math.min(Rank.values().length - 1, source.tier));
                     Title target = createTitle(id, realmId, Rank.values()[tier], source.name);
