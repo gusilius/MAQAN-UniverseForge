@@ -112,18 +112,19 @@ public final class SettlementMap {
         if (height < -2048 || height > 4096 || !Double.isFinite(fertility)) throw new IllegalArgumentException("Invalid terrain sample");
         cells.put(key(gx, gz), new Cell(gx, gz, height, biome == null ? "unknown" : biome,
                 clamp(fertility, 0, 1), 0, water));
-        recomputeSlopes();
+        recomputeSlope(gx, gz);
+        for (int[] d : new int[][]{{1,0},{-1,0},{0,1},{0,-1}}) recomputeSlope(gx + d[0], gz + d[1]);
     }
 
-    private void recomputeSlopes() {
-        for (Cell c : new ArrayList<>(cells.values())) {
-            int max = 0;
-            for (int[] d : new int[][]{{1,0},{-1,0},{0,1},{0,-1}}) {
-                Cell n = cells.get(key(c.gx + d[0], c.gz + d[1]));
-                if (n != null) max = Math.max(max, Math.abs(c.height - n.height));
-            }
-            cells.put(key(c.gx, c.gz), new Cell(c.gx, c.gz, c.height, c.biome, c.fertility, max, c.water));
+    private void recomputeSlope(int gx, int gz) {
+        Cell c = cells.get(key(gx, gz));
+        if (c == null) return;
+        int max = 0;
+        for (int[] d : new int[][]{{1,0},{-1,0},{0,1},{0,-1}}) {
+            Cell n = cells.get(key(gx + d[0], gz + d[1]));
+            if (n != null) max = Math.max(max, Math.abs(c.height - n.height));
         }
+        cells.put(key(gx, gz), new Cell(gx, gz, c.height, c.biome, c.fertility, max, c.water));
     }
 
     public Parcel zone(String id, int x, int z, int width, int depth, Zone zone) {
