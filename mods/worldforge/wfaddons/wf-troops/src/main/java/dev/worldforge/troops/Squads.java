@@ -24,6 +24,10 @@ public final class Squads {
         public double morale = 1.0;
         public boolean routed;
         public int lastAlive = -1;               // для шага морали (не сохраняется)
+        /** Canonical wf-people Character ID appointed to command this squad. */
+        public String leaderCharacterId = "";
+        public boolean leaderHero;
+        public int leadershipRank;
         Squad(String id, String name, String owner) { this.id = id; this.name = name; this.owner = owner; }
         public Order current() { return queue.peekFirst(); }
     }
@@ -46,6 +50,24 @@ public final class Squads {
         s.initial = s.members.size();
         squads.put(s.id, s);
         return s;
+    }
+
+    /** Assigns the canonical character identity; empty id clears the appointment. */
+    public boolean appointLeader(String squadId, String characterId, boolean hero, int rank) {
+        Squad squad = squads.get(squadId);
+        if (squad == null) return false;
+        String id = characterId == null ? "" : characterId.trim();
+        if (id.isEmpty()) {
+            squad.leaderCharacterId = "";
+            squad.leaderHero = false;
+            squad.leadershipRank = 0;
+            return true;
+        }
+        if (id.length() > 64 || !id.matches("[A-Za-z0-9_.:-]+")) return false;
+        squad.leaderCharacterId = id;
+        squad.leaderHero = hero;
+        squad.leadershipRank = Math.max(0, Math.min(10, rank));
+        return true;
     }
 
     public Squad get(String id) { return squads.get(id); }
@@ -196,6 +218,9 @@ public final class Squads {
                     .append(",\"initial\":").append(Math.max(s.members.size(), s.initial))
                     .append(",\"morale\":").append(Double.isFinite(s.morale) ? Math.max(0, Math.min(1, s.morale)) : 1.0)
                     .append(",\"routed\":").append(s.routed)
+                    .append(",\"leaderCharacterId\":").append(jsonString(s.leaderCharacterId))
+                    .append(",\"leaderHero\":").append(s.leaderHero)
+                    .append(",\"leadershipRank\":").append(Math.max(0, Math.min(10, s.leadershipRank)))
                     .append(",\"cx\":").append(Double.isFinite(s.cx) ? s.cx : 0)
                     .append(",\"cz\":").append(Double.isFinite(s.cz) ? s.cz : 0)
                     .append(",\"yaw\":").append(Double.isFinite(s.yaw) ? s.yaw : 0)
@@ -254,6 +279,10 @@ public final class Squads {
             s.yaw = finiteNumber(e.get("yaw"), 0);
             s.morale = Math.max(0, Math.min(1, finiteNumber(e.get("morale"), 1)));
             s.routed = Boolean.TRUE.equals(e.get("routed"));
+            s.leaderCharacterId = e.get("leaderCharacterId") instanceof String leader ? leader : "";
+            if (s.leaderCharacterId.length() > 64 || !s.leaderCharacterId.matches("[A-Za-z0-9_.:-]*")) s.leaderCharacterId = "";
+            s.leaderHero = Boolean.TRUE.equals(e.get("leaderHero")) && !s.leaderCharacterId.isEmpty();
+            s.leadershipRank = Math.max(0, Math.min(10, (int) finiteNumber(e.get("leadershipRank"), 0)));
             if (e.get("queue") instanceof List<?> orders) {
                 for (Object rawOrder : orders) {
                     if (s.queue.size() >= 64) break;
