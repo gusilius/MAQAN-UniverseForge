@@ -66,6 +66,7 @@ public class PeopleMod {
             () -> EntityType.Builder.of(WFNpc::new, MobCategory.CREATURE).sized(0.6F, 1.95F).clientTrackingRange(10).build(ID + ":npc"));
 
     public static volatile RoleDefs ROLES = new RoleDefs();
+    public static volatile dev.worldforge.people.ProfessionDefs PROFESSIONS = new dev.worldforge.people.ProfessionDefs();
     /** Исходные JSON ролей и событий: уходят клиенту, чтобы окно двора собрало те же определения. */
     public static volatile java.util.List<String> ROLES_RAW = java.util.List.of();
     public static volatile NameBank NAMES = new NameBank();
@@ -112,14 +113,17 @@ public class PeopleMod {
         FLAGS.clear();
         ticks = 0;
         RoleDefs roles = new RoleDefs();
+        dev.worldforge.people.ProfessionDefs professions = new dev.worldforge.people.ProfessionDefs();
         NameBank names = new NameBank();
         java.util.List<String> rawRoles = new java.util.ArrayList<>();
         load(e.getServer(), "wf_roles", j -> { roles.add(j); rawRoles.add(j); });
+        load(e.getServer(), "wf_professions", professions::add);
         ROLES_RAW = rawRoles;
         load(e.getServer(), "wf_names", names::add);
         ROLES = roles;
+        PROFESSIONS = professions;
         NAMES = names;
-        LOGGER.info("wf_people: загружено ролей: {}", roles.all().size());
+        LOGGER.info("wf_people: загружено ролей: {}, профессий: {}", roles.all().size(), professions.all().size());
     }
 
     private interface Sink {
