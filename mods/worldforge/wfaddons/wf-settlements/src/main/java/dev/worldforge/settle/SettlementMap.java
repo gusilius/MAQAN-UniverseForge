@@ -324,14 +324,25 @@ public final class SettlementMap {
         simulationTime += dt; simulationSteps++;
     }
 
+    public void removeBuilding(int uid) {
+        plans.remove(uid);
+        String warehouseId = "building:" + uid;
+        warehouses.remove(warehouseId);
+    }
+
     private void reconcileStorageBuildings(Settlement settlement) {
+        Set<String> activeStorage = new HashSet<>();
         for (Building b : settlement.buildings) {
             if (!b.def.storage.isEmpty()) {
                 String id = "building:" + b.uid;
+                activeStorage.add(id);
                 Warehouse w = warehouses.get(id);
+                double capacity = b.def.storage.values().stream().mapToDouble(Integer::doubleValue).sum();
                 if (w == null) {
-                    w = new Warehouse(id, b.x, b.z, b.def.storage.values().stream().mapToDouble(Integer::doubleValue).sum());
+                    w = new Warehouse(id, b.x, b.z, capacity);
                     warehouses.put(id, w);
+                } else {
+                    w.capacity = capacity;
                 }
             }
             ConstructionPlan p = plans.get(b.uid);
@@ -344,6 +355,7 @@ public final class SettlementMap {
             }
         }
         plans.keySet().removeIf(uid -> settlement.building(uid) == null);
+        warehouses.keySet().removeIf(id -> id.startsWith("building:") && !activeStorage.contains(id));
     }
 
     private void reconcileInventory(Settlement settlement) {
