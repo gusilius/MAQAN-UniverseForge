@@ -5,10 +5,12 @@ import dev.worldforge.mod.EditorManager;
 import dev.worldforge.mod.MapData;
 import dev.worldforge.mod.TitleData;
 import dev.worldforge.mod.WorldForgeMod;
+import dev.worldforge.mod.api.WorldForgeApi;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.Courts;
 import dev.worldforge.people.NameBank;
+import dev.worldforge.people.PopulationSimulation;
 import dev.worldforge.people.Role;
 import dev.worldforge.people.RoleDefs;
 import dev.worldforge.people.bridge.DialogueBridge;
@@ -55,7 +57,8 @@ import java.util.concurrent.ConcurrentHashMap;
 public class PeopleMod {
     public static final String ID = "wf_people";
     public static final Logger LOGGER = LogUtils.getLogger();
-    public static final int YEAR = 300, SAVE_EVERY = 6000, SPAWN_EVERY = 100;
+    public static volatile int YEAR = 300;
+    public static final int SAVE_EVERY = 6000, SPAWN_EVERY = 100;
     public static final String LAW = "primogeniture";
 
     public static final DeferredRegister<EntityType<?>> ENTITIES = DeferredRegister.create(ForgeRegistries.ENTITY_TYPES, ID);
@@ -136,6 +139,7 @@ public class PeopleMod {
 
     @SubscribeEvent
     public void onStarted(ServerStartedEvent e) {
+        YEAR = WorldForgeApi.clock().year();
         for (MapData m : WorldForgeMod.loadedMaps().values()) registry(m);
     }
 
@@ -204,6 +208,11 @@ public class PeopleMod {
         if (e.phase != TickEvent.Phase.END) return;
         ticks++;
         try {
+            int elapsedDays = WorldForgeApi.clock().pull("wf-people");
+            YEAR = WorldForgeApi.clock().year();
+            if (elapsedDays > 0) {
+                for (CharacterRegistry registry : REGS.values()) PopulationSimulation.advance(registry, elapsedDays, YEAR);
+            }
             if (ticks % SPAWN_EVERY == 0) NpcSpawner.pass(e.getServer());
             if (ticks % SAVE_EVERY == 0) saveAll(e.getServer());
         } catch (Exception ex) {
