@@ -82,7 +82,6 @@ public final class Colony {
         int minGX = SettlementMap.grid(Math.min(minX, maxX)), maxGX = SettlementMap.grid(Math.max(minX, maxX));
         int minGZ = SettlementMap.grid(Math.min(minZ, maxZ)), maxGZ = SettlementMap.grid(Math.max(minZ, maxZ));
         for (int gx = minGX; gx <= maxGX; gx++) for (int gz = minGZ; gz <= maxGZ; gz++) {
-            if (map.cell(gx, gz) != null) continue;
             int wx = cx + gx * SettlementMap.CELL_SIZE + SettlementMap.CELL_SIZE / 2;
             int wz = cz + gz * SettlementMap.CELL_SIZE + SettlementMap.CELL_SIZE / 2;
             BlockPos probe = new BlockPos(wx, level.getMinBuildHeight(), wz);
