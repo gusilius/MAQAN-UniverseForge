@@ -216,6 +216,18 @@ public final class Settlement {
                 worker.name == null ? "" : worker.name, reason));
     }
 
+    /** Removes a worker by canonical Character ID and persists the reason for lifecycle reconciliation. */
+    public boolean removeWorkerByPerson(String personId, String reason) {
+        if (personId == null || personId.isBlank() || reason == null || reason.isBlank()) return false;
+        for (Worker worker : new ArrayList<>(workers)) {
+            if (personId.equals(worker.person)) {
+                removeWorker(worker, reason);
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** Drained only after the owning CharacterRegistry confirms the lifecycle transition. */
     public List<WorkerDeparture> pendingDepartures() { return Collections.unmodifiableList(departures); }
     public void acknowledgeDeparture(WorkerDeparture departure) { departures.remove(departure); }
