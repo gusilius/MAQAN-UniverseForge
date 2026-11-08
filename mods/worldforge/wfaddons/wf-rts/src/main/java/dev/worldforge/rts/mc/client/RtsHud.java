@@ -96,9 +96,60 @@ public class RtsHud extends Screen {
 
     // ------------------------------------------------------------------ рисование
 
+    private boolean embeddedInMaqan;
+
+    public void setEmbeddedInMaqan(boolean embedded) { this.embeddedInMaqan = embedded; }
+
+    private void publishWorkspaceSelection() {
+        if (sel.hasBuilding()) {
+            Building b = sel.building(s);
+            if (b == null) { dev.worldforge.mod.client.PlatformWorkspaceBridge.clear("wf_rts"); return; }
+            dev.worldforge.mod.client.PlatformWorkspaceBridge.publish("wf_rts",
+                    "building:" + b.uid, "building", b.def.name,
+                    "Settlement building · " + Look.stateName(b) + " · " + b.x + ", " + b.z);
+            return;
+        }
+        List<Worker> workers = sel.workers(s);
+        if (workers.isEmpty()) {
+            dev.worldforge.mod.client.PlatformWorkspaceBridge.clear("wf_rts");
+            return;
+        }
+        if (workers.size() == 1) {
+            Worker worker = workers.get(0);
+            String id = worker.person == null || worker.person.isBlank()
+                    ? "worker:" + worker.id : worker.person;
+            dev.worldforge.mod.client.PlatformWorkspaceBridge.publish("wf_rts", id,
+                    worker.person == null || worker.person.isBlank() ? "worker" : "character",
+                    worker.name, "Profession: " + s.defs.professionName(worker.profession)
+                            + " · " + (worker.status == null ? "" : worker.status));
+            return;
+        }
+        String ids = workers.stream().map(w -> String.valueOf(w.id)).sorted()
+                .collect(java.util.stream.Collectors.joining(","));
+        String professions = sel.byProfession(s).entrySet().stream()
+                .map(e -> s.defs.professionName(e.getKey()) + " ×" + e.getValue())
+                .collect(java.util.stream.Collectors.joining(" · "));
+        dev.worldforge.mod.client.PlatformWorkspaceBridge.publish("wf_rts",
+                "worker-group:" + ids, "worker group", workers.size() + " selected",
+                workers.size() + " workers · " + professions);
+    }
+
+    @Override
+    public void removed() {
+        dev.worldforge.mod.client.PlatformWorkspaceBridge.clear("wf_rts");
+        super.removed();
+    }
+
+    @Override
+    public void onClose() {
+        if (embeddedInMaqan && dev.worldforge.mod.client.PlatformWorkspaceBridge.closeEmbedded(this)) return;
+        super.onClose();
+    }
+
     @Override
     public void render(GuiGraphics g, int mx, int my, float pt) {
         sel.prune(s);
+        publishWorkspaceSelection();
         hits.clear();
         tipTitle = null;
         curX = mx; curY = my;
