@@ -512,7 +512,7 @@ public class SettleMod {
         String place = "settlement:" + colony.s.id;
         person.props.put("population.location", colony.s.id);
         person.props.put("population.employer", place);
-        if (!person.has("settlement_worker", place)) registry.appoint(person.id, "settlement_worker", place);
+        if (!person.has("settlement_worker", place)) registry.appoint(person.id, "settlement_worker", place, PeopleMod.YEAR);
         return true;
     }
 
