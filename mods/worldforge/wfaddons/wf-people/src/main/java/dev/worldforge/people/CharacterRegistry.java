@@ -63,12 +63,8 @@ public final class CharacterRegistry {
 
     public void dismiss(String id, String role, String place) {
         Character c = require(id);
-        if (c.posts.removeIf(p -> p.role.equals(role) && p.place.equals(place))) {
-            for (Listener l : listeners) {
-                l.dismissed(c, role, place);
-                l.lifecycle(c, new LifecycleEvent(LifecycleKind.FIRED, c.id, place, "", 0));
-            }
-        }
+        if (c.posts.removeIf(p -> p.role.equals(role) && p.place.equals(place)))
+            for (Listener l : listeners) l.dismissed(c, role, place);
     }
 
     /** Employment is an assignment on the existing person, never a new population record. */
@@ -277,6 +273,7 @@ public final class CharacterRegistry {
         if (!(raw.get("characters") instanceof List<?> entries)) throw new IllegalArgumentException("Отсутствует список персонажей");
 
         Map<String, Character> loaded = new LinkedHashMap<>();
+        Map<String, String> entityOwners = new HashMap<>();
         int maxNumericId = 0;
         for (Object value : entries) {
             if (!(value instanceof Map<?, ?> m)) throw new IllegalArgumentException("Повреждена запись персонажа");
@@ -323,6 +320,16 @@ public final class CharacterRegistry {
                 for (Map.Entry<?, ?> entry : p.entrySet()) {
                     if (!(entry.getKey() instanceof String key)) throw new IllegalArgumentException("Некорректный ключ свойства " + id);
                     c.props.put(key, entry.getValue());
+                }
+            }
+            Object bindingsRaw = c.props.get("population.entity_bindings");
+            if (bindingsRaw instanceof Map<?, ?> bindings) {
+                for (Object bindingValue : bindings.values()) {
+                    if (!(bindingValue instanceof String uuid) || uuid.isBlank())
+                        throw new IllegalArgumentException("Повреждена привязка Minecraft Entity персонажа " + id);
+                    String previousOwner = entityOwners.putIfAbsent(uuid, id);
+                    if (previousOwner != null && !previousOwner.equals(id))
+                        throw new IllegalArgumentException("Minecraft Entity UUID " + uuid + " привязан к двум персонажам: " + previousOwner + " и " + id);
                 }
             }
             if (loaded.putIfAbsent(id, c) != null) throw new IllegalArgumentException("Повторный ID персонажа: " + id);
