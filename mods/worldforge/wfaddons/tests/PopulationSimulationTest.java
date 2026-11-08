@@ -41,8 +41,9 @@ public final class PopulationSimulationTest {
         ok("settlement:river".equals(smith.props.get("population.location"))
                         && registry.get(stableId) == smith,
                 "migration changes location without changing Character ID");
+        Character other = registry.create("Other", "", "north", "m", 280);
         ok(registry.bindEntity(smith.id, "npc", "entity-uuid-1")
-                        && !registry.bindEntity("c9999", "npc", "entity-uuid-1"),
+                        && !registry.bindEntity(other.id, "npc", "entity-uuid-1"),
                 "one Minecraft entity UUID cannot be bound to two Characters");
         String boundSave = registry.toJson();
         CharacterRegistry restoredBindings = new CharacterRegistry();
