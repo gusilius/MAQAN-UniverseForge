@@ -536,13 +536,23 @@ public class SettleScreen extends Screen {
         g.enableScissor(x + 2, top + 2, x + cw - 2, top + h - 2);
         g.fill(x + 2, top + 2, x + cw - 2, top + h - 2, 0xFF17231F);
 
-        // Sampled world terrain, not a synthetic background.
+        // Sampled world terrain, not a synthetic background. Elevation subtly shades the biome base.
+        int minHeight = Integer.MAX_VALUE, maxHeight = Integer.MIN_VALUE;
+        for (SettlementMap.Cell cell : map.cells()) { minHeight = Math.min(minHeight, cell.height); maxHeight = Math.max(maxHeight, cell.height); }
+        double heightRange = Math.max(1, maxHeight - minHeight);
         for (SettlementMap.Cell cell : map.cells()) {
             int sx = (int) Math.round(originX + cell.x() * scale - SettlementMap.CELL_SIZE * scale / 2.0);
             int sy = (int) Math.round(originY + cell.z() * scale - SettlementMap.CELL_SIZE * scale / 2.0);
             int size = Math.max(1, (int) Math.ceil(SettlementMap.CELL_SIZE * scale));
-            int color = cell.water ? 0xFF315F83 : cell.slope > 2.0 ? 0xFF6A5A45
+            int color = cell.water ? 0xFF315F83 : cell.slope > 1.0 ? 0xFF6A5A45
                     : cell.fertility > 0.7 ? 0xFF456B48 : cell.fertility > 0.4 ? 0xFF53634A : 0xFF6C6549;
+            if (!cell.water) {
+                int shade = (int) Math.round((cell.height - minHeight) / heightRange * 36.0) - 18;
+                int red = Math.max(0, Math.min(255, ((color >> 16) & 255) + shade));
+                int green = Math.max(0, Math.min(255, ((color >> 8) & 255) + shade));
+                int blue = Math.max(0, Math.min(255, (color & 255) + shade));
+                color = 0xFF000000 | (red << 16) | (green << 8) | blue;
+            }
             g.fill(sx, sy, sx + size, sy + size, color);
         }
         for (SettlementMap.Parcel parcel : map.parcels.values()) {
@@ -559,6 +569,18 @@ public class SettleScreen extends Screen {
             g.fill(px, pz, px + pw, pz + ph, color);
             g.renderOutline(px, pz, pw, ph, 0x99D5D0B8);
         }
+        // Spatial warehouses are separate from the settlement-wide inventory ledger.
+        for (SettlementMap.Warehouse warehouse : map.warehouses.values()) {
+            int wx = (int) Math.round(originX + warehouse.x * scale);
+            int wz = (int) Math.round(originY + warehouse.z * scale);
+            g.fill(wx - 4, wz - 4, wx + 5, wz + 5, 0xFFFFD36A);
+            g.renderOutline(wx - 4, wz - 4, 9, 9, 0xFF4A3214);
+            List<String> stock = new ArrayList<>();
+            stock.add("Вместимость: " + Math.round(warehouse.capacity));
+            for (var entry : warehouse.stock.entrySet()) stock.add(entry.getKey() + ": " + Math.round(entry.getValue()));
+            hit(wx - 6, wz - 6, 12, 12, null, "Склад " + warehouse.id, stock);
+        }
+
         for (SettlementMap.Road road : map.roads.values()) {
             for (int i = 1; i < road.path.size(); i++) {
                 SettlementMap.Node a = road.path.get(i - 1), b = road.path.get(i);
@@ -640,7 +662,7 @@ public class SettleScreen extends Screen {
 
         String heading = "ПЛАН ПОСЕЛЕНИЯ";
         g.drawString(font, heading, x + 8, top + 7, WFUi.GOLD);
-        String stats = s.buildings.size() + " зданий  ·  " + s.workers.size() + " жителей  ·  " + map.roads.size() + " дорог  ·  " + map.parcels.size() + " участков";
+        String stats = s.buildings.size() + " зданий  ·  " + s.workers.size() + " жителей  ·  " + map.roads.size() + " дорог  ·  " + map.parcels.size() + " участков  ·  " + map.warehouses.size() + " складов";
         g.drawString(font, stats, x + cw - 8 - font.width(stats), top + 7, WFUi.MUTED);
         String hint = "Рельеф  ·  участки  ·  дороги  ·  ЛКМ + перетаскивание — перемещение  ·  выбор здания/жителя";
         g.drawString(font, font.plainSubstrByWidth(hint, cw - 16), x + 8, top + h - 12, WFUi.MUTED);
