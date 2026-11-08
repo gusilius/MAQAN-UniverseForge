@@ -178,6 +178,50 @@ public class TroopsMod {
         return null;
     }
 
+    /** Reassigns an existing settlement Character to a physical soldier without allocating a new identity. */
+    public static boolean assignExistingCharacter(TroopEntity troop, String characterId) {
+        if (troop == null || troop.level().isClientSide || characterId == null || characterId.isBlank()
+                || !ModList.get().isLoaded("wf_people")) return false;
+        String previousId = troop.characterId;
+        troop.characterId = characterId;
+        PersonBinding binding = bindPerson(troop, false);
+        if (binding == null) { troop.characterId = previousId; return false; }
+        Character person = binding.character();
+        boolean workerDuty = PopulationSimulation.hasDuty(person, Duty.WORKER);
+        if (workerDuty) {
+            if (!ModList.get().isLoaded("wf_settle")
+                    || !dev.worldforge.settle.mc.SettleMod.detachWorkerForMilitary(person.id)) {
+                binding.registry().unbindEntity(person.id, "troop", troop.getUUID().toString());
+                troop.characterId = previousId;
+                return false;
+            }
+            person.props.put("population.pre_military_profession", PopulationSimulation.profession(person));
+            PopulationSimulation.removeDuty(person, Duty.WORKER);
+        }
+        PopulationSimulation.addDuty(person, Duty.SOLDIER);
+        syncPerson(troop);
+        return true;
+    }
+
+    /** Demobilizes a physical soldier into a settlement worker using the same Character ID. */
+    public static boolean demobilizeToSettlement(TroopEntity troop, String colonyId) {
+        if (troop == null || troop.level().isClientSide || !ModList.get().isLoaded("wf_settle")) return false;
+        PersonBinding binding = bindPerson(troop, false);
+        if (binding == null) return false;
+        Character person = binding.character();
+        if (!dev.worldforge.settle.mc.SettleMod.attachExistingCharacter(colonyId, person.id)) return false;
+        binding.registry().unbindEntity(person.id, "troop", troop.getUUID().toString());
+        person.props.remove("wf_troop_uuid");
+        person.props.remove("wf_troop_unit");
+        person.props.remove("wf_army_id");
+        person.props.remove("wf_combat_xp");
+        person.props.remove("wf_veteran_rank");
+        LIVE.remove(troop.getUUID().toString());
+        SQUADS.remove(troop.getUUID().toString());
+        troop.discard();
+        return true;
+    }
+
     /** Shared character identity, soldier duty, profession, combat XP and skill ranks. */
     static void syncPerson(TroopEntity troop) {
         PersonBinding binding = bindPerson(troop, true);
