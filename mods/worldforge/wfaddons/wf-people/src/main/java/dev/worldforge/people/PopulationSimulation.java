@@ -205,8 +205,10 @@ public final class PopulationSimulation {
         int rank = skillRank(character, id);
         long banked = trainingXp(character, id);
         if (rank >= MAX_SKILL_RANK) return 0;
-        long total = Math.min((long) MAX_SKILL_RANK * SKILL_XP_PER_RANK, banked + xp);
-        int nextRank = Math.min(MAX_SKILL_RANK, (int) (total / SKILL_XP_PER_RANK));
+        long sum = xp > Long.MAX_VALUE - banked ? Long.MAX_VALUE : banked + xp;
+        long total = Math.min((long) (MAX_SKILL_RANK - rank) * SKILL_XP_PER_RANK, sum);
+        int gained = (int) (total / SKILL_XP_PER_RANK);
+        int nextRank = Math.min(MAX_SKILL_RANK, rank + gained);
         mapProp(character, SKILLS).put(id, nextRank);
         mapProp(character, TRAINING).put(id, nextRank >= MAX_SKILL_RANK ? 0L : total % SKILL_XP_PER_RANK);
         return nextRank - rank;
