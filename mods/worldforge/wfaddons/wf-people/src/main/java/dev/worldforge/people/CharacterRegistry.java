@@ -241,7 +241,8 @@ public final class CharacterRegistry {
     /** Только перечисленные персонажи (null - все): для окон на клиенте, которым не нужен весь мир. */
     public String toJson(Set<String> only) {
         Map<String, Object> root = new LinkedHashMap<>();
-        root.put("format", "wf-people/1");
+        root.put("format", "wf-people/2");
+        root.put("schema_version", 2);
         root.put("next", next);
         List<Object> list = new ArrayList<>();
         for (Character c : byId.values()) {
@@ -267,7 +268,11 @@ public final class CharacterRegistry {
         // until the entire save has been accepted.
         Object parsed = Json.parse(json == null ? "" : json);
         if (!(parsed instanceof Map<?, ?> raw)) throw new IllegalArgumentException("Повреждён корень сохранения людей");
-        if (!"wf-people/1".equals(raw.get("format"))) throw new IllegalArgumentException("Неверный формат людей");
+        String format = raw.get("format") instanceof String f ? f : "";
+        if (!"wf-people/1".equals(format) && !"wf-people/2".equals(format))
+            throw new IllegalArgumentException("Неверный формат людей: " + format);
+        // wf-people/1 is migrated in memory without regenerating IDs, family links or existing props.
+        // Missing Phase-VII extension fields are intentionally defaulted by their accessors.
         Object rawNext = raw.get("next");
         if (!(rawNext instanceof Number nextNumber)) throw new IllegalArgumentException("Отсутствует счётчик персонажей");
         long requestedNext = nextNumber.longValue();
