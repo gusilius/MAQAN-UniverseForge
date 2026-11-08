@@ -406,13 +406,50 @@ public class SettleMod {
         String race = realm == null ? "" : propertyString(realm.props, "race");
         String culture = realm == null ? "" : propertyString(realm.props, "culture");
         String place = "settlement:" + colony.s.id;
-        for (dev.worldforge.settle.Worker worker : colony.s.workers) {
-            Character person = worker.person == null || worker.person.isBlank() ? null : registry.get(worker.person);
-            if (person == null || !person.alive) {
+
+        // Consume persisted departures before reconciling current workers. A crash/reload cannot erase a death or migration.
+        for (Settlement.WorkerDeparture departure : new ArrayList<>(colony.s.pendingDepartures())) {
+            if (departure.personId().isBlank()) {
+                colony.s.acknowledgeDeparture(departure); // legacy worker had no Character identity
+                continue;
+            }
+            Character departed = registry.get(departure.personId());
+            if (departed == null) {
+                LOGGER.warn("wf_settle: departure references missing Character {}; retaining event for repair", departure.personId());
+                continue;
+            }
+            if (departed.alive) {
+                try {
+                    if (departure.reason().startsWith("death:"))
+                        PopulationSimulation.die(registry, departed.id, PeopleMod.YEAR, departure.reason().substring("death:".length()));
+                    else registry.migrate(departed.id, "outside:" + colony.s.id, PeopleMod.YEAR);
+                } catch (RuntimeException ex) {
+                    LOGGER.error("wf_settle: lifecycle transition failed for {}: {}", departed.id, ex.toString());
+                    continue;
+                }
+            }
+            colony.s.acknowledgeDeparture(departure);
+        }
+
+        for (dev.worldforge.settle.Worker worker : new ArrayList<>(colony.s.workers)) {
+            boolean hasPersonId = worker.person != null && !worker.person.isBlank();
+            Character person = hasPersonId ? registry.get(worker.person) : null;
+            if (hasPersonId && person == null) {
+                LOGGER.warn("wf_settle: worker {} references missing Character {}; not creating a replacement", worker.id, worker.person);
+                continue;
+            }
+            if (person != null && !person.alive) {
+                colony.s.workers.remove(worker);
+                continue;
+            }
+            if (person == null) {
                 person = registry.create(worker.name, "", culture, "m", PeopleMod.YEAR - 20);
                 worker.person = person.id;
             }
             if (!person.has("settlement_worker", place)) registry.appoint(person.id, "settlement_worker", place);
+            person.props.put("population.employer", place);
+            person.props.put("population.location", colony.s.id);
+            if (person.culture == null || person.culture.isBlank()) person.culture = culture;
             if (person.culture == null || person.culture.isBlank()) person.culture = culture;
             String profession = worker.profession == null || worker.profession.isBlank() ? "laborer" : worker.profession;
             if (!profession.equals(PopulationSimulation.profession(person))) PopulationSimulation.assignProfession(person, profession, PeopleMod.YEAR);
