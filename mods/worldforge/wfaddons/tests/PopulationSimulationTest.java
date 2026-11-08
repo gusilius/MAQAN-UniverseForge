@@ -20,7 +20,7 @@ public final class PopulationSimulationTest {
         Character smith = registry.create("Aldric", "House Forge", "north", "m", 280);
         String stableId = smith.id;
 
-        ok(PopulationSimulation.progressOwner(smith).equals("n:" + stableId), "NPC progression owner derives from the one Character ID");
+        ok(PopulationSimulation.progressOwner(smith, "middle_earth").equals("n:middle_earth:" + stableId), "NPC progression owner derives from the one Character ID");
         ok(PopulationSimulation.age(smith, 300) == 20, "age derives from the shared world calendar");
         ok(PopulationSimulation.lifeStage(smith, 300) == LifeStage.ADULT, "life-stage thresholds are deterministic");
 
