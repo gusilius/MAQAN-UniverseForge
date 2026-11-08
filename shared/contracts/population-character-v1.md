@@ -34,3 +34,15 @@ Status: implementation contract for WorldForge population integrations.
 - Character IDs and family links are never regenerated when profession, duty, skill, needs or AI intent changes.
 - Dead characters remain in the registry; death releases posts but does not erase family links or history.
 - No independent population count may be treated as a substitute for named people when the system requires individual identity.
+
+
+## Lifecycle hardening — Phase VII
+
+- Lifecycle changes are explicit events: birth, hire, fire, migration, duty assignment/removal, death and registry restoration.
+- Hiring, firing and migration operate on an existing Character ID. They never allocate a replacement identity.
+- Settlement worker departures are persisted as pending lifecycle records before the Character registry acknowledges them. Starvation/raid deaths become Character deaths; low-approval departures become migration events.
+- A non-empty Worker.person or TroopEntity.characterId that cannot be resolved is a referential-integrity fault. Adapters must log/retain the unresolved reference and must not silently create a replacement person.
+- A dead Character is never revived or replaced by entity synchronization. The physical body is removed or held for repair.
+- Minecraft entity UUID bindings are stored under population.entity_bindings by body kind. One entity UUID cannot be owned by two different Characters; multiple body kinds may reference the same Character.
+- Registry restoration validates duplicate IDs and entity UUID ownership before replacing live state. Legacy wf-people/1 records without population extension keys remain readable; corrupt registry files fail closed instead of regenerating court people over unreadable data.
+- Entity unload is not death. Persistent body references are refreshed on entity join; death explicitly removes its binding.
