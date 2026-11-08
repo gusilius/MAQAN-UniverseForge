@@ -158,7 +158,7 @@ public final class CommandScreen extends Screen {
             if (foe != null) {
                 CommandMode.send(new OrderPacket(OrderPacket.ORDER, CommandMode.selected(), Squads.Kind.ATTACK.ordinal(), 0, 0, foe.getUUID().toString(), shift, 0));
             } else if (g != null) {
-                CommandMode.send(new OrderPacket(OrderPacket.WORK, CommandMode.selected(), 0, g.x, g.z, "", false, 0));      // рабочие: в здание под курсором
+                // The single ORDER packet is routed by the server to workers and troops independently.
                 Squads.Kind k = ctrl ? Squads.Kind.ATTACK_MOVE : Squads.Kind.MOVE;
                 CommandMode.send(new OrderPacket(OrderPacket.ORDER, CommandMode.selected(), k.ordinal(), g.x, g.z, "", shift, 0));
                 CommandMode.marker = g;
