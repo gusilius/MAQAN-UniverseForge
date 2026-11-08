@@ -227,7 +227,7 @@ public class TroopsMod {
             }
             case OrderPacket.BUILD -> {
                 if (!ModList.get().isLoaded("wf_settle")) return;
-                if (!may(p)) { p.displayClientMessage(Component.literal("Строить могут операторы"), true); return; }
+                // BuildControl validates the target colony owner and every assigned worker.
                 p.displayClientMessage(Component.literal(BuildControl.place(p, o.target(), (int) Math.floor(o.x()), (int) Math.floor(o.z()), o.ids())), true);
             }
             default -> {}
