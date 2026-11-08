@@ -1,0 +1,6 @@
+{
+  "id": "farmer",
+  "name": "Фермер",
+  "category": "worker",
+  "required_skills": {}
+}
