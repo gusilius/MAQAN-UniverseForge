@@ -20,13 +20,13 @@ import java.util.Map;
  */
 public final class PlatformShellScreen extends Screen {
     private static final Logger LOGGER = LogUtils.getLogger();
-    private static final int BG = 0xF0060B12;
-    private static final int SURFACE = 0xE8101924;
-    private static final int SURFACE_ALT = 0xF014202D;
-    private static final int EDGE = 0x883B5265;
-    private static final int TEXT = 0xFFE7F0F8;
-    private static final int MUTED = 0xFF91A5B7;
-    private static final int CYAN = 0xFF69CDE2;
+    private static final int BG = WorkspaceTheme.BACKGROUND;
+    private static final int SURFACE = WorkspaceTheme.SURFACE;
+    private static final int SURFACE_ALT = WorkspaceTheme.SURFACE_RAISED;
+    private static final int EDGE = WorkspaceTheme.BORDER;
+    private static final int TEXT = WorkspaceTheme.TEXT;
+    private static final int MUTED = WorkspaceTheme.TEXT_MUTED;
+    private static final int CYAN = WorkspaceTheme.ACCENT;
 
     private enum Profile {
         COSMOS("◎", "COSMOS", "maqan.atlas.cosmos"),
