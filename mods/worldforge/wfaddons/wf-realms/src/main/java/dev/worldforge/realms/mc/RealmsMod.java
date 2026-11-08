@@ -229,6 +229,26 @@ public class RealmsMod {
                                         .executes(c -> politics(c.getSource(), "succession",
                                                 StringArgumentType.getString(c, "realm"),
                                                 StringArgumentType.getString(c, "law"), "", "")))));
+        d.register(Commands.literal("wfdynasty").requires(s -> s.hasPermission(2))
+                .then(Commands.literal("register")
+                        .then(Commands.argument("house", StringArgumentType.word())
+                                .then(Commands.argument("founder", StringArgumentType.word())
+                                        .executes(ctx -> politics(ctx.getSource(), "dynasty", StringArgumentType.getString(ctx, "house"), StringArgumentType.getString(ctx, "founder"), "", "")))))
+                .then(Commands.literal("member")
+                        .then(Commands.argument("house", StringArgumentType.word())
+                                .then(Commands.argument("character", StringArgumentType.word())
+                                        .executes(ctx -> politics(ctx.getSource(), "dynasty_member", StringArgumentType.getString(ctx, "house"), StringArgumentType.getString(ctx, "character"), "", ""))))));
+        d.register(Commands.literal("wfplot").requires(s -> s.hasPermission(2))
+                .then(Commands.literal("create")
+                        .then(Commands.argument("realm", StringArgumentType.word())
+                                .then(Commands.argument("sponsor", StringArgumentType.word())
+                                        .then(Commands.argument("target", StringArgumentType.word())
+                                                .then(Commands.argument("kind", StringArgumentType.word())
+                                                        .executes(ctx -> politics(ctx.getSource(), "plot",
+                                                                StringArgumentType.getString(ctx, "realm"),
+                                                                StringArgumentType.getString(ctx, "sponsor"),
+                                                                StringArgumentType.getString(ctx, "target"),
+                                                                StringArgumentType.getString(ctx, "kind"))))))));
     }
 
     private static int politics(CommandSourceStack source, String action, String a, String b, String c, String d) {
@@ -243,6 +263,9 @@ public class RealmsMod {
                 case "treaty" -> POLITICS.setTreaty(a, b, Statecraft.Treaty.valueOf(c.toUpperCase(Locale.ROOT)), Boolean.parseBoolean(d));
                 case "war" -> POLITICS.declareWar(a, b, c, d, (int) WorldForgeApi.clock().dayNumber());
                 case "succession" -> POLITICS.setInheritanceLaw(a, Statecraft.InheritanceLaw.valueOf(b.toUpperCase(Locale.ROOT)));
+                case "dynasty" -> POLITICS.registerDynasty(a, b);
+                case "dynasty_member" -> { if (!POLITICS.addDynastyMember(a, b)) throw new IllegalArgumentException(POLITICS.lastError); }
+                case "plot" -> POLITICS.createPlot(a, b, c, Statecraft.PlotKind.valueOf(d.toUpperCase(Locale.ROOT)));
                 default -> throw new IllegalArgumentException("Неизвестная политическая операция");
             }
             save(source.getServer());
