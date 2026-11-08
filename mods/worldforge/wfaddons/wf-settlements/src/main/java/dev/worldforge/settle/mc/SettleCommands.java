@@ -264,7 +264,13 @@ public final class SettleCommands {
         int px = (int) Math.floor(s.getPosition().x), pz = (int) Math.floor(s.getPosition().z);
         return order(c, col -> {
             int x = dx != null ? dx : px - col.cx, z = dz != null ? dz : pz - col.cz;   // без аргументов - там, где стоит игрок
+            ServerLevel lv = col.level(c.getSource().getServer());
+            if (lv != null) col.captureTerrain(lv, x - 16, z - 16, x + 16, z + 16);
+            dev.worldforge.settle.Defs.Building definition = SettleMod.DEFS.buildings.get(def);
+            if (definition != null && !col.map.cells().isEmpty())
+                col.map.validatePlacement(definition.category, x, z, definition.sizeX, definition.sizeZ);
             Building b = col.s.place(def, x, z);
+            if (!col.map.cells().isEmpty()) col.map.planBuilding(b);
             return "Заложено: " + b.def.name + " #" + b.uid + " (смещение " + x + ", " + z + ")";
         });
     }
