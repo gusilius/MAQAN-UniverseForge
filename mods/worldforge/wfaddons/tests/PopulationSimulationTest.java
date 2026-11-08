@@ -33,6 +33,10 @@ public final class PopulationSimulationTest {
         ok(PopulationSimulation.hasDuty(smith, Duty.WORKER)
                         && smith.has("settlement_worker", "settlement:forge"),
                 "hiring assigns an existing Character without allocating another identity");
+        int hiredEventCount = lifecycle.size();
+        registry.hire(smith.id, "settlement:forge", "farmer", 300);
+        ok(lifecycle.size() == hiredEventCount,
+                "repeated hire is idempotent and does not duplicate lifecycle events");
         registry.fire(smith.id, "settlement:forge", 301);
         ok(!PopulationSimulation.hasDuty(smith, Duty.WORKER)
                         && !smith.has("settlement_worker", "settlement:forge"),
