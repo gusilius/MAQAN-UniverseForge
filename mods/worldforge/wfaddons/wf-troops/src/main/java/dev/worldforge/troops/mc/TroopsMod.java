@@ -4,6 +4,14 @@ import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.logging.LogUtils;
 import dev.worldforge.mod.api.TreasuryApi;
+import dev.worldforge.mod.MapData;
+import dev.worldforge.mod.TitleData;
+import dev.worldforge.mod.WorldForgeMod;
+import dev.worldforge.people.Character;
+import dev.worldforge.people.CharacterRegistry;
+import dev.worldforge.people.PopulationSimulation;
+import dev.worldforge.people.PopulationSimulation.Duty;
+import dev.worldforge.people.mc.PeopleMod;
 import dev.worldforge.troops.Formations;
 import dev.worldforge.troops.Forts;
 import dev.worldforge.troops.Muster;
@@ -126,11 +134,63 @@ public class TroopsMod {
     public void join(EntityJoinLevelEvent e) {
         if (e.getLevel().isClientSide || !(e.getEntity() instanceof TroopEntity t)) return;
         LIVE.put(t.getUUID().toString(), t);
+        syncPerson(t);
         if (SQUADS.squadOf(t.getUUID().toString()) == null) {                       // солдат без отряда (отряд потерян): свой отряд
             Squads.Squad s = SQUADS.create(t.ownerId(), null, List.of(t.getUUID().toString()));
             s.realm = t.realm; s.cx = t.getX(); s.cz = t.getZ();
             t.setSquadId(s.id);
         } else t.setSquadId(SQUADS.squadOf(t.getUUID().toString()).id);
+    }
+
+    private record PersonBinding(CharacterRegistry registry, Character character) {}
+
+    /** Resolves a physical soldier to the one authoritative Character in the map owning its realm. */
+    private static PersonBinding bindPerson(TroopEntity troop, boolean create) {
+        if (troop == null || !ModList.get().isLoaded("wf_people")) return null;
+        for (MapData map : WorldForgeMod.loadedMaps().values()) {
+            if (map.titles == null) continue;
+            TitleData.Realm realm = troop.realm == null || troop.realm.isBlank() ? null : map.titles.realms.get(troop.realm);
+            if (realm == null && (troop.realm == null || troop.realm.isBlank()) && troop.level() instanceof ServerLevel level) {
+                TitleData.Title province = map.provinceAt(troop.getBlockX(), troop.getBlockZ());
+                realm = province == null ? null : map.titles.realmOf(province);
+                if (realm != null) troop.realm = realm.id;
+            }
+            if (realm == null) continue;
+            CharacterRegistry registry = PeopleMod.registry(map);
+            if (registry == null) continue;
+            Character person = troop.characterId == null || troop.characterId.isBlank() ? null : registry.get(troop.characterId);
+            if (person == null || !person.alive) {
+                if (!create) return null;
+                String culture = realm.props == null || realm.props.get("culture") == null ? "" : String.valueOf(realm.props.get("culture"));
+                String name = troop.def() == null ? troop.unitId() : troop.def().name();
+                person = registry.create(name + " " + troop.getUUID().toString().substring(0, 4), "", culture, "m", PeopleMod.YEAR - 20);
+                troop.characterId = person.id;
+            }
+            return new PersonBinding(registry, person);
+        }
+        return null;
+    }
+
+    /** Shared character identity, soldier duty, profession, combat XP and skill ranks. */
+    static void syncPerson(TroopEntity troop) {
+        PersonBinding binding = bindPerson(troop, true);
+        if (binding == null) return;
+        Character person = binding.character();
+        String profession = troop.unitId() == null || troop.unitId().isBlank() ? "soldier" : troop.unitId();
+        if (!profession.equals(PopulationSimulation.profession(person)))
+            PopulationSimulation.assignProfession(person, profession, PeopleMod.YEAR);
+        PopulationSimulation.addDuty(person, Duty.SOLDIER);
+        long characterXp = PopulationSimulation.trainingXp(person, "combat");
+        if (characterXp > troop.combatXp()) troop.setCombatXpFromCharacter(characterXp);
+        else PopulationSimulation.setTrainingXp(person, "combat", troop.combatXp());
+        PopulationSimulation.setSkillRank(person, "combat", troop.veteranRank());
+        person.props.put("wf_unit_kind", "soldier");
+        person.props.put("wf_troop_uuid", troop.getUUID().toString());
+        person.props.put("wf_troop_unit", troop.unitId());
+        person.props.put("wf_army_id", troop.armyId);
+        person.props.put("wf_combat_xp", troop.combatXp());
+        person.props.put("wf_veteran_rank", troop.veteranRank());
+        PopulationSimulation.updateIntent(person, PeopleMod.YEAR);
     }
 
     @SubscribeEvent
@@ -140,6 +200,11 @@ public class TroopsMod {
     }
 
     static void onDeath(TroopEntity t) {
+        PersonBinding binding = bindPerson(t, false);
+        if (binding != null && binding.character().alive) {
+            try { PopulationSimulation.die(binding.registry(), binding.character().id, PeopleMod.YEAR, "combat"); }
+            catch (RuntimeException ex) { LOGGER.error("wf_troops: failed to record soldier death {}: {}", t.characterId, ex.toString()); }
+        }
         String id = t.getUUID().toString();
         LIVE.remove(id);
         SQUADS.remove(id);
@@ -150,6 +215,7 @@ public class TroopsMod {
         if (e.phase != TickEvent.Phase.END || server == null) return;
         ticks++;
         if (ticks % 10 == 0) TroopController.step(server);
+        if (ticks % 1200 == 0) for (TroopEntity troop : LIVE.values()) syncPerson(troop);
         if (ticks % 100 == 0) payroll();
         if (ticks % 20 == 0) FortService.step(server, ticks);
         if (ticks % 6000 == 0) save();
