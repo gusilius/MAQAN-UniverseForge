@@ -71,10 +71,18 @@ public final class Colony {
         return new BlockPos(x, y, z);
     }
 
-    /** Samples only already-loaded chunks; the map never forces distant terrain chunks to load. */
+    /** Samples the initial local area without loading chunks. */
     public int captureTerrain(ServerLevel level) {
+        return captureTerrain(level, -64, -64, 64, 64);
+    }
+
+    /** Expands the map only where an order needs terrain; no artificial settlement build radius. */
+    public int captureTerrain(ServerLevel level, int minX, int minZ, int maxX, int maxZ) {
         int captured = 0;
-        for (int gx = -8; gx <= 8; gx++) for (int gz = -8; gz <= 8; gz++) {
+        int minGX = SettlementMap.grid(Math.min(minX, maxX)), maxGX = SettlementMap.grid(Math.max(minX, maxX));
+        int minGZ = SettlementMap.grid(Math.min(minZ, maxZ)), maxGZ = SettlementMap.grid(Math.max(minZ, maxZ));
+        for (int gx = minGX; gx <= maxGX; gx++) for (int gz = minGZ; gz <= maxGZ; gz++) {
+            if (map.cell(gx, gz) != null) continue;
             int wx = cx + gx * SettlementMap.CELL_SIZE + SettlementMap.CELL_SIZE / 2;
             int wz = cz + gz * SettlementMap.CELL_SIZE + SettlementMap.CELL_SIZE / 2;
             BlockPos probe = new BlockPos(wx, level.getMinBuildHeight(), wz);
