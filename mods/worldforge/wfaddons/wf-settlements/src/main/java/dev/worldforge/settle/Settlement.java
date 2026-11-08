@@ -10,6 +10,10 @@ import java.util.*;
  * Приказы как в RTS: {@link #place}, {@link #assign}, {@link #setProfession}, {@link #setPriority}, {@link #cancel}.
  */
 public final class Settlement {
+    /** Persisted departures bridge settlement population changes to the canonical Character registry. */
+    public record WorkerDeparture(String personId, String name, String reason) { }
+    public final List<WorkerDeparture> departures = new ArrayList<>();
+
     public static final double BASE_CAP = 100, EAT = 0.02, GROW_EVERY = 45, STARVE_EVERY = 30, MAX_STEP = 2, MAX_TICK = 86400;
     public static final int BASE_HOUSING = 4, LOG_MAX = 60;
     /** Скорость рабочего (блоков в секунду), точка появления новых жителей, пороги настроения. */
@@ -97,7 +101,7 @@ public final class Settlement {
                     if (take > 0) { stock.put(r, amount(r) - take); lost += (lost.isEmpty() ? "" : ", ") + (int) take + " " + defs.resourceNames.getOrDefault(r, r); }
                 }
                 int dead = (int) Math.min(workers.size() - 1, Math.round((raidStrength - def) / 12.0));
-                for (int i = 0; i < dead && workers.size() > 1; i++) workers.remove(workers.size() - 1);
+                for (int i = 0; i < dead && workers.size() > 1; i++) removeWorker(workers.get(workers.size() - 1), "death:raid");
                 say("Налёт! Унесли: " + (lost.isEmpty() ? "ничего" : lost) + (dead > 0 ? "; погибло жителей: " + dead : ""));
             }
             raidTimer = RAID_EVERY;
@@ -205,6 +209,16 @@ public final class Settlement {
         workers.add(w);
         return w;
     }
+
+    private void removeWorker(Worker worker, String reason) {
+        if (worker == null || !workers.remove(worker)) return;
+        departures.add(new WorkerDeparture(worker.person == null ? "" : worker.person,
+                worker.name == null ? "" : worker.name, reason));
+    }
+
+    /** Drained only after the owning CharacterRegistry confirms the lifecycle transition. */
+    public List<WorkerDeparture> pendingDepartures() { return Collections.unmodifiableList(departures); }
+    public void acknowledgeDeparture(WorkerDeparture departure) { departures.remove(departure); }
 
     // ------------------------------------------------------------------ приказы
 
@@ -423,7 +437,8 @@ public final class Settlement {
         starveTimer += dt;
         if (starveTimer >= STARVE_EVERY) {
             starveTimer = 0;
-            Worker w = workers.remove(workers.size() - 1);
+            Worker w = workers.get(workers.size() - 1);
+            removeWorker(w, "death:starvation");
             say(w.name + " умер от голода");
         }
     }
@@ -436,7 +451,7 @@ public final class Settlement {
                 Worker w = null;
                 for (Worker o : workers) if (o.building == 0 && (w == null || o.id > w.id)) w = o;
                 if (w == null) w = workers.get(workers.size() - 1);
-                workers.remove(w);
+                removeWorker(w, "migration:dissatisfaction");
                 say(w.name + " покинул поселение (недовольство)");
             }
         } else leaveTimer = 0;
@@ -959,6 +974,13 @@ public final class Settlement {
             ws.add(m);
         }
         root.put("workers", ws);
+        List<Object> ds = new ArrayList<>();
+        for (WorkerDeparture d : departures) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("person", d.personId()); m.put("name", d.name()); m.put("reason", d.reason());
+            ds.add(m);
+        }
+        root.put("departures", ds);
         root.put("log", new ArrayList<Object>(log));
         return Json.write(root);
     }
@@ -1015,6 +1037,13 @@ public final class Settlement {
             if (m.get("prio") instanceof Map<?, ?> pm) { w.jobPrio = new TreeMap<>(); for (var e : pm.entrySet()) w.jobPrio.put(String.valueOf(e.getKey()), ((Number) e.getValue()).intValue()); }
             if (w.building != 0 && s.building(w.building) == null) w.building = 0;
             s.workers.add(w);
+        }
+        if (root.get("departures") instanceof List<?> ds) for (Object o : ds) {
+            if (!(o instanceof Map<?, ?> m)) continue;
+            String person = m.get("person") instanceof String v ? v : "";
+            String name = m.get("name") instanceof String v ? v : "";
+            String reason = m.get("reason") instanceof String v ? v : "migration:legacy";
+            s.departures.add(new WorkerDeparture(person, name, reason));
         }
         for (Object o : (List<Object>) root.get("log")) s.log.add((String) o);
         return s;
