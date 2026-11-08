@@ -34,15 +34,21 @@ public final class PlatformSelectionContext {
             clear(providerId);
             return;
         }
-        current = new Selection(
-                clean(providerId),
-                entityId,
-                clean(entityType),
-                clean(displayName),
-                clean(worldId),
-                clean(summary),
-                ++revision
-        );
+        String provider = clean(providerId);
+        String type = clean(entityType);
+        String name = clean(displayName);
+        String world = clean(worldId);
+        String details = clean(summary);
+        // Screens publish during render; identical frames must not look like new
+        // selections or force dependent inspectors to refresh every frame.
+        if (current != null
+                && current.providerId().equals(provider)
+                && current.entityId().equals(entityId)
+                && current.entityType().equals(type)
+                && current.displayName().equals(name)
+                && current.worldId().equals(world)
+                && current.summary().equals(details)) return;
+        current = new Selection(provider, entityId, type, name, world, details, ++revision);
     }
 
     public static synchronized void clear(String providerId) {
