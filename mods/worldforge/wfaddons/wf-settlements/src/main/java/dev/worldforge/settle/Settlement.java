@@ -12,8 +12,6 @@ import java.util.*;
 public final class Settlement {
     public static final double BASE_CAP = 100, EAT = 0.02, GROW_EVERY = 45, STARVE_EVERY = 30, MAX_STEP = 2, MAX_TICK = 86400;
     public static final int BASE_HOUSING = 4, LOG_MAX = 60;
-    /** Maximum local RTS command radius from a settlement centre, in blocks. */
-    public static final double MAX_COMMAND_DISTANCE = 512.0;
     /** Скорость рабочего (блоков в секунду), точка появления новых жителей, пороги настроения. */
     public static final double WORKER_SPEED = 2.5, SPAWN_X = -16, SPAWN_Z = 0, LEAVE_EVERY = 20;
     /** Торговля и казна: наценка рынка, налог с жителя в минуту (на уровне «обычный»), множители уровней налога. */
@@ -299,9 +297,8 @@ public final class Settlement {
     public void moveTo(int workerId, double x, double z) {
         Worker w = worker(workerId);
         if (w == null) throw new OrderException("Нет рабочего " + workerId);
-        if (!Double.isFinite(x) || !Double.isFinite(z)
-                || x * x + z * z > MAX_COMMAND_DISTANCE * MAX_COMMAND_DISTANCE)
-            throw new OrderException("Точка приказа находится за пределами поселения (максимум 512 блоков)");
+        if (!Double.isFinite(x) || !Double.isFinite(z) || Math.abs(x) > 100000 || Math.abs(z) > 100000)
+            throw new OrderException("Некорректная точка приказа");
         w.building = 0; w.manualOrder = true; w.orderX = x; w.orderZ = z; w.status = "приказ: движение";
     }
 
