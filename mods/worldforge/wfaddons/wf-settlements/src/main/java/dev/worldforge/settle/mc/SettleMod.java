@@ -422,6 +422,8 @@ public class SettleMod {
                 try {
                     if (departure.reason().startsWith("death:"))
                         PopulationSimulation.die(registry, departed.id, PeopleMod.YEAR, departure.reason().substring("death:".length()));
+                    else if (departure.reason().startsWith("transfer:"))
+                        registry.fire(departed.id, place, PeopleMod.YEAR);
                     else registry.migrate(departed.id, "outside:" + colony.s.id, PeopleMod.YEAR);
                 } catch (RuntimeException ex) {
                     LOGGER.error("wf_settle: lifecycle transition failed for {}: {}", departed.id, ex.toString());
@@ -467,6 +469,53 @@ public class SettleMod {
             person.props.put("wf_race_id", race);
             person.props.put("wf_culture_id", culture);
         }
+    }
+
+    /** Removes the existing worker projection for a person entering military service; the departure is persisted. */
+    public static boolean detachWorkerForMilitary(String characterId) {
+        if (characterId == null || characterId.isBlank()) return false;
+        for (Colony colony : COLONIES.values()) {
+            if (colony != null && colony.s != null
+                    && colony.s.removeWorkerByPerson(characterId, "transfer:military")) return true;
+        }
+        return false;
+    }
+
+    /** Reinstates an existing living Character as a settlement worker; no new Character is allocated. */
+    public static boolean attachExistingCharacter(String colonyId, String characterId) {
+        Colony colony = COLONIES.get(colonyId);
+        if (colony == null || colony.s == null || characterId == null || characterId.isBlank()
+                || !net.minecraftforge.fml.ModList.get().isLoaded("wf_people")) return false;
+        for (Colony other : COLONIES.values()) {
+            if (other == null || other.s == null) continue;
+            for (dev.worldforge.settle.Worker worker : other.s.workers)
+                if (characterId.equals(worker.person)) return false;
+        }
+        dev.worldforge.mod.MapData ownerMap = null;
+        dev.worldforge.mod.TitleData.Title province = null;
+        for (dev.worldforge.mod.MapData map : dev.worldforge.mod.WorldForgeMod.loadedMaps().values()) {
+            if (map.titles == null) continue;
+            dev.worldforge.mod.TitleData.Title candidate = map.provinceAt(colony.cx, colony.cz);
+            if (candidate != null) { ownerMap = map; province = candidate; break; }
+        }
+        if (ownerMap == null) return false;
+        CharacterRegistry registry = PeopleMod.registry(ownerMap);
+        Character person = registry == null ? null : registry.get(characterId);
+        if (person == null || !person.alive) return false;
+        String profession = person.props.get("population.pre_military_profession") instanceof String p && !p.isBlank()
+                ? p : PopulationSimulation.profession(person);
+        if (profession == null || profession.isBlank()) profession = "laborer";
+        dev.worldforge.settle.Worker worker = colony.s.addWorker(person.name);
+        worker.person = person.id;
+        worker.profession = profession;
+        person.props.remove("population.pre_military_profession");
+        PopulationSimulation.removeDuty(person, Duty.SOLDIER);
+        PopulationSimulation.addDuty(person, Duty.WORKER);
+        String place = "settlement:" + colony.s.id;
+        person.props.put("population.location", colony.s.id);
+        person.props.put("population.employer", place);
+        if (!person.has("settlement_worker", place)) registry.appoint(person.id, "settlement_worker", place);
+        return true;
     }
 
     @SubscribeEvent
