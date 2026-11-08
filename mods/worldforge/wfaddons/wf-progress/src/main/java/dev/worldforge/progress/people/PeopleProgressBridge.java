@@ -47,9 +47,11 @@ public final class PeopleProgressBridge {
     }
 
     public static void syncFromCharacter(Character character, Profile profile) {
-        Map<String, Integer> ranks = PopulationSimulation.skillRanksSnapshot(character);
+        Map<String, Integer> merged = new java.util.LinkedHashMap<>(profile.skills);
+        merged.putAll(PopulationSimulation.skillRanksSnapshot(character));
+        PopulationSimulation.syncSkillRanks(character, merged);
         profile.skills.clear();
-        profile.skills.putAll(ranks);
+        profile.skills.putAll(merged);
     }
 
     public static void syncToCharacter(Character character, Profile profile) {
