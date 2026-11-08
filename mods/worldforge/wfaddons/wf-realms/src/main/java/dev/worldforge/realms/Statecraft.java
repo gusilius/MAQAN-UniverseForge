@@ -125,6 +125,11 @@ public final class Statecraft {
     private static String pair(String a, String b) { return a.compareTo(b) <= 0 ? a + "|" + b : b + "|" + a; }
     private String nextId(String prefix) { return prefix + sequence++; }
 
+    private static Object value(Map<?, ?> map, String key, Object fallback) {
+        Object found = map.get(key);
+        return found == null ? fallback : found;
+    }
+
     // ---------------- Titles and feudal hierarchy ----------------
 
     public Title createTitle(String id, String realmId, Rank rank, String name) {
@@ -370,36 +375,36 @@ public final class Statecraft {
         if(root.get("titles") instanceof List<?> list) for(Object x:list) {
             Map<?,?> m=(Map<?,?>)x;
             Title t=next.createTitle(String.valueOf(m.get("id")),String.valueOf(m.get("realm")),Rank.valueOf(String.valueOf(m.get("rank"))),String.valueOf(m.get("name")));
-            t.holderCharacterId=String.valueOf(m.getOrDefault("holder",""));
-            t.liegeTitleId=String.valueOf(m.getOrDefault("liege",""));
+            t.holderCharacterId=String.valueOf(value(m,"holder",""));
+            t.liegeTitleId=String.valueOf(value(m,"liege",""));
             if(m.get("claims") instanceof List<?> claims) for(Object id:claims)t.claims.add(String.valueOf(id));
         }
         if(root.get("vassals") instanceof List<?> list) for(Object x:list) {
             Map<?,?> m=(Map<?,?>)x; next.setVassalage(String.valueOf(m.get("vassal")),String.valueOf(m.get("liege")),((Number)m.get("tax")).doubleValue(),((Number)m.get("levy")).doubleValue());
-            VassalContract v=next.vassals.get(String.valueOf(m.get("vassal")));v.loyalty=((Number)m.getOrDefault("loyalty",50)).intValue();v.protectedByLiege=!Boolean.FALSE.equals(m.get("protected"));
+            VassalContract v=next.vassals.get(String.valueOf(m.get("vassal")));v.loyalty=((Number)value(m,"loyalty",50)).intValue();v.protectedByLiege=!Boolean.FALSE.equals(m.get("protected"));
         }
         if(root.get("dynasties") instanceof List<?> list) for(Object x:list) {
             Map<?,?> m=(Map<?,?>)x; Dynasty d=next.registerDynasty(String.valueOf(m.get("house")),String.valueOf(m.get("founder")));
-            d.prestige=((Number)m.getOrDefault("prestige",0)).intValue();if(m.get("members") instanceof List<?> members)for(Object id:members)d.members.add(String.valueOf(id));
+            d.prestige=((Number)value(m,"prestige",0)).intValue();if(m.get("members") instanceof List<?> members)for(Object id:members)d.members.add(String.valueOf(id));
         }
         if(root.get("treasuries") instanceof Map<?,?> map) for(var e:map.entrySet()) {
             Treasury t=next.treasury(String.valueOf(e.getKey()));Map<?,?> m=(Map<?,?>)e.getValue();
-            t.balance=((Number)m.getOrDefault("balance",0.0)).doubleValue();t.taxRate=((Number)m.getOrDefault("taxRate",0.1)).doubleValue();
-            t.lastIncome=((Number)m.getOrDefault("lastIncome",0.0)).doubleValue();t.lastExpenses=((Number)m.getOrDefault("lastExpenses",0.0)).doubleValue();t.taxDays=((Number)m.getOrDefault("taxDays",0)).longValue();
+            t.balance=((Number)value(m,"balance",0.0)).doubleValue();t.taxRate=((Number)value(m,"taxRate",0.1)).doubleValue();
+            t.lastIncome=((Number)value(m,"lastIncome",0.0)).doubleValue();t.lastExpenses=((Number)value(m,"lastExpenses",0.0)).doubleValue();t.taxDays=((Number)value(m,"taxDays",0)).longValue();
         }
         if(root.get("relations") instanceof List<?> list) for(Object x:list) {
             Map<?,?> m=(Map<?,?>)x;Relation r=next.relation(String.valueOf(m.get("a")),String.valueOf(m.get("b")));
-            r.opinion=((Number)m.getOrDefault("opinion",0)).intValue();r.truceUntilDay=((Number)m.getOrDefault("truce",0)).intValue();
+            r.opinion=((Number)value(m,"opinion",0)).intValue();r.truceUntilDay=((Number)value(m,"truce",0)).intValue();
             if(m.get("treaties") instanceof List<?> treaties)for(Object v:treaties)r.treaties.add(Treaty.valueOf(String.valueOf(v)));
         }
         if(root.get("plots") instanceof List<?> list) for(Object x:list) {
             Map<?,?> m=(Map<?,?>)x;Plot p=new Plot(String.valueOf(m.get("id")),String.valueOf(m.get("realm")),String.valueOf(m.get("sponsor")),String.valueOf(m.get("target")),PlotKind.valueOf(String.valueOf(m.get("kind"))));
             if(m.get("backers") instanceof List<?> bs)for(Object id:bs)p.backers.add(String.valueOf(id));
-            p.status=PlotStatus.valueOf(String.valueOf(m.getOrDefault("status","GATHERING")));p.progress=((Number)m.getOrDefault("progress",0.0)).doubleValue();p.discovered=Boolean.TRUE.equals(m.get("discovered"));next.plots.put(p.id,p);
+            p.status=PlotStatus.valueOf(String.valueOf(value(m,"status","GATHERING")));p.progress=((Number)value(m,"progress",0.0)).doubleValue();p.discovered=Boolean.TRUE.equals(m.get("discovered"));next.plots.put(p.id,p);
         }
         if(root.get("wars") instanceof List<?> list) for(Object x:list) {
             Map<?,?> m=(Map<?,?>)x;War w=new War(String.valueOf(m.get("id")),String.valueOf(m.get("attacker")),String.valueOf(m.get("defender")),String.valueOf(m.get("casusBelli")),String.valueOf(m.get("ruler")),((Number)m.get("day")).intValue());
-            w.warScore=((Number)m.getOrDefault("score",0)).intValue();w.status=WarStatus.valueOf(String.valueOf(m.getOrDefault("status","ACTIVE")));w.outcome=String.valueOf(m.getOrDefault("outcome",""));next.wars.put(w.id,w);
+            w.warScore=((Number)value(m,"score",0)).intValue();w.status=WarStatus.valueOf(String.valueOf(value(m,"status","ACTIVE")));w.outcome=String.valueOf(value(m,"outcome",""));next.wars.put(w.id,w);
         }
         titles.clear();titles.putAll(next.titles);vassals.clear();vassals.putAll(next.vassals);dynasties.clear();dynasties.putAll(next.dynasties);
         treasuries.clear();treasuries.putAll(next.treasuries);relations.clear();relations.putAll(next.relations);plots.clear();plots.putAll(next.plots);wars.clear();wars.putAll(next.wars);sequence=next.sequence;
