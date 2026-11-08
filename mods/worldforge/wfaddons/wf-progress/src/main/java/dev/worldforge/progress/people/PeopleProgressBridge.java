@@ -2,9 +2,6 @@ package dev.worldforge.progress.people;
 
 import dev.worldforge.people.Character;
 import dev.worldforge.people.PopulationSimulation;
-import dev.worldforge.people.CharacterRegistry;
-import dev.worldforge.people.mc.PeopleMod;
-import dev.worldforge.mod.MapData;
 import dev.worldforge.progress.Profile;
 import dev.worldforge.progress.Progress;
 
@@ -59,19 +56,29 @@ public final class PeopleProgressBridge {
         PopulationSimulation.syncSkillRanks(character, profile.skills);
     }
 
-    /** Synchronizes only NPCs that already carry skills or have an RPG profile; does not allocate profiles for every villager. */
+    /** Synchronizes only NPCs that already carry skills or have an RPG profile. Reflection keeps wf-people optional. */
     public static void syncAll(Progress progress) {
-        for (Map.Entry<MapData, CharacterRegistry> entry : PeopleMod.registries().entrySet()) {
-            String scope = entry.getKey().name;
-            for (Character character : entry.getValue().all()) {
-                String owner = owner(character, scope);
-                Profile profile = progress.peek(owner);
-                Map<String, Integer> ranks = PopulationSimulation.skillRanksSnapshot(character);
-                if (profile == null && ranks.isEmpty()) continue;
-                if (profile == null) profile = progress.profile(owner);
-                if (ranks.isEmpty() && !profile.skills.isEmpty()) syncToCharacter(character, profile);
-                else syncFromCharacter(character, profile);
+        try {
+            Class<?> peopleMod = Class.forName("dev.worldforge.people.mc.PeopleMod");
+            Object raw = peopleMod.getMethod("registries").invoke(null);
+            if (!(raw instanceof Map<?, ?> registries)) return;
+            for (Map.Entry<?, ?> entry : registries.entrySet()) {
+                Object mapData = entry.getKey();
+                Object rawRegistry = entry.getValue();
+                if (!(rawRegistry instanceof dev.worldforge.people.CharacterRegistry registry)) continue;
+                String scope = String.valueOf(mapData.getClass().getField("name").get(mapData));
+                for (Character character : registry.all()) {
+                    String owner = owner(character, scope);
+                    Profile profile = progress.peek(owner);
+                    Map<String, Integer> ranks = PopulationSimulation.skillRanksSnapshot(character);
+                    if (profile == null && ranks.isEmpty()) continue;
+                    if (profile == null) profile = progress.profile(owner);
+                    if (ranks.isEmpty() && !profile.skills.isEmpty()) syncToCharacter(character, profile);
+                    else syncFromCharacter(character, profile);
+                }
             }
+        } catch (ReflectiveOperationException ex) {
+            throw new IllegalStateException("wf_people registry bridge failed", ex);
         }
     }
 }
