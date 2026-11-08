@@ -38,7 +38,7 @@ Status: implementation contract for WorldForge population integrations.
 
 ## Lifecycle hardening — Phase VII
 
-- Lifecycle changes are explicit events: birth, hire, fire, migration, duty assignment/removal, death and registry restoration.
+- Lifecycle changes are explicit events: birth, family-linked birth, marriage, calendar-derived life-stage transitions, post appointment/dismissal, profession changes, hire, fire, migration, duty assignment/removal, death and registry restoration.
 - Hiring, firing and migration operate on an existing Character ID. They never allocate a replacement identity.
 - Settlement worker departures are persisted as pending lifecycle records before the Character registry acknowledges them. Starvation/raid deaths become Character deaths; low-approval departures become migration events.
 - A non-empty Worker.person or TroopEntity.characterId that cannot be resolved is a referential-integrity fault. Adapters must log/retain the unresolved reference and must not silently create a replacement person.
