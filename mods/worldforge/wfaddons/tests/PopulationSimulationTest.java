@@ -132,8 +132,13 @@ public final class PopulationSimulationTest {
                 "individual soldier combat progression can use the shared Character skill record");
 
         Character spouse = registry.create("Elena", "", "north", "f", 281);
-        registry.marry(smith.id, spouse.id);
+        registry.marry(smith.id, spouse.id, 300);
+        ok(lifecycle.stream().anyMatch(e -> e.kind() == CharacterRegistry.LifecycleKind.MARRIED && e.characterId().equals(smith.id)),
+                "marriage emits lifecycle events for both existing Characters");
         Character heir = registry.addChild(smith, spouse, "Rowan", "m", 301);
+        ok(lifecycle.stream().anyMatch(e -> e.kind() == CharacterRegistry.LifecycleKind.CHILD_BORN
+                        && e.characterId().equals(heir.id) && e.from().equals(smith.id) && e.to().equals(spouse.id)),
+                "child birth event carries the same canonical parent Character IDs");
         PopulationSimulation.die(registry, smith.id, 303, "battle");
         ok(!smith.alive && registry.get(stableId) == smith, "death preserves the same Character record and ID");
         ok(registry.get(heir.id).father.equals(stableId), "family graph keeps the deceased parent's identity");
