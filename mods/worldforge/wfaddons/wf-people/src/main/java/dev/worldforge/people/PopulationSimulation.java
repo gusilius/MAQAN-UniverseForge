@@ -297,6 +297,7 @@ public final class PopulationSimulation {
     public static void advance(CharacterRegistry registry, long elapsedDays, int year) {
         if (elapsedDays < 0) throw new IllegalArgumentException("elapsedDays cannot be negative");
         if (elapsedDays == 0) return;
+        registry.refreshLifeStages(year);
         for (Character character : registry.all()) {
             if (!character.alive) continue;
             changeNeed(character, Need.HUNGER, drift(10, elapsedDays));
