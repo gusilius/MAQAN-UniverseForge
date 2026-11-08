@@ -448,13 +448,13 @@ public class SettleMod {
                 person = registry.create(worker.name, "", culture, "m", PeopleMod.YEAR - 20);
                 worker.person = person.id;
             }
-            if (!person.has("settlement_worker", place)) registry.appoint(person.id, "settlement_worker", place);
+            if (!person.has("settlement_worker", place)) registry.appoint(person.id, "settlement_worker", place, PeopleMod.YEAR);
             person.props.put("population.employer", place);
             person.props.put("population.location", colony.s.id);
             if (person.culture == null || person.culture.isBlank()) person.culture = culture;
             if (person.culture == null || person.culture.isBlank()) person.culture = culture;
             String profession = worker.profession == null || worker.profession.isBlank() ? "laborer" : worker.profession;
-            if (!profession.equals(PopulationSimulation.profession(person))) PopulationSimulation.assignProfession(person, profession, PeopleMod.YEAR);
+            if (!profession.equals(PopulationSimulation.profession(person))) registry.changeProfession(person.id, profession, PeopleMod.YEAR);
             PopulationSimulation.addDuty(person, Duty.WORKER);
             if (java.util.Set.of("guard", "soldier", "archer", "knight").contains(profession)) PopulationSimulation.addDuty(person, Duty.SOLDIER);
             else PopulationSimulation.removeDuty(person, Duty.SOLDIER);
