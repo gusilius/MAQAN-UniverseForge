@@ -67,6 +67,7 @@ public final class PopulationSimulationTest {
         PopulationSimulation.setCommand(smith, "");
         ok(PopulationSimulation.hasDuty(smith, Duty.HERO) && PopulationSimulation.hasDuty(smith, Duty.SOLDIER), "hero and soldier duties coexist without a second identity");
 
+        Progress progress = new Progress(new ProgressDefs());
         Character legacyNpc = registry.create("Legacy", "", "north", "m", 280);
         String legacyOwner = PeopleProgressBridge.owner(legacyNpc, "middle_earth");
         progress.profile(legacyOwner).skills.put("archery", 4);
@@ -86,7 +87,6 @@ public final class PopulationSimulationTest {
         ok(PopulationSimulation.need(smith, Need.HUNGER) == 10 && PopulationSimulation.need(smith, Need.REST) == 6,
                 "shared needs accumulate from the same world-day clock");
 
-        Progress progress = new Progress(new ProgressDefs());
         int bridgeRanks = PeopleProgressBridge.train(progress, smith, "middle_earth", "tactics", 200);
         ok(bridgeRanks == 2, "NPC training uses the unified Character-backed skill record");
         String npcOwner = PeopleProgressBridge.owner(smith, "middle_earth");
