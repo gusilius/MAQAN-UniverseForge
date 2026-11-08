@@ -302,6 +302,13 @@ public final class Settlement {
         w.building = 0; w.manualOrder = true; w.orderX = x; w.orderZ = z; w.status = "приказ: движение";
     }
 
+    /** Остановить рабочего в текущей точке; ручное удержание не перехватывается автоназначением. */
+    public void holdAt(int workerId, double x, double z) {
+        moveTo(workerId, x, z);
+        Worker w = worker(workerId);
+        w.status = "приказ: удерживать позицию";
+    }
+
     public void setProfession(int workerId, String profession) {
         Worker w = worker(workerId);
         if (w == null) throw new OrderException("Нет рабочего " + workerId);
