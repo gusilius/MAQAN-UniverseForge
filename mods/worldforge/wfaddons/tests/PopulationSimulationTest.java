@@ -70,6 +70,8 @@ public final class PopulationSimulationTest {
         ok(PopulationSimulation.age(smith, 303) == 23, "population clock advances calendar age");
         ok(PopulationSimulation.lastIntent(smith) == Intent.PATROL, "daily simulation refreshes deterministic AI intent");
         ok(((Number) smith.props.get("population.simulated_days")).longValue() == 1, "elapsed population days are persisted on the Character");
+        ok(PopulationSimulation.need(smith, Need.HUNGER) == 10 && PopulationSimulation.need(smith, Need.REST) == 6,
+                "shared needs accumulate from the same world-day clock");
 
         Progress progress = new Progress(new ProgressDefs());
         int bridgeRanks = PeopleProgressBridge.train(progress, smith, "middle_earth", "tactics", 200);
