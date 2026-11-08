@@ -2,6 +2,7 @@ package dev.worldforge.troops.mc;
 
 import dev.worldforge.troops.Formations;
 import dev.worldforge.troops.Morale;
+import dev.worldforge.troops.Leadership;
 import dev.worldforge.troops.Squads;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.entity.Entity;
@@ -101,7 +102,12 @@ final class TroopController {
         double lost = Math.max(0, s.lastAlive - n) / (double) Math.max(1, s.initial);
         s.lastAlive = n;
         List<TroopEntity> leaders = new ArrayList<>();
-        for (TroopEntity t : alive) if (t.def() != null && t.def().aura() > 0) leaders.add(t);
+        for (TroopEntity t : alive) {
+            boolean appointed = !s.leaderCharacterId.isEmpty() && s.leaderCharacterId.equals(t.characterId);
+            double aura = Leadership.aura(t.def() == null ? 0 : t.def().aura(),
+                    appointed, appointed && s.leaderHero, appointed ? s.leadershipRank : 0);
+            if (aura > 0) leaders.add(t);
+        }
         s.morale = Morale.step(s.morale, n / (double) Math.max(1, s.initial), lost, near ? en[0] / n : 0, !leaders.isEmpty(), near, 0.5);
         boolean was = s.routed;
         s.routed = Morale.routed(was, s.morale, near);
@@ -112,7 +118,12 @@ final class TroopController {
         }
         for (TroopEntity t : alive) {
             boolean led = false;
-            for (TroopEntity l : leaders) if (t.distanceToSqr(l) <= l.def().aura() * l.def().aura()) { led = true; break; }
+            for (TroopEntity l : leaders) {
+                boolean appointed = !s.leaderCharacterId.isEmpty() && s.leaderCharacterId.equals(l.characterId);
+                double aura = Leadership.aura(l.def() == null ? 0 : l.def().aura(),
+                        appointed, appointed && s.leaderHero, appointed ? s.leadershipRank : 0);
+                if (t.distanceToSqr(l) <= aura * aura) { led = true; break; }
+            }
             t.setDamageMult(Morale.damage(s.morale, led));
             t.setMorale((int) Math.round(s.morale * 100));
         }
