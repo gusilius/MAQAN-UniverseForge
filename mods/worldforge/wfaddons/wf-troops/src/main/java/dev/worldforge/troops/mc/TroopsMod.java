@@ -182,6 +182,9 @@ public class TroopsMod {
     public static boolean assignExistingCharacter(TroopEntity troop, String characterId) {
         if (troop == null || troop.level().isClientSide || characterId == null || characterId.isBlank()
                 || !ModList.get().isLoaded("wf_people")) return false;
+        if (!troop.deferCharacterBinding && troop.characterId != null && !troop.characterId.isBlank()
+                && !troop.characterId.equals(characterId)) return false;
+        if (!troop.deferCharacterBinding && (troop.characterId == null || troop.characterId.isBlank())) return false;
         String previousId = troop.characterId;
         troop.characterId = characterId;
         PersonBinding binding = bindPerson(troop, false);
@@ -229,7 +232,7 @@ public class TroopsMod {
         Character person = binding.character();
         String profession = troop.unitId() == null || troop.unitId().isBlank() ? "soldier" : troop.unitId();
         if (!profession.equals(PopulationSimulation.profession(person)))
-            PopulationSimulation.assignProfession(person, profession, PeopleMod.YEAR);
+            binding.registry().changeProfession(person.id, profession, PeopleMod.YEAR);
         PopulationSimulation.addDuty(person, Duty.SOLDIER);
         long characterXp = PopulationSimulation.trainingXp(person, "combat");
         if (characterXp > troop.combatXp()) troop.setCombatXpFromCharacter(characterXp);
