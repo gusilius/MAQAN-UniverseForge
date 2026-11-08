@@ -177,8 +177,15 @@ public final class Statecraft {
         String vassal = clean(vassalRealm, "vassal realm"), liege = clean(liegeRealm, "liege realm");
         if (vassal.equals(liege)) return fail("a realm cannot be its own liege");
         rate(taxShare); rate(levyShare);
-        for (VassalContract cursor = vassals.get(liege); cursor != null; cursor = vassals.get(cursor.liegeRealm))
-            if (cursor.vassalRealm.equals(vassal)) return fail("vassalage cycle");
+        String cursorRealm = liege;
+        Set<String> visited = new HashSet<>();
+        while (!cursorRealm.isEmpty() && visited.add(cursorRealm)) {
+            if (cursorRealm.equals(vassal)) return fail("vassalage cycle");
+            VassalContract cursor = vassals.get(cursorRealm);
+            if (cursor == null) break;
+            cursorRealm = cursor.liegeRealm;
+        }
+        if (!cursorRealm.isEmpty() && !visited.add(cursorRealm)) return fail("existing vassalage cycle");
         VassalContract contract = vassals.get(vassal);
         if (contract == null) vassals.put(vassal, new VassalContract(vassal, liege, taxShare, levyShare));
         else { contract.liegeRealm=liege; contract.taxShare=taxShare; contract.levyShare=levyShare; }
