@@ -308,8 +308,7 @@ public final class SettlementMap {
         for (LogisticsJob job : logistics.values()) {
             Warehouse from = warehouses.get(job.from), to = warehouses.get(job.to);
             if (from == null || to == null) { job.status = "missing warehouse"; continue; }
-            int distance = roadDistance(from.x, from.z) + roadDistance(to.x, to.z);
-            if (distance == Integer.MAX_VALUE) { job.status = "road disconnected"; continue; }
+            if (!roadConnected(from.x, from.z, to.x, to.z)) { job.status = "road disconnected"; continue; }
             job.accumulator += job.rate * dt / 60.0;
             double amount = Math.floor(job.accumulator);
             if (amount < 1) { job.status = "en route"; continue; }
