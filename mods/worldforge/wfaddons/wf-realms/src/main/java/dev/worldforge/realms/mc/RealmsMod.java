@@ -229,6 +229,14 @@ public class RealmsMod {
                                         .executes(c -> politics(c.getSource(), "succession",
                                                 StringArgumentType.getString(c, "realm"),
                                                 StringArgumentType.getString(c, "law"), "", "")))));
+        d.register(Commands.literal("wfinherit").requires(s -> s.hasPermission(2))
+                .then(Commands.argument("title", StringArgumentType.word())
+                        .then(Commands.argument("deceased", StringArgumentType.word())
+                                .then(Commands.argument("successor", StringArgumentType.word())
+                                        .executes(ctx -> politics(ctx.getSource(), "inherit",
+                                                StringArgumentType.getString(ctx, "title"),
+                                                StringArgumentType.getString(ctx, "deceased"),
+                                                StringArgumentType.getString(ctx, "successor"), ""))))));
         d.register(Commands.literal("wfdynasty").requires(s -> s.hasPermission(2))
                 .then(Commands.literal("register")
                         .then(Commands.argument("house", StringArgumentType.word())
@@ -266,6 +274,7 @@ public class RealmsMod {
                 case "dynasty" -> POLITICS.registerDynasty(a, b);
                 case "dynasty_member" -> { if (!POLITICS.addDynastyMember(a, b)) throw new IllegalArgumentException(POLITICS.lastError); }
                 case "plot" -> POLITICS.createPlot(a, b, c, Statecraft.PlotKind.valueOf(d.toUpperCase(Locale.ROOT)));
+                case "inherit" -> { if (!POLITICS.inheritTitle(a, b, c)) throw new IllegalArgumentException(POLITICS.lastError); }
                 default -> throw new IllegalArgumentException("Неизвестная политическая операция");
             }
             save(source.getServer());
