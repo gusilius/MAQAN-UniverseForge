@@ -88,6 +88,10 @@ public final class PopulationSimulationTest {
         progress.profile(npcOwner).skills.put("tactics", 3);
         PeopleProgressBridge.syncToCharacter(smith, progress.profile(npcOwner));
         ok(PopulationSimulation.skillRank(smith, "tactics") == 3, "RPG skill allocation writes back to the same Character");
+        PopulationSimulation.setTrainingXp(smith, "combat", 750);
+        PopulationSimulation.setSkillRank(smith, "combat", 3);
+        ok(PopulationSimulation.trainingXp(smith, "combat") == 750 && PopulationSimulation.skillRank(smith, "combat") == 3,
+                "individual soldier combat progression can use the shared Character skill record");
 
         Character spouse = registry.create("Elena", "", "north", "f", 281);
         registry.marry(smith.id, spouse.id);
