@@ -87,6 +87,22 @@ public final class PopulationSimulation {
      * Changes the current profession without deleting previous skill ranks.
      * Profession IDs are stable data identifiers, not localized display names.
      */
+    public static void assignProfession(Character character, ProfessionDefs definitions, String professionId, int year) {
+        Objects.requireNonNull(definitions, "definitions");
+        ProfessionDef definition = definitions.get(professionId);
+        if (definition == null) throw new IllegalArgumentException("Unknown profession: " + professionId);
+        if (!canWork(character, year)) throw new IllegalStateException(character.name + " is not old enough or able to work");
+        for (Map.Entry<String, Integer> requirement : definition.requiredSkills.entrySet()) {
+            if (skillRank(character, requirement.getKey()) < requirement.getValue())
+                throw new IllegalStateException("Requires skill " + requirement.getKey() + " rank " + requirement.getValue());
+        }
+        assignProfession(character, definition.id, year);
+        removeDuty(character, Duty.WORKER);
+        removeDuty(character, Duty.SPECIALIST);
+        addDuty(character, definition.duty);
+    }
+
+    /** Low-level migration/admin path; prefer the catalog-validated overload. */
     public static void assignProfession(Character character, String professionId, int year) {
         requireAlive(character);
         String next = normalizeId(professionId, "profession");
