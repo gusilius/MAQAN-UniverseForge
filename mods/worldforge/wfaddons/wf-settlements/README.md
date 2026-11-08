@@ -16,7 +16,7 @@
 - Parcels provide non-overlapping residential, agricultural, industrial, commercial, civic, military and storage zoning.
 - Roads are A* paths over sampled terrain. Water and excessive slope are impassable. Road segments materialize as gravel/dirt/cobblestone only near players and never overwrite structures.
 - Construction plans reference the existing Settlement building UID and mirror its authoritative construction progress.
-- Storage buildings create spatial warehouse nodes. The map reconciles their inventory partitions with the canonical Settlement stock.
+- Completed storage buildings create spatial warehouse nodes. New production output is allocated to the nearest suitable warehouse; the map reconciles warehouse inventory partitions with the canonical Settlement stock.
 - Logistics jobs move resources between warehouses only when both ends share a connected road network; transfer throughput and progress are persisted.
 - The map simulation ticks for every colony without loading its world dimension or chunks. Existing Settlement production/consumption remains the canonical production engine.
 
