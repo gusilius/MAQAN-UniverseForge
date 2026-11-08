@@ -44,5 +44,5 @@ Status: implementation contract for WorldForge population integrations.
 - A non-empty Worker.person or TroopEntity.characterId that cannot be resolved is a referential-integrity fault. Adapters must log/retain the unresolved reference and must not silently create a replacement person.
 - A dead Character is never revived or replaced by entity synchronization. The physical body is removed or held for repair.
 - Minecraft entity UUID bindings are stored under population.entity_bindings by body kind. One entity UUID cannot be owned by two different Characters; multiple body kinds may reference the same Character.
-- Registry restoration validates duplicate IDs and entity UUID ownership before replacing live state. Legacy wf-people/1 records without population extension keys remain readable; corrupt registry files fail closed instead of regenerating court people over unreadable data.
+- Registry restoration validates duplicate IDs and entity UUID ownership before replacing live state. Registry writes now use wf-people/2; wf-people/1 saves are migrated in memory without changing Character IDs, family links or existing props. Corrupt registry files fail closed instead of regenerating court people over unreadable data.
 - Entity unload is not death. Persistent body references are refreshed on entity join; death explicitly removes its binding.
