@@ -8,6 +8,7 @@ import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.CharacterStats;
 import dev.worldforge.people.Role;
 import dev.worldforge.people.RoleDefs;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
@@ -132,6 +133,7 @@ public class CharacterScreen extends Screen {
     public void render(GuiGraphics g, int mx, int my, float pt) {
         hits.clear();
         Character c = ch(focus);
+        publishWorkspaceSelection(c);
         int W = Math.min(W0, width - 8), H = Math.min(H0, height - 8);
         int x = (width - W) / 2, y = (height - H) / 2;
         WFUi.panel(g, font, x, y, W, H, c == null ? "Персонаж" : "Персонаж  ·  " + c.name);
@@ -544,6 +546,39 @@ public class CharacterScreen extends Screen {
             return true;
         }
         return super.mouseScrolled(mx, my, d);
+    }
+
+    /**
+     * Optional bridge to MAQAN Platform. Reflection keeps wf-people independently
+     * installable; the global inspector receives only a stable Character ID and
+     * display metadata, never ownership of the Character object.
+     */
+    private void publishWorkspaceSelection(Character character) {
+        try {
+            Class<?> context = Class.forName("dev.maqan.platform.client.PlatformSelectionContext");
+            if (character == null) {
+                context.getMethod("clear", String.class).invoke(null, "wf_people");
+                return;
+            }
+            Minecraft mc = Minecraft.getInstance();
+            String world = mc.level == null ? "" : mc.level.dimension().location().toString();
+            String summary = (character.alive ? "Alive" : "Deceased")
+                    + " · age " + CharacterStats.age(character, year)
+                    + (character.house.isBlank() ? "" : " · house " + character.house)
+                    + (character.culture.isBlank() ? "" : " · culture " + character.culture);
+            context.getMethod("publish", String.class, String.class, String.class,
+                    String.class, String.class, String.class)
+                    .invoke(null, "wf_people", character.id, "character",
+                            character.name, world, summary);
+        } catch (ReflectiveOperationException | LinkageError ignored) {
+            // Platform is optional; the standalone character screen remains fully functional.
+        }
+    }
+
+    @Override
+    public void removed() {
+        publishWorkspaceSelection(null);
+        super.removed();
     }
 
     @Override
