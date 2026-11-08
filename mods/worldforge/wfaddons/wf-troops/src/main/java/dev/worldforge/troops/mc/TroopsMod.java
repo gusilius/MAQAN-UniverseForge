@@ -159,14 +159,20 @@ public class TroopsMod {
             if (realm == null) continue;
             CharacterRegistry registry = PeopleMod.registry(map);
             if (registry == null) continue;
-            Character person = troop.characterId == null || troop.characterId.isBlank() ? null : registry.get(troop.characterId);
-            if (person == null || !person.alive) {
+            boolean hasIdentity = troop.characterId != null && !troop.characterId.isBlank();
+            Character person = hasIdentity ? registry.get(troop.characterId) : null;
+            if (hasIdentity && (person == null || !person.alive)) {
+                // A missing/dead foreign key is a data-integrity fault, not permission to invent a replacement person.
+                return null;
+            }
+            if (!hasIdentity) {
                 if (!create) return null;
                 String culture = realm.props == null || realm.props.get("culture") == null ? "" : String.valueOf(realm.props.get("culture"));
                 String name = troop.def() == null ? troop.unitId() : troop.def().name();
                 person = registry.create(name + " " + troop.getUUID().toString().substring(0, 4), "", culture, "m", PeopleMod.YEAR - 20);
                 troop.characterId = person.id;
             }
+            registry.bindEntity(person.id, "troop", troop.getUUID().toString());
             return new PersonBinding(registry, person);
         }
         return null;
@@ -203,6 +209,7 @@ public class TroopsMod {
     static void onDeath(TroopEntity t) {
         PersonBinding binding = bindPerson(t, false);
         if (binding != null && binding.character().alive) {
+            binding.registry().unbindEntity(binding.character().id, "troop", t.getUUID().toString());
             try { PopulationSimulation.die(binding.registry(), binding.character().id, PeopleMod.YEAR, "combat"); }
             catch (RuntimeException ex) { LOGGER.error("wf_troops: failed to record soldier death {}: {}", t.characterId, ex.toString()); }
         }
