@@ -28,8 +28,8 @@ public final class PopulationSimulationTest {
         ok(PopulationSimulation.lifeStage(smith, 300) == LifeStage.ADULT, "life-stage thresholds are deterministic");
 
         ProfessionDefs professionDefs = new ProfessionDefs();
-        professionDefs.add("{\\"id\\":\\"farmer\\",\\"name\\":\\"Farmer\\",\\"category\\":\\"worker\\"}");
-        professionDefs.add("{\\"id\\":\\"blacksmith\\",\\"name\\":\\"Blacksmith\\",\\"category\\":\\"specialist\\",\\"required_skills\\":{\\"smithing\\":1}}");
+        professionDefs.add("{\"id\":\"farmer\",\"name\":\"Farmer\",\"category\":\"worker\"}");
+        professionDefs.add("{\"id\":\"blacksmith\",\"name\":\"Blacksmith\",\"category\":\"specialist\",\"required_skills\":{\"smithing\":1}}");
         PopulationSimulation.assignProfession(smith, professionDefs, "farmer", 300);
         PopulationSimulation.train(smith, "smithing", 100);
         PopulationSimulation.assignProfession(smith, professionDefs, "blacksmith", 300);
@@ -43,7 +43,7 @@ public final class PopulationSimulationTest {
         ok(PopulationSimulation.skillRank(smith, "smithing") == 3 && PopulationSimulation.trainingXp(smith, "smithing") == 50,
                 "training remainder and skill rank persist in Character data");
 
-        professionDefs.add("{\\"id\\":\\"armorer\\",\\"name\\":\\"Armorer\\",\\"category\\":\\"specialist\\"}");
+        professionDefs.add("{\"id\":\"armorer\",\"name\":\"Armorer\",\"category\":\"specialist\"}");
         PopulationSimulation.assignProfession(smith, professionDefs, "armorer", 302);
         ok(PopulationSimulation.profession(smith).equals("armorer"), "profession can change without replacing Character");
         ok(PopulationSimulation.professionHistory(smith).equals(java.util.List.of("farmer", "blacksmith")), "previous profession is retained in history");
