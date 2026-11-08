@@ -50,7 +50,7 @@ public final class RoadSite {
                 BlockPos pos = new BlockPos(px, y - 1, pz);
                 if (!level.hasChunkAt(pos)) return false;
                 BlockState old = level.getBlockState(pos);
-                if (old.isAir() || !old.getFluidState().isEmpty()) return false;
+                if (old.isAir() || !old.getFluidState().isEmpty()) continue;
                 if (old.is(Blocks.GRASS_BLOCK) || old.is(Blocks.DIRT) || old.is(Blocks.COARSE_DIRT)
                         || old.is(Blocks.ROOTED_DIRT) || old.is(Blocks.SAND) || old.is(Blocks.GRAVEL)
                         || old.is(Blocks.SNOW) || old.is(Blocks.DIRT_PATH)) {
