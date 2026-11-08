@@ -186,11 +186,23 @@ public final class SettlementMap {
         return false;
     }
 
+    public void validatePlacement(String category, int centerX, int centerZ, int width, int depth) {
+        width = Math.max(1, width); depth = Math.max(1, depth);
+        int x = centerX - width / 2, z = centerZ - depth / 2;
+        requireTerrain(x, z, width, depth, MAX_BUILDING_SLOPE);
+        for (Parcel p : parcels.values()) if (p.overlaps(x, z, width, depth)) {
+            if (!p.contains(x, z, width, depth)) throw new IllegalArgumentException("Building must fit entirely inside parcel " + p.id);
+            if (!zoneAllows(p.zone, category)) throw new IllegalArgumentException("Zone " + p.zone + " does not permit " + category);
+        }
+        for (int gx = grid(x); gx <= grid(x + width - 1); gx++) for (int gz = grid(z); gz <= grid(z + depth - 1); gz++)
+            if (isRoad(gx, gz)) throw new IllegalArgumentException("Building footprint overlaps a road");
+    }
+
     public ConstructionPlan planBuilding(Building b) {
         if (b == null) throw new IllegalArgumentException("Building is required");
         int width = Math.max(1, b.def.sizeX), depth = Math.max(1, b.def.sizeZ);
         int x = b.x - width / 2, z = b.z - depth / 2;
-        requireTerrain(x, z, width, depth, MAX_BUILDING_SLOPE);
+        validatePlacement(b.def.category, b.x, b.z, width, depth);
         for (ConstructionPlan p : plans.values()) if (p.buildingUid != b.uid && overlaps(x, z, width, depth, p.x, p.z, p.width, p.depth))
             throw new IllegalArgumentException("Construction plan overlaps building #" + p.buildingUid);
         for (Parcel p : parcels.values()) if (p.overlaps(x, z, width, depth)) {
@@ -250,8 +262,8 @@ public final class SettlementMap {
         if (from.equals(to)) throw new IllegalArgumentException("Logistics needs two different warehouses");
         if (resource == null || resource.isBlank() || resource.equals(Defs.SILVER)) throw new IllegalArgumentException("Choose a physical resource");
         if (!Double.isFinite(rate) || rate <= 0 || rate > 10000) throw new IllegalArgumentException("Rate must be 0..10000 units per minute");
-        if (roadDistance(a.x, a.z) == Integer.MAX_VALUE || roadDistance(b.x, b.z) == Integer.MAX_VALUE)
-            throw new IllegalArgumentException("Both warehouses must connect to the road network");
+        if (!roadConnected(a.x, a.z, b.x, b.z))
+            throw new IllegalArgumentException("Both warehouses must connect to the same road network");
         for (LogisticsJob j : logistics.values()) if (j.from.equals(from) && j.to.equals(to) && j.resource.equals(resource))
             throw new IllegalArgumentException("This logistics route already exists");
         LogisticsJob job = new LogisticsJob(nextLogistics++, from, to, resource, rate);
@@ -259,22 +271,22 @@ public final class SettlementMap {
         return job;
     }
 
-    private int roadDistance(int x, int z) {
-        if (roads.isEmpty()) return Integer.MAX_VALUE;
-        Node start = nearestRoad(grid(x), grid(z));
-        if (start == null) return Integer.MAX_VALUE;
+    private boolean roadConnected(int ax, int az, int bx, int bz) {
+        if (roads.isEmpty()) return false;
+        Node start = nearestRoad(grid(ax), grid(az)), goal = nearestRoad(grid(bx), grid(bz));
+        if (start == null || goal == null) return false;
         Set<Node> seen = new HashSet<>();
         ArrayDeque<Node> q = new ArrayDeque<>();
-        Map<Node, Integer> dist = new HashMap<>();
-        q.add(start); seen.add(start); dist.put(start, 0);
+        q.add(start); seen.add(start);
         while (!q.isEmpty()) {
             Node n = q.removeFirst();
+            if (n.equals(goal)) return true;
             for (int[] d : new int[][]{{1,0},{-1,0},{0,1},{0,-1}}) {
                 Node v = new Node(n.gx + d[0], n.gz + d[1]);
-                if (isRoad(v.gx, v.gz) && seen.add(v)) { dist.put(v, dist.get(n) + 1); q.addLast(v); }
+                if (isRoad(v.gx, v.gz) && seen.add(v)) q.addLast(v);
             }
         }
-        return dist.values().stream().mapToInt(Integer::intValue).min().orElse(Integer.MAX_VALUE);
+        return false;
     }
 
     private Node nearestRoad(int gx, int gz) {
@@ -393,7 +405,7 @@ public final class SettlementMap {
         SettlementMap map = new SettlementMap();
         map.cells.clear(); map.parcels.clear(); map.roads.clear(); map.plans.clear(); map.warehouses.clear(); map.logistics.clear();
         map.nextRoad = number(root.get("nextRoad"),1); map.nextLogistics = number(root.get("nextLogistics"),1);
-        map.simulationTime = decimal(root.get("simulationTime"),0); map.totalGoodsMoved = decimal(root.get("totalGoodsMoved"),0); map.simulationSteps = number(root.get("simulationSteps"),0);
+        map.simulationTime = decimal(root.get("simulationTime"),0); map.totalGoodsMoved = decimal(root.get("totalGoodsMoved"),0); map.simulationSteps = number(root.get("simulationSteps"),0L);
         if (root.get("terrain") instanceof List<?> list) for (Object o : list) {
             Map<String,Object> m = (Map<String,Object>)o;
             map.cells.put(key(number(m.get("gx"),0),number(m.get("gz"),0)),new Cell(number(m.get("gx"),0),number(m.get("gz"),0),number(m.get("height"),0),String.valueOf(m.get("biome")),decimal(m.get("fertility"),0),decimal(m.get("slope"),0),Boolean.TRUE.equals(m.get("water"))));
