@@ -10,7 +10,7 @@
 
 ## Settlement map (phase III)
 
-`SettlementMap` is the authoritative, persisted planning layer for a colony. Coordinates are block offsets from the colony centre; terrain is sampled at 8-block cell spacing. Sampling only reads already-loaded chunks. Map coverage expands on demand when a player refreshes the map, zones land, plans a building or draws a road; there is no fixed build radius.
+`SettlementMap` is the authoritative, persisted planning layer for a colony. Coordinates are block offsets from the colony centre; terrain is sampled at 4-block cell spacing. Sampling only reads already-loaded chunks. Map coverage expands on demand when a player refreshes the map, zones land, plans a building or draws a road; there is no fixed build radius.
 
 - Terrain cells retain height, biome, water and fertility; slope is recomputed locally.
 - Parcels provide non-overlapping residential, agricultural, industrial, commercial, civic, military and storage zoning.
