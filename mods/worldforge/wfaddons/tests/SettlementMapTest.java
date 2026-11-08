@@ -68,6 +68,16 @@ public final class SettlementMapTest {
                 "road-connected logistics moves real inventory between spatial warehouses");
         ok(settlement.amount("wood") == 100, "warehouse transfers preserve the canonical settlement inventory total");
 
+        Settlement producerSettlement = new Settlement("producer_map", "Producer map", defs);
+        Building farm = producerSettlement.place("farm", 0, 0);
+        farm.state = Building.State.DONE;
+        producerSettlement.add("food", 20);
+        SettlementMap productionMap = flatMap();
+        SettlementMap.Warehouse farmStore = productionMap.addWarehouse("farmstore", 8, 0, 100);
+        productionMap.tick(producerSettlement, 1);
+        ok(farmStore.amount("food") == 20 && productionMap.warehouses.get("central").amount("food") == 0,
+                "production output is allocated to the nearest spatial warehouse");
+
         SettlementMap steep = new SettlementMap();
         steep.sample(0, 0, 64, "minecraft:plains", 0.8, false);
         steep.sample(1, 0, 70, "minecraft:plains", 0.8, false);
