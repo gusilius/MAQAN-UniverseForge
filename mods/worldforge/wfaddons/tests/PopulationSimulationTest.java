@@ -3,6 +3,9 @@ package dev.worldforge.tests;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.PopulationSimulation;
+import dev.worldforge.progress.Progress;
+import dev.worldforge.progress.ProgressDefs;
+import dev.worldforge.progress.people.PeopleProgressBridge;
 import dev.worldforge.people.PopulationSimulation.Duty;
 import dev.worldforge.people.PopulationSimulation.Intent;
 import dev.worldforge.people.PopulationSimulation.LifeStage;
@@ -60,6 +63,17 @@ public final class PopulationSimulationTest {
         PopulationSimulation.advance(registry, 1, 303);
         ok(PopulationSimulation.age(smith, 303) == 23, "population clock advances calendar age");
         ok(PopulationSimulation.lastIntent(smith) == Intent.PATROL, "daily simulation refreshes deterministic AI intent");
+        ok(((Number) smith.props.get("population.simulated_days")).longValue() == 1, "elapsed population days are persisted on the Character");
+
+        Progress progress = new Progress(new ProgressDefs());
+        int bridgeRanks = PeopleProgressBridge.train(progress, smith, "middle_earth", "tactics", 200);
+        ok(bridgeRanks == 2, "NPC training uses the unified Character-backed skill record");
+        String npcOwner = PeopleProgressBridge.owner(smith, "middle_earth");
+        ok(npcOwner.equals("n:middle_earth:" + stableId), "progress profile owner is derived from scoped Character ID");
+        ok(progress.profile(npcOwner).skill("tactics") == PopulationSimulation.skillRank(smith, "tactics"), "RPG profile mirrors canonical Character skill ranks");
+        progress.profile(npcOwner).skills.put("tactics", 3);
+        PeopleProgressBridge.syncToCharacter(smith, progress.profile(npcOwner));
+        ok(PopulationSimulation.skillRank(smith, "tactics") == 3, "RPG skill allocation writes back to the same Character");
 
         Character spouse = registry.create("Elena", "", "north", "f", 281);
         registry.marry(smith.id, spouse.id);
