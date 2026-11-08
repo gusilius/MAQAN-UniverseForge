@@ -29,6 +29,13 @@ public final class PopulationSimulationTest {
         String stableId = smith.id;
         ok(lifecycle.size() == 1 && lifecycle.get(0).kind() == CharacterRegistry.LifecycleKind.BORN,
                 "birth emits one canonical lifecycle event");
+        Character childStage = registry.create("Nell", "", "north", "f", 295);
+        registry.refreshLifeStages(300);
+        registry.refreshLifeStages(301);
+        ok(PopulationSimulation.lifeStage(childStage, 301) == PopulationSimulation.LifeStage.CHILD
+                        && lifecycle.stream().anyMatch(e -> e.kind() == CharacterRegistry.LifecycleKind.LIFE_STAGE_CHANGED
+                        && e.characterId().equals(childStage.id) && e.from().equals("infant") && e.to().equals("child")),
+                "calendar aging emits lifecycle events at life-stage boundaries");
         registry.hire(smith.id, "settlement:forge", "farmer", 300);
         ok(PopulationSimulation.hasDuty(smith, Duty.WORKER)
                         && smith.has("settlement_worker", "settlement:forge"),
