@@ -35,7 +35,10 @@ public class SettleScreen extends Screen {
         this.cmd = cmd;
     }
 
-    public void setModel(Settlement n) { this.s = n; mapZoom = 1.0; mapPanX = 0; mapPanY = 0; }
+    public void setModel(Settlement n) {
+        if (s == null || !s.id.equals(n.id)) { mapZoom = 1.0; mapPanX = 0; mapPanY = 0; }
+        this.s = n;
+    }
     public void setMap(SettlementMap map) { this.map = map == null ? new SettlementMap() : map; }
 
     private java.util.List<dev.worldforge.settle.CityRow> cities = new ArrayList<>();
