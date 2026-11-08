@@ -169,9 +169,11 @@ public final class CharacterRegistry {
         c.alive = false;
         c.posts.clear();
         for (Character.Post p : vacated) for (Listener l : listeners) l.dismissed(c, p.role, p.place);
+        c.props.remove("population.entity_bindings");
+        int deathYear = c.props.get("population.death_year") instanceof Number n ? n.intValue() : 0;
         for (Listener l : listeners) {
             l.died(c);
-            l.lifecycle(c, new LifecycleEvent(LifecycleKind.DIED, c.id, "", "", 0));
+            l.lifecycle(c, new LifecycleEvent(LifecycleKind.DIED, c.id, "", "", deathYear));
         }
         return vacated;
     }
@@ -323,6 +325,8 @@ public final class CharacterRegistry {
                 }
             }
             Object bindingsRaw = c.props.get("population.entity_bindings");
+            if (bindingsRaw != null && !(bindingsRaw instanceof Map<?, ?>))
+                throw new IllegalArgumentException("Некорректная таблица привязок Minecraft Entity персонажа " + id);
             if (bindingsRaw instanceof Map<?, ?> bindings) {
                 for (Object bindingValue : bindings.values()) {
                     if (!(bindingValue instanceof String uuid) || uuid.isBlank())
