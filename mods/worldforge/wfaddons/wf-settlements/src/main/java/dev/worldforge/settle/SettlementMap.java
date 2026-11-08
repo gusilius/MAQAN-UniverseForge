@@ -50,6 +50,7 @@ public final class SettlementMap {
         public final int id;
         public final List<Node> path;
         public String surface = "gravel";
+        public int builtSegments;
         Road(int id, List<Node> path) { this.id = id; this.path = new ArrayList<>(path); }
         public double length() { return Math.max(0, path.size() - 1) * CELL_SIZE; }
     }
@@ -383,7 +384,7 @@ public final class SettlementMap {
         List<Object> roadData = new ArrayList<>();
         for (Road r : roads.values()) {
             List<Object> nodes = new ArrayList<>(); for (Node n : r.path) nodes.add(List.of(n.gx,n.gz));
-            roadData.add(Map.of("id",r.id,"surface",r.surface,"path",nodes));
+            roadData.add(Map.of("id",r.id,"surface",r.surface,"builtSegments",r.builtSegments,"path",nodes));
         }
         root.put("roads",roadData);
         List<Object> planData = new ArrayList<>();
@@ -418,7 +419,7 @@ public final class SettlementMap {
         if (root.get("roads") instanceof List<?> list) for (Object o : list) {
             Map<String,Object> m = (Map<String,Object>)o; List<Node> path = new ArrayList<>();
             if (m.get("path") instanceof List<?> nodes) for (Object raw : nodes) if (raw instanceof List<?> pair && pair.size() >= 2) path.add(new Node(((Number)pair.get(0)).intValue(),((Number)pair.get(1)).intValue()));
-            Road r = new Road(number(m.get("id"),0),path); r.surface = String.valueOf(m.getOrDefault("surface","gravel")); map.roads.put(r.id,r);
+            Road r = new Road(number(m.get("id"),0),path); r.surface = String.valueOf(m.getOrDefault("surface","gravel")); r.builtSegments = Math.max(0, Math.min(Math.max(0, path.size()-1), number(m.get("builtSegments"),0))); map.roads.put(r.id,r);
         }
         if (root.get("plans") instanceof List<?> list) for (Object o : list) {
             Map<String,Object> m = (Map<String,Object>)o;
