@@ -101,6 +101,9 @@ public final class StatecraftTest {
 
         // Succession law and complete save/load
         state.setInheritanceLaw("north", Statecraft.InheritanceLaw.COGNATIC);
+        check(state.successionLawForPeople("north").equals("cognatic")
+                && state.successionLawForPeople("unknown").equals("primogeniture"),
+                "realm inheritance policy maps to the existing wf-people succession contract");
         String snapshot = state.toJson();
         Statecraft restored = new Statecraft();
         restored.fromJson(snapshot);
