@@ -112,6 +112,11 @@ public final class PlatformShellScreen extends Screen {
 
     private boolean attachProviderView(CapabilityRegistry.Capability capability, Screen view) {
         if (capability == null || view == null) return false;
+        try {
+            view.getClass().getMethod("setEmbeddedInMaqan", boolean.class).invoke(view, true);
+        } catch (ReflectiveOperationException ignored) {
+            // Provider screens without an embedding hook still use the shared input/render host.
+        }
         setProfile(profileForDomain(capability.domain()));
         selectedDomain = capability.domain();
         selectedCapabilityId = capability.id();
@@ -242,6 +247,28 @@ public final class PlatformShellScreen extends Screen {
         Screen previous = providerViews.put(selectedCapabilityId, view);
         if (previous != null && previous != view) previous.removed();
         if (width > 0 && height > 0) view.init(Minecraft.getInstance(), width, height);
+    }
+
+    /** Close a hosted provider view without dismissing the MAQAN workspace itself. */
+    public static boolean closeEmbeddedProviderView(Screen view) {
+        Minecraft mc = Minecraft.getInstance();
+        return mc.screen instanceof PlatformShellScreen shell && shell.detachProviderView(view);
+    }
+
+    private boolean detachProviderView(Screen view) {
+        if (view == null) return false;
+        if (embeddedView == view) {
+            embeddedView = null;
+            view.removed();
+            return true;
+        }
+        String found = null;
+        for (Map.Entry<String, Screen> entry : providerViews.entrySet())
+            if (entry.getValue() == view) { found = entry.getKey(); break; }
+        if (found == null) return false;
+        providerViews.remove(found);
+        view.removed();
+        return true;
     }
 
     private Screen activeView() {
