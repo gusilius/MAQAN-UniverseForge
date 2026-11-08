@@ -117,6 +117,7 @@ public final class PlatformShellScreen extends Screen {
         } catch (ReflectiveOperationException ignored) {
             // Provider screens without an embedding hook still use the shared input/render host.
         }
+        if (!capability.id().equals(selectedCapabilityId)) PlatformSelectionContext.clear(null);
         setProfile(profileForDomain(capability.domain()));
         selectedDomain = capability.domain();
         selectedCapabilityId = capability.id();
