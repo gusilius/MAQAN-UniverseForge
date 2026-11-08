@@ -61,9 +61,6 @@ final class BuildControl {
         Colony c = SettleMod.nearest(p.serverLevel(), wx, wz);
         if (c == null) return "Рядом нет поселения";
         if (!WorkerControl.mayControl(p, c)) return "Это поселение вам не принадлежит";
-        long dx = (long) wx - c.cx, dz = (long) wz - c.cz;
-        if (dx * dx + dz * dz > (long) Settlement.MAX_COMMAND_DISTANCE * (long) Settlement.MAX_COMMAND_DISTANCE)
-            return "Место строительства находится за пределами поселения (максимум 512 блоков)";
         Building b;
         try {
             b = c.s.place(defId, wx - c.cx, wz - c.cz);
