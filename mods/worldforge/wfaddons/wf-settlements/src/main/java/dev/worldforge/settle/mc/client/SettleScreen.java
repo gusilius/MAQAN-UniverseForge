@@ -5,6 +5,7 @@ import dev.worldforge.mod.client.WFUi;
 import dev.worldforge.settle.Building;
 import dev.worldforge.settle.Defs;
 import dev.worldforge.settle.Settlement;
+import dev.worldforge.settle.SettlementMap;
 import dev.worldforge.settle.Worker;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
@@ -23,6 +24,7 @@ public class SettleScreen extends Screen {
     private static final int W = 640, H = 400;
     private static final String[] TABS = {"Обзор", "Здания", "Люди", "Строить", "Торговля", "Бюджет", "Города", "Журнал", "Карта"};
     private Settlement s;
+    private SettlementMap map = new SettlementMap();
     private final Consumer<String> cmd;
     private int tab, selWorker, selBuilding, scroll, cat;
     private final List<Object[]> hits = new ArrayList<>();   // {x,y,w,h,Runnable,title,tipLines}
@@ -34,6 +36,7 @@ public class SettleScreen extends Screen {
     }
 
     public void setModel(Settlement n) { this.s = n; mapZoom = 1.0; mapPanX = 0; mapPanY = 0; }
+    public void setMap(SettlementMap map) { this.map = map == null ? new SettlementMap() : map; }
 
     private java.util.List<dev.worldforge.settle.CityRow> cities = new ArrayList<>();
     private String citySort = "pop";
@@ -533,6 +536,42 @@ public class SettleScreen extends Screen {
         g.enableScissor(x + 2, top + 2, x + cw - 2, top + h - 2);
         g.fill(x + 2, top + 2, x + cw - 2, top + h - 2, 0xFF17231F);
 
+        // Sampled world terrain, not a synthetic background.
+        for (SettlementMap.Cell cell : map.cells()) {
+            int sx = (int) Math.round(originX + cell.x() * scale - SettlementMap.CELL_SIZE * scale / 2.0);
+            int sy = (int) Math.round(originY + cell.z() * scale - SettlementMap.CELL_SIZE * scale / 2.0);
+            int size = Math.max(1, (int) Math.ceil(SettlementMap.CELL_SIZE * scale));
+            int color = cell.water ? 0xFF315F83 : cell.slope > 2.0 ? 0xFF6A5A45
+                    : cell.fertility > 0.7 ? 0xFF456B48 : cell.fertility > 0.4 ? 0xFF53634A : 0xFF6C6549;
+            g.fill(sx, sy, sx + size, sy + size, color);
+        }
+        for (SettlementMap.Parcel parcel : map.parcels.values()) {
+            int px = (int) Math.round(originX + parcel.x * scale);
+            int pz = (int) Math.round(originY + parcel.z * scale);
+            int pw = Math.max(1, (int) Math.round(parcel.width * scale));
+            int ph = Math.max(1, (int) Math.round(parcel.depth * scale));
+            int color = switch (parcel.zone) {
+                case RESIDENTIAL -> 0x443E8BD0; case AGRICULTURE -> 0x4478B84C;
+                case INDUSTRY -> 0x44B87942; case COMMERCE -> 0x44D6B64A;
+                case CIVIC -> 0x448B75C4; case MILITARY -> 0x44C44B4B;
+                case STORAGE -> 0x448B9299; case NONE -> 0x22000000;
+            };
+            g.fill(px, pz, px + pw, pz + ph, color);
+            g.renderOutline(px, pz, pw, ph, 0x99D5D0B8);
+        }
+        for (SettlementMap.Road road : map.roads.values()) {
+            for (int i = 1; i < road.path.size(); i++) {
+                SettlementMap.Node a = road.path.get(i - 1), b = road.path.get(i);
+                int ax = (int) Math.round(originX + a.gx() * SettlementMap.CELL_SIZE * scale);
+                int ay = (int) Math.round(originY + a.gz() * SettlementMap.CELL_SIZE * scale);
+                int bx = (int) Math.round(originX + b.gx() * SettlementMap.CELL_SIZE * scale);
+                int by = (int) Math.round(originY + b.gz() * SettlementMap.CELL_SIZE * scale);
+                int thickness = Math.max(2, (int) Math.ceil(scale * 2.2));
+                g.fill(Math.min(ax,bx)-thickness/2, Math.min(ay,by)-thickness/2,
+                        Math.max(ax,bx)+thickness/2+1, Math.max(ay,by)+thickness/2+1, 0xFFB49A70);
+            }
+        }
+
         // Масштабируемая координатная сетка помогает читать план и соотносить его с координатами мира.
         double rawStep = 48.0 / Math.max(0.0001, scale);
         double gridStep = Math.pow(2.0, Math.round(Math.log(rawStep) / Math.log(2.0)));
@@ -601,9 +640,9 @@ public class SettleScreen extends Screen {
 
         String heading = "ПЛАН ПОСЕЛЕНИЯ";
         g.drawString(font, heading, x + 8, top + 7, WFUi.GOLD);
-        String stats = s.buildings.size() + " зданий  ·  " + s.workers.size() + " жителей";
+        String stats = s.buildings.size() + " зданий  ·  " + s.workers.size() + " жителей  ·  " + map.roads.size() + " дорог  ·  " + map.parcels.size() + " участков";
         g.drawString(font, stats, x + cw - 8 - font.width(stats), top + 7, WFUi.MUTED);
-        String hint = "Колесо — масштаб  ·  ЛКМ + перетаскивание — перемещение  ·  Выберите здание или жителя";
+        String hint = "Рельеф  ·  участки  ·  дороги  ·  ЛКМ + перетаскивание — перемещение  ·  выбор здания/жителя";
         g.drawString(font, font.plainSubstrByWidth(hint, cw - 16), x + 8, top + h - 12, WFUi.MUTED);
         String zoomLabel = Math.round(mapZoom * 100) + "%";
         g.drawString(font, zoomLabel, x + cw - 8 - font.width(zoomLabel), top + h - 12, WFUi.GOLD_DIM);
