@@ -198,6 +198,24 @@ public class TroopsTest {
         check(damagedOrders.get("s1").queue.size() == 1 && damagedOrders.get("s1").current().x() == 4,
                 "повреждённая команда не скрывает последующие корректные команды");
 
+        // commander Character ID persistence
+        Squads ledSquads = new Squads();
+        Squads.Squad ledSquad = ledSquads.create("owner", "Vanguard", List.of("unit-commander", "unit-guard"));
+        check(ledSquads.appointLeader(ledSquad.id, "c42", true, 7)
+                        && ledSquad.leaderCharacterId.equals("c42") && ledSquad.leaderHero && ledSquad.leadershipRank == 7,
+                "squad commander references the canonical character id and hero progression");
+        check(!ledSquads.appointLeader(ledSquad.id, "invalid id", false, 0),
+                "invalid commander character ids are rejected");
+        Squads ledRestored = new Squads();
+        ledRestored.fromJson(ledSquads.toJson());
+        Squads.Squad loadedLeader = ledRestored.get(ledSquad.id);
+        check(loadedLeader != null && loadedLeader.leaderCharacterId.equals("c42")
+                        && loadedLeader.leaderHero && loadedLeader.leadershipRank == 7,
+                "commander identity and hero leadership survive save/load");
+        check(ledRestored.appointLeader(ledSquad.id, "", false, 0)
+                        && loadedLeader.leaderCharacterId.isEmpty() && !loadedLeader.leaderHero,
+                "commander can be safely relieved from command");
+
         // выделение
         UnitSelection sel = new UnitSelection();
         List<UnitSelection.Screen> sc = List.of(
