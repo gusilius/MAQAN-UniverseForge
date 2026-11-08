@@ -10,7 +10,7 @@ import java.util.*;
  * deterministically without loading chunks, so unloaded settlements keep simulating safely.
  */
 public final class SettlementMap {
-    public static final int CELL_SIZE = 8, MAX_CELLS = 4096;
+    public static final int CELL_SIZE = 8, MAX_CELLS = 65536;
     public static final double MAX_BUILDING_SLOPE = 2.0, MAX_ROAD_SLOPE = 3.0;
 
     public enum Zone { NONE, RESIDENTIAL, AGRICULTURE, INDUSTRY, COMMERCE, CIVIC, MILITARY, STORAGE }
@@ -25,8 +25,8 @@ public final class SettlementMap {
             this.gx = gx; this.gz = gz; this.height = height; this.biome = biome;
             this.fertility = fertility; this.slope = slope; this.water = water;
         }
-        public int x() { return gx * CELL_SIZE; }
-        public int z() { return gz * CELL_SIZE; }
+        public int x() { return gx * CELL_SIZE + CELL_SIZE / 2; }
+        public int z() { return gz * CELL_SIZE + CELL_SIZE / 2; }
     }
 
     public static final class Parcel {
