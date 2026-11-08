@@ -251,14 +251,30 @@ public class TroopsMod {
             case OrderPacket.ORDER -> {
                 Squads.Order ord = o.kind() == Squads.Kind.ATTACK.ordinal() ? new Squads.Order(Squads.Kind.ATTACK, 0, 0, o.target())
                         : new Squads.Order(Squads.Kind.values()[Math.max(0, Math.min(o.kind(), Squads.Kind.values().length - 1))], o.x(), o.z(), o.target());
-                for (String id : troopIds(o)) {
+                List<String> selectedTroops = troopIds(o);
+                boolean selectedWorkers = ModList.get().isLoaded("wf_settle") && WorkerControl.anyWorker(p, o);
+                MixedOrders.Plan mixed = MixedOrders.plan(ord.kind(), selectedWorkers, !selectedTroops.isEmpty());
+                if (mixed.workers() != MixedOrders.WorkerAction.NONE) {
+                    int workerAction = switch (mixed.workers()) {
+                        case MOVE -> OrderPacket.WORK;
+                        case HOLD -> OrderPacket.WORK_HOLD;
+                        case STOP -> OrderPacket.WORK_STOP;
+                        default -> -1;
+                    };
+                    if (workerAction >= 0) {
+                        OrderPacket workerOrder = new OrderPacket(workerAction, o.ids(), 0, o.x(), o.z(), "", false, 0);
+                        p.displayClientMessage(Component.literal(WorkerControl.command(p, workerOrder)), true);
+                    }
+                }
+                if (!mixed.commandTroops()) return;
+                for (String id : selectedTroops) {
                     Squads.Squad rs = SQUADS.squadOf(id);
                     if (rs != null && rs.owner.equals(owner) && rs.routed && ord.kind() != Squads.Kind.STOP) {
                         p.displayClientMessage(Component.literal("Отряд «" + rs.name + "» бежит и не слушает приказов"), true);
                         return;
                     }
                 }
-                Squads.Squad s = SQUADS.commandUnits(owner, troopIds(o), ord, o.queue());
+                Squads.Squad s = SQUADS.commandUnits(owner, selectedTroops, ord, o.queue());
                 if (s != null) p.displayClientMessage(Component.literal(s.name + " (" + s.members.size() + "): " + ord.kind().title), true);
             }
             case OrderPacket.FORMATION, OrderPacket.STANCE -> {
