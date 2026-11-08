@@ -491,16 +491,14 @@ public class SettleMod {
             for (dev.worldforge.settle.Worker worker : other.s.workers)
                 if (characterId.equals(worker.person)) return false;
         }
-        dev.worldforge.mod.MapData ownerMap = null;
-        dev.worldforge.mod.TitleData.Title province = null;
+        CharacterRegistry registry = null;
+        Character person = null;
         for (dev.worldforge.mod.MapData map : dev.worldforge.mod.WorldForgeMod.loadedMaps().values()) {
-            if (map.titles == null) continue;
-            dev.worldforge.mod.TitleData.Title candidate = map.provinceAt(colony.cx, colony.cz);
-            if (candidate != null) { ownerMap = map; province = candidate; break; }
+            if (map.titles == null || map.provinceAt(colony.cx, colony.cz) == null) continue;
+            CharacterRegistry candidate = PeopleMod.registry(map);
+            Character found = candidate == null ? null : candidate.get(characterId);
+            if (found != null) { registry = candidate; person = found; break; }
         }
-        if (ownerMap == null) return false;
-        CharacterRegistry registry = PeopleMod.registry(ownerMap);
-        Character person = registry == null ? null : registry.get(characterId);
         if (person == null || !person.alive) return false;
         String profession = person.props.get("population.pre_military_profession") instanceof String p && !p.isBlank()
                 ? p : PopulationSimulation.profession(person);
