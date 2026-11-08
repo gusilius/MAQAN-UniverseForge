@@ -402,7 +402,7 @@ public class TroopsMod {
                         ServerPlayer p = c.getSource().getPlayerOrException();
                         int n = 0;
                         for (Squads.Squad s : new ArrayList<>(SQUADS.of(p.getUUID().toString()))) {
-                            for (String id : new ArrayList<>(s.members)) { TroopEntity t = LIVE.get(id); if (t != null) { t.discard(); n++; } SQUADS.remove(id); }
+                            for (String id : new ArrayList<>(s.members)) { TroopEntity t = LIVE.get(id); if (t != null) { releaseBody(t); t.discard(); n++; } SQUADS.remove(id); }
                         }
                         int cnt = n;
                         c.getSource().sendSuccess(() -> Component.literal("Распущено солдат: " + cnt), false);
@@ -718,15 +718,32 @@ public class TroopsMod {
             if (ArmyLink.give(e.getKey(), men)) back += men.values().stream().mapToInt(Integer::intValue).sum();
             else gone.removeIf(t -> t.armyId == e.getKey());                                    // армии больше нет: солдаты остаются
         }
-        for (TroopEntity t : gone) { onDeath(t); t.discard(); }
+        for (TroopEntity t : gone) { releaseBody(t); t.discard(); }
         int men = back;
         src.sendSuccess(() -> Component.literal("Вернулось в армии людей: " + men), false);
         return gone.size();
     }
 
+    /** Removes a physical troop body without killing the underlying person (return, rollback or disband). */
+    private static void releaseBody(TroopEntity troop) {
+        PersonBinding binding = bindPerson(troop, false);
+        if (binding != null) {
+            Character person = binding.character();
+            binding.registry().unbindEntity(person.id, "troop", troop.getUUID().toString());
+            person.props.remove("wf_troop_uuid");
+            person.props.remove("wf_troop_unit");
+            person.props.remove("wf_army_id");
+            person.props.remove("wf_combat_xp");
+            person.props.remove("wf_veteran_rank");
+        }
+        String id = troop.getUUID().toString();
+        LIVE.remove(id);
+        SQUADS.remove(id);
+    }
+
     private static void discardPrepared(List<TroopEntity> troops) {
         for (TroopEntity troop : troops) {
-            onDeath(troop);
+            releaseBody(troop);
             troop.discard();
         }
     }
