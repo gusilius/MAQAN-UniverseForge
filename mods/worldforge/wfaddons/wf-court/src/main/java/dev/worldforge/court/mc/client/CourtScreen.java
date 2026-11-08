@@ -89,8 +89,38 @@ public class CourtScreen extends Screen {
         return l;
     }
 
+    private boolean embeddedInMaqan;
+
+    public void setEmbeddedInMaqan(boolean embedded) { this.embeddedInMaqan = embedded; }
+
+    private void publishWorkspaceSelection() {
+        Character ruler = s.ruler(realm);
+        if (ruler == null) {
+            dev.worldforge.mod.client.PlatformWorkspaceBridge.publish("wf_court",
+                    "realm:" + realm, "realm", realmName(realm), "Realm court · year " + s.year());
+            return;
+        }
+        dev.worldforge.mod.client.PlatformWorkspaceBridge.publish("wf_court",
+                ruler.id, "character", ruler.name,
+                "Ruler · " + realmName(realm) + " · year " + s.year()
+                        + (ruler.alive ? " · alive" : " · deceased"));
+    }
+
+    @Override
+    public void removed() {
+        dev.worldforge.mod.client.PlatformWorkspaceBridge.clear("wf_court");
+        super.removed();
+    }
+
+    @Override
+    public void onClose() {
+        if (embeddedInMaqan && dev.worldforge.mod.client.PlatformWorkspaceBridge.closeEmbedded(this)) return;
+        super.onClose();
+    }
+
     @Override
     public void render(GuiGraphics g, int mx, int my, float pt) {
+        publishWorkspaceSelection();
         hits.clear();
         int x = (width - W) / 2, y = (height - H) / 2;
         TitleData.Realm re = d().realms.get(realm);
