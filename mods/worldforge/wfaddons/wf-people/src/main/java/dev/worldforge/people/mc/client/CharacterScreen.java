@@ -39,6 +39,7 @@ public class CharacterScreen extends Screen {
     private final Opinion opinion;
     private final Consumer<String> cmd;
     private String focus;
+    private boolean embeddedInMaqan;
     private final List<String> history = new ArrayList<>();
     private boolean appointOpen;
     private int famScroll;
@@ -546,6 +547,23 @@ public class CharacterScreen extends Screen {
             return true;
         }
         return super.mouseScrolled(mx, my, d);
+    }
+
+    /** Called reflectively by MAQAN Platform; keeps standalone behavior when absent. */
+    public void setEmbeddedInMaqan(boolean embedded) { this.embeddedInMaqan = embedded; }
+
+    @Override
+    public void onClose() {
+        if (embeddedInMaqan) {
+            try {
+                Class<?> shell = Class.forName("dev.maqan.platform.client.PlatformShellScreen");
+                Object closed = shell.getMethod("closeEmbeddedProviderView", Screen.class).invoke(null, this);
+                if (Boolean.TRUE.equals(closed)) return;
+            } catch (ReflectiveOperationException | LinkageError ignored) {
+                // Fall back to ordinary Minecraft screen closing if the host disappeared.
+            }
+        }
+        super.onClose();
     }
 
     /**
