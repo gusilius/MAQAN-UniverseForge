@@ -51,7 +51,7 @@ public final class PopulationSimulation {
 
     /** Imports ranks from the shared RPG progression profile into this Character's canonical skill store. */
     public static void syncSkillRanks(Character character, Map<String, Integer> ranks) {
-        requireAlive(character);
+        Objects.requireNonNull(character, "character");
         Map<String, Object> target = mapProp(character, SKILLS);
         target.clear();
         for (var entry : ranks.entrySet()) {
