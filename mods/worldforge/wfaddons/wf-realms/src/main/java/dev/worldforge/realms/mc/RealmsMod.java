@@ -11,6 +11,8 @@ import dev.worldforge.realms.RealmDefs;
 import dev.worldforge.realms.Realms;
 import dev.worldforge.realms.Statecraft;
 import com.mojang.brigadier.arguments.DoubleArgumentType;
+import com.mojang.brigadier.arguments.BoolArgumentType;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
@@ -142,12 +144,114 @@ public class RealmsMod {
     @SubscribeEvent public void onCommands(RegisterCommandsEvent e) { register(e.getDispatcher()); }
 
     private static void register(CommandDispatcher<CommandSourceStack> d) {
+        registerPolitics(d);
         d.register(Commands.literal("wfrealm")
                 .executes(c -> info(c.getSource(), ""))
                 .then(Commands.literal("info").then(Commands.argument("realm", StringArgumentType.word()).executes(c -> info(c.getSource(), StringArgumentType.getString(c, "realm")))))
                 .then(Commands.literal("gov").then(Commands.argument("id", StringArgumentType.word()).executes(c -> act(c.getSource(), "gov", StringArgumentType.getString(c, "id"), ""))))
                 .then(Commands.literal("unlock").then(Commands.argument("key", StringArgumentType.word()).executes(c -> act(c.getSource(), "unlock", StringArgumentType.getString(c, "key"), ""))))
                 .then(Commands.literal("law").then(Commands.argument("law", StringArgumentType.word()).then(Commands.argument("option", StringArgumentType.word()).executes(c -> act(c.getSource(), "law", StringArgumentType.getString(c, "law"), StringArgumentType.getString(c, "option")))))));
+    }
+
+    /** Operator-only bootstrap surface for the political simulation. */
+    private static void registerPolitics(CommandDispatcher<CommandSourceStack> d) {
+        d.register(Commands.literal("wfpolitics").requires(s -> s.hasPermission(2))
+                .then(Commands.literal("title")
+                        .then(Commands.literal("create")
+                                .then(Commands.argument("id", StringArgumentType.word())
+                                        .then(Commands.argument("realm", StringArgumentType.word())
+                                                .then(Commands.argument("rank", StringArgumentType.word())
+                                                        .then(Commands.argument("name", StringArgumentType.word())
+                                                                .executes(c -> politics(c.getSource(), "title_create",
+                                                                        StringArgumentType.getString(c, "id"),
+                                                                        StringArgumentType.getString(c, "realm"),
+                                                                        StringArgumentType.getString(c, "rank"),
+                                                                        StringArgumentType.getString(c, "name"))))))))
+                        .then(Commands.literal("grant")
+                                .then(Commands.argument("title", StringArgumentType.word())
+                                        .then(Commands.argument("character", StringArgumentType.word())
+                                                .executes(c -> politics(c.getSource(), "title_grant",
+                                                        StringArgumentType.getString(c, "title"),
+                                                        StringArgumentType.getString(c, "character"), "", "")))))
+                        .then(Commands.literal("claim")
+                                .then(Commands.argument("title", StringArgumentType.word())
+                                        .then(Commands.argument("character", StringArgumentType.word())
+                                                .executes(c -> politics(c.getSource(), "title_claim",
+                                                        StringArgumentType.getString(c, "title"),
+                                                        StringArgumentType.getString(c, "character"), "", ""))))))
+                .then(Commands.literal("vassal")
+                        .then(Commands.argument("vassal", StringArgumentType.word())
+                                .then(Commands.argument("liege", StringArgumentType.word())
+                                        .then(Commands.argument("tax_share", DoubleArgumentType.doubleArg(0, 1))
+                                                .then(Commands.argument("levy_share", DoubleArgumentType.doubleArg(0, 1))
+                                                        .executes(c -> politics(c.getSource(), "vassal",
+                                                                StringArgumentType.getString(c, "vassal"),
+                                                                StringArgumentType.getString(c, "liege"),
+                                                                Double.toString(DoubleArgumentType.getDouble(c, "tax_share")),
+                                                                Double.toString(DoubleArgumentType.getDouble(c, "levy_share")))))))))
+                .then(Commands.literal("tax")
+                        .then(Commands.argument("realm", StringArgumentType.word())
+                                .then(Commands.argument("rate", DoubleArgumentType.doubleArg(0, 1))
+                                        .executes(c -> politics(c.getSource(), "tax",
+                                                StringArgumentType.getString(c, "realm"),
+                                                Double.toString(DoubleArgumentType.getDouble(c, "rate")), "", "")))))
+                .then(Commands.literal("opinion")
+                        .then(Commands.argument("realm_a", StringArgumentType.word())
+                                .then(Commands.argument("realm_b", StringArgumentType.word())
+                                        .then(Commands.argument("value", IntegerArgumentType.integer(-100, 100))
+                                                .executes(c -> politics(c.getSource(), "opinion",
+                                                        StringArgumentType.getString(c, "realm_a"),
+                                                        StringArgumentType.getString(c, "realm_b"),
+                                                        Integer.toString(IntegerArgumentType.getInteger(c, "value")), ""))))))
+                .then(Commands.literal("treaty")
+                        .then(Commands.argument("realm_a", StringArgumentType.word())
+                                .then(Commands.argument("realm_b", StringArgumentType.word())
+                                        .then(Commands.argument("type", StringArgumentType.word())
+                                                .then(Commands.argument("active", BoolArgumentType.bool())
+                                                        .executes(c -> politics(c.getSource(), "treaty",
+                                                                StringArgumentType.getString(c, "realm_a"),
+                                                                StringArgumentType.getString(c, "realm_b"),
+                                                                StringArgumentType.getString(c, "type"),
+                                                                Boolean.toString(BoolArgumentType.getBool(c, "active")))))))))
+                .then(Commands.literal("war")
+                        .then(Commands.argument("attacker", StringArgumentType.word())
+                                .then(Commands.argument("defender", StringArgumentType.word())
+                                        .then(Commands.argument("casus_belli", StringArgumentType.word())
+                                                .then(Commands.argument("ruler_character", StringArgumentType.word())
+                                                        .executes(c -> politics(c.getSource(), "war",
+                                                                StringArgumentType.getString(c, "attacker"),
+                                                                StringArgumentType.getString(c, "defender"),
+                                                                StringArgumentType.getString(c, "casus_belli"),
+                                                                StringArgumentType.getString(c, "ruler_character"))))))))
+                .then(Commands.literal("succession")
+                        .then(Commands.argument("realm", StringArgumentType.word())
+                                .then(Commands.argument("law", StringArgumentType.word())
+                                        .executes(c -> politics(c.getSource(), "succession",
+                                                StringArgumentType.getString(c, "realm"),
+                                                StringArgumentType.getString(c, "law"), "", "")))));
+    }
+
+    private static int politics(CommandSourceStack source, String action, String a, String b, String c, String d) {
+        try {
+            switch (action) {
+                case "title_create" -> POLITICS.createTitle(a, b, Statecraft.Rank.valueOf(c.toUpperCase(Locale.ROOT)), d);
+                case "title_grant" -> { if (!POLITICS.grantTitle(a, b)) throw new IllegalArgumentException(POLITICS.lastError); }
+                case "title_claim" -> { if (!POLITICS.addClaim(a, b)) throw new IllegalArgumentException(POLITICS.lastError); }
+                case "vassal" -> { if (!POLITICS.setVassalage(a, b, Double.parseDouble(c), Double.parseDouble(d))) throw new IllegalArgumentException(POLITICS.lastError); }
+                case "tax" -> POLITICS.setTaxRate(a, Double.parseDouble(b));
+                case "opinion" -> POLITICS.setOpinion(a, b, Integer.parseInt(c));
+                case "treaty" -> POLITICS.setTreaty(a, b, Statecraft.Treaty.valueOf(c.toUpperCase(Locale.ROOT)), Boolean.parseBoolean(d));
+                case "war" -> POLITICS.declareWar(a, b, c, d, (int) WorldForgeApi.clock().dayNumber());
+                case "succession" -> POLITICS.setInheritanceLaw(a, Statecraft.InheritanceLaw.valueOf(b.toUpperCase(Locale.ROOT)));
+                default -> throw new IllegalArgumentException("Неизвестная политическая операция");
+            }
+            save(source.getServer());
+            source.sendSuccess(() -> Component.literal("Политическое состояние обновлено: " + action), true);
+            return 1;
+        } catch (Exception ex) {
+            source.sendFailure(Component.literal("Политическая операция отклонена: " + ex.getMessage()));
+            return 0;
+        }
     }
 
     private static int info(CommandSourceStack s, String realm) {
