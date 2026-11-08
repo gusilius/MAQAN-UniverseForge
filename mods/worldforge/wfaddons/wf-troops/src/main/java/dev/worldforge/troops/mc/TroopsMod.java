@@ -135,7 +135,7 @@ public class TroopsMod {
     public void join(EntityJoinLevelEvent e) {
         if (e.getLevel().isClientSide || !(e.getEntity() instanceof TroopEntity t)) return;
         LIVE.put(t.getUUID().toString(), t);
-        syncPerson(t);
+        if (!t.deferCharacterBinding) syncPerson(t); // legacy saved entities migrate once; new recruits bind after payment commits
         if (SQUADS.squadOf(t.getUUID().toString()) == null) {                       // солдат без отряда (отряд потерян): свой отряд
             Squads.Squad s = SQUADS.create(t.ownerId(), null, List.of(t.getUUID().toString()));
             s.realm = t.realm; s.cx = t.getX(); s.cz = t.getZ();
@@ -572,6 +572,7 @@ public class TroopsMod {
             troop.moveTo(positions.get(i)[0], y, positions.get(i)[1], p.getYRot(), 0);
             troop.setup(unit, owner);
             troop.realm = realm.isEmpty() ? dev.worldforge.settle.mc.SettleMod.realmOf(site.colony()) : realm;
+            troop.deferCharacterBinding = true;
             recruits.add(troop);
         }
 
@@ -608,6 +609,7 @@ public class TroopsMod {
                 left -= take;
             }
         }
+        for (TroopEntity troop : recruits) { troop.deferCharacterBinding = false; syncPerson(troop); }
         src.sendSuccess(() -> Component.literal("Из «" + site.building().def.name + "» выпущен отряд «"
                 + squad.name + "»: " + recruits.size() + " × " + unit.name() + "; золото "
                 + goldCost + ", снабжение " + totalSupply), false);
@@ -669,6 +671,7 @@ public class TroopsMod {
                 troop.setup(unit, owner);
                 troop.realm = found.army().realm;
                 troop.armyId = armyId;
+                troop.deferCharacterBinding = true;
                 batch.add(troop);
             }
         }
@@ -734,6 +737,7 @@ public class TroopsMod {
             paidBuildings.add(entry.getKey());
         }
 
+        for (TroopEntity troop : allPrepared) { troop.deferCharacterBinding = false; syncPerson(troop); }
         int recruited = total;
         src.sendSuccess(() -> Component.literal("Из военных зданий поселения призвано " + recruited
                 + " солдат армии " + armyId + " (оставшиеся люди: " + found.army().men() + ")"), false);
