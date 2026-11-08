@@ -73,7 +73,7 @@ public class SettleScreen extends Screen {
             Building b = s.building(selBuilding);
             if (b != null) {
                 dev.worldforge.mod.client.PlatformWorkspaceBridge.publish("wf_settlements",
-                        "building:" + b.uid, "building", b.def.name,
+                        "settlement:" + s.id + ":building:" + b.uid, "building", b.def.name,
                         "Settlement building · " + b.state + " · " + b.x + ", " + b.z);
                 return;
             }
@@ -81,7 +81,7 @@ public class SettleScreen extends Screen {
         if (selWorker != 0) {
             Worker w = s.worker(selWorker);
             if (w != null) {
-                String id = w.person == null || w.person.isBlank() ? "worker:" + w.id : w.person;
+                String id = w.person == null || w.person.isBlank() ? "settlement:" + s.id + ":worker:" + w.id : w.person;
                 dev.worldforge.mod.client.PlatformWorkspaceBridge.publish("wf_settlements", id,
                         w.person == null || w.person.isBlank() ? "worker" : "character",
                         w.name, "Profession: " + s.defs.professionName(w.profession)
