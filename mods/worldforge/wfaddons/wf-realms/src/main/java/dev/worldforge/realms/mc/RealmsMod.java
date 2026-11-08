@@ -9,6 +9,8 @@ import dev.worldforge.mod.api.DemoApi;
 import dev.worldforge.mod.api.WorldForgeApi;
 import dev.worldforge.realms.RealmDefs;
 import dev.worldforge.realms.Realms;
+import dev.worldforge.realms.Statecraft;
+import com.mojang.brigadier.arguments.DoubleArgumentType;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
@@ -48,6 +50,8 @@ public class RealmsMod {
     public static final Logger LOGGER = LogUtils.getLogger();
     public static final RealmDefs DEFS = new RealmDefs();
     public static final Realms REALMS = new Realms(DEFS);
+    /** Persistent political state; Character IDs always resolve through wf-people. */
+    public static final Statecraft POLITICS = new Statecraft();
     private static long ticks;
     private static final Random RNG = new Random();
 
@@ -87,6 +91,7 @@ public class RealmsMod {
     }
 
     private static Path file(MinecraftServer s) { return s.getWorldPath(LevelResource.ROOT).resolve("worldforge").resolve("wf_realms.json"); }
+    private static Path politicsFile(MinecraftServer s) { return s.getWorldPath(LevelResource.ROOT).resolve("worldforge").resolve("wf_statecraft.json"); }
 
     private static void loadDefs(ResourceManager rm) {
         Map<ResourceLocation, Resource> found = rm.listResources("wf_realms", rl -> rl.getPath().endsWith(".json"));
@@ -103,13 +108,19 @@ public class RealmsMod {
 
     @SubscribeEvent
     public void onStarted(ServerStartedEvent e) {
-        try { Path f = file(e.getServer()); if (Files.exists(f)) REALMS.fromJson(Files.readString(f)); }
-        catch (Exception ex) { LOGGER.error("wf_realms: не удалось прочитать состояние: {}", ex.toString()); }
+        try {
+            Path f = file(e.getServer());
+            if (Files.exists(f)) REALMS.fromJson(Files.readString(f));
+            Path political = politicsFile(e.getServer());
+            if (Files.exists(political)) POLITICS.fromJson(Files.readString(political));
+        } catch (Exception ex) { LOGGER.error("wf_realms: не удалось прочитать состояние: {}", ex.toString()); }
     }
 
     private static void save(MinecraftServer s) {
-        try { Path f = file(s); Files.createDirectories(f.getParent()); Files.writeString(f, REALMS.toJson()); }
-        catch (Exception ex) { LOGGER.error("wf_realms: не удалось сохранить: {}", ex.toString()); }
+        try {
+            Path f = file(s); Files.createDirectories(f.getParent()); Files.writeString(f, REALMS.toJson());
+            Files.writeString(politicsFile(s), POLITICS.toJson());
+        } catch (Exception ex) { LOGGER.error("wf_realms: не удалось сохранить: {}", ex.toString()); }
     }
 
     @SubscribeEvent
