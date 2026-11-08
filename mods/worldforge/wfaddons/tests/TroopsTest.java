@@ -81,6 +81,33 @@ public class TroopsTest {
                 && nonFinite.validate().stream().anyMatch(x -> x.contains("скорость")),
                 "валидация отклоняет NaN и бесконечные характеристики");
 
+        // mixed civilian + military command routing
+        MixedOrders.Plan mixedMove = MixedOrders.plan(Squads.Kind.MOVE, true, true);
+        check(mixedMove.commandTroops() && mixedMove.workers() == MixedOrders.WorkerAction.MOVE,
+                "one move order routes independently to selected workers and troops");
+        MixedOrders.Plan mixedAttack = MixedOrders.plan(Squads.Kind.ATTACK, true, true);
+        check(mixedAttack.commandTroops() && mixedAttack.workers() == MixedOrders.WorkerAction.NONE,
+                "direct attack never turns civilian workers into combat units");
+        MixedOrders.Plan mixedHold = MixedOrders.plan(Squads.Kind.HOLD, true, true);
+        check(mixedHold.commandTroops() && mixedHold.workers() == MixedOrders.WorkerAction.HOLD,
+                "hold order reaches both military and civilian selection");
+        MixedOrders.Plan workerOnly = MixedOrders.plan(Squads.Kind.MOVE, true, false);
+        check(!workerOnly.commandTroops() && workerOnly.workers() == MixedOrders.WorkerAction.MOVE,
+                "worker-only selection receives movement without creating a military squad");
+        check(MixedOrders.plan(Squads.Kind.STOP, true, true).workers() == MixedOrders.WorkerAction.STOP,
+                "stop order is routed to both selected unit categories");
+
+        // appointed commander / hero leadership
+        check(Leadership.aura(8, true, false, 0) == 20,
+                "appointed commander adds command aura to the unit's native aura");
+        check(Leadership.aura(0, true, true, 4) == 22,
+                "hero leadership combines appointment, hero status and skill rank");
+        check(Leadership.commandCapacity(false, 0) == 20
+                        && Leadership.commandCapacity(true, 5) == 50,
+                "hero and leadership rank increase command capacity");
+        check(Leadership.moraleMultiplier(true, 5) > Leadership.moraleMultiplier(false, 0),
+                "hero leadership improves squad morale");
+
         // строи
         for (Formations.Type t : Formations.Type.values()) {
             for (int n : new int[]{1, 5, 17, 40}) {
