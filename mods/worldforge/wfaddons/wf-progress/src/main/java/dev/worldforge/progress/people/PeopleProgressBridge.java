@@ -1,6 +1,7 @@
 package dev.worldforge.progress.people;
 
 import dev.worldforge.people.Character;
+import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.PopulationSimulation;
 import dev.worldforge.progress.Profile;
 import dev.worldforge.progress.Progress;
@@ -26,8 +27,46 @@ public final class PeopleProgressBridge {
         Objects.requireNonNull(character, "character");
         String owner = owner(character, populationScopeId);
         Profile profile = progress.profile(owner);
+        migrateLegacyProfile(progress, character, profile);
         syncFromCharacter(character, profile);
         return profile;
+    }
+
+    /** Migrate the pre-scope NPC key only when that Character ID is unique across loaded map registries. */
+    private static void migrateLegacyProfile(Progress progress, Character character, Profile target) {
+        Profile legacy = progress.peek("n:" + character.id);
+        if (legacy == null || legacy == target || !isUniqueCharacterId(character.id)) return;
+        boolean fresh = target.level == 1 && target.xp == 0 && target.totalXp == 0
+                && target.attrFree == 0 && target.skillFree == 0 && target.passiveFree == 0
+                && target.attrs.isEmpty() && target.skills.isEmpty() && target.nodes.isEmpty();
+        if (!fresh) return;
+        target.level = legacy.level;
+        target.xp = legacy.xp;
+        target.totalXp = legacy.totalXp;
+        target.attrFree = legacy.attrFree;
+        target.skillFree = legacy.skillFree;
+        target.passiveFree = legacy.passiveFree;
+        target.archetype = legacy.archetype;
+        target.attrs.putAll(legacy.attrs);
+        target.skills.putAll(legacy.skills);
+        target.nodes.addAll(legacy.nodes);
+        target.respecs = legacy.respecs;
+    }
+
+    private static boolean isUniqueCharacterId(String id) {
+        try {
+            Class<?> peopleMod = Class.forName("dev.worldforge.people.mc.PeopleMod");
+            Object raw = peopleMod.getMethod("registries").invoke(null);
+            if (!(raw instanceof Map<?, ?> registries)) return false;
+            int matches = 0;
+            for (Object value : registries.values()) {
+                if (!(value instanceof CharacterRegistry registry)) continue;
+                for (Character character : registry.all()) if (id.equals(character.id) && ++matches > 1) return false;
+            }
+            return matches == 1;
+        } catch (ReflectiveOperationException ex) {
+            return false;
+        }
     }
 
     /** NPC practice updates the Character first, then mirrors the resulting ranks into the RPG sheet. */
@@ -73,8 +112,8 @@ public final class PeopleProgressBridge {
                     String owner = owner(character, scope);
                     Profile profile = progress.peek(owner);
                     Map<String, Integer> ranks = PopulationSimulation.skillRanksSnapshot(character);
-                    if (profile == null && ranks.isEmpty()) continue;
-                    if (profile == null) profile = progress.profile(owner);
+                    if (profile == null && ranks.isEmpty() && progress.peek("n:" + character.id) == null) continue;
+                    profile = profile(progress, character, scope);
                     if (ranks.isEmpty() && !profile.skills.isEmpty()) syncToCharacter(character, profile);
                     else syncFromCharacter(character, profile);
                 }
