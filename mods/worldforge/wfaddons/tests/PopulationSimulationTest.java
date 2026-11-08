@@ -67,6 +67,13 @@ public final class PopulationSimulationTest {
         PopulationSimulation.setCommand(smith, "");
         ok(PopulationSimulation.hasDuty(smith, Duty.HERO) && PopulationSimulation.hasDuty(smith, Duty.SOLDIER), "hero and soldier duties coexist without a second identity");
 
+        Character legacyNpc = registry.create("Legacy", "", "north", "m", 280);
+        String legacyOwner = PeopleProgressBridge.owner(legacyNpc, "middle_earth");
+        progress.profile(legacyOwner).skills.put("archery", 4);
+        PeopleProgressBridge.profile(progress, legacyNpc, "middle_earth");
+        ok(PopulationSimulation.skillRank(legacyNpc, "archery") == 4,
+                "legacy NPC progression ranks migrate into the same Character without data loss");
+
         Character child = registry.create("Mira", "", "north", "f", 296);
         ok(PopulationSimulation.lifeStage(child, 300) == LifeStage.INFANT, "infant classification");
         ok(PopulationSimulation.decide(child, 300) == Intent.IDLE, "infants do not receive adult work or combat intents");
