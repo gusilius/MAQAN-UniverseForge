@@ -110,7 +110,7 @@ public final class PopulationSimulationTest {
         ok(PopulationSimulation.skillRank(restored, "smithing") == 3, "skills survive save/load");
         ok(PopulationSimulation.hasDuty(restored, Duty.SOLDIER), "multiple duties survive save/load");
         ok(PopulationSimulation.profession(restored).equals("armorer"), "current profession survives save/load");
-        ok(!restored.alive && restored.props.get("population.death_year").equals(303), "dead characters remain in the persistent registry");
+        ok(!restored.alive && ((Number) restored.props.get("population.death_year")).intValue() == 303, "dead characters remain in the persistent registry");
 
         boolean rejectsDeadAssignment = false;
         try { PopulationSimulation.assignProfession(restored, professionDefs, "farmer", 304); }
