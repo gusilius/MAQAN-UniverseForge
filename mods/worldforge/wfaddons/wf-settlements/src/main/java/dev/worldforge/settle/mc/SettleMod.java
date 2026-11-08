@@ -455,11 +455,11 @@ public class SettleMod {
             if (person.culture == null || person.culture.isBlank()) person.culture = culture;
             String profession = worker.profession == null || worker.profession.isBlank() ? "laborer" : worker.profession;
             if (!profession.equals(PopulationSimulation.profession(person))) registry.changeProfession(person.id, profession, PeopleMod.YEAR);
-            PopulationSimulation.addDuty(person, Duty.WORKER);
-            if (java.util.Set.of("guard", "soldier", "archer", "knight").contains(profession)) PopulationSimulation.addDuty(person, Duty.SOLDIER);
-            else PopulationSimulation.removeDuty(person, Duty.SOLDIER);
-            if (java.util.Set.of("blacksmith", "armorer", "trainer", "healer", "merchant", "scholar").contains(profession)) PopulationSimulation.addDuty(person, Duty.SPECIALIST);
-            else PopulationSimulation.removeDuty(person, Duty.SPECIALIST);
+            registry.setDuty(person.id, Duty.WORKER, true, PeopleMod.YEAR);
+            if (java.util.Set.of("guard", "soldier", "archer", "knight").contains(profession)) registry.setDuty(person.id, Duty.SOLDIER, true, PeopleMod.YEAR);
+            else registry.setDuty(person.id, Duty.SOLDIER, false, PeopleMod.YEAR);
+            if (java.util.Set.of("blacksmith", "armorer", "trainer", "healer", "merchant", "scholar").contains(profession)) registry.setDuty(person.id, Duty.SPECIALIST, true, PeopleMod.YEAR);
+            else registry.setDuty(person.id, Duty.SPECIALIST, false, PeopleMod.YEAR);
             PopulationSimulation.updateIntent(person, PeopleMod.YEAR);
             person.props.put("wf_unit_kind", "worker");
             person.props.put("wf_settlement_id", colony.s.id);
