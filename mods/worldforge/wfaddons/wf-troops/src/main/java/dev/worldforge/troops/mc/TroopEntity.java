@@ -54,6 +54,8 @@ public class TroopEntity extends PathfinderMob {
     public String realm = "";
     public int fortId;                     // защитник крепости (0 - полевой солдат)
     public int armyId;                     // из какой армии wf-army призван (0 - нанят за золото)
+    /** Stable foreign key into wf-people.CharacterRegistry; empty when wf-people is absent. */
+    public String characterId = "";
     private int cooldown, seek;
     private int combatXp;
     private TroopDefs.Unit def;
@@ -105,10 +107,12 @@ public class TroopEntity extends PathfinderMob {
     public void setSquadId(String s) { entityData.set(SQUAD, s); }
     public TroopDefs.Unit def() { return def; }
     public int combatXp() { return combatXp; }
+    public void setCombatXpFromCharacter(long xp) { combatXp = (int) Math.max(0, Math.min(TroopProgression.MAX_XP, xp)); }
     public int veteranRank() { return TroopProgression.rank(combatXp); }
     public void awardCombatXp(int amount) {
         int before = veteranRank();
         combatXp = TroopProgression.addXp(combatXp, amount);
+        TroopsMod.syncPerson(this);
         if (veteranRank() > before && def != null) {
             float oldHealth = getHealth();
             double oldMax = getMaxHealth();
@@ -155,6 +159,7 @@ public class TroopEntity extends PathfinderMob {
         t.putInt("wf_army", armyId);
         t.putInt("wf_fort", fortId);
         t.putInt("wf_combat_xp", combatXp);
+        t.putString("wf_character", characterId == null ? "" : characterId);
     }
 
     @Override
@@ -164,6 +169,7 @@ public class TroopEntity extends PathfinderMob {
         armyId = t.getInt("wf_army");
         fortId = t.getInt("wf_fort");
         combatXp = Math.max(0, Math.min(TroopProgression.MAX_XP, t.getInt("wf_combat_xp")));
+        characterId = t.getString("wf_character");
         TroopDefs.Unit u = TroopsMod.DEFS.units.get(t.getString("wf_unit"));
         if (u != null) {
             float hp = getHealth();
