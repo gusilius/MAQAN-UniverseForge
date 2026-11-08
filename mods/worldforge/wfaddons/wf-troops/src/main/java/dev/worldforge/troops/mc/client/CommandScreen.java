@@ -254,14 +254,10 @@ public final class CommandScreen extends Screen {
         if (CommandMode.SEL.selected().isEmpty()) return true;
         List<String> sel = CommandMode.selected();
         switch (key) {
-            case GLFW.GLFW_KEY_Z -> {
-                CommandMode.send(new OrderPacket(OrderPacket.ORDER, sel, Squads.Kind.STOP.ordinal(), 0, 0, "", false, 0));
-                CommandMode.send(new OrderPacket(OrderPacket.WORK_STOP, sel, 0, 0, 0, "", false, 0));
-            }
-            case GLFW.GLFW_KEY_X -> {
-                CommandMode.send(new OrderPacket(OrderPacket.ORDER, sel, Squads.Kind.HOLD.ordinal(), 0, 0, "", false, 0));
-                CommandMode.send(new OrderPacket(OrderPacket.WORK_HOLD, sel, 0, 0, 0, "", false, 0));
-            }
+            case GLFW.GLFW_KEY_Z ->
+                    CommandMode.send(new OrderPacket(OrderPacket.ORDER, sel, Squads.Kind.STOP.ordinal(), 0, 0, "", false, 0));
+            case GLFW.GLFW_KEY_X ->
+                    CommandMode.send(new OrderPacket(OrderPacket.ORDER, sel, Squads.Kind.HOLD.ordinal(), 0, 0, "", false, 0));
             case GLFW.GLFW_KEY_C -> {
                 CommandMode.formation = (CommandMode.formation + 1) % Formations.Type.values().length;
                 CommandMode.send(new OrderPacket(OrderPacket.FORMATION, sel, 0, 0, 0, "", false, CommandMode.formation));
