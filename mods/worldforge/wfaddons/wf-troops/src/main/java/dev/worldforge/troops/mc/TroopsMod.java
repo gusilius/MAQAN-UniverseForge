@@ -15,6 +15,7 @@ import dev.worldforge.people.mc.PeopleMod;
 import dev.worldforge.troops.Formations;
 import dev.worldforge.troops.Forts;
 import dev.worldforge.troops.Muster;
+import dev.worldforge.troops.MixedOrders;
 import dev.worldforge.troops.Wars;
 import dev.worldforge.troops.Squads;
 import dev.worldforge.troops.TroopDefs;
