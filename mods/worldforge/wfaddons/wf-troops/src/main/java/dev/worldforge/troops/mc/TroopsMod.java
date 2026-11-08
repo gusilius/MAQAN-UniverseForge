@@ -146,7 +146,7 @@ public class TroopsMod {
 
     /** Resolves a physical soldier to the one authoritative Character in the map owning its realm. */
     private static PersonBinding bindPerson(TroopEntity troop, boolean create) {
-        if (troop == null || !ModList.get().isLoaded("wf_people")) return null;
+        if (troop == null || troop.level().isClientSide || !ModList.get().isLoaded("wf_people")) return null;
         for (MapData map : WorldForgeMod.loadedMaps().values()) {
             if (map.titles == null) continue;
             TitleData.Realm realm = troop.realm == null || troop.realm.isBlank() ? null : map.titles.realms.get(troop.realm);
