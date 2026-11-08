@@ -93,8 +93,6 @@ public final class CharacterRegistry {
         if (!c.alive) throw new IllegalStateException(c.name + " is dead");
         String employer = requireText(employerId, "employer");
         String profession = requireText(professionId, "profession");
-        changeProfession(id, profession, year);
-        setDuty(id, PopulationSimulation.Duty.WORKER, true, year);
         String previous = String.valueOf(c.props.getOrDefault("population.employer", ""));
         boolean changed = !employer.equals(previous)
                 || !profession.equals(PopulationSimulation.profession(c))
