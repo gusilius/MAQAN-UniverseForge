@@ -174,6 +174,9 @@ public class PeopleMod {
         return 0x57464F52L ^ ((long) m.name.hashCode() * 0x9E3779B97F4A7C15L);
     }
 
+    /** Read-only snapshot for optional population/progression bridges. */
+    public static Map<MapData, CharacterRegistry> registries() { return java.util.Collections.unmodifiableMap(new HashMap<>(REGS)); }
+
     public static CharacterRegistry registryFor(ServerLevel level) {
         return registry(EditorManager.dataFor(level));
     }
