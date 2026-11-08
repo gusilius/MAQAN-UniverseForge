@@ -142,7 +142,7 @@ public final class PopulationSimulationTest {
         legacyLoaded.fromJson(saved.replace("wf-people/2", "wf-people/1"));
         ok(legacyLoaded.get(stableId) != null
                         && legacyLoaded.get(stableId).id.equals(stableId)
-                        && legacyLoaded.get(stableId).father.isEmpty() == smith.father.isEmpty(),
+                        && legacyLoaded.get(stableId).children.equals(smith.children),
                 "wf-people/1 saves migrate in place without regenerating Character identity");
         CharacterRegistry loaded = new CharacterRegistry();
         loaded.fromJson(saved);
