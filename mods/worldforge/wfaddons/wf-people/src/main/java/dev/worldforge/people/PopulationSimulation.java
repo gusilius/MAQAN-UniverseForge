@@ -31,9 +31,30 @@ public final class PopulationSimulation {
     private PopulationSimulation() { }
 
     /** Canonical owner key understood by wf-progress for NPC profiles. */
-    public static String progressOwner(Character character) {
+    public static String progressOwner(Character character, String populationScopeId) {
         Objects.requireNonNull(character, "character");
-        return "n:" + character.id;
+        String scope = normalizeId(populationScopeId, "population scope");
+        return "n:" + scope + ":" + character.id;
+    }
+
+    /** Immutable copy used by the shared RPG progression adapter. */
+    public static Map<String, Integer> skillRanksSnapshot(Character character) {
+        Map<String, Integer> copy = new TreeMap<>();
+        for (var entry : mapProp(character, SKILLS).entrySet()) {
+            if (entry.getValue() instanceof Number n) copy.put(entry.getKey(), clamp(n.intValue(), 0, MAX_SKILL_RANK));
+        }
+        return Collections.unmodifiableMap(copy);
+    }
+
+    /** Imports ranks from the shared RPG progression profile into this Character's canonical skill store. */
+    public static void syncSkillRanks(Character character, Map<String, Integer> ranks) {
+        requireAlive(character);
+        Map<String, Object> target = mapProp(character, SKILLS);
+        target.clear();
+        for (var entry : ranks.entrySet()) {
+            String id = normalizeId(entry.getKey(), "skill");
+            target.put(id, clamp(entry.getValue(), 0, MAX_SKILL_RANK));
+        }
     }
 
     public static int age(Character character, int year) {
