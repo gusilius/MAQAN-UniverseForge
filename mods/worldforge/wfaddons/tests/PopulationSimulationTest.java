@@ -137,6 +137,13 @@ public final class PopulationSimulationTest {
         ok("battle".equals(registry.get(stableId).props.get("population.death_cause")), "death cause is recorded");
 
         String saved = registry.toJson();
+        ok(saved.contains("wf-people/2"), "Character saves use the versioned lifecycle schema");
+        CharacterRegistry legacyLoaded = new CharacterRegistry();
+        legacyLoaded.fromJson(saved.replace("wf-people/2", "wf-people/1"));
+        ok(legacyLoaded.get(stableId) != null
+                        && legacyLoaded.get(stableId).id.equals(stableId)
+                        && legacyLoaded.get(stableId).father.isEmpty() == smith.father.isEmpty(),
+                "wf-people/1 saves migrate in place without regenerating Character identity");
         CharacterRegistry loaded = new CharacterRegistry();
         loaded.fromJson(saved);
         Character restored = loaded.get(stableId);
