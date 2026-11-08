@@ -4,6 +4,7 @@ import dev.worldforge.mod.Json;
 import dev.worldforge.settle.Building;
 import dev.worldforge.settle.Defs;
 import dev.worldforge.settle.Settlement;
+import dev.worldforge.settle.SettlementMap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
@@ -12,6 +13,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.level.block.Blocks;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -30,6 +32,7 @@ public final class Colony {
     public final String dim;
     public final int cx, cz;
     public final Map<Integer, Site> sites = new LinkedHashMap<>();
+    public SettlementMap map = new SettlementMap();
     /** UUID игрока-правителя (пусто - поселение без правителя-игрока). Правитель управляет своим поселением без прав оператора. */
     public String owner = "";
 
@@ -68,6 +71,30 @@ public final class Colony {
         return new BlockPos(x, y, z);
     }
 
+    /** Samples only already-loaded chunks; the map never forces distant terrain chunks to load. */
+    public int captureTerrain(ServerLevel level) {
+        int captured = 0;
+        for (int gx = -8; gx <= 8; gx++) for (int gz = -8; gz <= 8; gz++) {
+            int wx = cx + gx * SettlementMap.CELL_SIZE + SettlementMap.CELL_SIZE / 2;
+            int wz = cz + gz * SettlementMap.CELL_SIZE + SettlementMap.CELL_SIZE / 2;
+            BlockPos probe = new BlockPos(wx, level.getMinBuildHeight(), wz);
+            if (!level.hasChunkAt(probe)) continue;
+            int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, wx, wz);
+            BlockPos surface = new BlockPos(wx, Math.max(level.getMinBuildHeight(), y - 1), wz);
+            var state = level.getBlockState(surface);
+            boolean water = !state.getFluidState().isEmpty() || state.is(Blocks.WATER) || state.is(Blocks.LAVA);
+            String biome = level.getBiome(surface).unwrapKey().map(k -> k.location().toString()).orElse("unknown");
+            double fertility = state.is(Blocks.FARMLAND) ? 1.0
+                    : state.is(Blocks.GRASS_BLOCK) || state.is(Blocks.DIRT) || state.is(Blocks.ROOTED_DIRT) ? 0.72
+                    : state.is(Blocks.SAND) || state.is(Blocks.RED_SAND) || state.is(Blocks.GRAVEL) ? 0.28 : 0.45;
+            if (biome.contains("plains") || biome.contains("forest") || biome.contains("meadow")) fertility = Math.min(1.0, fertility + 0.12);
+            if (biome.contains("desert") || biome.contains("badlands") || biome.contains("snow")) fertility *= 0.55;
+            map.sample(gx, gz, y, biome, fertility, water);
+            captured++;
+        }
+        return captured;
+    }
+
     // ------------------------------------------------------------------ сохранение
 
     @SuppressWarnings("unchecked")
@@ -87,6 +114,7 @@ public final class Colony {
             l.add(o);
         }
         m.put("sites", l);
+        m.put("map", Json.parse(map.toJson()));
         return m;
     }
 
@@ -94,6 +122,7 @@ public final class Colony {
     public static Colony fromMap(Map<String, Object> m, Defs defs) {
         Settlement s = Settlement.fromJson(Json.write(m.get("settlement")), defs);
         Colony c = new Colony(s, (String) m.get("dim"), ((Number) m.get("cx")).intValue(), ((Number) m.get("cz")).intValue());
+        if (m.get("map") instanceof Map<?, ?> mapData) c.map = SettlementMap.fromJson(Json.write(mapData));
         if (m.get("owner") instanceof String ow) c.owner = ow;
         if (m.get("sites") instanceof List) {
             for (Object o : (List<Object>) m.get("sites")) {
