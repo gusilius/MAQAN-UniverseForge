@@ -59,7 +59,7 @@ public final class SettlementMapTest {
         SettlementMap.Road road = map.addRoad(0, 0, 32, 0);
         ok(road.path.size() > 5 && road.path.stream().noneMatch(n -> n.gx() == 2 && n.gz() == 0),
                 "A* road planning routes around water using passable terrain");
-        ok(map.isRoad(0, 0) && map.isRoad(4, 0), "road path is represented as a connected network");
+        ok(map.isRoad(0, 0) && map.isRoad(8, 0), "road path is represented as a connected network");
 
         SettlementMap.Warehouse east = map.addWarehouse("east", 32, 0, 100);
         SettlementMap.LogisticsJob job = map.addLogistics("central", "east", "wood", 60);
