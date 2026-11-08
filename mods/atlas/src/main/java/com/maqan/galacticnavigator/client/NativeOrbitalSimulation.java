@@ -21,6 +21,64 @@ public final class NativeOrbitalSimulation {
 
     private NativeOrbitalSimulation() {}
 
+    /** Immutable, same-clock sample of every uniquely identified body in one system. */
+    public record OrbitalSnapshot(String systemId, double gameTime, double simulationTicks,
+                                  boolean orbitalMotionEnabled, Map<String, double[]> positions) {
+        public OrbitalSnapshot {
+            Map<String, double[]> copy = new LinkedHashMap<>();
+            if (positions != null) positions.forEach((id, value) -> {
+                if (id != null && value != null && value.length == 3 && finite(value))
+                    copy.put(id, value.clone());
+            });
+            positions = Collections.unmodifiableMap(copy);
+        }
+
+        @Override public Map<String, double[]> positions() {
+            Map<String, double[]> copy = new LinkedHashMap<>();
+            positions.forEach((id, value) -> copy.put(id, value.clone()));
+            return Collections.unmodifiableMap(copy);
+        }
+
+        public Optional<double[]> position(String bodyId) {
+            double[] value = positions.get(bodyId);
+            return value == null ? Optional.empty() : Optional.of(value.clone());
+        }
+    }
+
+    /**
+     * Captures the authoritative simulation once at a single game-time value.
+     * Coordinate calls share the simulator's frame cache, so all axes and bodies
+     * are sampled against the same simulation clock without advancing per axis.
+     */
+    public static synchronized OrbitalSnapshot snapshot(String systemId, JsonObject system,
+                                                         double gameTime) {
+        if (systemId == null || systemId.isBlank() || system == null
+                || !Double.isFinite(gameTime))
+            return new OrbitalSnapshot(systemId == null ? "" : systemId, gameTime,
+                    Double.NaN, false, Map.of());
+
+        JsonObject bodies = object(system, "planets");
+        Map<String, double[]> positions = new LinkedHashMap<>();
+        for (Map.Entry<String, JsonElement> entry : bodies.entrySet()) {
+            if (!entry.getValue().isJsonObject()) continue;
+            JsonObject body = entry.getValue().getAsJsonObject();
+            String id = bodyId(body);
+            if (id.isBlank() || positions.containsKey(id)) continue;
+            double[] position = new double[]{
+                    coordinate(systemId, system, body, 0, gameTime),
+                    coordinate(systemId, system, body, 1, gameTime),
+                    coordinate(systemId, system, body, 2, gameTime)
+            };
+            if (finite(position)) positions.put(id, position);
+        }
+
+        net.minecraft.world.level.Level level = net.minecraft.client.Minecraft.getInstance().level;
+        double ticks = CosmicMotionClock.orbitTicks(level, gameTime);
+        CosmicOrbitSettings.Config settings = CosmicOrbitSettings.get();
+        boolean enabled = settings.enabled && settings.orbitalMotion;
+        return new OrbitalSnapshot(systemId, gameTime, ticks, enabled, positions);
+    }
+
     public static synchronized double coordinate(String systemId, JsonObject system,
                                                   JsonObject body, int axis, double gameTime) {
         if (systemId == null || system == null || body == null) return sourceCoordinate(body, axis);

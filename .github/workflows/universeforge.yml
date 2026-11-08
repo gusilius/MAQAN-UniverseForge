@@ -22,7 +22,9 @@ permissions:
 
 concurrency:
   group: universeforge-windows-quality-gate-${{ github.ref }}
-  cancel-in-progress: false
+  # New commits supersede older PR builds; avoid queueing full addon matrices
+  # for stale snapshots while keeping the newest branch revision fully gated.
+  cancel-in-progress: true
 
 jobs:
   atlas:

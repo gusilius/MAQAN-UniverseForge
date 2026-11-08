@@ -17,39 +17,117 @@ public final class TroopDefs {
     public final Map<String, Unit> units = new LinkedHashMap<>();
     /** Соответствие типов армии wf-army типам солдат (секция "army_map"); пусто - Muster.defaultMap(). */
     public final Map<String, String> armyMap = new LinkedHashMap<>();
+    /** Реальные производственные здания и расход материалов для найма каждого архетипа. */
+    public final Map<String, String> recruitmentBuildings = new LinkedHashMap<>();
+    public final Map<String, Map<String, Integer>> recruitmentCosts = new LinkedHashMap<>();
+
+    public String recruitmentBuilding(String unitId) { return recruitmentBuildings.getOrDefault(unitId, "barracks"); }
+    public Map<String, Integer> recruitmentCost(String unitId) { return recruitmentCosts.getOrDefault(unitId, Map.of()); }
 
     private static double dbl(Object o, double d) { return o instanceof Number n ? n.doubleValue() : d; }
     private static String str(Object o, String d) { return o == null ? d : String.valueOf(o); }
 
     @SuppressWarnings("unchecked")
     public void load(String json) {
+        // Parse each datapack/world override into an isolated delta first. A malformed
+        // file must not leave half of its archetypes or recruitment rules in the live registry.
         Object root = Json.parse(json);
-        if (!(root instanceof Map)) throw new IllegalArgumentException("Нужен объект JSON");
-        if (((Map<String, Object>) root).get("units") instanceof List<?> l) for (Object o : l) add((Map<String, Object>) o);
-        if (((Map<String, Object>) root).get("army_map") instanceof Map<?, ?> am) for (var e : am.entrySet()) armyMap.put(String.valueOf(e.getKey()), String.valueOf(e.getValue()));
+        if (!(root instanceof Map<?, ?> raw)) throw new IllegalArgumentException("Нужен объект JSON");
+        TroopDefs staged = new TroopDefs();
+        Object rawUnits = raw.get("units");
+        if (rawUnits != null) {
+            if (!(rawUnits instanceof List<?> list)) throw new IllegalArgumentException("units должен быть массивом");
+            for (Object value : list) {
+                if (!(value instanceof Map<?, ?> entry)) throw new IllegalArgumentException("Некорректный архетип войска");
+                staged.add((Map<String, Object>) entry);
+            }
+        }
+        Object rawArmyMap = raw.get("army_map");
+        if (rawArmyMap != null) {
+            if (!(rawArmyMap instanceof Map<?, ?> map)) throw new IllegalArgumentException("army_map должен быть объектом");
+            for (var entry : map.entrySet()) {
+                String key = String.valueOf(entry.getKey());
+                String value = String.valueOf(entry.getValue());
+                if (key.isBlank() || value.isBlank()) throw new IllegalArgumentException("Пустая запись army_map");
+                staged.armyMap.put(key, value);
+            }
+        }
+        for (String id : staged.units.keySet()) {
+            recruitmentBuildings.remove(id);
+            recruitmentCosts.remove(id);
+        }
+        units.putAll(staged.units);
+        for (String id : staged.units.keySet()) {
+            if (staged.recruitmentBuildings.containsKey(id)) recruitmentBuildings.put(id, staged.recruitmentBuildings.get(id));
+            if (staged.recruitmentCosts.containsKey(id)) recruitmentCosts.put(id, staged.recruitmentCosts.get(id));
+        }
+        armyMap.putAll(staged.armyMap);
     }
 
     public Map<String, String> armyTypes() { return armyMap.isEmpty() ? Muster.defaultMap() : armyMap; }
 
+    public String recruitmentBuilding(Unit unit) {
+        return recruitmentBuilding(unit.id());
+    }
+
+    public Map<String, Integer> recruitmentCost(Unit unit) {
+        return recruitmentCost(unit.id());
+    }
+
     public void add(Map<String, Object> u) {
         String id = str(u.get("id"), "");
         if (id.isEmpty()) throw new IllegalArgumentException("Тип солдата без id");
+        // An override replaces the whole archetype, including its recruitment metadata.
+        // Do not silently inherit a stale building/cost from the previous definition.
+        recruitmentBuildings.remove(id);
+        recruitmentCosts.remove(id);
         units.put(id, new Unit(id, str(u.get("name"), id), str(u.get("role"), "melee"), dbl(u.get("hp"), 20), dbl(u.get("dmg"), 3), dbl(u.get("range"), 2), dbl(u.get("speed"), 1),
                 dbl(u.get("armor"), 0), dbl(u.get("sight"), 24), (int) dbl(u.get("cost"), 10), dbl(u.get("upkeep"), 0.2),
                 str(u.get("weapon"), ""), str(u.get("head"), ""), str(u.get("chest"), ""), str(u.get("legs"), ""), str(u.get("feet"), ""), str(u.get("desc"), ""), dbl(u.get("aura"), 0), dbl(u.get("heal"), 0), dbl(u.get("siege"), 0)));
+        String building = str(u.get("recruitment_building"), "");
+        if (!building.isEmpty()) recruitmentBuildings.put(id, building);
+        if (u.get("recruitment_cost") instanceof Map<?, ?> raw) {
+            Map<String, Integer> cost = new LinkedHashMap<>();
+            for (var e : raw.entrySet()) {
+                int amount = e.getValue() instanceof Number n ? n.intValue() : -1;
+                if (amount < 0) throw new IllegalArgumentException(id + ": неверная стоимость ресурса " + e.getKey());
+                if (amount > 0) cost.put(String.valueOf(e.getKey()), amount);
+            }
+            recruitmentCosts.put(id, Map.copyOf(cost));
+        }
     }
 
     public List<String> validate() {
         List<String> e = new ArrayList<>();
         for (Unit u : units.values()) {
             if (!ROLES.contains(u.role())) e.add(u.id() + ": неизвестная роль " + u.role());
-            if (u.hp() <= 0) e.add(u.id() + ": здоровье должно быть больше нуля");
-            if (u.speed() <= 0 || u.speed() > 3) e.add(u.id() + ": скорость от 0 до 3");
+            if (!Double.isFinite(u.hp()) || u.hp() <= 0) e.add(u.id() + ": здоровье должно быть конечным и больше нуля");
+            if (!Double.isFinite(u.dmg()) || u.dmg() < 0) e.add(u.id() + ": урон должен быть конечным и неотрицательным");
+            if (!Double.isFinite(u.range()) || u.range() < 0) e.add(u.id() + ": дальность должна быть конечной и неотрицательной");
+            if (!Double.isFinite(u.speed()) || u.speed() <= 0 || u.speed() > 3) e.add(u.id() + ": скорость должна быть конечной и от 0 до 3");
+            if (!Double.isFinite(u.armor()) || u.armor() < 0) e.add(u.id() + ": броня должна быть конечной и неотрицательной");
+            if (!Double.isFinite(u.sight()) || u.sight() < 0) e.add(u.id() + ": обзор должен быть конечным и неотрицательным");
+            if (!Double.isFinite(u.upkeep()) || u.upkeep() < 0) e.add(u.id() + ": содержание должно быть конечным и неотрицательным");
+            if (!Double.isFinite(u.aura()) || u.aura() < 0 || !Double.isFinite(u.heal()) || u.heal() < 0
+                    || !Double.isFinite(u.siege()) || u.siege() < 0)
+                e.add(u.id() + ": параметры поддержки и осады должны быть конечными и неотрицательными");
             if (u.role().equals("ranged") && u.range() < 6) e.add(u.id() + ": у стрелка дальность меньше 6");
             if (u.cost() < 0) e.add(u.id() + ": цена не может быть отрицательной");
+            if (!recruitmentBuildings.containsKey(u.id())) e.add(u.id() + ": не указано здание найма");
+            if (!recruitmentCosts.containsKey(u.id()) || recruitmentCosts.get(u.id()).isEmpty())
+                e.add(u.id() + ": не указана стоимость найма");
         }
         if (units.isEmpty()) e.add("нет типов солдат");
         for (var m : armyMap.entrySet()) if (!units.containsKey(m.getValue())) e.add("army_map: нет солдата " + m.getValue() + " для " + m.getKey());
+        Set<String> validRecruitmentBuildings = Set.of("barracks", "archery_range", "stable", "siege_workshop");
+        for (var eCost : recruitmentCosts.entrySet()) {
+            if (!units.containsKey(eCost.getKey())) e.add("recruitment_cost: нет типа войска " + eCost.getKey());
+            for (var resource : eCost.getValue().entrySet())
+                if (resource.getValue() < 0) e.add(eCost.getKey() + ": отрицательная стоимость " + resource.getKey());
+        }
+        for (var entry : recruitmentBuildings.entrySet())
+            if (!units.containsKey(entry.getKey()) || !validRecruitmentBuildings.contains(entry.getValue()))
+                e.add(entry.getKey() + ": неизвестное здание найма " + entry.getValue());
         return e;
     }
 }

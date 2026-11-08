@@ -31,8 +31,15 @@ public class TradeNetTest {
         ok(!sug.isEmpty() && sug.get(0)[0].equals("A") && sug.get(0)[1].equals("B") && sug.get(0)[2].equals("wood"), "подсказка: возить дрова из A в B");
         try { n.add(cs, "A", "A", "wood", 5); ok(false, "в себя нельзя"); } catch (TradeNetwork.TradeException e) { ok(true, "в себя нельзя"); }
         try { n.add(cs, "A", "B", "silver", 5); ok(false, "серебро не возят"); } catch (TradeNetwork.TradeException e) { ok(true, "серебро не возят"); }
+        try { n.add(cs, "A", "B", "wood", Double.NaN); ok(false, "NaN скорость запрещена"); } catch (TradeNetwork.TradeException e) { ok(true, "NaN скорость запрещена"); }
+        try { n.add(cs, "A", "B", "wood", Double.POSITIVE_INFINITY); ok(false, "бесконечная скорость запрещена"); } catch (TradeNetwork.TradeException e) { ok(true, "бесконечная скорость запрещена"); }
         var r = n.add(cs, "A", "B", "wood", 10);
         try { n.add(cs, "A", "B", "wood", 10); ok(false, "дубликат"); } catch (TradeNetwork.TradeException e) { ok(true, "дубликат отклонён"); }
+        double accBeforeInvalidTicks = r.acc;
+        n.tick(cs, Double.NaN);
+        n.tick(cs, Double.POSITIVE_INFINITY);
+        n.tick(cs, -1);
+        ok(r.acc == accBeforeInvalidTicks && r.carried == 0, "невалидный шаг времени не портит торговый маршрут");
         double sa = A.amount("silver"), sb = B.amount("silver"), spread0 = B.price("wood") / A.price("wood");
         double wa = A.amount("wood"), wb = B.amount("wood");
         for (int i = 0; i < 20; i++) { A.tradeLeft = 100; B.tradeLeft = 100; n.tick(cs, 30); }

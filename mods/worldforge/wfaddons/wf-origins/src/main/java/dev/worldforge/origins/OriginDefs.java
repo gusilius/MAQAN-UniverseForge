@@ -46,8 +46,41 @@ public final class OriginDefs {
         return m;
     }
 
-    @SuppressWarnings("unchecked")
+    /** Atomically replace all datapack definitions after a complete reload has been parsed and validated. */
+    public void replaceWith(OriginDefs source) {
+        Objects.requireNonNull(source, "source");
+        List<String> problems = source.validate();
+        if (!problems.isEmpty()) throw new IllegalArgumentException("Некорректные определения происхождения: " + String.join("; ", problems));
+        races.clear(); races.putAll(source.races);
+        classes.clear(); classes.putAll(source.classes);
+        professions.clear(); professions.putAll(source.professions);
+        synergies.clear(); synergies.putAll(source.synergies);
+        extraPerks.clear();
+        for (var entry : source.extraPerks.entrySet()) extraPerks.put(entry.getKey(), new TreeMap<>(entry.getValue()));
+        extraPerkNames.clear();
+        for (var entry : source.extraPerkNames.entrySet()) extraPerkNames.put(entry.getKey(), new LinkedHashMap<>(entry.getValue()));
+    }
+
     public void load(String json) {
+        // A malformed data file must not leave half of its definitions installed.
+        OriginDefs staged = new OriginDefs();
+        staged.races.putAll(races);
+        staged.classes.putAll(classes);
+        staged.professions.putAll(professions);
+        staged.synergies.putAll(synergies);
+        for (var e : extraPerks.entrySet()) staged.extraPerks.put(e.getKey(), new TreeMap<>(e.getValue()));
+        for (var e : extraPerkNames.entrySet()) staged.extraPerkNames.put(e.getKey(), new LinkedHashMap<>(e.getValue()));
+        staged.loadInto(json);
+        races.clear(); races.putAll(staged.races);
+        classes.clear(); classes.putAll(staged.classes);
+        professions.clear(); professions.putAll(staged.professions);
+        synergies.clear(); synergies.putAll(staged.synergies);
+        extraPerks.clear(); extraPerks.putAll(staged.extraPerks);
+        extraPerkNames.clear(); extraPerkNames.putAll(staged.extraPerkNames);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void loadInto(String json) {
         Object root = Json.parse(json);
         if (!(root instanceof Map)) throw new IllegalArgumentException("Нужен объект JSON");
         Map<String, Object> m = (Map<String, Object>) root;
@@ -70,6 +103,7 @@ public final class OriginDefs {
     public void addSynergy(Map<String, Object> y) {
         String id = str(y.get("id"), "");
         if (id.isEmpty()) throw new IllegalArgumentException("У переплетения нет id");
+        if (synergies.containsKey(id)) throw new IllegalArgumentException("Повторный id переплетения: " + id);
         synergies.put(id, new Synergy(id, str(y.get("name"), id), str(y.get("desc"), ""), strs(y.get("races")), strs(y.get("classes")), ints(y.get("profs")), strs(y.get("flags")), mods(y.get("mods"))));
     }
 
@@ -77,6 +111,7 @@ public final class OriginDefs {
     public void addRace(Map<String, Object> r) {
         String id = str(r.get("id"), "");
         if (id.isEmpty()) throw new IllegalArgumentException("У расы нет id");
+        if (races.containsKey(id)) throw new IllegalArgumentException("Повторный id расы: " + id);
         Map<String, String> innate = new LinkedHashMap<>();
         if (r.get("innate") instanceof Map<?, ?> im) for (var e : im.entrySet()) innate.put(String.valueOf(e.getKey()), String.valueOf(e.getValue()));
         TreeMap<Integer, Map<String, Double>> perks = new TreeMap<>();
@@ -94,6 +129,7 @@ public final class OriginDefs {
     public void addClass(Map<String, Object> c) {
         String id = str(c.get("id"), "");
         if (id.isEmpty()) throw new IllegalArgumentException("У класса нет id");
+        if (classes.containsKey(id)) throw new IllegalArgumentException("Повторный id класса: " + id);
         TreeMap<Integer, Map<String, Double>> perks = new TreeMap<>();
         Map<String, String> pn = new LinkedHashMap<>();
         if (c.get("perks") instanceof Map<?, ?> pm) for (var e : pm.entrySet()) {
@@ -111,6 +147,7 @@ public final class OriginDefs {
     public void addProfession(Map<String, Object> p) {
         String id = str(p.get("id"), "");
         if (id.isEmpty()) throw new IllegalArgumentException("У профессии нет id");
+        if (professions.containsKey(id)) throw new IllegalArgumentException("Повторный id профессии: " + id);
         List<Rank> ranks = new ArrayList<>();
         if (p.get("ranks") instanceof List<?> l) for (Object o : l) { Map<String, Object> r = (Map<String, Object>) o; ranks.add(new Rank(str(r.get("name"), "Ранг"), num(r.get("xp"), 0), mods(r.get("mods")))); }
         if (ranks.isEmpty()) throw new IllegalArgumentException(id + ": нужен хотя бы один ранг");
@@ -165,13 +202,23 @@ public final class OriginDefs {
                 if (!classes.containsKey(x)) p.add("Класс " + c.id() + ": нет второго предка " + x);
                 else if (classes.get(x).tier() >= c.tier()) p.add("Класс " + c.id() + ": ступень должна быть выше предка " + x);
             }
-            for (String x : c.reqProf().keySet()) if (!professions.containsKey(x)) p.add("Класс " + c.id() + ": нет профессии " + x);
+            for (var req : c.reqProf().entrySet()) {
+                Profession required = professions.get(req.getKey());
+                if (required == null) p.add("Класс " + c.id() + ": нет профессии " + req.getKey());
+                else if (req.getValue() < 0 || req.getValue() >= required.ranks().size())
+                    p.add("Класс " + c.id() + ": требуемый ранг вне диапазона профессии " + req.getKey());
+            }
         }
         for (String rid : extraPerks.keySet()) if (!races.containsKey(rid)) p.add("race_perks: нет расы " + rid);
         for (Synergy y : synergies.values()) {
             for (String r : y.races()) if (!races.containsKey(r)) p.add("Переплетение " + y.id() + ": нет расы " + r);
             for (String c : y.classes()) if (!classes.containsKey(c)) p.add("Переплетение " + y.id() + ": нет класса " + c);
-            for (String x : y.profs().keySet()) if (!professions.containsKey(x)) p.add("Переплетение " + y.id() + ": нет профессии " + x);
+            for (var req : y.profs().entrySet()) {
+                Profession required = professions.get(req.getKey());
+                if (required == null) p.add("Переплетение " + y.id() + ": нет профессии " + req.getKey());
+                else if (req.getValue() < 0 || req.getValue() >= required.ranks().size())
+                    p.add("Переплетение " + y.id() + ": ранг вне диапазона профессии " + req.getKey());
+            }
             if (y.races().isEmpty() && y.classes().isEmpty() && y.profs().isEmpty() && y.flags().isEmpty()) p.add("Переплетение " + y.id() + ": нет условий");
         }
         for (Profession pr : professions.values()) {
@@ -183,7 +230,13 @@ public final class OriginDefs {
             }
             for (String x : pr.reqClasses()) if (!classes.containsKey(x)) p.add("Профессия " + pr.id() + ": нет класса " + x);
             for (String r : pr.reqRaces()) if (!races.containsKey(r)) p.add("Профессия " + pr.id() + ": нет расы " + r);
-            for (int i = 1; i < pr.ranks().size(); i++) if (pr.ranks().get(i).xp() <= pr.ranks().get(i - 1).xp()) p.add("Профессия " + pr.id() + ": опыт рангов должен расти");
+            if (pr.wage() < 0) p.add("Профессия " + pr.id() + ": жалованье не может быть отрицательным");
+            if (pr.ranks().get(0).xp() != 0) p.add("Профессия " + pr.id() + ": первый ранг должен начинаться с 0 XP");
+            for (int i = 0; i < pr.ranks().size(); i++) {
+                if (pr.ranks().get(i).xp() < 0) p.add("Профессия " + pr.id() + ": отрицательный порог XP");
+                if (i > 0 && pr.ranks().get(i).xp() <= pr.ranks().get(i - 1).xp())
+                    p.add("Профессия " + pr.id() + ": опыт рангов должен расти");
+            }
         }
         return p;
     }

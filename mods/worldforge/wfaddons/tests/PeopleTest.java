@@ -74,6 +74,22 @@ public class PeopleTest {
         Character ruler = reg.holder("ruler", Courts.realmPlace(d.realmList().get(1).id));
         Character sp = reg.get(ruler.spouse);
         ok(sp != null && sp.spouse.equals(ruler.id) && !sp.house.equals(ruler.house), "супруг из другого дома");
+        Character unmarried = reg.create("Тестовый дворянин", "test_house", "test_culture", "m", 270);
+        CharacterActions.Action marriage = CharacterActions.available(reg, defs, ruler, unmarried, 300)
+                .stream().filter(action -> action.id.equals("marry")).findFirst().orElseThrow();
+        ok(!marriage.enabled && marriage.reason.contains("брак"),
+                "состоящий в браке инициатор не может заключить второй брак");
+        Character widower = reg.create("Вдовец", "test_house", "test_culture", "m", 260);
+        Character deceased = reg.create("Умершая супруга", "other_house", "test_culture", "f", 260);
+        Character secondSpouse = reg.create("Вторая супруга", "third_house", "test_culture", "f", 260);
+        reg.marry(widower.id, deceased.id);
+        reg.kill(deceased.id);
+        reg.marry(widower.id, secondSpouse.id);
+        ok(widower.spouse.equals(secondSpouse.id) && secondSpouse.spouse.equals(widower.id)
+                && deceased.spouse.isEmpty(), "вдовство позволяет повторный брак без устаревшей обратной связи");
+        boolean selfMarriageRejected = false;
+        try { reg.marry(widower.id, widower.id); } catch (IllegalArgumentException expected) { selfMarriageRejected = true; }
+        ok(selfMarriageRejected, "самобрак отклоняется реестром персонажей");
         boolean kidsOk = true;
         for (String k : ruler.children.isEmpty() ? sp.children : ruler.children) { Character kid = reg.get(k); if (kid.birthYear < ruler.birthYear + 17 || kid.birthYear > 300) kidsOk = false; }
         ok(kidsOk, "возраст детей правдоподобен");
@@ -117,8 +133,31 @@ public class PeopleTest {
         CharacterRegistry back = new CharacterRegistry();
         back.fromJson(js);
         ok(back.size() == reg.size() && back.toJson().equals(js), "сохранение и загрузка без потерь (" + back.size() + " человек)");
+        boolean registryViewReadOnly = false;
+        try { back.all().clear(); } catch (UnsupportedOperationException readOnlyFailure) { registryViewReadOnly = true; }
+        ok(registryViewReadOnly && back.size() == reg.size(),
+                "публичная коллекция персонажей не позволяет обходить операции реестра");
+        String invalidAliveJson = js.replaceFirst("\\\"alive\\\":(?:true|false)", "\\\"alive\\\":\\\"yes\\\"");
+        boolean invalidAliveRejected = false;
+        try { back.fromJson(invalidAliveJson); } catch (IllegalArgumentException invalidSave) { invalidAliveRejected = true; }
+        ok(invalidAliveRejected && back.toJson().equals(js),
+                "неверный тип alive отклоняется без повреждения действующего реестра");
         back.create("Новый", "", "", "m", 1);
         ok(back.get("c" + (reg.size() + 1)) != null, "счётчик id продолжается после загрузки");
+        // Повреждённый снимок не должен очищать уже загруженный реестр.
+        String beforeBadLoad = back.toJson();
+        String duplicateIdJson = js.replace("\"id\":\"c2\"", "\"id\":\"c1\"");
+        boolean duplicateRejected = false;
+        try { back.fromJson(duplicateIdJson); } catch (IllegalArgumentException invalidSave) { duplicateRejected = true; }
+        ok(duplicateRejected && back.toJson().equals(beforeBadLoad),
+                "дублирующийся ID отклоняется без потери действующего реестра");
+        String staleCounterJson = js.replaceFirst("\"next\":\\d+", "\"next\":1");
+        CharacterRegistry staleCounter = new CharacterRegistry();
+        staleCounter.fromJson(staleCounterJson);
+        Character afterStaleCounter = staleCounter.create("После загрузки", "", "", "m", 1);
+        ok(staleCounter.get(afterStaleCounter.id) == afterStaleCounter && !js.contains("\"id\":\"" + afterStaleCounter.id + "\""),
+                "устаревший счётчик автоматически продолжает последовательность ID");
+
 
         // диалог с персонажем
         DialogueBridge.register();

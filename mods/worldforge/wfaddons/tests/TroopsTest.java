@@ -11,11 +11,75 @@ public class TroopsTest {
     public static void main(String[] a) throws Exception {
         TroopDefs d = new TroopDefs();
         d.load(Files.readString(Path.of("wf-troops/src/main/resources/data/wf_troops/wf_troops/units.json")));
-        check(d.units.size() == 14, "14 юнитов " + d.units.size());
+        check(d.units.size() == 23, "23 боевых архетипа " + d.units.size());
+        check(d.recruitmentBuildings.size() == d.units.size()
+                && d.units.values().stream().allMatch(u -> !d.recruitmentCost(u).isEmpty()),
+                "каждый архетип имеет здание создания и стоимость снабжения");
+        check("archery_range".equals(d.recruitmentBuilding(d.units.get("longbowman")))
+                && "stable".equals(d.recruitmentBuilding(d.units.get("horse_archer")))
+                && "siege_workshop".equals(d.recruitmentBuilding(d.units.get("trebuchet")))
+                && "barracks".equals(d.recruitmentBuilding(d.units.get("footman"))),
+                "стрелки, конница, осадные и линейные войска привязаны к профильным зданиям");
+        check(d.recruitmentCost(d.units.get("knight")).getOrDefault("iron", 0) > 0
+                && d.recruitmentCost(d.units.get("field_medic")).getOrDefault("cloth", 0) > 0,
+                "экипировка элитных и вспомогательных войск расходует профильные ресурсы");
+        check(d.units.get("halberdier") != null && d.units.get("greatsword") != null
+                && d.units.get("longbowman") != null && d.units.get("lancer") != null,
+                "добавлены специализированные пехотные и стрелковые ветви");
+        check(d.units.get("horse_archer").role().equals("cavalry") && d.units.get("horse_archer").range() >= 6,
+                "конный лучник сохраняет кавалерийскую классификацию и дальний бой");
+        check(d.units.get("banner_guard").aura() > 0 && d.units.get("field_medic").heal() > 0
+                && d.units.get("ballista").siege() > 0 && d.units.get("trebuchet").siege() > d.units.get("ballista").siege(),
+                "знаменосцы, медики и осадные специализации имеют отдельные параметры");
         check(d.validate().isEmpty(), "валидация " + d.validate());
+        TroopDefs overrideDefs = new TroopDefs();
+        overrideDefs.load(Files.readString(Path.of("wf-troops/src/main/resources/data/wf_troops/wf_troops/units.json")));
+        Map<String, Object> incompleteOverride = new LinkedHashMap<>();
+        incompleteOverride.put("id", "footman");
+        incompleteOverride.put("name", "Пехотинец без снабжения");
+        incompleteOverride.put("role", "melee");
+        incompleteOverride.put("hp", 25);
+        incompleteOverride.put("speed", 1);
+        overrideDefs.add(incompleteOverride);
+        check(!overrideDefs.recruitmentBuildings.containsKey("footman")
+                && !overrideDefs.recruitmentCosts.containsKey("footman")
+                && overrideDefs.validate().stream().anyMatch(x -> x.contains("footman") && x.contains("здание найма"))
+                && overrideDefs.validate().stream().anyMatch(x -> x.contains("footman") && x.contains("стоимость найма")),
+                "переопределение архетипа не наследует устаревшие здание и стоимость найма");
+        String beforeMalformedOverride = overrideDefs.units.get("footman").name();
+        boolean malformedOverrideRejected = false;
+        try {
+            overrideDefs.load("{\"units\":[{\"id\":\"new_unit\",\"role\":\"melee\"},{");
+        } catch (RuntimeException expected) { malformedOverrideRejected = true; }
+        check(malformedOverrideRejected && !overrideDefs.units.containsKey("new_unit")
+                && overrideDefs.units.get("footman").name().equals(beforeMalformedOverride),
+                "ошибочный JSON не оставляет частично применённые архетипы");
+        check(TroopProgression.rank(0) == 0 && TroopProgression.rank(100) == 1
+                && TroopProgression.rank(300) == 2 && TroopProgression.rank(700) == 3
+                && TroopProgression.rank(1500) == 4, "пять ступеней индивидуальной военной выучки");
+        check(TroopProgression.addXp(99, 1) == 100
+                && TroopProgression.addXp(TroopProgression.MAX_XP - 1, 100) == TroopProgression.MAX_XP,
+                "боевой опыт повышает ранг и безопасно ограничивается");
+        check(TroopProgression.damageMultiplier(4) > TroopProgression.damageMultiplier(0)
+                && TroopProgression.healthMultiplier(4) > TroopProgression.healthMultiplier(0)
+                && TroopProgression.armorBonus(4) > TroopProgression.armorBonus(0),
+                "ветеранские ранги повышают боевые характеристики");
+        boolean negativeXpRejected = false;
+        try { TroopProgression.addXp(0, -1); } catch (IllegalArgumentException expected) { negativeXpRejected = true; }
+        check(negativeXpRejected, "отрицательный боевой опыт отклоняется");
         TroopDefs bad = new TroopDefs();
         bad.add(new HashMap<>(Map.of("id", "x", "role", "wizard", "hp", 0)));
         check(bad.validate().size() >= 2, "ошибки данных");
+        TroopDefs incompleteRecruitment = new TroopDefs();
+        incompleteRecruitment.add(new HashMap<>(Map.of("id", "unassigned", "role", "melee", "hp", 20, "speed", 1)));
+        check(incompleteRecruitment.validate().stream().anyMatch(x -> x.contains("здание найма"))
+                && incompleteRecruitment.validate().stream().anyMatch(x -> x.contains("стоимость найма")),
+                "валидация отклоняет архетипы без здания и стоимости найма");
+        TroopDefs nonFinite = new TroopDefs();
+        nonFinite.add(new HashMap<>(Map.of("id", "nan_unit", "role", "melee", "hp", Double.NaN, "speed", Double.POSITIVE_INFINITY)));
+        check(nonFinite.validate().stream().anyMatch(x -> x.contains("здоровье"))
+                && nonFinite.validate().stream().anyMatch(x -> x.contains("скорость")),
+                "валидация отклоняет NaN и бесконечные характеристики");
 
         // строи
         for (Formations.Type t : Formations.Type.values()) {
@@ -63,12 +127,49 @@ public class TroopsTest {
         sq.remove("u0");
         check(!big.members.contains("u0"), "смерть удаляет из отряда");
         check(sq.merge(s1.id, mix.id), "слияние");
+        Squads duplicateInput = new Squads();
+        Squads.Squad uniqueSquad = duplicateInput.create("p1", "Unique", Arrays.asList("x", "x", "", null, "y"));
+        check(uniqueSquad.members.equals(List.of("x", "y")), "создание отряда удаляет дубликаты и пустые UUID");
+        Squads partialMerge = new Squads();
+        Squads.Squad receiver = partialMerge.create("p1", "Receiver", java.util.stream.IntStream.range(0, 39).mapToObj(i -> "r" + i).toList());
+        Squads.Squad donor = partialMerge.create("p1", "Donor", List.of("d1", "d2", "d3"));
+        donor.initial = 6;
+        check(partialMerge.merge(receiver.id, donor.id) && receiver.members.size() == 40
+                && donor.members.equals(List.of("d2", "d3")) && receiver.initial == 41 && donor.initial == 4,
+                "частичное слияние переносит только доступных бойцов и пропорциональные потери");
+        check(!partialMerge.merge(receiver.id, donor.id), "слияние полного отряда отклоняется без потери бойцов");
         String json = sq.toJson();
         Squads sq2 = new Squads();
         sq2.fromJson(json);
         check(sq2.all().size() == sq.all().size() && sq2.get(s1.id).members.equals(s1.members), "сохранение/загрузка");
         check(sq2.create("p1", "", List.of("zz")).id.compareTo("s") > 0 && sq2.get("s" + 99) == null, "счётчик продолжается");
         check(sq.viewJson("p1").startsWith("[{"), "view");
+
+        Squads damaged = new Squads();
+        damaged.fromJson("{\"counter\":2,\"squads\":[null,7,{\"id\":\"s1\",\"name\":\"bad\",\"owner\":\"p1\",\"members\":[\"u1\",\"u1\",null,\"u2\",7],\"cx\":1e999,\"morale\":-4},{\"id\":\"s2\",\"name\":\"\"},{\"id\":\"s3\",\"owner\":\"p1\",\"members\":[\"u1\",\"u3\"]}]}");
+        check(damaged.all().size() == 2 && damaged.get("s1").members.equals(List.of("u1", "u2"))
+                && damaged.get("s3").members.equals(List.of("u3"))
+                && damaged.get("s1").cx == 0 && damaged.get("s1").morale == 0,
+                "загрузка повреждённых отрядов фильтрует записи и дубли UUID, сохраняя неповреждённые бойцовские записи");
+        String escaped = damaged.create("p1", "Guard \"North\\Wing\n", List.of("u4")).name;
+        Squads escapedRoundTrip = new Squads();
+        escapedRoundTrip.fromJson(damaged.toJson());
+        check(escaped.equals(escapedRoundTrip.get("s4").name), "сериализация и обратная загрузка экранируют кавычки, слеши и переводы строк");
+        Squads orderPersistence = new Squads();
+        Squads.Squad ordered = orderPersistence.create("p1", "Persistent", List.of("unit-a"));
+        orderPersistence.command(ordered.id, Squads.Order.move(12.5, -7.25), false);
+        orderPersistence.command(ordered.id, new Squads.Order(Squads.Kind.ATTACK, 0, 0, "00000000-0000-0000-0000-000000000001"), true);
+        Squads orderRestored = new Squads();
+        orderRestored.fromJson(orderPersistence.toJson());
+        check(orderRestored.get(ordered.id).queue.size() == 2
+                && orderRestored.get(ordered.id).current().kind() == Squads.Kind.MOVE
+                && orderRestored.get(ordered.id).current().x() == 12.5
+                && orderRestored.get(ordered.id).queue.peekLast().target().endsWith("0001"),
+                "сохранение и восстановление очереди приказов отряда");
+        Squads damagedOrders = new Squads();
+        damagedOrders.fromJson("{\"squads\":[{\"id\":\"s1\",\"owner\":\"p1\",\"members\":[\"u1\"],\"queue\":[null,7,{\"kind\":\"UNKNOWN\"},{\"kind\":\"MOVE\",\"x\":4,\"z\":5}]}]}");
+        check(damagedOrders.get("s1").queue.size() == 1 && damagedOrders.get("s1").current().x() == 4,
+                "повреждённая команда не скрывает последующие корректные команды");
 
         // выделение
         UnitSelection sel = new UnitSelection();
@@ -85,10 +186,37 @@ public class TroopsTest {
         sel.click(sc, 100, 100, false, 9000); sel.click(sc, 100, 100, false, 9200);
         check(sel.selected().equals(Set.of("a", "b")), "двойной клик - все того же типа на экране (невидимых нет) " + sel.selected());
         check(!sel.click(sc, 700, 700, false, 20000) && sel.selected().isEmpty(), "клик в пустоту снимает выбор");
+        UnitSelection missReset = new UnitSelection();
+        missReset.click(sc, 100, 100, false, 0);
+        missReset.click(sc, 700, 700, false, 100);
+        missReset.click(sc, 100, 100, false, 200);
+        check(missReset.selected().equals(Set.of("a")), "клик в пустоту сбрасывает последовательность двойного клика");
         check(sel.box(sc, 50, 50, 350, 250, false) == 3, "рамка");
         check(!UnitSelection.isBox(10, 10, 12, 13) && UnitSelection.isBox(10, 10, 40, 40), "малая рамка - клик");
+        sel.saveGroup(0);
+        check(!sel.recallGroup(0, Set.of("a", "c")), "нулевая группа не используется");
         sel.saveGroup(1); sel.clear();
         check(sel.recallGroup(1, Set.of("a", "c")) && sel.selected().equals(Set.of("a", "c")), "группа 1, павшие убраны");
+        UnitSelection clockSelection = new UnitSelection();
+        clockSelection.click(sc, 100, 100, false, 1000);
+        clockSelection.click(sc, 100, 100, false, 900);
+        check(clockSelection.selected().equals(Set.of("a")), "откат системного времени не считается двойным кликом");
+        List<UnitSelection.Screen> mixedScreens = Arrays.asList(
+                new UnitSelection.Screen("valid", "worker", 10, 10, 5, true),
+                new UnitSelection.Screen("bad-x", "worker", Double.NaN, 10, 5, true),
+                new UnitSelection.Screen("bad-radius", "worker", 10, 10, Double.POSITIVE_INFINITY, true),
+                new UnitSelection.Screen("", "worker", 10, 10, 5, true),
+                null);
+        UnitSelection guardedSelection = new UnitSelection();
+        check(guardedSelection.click(mixedScreens, 10, 10, false, 10)
+                && guardedSelection.selected().equals(Set.of("valid")), "выбор игнорирует повреждённые и пустые экранные сущности");
+        check(!guardedSelection.click(mixedScreens, Double.NaN, 10, false, 11)
+                && guardedSelection.selected().equals(Set.of("valid")), "некорректная позиция курсора не меняет выбор");
+        guardedSelection.set(Arrays.asList("valid", null, "", "valid"));
+        check(guardedSelection.selected().equals(Set.of("valid")), "установка выбора фильтрует пустые идентификаторы");
+        guardedSelection.saveGroup(1);
+        guardedSelection.retain(Set.of());
+        check(guardedSelection.recallGroup(1, Set.of("valid")) == false, "очистка живых сущностей очищает и состав групп");
 
         // проекция
         double[] vp = Projection.mul(Projection.perspective(70, 16 / 9.0, 0.05, 512), Projection.view(0, 30));

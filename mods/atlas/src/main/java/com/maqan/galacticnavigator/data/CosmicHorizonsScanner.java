@@ -35,13 +35,17 @@ public final class CosmicHorizonsScanner {
             Method get = variables.getMethod("get", net.minecraft.world.level.LevelAccessor.class);
             Object instance = get.invoke(null, level);
             if (instance == null) {
-                GalaxyCatalog.clearCosmicHorizons("Cosmic Horizons data is not synchronized yet");
+                // Keep the last valid snapshot during a transient sync gap. A new
+                // Level already resets the fingerprint and clears stale world data.
+                if (!hasFingerprint)
+                    GalaxyCatalog.clearCosmicHorizons("Cosmic Horizons data is not synchronized yet");
                 return;
             }
             Field field = variables.getField("datapack");
             Object raw = field.get(instance);
             if (!(raw instanceof ListTag list)) {
-                GalaxyCatalog.clearCosmicHorizons("Cosmic Horizons datapack list is unavailable");
+                if (!hasFingerprint)
+                    GalaxyCatalog.clearCosmicHorizons("Cosmic Horizons datapack list is unavailable");
                 return;
             }
 
@@ -61,9 +65,12 @@ public final class CosmicHorizonsScanner {
         } catch (ClassNotFoundException ignored) {
             GalaxyCatalog.clearCosmicHorizons("Cosmic Horizons is not installed");
         } catch (ReflectiveOperationException | RuntimeException error) {
-            GalaxyCatalog.clearCosmicHorizons("Waiting for Cosmic Horizons data: " +
-                    error.getClass().getSimpleName());
-            // The CH sync packet may not have arrived yet; retry on the next poll.
+            // Reflection can fail briefly while CH reloads or synchronizes. Do not
+            // replace a known-good catalogue with an empty scene during that gap.
+            if (!hasFingerprint)
+                GalaxyCatalog.clearCosmicHorizons("Waiting for Cosmic Horizons data: " +
+                        error.getClass().getSimpleName());
+            // Retry on the next poll; the next successful payload replaces the snapshot.
         }
     }
 
@@ -269,7 +276,7 @@ public final class CosmicHorizonsScanner {
                 // solar-system catalogue. Dimension-only sky_data files are not
                 // promoted into standalone star systems.
                 JsonObject skyData = object(source, "sky_data");
-                if (!bodies.isEmpty()) {
+                if (bodies.size() > 0) {
                     for (Map.Entry<String, JsonElement> skyEntry : skyData.entrySet()) {
                         if (!skyEntry.getValue().isJsonObject()) continue;
                         String skyId = skyEntry.getKey();

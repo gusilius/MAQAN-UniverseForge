@@ -1,14 +1,200 @@
 {
-  "resources": {"iron": "Железо", "tools": "Инструменты"},
+  "resources": {
+    "iron": "Железо",
+    "tools": "Инструменты"
+  },
   "buildings": {
-    "cottage":    {"name": "Хижина", "category": "housing", "cost": {"wood": 10}, "work": 15, "size": [3, 3], "blueprint": "wf_settle:cottage", "housing": 2},
-    "iron_mine":  {"name": "Рудник", "category": "industry", "cost": {"wood": 25, "stone": 5}, "work": 40, "size": [5, 5], "blueprint": "wf_settle:iron_mine",
-                   "requires": ["quarry"], "jobs": {"miner": 3}, "recipe": {"in": {}, "out": {"iron": 1}, "cycle": 25}},
-    "smithy":     {"name": "Кузница", "category": "industry", "cost": {"wood": 20, "stone": 20}, "work": 50, "size": [4, 4], "blueprint": "wf_settle:smithy",
-                   "requires": ["iron_mine"], "jobs": {"smith": 2}, "recipe": {"in": {"iron": 1, "wood": 1}, "out": {"tools": 1}, "cycle": 20}},
-    "barracks":   {"name": "Казарма", "category": "military", "cost": {"wood": 40, "stone": 20}, "work": 60, "size": [6, 4], "blueprint": "wf_settle:barracks",
-                   "requires": ["watch_post"], "housing": 6, "jobs": {"guard": 4}, "limit": 2},
-    "warehouse":  {"name": "Склад", "category": "storage", "cost": {"wood": 25, "stone": 5}, "work": 35, "size": [5, 4], "blueprint": "wf_settle:warehouse",
-                   "storage": {"wood": 150, "stone": 150, "iron": 100, "tools": 100}, "limit": 3}
+    "cottage": {
+      "name": "Хижина",
+      "category": "housing",
+      "cost": {
+        "wood": 10
+      },
+      "work": 15,
+      "size": [
+        3,
+        3
+      ],
+      "blueprint": "wf_settle:cottage",
+      "housing": 2
+    },
+    "iron_mine": {
+      "name": "Рудник",
+      "category": "industry",
+      "cost": {
+        "wood": 25,
+        "stone": 5
+      },
+      "work": 40,
+      "size": [
+        5,
+        5
+      ],
+      "blueprint": "wf_settle:iron_mine",
+      "requires": [
+        "quarry"
+      ],
+      "jobs": {
+        "miner": 3
+      },
+      "recipe": {
+        "in": {},
+        "out": {
+          "iron": 1
+        },
+        "cycle": 25
+      }
+    },
+    "smithy": {
+      "name": "Кузница",
+      "category": "industry",
+      "cost": {
+        "wood": 20,
+        "stone": 20
+      },
+      "work": 50,
+      "size": [
+        4,
+        4
+      ],
+      "blueprint": "wf_settle:smithy",
+      "requires": [
+        "iron_mine"
+      ],
+      "jobs": {
+        "smith": 2
+      },
+      "recipe": {
+        "in": {
+          "iron": 1,
+          "wood": 1
+        },
+        "out": {
+          "tools": 1
+        },
+        "cycle": 20
+      }
+    },
+    "barracks": {
+      "name": "Казармы",
+      "category": "military",
+      "cost": {
+        "wood": 40,
+        "stone": 20
+      },
+      "work": 60,
+      "size": [
+        7,
+        5
+      ],
+      "blueprint": "wf_settle:barracks",
+      "requires": [
+        "watch_post"
+      ],
+      "housing": 6,
+      "jobs": {
+        "guard": 4,
+        "trainer": 1
+      },
+      "limit": 2,
+      "upkeep": 1.5,
+      "safety": 2
+    },
+    "warehouse": {
+      "name": "Склад",
+      "category": "storage",
+      "cost": {
+        "wood": 25,
+        "stone": 5
+      },
+      "work": 35,
+      "size": [
+        5,
+        4
+      ],
+      "blueprint": "wf_settle:warehouse",
+      "storage": {
+        "wood": 150,
+        "stone": 150,
+        "iron": 100,
+        "tools": 100
+      },
+      "limit": 3
+    },
+    "archery_range": {
+      "name": "Стрельбище",
+      "category": "military",
+      "cost": {
+        "wood": 35,
+        "planks": 15,
+        "stone": 8,
+        "tools": 2
+      },
+      "work": 75,
+      "size": [
+        9,
+        7
+      ],
+      "blueprint": "wf_settle:archery_range",
+      "requires": [
+        "barracks"
+      ],
+      "jobs": {
+        "trainer": 1
+      },
+      "upkeep": 0.8,
+      "safety": 1
+    },
+    "stable": {
+      "name": "Конюшня",
+      "category": "military",
+      "cost": {
+        "wood": 40,
+        "planks": 20,
+        "stone": 10,
+        "tools": 3
+      },
+      "work": 90,
+      "size": [
+        9,
+        7
+      ],
+      "blueprint": "wf_settle:stable",
+      "requires": [
+        "barracks"
+      ],
+      "jobs": {
+        "trainer": 1
+      },
+      "upkeep": 1.2,
+      "safety": 1
+    },
+    "siege_workshop": {
+      "name": "Осадная мастерская",
+      "category": "military",
+      "cost": {
+        "wood": 60,
+        "planks": 25,
+        "stone": 30,
+        "iron": 8,
+        "tools": 6
+      },
+      "work": 140,
+      "size": [
+        11,
+        9
+      ],
+      "blueprint": "wf_settle:siege_workshop",
+      "requires": [
+        "barracks",
+        "smithy"
+      ],
+      "jobs": {
+        "trainer": 2,
+        "smith": 1
+      },
+      "upkeep": 2,
+      "safety": 2
+    }
   }
 }

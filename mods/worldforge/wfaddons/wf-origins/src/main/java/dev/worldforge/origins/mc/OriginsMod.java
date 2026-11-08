@@ -60,11 +60,24 @@ public class OriginsMod {
 
     private static void loadDefs(ResourceManager rm) {
         Map<ResourceLocation, Resource> found = rm.listResources("wf_origins", rl -> rl.getPath().endsWith(".json"));
-        for (Map.Entry<ResourceLocation, Resource> r : found.entrySet()) {
-            try (InputStream in = r.getValue().open()) { DEFS.load(new String(in.readAllBytes(), StandardCharsets.UTF_8)); }
-            catch (Exception ex) { LOGGER.error("wf_origins: ошибка в {}: {}", r.getKey(), ex.toString()); }
+        OriginDefs staged = new OriginDefs();
+        try {
+            List<Map.Entry<ResourceLocation, Resource>> ordered = new ArrayList<>(found.entrySet());
+            ordered.sort(Map.Entry.comparingByKey(Comparator.comparing(ResourceLocation::toString)));
+            for (Map.Entry<ResourceLocation, Resource> resource : ordered) {
+                try (InputStream in = resource.getValue().open()) {
+                    staged.load(new String(in.readAllBytes(), StandardCharsets.UTF_8));
+                }
+            }
+            List<String> problems = staged.validate();
+            if (!problems.isEmpty()) throw new IllegalArgumentException(String.join("; ", problems));
+            DEFS.replaceWith(staged);
+            LOGGER.info("wf_origins: загружено рас {}, классов {}, профессий {}, переплетений {}",
+                    DEFS.races.size(), DEFS.classes.size(), DEFS.professions.size(), DEFS.synergies.size());
+        } catch (Exception ex) {
+            // Keep the last known-good registry; never accumulate stale or partially reloaded datapack entries.
+            LOGGER.error("wf_origins: набор определений не применён, сохранена предыдущая версия: {}", ex.toString());
         }
-        LOGGER.info("wf_origins: рас {}, классов {}, профессий {}", DEFS.races.size(), DEFS.classes.size(), DEFS.professions.size());
     }
 
     @SubscribeEvent public void onStarting(ServerStartingEvent e) { loadDefs(e.getServer().getResourceManager()); }

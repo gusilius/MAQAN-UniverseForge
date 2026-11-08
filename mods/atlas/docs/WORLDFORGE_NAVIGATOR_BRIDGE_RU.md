@@ -67,6 +67,17 @@ Navigator принимает экспорт WorldForge по пути:
 - Snapshot schema version mismatch, duplicate IDs, invalid coordinates, excessive file size, or malformed polygons reject the snapshot as a whole.
 - The Navigator import is read-only and never writes back to WorldForge.
 
+## Отображение в Atlas Surface Map
+
+В текущей реализации Atlas:
+- отбирает записи по точному `dimension_id`;
+- обрезает полигоны по границам viewport;
+- рисует прозрачную заливку по scanline spans и точные контуры, включая вогнутые полигоны;
+- размещает подпись на внутренней scanline-позиции, а не на первой вершине;
+- показывает POI-маркеры поверх исследованной поверхности.
+
+Геометрические операции вынесены в независимый от Minecraft класс `WorldForgeMapGeometry` и покрыты unit-тестами. Политические полигоны не подменяют данные исследования поверхности и не открывают неисследованные чанки.
+
 ## Ownership and rollout
 
 WorldForge remains authoritative for political and civilization state. Navigator owns map presentation, layer visibility, clustering, filtering, labels, and route visualization.

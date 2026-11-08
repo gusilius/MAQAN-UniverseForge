@@ -212,7 +212,8 @@ public final class Origins {
         Build b = build(owner);
         if (!b.prof.containsKey(id) || units <= 0) return -1;
         int before = rank(owner, id);
-        b.prof.merge(id, units, Integer::sum);
+        long earned = (long) b.prof.get(id) + (long) units;
+        b.prof.put(id, (int) Math.min(Integer.MAX_VALUE, earned));
         int after = rank(owner, id);
         return after > before ? after : -1;
     }
@@ -268,6 +269,9 @@ public final class Origins {
 
     /** То же, но раса берётся из состава жителей государства realm (если он известен). */
     public Build assign(String owner, long seed, String hint, int level, String realm) {
+        Build existing = builds.get(owner);
+        if (existing != null) return existing; // Repeated NPC population passes must not erase learned progression.
+        if (owner == null || owner.isBlank()) throw new IllegalArgumentException("Пустой идентификатор владельца");
         Random rng = new Random(seed);
         Build b = new Build();
         builds.put(owner, b);
@@ -381,16 +385,74 @@ public final class Origins {
     }
 
     public void fromJson(String json) {
-        builds.clear();
-        if (!(Json.parse(json) instanceof Map<?, ?> root)) return;
-        for (var e : root.entrySet()) {
-            if (!(e.getValue() instanceof Map<?, ?> m)) continue;
+        // Build and validate an isolated snapshot before replacing live progression.
+        Object parsed = Json.parse(json == null ? "" : json);
+        if (!(parsed instanceof Map<?, ?> root))
+            throw new IllegalArgumentException("Сохранение происхождения должно быть объектом");
+        Map<String, Build> loaded = new LinkedHashMap<>();
+        for (var entry : root.entrySet()) {
+            if (!(entry.getKey() instanceof String owner) || owner.isBlank())
+                throw new IllegalArgumentException("Некорректный идентификатор владельца");
+            if (!(entry.getValue() instanceof Map<?, ?> data))
+                throw new IllegalArgumentException("Повреждена запись происхождения: " + owner);
             Build b = new Build();
-            b.race = String.valueOf(m.get("race") == null ? "" : m.get("race")); b.cls = String.valueOf(m.get("class") == null ? "" : m.get("class"));
-            if (m.get("retrain") instanceof Number rn) b.retrainDay = rn.intValue();
-            if (m.get("history") instanceof List<?> l) for (Object o : l) b.history.add(String.valueOf(o));
-            if (m.get("prof") instanceof Map<?, ?> pm) for (var x : pm.entrySet()) b.prof.put(String.valueOf(x.getKey()), x.getValue() instanceof Number n ? n.intValue() : 0);
-            builds.put(String.valueOf(e.getKey()), b);
+            Object race = data.get("race"), cls = data.get("class");
+            if (race != null && !(race instanceof String) || cls != null && !(cls instanceof String))
+                throw new IllegalArgumentException("Некорректная раса или класс: " + owner);
+            b.race = race == null ? "" : (String) race;
+            b.cls = cls == null ? "" : (String) cls;
+            if (!b.race.isEmpty() && !defs.races.containsKey(b.race))
+                throw new IllegalArgumentException("Неизвестная раса: " + b.race);
+            Object retrain = data.get("retrain");
+            if (retrain != null && !(retrain instanceof Number))
+                throw new IllegalArgumentException("Некорректный день переобучения: " + owner);
+            b.retrainDay = retrain == null ? 0 : ((Number) retrain).intValue();
+            if (b.retrainDay < 0) throw new IllegalArgumentException("Отрицательный день переобучения: " + owner);
+
+            Object history = data.get("history");
+            if (history != null && !(history instanceof List<?>))
+                throw new IllegalArgumentException("Повреждена история классов: " + owner);
+            if (history instanceof List<?> items) {
+                String previous = "";
+                Set<String> unique = new HashSet<>();
+                for (Object item : items) {
+                    if (!(item instanceof String id) || !unique.add(id))
+                        throw new IllegalArgumentException("Повреждена или повторяется ступень класса: " + owner);
+                    OriginDefs.ClassDef def = defs.classes.get(id);
+                    if (def == null || (previous.isEmpty() ? !def.from().isEmpty() : !defs.isParent(def, previous)))
+                        throw new IllegalArgumentException("Нарушена последовательность классов: " + owner + " / " + id);
+                    b.history.add(id);
+                    previous = id;
+                }
+            }
+            String lastClass = b.history.isEmpty() ? "" : b.history.get(b.history.size() - 1);
+            if (!lastClass.equals(b.cls))
+                throw new IllegalArgumentException("Текущий класс не совпадает с историей: " + owner);
+
+            Object professions = data.get("prof");
+            if (professions != null && !(professions instanceof Map<?, ?>))
+                throw new IllegalArgumentException("Повреждены профессии: " + owner);
+            if (professions instanceof Map<?, ?> values) for (var p : values.entrySet()) {
+                if (!(p.getKey() instanceof String id) || !(p.getValue() instanceof Number xp)
+                        || xp.longValue() < 0 || xp.longValue() > Integer.MAX_VALUE || !defs.professions.containsKey(id))
+                    throw new IllegalArgumentException("Некорректная профессия: " + owner);
+                b.prof.put(id, xp.intValue());
+            }
+            int roots = 0;
+            Set<String> exclusive = new HashSet<>();
+            for (String id : b.prof.keySet()) {
+                OriginDefs.Profession def = defs.professions.get(id);
+                if (!def.from().isEmpty() && !b.prof.containsKey(def.from()))
+                    throw new IllegalArgumentException("Специализация без основной профессии: " + owner + " / " + id);
+                if (def.from().isEmpty()) roots++;
+                if (!def.exclusive().isEmpty() && !exclusive.add(def.exclusive()))
+                    throw new IllegalArgumentException("Взаимоисключающие профессии: " + owner);
+            }
+            if (roots > MAX_PROFESSIONS)
+                throw new IllegalArgumentException("Превышен лимит основных профессий: " + owner);
+            loaded.put(owner, b);
         }
+        builds.clear();
+        builds.putAll(loaded);
     }
 }

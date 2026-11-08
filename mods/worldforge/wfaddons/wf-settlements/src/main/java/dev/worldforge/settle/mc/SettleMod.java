@@ -2,8 +2,12 @@ package dev.worldforge.settle.mc;
 
 import com.mojang.logging.LogUtils;
 import dev.worldforge.mod.Json;
+import dev.worldforge.settle.Building;
 import dev.worldforge.settle.Defs;
 import dev.worldforge.settle.Settlement;
+import dev.worldforge.people.Character;
+import dev.worldforge.people.CharacterRegistry;
+import dev.worldforge.people.mc.PeopleMod;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -80,6 +84,7 @@ public class SettleMod {
     private static long ticks;
 
     public SettleMod() {
+        dev.worldforge.mod.WorldForgeSnapshotExporter.registerContributor(SettleMod::appendAtlasFeatures);
         IEventBus bus = FMLJavaModLoadingContext.get().getModEventBus();
         ITEMS.register(bus);
         ENTITIES.register(bus);
@@ -96,6 +101,96 @@ public class SettleMod {
 
     private void tabs(BuildCreativeModeTabContentsEvent e) {
         if (e.getTabKey() == CreativeModeTabs.TOOLS_AND_UTILITIES) e.accept(WAND);
+    }
+
+    // ------------------------------------------------------------------ Atlas snapshot integration
+
+    /** Adds live settlement and building locations to the same WorldForge snapshot used by Atlas. */
+    private static void appendAtlasFeatures(MinecraftServer server, ServerLevel level,
+            dev.worldforge.mod.MapData map, List<Object> features) {
+        String dimension = level.dimension().location().toString();
+        for (Colony colony : COLONIES.values()) {
+            if (colony == null || !dimension.equals(colony.dim) || colony.s == null) continue;
+            dev.worldforge.mod.TitleData.Title province = map.provinceAt(colony.cx, colony.cz);
+            dev.worldforge.mod.TitleData.Realm realm = province == null || map.titles == null
+                    ? null : map.titles.realmOf(province);
+            String realmId = realm == null ? "" : realm.id;
+            String raceId = realm == null ? "" : propertyString(realm.props, "race");
+            String cultureId = realm == null ? "" : propertyString(realm.props, "culture");
+            String provinceFeatureId = province == null ? "" :
+                    "worldforge:" + dimension + ":" + map.name + ":province:" + province.key;
+            int y = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+                    colony.cx, colony.cz);
+            Map<String, String> attrs = new java.util.LinkedHashMap<>();
+            attrs.put("population", Integer.toString(colony.s.workers.size()));
+            attrs.put("housing", Integer.toString(colony.s.housing()));
+            attrs.put("settlement_type", colony.s.typeId == null ? "" : colony.s.typeId);
+            attrs.put("owner_assigned", Boolean.toString(colony.owner != null && !colony.owner.isBlank()));
+            attrs.put("realm_id", realmId);
+            attrs.put("province_id", province == null ? "" : province.key);
+            attrs.put("year", Integer.toString(colony.s.year()));
+            attrs.put("season", colony.s.seasonName());
+            attrs.put("approval", Integer.toString(colony.s.approval()));
+            attrs.put("tax_level", Integer.toString(colony.s.taxLevel));
+            attrs.put("wealth", Double.toString(colony.s.wealth()));
+            attrs.put("buildings", Integer.toString(colony.s.buildings.size()));
+            attrs.put("map_id", map.name);
+            Map<String, Object> settlementFeature = atlasFeature("worldforge:settlement:" + dimension + ":" + colony.s.id,
+                    "settlement", colony.s.name, dimension, colony.cx, y, colony.cz,
+                    realmId, colony.s.typeId, attrs);
+            settlementFeature.put("territory_id", provinceFeatureId);
+            settlementFeature.put("race_id", raceId);
+            settlementFeature.put("culture_id", cultureId);
+            features.add(settlementFeature);
+
+            for (dev.worldforge.settle.Building building : colony.s.buildings) {
+                if (building == null || building.def == null) continue;
+                int x = colony.worldX(building), z = colony.worldZ(building);
+                int by = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,x,z);
+                Map<String, String> buildingAttrs = new java.util.LinkedHashMap<>();
+                buildingAttrs.put("settlement_id", colony.s.id);
+                buildingAttrs.put("building_uid", Integer.toString(building.uid));
+                buildingAttrs.put("building_state", building.state == null ? "" : building.state.name().toLowerCase(java.util.Locale.ROOT));
+                buildingAttrs.put("progress", Double.toString(building.progress));
+                buildingAttrs.put("paused", Boolean.toString(building.paused));
+                buildingAttrs.put("workers", Integer.toString(colony.s.assigned(building.uid).size()));
+                buildingAttrs.put("realm_id", realmId);
+                buildingAttrs.put("province_id", province == null ? "" : province.key);
+                buildingAttrs.put("map_id", map.name);
+                Map<String, Object> buildingFeature = atlasFeature("worldforge:settlement:" + dimension + ":" + colony.s.id
+                                + ":building:" + building.uid,
+                        "settlement_building", building.def.name, dimension, x, by, z,
+                        realmId, building.def.id, buildingAttrs);
+                buildingFeature.put("territory_id", provinceFeatureId);
+                buildingFeature.put("race_id", raceId);
+                buildingFeature.put("culture_id", cultureId);
+                features.add(buildingFeature);
+            }
+        }
+    }
+
+    private static String propertyString(Map<String, Object> properties, String key) {
+        if (properties == null) return "";
+        Object value = properties.get(key);
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    private static Map<String, Object> atlasFeature(String id, String kind, String name,
+            String dimension, double x, double y, double z, String realmId,
+            String subtype, Map<String, String> attributes) {
+        Map<String, Object> value = new java.util.LinkedHashMap<>();
+        value.put("id", id);
+        value.put("kind", kind);
+        value.put("name", name == null ? "" : name);
+        value.put("dimension_id", dimension);
+        value.put("x", x);
+        value.put("y", y);
+        value.put("z", z);
+        value.put("realm_id", realmId);
+        value.put("subtype", subtype == null ? "" : subtype);
+        value.put("color", 0xD6B56D);
+        value.put("attributes", attributes);
+        return value;
     }
 
     // ------------------------------------------------------------------ доступ
@@ -132,6 +227,51 @@ public class SettleMod {
             if (d < bd) { bd = d; best = c; }
         }
         return best;
+    }
+
+    /** Validated completed recruitment building owned by the player and staffed by a trainer. */
+    public record RecruitmentSite(Colony colony, Building building, BlockPos spawn) {}
+
+    public static RecruitmentSite recruitmentSite(ServerLevel level, String owner, String buildingId,
+                                                   double playerX, double playerZ) {
+        String dimension = level.dimension().location().toString();
+        Colony bestColony = null;
+        Building bestBuilding = null;
+        double bestDistance = 128.0 * 128.0;
+        for (Colony colony : COLONIES.values()) {
+            if (!dimension.equals(colony.dim)) continue;
+            if (!colony.owner.isEmpty() && !colony.owner.equals(owner)) continue;
+            for (Building building : colony.s.buildings) {
+                if (!building.def.id.equals(buildingId) || building.state != Building.State.DONE || building.paused) continue;
+                Colony.Site physicalSite = colony.sites.get(building.uid);
+                if (physicalSite == null) continue; // A simulated building is not a recruitment facility until its world structure exists.
+                Blueprints.Plan plan = Blueprints.get(level, building.def);
+                if (plan == null || physicalSite.placed < plan.blocks().size()) continue;
+                boolean staffed = colony.s.assigned(building.uid).stream()
+                        .anyMatch(worker -> "trainer".equals(worker.profession));
+                if (!staffed) continue;
+                double x = colony.worldX(building), z = colony.worldZ(building);
+                double distance = (x - playerX) * (x - playerX) + (z - playerZ) * (z - playerZ);
+                if (distance < bestDistance) {
+                    bestDistance = distance;
+                    bestColony = colony;
+                    bestBuilding = building;
+                }
+            }
+        }
+        if (bestColony == null) return null;
+        return new RecruitmentSite(bestColony, bestBuilding, bestColony.workPoint(level, bestBuilding));
+    }
+
+    /** Deducts materials only after the caller has prepared the whole recruit batch. */
+    public static boolean payRecruitment(RecruitmentSite site, java.util.Map<String, Integer> cost) {
+        return site != null && site.colony().s.spend(cost);
+    }
+
+    /** Rolls back a just-paid recruitment batch if its second payment leg fails. */
+    public static void refundRecruitment(RecruitmentSite site, java.util.Map<String, Integer> cost) {
+        if (site == null || cost == null) return;
+        for (var entry : cost.entrySet()) site.colony().s.add(entry.getKey(), entry.getValue());
     }
 
     /** Закладывает поселение: 4 рабочих, склад дерево 60 / еда 40 / камень 10. */
@@ -242,6 +382,45 @@ public class SettleMod {
         Blueprints.clearCache();
     }
 
+    /**
+     * Bridges settlement workers to the authoritative person registry.
+     * Worker.person is the durable foreign key; profession/building remain settlement-owned state.
+     * The optional wf_people addon remains optional and no duplicate character registry is created here.
+     */
+    private static void syncPeople(Colony colony) {
+        if (!net.minecraftforge.fml.ModList.get().isLoaded("wf_people") || colony == null || colony.s == null) return;
+        dev.worldforge.mod.MapData ownerMap = null;
+        dev.worldforge.mod.TitleData.Title province = null;
+        for (dev.worldforge.mod.MapData map : dev.worldforge.mod.WorldForgeMod.loadedMaps().values()) {
+            if (map.titles == null) continue;
+            dev.worldforge.mod.TitleData.Title candidate = map.provinceAt(colony.cx, colony.cz);
+            if (candidate != null) { ownerMap = map; province = candidate; break; }
+        }
+        if (ownerMap == null) return;
+        CharacterRegistry registry = PeopleMod.registry(ownerMap);
+        if (registry == null) return;
+        dev.worldforge.mod.TitleData.Realm realm = ownerMap.titles.realmOf(province);
+        String race = realm == null ? "" : propertyString(realm.props, "race");
+        String culture = realm == null ? "" : propertyString(realm.props, "culture");
+        String place = "settlement:" + colony.s.id;
+        for (dev.worldforge.settle.Worker worker : colony.s.workers) {
+            Character person = worker.person == null || worker.person.isBlank() ? null : registry.get(worker.person);
+            if (person == null || !person.alive) {
+                person = registry.create(worker.name, "", culture, "m", colony.s.year());
+                worker.person = person.id;
+            }
+            if (!person.has("settlement_worker", place)) registry.appoint(person.id, "settlement_worker", place);
+            if (person.culture == null || person.culture.isBlank()) person.culture = culture;
+            person.props.put("wf_unit_kind", "worker");
+            person.props.put("wf_settlement_id", colony.s.id);
+            person.props.put("wf_worker_id", worker.id);
+            person.props.put("wf_profession", worker.profession == null ? "laborer" : worker.profession);
+            person.props.put("wf_building_uid", worker.building);
+            person.props.put("wf_race_id", race);
+            person.props.put("wf_culture_id", culture);
+        }
+    }
+
     @SubscribeEvent
     public void onTick(TickEvent.ServerTickEvent e) {
         if (e.phase != TickEvent.Phase.END || DEFS == null) return;
@@ -254,6 +433,7 @@ public class SettleMod {
                 if (speed <= 0) break;
                 try {
                     c.s.tick(speed);                                   // 1 секунда симуляции = 20 тиков
+                    syncPeople(c);
                     if (ticks % (STEP_TICKS * 10) == 0) { c.s.types = TYPES; String rid = realmOf(c); c.s.refreshType(c.s.workers.size(), rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.terrain(rid), rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.races(rid)); }
                 } catch (RuntimeException ex) {
                     LOGGER.error("wf_settle: ошибка симуляции поселения {}: {}", c.s.id, ex.toString());

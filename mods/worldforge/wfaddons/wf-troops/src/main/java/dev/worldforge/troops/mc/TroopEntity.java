@@ -1,6 +1,7 @@
 package dev.worldforge.troops.mc;
 
 import dev.worldforge.troops.TroopDefs;
+import dev.worldforge.troops.TroopProgression;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.syncher.EntityDataAccessor;
@@ -54,6 +55,7 @@ public class TroopEntity extends PathfinderMob {
     public int fortId;                     // защитник крепости (0 - полевой солдат)
     public int armyId;                     // из какой армии wf-army призван (0 - нанят за золото)
     private int cooldown, seek;
+    private int combatXp;
     private TroopDefs.Unit def;
 
     public TroopEntity(EntityType<? extends TroopEntity> type, Level level) {
@@ -102,18 +104,31 @@ public class TroopEntity extends PathfinderMob {
     public String squadId() { return entityData.get(SQUAD); }
     public void setSquadId(String s) { entityData.set(SQUAD, s); }
     public TroopDefs.Unit def() { return def; }
+    public int combatXp() { return combatXp; }
+    public int veteranRank() { return TroopProgression.rank(combatXp); }
+    public void awardCombatXp(int amount) {
+        int before = veteranRank();
+        combatXp = TroopProgression.addXp(combatXp, amount);
+        if (veteranRank() > before && def != null) {
+            float oldHealth = getHealth();
+            double oldMax = getMaxHealth();
+            setup(def, ownerId());
+            setHealth((float) Math.min(getMaxHealth(), oldHealth + Math.max(0, getMaxHealth() - oldMax)));
+        }
+    }
 
     /** Применяет тип: здоровье, урон, скорость, броня, снаряжение. */
     public void setup(TroopDefs.Unit u, String owner) {
         this.def = u;
         entityData.set(UNIT, u.id());
         entityData.set(OWNER, owner);
-        getAttribute(Attributes.MAX_HEALTH).setBaseValue(u.hp());
-        getAttribute(Attributes.ATTACK_DAMAGE).setBaseValue(u.dmg());
+        int veteran = veteranRank();
+        getAttribute(Attributes.MAX_HEALTH).setBaseValue(u.hp() * TroopProgression.healthMultiplier(veteran));
+        getAttribute(Attributes.ATTACK_DAMAGE).setBaseValue(u.dmg() * TroopProgression.damageMultiplier(veteran));
         getAttribute(Attributes.MOVEMENT_SPEED).setBaseValue(0.25 * u.speed());
-        getAttribute(Attributes.ARMOR).setBaseValue(u.armor());
+        getAttribute(Attributes.ARMOR).setBaseValue(u.armor() + TroopProgression.armorBonus(veteran));
         getAttribute(Attributes.FOLLOW_RANGE).setBaseValue(Math.max(32, u.sight() + 8));
-        setHealth((float) u.hp());
+        setHealth((float) (u.hp() * TroopProgression.healthMultiplier(veteran)));
         equip(EquipmentSlot.MAINHAND, u.weapon());
         equip(EquipmentSlot.HEAD, u.head());
         equip(EquipmentSlot.CHEST, u.chest());
@@ -139,6 +154,7 @@ public class TroopEntity extends PathfinderMob {
         t.putString("wf_realm", realm);
         t.putInt("wf_army", armyId);
         t.putInt("wf_fort", fortId);
+        t.putInt("wf_combat_xp", combatXp);
     }
 
     @Override
@@ -147,11 +163,12 @@ public class TroopEntity extends PathfinderMob {
         realm = t.getString("wf_realm");
         armyId = t.getInt("wf_army");
         fortId = t.getInt("wf_fort");
+        combatXp = Math.max(0, Math.min(TroopProgression.MAX_XP, t.getInt("wf_combat_xp")));
         TroopDefs.Unit u = TroopsMod.DEFS.units.get(t.getString("wf_unit"));
         if (u != null) {
             float hp = getHealth();
             setup(u, t.getString("wf_owner"));
-            setHealth(Math.min(hp <= 0 ? (float) u.hp() : hp, (float) u.hp()));
+            setHealth((float) Math.min(hp <= 0 ? getMaxHealth() : hp, getMaxHealth()));
         } else entityData.set(OWNER, t.getString("wf_owner"));
         entityData.set(SQUAD, t.getString("wf_squad"));
     }
@@ -203,10 +220,11 @@ public class TroopEntity extends PathfinderMob {
     private void shoot(LivingEntity target) {
         Arrow a = new Arrow(level(), this);
         double dx = target.getX() - getX(), dy = target.getEyeY() - 0.2 - a.getY(), dz = target.getZ() - getZ(), h = Math.sqrt(dx * dx + dz * dz);
-        a.setBaseDamage(Math.max(0.5, (def == null ? 1.5 : def.dmg() / 3.0) * dmgMult));
+        a.setBaseDamage(Math.max(0.5, (def == null ? 1.5 : def.dmg() * TroopProgression.damageMultiplier(veteranRank()) / 3.0) * dmgMult));
         a.pickup = AbstractArrow.Pickup.DISALLOWED;
         a.shoot(dx, dy + h * 0.2, dz, 1.7f, 3.0f);
         level().addFreshEntity(a);
+        awardCombatXp(1);
         playSound(net.minecraft.sounds.SoundEvents.SKELETON_SHOOT, 1f, 1f / (random.nextFloat() * 0.4f + 0.8f));
         swing(net.minecraft.world.InteractionHand.MAIN_HAND);
     }
@@ -227,7 +245,7 @@ public class TroopEntity extends PathfinderMob {
             if (m.level().isClientSide) return;
             if (m.cooldown > 0) m.cooldown--;
             TroopDefs.Unit d = m.def;
-            boolean ranged = d != null && (d.role().equals("ranged") || d.role().equals("siege") && d.range() >= 6);
+            boolean ranged = d != null && d.range() >= 6 && (d.role().equals("ranged") || d.role().equals("cavalry") || d.role().equals("siege"));
             double reach = d == null ? 2.5 : d.range();
             LivingEntity forced = m.forcedTarget();
             if (forced != null) target = forced;
@@ -253,7 +271,7 @@ public class TroopEntity extends PathfinderMob {
                 } else {
                     if (dist <= reach + target.getBbWidth() / 2) {
                         m.getNavigation().stop();
-                        if (m.cooldown <= 0) { m.cooldown = 20; m.swing(net.minecraft.world.InteractionHand.MAIN_HAND); m.doHurtTarget(target); }
+                        if (m.cooldown <= 0) { m.cooldown = 20; m.swing(net.minecraft.world.InteractionHand.MAIN_HAND); if (m.doHurtTarget(target)) m.awardCombatXp(target.isAlive() ? 2 : 10); }
                     } else if (m.engage != Engage.RANGE && --repath <= 0) {
                         repath = 8;
                         m.getNavigation().moveTo(target, 1.15);

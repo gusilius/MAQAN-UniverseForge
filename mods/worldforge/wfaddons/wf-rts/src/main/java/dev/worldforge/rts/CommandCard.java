@@ -140,7 +140,6 @@ public final class CommandCard {
             int pc = (int) Math.round(Orders.refundShare(b) * 100);
             run(c, 4, "demolish", "@sword", done ? "Снести" : "Отмена", err == null, err, done ? "Снести здание" : "Отменить стройку", "Вернёт " + pc + "% материалов", "Рабочие станут свободными");
             run(c, 5, "selectStaff", "@people", "Работники", !s.assigned(b.uid).isEmpty(), "В здании никого нет", "Выбрать работников", "Рабочие этого здания");
-            put(c, 6, "upgrade", Command.Kind.RUN, null, "@crown", "Улучшить", tip("Улучшить", "!Улучшения пока недоступны"), false, false);
             put(c, 8, "build", Command.Kind.SUBMENU, BUILD, "@build", "Построить", tip("Построить", "Меню стройки"), true, false);
             put(c, 9, "priorities", Command.Kind.OPEN, "priorities", "@scroll", "Работы", tip("Приоритеты работ", "Матрица рабочих"), true, false);
             put(c, 10, "camera", Command.Kind.CAMERA, null, "@move", "Камера", tip("Камера на здание"), true, false);

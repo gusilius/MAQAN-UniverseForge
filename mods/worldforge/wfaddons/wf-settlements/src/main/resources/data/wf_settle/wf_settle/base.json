@@ -1,22 +1,261 @@
 {
-  "resources": {"wood": "Дерево", "planks": "Доски", "stone": "Камень", "food": "Еда", "iron": "Железо", "tools": "Инструменты"},
+  "resources": {
+    "wood": "Дерево",
+    "planks": "Доски",
+    "stone": "Камень",
+    "food": "Еда",
+    "iron": "Железо",
+    "tools": "Инструменты",
+    "cloth": "Ткань"
+  },
   "professions": {
-    "lumberjack": {"name": "Дровосек"}, "sawyer": {"name": "Пильщик"}, "farmer": {"name": "Земледелец"},
-    "miner": {"name": "Каменотёс"}, "smith": {"name": "Кузнец"}, "guard": {"name": "Стражник"}
+    "lumberjack": {
+      "name": "Дровосек"
+    },
+    "sawyer": {
+      "name": "Пильщик"
+    },
+    "farmer": {
+      "name": "Земледелец"
+    },
+    "miner": {
+      "name": "Каменотёс"
+    },
+    "smith": {
+      "name": "Кузнец"
+    },
+    "guard": {
+      "name": "Стражник"
+    },
+    "trainer": {
+      "name": "Военный инструктор"
+    }
   },
   "buildings": {
-    "house":       {"name": "Дом", "category": "housing", "cost": {"wood": 20}, "work": 30, "size": [3, 3], "blueprint": "wf_settle:house", "housing": 4},
-    "lumber_camp": {"name": "Лесопилка-лагерь", "category": "industry", "cost": {"wood": 10}, "work": 20, "size": [4, 4], "blueprint": "wf_settle:lumber_camp",
-                    "jobs": {"lumberjack": 3}, "recipe": {"in": {}, "out": {"wood": 3}, "cycle": 12}},
-    "sawmill":     {"name": "Лесопилка", "category": "industry", "cost": {"wood": 30, "stone": 5}, "work": 45, "size": [5, 4], "blueprint": "wf_settle:sawmill",
-                    "requires": ["lumber_camp"], "jobs": {"sawyer": 2}, "recipe": {"in": {"wood": 2}, "out": {"planks": 1}, "cycle": 10}},
-    "farm":        {"name": "Ферма", "category": "food", "cost": {"wood": 15}, "work": 25, "size": [6, 6], "blueprint": "wf_settle:farm",
-                    "jobs": {"farmer": 4}, "recipe": {"in": {}, "out": {"food": 4}, "cycle": 20}},
-    "quarry":      {"name": "Каменоломня", "category": "industry", "cost": {"wood": 20}, "work": 35, "size": [5, 5], "blueprint": "wf_settle:quarry",
-                    "jobs": {"miner": 3}, "recipe": {"in": {}, "out": {"stone": 2}, "cycle": 15}},
-    "granary":     {"name": "Амбар", "category": "storage", "cost": {"wood": 30, "planks": 5}, "work": 40, "size": [4, 4], "blueprint": "wf_settle:granary",
-                    "requires": ["sawmill"], "storage": {"food": 300, "wood": 200, "planks": 200, "stone": 200}, "limit": 3},
-    "watch_post":  {"name": "Сторожевой пост", "category": "military", "cost": {"wood": 25, "stone": 10}, "work": 40, "size": [3, 3], "blueprint": "wf_settle:watch_post",
-                    "jobs": {"guard": 2}}
+    "house": {
+      "name": "Дом",
+      "category": "housing",
+      "cost": {
+        "wood": 20
+      },
+      "work": 30,
+      "size": [
+        3,
+        3
+      ],
+      "blueprint": "wf_settle:house",
+      "housing": 4
+    },
+    "lumber_camp": {
+      "name": "Лесопилка-лагерь",
+      "category": "industry",
+      "cost": {
+        "wood": 10
+      },
+      "work": 20,
+      "size": [
+        4,
+        4
+      ],
+      "blueprint": "wf_settle:lumber_camp",
+      "jobs": {
+        "lumberjack": 3
+      },
+      "recipe": {
+        "in": {},
+        "out": {
+          "wood": 3
+        },
+        "cycle": 12
+      }
+    },
+    "sawmill": {
+      "name": "Лесопилка",
+      "category": "industry",
+      "cost": {
+        "wood": 30,
+        "stone": 5
+      },
+      "work": 45,
+      "size": [
+        5,
+        4
+      ],
+      "blueprint": "wf_settle:sawmill",
+      "requires": [
+        "lumber_camp"
+      ],
+      "jobs": {
+        "sawyer": 2
+      },
+      "recipe": {
+        "in": {
+          "wood": 2
+        },
+        "out": {
+          "planks": 1
+        },
+        "cycle": 10
+      }
+    },
+    "farm": {
+      "name": "Ферма",
+      "category": "food",
+      "cost": {
+        "wood": 15
+      },
+      "work": 25,
+      "size": [
+        6,
+        6
+      ],
+      "blueprint": "wf_settle:farm",
+      "jobs": {
+        "farmer": 4
+      },
+      "recipe": {
+        "in": {},
+        "out": {
+          "food": 4
+        },
+        "cycle": 20
+      }
+    },
+    "quarry": {
+      "name": "Каменоломня",
+      "category": "industry",
+      "cost": {
+        "wood": 20
+      },
+      "work": 35,
+      "size": [
+        5,
+        5
+      ],
+      "blueprint": "wf_settle:quarry",
+      "jobs": {
+        "miner": 3
+      },
+      "recipe": {
+        "in": {},
+        "out": {
+          "stone": 2
+        },
+        "cycle": 15
+      }
+    },
+    "granary": {
+      "name": "Амбар",
+      "category": "storage",
+      "cost": {
+        "wood": 30,
+        "planks": 5
+      },
+      "work": 40,
+      "size": [
+        4,
+        4
+      ],
+      "blueprint": "wf_settle:granary",
+      "requires": [
+        "sawmill"
+      ],
+      "storage": {
+        "food": 300,
+        "wood": 200,
+        "planks": 200,
+        "stone": 200
+      },
+      "limit": 3
+    },
+    "watch_post": {
+      "name": "Сторожевой пост",
+      "category": "military",
+      "cost": {
+        "wood": 25,
+        "stone": 10
+      },
+      "work": 40,
+      "size": [
+        3,
+        3
+      ],
+      "blueprint": "wf_settle:watch_post",
+      "jobs": {
+        "guard": 2
+      }
+    },
+    "archery_range": {
+      "name": "Стрельбище",
+      "category": "military",
+      "cost": {
+        "wood": 35,
+        "planks": 15,
+        "stone": 8,
+        "tools": 2
+      },
+      "work": 75,
+      "size": [
+        9,
+        7
+      ],
+      "blueprint": "wf_settle:archery_range",
+      "requires": [
+        "barracks"
+      ],
+      "jobs": {
+        "trainer": 1
+      },
+      "upkeep": 0.8
+    },
+    "stable": {
+      "name": "Конюшня",
+      "category": "military",
+      "cost": {
+        "wood": 40,
+        "planks": 20,
+        "stone": 10,
+        "tools": 3
+      },
+      "work": 90,
+      "size": [
+        9,
+        7
+      ],
+      "blueprint": "wf_settle:stable",
+      "requires": [
+        "barracks"
+      ],
+      "jobs": {
+        "trainer": 1
+      },
+      "upkeep": 1.2
+    },
+    "siege_workshop": {
+      "name": "Осадная мастерская",
+      "category": "military",
+      "cost": {
+        "wood": 60,
+        "planks": 25,
+        "stone": 30,
+        "iron": 8,
+        "tools": 6
+      },
+      "work": 140,
+      "size": [
+        11,
+        9
+      ],
+      "blueprint": "wf_settle:siege_workshop",
+      "requires": [
+        "barracks",
+        "sawmill"
+      ],
+      "jobs": {
+        "trainer": 2,
+        "smith": 1
+      },
+      "upkeep": 2
+    }
   }
 }

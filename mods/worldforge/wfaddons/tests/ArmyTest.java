@@ -47,6 +47,24 @@ public class ArmyTest {
         System.out.println("пара: " + A + " (" + e.baroniesOf(A).size() + " баронств) против " + B + " (" + e.baroniesOf(B).size() + ")");
         ok(e.baroniesOf(A).size() > 3 && e.baroniesOf(B).size() > 3, "у государств есть баронства");
         ok(e.capital(A) != 0, "есть столица");
+        long dayBeforeInvalidTicks = e.war.day;
+        e.tick(Double.NaN);
+        e.tick(Double.POSITIVE_INFINITY);
+        e.tick(Double.NEGATIVE_INFINITY);
+        e.tick(-1);
+        e.tick(0);
+        ok(e.war.day == dayBeforeInvalidTicks, "невалидный шаг времени армии не двигает календарь");
+        boolean oversizedTickRejected = false;
+        try { e.tick(3651); } catch (IllegalArgumentException ex) { oversizedTickRejected = true; }
+        ok(oversizedTickRejected && e.war.day == dayBeforeInvalidTicks, "чрезмерный шаг времени отклоняется без зависания");
+        ArmyEngine clock = fresh(a[0], ids); clock.ai = false;
+        long clockStart = clock.war.day;
+        clock.tick(0.4);
+        ok(clock.war.day == clockStart, "дробный шаг меньше суток пока не продвигает день");
+        ArmyEngine clockReload = new ArmyEngine(clock.war);
+        clockReload.fromJson(clock.toJson());
+        clockReload.tick(0.6);
+        ok(clock.war.day == clockStart + 1, "дробные шаги накапливаются и сохраняются между загрузками");
 
         // набор
         double p0 = e.pool(A);
@@ -57,6 +75,7 @@ public class ArmyTest {
         e.raise(A, "archer", 20);
         ok(e.gold(A) < g0, "профессионалы стоят золота");
         ok(fails(() -> e.raise(A, "knight", 100_000)), "не хватает золота");
+        ok(fails(() -> e.hire("missing_realm", "cavalry", 10)), "нельзя нанимать войско государству без земель");
         Army merc = e.hire(A, "cavalry", 10);
         ok(merc.mercenary && merc != ar, "наёмники отдельной армией");
         ok(e.armiesOf(A).size() == 2 && ar.count("archer") == 20, "армии: войско и наёмники");

@@ -41,6 +41,8 @@ public final class Orders {
 
     public static String unassignCmd(int worker) { return "wfsettle unassign " + worker; }
 
+    public static String moveCmd(int worker, double x, double z) { return "wfsettle move " + worker + " " + x + " " + z; }
+
     public static String professionCmd(int worker, String prof) { return "wfsettle profession " + worker + " " + prof; }
 
     public static String buildCmd(String def, int x, int z) { return "wfsettle build " + def + " " + x + " " + z; }
@@ -238,6 +240,13 @@ public final class Orders {
             return place(s, pendingBuild, t.x, t.z);
         }
         if (sel.hasWorkers() && t.kind == Target.Kind.BUILDING) return assign(s, sel.workers(), t.id);
+        if (sel.hasWorkers() && t.kind == Target.Kind.GROUND) {
+            Result r = new Result();
+            for (int id : sel.workers()) if (s.worker(id) != null) r.commands.add(moveCmd(id, t.x, t.z));
+            r.ok = !r.commands.isEmpty();
+            r.message = r.ok ? "Приказ перемещения: " + r.commands.size() + " рабочих" : "Нет выбранных рабочих";
+            return r;
+        }
         if (sel.hasBuilding() && t.kind == Target.Kind.WORKER) return assign(s, List.of(t.id), sel.building());
         return Result.none();
     }

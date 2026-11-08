@@ -66,11 +66,21 @@ public class OriginsTest {
         Origins.Build n1 = o.assign("n:a", 7, "smith", 30), n2 = o.assign("n:b", 7, "smith", 30), n3 = o.assign("n:c", 8, "craft", 3);
         ok(n1.race.equals(n2.race) && n1.history.equals(n2.history), "NPC детерминированы по сиду");
         ok(n1.prof.containsKey("smith") && !n1.history.isEmpty(), "NPC 30 уровня: профессия и класс " + n1.history);
+        Origins.Build n1Again = o.assign("n:a", 999, "trade", 55);
+        ok(n1Again == n1 && n1Again.history.equals(n1.history) && n1Again.prof.equals(n1.prof),
+                "повторное назначение NPC не перезаписывает его развитие");
         ok(n3.history.isEmpty(), "новичок без класса");
         // сохранение
         Origins o2 = new Origins(d);
         o2.fromJson(o.toJson());
-        ok(o2.build(P).history.equals(o.build(P).history) && o2.build(P).prof.equals(o.build(P).prof) && o2.mods(P).equals(o.mods(P)) || true, "save/load");
+        ok(o2.build(P).history.equals(o.build(P).history) && o2.build(P).prof.equals(o.build(P).prof) && o2.mods(P).equals(o.mods(P)), "save/load сохраняет историю, профессии и рассчитанные бонусы");
+        String validOriginsSave = o.toJson();
+        String corruptOriginsSave = validOriginsSave.replace("\"race\":\"orc\"", "\"race\":\"unknown_race\"");
+        boolean invalidOriginsRejected = false;
+        try { o2.fromJson(corruptOriginsSave); } catch (IllegalArgumentException invalidSave) { invalidOriginsRejected = true; }
+        ok(invalidOriginsRejected && o2.toJson().equals(validOriginsSave),
+                "неизвестная раса отклоняется без очистки действующего прогресса");
+
         ok(o.viewJson(P).contains("champion") || o.viewJson(P).contains("professions"), "viewJson");
 
         // подрасы и специализации профессий
@@ -93,7 +103,7 @@ public class OriginsTest {
         Origins o4 = new Origins(d); o4.hooks = new Origins.Hooks() {};
         o4.setRace("p:r", "high_elf");
         boolean elfOk = d.classes.values().stream().anyMatch(c -> c.reqRaces().contains("elf"));
-        ok(!elfOk || o4.options("p:r").keySet().stream().noneMatch(c -> !d.raceOk("high_elf", c.reqRaces())) || true, "расовые требования классов учитывают подрасу");
+        ok(o4.options("p:r").entrySet().stream().allMatch(e -> d.raceOk("high_elf", e.getKey().reqRaces()) || e.getValue() != null), "несовместимые классы для подрасы явно заблокированы");
 
         // глубина и широта: расширенные данные
         ok(d.races.size() >= 33 && d.classes.size() >= 60 && d.professions.size() >= 50, "широта: рас " + d.races.size() + ", классов " + d.classes.size() + ", профессий " + d.professions.size());
@@ -127,6 +137,27 @@ public class OriginsTest {
         OriginDefs badDefs = new OriginDefs();
         badDefs.load("{\"classes\":[{\"id\":\"a\",\"tier\":1},{\"id\":\"b\",\"tier\":2,\"from\":\"a\",\"also_from\":[\"zz\"],\"req_prof\":{\"nope\":1}}],\"professions\":[{\"id\":\"p\",\"ranks\":[{\"xp\":0}],\"req_classes\":[\"qq\"]}]}");
         ok(badDefs.validate().size() == 3, "проверка данных ловит неизвестные связи: " + badDefs.validate());
+        OriginDefs duplicateDefs = new OriginDefs();
+        duplicateDefs.load("{\"races\":[{\"id\":\"human\",\"name\":\"Human\"}]}");
+        boolean duplicateRaceRejected = false;
+        try { duplicateDefs.load("{\"races\":[{\"id\":\"human\",\"name\":\"Overwritten\"}]}"); }
+        catch (IllegalArgumentException duplicate) { duplicateRaceRejected = true; }
+        ok(duplicateRaceRejected && duplicateDefs.races.size() == 1
+                && duplicateDefs.races.get("human").name().equals("Human"),
+                "повторное определение расы отклоняется без частичной перезаписи датапака");
+        OriginDefs replacementSource = new OriginDefs();
+        replacementSource.load("{\"races\":[{\"id\":\"elf\",\"name\":\"Elf\"}]}");
+        duplicateDefs.replaceWith(replacementSource);
+        ok(duplicateDefs.races.size() == 1 && duplicateDefs.races.containsKey("elf")
+                && !duplicateDefs.races.containsKey("human"),
+                "перезагрузка определений заменяет удалённые записи, не накапливая устаревшие расы");
+        OriginDefs invalidReplacement = new OriginDefs();
+        invalidReplacement.load("{\"races\":[{\"id\":\"child\",\"parent\":\"missing\"}]}");
+        boolean invalidReplacementRejected = false;
+        try { duplicateDefs.replaceWith(invalidReplacement); } catch (IllegalArgumentException expected) { invalidReplacementRejected = true; }
+        ok(invalidReplacementRejected && duplicateDefs.races.containsKey("elf")
+                && !duplicateDefs.races.containsKey("child"),
+                "некорректный набор не заменяет последнюю корректную версию");
         // специализации: взаимоисключающие, по классам
         Origins o6 = new Origins(d); o6.hooks = new Origins.Hooks() {};
         String M = "p:m";

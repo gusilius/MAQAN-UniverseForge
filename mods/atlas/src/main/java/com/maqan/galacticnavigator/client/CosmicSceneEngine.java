@@ -17,6 +17,24 @@ import java.util.*;
 public final class CosmicSceneEngine {
     public enum PlacementSource { DATAPACK, SCHEMATIC, UNPLACED }
     public enum SceneLevel { UNIVERSE, GALAXY, SECTOR, SYSTEM, BODY }
+    public enum PositionFrame { SYSTEM_LOCAL, GALAXY, UNIVERSE, SCHEMATIC, UNKNOWN }
+
+    /** Explicitly separates a body's attached world from its travel destination. */
+    public record WorldBinding(String systemId, String bodyId, String attachedDimensionId,
+                               String travelDimensionId, String unlockingDimensionId,
+                               String systemTravelDimensionId) {
+        public boolean hasAttachedWorld() { return !attachedDimensionId.isBlank(); }
+        public boolean hasTravelDestination() { return !travelDimensionId.isBlank(); }
+        public boolean hasUnlockingDimension() { return !unlockingDimensionId.isBlank(); }
+    }
+
+    /** A coordinate together with its frame and whether it is canonical source data. */
+    public record PositionResult(Vector3 position, PositionFrame frame, boolean canonical) {
+        public PositionResult {
+            Objects.requireNonNull(position, "position");
+            Objects.requireNonNull(frame, "frame");
+        }
+    }
 
     public record Vector3(double x, double y, double z) {
         public static final Vector3 ZERO = new Vector3(0, 0, 0);
@@ -58,29 +76,400 @@ public final class CosmicSceneEngine {
         }
     }
 
+    private static final double SPATIAL_CELL_SIZE = 256.0;
+    private static final long MAX_SPATIAL_BUCKETS_PER_QUERY = 4096L;
+
     public record SceneSnapshot(String universeId, String universeName, long catalogRevision,
                                 double gameTime, List<SceneGalaxy> galaxies,
                                 List<SceneSector> sectors, List<SceneSystem> systems,
                                 int bodyCount, int datapackPlacedSystems,
-                                int schematicSystems, int unplacedSystems) {
+                                int schematicSystems, int unplacedSystems,
+                                Map<String, SceneSystem> systemIndex,
+                                Map<String, Map<String, SceneBody>> bodyIndex,
+                                Map<String, List<SceneSystem>> galaxyIndex,
+                                Map<String, List<SceneSystem>> sectorIndex,
+                                Map<String, List<SceneSystem>> spatialCellIndex,
+                                Map<String, Map<String, SceneBody>> parentBodyIndex,
+                                Map<String, Map<String, List<SceneBody>>> childBodyIndex,
+                                Map<String, List<SceneBody>> rootBodyIndex,
+                                Map<String, Set<String>> unresolvedParentIndex,
+                                Map<String, Set<String>> cyclicBodyIndex) {
         public SceneSnapshot {
             galaxies = List.copyOf(galaxies);
             sectors = List.copyOf(sectors);
             systems = List.copyOf(systems);
+
+            Map<String, SceneSystem> byId = new LinkedHashMap<>();
+            Map<String, Map<String, SceneBody>> bodiesBySystem = new LinkedHashMap<>();
+            Map<String, List<SceneSystem>> byGalaxy = new LinkedHashMap<>();
+            Map<String, List<SceneSystem>> bySector = new LinkedHashMap<>();
+            Map<String, List<SceneSystem>> bySpatialCell = new LinkedHashMap<>();
+            for (SceneSystem system : systems) {
+                if (system == null || system.id() == null || system.id().isBlank()) continue;
+                byId.putIfAbsent(system.id(), system);
+                Map<String, SceneBody> bodyMap = new LinkedHashMap<>();
+                for (SceneBody body : system.bodies()) {
+                    if (body != null && body.id() != null && !body.id().isBlank())
+                        bodyMap.putIfAbsent(body.id(), body);
+                }
+                bodiesBySystem.put(system.id(), Collections.unmodifiableMap(bodyMap));
+                byGalaxy.computeIfAbsent(normalizeGroup(system.galaxyId()), ignored -> new ArrayList<>()).add(system);
+                bySector.computeIfAbsent(normalizeGroup(system.sectorId()), ignored -> new ArrayList<>()).add(system);
+                if (system.placementSource() != PlacementSource.UNPLACED
+                        && system.universePosition() != null && system.universePosition().finite()) {
+                    Vector3 position = system.universePosition();
+                    String cell = spatialCellKey(position.x(), position.y(), position.z());
+                    if (cell != null)
+                        bySpatialCell.computeIfAbsent(cell, ignored -> new ArrayList<>()).add(system);
+                }
+            }
+            systemIndex = Collections.unmodifiableMap(byId);
+            bodyIndex = Collections.unmodifiableMap(bodiesBySystem);
+            galaxyIndex = immutableGroups(byGalaxy);
+            sectorIndex = immutableGroups(bySector);
+            spatialCellIndex = immutableGroups(bySpatialCell);
+
+            Map<String, Map<String, SceneBody>> parentsBySystem = new LinkedHashMap<>();
+            Map<String, Map<String, List<SceneBody>>> childrenBySystem = new LinkedHashMap<>();
+            Map<String, List<SceneBody>> rootsBySystem = new LinkedHashMap<>();
+            Map<String, Set<String>> unresolvedBySystem = new LinkedHashMap<>();
+            Map<String, Set<String>> cyclesBySystem = new LinkedHashMap<>();
+            for (SceneSystem system : systems) {
+                if (system == null || system.id() == null) continue;
+                Map<String, SceneBody> bodies = bodyIndex.getOrDefault(system.id(), Map.of());
+                Map<String, SceneBody> resolvedParents = new LinkedHashMap<>();
+                Map<String, List<SceneBody>> children = new LinkedHashMap<>();
+                List<SceneBody> roots = new ArrayList<>();
+                Set<String> unresolved = new LinkedHashSet<>();
+                Map<String, String> foldedIds = new HashMap<>();
+                bodies.keySet().forEach(id -> foldedIds.putIfAbsent(
+                        id.toLowerCase(Locale.ROOT), id));
+
+                for (SceneBody body : bodies.values()) {
+                    String parentId = body.parentId() == null ? "" : body.parentId().trim();
+                    if (parentId.isEmpty()) {
+                        roots.add(body);
+                        continue;
+                    }
+                    String resolvedId = bodies.containsKey(parentId)
+                            ? parentId : foldedIds.get(parentId.toLowerCase(Locale.ROOT));
+                    if (resolvedId == null) {
+                        unresolved.add(body.id());
+                        continue;
+                    }
+                    SceneBody parent = bodies.get(resolvedId);
+                    resolvedParents.put(body.id(), parent);
+                    children.computeIfAbsent(resolvedId, ignored -> new ArrayList<>()).add(body);
+                }
+
+                Set<String> cyclic = findCycles(bodies.keySet(), resolvedParents);
+                Map<String, List<SceneBody>> immutableChildren = new LinkedHashMap<>();
+                children.forEach((id, list) -> immutableChildren.put(id, List.copyOf(list)));
+                parentsBySystem.put(system.id(), Collections.unmodifiableMap(resolvedParents));
+                childrenBySystem.put(system.id(), Collections.unmodifiableMap(immutableChildren));
+                rootsBySystem.put(system.id(), List.copyOf(roots));
+                unresolvedBySystem.put(system.id(), Collections.unmodifiableSet(unresolved));
+                cyclesBySystem.put(system.id(), Collections.unmodifiableSet(cyclic));
+            }
+            parentBodyIndex = Collections.unmodifiableMap(parentsBySystem);
+            childBodyIndex = Collections.unmodifiableMap(childrenBySystem);
+            rootBodyIndex = Collections.unmodifiableMap(rootsBySystem);
+            unresolvedParentIndex = Collections.unmodifiableMap(unresolvedBySystem);
+            cyclicBodyIndex = Collections.unmodifiableMap(cyclesBySystem);
         }
+
+        private static Set<String> findCycles(Set<String> bodyIds,
+                                              Map<String, SceneBody> parents) {
+            Set<String> completed = new HashSet<>();
+            Set<String> cycles = new LinkedHashSet<>();
+            for (String start : bodyIds) {
+                if (completed.contains(start)) continue;
+                List<String> path = new ArrayList<>();
+                Map<String, Integer> pathPositions = new HashMap<>();
+                String current = start;
+                while (current != null && !completed.contains(current)) {
+                    Integer cycleStart = pathPositions.putIfAbsent(current, path.size());
+                    if (cycleStart != null) {
+                        cycles.addAll(path.subList(cycleStart, path.size()));
+                        break;
+                    }
+                    path.add(current);
+                    SceneBody parent = parents.get(current);
+                    current = parent == null ? null : parent.id();
+                }
+                completed.addAll(path);
+            }
+            return cycles;
+        }
+
+        /** Backwards-compatible constructor for callers that only provide scene data. */
+        public SceneSnapshot(String universeId, String universeName, long catalogRevision,
+                             double gameTime, List<SceneGalaxy> galaxies,
+                             List<SceneSector> sectors, List<SceneSystem> systems,
+                             int bodyCount, int datapackPlacedSystems,
+                             int schematicSystems, int unplacedSystems) {
+            this(universeId, universeName, catalogRevision, gameTime, galaxies, sectors, systems,
+                    bodyCount, datapackPlacedSystems, schematicSystems, unplacedSystems,
+                    Map.of(), Map.of(), Map.of(), Map.of(), Map.of(),
+                    Map.of(), Map.of(), Map.of(), Map.of(), Map.of());
+        }
+
         public Optional<SceneSystem> system(String id) {
-            return systems.stream().filter(s -> s.id().equals(id)).findFirst();
+            return Optional.ofNullable(systemIndex.get(id));
         }
+
         public Optional<SceneBody> body(String systemId, String bodyId) {
-            return system(systemId).stream().flatMap(s -> s.bodies().stream())
-                    .filter(b -> b.id().equals(bodyId)).findFirst();
+            return Optional.ofNullable(bodyIndex.getOrDefault(systemId, Map.of()).get(bodyId));
+        }
+
+        public List<SceneSystem> systemsInGalaxy(String galaxyId) {
+            return galaxyIndex.getOrDefault(normalizeGroup(galaxyId), List.of());
+        }
+
+        public List<SceneSystem> systemsInSector(String sectorId) {
+            return sectorIndex.getOrDefault(normalizeGroup(sectorId), List.of());
+        }
+
+        /** Stable body identity is scoped to its owning star system. */
+        public static String bodyKey(String systemId, String bodyId) {
+            return (systemId == null ? "" : systemId) + "::" + (bodyId == null ? "" : bodyId);
+        }
+
+        public Optional<SceneBody> parentBody(String systemId, String bodyId) {
+            return Optional.ofNullable(parentBodyIndex
+                    .getOrDefault(systemId, Map.of()).get(bodyId));
+        }
+
+        /** Position in the body's owning star-system frame, as supplied by the live orbital simulation. */
+        public Optional<PositionResult> bodySystemPosition(String systemId, String bodyId) {
+            SceneBody body = bodyIndex.getOrDefault(systemId, Map.of()).get(bodyId);
+            if (body == null || body.localPosition() == null || !body.localPosition().finite()
+                    || body.positionSource() == PlacementSource.UNPLACED) return Optional.empty();
+            return Optional.of(new PositionResult(body.localPosition(),
+                    PositionFrame.SYSTEM_LOCAL, body.positionSource() == PlacementSource.DATAPACK));
+        }
+
+        /**
+         * Returns the authored system origin with its real coordinate frame.
+         * galaxy_system_pos is intentionally NOT promoted to universe coordinates.
+         */
+        public Optional<PositionResult> systemPosition(String systemId) {
+            SceneSystem system = systemIndex.get(systemId);
+            if (system == null || system.universePosition() == null
+                    || !system.universePosition().finite()
+                    || system.placementSource() == PlacementSource.UNPLACED) return Optional.empty();
+            if (system.placementSource() == PlacementSource.SCHEMATIC)
+                return Optional.of(new PositionResult(system.universePosition(),
+                        PositionFrame.SCHEMATIC, false));
+            JsonObject source = system.sourceData();
+            if (source.has("universe_system_pos") || source.has("map_pos_global"))
+                return Optional.of(new PositionResult(system.universePosition(),
+                        PositionFrame.UNIVERSE, true));
+            if (source.has("galaxy_system_pos"))
+                return Optional.of(new PositionResult(system.universePosition(),
+                        PositionFrame.GALAXY, true));
+            return Optional.empty();
+        }
+
+        /** Adds system-local body coordinates to the authored system origin only when frames agree. */
+        public Optional<PositionResult> bodyPosition(String systemId, String bodyId) {
+            Optional<PositionResult> local = bodySystemPosition(systemId, bodyId);
+            Optional<PositionResult> origin = systemPosition(systemId);
+            if (local.isEmpty() || origin.isEmpty()) return Optional.empty();
+            PositionResult base = origin.get();
+            if (base.frame() != PositionFrame.UNIVERSE && base.frame() != PositionFrame.GALAXY)
+                return Optional.empty();
+            Vector3 offset = local.get().position();
+            Vector3 point = new Vector3(base.position().x() + offset.x(),
+                    base.position().y() + offset.y(), base.position().z() + offset.z());
+            if (!point.finite()) return Optional.empty();
+            return Optional.of(new PositionResult(point, base.frame(),
+                    base.canonical() && local.get().canonical()));
+        }
+
+        public Optional<PositionResult> bodyUniversePosition(String systemId, String bodyId) {
+            return bodyPosition(systemId, bodyId)
+                    .filter(position -> position.frame() == PositionFrame.UNIVERSE);
+        }
+
+        public List<SceneBody> childBodies(String systemId, String bodyId) {
+            return childBodyIndex.getOrDefault(systemId, Map.of())
+                    .getOrDefault(bodyId, List.of());
+        }
+
+        public List<SceneBody> rootBodies(String systemId) {
+            return rootBodyIndex.getOrDefault(systemId, List.of());
+        }
+
+        public boolean hasUnresolvedParent(String systemId, String bodyId) {
+            return unresolvedParentIndex.getOrDefault(systemId, Set.of()).contains(bodyId);
+        }
+
+        public boolean isInParentCycle(String systemId, String bodyId) {
+            return cyclicBodyIndex.getOrDefault(systemId, Set.of()).contains(bodyId);
+        }
+
+        /**
+         * Resolves dimension roles without treating an attached dimension as a
+         * unique system identifier or silently substituting a travel destination.
+         */
+        public Optional<WorldBinding> worldBinding(String systemId, String bodyId) {
+            SceneBody body = bodyIndex.getOrDefault(systemId, Map.of()).get(bodyId);
+            SceneSystem system = systemIndex.get(systemId);
+            if (body == null || system == null) return Optional.empty();
+            JsonObject bodyData = body.sourceData();
+            JsonObject systemData = system.sourceData();
+            String attached = firstNonBlank(bodyData, "dimension", "dimension_id",
+                    "attached_dimension_id", "attached_dimention_id");
+            String travel = firstNonBlank(bodyData, "travel_dimension");
+            String unlocking = firstNonBlank(bodyData,
+                    "category_unlocking_dimension", "unlocking_dimension");
+            String systemTravel = firstNonBlank(systemData, "travel_to_dimension", "travel_to");
+            return Optional.of(new WorldBinding(systemId, bodyId, attached, travel,
+                    unlocking, systemTravel));
+        }
+
+        private static String firstNonBlank(JsonObject source, String... keys) {
+            for (String key : keys) {
+                if (source == null || !source.has(key) || source.get(key).isJsonNull()) continue;
+                try {
+                    String value = source.get(key).getAsString().trim();
+                    if (!value.isBlank()) return value;
+                } catch (RuntimeException ignored) { }
+            }
+            return "";
+        }
+
+        /**
+         * Returns systems inside a sphere using a uniform 3D spatial hash.
+         * Very large query volumes fall back to a linear scan to avoid iterating
+         * millions of empty cells. Unplaced systems are never treated as origin.
+         */
+        public List<SceneSystem> systemsWithin(Vector3 center, double radius) {
+            if (center == null || !center.finite() || !Double.isFinite(radius) || radius < 0)
+                return List.of();
+            double radiusSquared = radius * radius;
+            if (!Double.isFinite(radiusSquared)) return systemsWithinLinear(center, radiusSquared);
+
+            long minX = cellCoordinate(center.x() - radius);
+            long maxX = cellCoordinate(center.x() + radius);
+            long minY = cellCoordinate(center.y() - radius);
+            long maxY = cellCoordinate(center.y() + radius);
+            long minZ = cellCoordinate(center.z() - radius);
+            long maxZ = cellCoordinate(center.z() + radius);
+            double bucketCount = ((double) maxX - minX + 1)
+                    * ((double) maxY - minY + 1) * ((double) maxZ - minZ + 1);
+            if (!Double.isFinite(bucketCount) || bucketCount > MAX_SPATIAL_BUCKETS_PER_QUERY)
+                return systemsWithinLinear(center, radiusSquared);
+
+            LinkedHashSet<SceneSystem> candidates = new LinkedHashSet<>();
+            for (long x = minX; ; x++) {
+                for (long y = minY; ; y++) {
+                    for (long z = minZ; ; z++) {
+                        List<SceneSystem> bucket = spatialCellIndex.get(cellKey(x, y, z));
+                        if (bucket != null) candidates.addAll(bucket);
+                        if (z == maxZ) break;
+                    }
+                    if (y == maxY) break;
+                }
+                if (x == maxX) break;
+            }
+            return filterWithin(candidates, center, radiusSquared);
+        }
+
+        private List<SceneSystem> systemsWithinLinear(Vector3 center, double radiusSquared) {
+            return filterWithin(systems, center, radiusSquared);
+        }
+
+        private static List<SceneSystem> filterWithin(Collection<SceneSystem> candidates,
+                                                       Vector3 center, double radiusSquared) {
+            List<SceneSystem> matches = new ArrayList<>();
+            for (SceneSystem system : candidates) {
+                if (system.placementSource() == PlacementSource.UNPLACED) continue;
+                Vector3 position = system.universePosition();
+                if (position == null || !position.finite()) continue;
+                double dx = position.x() - center.x();
+                double dy = position.y() - center.y();
+                double dz = position.z() - center.z();
+                if (dx * dx + dy * dy + dz * dz <= radiusSquared) matches.add(system);
+            }
+            return List.copyOf(matches);
+        }
+
+        private static long cellCoordinate(double coordinate) {
+            double cell = Math.floor(coordinate / SPATIAL_CELL_SIZE);
+            if (cell <= Long.MIN_VALUE) return Long.MIN_VALUE;
+            if (cell >= Long.MAX_VALUE) return Long.MAX_VALUE;
+            return (long) cell;
+        }
+
+        private static String spatialCellKey(double x, double y, double z) {
+            if (!Double.isFinite(x) || !Double.isFinite(y) || !Double.isFinite(z)) return null;
+            return cellKey(cellCoordinate(x), cellCoordinate(y), cellCoordinate(z));
+        }
+
+        private static String cellKey(long x, long y, long z) {
+            return x + ":" + y + ":" + z;
+        }
+
+        private static String normalizeGroup(String value) {
+            return value == null || value.isBlank() ? "__unassigned" : value;
+        }
+
+        private static Map<String, List<SceneSystem>> immutableGroups(
+                Map<String, List<SceneSystem>> source) {
+            Map<String, List<SceneSystem>> result = new LinkedHashMap<>();
+            source.forEach((key, value) -> result.put(key, List.copyOf(value)));
+            return Collections.unmodifiableMap(result);
         }
     }
 
+    private record CatalogSystem(String id, JsonObject data,
+                                 List<Map.Entry<String, JsonObject>> bodies) {}
+
     private static long revision;
     private static JsonObject lastRoot;
+    private static List<CatalogSystem> cachedCatalog = List.of();
+    private static Map<String, CatalogSystem> cachedSystems = Map.of();
 
     private CosmicSceneEngine() {}
+
+    /**
+     * GalaxyCatalog publishes replacement roots on resource reload. Build the
+     * structural index once per root; per-frame captures reuse its immutable
+     * entry lists and only refresh time-dependent positions.
+     */
+    private static void refreshCatalogIndex(JsonObject root) {
+        if (root == lastRoot) return;
+        lastRoot = root;
+        revision++;
+        List<CatalogSystem> systems = new ArrayList<>();
+        Map<String, CatalogSystem> byId = new LinkedHashMap<>();
+        if (root != null && root.has("universes") && root.get("universes").isJsonObject()) {
+            JsonObject universes = root.getAsJsonObject("universes");
+            for (Map.Entry<String, JsonElement> systemEntry : universes.entrySet()) {
+                if (!systemEntry.getValue().isJsonObject()) continue;
+                String id = systemEntry.getKey();
+                JsonObject data = systemEntry.getValue().getAsJsonObject();
+                List<Map.Entry<String, JsonObject>> bodies = new ArrayList<>();
+                JsonElement rawBodies = data.get("planets");
+                if (rawBodies != null && rawBodies.isJsonObject()) {
+                    for (Map.Entry<String, JsonElement> bodyEntry
+                            : rawBodies.getAsJsonObject().entrySet()) {
+                        if (bodyEntry.getValue().isJsonObject()) {
+                            bodies.add(new AbstractMap.SimpleImmutableEntry<>(
+                                    bodyEntry.getKey(), bodyEntry.getValue().getAsJsonObject()));
+                        }
+                    }
+                }
+                CatalogSystem indexed = new CatalogSystem(id, data, List.copyOf(bodies));
+                systems.add(indexed);
+                byId.put(id, indexed);
+            }
+        }
+        cachedCatalog = List.copyOf(systems);
+        cachedSystems = Collections.unmodifiableMap(byId);
+    }
 
     /**
      * Captures all currently loaded systems in the active universe. No system
@@ -88,20 +477,23 @@ public final class CosmicSceneEngine {
      */
     public static synchronized SceneSnapshot capture(String universeId, double gameTime) {
         JsonObject root = GalaxyCatalog.ROOT;
-        if (root != lastRoot) {
-            lastRoot = root;
-            revision++;
-        }
-        JsonObject universe = GalaxyCatalog.universe(universeId);
+        refreshCatalogIndex(root);
+        CatalogSystem selectedCatalog = cachedSystems.get(universeId);
+        JsonObject universe = selectedCatalog == null ? new JsonObject() : selectedCatalog.data();
         String universeName = GalaxyCatalog.text(universe, "name", universeId);
         List<SceneSystem> systems = new ArrayList<>();
         int bodyCount = 0, datapack = 0, schematic = 0, unplaced = 0;
 
-        for (String systemId : GalaxyCatalog.universes()) {
-            JsonObject systemData = GalaxyCatalog.universe(systemId);
-            if (!belongsToUniverse(systemId, systemData, universeId, universe)) continue;
-            List<SceneBody> bodies = new ArrayList<>();
-            for (Map.Entry<String, JsonObject> entry : GalaxyCatalog.objects(systemId)) {
+        List<Map.Entry<String, JsonObject>> selectedBodies = selectedCatalog == null
+                ? List.of() : selectedCatalog.bodies();
+        for (CatalogSystem catalogSystem : cachedCatalog) {
+            String systemId = catalogSystem.id();
+            JsonObject systemData = catalogSystem.data();
+            List<Map.Entry<String, JsonObject>> sourceBodies = catalogSystem.bodies();
+            if (!belongsToUniverse(systemData, sourceBodies, universeId, universe,
+                    selectedBodies)) continue;
+            List<SceneBody> bodies = new ArrayList<>(sourceBodies.size());
+            for (Map.Entry<String, JsonObject> entry : sourceBodies) {
                 JsonObject source = entry.getValue();
                 String bodyId = GalaxyCatalog.text(source, "catalog_id", entry.getKey());
                 String kind = firstText(source, "kind", "display_type", "type");
@@ -122,10 +514,10 @@ public final class CosmicSceneEngine {
             if (placement == null) placement = Vector3.ZERO;
             if (placementSource == PlacementSource.DATAPACK) datapack++;
             else unplaced++;
-            String galaxyId = groupValue(systemId, systemData, "galaxy_id", "galaxy");
-            String galaxyName = groupLabel(systemId, systemData, galaxyId, "galaxy_name", "galaxy");
-            String sectorId = groupValue(systemId, systemData, "sector_id", "sector");
-            String sectorName = groupLabel(systemId, systemData, sectorId, "sector_name", "sector");
+            String galaxyId = groupValue(sourceBodies, systemData, "galaxy_id", "galaxy");
+            String galaxyName = groupLabel(sourceBodies, systemData, galaxyId, "galaxy_name", "galaxy");
+            String sectorId = groupValue(sourceBodies, systemData, "sector_id", "sector");
+            String sectorName = groupLabel(sourceBodies, systemData, sectorId, "sector_name", "sector");
             systems.add(new SceneSystem(systemId,
                     GalaxyCatalog.text(systemData, "name", systemId),
                     galaxyId, galaxyName, sectorId, sectorName, placement,
@@ -153,11 +545,13 @@ public final class CosmicSceneEngine {
                 galaxies, sectors, systems, bodyCount, datapack, schematic, unplaced);
     }
 
-    private static boolean belongsToUniverse(String systemId, JsonObject system,
-                                             String selectedId, JsonObject selectedUniverse) {
+    private static boolean belongsToUniverse(JsonObject system,
+                                             List<Map.Entry<String, JsonObject>> systemBodies,
+                                             String selectedId, JsonObject selectedUniverse,
+                                             List<Map.Entry<String, JsonObject>> selectedBodies) {
         String explicit = firstText(system, "universe_id", "universe", "cosmos_id");
         if (explicit.isBlank()) {
-            for (Map.Entry<String, JsonObject> body : GalaxyCatalog.objects(systemId)) {
+            for (Map.Entry<String, JsonObject> body : systemBodies) {
                 explicit = firstText(body.getValue(), "universe_id", "universe", "cosmos_id");
                 if (!explicit.isBlank()) break;
             }
@@ -165,7 +559,7 @@ public final class CosmicSceneEngine {
         if (explicit.isBlank()) return true;
         String selectedGroup = firstText(selectedUniverse, "universe_id", "universe", "cosmos_id");
         if (selectedGroup.isBlank()) {
-            for (Map.Entry<String, JsonObject> body : GalaxyCatalog.objects(selectedId)) {
+            for (Map.Entry<String, JsonObject> body : selectedBodies) {
                 selectedGroup = firstText(body.getValue(), "universe_id", "universe", "cosmos_id");
                 if (!selectedGroup.isBlank()) break;
             }
@@ -261,21 +655,22 @@ public final class CosmicSceneEngine {
         return result;
     }
 
-    private static String groupValue(String systemId, JsonObject system, String... keys) {
+    private static String groupValue(List<Map.Entry<String, JsonObject>> bodies,
+                                     JsonObject system, String... keys) {
         String value = firstText(system, keys);
         if (!value.isBlank()) return value;
-        for (Map.Entry<String, JsonObject> body : GalaxyCatalog.objects(systemId)) {
+        for (Map.Entry<String, JsonObject> body : bodies) {
             value = firstText(body.getValue(), keys);
             if (!value.isBlank()) return value;
         }
         return "__unassigned";
     }
 
-    private static String groupLabel(String systemId, JsonObject system, String fallback,
-                                      String... keys) {
+    private static String groupLabel(List<Map.Entry<String, JsonObject>> bodies,
+                                     JsonObject system, String fallback, String... keys) {
         String label = firstText(system, keys);
         if (!label.isBlank()) return label;
-        for (Map.Entry<String, JsonObject> body : GalaxyCatalog.objects(systemId)) {
+        for (Map.Entry<String, JsonObject> body : bodies) {
             label = firstText(body.getValue(), keys);
             if (!label.isBlank()) return label;
         }

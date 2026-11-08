@@ -6,6 +6,10 @@ import com.maqan.galacticnavigator.navigation.NavigatorPlayerPosition;
 import com.maqan.galacticnavigator.navigation.NavigatorPlayerPositionTracker;
 import com.maqan.galacticnavigator.navigation.NavigatorWaypoint;
 import com.maqan.galacticnavigator.navigation.NavigatorWaypointStore;
+import com.maqan.galacticnavigator.navigation.NavigatorWorldForgeMapStore;
+import com.maqan.galacticnavigator.navigation.NavigatorPlatformSelectionBridge;
+import com.maqan.galacticnavigator.navigation.WorldForgeMapSnapshot;
+import com.maqan.galacticnavigator.navigation.WorldForgeMapGeometry;
 import com.maqan.galacticnavigator.navigation.SurfaceTerrainProjection;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -14,6 +18,7 @@ import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import java.util.List;
+import java.util.Map;
 
 /** Fog-of-war map: only chunks explicitly recorded while the player occupied them are rendered. */
 public final class NavigatorSurfaceMapScreen extends Screen {
@@ -29,10 +34,13 @@ public final class NavigatorSurfaceMapScreen extends Screen {
     private double cameraYaw=Math.toRadians(35),cameraPitch=Math.toRadians(48),terrainHeightScale=0.055;
     private boolean cameraDrag;
     private Button viewModeButton;
-    private Button layerButton,depthDownButton,depthUpButton,routeModeButton,clearRouteButton;
+    private Button layerButton,depthDownButton,depthUpButton,routeModeButton,clearRouteButton,politicalLayerButton;
     private ExploredSurfaceRoutePlanner.Mode routeMode=ExploredSurfaceRoutePlanner.Mode.WALK;
     private ExploredSurfaceRoutePlanner.Result surfaceRoute;
     private String selectedWaypointId="";
+    private String selectedWorldForgeEntityId="";
+    /** 0 provinces, 1 realms, 2 both, 3 political overlays hidden. */
+    private int politicalLayer;
     private int routeStartX=Integer.MIN_VALUE,routeStartZ=Integer.MIN_VALUE;
     private static final int BACKGROUND=0xF0060B16;
 
@@ -41,6 +49,7 @@ public final class NavigatorSurfaceMapScreen extends Screen {
         super(Component.literal("MAQAN · Surface Map"));
         this.parent=parent;
         this.dimension=dimension==null?"":dimension;
+        NavigatorWorldForgeMapStore.reload();
         NavigatorPlayerPosition p=NavigatorPlayerPositionTracker.current();
         if(p!=null&&this.dimension.equals(p.dimensionId())){
             centerChunkX=((int)Math.floor(p.x()))>>4;
@@ -74,6 +83,15 @@ public final class NavigatorSurfaceMapScreen extends Screen {
         clearRouteButton=addRenderableWidget(Button.builder(Component.literal("CLEAR ROUTE"),b->{
             selectedWaypointId="";surfaceRoute=null;routeStartX=routeStartZ=Integer.MIN_VALUE;
         }).bounds(482,48,96,20).build());
+        politicalLayerButton=addRenderableWidget(Button.builder(Component.literal("POLITICAL: PROVINCES"),b->{
+            politicalLayer=(politicalLayer+1)%4;
+            b.setMessage(Component.literal(switch(politicalLayer){
+                case 0 -> "POLITICAL: PROVINCES";
+                case 1 -> "POLITICAL: REALMS";
+                case 2 -> "POLITICAL: BOTH";
+                default -> "POLITICAL: OFF";
+            }));
+        }).bounds(586,48,154,20).build());
         addRenderableWidget(Button.builder(Component.literal("OPEN 3D PLANET MAP"),
                 b->MaqanScreenHost.open(minecraft, new NavigatorTerrain3DScreen(dimension,this)))
                 .bounds(Math.max(18,width-190),height-68,172,20).build());
@@ -147,6 +165,8 @@ public final class NavigatorSurfaceMapScreen extends Screen {
         }
 
         if(!underground&&terrain3D) renderTerrain3D(g,chunks,mapLeft,mapTop,mapRight,mapBottom,cell);
+        if(!underground&&!terrain3D)
+            renderWorldForgeOverlay(g,cell,mapLeft,mapTop,mapRight,mapBottom,player);
 
         if(!underground&&surfaceRoute!=null&&surfaceRoute.found()){
             List<ExploredSurfaceRoutePlanner.Point> routePoints=surfaceRoute.points();
@@ -205,6 +225,215 @@ public final class NavigatorSurfaceMapScreen extends Screen {
         super.render(g,mouseX,mouseY,partialTick);
         MaqanUiTheme.skinWidgets(this,g,font);
     }
+    /** Renders validated political and settlement layers from the active WorldForge dimension. */
+    private void renderWorldForgeOverlay(GuiGraphics g,double cell,int left,int top,int right,int bottom,
+                                         NavigatorPlayerPosition player){
+        WorldForgeMapSnapshot snapshot=NavigatorWorldForgeMapStore.current();
+        if(snapshot==null)return;
+        List<WorldForgeMapSnapshot.Territory> territories=
+                NavigatorWorldForgeMapStore.territories(dimension);
+        List<WorldForgeMapSnapshot.Feature> features=
+                NavigatorWorldForgeMapStore.features(dimension);
+        int drawnTerritories=0,drawnFeatures=0;
+        if(politicalLayer==0||politicalLayer==2)for(WorldForgeMapSnapshot.Territory territory:territories){
+            List<List<WorldForgeMapGeometry.Point>> rings=new ArrayList<>();
+            List<List<WorldForgeMapSnapshot.Vertex>> sourceRings=territory.rings;
+            if(sourceRings==null||sourceRings.isEmpty()){
+                if(territory.vertices!=null&&!territory.vertices.isEmpty())sourceRings=List.of(territory.vertices);
+            }
+            if(sourceRings==null)continue;
+            for(List<WorldForgeMapSnapshot.Vertex> sourceRing:sourceRings){
+                if(sourceRing==null||sourceRing.size()<3)continue;
+                List<WorldForgeMapGeometry.Point> points=new ArrayList<>(sourceRing.size());
+                for(WorldForgeMapSnapshot.Vertex vertex:sourceRing){
+                    double[] projected=project(vertex.x/16.0,vertex.z/16.0,cell,left,top,right,bottom,player);
+                    points.add(new WorldForgeMapGeometry.Point(projected[0],projected[1]));
+                }
+                List<WorldForgeMapGeometry.Point> clipped=WorldForgeMapGeometry.clipPolygon(points,left,top,right,bottom);
+                if(clipped.size()>=3)rings.add(clipped);
+            }
+            if(rings.isEmpty())continue;
+            int color=territory.id.equals(selectedWorldForgeEntityId)
+                    ?0xFF65E6FF:(territory.color==0?0xFF69B8E8:(territory.color|0xFF000000));
+            int alpha=Math.max(0,Math.min(160,territory.fill_alpha));
+            if(alpha>0)for(WorldForgeMapGeometry.Span span:
+                    WorldForgeMapGeometry.scanlineSpansRings(rings,left,top,right,bottom))
+                g.fill(span.xStart(),span.y(),span.xEndExclusive(),span.y()+1,(alpha<<24)|(color&0x00FFFFFF));
+            for(List<WorldForgeMapGeometry.Point> ring:rings)for(int i=0;i<ring.size();i++){
+                WorldForgeMapGeometry.Point a=ring.get(i),b=ring.get((i+1)%ring.size());
+                drawLine(g,(int)Math.round(a.x()),(int)Math.round(a.y()),
+                        (int)Math.round(b.x()),(int)Math.round(b.y()),color);
+            }
+            WorldForgeMapGeometry.Point label=WorldForgeMapGeometry.interiorLabelPointRings(rings,left,top,right,bottom);
+            if(insideMap(label.x(),label.y(),left,top,right,bottom))
+                g.drawString(font,territory.name,(int)Math.round(label.x())+3,
+                        (int)Math.round(label.y())-font.lineHeight/2,color,false);
+            drawnTerritories++;
+        }
+        int drawnRealms=0;
+        if(politicalLayer==1||politicalLayer==2)for(WorldForgeMapSnapshot.PoliticalBoundary boundary:
+                NavigatorWorldForgeMapStore.boundaries(dimension)){
+            int color=boundary.id.equals(selectedWorldForgeEntityId)?0xFFFFD36A:
+                    (boundary.color==0?0xFFFFD36A:(boundary.color|0xFF000000));
+            for(List<WorldForgeMapSnapshot.Vertex> sourceRing:boundary.rings){
+                if(sourceRing==null||sourceRing.size()<3)continue;
+                List<WorldForgeMapGeometry.Point> ring=new ArrayList<>(sourceRing.size());
+                for(WorldForgeMapSnapshot.Vertex vertex:sourceRing){
+                    double[] point=project(vertex.x/16.0,vertex.z/16.0,cell,left,top,right,bottom,player);
+                    ring.add(new WorldForgeMapGeometry.Point(point[0],point[1]));
+                }
+                List<WorldForgeMapGeometry.Point> clipped=WorldForgeMapGeometry.clipPolygon(
+                        ring,left,top,right,bottom);
+                for(int i=0;i<clipped.size();i++){
+                    WorldForgeMapGeometry.Point a=clipped.get(i),b=clipped.get((i+1)%clipped.size());
+                    drawLine(g,(int)Math.round(a.x()),(int)Math.round(a.y()),
+                            (int)Math.round(b.x()),(int)Math.round(b.y()),color);
+                }
+            }
+            drawnRealms++;
+        }
+        for(WorldForgeMapSnapshot.Feature feature:features){
+            double[] projected=project(feature.x/16.0,feature.z/16.0,cell,
+                    left,top,right,bottom,player);
+            if(!insideMap(projected[0],projected[1],left,top,right,bottom))continue;
+            int x=(int)Math.round(projected[0]),y=(int)Math.round(projected[1]);
+            int color=feature.id.equals(selectedWorldForgeEntityId)
+                    ?0xFF65E6FF:(feature.color==0?0xFFFFC66D:(feature.color|0xFF000000));
+            g.fill(x-4,y-4,x+5,y+5,0xDD07101A);
+            g.fill(x-2,y-2,x+3,y+3,color);
+            drawnFeatures++;
+        }
+        if(drawnTerritories>0||drawnFeatures>0||drawnRealms>0)
+            g.drawString(font,"WORLDFORGE  ·  "+drawnTerritories+" PROVINCES  ·  "
+                    +drawnRealms+" REALMS  ·  "+drawnFeatures+" FEATURES",left+8,top+8,0xFF9BD7F1,false);
+    }
+
+
+    /** Selects an imported WorldForge feature or territory and publishes its identity to MAQAN Inspector. */
+    private boolean selectWorldForgeAt(double mouseX,double mouseY) {
+        if(underground||terrain3D)return false;
+        int left=18,top=74,right=width-18,bottom=height-48;
+        if(!insideMap(mouseX,mouseY,left,top,right,bottom))return false;
+        WorldForgeMapSnapshot snapshot=NavigatorWorldForgeMapStore.current();
+        if(snapshot==null)return false;
+        NavigatorPlayerPosition player=NavigatorPlayerPositionTracker.current();
+        double cell=18.0*zoom;
+
+        // POI markers take priority over territory fills.
+        WorldForgeMapSnapshot.Feature nearest=null;
+        double bestDistance=64.0;
+        for(WorldForgeMapSnapshot.Feature feature:NavigatorWorldForgeMapStore.features(dimension)){
+            double[] point=project(feature.x/16.0,feature.z/16.0,cell,left,top,right,bottom,player);
+            double dx=point[0]-mouseX,dy=point[1]-mouseY,distance=dx*dx+dy*dy;
+            if(distance<=bestDistance){bestDistance=distance;nearest=feature;}
+        }
+        if(nearest!=null){
+            selectedWorldForgeEntityId=nearest.id;
+            List<String> context=new ArrayList<>();
+            addContext(context,"kind",nearest.kind);
+            addContext(context,"subtype",nearest.subtype);
+            addContext(context,"realm",nearest.realm_id);
+            addContext(context,"territory",nearest.territory_id);
+            addContext(context,"race",nearest.race_id);
+            addContext(context,"culture",nearest.culture_id);
+            if(nearest.attributes!=null){
+                int included=0;
+                for(Map.Entry<String,String> entry:nearest.attributes.entrySet()){
+                    if(included++>=16)break;
+                    addContext(context,entry.getKey(),entry.getValue());
+                }
+            }
+            NavigatorPlatformSelectionBridge.publish("worldforge:feature/"+nearest.id,
+                    nearest.kind,nearest.name,dimension,String.join(" · ",context));
+            return true;
+        }
+
+        if(politicalLayer==1||politicalLayer==2){
+            WorldForgeMapSnapshot.PoliticalBoundary nearestBoundary=null;
+            double nearestDistance=36.0;
+            for(WorldForgeMapSnapshot.PoliticalBoundary boundary:NavigatorWorldForgeMapStore.boundaries(dimension)){
+                for(List<WorldForgeMapSnapshot.Vertex> sourceRing:boundary.rings){
+                    if(sourceRing==null||sourceRing.size()<2)continue;
+                    List<WorldForgeMapGeometry.Point> ring=new ArrayList<>(sourceRing.size());
+                    for(WorldForgeMapSnapshot.Vertex vertex:sourceRing){
+                        double[] point=project(vertex.x/16.0,vertex.z/16.0,cell,left,top,right,bottom,player);
+                        ring.add(new WorldForgeMapGeometry.Point(point[0],point[1]));
+                    }
+                    for(int i=0;i<ring.size();i++){
+                        var a=ring.get(i);var b=ring.get((i+1)%ring.size());
+                        double distance=segmentDistanceSquared(mouseX,mouseY,a.x(),a.y(),b.x(),b.y());
+                        if(distance<=nearestDistance){nearestDistance=distance;nearestBoundary=boundary;}
+                    }
+                }
+            }
+            if(nearestBoundary!=null){
+                selectedWorldForgeEntityId=nearestBoundary.id;
+                List<String> context=new ArrayList<>();
+                addContext(context,"realm id",nearestBoundary.realm_id);
+                addContext(context,"ruler",nearestBoundary.ruler);
+                addContext(context,"relation",nearestBoundary.relation);
+                addContext(context,"overlord",nearestBoundary.overlord_id);
+                if(nearestBoundary.subjects!=null)addContext(context,"subjects",String.join(", ",nearestBoundary.subjects));
+                if(nearestBoundary.attributes!=null){
+                    addContext(context,"government",nearestBoundary.attributes.get("realm.government"));
+                    addContext(context,"race",nearestBoundary.attributes.get("realm.race"));
+                    addContext(context,"culture",nearestBoundary.attributes.get("realm.culture"));
+                }
+                NavigatorPlatformSelectionBridge.publish("worldforge:realm/"+nearestBoundary.realm_id,
+                        "realm",nearestBoundary.name,dimension,String.join(" · ",context));
+                return true;
+            }
+        }
+        if(politicalLayer==1)return false;
+
+        List<WorldForgeMapSnapshot.Territory> territories=
+                NavigatorWorldForgeMapStore.territories(dimension);
+        for(int index=territories.size()-1;index>=0;index--){
+            WorldForgeMapSnapshot.Territory territory=territories.get(index);
+            List<List<WorldForgeMapGeometry.Point>> rings=new ArrayList<>();
+            List<List<WorldForgeMapSnapshot.Vertex>> sourceRings=territory.rings;
+            if(sourceRings==null||sourceRings.isEmpty()){
+                if(territory.vertices!=null&&!territory.vertices.isEmpty())sourceRings=List.of(territory.vertices);
+            }
+            if(sourceRings==null)continue;
+            for(List<WorldForgeMapSnapshot.Vertex> sourceRing:sourceRings){
+                if(sourceRing==null||sourceRing.size()<3)continue;
+                List<WorldForgeMapGeometry.Point> ring=new ArrayList<>(sourceRing.size());
+                for(WorldForgeMapSnapshot.Vertex vertex:sourceRing){
+                    double[] point=project(vertex.x/16.0,vertex.z/16.0,cell,left,top,right,bottom,player);
+                    ring.add(new WorldForgeMapGeometry.Point(point[0],point[1]));
+                }
+                rings.add(ring);
+            }
+            if(!WorldForgeMapGeometry.containsPointRings(rings,mouseX,mouseY))continue;
+            selectedWorldForgeEntityId=territory.id;
+            List<String> context=new ArrayList<>();
+            addContext(context,"realm",territory.realm_name);
+            addContext(context,"government",territory.government);
+            addContext(context,"administrative title",territory.administrative_title_id);
+            addContext(context,"control",territory.control_status);
+            addContext(context,"race",territory.race_id);
+            addContext(context,"culture",territory.culture_id);
+            if(territory.attributes!=null)addContext(context,"ruler",territory.attributes.get("realm_ruler"));
+            NavigatorPlatformSelectionBridge.publish("worldforge:territory/"+territory.id,
+                    "province",territory.name,dimension,String.join(" · ",context));
+            return true;
+        }
+        return false;
+    }
+
+    private static double segmentDistanceSquared(double px,double py,double ax,double ay,double bx,double by){
+        double dx=bx-ax,dy=by-ay,length=dx*dx+dy*dy;
+        if(length<=1e-12){double x=px-ax,y=py-ay;return x*x+y*y;}
+        double t=Math.max(0.0,Math.min(1.0,((px-ax)*dx+(py-ay)*dy)/length));
+        double x=px-(ax+t*dx),y=py-(ay+t*dy);
+        return x*x+y*y;
+    }
+
+    private static void addContext(List<String> target,String label,String value){
+        if(value!=null&&!value.isBlank())target.add(label+": "+value.trim());
+    }
+
     private record TerrainPixel(double depth,int x,int y,int color) {}
     private void renderTerrain3D(GuiGraphics g,List<NavigatorExplorationStore.ExploredChunk> chunks,
                                  int left,int top,int right,int bottom,double cell){
@@ -354,6 +583,7 @@ public final class NavigatorSurfaceMapScreen extends Screen {
     @Override public boolean mouseClicked(double x,double y,int button){
         if(super.mouseClicked(x,y,button))return true;
         if(button==1&&selectWaypointAt(x,y))return true;
+        if(button==0&&selectWorldForgeAt(x,y))return true;
         if((button==0||button==2)&&x>=18&&x<=width-18&&y>=74&&y<=height-48){
             dragging=true;dragX=x;dragY=y;cameraDrag=button==2;return true;
         }
@@ -370,7 +600,17 @@ public final class NavigatorSurfaceMapScreen extends Screen {
         return super.mouseDragged(x,y,button,dx,dy);
     }
     @Override public boolean mouseScrolled(double x,double y,double delta){
-        zoom=Math.max(0.35,Math.min(4.0,zoom*(delta>0?1.15:1.0/1.15)));
+        if (delta == 0) return false;
+        int left=18,top=74,right=width-18,bottom=height-48;
+        if (!insideMap(x,y,left,top,right,bottom)) return super.mouseScrolled(x,y,delta);
+        double factor=delta>0?1.15:1.0/1.15;
+        double nextZoom=Math.max(0.35,Math.min(4.0,zoom*factor));
+        if (nextZoom==zoom) return true;
+        double centerX=(left+right)/2.0,centerY=(top+bottom)/2.0;
+        // Preserve the world point beneath the cursor while changing scale.
+        panX=x-centerX-(x-centerX-panX)*(nextZoom/zoom);
+        panY=y-centerY-(y-centerY-panY)*(nextZoom/zoom);
+        zoom=nextZoom;
         return true;
     }
     @Override public void onClose(){if(minecraft!=null)MaqanScreenHost.back(minecraft, parent);else super.onClose();}

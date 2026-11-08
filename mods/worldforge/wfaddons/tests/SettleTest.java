@@ -3,6 +3,7 @@ package dev.worldforge.tests;
 import dev.worldforge.settle.*;
 
 import java.nio.file.*;
+import java.util.*;
 
 public class SettleTest {
     static int fails;
@@ -12,6 +13,8 @@ public class SettleTest {
     static Defs defs() throws Exception {
         Defs d = new Defs();
         d.add(Files.readString(Path.of("wf-settlements/src/main/resources/data/wf_settle/wf_settle/base.json")));
+        d.add(Files.readString(Path.of("wf-settlements/src/main/resources/data/wf_settle/wf_settle/economy.json")));
+        d.add(Files.readString(Path.of("wf-settlements/src/main/resources/data/wf_settle/wf_settle/extra.json")));
         return d;
     }
 
@@ -29,8 +32,55 @@ public class SettleTest {
     public static void main(String[] a) throws Exception {
         Defs d = defs();
         ok(d.validate().stream().noneMatch(m -> !m.startsWith("Предупреждение")), "набор данных без ошибок: " + d.validate());
+        ok(d.professions.containsKey("trainer") && d.buildings.get("barracks").jobs.getOrDefault("trainer", 0) == 1,
+                "казармы требуют рабочего-инструктора");
+        ok(d.buildings.get("archery_range") != null && d.buildings.get("stable") != null
+                && d.buildings.get("siege_workshop") != null,
+                "стрельбище, конюшня и осадная мастерская загружаются из датапака");
+        ok(d.buildings.get("archery_range").requires.contains("barracks")
+                && d.buildings.get("stable").requires.contains("barracks")
+                && d.buildings.get("siege_workshop").requires.contains("smithy"),
+                "специализированные военные здания имеют технологические зависимости");
+        Settlement supply = fresh(d, 0);
+        double supplyWood = supply.amount("wood"), supplyStone = supply.amount("stone");
+        ok(!supply.spend(Map.of("wood", 10, "stone", 999))
+                && supply.amount("wood") == supplyWood && supply.amount("stone") == supplyStone,
+                "нехватка одного ресурса не списывает частично остальные");
+        ok(supply.spend(Map.of("wood", 10, "stone", 5))
+                && supply.amount("wood") == supplyWood - 10 && supply.amount("stone") == supplyStone - 5,
+                "снабжение военного найма списывается одной атомарной операцией");
+
+        Flow flow = new Flow();
+        flow.record(1, "wood", 5, true);
+        double validFlow = flow.perMinute(2, "wood", true);
+        flow.record(Double.NaN, "wood", 100, true);
+        flow.record(Double.POSITIVE_INFINITY, "wood", 100, true);
+        flow.record(2, "wood", Double.NaN, true);
+        flow.record(2, "wood", Double.POSITIVE_INFINITY, true);
+        flow.record(2, "wood", -1, true);
+        flow.record(2, "", 100, true);
+        ok(flow.perMinute(2, "wood", true) == validFlow, "невалидные события не портят статистику производства");
+        ok(flow.perMinute(Double.NaN, "wood", true) == 0 && flow.perMinute(Double.POSITIVE_INFINITY, "wood", true) == 0, "некорректное время запроса статистики безопасно");
+        List<Object> corruptedFlow = new ArrayList<>();
+        corruptedFlow.add(Map.of("t", 1L, "r", "wood", "p", Double.NaN, "c", 2.0));
+        corruptedFlow.add(Map.of("t", 2L, "r", "stone", "p", 3.0, "c", -1.0));
+        corruptedFlow.add("broken-entry");
+        corruptedFlow.add(Map.of("t", 3L, "r", "food", "p", 4.0, "c", 1.0));
+        Flow restoredFlow = new Flow();
+        restoredFlow.load(corruptedFlow);
+        ok(restoredFlow.resources().equals(Set.of("food")) && restoredFlow.perMinute(4, "food", true) > 0, "загрузка статистики пропускает повреждённые записи");
 
         Settlement s = fresh(d, 4);
+        String unchanged = s.toJson();
+        s.tick(Double.NaN);
+        s.tick(Double.POSITIVE_INFINITY);
+        s.tick(Double.NEGATIVE_INFINITY);
+        s.tick(-1);
+        s.tick(0);
+        ok(s.toJson().equals(unchanged), "невалидный шаг времени не меняет поселение");
+        boolean oversizedRejected = false;
+        try { s.tick(Settlement.MAX_TICK + 1); } catch (IllegalArgumentException ex) { oversizedRejected = true; }
+        ok(oversizedRejected && s.toJson().equals(unchanged), "чрезмерный шаг времени отклоняется до симуляции");
         Building h = s.place("house", 0, 0);
         s.tick(1);
         ok(h.state == Building.State.BUILDING && s.amount("wood") == 80, "стройка началась, материалы списаны");
@@ -50,8 +100,10 @@ public class SettleTest {
         ok(throwsOrder(() -> s.place("granary", 30, 30)), "амбар требует лесопилку");
         ok(throwsOrder(() -> s.place("house", 1, 1)), "нельзя строить поверх другого здания");
         ok(throwsOrder(() -> s.place("nope", 50, 50)), "неизвестное здание отклоняется");
-        s.place("sawmill", 20, 20);
-        ok(throwsOrder(() -> s.cancel(lc.uid)) || true, "снос проверяется");
+        Building mill = s.place("sawmill", 20, 20);
+        s.tick(60);
+        ok(mill.state == Building.State.DONE, "лесопилка действительно построена перед проверкой зависимости");
+        ok(throwsOrder(() -> s.cancel(lc.uid)), "нельзя снести лесной лагерь, пока от него зависит построенная лесопилка");
 
         // отмена с возвратом
         Settlement c = fresh(d, 0);
@@ -103,12 +155,36 @@ public class SettleTest {
         Settlement cap = fresh(d, 0);
         ok(cap.add("wood", 1000) == 0 || cap.amount("wood") <= 100, "склад ограничен");
 
+        Settlement manual = fresh(d, 1);
+        Worker commanded = manual.workers.get(0);
+        manual.moveTo(commanded.id, 12.5, -7.25);
+        ok(commanded.manualOrder && commanded.building == 0 && manual.targetOf(commanded)[0] == 12.5,
+                "приказ RTS задаёт индивидуальную точку и снимает назначение здания");
+        manual.auto = true; manual.tick(1);
+        ok(commanded.manualOrder && commanded.building == 0, "автораспределение не перехватывает рабочего с ручным приказом");
+        Settlement manualBack = Settlement.fromJson(manual.toJson(), d);
+        Worker restoredCommand = manualBack.worker(commanded.id);
+        ok(restoredCommand.manualOrder && restoredCommand.orderX == 12.5 && restoredCommand.orderZ == -7.25,
+                "ручной приказ рабочего сохраняется и восстанавливается");
+        manual.holdAt(commanded.id, 3.0, 4.0);
+        ok(commanded.manualOrder && commanded.orderX == 3.0 && commanded.orderZ == 4.0
+                && commanded.status.contains("удерживать"), "приказ удержания фиксирует позицию рабочего");
+        manual.moveTo(commanded.id, 900.0, -1250.0);
+        ok(commanded.manualOrder && commanded.orderX == 900.0 && commanded.orderZ == -1250.0,
+                "приказ RTS допускает перемещение в удалённую точку карты");
+        boolean badMoveRejected = false;
+        try { manual.moveTo(commanded.id, Double.NaN, 0); } catch (Settlement.OrderException expectedMove) { badMoveRejected = true; }
+        ok(badMoveRejected && commanded.manualOrder, "некорректные координаты не сбрасывают действующий приказ");
+
         // детерминизм и сохранение
         Settlement x = fresh(d, 5), y = fresh(d, 5);
         for (Settlement t : new Settlement[]{x, y}) { t.place("house", 0, 0); t.place("lumber_camp", 10, 0); t.place("farm", 20, 0); t.tick(500); }
         ok(x.toJson().equals(y.toJson()), "две одинаковые симуляции совпадают");
+        if (!x.workers.isEmpty()) x.workers.get(0).person = "c-person-roundtrip";
         Settlement r = Settlement.fromJson(x.toJson(), d);
-        ok(r.toJson().equals(x.toJson()), "сохранение и загрузка без потерь");
+        ok(r.toJson().equals(x.toJson()), "сохранение и загрузка без потерь, включая ссылку на личность");
+        ok(!r.workers.isEmpty() && r.workers.get(0).person.equals("c-person-roundtrip"),
+                "ссылка рабочего на CharacterRegistry сохраняется как стабильный foreign key");
         x.tick(100); r.tick(100);
         ok(x.toJson().equals(r.toJson()), "после загрузки симуляция идёт так же");
 

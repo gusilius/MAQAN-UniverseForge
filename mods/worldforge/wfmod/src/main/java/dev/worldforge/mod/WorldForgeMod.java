@@ -191,6 +191,7 @@ public class WorldForgeMod {
                 .then(Commands.literal("info").executes(c -> info(c.getSource())))
                 .then(EditorCommands.build())
                 .then(MapCommands.marker())
+                .then(Commands.literal("export").executes(c -> exportAtlasSnapshot(c.getSource())))
                 .then(MapCommands.web())
                 .then(MapCommands.tpxz())
                 .then(Commands.literal("reload").executes(c -> {
@@ -211,6 +212,24 @@ public class WorldForgeMod {
                 .then(Commands.literal("realms").executes(c -> listRealms(c.getSource())))
                 .then(Commands.literal("realm").then(Commands.argument("name", StringArgumentType.greedyString())
                         .executes(c -> realmInfo(c.getSource(), StringArgumentType.getString(c, "name"))))));
+    }
+
+    private static int exportAtlasSnapshot(CommandSourceStack source) {
+        ServerLevel level = source.getLevel();
+        if (!(level.getChunkSource().getGenerator() instanceof MapChunkGenerator generator)) {
+            source.sendFailure(Component.literal("В этом измерении нет генератора worldforge:image"));
+            return 0;
+        }
+        try {
+            Path output = WorldForgeSnapshotExporter.export(source.getServer(), level, generator.data());
+            source.sendSuccess(() -> Component.literal(
+                    "Atlas snapshot exported for all loaded WorldForge dimensions · " + output), true);
+            return 1;
+        } catch (IOException | RuntimeException error) {
+            LOGGER.error("WorldForge: Atlas snapshot export failed", error);
+            source.sendFailure(Component.literal("Atlas export failed: " + error.getMessage()));
+            return 0;
+        }
     }
 
     private static MapData dataOf(CommandSourceStack s) {

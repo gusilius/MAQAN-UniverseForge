@@ -24,9 +24,15 @@ final class WorkerControl {
         return false;
     }
 
+    static boolean mayControl(ServerPlayer p, Colony colony) {
+        return p.hasPermissions(2) || p.server.isSingleplayerOwner(p.getGameProfile())
+                || (colony != null && p.getUUID().toString().equals(colony.owner));
+    }
+
     static String command(ServerPlayer p, OrderPacket o) {
         ServerLevel lv = p.serverLevel();
         int done = 0;
+        boolean denied = false;
         String where = "";
         for (String id : o.ids()) {
             Entity e;
@@ -38,21 +44,38 @@ final class WorkerControl {
             if (!(e instanceof WFWorker w)) continue;
             Colony c = SettleMod.colony(w.colonyId);
             if (c == null || w.worker() == null) continue;
+            if (!mayControl(p, c)) { denied = true; continue; }
             if (o.action() == OrderPacket.RELEASE) {
                 try { c.s.unassign(w.workerId); done++; } catch (RuntimeException ignored) {}
                 continue;
             }
+            if (o.action() == OrderPacket.WORK_STOP || o.action() == OrderPacket.WORK_HOLD) {
+                try {
+                    double x = w.getX() - c.cx, z = w.getZ() - c.cz;
+                    c.s.holdAt(w.workerId, x, z);
+                    done++;
+                    where = o.action() == OrderPacket.WORK_STOP ? "остановиться" : "удерживать позицию";
+                } catch (RuntimeException ex) { where = ex.getMessage(); }
+                continue;
+            }
             Building b = c.buildingAt((int) Math.floor(o.x()), (int) Math.floor(o.z()));
-            if (b == null) continue;
             try {
-                c.s.assign(w.workerId, b.uid);
-                where = b.def.name;
+                if (b == null) {
+                    c.s.moveTo(w.workerId, o.x() - c.cx, o.z() - c.cz);
+                    where = "точку назначения";
+                } else {
+                    c.s.assign(w.workerId, b.uid);
+                    where = b.def.name;
+                }
                 done++;
             } catch (RuntimeException ex) {
-                where = ex.getMessage();                       // здание заполнено / не подходит профессия
+                where = ex.getMessage();
             }
         }
-        if (done == 0) return o.action() == OrderPacket.RELEASE ? "Рабочие не выбраны" : where.isEmpty() ? "Здесь нет здания своего поселения" : where;
+        if (done == 0) {
+            if (denied) return "Это поселение не ваше: приказы рабочим отдаёт его правитель";
+            return o.action() == OrderPacket.RELEASE ? "Рабочие не выбраны" : where.isEmpty() ? "Здесь нет здания своего поселения" : where;
+        }
         return o.action() == OrderPacket.RELEASE ? "Освобождено рабочих: " + done : "Отправлено в «" + where + "»: " + done;
     }
 }

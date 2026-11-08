@@ -216,9 +216,9 @@ public class TroopsMod {
                     p.displayClientMessage(Component.literal("Собран " + n.name + " (" + n.members.size() + ")"), true);
                 }
             }
-            case OrderPacket.WORK, OrderPacket.RELEASE -> {
+            case OrderPacket.WORK, OrderPacket.RELEASE, OrderPacket.WORK_STOP, OrderPacket.WORK_HOLD -> {
                 if (!ModList.get().isLoaded("wf_settle") || !WorkerControl.anyWorker(p, o)) return;
-                if (!may(p)) { p.displayClientMessage(Component.literal("Рабочими управляют операторы"), true); return; }
+                // WorkerControl проверяет владельца каждого поселения; глобальный операторский gate здесь неверен.
                 p.displayClientMessage(Component.literal(WorkerControl.command(p, o)), true);
             }
             case OrderPacket.BUILD_LIST -> {
@@ -227,7 +227,7 @@ public class TroopsMod {
             }
             case OrderPacket.BUILD -> {
                 if (!ModList.get().isLoaded("wf_settle")) return;
-                if (!may(p)) { p.displayClientMessage(Component.literal("Строить могут операторы"), true); return; }
+                // BuildControl validates the target colony owner and every assigned worker.
                 p.displayClientMessage(Component.literal(BuildControl.place(p, o.target(), (int) Math.floor(o.x()), (int) Math.floor(o.z()), o.ids())), true);
             }
             default -> {}
@@ -275,7 +275,7 @@ public class TroopsMod {
         e.getDispatcher().register(Commands.literal("wftroops")
                 .then(Commands.literal("types").executes(c -> {
                     for (TroopDefs.Unit u : DEFS.units.values())
-                        c.getSource().sendSuccess(() -> Component.literal(u.id() + ": " + u.name() + " [" + u.role() + "] " + u.cost() + " зол."), false);
+                        c.getSource().sendSuccess(() -> Component.literal(u.id() + ": " + u.name() + " [" + u.role() + "] " + u.cost() + " зол. | здание: " + DEFS.recruitmentBuilding(u)), false);
                     return 1;
                 }))
                 .then(Commands.literal("raise")
@@ -313,93 +313,232 @@ public class TroopsMod {
                 })));
     }
 
-    /** Наём отряда: платит игрок золотыми самородками (оператор в творческом режиме - бесплатно) или казна государства (realm, только оператор). */
+    /** Наём только из завершённого и укомплектованного профильного здания; списывает снабжение поселения и золото игрока/казны. */
     private static int raise(CommandSourceStack src, String type, int n, String realm) {
         ServerPlayer p;
-        try {
-            p = src.getPlayerOrException();
-        } catch (Exception ex) {
-            src.sendFailure(Component.literal("Только для игрока"));
+        try { p = src.getPlayerOrException(); }
+        catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
+
+        TroopDefs.Unit unit = DEFS.units.get(type);
+        if (unit == null) { src.sendFailure(Component.literal("Нет такого типа: " + type)); return 0; }
+        if (!ModList.get().isLoaded("wf_settle")) {
+            src.sendFailure(Component.literal("Для найма требуется wf_settle и построенное военное здание."));
             return 0;
         }
-        TroopDefs.Unit u = DEFS.units.get(type);
-        if (u == null) { src.sendFailure(Component.literal("Нет такого типа: " + type)); return 0; }
-        int cost = u.cost() * n;
-        if (!realm.isEmpty()) {
-            if (!TreasuryApi.spend(realm, cost, "Наём: " + u.name())) { src.sendFailure(Component.literal("В казне " + realm + " не хватает золота: нужно " + cost)); return 0; }
-        } else if (!p.isCreative()) {
-            int have = 0;
-            for (var st : p.getInventory().items) if (st.is(Items.GOLD_NUGGET)) have += st.getCount();
-            if (have < cost) { src.sendFailure(Component.literal("Нужно " + cost + " золотых самородков, есть " + have)); return 0; }
-            int left = cost;
-            for (var st : p.getInventory().items) if (left > 0 && st.is(Items.GOLD_NUGGET)) { int take = Math.min(left, st.getCount()); st.shrink(take); left -= take; }
-        }
-        ServerLevel lv = p.serverLevel();
-        List<String> ids = new ArrayList<>();
-        List<TroopEntity> made = new ArrayList<>();
-        List<Formations.Slot> slots = Formations.slots(Formations.Type.BLOCK, n, 1.6);
-        List<double[]> pos = Formations.place(slots, p.getX(), p.getZ(), p.getYRot() + 180);
+
         String owner = p.getUUID().toString();
-        for (int i = 0; i < n; i++) {
-            TroopEntity t = TROOP.get().create(lv);
-            if (t == null) continue;
-            int x = (int) Math.floor(pos.get(i)[0]), z = (int) Math.floor(pos.get(i)[1]);
-            int y = lv.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
-            t.moveTo(pos.get(i)[0], y, pos.get(i)[1], p.getYRot(), 0);
-            t.setup(u, owner);
-            t.realm = realm;
-            made.add(t);
-            ids.add(t.getUUID().toString());
+        ServerLevel level = p.serverLevel();
+        String requiredBuilding = DEFS.recruitmentBuilding(unit);
+        dev.worldforge.settle.mc.SettleMod.RecruitmentSite site =
+                dev.worldforge.settle.mc.SettleMod.recruitmentSite(level, owner, requiredBuilding, p.getX(), p.getZ());
+        if (site == null) {
+            src.sendFailure(Component.literal("Нет доступного готового здания «" + requiredBuilding
+                    + "» с назначенным военным инструктором в радиусе 128 блоков."));
+            return 0;
         }
-        Squads.Squad s = SQUADS.create(owner, null, ids);
-        s.realm = realm; s.cx = p.getX(); s.cz = p.getZ();
-        for (TroopEntity t : made) { t.setSquadId(s.id); lv.addFreshEntity(t); }
-        src.sendSuccess(() -> Component.literal("Нанят " + s.name + ": " + made.size() + " × " + u.name() + " за " + cost), false);
-        return made.size();
+
+        Map<String, Integer> totalSupply = new LinkedHashMap<>();
+        for (var entry : DEFS.recruitmentCost(unit).entrySet()) {
+            long total = (long) entry.getValue() * n;
+            if (total > Integer.MAX_VALUE) { src.sendFailure(Component.literal("Слишком большой заказ")); return 0; }
+            totalSupply.put(entry.getKey(), (int) total);
+        }
+        if (!site.colony().s.canPay(totalSupply)) {
+            src.sendFailure(Component.literal("В поселении «" + site.colony().s.name
+                    + "» не хватает материалов и припасов для найма: " + totalSupply));
+            return 0;
+        }
+
+        int goldCost = Math.multiplyExact(unit.cost(), n);
+        if (realm.isEmpty() && !p.isCreative()) {
+            int have = 0;
+            for (var stack : p.getInventory().items) if (stack.is(Items.GOLD_NUGGET)) have += stack.getCount();
+            if (have < goldCost) {
+                src.sendFailure(Component.literal("Нужно " + goldCost + " золотых самородков, есть " + have));
+                return 0;
+            }
+        }
+
+        List<Formations.Slot> slots = Formations.slots(Formations.Type.BLOCK, n, 1.6);
+        List<double[]> positions = Formations.place(slots, site.spawn().getX() + 0.5, site.spawn().getZ() + 0.5, p.getYRot() + 180);
+        List<TroopEntity> recruits = new ArrayList<>();
+        for (int i = 0; i < n; i++) {
+            TroopEntity troop = TROOP.get().create(level);
+            if (troop == null) {
+                src.sendFailure(Component.literal("Не удалось подготовить всех новобранцев; ресурсы не списаны."));
+                return 0;
+            }
+            int x = (int) Math.floor(positions.get(i)[0]), z = (int) Math.floor(positions.get(i)[1]);
+            int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+            troop.moveTo(positions.get(i)[0], y, positions.get(i)[1], p.getYRot(), 0);
+            troop.setup(unit, owner);
+            troop.realm = realm.isEmpty() ? dev.worldforge.settle.mc.SettleMod.realmOf(site.colony()) : realm;
+            recruits.add(troop);
+        }
+
+        List<String> ids = new ArrayList<>();
+        for (TroopEntity troop : recruits) ids.add(troop.getUUID().toString());
+        Squads.Squad squad = SQUADS.create(owner, null, ids);
+        squad.realm = recruits.get(0).realm;
+        squad.cx = site.spawn().getX();
+        squad.cz = site.spawn().getZ();
+        for (TroopEntity troop : recruits) {
+            troop.setSquadId(squad.id);
+            if (!level.addFreshEntity(troop)) {
+                discardPrepared(recruits);
+                src.sendFailure(Component.literal("Мир отклонил создание новобранцев; платежи не списаны."));
+                return 0;
+            }
+        }
+        if (!dev.worldforge.settle.mc.SettleMod.payRecruitment(site, totalSupply)) {
+            discardPrepared(recruits);
+            src.sendFailure(Component.literal("Склад изменился во время найма; отряд удалён, ресурсы не списаны."));
+            return 0;
+        }
+        if (!realm.isEmpty() && !TreasuryApi.spend(realm, goldCost, "Наём: " + unit.name())) {
+            dev.worldforge.settle.mc.SettleMod.refundRecruitment(site, totalSupply);
+            discardPrepared(recruits);
+            src.sendFailure(Component.literal("В казне " + realm + " не хватает золота: нужно " + goldCost));
+            return 0;
+        }
+        if (realm.isEmpty() && !p.isCreative()) {
+            int left = goldCost;
+            for (var stack : p.getInventory().items) if (left > 0 && stack.is(Items.GOLD_NUGGET)) {
+                int take = Math.min(left, stack.getCount());
+                stack.shrink(take);
+                left -= take;
+            }
+        }
+        src.sendSuccess(() -> Component.literal("Из «" + site.building().def.name + "» выпущен отряд «"
+                + squad.name + "»: " + recruits.size() + " × " + unit.name() + "; золото "
+                + goldCost + ", снабжение " + totalSupply), false);
+        return recruits.size();
     }
 
     /** Призыв из армии wf-army: люди снимаются с армии, 1 солдат = Muster.SCALE человек; государство армии платит жалованье. */
     private static int muster(CommandSourceStack src, int armyId, int n) {
-        if (!ModList.get().isLoaded("wf_army")) { src.sendFailure(Component.literal("Нужен мод wf_army")); return 0; }
-        ServerPlayer p;
-        try {
-            p = src.getPlayerOrException();
-        } catch (Exception ex) {
-            src.sendFailure(Component.literal("Только для игрока"));
+        if (!ModList.get().isLoaded("wf_army") || !ModList.get().isLoaded("wf_settle")) {
+            src.sendFailure(Component.literal("Для призыва нужны wf_army и wf_settle."));
             return 0;
         }
-        ArmyLink.Found f = ArmyLink.find(armyId);
-        if (f == null) { src.sendFailure(Component.literal("Нет армии " + armyId)); return 0; }
-        Muster.Plan plan = Muster.plan(f.army().units, n, DEFS.armyTypes());
-        if (plan.total() == 0) { src.sendFailure(Component.literal("В армии нет столько людей: на одного солдата нужно " + Muster.SCALE + ", осадные машины не призываются")); return 0; }
-        ArmyLink.take(f.army(), plan.menTaken());
-        ServerLevel lv = p.serverLevel();
-        String owner = p.getUUID().toString();
-        List<TroopEntity> made = new ArrayList<>();
-        List<String> ids = new ArrayList<>();
-        List<Formations.Slot> slots = Formations.slots(Formations.Type.BLOCK, plan.total(), 1.6);
-        List<double[]> pos = Formations.place(slots, p.getX(), p.getZ(), p.getYRot() + 180);
-        int k = 0;
-        for (var e : plan.soldiers().entrySet()) {
-            TroopDefs.Unit u = DEFS.units.get(e.getKey());
-            if (u == null) continue;
-            for (int i = 0; i < e.getValue(); i++, k++) {
-                TroopEntity t = TROOP.get().create(lv);
-                if (t == null) continue;
-                int x = (int) Math.floor(pos.get(k)[0]), z = (int) Math.floor(pos.get(k)[1]);
-                t.moveTo(pos.get(k)[0], lv.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z), pos.get(k)[1], p.getYRot(), 0);
-                t.setup(u, owner);
-                t.realm = f.army().realm;
-                t.armyId = armyId;
-                made.add(t);
-                ids.add(t.getUUID().toString());
+        ServerPlayer player;
+        try { player = src.getPlayerOrException(); }
+        catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
+        ArmyLink.Found found = ArmyLink.find(armyId);
+        if (found == null) { src.sendFailure(Component.literal("Нет армии " + armyId)); return 0; }
+
+        Muster.Plan plan = Muster.plan(found.army().units, n, DEFS.armyTypes());
+        if (plan.total() == 0) {
+            src.sendFailure(Component.literal("В армии недостаточно людей для призыва; на одного солдата нужно "
+                    + Muster.SCALE + " человек."));
+            return 0;
+        }
+
+        String owner = player.getUUID().toString();
+        ServerLevel level = player.serverLevel();
+        Map<String, dev.worldforge.settle.mc.SettleMod.RecruitmentSite> sites = new LinkedHashMap<>();
+        Map<String, Map<String, Integer>> supplies = new LinkedHashMap<>();
+        Map<String, List<TroopEntity>> batches = new LinkedHashMap<>();
+
+        for (var entry : plan.soldiers().entrySet()) {
+            TroopDefs.Unit unit = DEFS.units.get(entry.getKey());
+            if (unit == null) {
+                src.sendFailure(Component.literal("В army_map указан неизвестный тип войска: " + entry.getKey()));
+                return 0;
+            }
+            String buildingId = DEFS.recruitmentBuilding(unit);
+            var site = sites.computeIfAbsent(buildingId, id ->
+                    dev.worldforge.settle.mc.SettleMod.recruitmentSite(level, owner, id, player.getX(), player.getZ()));
+            if (site == null) {
+                src.sendFailure(Component.literal("Для призыва «" + unit.name() + "» требуется готовое здание «"
+                        + buildingId + "» с инструктором в радиусе 128 блоков."));
+                return 0;
+            }
+            Map<String, Integer> required = supplies.computeIfAbsent(buildingId, id -> new LinkedHashMap<>());
+            for (var resource : DEFS.recruitmentCost(unit).entrySet()) {
+                long amount = (long) resource.getValue() * entry.getValue();
+                if (amount > Integer.MAX_VALUE) { src.sendFailure(Component.literal("Слишком большой заказ")); return 0; }
+                required.merge(resource.getKey(), (int) amount, Integer::sum);
+            }
+            List<TroopEntity> batch = batches.computeIfAbsent(buildingId, id -> new ArrayList<>());
+            for (int i = 0; i < entry.getValue(); i++) {
+                TroopEntity troop = TROOP.get().create(level);
+                if (troop == null) {
+                    src.sendFailure(Component.literal("Не удалось подготовить весь призыв; армия и склады не изменены."));
+                    return 0;
+                }
+                troop.setup(unit, owner);
+                troop.realm = found.army().realm;
+                troop.armyId = armyId;
+                batch.add(troop);
             }
         }
-        Squads.Squad s = SQUADS.create(owner, f.army().name, ids);
-        s.realm = f.army().realm; s.cx = p.getX(); s.cz = p.getZ();
-        for (TroopEntity t : made) { t.setSquadId(s.id); lv.addFreshEntity(t); }
-        src.sendSuccess(() -> Component.literal("Призван отряд «" + s.name + "»: " + made.size() + " солдат из армии " + armyId + " (осталось людей: " + f.army().men() + ")"), false);
-        return made.size();
+
+        for (var entry : supplies.entrySet()) {
+            var site = sites.get(entry.getKey());
+            if (!site.colony().s.canPay(entry.getValue())) {
+                src.sendFailure(Component.literal("В поселении «" + site.colony().s.name
+                        + "» не хватает снабжения для " + entry.getKey() + ": " + entry.getValue()));
+                return 0;
+            }
+        }
+
+        // Prepare all physical soldiers before touching army manpower or settlement stock.
+        List<TroopEntity> allPrepared = new ArrayList<>();
+        for (List<TroopEntity> batch : batches.values()) allPrepared.addAll(batch);
+        for (var entry : batches.entrySet()) {
+            var site = sites.get(entry.getKey());
+            List<TroopEntity> batch = entry.getValue();
+            List<Formations.Slot> slots = Formations.slots(Formations.Type.BLOCK, batch.size(), 1.6);
+            List<double[]> positions = Formations.place(slots, site.spawn().getX() + 0.5,
+                    site.spawn().getZ() + 0.5, player.getYRot() + 180);
+            for (int i = 0; i < batch.size(); i++) {
+                TroopEntity troop = batch.get(i);
+                int x = (int) Math.floor(positions.get(i)[0]), z = (int) Math.floor(positions.get(i)[1]);
+                int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+                troop.moveTo(positions.get(i)[0], y, positions.get(i)[1], player.getYRot(), 0);
+            }
+        }
+
+        int total = 0;
+        for (var entry : batches.entrySet()) {
+            var site = sites.get(entry.getKey());
+            List<TroopEntity> batch = entry.getValue();
+            List<String> ids = new ArrayList<>();
+            for (TroopEntity troop : batch) ids.add(troop.getUUID().toString());
+            Squads.Squad squad = SQUADS.create(owner, found.army().name, ids);
+            squad.realm = found.army().realm;
+            squad.cx = site.spawn().getX();
+            squad.cz = site.spawn().getZ();
+            for (TroopEntity troop : batch) {
+                troop.setSquadId(squad.id);
+                if (!level.addFreshEntity(troop)) {
+                    discardPrepared(allPrepared);
+                    src.sendFailure(Component.literal("Мир отклонил создание призванных солдат; армия и склады не изменены."));
+                    return 0;
+                }
+            }
+            total += batch.size();
+        }
+
+        ArmyLink.take(found.army(), plan.menTaken());
+        List<String> paidBuildings = new ArrayList<>();
+        for (var entry : supplies.entrySet()) {
+            if (!dev.worldforge.settle.mc.SettleMod.payRecruitment(sites.get(entry.getKey()), entry.getValue())) {
+                for (String paid : paidBuildings)
+                    dev.worldforge.settle.mc.SettleMod.refundRecruitment(sites.get(paid), supplies.get(paid));
+                ArmyLink.give(armyId, plan.menTaken());
+                discardPrepared(allPrepared);
+                src.sendFailure(Component.literal("Склад изменился во время призыва; люди возвращены в армию, отряд удалён."));
+                return 0;
+            }
+            paidBuildings.add(entry.getKey());
+        }
+
+        int recruited = total;
+        src.sendSuccess(() -> Component.literal("Из военных зданий поселения призвано " + recruited
+                + " солдат армии " + armyId + " (оставшиеся люди: " + found.army().men() + ")"), false);
+        return recruited;
     }
 
     /** Выжившие призванные солдаты игрока возвращаются в свои армии; павшие потеряны. */
@@ -428,6 +567,13 @@ public class TroopsMod {
         int men = back;
         src.sendSuccess(() -> Component.literal("Вернулось в армии людей: " + men), false);
         return gone.size();
+    }
+
+    private static void discardPrepared(List<TroopEntity> troops) {
+        for (TroopEntity troop : troops) {
+            onDeath(troop);
+            troop.discard();
+        }
     }
 
     static Entity find(UUID id) {

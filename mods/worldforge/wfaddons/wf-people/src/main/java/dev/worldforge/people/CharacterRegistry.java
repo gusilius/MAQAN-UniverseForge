@@ -27,7 +27,8 @@ public final class CharacterRegistry {
 
     public Character get(String id) { return byId.get(id); }
 
-    public Collection<Character> all() { return byId.values(); }
+    /** Read-only view: callers must use registry operations so lifecycle events cannot be bypassed. */
+    public Collection<Character> all() { return Collections.unmodifiableCollection(byId.values()); }
 
     public int size() { return byId.size(); }
 
@@ -88,8 +89,23 @@ public final class CharacterRegistry {
 
     public void marry(String a, String b) {
         Character x = require(a), y = require(b);
+        if (x == y) throw new IllegalArgumentException("Персонаж не может вступить в брак с самим собой");
+        if (!x.alive || !y.alive) throw new IllegalStateException("Умерший персонаж не может вступить в брак");
+        clearDeceasedSpouse(x);
+        clearDeceasedSpouse(y);
+        if (!x.spouse.isEmpty()) throw new IllegalStateException(x.name + " уже состоит в браке");
+        if (!y.spouse.isEmpty()) throw new IllegalStateException(y.name + " уже состоит в браке");
         x.spouse = y.id;
         y.spouse = x.id;
+    }
+
+    /** A deceased or missing spouse does not permanently prevent remarriage. */
+    private void clearDeceasedSpouse(Character character) {
+        if (character.spouse.isEmpty()) return;
+        Character spouse = byId.get(character.spouse);
+        if (spouse != null && spouse.alive) return;
+        if (spouse != null && character.id.equals(spouse.spouse)) spouse.spouse = "";
+        character.spouse = "";
     }
 
     public Character addChild(Character father, Character mother, String name, String gender, int year) {
@@ -136,21 +152,99 @@ public final class CharacterRegistry {
 
     @SuppressWarnings("unchecked")
     public void fromJson(String json) {
+        // Parse and validate into an isolated snapshot. Never destroy the live registry
+        // until the entire save has been accepted.
+        Object parsed = Json.parse(json == null ? "" : json);
+        if (!(parsed instanceof Map<?, ?> raw)) throw new IllegalArgumentException("Повреждён корень сохранения людей");
+        if (!"wf-people/1".equals(raw.get("format"))) throw new IllegalArgumentException("Неверный формат людей");
+        Object rawNext = raw.get("next");
+        if (!(rawNext instanceof Number nextNumber)) throw new IllegalArgumentException("Отсутствует счётчик персонажей");
+        long requestedNext = nextNumber.longValue();
+        if (requestedNext < 1 || requestedNext > Integer.MAX_VALUE) throw new IllegalArgumentException("Недопустимый счётчик персонажей");
+        if (!(raw.get("characters") instanceof List<?> entries)) throw new IllegalArgumentException("Отсутствует список персонажей");
+
+        Map<String, Character> loaded = new LinkedHashMap<>();
+        int maxNumericId = 0;
+        for (Object value : entries) {
+            if (!(value instanceof Map<?, ?> m)) throw new IllegalArgumentException("Повреждена запись персонажа");
+            String id = requiredString(m, "id");
+            String name = requiredString(m, "name");
+            if (id.isBlank() || name.isBlank()) throw new IllegalArgumentException("Пустой ID или имя персонажа");
+            Character c = new Character(id, name);
+            c.house = optionalString(m, "house");
+            c.culture = optionalString(m, "culture");
+            c.gender = optionalString(m, "gender");
+            if (c.gender.isBlank()) c.gender = "m";
+            Object birth = m.get("birth");
+            if (!(birth instanceof Number birthNumber)) throw new IllegalArgumentException("Нет года рождения: " + id);
+            c.birthYear = birthNumber.intValue();
+            Object alive = m.get("alive");
+            if (!(alive instanceof Boolean)) throw new IllegalArgumentException("Некорректный статус жизни персонажа " + id);
+            c.alive = (Boolean) alive;
+            c.father = optionalString(m, "father");
+            c.mother = optionalString(m, "mother");
+            c.spouse = optionalString(m, "spouse");
+
+            readStringList(m.get("children"), c.children, "children", id);
+            Object rawPosts = m.get("posts");
+            if (!(rawPosts instanceof List<?> posts)) throw new IllegalArgumentException("Повреждены должности персонажа " + id);
+            for (Object post : posts) {
+                if (!(post instanceof List<?> pair) || pair.size() != 2
+                        || !(pair.get(0) instanceof String role) || role.isBlank()
+                        || !(pair.get(1) instanceof String place) || place.isBlank())
+                    throw new IllegalArgumentException("Повреждена должность персонажа " + id);
+                if (c.has(role, place)) throw new IllegalArgumentException("Повторная должность персонажа " + id);
+                c.posts.add(new Character.Post(role, place));
+            }
+            Object rawTraits = m.get("traits");
+            if (!(rawTraits instanceof List<?> traits)) throw new IllegalArgumentException("Повреждены черты персонажа " + id);
+            Set<String> uniqueTraits = new HashSet<>();
+            for (Object trait : traits) {
+                if (!(trait instanceof String s) || s.isBlank() || !uniqueTraits.add(s))
+                    throw new IllegalArgumentException("Повреждена или повторяется черта персонажа " + id);
+                c.traits.add(s);
+            }
+            Object props = m.get("props");
+            if (props != null) {
+                if (!(props instanceof Map<?, ?> p)) throw new IllegalArgumentException("Повреждены свойства персонажа " + id);
+                for (Map.Entry<?, ?> entry : p.entrySet()) {
+                    if (!(entry.getKey() instanceof String key)) throw new IllegalArgumentException("Некорректный ключ свойства " + id);
+                    c.props.put(key, entry.getValue());
+                }
+            }
+            if (loaded.putIfAbsent(id, c) != null) throw new IllegalArgumentException("Повторный ID персонажа: " + id);
+            if (id.matches("c[0-9]+")) {
+                try { maxNumericId = Math.max(maxNumericId, Integer.parseInt(id.substring(1))); }
+                catch (NumberFormatException ignored) { /* non-allocatable legacy identifier */ }
+            }
+        }
+        if (maxNumericId == Integer.MAX_VALUE) throw new IllegalArgumentException("Исчерпаны ID персонажей");
+        int safeNext = (int) Math.max(requestedNext, (long) maxNumericId + 1L);
         byId.clear();
-        Map<String, Object> root = (Map<String, Object>) Json.parse(json);
-        if (!"wf-people/1".equals(root.get("format"))) throw new IllegalArgumentException("Неверный формат людей");
-        next = ((Number) root.get("next")).intValue();
-        for (Object o : (List<Object>) root.get("characters")) {
-            Map<String, Object> m = (Map<String, Object>) o;
-            Character c = new Character((String) m.get("id"), (String) m.get("name"));
-            c.house = (String) m.get("house"); c.culture = (String) m.get("culture"); c.gender = (String) m.get("gender");
-            c.birthYear = ((Number) m.get("birth")).intValue(); c.alive = Boolean.TRUE.equals(m.get("alive"));
-            c.father = (String) m.get("father"); c.mother = (String) m.get("mother"); c.spouse = (String) m.get("spouse");
-            for (Object k : (List<Object>) m.get("children")) c.children.add((String) k);
-            for (Object p : (List<Object>) m.get("posts")) { List<Object> l = (List<Object>) p; c.posts.add(new Character.Post((String) l.get(0), (String) l.get(1))); }
-            for (Object t : (List<Object>) m.get("traits")) c.traits.add((String) t);
-            if (m.get("props") instanceof Map) c.props.putAll((Map<String, Object>) m.get("props"));
-            byId.put(c.id, c);
+        byId.putAll(loaded);
+        next = safeNext;
+    }
+
+    private static String requiredString(Map<?, ?> map, String key) {
+        Object value = map.get(key);
+        if (!(value instanceof String s)) throw new IllegalArgumentException("Ожидалась строка " + key);
+        return s;
+    }
+
+    private static String optionalString(Map<?, ?> map, String key) {
+        Object value = map.get(key);
+        if (value == null) return "";
+        if (!(value instanceof String s)) throw new IllegalArgumentException("Ожидалась строка " + key);
+        return s;
+    }
+
+    private static void readStringList(Object raw, List<String> target, String field, String id) {
+        if (!(raw instanceof List<?> values)) throw new IllegalArgumentException("Повреждено поле " + field + " персонажа " + id);
+        Set<String> unique = new HashSet<>();
+        for (Object value : values) {
+            if (!(value instanceof String s) || s.isBlank() || !unique.add(s))
+                throw new IllegalArgumentException("Поврежден список " + field + " персонажа " + id);
+            target.add(s);
         }
     }
 }

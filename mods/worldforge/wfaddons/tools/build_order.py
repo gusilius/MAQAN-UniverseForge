@@ -14,12 +14,34 @@ for d in dirs:
     p = os.path.join(root, d, "build.gradle")
     txt = open(p, encoding="utf-8").read() if os.path.exists(p) else ""
     deps[d] = {modid[m] for m in re.findall(r"'(wf_\w+)-\*\.jar'", txt) if m in modid and modid[m] != d}
-order, seen, temp = [], set(), set()
+order, state, stack = [], {}, []
+
 def visit(d):
-    if d in seen: return
-    if d in temp: return          # цикл: игнорируем обратное ребро
-    temp.add(d)
-    for x in sorted(deps[d]): visit(x)
-    temp.discard(d); seen.add(d); order.append(d)
-for d in dirs: visit(d)
+    status = state.get(d, 0)
+    if status == 2:
+        return
+    if status == 1:
+        cycle_start = stack.index(d)
+        cycle = stack[cycle_start:] + [d]
+        raise RuntimeError("Циклическая зависимость аддонов: " + " -> ".join(cycle))
+    state[d] = 1
+    stack.append(d)
+    for dependency in sorted(deps[d]):
+        visit(dependency)
+    stack.pop()
+    state[d] = 2
+    order.append(d)
+
+try:
+    for d in dirs:
+        visit(d)
+except RuntimeError as error:
+    print(f"ERROR: {error}", file=sys.stderr)
+    sys.exit(1)
+
+if len(order) != len(dirs):
+    missing = sorted(set(dirs) - set(order))
+    print("ERROR: аддоны не попали в порядок сборки: " + ", ".join(missing), file=sys.stderr)
+    sys.exit(1)
+
 print(" ".join(order))

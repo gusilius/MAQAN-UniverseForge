@@ -1,53 +1,76 @@
 package com.maqan.galacticnavigator.navigation;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
-/**
- * Versioned, renderer-neutral import format for WorldForge map exports.
- * Coordinates are Minecraft block coordinates in an explicitly named dimension.
- */
+/** Versioned, renderer-neutral WorldForge map snapshot. */
 public final class WorldForgeMapSnapshot {
     public int schema_version;
     public String world_id;
     public String generated_at;
     public List<Territory> territories = new ArrayList<>();
     public List<Feature> features = new ArrayList<>();
+    public List<PoliticalBoundary> political_boundaries = new ArrayList<>();
+    private transient Map<String,List<Territory>> territoriesByDimension = Map.of();
+    private transient Map<String,List<Feature>> featuresByDimension = Map.of();
+    private transient Map<String,List<PoliticalBoundary>> boundariesByDimension = Map.of();
 
-    public static final class Vertex {
-        public double x;
-        public double y;
-        public double z;
+    public void rebuildIndexes() {
+        Map<String,List<Territory>> tg=new LinkedHashMap<>();
+        if(territories!=null) for(Territory t:territories)
+            if(t!=null&&t.dimension_id!=null&&!t.dimension_id.isBlank())
+                tg.computeIfAbsent(t.dimension_id,k->new ArrayList<>()).add(t);
+        Map<String,List<Feature>> fg=new LinkedHashMap<>();
+        if(features!=null) for(Feature f:features)
+            if(f!=null&&f.dimension_id!=null&&!f.dimension_id.isBlank())
+                fg.computeIfAbsent(f.dimension_id,k->new ArrayList<>()).add(f);
+        Map<String,List<PoliticalBoundary>> bg=new LinkedHashMap<>();
+        if(political_boundaries!=null) for(PoliticalBoundary b:political_boundaries)
+            if(b!=null&&b.dimension_id!=null&&!b.dimension_id.isBlank())
+                bg.computeIfAbsent(b.dimension_id,k->new ArrayList<>()).add(b);
+        territoriesByDimension=freeze(tg);
+        featuresByDimension=freeze(fg);
+        boundariesByDimension=freeze(bg);
     }
-
+    public List<Territory> territoriesInDimension(String id) {
+        return id==null||id.isBlank()?List.of():territoriesByDimension.getOrDefault(id,List.of());
+    }
+    public List<Feature> featuresInDimension(String id) {
+        return id==null||id.isBlank()?List.of():featuresByDimension.getOrDefault(id,List.of());
+    }
+    public List<PoliticalBoundary> boundariesInDimension(String id) {
+        return id==null||id.isBlank()?List.of():boundariesByDimension.getOrDefault(id,List.of());
+    }
+    private static <T> Map<String,List<T>> freeze(Map<String,List<T>> src) {
+        Map<String,List<T>> out=new LinkedHashMap<>();
+        src.forEach((k,v)->out.put(k,List.copyOf(v)));
+        return Collections.unmodifiableMap(out);
+    }
+    public static final class Vertex { public double x,y,z; }
     public static final class Territory {
-        public String id;
-        public String name;
-        public String realm_id;
-        public String realm_name;
-        public String government;
-        public String dimension_id;
-        public String administrative_title_id;
-        public String control_status;
-        public int color;
-        public int fill_alpha = 38;
-        public List<Vertex> vertices = new ArrayList<>();
+        public String id,name,realm_id,realm_name,government,dimension_id,administrative_title_id,
+                control_status,race_id,culture_id;
+        public int color,fill_alpha=38;
+        /** Legacy single contour retained for existing snapshot producers. */
+        public List<Vertex> vertices=new ArrayList<>();
+        /** Outer contours, islands and holes; renderer uses even-odd fill. */
+        public List<List<Vertex>> rings=new ArrayList<>();
+        public Map<String,String> attributes=new LinkedHashMap<>();
     }
-
-    public static final class Feature {
-        public String id;
-        public String kind;
-        public String name;
-        public String dimension_id;
-        public double x;
-        public double y;
-        public double z;
-        public String realm_id;
-        public String territory_id;
-        public String race_id;
-        public String culture_id;
-        public String subtype;
+    public static final class PoliticalBoundary {
+        public String id,name,realm_id,dimension_id,overlord_id,relation,ruler;
+        public List<String> subjects=new ArrayList<>();
         public int color;
-        public java.util.Map<String, String> attributes = new java.util.LinkedHashMap<>();
+        public List<List<Vertex>> rings=new ArrayList<>();
+        public Map<String,String> attributes=new LinkedHashMap<>();
+    }
+    public static final class Feature {
+        public String id,kind,name,dimension_id,realm_id,territory_id,race_id,culture_id,subtype;
+        public double x,y,z;
+        public int color;
+        public Map<String,String> attributes=new LinkedHashMap<>();
     }
 }

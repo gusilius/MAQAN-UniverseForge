@@ -47,6 +47,9 @@ dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
     // Ядро WorldForge: только чистые классы (api, TitleData, TitleEditor, Json), поэтому деобфускация не нужна.
     compileOnly fileTree(dir: 'libs', include: ['worldforge-*.jar'])
+    // Optional identity bridge: settlements reuse wf-people characters when that addon is installed.
+    compileOnly fileTree(dir: 'libs', include: ['wf_people-*.jar'])
+    compileOnly fileTree(dir: '../wf-people/build/libs', include: ['wf_people-*.jar'])
 }
 
 tasks.named('processResources', ProcessResources).configure {

@@ -17,7 +17,7 @@ import org.lwjgl.glfw.GLFW;
 @Mod.EventBusSubscriber(modid = MaqanPlatform.MOD_ID, value = Dist.CLIENT, bus = Mod.EventBusSubscriber.Bus.MOD)
 public final class PlatformClient {
     private static final KeyMapping OPEN = new KeyMapping(
-            "key.maqan_platform.open", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_P, "key.categories.maqan");
+            "key.maqan_platform.open", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_F10, "key.categories.maqan");
     private PlatformClient() { }
 
     @SubscribeEvent
@@ -40,6 +40,14 @@ public final class PlatformClient {
             String packageRoot = className.substring("dev.worldforge.".length()).split("\\.")[0];
             String providerModId = packageRoot.equals("mod") ? "worldforge" : "wf_" + packageRoot;
             if (!ModList.get().isLoaded(providerModId) && !providerModId.equals("worldforge")) return;
+            Minecraft mc = Minecraft.getInstance();
+            if (mc.screen instanceof PlatformShellScreen shell
+                    && shell.attachProviderView(providerModId, next)) {
+                // Opening is cancellable: retain the current shell instance and
+                // mount the provider view without closing/removing the shell.
+                event.setCanceled(true);
+                return;
+            }
             event.setNewScreen(PlatformShellScreen.wrapProviderView(providerModId, next));
         }
 

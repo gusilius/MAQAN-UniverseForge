@@ -32,7 +32,7 @@ public final class TradeNetwork {
         if (a == null || b == null) throw new TradeException("Нет такого поселения");
         if (from.equals(to)) throw new TradeException("Нужны два разных поселения");
         if (a.basePrice(res) <= 0 || res.equals(Defs.SILVER)) throw new TradeException("Этот ресурс не торгуется");
-        if (rate <= 0 || rate > 30) throw new TradeException("Скорость от 0 до 30 ед. в минуту");
+        if (!Double.isFinite(rate) || rate <= 0 || rate > 30) throw new TradeException("Скорость должна быть конечной величиной от 0 до 30 ед. в минуту");
         for (Route r : routes.values()) if (r.from.equals(from) && r.to.equals(to) && r.res.equals(res)) throw new TradeException("Такой маршрут уже есть");
         Route r = new Route(next++, from, to, res, rate);
         routes.put(r.id, r);
@@ -42,6 +42,7 @@ public final class TradeNetwork {
     public void remove(int id) { if (routes.remove(id) == null) throw new TradeException("Нет маршрута " + id); }
 
     public void tick(Map<String, Settlement> cities, double dt) {
+        if (!Double.isFinite(dt) || dt <= 0) return;
         for (Route r : routes.values()) {
             Settlement a = cities.get(r.from), b = cities.get(r.to);
             if (a == null || b == null) { r.status = "нет города"; continue; }

@@ -10,7 +10,6 @@ import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 
 import java.util.ArrayList;
-import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -64,12 +63,13 @@ public final class PlatformShellScreen extends Screen {
     private boolean inspectorVisible = true;
     private boolean timelineVisible = true;
     private Screen embeddedView;
-    private final Map<Profile, Screen> providerViews = new EnumMap<>(Profile.class);
+    private final Map<String, Screen> providerViews = new LinkedHashMap<>();
     private boolean embeddedViewReady;
     private boolean settingsVisible;
     private boolean ambientGrid = true;
     private boolean panelShadows = true;
     private int previewLayer = 0;
+    private int navigationScroll;
 
     public PlatformShellScreen() { super(Component.literal("MAQAN")); }
 
@@ -95,12 +95,27 @@ public final class PlatformShellScreen extends Screen {
 
     /** Build a MAQAN host for an existing provider screen without changing Minecraft's screen mid-event. */
     public static PlatformShellScreen wrapProviderView(String providerModId, Screen view) {
-        CapabilityRegistry.Capability capability = CapabilityRegistry.all().stream()
-                .filter(c -> c.providerModId().equals(providerModId)).findFirst().orElse(null);
-        String capabilityId = capability == null ? "worldforge.realms.politics" : capability.id();
+        CapabilityRegistry.Capability capability = CapabilityRegistry.forProvider(providerModId, view.getClass().getName());
+        String capabilityId = capability == null ? "worldforge.map" : capability.id();
         PlatformShellScreen shell = new PlatformShellScreen(capabilityId);
-        shell.showEmbeddedView(view);
+        shell.attachProviderView(capability, view);
         return shell;
+    }
+
+    /** Mounts a provider screen into this live shell without replacing the shared workspace. */
+    public boolean attachProviderView(String providerModId, Screen view) {
+        return attachProviderView(CapabilityRegistry.forProvider(providerModId, view.getClass().getName()), view);
+    }
+
+    private boolean attachProviderView(CapabilityRegistry.Capability capability, Screen view) {
+        if (capability == null || view == null) return false;
+        setProfile(profileForDomain(capability.domain()));
+        selectedDomain = capability.domain();
+        selectedCapabilityId = capability.id();
+        Screen previous = providerViews.put(capability.id(), view);
+        if (previous != null && previous != view) previous.removed();
+        if (width > 0 && height > 0) view.init(Minecraft.getInstance(), width, height);
+        return true;
     }
 
     /** Optional providers may call this directly when opening a view outside ScreenEvent.Opening. */
@@ -121,9 +136,14 @@ public final class PlatformShellScreen extends Screen {
             panels.get("timeline").visible = false;
             panels.get("tools").visible = false;
         }
+        if (!profileAvailable(profile)) {
+            for (Profile candidate : Profile.values()) {
+                if (profileAvailable(candidate)) { profile = candidate; break; }
+            }
+        }
         if (profile == Profile.COSMOS) ensureAtlasView();
         if (embeddedView != null) embeddedView.init(Minecraft.getInstance(), width, height);
-        Screen providerView = providerViews.get(profile);
+        Screen providerView = providerViews.get(selectedCapabilityId);
         if (providerView != null) providerView.init(Minecraft.getInstance(), width, height);
         clampPanels();
     }
@@ -161,13 +181,13 @@ public final class PlatformShellScreen extends Screen {
             if (width > 0 && height > 0) embeddedView.init(Minecraft.getInstance(), width, height);
             return;
         }
-        Screen previous = providerViews.put(profile, view);
+        Screen previous = providerViews.put(selectedCapabilityId, view);
         if (previous != null && previous != view) previous.removed();
         if (width > 0 && height > 0) view.init(Minecraft.getInstance(), width, height);
     }
 
     private Screen activeView() {
-        return profile == Profile.COSMOS ? embeddedView : providerViews.get(profile);
+        return profile == Profile.COSMOS ? embeddedView : providerViews.get(selectedCapabilityId);
     }
 
     private void clampPanels() {
@@ -201,6 +221,7 @@ public final class PlatformShellScreen extends Screen {
         g.fill(34, 9, 35, 25, EDGE);
         int x = Math.max(178, width / 2 - 112);
         for (Profile p : Profile.values()) {
+            if (!profileAvailable(p)) continue;
             boolean active = p == profile;
             g.fill(x, 5, x + 48, 29, active ? 0x553B9FB5 : 0x00101924);
             if (active) g.fill(x, 28, x + 48, 30, CYAN);
@@ -283,38 +304,119 @@ public final class PlatformShellScreen extends Screen {
         };
     }
 
+    private List<CapabilityRegistry.Capability> navigationCapabilities() {
+        return CapabilityRegistry.available().stream()
+                .filter(c -> domainVisible(c.domain()))
+                .toList();
+    }
+
+    private int navigationViewportTop(Panel p) { return p.y + 31; }
+    private int navigationViewportBottom(Panel p) { return p.y + p.h - 9; }
+    private int navigationVisibleRows(Panel p) {
+        return Math.max(1, (navigationViewportBottom(p) - navigationViewportTop(p)) / 21);
+    }
+    private int navigationMaxScroll(Panel p) {
+        return Math.max(0, navigationCapabilities().size() - navigationVisibleRows(p));
+    }
+
     private void drawNavigationPanel(GuiGraphics g, Panel p) {
-        int y=p.y+38;
-        List<CapabilityRegistry.Capability> capabilities=CapabilityRegistry.all();
-        for(CapabilityRegistry.Capability c:capabilities) {
-            if (!domainVisible(c.domain())) continue;
-            boolean installed=ModList.get().isLoaded(c.providerModId());
-            boolean active=c.id().equals(selectedCapabilityId);
-            if(active) g.fill(p.x+6,y-4,p.x+p.w-6,y+17,0x333B9FB5);
-            g.drawString(font,c.icon(),p.x+12,y,installed?CYAN:0xFF536879,false);
-            g.drawString(font,c.label(),p.x+34,y,installed?TEXT:0xFF718496,false);
-            g.fill(p.x+p.w-17,y+3,p.x+p.w-12,y+8,installed?0xFF62D69C:0xFF53616D);
-            if(installed && active) g.fill(p.x+6,y+15,p.x+p.w-6,y+16,CYAN);
-            y+=21;
-            if(y>p.y+p.h-14) break;
+        List<CapabilityRegistry.Capability> capabilities = navigationCapabilities();
+        navigationScroll = Math.max(0, Math.min(navigationScroll, navigationMaxScroll(p)));
+        int top = navigationViewportTop(p);
+        int bottom = navigationViewportBottom(p);
+        g.enableScissor(p.x + 5, top, p.x + p.w - 5, bottom);
+        for (int row = 0; row < navigationVisibleRows(p); row++) {
+            int index = navigationScroll + row;
+            if (index >= capabilities.size()) break;
+            CapabilityRegistry.Capability c = capabilities.get(index);
+            int y = p.y + 38 + row * 21;
+            boolean installed = ModList.get().isLoaded(c.providerModId());
+            boolean active = c.id().equals(selectedCapabilityId);
+            if (active) g.fill(p.x + 6, y - 4, p.x + p.w - 6, y + 17, 0x333B9FB5);
+            g.drawString(font, c.icon(), p.x + 12, y, installed ? CYAN : 0xFF536879, false);
+            g.drawString(font, c.label(), p.x + 34, y, installed ? TEXT : 0xFF718496, false);
+            g.fill(p.x + p.w - 17, y + 3, p.x + p.w - 12, y + 8,
+                    installed ? 0xFF62D69C : 0xFF53616D);
+            if (installed && active) g.fill(p.x + 6, y + 15, p.x + p.w - 6, y + 16, CYAN);
         }
+        g.disableScissor();
+        if (capabilities.size() > navigationVisibleRows(p)) {
+            int trackX = p.x + p.w - 5;
+            int trackTop = top + 2;
+            int trackBottom = bottom - 2;
+            int trackHeight = Math.max(1, trackBottom - trackTop);
+            int thumbHeight = Math.max(16, trackHeight * navigationVisibleRows(p) / capabilities.size());
+            int travel = Math.max(0, trackHeight - thumbHeight);
+            int thumbY = trackTop + (navigationMaxScroll(p) == 0 ? 0
+                    : travel * navigationScroll / navigationMaxScroll(p));
+            g.fill(trackX, trackTop, trackX + 2, trackBottom, 0x554A6579);
+            g.fill(trackX, thumbY, trackX + 2, thumbY + thumbHeight, CYAN);
+        }
+    }
+
+    private boolean profileAvailable(Profile candidate) {
+        return switch (candidate) {
+            case COSMOS -> !CapabilityRegistry.inDomain("COSMOS").isEmpty()
+                    || !CapabilityRegistry.inDomain("WORLDS").isEmpty();
+            case POLITICS -> !CapabilityRegistry.inDomain("POLITICS").isEmpty()
+                    || !CapabilityRegistry.inDomain("SOCIETY").isEmpty()
+                    || !CapabilityRegistry.inDomain("ECONOMY").isEmpty();
+            case SETTLEMENTS -> !CapabilityRegistry.inDomain("SETTLEMENTS").isEmpty()
+                    || !CapabilityRegistry.inDomain("SOCIETY").isEmpty()
+                    || !CapabilityRegistry.inDomain("ECONOMY").isEmpty()
+                    || !CapabilityRegistry.inDomain("CREATION").isEmpty();
+            case RTS -> !CapabilityRegistry.inDomain("TACTICAL").isEmpty()
+                    || !CapabilityRegistry.inDomain("ARMY").isEmpty();
+        };
     }
 
     private boolean domainVisible(String domain) {
         return switch(profile) {
             case COSMOS -> domain.equals("COSMOS") || domain.equals("WORLDS");
-            case POLITICS -> domain.equals("POLITICS") || domain.equals("SOCIETY") || domain.equals("ECONOMY");
-            case SETTLEMENTS -> domain.equals("SETTLEMENTS") || domain.equals("SOCIETY") || domain.equals("ECONOMY");
-            case RTS -> domain.equals("TACTICAL") || domain.equals("ARMY") || domain.equals("SETTLEMENTS");
+            case POLITICS -> domain.equals("POLITICS") || domain.equals("SOCIETY") || domain.equals("ECONOMY") || domain.equals("ARMY");
+            case SETTLEMENTS -> domain.equals("SETTLEMENTS") || domain.equals("SOCIETY") || domain.equals("ECONOMY") || domain.equals("CREATION");
+            case RTS -> domain.equals("TACTICAL") || domain.equals("ARMY") || domain.equals("SETTLEMENTS") || domain.equals("ECONOMY");
         };
     }
 
     private void drawInspectorPanel(GuiGraphics g, Panel p) {
-        g.drawString(font,"◇",p.x+12,p.y+40,CYAN,false);
-        g.drawString(font,"NO SELECTION",p.x+30,p.y+40,TEXT,false);
-        g.fill(p.x+10,p.y+59,p.x+p.w-10,p.y+60,EDGE);
-        g.drawString(font,"Select an object to inspect",p.x+12,p.y+75,MUTED,false);
-        g.drawString(font,"Properties and actions appear here.",p.x+12,p.y+91,MUTED,false);
+        PlatformSelectionContext.Selection selected = PlatformSelectionContext.current();
+        if (selected == null) {
+            g.drawString(font,"◇",p.x+12,p.y+40,CYAN,false);
+            g.drawString(font,"NO SELECTION",p.x+30,p.y+40,TEXT,false);
+            g.fill(p.x+10,p.y+59,p.x+p.w-10,p.y+60,EDGE);
+            g.drawString(font,"Select an object in a workspace",p.x+12,p.y+75,MUTED,false);
+            g.drawString(font,"Its identity and context appear here.",p.x+12,p.y+91,MUTED,false);
+            return;
+        }
+        int left = p.x + 12;
+        int right = p.x + p.w - 12;
+        g.drawString(font, "◇ " + selected.entityType().toUpperCase(java.util.Locale.ROOT),
+                left, p.y + 40, CYAN, false);
+        g.drawString(font, trimInspector(selected.displayName(), p.w - 24),
+                left, p.y + 59, TEXT, false);
+        g.fill(left, p.y + 75, right, p.y + 76, EDGE);
+        g.drawString(font, "SOURCE", left, p.y + 87, MUTED, false);
+        g.drawString(font, trimInspector(selected.providerId(), p.w - 24),
+                left, p.y + 99, TEXT, false);
+        g.drawString(font, "IDENTITY", left, p.y + 118, MUTED, false);
+        g.drawString(font, trimInspector(selected.entityId(), p.w - 24),
+                left, p.y + 130, TEXT, false);
+        if (!selected.worldId().isBlank()) {
+            g.drawString(font, "WORLD / SYSTEM", left, p.y + 149, MUTED, false);
+            g.drawString(font, trimInspector(selected.worldId(), p.w - 24),
+                    left, p.y + 161, TEXT, false);
+        }
+        if (!selected.summary().isBlank()) {
+            g.drawString(font, "DIMENSION / CONTEXT", left, p.y + 180, MUTED, false);
+            g.drawString(font, trimInspector(selected.summary(), p.w - 24),
+                    left, p.y + 192, TEXT, false);
+        }
+    }
+
+    private String trimInspector(String value, int maxWidth) {
+        if (value == null || value.isBlank()) return "—";
+        return font.plainSubstrByWidth(value, Math.max(16, maxWidth));
     }
 
     private void drawTimelinePanel(GuiGraphics g, Panel p) {
@@ -343,6 +445,7 @@ public final class PlatformShellScreen extends Screen {
         if(my<34) {
             int x=Math.max(178,width/2-112);
             for(Profile p:Profile.values()) {
+                if (!profileAvailable(p)) continue;
                 if(mx>=x&&mx<x+48) { setProfile(p); return true; }
                 x+=52;
             }
@@ -393,18 +496,16 @@ public final class PlatformShellScreen extends Screen {
                 return true;
             }
             if(p.id.equals("navigation")) {
-                int y=p.y+38;
-                for(CapabilityRegistry.Capability c:CapabilityRegistry.all()) {
-                    if(!domainVisible(c.domain())) continue;
-                    if(my>=y-4&&my<y+17) {
-                        selectedCapabilityId=c.id(); selectedDomain=c.domain();
-                        if(c.id().equals("maqan.atlas.cosmos") || c.id().equals("maqan.atlas.worlds")) setProfile(Profile.COSMOS);
-                        else if(c.domain().equals("POLITICS")) setProfile(Profile.POLITICS);
-                        else if(c.domain().equals("SETTLEMENTS")) setProfile(Profile.SETTLEMENTS);
-                        else if(c.domain().equals("TACTICAL") || c.domain().equals("ARMY")) setProfile(Profile.RTS);
-                        return true;
+                int top = navigationViewportTop(p);
+                int bottom = navigationViewportBottom(p);
+                if (my >= top && my < bottom) {
+                    int row = (int) ((my - (p.y + 34)) / 21);
+                    int index = navigationScroll + row;
+                    List<CapabilityRegistry.Capability> capabilities = navigationCapabilities();
+                    if (index >= 0 && index < capabilities.size()) {
+                        openCapability(capabilities.get(index));
                     }
-                    y+=21;
+                    return true;
                 }
             }
             return true;
@@ -424,9 +525,19 @@ public final class PlatformShellScreen extends Screen {
 
     private void setProfile(Profile next) {
         profile=next;
+        navigationScroll = 0;
+        selectedCapabilityId = switch (next) {
+            case COSMOS -> "maqan.atlas.cosmos";
+            case POLITICS -> "worldforge.realms.politics";
+            case SETTLEMENTS -> "worldforge.settlements";
+            case RTS -> "worldforge.rts";
+        };
         if (next == Profile.COSMOS) {
             ensureAtlasView();
             if (embeddedView != null) embeddedView.init(Minecraft.getInstance(), width, height);
+        } else {
+            Screen view = providerViews.get(selectedCapabilityId);
+            if (view != null) view.init(Minecraft.getInstance(), width, height);
         }
         selectedDomain=switch(next) {
             case COSMOS -> "COSMOS";
@@ -457,10 +568,53 @@ public final class PlatformShellScreen extends Screen {
      * embedded workspace views while their existing domain logic stays provider-owned.
      */
     private void openCapability(CapabilityRegistry.Capability capability) {
-        selectedDomain=capability.domain();
-        selectedCapabilityId=capability.id();
-        // Keep this Screen alive. A provider must register an embedded view adapter
-        // before its existing standalone screen can be retired.
+        Profile target = profileForDomain(capability.domain());
+        setProfile(target);
+        selectedDomain = capability.domain();
+        selectedCapabilityId = capability.id();
+        Screen view = activeView();
+        if (view != null) {
+            view.init(Minecraft.getInstance(), width, height);
+            return;
+        }
+        // Some providers expose a complete no-argument screen (for example the
+        // WorldForge political map). Mount that real screen instead of a preview.
+        if (capability.screenClass() != null && !capability.screenClass().isBlank()) {
+            try {
+                Class<?> type = Class.forName(capability.screenClass());
+                if (Screen.class.isAssignableFrom(type)) {
+                    Object instance = type.getDeclaredConstructor().newInstance();
+                    if (instance instanceof Screen providerScreen
+                            && attachProviderView(capability, providerScreen)) return;
+                }
+            } catch (NoSuchMethodException ignored) {
+                // Data-driven screens need a server payload; request them below.
+            } catch (ReflectiveOperationException | LinkageError error) {
+                LOGGER.warn("Unable to create provider view for {}", capability.id(), error);
+            }
+        }
+        String command = switch (capability.id()) {
+            case "worldforge.settlements" -> "wfsettle view panel";
+            case "worldforge.rts" -> "wfsettle view hud";
+            case "worldforge.genesis" -> "wfgenesis";
+            case "worldforge.origins" -> "wforigin";
+            case "worldforge.progress" -> "wfprog";
+            case "worldforge.forms" -> "wfform";
+            case "worldforge.quests" -> "wfquest";
+            case "worldforge.orders" -> "wforders";
+            case "worldforge.relations" -> "wfrel";
+            // Reputation currently exposes a server-authoritative command, not a client screen.
+            // Keep the shell entry actionable without fabricating a local reputation view.
+            case "worldforge.reputation" -> "wfrep show";
+            case "worldforge.court" -> "wfcourt";
+            case "worldforge.trade" -> "wftrade";
+            case "worldforge.army" -> "wfarmy screen";
+            case "worldforge.war" -> "wfwar screen";
+            default -> null;
+        };
+        Minecraft mc = Minecraft.getInstance();
+        if (command != null && mc.player != null && mc.player.connection != null)
+            mc.player.connection.sendCommand(command);
     }
 
     @Override public boolean mouseDragged(double mx,double my,int button,double dx,double dy) {
@@ -514,6 +668,16 @@ public final class PlatformShellScreen extends Screen {
     }
 
     @Override public boolean mouseScrolled(double mouseX,double mouseY,double delta) {
+        Panel nav = panels.get("navigation");
+        if (nav != null && nav.visible && !nav.minimized
+                && mouseX >= nav.x && mouseX <= nav.x + nav.w
+                && mouseY >= navigationViewportTop(nav)
+                && mouseY < navigationViewportBottom(nav)
+                && !navigationCapabilities().isEmpty()) {
+            int direction = delta > 0 ? -1 : 1;
+            navigationScroll = Math.max(0, Math.min(navigationMaxScroll(nav), navigationScroll + direction * 2));
+            return true;
+        }
         boolean handled = super.mouseScrolled(mouseX,mouseY,delta);
         if (activeView() != null)
             handled = activeView().mouseScrolled(mouseX,mouseY,delta) || handled;
@@ -521,8 +685,8 @@ public final class PlatformShellScreen extends Screen {
     }
 
     @Override public boolean keyPressed(int keyCode,int scanCode,int modifiers) {
-        // P is owned by PlatformClient's global KeyMapping; handling it here as
-        // well would close and immediately reopen the shell during the same tick.
+        // The global workspace toggle is F10 (not P): WorldForge progress and
+        // other provider screens retain their own P shortcut bindings.
         if(keyCode==GLFW.GLFW_KEY_ESCAPE) { if(settingsVisible){settingsVisible=false;return true;} onClose(); return true; }
         boolean handled = super.keyPressed(keyCode,scanCode,modifiers);
         if (activeView() != null)
