@@ -71,6 +71,8 @@ public class PeopleMod {
     public static volatile java.util.List<String> ROLES_RAW = java.util.List.of();
     public static volatile NameBank NAMES = new NameBank();
     private static final Map<MapData, CharacterRegistry> REGS = new ConcurrentHashMap<>();
+    /** Corrupt saves fail closed: never regenerate courts over unreadable identity data. */
+    private static final Set<MapData> INVALID_REGS = ConcurrentHashMap.newKeySet();
     public static final int TICKS_PER_DAY = 1200;
     private static final Map<UUID, Set<String>> FLAGS = new ConcurrentHashMap<>();
     private static long ticks;
@@ -110,6 +112,7 @@ public class PeopleMod {
     @SubscribeEvent
     public void onAboutToStart(ServerAboutToStartEvent e) {
         REGS.clear();
+        INVALID_REGS.clear();
         FLAGS.clear();
         ticks = 0;
         RoleDefs roles = new RoleDefs();
@@ -149,7 +152,7 @@ public class PeopleMod {
 
     /** Реестр людей карты: читается из папки мира, при первом обращении достраивается дворами (Courts.ensure). Null, если у карты нет титулов. */
     public static CharacterRegistry registry(MapData m) {
-        if (m == null || m.titles == null) return null;
+        if (m == null || m.titles == null || INVALID_REGS.contains(m)) return null;
         CharacterRegistry have = REGS.get(m);
         if (have != null) return have;
         MinecraftServer server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
@@ -159,8 +162,9 @@ public class PeopleMod {
             try {
                 if (Files.exists(f)) reg.fromJson(Files.readString(f));
             } catch (Exception ex) {
-                LOGGER.error("wf_people: не удалось прочитать {}: {}", f, ex.toString());
-                reg = new CharacterRegistry();
+                LOGGER.error("wf_people: сохранение {} повреждено; генерация персонажей заблокирована во избежание потери данных: {}", f, ex.toString());
+                INVALID_REGS.add(m);
+                return null;
             }
         }
         int before = reg.size();
