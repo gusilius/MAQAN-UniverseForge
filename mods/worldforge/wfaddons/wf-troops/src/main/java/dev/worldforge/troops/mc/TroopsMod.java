@@ -199,9 +199,9 @@ public class TroopsMod {
                 return false;
             }
             person.props.put("population.pre_military_profession", PopulationSimulation.profession(person));
-            PopulationSimulation.removeDuty(person, Duty.WORKER);
+            binding.registry().setDuty(person.id, Duty.WORKER, false, PeopleMod.YEAR);
         }
-        PopulationSimulation.addDuty(person, Duty.SOLDIER);
+        binding.registry().setDuty(person.id, Duty.SOLDIER, true, PeopleMod.YEAR);
         syncPerson(troop);
         return true;
     }
@@ -233,7 +233,7 @@ public class TroopsMod {
         String profession = troop.unitId() == null || troop.unitId().isBlank() ? "soldier" : troop.unitId();
         if (!profession.equals(PopulationSimulation.profession(person)))
             binding.registry().changeProfession(person.id, profession, PeopleMod.YEAR);
-        PopulationSimulation.addDuty(person, Duty.SOLDIER);
+        binding.registry().setDuty(person.id, Duty.SOLDIER, true, PeopleMod.YEAR);
         long characterXp = PopulationSimulation.trainingXp(person, "combat");
         if (characterXp > troop.combatXp()) troop.setCombatXpFromCharacter(characterXp);
         else PopulationSimulation.setTrainingXp(person, "combat", troop.combatXp());
