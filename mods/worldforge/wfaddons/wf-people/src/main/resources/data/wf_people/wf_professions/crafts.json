@@ -1,0 +1,6 @@
+{
+  "id": "blacksmith",
+  "name": "Кузнец",
+  "category": "specialist",
+  "required_skills": { "smithing": 1 }
+}
