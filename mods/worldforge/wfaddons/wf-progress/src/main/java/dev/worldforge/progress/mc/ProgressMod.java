@@ -61,7 +61,7 @@ public class ProgressMod {
     public static final Progress PROGRESS = new Progress(DEFS);
     private static final UUID MOD_ID = UUID.fromString("5c0f4a3e-6a54-4f38-9b6f-2f2d8d3c0001");
     private static long ticks;
-    private static final int SAVE_EVERY = 6000, APPLY_EVERY = 40;
+    private static final int SAVE_EVERY = 6000, APPLY_EVERY = 40, PEOPLE_SYNC_EVERY = 1200;
 
     public ProgressMod() { MinecraftForge.EVENT_BUS.register(this); PROGRESS.publish(); }
 
@@ -124,6 +124,17 @@ public class ProgressMod {
     @SubscribeEvent
     public void onStopping(ServerStoppingEvent e) { save(e.getServer()); }
 
+    /** Optional wf-people integration is loaded reflectively so wf-progress remains usable alone. */
+    private static void syncPeopleProfiles() {
+        if (!ModList.get().isLoaded("wf_people")) return;
+        try {
+            Class<?> bridge = Class.forName("dev.worldforge.progress.people.PeopleProgressBridge");
+            bridge.getMethod("syncAll", Progress.class).invoke(null, PROGRESS);
+        } catch (ReflectiveOperationException ex) {
+            LOGGER.error("wf_progress: wf_people bridge could not synchronize profiles", ex);
+        }
+    }
+
     private static void save(MinecraftServer s) {
         try { Path f = file(s); Files.createDirectories(f.getParent()); Files.writeString(f, PROGRESS.toJson()); }
         catch (Exception ex) { LOGGER.error("wf_progress: не удалось сохранить: {}", ex.toString()); }
@@ -135,6 +146,7 @@ public class ProgressMod {
         ticks++;
         try {
             if (ticks % APPLY_EVERY == 0) for (ServerPlayer p : e.getServer().getPlayerList().getPlayers()) apply(p);
+            if (ticks % PEOPLE_SYNC_EVERY == 0) syncPeopleProfiles();
             if (ticks % SAVE_EVERY == 0) save(e.getServer());
         } catch (Exception ex) { LOGGER.error("wf_progress: ошибка тика: {}", ex.toString()); }
     }
