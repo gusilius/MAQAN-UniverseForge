@@ -94,7 +94,7 @@ public final class CharacterRegistry {
         String employer = requireText(employerId, "employer");
         String profession = requireText(professionId, "profession");
         changeProfession(id, profession, year);
-        PopulationSimulation.addDuty(c, PopulationSimulation.Duty.WORKER);
+        setDuty(id, PopulationSimulation.Duty.WORKER, true, year);
         String previous = String.valueOf(c.props.getOrDefault("population.employer", ""));
         c.props.put("population.employer", employer);
         appoint(id, "settlement_worker", employer, year);
@@ -108,7 +108,7 @@ public final class CharacterRegistry {
                 ? String.valueOf(c.props.getOrDefault("population.employer", "")) : employerId.trim();
         if (!employer.isEmpty()) dismiss(id, "settlement_worker", employer, year);
         c.props.remove("population.employer");
-        PopulationSimulation.removeDuty(c, PopulationSimulation.Duty.WORKER);
+        setDuty(id, PopulationSimulation.Duty.WORKER, false, year);
         emit(c, LifecycleKind.FIRED, employer, "", year);
     }
 
