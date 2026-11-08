@@ -33,7 +33,10 @@ public final class PopulationSimulation {
     /** Canonical owner key understood by wf-progress for NPC profiles. */
     public static String progressOwner(Character character, String populationScopeId) {
         Objects.requireNonNull(character, "character");
-        String scope = normalizeId(populationScopeId, "population scope");
+        String rawScope = Objects.requireNonNull(populationScopeId, "populationScopeId").trim().toLowerCase(Locale.ROOT);
+        if (rawScope.isEmpty()) throw new IllegalArgumentException("population scope id is required");
+        String scope = rawScope.matches("[a-z0-9_.:-]{1,64}") ? rawScope
+                : UUID.nameUUIDFromBytes(rawScope.getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString();
         return "n:" + scope + ":" + character.id;
     }
 
@@ -260,6 +263,9 @@ public final class PopulationSimulation {
         for (Character character : registry.all()) {
             if (!character.alive) continue;
             updateIntent(character, year);
+            Object previous = character.props.get("population.simulated_days");
+            long simulated = previous instanceof Number n ? Math.max(0, n.longValue()) : 0;
+            character.props.put("population.simulated_days", simulated + elapsedDays);
             character.props.put("population.last_simulated_year", year);
         }
     }
