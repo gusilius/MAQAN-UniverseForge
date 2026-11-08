@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.prefs.Preferences;
 
 /**
  * MAQAN's shared workspace shell. It owns presentation and layout only;
@@ -70,6 +71,8 @@ public final class PlatformShellScreen extends Screen {
     private boolean panelShadows = true;
     private int previewLayer = 0;
     private int navigationScroll;
+    private boolean workspaceStateLoaded;
+    private static final int WORKSPACE_SCHEMA = 1;
 
     public PlatformShellScreen() { super(Component.literal("MAQAN")); }
 
@@ -136,6 +139,7 @@ public final class PlatformShellScreen extends Screen {
             panels.get("timeline").visible = false;
             panels.get("tools").visible = false;
         }
+        if (!workspaceStateLoaded) loadWorkspaceState();
         if (!profileAvailable(profile)) {
             for (Profile candidate : Profile.values()) {
                 if (profileAvailable(candidate)) { profile = candidate; break; }
@@ -146,6 +150,60 @@ public final class PlatformShellScreen extends Screen {
         Screen providerView = providerViews.get(selectedCapabilityId);
         if (providerView != null) providerView.init(Minecraft.getInstance(), width, height);
         clampPanels();
+    }
+
+    private Preferences workspacePreferences() {
+        return Preferences.userNodeForPackage(PlatformShellScreen.class).node("workspace");
+    }
+
+    private void loadWorkspaceState() {
+        Preferences prefs = workspacePreferences();
+        int schema = prefs.getInt("schema", 0);
+        if (schema <= WORKSPACE_SCHEMA) {
+            try { profile = Profile.valueOf(prefs.get("profile", profile.name())); }
+            catch (IllegalArgumentException ignored) { profile = Profile.COSMOS; }
+            selectedCapabilityId = prefs.get("capability", selectedCapabilityId);
+            for (Panel panel : panels.values()) {
+                String key = "panel." + panel.id + ".";
+                panel.x = prefs.getInt(key + "x", panel.x);
+                panel.y = prefs.getInt(key + "y", panel.y);
+                panel.w = prefs.getInt(key + "w", panel.w);
+                panel.h = prefs.getInt(key + "h", panel.h);
+                panel.visible = prefs.getBoolean(key + "visible", panel.visible);
+                panel.minimized = prefs.getBoolean(key + "minimized", panel.minimized);
+                panel.pinned = prefs.getBoolean(key + "pinned", panel.pinned);
+                panel.dock = prefs.get(key + "dock", panel.dock);
+            }
+            ambientGrid = prefs.getBoolean("ambient_grid", ambientGrid);
+            panelShadows = prefs.getBoolean("panel_shadows", panelShadows);
+        }
+        workspaceStateLoaded = true;
+    }
+
+    private void saveWorkspaceState() {
+        if (!workspaceStateLoaded) return;
+        try {
+            Preferences prefs = workspacePreferences();
+            prefs.putInt("schema", WORKSPACE_SCHEMA);
+            prefs.put("profile", profile.name());
+            prefs.put("capability", selectedCapabilityId);
+            prefs.putBoolean("ambient_grid", ambientGrid);
+            prefs.putBoolean("panel_shadows", panelShadows);
+            for (Panel panel : panels.values()) {
+                String key = "panel." + panel.id + ".";
+                prefs.putInt(key + "x", panel.x);
+                prefs.putInt(key + "y", panel.y);
+                prefs.putInt(key + "w", panel.w);
+                prefs.putInt(key + "h", panel.h);
+                prefs.putBoolean(key + "visible", panel.visible);
+                prefs.putBoolean(key + "minimized", panel.minimized);
+                prefs.putBoolean(key + "pinned", panel.pinned);
+                prefs.put(key + "dock", panel.dock);
+            }
+            prefs.flush();
+        } catch (Exception error) {
+            LOGGER.warn("Unable to persist MAQAN workspace layout", error);
+        }
     }
 
     private void ensureAtlasView() {
@@ -460,10 +518,10 @@ public final class PlatformShellScreen extends Screen {
             if(index==1 && profile==Profile.COSMOS && embeddedView!=null) {
                 invokeAtlasRailAction("toggleInfoPanel"); return true;
             }
-            if(index==0) { panels.get("navigation").visible=!panels.get("navigation").visible; return true; }
-            if(index==1) { panels.get("inspector").visible=!panels.get("inspector").visible; return true; }
-            if(index==2) { panels.get("tools").visible=!panels.get("tools").visible; return true; }
-            if(index==3) { panels.get("timeline").visible=!panels.get("timeline").visible; return true; }
+            if(index==0) { panels.get("navigation").visible=!panels.get("navigation").visible; saveWorkspaceState(); return true; }
+            if(index==1) { panels.get("inspector").visible=!panels.get("inspector").visible; saveWorkspaceState(); return true; }
+            if(index==2) { panels.get("tools").visible=!panels.get("tools").visible; saveWorkspaceState(); return true; }
+            if(index==3) { panels.get("timeline").visible=!panels.get("timeline").visible; saveWorkspaceState(); return true; }
             return true;
         }
         if(settingsVisible) {
@@ -485,9 +543,9 @@ public final class PlatformShellScreen extends Screen {
             if(mx<p.x||mx>p.x+p.w||my<p.y||my>p.y+ph) continue;
             if(my<=p.y+26) {
                 int bx=p.x+p.w-64;
-                if(mx>=bx&&mx<bx+16) { p.pinned=!p.pinned; return true; }
-                if(mx>=bx+18&&mx<bx+38) { p.minimized=!p.minimized; return true; }
-                if(mx>=bx+38&&mx<bx+58) { if(!p.pinned) p.visible=false; return true; }
+                if(mx>=bx&&mx<bx+16) { p.pinned=!p.pinned; saveWorkspaceState(); return true; }
+                if(mx>=bx+18&&mx<bx+38) { p.minimized=!p.minimized; saveWorkspaceState(); return true; }
+                if(mx>=bx+38&&mx<bx+58) { if(!p.pinned) p.visible=false; saveWorkspaceState(); return true; }
                 draggingPanel=p.id; pointerOffsetX=(int)mx-p.x; pointerOffsetY=(int)my-p.y;
                 return true;
             }
@@ -545,6 +603,7 @@ public final class PlatformShellScreen extends Screen {
             case SETTLEMENTS -> "SETTLEMENTS";
             case RTS -> "TACTICAL";
         };
+        saveWorkspaceState();
         Panel nav=panels.get("navigation"), inspector=panels.get("inspector"), timeline=panels.get("timeline");
         switch(next) {
             case COSMOS -> { nav.title="COSMIC CATALOGUE"; inspector.title="BODY INSPECTOR"; timeline.title="ORBIT / TIME"; }
@@ -646,7 +705,11 @@ public final class PlatformShellScreen extends Screen {
     }
 
     @Override public boolean mouseReleased(double mx,double my,int button) {
-        if(button==0) { draggingPanel=null; resizingPanel=null; }
+        if(button==0) {
+            boolean changed = draggingPanel != null || resizingPanel != null;
+            draggingPanel=null; resizingPanel=null;
+            if (changed) saveWorkspaceState();
+        }
         boolean handled = super.mouseReleased(mx,my,button);
         if (activeView() != null)
             handled = activeView().mouseReleased(mx,my,button) || handled;
