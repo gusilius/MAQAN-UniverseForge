@@ -96,9 +96,16 @@ public final class CharacterRegistry {
         changeProfession(id, profession, year);
         setDuty(id, PopulationSimulation.Duty.WORKER, true, year);
         String previous = String.valueOf(c.props.getOrDefault("population.employer", ""));
+        boolean changed = !employer.equals(previous)
+                || !profession.equals(PopulationSimulation.profession(c))
+                || !c.has("settlement_worker", employer)
+                || !PopulationSimulation.hasDuty(c, PopulationSimulation.Duty.WORKER);
+        if (!previous.isEmpty() && !previous.equals(employer)) fire(id, previous, year);
+        changeProfession(id, profession, year);
+        setDuty(id, PopulationSimulation.Duty.WORKER, true, year);
         c.props.put("population.employer", employer);
         appoint(id, "settlement_worker", employer, year);
-        emit(c, LifecycleKind.HIRED, previous, employer, year);
+        if (changed) emit(c, LifecycleKind.HIRED, previous, employer, year);
     }
 
     /** Releases employment without deleting the Character or any skills/family/history. */
@@ -106,10 +113,11 @@ public final class CharacterRegistry {
         Character c = require(id);
         String employer = employerId == null || employerId.isBlank()
                 ? String.valueOf(c.props.getOrDefault("population.employer", "")) : employerId.trim();
+        boolean employed = !employer.isEmpty() || PopulationSimulation.hasDuty(c, PopulationSimulation.Duty.WORKER);
         if (!employer.isEmpty()) dismiss(id, "settlement_worker", employer, year);
         c.props.remove("population.employer");
         setDuty(id, PopulationSimulation.Duty.WORKER, false, year);
-        emit(c, LifecycleKind.FIRED, employer, "", year);
+        if (employed) emit(c, LifecycleKind.FIRED, employer, "", year);
     }
 
     /** Moves the same person to another population scope and releases the old settlement post. */
