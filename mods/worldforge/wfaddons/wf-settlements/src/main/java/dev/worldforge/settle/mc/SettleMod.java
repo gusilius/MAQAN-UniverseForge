@@ -456,10 +456,20 @@ public class SettleMod {
             String profession = worker.profession == null || worker.profession.isBlank() ? "laborer" : worker.profession;
             if (!profession.equals(PopulationSimulation.profession(person))) registry.changeProfession(person.id, profession, PeopleMod.YEAR);
             registry.setDuty(person.id, Duty.WORKER, true, PeopleMod.YEAR);
-            if (java.util.Set.of("guard", "soldier", "archer", "knight").contains(profession)) registry.setDuty(person.id, Duty.SOLDIER, true, PeopleMod.YEAR);
-            else registry.setDuty(person.id, Duty.SOLDIER, false, PeopleMod.YEAR);
-            if (java.util.Set.of("blacksmith", "armorer", "trainer", "healer", "merchant", "scholar").contains(profession)) registry.setDuty(person.id, Duty.SPECIALIST, true, PeopleMod.YEAR);
-            else registry.setDuty(person.id, Duty.SPECIALIST, false, PeopleMod.YEAR);
+            boolean settlementSoldier = java.util.Set.of("guard", "soldier", "archer", "knight").contains(profession);
+            if (settlementSoldier && !PopulationSimulation.hasDuty(person, Duty.SOLDIER)) {
+                registry.setDuty(person.id, Duty.SOLDIER, true, PeopleMod.YEAR);
+                person.props.put("population.settlement_soldier_duty", true);
+            } else if (!settlementSoldier && Boolean.TRUE.equals(person.props.remove("population.settlement_soldier_duty"))) {
+                registry.setDuty(person.id, Duty.SOLDIER, false, PeopleMod.YEAR);
+            }
+            boolean settlementSpecialist = java.util.Set.of("blacksmith", "armorer", "trainer", "healer", "merchant", "scholar").contains(profession);
+            if (settlementSpecialist && !PopulationSimulation.hasDuty(person, Duty.SPECIALIST)) {
+                registry.setDuty(person.id, Duty.SPECIALIST, true, PeopleMod.YEAR);
+                person.props.put("population.settlement_specialist_duty", true);
+            } else if (!settlementSpecialist && Boolean.TRUE.equals(person.props.remove("population.settlement_specialist_duty"))) {
+                registry.setDuty(person.id, Duty.SPECIALIST, false, PeopleMod.YEAR);
+            }
             PopulationSimulation.updateIntent(person, PeopleMod.YEAR);
             person.props.put("wf_unit_kind", "worker");
             person.props.put("wf_settlement_id", colony.s.id);
