@@ -465,6 +465,7 @@ public class SettleMod {
                 if (lv == null) continue;
                 try {
                     BuildingSite.tick(lv, c);
+                    RoadSite.tick(lv, c);
                 } catch (RuntimeException ex) {
                     LOGGER.error("wf_settle: ошибка стройки {}: {}", c.s.id, ex.toString());
                 }
