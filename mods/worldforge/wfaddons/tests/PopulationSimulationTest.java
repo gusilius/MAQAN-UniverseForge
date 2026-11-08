@@ -21,8 +21,34 @@ public final class PopulationSimulationTest {
 
     public static void main(String[] args) {
         CharacterRegistry registry = new CharacterRegistry();
+        java.util.List<CharacterRegistry.LifecycleEvent> lifecycle = new java.util.ArrayList<>();
+        registry.addListener(new CharacterRegistry.Listener() {
+            @Override public void lifecycle(Character c, CharacterRegistry.LifecycleEvent event) { lifecycle.add(event); }
+        });
         Character smith = registry.create("Aldric", "House Forge", "north", "m", 280);
         String stableId = smith.id;
+        ok(lifecycle.size() == 1 && lifecycle.get(0).kind() == CharacterRegistry.LifecycleKind.BORN,
+                "birth emits one canonical lifecycle event");
+        registry.hire(smith.id, "settlement:forge", "farmer", 300);
+        ok(PopulationSimulation.hasDuty(smith, Duty.WORKER)
+                        && smith.has("settlement_worker", "settlement:forge"),
+                "hiring assigns an existing Character without allocating another identity");
+        registry.fire(smith.id, "settlement:forge", 301);
+        ok(!PopulationSimulation.hasDuty(smith, Duty.WORKER)
+                        && !smith.has("settlement_worker", "settlement:forge"),
+                "firing releases employment but preserves the person");
+        registry.migrate(smith.id, "settlement:river", 302);
+        ok("settlement:river".equals(smith.props.get("population.location"))
+                        && registry.get(stableId) == smith,
+                "migration changes location without changing Character ID");
+        ok(registry.bindEntity(smith.id, "npc", "entity-uuid-1")
+                        && !registry.bindEntity("c9999", "npc", "entity-uuid-1"),
+                "one Minecraft entity UUID cannot be bound to two Characters");
+        String boundSave = registry.toJson();
+        CharacterRegistry restoredBindings = new CharacterRegistry();
+        restoredBindings.fromJson(boundSave);
+        ok(restoredBindings.get(stableId).props.containsKey("population.entity_bindings"),
+                "Minecraft entity bindings survive registry save/load");
 
         ok(PopulationSimulation.progressOwner(smith, "middle_earth").equals("n:middle_earth:" + stableId), "NPC progression owner derives from the one Character ID");
         ok(PopulationSimulation.age(smith, 300) == 20, "age derives from the shared world calendar");
