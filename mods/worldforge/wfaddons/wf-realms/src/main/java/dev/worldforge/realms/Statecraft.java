@@ -17,7 +17,7 @@ public final class Statecraft {
     public enum PlotKind { CLAIM_TITLE, UNDERMINE_RULER, FABRICATE_CLAIM, ASSASSINATION }
     public enum PlotStatus { GATHERING, ACTIVE, EXPOSED, SUCCEEDED, FAILED }
     public enum WarStatus { ACTIVE, WHITE_PEACE, ATTACKER_VICTORY, DEFENDER_VICTORY }
-    public enum InheritanceLaw { PRIMOGENITURE, COGNATIC, ULTIMOGENITURE, ELECTIVE, SENIORITY }
+    public enum InheritanceLaw { PRIMOGENITURE, COGNATIC, ULTIMOGENITURE }
 
     public static final class Title {
         public final String id;
@@ -210,6 +210,10 @@ public final class Statecraft {
     }
     public InheritanceLaw inheritanceLaw(String realmId) {
         return inheritanceLaws.getOrDefault(realmId, InheritanceLaw.PRIMOGENITURE);
+    }
+    /** Exact law identifier accepted by wf-people Succession.onDeath(...). */
+    public String successionLawForPeople(String realmId) {
+        return inheritanceLaw(realmId).name().toLowerCase(Locale.ROOT);
     }
 
     /**
