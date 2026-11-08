@@ -41,6 +41,7 @@ public final class RoadSite {
         int previousY = Integer.MIN_VALUE;
         for (int i = 0; i <= length; i++) {
             int x = ax + sx * i, z = az + sz * i;
+            if (!level.hasChunkAt(new BlockPos(x, level.getMinBuildHeight(), z))) return false;
             int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
             if (previousY != Integer.MIN_VALUE && Math.abs(y - previousY) > 1) return false;
             previousY = y;
