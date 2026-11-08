@@ -228,7 +228,7 @@ public class RealmsMod {
                                 .then(Commands.argument("law", StringArgumentType.word())
                                         .executes(c -> politics(c.getSource(), "succession",
                                                 StringArgumentType.getString(c, "realm"),
-                                                StringArgumentType.getString(c, "law"), "", ""))))));
+                                                StringArgumentType.getString(c, "law"), "", "")))))));
         d.register(Commands.literal("wfinherit").requires(s -> s.hasPermission(2))
                 .then(Commands.argument("title", StringArgumentType.word())
                         .then(Commands.argument("deceased", StringArgumentType.word())
@@ -236,7 +236,7 @@ public class RealmsMod {
                                         .executes(ctx -> politics(ctx.getSource(), "inherit",
                                                 StringArgumentType.getString(ctx, "title"),
                                                 StringArgumentType.getString(ctx, "deceased"),
-                                                StringArgumentType.getString(ctx, "successor"), "")))))
+                                                StringArgumentType.getString(ctx, "successor"), ""))))))
         d.register(Commands.literal("wfdynasty").requires(s -> s.hasPermission(2))
                 .then(Commands.literal("register")
                         .then(Commands.argument("house", StringArgumentType.word())
@@ -245,7 +245,7 @@ public class RealmsMod {
                 .then(Commands.literal("member")
                         .then(Commands.argument("house", StringArgumentType.word())
                                 .then(Commands.argument("character", StringArgumentType.word())
-                                        .executes(ctx -> politics(ctx.getSource(), "dynasty_member", StringArgumentType.getString(ctx, "house"), StringArgumentType.getString(ctx, "character"), "", "")))))
+                                        .executes(ctx -> politics(ctx.getSource(), "dynasty_member", StringArgumentType.getString(ctx, "house"), StringArgumentType.getString(ctx, "character"), "", ""))))))
         d.register(Commands.literal("wfplot").requires(s -> s.hasPermission(2))
                 .then(Commands.literal("create")
                         .then(Commands.argument("realm", StringArgumentType.word())
@@ -256,7 +256,7 @@ public class RealmsMod {
                                                                 StringArgumentType.getString(ctx, "realm"),
                                                                 StringArgumentType.getString(ctx, "sponsor"),
                                                                 StringArgumentType.getString(ctx, "target"),
-                                                                StringArgumentType.getString(ctx, "kind")))))))));
+                                                                StringArgumentType.getString(ctx, "kind"))))))));
     }
 
     private static int politics(CommandSourceStack source, String action, String a, String b, String c, String d) {
