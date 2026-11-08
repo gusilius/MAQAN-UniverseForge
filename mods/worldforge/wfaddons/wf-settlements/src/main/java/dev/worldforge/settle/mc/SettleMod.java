@@ -477,5 +477,6 @@ public class SettleMod {
     @SubscribeEvent
     public void onCommands(RegisterCommandsEvent e) {
         SettleCommands.register(e.getDispatcher());
+        SettleMapCommands.register(e.getDispatcher());
     }
 }
