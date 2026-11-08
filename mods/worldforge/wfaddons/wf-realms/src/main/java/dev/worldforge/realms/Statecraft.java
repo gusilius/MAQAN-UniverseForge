@@ -17,6 +17,7 @@ public final class Statecraft {
     public enum PlotKind { CLAIM_TITLE, UNDERMINE_RULER, FABRICATE_CLAIM, ASSASSINATION }
     public enum PlotStatus { GATHERING, ACTIVE, EXPOSED, SUCCEEDED, FAILED }
     public enum WarStatus { ACTIVE, WHITE_PEACE, ATTACKER_VICTORY, DEFENDER_VICTORY }
+    public enum InheritanceLaw { PRIMOGENITURE, COGNATIC, ULTIMOGENITURE, ELECTIVE, SENIORITY }
 
     public static final class Title {
         public final String id;
@@ -103,6 +104,7 @@ public final class Statecraft {
     private final Map<String, Relation> relations = new LinkedHashMap<>();
     private final Map<String, Plot> plots = new LinkedHashMap<>();
     private final Map<String, War> wars = new LinkedHashMap<>();
+    private final Map<String, InheritanceLaw> inheritanceLaws = new LinkedHashMap<>();
     private long sequence = 1;
     public String lastError = "";
 
@@ -193,6 +195,29 @@ public final class Statecraft {
         if (v == null) throw new IllegalArgumentException("realm is not a vassal");
         v.loyalty = Math.max(0, Math.min(100, v.loyalty + delta));
         return v.loyalty;
+    }
+
+    /** Inheritance policy is stored per realm and translated by the wf-people succession adapter. */
+    public void setInheritanceLaw(String realmId, InheritanceLaw law) {
+        inheritanceLaws.put(clean(realmId, "realm id"), Objects.requireNonNull(law, "inheritance law"));
+    }
+    public InheritanceLaw inheritanceLaw(String realmId) {
+        return inheritanceLaws.getOrDefault(realmId, InheritanceLaw.PRIMOGENITURE);
+    }
+
+    /**
+     * Applies a successor already validated by wf-people's family/succession resolver.
+     * The successor must hold a recorded claim; this layer never invents kinship.
+     */
+    public boolean inheritTitle(String titleId, String deceasedCharacterId, String successorCharacterId) {
+        Title title = titles.get(titleId);
+        if (title == null) return fail("unknown title");
+        if (!title.holderCharacterId.equals(deceasedCharacterId)) return fail("deceased character does not hold this title");
+        String heir = clean(successorCharacterId, "successor Character ID");
+        if (!title.claims.contains(heir)) return fail("successor has no recorded claim");
+        title.holderCharacterId = heir;
+        title.claims.remove(heir);
+        return true;
     }
 
     // ---------------- Dynasties ----------------
@@ -363,6 +388,9 @@ public final class Statecraft {
         List<Object> ws=new ArrayList<>();
         for (War w:wars.values()) { Map<String,Object> m=new LinkedHashMap<>();m.put("id",w.id);m.put("attacker",w.attackerRealm);m.put("defender",w.defenderRealm);m.put("casusBelli",w.casusBelli);m.put("ruler",w.declaredByCharacterId);m.put("day",w.startDay);m.put("score",w.warScore);m.put("status",w.status.name());m.put("outcome",w.outcome);ws.add(m); }
         root.put("wars",ws);
+        Map<String,Object> succession=new LinkedHashMap<>();
+        inheritanceLaws.forEach((realm,law)->succession.put(realm,law.name()));
+        root.put("inheritanceLaws",succession);
         return Json.write(root);
     }
 
@@ -402,11 +430,13 @@ public final class Statecraft {
             if(m.get("backers") instanceof List<?> bs)for(Object id:bs)p.backers.add(String.valueOf(id));
             p.status=PlotStatus.valueOf(String.valueOf(value(m,"status","GATHERING")));p.progress=((Number)value(m,"progress",0.0)).doubleValue();p.discovered=Boolean.TRUE.equals(m.get("discovered"));next.plots.put(p.id,p);
         }
+        if(root.get("inheritanceLaws") instanceof Map<?,?> map) for(var e:map.entrySet())
+            next.setInheritanceLaw(String.valueOf(e.getKey()), InheritanceLaw.valueOf(String.valueOf(e.getValue())));
         if(root.get("wars") instanceof List<?> list) for(Object x:list) {
             Map<?,?> m=(Map<?,?>)x;War w=new War(String.valueOf(m.get("id")),String.valueOf(m.get("attacker")),String.valueOf(m.get("defender")),String.valueOf(m.get("casusBelli")),String.valueOf(m.get("ruler")),((Number)m.get("day")).intValue());
             w.warScore=((Number)value(m,"score",0)).intValue();w.status=WarStatus.valueOf(String.valueOf(value(m,"status","ACTIVE")));w.outcome=String.valueOf(value(m,"outcome",""));next.wars.put(w.id,w);
         }
         titles.clear();titles.putAll(next.titles);vassals.clear();vassals.putAll(next.vassals);dynasties.clear();dynasties.putAll(next.dynasties);
-        treasuries.clear();treasuries.putAll(next.treasuries);relations.clear();relations.putAll(next.relations);plots.clear();plots.putAll(next.plots);wars.clear();wars.putAll(next.wars);sequence=next.sequence;
+        treasuries.clear();treasuries.putAll(next.treasuries);relations.clear();relations.putAll(next.relations);plots.clear();plots.putAll(next.plots);wars.clear();wars.putAll(next.wars);inheritanceLaws.clear();inheritanceLaws.putAll(next.inheritanceLaws);sequence=next.sequence;
     }
 }
