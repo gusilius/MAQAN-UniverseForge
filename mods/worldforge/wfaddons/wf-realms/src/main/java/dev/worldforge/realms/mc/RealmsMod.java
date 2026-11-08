@@ -240,7 +240,7 @@ public class RealmsMod {
                                         .executes(ctx -> politics(ctx.getSource(), "inherit",
                                                 StringArgumentType.getString(ctx, "title"),
                                                 StringArgumentType.getString(ctx, "deceased"),
-                                                StringArgumentType.getString(ctx, "successor"), ""))))))
+                                                StringArgumentType.getString(ctx, "successor"), ""))))));
         d.register(Commands.literal("wfdynasty").requires(s -> s.hasPermission(2))
                 .then(Commands.literal("register")
                         .then(Commands.argument("house", StringArgumentType.word())
@@ -249,7 +249,7 @@ public class RealmsMod {
                 .then(Commands.literal("member")
                         .then(Commands.argument("house", StringArgumentType.word())
                                 .then(Commands.argument("character", StringArgumentType.word())
-                                        .executes(ctx -> politics(ctx.getSource(), "dynasty_member", StringArgumentType.getString(ctx, "house"), StringArgumentType.getString(ctx, "character"), "", ""))))))
+                                        .executes(ctx -> politics(ctx.getSource(), "dynasty_member", StringArgumentType.getString(ctx, "house"), StringArgumentType.getString(ctx, "character"), "", ""))))));
         d.register(Commands.literal("wfplot").requires(s -> s.hasPermission(2))
                 .then(Commands.literal("create")
                         .then(Commands.argument("realm", StringArgumentType.word())
