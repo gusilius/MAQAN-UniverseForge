@@ -9,7 +9,8 @@ import java.util.*;
  * и спрашивают, что разрешает должность ({@link #unlocked}), не зная ничего о ролях друг друга.
  */
 public final class CharacterRegistry {
-    public enum LifecycleKind { BORN, HIRED, FIRED, MIGRATED, DUTY_ASSIGNED, DUTY_REMOVED, DIED, RESTORED }
+    public enum LifecycleKind { BORN, MARRIED, POST_APPOINTED, POST_DISMISSED, PROFESSION_CHANGED,
+        HIRED, FIRED, MIGRATED, DUTY_ASSIGNED, DUTY_REMOVED, DIED, RESTORED }
 
     public record LifecycleEvent(LifecycleKind kind, String characterId, String from, String to, int year) { }
 
@@ -53,18 +54,37 @@ public final class CharacterRegistry {
         return c;
     }
 
-    public void appoint(String id, String role, String place) {
+    public void appoint(String id, String role, String place) { appoint(id, role, place, 0); }
+
+    public void appoint(String id, String role, String place, int year) {
         Character c = require(id);
         if (!c.alive) throw new IllegalStateException(c.name + " мёртв и не может занять должность");
         if (c.has(role, place)) return;
         c.posts.add(new Character.Post(role, place));
-        for (Listener l : listeners) l.appointed(c, role, place);
+        for (Listener l : listeners) {
+            l.appointed(c, role, place);
+            l.lifecycle(c, new LifecycleEvent(LifecycleKind.POST_APPOINTED, c.id, "", role + "@" + place, year));
+        }
     }
 
-    public void dismiss(String id, String role, String place) {
+    public void dismiss(String id, String role, String place) { dismiss(id, role, place, 0); }
+
+    public void dismiss(String id, String role, String place, int year) {
         Character c = require(id);
         if (c.posts.removeIf(p -> p.role.equals(role) && p.place.equals(place)))
-            for (Listener l : listeners) l.dismissed(c, role, place);
+            for (Listener l : listeners) {
+                l.dismissed(c, role, place);
+                l.lifecycle(c, new LifecycleEvent(LifecycleKind.POST_DISMISSED, c.id, role + "@" + place, "", year));
+            }
+    }
+
+    public void changeProfession(String id, String professionId, int year) {
+        Character c = require(id);
+        String previous = PopulationSimulation.profession(c);
+        PopulationSimulation.assignProfession(c, professionId, year);
+        String current = PopulationSimulation.profession(c);
+        if (!previous.equals(current))
+            emit(c, LifecycleKind.PROFESSION_CHANGED, previous, current, year);
     }
 
     /** Employment is an assignment on the existing person, never a new population record. */
@@ -73,11 +93,11 @@ public final class CharacterRegistry {
         if (!c.alive) throw new IllegalStateException(c.name + " is dead");
         String employer = requireText(employerId, "employer");
         String profession = requireText(professionId, "profession");
-        PopulationSimulation.assignProfession(c, profession, year);
+        changeProfession(id, profession, year);
         PopulationSimulation.addDuty(c, PopulationSimulation.Duty.WORKER);
         String previous = String.valueOf(c.props.getOrDefault("population.employer", ""));
         c.props.put("population.employer", employer);
-        appoint(id, "settlement_worker", employer);
+        appoint(id, "settlement_worker", employer, year);
         emit(c, LifecycleKind.HIRED, previous, employer, year);
     }
 
@@ -86,7 +106,7 @@ public final class CharacterRegistry {
         Character c = require(id);
         String employer = employerId == null || employerId.isBlank()
                 ? String.valueOf(c.props.getOrDefault("population.employer", "")) : employerId.trim();
-        if (!employer.isEmpty()) dismiss(id, "settlement_worker", employer);
+        if (!employer.isEmpty()) dismiss(id, "settlement_worker", employer, year);
         c.props.remove("population.employer");
         PopulationSimulation.removeDuty(c, PopulationSimulation.Duty.WORKER);
         emit(c, LifecycleKind.FIRED, employer, "", year);
@@ -208,6 +228,8 @@ public final class CharacterRegistry {
         if (!y.spouse.isEmpty()) throw new IllegalStateException(y.name + " уже состоит в браке");
         x.spouse = y.id;
         y.spouse = x.id;
+        emit(x, LifecycleKind.MARRIED, "", y.id, 0);
+        emit(y, LifecycleKind.MARRIED, "", x.id, 0);
     }
 
     /** A deceased or missing spouse does not permanently prevent remarriage. */
