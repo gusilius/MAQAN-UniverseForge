@@ -108,6 +108,38 @@ public class TroopsTest {
         check(Leadership.moraleMultiplier(true, 5) > Leadership.moraleMultiplier(false, 0),
                 "hero leadership improves squad morale");
 
+        // field supply and operational readiness
+        OperationalSupply.State supply = new OperationalSupply.State();
+        OperationalSupply.Report emptySupply = OperationalSupply.step(supply, 10, 1);
+        check(emptySupply.status() == OperationalSupply.Status.LOW
+                        && emptySupply.shortage() == 10 && supply.readiness < 1,
+                "unsupplied squads lose readiness according to ration deficit");
+        OperationalSupply.deliver(supply, 20);
+        OperationalSupply.Report supplied = OperationalSupply.step(supply, 10, 1);
+        check(supplied.status() == OperationalSupply.Status.SUPPLIED
+                        && supplied.consumed() == 10 && supply.rations == 10,
+                "delivered field rations cover squad demand and leave a reserve");
+        check(OperationalSupply.combatMultiplier(supply) > 0.65
+                        && OperationalSupply.movementMultiplier(supply) > 0.70,
+                "readiness controls combat and movement effectiveness");
+        boolean invalidSupplyRejected = false;
+        try { OperationalSupply.deliver(supply, Double.NaN); }
+        catch (IllegalArgumentException expected) { invalidSupplyRejected = true; }
+        check(invalidSupplyRejected, "invalid supply deliveries are rejected");
+
+        // campaign operations state machine
+        CampaignOperation operation = new CampaignOperation("op-1", "owner", CampaignOperation.Objective.SIEGE, 120, -40);
+        check(operation.assign("s1", "owner") && !operation.assign("s2", "enemy"),
+                "operation accepts only friendly assigned squads");
+        check(operation.waypoint(20, 10) && operation.waypoint(60, -10) && operation.start(),
+                "operation assembles assigned squads along explicit waypoints");
+        check(!operation.advance(0.3) && operation.phase == CampaignOperation.Phase.RESUPPLYING,
+                "operation pauses its advance below the supply readiness threshold");
+        check(operation.advance(0.9) && operation.engage() && operation.hold(),
+                "operation transitions from advance to engagement and tactical hold");
+        check(operation.complete("objective secured") && operation.terminal(),
+                "operation records a terminal outcome exactly once");
+
         // строи
         for (Formations.Type t : Formations.Type.values()) {
             for (int n : new int[]{1, 5, 17, 40}) {
