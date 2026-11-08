@@ -49,6 +49,15 @@ final class WorkerControl {
                 try { c.s.unassign(w.workerId); done++; } catch (RuntimeException ignored) {}
                 continue;
             }
+            if (o.action() == OrderPacket.WORK_STOP || o.action() == OrderPacket.WORK_HOLD) {
+                try {
+                    double x = w.getX() - c.cx, z = w.getZ() - c.cz;
+                    c.s.holdAt(w.workerId, x, z);
+                    done++;
+                    where = o.action() == OrderPacket.WORK_STOP ? "остановиться" : "удерживать позицию";
+                } catch (RuntimeException ex) { where = ex.getMessage(); }
+                continue;
+            }
             Building b = c.buildingAt((int) Math.floor(o.x()), (int) Math.floor(o.z()));
             try {
                 if (b == null) {
