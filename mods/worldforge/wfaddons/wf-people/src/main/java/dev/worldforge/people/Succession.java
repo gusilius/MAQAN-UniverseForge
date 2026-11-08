@@ -20,7 +20,7 @@ public final class Succession {
     public static List<Result> onDeath(CharacterRegistry reg, RoleDefs defs, TitleData d, TitleEditor ed, NameBank names, long seed, String id, int year, String law) {
         Character dead = reg.get(id);
         if (dead == null) throw new IllegalArgumentException("Нет персонажа " + id);
-        List<Character.Post> posts = reg.kill(id);
+        List<Character.Post> posts = PopulationSimulation.die(reg, id, year, "unspecified");
         List<Result> out = new ArrayList<>();
         for (Character.Post p : posts) {
             Role role = defs.get(p.role);
