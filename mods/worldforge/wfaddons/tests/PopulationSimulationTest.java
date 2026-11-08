@@ -3,6 +3,7 @@ package dev.worldforge.tests;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.PopulationSimulation;
+import dev.worldforge.people.ProfessionDefs;
 import dev.worldforge.progress.Progress;
 import dev.worldforge.progress.ProgressDefs;
 import dev.worldforge.progress.people.PeopleProgressBridge;
