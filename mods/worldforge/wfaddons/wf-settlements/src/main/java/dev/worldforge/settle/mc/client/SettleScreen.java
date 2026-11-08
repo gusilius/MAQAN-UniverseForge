@@ -64,8 +64,49 @@ public class SettleScreen extends Screen {
 
     private static int sev(int v) { return v >= 2 ? WFUi.BAD : v == 1 ? WFUi.GOLD : WFUi.MUTED; }
 
+    private boolean embeddedInMaqan;
+
+    public void setEmbeddedInMaqan(boolean embedded) { this.embeddedInMaqan = embedded; }
+
+    private void publishWorkspaceSelection() {
+        if (selBuilding != 0) {
+            Building b = s.building(selBuilding);
+            if (b != null) {
+                dev.worldforge.mod.client.PlatformWorkspaceBridge.publish("wf_settlements",
+                        "building:" + b.uid, "building", b.def.name,
+                        "Settlement building · " + b.state + " · " + b.x + ", " + b.z);
+                return;
+            }
+        }
+        if (selWorker != 0) {
+            Worker w = s.worker(selWorker);
+            if (w != null) {
+                String id = w.person == null || w.person.isBlank() ? "worker:" + w.id : w.person;
+                dev.worldforge.mod.client.PlatformWorkspaceBridge.publish("wf_settlements", id,
+                        w.person == null || w.person.isBlank() ? "worker" : "character",
+                        w.name, "Profession: " + s.defs.professionName(w.profession)
+                                + " · " + (w.status == null ? "" : w.status));
+                return;
+            }
+        }
+        dev.worldforge.mod.client.PlatformWorkspaceBridge.clear("wf_settlements");
+    }
+
+    @Override
+    public void removed() {
+        dev.worldforge.mod.client.PlatformWorkspaceBridge.clear("wf_settlements");
+        super.removed();
+    }
+
+    @Override
+    public void onClose() {
+        if (embeddedInMaqan && dev.worldforge.mod.client.PlatformWorkspaceBridge.closeEmbedded(this)) return;
+        super.onClose();
+    }
+
     @Override
     public void render(GuiGraphics g, int mx, int my, float pt) {
+        publishWorkspaceSelection();
         hits.clear();
         int x = (width - W) / 2, y = (height - H) / 2;
         int ap = s.approval();
