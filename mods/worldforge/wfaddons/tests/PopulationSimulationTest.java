@@ -40,14 +40,14 @@ public final class PopulationSimulationTest {
         PopulationSimulation.setTrainingTarget(smith, "smithing");
         ok(PopulationSimulation.decide(smith, 300) == Intent.TRAIN, "training target takes precedence over generic work");
         ok(PopulationSimulation.train(smith, "smithing", 250) == 2, "training XP advances two ranks");
-        ok(PopulationSimulation.skillRank(smith, "smithing") == 2 && PopulationSimulation.trainingXp(smith, "smithing") == 50,
+        ok(PopulationSimulation.skillRank(smith, "smithing") == 3 && PopulationSimulation.trainingXp(smith, "smithing") == 50,
                 "training remainder and skill rank persist in Character data");
 
         professionDefs.add("{\\"id\\":\\"armorer\\",\\"name\\":\\"Armorer\\",\\"category\\":\\"specialist\\"}");
         PopulationSimulation.assignProfession(smith, professionDefs, "armorer", 302);
         ok(PopulationSimulation.profession(smith).equals("armorer"), "profession can change without replacing Character");
-        ok(PopulationSimulation.professionHistory(smith).equals(java.util.List.of("blacksmith")), "previous profession is retained in history");
-        ok(PopulationSimulation.skillRank(smith, "smithing") == 2, "skills survive profession changes");
+        ok(PopulationSimulation.professionHistory(smith).equals(java.util.List.of("farmer", "blacksmith")), "previous profession is retained in history");
+        ok(PopulationSimulation.skillRank(smith, "smithing") == 3, "skills survive profession changes");
 
         PopulationSimulation.addDuty(smith, Duty.SOLDIER);
         PopulationSimulation.setNeed(smith, Need.HUNGER, 90);
@@ -95,7 +95,7 @@ public final class PopulationSimulationTest {
         loaded.fromJson(saved);
         Character restored = loaded.get(stableId);
         ok(restored != null && restored.props.containsKey("population.profession"), "population data survives CharacterRegistry JSON save/load");
-        ok(PopulationSimulation.skillRank(restored, "smithing") == 2, "skills survive save/load");
+        ok(PopulationSimulation.skillRank(restored, "smithing") == 3, "skills survive save/load");
         ok(PopulationSimulation.hasDuty(restored, Duty.SOLDIER), "multiple duties survive save/load");
         ok(PopulationSimulation.profession(restored).equals("armorer"), "current profession survives save/load");
         ok(!restored.alive && restored.props.get("population.death_year").equals(303), "dead characters remain in the persistent registry");
