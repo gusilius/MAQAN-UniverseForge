@@ -21,6 +21,7 @@ public final class SettleViews {
         for (Colony x : SettleMod.COLONIES.values()) rows.add(dev.worldforge.settle.CityRow.of(x.s));
         m.put("cities", dev.worldforge.settle.CityRow.toJson(rows));
         m.put("routes", SettleMod.NETWORK.toJson());
+        m.put("map", c.map.toJson());
         WFNet.sendView(sp, view, Json.write(m));
     }
 }
