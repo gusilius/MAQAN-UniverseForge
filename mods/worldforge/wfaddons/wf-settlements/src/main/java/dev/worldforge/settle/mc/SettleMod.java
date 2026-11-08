@@ -507,8 +507,8 @@ public class SettleMod {
         worker.person = person.id;
         worker.profession = profession;
         person.props.remove("population.pre_military_profession");
-        PopulationSimulation.removeDuty(person, Duty.SOLDIER);
-        PopulationSimulation.addDuty(person, Duty.WORKER);
+        registry.setDuty(person.id, Duty.SOLDIER, false, PeopleMod.YEAR);
+        registry.setDuty(person.id, Duty.WORKER, true, PeopleMod.YEAR);
         String place = "settlement:" + colony.s.id;
         person.props.put("population.location", colony.s.id);
         person.props.put("population.employer", place);
