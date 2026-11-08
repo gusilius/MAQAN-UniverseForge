@@ -47,6 +47,9 @@ dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
     // Ядро WorldForge: только чистые классы (api, TitleData, TitleEditor, Json), поэтому деобфускация не нужна.
     compileOnly fileTree(dir: 'libs', include: ['worldforge-*.jar'])
+    // Optional shared person identity for physical soldiers.
+    compileOnly fileTree(dir: 'libs', include: ['wf_people-*.jar'])
+    compileOnly fileTree(dir: '../wf-people/build/libs', include: ['wf_people-*.jar'])
     compileOnly fileTree(dir: 'libs', include: ['wf_settle-*.jar'])
     compileOnly fileTree(dir: '../wf-settlements/build/libs', include: ['wf_settle-*.jar'])
     compileOnly fileTree(dir: 'libs', include: ['wf_army-*.jar'])
