@@ -178,6 +178,17 @@ public final class PopulationSimulation {
         return value instanceof Number n ? Math.max(0, n.longValue()) : 0;
     }
 
+    public static void setTrainingXp(Character character, String skillId, long xp) {
+        requireAlive(character);
+        if (xp < 0) throw new IllegalArgumentException("Training XP cannot be negative");
+        mapProp(character, TRAINING).put(normalizeId(skillId, "skill"), xp);
+    }
+
+    public static void setSkillRank(Character character, String skillId, int rank) {
+        requireAlive(character);
+        mapProp(character, SKILLS).put(normalizeId(skillId, "skill"), clamp(rank, 0, MAX_SKILL_RANK));
+    }
+
     /** Adds training XP and returns the number of ranks gained. */
     public static int train(Character character, String skillId, long xp) {
         requireAlive(character);
