@@ -316,6 +316,9 @@ public final class PlatformShellScreen extends Screen {
             x += 52;
         }
         g.drawString(font, embeddedView != null && profile == Profile.COSMOS ? "ATLAS" : "WORKSPACE", 46, 13, MUTED, false);
+        g.drawCenteredString(font, "×", width - 18, 13, MUTED);
+        if (mx >= width - 30 && mx < width - 6 && my < 34)
+            g.renderTooltip(font, Component.literal(activeView() == null ? "Close workspace" : "Close current module view"), mx, my);
         if (mx >= 8 && mx < 30 && my < 34) g.renderTooltip(font, Component.literal("MAQAN workspace"), mx, my);
     }
 
@@ -528,6 +531,12 @@ public final class PlatformShellScreen extends Screen {
         if(button!=0) return activeView() != null
                 ? activeView().mouseClicked(mx,my,button) : super.mouseClicked(mx,my,button);
         if(my<34) {
+            if (mx >= width - 30 && mx < width - 6) {
+                Screen view = activeView();
+                if (view != null) detachProviderView(view);
+                else onClose();
+                return true;
+            }
             int x=Math.max(178,width/2-112);
             for(Profile p:Profile.values()) {
                 if (!profileAvailable(p)) continue;
