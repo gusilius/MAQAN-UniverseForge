@@ -264,7 +264,7 @@ public final class SettlementMap {
         if (from.equals(to)) throw new IllegalArgumentException("Logistics needs two different warehouses");
         if (resource == null || resource.isBlank() || resource.equals(Defs.SILVER)) throw new IllegalArgumentException("Choose a physical resource");
         if (!Double.isFinite(rate) || rate <= 0 || rate > 10000) throw new IllegalArgumentException("Rate must be 0..10000 units per minute");
-        if (!roadConnected(a.x, a.z, b.x, b.z))
+        if (roadDistanceBetween(a.x, a.z, b.x, b.z) == Integer.MAX_VALUE)
             throw new IllegalArgumentException("Both warehouses must connect to the same road network");
         for (LogisticsJob j : logistics.values()) if (j.from.equals(from) && j.to.equals(to) && j.resource.equals(resource))
             throw new IllegalArgumentException("This logistics route already exists");
@@ -273,22 +273,30 @@ public final class SettlementMap {
         return job;
     }
 
-    private boolean roadConnected(int ax, int az, int bx, int bz) {
-        if (roads.isEmpty()) return false;
+    private int roadDistanceBetween(int ax, int az, int bx, int bz) {
+        if (roads.isEmpty()) return Integer.MAX_VALUE;
         Node start = nearestRoad(grid(ax), grid(az)), goal = nearestRoad(grid(bx), grid(bz));
-        if (start == null || goal == null) return false;
+        if (start == null || goal == null) return Integer.MAX_VALUE;
         Set<Node> seen = new HashSet<>();
         ArrayDeque<Node> q = new ArrayDeque<>();
-        q.add(start); seen.add(start);
+        Map<Node, Integer> distance = new HashMap<>();
+        q.add(start); seen.add(start); distance.put(start, 0);
         while (!q.isEmpty()) {
             Node n = q.removeFirst();
-            if (n.equals(goal)) return true;
+            if (n.equals(goal)) {
+                int access = Math.abs(grid(ax) - start.gx) + Math.abs(grid(az) - start.gz)
+                        + Math.abs(grid(bx) - goal.gx) + Math.abs(grid(bz) - goal.gz);
+                return (distance.get(n) + access) * CELL_SIZE;
+            }
             for (int[] d : new int[][]{{1,0},{-1,0},{0,1},{0,-1}}) {
                 Node v = new Node(n.gx + d[0], n.gz + d[1]);
-                if (isRoad(v.gx, v.gz) && seen.add(v)) q.addLast(v);
+                if (isRoad(v.gx, v.gz) && seen.add(v)) {
+                    distance.put(v, distance.get(n) + 1);
+                    q.addLast(v);
+                }
             }
         }
-        return false;
+        return Integer.MAX_VALUE;
     }
 
     private Node nearestRoad(int gx, int gz) {
@@ -308,8 +316,10 @@ public final class SettlementMap {
         for (LogisticsJob job : logistics.values()) {
             Warehouse from = warehouses.get(job.from), to = warehouses.get(job.to);
             if (from == null || to == null) { job.status = "missing warehouse"; continue; }
-            if (!roadConnected(from.x, from.z, to.x, to.z)) { job.status = "road disconnected"; continue; }
-            job.accumulator += job.rate * dt / 60.0;
+            int distance = roadDistanceBetween(from.x, from.z, to.x, to.z);
+            if (distance == Integer.MAX_VALUE) { job.status = "road disconnected"; continue; }
+            double distanceAdjustedRate = job.rate / (1.0 + distance / 64.0);
+            job.accumulator += distanceAdjustedRate * dt / 60.0;
             double amount = Math.floor(job.accumulator);
             if (amount < 1) { job.status = "en route"; continue; }
             double free = Math.max(0, to.capacity - to.used());
