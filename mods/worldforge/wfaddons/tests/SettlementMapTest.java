@@ -20,7 +20,7 @@ public final class SettlementMapTest {
     }
     private static SettlementMap flatMap() {
         SettlementMap map = new SettlementMap();
-        for (int x = -5; x <= 6; x++) for (int z = -5; z <= 6; z++) {
+        for (int x = -10; x <= 10; x++) for (int z = -10; z <= 10; z++) {
             boolean water = x == 2 && z == 0;
             map.sample(x, z, 64, "minecraft:plains", 0.85, water);
         }
@@ -29,9 +29,9 @@ public final class SettlementMapTest {
     public static void main(String[] args) throws Exception {
         Defs defs = defs();
         SettlementMap map = flatMap();
-        ok(map.cells().size() == 144, "terrain cells are stored as a real sampled grid");
+        ok(map.cells().size() == 441, "terrain cells are stored as a real sampled grid");
         ok(map.cellAt(0, 0) != null && map.cellAt(0, 0).fertility > 0.8, "terrain lookup exposes fertility and biome data");
-        ok(map.cellAt(16, 0).water, "water is represented as a non-buildable terrain cell");
+        ok(map.cellAt(8, 0).water, "water is represented as a non-buildable terrain cell");
 
         SettlementMap.Parcel residential = map.zone("homes", -8, -8, 16, 16, SettlementMap.Zone.RESIDENTIAL);
         ok(residential.contains(-4, -4, 8, 8), "land parcel bounds are validated and queryable");
@@ -52,7 +52,7 @@ public final class SettlementMapTest {
         catch (IllegalArgumentException expected) { wrongZoneRejected = true; }
         ok(wrongZoneRejected, "zoning blocks an incompatible industrial building");
         boolean waterRejected = false;
-        try { map.validatePlacement("food", 16, 0, 4, 4); }
+        try { map.validatePlacement("food", 8, 0, 4, 4); }
         catch (IllegalArgumentException expected) { waterRejected = true; }
         ok(waterRejected, "construction on water is rejected");
 
