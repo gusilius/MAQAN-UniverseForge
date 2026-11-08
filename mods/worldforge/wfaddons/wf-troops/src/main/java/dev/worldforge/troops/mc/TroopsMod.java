@@ -419,6 +419,10 @@ public class TroopsMod {
             src.sendFailure(Component.literal("Для назначения командира требуется wf_people"));
             return 0;
         }
+        if (squad.realm.isEmpty()) {
+            src.sendFailure(Component.literal("У отряда не определено государство/регион для разрешения Character ID"));
+            return 0;
+        }
         boolean member = false;
         for (String unitId : squad.members) {
             TroopEntity troop = LIVE.get(unitId);
@@ -449,7 +453,8 @@ public class TroopsMod {
             src.sendFailure(Component.literal("Не удалось назначить командира"));
             return 0;
         }
-        src.sendSuccess(() -> Component.literal("Командир отряда «" + squad.name + "»: " + person.name
+        Character appointed = person;
+        src.sendSuccess(() -> Component.literal("Командир отряда «" + squad.name + "»: " + appointed.name
                 + (hero ? " (герой)" : "") + ", навык лидерства " + rank), false);
         save();
         return 1;
