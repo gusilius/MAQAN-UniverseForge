@@ -68,6 +68,26 @@ public final class SettlementMapTest {
                 "road-connected logistics moves real inventory between spatial warehouses");
         ok(settlement.amount("wood") == 100, "warehouse transfers preserve the canonical settlement inventory total");
 
+        SettlementMap steep = new SettlementMap();
+        steep.sample(0, 0, 64, "minecraft:plains", 0.8, false);
+        steep.sample(1, 0, 70, "minecraft:plains", 0.8, false);
+        boolean slopeRejected = false;
+        try { steep.validatePlacement("housing", 0, 0, 1, 1); }
+        catch (IllegalArgumentException expected) { slopeRejected = true; }
+        ok(slopeRejected, "steep terrain rejects a building footprint");
+
+        SettlementMap disconnected = new SettlementMap();
+        for (int x = -2; x <= 14; x++) for (int z = -2; z <= 2; z++)
+            disconnected.sample(x, z, 64, "minecraft:plains", 0.8, false);
+        disconnected.addRoad(0, 0, 8, 0);
+        disconnected.addRoad(40, 0, 48, 0);
+        disconnected.addWarehouse("west", 0, 0, 100);
+        disconnected.addWarehouse("east", 48, 0, 100);
+        boolean disconnectedRejected = false;
+        try { disconnected.addLogistics("west", "east", "wood", 10); }
+        catch (IllegalArgumentException expected) { disconnectedRejected = true; }
+        ok(disconnectedRejected, "logistics cannot connect warehouses on separate road components");
+
         SettlementMap restored = SettlementMap.fromJson(map.toJson());
         ok(restored.cells().size() == map.cells().size() && restored.roads.size() == 1
                 && restored.parcels.size() == 1 && restored.plans.containsKey(house.uid),
@@ -78,6 +98,8 @@ public final class SettlementMapTest {
         restored.tick(settlement, 60);
         ok(restored.simulationSteps == map.simulationSteps + 1,
                 "global settlement map simulation advances deterministically without chunk access");
+        restored.removeBuilding(house.uid);
+        ok(!restored.plans.containsKey(house.uid), "cancelled buildings remove their map construction plan");
 
         System.out.println(failures == 0 ? "ALL OK" : failures + " FAILED");
         if (failures > 0) System.exit(1);
