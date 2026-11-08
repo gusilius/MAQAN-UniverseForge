@@ -144,6 +144,14 @@ public final class PopulationSimulation {
         return raw instanceof List<?> list && list.contains(duty.name().toLowerCase(Locale.ROOT));
     }
 
+    public static void promoteToHero(Character character) { addDuty(character, Duty.HERO); }
+
+    public static void setCommand(Character character, String commandId) {
+        requireAlive(character);
+        if (commandId == null || commandId.isBlank()) character.props.remove("population.command");
+        else character.props.put("population.command", normalizeId(commandId, "command"));
+    }
+
     public static Set<String> duties(Character character) {
         TreeSet<String> result = new TreeSet<>();
         Object raw = character.props.get(DUTIES);
