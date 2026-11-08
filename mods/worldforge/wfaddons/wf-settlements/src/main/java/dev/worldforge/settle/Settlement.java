@@ -960,7 +960,8 @@ public final class Settlement {
 
     public String toJson() {
         Map<String, Object> root = new LinkedHashMap<>();
-        root.put("format", "wf-settlement/1");
+        root.put("format", "wf-settlement/2");
+        root.put("schema_version", 2);
         root.put("id", id); root.put("name", name); root.put("time", time); root.put("auto", auto);
         root.put("next_building", nextBuilding); root.put("next_worker", nextWorker); root.put("grow", growTimer); root.put("starve", starveTimer); root.put("leave", leaveTimer);
         root.put("flow", flow.save());
@@ -1000,7 +1001,9 @@ public final class Settlement {
     @SuppressWarnings("unchecked")
     public static Settlement fromJson(String json, Defs defs) {
         Map<String, Object> root = (Map<String, Object>) Json.parse(json);
-        if (!"wf-settlement/1".equals(root.get("format"))) throw new IllegalArgumentException("Неверный формат поселения");
+        String format = root.get("format") instanceof String f ? f : "";
+        if (!"wf-settlement/1".equals(format) && !"wf-settlement/2".equals(format))
+            throw new IllegalArgumentException("Неверный формат поселения: " + format);
         Settlement s = new Settlement((String) root.get("id"), (String) root.get("name"), defs);
         s.time = ((Number) root.get("time")).doubleValue();
         s.auto = Boolean.TRUE.equals(root.get("auto"));
