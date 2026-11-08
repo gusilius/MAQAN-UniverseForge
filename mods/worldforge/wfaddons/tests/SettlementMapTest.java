@@ -1,0 +1,85 @@
+package dev.worldforge.tests;
+
+import dev.worldforge.settle.*;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+
+public final class SettlementMapTest {
+    private static int failures;
+    private static void ok(boolean value, String label) {
+        System.out.println((value ? "ok   " : "FAIL ") + label);
+        if (!value) failures++;
+    }
+    private static Defs defs() throws Exception {
+        Defs d = new Defs();
+        d.add(Files.readString(Path.of("wf-settlements/src/main/resources/data/wf_settle/wf_settle/base.json")));
+        d.add(Files.readString(Path.of("wf-settlements/src/main/resources/data/wf_settle/wf_settle/economy.json")));
+        d.add(Files.readString(Path.of("wf-settlements/src/main/resources/data/wf_settle/wf_settle/extra.json")));
+        return d;
+    }
+    private static SettlementMap flatMap() {
+        SettlementMap map = new SettlementMap();
+        for (int x = -5; x <= 6; x++) for (int z = -5; z <= 6; z++) {
+            boolean water = x == 2 && z == 0;
+            map.sample(x, z, 64, "minecraft:plains", 0.85, water);
+        }
+        return map;
+    }
+    public static void main(String[] args) throws Exception {
+        Defs defs = defs();
+        SettlementMap map = flatMap();
+        ok(map.cells().size() == 144, "terrain cells are stored as a real sampled grid");
+        ok(map.cellAt(0, 0) != null && map.cellAt(0, 0).fertility > 0.8, "terrain lookup exposes fertility and biome data");
+        ok(map.cellAt(16, 0).water, "water is represented as a non-buildable terrain cell");
+
+        SettlementMap.Parcel residential = map.zone("homes", -8, -8, 16, 16, SettlementMap.Zone.RESIDENTIAL);
+        ok(residential.contains(-4, -4, 8, 8), "land parcel bounds are validated and queryable");
+        boolean overlapRejected = false;
+        try { map.zone("overlap", 0, 0, 16, 16, SettlementMap.Zone.INDUSTRY); }
+        catch (IllegalArgumentException expected) { overlapRejected = true; }
+        ok(overlapRejected, "overlapping land parcels are rejected");
+
+        Settlement settlement = new Settlement("map_test", "Map test", defs);
+        settlement.add("wood", 100);
+        Building house = settlement.place("house", 0, 0);
+        map.validatePlacement(house.def.category, house.x, house.z, house.def.sizeX, house.def.sizeZ);
+        SettlementMap.ConstructionPlan plan = map.planBuilding(house);
+        ok(plan.buildingUid == house.uid && plan.state == SettlementMap.PlanState.PLANNED,
+                "building placement creates a linked construction plan");
+        boolean wrongZoneRejected = false;
+        try { map.validatePlacement("industry", 0, 0, 5, 5); }
+        catch (IllegalArgumentException expected) { wrongZoneRejected = true; }
+        ok(wrongZoneRejected, "zoning blocks an incompatible industrial building");
+        boolean waterRejected = false;
+        try { map.validatePlacement("food", 16, 0, 4, 4); }
+        catch (IllegalArgumentException expected) { waterRejected = true; }
+        ok(waterRejected, "construction on water is rejected");
+
+        SettlementMap.Road road = map.addRoad(0, 0, 32, 0);
+        ok(road.path.size() > 5 && road.path.stream().noneMatch(n -> n.gx() == 2 && n.gz() == 0),
+                "A* road planning routes around water using passable terrain");
+        ok(map.isRoad(0, 0) && map.isRoad(4, 0), "road path is represented as a connected network");
+
+        SettlementMap.Warehouse east = map.addWarehouse("east", 32, 0, 100);
+        SettlementMap.LogisticsJob job = map.addLogistics("central", "east", "wood", 60);
+        map.tick(settlement, 60);
+        ok(east.amount("wood") == 60 && job.moved == 60 && map.totalGoodsMoved == 60,
+                "road-connected logistics moves real inventory between spatial warehouses");
+        ok(settlement.amount("wood") == 100, "warehouse transfers preserve the canonical settlement inventory total");
+
+        SettlementMap restored = SettlementMap.fromJson(map.toJson());
+        ok(restored.cells().size() == map.cells().size() && restored.roads.size() == 1
+                && restored.parcels.size() == 1 && restored.plans.containsKey(house.uid),
+                "terrain, zoning, roads and construction plans survive save/load");
+        ok(restored.warehouses.get("east").amount("wood") == 60
+                && restored.logistics.get(job.id).moved == 60,
+                "warehouse stocks and logistics progress survive save/load");
+        restored.tick(settlement, 60);
+        ok(restored.simulationSteps == map.simulationSteps + 1,
+                "global settlement map simulation advances deterministically without chunk access");
+
+        System.out.println(failures == 0 ? "ALL OK" : failures + " FAILED");
+        if (failures > 0) System.exit(1);
+    }
+}
