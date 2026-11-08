@@ -169,6 +169,11 @@ public class SettleTest {
         manual.holdAt(commanded.id, 3.0, 4.0);
         ok(commanded.manualOrder && commanded.orderX == 3.0 && commanded.orderZ == 4.0
                 && commanded.status.contains("удерживать"), "приказ удержания фиксирует позицию рабочего");
+        boolean distantMoveRejected = false;
+        try { manual.moveTo(commanded.id, Settlement.MAX_COMMAND_DISTANCE + 1, 0); }
+        catch (Settlement.OrderException expectedDistance) { distantMoveRejected = true; }
+        ok(distantMoveRejected && commanded.manualOrder && commanded.orderX == 3.0,
+                "приказы RTS за пределами поселения отклоняются без изменения действующего приказа");
         boolean badMoveRejected = false;
         try { manual.moveTo(commanded.id, Double.NaN, 0); } catch (Settlement.OrderException expectedMove) { badMoveRejected = true; }
         ok(badMoveRejected && commanded.manualOrder, "некорректные координаты не сбрасывают действующий приказ");
