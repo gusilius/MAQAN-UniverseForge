@@ -192,7 +192,7 @@ public class SettleScreen extends Screen {
             boolean hov = WFUi.over(mx, my, x + 4, cy - 1, lw - 8, 11) && a.building != 0;
             WFUi.dot(g, x + 6, cy + 2, 5, sev(a.severity));
             g.drawString(font, font.plainSubstrByWidth(a.text, lw - 26), x + 16, cy, hov ? WFUi.GOLD : WFUi.TX);
-            if (a.building != 0) { final int b = a.building; hit(x + 4, cy - 1, lw - 8, 11, () -> { selBuilding = b; tab = 1; }, null, null); }
+            if (a.building != 0) { final int b = a.building; hit(x + 4, cy - 1, lw - 8, 11, () -> { selBuilding = b; selWorker = 0; tab = 1; }, null, null); }
             cy += 11;
         }
         WFUi.bevel(g, rx, top, rw, h, true);
@@ -237,7 +237,7 @@ public class SettleScreen extends Screen {
             if (b.state == Building.State.DONE && b.def.produces()) g.drawString(font, Math.round(ch.efficiency * 100) + "%", col[3], ry + 2, ch.efficiency > 0.7 ? WFUi.GOOD : ch.efficiency > 0 ? WFUi.GOLD : WFUi.BAD);
             g.drawString(font, String.valueOf(b.priority), col[4], ry + 2, WFUi.TX);
             final int uid = b.uid;
-            hit(x + 3, ry - 1, lw - 6, 14, () -> selBuilding = uid, null, null);
+            hit(x + 3, ry - 1, lw - 6, 14, () -> { selBuilding = uid; selWorker = 0; }, null, null);
             ry += 14;
         }
         if (s.buildings.isEmpty()) g.drawString(font, "Пока ничего нет: вкладка «Строить».", x + 8, top + 22, WFUi.MUTED);
@@ -297,7 +297,7 @@ public class SettleScreen extends Screen {
             g.drawString(font, font.plainSubstrByWidth(wb == null ? "свободен" : wb.def.name, 106), col[2], ry + 2, wb == null ? WFUi.OFF : WFUi.TX);
             g.drawString(font, font.plainSubstrByWidth(w.status, 96), col[3], ry + 2, WFUi.MUTED);
             final int id = w.id;
-            hit(x + 3, ry - 1, lw - 6, 14, () -> selWorker = id, null, null);
+            hit(x + 3, ry - 1, lw - 6, 14, () -> { selWorker = id; selBuilding = 0; }, null, null);
             ry += 14;
         }
         WFUi.scrollbar(g, x + lw - 5, top + 19, h - 22, s.workers.size() * 14, scroll * 14);
@@ -692,6 +692,7 @@ public class SettleScreen extends Screen {
             final int uid = b.uid;
             hit(bx - 3, by - 3, bw + 6, bh + 6, () -> {
                 selBuilding = uid;
+                selWorker = 0;
                 tab = 1;
                 scroll = Math.max(0, s.buildings.indexOf(s.building(uid)));
             }, b.def.name, List.of("Координаты: " + b.x + ", " + b.z,
@@ -709,6 +710,7 @@ public class SettleScreen extends Screen {
             final int workerId = w.id;
             hit(wx - 5, wy - 5, 10, 10, () -> {
                 selWorker = workerId;
+                selBuilding = 0;
                 tab = 2;
                 scroll = Math.max(0, s.workers.indexOf(s.worker(workerId)));
             }, w.name, List.of("Профессия: " + s.defs.professionName(w.profession),
