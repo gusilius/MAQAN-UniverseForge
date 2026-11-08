@@ -562,10 +562,10 @@ public class SettleScreen extends Screen {
         for (SettlementMap.Road road : map.roads.values()) {
             for (int i = 1; i < road.path.size(); i++) {
                 SettlementMap.Node a = road.path.get(i - 1), b = road.path.get(i);
-                int ax = (int) Math.round(originX + a.gx() * SettlementMap.CELL_SIZE * scale);
-                int ay = (int) Math.round(originY + a.gz() * SettlementMap.CELL_SIZE * scale);
-                int bx = (int) Math.round(originX + b.gx() * SettlementMap.CELL_SIZE * scale);
-                int by = (int) Math.round(originY + b.gz() * SettlementMap.CELL_SIZE * scale);
+                int ax = (int) Math.round(originX + (a.gx() * SettlementMap.CELL_SIZE + SettlementMap.CELL_SIZE / 2.0) * scale);
+                int ay = (int) Math.round(originY + (a.gz() * SettlementMap.CELL_SIZE + SettlementMap.CELL_SIZE / 2.0) * scale);
+                int bx = (int) Math.round(originX + (b.gx() * SettlementMap.CELL_SIZE + SettlementMap.CELL_SIZE / 2.0) * scale);
+                int by = (int) Math.round(originY + (b.gz() * SettlementMap.CELL_SIZE + SettlementMap.CELL_SIZE / 2.0) * scale);
                 int thickness = Math.max(2, (int) Math.ceil(scale * 2.2));
                 g.fill(Math.min(ax,bx)-thickness/2, Math.min(ay,by)-thickness/2,
                         Math.max(ax,bx)+thickness/2+1, Math.max(ay,by)+thickness/2+1, 0xFFB49A70);
