@@ -7,6 +7,8 @@ import dev.worldforge.settle.Defs;
 import dev.worldforge.settle.Settlement;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
+import dev.worldforge.people.PopulationSimulation;
+import dev.worldforge.people.PopulationSimulation.Duty;
 import dev.worldforge.people.mc.PeopleMod;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
@@ -406,11 +408,19 @@ public class SettleMod {
         for (dev.worldforge.settle.Worker worker : colony.s.workers) {
             Character person = worker.person == null || worker.person.isBlank() ? null : registry.get(worker.person);
             if (person == null || !person.alive) {
-                person = registry.create(worker.name, "", culture, "m", colony.s.year());
+                person = registry.create(worker.name, "", culture, "m", PeopleMod.YEAR - 20);
                 worker.person = person.id;
             }
             if (!person.has("settlement_worker", place)) registry.appoint(person.id, "settlement_worker", place);
             if (person.culture == null || person.culture.isBlank()) person.culture = culture;
+            String profession = worker.profession == null || worker.profession.isBlank() ? "laborer" : worker.profession;
+            if (!profession.equals(PopulationSimulation.profession(person))) PopulationSimulation.assignProfession(person, profession, PeopleMod.YEAR);
+            PopulationSimulation.addDuty(person, Duty.WORKER);
+            if (java.util.Set.of("guard", "soldier", "archer", "knight").contains(profession)) PopulationSimulation.addDuty(person, Duty.SOLDIER);
+            else PopulationSimulation.removeDuty(person, Duty.SOLDIER);
+            if (java.util.Set.of("blacksmith", "armorer", "trainer", "healer", "merchant", "scholar").contains(profession)) PopulationSimulation.addDuty(person, Duty.SPECIALIST);
+            else PopulationSimulation.removeDuty(person, Duty.SPECIALIST);
+            PopulationSimulation.updateIntent(person, PeopleMod.YEAR);
             person.props.put("wf_unit_kind", "worker");
             person.props.put("wf_settlement_id", colony.s.id);
             person.props.put("wf_worker_id", worker.id);
