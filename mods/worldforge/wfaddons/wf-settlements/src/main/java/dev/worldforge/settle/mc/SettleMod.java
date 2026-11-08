@@ -289,6 +289,7 @@ public class SettleMod {
         s.add("food", 40);
         s.add("stone", 10);
         Colony c = new Colony(s, lv.dimension().location().toString(), p.getX(), p.getZ());
+        c.captureTerrain(lv);
         COLONIES.put(id, c);
         return c;
     }
@@ -444,6 +445,7 @@ public class SettleMod {
                 try {
                     c.s.tick(speed);                                   // 1 секунда симуляции = 20 тиков
                     syncPeople(c);
+                    c.map.tick(c.s, speed);                             // глобальная логистика не зависит от загруженности чанков
                     if (ticks % (STEP_TICKS * 10) == 0) { c.s.types = TYPES; String rid = realmOf(c); c.s.refreshType(c.s.workers.size(), rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.terrain(rid), rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.races(rid)); }
                 } catch (RuntimeException ex) {
                     LOGGER.error("wf_settle: ошибка симуляции поселения {}: {}", c.s.id, ex.toString());
