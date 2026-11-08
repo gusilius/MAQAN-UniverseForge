@@ -512,7 +512,8 @@ public class SettleMod {
         if (person == null || !person.alive) return false;
         String profession = person.props.get("population.pre_military_profession") instanceof String p && !p.isBlank()
                 ? p : PopulationSimulation.profession(person);
-        if (profession == null || profession.isBlank()) profession = "laborer";
+        if (profession == null || profession.isBlank() || DEFS == null || !DEFS.professions.containsKey(profession))
+            profession = "laborer";
         dev.worldforge.settle.Worker worker = colony.s.addWorker(person.name);
         worker.person = person.id;
         worker.profession = profession;
