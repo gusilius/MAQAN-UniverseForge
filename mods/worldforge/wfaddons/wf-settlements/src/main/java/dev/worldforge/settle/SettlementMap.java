@@ -333,7 +333,7 @@ public final class SettlementMap {
     private void reconcileStorageBuildings(Settlement settlement) {
         Set<String> activeStorage = new HashSet<>();
         for (Building b : settlement.buildings) {
-            if (!b.def.storage.isEmpty()) {
+            if (b.state == Building.State.DONE && !b.def.storage.isEmpty()) {
                 String id = "building:" + b.uid;
                 activeStorage.add(id);
                 Warehouse w = warehouses.get(id);
@@ -358,6 +358,27 @@ public final class SettlementMap {
         warehouses.keySet().removeIf(id -> id.startsWith("building:") && !activeStorage.contains(id));
     }
 
+    /** Newly produced goods enter the nearest completed storage node to a building producing that resource. */
+    private Warehouse productionWarehouse(Settlement settlement, String resource, Warehouse fallback) {
+        Building producer = null;
+        for (Building b : settlement.buildings) {
+            if (b.state == Building.State.DONE && !b.paused && b.def.out.getOrDefault(resource, 0) > 0) {
+                producer = b;
+                break;
+            }
+        }
+        if (producer == null) return fallback;
+        Warehouse best = fallback;
+        double distance = Double.POSITIVE_INFINITY;
+        for (Warehouse warehouse : warehouses.values()) {
+            if (warehouse == fallback || warehouse.capacity - warehouse.used() < 1) continue;
+            double dx = warehouse.x - producer.x, dz = warehouse.z - producer.z;
+            double d = dx * dx + dz * dz;
+            if (d < distance) { distance = d; best = warehouse; }
+        }
+        return best;
+    }
+
     private void reconcileInventory(Settlement settlement) {
         Warehouse central = warehouses.get("central");
         if (central == null) { central = new Warehouse("central", 0, 0, Settlement.BASE_CAP); warehouses.put("central", central); }
@@ -368,8 +389,10 @@ public final class SettlementMap {
             for (Warehouse w : warehouses.values()) total += w.amount(resource);
             double target = settlement.amount(resource);
             double delta = target - total;
-            if (delta > 0.000001) central.stock.merge(resource, delta, Double::sum);
-            else if (delta < -0.000001) {
+            if (delta > 0.000001) {
+                Warehouse destination = productionWarehouse(settlement, resource, central);
+                destination.stock.merge(resource, delta, Double::sum);
+            } else if (delta < -0.000001) {
                 double remove = -delta;
                 List<Warehouse> ordered = new ArrayList<>(warehouses.values());
                 ordered.sort(Comparator.comparing(w -> w.id.equals("central") ? "" : w.id));
