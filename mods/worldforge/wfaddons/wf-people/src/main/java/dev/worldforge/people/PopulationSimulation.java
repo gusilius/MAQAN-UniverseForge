@@ -278,6 +278,10 @@ public final class PopulationSimulation {
         if (elapsedDays == 0) return;
         for (Character character : registry.all()) {
             if (!character.alive) continue;
+            changeNeed(character, Need.HUNGER, drift(10, elapsedDays));
+            changeNeed(character, Need.REST, drift(6, elapsedDays));
+            changeNeed(character, Need.SOCIAL, drift(2, elapsedDays));
+            changeNeed(character, Need.PURPOSE, drift(1, elapsedDays));
             updateIntent(character, year);
             Object previous = character.props.get("population.simulated_days");
             long simulated = previous instanceof Number n ? Math.max(0, n.longValue()) : 0;
@@ -314,6 +318,10 @@ public final class PopulationSimulation {
         List<Object> created = new ArrayList<>();
         character.props.put(key, created);
         return created;
+    }
+
+    private static int drift(int perDay, long days) {
+        return (int) Math.min(MAX_NEED, (long) perDay * Math.min(days, MAX_NEED));
     }
 
     private static int clamp(int value, int min, int max) { return Math.max(min, Math.min(max, value)); }
