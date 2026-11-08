@@ -228,7 +228,7 @@ public class RealmsMod {
                                 .then(Commands.argument("law", StringArgumentType.word())
                                         .executes(c -> politics(c.getSource(), "succession",
                                                 StringArgumentType.getString(c, "realm"),
-                                                StringArgumentType.getString(c, "law"), "", "")))))));
+                                                StringArgumentType.getString(c, "law"), "", ""))))));
         d.register(Commands.literal("wfinherit").requires(s -> s.hasPermission(2))
                 .then(Commands.argument("title", StringArgumentType.word())
                         .then(Commands.argument("deceased", StringArgumentType.word())
@@ -256,7 +256,7 @@ public class RealmsMod {
                                                                 StringArgumentType.getString(ctx, "realm"),
                                                                 StringArgumentType.getString(ctx, "sponsor"),
                                                                 StringArgumentType.getString(ctx, "target"),
-                                                                StringArgumentType.getString(ctx, "kind"))))))));
+                                                                StringArgumentType.getString(ctx, "kind")))))))));
     }
 
     private static int politics(CommandSourceStack source, String action, String a, String b, String c, String d) {
