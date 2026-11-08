@@ -115,6 +115,10 @@ public class RealmsMod {
             if (Files.exists(f)) REALMS.fromJson(Files.readString(f));
             Path political = politicsFile(e.getServer());
             if (Files.exists(political)) POLITICS.fromJson(Files.readString(political));
+            int importedTitles = 0;
+            for (var map : WorldForgeMod.loadedMaps().values())
+                if (map.titles != null) importedTitles += POLITICS.syncMapTitles(map.name, map.titles);
+            if (importedTitles > 0) LOGGER.info("wf_realms: imported {} political titles from world maps", importedTitles);
         } catch (Exception ex) { LOGGER.error("wf_realms: не удалось прочитать состояние: {}", ex.toString()); }
     }
 
