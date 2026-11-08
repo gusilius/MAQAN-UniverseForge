@@ -73,7 +73,7 @@ public final class SettlementMapTest {
         farm.state = Building.State.DONE;
         producerSettlement.add("food", 20);
         SettlementMap productionMap = flatMap();
-        SettlementMap.Warehouse farmStore = productionMap.addWarehouse("farmstore", 8, 0, 100);
+        SettlementMap.Warehouse farmStore = productionMap.addWarehouse("farmstore", 4, 0, 100);
         productionMap.tick(producerSettlement, 1);
         ok(farmStore.amount("food") == 20 && productionMap.warehouses.get("central").amount("food") == 0,
                 "production output is allocated to the nearest spatial warehouse");
