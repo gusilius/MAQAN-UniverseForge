@@ -523,6 +523,20 @@ public class SettleScreen extends Screen {
             minX = Math.min(minX, w.x); maxX = Math.max(maxX, w.x);
             minZ = Math.min(minZ, w.z); maxZ = Math.max(maxZ, w.z);
         }
+        for (SettlementMap.Cell cell : map.cells()) {
+            minX = Math.min(minX, cell.x() - SettlementMap.CELL_SIZE / 2.0);
+            maxX = Math.max(maxX, cell.x() + SettlementMap.CELL_SIZE / 2.0);
+            minZ = Math.min(minZ, cell.z() - SettlementMap.CELL_SIZE / 2.0);
+            maxZ = Math.max(maxZ, cell.z() + SettlementMap.CELL_SIZE / 2.0);
+        }
+        for (SettlementMap.Parcel parcel : map.parcels.values()) {
+            minX = Math.min(minX, parcel.x); maxX = Math.max(maxX, parcel.x + parcel.width);
+            minZ = Math.min(minZ, parcel.z); maxZ = Math.max(maxZ, parcel.z + parcel.depth);
+        }
+        for (SettlementMap.Warehouse warehouse : map.warehouses.values()) {
+            minX = Math.min(minX, warehouse.x); maxX = Math.max(maxX, warehouse.x);
+            minZ = Math.min(minZ, warehouse.z); maxZ = Math.max(maxZ, warehouse.z);
+        }
         minX -= 10; maxX += 10; minZ -= 10; maxZ += 10;
         double spanX = Math.max(48, maxX - minX), spanZ = Math.max(48, maxZ - minZ);
         double baseScale = Math.min((cw - 24.0) / spanX, (h - 24.0) / spanZ);
