@@ -64,8 +64,9 @@ public final class SettlementMapTest {
         SettlementMap.Warehouse east = map.addWarehouse("east", 32, 0, 100);
         SettlementMap.LogisticsJob job = map.addLogistics("central", "east", "wood", 60);
         map.tick(settlement, 60);
-        ok(east.amount("wood") == 60 && job.moved == 60 && map.totalGoodsMoved == 60,
-                "road-connected logistics moves real inventory between spatial warehouses");
+        ok(east.amount("wood") > 0 && east.amount("wood") < 60 && job.moved == east.amount("wood")
+                        && map.totalGoodsMoved == job.moved,
+                "road-connected logistics moves inventory with throughput reduced by route distance");
         ok(settlement.amount("wood") == 100, "warehouse transfers preserve the canonical settlement inventory total");
 
         Settlement producerSettlement = new Settlement("producer_map", "Producer map", defs);
@@ -102,8 +103,8 @@ public final class SettlementMapTest {
         ok(restored.cells().size() == map.cells().size() && restored.roads.size() == 1
                 && restored.parcels.size() == 1 && restored.plans.containsKey(house.uid),
                 "terrain, zoning, roads and construction plans survive save/load");
-        ok(restored.warehouses.get("east").amount("wood") == 60
-                && restored.logistics.get(job.id).moved == 60,
+        ok(restored.warehouses.get("east").amount("wood") == east.amount("wood")
+                && restored.logistics.get(job.id).moved == job.moved,
                 "warehouse stocks and logistics progress survive save/load");
         restored.tick(settlement, 60);
         ok(restored.simulationSteps == map.simulationSteps + 1,
