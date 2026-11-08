@@ -1,6 +1,7 @@
 package dev.worldforge.realms;
 
 import dev.worldforge.mod.Json;
+import dev.worldforge.mod.TitleData;
 
 import java.util.*;
 
@@ -145,6 +146,56 @@ public final class Statecraft {
 
     public Title title(String id) { return titles.get(id); }
     public Collection<Title> titles() { return Collections.unmodifiableCollection(titles.values()); }
+
+    /**
+     * Idempotently imports the existing WorldForge map title tree and realm overlord links.
+     * Political titles are namespaced by map; character holders are not guessed from display names.
+     */
+    public int syncMapTitles(String mapName, TitleData data) {
+        Objects.requireNonNull(data, "title data");
+        String namespace = (mapName == null ? "map" : mapName.trim()).replaceAll("[^A-Za-z0-9_.-]", "_");
+        if (namespace.isEmpty()) namespace = "map";
+        Map<Integer, String> ids = new LinkedHashMap<>();
+        Map<Integer, String> realmsByTitle = new HashMap<>();
+        int imported = 0;
+        for (TitleData.Realm realm : data.realmList()) {
+            String realmId = clean(realm.id, "realm id");
+            for (String key : realm.titleKeys) {
+                TitleData.Title source = data.title(key);
+                if (source == null) continue;
+                String id = "map:" + UUID.nameUUIDFromBytes((namespace + "|" + key)
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                ids.put(source.id, id);
+                realmsByTitle.put(source.id, realmId);
+                if (!titles.containsKey(id)) {
+                    int tier = Math.max(0, Math.min(Rank.values().length - 1, source.tier));
+                    Title target = createTitle(id, realmId, Rank.values()[tier], source.name);
+                    Object holder = source.props.get("holderCharacterId");
+                    if (holder instanceof String characterId && !characterId.isBlank())
+                        target.holderCharacterId = clean(characterId, "holder Character ID");
+                    imported++;
+                }
+            }
+        }
+        for (TitleData.Title source : data.allTitles()) {
+            String childId = ids.get(source.id), parentId = ids.get(source.parent);
+            if (childId == null || parentId == null) continue;
+            Title child = titles.get(childId), parent = titles.get(parentId);
+            if (child != null && parent != null && child.liegeTitleId.isEmpty()
+                    && child.realmId.equals(parent.realmId) && child.rank.ordinal() < parent.rank.ordinal())
+                setTitleLiege(childId, parentId);
+        }
+        for (TitleData.Realm realm : data.realmList()) {
+            if (realm.overlordId == null || realm.overlordId.isBlank() || vassals.containsKey(realm.id)) continue;
+            if (data.realms.containsKey(realm.overlordId)) {
+                Object tax = realm.props.get("tax_share"), levy = realm.props.get("levy_share");
+                double taxShare = tax instanceof Number n ? Math.max(0, Math.min(1, n.doubleValue())) : 0.10;
+                double levyShare = levy instanceof Number n ? Math.max(0, Math.min(1, n.doubleValue())) : 0.10;
+                setVassalage(realm.id, realm.overlordId, taxShare, levyShare);
+            }
+        }
+        return imported;
+    }
 
     public boolean grantTitle(String titleId, String characterId) {
         Title title = titles.get(titleId);
