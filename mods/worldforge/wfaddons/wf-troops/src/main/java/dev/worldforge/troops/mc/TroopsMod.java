@@ -370,6 +370,16 @@ public class TroopsMod {
                         .then(Commands.argument("army", IntegerArgumentType.integer(1))
                                 .then(Commands.argument("n", IntegerArgumentType.integer(1, Squads.MAX_SIZE)).executes(c -> muster(c.getSource(), IntegerArgumentType.getInteger(c, "army"), IntegerArgumentType.getInteger(c, "n"))))))
                 .then(Commands.literal("return").requires(s -> s.hasPermission(2)).executes(c -> returnToArmy(c.getSource())))
+                .then(Commands.literal("appoint")
+                        .then(Commands.argument("squad", StringArgumentType.word())
+                                .then(Commands.argument("character", StringArgumentType.word())
+                                        .then(Commands.argument("hero", com.mojang.brigadier.arguments.BoolArgumentType.bool())
+                                                .then(Commands.argument("rank", IntegerArgumentType.integer(0, 10))
+                                                        .executes(ctx -> appointCommander(ctx.getSource(),
+                                                                StringArgumentType.getString(ctx, "squad"),
+                                                                StringArgumentType.getString(ctx, "character"),
+                                                                com.mojang.brigadier.arguments.BoolArgumentType.getBool(ctx, "hero"),
+                                                                IntegerArgumentType.getInteger(ctx, "rank"))))))))
                 .then(Commands.literal("list").executes(c -> {
                     try {
                         String json = SQUADS.viewJson(c.getSource().getPlayerOrException().getUUID().toString());
@@ -393,6 +403,56 @@ public class TroopsMod {
                     }
                     return 1;
                 })));
+    }
+
+    /** Appoints a living canonical wf-people Character who is physically present in the squad. */
+    private static int appointCommander(CommandSourceStack src, String squadId, String characterId, boolean hero, int rank) {
+        ServerPlayer player;
+        try { player = src.getPlayerOrException(); }
+        catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
+        Squads.Squad squad = SQUADS.get(squadId);
+        if (squad == null || !squad.owner.equals(player.getUUID().toString())) {
+            src.sendFailure(Component.literal("Отряд не найден или принадлежит другому игроку"));
+            return 0;
+        }
+        if (!ModList.get().isLoaded("wf_people")) {
+            src.sendFailure(Component.literal("Для назначения командира требуется wf_people"));
+            return 0;
+        }
+        boolean member = false;
+        for (String unitId : squad.members) {
+            TroopEntity troop = LIVE.get(unitId);
+            if (troop != null && characterId.equals(troop.characterId)) { member = true; break; }
+        }
+        if (!member) {
+            src.sendFailure(Component.literal("Персонаж должен состоять в этом отряде"));
+            return 0;
+        }
+        Character person = null;
+        for (MapData map : WorldForgeMod.loadedMaps().values()) {
+            if (map.titles == null) continue;
+            if (!squad.realm.isEmpty() && !map.titles.realms.containsKey(squad.realm)) continue;
+            CharacterRegistry registry = PeopleMod.registry(map);
+            if (registry == null) continue;
+            Character candidate = registry.get(characterId);
+            if (candidate != null) { person = candidate; break; }
+        }
+        if (person == null || !person.alive) {
+            src.sendFailure(Component.literal("Живой персонаж с таким Character ID не найден"));
+            return 0;
+        }
+        if (hero && !PopulationSimulation.hasDuty(person, Duty.HERO)) {
+            src.sendFailure(Component.literal("Герой должен иметь роль HERO в общей симуляции населения"));
+            return 0;
+        }
+        if (!SQUADS.appointLeader(squadId, characterId, hero, rank)) {
+            src.sendFailure(Component.literal("Не удалось назначить командира"));
+            return 0;
+        }
+        src.sendSuccess(() -> Component.literal("Командир отряда «" + squad.name + "»: " + person.name
+                + (hero ? " (герой)" : "") + ", навык лидерства " + rank), false);
+        save();
+        return 1;
     }
 
     /** Наём только из завершённого и укомплектованного профильного здания; списывает снабжение поселения и золото игрока/казны. */
