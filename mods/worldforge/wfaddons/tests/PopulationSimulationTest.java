@@ -61,6 +61,11 @@ public final class PopulationSimulationTest {
         PopulationSimulation.setNeed(smith, Need.SOCIAL, 0);
         PopulationSimulation.setNeed(smith, Need.PURPOSE, 0);
         ok(PopulationSimulation.decide(smith, 302) == Intent.PATROL, "same person can retain profession and serve as a soldier");
+        PopulationSimulation.promoteToHero(smith);
+        PopulationSimulation.setCommand(smith, "defend_capital");
+        ok(PopulationSimulation.decide(smith, 302) == Intent.FOLLOW_COMMAND, "hero is the same Character and follows a strategic command");
+        PopulationSimulation.setCommand(smith, "");
+        ok(PopulationSimulation.hasDuty(smith, Duty.HERO) && PopulationSimulation.hasDuty(smith, Duty.SOLDIER), "hero and soldier duties coexist without a second identity");
 
         Character child = registry.create("Mira", "", "north", "f", 296);
         ok(PopulationSimulation.lifeStage(child, 300) == LifeStage.INFANT, "infant classification");
