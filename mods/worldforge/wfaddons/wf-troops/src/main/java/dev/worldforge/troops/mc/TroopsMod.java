@@ -216,9 +216,9 @@ public class TroopsMod {
                     p.displayClientMessage(Component.literal("Собран " + n.name + " (" + n.members.size() + ")"), true);
                 }
             }
-            case OrderPacket.WORK, OrderPacket.RELEASE -> {
+            case OrderPacket.WORK, OrderPacket.RELEASE, OrderPacket.WORK_STOP, OrderPacket.WORK_HOLD -> {
                 if (!ModList.get().isLoaded("wf_settle") || !WorkerControl.anyWorker(p, o)) return;
-                if (!may(p)) { p.displayClientMessage(Component.literal("Рабочими управляют операторы"), true); return; }
+                // WorkerControl проверяет владельца каждого поселения; глобальный операторский gate здесь неверен.
                 p.displayClientMessage(Component.literal(WorkerControl.command(p, o)), true);
             }
             case OrderPacket.BUILD_LIST -> {
