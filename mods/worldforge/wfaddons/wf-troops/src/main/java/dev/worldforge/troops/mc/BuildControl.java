@@ -28,6 +28,11 @@ final class BuildControl {
             WFNet.sendView(p, VIEW, Json.write(m));
             return;
         }
+        if (!WorkerControl.mayControl(p, c)) {
+            m.put("error", "Это поселение вам не принадлежит");
+            WFNet.sendView(p, VIEW, Json.write(m));
+            return;
+        }
         m.put("colony", c.s.name);
         m.put("cx", c.cx);
         m.put("cz", c.cz);
@@ -55,6 +60,7 @@ final class BuildControl {
     static String place(ServerPlayer p, String defId, int wx, int wz, List<String> workerIds) {
         Colony c = SettleMod.nearest(p.serverLevel(), wx, wz);
         if (c == null) return "Рядом нет поселения";
+        if (!WorkerControl.mayControl(p, c)) return "Это поселение вам не принадлежит";
         Building b;
         try {
             b = c.s.place(defId, wx - c.cx, wz - c.cz);
@@ -65,7 +71,8 @@ final class BuildControl {
         for (String id : workerIds) {
             try {
                 Entity e = p.serverLevel().getEntity(UUID.fromString(id));
-                if (!(e instanceof WFWorker w) || w.worker() == null) continue;
+                if (!(e instanceof WFWorker w) || w.worker() == null
+                        || !w.colonyId.equals(c.s.id) || !WorkerControl.mayControl(p, w.colony())) continue;
                 c.s.assign(w.workerId, b.uid);
                 builders++;
             } catch (RuntimeException ignored) {}
