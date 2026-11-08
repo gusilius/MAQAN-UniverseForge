@@ -10,8 +10,8 @@ import java.util.*;
  * deterministically without loading chunks, so unloaded settlements keep simulating safely.
  */
 public final class SettlementMap {
-    public static final int CELL_SIZE = 8, MAX_CELLS = 65536;
-    public static final double MAX_BUILDING_SLOPE = 2.0, MAX_ROAD_SLOPE = 3.0;
+    public static final int CELL_SIZE = 4, MAX_CELLS = 65536;
+    public static final double MAX_BUILDING_SLOPE = 1.0, MAX_ROAD_SLOPE = 1.0;
 
     public enum Zone { NONE, RESIDENTIAL, AGRICULTURE, INDUSTRY, COMMERCE, CIVIC, MILITARY, STORAGE }
     public enum PlanState { PLANNED, BUILDING, COMPLETE, BLOCKED }
