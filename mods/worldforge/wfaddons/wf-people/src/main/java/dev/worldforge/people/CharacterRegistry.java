@@ -9,7 +9,7 @@ import java.util.*;
  * и спрашивают, что разрешает должность ({@link #unlocked}), не зная ничего о ролях друг друга.
  */
 public final class CharacterRegistry {
-    public enum LifecycleKind { BORN, CHILD_BORN, MARRIED, POST_APPOINTED, POST_DISMISSED, PROFESSION_CHANGED,
+    public enum LifecycleKind { BORN, CHILD_BORN, MARRIED, LIFE_STAGE_CHANGED, POST_APPOINTED, POST_DISMISSED, PROFESSION_CHANGED,
         HIRED, FIRED, MIGRATED, DUTY_ASSIGNED, DUTY_REMOVED, DIED, RESTORED }
 
     public record LifecycleEvent(LifecycleKind kind, String characterId, String from, String to, int year) { }
@@ -76,6 +76,18 @@ public final class CharacterRegistry {
                 l.dismissed(c, role, place);
                 l.lifecycle(c, new LifecycleEvent(LifecycleKind.POST_DISMISSED, c.id, role + "@" + place, "", year));
             }
+    }
+
+    /** Updates calendar-derived life stages and emits only real stage transitions. */
+    public void refreshLifeStages(int year) {
+        for (Character character : byId.values()) {
+            if (!character.alive) continue;
+            String current = PopulationSimulation.lifeStage(character, year).name().toLowerCase(Locale.ROOT);
+            Object previous = character.props.put("population.life_stage", current);
+            if (previous instanceof String old && !old.equals(current))
+                emit(character, LifecycleKind.LIFE_STAGE_CHANGED, old, current, year);
+            character.props.put("population.age_years", PopulationSimulation.age(character, year));
+        }
     }
 
     public void changeProfession(String id, String professionId, int year) {
