@@ -187,6 +187,18 @@ public class SettleTest {
         ok(specialistSite.progress > generalBuildProgress,
                 "профильный строитель реально строит быстрее общего рабочего");
 
+        Settlement exactRole = fresh(d, 2);
+        exactRole.auto = false;
+        Building exactCamp = exactRole.place("lumber_camp", 12, 0);
+        exactRole.tick(2);
+        Worker exactHauler = exactRole.workers.get(0);
+        exactRole.assign(exactHauler.id, exactCamp.uid, "hauler");
+        ok("hauler".equals(exactHauler.workRole()),
+                "прямое поручение назначает именно выбранную роль, а не первую свободную вакансию");
+        Worker wrongRole = exactRole.workers.get(1);
+        ok(throwsOrder(() -> exactRole.assign(wrongRole.id, exactCamp.uid, "builder")),
+                "прямое поручение отклоняет роль, которой нет среди вакансий здания");
+
         Settlement bufferTest = fresh(d, 3);
         bufferTest.auto = false;
         Building bufferCamp = bufferTest.place("lumber_camp", 10, 0);
