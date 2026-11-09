@@ -22,6 +22,21 @@ public final class DialogueBridge {
             ReputationStore s = store(c);
             return s.standing(player(c), target(a)) == Standing.byName(String.valueOf(a.get("name")));
         });
+        // NPC reactions use only reputation personally known to that speaker.
+        DialogueApi.registerCondition("rep_known", (c, a) ->
+                store(c).known(resident(c), player(c), scope(a), scopeId(a)) != null);
+        DialogueApi.registerCondition("known_rep_at_least", (c, a) -> {
+            ReputationStore.KnownReputation known = store(c).known(resident(c), player(c), scope(a), scopeId(a));
+            return known != null && known.value >= num(a, "value");
+        });
+        DialogueApi.registerCondition("known_rep_at_most", (c, a) -> {
+            ReputationStore.KnownReputation known = store(c).known(resident(c), player(c), scope(a), scopeId(a));
+            return known != null && known.value <= num(a, "value");
+        });
+        DialogueApi.registerCondition("known_standing_is", (c, a) -> {
+            ReputationStore.KnownReputation known = store(c).known(resident(c), player(c), scope(a), scopeId(a));
+            return known != null && Standing.of(known.value) == Standing.byName(String.valueOf(a.get("name")));
+        });
         DialogueApi.registerEffect("rep_add", (c, a) -> store(c).add(player(c), target(a), num(a, "value"), a.get("reason") == null ? "диалог" : String.valueOf(a.get("reason"))));
     }
 
@@ -29,6 +44,21 @@ public final class DialogueBridge {
         ReputationStore s = c.service(ReputationStore.class);
         if (s == null) throw new IllegalStateException("В разговоре нет ReputationStore");
         return s;
+    }
+
+    private static String resident(Ctx c) {
+        String id = c.vars.get("npc_id");
+        if (id == null || id.isBlank()) throw new IllegalStateException("В разговоре нет npc_id");
+        return id;
+    }
+
+    private static ReputationStore.Scope scope(Map<String, Object> a) {
+        return ReputationStore.Scope.valueOf(String.valueOf(a.get("scope")).toUpperCase(java.util.Locale.ROOT));
+    }
+
+    private static String scopeId(Map<String, Object> a) {
+        Object id = a.get("scope_id");
+        return id == null ? "" : String.valueOf(id);
     }
 
     private static String player(Ctx c) {
