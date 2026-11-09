@@ -136,11 +136,77 @@ public final class CommandScreen extends Screen {
 
     private int rowsFit() { return Math.max(3, (panelH() - 62) / ROW); }
 
+    // ---------- инспектор выбранных персонажей ----------
+    private static final int INSPECT_X=4, INSPECT_Y=34, INSPECT_W=250, INSPECT_ROW=19;
+
+    private boolean inspectAt(double x,double y) {
+        if(x<INSPECT_X||x>=INSPECT_X+INSPECT_W||y<INSPECT_Y+22)return false;
+        int row=(int)((y-(INSPECT_Y+22))/INSPECT_ROW);
+        if(row<0||row>=8)return false;
+        List<String> ids=CommandMode.selected();
+        if(row>=ids.size())return y<INSPECT_Y+22+8*INSPECT_ROW;
+        String id=ids.get(row);
+        for(net.minecraft.world.entity.Entity entity:minecraft.level.entitiesForRendering()){
+            if(!entity.isAlive()||!entity.getUUID().toString().equals(id))continue;
+            CommandMode.SEL.set(List.of(id));
+            CommandMode.RIG.focusOn(entity.getX(),entity.getZ());
+            return true;
+        }
+        return true;
+    }
+
+    private void drawUnitInspector(GuiGraphics g) {
+        List<String> ids=CommandMode.selected();
+        if(ids.isEmpty())return;
+        int rows=Math.min(8,ids.size());
+        int h=24+rows*INSPECT_ROW;
+        g.fill(INSPECT_X,INSPECT_Y,INSPECT_X+INSPECT_W,INSPECT_Y+h,0xD910121A);
+        g.fill(INSPECT_X,INSPECT_Y,INSPECT_X+INSPECT_W,INSPECT_Y+1,0xFF8A7040);
+        g.drawString(font,"ИНСПЕКТОР · "+ids.size()+" ВЫБРАНО",INSPECT_X+6,INSPECT_Y+6,0xFFE6C875,false);
+        int row=0;
+        for(String id:ids){
+            if(row>=8)break;
+            net.minecraft.world.entity.Entity entity=null;
+            for(net.minecraft.world.entity.Entity candidate:minecraft.level.entitiesForRendering())
+                if(candidate.getUUID().toString().equals(id)){entity=candidate;break;}
+            int y=INSPECT_Y+22+row*INSPECT_ROW;
+            if(entity==null){g.drawString(font,"Недоступен · "+id.substring(0,Math.min(8,id.length())),INSPECT_X+6,y+4,0xFF888888,false);row++;continue;}
+            boolean troop=entity instanceof TroopEntity;
+            String name=entity.getDisplayName().getString();
+            String role,identity="";
+            int morale=-1,xp=-1;
+            if(entity instanceof TroopEntity t){
+                role=t.def()==null?t.unitId():t.def().role();
+                morale=t.moralePct();xp=t.combatXp();
+                identity=t.characterId==null?"":t.characterId;
+            }else if(entity instanceof dev.worldforge.settle.mc.WFWorker w){
+                role=w.professionId().isBlank()?"Рабочий":w.professionId();
+                identity=w.characterId();
+            }else role="Юнит";
+            g.fill(INSPECT_X+3,y,INSPECT_X+INSPECT_W-3,y+INSPECT_ROW-1,
+                    (row&1)==0?0x55333344:0x33222230);
+            int health=entity instanceof LivingEntity living&&living.getMaxHealth()>0
+                    ?Math.round(100*living.getHealth()/living.getMaxHealth()):0;
+            String detail=role+" · HP "+health+"%"+(morale>=0?" · Мораль "+morale+"%":"")+(xp>=0?" · XP "+xp:"");
+            g.drawString(font,font.plainSubstrByWidth(name,INSPECT_W-14),INSPECT_X+7,y+2,
+                    troop?0xFFE6C875:0xFFB8D8A0,false);
+            g.drawString(font,font.plainSubstrByWidth(detail,INSPECT_W-14),INSPECT_X+7,y+11,0xFFB5B7C2,false);
+            if(!identity.isBlank()){
+                String shortId=identity.length()>16?identity.substring(0,16)+"…":identity;
+                g.drawString(font,shortId,INSPECT_X+INSPECT_W-7-font.width(shortId),y+2,0xFF777F91,false);
+            }
+            row++;
+        }
+        if(ids.size()>8)g.drawString(font,"Ещё "+(ids.size()-8)+" · выберите строку для фокуса",
+                INSPECT_X+6,INSPECT_Y+h-10,0xFF9EA4B5,false);
+    }
+
     // ---------- ввод ----------
     @Override
     public boolean mouseClicked(double x, double y, int button) {
         mx = x; my = y;
         boolean shift = hasShiftDown(), ctrl = hasControlDown();
+        if(button==0&&inspectAt(x,y))return true;
         if (button == 0) {
             for (Btn b : buttons()) if (b.hit(x, y)) { b.run().run(); return true; }
             if (buildOpen && inBuildPanel(x, y)) { panelClick(x, y); return true; }
@@ -354,6 +420,7 @@ public final class CommandScreen extends Screen {
         }
         for (Btn b : buttons()) button(g, b, mxi, myi);
         drawSelection(g, h);
+        drawUnitInspector(g);
         if (buildOpen) drawBuildPanel(g, mxi, myi);
         String hint = picked != null ? "ЛКМ - поставить здание (Shift - ещё одно) · ПКМ/Esc - отмена · колесо - высота камеры"
                 : "ЛКМ выбор/рамка · ПКМ приказ · WASD и края экрана - камера · колесо - высота · СКМ - вращать · Q/E поворот · Tab вид · Space к выбранным · B стройка · R выход";
