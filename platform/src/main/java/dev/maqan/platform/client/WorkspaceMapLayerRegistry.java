@@ -98,6 +98,7 @@ public final class WorkspaceMapLayerRegistry {
             try {
                 layer.renderer().render(graphics, x, y, width, height, opacity(layer.id()));
             } catch (RuntimeException error) {
+                VISIBILITY.put(layer.id(), false);
                 WorkspaceRuntime.publish(WorkspaceRuntime.Severity.WARNING,
                         layer.providerId(), "map-layer",
                         "Map layer failed: " + layer.label(), layer.id(), "");
