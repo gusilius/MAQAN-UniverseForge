@@ -45,6 +45,7 @@ public final class Worker {
     public double lifeTargetX, lifeTargetZ;
     public double lifeActionUntil;
     public double haulProgress;
+    public boolean manualHauler;
 
     Worker(int id, String name) { this.id = id; this.name = name; }
 }
