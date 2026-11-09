@@ -134,13 +134,31 @@ public class ReputationTest {
         ok(new Session(knownDialogue, unknownSpeaker).view().choices.isEmpty()
                         && new Session(knownDialogue, informedSpeaker).view().choices.size() == 2,
                 "dialogue branches react to what this NPC knows, not the global reputation database");
+        ok(scoped.shareWithTrustedContact("resident_a", "friend_resident", "p",
+                        ReputationStore.Scope.SETTLEMENT, "village_a", 140, 80, 0.8)
+                        && scoped.known("friend_resident", "p", ReputationStore.Scope.SETTLEMENT, "village_a").depth == 1
+                        && scoped.known("friend_resident", "p", ReputationStore.Scope.SETTLEMENT, "village_a").confidence < 1.0,
+                "trusted personal contacts receive a lower-confidence rumor with provenance depth");
+        ok(!scoped.shareWithTrustedContact("resident_a", "stranger", "p",
+                        ReputationStore.Scope.SETTLEMENT, "village_a", 140, 20, 0.8)
+                        && !scoped.shareWithTrustedContact("resident_a", "late_friend", "p",
+                        ReputationStore.Scope.SETTLEMENT, "village_a", 90, 80, 0.8),
+                "low-trust and time-reversed rumor transfers are rejected");
+        ok(scoped.knownAt("resident_a", "p", ReputationStore.Scope.SETTLEMENT, "village_a",
+                        150, 100, 0.5) != null
+                        && scoped.knownAt("resident_a", "p", ReputationStore.Scope.SETTLEMENT, "village_a",
+                        500, 100, 0.5) == null,
+                "stale information expires instead of masquerading as current knowledge");
         String scopedJson = scoped.toJson();
         ReputationStore scopedReload = new ReputationStore();
         scopedReload.fromJson(scopedJson);
         ok(scopedReload.get("p", ReputationStore.Scope.SETTLEMENT, "village_b") == 55
+                        && scopedReload.get("p", ReputationStore.Scope.POLITY, "kingdom_red") == -1
+                        && scopedReload.get("p", ReputationStore.Scope.POLITY, "kingdom_rival") == -10
                         && scopedReload.known("resident_a", "p", ReputationStore.Scope.SETTLEMENT, "village_a") != null
-                        && scopedReload.known("resident_c", "p", ReputationStore.Scope.ORGANIZATION, "guild") != null,
-                "scoped values and resident knowledge survive save/load");
+                        && scopedReload.known("resident_c", "p", ReputationStore.Scope.ORGANIZATION, "guild") != null
+                        && scopedReload.known("friend_resident", "p", ReputationStore.Scope.SETTLEMENT, "village_a").depth == 1,
+                "scoped values, diplomacy links, rumor provenance and resident knowledge survive save/load");
 
         System.out.println(fails == 0 ? "ВСЕ ПРОВЕРКИ ПРОЙДЕНЫ" : "ПРОВАЛОВ: " + fails);
         if (fails > 0) System.exit(1);
