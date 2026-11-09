@@ -59,6 +59,7 @@ public final class Settlement {
     public double time;
     private int nextBuilding = 1, nextWorker = 1;
     public final Flow flow = new Flow();
+    public final ResidentTaskGraph taskGraph = new ResidentTaskGraph();
     private double growTimer, starveTimer, leaveTimer;
 
     // ---- времена года и набеги
@@ -375,6 +376,12 @@ public final class Settlement {
         List<Worker> l = new ArrayList<>();
         for (Worker w : workers) if (w.building == uid) l.add(w);
         return l;
+    }
+
+    private int workerForRole(int uid, Collection<String> roles) {
+        for (Worker worker : workers)
+            if (worker.building == uid && worker.lifeAction.isBlank() && roles.contains(worker.workRole())) return worker.id;
+        return 0;
     }
 
     private int assignedWith(int uid, String profession) {
@@ -721,6 +728,8 @@ public final class Settlement {
         for (Building b : byPriority(x -> x.state == Building.State.PLANNED)) {
             if (!canPay(b.def.cost)) { b.status = "ждёт материалов"; continue; }
             if (!pay(b.def.cost, "construction", "building:" + b.uid)) { b.status = "ждёт материалов"; continue; }
+            for (Map.Entry<String,Integer> cost : b.def.cost.entrySet())
+                taskGraph.consume(ResidentTaskGraph.Stage.CONSTRUCTION, b.uid, 0, cost.getKey(), cost.getValue(), time);
             b.state = Building.State.BUILDING;
             b.status = "строится";
             say("Начата стройка: " + b.def.name);
@@ -801,6 +810,7 @@ public final class Settlement {
                 if (available <= 1e-9) { source.localStock.remove(resource); continue; }
                 double accepted = receiveResource(resource, Math.min(capacity, available));
                 if (accepted <= 0) break;
+                taskGraph.deliver(source.uid, worker.id, resource, accepted, time);
                 double remaining = available - accepted;
                 if (remaining <= 1e-9) source.localStock.remove(resource);
                 else source.localStock.put(resource, remaining);
@@ -865,8 +875,12 @@ public final class Settlement {
                     if (b.localStock.getOrDefault(o.getKey(), 0.0) + o.getValue() > LOCAL_BUFFER_CAP + 1e-9) room = false;
                 if (!room) { b.status = "цеховой буфер полон: нужен носильщик"; b.cycleTime = b.def.cycle; break; }
                 if (!pay(b.def.in, "production-input", "building:" + b.uid)) { b.status = "нет сырья"; b.cycleTime = b.def.cycle; break; }
-                for (Map.Entry<String, Integer> o : b.def.out.entrySet())
+                for (Map.Entry<String,Integer> input : b.def.in.entrySet())
+                    taskGraph.consume(ResidentTaskGraph.Stage.PROCESSED, b.uid, workerForRole(b.uid, b.def.jobs.keySet()), input.getKey(), input.getValue(), time);
+                for (Map.Entry<String, Integer> o : b.def.out.entrySet()) {
                     b.localStock.merge(o.getKey(), (double) o.getValue(), Double::sum);
+                    taskGraph.extract(b.uid, workerForRole(b.uid, b.def.jobs.keySet()), o.getKey(), o.getValue(), time);
+                }
                 b.cycleTime -= b.def.cycle;
                 b.status = "работает";
             }
@@ -1267,6 +1281,7 @@ public final class Settlement {
         root.put("id", id); root.put("name", name); root.put("ledger_scope", ledgerScope); root.put("time", time); root.put("auto", auto);
         root.put("next_building", nextBuilding); root.put("next_worker", nextWorker); root.put("grow", growTimer); root.put("starve", starveTimer); root.put("leave", leaveTimer);
         root.put("flow", flow.save());
+        root.put("resident_task_graph", taskGraph.toJson());
         root.put("raid_timer", raidTimer); root.put("raid_strength", raidStrength); root.put("raid_warn", raidWarnLeft); root.put("raid_in", raidIncoming); root.put("raid_ok", raidsRepelled); root.put("raid_bad", raidsLost); root.put("raids", raids);
         root.put("pressure", new LinkedHashMap<String, Object>(pressure)); root.put("tax", taxLevel); root.put("trade_left", tradeLeft);
         root.put("tax_got", taxCollected); root.put("remitted", remittedSilver); root.put("granted", grantedSilver); root.put("crown", crownShare);
@@ -1325,6 +1340,9 @@ public final class Settlement {
         s.starveTimer = ((Number) root.get("starve")).doubleValue();
         if (root.get("leave") instanceof Number n) s.leaveTimer = n.doubleValue();
         s.flow.load(root.get("flow"));
+        if (root.get("resident_task_graph") instanceof String graph)
+            try { s.taskGraph.fromJson(graph); }
+            catch (RuntimeException ex) { /* keep the settlement snapshot; malformed task receipts are isolated */ }
         if (root.get("raid_timer") instanceof Number rt) s.raidTimer = rt.doubleValue();
         if (root.get("raid_strength") instanceof Number rs) s.raidStrength = rs.doubleValue();
         if (root.get("raid_warn") instanceof Number rw) s.raidWarnLeft = rw.doubleValue();
