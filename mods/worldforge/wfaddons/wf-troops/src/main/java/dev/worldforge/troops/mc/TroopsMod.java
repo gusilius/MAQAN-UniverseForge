@@ -281,6 +281,8 @@ public class TroopsMod {
             if (!settled) {
                 binding.registry().setDuty(person.id, Duty.SOLDIER, false, PeopleMod.YEAR);
                 person.props.put("population.status", "deserted");
+                person.props.put("population.employer", "");
+                person.props.remove("wf_unit_kind");
                 person.props.remove("wf_troop_uuid");
                 person.props.remove("wf_troop_unit");
                 person.props.remove("wf_army_id");
