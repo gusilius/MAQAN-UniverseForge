@@ -68,6 +68,8 @@ public final class WorkspaceDockTree {
         }
     }
 
+    public record Splitter(String path, Axis axis, int position, int start, int end) {}
+
     private WorkspaceDockTree() {}
 
     public static Map<String, Rect> layout(Node root, Rect bounds) {
@@ -153,6 +155,55 @@ public final class WorkspaceDockTree {
                     ? new Split(horizontal ? Axis.HORIZONTAL : Axis.VERTICAL, firstWeight, added, target)
                     : new Split(horizontal ? Axis.HORIZONTAL : Axis.VERTICAL, firstWeight, target, added);
         });
+    }
+
+    /** Updates a split ratio by a stable child path: 0=first, 1=second. */
+    public static Node resize(Node root, String path, int firstWeight) {
+        if (root == null) throw new IllegalArgumentException("Workspace tree is empty");
+        if (firstWeight < MIN_SPLIT_WEIGHT || firstWeight > MAX_SPLIT_WEIGHT)
+            throw new IllegalArgumentException("Split weight must be between 100 and 900");
+        return resizeAt(root, path == null ? "" : path, 0, firstWeight);
+    }
+
+    private static Node resizeAt(Node node, String path, int offset, int weight) {
+        if (offset == path.length()) {
+            if (!(node instanceof Split split)) throw new IllegalArgumentException("Path does not identify a split");
+            return new Split(split.axis(), weight, split.first(), split.second());
+        }
+        if (!(node instanceof Split split)) throw new IllegalArgumentException("Invalid split path");
+        char direction = path.charAt(offset);
+        if (direction == '0')
+            return new Split(split.axis(), split.firstWeight(),
+                    resizeAt(split.first(), path, offset + 1, weight), split.second());
+        if (direction == '1')
+            return new Split(split.axis(), split.firstWeight(), split.first(),
+                    resizeAt(split.second(), path, offset + 1, weight));
+        throw new IllegalArgumentException("Split paths may contain only 0 and 1");
+    }
+
+    public static List<Splitter> splitters(Node root, Rect bounds) {
+        List<Splitter> result = new ArrayList<>();
+        collectSplitters(root, bounds, "", result);
+        return List.copyOf(result);
+    }
+
+    private static void collectSplitters(Node node, Rect bounds, String path, List<Splitter> result) {
+        if (!(node instanceof Split split)) return;
+        boolean horizontal = split.axis() == Axis.HORIZONTAL;
+        int available = horizontal ? bounds.width() : bounds.height();
+        int firstSize = (int) (((long) available * split.firstWeight()) / WEIGHT_SCALE);
+        int position = horizontal ? bounds.x() + firstSize : bounds.y() + firstSize;
+        result.add(new Splitter(path, split.axis(), position,
+                horizontal ? bounds.y() : bounds.x(),
+                horizontal ? bounds.y() + bounds.height() : bounds.x() + bounds.width()));
+        Rect first = horizontal
+                ? new Rect(bounds.x(), bounds.y(), firstSize, bounds.height())
+                : new Rect(bounds.x(), bounds.y(), bounds.width(), firstSize);
+        Rect second = horizontal
+                ? new Rect(bounds.x() + firstSize, bounds.y(), bounds.width() - firstSize, bounds.height())
+                : new Rect(bounds.x(), bounds.y() + firstSize, bounds.width(), bounds.height() - firstSize);
+        collectSplitters(split.first(), first, path + "0", result);
+        collectSplitters(split.second(), second, path + "1", result);
     }
 
     public static Node group(Node root, String targetPanelId, String newPanelId) {
