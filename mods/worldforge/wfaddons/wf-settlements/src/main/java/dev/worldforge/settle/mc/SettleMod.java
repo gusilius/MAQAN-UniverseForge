@@ -560,7 +560,7 @@ public class SettleMod {
             } else if (!settlementSoldier && Boolean.TRUE.equals(person.props.remove("population.settlement_soldier_duty"))) {
                 registry.setDuty(person.id, Duty.SOLDIER, false, PeopleMod.YEAR);
             }
-            boolean settlementSpecialist = java.util.Set.of("blacksmith", "armorer", "trainer", "healer", "merchant", "scholar").contains(profession);
+            boolean settlementSpecialist = java.util.Set.of("blacksmith", "armorer", "trainer", "healer", "merchant", "scholar", "porter").contains(profession);
             if (settlementSpecialist && !PopulationSimulation.hasDuty(person, Duty.SPECIALIST)) {
                 registry.setDuty(person.id, Duty.SPECIALIST, true, PeopleMod.YEAR);
                 person.props.put("population.settlement_specialist_duty", true);
