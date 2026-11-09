@@ -9,7 +9,7 @@ import java.util.*;
  * Domain effects are committed by Settlement only after stock or work services accept them.
  */
 public final class ResidentTaskGraph {
-    public enum Stage { EXTRACTED, HAULED, STORED, PROCESSED, CONSTRUCTION, BUILT }
+    public enum Stage { EXTRACTED, HAULED, STORED, PROCESSED, PRODUCED, CONSTRUCTION, BUILT }
     public record Receipt(long id, Stage stage, int buildingId, int workerId, String resource,
                           double quantity, long parentReceiptId, double worldTime) { }
     private record Lot(long receiptId, double quantity) { }
@@ -26,6 +26,23 @@ public final class ResidentTaskGraph {
     public Receipt extract(int buildingId, int workerId, String resource, double quantity, double time) {
         validate(resource, quantity, time);
         Receipt receipt = record(Stage.EXTRACTED, buildingId, workerId, resource, quantity, 0, time);
+        localLots.computeIfAbsent(localKey(buildingId, resource), ignored -> new ArrayDeque<>())
+                .addLast(new Lot(receipt.id(), quantity));
+        return receipt;
+    }
+
+    /** Records a processed output lot and links it to the input-processing receipt. */
+    public Receipt produce(int buildingId, int workerId, String resource, double quantity, double time) {
+        validate(resource, quantity, time);
+        long parent = 0;
+        for (int i = receipts.size() - 1; i >= 0; i--) {
+            Receipt receipt = receipts.get(i);
+            if (receipt.stage() == Stage.PROCESSED && receipt.buildingId() == buildingId) {
+                parent = receipt.id();
+                break;
+            }
+        }
+        Receipt receipt = record(Stage.PRODUCED, buildingId, workerId, resource, quantity, parent, time);
         localLots.computeIfAbsent(localKey(buildingId, resource), ignored -> new ArrayDeque<>())
                 .addLast(new Lot(receipt.id(), quantity));
         return receipt;
