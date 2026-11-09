@@ -80,7 +80,7 @@ def build_world() -> dict[str, bytes]:
                     "tier": 0, "parent": county_id, "color": color,
                     "capital": {"x": cx, "z": cz, "nx": (cx + 0.5) / WIDTH,
                                 "ny": (cz + 0.5) / HEIGHT, "province": barony_id},
-                    "area_blocks": 1, "area_pct_of_land": 0.0,
+                    "area_blocks": (WIDTH // REALMS) * ROWS_PER_BARONY, "area_pct_of_land": 100.0 / (REALMS * BARONIES_PER_REALM),
                     "children": [], "neighbors": [], "props": {}
                 })
 
@@ -91,7 +91,7 @@ def build_world() -> dict[str, bytes]:
                 "tier": 1, "parent": 0, "color": color,
                 "capital": {"x": cx, "z": cz, "nx": (cx + 0.5) / WIDTH,
                             "ny": (cz + 0.5) / HEIGHT, "province": child_ids[0]},
-                "area_blocks": 1, "area_pct_of_land": 0.0,
+                "area_blocks": (WIDTH // REALMS) * (HEIGHT // 2), "area_pct_of_land": 100.0 / REALMS,
                 "children": child_ids, "neighbors": [], "props": {}
             })
 
@@ -99,7 +99,7 @@ def build_world() -> dict[str, bytes]:
             "id": realm_id, "name": f"Test Realm {realm_index + 1}",
             "ruler": "", "color": color, "titles": county_keys,
             "overlord": None, "relation": "independent", "subjects": [],
-            "area_blocks": 1, "props": {}
+            "area_blocks": (WIDTH // REALMS) * HEIGHT, "props": {}
         })
 
     # IDs are contiguous but the array is deliberately sorted by ID because
@@ -114,7 +114,14 @@ def build_world() -> dict[str, bytes]:
         ],
         "titles": titles
     }
-    realm_doc = {"format": "worldforge-realms/1", "realms": realms}
+    realm_doc = {
+        "format": "worldforge-realms/1",
+        "relation_types": {
+            "vassal": {"label": "Vassal", "tribute": 10, "levy": 10, "can_declare_war": False},
+            "personal_union": {"label": "Personal union", "tribute": 0, "levy": 0, "can_declare_war": False}
+        },
+        "realms": realms
+    }
     meta_doc = {
         "size_px": [WIDTH, HEIGHT], "blocks_per_pixel": 16,
         "sea_level": 63, "min_y": -64, "max_y": 320,
