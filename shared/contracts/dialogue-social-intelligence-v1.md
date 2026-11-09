@@ -35,6 +35,18 @@
 - Settlement, army, realm and personal-life simulation publish events into one world event stream; each domain remains authoritative for its commits.
 - Remote simulation must not claim physical navigation, animation or block placement unless the runtime executor performed it.
 
+## Reputation, locality and knowledge
+
+- Reputation value and reputation knowledge are separate state.
+- Value scopes are WORLD, SETTLEMENT, POLITY and ORGANIZATION. Keys are explicit; absence of a link means no propagation.
+- Scope links are configured per relationship with a coefficient in [-1, 1]. Positive coefficients share the direction of an action; negative coefficients model rivalries where helping one polity may damage standing with another.
+- No settlement reputation is automatically promoted to world reputation. No resident automatically knows every value stored for the player.
+- `observe(residentId, playerId, scope, scopeId, worldTime, source)` records only the exact scope the resident witnessed or learned about.
+- Organization gossip requires an explicit recipient-membership check and shares only that organization's observation with the selected recipient. It does not reveal settlement, rival organization or world reputation.
+- Dialogue conditions `rep_known`, `known_rep_at_least`, `known_rep_at_most` and `known_standing_is` evaluate the speaking NPC's own knowledge. Unknown reputation is not treated as neutral.
+- Existing `rep_at_least`, `rep_at_most` and `standing_is` remain global-to-script value checks for legacy scripts; use the `known_*` conditions for what this particular NPC actually knows.
+- The observation source and timestamp are persisted. Automatic rumor generation, witness detection, organization membership adapters, and reputation UI are still integration work; the core store does not invent witnesses or spread rumors by itself.
+
 ## Current implementation boundary
 - Implemented in this pass: owner-backed semantic dialogue memory, fact placeholders, bounded event history, promise/request/grievance records, open/resolved conditions, relationship score adapter for Character social state, opt-in nearby NPC-initiated follow-ups, speaker-distance enforcement, and bounded action fallback with failure reasons.
 - Still requires domain scripts and adapters to author meaningful conversation branches, automatically resolve obligations from actual deliveries/transactions, and provide initiative dialogue IDs per role/character.
