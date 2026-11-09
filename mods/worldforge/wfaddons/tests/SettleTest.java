@@ -99,10 +99,12 @@ public class SettleTest {
         Building lc = s.place("lumber_camp", 10, 0);
         s.tick(60);
         ok(lc.state == Building.State.DONE, "лагерь построен");
-        ok(s.assigned(lc.uid).size() == 3
-                        && s.assigned(lc.uid).stream().allMatch(w -> w.profession.equals("laborer")
-                        && w.assignedProfession.equals("lumberjack")),
-                "общие рабочие назначаются на добычу, не теряя постоянную профессию");
+        ok(s.assigned(lc.uid).size() == 4
+                        && s.assigned(lc.uid).stream().filter(w -> w.workRole().equals("lumberjack")).count() == 3
+                        && s.assigned(lc.uid).stream().filter(w -> w.workRole().equals("hauler")).count() == 1
+                        && s.assigned(lc.uid).stream().filter(w -> w.workRole().equals("lumberjack"))
+                        .allMatch(w -> w.profession.equals("laborer")),
+                "общие рабочие добывают, не теряя профессию, а отдельный носильщик доставляет ресурсы");
         double w0 = s.amount("wood");
         s.tick(120);
         ok(s.amount("wood") > w0, "дерево добывается");
