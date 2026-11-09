@@ -72,7 +72,7 @@ public final class StatecraftTest {
 
         check(state.fundArmy("north", 25, "north_guard", 2000)
                         && state.payArmyUpkeep("north_guard", 5, 2001, "garrison-month")
-                        && dev.worldforge.mod.TreasuryService.current().balance("army:north_guard") == 20,
+                        && dev.worldforge.mod.economy.TreasuryService.current().balance("army:north_guard") == 20,
                 "realm budget funds a dedicated army account and upkeep is paid from it");
         state.treasury("debt_realm");
         check(state.setRealmCreditLimit("debt_realm", 10)
