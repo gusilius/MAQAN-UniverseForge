@@ -160,6 +160,32 @@ public final class PopulationSimulationTest {
                         && PopulationSimulation.need(blocked, Need.HUNGER) == 90,
                 "unavailable resources and blocked actions do not grant free need relief");
 
+        Character fallbackNpc = registry.create("Tarin", "", "north", "m", 280);
+        PopulationSimulation.setNeed(fallbackNpc, Need.HUNGER, 90);
+        PopulationSimulation.setNeed(fallbackNpc, Need.REST, 65);
+        java.util.List<LifeSimulation.Action> fallbackAttempts = new java.util.ArrayList<>();
+        LifeSimulation.Decision fallbackDecision = LifeSimulation.tick(fallbackNpc,
+                new LifeSimulation.Context(700, true, true, true, true, true, true, true, false, LifeSimulation.LOD.ACTIVE),
+                new LifeSimulation.Executor() {
+                    @Override public LifeSimulation.Outcome execute(Character person, LifeSimulation.Action action, LifeSimulation.Context context) {
+                        fallbackAttempts.add(action);
+                        return action == LifeSimulation.Action.EAT ? LifeSimulation.Outcome.BLOCKED : LifeSimulation.Outcome.SUCCESS;
+                    }
+                    @Override public String failureReason(Character person, LifeSimulation.Action action, LifeSimulation.Context context, LifeSimulation.Outcome outcome) {
+                        return "no_edible_target_found";
+                    }
+                });
+        Object failureHistory = fallbackNpc.props.get("population.ai.failure_history");
+        ok(fallbackDecision.action() == LifeSimulation.Action.SLEEP
+                        && fallbackDecision.outcome() == LifeSimulation.Outcome.SUCCESS
+                        && fallbackAttempts.size() == 2 && fallbackAttempts.get(0) == LifeSimulation.Action.EAT,
+                "blocked survival action triggers a bounded alternative and the NPC completes the fallback");
+        ok(PopulationSimulation.need(fallbackNpc, Need.HUNGER) == 90
+                        && PopulationSimulation.need(fallbackNpc, Need.REST) == 0
+                        && failureHistory instanceof java.util.List<?> history && !history.isEmpty()
+                        && "no_edible_target_found".equals(((java.util.Map<?,?>) history.get(0)).get("reason")),
+                "failed action does not grant free effects; exact failure reason is retained in Character memory");
+
         Character scheduled = registry.create("Edda", "", "north", "f", 280);
         PopulationSimulation.setNeed(scheduled, Need.REST, 60);
         LifeSimulation.Context night = new LifeSimulation.Context(
