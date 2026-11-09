@@ -11,11 +11,11 @@ Silver is the world base money unit; the legacy CityTax UI's gold is a 5:1 displ
 | Owner | Account ID | Currency |
 |---|---|---|
 | Realm treasury | realm:<realm-id> | silver |
-| Settlement money | settlement:<settlement-id> | silver |
-| Settlement commodity stock | stock:<settlement-id>:<resource-id> | resource ID |
+| Settlement money | settlement:<dimension>:<settlement-id> | silver |
+| Settlement commodity stock | stock:<dimension>:<settlement-id>:<resource-id> | resource ID |
 | Army budget | army:<army-id> | silver |
 
-Settlement stock remains a compatibility mirror for existing UI and simulation APIs; account balances in the world ledger are authoritative. Legacy settlement inventories are imported when an account is first opened. Existing world treasury accounts win over stale stock snapshots on subsequent loads.
+Settlement stock remains a compatibility mirror for existing UI and simulation APIs; account balances in the world ledger are authoritative. Legacy settlement inventories are imported when an account is first opened. Settlement account IDs are scoped by Minecraft dimension so identically named settlements in separate worlds cannot share money or goods. Previous unscoped accounts are migrated into the dimension-scoped account on load. Existing world treasury accounts win over stale stock snapshots on subsequent loads.
 
 ## Connected flows
 
