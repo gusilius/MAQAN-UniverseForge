@@ -225,8 +225,11 @@ public class TroopsMod {
                 HIERARCHY.ensureArmy(troop.armyId, name, troop.ownerId(), realm);
                 if (strategic != null && !strategic.army().commander.isBlank())
                     HIERARCHY.appointArmyCommander(troop.armyId, strategic.army().commander);
-                ArmyHierarchy.Corps corps = HIERARCHY.defaultCorps(troop.armyId);
-                HIERARCHY.assignSquad(corps.id, squad.id, SQUADS);
+                ArmyHierarchy.Corps assigned = HIERARCHY.corpsForSquad(squad.id);
+                if (assigned == null || assigned.armyId != troop.armyId) {
+                    ArmyHierarchy.Corps corps = HIERARCHY.defaultCorps(troop.armyId);
+                    HIERARCHY.assignSquad(corps.id, squad.id, SQUADS);
+                }
             } catch (RuntimeException ex) {
                 LOGGER.warn("wf-troops: hierarchy reconcile failed for army {}: {}", troop.armyId, ex.toString());
             }
@@ -753,6 +756,7 @@ public class TroopsMod {
     }
 
     private static int orderArmy(CommandSourceStack src, int armyId, String kind, double x, double z, boolean queue) {
+        syncArmyHierarchy();
         ServerPlayer player;
         try { player = src.getPlayerOrException(); }
         catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
@@ -772,6 +776,7 @@ public class TroopsMod {
     }
 
     private static int orderCorps(CommandSourceStack src, String corpsId, String kind, double x, double z, boolean queue) {
+        syncArmyHierarchy();
         ServerPlayer player;
         try { player = src.getPlayerOrException(); }
         catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
@@ -792,6 +797,7 @@ public class TroopsMod {
     }
 
     private static int showHierarchy(CommandSourceStack src, int armyId) {
+        syncArmyHierarchy();
         ServerPlayer player;
         try { player = src.getPlayerOrException(); }
         catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
