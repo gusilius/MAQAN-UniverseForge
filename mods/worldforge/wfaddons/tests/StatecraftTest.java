@@ -67,6 +67,9 @@ public final class StatecraftTest {
         double income = state.collectTaxes(realmRules, "north", 1000, 1);
         check(income > 100 && state.treasury("north").balance == income,
                 "tax revenue applies existing realm-law modifiers and vassal tribute");
+        check(Math.abs(dev.worldforge.mod.api.TreasuryApi.balance("north")
+                        - state.treasury("north").balance / 5.0) < 1e-9,
+                "legacy gold treasury facade and Statecraft silver treasury read the same canonical account");
         check(state.spend("north", 10, "roads") && !state.spend("north", 1_000_000, "unfunded"),
                 "treasury expenses are constrained by available funds");
 
