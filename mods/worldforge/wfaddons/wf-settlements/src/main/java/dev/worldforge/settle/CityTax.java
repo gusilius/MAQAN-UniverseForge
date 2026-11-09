@@ -2,6 +2,7 @@ package dev.worldforge.settle;
 
 import dev.worldforge.mod.Json;
 import dev.worldforge.mod.api.TreasuryApi;
+import dev.worldforge.mod.economy.TreasuryService;
 
 import java.util.*;
 import java.util.function.Function;
@@ -55,6 +56,7 @@ public final class CityTax {
             if (take <= 0) { s.taxCollected = 0; continue; }
             double gold = take / SILVER_PER_GOLD;
             if (!TreasuryApi.remitSettlement(s.id, realm, take, LABEL_TAX)) continue;
+            s.stock.put(Defs.SILVER, TreasuryService.current().balance("settlement:" + s.id));
             s.taxCollected = 0;
             s.remittedSilver += take;
             Stat st = stat(realm);
@@ -73,6 +75,7 @@ public final class CityTax {
             lastError = "В казне нет столько золота (" + Math.round(TreasuryApi.balance(realm)) + ").";
             return false;
         }
+        s.stock.put(Defs.SILVER, TreasuryService.current().balance("settlement:" + s.id));
         s.grantedSilver += silver;
         stat(realm).grantedGold += gold;
         return true;
