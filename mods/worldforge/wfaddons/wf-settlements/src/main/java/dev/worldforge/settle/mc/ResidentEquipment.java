@@ -230,6 +230,27 @@ public final class ResidentEquipment {
     }
 
 
+    /** Repair a damaged profession tool using real settlement stock; no free durability restoration. */
+    public static String repair(WFWorker body) {
+        Colony colony = body.colony();
+        Character person = SettleMod.residentCharacter(body);
+        if (colony == null || person == null) return "Не удалось проверить поселение или персонажа.";
+        ItemStack stack = load(person);
+        if (stack.isEmpty()) return "Нечего ремонтировать: инструмент отсутствует.";
+        if (stack.getMaxDamage() <= 0 || stack.getDamageValue() <= 0) return "Инструмент не повреждён.";
+        int tier = person.props.get(TIER_KEY) instanceof Number n ? Math.max(0, Math.min(4, n.intValue())) : 0;
+        String material = materialForTier(tier);
+        int cost = tier >= 3 ? 2 : 1;
+        if (!colony.s.consumeResource(material, cost))
+            return "Не хватает " + material + " для ремонта (нужно " + cost + ").";
+        int oldDamage = stack.getDamageValue();
+        stack.setDamageValue(0);
+        save(person, stack, tier, String.valueOf(person.props.getOrDefault(ROLE_KEY, "worker")));
+        body.setItemSlot(EquipmentSlot.MAINHAND, stack.copy());
+        person.props.put("equipment.last_repair", colony.s.year());
+        return "Отремонтировал " + stack.getHoverName().getString() + ": восстановлено " + oldDamage + " единиц прочности за " + cost + " " + material + ".";
+    }
+
     /** Refuse physical extraction when the required tool is missing or of the wrong type. */
     public static boolean readyForWork(WFWorker body, String mode) {
         Kind required = requiredKind(mode);
@@ -254,6 +275,10 @@ public final class ResidentEquipment {
         if (last instanceof Number n && now - n.longValue() < 120) return;
         person.props.put("equipment.craft_attempt", now);
         ItemStack before = load(person);
+        if (!before.isEmpty() && before.getMaxDamage() > 0 && before.getDamageValue() > 0) {
+            String repaired = repair(body);
+            if (repaired.startsWith("Отремонтировал")) { worker.status = repaired.toLowerCase(Locale.ROOT); return; }
+        }
         String result = craft(body);
         if (result.startsWith("Изготовил")) worker.status = "самостоятельно " + result.toLowerCase(Locale.ROOT);
         else if (before.isEmpty()) worker.status = "нужен инструмент: " + result;
