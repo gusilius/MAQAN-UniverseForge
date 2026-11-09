@@ -38,6 +38,7 @@ public final class BuildingSite {
     }
 
     public static void tick(ServerLevel lv, Colony c) {
+        cleanupTemporaryScaffolds(lv, c);
         Iterator<Map.Entry<Integer, Colony.Site>> it = c.sites.entrySet().iterator();
         while (it.hasNext()) {
             Map.Entry<Integer, Colony.Site> e = it.next();
@@ -95,6 +96,31 @@ public final class BuildingSite {
                 b.status = b.paused ? "пауза" : (b.def.produces() ? "работает" : "готово");
                 site.physicalPending = false;
                 releaseBuilderCrew(c, b);
+            }
+        }
+    }
+
+    /** Clean persisted worker scaffolds after the last worker has left the access area. */
+    private static void cleanupTemporaryScaffolds(ServerLevel level, Colony colony) {
+        Iterator<Map.Entry<BlockPos, String>> iterator = colony.temporaryScaffolds.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<BlockPos, String> entry = iterator.next();
+            BlockPos step = entry.getKey();
+            if (!level.hasChunkAt(step)) continue;
+            BlockState expected = "wood".equals(entry.getValue())
+                    ? Blocks.OAK_PLANKS.defaultBlockState() : Blocks.COBBLESTONE.defaultBlockState();
+            if (!level.getBlockState(step).equals(expected)) {
+                iterator.remove();
+                continue;
+            }
+            net.minecraft.world.phys.AABB nearby = new net.minecraft.world.phys.AABB(step).inflate(4.0);
+            if (!level.getEntitiesOfClass(WFWorker.class, nearby, Entity::isAlive).isEmpty()) continue;
+            net.minecraft.world.phys.AABB standingSpace = new net.minecraft.world.phys.AABB(step.above());
+            if (!level.getEntitiesOfClass(net.minecraft.world.entity.LivingEntity.class, standingSpace,
+                    Entity::isAlive).isEmpty()) continue;
+            if (level.setBlock(step, Blocks.AIR.defaultBlockState(), 3)) {
+                colony.s.receiveResource(entry.getValue(), 1);
+                iterator.remove();
             }
         }
     }
