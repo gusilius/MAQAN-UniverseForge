@@ -292,11 +292,7 @@ public final class ResidentInteraction {
             }
             if (!compatible) continue;
             try {
-                colony.s.assign(worker.id, building.uid);
-                if (requestedRole != null && !requestedRole.isBlank()) {
-                    Worker assigned = colony.s.worker(worker.id);
-                    if (assigned != null) assigned.assignedProfession = requestedRole;
-                }
+                colony.s.assign(worker.id, building.uid, requestedRole);
                 return building.uid;
             } catch (RuntimeException ignored) { /* try next compatible job slot */ }
         }
