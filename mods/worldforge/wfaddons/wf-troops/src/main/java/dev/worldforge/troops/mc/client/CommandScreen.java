@@ -126,9 +126,19 @@ public final class CommandScreen extends Screen {
                 workMode < 0 ? "Режим выбора участков выключен" :
                         "Выделите участок для задачи: " + WORK_LABELS[workMode] + " · Y — сменить задачу · O — видимость"), true);
     }
+    private List<String> selectedWorkerIds() {
+        List<String> ids = new ArrayList<>();
+        Set<String> selected = new HashSet<>(CommandMode.selected());
+        for (net.minecraft.world.entity.Entity entity : minecraft.level.entitiesForRendering())
+            if (entity instanceof LivingEntity living && CommandMode.isWorkerEntity(living)
+                    && selected.contains(entity.getUUID().toString())) ids.add(entity.getUUID().toString());
+        return ids;
+    }
+
     private void sendWorkArea(Vec3 a, Vec3 b, int radius) {
-        if (CommandMode.SEL.selected().isEmpty()) {
-            minecraft.player.displayClientMessage(Component.literal("Сначала выделите рабочих"), true);
+        List<String> workers = selectedWorkerIds();
+        if (workers.isEmpty()) {
+            minecraft.player.displayClientMessage(Component.literal("Для добычи и земляных работ выделите рабочих поселения"), true);
             return;
         }
         double x = (a.x + b.x) * 0.5, z = (a.z + b.z) * 0.5;
@@ -136,7 +146,7 @@ public final class CommandScreen extends Screen {
         int halfX = Math.min(64, (int) Math.ceil(Math.abs(b.x - a.x) * 0.5));
         int halfZ = Math.min(64, (int) Math.ceil(Math.abs(b.z - a.z) * 0.5));
         int extent = Math.max(halfX, halfZ);
-        CommandMode.send(new OrderPacket(OrderPacket.WORK_AREA, CommandMode.selected(), workMode,
+        CommandMode.send(new OrderPacket(OrderPacket.WORK_AREA, workers, workMode,
                 x, z, workOverlay + ":" + y + ":" + halfX + ":" + halfZ, false, extent));
         CommandMode.marker = new Vec3(x, y, z);
         CommandMode.markerUntil = System.currentTimeMillis() + 1800;
@@ -426,7 +436,7 @@ public final class CommandScreen extends Screen {
         if (key == GLFW.GLFW_KEY_O) {
             workOverlay = (workOverlay + 1) % 3;
             if (!CommandMode.SEL.selected().isEmpty()) {
-                CommandMode.send(new OrderPacket(OrderPacket.WORK_AREA, CommandMode.selected(), 0,
+                CommandMode.send(new OrderPacket(OrderPacket.WORK_AREA, selectedWorkerIds(), 0,
                         0, 0, workOverlay + ":0", false, -1));
             }
             if (minecraft.player != null) minecraft.player.displayClientMessage(Component.literal(
