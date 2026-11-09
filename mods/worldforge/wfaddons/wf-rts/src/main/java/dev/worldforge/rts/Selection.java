@@ -136,7 +136,7 @@ public final class Selection {
     /** Сводка «профессия -> сколько», больше - раньше (для надписи «Дровосек x3»). */
     public LinkedHashMap<String, Integer> byProfession(Settlement s) {
         Map<String, Integer> m = new HashMap<>();
-        for (Worker w : workers(s)) m.merge(w.profession, 1, Integer::sum);
+        for (Worker w : workers(s)) m.merge(w.workRole(), 1, Integer::sum);
         List<Map.Entry<String, Integer>> l = new ArrayList<>(m.entrySet());
         l.sort((a, b) -> a.getValue().equals(b.getValue()) ? a.getKey().compareTo(b.getKey()) : b.getValue() - a.getValue());
         LinkedHashMap<String, Integer> out = new LinkedHashMap<>();
