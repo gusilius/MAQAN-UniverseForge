@@ -61,8 +61,8 @@ final class WorkerControl {
             Building b = c.buildingAt((int) Math.floor(o.x()), (int) Math.floor(o.z()));
             try {
                 if (b == null) {
-                    c.s.moveTo(w.workerId, o.x() - c.cx, o.z() - c.cz);
-                    where = "точку назначения";
+                    c.s.moveTo(w.workerId,o.x()-c.cx,o.z()-c.cz,o.queue());
+                    where=o.queue()?"очередь маршрута":"точку назначения";
                 } else {
                     c.s.assign(w.workerId, b.uid);
                     where = b.def.name;
