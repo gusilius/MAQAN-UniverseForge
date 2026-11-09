@@ -148,6 +148,9 @@ final class TroopController {
             }
             t.setDamageMult(Morale.damage(s.morale, led));
             t.setMorale((int) Math.round(s.morale * 100));
+            // Squad morale is gameplay state: keep the soldier's canonical Character in sync
+            // so personality, dialogue, leadership and future decisions observe the same value.
+            TroopsMod.syncMilitaryMorale(t);
         }
         for (TroopEntity h : alive) {                                               // лекари лечат раненых своего отряда рядом
             if (h.def() == null || h.def().heal() <= 0) continue;
