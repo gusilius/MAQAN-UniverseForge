@@ -28,6 +28,8 @@ public final class Squads {
         public String leaderCharacterId = "";
         public boolean leaderHero;
         public int leadershipRank;
+        public double patrolOriginX,patrolOriginZ;
+        public boolean patrolReturning;
         Squad(String id, String name, String owner) { this.id = id; this.name = name; this.owner = owner; }
         public Order current() { return queue.peekFirst(); }
     }
@@ -87,7 +89,12 @@ public final class Squads {
     public void command(String squadId, Order o, boolean queue) {
         Squad s = squads.get(squadId);
         if (s == null) return;
-        if (o.kind() == Kind.STOP) { s.queue.clear(); return; }
+        if (o.kind() == Kind.STOP) { s.queue.clear(); s.patrolReturning=false; return; }
+        if(o.kind()==Kind.PATROL&&!queue){
+            s.patrolOriginX=Double.isFinite(s.cx)?s.cx:0;
+            s.patrolOriginZ=Double.isFinite(s.cz)?s.cz:0;
+            s.patrolReturning=false;
+        }
         if (!queue) s.queue.clear();
         s.queue.addLast(o);
     }
@@ -125,7 +132,8 @@ public final class Squads {
         n.initial = movedInitial;
         from.initial = Math.max(from.members.size(), oldInitial - movedInitial);
         n.morale = oldMorale; n.routed = from.routed; n.realm = from.realm;
-        n.formation = from.formation; n.stance = from.stance; n.cx = from.cx; n.cz = from.cz; n.yaw = from.yaw;
+        n.formation=from.formation;n.stance=from.stance;n.cx=from.cx;n.cz=from.cz;n.yaw=from.yaw;
+        n.patrolOriginX=from.patrolOriginX;n.patrolOriginZ=from.patrolOriginZ;n.patrolReturning=from.patrolReturning;
         return n;
     }
 
@@ -157,8 +165,16 @@ public final class Squads {
     public void completeCurrent(String squadId) {
         Squad s = squads.get(squadId);
         if (s == null || s.queue.isEmpty()) return;
-        Order o = s.queue.pollFirst();
-        if (o.kind() == Kind.PATROL) s.queue.addLast(new Order(Kind.PATROL, s.cx, s.cz, ""));     // патруль зацикливается: вернуться на старт
+        Order o=s.queue.pollFirst();
+        if(o.kind()==Kind.PATROL){
+            if(!s.patrolReturning){
+                s.patrolReturning=true;
+                s.queue.addLast(new Order(Kind.PATROL,s.patrolOriginX,s.patrolOriginZ,""));
+            }else{
+                s.patrolReturning=false;
+                s.queue.addLast(new Order(Kind.PATROL,o.x(),o.z(),""));
+            }
+        }
     }
 
     private static String jsonString(String value) {
@@ -224,6 +240,9 @@ public final class Squads {
                     .append(",\"cx\":").append(Double.isFinite(s.cx) ? s.cx : 0)
                     .append(",\"cz\":").append(Double.isFinite(s.cz) ? s.cz : 0)
                     .append(",\"yaw\":").append(Double.isFinite(s.yaw) ? s.yaw : 0)
+                    .append(",\"patrolOriginX\":").append(Double.isFinite(s.patrolOriginX)?s.patrolOriginX:0)
+                    .append(",\"patrolOriginZ\":").append(Double.isFinite(s.patrolOriginZ)?s.patrolOriginZ:0)
+                    .append(",\"patrolReturning\":").append(s.patrolReturning)
                     .append(",\"queue\":[");
             boolean firstOrder = true;
             for (Order order : s.queue) {
@@ -276,7 +295,10 @@ public final class Squads {
             try { s.stance = Stance.valueOf(String.valueOf(e.get("stance"))); } catch (RuntimeException ignored) {}
             s.cx = finiteNumber(e.get("cx"), 0);
             s.cz = finiteNumber(e.get("cz"), 0);
-            s.yaw = finiteNumber(e.get("yaw"), 0);
+            s.yaw=finiteNumber(e.get("yaw"),0);
+            s.patrolOriginX=finiteNumber(e.get("patrolOriginX"),s.cx);
+            s.patrolOriginZ=finiteNumber(e.get("patrolOriginZ"),s.cz);
+            s.patrolReturning=Boolean.TRUE.equals(e.get("patrolReturning"));
             s.morale = Math.max(0, Math.min(1, finiteNumber(e.get("morale"), 1)));
             s.routed = Boolean.TRUE.equals(e.get("routed"));
             s.leaderCharacterId = e.get("leaderCharacterId") instanceof String leader ? leader : "";
