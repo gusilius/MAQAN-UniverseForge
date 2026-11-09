@@ -210,6 +210,8 @@ public class TroopsMod {
             String realm = strategic == null ? troop.realm : strategic.army().realm;
             try {
                 HIERARCHY.ensureArmy(troop.armyId, name, troop.ownerId(), realm);
+                if (strategic != null && !strategic.army().commander.isBlank())
+                    HIERARCHY.appointArmyCommander(troop.armyId, strategic.army().commander);
                 ArmyHierarchy.Corps corps = HIERARCHY.defaultCorps(troop.armyId);
                 HIERARCHY.assignSquad(corps.id, squad.id, SQUADS);
             } catch (RuntimeException ex) {
@@ -803,12 +805,15 @@ public class TroopsMod {
         ServerPlayer player;
         try { player = src.getPlayerOrException(); }
         catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
+        syncArmyHierarchy();
         ArmyHierarchy.ArmyNode army = HIERARCHY.army(armyId);
         Character character = findArmyCharacter(army, characterId);
         if (army == null || !army.owner.equals(player.getUUID().toString()) || character == null
                 || !HIERARCHY.appointArmyCommander(armyId, characterId)) {
             src.sendFailure(Component.literal("Живой Character из государства армии не найден или нет прав")); return 0;
         }
+        ArmyLink.Found strategic = ArmyLink.find(armyId);
+        if (strategic != null) strategic.army().commander = characterId;
         save();
         src.sendSuccess(() -> Component.literal("Командующий армией «" + army.name + "»: " + character.name), false);
         return 1;
@@ -818,6 +823,7 @@ public class TroopsMod {
         ServerPlayer player;
         try { player = src.getPlayerOrException(); }
         catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
+        syncArmyHierarchy();
         ArmyHierarchy.Corps corps = HIERARCHY.corps(corpsId);
         ArmyHierarchy.ArmyNode army = corps == null ? null : HIERARCHY.army(corps.armyId);
         Character character = findArmyCharacter(army, characterId);
