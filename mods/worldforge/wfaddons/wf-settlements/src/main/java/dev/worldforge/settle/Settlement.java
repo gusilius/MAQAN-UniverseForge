@@ -317,18 +317,19 @@ public final class Settlement {
     /** Atomic resource withdrawal used by recruitment and other settlement services. */
     public boolean spend(Map<String, Integer> cost) {
         if (cost == null || !canPay(cost)) return false;
-        pay(cost);
-        return true;
+        return pay(cost);
     }
 
-    private void pay(Map<String, Integer> cost) { pay(cost, "settlement-spend", "resource-cost"); }
+    private boolean pay(Map<String, Integer> cost) { return pay(cost, "settlement-spend", "resource-cost"); }
 
-    private void pay(Map<String, Integer> cost, String category, String reference) {
+    private boolean pay(Map<String, Integer> cost, String category, String reference) {
+        if (cost == null || !canPay(cost)) return false;
         for (Map.Entry<String, Integer> e : cost.entrySet()) {
-            debitResource(e.getKey(), e.getValue(), Defs.SILVER.equals(e.getKey())
-                    ? TreasuryLedger.Kind.WITHDRAWAL : TreasuryLedger.Kind.CONSUMPTION, category, reference);
+            if (e.getValue() < 0 || !debitResource(e.getKey(), e.getValue(), Defs.SILVER.equals(e.getKey())
+                    ? TreasuryLedger.Kind.WITHDRAWAL : TreasuryLedger.Kind.CONSUMPTION, category, reference)) return false;
             flow.record(time, e.getKey(), e.getValue(), false);
         }
+        return true;
     }
 
     /** Выработка, расход и чистый доход ресурса в минуту (скользящее окно 60 с). */
@@ -665,7 +666,7 @@ public final class Settlement {
     private void startConstruction() {
         for (Building b : byPriority(x -> x.state == Building.State.PLANNED)) {
             if (!canPay(b.def.cost)) { b.status = "ждёт материалов"; continue; }
-            pay(b.def.cost, "construction", "building:" + b.uid);
+            if (!pay(b.def.cost, "construction", "building:" + b.uid)) { b.status = "ждёт материалов"; continue; }
             b.state = Building.State.BUILDING;
             b.status = "строится";
             say("Начата стройка: " + b.def.name);
@@ -752,7 +753,7 @@ public final class Settlement {
                 boolean room = true;
                 for (Map.Entry<String, Integer> o : b.def.out.entrySet()) if (amount(o.getKey()) + o.getValue() > capacity(o.getKey()) + 1e-9) room = false;
                 if (!room) { b.status = "склад полон"; b.cycleTime = b.def.cycle; break; }
-                pay(b.def.in, "production-input", "building:" + b.uid);
+                if (!pay(b.def.in, "production-input", "building:" + b.uid)) { b.status = "нет сырья"; b.cycleTime = b.def.cycle; break; }
                 for (Map.Entry<String, Integer> o : b.def.out.entrySet()) flow.record(time, o.getKey(), produceResource(o.getKey(), o.getValue()), true);
                 b.cycleTime -= b.def.cycle;
                 b.status = "работает";
