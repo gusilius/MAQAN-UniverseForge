@@ -146,6 +146,7 @@ public class WFWorker extends PathfinderMob {
             discard();
             return;
         }
+        ResidentEquipment.autoMaintain(this);
         refreshName();
     }
 
@@ -617,6 +618,12 @@ public class WFWorker extends PathfinderMob {
         }
 
         private static boolean performWork(WFWorker worker, Colony colony, Colony.WorkOrder order, BlockPos pos) {
+            boolean completed = performWorkInternal(worker, colony, order, pos);
+            if (completed) ResidentEquipment.onWork(worker, colony, order.mode);
+            return completed;
+        }
+
+        private static boolean performWorkInternal(WFWorker worker, Colony colony, Colony.WorkOrder order, BlockPos pos) {
             if (!(worker.level() instanceof net.minecraft.server.level.ServerLevel level) || !level.hasChunkAt(pos)) return false;
             BlockState state = level.getBlockState(pos);
             if (!isWorkTarget(state, order.mode)) return false;
