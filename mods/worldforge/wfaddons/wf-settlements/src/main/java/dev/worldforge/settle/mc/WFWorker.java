@@ -440,6 +440,8 @@ public class WFWorker extends PathfinderMob {
 
         /** Find a walkable adjacent cell; pathfinding must never be asked to walk into the solid resource block. */
         private static BlockPos workApproachTarget(WFWorker worker, BlockPos resource) {
+            // The five immediate work positions cover normal terrain. Keep path checks bounded;
+            // large candidate rings are handled by the higher-level detour planner, not per block.
             List<BlockPos> candidates = new ArrayList<>();
             BlockPos above = resource.above();
             if (standable(worker, above)) candidates.add(above);
@@ -447,16 +449,6 @@ public class WFWorker extends PathfinderMob {
                 BlockPos side = resource.relative(direction);
                 if (standable(worker, side)) candidates.add(side);
             }
-            // A resource may be surrounded by plants, slabs or irregular terrain. Search a small
-            // safe ring, but accept only positions the navigation system can actually reach.
-            for (int dy = -1; dy <= 1; dy++) for (int dx = -2; dx <= 2; dx++)
-                for (int dz = -2; dz <= 2; dz++) {
-                    if (Math.abs(dx) + Math.abs(dz) > 3) continue;
-                    BlockPos candidate = resource.offset(dx, dy, dz);
-                    if (standable(worker, candidate) && worker.distanceToSqr(
-                            candidate.getX() + 0.5, candidate.getY(), candidate.getZ() + 0.5) <= 100)
-                        candidates.add(candidate);
-                }
             return candidates.stream().distinct()
                     .filter(pos -> {
                         var path = worker.getNavigation().createPath(pos, 0);
@@ -562,7 +554,7 @@ public class WFWorker extends PathfinderMob {
                 if (!evaluated.add(selected.immutable())) continue;
                 if (workApproachTarget(worker, selected) != null) return selected;
                 if (canPlaceTemporaryStep(worker, colony, selected)) return selected;
-                if (++checked >= 24) break;
+                if (++checked >= 8) break;
             }
             return null;
         }
