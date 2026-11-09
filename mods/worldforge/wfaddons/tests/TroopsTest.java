@@ -395,6 +395,27 @@ public class TroopsTest {
         Squads.Squad part2 = sm.commandUnits("p", List.of("a"), Squads.Order.move(1, 1), false);
         check(part2.morale == 0.3 && part2.routed && ms.initial == 3, "часть отряда наследует мораль, состав пересчитан " + ms.initial);
 
+        Squads patrols=new Squads();
+        Squads.Squad patrol=patrols.create("p","Patrol",List.of("u1","u2"));
+        patrol.cx=10;patrol.cz=20;
+        patrols.command(patrol.id,new Squads.Order(Squads.Kind.PATROL,30,40,""),false);
+        check(patrol.patrolOriginX==10&&patrol.patrolOriginZ==20,
+                "патруль фиксирует исходную позицию отряда");
+        patrols.completeCurrent(patrol.id);
+        check(patrol.queue.peekFirst()!=null&&patrol.queue.peekFirst().kind()==Squads.Kind.PATROL
+                        &&patrol.queue.peekFirst().x()==10&&patrol.queue.peekFirst().z()==20
+                        &&patrol.patrolReturning,
+                "после достижения конца патруль возвращается к сохранённому началу");
+        Squads patrolRestore=new Squads();patrolRestore.fromJson(patrols.toJson());
+        Squads.Squad restoredPatrol=patrolRestore.get(patrol.id);
+        check(restoredPatrol!=null&&restoredPatrol.patrolReturning
+                        &&restoredPatrol.patrolOriginX==10&&restoredPatrol.patrolOriginZ==20,
+                "состояние патруля сохраняется между загрузками");
+        patrolRestore.completeCurrent(patrol.id);
+        check(restoredPatrol.queue.peekFirst()!=null&&restoredPatrol.queue.peekFirst().x()==30
+                        &&restoredPatrol.queue.peekFirst().z()==40&&!restoredPatrol.patrolReturning,
+                "патруль после возврата снова идёт к конечной точке");
+
         // укрепления
         Forts fs = new Forts();
         Forts.Fort fort = fs.create("Тестовая", "p1", "", "minecraft:overworld", 100, 100, 16, 2);
