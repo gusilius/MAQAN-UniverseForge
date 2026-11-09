@@ -4,6 +4,8 @@ import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.logging.LogUtils;
 import dev.worldforge.mod.api.TreasuryApi;
+import dev.worldforge.mod.api.WorldForgeApi;
+import dev.worldforge.mod.economy.TreasuryLedger;
 import dev.worldforge.mod.MapData;
 import dev.worldforge.mod.TitleData;
 import dev.worldforge.mod.WorldForgeMod;
@@ -279,22 +281,50 @@ public class TroopsMod {
     // ---- жалованье ----
     private static final Random RNG = new Random();
 
-    /** Раз в игровой день: государства платят солдатам из казны; не заплатили - четверть разбегается. */
+    private record PayrollKey(String realm, int armyId) {}
+
+    /** Daily payroll is funded through the same realm and army accounts used by Statecraft. */
     private static void payroll() {
-        int days = dev.worldforge.mod.api.WorldForgeApi.clock().pull("wf_troops");
+        int days = WorldForgeApi.clock().pull("wf_troops");
         if (days <= 0) return;
-        Map<String, List<TroopEntity>> byRealm = new LinkedHashMap<>();
-        for (TroopEntity t : LIVE.values()) if (t.isAlive() && !t.realm.isEmpty()) byRealm.computeIfAbsent(t.realm, k -> new ArrayList<>()).add(t);
-        for (var e : byRealm.entrySet()) {
+        long day = Math.max(0, WorldForgeApi.clock().dayNumber());
+        long worldMinute = day * 1440L;
+        TreasuryLedger ledger = WorldForgeMod.treasury();
+        Map<PayrollKey, List<TroopEntity>> groups = new LinkedHashMap<>();
+        for (TroopEntity troop : LIVE.values()) {
+            if (!troop.isAlive() || troop.realm == null || troop.realm.isBlank()) continue;
+            groups.computeIfAbsent(new PayrollKey(troop.realm, troop.armyId), ignored -> new ArrayList<>()).add(troop);
+        }
+        for (Map.Entry<PayrollKey, List<TroopEntity>> entry : groups.entrySet()) {
+            PayrollKey key = entry.getKey();
             Map<String, Integer> counts = new HashMap<>();
-            for (TroopEntity t : e.getValue()) counts.merge(t.unitId(), 1, Integer::sum);
-            double cost = Muster.upkeep(DEFS, counts) * days;
-            if (cost <= 0 || TreasuryApi.spend(e.getKey(), cost, "Жалованье солдат")) continue;
-            List<TroopEntity> list = e.getValue();
-            for (int i : Muster.deserters(list.size(), RNG)) {
-                TroopEntity t = list.get(i);
-                onDeath(t);
-                t.discard();
+            for (TroopEntity troop : entry.getValue()) counts.merge(troop.unitId(), 1, Integer::sum);
+            // Unit upkeep is authored in gold; the canonical world ledger stores silver (5:1).
+            double costSilver = Muster.upkeep(DEFS, counts) * days * 5.0;
+            if (!Double.isFinite(costSilver) || costSilver <= 0) continue;
+
+            String realmAccount = "realm:" + key.realm();
+            ledger.open(realmAccount, key.realm(), "silver", 0);
+            String armyAccount = key.armyId() > 0 ? "army:" + key.armyId() : "army:garrison:" + key.realm();
+            String armyOwner = key.armyId() > 0 ? Integer.toString(key.armyId()) : "garrison:" + key.realm();
+            ledger.open(armyAccount, armyOwner, "silver", 0);
+
+            double topUp = Math.max(0, costSilver - ledger.balance(armyAccount));
+            boolean funded = topUp <= 1e-9 || ledger.transferOnce(
+                    realmAccount, armyAccount, topUp, TreasuryLedger.Kind.ARMY_UPKEEP,
+                    "payroll-funding", "payroll-fund:" + key.realm() + ":" + key.armyId() + ":" + day,
+                    worldMinute, "daily military payroll appropriation");
+            boolean paid = funded && ledger.withdrawOnce(
+                    armyAccount, costSilver, TreasuryLedger.Kind.WAGE,
+                    "soldier-payroll", "payroll:" + key.realm() + ":" + key.armyId() + ":" + day,
+                    worldMinute, "daily soldier wages");
+            if (paid) continue;
+
+            List<TroopEntity> soldiers = entry.getValue();
+            for (int index : Muster.deserters(soldiers.size(), RNG)) {
+                TroopEntity troop = soldiers.get(index);
+                onDeath(troop);
+                troop.discard();
             }
         }
     }
