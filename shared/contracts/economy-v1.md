@@ -21,7 +21,7 @@ Settlement stock remains a compatibility mirror for existing UI and simulation A
 
 - Building production credits commodity accounts with PRODUCTION entries; recipe inputs, population food, comfort goods and construction materials debit the same resource accounts.
 - Settlement tax income, building upkeep, market purchases/sales, raid losses and character consumption are journaled.
-- Caravan routes transfer the commodity between settlement accounts and transfer silver between treasury accounts. The price spread is divided between seller proceeds and a recorded market fee.
+- Caravan routes transfer the commodity between settlement accounts and transfer silver between treasury accounts. The price spread is divided between seller proceeds and a recorded market fee. Routes can configure an ad-valorem customs duty (0–50%) paid by the importer to a destination realm treasury.
 - CityTax remittance and grants transfer silver atomically between settlement and realm accounts. A configured settlement crown share is remitted as a paired TAX transfer; grants are paired GRANT transfers. The legacy TreasuryApi facade presents realm balances in gold while using the same silver-denominated account as Statecraft.
 - Statecraft realm taxes and vassal tribute are booked to realm accounts. Realms with a numeric taxable_base property are assessed automatically on the shared world calendar; government expenditure is constrained by available funds.
 - Realm budgets can fund dedicated army accounts; army upkeep can be charged from those accounts.
@@ -43,7 +43,7 @@ Settlement markets retain their current local base-price and demand-pressure mod
 - Automatic realm assessment currently requires a configured taxable_base property. A derived tax base from population, land, trade and economic activity is not yet implemented.
 - Army funding/upkeep APIs exist, but the actual troop roster and soldier payroll/food/equipment upkeep adapter is not yet connected.
 - Warehouse nodes and each logistics leg need independent subaccounts/transfer entries so every intra-settlement warehouse movement is auditable, not only the aggregate settlement stock.
-- Caravan travel time, route risk, losses, tariffs/customs, border controls and transport costs still need to affect the route settlement.
+- Configured route customs duties are supported, but border-derived tariff schedules, border controls, travel time, route risk, cargo losses and transport costs still need to affect route settlement.
 - Global cross-settlement price discovery and state budget dashboards are not yet unified across every UI workspace.
 - Long-running journal retention, archival/compaction and crash-recovery replay tests are required before production-scale world saves.
 - CI and Forge runtime tests must pass on the final head; no in-game acceptance is claimed by this contract.
