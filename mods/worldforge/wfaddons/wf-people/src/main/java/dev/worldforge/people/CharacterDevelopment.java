@@ -69,6 +69,58 @@ public final class CharacterDevelopment {
         c.props.put("military.morale",Math.max(0,Math.min(100,morale)));
     }
 
+    /** Records a lasting injury on the canonical person, not on the disposable troop entity. */
+    public static int recordInjury(Character c,int severity,String cause,long worldMinute) {
+        Objects.requireNonNull(c);
+        if(severity<1||severity>3||worldMinute<0)throw new IllegalArgumentException("invalid injury");
+        int current=injurySeverity(c);
+        int next=Math.min(5,current+severity);
+        c.props.put("military.injury.severity",next);
+        c.props.put("military.injury.last_minute",worldMinute);
+        c.props.put("military.injury.cause",cause==null?"combat":cause);
+        Object raw=c.props.get("military.injury.count");
+        c.props.put("military.injury.count",raw instanceof Number n?Math.max(0,n.intValue())+1:1);
+        List<Map<String,Object>> history=new ArrayList<>();
+        Object old=c.props.get("military.injury.history");
+        if(old instanceof List<?> list)for(Object item:list)if(item instanceof Map<?,?> map){
+            Map<String,Object> copy=new LinkedHashMap<>();
+            map.forEach((k,v)->{if(k instanceof String key)copy.put(key,v);});
+            history.add(copy);
+        }
+        Map<String,Object> event=new LinkedHashMap<>();
+        event.put("severity",severity);event.put("cause",cause==null?"combat":cause);event.put("minute",worldMinute);
+        history.add(event);
+        while(history.size()>24)history.remove(0);
+        c.props.put("military.injury.history",history);
+        return next;
+    }
+
+    public static int injurySeverity(Character c) {
+        Object raw=c.props.get("military.injury.severity");
+        return raw instanceof Number n?Math.max(0,Math.min(5,n.intValue())):0;
+    }
+
+    public static int injuryCount(Character c) {
+        Object raw=c.props.get("military.injury.count");
+        return raw instanceof Number n?Math.max(0,n.intValue()):0;
+    }
+
+    /** Healing is explicit and gradual; injuries do not vanish merely because an entity reloads. */
+    public static int healInjury(Character c,int severityPoints) {
+        if(severityPoints<0)throw new IllegalArgumentException("healing must be nonnegative");
+        int next=Math.max(0,injurySeverity(c)-severityPoints);
+        if(next==0){
+            c.props.remove("military.injury.severity");
+            c.props.remove("military.injury.cause");
+            c.props.remove("military.injury.last_minute");
+        } else c.props.put("military.injury.severity",next);
+        return next;
+    }
+
+    public static double injuryCombatMultiplier(Character c) {
+        return Math.max(0.55,1.0-injurySeverity(c)*0.09);
+    }
+
     /** Effective court/leadership stat = stable base + personality traits + mood + military morale. */
     public static int effectiveAttribute(Character c,String attribute,long worldMinute){
         int value=CharacterStats.value(c,attribute);
