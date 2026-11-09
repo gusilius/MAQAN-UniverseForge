@@ -1,0 +1,242 @@
+[
+  {
+    "id": "lumberjack",
+    "name": "Лесоруб",
+    "category": "specialist",
+    "required_skills": {}
+  },
+  {
+    "id": "porter",
+    "name": "Носильщик",
+    "category": "worker",
+    "required_skills": {}
+  },
+  {
+    "id": "sawyer",
+    "name": "Пильщик",
+    "category": "specialist",
+    "required_skills": {}
+  },
+  {
+    "id": "laborer",
+    "name": "Разнорабочий",
+    "category": "worker",
+    "required_skills": {}
+  },
+  {
+    "id": "builder",
+    "name": "Строитель",
+    "category": "specialist",
+    "required_skills": {}
+  },
+  {
+    "id": "stonemason",
+    "name": "Каменотёс",
+    "category": "specialist",
+    "required_skills": {}
+  },
+  {
+    "id": "rancher",
+    "name": "Скотовод",
+    "category": "specialist",
+    "required_skills": {}
+  },
+  {
+    "id": "shepherd",
+    "name": "Овцевод",
+    "category": "specialist",
+    "required_skills": {}
+  },
+  {
+    "id": "butcher",
+    "name": "Мясник",
+    "category": "specialist",
+    "required_skills": {}
+  },
+  {
+    "id": "hunter",
+    "name": "Охотник",
+    "category": "specialist",
+    "required_skills": {}
+  },
+  {
+    "id": "beekeeper",
+    "name": "Пасечник",
+    "category": "specialist",
+    "required_skills": {}
+  },
+  {
+    "id": "gardener",
+    "name": "Садовод",
+    "category": "specialist",
+    "required_skills": {}
+  },
+  {
+    "id": "fisher",
+    "name": "Рыбак",
+    "category": "specialist",
+    "required_skills": {}
+  },
+  {
+    "id": "miller",
+    "name": "Мельник",
+    "category": "specialist",
+    "required_skills": {}
+  },
+  {
+    "id": "baker",
+    "name": "Пекарь",
+    "category": "specialist",
+    "required_skills": {}
+  },
+  {
+    "id": "tanner",
+    "name": "Кожевник",
+    "category": "specialist",
+    "required_skills": {}
+  },
+  {
+    "id": "weaver",
+    "name": "Ткач",
+    "category": "specialist",
+    "required_skills": {}
+  },
+  {
+    "id": "jeweler",
+    "name": "Ювелир",
+    "category": "specialist",
+    "required_skills": {}
+  },
+  {
+    "id": "armorer",
+    "name": "Бронник",
+    "category": "specialist",
+    "required_skills": {}
+  },
+  {
+    "id": "weaponsmith",
+    "name": "Оружейник",
+    "category": "specialist",
+    "required_skills": {}
+  },
+  {
+    "id": "alchemist",
+    "name": "Алхимик",
+    "category": "specialist",
+    "required_skills": {}
+  },
+  {
+    "id": "herbalist",
+    "name": "Травник",
+    "category": "specialist",
+    "required_skills": {}
+  },
+  {
+    "id": "mage",
+    "name": "Чародей",
+    "category": "specialist",
+    "required_skills": {}
+  },
+  {
+    "id": "priest",
+    "name": "Священнослужитель",
+    "category": "specialist",
+    "required_skills": {}
+  },
+  {
+    "id": "merchant",
+    "name": "Торговец",
+    "category": "specialist",
+    "required_skills": {}
+  },
+  {
+    "id": "innkeeper",
+    "name": "Трактирщик",
+    "category": "specialist",
+    "required_skills": {}
+  },
+  {
+    "id": "healer",
+    "name": "Лекарь",
+    "category": "specialist",
+    "required_skills": {}
+  },
+  {
+    "id": "sailor",
+    "name": "Моряк",
+    "category": "specialist",
+    "required_skills": {}
+  },
+  {
+    "id": "shipwright",
+    "name": "Корабел",
+    "category": "specialist",
+    "required_skills": {}
+  },
+  {
+    "id": "potter",
+    "name": "Гончар",
+    "category": "specialist",
+    "required_skills": {}
+  },
+  {
+    "id": "mint_worker",
+    "name": "Чеканщик",
+    "category": "specialist",
+    "required_skills": {}
+  },
+  {
+    "id": "foundryman",
+    "name": "Литейщик",
+    "category": "specialist",
+    "required_skills": {}
+  },
+  {
+    "id": "metallurgist",
+    "name": "Металлург",
+    "category": "specialist",
+    "required_skills": {}
+  },
+  {
+    "id": "siege_engineer",
+    "name": "Осадный инженер",
+    "category": "specialist",
+    "required_skills": {}
+  },
+  {
+    "id": "stablehand",
+    "name": "Конюх",
+    "category": "specialist",
+    "required_skills": {}
+  },
+  {
+    "id": "administrator",
+    "name": "Управляющий",
+    "category": "specialist",
+    "required_skills": {}
+  },
+  {
+    "id": "scribe",
+    "name": "Писарь",
+    "category": "specialist",
+    "required_skills": {}
+  },
+  {
+    "id": "forester",
+    "name": "Лесничий",
+    "category": "specialist",
+    "required_skills": {}
+  },
+  {
+    "id": "trainer",
+    "name": "Военный инструктор",
+    "category": "specialist",
+    "required_skills": {}
+  },
+  {
+    "id": "miner",
+    "name": "Шахтёр",
+    "category": "specialist",
+    "required_skills": {}
+  }
+]
