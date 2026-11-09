@@ -165,6 +165,8 @@ public class WFWorker extends PathfinderMob {
         private BlockPos idle;
         private BlockPos lastPosition;
         private int stuckTicks;
+        private int approachRetry;
+        private BlockPos lastNavigationTarget;
         private BlockPos cachedApproachFor;
         private BlockPos cachedApproachTarget;
         private BlockPos activeDetour;
@@ -217,11 +219,11 @@ public class WFWorker extends PathfinderMob {
                 if (resourceTarget != null) {
                     if (!resourceTarget.equals(cachedApproachFor)
                             || (cachedApproachTarget != null && !w.level().hasChunkAt(cachedApproachTarget))
-                            || --repath <= 0) {
+                            || --approachRetry <= 0) {
                         cachedApproachFor = resourceTarget.immutable();
                         cachedApproachTarget = workApproachTarget(w, resourceTarget);
                         if (cachedApproachTarget == null) cachedApproachTarget = placeTemporaryStep(w, c, resourceTarget);
-                        repath = 20;
+                        approachRetry = 20;
                     }
                     if (cachedApproachTarget == null) {
                         target = w.blockPosition();
@@ -293,16 +295,18 @@ public class WFWorker extends PathfinderMob {
             }
             double targetFeetY = target.getY();
             boolean arrived = w.distanceToSqr(target.getX() + 0.5, targetFeetY, target.getZ() + 0.5) < 6.25;
-            if (!arrived && --repath <= 0) {
-                repath = 10;
+            if (!arrived) {
                 BlockPos route = target;
                 if (w.distanceToSqr(target.getX() + 0.5, target.getY(), target.getZ() + 0.5) > 400
                         && w.tickCount % 40 == 0) {
                     BlockPos road = roadWaypoint(w, target);
                     if (road != null) route = road;
                 }
-                var path = w.getNavigation().createPath(route, 0);
-                if (path == null || !path.canReach()) {
+                boolean routeChanged = lastNavigationTarget == null || !lastNavigationTarget.equals(route);
+                if (routeChanged || w.getNavigation().isDone() || --repath <= 0) {
+                    repath = 40;
+                    var path = w.getNavigation().createPath(route, 0);
+                    if (path == null || !path.canReach()) {
                     BlockPos detour = reachableDetour(w, target);
                     path = detour == null ? null : w.getNavigation().createPath(detour, 0);
                     if (path != null && path.canReach()) {
@@ -312,18 +316,22 @@ public class WFWorker extends PathfinderMob {
                         wk.status = "обходит препятствие по безопасному маршруту";
                     }
                 }
-                if (path != null && path.canReach()) {
-                    w.getNavigation().moveTo(path, 1.0);
-                } else {
-                    // Do not push the NPC into a wall, cliff or unloaded chunk. Retry after a short
-                    // cooldown so a temporary obstruction can clear without pathfinding every tick.
-                    w.getNavigation().stop();
-                    wk.status = "нет безопасного пути: ждёт и повторно ищет обход";
-                    repath = 40;
+                    if (path != null && path.canReach()) {
+                        w.getNavigation().moveTo(path, 1.0);
+                        lastNavigationTarget = route.immutable();
+                    } else {
+                        // Do not push the NPC into a wall, cliff or unloaded chunk. Retry after a short
+                        // cooldown so a temporary obstruction can clear without pathfinding every tick.
+                        w.getNavigation().stop();
+                        lastNavigationTarget = null;
+                        wk.status = "нет безопасного пути: ждёт и повторно ищет обход";
+                        repath = 40;
+                    }
                 }
             }
             if (arrived) {
                 w.getNavigation().stop();
+                lastNavigationTarget = null;
                 if (area != null && !area.complete && resourceTarget == null && workScan > 0) {
                     BlockPos waypoint = workWaypoint(w, area);
                     if (waypoint == null || w.distanceToSqr(waypoint.getX() + 0.5, w.getY(), waypoint.getZ() + 0.5) < 6.25) {
