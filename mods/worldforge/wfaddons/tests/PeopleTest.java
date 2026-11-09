@@ -159,6 +159,35 @@ public class PeopleTest {
                 "устаревший счётчик автоматически продолжает последовательность ID");
 
 
+        // Canonical Character lifecycle journal is shared by every subsystem and persisted with Character.props.
+        CharacterRegistry journal = new CharacterRegistry();
+        int[] lifecycleCallbacks = {0, 0};
+        journal.addListener(new CharacterRegistry.Listener() {
+            @Override public void lifecycle(Character person, CharacterRegistry.LifecycleEvent event) { lifecycleCallbacks[0]++; }
+        });
+        journal.addListener(new CharacterRegistry.Listener() {
+            @Override public void lifecycle(Character person, CharacterRegistry.LifecycleEvent event) { lifecycleCallbacks[1]++; }
+        });
+        Character journalPerson = journal.create("Житель журнала", "", "", "m", 1);
+        journal.appoint(journalPerson.id, "guard", "settlement:test", 10);
+        journal.dismiss(journalPerson.id, "guard", "settlement:test", 11);
+        journal.kill(journalPerson.id);
+        List<Map<String, Object>> lifeHistory = journal.recentLifecycle(journalPerson.id, 20);
+        ok(lifeHistory.size() == 4
+                        && "BORN".equals(lifeHistory.get(0).get("kind"))
+                        && "POST_APPOINTED".equals(lifeHistory.get(1).get("kind"))
+                        && "POST_DISMISSED".equals(lifeHistory.get(2).get("kind"))
+                        && "DIED".equals(lifeHistory.get(3).get("kind")),
+                "one canonical per-character journal records birth, appointment, dismissal and death");
+        ok(lifecycleCallbacks[0] == 4 && lifecycleCallbacks[1] == 4,
+                "lifecycle event bus notifies each listener exactly once per transition");
+        String journalSave = journal.toJson();
+        CharacterRegistry journalReload = new CharacterRegistry();
+        journalReload.fromJson(journalSave);
+        ok(journalReload.recentLifecycle(journalPerson.id, 20).equals(lifeHistory)
+                        && journalReload.toJson().equals(journalSave),
+                "canonical character history survives save/load without synthetic restore events");
+
         // диалог с персонажем
         DialogueBridge.register();
         Character chancellor = reg.holder("chancellor", Courts.realmPlace(d.realmList().get(3).id));
