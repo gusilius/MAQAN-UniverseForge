@@ -176,14 +176,8 @@
     "scribe": {
       "name": "Писарь"
     },
-    "fisherman": {
-      "name": "Рыбак"
-    },
     "forester": {
       "name": "Лесничий"
-    },
-    "militia": {
-      "name": "Ополченец"
     }
   },
   "buildings": {
@@ -202,7 +196,7 @@
       "housing": 4
     },
     "lumber_camp": {
-      "name": "Лесопилка-лагерь",
+      "name": "Лесной лагерь",
       "category": "industry",
       "cost": {
         "wood": 10
@@ -289,7 +283,7 @@
       ],
       "blueprint": "wf_settle:quarry",
       "jobs": {
-        "miner": 3
+        "stonemason": 3
       },
       "recipe": {
         "in": {},
@@ -320,8 +314,7 @@
         "wood": 200,
         "planks": 200,
         "stone": 200
-      },
-      "limit": 3
+      }
     },
     "watch_post": {
       "name": "Сторожевой пост",
@@ -382,7 +375,7 @@
         "barracks"
       ],
       "jobs": {
-        "trainer": 1
+        "stablehand": 2
       },
       "upkeep": 1.2
     },
@@ -407,7 +400,7 @@
         "sawmill"
       ],
       "jobs": {
-        "trainer": 2,
+        "siege_engineer": 2,
         "smith": 1
       },
       "upkeep": 2
@@ -421,7 +414,8 @@
         5
       ],
       "jobs": {
-        "administrator": 2
+        "administrator": 1,
+        "scribe": 1
       },
       "description": "Общий центр сельского поселения",
       "effects": {}
@@ -452,7 +446,7 @@
         5
       ],
       "jobs": {
-        "porter": 2
+        "hauler": 2
       },
       "description": "Центральное хранение урожая и продукции добывающих построек",
       "effects": {
@@ -471,7 +465,7 @@
         5
       ],
       "jobs": {
-        "farmer": 2
+        "farmer": 3
       },
       "description": "Поля, мельница, выращивание культур и обеспечение поселения продовольствием",
       "effects": {
@@ -498,7 +492,9 @@
         5
       ],
       "jobs": {
-        "rancher": 2
+        "rancher": 1,
+        "shepherd": 1,
+        "butcher": 1
       },
       "description": "Содержание и разведение сельскохозяйственных животных",
       "effects": {
@@ -526,7 +522,8 @@
         5
       ],
       "jobs": {
-        "beekeeper": 2
+        "beekeeper": 1,
+        "gardener": 1
       },
       "description": "Пасека, цветники, фруктовые деревья и садоводство",
       "effects": {
@@ -633,7 +630,9 @@
         5
       ],
       "jobs": {
-        "administrator": 2
+        "administrator": 1,
+        "scribe": 1,
+        "guard": 1
       },
       "description": "Резиденция правителя, двор, оружейная, залы и стратегическая оборона",
       "effects": {
@@ -653,9 +652,9 @@
       "jobs": {
         "smith": 2
       },
-      "description": "Базовая обработка металла, инструменты, щиты и защитное снаряжение",
+      "description": "Сельская кузница: ремонт и изготовление базовых инструментов и металлических изделий",
       "effects": {
-        "crafting_tier": "uncommon"
+        "crafting_tier": 1
       },
       "requires": [
         "village_hall"
@@ -684,7 +683,7 @@
       },
       "description": "Изготовление украшений и ювелирных изделий",
       "effects": {
-        "crafting_tier": "uncommon"
+        "crafting_tier": 1
       },
       "requires": [
         "village_hall"
@@ -712,7 +711,7 @@
       },
       "description": "Изготовление средней и тяжёлой брони",
       "effects": {
-        "crafting_tier": "uncommon"
+        "crafting_tier": 1
       },
       "requires": [
         "village_hall"
@@ -740,7 +739,7 @@
       },
       "description": "Изготовление холодного и стрелкового оружия",
       "effects": {
-        "crafting_tier": "uncommon"
+        "crafting_tier": 1
       },
       "requires": [
         "village_hall"
@@ -768,7 +767,7 @@
       },
       "description": "Ткань, нити, сумки и тканевое снаряжение",
       "effects": {
-        "crafting_tier": "uncommon"
+        "crafting_tier": 1
       },
       "requires": [
         "village_hall"
@@ -819,7 +818,7 @@
         5
       ],
       "jobs": {
-        "herbalist": 2
+        "herbalist": 1
       },
       "description": "Сбор и обработка трав, простые лечебные средства и зелья",
       "effects": {
@@ -887,7 +886,8 @@
         5
       ],
       "jobs": {
-        "priest": 2
+        "priest": 1,
+        "scribe": 1
       },
       "description": "Религиозная община, служения, молитвы и духовная поддержка",
       "effects": {
@@ -904,7 +904,8 @@
         5
       ],
       "jobs": {
-        "guard": 2
+        "guard": 2,
+        "trainer": 1
       },
       "description": "Сбор, размещение и подготовка ополчения",
       "effects": {
@@ -942,7 +943,8 @@
         5
       ],
       "jobs": {
-        "shipwright": 2
+        "sailor": 1,
+        "shipwright": 1
       },
       "description": "Причалы, склад, верфь и строительство малых кораблей",
       "effects": {
@@ -1051,7 +1053,8 @@
         5
       ],
       "jobs": {
-        "lumberjack": 2
+        "lumberjack": 2,
+        "forester": 1
       },
       "description": "Заготовка древесины и распиловка лесоматериалов",
       "effects": {
@@ -1165,7 +1168,8 @@
         5
       ],
       "jobs": {
-        "weaver": 2
+        "weaver": 2,
+        "tanner": 1
       },
       "description": "Производство тканей, нитей и обработанной кожи",
       "effects": {
@@ -1264,7 +1268,7 @@
         5
       ],
       "jobs": {
-        "porter": 2
+        "hauler": 2
       },
       "description": "Городской централизованный склад и точка приёма добычи",
       "effects": {
@@ -1283,7 +1287,8 @@
         5
       ],
       "jobs": {
-        "administrator": 2
+        "administrator": 2,
+        "scribe": 1
       },
       "description": "Муниципальное управление, приём граждан и городские службы",
       "effects": {
@@ -1306,7 +1311,7 @@
       },
       "description": "Развитая кузнечная мастерская редкого качества",
       "effects": {
-        "crafting_tier": "rare"
+        "crafting_tier": 2
       },
       "requires": [
         "urban_residential_district"
@@ -1335,7 +1340,7 @@
       },
       "description": "Ювелирное производство редкого качества",
       "effects": {
-        "crafting_tier": "rare"
+        "crafting_tier": 2
       },
       "requires": [
         "urban_residential_district"
@@ -1363,7 +1368,7 @@
       },
       "description": "Производство брони редкого качества",
       "effects": {
-        "crafting_tier": "rare"
+        "crafting_tier": 2
       },
       "requires": [
         "urban_residential_district"
@@ -1391,7 +1396,7 @@
       },
       "description": "Производство оружия редкого качества",
       "effects": {
-        "crafting_tier": "rare"
+        "crafting_tier": 2
       },
       "requires": [
         "urban_residential_district"
@@ -1415,11 +1420,12 @@
         5
       ],
       "jobs": {
-        "mage": 2
+        "mage": 1,
+        "scribe": 1
       },
       "description": "Гильдия, библиотека, хранилище знаний и магические исследования",
       "effects": {
-        "crafting_tier": "rare"
+        "crafting_tier": 2
       },
       "requires": [
         "urban_residential_district"
@@ -1445,7 +1451,7 @@
       },
       "description": "Городское текстильное производство",
       "effects": {
-        "crafting_tier": "rare"
+        "crafting_tier": 2
       },
       "requires": [
         "urban_residential_district"
@@ -1499,11 +1505,13 @@
         5
       ],
       "jobs": {
-        "siege_engineer": 2
+        "siege_engineer": 2,
+        "smith": 1
       },
-      "description": "Проектирование и изготовление осадных орудий",
+      "description": "Инженерная мастерская для проектирования и производства осадных машин",
       "effects": {
-        "siege_engineering": 1
+        "siege_engineering": 1,
+        "crafting_tier": 3
       },
       "requires": [
         "city_forge"
@@ -1532,7 +1540,7 @@
       },
       "description": "Гильдейская кузница и производство эпического качества",
       "effects": {
-        "crafting_tier": "epic"
+        "crafting_tier": 3
       },
       "requires": [
         "city_forge"
@@ -1561,7 +1569,7 @@
       },
       "description": "Гильдейское ювелирное производство эпического качества",
       "effects": {
-        "crafting_tier": "epic"
+        "crafting_tier": 3
       },
       "requires": [
         "city_jeweler"
@@ -1589,7 +1597,7 @@
       },
       "description": "Гильдейское производство эпической брони",
       "effects": {
-        "crafting_tier": "epic"
+        "crafting_tier": 3
       },
       "requires": [
         "city_armory"
@@ -1617,7 +1625,7 @@
       },
       "description": "Гильдейское производство эпического оружия",
       "effects": {
-        "crafting_tier": "epic"
+        "crafting_tier": 3
       },
       "requires": [
         "city_armory_weapons"
@@ -1645,7 +1653,7 @@
       },
       "description": "Магическая практика и создание эпических посохов",
       "effects": {
-        "crafting_tier": "epic"
+        "crafting_tier": 3
       },
       "requires": [
         "mage_guild"
@@ -1667,11 +1675,12 @@
         5
       ],
       "jobs": {
-        "weaver": 2
+        "weaver": 2,
+        "tanner": 1
       },
       "description": "Производство зачарованных тканей и эпического снаряжения",
       "effects": {
-        "crafting_tier": "epic"
+        "crafting_tier": 3
       },
       "requires": [
         "city_weaving"
@@ -1760,7 +1769,8 @@
         5
       ],
       "jobs": {
-        "priest": 2
+        "priest": 2,
+        "scribe": 1
       },
       "description": "Главный религиозный центр города",
       "effects": {
@@ -1780,7 +1790,8 @@
         5
       ],
       "jobs": {
-        "guard": 2
+        "guard": 2,
+        "trainer": 1
       },
       "description": "Размещение, снабжение и обучение постоянных войск",
       "effects": {
@@ -1818,7 +1829,8 @@
         5
       ],
       "jobs": {
-        "guard": 2
+        "guard": 1,
+        "merchant": 1
       },
       "description": "Контракты, набор и снабжение наёмных отрядов",
       "effects": {
@@ -2045,7 +2057,8 @@
         5
       ],
       "jobs": {
-        "weaver": 2
+        "weaver": 1,
+        "tanner": 1
       },
       "description": "Промышленная обработка кожи и текстиля",
       "effects": {
@@ -2063,6 +2076,74 @@
           "leather": 2
         },
         "cycle": 20
+      }
+    },
+    "windmill": {
+      "name": "Ветряная или водяная мельница",
+      "category": "food",
+      "cost": {
+        "wood": 24,
+        "stone": 12
+      },
+      "work": 55,
+      "size": [
+        5,
+        5
+      ],
+      "blueprint": "wf_settle:windmill",
+      "requires": [
+        "farm_district"
+      ],
+      "jobs": {
+        "miller": 1
+      },
+      "description": "Перерабатывает зерно в муку; может быть размещена как ветряная или водяная мельница",
+      "recipe": {
+        "in": {
+          "grain": 2
+        },
+        "out": {
+          "flour": 2
+        },
+        "cycle": 18
+      },
+      "effects": {
+        "food_processing": 1
+      }
+    },
+    "fish_smokehouse": {
+      "name": "Рыбная коптильня",
+      "category": "food",
+      "cost": {
+        "wood": 18,
+        "stone": 6
+      },
+      "work": 35,
+      "size": [
+        4,
+        4
+      ],
+      "blueprint": "wf_settle:fish_smokehouse",
+      "requires": [
+        "fishing_district"
+      ],
+      "jobs": {
+        "fisher": 1,
+        "laborer": 1
+      },
+      "description": "Перерабатывает рыбу и сохраняет продовольствие",
+      "recipe": {
+        "in": {
+          "fish": 2,
+          "wood": 1
+        },
+        "out": {
+          "food": 3
+        },
+        "cycle": 18
+      },
+      "effects": {
+        "food_processing": 1
       }
     }
   }
