@@ -9,7 +9,7 @@ on:
       - "platform/**"
       - ".github/workflows/**"
   pull_request:
-    branches: [main]
+    branches: [main, feature/rts-phase-iv]
     paths:
       - "mods/**"
       - "shared/**"
