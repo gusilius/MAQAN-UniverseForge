@@ -47,10 +47,8 @@ public final class CharacterRegistry {
         c.gender = gender;
         c.birthYear = birthYear;
         byId.put(c.id, c);
-        for (Listener l : listeners) {
-            l.born(c);
-            publish(c, new LifecycleEvent(LifecycleKind.BORN, c.id, "", "", birthYear));
-        }
+        for (Listener l : listeners) l.born(c);
+        publish(c, new LifecycleEvent(LifecycleKind.BORN, c.id, "", "", birthYear));
         return c;
     }
 
@@ -61,21 +59,18 @@ public final class CharacterRegistry {
         if (!c.alive) throw new IllegalStateException(c.name + " мёртв и не может занять должность");
         if (c.has(role, place)) return;
         c.posts.add(new Character.Post(role, place));
-        for (Listener l : listeners) {
-            l.appointed(c, role, place);
-            publish(c, new LifecycleEvent(LifecycleKind.POST_APPOINTED, c.id, "", role + "@" + place, year));
-        }
+        for (Listener l : listeners) l.appointed(c, role, place);
+        publish(c, new LifecycleEvent(LifecycleKind.POST_APPOINTED, c.id, "", role + "@" + place, year));
     }
 
     public void dismiss(String id, String role, String place) { dismiss(id, role, place, 0); }
 
     public void dismiss(String id, String role, String place, int year) {
         Character c = require(id);
-        if (c.posts.removeIf(p -> p.role.equals(role) && p.place.equals(place)))
-            for (Listener l : listeners) {
-                l.dismissed(c, role, place);
-                publish(c, new LifecycleEvent(LifecycleKind.POST_DISMISSED, c.id, role + "@" + place, "", year));
-            }
+        if (c.posts.removeIf(p -> p.role.equals(role) && p.place.equals(place))) {
+            for (Listener l : listeners) l.dismissed(c, role, place);
+            publish(c, new LifecycleEvent(LifecycleKind.POST_DISMISSED, c.id, role + "@" + place, "", year));
+        }
     }
 
     /** Updates calendar-derived life stages and emits only real stage transitions. */
@@ -433,10 +428,8 @@ public final class CharacterRegistry {
         byId.clear();
         byId.putAll(loaded);
         next = safeNext;
-        for (Character character : byId.values()) {
-            for (Listener listener : listeners)
-                publish(character, new LifecycleEvent(LifecycleKind.RESTORED, character.id, "", "", 0));
-        }
+        for (Character character : byId.values())
+            publish(character, new LifecycleEvent(LifecycleKind.RESTORED, character.id, "", "", 0));
     }
 
     private static String requiredString(Map<?, ?> map, String key) {
