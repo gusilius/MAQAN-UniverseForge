@@ -31,6 +31,7 @@ public final class Colony {
     public static final class WorkOrder {
         public String mode = "wood";
         public int x, z, radius = 8, level, cursor, soil;
+        public boolean complete;
         /** 0=hidden, 1=subtle, 2=strong. */
         public int overlay = 2;
     }
@@ -135,7 +136,7 @@ public final class Colony {
             WorkOrder o = e.getValue();
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("worker", e.getKey()); row.put("mode", o.mode); row.put("x", o.x); row.put("z", o.z);
-            row.put("radius", o.radius); row.put("level", o.level); row.put("overlay", o.overlay); row.put("cursor", o.cursor); row.put("soil", o.soil);
+            row.put("radius", o.radius); row.put("level", o.level); row.put("overlay", o.overlay); row.put("cursor", o.cursor); row.put("soil", o.soil); row.put("complete", o.complete);
             orders.add(row);
         }
         m.put("workOrders", orders);
@@ -168,6 +169,7 @@ public final class Colony {
                 o.cursor = cursorValue instanceof Number n ? Math.max(0, n.intValue()) : 0;
                 Object soilValue = row.get("soil");
                 o.soil = soilValue instanceof Number n ? Math.max(0, n.intValue()) : 0;
+                o.complete = Boolean.TRUE.equals(row.get("complete"));
                 c.workOrders.put(workerId, o);
             }
         }
