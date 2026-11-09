@@ -15,7 +15,8 @@ public final class ResidentSocialTest {
     }
 
     public static void main(String[] args) {
-        Character resident = new CharacterRegistry().create("Mira", "", "", "f", 1);
+        CharacterRegistry registry = new CharacterRegistry();
+        Character resident = registry.create("Mira", "", "", "f", 1);
         String player = "player-uuid";
         check(ResidentSocial.score(resident, player) == 0, "new relationship starts neutral");
         check(ResidentSocial.adjust(resident, player, 10) == 10, "gift increases relationship");
@@ -25,9 +26,9 @@ public final class ResidentSocialTest {
         check(ResidentSocial.score(resident, player) == -100, "score is read from Character properties");
         check(ResidentSocial.score(resident, "another-player") == 0, "relationships are per counterpart");
 
-        Object saved = resident.props.get("social.relationships");
-        Character restored = new CharacterRegistry().create("Mira", "", "", "f", 1);
-        restored.props.put("social.relationships", saved);
+        CharacterRegistry restoredRegistry = new CharacterRegistry();
+        restoredRegistry.fromJson(registry.toJson());
+        Character restored = restoredRegistry.get(resident.id);
         check(ResidentSocial.score(restored, player) == -100, "relationship state persists with Character");
         check(ResidentSocial.adjust(restored, player, 10) == -90, "relationship remains mutable after Character restore");
         boolean invalidTargetRejected = false;
