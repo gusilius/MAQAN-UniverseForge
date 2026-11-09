@@ -29,6 +29,7 @@ import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.event.RegisterCommandsEvent;
+import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.level.LevelEvent;
 import net.minecraftforge.event.server.ServerAboutToStartEvent;
 import net.minecraftforge.event.server.ServerStoppedEvent;
@@ -67,6 +68,7 @@ public class WorldForgeMod {
     private static final Map<String, MapData> MAPS = new ConcurrentHashMap<>();
     private static volatile Registry<Biome> biomes;\n    private static volatile TreasuryLedger treasury = new TreasuryLedger();
     private static volatile boolean treasuryLoadFailed;
+    private static long treasuryTicks;
 
     public WorldForgeMod() {
         IEventBus bus = FMLJavaModLoadingContext.get().getModEventBus();
@@ -157,6 +159,12 @@ public class WorldForgeMod {
 
     @SubscribeEvent
     public void onServerStarted(ServerStartedEvent e) { loadTreasury(e.getServer()); ContentCommands.load(e.getServer()); }
+
+    @SubscribeEvent
+    public void onTreasuryTick(TickEvent.ServerTickEvent e) {
+        if (e.phase != TickEvent.Phase.END) return;
+        if (++treasuryTicks % 6000 == 0) saveTreasury(e.getServer());
+    }
 
     @SubscribeEvent
     public void onServerStopping(ServerStoppingEvent e) { saveTreasury(e.getServer()); ContentCommands.save(e.getServer()); }
