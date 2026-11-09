@@ -144,6 +144,7 @@ public final class ResidentInteraction {
             case "follow" -> {
                 if (!ruler) { deny(player); return 0; }
                 data.manualFollow = true;
+                data.manualFollowOwner = player.getUUID().toString();
                 data.manualOrder = false;
                 data.building = 0;
                 data.orderQueue.clear();
