@@ -36,6 +36,8 @@ public class WFWorker extends PathfinderMob {
     private static final EntityDataAccessor<String> SYNC_PERSON = SynchedEntityData.defineId(WFWorker.class, EntityDataSerializers.STRING);
     private static final EntityDataAccessor<String> SYNC_PROFESSION = SynchedEntityData.defineId(WFWorker.class, EntityDataSerializers.STRING);
     private static final EntityDataAccessor<Integer> SYNC_WORKER_ID = SynchedEntityData.defineId(WFWorker.class, EntityDataSerializers.INT);
+    private static final EntityDataAccessor<Integer> SYNC_BUILDING = SynchedEntityData.defineId(WFWorker.class, EntityDataSerializers.INT);
+    private static final EntityDataAccessor<String> SYNC_STATUS = SynchedEntityData.defineId(WFWorker.class, EntityDataSerializers.STRING);
     public String colonyId = "";
     public int workerId;
     private int age;
@@ -66,6 +68,8 @@ public class WFWorker extends PathfinderMob {
         entityData.define(SYNC_PERSON, "");
         entityData.define(SYNC_PROFESSION, "");
         entityData.define(SYNC_WORKER_ID, 0);
+        entityData.define(SYNC_BUILDING,0);
+        entityData.define(SYNC_STATUS,"");
     }
 
     public String syncedColonyId() { return entityData.get(SYNC_COLONY); }
@@ -73,6 +77,8 @@ public class WFWorker extends PathfinderMob {
     public String characterId() { return entityData.get(SYNC_PERSON); }
     public String professionId() { return entityData.get(SYNC_PROFESSION); }
     public int syncedWorkerId() { return entityData.get(SYNC_WORKER_ID); }
+    public int assignedBuildingId() { return entityData.get(SYNC_BUILDING); }
+    public String statusLabel() { return entityData.get(SYNC_STATUS); }
 
     public Colony colony() { return SettleMod.colony(colonyId); }
 
@@ -91,10 +97,14 @@ public class WFWorker extends PathfinderMob {
         if (w == null) {
             entityData.set(SYNC_PERSON, "");
             entityData.set(SYNC_PROFESSION, "");
+            entityData.set(SYNC_BUILDING,0);
+            entityData.set(SYNC_STATUS,"");
             return;
         }
         entityData.set(SYNC_PERSON, w.person == null ? "" : w.person);
         entityData.set(SYNC_PROFESSION, w.profession == null ? "" : w.profession);
+        entityData.set(SYNC_BUILDING,Math.max(0,w.building));
+        entityData.set(SYNC_STATUS,w.status==null?"":w.status);
         setCustomName(Component.literal(w.name + " (" + c.s.defs.professionName(w.profession) + ")"));
         setCustomNameVisible(true);
     }
