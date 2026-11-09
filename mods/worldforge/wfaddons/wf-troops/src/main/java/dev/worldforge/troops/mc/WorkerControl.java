@@ -33,9 +33,9 @@ final class WorkerControl {
     static String workArea(ServerPlayer p, OrderPacket o) {
         int accepted = 0;
         boolean denied = false;
-        String[] modes = {"wood", "stone", "ore", "clear", "level"};
-        String[] roles = {"lumberjack", "miner", "miner", "builder", "builder"};
-        String[] labels = {"добывать древесину", "добывать камень", "добывать руду", "расчищать растительность", "выравнивать участок"};
+        String[] modes = {"wood", "stone", "ore", "clear", "level", "harvest"};
+        String[] roles = {"lumberjack", "miner", "miner", "builder", "builder", "farmer"};
+        String[] labels = {"вырубать целые деревья", "добывать камень", "добывать руду", "расчищать растительность", "выравнивать участок", "собирать зрелые культуры"};
         String[] params = o.target().split(":", 4);
         int overlay = 2, level = 0;
         try { if (params.length > 0) overlay = Math.max(0, Math.min(2, Integer.parseInt(params[0]))); }
