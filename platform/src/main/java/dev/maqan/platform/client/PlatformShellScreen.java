@@ -360,6 +360,7 @@ public final class PlatformShellScreen extends Screen {
             Screen view = activeView();
             if (view != null) view.render(g, mouseX, mouseY, partialTick);
             else WorkspacePreviewRenderer.render(g, font, width, height, profile.name(), previewLayer, mouseX, mouseY, ambientGrid);
+            WorkspaceMapLayerRegistry.render(g, content.x, content.y, content.w, content.h);
             g.disableScissor();
         }
         drawTopBar(g, mouseX, mouseY);
