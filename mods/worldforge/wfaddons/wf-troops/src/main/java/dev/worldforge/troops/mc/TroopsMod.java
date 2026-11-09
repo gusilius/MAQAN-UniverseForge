@@ -431,6 +431,7 @@ public class TroopsMod {
                 if (mixed.workers() != MixedOrders.WorkerAction.NONE) {
                     int workerAction = switch (mixed.workers()) {
                         case MOVE -> OrderPacket.WORK;
+                        case FOLLOW -> OrderPacket.WORK_FOLLOW;
                         case HOLD -> OrderPacket.WORK_HOLD;
                         case STOP -> OrderPacket.WORK_STOP;
                         default -> -1;
@@ -493,7 +494,7 @@ public class TroopsMod {
                     p.displayClientMessage(Component.literal("Собран " + n.name + " (" + n.members.size() + ")"), true);
                 }
             }
-            case OrderPacket.WORK, OrderPacket.RELEASE, OrderPacket.WORK_STOP, OrderPacket.WORK_HOLD -> {
+            case OrderPacket.WORK, OrderPacket.RELEASE, OrderPacket.WORK_STOP, OrderPacket.WORK_HOLD, OrderPacket.WORK_FOLLOW -> {
                 if (!ModList.get().isLoaded("wf_settle") || !WorkerControl.anyWorker(p, o)) return;
                 // WorkerControl проверяет владельца каждого поселения; глобальный операторский gate здесь неверен.
                 p.displayClientMessage(Component.literal(WorkerControl.command(p, o)), true);
