@@ -169,6 +169,19 @@ public class PeopleTest {
             @Override public void lifecycle(Character person, CharacterRegistry.LifecycleEvent event) { lifecycleCallbacks[1]++; }
         });
         Character journalPerson = journal.create("Житель журнала", "", "", "m", 1);
+        Character carrier = journal.create("Переносчик", "", "", "m", 1);
+        CharacterInventory.add(journalPerson,"minecraft:bread",8);
+        CharacterInventory.add(journalPerson,"minecraft:iron_sword",1,"{Damage:3}");
+        ok(CharacterInventory.count(journalPerson,"minecraft:bread")==8
+                        &&CharacterInventory.items(journalPerson).size()==2,
+                "canonical Character inventory stores stack counts and distinct item data");
+        ok(CharacterInventory.transfer(journalPerson,carrier,"minecraft:bread",3)
+                        &&CharacterInventory.count(journalPerson,"minecraft:bread")==5
+                        &&CharacterInventory.count(carrier,"minecraft:bread")==3,
+                "inventory items transfer between two canonical people without duplicating identity");
+        ok(!CharacterInventory.remove(journalPerson,"minecraft:bread",99)
+                        &&CharacterInventory.count(journalPerson,"minecraft:bread")==5,
+                "failed inventory removal is atomic and cannot create negative stock");
         CharacterDevelopment.setMilitaryMorale(journalPerson, 15);
         journalPerson.props.put("wf_unit_kind", "soldier");
         int baseMartial = CharacterStats.value(journalPerson, "martial");
