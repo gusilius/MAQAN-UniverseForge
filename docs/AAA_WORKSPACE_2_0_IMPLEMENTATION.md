@@ -140,3 +140,30 @@ Do not mark Stage XII complete merely because the shell builds or its unit tests
 - no dead-end/placeholder routes and no duplicate authoritative registries or ledgers.
 
 This backlog supersedes any narrower interpretation of “all game systems available in one interface.” PR #14 is an infrastructure increment, not evidence that Stages VII-XI or every XII substage are complete.
+
+
+## Follow-up implementation pass — workspace manager and notifications
+
+The shell now includes two visible first-pass overlays in addition to the earlier profile-store and journal APIs:
+
+- Workspace profile manager: open from the top bar, list saved profiles, restore a selected layout, save the active layout, create a uniquely named profile from the current layout, and delete the active non-default profile.
+- Notification/event center: open from the top bar and inspect the latest in-memory workspace events with severity, source, category and world context.
+
+These are useful UI surfaces, but they are not yet the full acceptance implementation:
+- Profile rename, user-entered naming, scrolling/paging for large profile lists, duplicate/overwrite confirmation and lifecycle tests across restart/provider removal remain.
+- Notification read/unread state, filters, durable history, acknowledgement/clear controls and event retention policy remain. The underlying journal is still bounded in-memory history.
+- The manager currently uses generated profile names for the create action; it does not yet expose a text-entry dialog.
+
+The follow-up commit also removes a Java lambda capture issue in unique profile-name generation.
+
+## Current explicit completion boundary
+
+The seven follow-up tasks should now be read as follows:
+
+1. Provider integration — the generic bridge exists; per-module real registrations are still outstanding.
+2. Full-world search — the shell searches the local runtime index; providers must index their full authorized entity catalogs and provide paging/update/removal.
+3. Component library — shared drawing primitives and descriptors exist; legacy Atlas/WorldForge screens have not all migrated to a versioned shared widget/component set.
+4. Workspace manager — a basic visible manager is now present; full rename/input/large-list/confirmation and lifecycle QA remain.
+5. Notification center — a visible event-history overlay is now present; durable notification-center behavior remains outstanding.
+6. Responsive behavior — only shared scaling primitives and layout minimums exist; no completed in-game matrix of resolutions, aspect ratios, GUI scales, keyboard navigation and accessibility has been certified.
+7. Embedded routes — some provider screens mount inside the shell, while other capabilities still invoke provider-owned commands because no embeddable view factory is registered. Those routes are functional provider commands, not proof of a unified embedded workspace. Each remaining route needs an actual embedded view or an explicitly documented non-UI action; never substitute a decorative preview for missing domain functionality.
