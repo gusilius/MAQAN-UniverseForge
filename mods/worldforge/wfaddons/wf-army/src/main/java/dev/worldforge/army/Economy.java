@@ -68,7 +68,9 @@ public final class Economy {
 
     public List<String> vassals(String liege) {
         List<String> out = new ArrayList<>();
-        for (TitleData.Realm r : e.war.editor.data().realmList()) if (liege.equals(r.overlordId)) out.add(r.id);
+        if (liege == null || liege.isBlank()) return out;
+        for (TitleData.Realm r : e.war.editor.data().realmList())
+            if (liege.equals(r.overlordId)) out.add(r.id);
         return out;
     }
 
