@@ -107,6 +107,26 @@ public final class BuildingSite {
             worker.status = "идёт укладывать блоки чертежа";
             return;
         }
+        // If every resident has been auto-assigned again, temporarily borrow a builder-capable
+        // specialist from the most staffed completed workplace instead of deadlocking the site.
+        Worker pick = null;
+        int bestStaff = 1;
+        for (Worker worker : colony.s.workers) {
+            if (worker.building == 0 || worker.manualOrder || worker.manualFollow || worker.manualHauler
+                    || !worker.lifeAction.isBlank() || !worker.canPerform("builder")) continue;
+            Building from = colony.s.building(worker.building);
+            if (from == null || from.state != Building.State.DONE) continue;
+            int staff = colony.s.assigned(from.uid).size();
+            if (staff > bestStaff || (staff == bestStaff && pick != null && worker.id > pick.id)) {
+                pick = worker;
+                bestStaff = staff;
+            }
+        }
+        if (pick != null) {
+            pick.building = building.uid;
+            pick.assignedProfession = "builder";
+            pick.status = "временно помогает завершить стройку";
+        }
     }
 
     private static int buildersAtSite(ServerLevel level, Colony colony, Building building) {
