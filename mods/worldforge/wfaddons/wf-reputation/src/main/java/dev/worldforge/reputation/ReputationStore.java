@@ -214,7 +214,9 @@ public final class ReputationStore {
                                             String player, String organizationId, long sharedAt, Predicate<String> recipientMembershipCheck) {
         KnownReputation heard = known(witnessResidentId, player, Scope.ORGANIZATION, organizationId);
         if (heard == null || recipientResidentId == null || recipientResidentId.isBlank()
-                || recipientMembershipCheck == null || !recipientMembershipCheck.test(recipientResidentId)) return false;
+                || recipientMembershipCheck == null || sharedAt < heard.observedAt
+                || heard.depth >= 3 || heard.confidence < 0.2
+                || !recipientMembershipCheck.test(recipientResidentId)) return false;
         String key = target(Scope.ORGANIZATION, organizationId);
         Map<String, KnownReputation> recipient = knowledge
                 .computeIfAbsent(recipientResidentId, k -> new TreeMap<>())
@@ -274,7 +276,7 @@ public final class ReputationStore {
 
     @SuppressWarnings("unchecked")
     public void fromJson(String json) {
-        values.clear(); knowledge.clear();
+        values.clear(); knowledge.clear(); links.clear(); names.clear();
         Object parsed = Json.parse(json);
         if (!(parsed instanceof Map) || !(((Map<String, Object>) parsed).get("values") instanceof Map))
             throw new IllegalArgumentException("Неверный формат репутации");
