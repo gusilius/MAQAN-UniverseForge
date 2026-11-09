@@ -134,6 +134,7 @@ public final class ResidentInteraction {
         }
         boolean ruler = WorkerControlAccess.mayControl(player, colony);
         switch (action) {
+            case "open" -> open(player, worker);
             case "talk" -> player.sendSystemMessage(Component.literal("§f" + greeting(person, data, colony)
                     + " §7(Отношение: " + relationship(person, player) + ")"));
             case "status" -> {
