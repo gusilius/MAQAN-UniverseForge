@@ -45,6 +45,16 @@ public final class TreasuryLedger {
     public boolean hasAccount(String id) { return accounts.containsKey(id); }
     public double balance(String id) { Account a=accounts.get(id); return a==null?0:a.balance; }
 
+    /** Total successfully posted debit value for an account/category, rebuilt from the durable journal. */
+    public double totalDebits(String accountId, Kind kind, String category) {
+        double total = 0;
+        for (Entry entry : journal) {
+            if (entry.accountId().equals(accountId) && !entry.credit() && entry.kind() == kind
+                    && entry.category().equals(clean(category))) total += entry.amount();
+        }
+        return total;
+    }
+
     private static String referenceKey(String accountId, Kind kind, String reference) {
         return String.valueOf(accountId) + "\\u0000" + String.valueOf(kind) + "\\u0000" + clean(reference);
     }
