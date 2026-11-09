@@ -3,6 +3,7 @@ package dev.worldforge.dialogue.mc;
 import com.mojang.logging.LogUtils;
 import dev.worldforge.dialogue.Ctx;
 import dev.worldforge.dialogue.Dialogue;
+import dev.worldforge.dialogue.DialogueMemory;
 import dev.worldforge.dialogue.Session;
 import dev.worldforge.mod.Json;
 import net.minecraft.server.MinecraftServer;
@@ -56,8 +57,20 @@ public final class DialogueMc {
         return open(player, dialogueId, vars, null, DEFAULT_MAX_DISTANCE);
     }
 
+    /** Opens a character conversation with durable memory stored in the canonical Character.props map. */
+    public static boolean openCharacter(ServerPlayer player, String dialogueId, Map<String, String> vars,
+                                        Map<String, Object> characterProps) {
+        return openInternal(player, dialogueId, vars, null, DEFAULT_MAX_DISTANCE,
+                new DialogueMemory(characterProps));
+    }
+
     /** Открывает диалог; speakerPos != null: разговор прервётся, если игрок отойдёт дальше maxDistance блоков. */
     public static boolean open(ServerPlayer player, String dialogueId, Map<String, String> vars, Vec3 speakerPos, double maxDistance) {
+        return openInternal(player, dialogueId, vars, speakerPos, maxDistance, null);
+    }
+
+    private static boolean openInternal(ServerPlayer player, String dialogueId, Map<String, String> vars,
+                                        Vec3 speakerPos, double maxDistance, DialogueMemory memory) {
         Dialogue d = DialogueRegistry.get(dialogueId);
         if (d == null) {
             LOGGER.warn("wf_dialogue: нет диалога '{}'", dialogueId);
@@ -67,7 +80,7 @@ public final class DialogueMc {
         Active old = ACTIVE.remove(uid);
         if (old != null) DialogueNet.sendTo(player, new DialogueNet.Close(old.id));
         try {
-            Ctx ctx = new Ctx(flagsOf(uid));
+            Ctx ctx = new Ctx(flagsOf(uid), memory);
             ctx.var("player", player.getGameProfile().getName());
             if (vars != null) for (Map.Entry<String, String> e : vars.entrySet()) ctx.var(e.getKey(), e.getValue());
             ctx.var("player_id", uid.toString());
