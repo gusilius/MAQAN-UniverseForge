@@ -109,7 +109,7 @@ public final class TreasuryLedgerTest {
         @SuppressWarnings("unchecked")
         Map<String, Object> damaged = (Map<String, Object>) Json.parse(retry.toJson());
         List<Object> damagedJournal = new ArrayList<>((List<Object>) damaged.get("journal"));
-        damagedJournal.remove(damagedJournal.size() - 1);
+        damagedJournal.remove(damagedJournal.size() - 2);
         damaged.put("journal", damagedJournal);
         boolean rejectedUnbalanced = false;
         try { TreasuryLedger.fromJson(Json.write(damaged)); }
