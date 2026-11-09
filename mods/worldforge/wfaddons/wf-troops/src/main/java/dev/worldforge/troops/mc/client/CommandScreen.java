@@ -417,7 +417,11 @@ public final class CommandScreen extends Screen {
         boolean ctrl = hasControlDown();
         if (key == GLFW.GLFW_KEY_TAB) { CommandMode.RIG.cycle(); return true; }
         if (key == GLFW.GLFW_KEY_B) { toggleBuild(); return true; }
-        if (key == GLFW.GLFW_KEY_H) { settlementOpen = !settlementOpen; return true; }
+        if (key == GLFW.GLFW_KEY_H) {
+            settlementOpen = !settlementOpen;
+            if (settlement == null && minecraft.player != null) minecraft.player.connection.sendCommand("wfsettle view hud");
+            return true;
+        }
         if (key == GLFW.GLFW_KEY_Y) { cycleWorkMode(); return true; }
         if (key == GLFW.GLFW_KEY_O) {
             workOverlay = (workOverlay + 1) % 3;
