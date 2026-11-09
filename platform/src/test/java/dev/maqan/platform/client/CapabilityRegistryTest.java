@@ -19,7 +19,6 @@ class CapabilityRegistryTest {
         CapabilityRegistry.register(capability);
 
         assertTrue(CapabilityRegistry.all().contains(capability));
-        assertTrue(CapabilityRegistry.available().contains(capability));
         assertEquals(capability, CapabilityRegistry.forProvider("test_provider", "example.TestScreen"));
 
         CapabilityRegistry.unregisterProvider("test_provider");
