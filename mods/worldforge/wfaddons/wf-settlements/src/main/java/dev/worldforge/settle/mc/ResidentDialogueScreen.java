@@ -26,14 +26,14 @@ public final class ResidentDialogueScreen extends AbstractContainerScreen<Reside
         addRenderableWidget(action("Поговорить", "talk", left, top, w, h));
         addRenderableWidget(action("Следовать", "follow", left + w + gap, top, w, h));
         addRenderableWidget(action("Остановиться", "stop", left + (w + gap) * 2, top, w, h));
-        addRenderableWidget(action("Вернуться к работе", "work", left + (w + gap) * 3, top, w, h));
-        addRenderableWidget(action("Подарить изумруд", "gift", left, top + 30, w, h));
+        addRenderableWidget(action("На работу", "work", left + (w + gap) * 3, top, w, h));
+        addRenderableWidget(action("Подарок", "gift", left, top + 30, w, h));
         addRenderableWidget(action("Поручение", "quest", left + w + gap, top + 30, w, h));
         String questAction = menu.quest.startsWith("ACCEPTED") ? "deliver"
                 : menu.quest.startsWith("OFFERED") ? "accept" : "status";
         String questLabel = menu.quest.startsWith("ACCEPTED") ? "Передать" : menu.quest.startsWith("OFFERED") ? "Принять" : "Состояние";
         addRenderableWidget(action(questLabel, questAction, left + (w + gap) * 2, top + 30, w, h));
-        addRenderableWidget(action("Отношения и семья", "status", left + (w + gap) * 3, top + 30, w, h));
+        addRenderableWidget(action("Профиль", "status", left + (w + gap) * 3, top + 30, w, h));
         addRenderableWidget(action("О семье", "talk_family", left, top + 60, w, h));
         addRenderableWidget(action("О работе", "talk_work", left + w + gap, top + 60, w, h));
         addRenderableWidget(action("О мире", "talk_world", left + (w + gap) * 2, top + 60, w, h));
@@ -66,10 +66,18 @@ public final class ResidentDialogueScreen extends AbstractContainerScreen<Reside
         graphics.drawString(font, Component.literal(menu.status), 160, 84, 0xFFD6E2E8, false);
         graphics.drawString(font, Component.literal("ОТНОШЕНИЕ К ВАМ"), 160, 108, 0xFF69C7D5, false);
         graphics.drawString(font, Component.literal(menu.relationship), 160, 124, 0xFFD6E2E8, false);
-        graphics.drawString(font, Component.literal("СЕМЬЯ И СВЯЗИ"), 24, 166, 0xFF69C7D5, false);
-        graphics.drawString(font, Component.literal(menu.family), 24, 182, 0xFFD6E2E8, false);
+        graphics.drawString(font, Component.literal("СЕМЬЯ · ХАРАКТЕР · НАВЫКИ"), 24, 166, 0xFF69C7D5, false);
+        int familyY = 182;
+        for (var line : font.split(Component.literal(menu.family), 380).stream().limit(2).toList()) {
+            graphics.drawString(font, line, 24, familyY, 0xFFD6E2E8, false);
+            familyY += 10;
+        }
         graphics.drawString(font, Component.literal("ПОРУЧЕНИЕ"), 24, 206, 0xFF69C7D5, false);
-        graphics.drawString(font, Component.literal(menu.quest), 24, 222, 0xFFD6E2E8, false);
+        int questY = 222;
+        for (var line : font.split(Component.literal(menu.quest), 380).stream().limit(2).toList()) {
+            graphics.drawString(font, line, 24, questY, 0xFFD6E2E8, false);
+            questY += 10;
+        }
         graphics.drawString(font, Component.literal("МАQAN · ЖИВОЙ МИР"), 24, 24, 0xFF8DA7B6, false);
     }
 
