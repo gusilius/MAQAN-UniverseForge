@@ -110,13 +110,20 @@ public class SettleTest {
         ok(s.amount("wood") > w0, "дерево добывается");
 
         Settlement generalistYield = fresh(d, 1);
+        generalistYield.auto = false;
         Building generalistCamp = generalistYield.place("lumber_camp", 10, 0);
-        generalistYield.tick(60);
+        generalistYield.tick(2);
+        generalistYield.assign(generalistYield.workers.get(0).id, generalistCamp.uid);
+        generalistYield.tick(30);
+        generalistYield.assign(generalistYield.workers.get(0).id, generalistCamp.uid);
         generalistYield.tick(120);
         double generalistWood = generalistCamp.localStock.getOrDefault("wood", 0.0);
         Settlement specialistYield = fresh(d, 1);
+        specialistYield.auto = false;
         Building specialistCamp = specialistYield.place("lumber_camp", 10, 0);
-        specialistYield.tick(60);
+        specialistYield.tick(2);
+        specialistYield.assign(specialistYield.workers.get(0).id, specialistCamp.uid);
+        specialistYield.tick(30);
         Worker lumberjack = specialistYield.workers.get(0);
         specialistYield.setProfession(lumberjack.id, "lumberjack");
         specialistYield.assign(lumberjack.id, specialistCamp.uid);
