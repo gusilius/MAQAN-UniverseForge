@@ -508,7 +508,9 @@
         "out": {
           "meat": 2,
           "milk": 1,
-          "leather": 1
+          "wool": 1,
+          "rawhide": 1,
+          "eggs": 1
         },
         "cycle": 20
       }
@@ -563,7 +565,7 @@
         "in": {},
         "out": {
           "meat": 2,
-          "leather": 1
+          "rawhide": 1
         },
         "cycle": 20
       }
@@ -1150,10 +1152,9 @@
       ],
       "recipe": {
         "in": {
-          "meat": 1
+          "rawhide": 2
         },
         "out": {
-          "rawhide": 2,
           "leather": 2
         },
         "cycle": 20
@@ -1214,7 +1215,7 @@
         "out": {
           "bread": 3
         },
-        "cycle": 20
+        "cycle": 18
       }
     },
     "mint_workshop": {
