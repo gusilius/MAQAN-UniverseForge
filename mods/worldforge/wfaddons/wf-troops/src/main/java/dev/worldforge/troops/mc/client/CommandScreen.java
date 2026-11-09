@@ -182,11 +182,13 @@ public final class CommandScreen extends Screen {
                 identity=t.syncedCharacterId()==null?"":t.syncedCharacterId();
                 xp=t.syncedCombatXp();
                 state=t.squadId()==null||t.squadId().isBlank()?"":"Отряд "+t.squadId();
-            }else if(entity instanceof dev.worldforge.settle.mc.WFWorker w){
-                role=w.professionId().isBlank()?"Рабочий":w.professionId();
-                identity=w.characterId();
-                state=w.statusLabel();
-                if(w.assignedBuildingId()>0)state+=" · здание #"+w.assignedBuildingId();
+            }else if(entity instanceof LivingEntity worker&&CommandMode.isWorkerEntity(worker)){
+                role=CommandMode.workerString(worker,"professionId");
+                if(role.isBlank())role="Рабочий";
+                identity=CommandMode.workerString(worker,"characterId");
+                state=CommandMode.workerString(worker,"statusLabel");
+                int assigned=CommandMode.workerInt(worker,"assignedBuildingId");
+                if(assigned>0)state+=" · здание #"+assigned;
             }else role="Юнит";
             g.fill(INSPECT_X+3,y,INSPECT_X+INSPECT_W-3,y+INSPECT_ROW-1,
                     (row&1)==0?0x55333344:0x33222230);
