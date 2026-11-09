@@ -60,7 +60,16 @@ public final class CharacterDevelopment {
     }
     public static String moodCause(Character c){return string(c,MOOD_CAUSE,"");}
 
-    /** Effective court/leadership stat = stable base + personality traits + current mood. */
+    /** Current soldier morale is stored on the same Character identity, not only on its entity projection. */
+    public static int militaryMorale(Character c) {
+        Object raw=c.props.get("military.morale");
+        return raw instanceof Number n ? Math.max(0,Math.min(100,n.intValue())) : 100;
+    }
+    public static void setMilitaryMorale(Character c,int morale) {
+        c.props.put("military.morale",Math.max(0,Math.min(100,morale)));
+    }
+
+    /** Effective court/leadership stat = stable base + personality traits + mood + military morale. */
     public static int effectiveAttribute(Character c,String attribute,long worldMinute){
         int value=CharacterStats.value(c,attribute);
         Mood mood=mood(c,worldMinute);
@@ -74,6 +83,12 @@ public final class CharacterDevelopment {
             case EXHAUSTED -> attribute.equals("martial")||attribute.equals("stewardship")?-2:0;
             case NEUTRAL -> 0;
         };
+        if ("soldier".equals(String.valueOf(c.props.get("wf_unit_kind")))) {
+            int morale=militaryMorale(c);
+            if (morale < 20) modifier += attribute.equals("martial") ? -3 : attribute.equals("diplomacy") ? -1 : 0;
+            else if (morale < 40) modifier += attribute.equals("martial") ? -2 : 0;
+            else if (morale >= 85) modifier += attribute.equals("martial") ? 1 : 0;
+        }
         return Math.max(0,Math.min(20,value+modifier));
     }
 
