@@ -54,6 +54,8 @@ public final class WorldForgeSnapshotExporter {
         List<Object> territories = new ArrayList<>();
         List<Object> features = new ArrayList<>();
         List<Object> politicalBoundaries = new ArrayList<>();
+        List<Object> terrain = new ArrayList<>();
+        root.put("terrain", terrain);
         root.put("territories", territories);
         root.put("features", features);
         root.put("political_boundaries", politicalBoundaries);
@@ -64,7 +66,7 @@ public final class WorldForgeSnapshotExporter {
             if (!(candidateGenerator instanceof MapChunkGenerator mapGenerator)) continue;
             MapData candidateMap = mapGenerator.data();
             if (candidateMap == null) continue;
-            appendMap(server, candidate, candidateMap, territories, features, politicalBoundaries);
+            appendMap(server, candidate, candidateMap, terrain, territories, features, politicalBoundaries);
             exportedMaps++;
         }
         if (exportedMaps == 0)
@@ -86,9 +88,10 @@ public final class WorldForgeSnapshotExporter {
 
     /** Appends one currently loaded WorldForge dimension to the shared world snapshot. */
     private static void appendMap(MinecraftServer server, ServerLevel level, MapData map,
-            List<Object> territories, List<Object> features, List<Object> politicalBoundaries) {
+            List<Object> terrain, List<Object> territories, List<Object> features, List<Object> politicalBoundaries) {
         String dimensionId = level.dimension().location().toString();
         MapChunkGenerator generator = (MapChunkGenerator) level.getChunkSource().getGenerator();
+        terrain.add(terrainRaster(dimensionId, map));
         
         if (map.titles != null) {
             Map<Integer, List<List<WorldForgeProvinceContourBuilder.Point>>> contours =
@@ -279,6 +282,44 @@ public final class WorldForgeSnapshotExporter {
                     "marker", marker.name, dimensionId, marker.x, pos.getY(), marker.z,
                     marker.rgb, "", safe(marker.type), attrs));
         }
+    }
+
+    /**
+     * Exports a bounded overview raster (at most 256x256 samples per dimension).
+     * Source imagery is authoritative WorldForge map data, not chunk exploration,
+     * and remains independent from the player's fog-of-war cache.
+     */
+    private static Map<String, Object> terrainRaster(String dimensionId, MapData map) {
+        final int maxSide = 256;
+        int step = Math.max(1, (int) Math.ceil(Math.max(map.w, map.h) / (double) maxSide));
+        int width = (map.w + step - 1) / step;
+        int height = (map.h + step - 1) / step;
+        int count = Math.multiplyExact(width, height);
+        if (count > maxSide * maxSide) throw new IllegalStateException("Terrain raster exceeds export budget");
+        int[] heights = new int[count], biomes = new int[count], rivers = new int[count];
+        for (int z = 0; z < height; z++) for (int x = 0; x < width; x++) {
+            int px = Math.min(map.w - 1, x * step + step / 2);
+            int pz = Math.min(map.h - 1, z * step + step / 2);
+            int index = z * width + x;
+            heights[index] = (int) Math.round(map.minY
+                    + map.rawHeightPx(px, pz) / 65535.0 * (map.maxY - map.minY));
+            biomes[index] = map.biomeAtPx(px, pz);
+            rivers[index] = map.riverAtPx(px, pz);
+        }
+        Map<String, Object> raster = new LinkedHashMap<>();
+        raster.put("dimension_id", dimensionId);
+        raster.put("width", width);
+        raster.put("height", height);
+        raster.put("step_pixels", step);
+        raster.put("blocks_per_pixel", map.bpp);
+        raster.put("origin_x", -map.w * 0.5 * map.bpp);
+        raster.put("origin_z", -map.h * 0.5 * map.bpp);
+        raster.put("heights", heights);
+        raster.put("biome_indices", biomes);
+        raster.put("river_values", rivers);
+        raster.put("biome_palette", map.keys);
+        raster.put("biome_colors", map.biomeRgb);
+        return raster;
     }
 
     private static Map<String, Object> feature(String id, String kind, String name,

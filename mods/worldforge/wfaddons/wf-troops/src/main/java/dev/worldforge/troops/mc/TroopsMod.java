@@ -89,6 +89,65 @@ public class TroopsMod {
         bus.addListener((net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent e) ->
                 NET.registerMessage(0, OrderPacket.class, OrderPacket::encode, OrderPacket::decode, OrderPacket::handle));
         MinecraftForge.EVENT_BUS.register(this);
+        WorldForgeModSnapshotBridge.register();
+    }
+
+    private static final class WorldForgeModSnapshotBridge {
+        private static void register() {
+            dev.worldforge.mod.WorldForgeSnapshotExporter.registerContributor(TroopsMod::appendAtlasTroops);
+        }
+    }
+
+    /** Physical soldiers and army aggregates are exported in the same dimension/block frame as settlements. */
+    private static void appendAtlasTroops(MinecraftServer server, ServerLevel level, MapData map, List<Object> features) {
+        String dimension=level.dimension().location().toString();
+        Map<String,List<TroopEntity>> armies=new LinkedHashMap<>();
+        for(TroopEntity troop:LIVE.values()){
+            if(troop==null||!troop.isAlive()||troop.level()!=level)continue;
+            String realm=troop.realm==null?"":troop.realm;
+            int armyId=troop.armyId;
+            String groupKey=realm+"|"+(armyId>0?"army:"+armyId:"garrison");
+            armies.computeIfAbsent(groupKey,ignored->new ArrayList<>()).add(troop);
+            Map<String,String> attrs=new LinkedHashMap<>();
+            attrs.put("realm_id",realm);
+            attrs.put("army_id",Integer.toString(armyId));
+            attrs.put("squad_id",troop.squadId()==null?"":troop.squadId());
+            attrs.put("character_id",troop.characterId==null?"":troop.characterId);
+            attrs.put("owner_id",troop.ownerId());
+            attrs.put("unit_id",troop.unitId());
+            attrs.put("morale",Integer.toString(troop.moralePct()));
+            attrs.put("health",Double.toString(troop.getHealth()));
+            Map<String,Object> feature=new LinkedHashMap<>();
+            feature.put("id","worldforge:army-unit:"+dimension+":"+troop.getUUID());
+            feature.put("kind","army_unit");
+            feature.put("name",troop.unitId()==null||troop.unitId().isBlank()?"Soldier":troop.unitId());
+            feature.put("dimension_id",dimension);
+            feature.put("x",troop.getX());feature.put("y",troop.getY());feature.put("z",troop.getZ());
+            feature.put("realm_id",realm);feature.put("subtype",troop.unitId());
+            feature.put("color",0xC65A55);feature.put("attributes",attrs);
+            features.add(feature);
+        }
+        for(Map.Entry<String,List<TroopEntity>> entry:armies.entrySet()){
+            List<TroopEntity> units=entry.getValue();
+            if(units.isEmpty())continue;
+            double x=0,y=0,z=0;
+            for(TroopEntity troop:units){x+=troop.getX();y+=troop.getY();z+=troop.getZ();}
+            x/=units.size();y/=units.size();z/=units.size();
+            TroopEntity sample=units.get(0);
+            String realm=sample.realm==null?"":sample.realm;
+            Map<String,String> attrs=new LinkedHashMap<>();
+            attrs.put("realm_id",realm);attrs.put("army_id",Integer.toString(sample.armyId));
+            attrs.put("unit_count",Integer.toString(units.size()));
+            attrs.put("composition",units.stream().collect(java.util.stream.Collectors.groupingBy(
+                    TroopEntity::unitId,TreeMap::new,java.util.stream.Collectors.counting())).toString());
+            Map<String,Object> feature=new LinkedHashMap<>();
+            feature.put("id","worldforge:army:"+dimension+":"+entry.getKey().replace('|',':'));
+            feature.put("kind","army");feature.put("name",sample.armyId>0?"Army "+sample.armyId:"Garrison · "+realm);
+            feature.put("dimension_id",dimension);feature.put("x",x);feature.put("y",y);feature.put("z",z);
+            feature.put("realm_id",realm);feature.put("subtype","military_force");
+            feature.put("color",0xD95A55);feature.put("attributes",attrs);
+            features.add(feature);
+        }
     }
 
     static TroopDefs load(Path override) {

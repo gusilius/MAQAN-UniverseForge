@@ -169,9 +169,84 @@ public class SettleMod {
                 buildingFeature.put("territory_id", provinceFeatureId);
                 buildingFeature.put("race_id", raceId);
                 buildingFeature.put("culture_id", cultureId);
+                int halfX = Math.max(1, building.def.sizeX) / 2;
+                int halfZ = Math.max(1, building.def.sizeZ) / 2;
+                List<Object> footprint = List.of(
+                        atlasVertex(x-halfX, by, z-halfZ), atlasVertex(x+halfX, by, z-halfZ),
+                        atlasVertex(x+halfX, by, z+halfZ), atlasVertex(x-halfX, by, z+halfZ),
+                        atlasVertex(x-halfX, by, z-halfZ));
+                buildingFeature.put("rings", List.of(footprint));
                 features.add(buildingFeature);
             }
+
+            // Planned parcels and road centre-lines share the exact colony/world coordinate frame.
+            for (dev.worldforge.settle.SettlementMap.Parcel parcel : colony.map.parcels.values()) {
+                int x0=colony.cx+parcel.x, z0=colony.cz+parcel.z;
+                int x1=x0+parcel.width, z1=z0+parcel.depth;
+                int py=level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+                        x0+parcel.width/2,z0+parcel.depth/2);
+                Map<String,String> parcelAttrs=new java.util.LinkedHashMap<>();
+                parcelAttrs.put("settlement_id",colony.s.id);
+                parcelAttrs.put("parcel_id",parcel.id);
+                parcelAttrs.put("zone",parcel.zone.name().toLowerCase(java.util.Locale.ROOT));
+                parcelAttrs.put("owner",parcel.owner==null?"":parcel.owner);
+                Map<String,Object> parcelFeature=atlasFeature(
+                        "worldforge:settlement:"+dimension+":"+colony.s.id+":parcel:"+parcel.id,
+                        "land_parcel",parcel.id,dimension,x0+parcel.width/2,py,z0+parcel.depth/2,
+                        realmId,parcel.zone.name().toLowerCase(java.util.Locale.ROOT),parcelAttrs);
+                parcelFeature.put("territory_id",provinceFeatureId);
+                parcelFeature.put("rings",List.of(List.of(atlasVertex(x0,py,z0),atlasVertex(x1,py,z0),
+                        atlasVertex(x1,py,z1),atlasVertex(x0,py,z1),atlasVertex(x0,py,z0))));
+                features.add(parcelFeature);
+            }
+            for (dev.worldforge.settle.SettlementMap.Road road : colony.map.roads.values()) {
+                if (road.path==null||road.path.size()<2) continue;
+                List<Object> path=new ArrayList<>();
+                int pathStep=Math.max(1,(int)Math.ceil((road.path.size()-1)/4095.0));
+                for (int index=0;index<road.path.size();index+=pathStep) {
+                    dev.worldforge.settle.SettlementMap.Node node=road.path.get(index);
+                    int wx=colony.cx+node.gx()*dev.worldforge.settle.SettlementMap.CELL_SIZE
+                            +dev.worldforge.settle.SettlementMap.CELL_SIZE/2;
+                    int wz=colony.cz+node.gz()*dev.worldforge.settle.SettlementMap.CELL_SIZE
+                            +dev.worldforge.settle.SettlementMap.CELL_SIZE/2;
+                    dev.worldforge.settle.SettlementMap.Cell cell=colony.map.cell(node.gx(),node.gz());
+                    int ry=cell==null?y:cell.height;
+                    path.add(atlasVertex(wx,ry,wz));
+                }
+                if((road.path.size()-1)%pathStep!=0){
+                    dev.worldforge.settle.SettlementMap.Node node=road.path.get(road.path.size()-1);
+                    int wx=colony.cx+node.gx()*dev.worldforge.settle.SettlementMap.CELL_SIZE
+                            +dev.worldforge.settle.SettlementMap.CELL_SIZE/2;
+                    int wz=colony.cz+node.gz()*dev.worldforge.settle.SettlementMap.CELL_SIZE
+                            +dev.worldforge.settle.SettlementMap.CELL_SIZE/2;
+                    dev.worldforge.settle.SettlementMap.Cell cell=colony.map.cell(node.gx(),node.gz());
+                    path.add(atlasVertex(wx,cell==null?y:cell.height,wz));
+                }
+                var first=road.path.get(0);
+                int rx=colony.cx+first.gx()*dev.worldforge.settle.SettlementMap.CELL_SIZE
+                        +dev.worldforge.settle.SettlementMap.CELL_SIZE/2;
+                int rz=colony.cz+first.gz()*dev.worldforge.settle.SettlementMap.CELL_SIZE
+                        +dev.worldforge.settle.SettlementMap.CELL_SIZE/2;
+                Map<String,String> roadAttrs=new java.util.LinkedHashMap<>();
+                roadAttrs.put("settlement_id",colony.s.id);
+                roadAttrs.put("road_id",Integer.toString(road.id));
+                roadAttrs.put("surface",road.surface);
+                roadAttrs.put("built_segments",Integer.toString(road.builtSegments));
+                roadAttrs.put("segments",Integer.toString(road.path.size()-1));
+                Map<String,Object> roadFeature=atlasFeature(
+                        "worldforge:settlement:"+dimension+":"+colony.s.id+":road:"+road.id,
+                        "settlement_road","Road "+road.id,dimension,rx,y,rz,realmId,road.surface,roadAttrs);
+                roadFeature.put("territory_id",provinceFeatureId);
+                roadFeature.put("path",path);
+                features.add(roadFeature);
+            }
         }
+    }
+
+    private static Map<String,Object> atlasVertex(double x,double y,double z) {
+        Map<String,Object> vertex=new java.util.LinkedHashMap<>();
+        vertex.put("x",x);vertex.put("y",y);vertex.put("z",z);
+        return vertex;
     }
 
     private static String propertyString(Map<String, Object> properties, String key) {
