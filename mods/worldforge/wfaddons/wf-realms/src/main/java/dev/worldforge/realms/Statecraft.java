@@ -406,7 +406,7 @@ public final class Statecraft {
         TreasuryLedger ledger = TreasuryService.current();
         long minute = Math.max(0, WorldForgeApi.clock().dayNumber()) * 1440L;
         String taxReference = "tax:" + realmId + ":" + t.taxDays;
-        boolean taxAlreadyPosted = ledger.hasTransaction(treasuryAccountId(realmId), TreasuryLedger.Kind.TAX, taxReference);
+        boolean taxAlreadyPosted = ledger.hasCredit(treasuryAccountId(realmId), TreasuryLedger.Kind.TAX, taxReference);
         if (gross > 0 && !ledger.depositOnce(treasuryAccountId(realmId), gross, TreasuryLedger.Kind.TAX,
                 "taxation", taxReference, minute, "realm tax collection"))
             throw new IllegalStateException(ledger.lastError());
@@ -416,7 +416,7 @@ public final class Statecraft {
             Treasury vt = treasury(v.vassalRealm);
             String vassalAccount = treasuryAccountId(v.vassalRealm);
             String tributeReference = "tribute:" + v.vassalRealm + ":" + t.taxDays;
-            if (!ledger.hasTransaction(vassalAccount, TreasuryLedger.Kind.VASSAL_TRIBUTE, tributeReference)) {
+            if (!ledger.hasDebit(vassalAccount, TreasuryLedger.Kind.VASSAL_TRIBUTE, tributeReference)) {
                 double available = ledger.balance(vassalAccount);
                 double payment = Math.min(available, available * v.taxShare);
                 if (payment > 0 && ledger.transferOnce(vassalAccount, treasuryAccountId(realmId), payment,
