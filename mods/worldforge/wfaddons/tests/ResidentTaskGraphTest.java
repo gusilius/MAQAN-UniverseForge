@@ -40,6 +40,22 @@ public final class ResidentTaskGraphTest {
         ResidentTaskGraph.Receipt built = restored.built(12, 55, 5);
         check(built.stage() == ResidentTaskGraph.Stage.BUILT && built.parentReceiptId() == construction.id(),
                 "completed construction records the worker and links to its committed materials");
+        ResidentTaskGraph bounded = new ResidentTaskGraph();
+        bounded.extract(3, 7, "stone", 2, 1);
+        check(bounded.deliver(3, 8, "stone", 5, 2) == 2,
+                "hauling is capped by the actual local resource lot");
+        check(bounded.deliver(3, 8, "stone", 1, 3) == 0,
+                "hauling cannot create receipts for resources absent from the source");
+        check(bounded.consume(ResidentTaskGraph.Stage.CONSTRUCTION, 4, 9, "stone", 5, 4) == 2,
+                "consumption is capped by the stored resource lots");
+        check(bounded.consume(ResidentTaskGraph.Stage.PROCESSED, 4, 9, "stone", 1, 5) == 0
+                        && bounded.count(ResidentTaskGraph.Stage.PROCESSED) == 0,
+                "missing inventory cannot be represented as a successful consumption");
+        boolean rejectedCorrupt = false;
+        try {
+            bounded.fromJson("{\\"format\\":\\"wf-resident-task-graph/1\\",\\"next\\":2,\\"receipts\\":[{\\"id\\":1,\\"stage\\":\\"UNKNOWN\\",\\"building\\":1,\\"worker\\":1,\\"resource\\":\\"wood\\",\\"quantity\\":1,\\"parent\\":0,\\"time\\":1}],\\"local\\":{},\\"stored\\":{}}");
+        } catch (RuntimeException expected) { rejectedCorrupt = true; }
+        check(rejectedCorrupt, "corrupt receipt stages fail closed instead of being silently discarded");
         if (failures > 0) throw new AssertionError(failures + " resident task graph tests failed");
     }
 }
