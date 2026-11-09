@@ -241,7 +241,7 @@ public final class ReputationStore {
                     long time = item.get("time") instanceof Number n ? n.longValue() : 0L;
                     obs.put(String.valueOf(oe.getKey()), new KnownReputation(
                             Math.max(MIN, Math.min(MAX, value.intValue())), time,
-                            String.valueOf(item.getOrDefault("source", "legacy"))));
+                            String.valueOf(item.containsKey("source") ? item.get("source") : "legacy")));
                 }
                 if (!obs.isEmpty()) playerMap.put(String.valueOf(pe.getKey()), obs);
             }
