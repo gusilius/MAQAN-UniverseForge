@@ -348,21 +348,94 @@ public final class PlatformShellScreen extends Screen {
     }
 
     @Override public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
-        Screen view = activeView();
-        if (view != null) {
-            view.render(g, mouseX, mouseY, partialTick);
-        } else {
-            g.fill(0, 0, width, height, BG);
-            WorkspacePreviewRenderer.render(g, font, width, height, profile.name(), previewLayer, mouseX, mouseY, ambientGrid);
+        layoutWorkspace();
+        g.fill(0, 0, width, height, BG);
+        Panel content = panels.get("content");
+        if (content != null && content.visible) {
+            g.enableScissor(content.x, content.y, content.x + content.w, content.y + content.h);
+            Screen view = activeView();
+            if (view != null) view.render(g, mouseX, mouseY, partialTick);
+            else WorkspacePreviewRenderer.render(g, font, width, height, profile.name(), previewLayer, mouseX, mouseY, ambientGrid);
+            g.disableScissor();
         }
         drawTopBar(g, mouseX, mouseY);
         drawRail(g, mouseX, mouseY);
-        for (Panel p : panels.values()) if (p.visible) drawPanel(g, p, mouseX, mouseY);
+        for (Panel p : panels.values())
+            if (p.visible && !p.id.equals("content")) drawPanel(g, p, mouseX, mouseY);
         if (settingsVisible) drawSettings(g, mouseX, mouseY);
         drawDockSplitters(g, mouseX, mouseY);
         if (searchVisible) drawSearchOverlay(g, mouseX, mouseY);
         if (contextMenuVisible) drawContextMenu(g, mouseX, mouseY);
         super.render(g, mouseX, mouseY, partialTick);
+    }
+
+    private void drawDockSplitters(GuiGraphics g, int mx, int my) {
+        for (WorkspaceDockTree.Splitter splitter : WorkspaceDockTree.splitters(workspaceRoot, workspaceBounds())) {
+            boolean horizontal = splitter.axis() == WorkspaceDockTree.Axis.HORIZONTAL;
+            int left = horizontal ? splitter.position() - 2 : splitter.start();
+            int top = horizontal ? splitter.start() : splitter.position() - 2;
+            int right = horizontal ? splitter.position() + 2 : splitter.end();
+            int bottom = horizontal ? splitter.end() : splitter.position() + 2;
+            boolean hover = mx >= left - 3 && mx <= right + 3 && my >= top - 3 && my <= bottom + 3;
+            g.fill(left, top, right, bottom, hover ? CYAN : 0xAA34495B);
+        }
+    }
+
+    private void drawSearchOverlay(GuiGraphics g, int mx, int my) {
+        int boxWidth = Math.min(520, width - 80);
+        int x = (width - boxWidth) / 2;
+        int y = Math.max(48, height / 5);
+        g.fill(0, 35, width, height, 0x99000000);
+        g.fill(x, y, x + boxWidth, y + 30, SURFACE_ALT);
+        g.fill(x, y + 29, x + boxWidth, y + 31, CYAN);
+        g.drawString(font, "⌕", x + 12, y + 10, CYAN, false);
+        g.drawString(font, searchQuery.isBlank() ? "Search characters, objects, territories…" : searchQuery,
+                x + 34, y + 10, TEXT, false);
+        int rowY = y + 40;
+        for (int i = 0; i < Math.min(7, searchResults.size()); i++) {
+            WorkspaceRuntime.SearchEntry result = searchResults.get(i);
+            int top = rowY + i * 25;
+            boolean hover = mx >= x && mx <= x + boxWidth && my >= top && my < top + 23;
+            g.fill(x, top, x + boxWidth, top + 23, hover ? 0x553B9FB5 : SURFACE);
+            g.drawString(font, result.name(), x + 12, top + 4, TEXT, false);
+            String meta = result.type() + " · " + result.providerId()
+                    + (result.worldId().isBlank() ? "" : " · " + result.worldId());
+            g.drawString(font, trimInspector(meta, boxWidth - 24), x + 12, top + 14, MUTED, false);
+        }
+        if (searchResults.isEmpty())
+            g.drawString(font, searchQuery.isBlank() ? "Type to search indexed game entities" : "No indexed entities found",
+                    x + 12, rowY + 6, MUTED, false);
+        g.drawString(font, "ENTER  OPEN FIRST RESULT     ESC  CLOSE", x + 12,
+                rowY + Math.max(1, Math.min(7, searchResults.size())) * 25 + 8, MUTED, false);
+    }
+
+    private void drawContextMenu(GuiGraphics g, int mx, int my) {
+        int menuWidth = 190;
+        int rowHeight = 22;
+        int x = Math.max(4, Math.min(contextMenuX, width - menuWidth - 4));
+        int y = Math.max(38, Math.min(contextMenuY, height - contextActions.size() * rowHeight - 4));
+        g.fill(x, y, x + menuWidth, y + contextActions.size() * rowHeight + 4, SURFACE);
+        g.fill(x, y, x + menuWidth, y + 2, CYAN);
+        for (int i = 0; i < contextActions.size(); i++) {
+            int rowY = y + 4 + i * rowHeight;
+            boolean hover = mx >= x && mx <= x + menuWidth && my >= rowY && my < rowY + rowHeight;
+            if (hover) g.fill(x + 2, rowY, x + menuWidth - 2, rowY + rowHeight, 0x553B9FB5);
+            g.drawString(font, contextActions.get(i).label(), x + 10, rowY + 7, TEXT, false);
+        }
+    }
+
+    private void refreshSearch() {
+        searchResults = WorkspaceRuntime.search(searchQuery, 7);
+    }
+
+    private void chooseSearchResult(int index) {
+        if (index < 0 || index >= searchResults.size()) return;
+        WorkspaceRuntime.SearchEntry entry = searchResults.get(index);
+        PlatformSelectionContext.publish(entry.providerId(), entry.id(), entry.type(),
+                entry.name(), entry.worldId(), entry.summary());
+        Profile target = profileForDomain(entry.type());
+        contextMenuVisible = false;
+        searchVisible = false;
     }
 
     private void drawTopBar(GuiGraphics g, int mx, int my) {
