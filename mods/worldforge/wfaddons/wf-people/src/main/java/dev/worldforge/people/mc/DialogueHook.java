@@ -27,8 +27,8 @@ final class DialogueHook {
         try {
             Ctx ctx = DialogueBridge.context(npc, defs, d, player.getGameProfile().getName(), player.getUUID().toString(), flags);
             Class<?> c = Class.forName("dev.worldforge.dialogue.mc.DialogueMc");
-            Method m = c.getMethod("open", ServerPlayer.class, String.class, Map.class);
-            m.invoke(null, player, dialogueId, ctx.vars);
+            Method m = c.getMethod("openCharacter", ServerPlayer.class, String.class, Map.class, Map.class);
+            m.invoke(null, player, dialogueId, ctx.vars, npc.props);
             return true;
         } catch (Throwable t) {
             PeopleMod.LOGGER.error("wf_people: не удалось открыть диалог '{}': {}", dialogueId, t.toString());
