@@ -604,7 +604,7 @@ public final class CommandScreen extends Screen {
             drawGhost(g, mxi, myi, w, h);
             drawTaken(g, w, h);
             drawWorkAreas(g, w, h);
-            drawConstructionGhosts(g, w, h);
+            drawConstructionGhosts(g, w, h, mxi, myi);
         }
         if (dragging) {
             int x1 = (int) Math.min(dragX, mx), x2 = (int) Math.max(dragX, mx), y1 = (int) Math.min(dragY, my), y2 = (int) Math.max(dragY, my);
@@ -630,7 +630,7 @@ public final class CommandScreen extends Screen {
         for (BuildGhost.Rect r : taken) outline(g, (int) Math.floor(r.cx()), (int) Math.floor(r.cz()), r.sx(), r.sz(), groundYFor(r.cx(), r.cz()), 0x88BBBBBB, w, h);
     }
 
-    private void drawConstructionGhosts(GuiGraphics g, int w, int h) {
+    private void drawConstructionGhosts(GuiGraphics g, int w, int h, int mouseX, int mouseY) {
         if (constructionGhosts.isEmpty() || CommandMode.vp == null || minecraft.level == null) return;
         int visible = 0;
         for (ConstructionGhost ghost : constructionGhosts) {
@@ -643,6 +643,12 @@ public final class CommandScreen extends Screen {
             int size = Math.max(2, Math.min(6, (int) (18 / p[2])));
             g.fill(x - size, y - size, x + size + 1, y + size + 1, 0x6638CFFF);
             g.fill(x - 1, y - 1, x + 2, y + 2, 0xFF9BE8FF);
+            if (Math.hypot(mouseX - x, mouseY - y) <= Math.max(8, size + 3)) {
+                String label = ghost.block() + " · " + ghost.x() + " " + ghost.y() + " " + ghost.z();
+                int tx = Math.min(w - font.width(label) - 8, mouseX + 12), ty = Math.max(28, mouseY + 10);
+                g.fill(tx - 3, ty - 2, tx + font.width(label) + 4, ty + 11, 0xDD101820);
+                g.drawString(font, label, tx, ty, 0xFF9BE8FF, false);
+            }
             visible++;
         }
         if (visible > 0) {
