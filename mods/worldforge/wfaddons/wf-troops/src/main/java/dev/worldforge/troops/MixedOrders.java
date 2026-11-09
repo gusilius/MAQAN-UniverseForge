@@ -7,7 +7,7 @@ package dev.worldforge.troops;
 public final class MixedOrders {
     private MixedOrders() {}
 
-    public enum WorkerAction { NONE, MOVE, HOLD, STOP }
+    public enum WorkerAction { NONE, MOVE, FOLLOW, HOLD, STOP }
 
     public record Plan(boolean commandTroops, WorkerAction workers) {
         public boolean hasWork() { return commandTroops || workers != WorkerAction.NONE; }
@@ -18,9 +18,10 @@ public final class MixedOrders {
         WorkerAction workerAction = WorkerAction.NONE;
         if (workersSelected) {
             workerAction = switch (order) {
-                case MOVE, ATTACK_MOVE, RETREAT, PATROL, FOLLOW, GUARD -> WorkerAction.MOVE;
-                case HOLD -> WorkerAction.HOLD;
-                case STOP -> WorkerAction.STOP;
+                case MOVE, ATTACK_MOVE, PATROL -> WorkerAction.MOVE;
+                case FOLLOW -> WorkerAction.FOLLOW;
+                case HOLD, GUARD -> WorkerAction.HOLD;
+                case STOP, RETREAT -> WorkerAction.STOP;
                 case ATTACK -> WorkerAction.NONE;
             };
         }
