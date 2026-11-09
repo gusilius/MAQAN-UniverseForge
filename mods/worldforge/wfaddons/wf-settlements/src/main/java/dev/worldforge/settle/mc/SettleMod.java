@@ -9,6 +9,8 @@ import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.PopulationSimulation;
 import dev.worldforge.people.LifeSimulation;
+import dev.worldforge.mod.WorldForgeMod;
+import dev.worldforge.mod.economy.TreasuryLedger;
 import dev.worldforge.people.PopulationSimulation.Duty;
 import dev.worldforge.people.mc.PeopleMod;
 import net.minecraft.core.BlockPos;
@@ -632,6 +634,30 @@ public class SettleMod {
         return true;
     }
 
+    /** Remit the configured settlement tax share to the owning realm through the global ledger. */
+    private static void remitCrownTaxes(Colony colony) {
+        if (colony == null || colony.s == null || colony.s.crownShare <= 0) return;
+        String realmId = realmOf(colony);
+        if (realmId == null || realmId.isBlank()) return;
+        Settlement settlement = colony.s;
+        String source = "settlement:" + settlement.id;
+        String target = "realm:" + realmId;
+        TreasuryLedger ledger = WorldForgeMod.treasury();
+        settlement.amount(Defs.SILVER); // ensures/migrates the settlement account
+        ledger.open(target, realmId, Defs.SILVER, 0);
+        double due = Math.max(0, settlement.taxCollected * Math.max(0, Math.min(100, settlement.crownShare)) / 100.0
+                - settlement.remittedSilver);
+        double payment = Math.min(due, ledger.balance(source));
+        if (payment <= 1e-9) return;
+        boolean transferred = ledger.transfer(source, target, payment, TreasuryLedger.Kind.TAX,
+                "crown-remittance", settlement.id + ":" + Math.round(settlement.remittedSilver),
+                Math.max(0, (long) Math.floor(settlement.time / 60.0)), "settlement tax remitted to realm treasury");
+        if (transferred) {
+            settlement.remittedSilver += payment;
+            settlement.stock.put(Defs.SILVER, ledger.balance(source));
+        }
+    }
+
     @SubscribeEvent
     public void onTick(TickEvent.ServerTickEvent e) {
         if (e.phase != TickEvent.Phase.END || DEFS == null) return;
@@ -644,6 +670,7 @@ public class SettleMod {
                 if (speed <= 0) break;
                 try {
                     c.s.tick(speed);                                   // 1 секунда симуляции = 20 тиков
+                    remitCrownTaxes(c);
                     syncPeople(c);
                     runLifeAI(server, c);
                     c.map.tick(c.s, speed);                             // глобальная логистика не зависит от загруженности чанков
