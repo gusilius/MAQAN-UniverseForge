@@ -5,6 +5,9 @@ import dev.worldforge.settle.Defs;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.Entity;
+import net.minecraftforge.event.level.BlockEvent;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
@@ -66,12 +69,52 @@ public final class BuildingSite {
                 Blueprints.Entry en = plan.blocks().get(site.placed);
                 BlockPos pos = new BlockPos(site.x + en.x(), site.y + en.y(), site.z + en.z());
                 if (!lv.hasChunkAt(pos)) break;                                                       // чанк выгружен - ждём
+                if (site.assisted.remove(site.placed)) {
+                    if (lv.getBlockState(pos) == en.state()) { site.placed++; continue; }
+                }
                 if (!place(lv, pos, en.state())) {
                     b.status = "препятствие на чертеже: расчистите блоки";
                     break; // Never advance the blueprint cursor past a block that was not placed.
                 }
                 site.placed++;
             }
+        }
+    }
+
+    /** Player placement that matches a blueprint block contributes directly to construction progress. */
+    public static boolean assist(ServerPlayer player, ServerLevel level, BlockPos pos, BlockState placedState) {
+        for (Colony colony : SettleMod.COLONIES.values()) {
+            if (colony == null || !level.dimension().location().toString().equals(colony.dim)) continue;
+            if (!player.hasPermissions(2) && !player.server.isSingleplayerOwner(player.getGameProfile())
+                    && !player.getUUID().toString().equals(colony.owner)) continue;
+            for (Building building : colony.s.buildings) {
+                if (building.state != Building.State.BUILDING) continue;
+                Colony.Site site = colony.sites.get(building.uid);
+                if (site == null || pos.getX() < site.x || pos.getX() >= site.x + site.sx
+                        || pos.getY() < site.y || pos.getY() >= site.y + site.sy
+                        || pos.getZ() < site.z || pos.getZ() >= site.z + site.sz) continue;
+                Blueprints.Plan plan = Blueprints.get(level, building.def);
+                for (int i = Math.max(0, site.placed); i < plan.blocks().size(); i++) {
+                    Blueprints.Entry entry = plan.blocks().get(i);
+                    if (site.x + entry.x() != pos.getX() || site.y + entry.y() != pos.getY()
+                            || site.z + entry.z() != pos.getZ() || !entry.state().equals(placedState)) continue;
+                    site.assisted.add(i);
+                    int contributed = Math.min(plan.blocks().size(), Math.max(site.placed, i + 1));
+                    building.progress = Math.max(building.progress, building.def.work * contributed / plan.blocks().size());
+                    building.status = "строится: помощь игрока";
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    public static final class Events {
+        @SubscribeEvent
+        public void onPlace(BlockEvent.EntityPlaceEvent event) {
+            if (!(event.getEntity() instanceof ServerPlayer player)
+                    || !(event.getLevel() instanceof ServerLevel level)) return;
+            assist(player, level, event.getPos(), event.getPlacedBlock());
         }
     }
 
