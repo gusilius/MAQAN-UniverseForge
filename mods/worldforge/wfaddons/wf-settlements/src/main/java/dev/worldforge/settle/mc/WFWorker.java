@@ -268,7 +268,7 @@ public class WFWorker extends PathfinderMob {
         /** Search only inside the assigned footprint; the worker never picks an unrelated distant resource node. */
         private static BlockPos workWaypoint(WFWorker worker, Colony.WorkOrder order) {
             int radius = Math.max(0, Math.min(64, order.radius));
-            if (radius == 0) return new BlockPos(order.x, order.level > 0 ? order.level : worker.getBlockY(), order.z);
+            if (radius == 0) return order.cursor > 0 ? null : new BlockPos(order.x, order.level, order.z);
             int span = radius * 2 + 1, spacing = 12, columns = Math.max(1, (span + spacing - 1) / spacing);
             int index = Math.floorMod(order.cursor, columns * columns);
             int x = order.x - radius + Math.min(span - 1, (index % columns) * spacing + spacing / 2);
@@ -289,8 +289,8 @@ public class WFWorker extends PathfinderMob {
             int yCenter = order.level > worker.level().getMinBuildHeight() && order.level < worker.level().getMaxBuildHeight()
                     ? order.level : worker.getBlockY();
             int yRange = radius == 0 ? 16 : "ore".equals(order.mode) ? 32 : "stone".equals(order.mode) ? 20 : 10;
-            int fromY = Math.max(worker.level().getMinBuildHeight(), yCenter - yRange);
-            int toY = Math.min(worker.level().getMaxBuildHeight() - 1, yCenter + yRange);
+            int fromY = radius == 0 ? yCenter : Math.max(worker.level().getMinBuildHeight(), yCenter - yRange);
+            int toY = radius == 0 ? yCenter : Math.min(worker.level().getMaxBuildHeight() - 1, yCenter + yRange);
             BlockPos best = null;
             double bestDistance = Double.MAX_VALUE;
             for (int x = minX; x <= maxX; x++) for (int z = minZ; z <= maxZ; z++) {
@@ -301,7 +301,7 @@ public class WFWorker extends PathfinderMob {
                     int surface = worker.level().getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z) - 1;
                     BlockPos candidate = surface > order.level ? new BlockPos(x, surface, z)
                             : surface < order.level && order.soil > 0 ? new BlockPos(x, surface + 1, z) : null;
-                    if (candidate != null && candidate.getY() >= fromY && candidate.getY() <= toY) {
+                    if (candidate != null) {
                         double d = worker.distanceToSqr(candidate.getX() + 0.5, candidate.getY() + 0.5, candidate.getZ() + 0.5);
                         if (d < bestDistance) { bestDistance = d; best = candidate; }
                     }
