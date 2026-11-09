@@ -8,7 +8,7 @@ import net.minecraft.world.entity.player.Inventory;
 
 /** Dedicated, keyboard/mouse accessible resident conversation workspace. */
 public final class ResidentDialogueScreen extends AbstractContainerScreen<ResidentDialogueMenu> {
-    private static final int PANEL_W = 430, PANEL_H = 400;
+    private static final int PANEL_W = 430, PANEL_H = 460;
 
     public ResidentDialogueScreen(ResidentDialogueMenu menu, Inventory inventory, Component title) {
         super(menu, inventory, title);
@@ -45,6 +45,8 @@ public final class ResidentDialogueScreen extends AbstractContainerScreen<Reside
         addRenderableWidget(action("Фермер", "work_farmer", left, top + 120, w, h));
         addRenderableWidget(action("Продолжить участок", "work_area_resume", left + w + gap, top + 120, w, h));
         addRenderableWidget(action("Снять участок", "work_area_cancel", left + (w + gap) * 2, top + 120, w, h));
+        addRenderableWidget(action("Изготовить инструмент", "tool", left, top + 150, 142, h));
+        addRenderableWidget(action("Передать инструмент", "equip", left + 150, top + 150, 142, h));
     }
 
     private Button action(String label, String command, int x, int y, int width, int height) {
