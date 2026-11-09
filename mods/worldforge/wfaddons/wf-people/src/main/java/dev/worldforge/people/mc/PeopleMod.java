@@ -22,6 +22,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.packs.resources.Resource;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.MobCategory;
+import net.minecraft.world.phys.AABB;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.event.TickEvent;
@@ -44,7 +45,9 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
@@ -225,6 +228,7 @@ public class PeopleMod {
                 for (CharacterRegistry registry : REGS.values()) PopulationSimulation.advance(registry, elapsedDays, YEAR);
             }
             if (ticks % SPAWN_EVERY == 0) NpcSpawner.pass(e.getServer());
+            if (ticks % 20 == 0) socialInitiatives(e.getServer());
             if (ticks % SAVE_EVERY == 0) saveAll(e.getServer());
         } catch (Exception ex) {
             LOGGER.error("wf_people: ошибка тика: {}", ex.toString());
@@ -232,6 +236,64 @@ public class PeopleMod {
     }
 
     @SubscribeEvent
+    /**
+     * Optional NPC-initiated conversation. Runs only for explicitly configured characters
+     * or characters with unresolved semantic obligations. A per-character/player cooldown
+     * prevents repeated popups.
+     */
+    private static void socialInitiatives(MinecraftServer server) {
+        if (!dialogueLoaded()) return;
+        for (ServerLevel level : server.getAllLevels()) {
+            CharacterRegistry registry = peek(level);
+            if (registry == null) continue;
+            MapData map = EditorManager.dataFor(level);
+            if (map == null || map.titles == null) continue;
+            for (ServerPlayer player : level.players()) {
+                if (DialogueHook.hasSession(player)) continue;
+                List<WFNpc> nearby = level.getEntitiesOfClass(WFNpc.class, player.getBoundingBox().inflate(3.0));
+                for (WFNpc body : nearby) {
+                    if (player.distanceToSqr(body) > 9.0) continue;
+                    Character person = registry.get(body.characterId());
+                    if (person == null || !person.alive) continue;
+                    Object configured = person.props.get("social.initiative_dialogue");
+                    if (!(configured instanceof String dialogueId) || dialogueId.isBlank()) continue;
+                    String intent = pendingSocialIntent(person);
+                    if (!Boolean.TRUE.equals(person.props.get("social.initiative_enabled")) && intent.isEmpty()) continue;
+                    Map<String,Object> cooldowns = new HashMap<>();
+                    Object raw = person.props.get("social.initiative_cooldowns");
+                    if (raw instanceof Map<?,?> values) for (Map.Entry<?,?> entry : values.entrySet())
+                        if (entry.getKey() instanceof String key && entry.getValue() instanceof Number n) cooldowns.put(key,n.longValue());
+                    String playerId = player.getUUID().toString();
+                    Object last = cooldowns.get(playerId);
+                    if (last instanceof Number n && ticks - n.longValue() < 2400) continue;
+                    person.props.put("social.initiative_intent", intent.isEmpty() ? "greeting" : intent);
+                    if (!DialogueHook.open(player, body, person, dialogueId, ROLES, map.titles,
+                            FLAGS.computeIfAbsent(player.getUUID(), k -> new HashSet<>()))) continue;
+                    cooldowns.put(playerId, ticks);
+                    person.props.put("social.initiative_cooldowns", cooldowns);
+                    break;
+                }
+            }
+        }
+    }
+
+    /** First unresolved promise/request/grievance category for a follow-up conversation. */
+    private static String pendingSocialIntent(Character person) {
+        Object raw = person.props.get("dialogue.memory");
+        if (!(raw instanceof Map<?,?> root) || !(root.get("records") instanceof Map<?,?> records)) return "";
+        for (String category : List.of("grievance", "request", "promise")) {
+            String prefix = category + ".";
+            for (Map.Entry<?,?> entry : records.entrySet()) {
+                if (!(entry.getKey() instanceof String key) || !key.startsWith(prefix)
+                        || !(entry.getValue() instanceof Map<?,?> record)) continue;
+                if (!"open".equals(String.valueOf(record.get("status")))) continue;
+                person.props.put("social.initiative_subject", String.valueOf(record.containsKey("text") ? record.get("text") : ""));
+                return category + "_followup";
+            }
+        }
+        return "";
+    }
+
     public void onCommands(RegisterCommandsEvent e) {
         PeopleCommands.register(e.getDispatcher());
     }
