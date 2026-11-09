@@ -374,8 +374,7 @@ public class WFWorker extends PathfinderMob {
                         || state.is(Blocks.FERN) || state.is(Blocks.LARGE_FERN) || state.is(Blocks.DEAD_BUSH)
                         || state.is(Blocks.VINE);
                 case "level" -> true;
-                case "harvest" -> state.getBlock() instanceof net.minecraft.world.level.block.CropBlock crop
-                        && state.getValue(crop.getAgeProperty()) >= crop.getMaxAge();
+                case "harvest" -> isMatureHarvest(state);
                 default -> false;
             };
         }
@@ -390,14 +389,13 @@ public class WFWorker extends PathfinderMob {
             }
             if ("wood".equals(order.mode)) return fellWholeTree(worker, colony, level, pos);
             if ("harvest".equals(order.mode)) {
-                if (!(state.getBlock() instanceof net.minecraft.world.level.block.CropBlock crop)) return false;
-                if (state.getValue(crop.getAgeProperty()) < crop.getMaxAge()) return false;
+                if (!isMatureHarvest(state)) return false;
                 if (colony.s.amount("food") + 1 > colony.s.capacity("food")) {
                     Worker resident = colony.s.worker(worker.workerId);
                     if (resident != null) resident.status = "склад еды заполнен";
                     return false;
                 }
-                if (!level.setBlock(pos, state.setValue(crop.getAgeProperty(), 0), 3)) return false;
+                if (!level.setBlock(pos, resetHarvestBlock(state), 3)) return false;
                 colony.s.receiveResource("food", 1);
                 return true;
             }
@@ -479,6 +477,26 @@ public class WFWorker extends PathfinderMob {
             for (BlockPos leaf : leaves) if (level.hasChunkAt(leaf)
                     && level.getBlockState(leaf).is(BlockTags.LEAVES)) level.destroyBlock(leaf, false, worker);
             return true;
+        }
+
+        private static boolean isMatureHarvest(BlockState state) {
+            if (state.getBlock() instanceof net.minecraft.world.level.block.CropBlock crop)
+                return state.getValue(crop.getAgeProperty()) >= crop.getMaxAge();
+            if (state.getBlock() instanceof net.minecraft.world.level.block.SweetBerryBushBlock)
+                return state.getValue(net.minecraft.world.level.block.SweetBerryBushBlock.AGE) >= 3;
+            if (state.getBlock() instanceof net.minecraft.world.level.block.CocoaBlock)
+                return state.getValue(net.minecraft.world.level.block.CocoaBlock.AGE) >= 2;
+            return false;
+        }
+
+        private static BlockState resetHarvestBlock(BlockState state) {
+            if (state.getBlock() instanceof net.minecraft.world.level.block.CropBlock crop)
+                return state.setValue(crop.getAgeProperty(), 0);
+            if (state.getBlock() instanceof net.minecraft.world.level.block.SweetBerryBushBlock)
+                return state.setValue(net.minecraft.world.level.block.SweetBerryBushBlock.AGE, 1);
+            if (state.getBlock() instanceof net.minecraft.world.level.block.CocoaBlock)
+                return state.setValue(net.minecraft.world.level.block.CocoaBlock.AGE, 0);
+            return state;
         }
 
         private static String oreResource(BlockState state) {
