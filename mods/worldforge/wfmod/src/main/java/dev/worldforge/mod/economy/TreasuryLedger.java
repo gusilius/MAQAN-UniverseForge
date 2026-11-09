@@ -17,7 +17,7 @@ public final class TreasuryLedger {
         private Account(String id, String ownerId, String currency, double opening) {
             this.id=id; this.ownerId=ownerId; this.currency=currency; this.balance=opening;
         }
-        public double available() { return Math.max(0, balance + creditLimit); }
+        public double available() { return Math.max(0, balance + creditLimit - debt); }
     }
     public record Entry(long sequence, String transactionId, String accountId, String counterpartyId,
                         String currency, double amount, boolean credit, Kind kind, String category,
@@ -63,7 +63,7 @@ public final class TreasuryLedger {
     public boolean deposit(String accountId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
         Account a=accounts.get(accountId); if(a==null) return fail("unknown account");
         value=amount(value); minute(worldMinute); if(value==0) return true;
-        a.balance+=value; append("tx:"+transactionSequence++,a.id,"external",a.currency,value,true,kind,clean(category),clean(reference),worldMinute,a.balance,clean(memo));
+        double offset=Math.min(a.debt,value); a.debt-=offset; a.balance+=value-offset; append("tx:"+transactionSequence++,a.id,"external",a.currency,value,true,kind,clean(category),clean(reference),worldMinute,a.balance,clean(memo));
         updateBankruptcy(a); return true;
     }
     public boolean withdraw(String accountId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
@@ -93,7 +93,7 @@ public final class TreasuryLedger {
         if(!Double.isFinite(rate)||rate<0||rate>1) throw new IllegalArgumentException("interest rate must be 0..1");
         if(a.debt<=0 || rate==0) return true;
         double interest=a.debt*rate;
-        a.balance-=interest; a.debt+=interest;
+        a.debt+=interest;
         append("tx:"+transactionSequence++,a.id,"external",a.currency,interest,false,Kind.INTEREST,"finance",clean(reference),minute(worldMinute),a.balance,"debt interest");
         updateBankruptcy(a); return true;
     }
@@ -105,7 +105,7 @@ public final class TreasuryLedger {
         append("tx:"+transactionSequence++,a.id,"debt",a.currency,value,false,Kind.REPAYMENT,"finance",clean(reference),minute(worldMinute),a.balance,"debt repayment");
         updateBankruptcy(a); return true;
     }
-    private void updateBankruptcy(Account a) { a.debt=Math.max(0,-a.balance); a.bankrupt=a.debt>a.creditLimit+1e-9; }
+    private void updateBankruptcy(Account a) { a.bankrupt=a.debt>a.creditLimit+1e-9; }
     private boolean fail(String s) { lastError=s; return false; }
     private static String clean(String s) { return s==null?"":s.trim(); }
     private void append(String tx,String account,String other,String currency,double value,boolean credit,Kind kind,String category,String reference,long minute,double balance,String memo) {
@@ -131,7 +131,7 @@ public final class TreasuryLedger {
             String id=String.valueOf(m.get("id")), owner=String.valueOf(m.get("owner")), currency=String.valueOf(m.get("currency"));
             double balance=number(m.get("balance"),0);
             Account a=ledger.open(id,owner,currency,Math.max(0,balance));
-            a.balance=balance;a.creditLimit=number(m.get("creditLimit"),0);a.debt=number(m.get("debt"),Math.max(0,-balance));a.bankrupt=Boolean.TRUE.equals(m.get("bankrupt"));
+            a.balance=Math.max(0,balance);a.creditLimit=number(m.get("creditLimit"),0);a.debt=number(m.get("debt"),0);a.bankrupt=Boolean.TRUE.equals(m.get("bankrupt"));
         }
         ledger.journal.clear();
         if(root.get("journal") instanceof List<?> list) for(Object o:list) {
