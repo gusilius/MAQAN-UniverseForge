@@ -350,6 +350,11 @@ public class TroopsMod {
                 Math.max(0,troop.level().getDayTime()));
     }
 
+    static double injuryCombatMultiplier(TroopEntity troop) {
+        PersonBinding binding=bindPerson(troop,false);
+        return binding==null?1.0:CharacterDevelopment.injuryCombatMultiplier(binding.character());
+    }
+
     /** Pushes live squad morale to the canonical Character without rebuilding profession or XP state. */
     static void syncMilitaryMorale(TroopEntity troop) {
         PersonBinding binding = bindPerson(troop, false);
