@@ -16,7 +16,7 @@ import net.minecraft.server.level.ServerLevel;
 
 import java.util.Map;
 
-/** /wfsettle found|list|info|build|cancel|assign|unassign|profession|priority|auto|disband. Приказы действуют на ближайшее к игроку поселение. */
+/** /wfsettle found|list|info|build|cancel|assign|hauler|move|unassign|profession|priority|auto|disband. Приказы действуют на ближайшее к игроку поселение. */
 public final class SettleCommands {
     private SettleCommands() {}
 
@@ -67,6 +67,14 @@ public final class SettleCommands {
                                     int w = IntegerArgumentType.getInteger(c, "worker"), uid = IntegerArgumentType.getInteger(c, "uid");
                                     col.s.assign(w, uid);
                                     return "Рабочий #" + w + " отправлен в здание #" + uid;
+                                })))))
+                .then(Commands.literal("hauler").requires(SettleCommands::op)
+                        .then(Commands.argument("worker", IntegerArgumentType.integer(1))
+                                .then(Commands.argument("uid", IntegerArgumentType.integer(1)).executes(c -> order(c, col -> {
+                                    int w = IntegerArgumentType.getInteger(c, "worker");
+                                    int uid = IntegerArgumentType.getInteger(c, "uid");
+                                    col.s.assignHauler(w, uid);
+                                    return "Носильщик #" + w + " назначен на доставку ресурсов из здания #" + uid;
                                 })))))
                 .then(Commands.literal("move").requires(SettleCommands::op)
                         .then(Commands.argument("worker", IntegerArgumentType.integer(1))
