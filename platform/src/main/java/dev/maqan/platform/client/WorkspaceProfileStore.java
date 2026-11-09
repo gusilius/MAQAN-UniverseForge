@@ -53,7 +53,7 @@ public final class WorkspaceProfileStore {
             WorkspaceDockTree.Node tree = decode(encoded);
             WorkspaceDockTree.validate(tree);
             return tree;
-        } catch (BackingStoreException | IOException error) {
+        } catch (IOException error) {
             throw new IllegalStateException("Unable to load workspace profile " + name, error);
         }
     }
