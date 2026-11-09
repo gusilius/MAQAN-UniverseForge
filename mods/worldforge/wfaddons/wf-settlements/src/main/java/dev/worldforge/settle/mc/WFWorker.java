@@ -167,6 +167,8 @@ public class WFWorker extends PathfinderMob {
         private int stuckTicks;
         private BlockPos cachedApproachFor;
         private BlockPos cachedApproachTarget;
+        private BlockPos activeDetour;
+        private BlockPos detourFor;
 
         WorkGoal(WFWorker w) {
             this.w = w;
@@ -276,6 +278,19 @@ public class WFWorker extends PathfinderMob {
                 }
                 target = idle;
             }
+            if (activeDetour != null) {
+                if (detourFor == null || !detourFor.equals(target)) {
+                    activeDetour = null;
+                    detourFor = null;
+                } else if (w.distanceToSqr(activeDetour.getX() + 0.5, activeDetour.getY(), activeDetour.getZ() + 0.5) < 6.25) {
+                    // Reached the safe waypoint; now retry the actual order destination from here.
+                    activeDetour = null;
+                    detourFor = null;
+                    repath = 0;
+                } else {
+                    target = activeDetour;
+                }
+            }
             double targetFeetY = target.getY();
             boolean arrived = w.distanceToSqr(target.getX() + 0.5, targetFeetY, target.getZ() + 0.5) < 6.25;
             if (!arrived && --repath <= 0) {
@@ -291,6 +306,9 @@ public class WFWorker extends PathfinderMob {
                     BlockPos detour = reachableDetour(w, target);
                     path = detour == null ? null : w.getNavigation().createPath(detour, 0);
                     if (path != null && path.canReach()) {
+                        activeDetour = detour.immutable();
+                        detourFor = target.immutable();
+                        route = detour;
                         wk.status = "обходит препятствие по безопасному маршруту";
                     }
                 }
