@@ -184,6 +184,7 @@ public final class ResidentInteraction {
                 data.manualFollowOwner = player.getUUID().toString();
                 data.manualOrder = false;
                 data.assignedProfession = "";
+                data.manualHauler = false;
                 data.lifeAction = "";
                 data.building = 0;
                 data.orderQueue.clear();
