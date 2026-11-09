@@ -54,6 +54,7 @@ public final class PlatformShellScreen extends Screen {
     }
 
     private final Map<String, Panel> panels = new LinkedHashMap<>();
+    private final java.util.Set<String> hiddenPanels = new java.util.LinkedHashSet<>();
     private Profile profile = Profile.COSMOS;
     private String selectedDomain = "COSMOS";
     private String selectedCapabilityId = "maqan.atlas.cosmos";
@@ -204,7 +205,7 @@ public final class PlatformShellScreen extends Screen {
             if (panel == null) continue;
             WorkspaceDockTree.Rect rect = entry.getValue();
             panel.x = rect.x(); panel.y = rect.y(); panel.w = rect.width(); panel.h = rect.height();
-            panel.visible = true;
+            panel.visible = !hiddenPanels.contains(panel.id);
         }
         for (String id : List.of("navigation", "content", "inspector", "tools", "timeline")) {
             Panel panel = panels.get(id);
@@ -225,6 +226,7 @@ public final class PlatformShellScreen extends Screen {
             selectedCapabilityId = prefs.get("capability", selectedCapabilityId);
             for (Panel panel : panels.values()) {
                 String key = "panel." + panel.id + ".";
+                if (prefs.getBoolean("hidden." + panel.id, false)) hiddenPanels.add(panel.id);
                 panel.x = prefs.getInt(key + "x", panel.x);
                 panel.y = prefs.getInt(key + "y", panel.y);
                 panel.w = prefs.getInt(key + "w", panel.w);
@@ -256,6 +258,8 @@ public final class PlatformShellScreen extends Screen {
             prefs.put("capability", selectedCapabilityId);
             prefs.putBoolean("ambient_grid", ambientGrid);
             prefs.putBoolean("panel_shadows", panelShadows);
+            for (String id : List.of("navigation", "inspector", "tools", "timeline"))
+                prefs.putBoolean("hidden." + id, hiddenPanels.contains(id));
             for (Panel panel : panels.values()) {
                 String key = "panel." + panel.id + ".";
                 prefs.putInt(key + "x", panel.x);
@@ -770,10 +774,17 @@ public final class PlatformShellScreen extends Screen {
             if(index==1 && profile==Profile.COSMOS && embeddedView!=null) {
                 invokeAtlasRailAction("toggleInfoPanel"); return true;
             }
-            if(index==0) { panels.get("navigation").visible=!panels.get("navigation").visible; saveWorkspaceState(); return true; }
-            if(index==1) { panels.get("inspector").visible=!panels.get("inspector").visible; saveWorkspaceState(); return true; }
-            if(index==2) { panels.get("tools").visible=!panels.get("tools").visible; saveWorkspaceState(); return true; }
-            if(index==3) { panels.get("timeline").visible=!panels.get("timeline").visible; saveWorkspaceState(); return true; }
+            if(index==0) { toggleWorkspacePanel("navigation"); return true; }
+            if(index==1) {
+                if (panels.get("inspector").visible) toggleWorkspacePanel("inspector");
+                else { hiddenPanels.remove("inspector"); workspaceRoot = WorkspaceDockTree.activateTab(workspaceRoot, "inspector"); layoutWorkspace(); saveWorkspaceState(); }
+                return true;
+            }
+            if(index==2) {
+                hiddenPanels.remove("tools"); workspaceRoot = WorkspaceDockTree.activateTab(workspaceRoot, "tools");
+                layoutWorkspace(); saveWorkspaceState(); return true;
+            }
+            if(index==3) { toggleWorkspacePanel("timeline"); return true; }
             return true;
         }
         if(settingsVisible) {
@@ -827,6 +838,13 @@ public final class PlatformShellScreen extends Screen {
         }
         return activeView() != null
                 ? activeView().mouseClicked(mx,my,button) : true;
+    }
+
+    private void toggleWorkspacePanel(String id) {
+        if (hiddenPanels.contains(id)) hiddenPanels.remove(id);
+        else hiddenPanels.add(id);
+        layoutWorkspace();
+        saveWorkspaceState();
     }
 
     private void invokeAtlasRailAction(String methodName) {
