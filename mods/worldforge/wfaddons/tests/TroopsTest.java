@@ -329,6 +329,9 @@ public class TroopsTest {
         check(cam.zoom < d1 && cam.zoom >= CameraRig.MIN_ZOOM, "приближение");
         cam.zoomBy(-100); check(cam.zoom == CameraRig.MAX_ZOOM, "потолок высоты");
         cam.zoomBy(500); check(cam.zoom == CameraRig.MIN_ZOOM, "пол высоты");
+        cam.setZoom(31); check(cam.zoom == 31, "ползунок задаёт точную дистанцию камеры");
+        cam.setZoom(1000); check(cam.zoom == CameraRig.MAX_ZOOM, "ползунок ограничен максимальной дистанцией");
+        cam.setZoom(Double.NaN); check(cam.zoom == CameraRig.MAX_ZOOM, "некорректное значение дистанции игнорируется");
         cam.focusOn(1000, 1000); cam.clamp(0, 0);
         check(Math.hypot(cam.fx, cam.fz) <= cam.leash + 1e-6, "привязь к игроку");
         cam.rotate(400, 500); check(cam.pitch == CameraRig.MAX_PITCH && Math.abs(cam.yaw) < 360, "поворот и наклон ограничены");
