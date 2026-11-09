@@ -345,6 +345,54 @@ public final class Statecraft {
         return true;
     }
 
+    /** Move an approved army budget from the realm treasury into its dedicated military account. */
+    public boolean fundArmy(String realmId, double amount, String armyId, long worldMinute) {
+        String realm = clean(realmId, "realm id");
+        String army = "army:" + clean(armyId, "army id");
+        Treasury snapshot = treasury(realm);
+        TreasuryLedger ledger = WorldForgeMod.treasury();
+        ledger.open(army, armyId, "silver", 0);
+        boolean ok = ledger.transfer(treasuryAccountId(realm), army, money(amount),
+                TreasuryLedger.Kind.ARMY_UPKEEP, "military-budget", armyId, worldMinute, "realm military appropriation");
+        if (ok) snapshot.balance = ledger.balance(treasuryAccountId(realm));
+        return ok;
+    }
+
+    /** Pay soldier/army upkeep from the dedicated military account; never silently overdraw. */
+    public boolean payArmyUpkeep(String armyId, double amount, long worldMinute, String reference) {
+        String account = "army:" + clean(armyId, "army id");
+        TreasuryLedger ledger = WorldForgeMod.treasury();
+        if (!ledger.hasAccount(account)) ledger.open(account, armyId, "silver", 0);
+        return ledger.withdraw(account, money(amount), TreasuryLedger.Kind.ARMY_UPKEEP,
+                "military-upkeep", reference, worldMinute, "army maintenance");
+    }
+
+    public boolean setRealmCreditLimit(String realmId, double limit) {
+        treasury(realmId);
+        return WorldForgeMod.treasury().setCreditLimit(treasuryAccountId(realmId), money(limit));
+    }
+
+    public boolean borrowForRealm(String realmId, double amount, String reference, long worldMinute) {
+        treasury(realmId);
+        return WorldForgeMod.treasury().withdraw(treasuryAccountId(realmId), money(amount),
+                TreasuryLedger.Kind.LOAN, "sovereign-debt", reference, worldMinute, "realm credit draw");
+    }
+
+    public boolean accrueRealmInterest(String realmId, double rate, long worldMinute) {
+        treasury(realmId);
+        return WorldForgeMod.treasury().accrueInterest(treasuryAccountId(realmId), rate, worldMinute, "realm-interest");
+    }
+
+    public double realmDebt(String realmId) {
+        TreasuryLedger.Account account = WorldForgeMod.treasury().account(treasuryAccountId(realmId));
+        return account == null ? 0 : account.debt;
+    }
+
+    public boolean realmBankrupt(String realmId) {
+        TreasuryLedger.Account account = WorldForgeMod.treasury().account(treasuryAccountId(realmId));
+        return account != null && account.bankrupt;
+    }
+
     /** Collects taxes using existing wf-realms law modifiers and sends vassal tribute to the liege. */
     public double collectTaxes(Realms realms, String realmId, double taxableBase, int days) {
         Objects.requireNonNull(realms, "realms");
