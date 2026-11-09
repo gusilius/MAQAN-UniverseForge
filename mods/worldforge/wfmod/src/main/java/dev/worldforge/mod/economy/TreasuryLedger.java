@@ -68,9 +68,13 @@ public final class TreasuryLedger {
     }
     public boolean withdraw(String accountId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
         Account a=accounts.get(accountId); if(a==null) return fail("unknown account");
-        value=amount(value); minute(worldMinute); if(a.balance+a.creditLimit+1e-9<value) return fail("insufficient funds");
+        value=amount(value); minute(worldMinute);
+        if(a.available()+1e-9<value) return fail("insufficient funds");
         if(value==0) return true;
-        a.balance-=value; a.debt=Math.max(0,-a.balance); append("tx:"+transactionSequence++,a.id,"external",a.currency,value,false,kind,clean(category),clean(reference),worldMinute,a.balance,clean(memo));
+        double cash=Math.min(a.balance,value);
+        a.balance-=cash;
+        a.debt+=value-cash;
+        append("tx:"+transactionSequence++,a.id,"external",a.currency,value,false,kind,clean(category),clean(reference),worldMinute,a.balance,clean(memo));
         updateBankruptcy(a); return true;
     }
     /** Atomic transfer: no balance changes occur unless both accounts and currency match and payer can cover it. */
@@ -80,10 +84,15 @@ public final class TreasuryLedger {
         if(from==to || from.id.equals(to.id)) return fail("self transfer is not allowed");
         if(!from.currency.equals(to.currency)) return fail("currency mismatch");
         value=amount(value); minute(worldMinute);
-        if(from.balance+from.creditLimit+1e-9<value) return fail("insufficient funds");
+        if(from.available()+1e-9<value) return fail("insufficient funds");
         if(value==0) return true;
         String tx="tx:"+transactionSequence++;
-        from.balance-=value; to.balance+=value; from.debt=Math.max(0,-from.balance);
+        double cash=Math.min(from.balance,value);
+        from.balance-=cash;
+        from.debt+=value-cash;
+        double debtOffset=Math.min(to.debt,value);
+        to.debt-=debtOffset;
+        to.balance+=value-debtOffset;
         append(tx,from.id,to.id,from.currency,value,false,kind,clean(category),clean(reference),worldMinute,from.balance,clean(memo));
         append(tx,to.id,from.id,to.currency,value,true,kind,clean(category),clean(reference),worldMinute,to.balance,clean(memo));
         updateBankruptcy(from); updateBankruptcy(to); return true;
