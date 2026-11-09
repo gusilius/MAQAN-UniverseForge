@@ -96,6 +96,10 @@ public class TroopsTest {
                 "worker-only selection receives movement without creating a military squad");
         check(MixedOrders.plan(Squads.Kind.STOP, true, true).workers() == MixedOrders.WorkerAction.STOP,
                 "stop order is routed to both selected unit categories");
+        check(MixedOrders.plan(Squads.Kind.FOLLOW, true, true).workers() == MixedOrders.WorkerAction.FOLLOW,
+                "follow order remains a follow command for selected residents, not a move to world origin");
+        check(MixedOrders.plan(Squads.Kind.RETREAT, true, true).workers() == MixedOrders.WorkerAction.STOP,
+                "military retreat never sends civilian workers to world origin");
 
         // appointed commander / hero leadership
         check(Leadership.aura(8, true, false, 0) == 20,
