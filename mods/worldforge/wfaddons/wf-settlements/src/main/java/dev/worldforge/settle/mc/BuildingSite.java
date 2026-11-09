@@ -1,6 +1,7 @@
 package dev.worldforge.settle.mc;
 
 import dev.worldforge.settle.Building;
+import dev.worldforge.settle.Worker;
 import dev.worldforge.settle.Defs;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
@@ -63,8 +64,16 @@ public final class BuildingSite {
                 c.sites.put(b.uid, site);
             }
             int total = plan.blocks().size();
+            if (done && !site.physicalPending && site.placed < total) {
+                site.physicalPending = true;
+                site.wasPaused = b.paused;
+                b.paused = true;
+                b.status = "строится: укладка блоков";
+            }
+            if (site.physicalPending) ensureBuilder(c, b);
+            int buildersHere = buildersAtSite(lv, c, b);
             int target = done ? total : (int) Math.floor(total * Math.max(0, Math.min(1, b.progress / b.def.work)));
-            int cap = PER_CALL;
+            int cap = buildersHere > 0 ? Math.min(PER_CALL, buildersHere * 4) : 0;
             while (site.placed < target && cap-- > 0) {
                 Blueprints.Entry en = plan.blocks().get(site.placed);
                 BlockPos pos = new BlockPos(site.x + en.x(), site.y + en.y(), site.z + en.z());
@@ -78,6 +87,47 @@ public final class BuildingSite {
                 }
                 site.placed++;
             }
+            if (site.physicalPending && site.placed >= total) {
+                b.paused = site.wasPaused;
+                b.status = b.paused ? "пауза" : (b.def.produces() ? "работает" : "готово");
+                site.physicalPending = false;
+                releaseBuilderCrew(c, b);
+            }
+        }
+    }
+
+    private static void ensureBuilder(Colony colony, Building building) {
+        if (colony.s.workers.stream().anyMatch(w -> w.building == building.uid && w.workRole().equals("builder"))) return;
+        for (Worker worker : colony.s.workers) {
+            if (worker.building != 0 || worker.manualOrder || worker.manualFollow || worker.manualHauler
+                    || !worker.lifeAction.isBlank() || !worker.canPerform("builder")) continue;
+            worker.building = building.uid;
+            worker.assignedProfession = "builder";
+            worker.status = "идёт укладывать блоки чертежа";
+            return;
+        }
+    }
+
+    private static int buildersAtSite(ServerLevel level, Colony colony, Building building) {
+        Colony.Site site = colony.sites.get(building.uid);
+        if (site == null) return 0;
+        int count = 0;
+        BlockPos workPoint = new BlockPos(site.x + site.sx / 2, site.y, site.z + site.sz);
+        for (Worker worker : colony.s.workers) {
+            if (worker.building != building.uid || !worker.workRole().equals("builder")) continue;
+            java.util.UUID id = Bodies.LIVE.get(Bodies.key(colony.s.id, worker.id));
+            Entity entity = id == null ? null : level.getEntity(id);
+            if (entity != null && entity.isAlive()
+                    && entity.distanceToSqr(workPoint.getX() + 0.5, workPoint.getY(), workPoint.getZ() + 0.5) <= 36) count++;
+        }
+        return count;
+    }
+
+    private static void releaseBuilderCrew(Colony colony, Building building) {
+        for (Worker worker : colony.s.workers) if (worker.building == building.uid && worker.workRole().equals("builder")) {
+            worker.building = 0;
+            worker.assignedProfession = "";
+            worker.status = "свободен";
         }
     }
 
