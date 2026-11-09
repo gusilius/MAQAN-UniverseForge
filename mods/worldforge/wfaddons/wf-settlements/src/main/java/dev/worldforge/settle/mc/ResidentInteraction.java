@@ -348,12 +348,21 @@ public final class ResidentInteraction {
 
     private static String family(Character person) {
         List<String> links = new java.util.ArrayList<>();
-        if (person.spouse != null && !person.spouse.isBlank()) links.add("супруг: " + person.spouse);
+        if (person.spouse != null && !person.spouse.isBlank()) {
+            Object spouseName = person.props.get("family.spouse_name");
+            links.add("супруг: " + (spouseName instanceof String name ? name : person.spouse));
+        }
         Object dating = person.props.get("family.dating_name");
         if (dating instanceof String name && !name.isBlank()) links.add("встречается: " + name);
         if (person.children.size() > 0) links.add("детей: " + person.children.size());
-        if (person.father != null && !person.father.isBlank()) links.add("отец: " + person.father);
-        if (person.mother != null && !person.mother.isBlank()) links.add("мать: " + person.mother);
+        if (person.father != null && !person.father.isBlank()) {
+            Object name = person.props.get("family.father_name");
+            links.add("отец: " + (name instanceof String value ? value : person.father));
+        }
+        if (person.mother != null && !person.mother.isBlank()) {
+            Object name = person.props.get("family.mother_name");
+            links.add("мать: " + (name instanceof String value ? value : person.mother));
+        }
         return links.isEmpty() ? "не указана" : String.join(" · ", links);
     }
 
