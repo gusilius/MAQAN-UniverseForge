@@ -35,6 +35,7 @@ import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.ModList;
 import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
 import org.lwjgl.glfw.GLFW;
 
@@ -280,6 +281,7 @@ public final class CommandMode {
         frame(mc);
         mc.setCameraEntity(camEntity);
         mc.setScreen(new CommandScreen());
+        if (ModList.get().isLoaded("wf_settle")) mc.player.connection.sendCommand("wfsettle view hud");
     }
 
     static void exit(Minecraft mc) {
