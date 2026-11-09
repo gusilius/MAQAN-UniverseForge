@@ -59,7 +59,16 @@ public final class PlatformShellScreen extends Screen {
     private String selectedCapabilityId = "maqan.atlas.cosmos";
     private String draggingPanel;
     private String resizingPanel;
+    private String resizingSplitterPath;
     private int pointerOffsetX, pointerOffsetY, resizeStartX, resizeStartY, resizeStartW, resizeStartH;
+    private WorkspaceDockTree.Node workspaceRoot;
+    private WorkspaceProfileStore profileStore;
+    private boolean searchVisible;
+    private String searchQuery = "";
+    private List<WorkspaceRuntime.SearchEntry> searchResults = List.of();
+    private boolean contextMenuVisible;
+    private int contextMenuX, contextMenuY;
+    private List<WorkspaceRuntime.Action> contextActions = List.of();
     private boolean navRailVisible = true;
     private boolean inspectorVisible = true;
     private boolean timelineVisible = true;
@@ -140,13 +149,17 @@ public final class PlatformShellScreen extends Screen {
             panels.put("inspector", new Panel("inspector", "INSPECTOR", width - 252, 52, 236, 230));
             panels.put("timeline", new Panel("timeline", "TIMELINE", Math.max(220, width / 2 - 180), height - 116, 360, 82));
             panels.put("tools", new Panel("tools", "COMMANDS", Math.max(220, width / 2 - 145), 82, 290, 180));
+            panels.put("content", new Panel("content", "WORKSPACE", 280, 35, Math.max(200, width - 520), Math.max(160, height - 130)));
             // A new workspace opens ready to navigate and inspect; secondary
             // panels stay opt-in so the world/map remains visually dominant.
             panels.get("navigation").visible = true;
             panels.get("inspector").visible = true;
-            panels.get("timeline").visible = false;
+            panels.get("timeline").visible = true;
             panels.get("tools").visible = false;
+            workspaceRoot = defaultWorkspaceTree();
         }
+        if (workspaceRoot == null) workspaceRoot = defaultWorkspaceTree();
+        if (profileStore == null) profileStore = new WorkspaceProfileStore(workspacePreferences().node("profiles"));
         if (!workspaceStateLoaded) loadWorkspaceState();
         if (!profileAvailable(profile)) {
             for (Profile candidate : Profile.values()) {
@@ -157,7 +170,46 @@ public final class PlatformShellScreen extends Screen {
         if (embeddedView != null) embeddedView.init(Minecraft.getInstance(), width, height);
         Screen providerView = providerViews.get(selectedCapabilityId);
         if (providerView != null) providerView.init(Minecraft.getInstance(), width, height);
+        layoutWorkspace();
         clampPanels();
+    }
+
+    private WorkspaceDockTree.Node defaultWorkspaceTree() {
+        return new WorkspaceDockTree.Split(WorkspaceDockTree.Axis.HORIZONTAL, 190,
+                new WorkspaceDockTree.Panel("navigation"),
+                new WorkspaceDockTree.Split(WorkspaceDockTree.Axis.HORIZONTAL, 760,
+                        new WorkspaceDockTree.Split(WorkspaceDockTree.Axis.VERTICAL, 820,
+                                new WorkspaceDockTree.Panel("content"),
+                                new WorkspaceDockTree.Panel("timeline")),
+                        new WorkspaceDockTree.Tabs(List.of(
+                                new WorkspaceDockTree.Panel("inspector"),
+                                new WorkspaceDockTree.Panel("tools")), 0)));
+    }
+
+    private WorkspaceDockTree.Rect workspaceBounds() {
+        return new WorkspaceDockTree.Rect(44, 35, Math.max(1, width - 44), Math.max(1, height - 35));
+    }
+
+    private void layoutWorkspace() {
+        if (workspaceRoot == null || panels.isEmpty()) return;
+        Map<String, WorkspaceDockTree.Rect> layout = WorkspaceDockTree.layout(workspaceRoot,
+                workspaceBounds(), Map.of(
+                        "navigation", new WorkspaceDockTree.MinimumSize(150, 120),
+                        "content", new WorkspaceDockTree.MinimumSize(220, 160),
+                        "inspector", new WorkspaceDockTree.MinimumSize(180, 140),
+                        "tools", new WorkspaceDockTree.MinimumSize(180, 120),
+                        "timeline", new WorkspaceDockTree.MinimumSize(180, 64)));
+        for (Map.Entry<String, WorkspaceDockTree.Rect> entry : layout.entrySet()) {
+            Panel panel = panels.get(entry.getKey());
+            if (panel == null) continue;
+            WorkspaceDockTree.Rect rect = entry.getValue();
+            panel.x = rect.x(); panel.y = rect.y(); panel.w = rect.width(); panel.h = rect.height();
+            panel.visible = true;
+        }
+        for (String id : List.of("navigation", "content", "inspector", "tools", "timeline")) {
+            Panel panel = panels.get(id);
+            if (panel != null && !layout.containsKey(id)) panel.visible = false;
+        }
     }
 
     private Preferences workspacePreferences() {
@@ -185,7 +237,14 @@ public final class PlatformShellScreen extends Screen {
             ambientGrid = prefs.getBoolean("ambient_grid", ambientGrid);
             panelShadows = prefs.getBoolean("panel_shadows", panelShadows);
         }
+        try {
+            WorkspaceDockTree.Node saved = profileStore.load("Default");
+            if (saved != null) workspaceRoot = saved;
+        } catch (RuntimeException ignored) {
+            workspaceRoot = defaultWorkspaceTree();
+        }
         workspaceStateLoaded = true;
+        layoutWorkspace();
     }
 
     private void saveWorkspaceState() {
@@ -209,6 +268,7 @@ public final class PlatformShellScreen extends Screen {
                 prefs.put(key + "dock", panel.dock);
             }
             prefs.flush();
+            if (profileStore != null && workspaceRoot != null) profileStore.save("Default", workspaceRoot);
         } catch (Exception error) {
             LOGGER.warn("Unable to persist MAQAN workspace layout", error);
         }
@@ -299,6 +359,9 @@ public final class PlatformShellScreen extends Screen {
         drawRail(g, mouseX, mouseY);
         for (Panel p : panels.values()) if (p.visible) drawPanel(g, p, mouseX, mouseY);
         if (settingsVisible) drawSettings(g, mouseX, mouseY);
+        drawDockSplitters(g, mouseX, mouseY);
+        if (searchVisible) drawSearchOverlay(g, mouseX, mouseY);
+        if (contextMenuVisible) drawContextMenu(g, mouseX, mouseY);
         super.render(g, mouseX, mouseY, partialTick);
     }
 
