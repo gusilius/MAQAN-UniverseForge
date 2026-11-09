@@ -180,7 +180,7 @@ public class SettleTest {
         // детерминизм и сохранение
         Settlement x = fresh(d, 5), y = fresh(d, 5);
         for (Settlement t : new Settlement[]{x, y}) { t.place("house", 0, 0); t.place("lumber_camp", 10, 0); t.place("farm", 20, 0); t.tick(500); }
-        ok(x.toJson().equals(y.toJson()), "две одинаковые симуляции совпадают");
+        ok(x.toJson().replace(x.id, "<settlement-id>").equals(y.toJson().replace(y.id, "<settlement-id>")), "две одинаковые симуляции совпадают независимо от идентификатора поселения");
         if (!x.workers.isEmpty()) x.workers.get(0).person = "c-person-roundtrip";
         Settlement r = Settlement.fromJson(x.toJson(), d);
         ok(r.toJson().equals(x.toJson()), "сохранение и загрузка без потерь, включая ссылку на личность");
