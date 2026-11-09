@@ -58,20 +58,20 @@ public final class ResidentEquipment {
     private static Tool tool(String role) {
         return switch (role) {
             case "lumberjack", "sawyer", "woodcutter" -> new Tool(Kind.AXE,
-                    new ItemStack[]{new ItemStack(Items.WOODEN_AXE),new ItemStack(Items.STONE_AXE),new ItemStack(Items.IRON_AXE),new ItemStack(Items.DIAMOND_AXE)},
-                    "woodcutting", "wood", new int[]{2,3,2,2});
+                    new ItemStack[]{new ItemStack(Items.WOODEN_AXE),new ItemStack(Items.STONE_AXE),new ItemStack(Items.IRON_AXE),new ItemStack(Items.DIAMOND_AXE),new ItemStack(Items.NETHERITE_AXE)},
+                    "axe_mastery", "wood", new int[]{2,3,2,2,1});
             case "miner", "mason", "stonemason" -> new Tool(Kind.PICKAXE,
-                    new ItemStack[]{new ItemStack(Items.WOODEN_PICKAXE),new ItemStack(Items.STONE_PICKAXE),new ItemStack(Items.IRON_PICKAXE),new ItemStack(Items.DIAMOND_PICKAXE)},
-                    "mining", "stone", new int[]{2,3,2,2});
+                    new ItemStack[]{new ItemStack(Items.WOODEN_PICKAXE),new ItemStack(Items.STONE_PICKAXE),new ItemStack(Items.IRON_PICKAXE),new ItemStack(Items.DIAMOND_PICKAXE),new ItemStack(Items.NETHERITE_PICKAXE)},
+                    "mining", "stone", new int[]{2,3,2,2,1});
             case "farmer", "gardener", "herbalist" -> new Tool(Kind.HOE,
-                    new ItemStack[]{new ItemStack(Items.WOODEN_HOE),new ItemStack(Items.STONE_HOE),new ItemStack(Items.IRON_HOE),new ItemStack(Items.DIAMOND_HOE)},
-                    "farming", "wood", new int[]{2,3,2,2});
+                    new ItemStack[]{new ItemStack(Items.WOODEN_HOE),new ItemStack(Items.STONE_HOE),new ItemStack(Items.IRON_HOE),new ItemStack(Items.DIAMOND_HOE),new ItemStack(Items.NETHERITE_HOE)},
+                    "farming", "wood", new int[]{2,3,2,2,1});
             case "builder", "excavator", "terraformer" -> new Tool(Kind.SHOVEL,
-                    new ItemStack[]{new ItemStack(Items.WOODEN_SHOVEL),new ItemStack(Items.STONE_SHOVEL),new ItemStack(Items.IRON_SHOVEL),new ItemStack(Items.DIAMOND_SHOVEL)},
-                    "construction", "wood", new int[]{2,3,2,2});
+                    new ItemStack[]{new ItemStack(Items.WOODEN_SHOVEL),new ItemStack(Items.STONE_SHOVEL),new ItemStack(Items.IRON_SHOVEL),new ItemStack(Items.DIAMOND_SHOVEL),new ItemStack(Items.NETHERITE_SHOVEL)},
+                    "carpentry", "wood", new int[]{2,3,2,2,1});
             case "guard", "soldier", "hunter", "ranger" -> new Tool(Kind.SWORD,
-                    new ItemStack[]{new ItemStack(Items.WOODEN_SWORD),new ItemStack(Items.STONE_SWORD),new ItemStack(Items.IRON_SWORD),new ItemStack(Items.DIAMOND_SWORD)},
-                    "combat", "wood", new int[]{2,3,2,2});
+                    new ItemStack[]{new ItemStack(Items.WOODEN_SWORD),new ItemStack(Items.STONE_SWORD),new ItemStack(Items.IRON_SWORD),new ItemStack(Items.DIAMOND_SWORD),new ItemStack(Items.NETHERITE_SWORD)},
+                    "swordsmanship", "wood", new int[]{2,3,2,2,1});
             default -> null;
         };
     }
@@ -126,8 +126,8 @@ public final class ResidentEquipment {
     private static int maxTier(Character person, Colony colony, Worker worker, Tool tool) {
         int level = level(person, colony);
         int rank = PopulationSimulation.skillRank(person, tool.skill);
-        int tier = level >= 10 && rank >= 8 ? 3 : level >= 6 && rank >= 5 ? 2
-                : level >= 3 && rank >= 2 ? 1 : 0;
+        int tier = level >= 15 && rank >= 10 ? 4 : level >= 10 && rank >= 8 ? 3
+                : level >= 6 && rank >= 5 ? 2 : level >= 3 && rank >= 2 ? 1 : 0;
         String clazz = archetype(person);
         String profession = worker.permanentProfession();
         boolean aligned = (tool.kind == Kind.AXE && (clazz.contains("ranger") || clazz.contains("druid") || clazz.contains("wood")))
@@ -135,9 +135,19 @@ public final class ResidentEquipment {
                 || (tool.kind == Kind.HOE && (clazz.contains("druid") || clazz.contains("farmer") || clazz.contains("nature")))
                 || (tool.kind == Kind.SHOVEL && (clazz.contains("builder") || clazz.contains("engineer")))
                 || (tool.kind == Kind.SWORD && (clazz.contains("warrior") || clazz.contains("fighter") || clazz.contains("ranger")));
-        if (aligned && tier < 3 && level >= 3) tier++;
+        if (aligned && tier < 4 && level >= 3) tier++;
         if (worker.generalist()) tier = Math.min(tier, 1);
-        return Math.min(3, tier);
+        return Math.min(4, tier);
+    }
+
+    private static String materialForTier(int tier) {
+        return switch (tier) {
+            case 0 -> "wood";
+            case 1 -> "stone";
+            case 2 -> "iron";
+            case 3 -> "diamond";
+            default -> "netherite";
+        };
     }
 
     private static boolean matches(ItemStack stack, Kind kind) {
@@ -196,14 +206,14 @@ public final class ResidentEquipment {
         int chosen = -1;
         for (int tier = allowed; tier >= 0; tier--) {
             if (tier <= currentTier) continue;
-            String resource = tier == 0 ? "wood" : tier == 1 ? "stone" : tier == 2 ? "iron" : "diamond";
+            String resource = materialForTier(tier);
             int cost = tool.cost[tier];
             if (colony.s.amount(resource) >= cost) { chosen = tier; break; }
         }
         if (chosen < 0) return current.isEmpty()
                 ? "Нет подходящих материалов для инструмента. Нужны ресурсы и навык " + tool.skill + "."
                 : "Текущий инструмент уже соответствует доступному уровню; для улучшения нужны уровень, навык и материалы.";
-        String resource = chosen == 0 ? "wood" : chosen == 1 ? "stone" : chosen == 2 ? "iron" : "diamond";
+        String resource = materialForTier(chosen);
         int cost = tool.cost[chosen];
         if (!colony.s.consumeResource(resource, cost)) return "Материалы уже использованы другим заказом; изготовление отменено.";
         ItemStack crafted = tool.tiers[chosen].copy();
@@ -273,7 +283,7 @@ public final class ResidentEquipment {
         if (!matches(offered, expected.kind)) return "Нужен инструмент подходящего типа для профессии " + worker.workRole() + ".";
         ItemStack copy = offered.copy();
         copy.setCount(1);
-        int tier = copy.getItem() instanceof TieredItem tiered ? Math.max(0, Math.min(3, tiered.getTier().getLevel())) : 0;
+        int tier = copy.getItem() instanceof TieredItem tiered ? Math.max(0, Math.min(4, tiered.getTier().getLevel())) : 0;
         save(person, copy, tier, worker.workRole());
         body.setItemSlot(EquipmentSlot.MAINHAND, copy.copy());
         offered.shrink(1);
