@@ -70,6 +70,11 @@ public class SettleTest {
         ok(d.buildings.get("village_granary").storage.getOrDefault("food", 0) > 0
                         && d.buildings.get("city_storehouse").storage.getOrDefault("steel", 0) > 0,
                 "деревенский и городской склады реально увеличивают вместимость общего хранилища");
+        ok(d.professions.containsKey("brewer") && d.buildings.containsKey("brewery")
+                        && d.buildings.get("brewery").jobs.getOrDefault("brewer", 0) == 2
+                        && d.buildings.get("brewery").in.containsKey("grain")
+                        && d.buildings.get("brewery").out.containsKey("ale"),
+                "пивовар имеет полноценную производственную цепочку и рабочее место");
         ok(d.professions.containsKey("trainer") && d.buildings.get("barracks").jobs.getOrDefault("trainer", 0) == 1,
                 "казармы требуют рабочего-инструктора");
         Worker roleProbe = fresh(d, 1).workers.get(0);
