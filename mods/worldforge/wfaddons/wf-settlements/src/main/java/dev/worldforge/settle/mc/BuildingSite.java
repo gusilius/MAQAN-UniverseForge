@@ -139,8 +139,8 @@ public final class BuildingSite {
             if (!player.hasPermissions(2) && !player.server.isSingleplayerOwner(player.getGameProfile())
                     && !player.getUUID().toString().equals(colony.owner)) continue;
             for (Building building : colony.s.buildings) {
-                if (building.state != Building.State.BUILDING) continue;
                 Colony.Site site = colony.sites.get(building.uid);
+                if (building.state != Building.State.BUILDING && (site == null || !site.physicalPending)) continue;
                 if (site == null || pos.getX() < site.x || pos.getX() >= site.x + site.sx
                         || pos.getY() < site.y || pos.getY() >= site.y + site.sy
                         || pos.getZ() < site.z || pos.getZ() >= site.z + site.sz) continue;
