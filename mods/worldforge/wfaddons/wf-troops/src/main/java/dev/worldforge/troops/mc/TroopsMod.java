@@ -234,6 +234,7 @@ public class TroopsMod {
                 LOGGER.warn("wf-troops: hierarchy reconcile failed for army {}: {}", troop.armyId, ex.toString());
             }
         }
+        HIERARCHY.pruneSquads(SQUADS);
     }
 
     @SubscribeEvent
