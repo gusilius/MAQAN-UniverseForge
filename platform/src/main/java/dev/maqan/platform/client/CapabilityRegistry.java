@@ -101,6 +101,7 @@ public final class CapabilityRegistry {
         REGISTERED.entrySet().removeIf(entry ->
                 entry.getValue().providerModId().equals(providerModId));
         WorkspaceRuntime.unregisterProvider(providerModId);
+        WorkspaceMapLayerRegistry.unregisterProvider(providerModId);
     }
 
     /** All built-in and runtime capabilities, including entries whose providers are absent. */
