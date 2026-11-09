@@ -1,6 +1,7 @@
 package dev.worldforge.tests;
 
 import dev.worldforge.people.Character;
+import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.settle.ResidentSocial;
 import java.util.Map;
 
@@ -14,7 +15,7 @@ public final class ResidentSocialTest {
     }
 
     public static void main(String[] args) {
-        Character resident = new Character("c-resident", "Mira");
+        Character resident = new CharacterRegistry().create("Mira", "", "", "f", 1);
         String player = "player-uuid";
         check(ResidentSocial.score(resident, player) == 0, "new relationship starts neutral");
         check(ResidentSocial.adjust(resident, player, 10) == 10, "gift increases relationship");
@@ -25,7 +26,7 @@ public final class ResidentSocialTest {
         check(ResidentSocial.score(resident, "another-player") == 0, "relationships are per counterpart");
 
         Object saved = resident.props.get("social.relationships");
-        Character restored = new Character("c-restored", "Mira");
+        Character restored = new CharacterRegistry().create("Mira", "", "", "f", 1);
         restored.props.put("social.relationships", saved);
         check(ResidentSocial.score(restored, player) == -100, "relationship state persists with Character");
         boolean invalidTargetRejected = false;
