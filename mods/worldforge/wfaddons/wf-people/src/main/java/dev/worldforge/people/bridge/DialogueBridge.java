@@ -44,7 +44,7 @@ public final class DialogueBridge {
     }
 
     public static Ctx context(Character npc, RoleDefs defs, TitleData d, String playerName, String playerId, Set<String> playerFlags) {
-        Ctx ctx = new Ctx(playerFlags).var("npc", npc.name).var("npc_house", npc.house).var("player", playerName).var("player_id", playerId);
+        Ctx ctx = new Ctx(playerFlags).var("npc", npc.name).var("npc_name", npc.name).var("npc_house", npc.house).var("player", playerName).var("player_id", playerId);
         List<String> roles = new ArrayList<>();
         String realm = "", title = "", realmId = "";
         for (Character.Post p : npc.posts) {
