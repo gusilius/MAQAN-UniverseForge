@@ -1290,6 +1290,20 @@ public final class PlatformShellScreen extends Screen {
             searchVisible = true; searchQuery = ""; searchResults = List.of(); contextMenuVisible = false;
             return true;
         }
+        if (keyCode == GLFW.GLFW_KEY_P
+                && (modifiers & (GLFW.GLFW_MOD_CONTROL | GLFW.GLFW_MOD_SHIFT))
+                == (GLFW.GLFW_MOD_CONTROL | GLFW.GLFW_MOD_SHIFT)) {
+            workspaceManagerVisible = !workspaceManagerVisible;
+            notificationCenterVisible = false;
+            return true;
+        }
+        if (keyCode == GLFW.GLFW_KEY_N
+                && (modifiers & (GLFW.GLFW_MOD_CONTROL | GLFW.GLFW_MOD_SHIFT))
+                == (GLFW.GLFW_MOD_CONTROL | GLFW.GLFW_MOD_SHIFT)) {
+            notificationCenterVisible = !notificationCenterVisible;
+            workspaceManagerVisible = false;
+            return true;
+        }
         if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
             if (workspaceManagerVisible) { workspaceManagerVisible = false; return true; }
             if (notificationCenterVisible) { notificationCenterVisible = false; return true; }
