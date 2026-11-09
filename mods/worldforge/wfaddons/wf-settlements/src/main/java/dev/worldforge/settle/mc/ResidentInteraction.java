@@ -1,7 +1,7 @@
 package dev.worldforge.settle.mc;
 
 import com.mojang.brigadier.arguments.StringArgumentType;
-import dev.worldforge.mod.Json;
+import dev.worldforge.settle.ResidentSocial;
 import dev.worldforge.people.Character;
 import dev.worldforge.settle.ResidentQuest;
 import dev.worldforge.settle.Worker;
@@ -72,6 +72,7 @@ public final class ResidentInteraction {
         player.sendSystemMessage(action("Остановиться здесь", "stop", worker));
         player.sendSystemMessage(action("Вернуться к работе", "work", worker));
         player.sendSystemMessage(action("Состояние и отношения", "status", worker));
+        player.sendSystemMessage(action("Подарить изумруд · улучшить отношения", "gift", worker));
         ResidentQuest quest = quest(person);
         if (quest == null || quest.status() == ResidentQuest.Status.ABANDONED) {
             player.sendSystemMessage(action("Попросить поручение", "quest", worker));
@@ -140,6 +141,17 @@ public final class ResidentInteraction {
                         + " · " + data.status + " · поселение " + colony.s.name));
                 player.sendSystemMessage(Component.literal("§7Семья: " + family(person)
                         + " · возраст: " + Math.max(0, PeopleMod.YEAR - person.birthYear) + " лет"));
+                player.sendSystemMessage(Component.literal("§7Отношение к вам: " + relationship(person, player)));
+            }
+            case "gift" -> {
+                if (player.getInventory().countItem(Items.EMERALD) < 1) {
+                    player.sendSystemMessage(Component.literal("§eДля подарка нужен изумруд."));
+                    return 0;
+                }
+                player.getInventory().removeItem(Items.EMERALD, 1);
+                int score = ResidentSocial.adjust(person, player.getUUID().toString(), 10);
+                player.sendSystemMessage(Component.literal("§a" + person.name
+                        + " благодарит за подарок. Отношение: " + score + "/100."));
             }
             case "follow" -> {
                 if (!ruler) { deny(player); return 0; }
@@ -226,12 +238,19 @@ public final class ResidentInteraction {
             player.sendSystemMessage(Component.literal("§cСклад поселения не может принять хлеб."));
             return;
         }
-        player.getInventory().removeItem(Items.BREAD, delivered);
+        if (accepted > delivered) colony.s.consumeResource("food", accepted - delivered);
+        net.minecraft.world.item.ItemStack removed = player.getInventory().removeItem(Items.BREAD, delivered);
+        delivered = Math.min(delivered, removed.getCount());
+        if (delivered <= 0) {
+            colony.s.consumeResource("food", Math.floor(accepted + 1e-9));
+            player.sendSystemMessage(Component.literal("§cХлеб не удалось передать."));
+            return;
+        }
         boolean completed = q.addProgress(delivered, colony.s.year());
         saveQuest(person, q);
         if (completed) {
             colony.s.add("silver", 2.0);
-            player.sendSystemMessage(Component.literal("§aПоручение выполнено! Поселение получило хлеб, вы получили 2 серебра в казну."));
+            player.sendSystemMessage(Component.literal("§aПоручение выполнено! Хлеб доставлен, в казну поселения зачислено 2 серебра."));
         } else {
             player.sendSystemMessage(Component.literal("§aПередано хлеба: " + delivered + ". Осталось: "
                     + (q.required() - q.progress()) + "."));
@@ -244,8 +263,7 @@ public final class ResidentInteraction {
         if (!(raw instanceof Map<?, ?> map)) return null;
         try { return ResidentQuest.fromMap(map); }
         catch (RuntimeException ex) {
-            person.props.remove(QUEST_KEY);
-            return null;
+            return null; // retain malformed persisted data; never silently erase a resident's contract
         }
     }
 
