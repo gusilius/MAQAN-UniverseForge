@@ -237,8 +237,16 @@ public class WFWorker extends PathfinderMob {
                 w.getNavigation().stop();
                 if (area != null && !area.complete && resourceTarget == null && workScan > 0) {
                     BlockPos waypoint = workWaypoint(w, area);
-                    if (w.distanceToSqr(waypoint.getX() + 0.5, w.getY(), waypoint.getZ() + 0.5) < 6.25) {
+                    if (waypoint == null || w.distanceToSqr(waypoint.getX() + 0.5, w.getY(), waypoint.getZ() + 0.5) < 6.25) {
                         area.cursor++;
+                        int halfX = Math.max(0, Math.min(64, area.halfX < 0 ? area.radius : area.halfX));
+                        int halfZ = Math.max(0, Math.min(64, area.halfZ < 0 ? area.radius : area.halfZ));
+                        int columns = halfX == 0 && halfZ == 0 ? 1 : Math.max(1, (halfX * 2 + 1 + 11) / 12);
+                        int rows = halfX == 0 && halfZ == 0 ? 1 : Math.max(1, (halfZ * 2 + 1 + 11) / 12);
+                        if (area.cursor >= columns * rows) {
+                            if ("level".equals(area.mode) && area.soil > 0) area.cursor = 0;
+                            else area.complete = true;
+                        }
                         workScan = 0;
                     }
                 }
@@ -267,32 +275,31 @@ public class WFWorker extends PathfinderMob {
 
         /** Search only inside the assigned footprint; the worker never picks an unrelated distant resource node. */
         private static BlockPos workWaypoint(WFWorker worker, Colony.WorkOrder order) {
-            int radius = Math.max(0, Math.min(64, order.radius));
             if (order.complete) return null;
-            if (radius == 0) return order.cursor > 0 ? null : new BlockPos(order.x, order.level, order.z);
-            int span = radius * 2 + 1, spacing = 12, columns = Math.max(1, (span + spacing - 1) / spacing);
-            if (order.cursor >= columns * columns) return null;
+            int halfX = Math.max(0, Math.min(64, order.halfX < 0 ? order.radius : order.halfX));
+            int halfZ = Math.max(0, Math.min(64, order.halfZ < 0 ? order.radius : order.halfZ));
+            if (halfX == 0 && halfZ == 0)
+                return order.cursor > 0 ? null : new BlockPos(order.x, order.level, order.z);
+            int columns = Math.max(1, (halfX * 2 + 1 + 11) / 12);
+            int rows = Math.max(1, (halfZ * 2 + 1 + 11) / 12);
+            if (order.cursor >= columns * rows) return null;
             int index = order.cursor;
-            int x = order.x - radius + Math.min(span - 1, (index % columns) * spacing + spacing / 2);
-            int z = order.z - radius + Math.min(span - 1, (index / columns) * spacing + spacing / 2);
-            double dx = x - order.x, dz = z - order.z, distance = Math.hypot(dx, dz);
-            if (distance > radius && distance > 0) {
-                x = (int) Math.round(order.x + dx * radius / distance);
-                z = (int) Math.round(order.z + dz * radius / distance);
-            }
+            int x = order.x - halfX + Math.min(halfX * 2, (index % columns) * 12 + 6);
+            int z = order.z - halfZ + Math.min(halfZ * 2, (index / columns) * 12 + 6);
             return new BlockPos(x, worker.getBlockY(), z);
         }
 
         /** Search a small local window, then sweep the larger selected area by persistent waypoints. */
         private static BlockPos findWorkTarget(WFWorker worker, Colony.WorkOrder order) {
             if (order.complete) return null;
-            int radius = Math.max(0, Math.min(64, order.radius));
-            int scan = radius == 0 ? 0 : 8;
-            int minX = Math.max(order.x - radius, worker.getBlockX() - scan);
-            int maxX = Math.min(order.x + radius, worker.getBlockX() + scan);
-            int minZ = Math.max(order.z - radius, worker.getBlockZ() - scan);
-            int maxZ = Math.min(order.z + radius, worker.getBlockZ() + scan);
-            if (radius == 0) { minX = maxX = order.x; minZ = maxZ = order.z; }
+            int halfX = Math.max(0, Math.min(64, order.halfX < 0 ? order.radius : order.halfX));
+            int halfZ = Math.max(0, Math.min(64, order.halfZ < 0 ? order.radius : order.halfZ));
+            int scan = halfX == 0 && halfZ == 0 ? 0 : 8;
+            int minX = Math.max(order.x - halfX, worker.getBlockX() - scan);
+            int maxX = Math.min(order.x + halfX, worker.getBlockX() + scan);
+            int minZ = Math.max(order.z - halfZ, worker.getBlockZ() - scan);
+            int maxZ = Math.min(order.z + halfZ, worker.getBlockZ() + scan);
+            if (halfX == 0 && halfZ == 0) { minX = maxX = order.x; minZ = maxZ = order.z; }
             int yCenter = order.level > worker.level().getMinBuildHeight() && order.level < worker.level().getMaxBuildHeight()
                     ? order.level : worker.getBlockY();
             int yRange = radius == 0 ? 16 : "ore".equals(order.mode) ? 32 : "stone".equals(order.mode) ? 20 : 10;
@@ -301,7 +308,6 @@ public class WFWorker extends PathfinderMob {
             BlockPos best = null;
             double bestDistance = Double.MAX_VALUE;
             for (int x = minX; x <= maxX; x++) for (int z = minZ; z <= maxZ; z++) {
-                if (Math.hypot(x - order.x, z - order.z) > radius + 0.75 && radius > 0) continue;
                 BlockPos probe = new BlockPos(x, worker.getBlockY(), z);
                 if (!worker.level().hasChunkAt(probe)) continue;
                 if ("level".equals(order.mode)) {
