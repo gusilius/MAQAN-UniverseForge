@@ -3,6 +3,7 @@ package dev.worldforge.tests;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.PopulationSimulation;
+import dev.worldforge.people.LifeSimulation;
 import dev.worldforge.people.ProfessionDefs;
 import dev.worldforge.progress.Progress;
 import dev.worldforge.progress.ProgressDefs;
@@ -124,6 +125,53 @@ public final class PopulationSimulationTest {
         ok(((Number) smith.props.get("population.simulated_days")).longValue() == 1, "elapsed population days are persisted on the Character");
         ok(PopulationSimulation.need(smith, Need.HUNGER) == 10 && PopulationSimulation.need(smith, Need.REST) == 6,
                 "shared needs accumulate from the same world-day clock");
+
+        Character autonomous = registry.create("Rowan", "", "north", "m", 280);
+        PopulationSimulation.setNeed(autonomous, Need.HUNGER, 92);
+        LifeSimulation.Context activeMorning = new LifeSimulation.Context(
+                420, true, true, true, true, true, true, true, false, LifeSimulation.LOD.ACTIVE);
+        java.util.List<LifeSimulation.Action> executed = new java.util.ArrayList<>();
+        LifeSimulation.Decision eatDecision = LifeSimulation.tick(autonomous, activeMorning, (person, action, context) -> {
+            executed.add(action);
+            return LifeSimulation.Outcome.SUCCESS;
+        });
+        ok(eatDecision.action() == LifeSimulation.Action.EAT && eatDecision.outcome() == LifeSimulation.Outcome.SUCCESS,
+                "behavior-tree survival branch selects eating for critical hunger");
+        ok(executed.equals(java.util.List.of(LifeSimulation.Action.EAT))
+                        && PopulationSimulation.need(autonomous, Need.HUNGER) == 22,
+                "AI executor performs the action and only then satisfies hunger");
+
+        Character blocked = registry.create("Bram", "", "north", "m", 280);
+        PopulationSimulation.setNeed(blocked, Need.HUNGER, 90);
+        LifeSimulation.Context blockedContext = new LifeSimulation.Context(
+                600, false, true, true, true, true, true, true, false, LifeSimulation.LOD.ACTIVE);
+        LifeSimulation.Decision blockedDecision = LifeSimulation.tick(blocked, blockedContext,
+                (person, action, context) -> LifeSimulation.Outcome.BLOCKED);
+        ok(blockedDecision.action() != LifeSimulation.Action.EAT
+                        && PopulationSimulation.need(blocked, Need.HUNGER) == 90,
+                "unavailable resources and blocked actions do not grant free need relief");
+
+        Character scheduled = registry.create("Edda", "", "north", "f", 280);
+        PopulationSimulation.setNeed(scheduled, Need.REST, 60);
+        LifeSimulation.Context night = new LifeSimulation.Context(
+                1380, true, true, true, true, true, true, true, false, LifeSimulation.LOD.ACTIVE);
+        ok(LifeSimulation.tick(scheduled, night, (person, action, context) -> LifeSimulation.Outcome.SUCCESS).action()
+                        == LifeSimulation.Action.SLEEP,
+                "night schedule biases a tired Character toward sleep");
+        PopulationSimulation.setNeed(scheduled, Need.LEISURE, 75);
+        ok(LifeSimulation.goapPlan(scheduled, night).contains(LifeSimulation.Action.RECREATE),
+                "GOAP planner includes recreation as a satisfiable leisure goal");
+
+        Character remote = registry.create("Mira Remote", "", "north", "f", 280);
+        LifeSimulation.Context remoteContext = new LifeSimulation.Context(
+                1000, true, true, true, true, true, true, true, false, LifeSimulation.LOD.REMOTE);
+        LifeSimulation.Decision remoteFirst = LifeSimulation.tick(remote, remoteContext,
+                (person, action, context) -> LifeSimulation.Outcome.SUCCESS);
+        LifeSimulation.Decision remoteSecond = LifeSimulation.tick(remote,
+                new LifeSimulation.Context(1001, true, true, true, true, true, true, true, false, LifeSimulation.LOD.REMOTE),
+                (person, action, context) -> LifeSimulation.Outcome.SUCCESS);
+        ok(remoteFirst.nextThinkMinute() == 1360 && remoteSecond.reason().equals("thinking-cooldown"),
+                "remote LOD batches autonomous thinking without ticking every minute");
 
         int bridgeRanks = PeopleProgressBridge.train(progress, smith, "middle_earth", "tactics", 200);
         ok(bridgeRanks == 2, "NPC training uses the unified Character-backed skill record");
