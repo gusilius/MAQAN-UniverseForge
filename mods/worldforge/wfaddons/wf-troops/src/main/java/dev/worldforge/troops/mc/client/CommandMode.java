@@ -222,14 +222,24 @@ public final class CommandMode {
 
     /** Resident under the RTS cursor; the same screen-space hitbox is used by click and box selection. */
     static LivingEntity residentAt(Minecraft mc, double sx, double sy) {
-        for (UnitSelection.Screen point : screenList(mc)) {
-            if (Math.hypot(point.x() - sx, point.y() - sy) > Math.max(point.radius(), 8)) continue;
-            for (net.minecraft.world.entity.Entity entity : mc.level.entitiesForRendering()) {
-                if (entity instanceof LivingEntity living && living.isAlive()
-                        && entity.getUUID().toString().equals(point.id()) && isWorkerEntity(living)) return living;
+        if (mc == null || mc.level == null || vp == null) return null;
+        int width = mc.getWindow().getGuiScaledWidth();
+        int height = mc.getWindow().getGuiScaledHeight();
+        LivingEntity best = null;
+        double bestDistance = Double.MAX_VALUE;
+        for (net.minecraft.world.entity.Entity entity : mc.level.entitiesForRendering()) {
+            if (!(entity instanceof LivingEntity living) || !living.isAlive() || !isWorkerEntity(living)) continue;
+            double[] point = Projection.project(vp, living.getX() - cam.x,
+                    living.getY() + living.getBbHeight() * 0.5 - cam.y,
+                    living.getZ() - cam.z, width, height);
+            if (point[2] <= 0) continue;
+            double distance = Math.hypot(point[0] - sx, point[1] - sy);
+            if (distance <= Math.max(8, 90 / point[2]) && distance < bestDistance) {
+                best = living;
+                bestDistance = distance;
             }
         }
-        return null;
+        return best;
     }
 
 
