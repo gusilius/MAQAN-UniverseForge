@@ -2,6 +2,9 @@ package dev.worldforge.settle;
 
 /** Рабочий поселения. person - связь с персонажем мода людей (может быть пустой). */
 public final class Worker {
+    public record ManualOrder(double x,double z) {}
+    public static final int MAX_MANUAL_ORDERS=16;
+    public final java.util.ArrayDeque<ManualOrder> orderQueue=new java.util.ArrayDeque<>();
     public final int id;
     public String name, profession = "laborer", person = "";
     public int building;            // uid здания, 0 - свободен
