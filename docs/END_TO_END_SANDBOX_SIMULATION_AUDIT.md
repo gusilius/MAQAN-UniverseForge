@@ -239,3 +239,22 @@ A newer run for the audit-document commit had the first five jobs green while Wo
 ## Release gate
 
 Do not declare Unified Living World complete until the complete acceptance scenario passes in both deterministic domain tests and a running Forge integration environment. Do not substitute screen presence, separate unit tests or green compilation for the scenario.
+
+
+## CI follow-up: deterministic fixture and zero skipped logic tests
+
+The previous audit reported eight tests skipped because they expected a map archive at argv[0]. That was a test-harness gap, not a reason to delete those tests.
+
+The harness now generates a deterministic synthetic `.worldmap` fixture at runtime:
+- 64x64 grayscale terrain and biome maps;
+- 32 baronies grouped into 16 counties and 8 independent realms;
+- adjacent realms and valid title hierarchy for war/army/court scenarios;
+- the same resource path expected by the existing tests: `data/planets/worldforge_maps/game_of_thrones/`.
+
+`tools/test-all.sh` now always supplies this fixture to every test class. Missing fixture input is no longer interpreted as a successful skip. An explicitly supplied archive must exist or the test job fails immediately. The runner reports `skipped=0` and fails if any test fails.
+
+The fixture is synthetic and test-only; it does not replace or modify production maps. Existing map-specific tests remain intact and continue to exercise their actual domain logic against deterministic input.
+
+CI installs Python 3.12 in the WorldForge logic-test job because the fixture generator uses only the Python standard library. No additional workflow was added; this remains inside the single `universeforge.yml` quality gate.
+
+**Verification status:** changes are committed to `integration/maqan-unified`; the corresponding GitHub Actions run must finish before this is considered green. The repository integration tools do not provide a local Windows/Gradle execution environment, so no claim of local test execution is made here.
