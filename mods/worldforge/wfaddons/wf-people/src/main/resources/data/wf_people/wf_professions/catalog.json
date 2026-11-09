@@ -238,5 +238,17 @@
     "name": "Шахтёр",
     "category": "specialist",
     "required_skills": {}
+  },
+  {
+    "id": "cook",
+    "name": "Повар",
+    "category": "specialist",
+    "required_skills": {}
+  },
+  {
+    "id": "salt_worker",
+    "name": "Солевар",
+    "category": "specialist",
+    "required_skills": {}
   }
 ]
