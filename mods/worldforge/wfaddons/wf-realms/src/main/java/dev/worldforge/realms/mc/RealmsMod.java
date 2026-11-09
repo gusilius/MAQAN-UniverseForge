@@ -119,6 +119,12 @@ public class RealmsMod {
             for (var map : WorldForgeMod.loadedMaps().values())
                 if (map.titles != null) importedTitles += POLITICS.syncMapTitles(map.name, map.titles);
             if (importedTitles > 0) LOGGER.info("wf_realms: imported {} political titles from world maps", importedTitles);
+            int treasuryAccounts = 0;
+            for (TitleData.Realm realm : realms()) {
+                POLITICS.treasury(realm.id);
+                treasuryAccounts++;
+            }
+            LOGGER.info("wf_realms: synchronized {} realm treasury accounts with WorldForge ledger", treasuryAccounts);
         } catch (Exception ex) { LOGGER.error("wf_realms: не удалось прочитать состояние: {}", ex.toString()); }
     }
 
