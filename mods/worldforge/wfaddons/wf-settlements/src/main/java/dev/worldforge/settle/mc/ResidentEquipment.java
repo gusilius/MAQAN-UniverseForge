@@ -183,13 +183,19 @@ public final class ResidentEquipment {
             body.setItemSlot(EquipmentSlot.MAINHAND, stored.copy());
     }
 
-    public static String summary(Character person) {
+    public static String summary(Character person, Colony colony, Worker worker) {
         ItemStack stack = load(person);
-        if (stack.isEmpty()) return "инструмент отсутствует";
+        Tool expected = tool(requiredRole(worker, colony));
+        String skill = expected == null ? "—" : expected.skill + " " + PopulationSimulation.skillRank(person, expected.skill);
+        String clazz = archetype(person);
+        String identity = "Класс: " + (clazz.isBlank() ? "не выбран" : clazz)
+                + " · уровень: " + level(person, colony) + " · навык: " + skill;
+        if (stack.isEmpty()) return "инструмент отсутствует · " + identity;
         Object role = person.props.getOrDefault(ROLE_KEY, "рабочий инструмент");
         Object tier = person.props.getOrDefault(TIER_KEY, 0);
         return stack.getHoverName().getString() + " · " + role + " · качество " + (1 + (tier instanceof Number n ? n.intValue() : 0))
-                + " · прочность " + (stack.getMaxDamage() <= 0 ? "∞" : (stack.getMaxDamage() - stack.getDamageValue()) + "/" + stack.getMaxDamage());
+                + " · прочность " + (stack.getMaxDamage() <= 0 ? "∞" : (stack.getMaxDamage() - stack.getDamageValue()) + "/" + stack.getMaxDamage())
+                + " · " + identity;
     }
 
     /** Craft a better profession tool only when the resident has the skill, level and settlement materials. */
