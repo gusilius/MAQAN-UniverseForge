@@ -129,17 +129,49 @@ public final class BuildingSite {
         }
     }
 
+    /** Returns a reachable standing position beside the next blueprint block, so builders physically walk around the structure. */
+    public static BlockPos builderWorkPoint(ServerLevel level, Colony colony, Building building, WFWorker worker) {
+        Colony.Site site = colony.sites.get(building.uid);
+        if (site == null) return colony.workPoint(level, building);
+        Blueprints.Plan plan = Blueprints.get(level, building.def);
+        int index = Math.max(0, site.placed);
+        while (index < plan.blocks().size() && site.assisted.contains(index)) index++;
+        if (index >= plan.blocks().size()) return colony.workPoint(level, building);
+        Blueprints.Entry entry = plan.blocks().get(index);
+        BlockPos block = new BlockPos(site.x + entry.x(), site.y + entry.y(), site.z + entry.z());
+        java.util.List<BlockPos> candidates = new java.util.ArrayList<>();
+        BlockPos above = block.above();
+        if (builderStandable(level, above)) candidates.add(above);
+        for (net.minecraft.core.Direction direction : net.minecraft.core.Direction.Plane.HORIZONTAL) {
+            BlockPos side = block.relative(direction);
+            if (builderStandable(level, side)) candidates.add(side);
+        }
+        return candidates.stream().distinct().filter(pos -> {
+            var path = worker.getNavigation().createPath(pos, 0);
+            return path != null && path.canReach();
+        }).min(java.util.Comparator.comparingDouble(pos ->
+            worker.distanceToSqr(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5)))
+            .orElseGet(() -> colony.workPoint(level, building));
+    }
+
+    private static boolean builderStandable(ServerLevel level, BlockPos feet) {
+        if (!level.hasChunkAt(feet) || !level.hasChunkAt(feet.below())) return false;
+        BlockState at = level.getBlockState(feet);
+        BlockState floor = level.getBlockState(feet.below());
+        return (at.isAir() || at.canBeReplaced()) && at.getFluidState().isEmpty() && floor.isSolid();
+    }
     private static int buildersAtSite(ServerLevel level, Colony colony, Building building) {
         Colony.Site site = colony.sites.get(building.uid);
         if (site == null) return 0;
         int count = 0;
-        BlockPos workPoint = new BlockPos(site.x + site.sx / 2, site.y, site.z + site.sz);
         for (Worker worker : colony.s.workers) {
             if (worker.building != building.uid || !worker.workRole().equals("builder")) continue;
             java.util.UUID id = Bodies.LIVE.get(Bodies.key(colony.s.id, worker.id));
             Entity entity = id == null ? null : level.getEntity(id);
-            if (entity != null && entity.isAlive()
-                    && entity.distanceToSqr(workPoint.getX() + 0.5, workPoint.getY(), workPoint.getZ() + 0.5) <= 36) count++;
+            if (entity instanceof WFWorker body && entity.isAlive()) {
+                BlockPos workPoint = builderWorkPoint(level, colony, building, body);
+                if (entity.distanceToSqr(workPoint.getX() + 0.5, workPoint.getY(), workPoint.getZ() + 0.5) <= 36) count++;
+            }
         }
         return count;
     }
