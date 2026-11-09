@@ -338,7 +338,7 @@ public final class Statecraft {
         Treasury t = treasury(realmId);
         double value = money(amount);
         boolean ok = WorldForgeMod.treasury().withdraw(treasuryAccountId(realmId), value,
-                TreasuryLedger.Kind.GRANT, "government", reason, 0, "statecraft expenditure");
+                TreasuryLedger.Kind.WITHDRAWAL, "government", reason, 0, "statecraft expenditure");
         if (!ok) return fail(WorldForgeMod.treasury().lastError());
         t.balance = WorldForgeMod.treasury().balance(treasuryAccountId(realmId));
         t.lastExpenses += value;
