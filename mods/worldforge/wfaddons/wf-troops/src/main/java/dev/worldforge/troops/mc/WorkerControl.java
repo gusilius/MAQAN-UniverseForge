@@ -53,12 +53,12 @@ final class WorkerControl {
             if (colony == null || resident == null) continue;
             if (!mayControl(p, colony)) { denied = true; continue; }
             String role = roles[o.kind()];
-            if (!resident.canPerform(role)) continue;
             if (o.arg() == -1) {
                 Colony.WorkOrder existing = colony.workOrders.get(resident.id);
                 if (existing != null) { existing.overlay = overlay; accepted++; }
                 continue;
             }
+            if (!resident.canPerform(role)) continue;
             Colony.WorkOrder work = new Colony.WorkOrder();
             work.mode = mode;
             work.x = (int) Math.floor(o.x());
