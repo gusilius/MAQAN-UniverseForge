@@ -5,7 +5,6 @@ import dev.worldforge.mod.TitleData;
 import dev.worldforge.mod.economy.TreasuryService;
 import dev.worldforge.mod.api.WorldForgeApi;
 import dev.worldforge.mod.economy.TreasuryLedger;
-import dev.worldforge.mod.economy.TreasuryService;
 
 import java.util.*;
 
