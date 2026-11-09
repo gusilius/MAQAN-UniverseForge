@@ -627,6 +627,7 @@ public class WFWorker extends PathfinderMob {
             if (!(worker.level() instanceof net.minecraft.server.level.ServerLevel level) || !level.hasChunkAt(pos)) return false;
             BlockState state = level.getBlockState(pos);
             if (!isWorkTarget(state, order.mode)) return false;
+            if (!ResidentEquipment.readyForWork(worker, order.mode)) return false;
             if (worker.distanceToSqr(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5) > 9.0) return false;
             if ("clear".equals(order.mode)) {
                 return level.destroyBlock(pos, false, worker);
