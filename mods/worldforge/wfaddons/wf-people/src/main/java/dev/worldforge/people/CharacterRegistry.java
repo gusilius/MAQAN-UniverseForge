@@ -238,6 +238,7 @@ public final class CharacterRegistry {
         if (!c.alive) return List.of();
         List<Character.Post> vacated = new ArrayList<>(c.posts);
         c.alive = false;
+        CharacterInventory.settleEstate(this,c);
         c.posts.clear();
         for (Character.Post p : vacated) for (Listener l : listeners) l.dismissed(c, p.role, p.place);
         c.props.remove("population.entity_bindings");
