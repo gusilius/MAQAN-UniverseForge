@@ -262,11 +262,12 @@ public class WFWorker extends PathfinderMob {
                         cachedWorkTarget = null;
                         workScan = 0;
                         wk.status = switch (area.mode) {
-                            case "wood" -> "добывает древесину";
+                            case "wood" -> "вырубает целое дерево";
                             case "stone" -> "добывает камень";
                             case "ore" -> "добывает руду";
                             case "clear" -> "расчищает участок";
                             case "level" -> "выравнивает участок";
+                            case "harvest" -> "собирает урожай";
                             default -> "работает на участке";
                         };
                         if (++swing >= 8) { swing = 0; w.swing(InteractionHand.MAIN_HAND); }
@@ -373,6 +374,8 @@ public class WFWorker extends PathfinderMob {
                         || state.is(Blocks.FERN) || state.is(Blocks.LARGE_FERN) || state.is(Blocks.DEAD_BUSH)
                         || state.is(Blocks.VINE);
                 case "level" -> true;
+                case "harvest" -> state.getBlock() instanceof net.minecraft.world.level.block.CropBlock crop
+                        && state.getValue(crop.getAgeProperty()) >= crop.getMaxAge();
                 default -> false;
             };
         }
@@ -386,6 +389,18 @@ public class WFWorker extends PathfinderMob {
                 return level.destroyBlock(pos, false, worker);
             }
             if ("wood".equals(order.mode)) return fellWholeTree(worker, colony, level, pos);
+            if ("harvest".equals(order.mode)) {
+                if (!(state.getBlock() instanceof net.minecraft.world.level.block.CropBlock crop)) return false;
+                if (state.getValue(crop.getAgeProperty()) < crop.getMaxAge()) return false;
+                if (colony.s.amount("food") + 1 > colony.s.capacity("food")) {
+                    Worker resident = colony.s.worker(worker.workerId);
+                    if (resident != null) resident.status = "склад еды заполнен";
+                    return false;
+                }
+                if (!level.setBlock(pos, state.setValue(crop.getAgeProperty(), 0), 3)) return false;
+                colony.s.receiveResource("food", 1);
+                return true;
+            }
             if ("level".equals(order.mode)) {
                 int desired = order.level;
                 if (desired <= level.getMinBuildHeight() || desired >= level.getMaxBuildHeight()) return false;
