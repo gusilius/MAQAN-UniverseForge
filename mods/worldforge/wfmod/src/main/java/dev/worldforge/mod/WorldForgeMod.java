@@ -39,11 +39,11 @@ import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.minecraftforge.fml.loading.FMLPaths;
 import net.minecraftforge.registries.DeferredRegister;
 import net.minecraftforge.server.ServerLifecycleHooks;
-import org.slf4j.Logger;
+import org.slf4j.Logger;\nimport dev.worldforge.mod.economy.TreasuryLedger;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.file.Path;
+import java.nio.file.Path;\nimport java.nio.file.Files;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -65,7 +65,7 @@ public class WorldForgeMod {
             DeferredRegister.create(Registries.BIOME_SOURCE, MOD_ID);
 
     private static final Map<String, MapData> MAPS = new ConcurrentHashMap<>();
-    private static volatile Registry<Biome> biomes;
+    private static volatile Registry<Biome> biomes;\n    private static volatile TreasuryLedger treasury = new TreasuryLedger();
 
     public WorldForgeMod() {
         IEventBus bus = FMLJavaModLoadingContext.get().getModEventBus();
@@ -92,7 +92,7 @@ public class WorldForgeMod {
         });
     }
 
-    public static Map<String, MapData> loadedMaps() {
+    /** Canonical world-wide money ledger shared by settlements, realms, trade and military addons. */\n    public static TreasuryLedger treasury() { return treasury; }\n\n    private static Path treasuryFile(MinecraftServer server) {\n        return server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT).resolve("worldforge").resolve("wf_treasury.json");\n    }\n\n    private static void loadTreasury(MinecraftServer server) {\n        Path file = treasuryFile(server);\n        try {\n            treasury = Files.isRegularFile(file) ? TreasuryLedger.fromJson(Files.readString(file)) : new TreasuryLedger();\n            LOGGER.info("WorldForge treasury: loaded {} accounts and {} journal entries", treasury.accounts().size(), treasury.journal().size());\n        } catch (Exception ex) {\n            LOGGER.error("WorldForge treasury load failed; refusing to overwrite the existing ledger: {}", ex.toString());\n            treasury = new TreasuryLedger();\n        }\n    }\n\n    private static void saveTreasury(MinecraftServer server) {\n        Path file = treasuryFile(server);\n        try {\n            Files.createDirectories(file.getParent());\n            Path temp = file.resolveSibling(file.getFileName() + ".tmp");\n            Files.writeString(temp, treasury.toJson());\n            try { Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE); }\n            catch (java.nio.file.AtomicMoveNotSupportedException ignored) { Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING); }\n        } catch (IOException ex) { LOGGER.error("WorldForge treasury save failed: {}", ex.toString()); }\n    }\n\n    public static Map<String, MapData> loadedMaps() {
         return MAPS;
     }
 
@@ -155,10 +155,10 @@ public class WorldForgeMod {
     }
 
     @SubscribeEvent
-    public void onServerStarted(ServerStartedEvent e) { ContentCommands.load(e.getServer()); }
+    public void onServerStarted(ServerStartedEvent e) { loadTreasury(e.getServer()); ContentCommands.load(e.getServer()); }
 
     @SubscribeEvent
-    public void onServerStopping(ServerStoppingEvent e) { ContentCommands.save(e.getServer()); }
+    public void onServerStopping(ServerStoppingEvent e) { saveTreasury(e.getServer()); ContentCommands.save(e.getServer()); }
 
     @SubscribeEvent
     public void onServerStopped(ServerStoppedEvent e) {
