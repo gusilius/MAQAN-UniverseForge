@@ -18,8 +18,9 @@ public class SettleTest {
         return d;
     }
 
+    static int nextSettlementId = 1;
     static Settlement fresh(Defs d, int workers) {
-        Settlement s = new Settlement("s1", "Тест", d);
+        Settlement s = new Settlement("settle_test_" + (nextSettlementId++), "Тест", d);
         s.add("wood", 100); s.add("stone", 20); s.add("food", 50);
         for (int i = 0; i < workers; i++) s.addWorker(null);
         return s;
