@@ -528,7 +528,7 @@ public class WFWorker extends PathfinderMob {
 
         private static boolean isMatureHarvest(BlockState state) {
             if (state.getBlock() instanceof net.minecraft.world.level.block.CropBlock crop)
-                return state.getValue(crop.getAgeProperty()) >= crop.getMaxAge();
+                return state.getValue(net.minecraft.world.level.block.CropBlock.AGE) >= crop.getMaxAge();
             if (state.getBlock() instanceof net.minecraft.world.level.block.SweetBerryBushBlock)
                 return state.getValue(net.minecraft.world.level.block.SweetBerryBushBlock.AGE) >= 3;
             if (state.getBlock() instanceof net.minecraft.world.level.block.CocoaBlock)
@@ -538,7 +538,7 @@ public class WFWorker extends PathfinderMob {
 
         private static BlockState resetHarvestBlock(BlockState state) {
             if (state.getBlock() instanceof net.minecraft.world.level.block.CropBlock crop)
-                return state.setValue(crop.getAgeProperty(), 0);
+                return state.setValue(net.minecraft.world.level.block.CropBlock.AGE, 0);
             if (state.getBlock() instanceof net.minecraft.world.level.block.SweetBerryBushBlock)
                 return state.setValue(net.minecraft.world.level.block.SweetBerryBushBlock.AGE, 1);
             if (state.getBlock() instanceof net.minecraft.world.level.block.CocoaBlock)
