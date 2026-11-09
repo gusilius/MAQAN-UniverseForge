@@ -35,6 +35,8 @@ public final class ResidentLifeEvents {
             String childName = "Дитя семьи " + (mother.house == null || mother.house.isBlank() ? mother.name : mother.house);
             Character child = registry.addChild(father, mother, childName, gender, year);
             child.traits.add("curious");
+            child.props.put("family.father_name", father.name);
+            child.props.put("family.mother_name", mother.name);
             mother.props.put("family.last_birth_year", year);
             father.props.put("family.last_birth_year", year);
             mother.props.put("family.last_event", "child-born:" + child.id);
@@ -81,6 +83,8 @@ public final class ResidentLifeEvents {
                     second.props.remove("family.dating");
                     first.props.remove("family.dating_name");
                     second.props.remove("family.dating_name");
+                    first.props.put("family.spouse_name", second.name);
+                    second.props.put("family.spouse_name", first.name);
                     first.props.put("family.last_event", "married:" + second.id);
                     second.props.put("family.last_event", "married:" + first.id);
                 } catch (RuntimeException ignored) {
