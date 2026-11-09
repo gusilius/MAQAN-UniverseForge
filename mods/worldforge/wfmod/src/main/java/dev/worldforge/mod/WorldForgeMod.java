@@ -40,11 +40,13 @@ import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.minecraftforge.fml.loading.FMLPaths;
 import net.minecraftforge.registries.DeferredRegister;
 import net.minecraftforge.server.ServerLifecycleHooks;
-import org.slf4j.Logger;\nimport dev.worldforge.mod.economy.TreasuryLedger;
+import org.slf4j.Logger;
+import dev.worldforge.mod.economy.TreasuryLedger;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.file.Path;\nimport java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Files;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -66,7 +68,8 @@ public class WorldForgeMod {
             DeferredRegister.create(Registries.BIOME_SOURCE, MOD_ID);
 
     private static final Map<String, MapData> MAPS = new ConcurrentHashMap<>();
-    private static volatile Registry<Biome> biomes;\n    private static volatile TreasuryLedger treasury = new TreasuryLedger();
+    private static volatile Registry<Biome> biomes;
+    private static volatile TreasuryLedger treasury = new TreasuryLedger();
     private static volatile boolean treasuryLoadFailed;
     private static long treasuryTicks;
 
@@ -95,7 +98,14 @@ public class WorldForgeMod {
         });
     }
 
-    /** Canonical world-wide money ledger shared by settlements, realms, trade and military addons. */\n    public static TreasuryLedger treasury() { return treasury; }\n\n    private static Path treasuryFile(MinecraftServer server) {\n        return server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT).resolve("worldforge").resolve("wf_treasury.json");\n    }\n\n    private static void loadTreasury(MinecraftServer server) {
+    /** Canonical world-wide money ledger shared by settlements, realms, trade and military addons. */
+    public static TreasuryLedger treasury() { return treasury; }
+
+    private static Path treasuryFile(MinecraftServer server) {
+        return server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT).resolve("worldforge").resolve("wf_treasury.json");
+    }
+
+    private static void loadTreasury(MinecraftServer server) {
         treasuryLoadFailed = false;
         Path file = treasuryFile(server);
         try {
