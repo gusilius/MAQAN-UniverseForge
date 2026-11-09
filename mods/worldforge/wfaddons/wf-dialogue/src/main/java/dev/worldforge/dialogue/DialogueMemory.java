@@ -82,7 +82,7 @@ public final class DialogueMemory {
         return Collections.unmodifiableList(out);
     }
 
-    public void record(String kind,String text){
+    public void recordEvent(String kind,String text){
         Map<String,Object> e=new LinkedHashMap<>();
         e.put("sequence",events().isEmpty()?1:sequence(events().get(events().size()-1))+1);
         e.put("kind",kind==null?"conversation":kind);e.put("text",text==null?"":text);
