@@ -121,8 +121,9 @@ public final class ReputationStore {
 
     /** Apply configured propagation links only; unlinked scopes remain completely independent. */
     public void add(String player, String target, int delta, String reason) {
-        set(player, target, get(player, target) + delta, reason);
-        double d = delta;
+        int before = get(player, target);
+        set(player, target, before + delta, reason);
+        double d = get(player, target) - before;
         String cur = target;
         for (int depth = 0; depth < RIPPLE_DEPTH && links.containsKey(cur); depth++) {
             Link l = links.get(cur);
@@ -136,6 +137,14 @@ public final class ReputationStore {
 
     public void add(String player, Scope scope, String id, int delta, String reason) {
         add(player, target(scope, id), delta, reason);
+    }
+
+    /** Apply a witnessed event and record the resulting scoped reputation for that witness only. */
+    public void witness(String residentId, String player, Scope scope, String scopeId, int delta,
+                        long worldTime, String source) {
+        String key = target(scope, scopeId);
+        add(player, key, delta, source);
+        observe(residentId, player, scope, scopeId, worldTime, source);
     }
 
     /** A resident learns only what they witnessed/heard. This does not alter actual reputation. */
