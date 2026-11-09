@@ -224,6 +224,28 @@ public final class ResidentInteraction {
                             + "» в здании #" + assigned + "."
                         : "§eНет готового здания или свободного места для роли «" + role + "»."));
             }
+            case "work_area_resume" -> {
+                if (!ruler) { deny(player); return 0; }
+                Colony.WorkOrder order = colony.workOrders.get(data.id);
+                if (order == null) {
+                    player.sendSystemMessage(Component.literal("§eУ этого жителя нет назначенного участка. Выделите его и задайте участок в режиме RTS."));
+                    return 0;
+                }
+                order.complete = false;
+                order.cursor = 0;
+                data.manualFollow = false;
+                data.manualOrder = false;
+                data.status = "возвращается к поручению на участке";
+                player.sendSystemMessage(Component.literal("§a" + person.name + " возвращается к поручению: " + order.mode
+                        + " · область " + (order.halfX * 2 + 1) + "×" + (order.halfZ * 2 + 1) + "."));
+            }
+            case "work_area_cancel" -> {
+                if (!ruler) { deny(player); return 0; }
+                Colony.WorkOrder removed = colony.workOrders.remove(data.id);
+                player.sendSystemMessage(Component.literal(removed == null
+                        ? "§eУ этого жителя нет активного поручения по участку."
+                        : "§aПоручение по участку отменено. " + person.name + " снова свободен для других задач."));
+            }
             case "quest" -> {
                 if (person.props.containsKey(QUEST_KEY) && quest(person) == null) {
                     player.sendSystemMessage(Component.literal("§cСуществующая запись поручения повреждена; новое поручение не создано."));
