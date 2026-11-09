@@ -41,6 +41,8 @@ public class TroopEntity extends PathfinderMob {
     public static final EntityDataAccessor<Integer> MORALE = SynchedEntityData.defineId(TroopEntity.class, EntityDataSerializers.INT);
     private static final UUID MORALE_MOD = UUID.fromString("5b0a8e0e-6c3d-4a0e-9d0a-0d1f6f0c7a11");
     public static final EntityDataAccessor<String> SQUAD = SynchedEntityData.defineId(TroopEntity.class, EntityDataSerializers.STRING);
+    public static final EntityDataAccessor<String> CHARACTER = SynchedEntityData.defineId(TroopEntity.class, EntityDataSerializers.STRING);
+    public static final EntityDataAccessor<Integer> COMBAT_XP = SynchedEntityData.defineId(TroopEntity.class, EntityDataSerializers.INT);
 
     /** Режим боя во время приказа. */
     public enum Engage { NONE, RANGE, NEAR, FULL }
@@ -79,12 +81,23 @@ public class TroopEntity extends PathfinderMob {
         entityData.define(OWNER, "");
         entityData.define(SQUAD, "");
         entityData.define(MORALE, 100);
+        entityData.define(CHARACTER, "");
+        entityData.define(COMBAT_XP, 0);
     }
 
     public String unitId() { return entityData.get(UNIT); }
     public String ownerId() { return entityData.get(OWNER); }
     public int moralePct() { return entityData.get(MORALE); }
     public void setMorale(int pct) { if (entityData.get(MORALE) != pct) entityData.set(MORALE, pct); }
+    public String syncedCharacterId() { return entityData.get(CHARACTER); }
+    public void setCharacterId(String id) {
+        characterId=id==null?"":id;
+        if(!level().isClientSide&&!characterId.equals(entityData.get(CHARACTER)))entityData.set(CHARACTER,characterId);
+    }
+    public int syncedCombatXp() { return entityData.get(COMBAT_XP); }
+    private void syncCombatXp() {
+        if(!level().isClientSide&&entityData.get(COMBAT_XP)!=combatXp)entityData.set(COMBAT_XP,combatXp);
+    }
     public double dmgMult = 1;
 
     /** Множитель урона от морали и ауры командира: добавочный модификатор, чтобы не трогать базу типа. */
@@ -109,11 +122,15 @@ public class TroopEntity extends PathfinderMob {
     public void setSquadId(String s) { entityData.set(SQUAD, s); }
     public TroopDefs.Unit def() { return def; }
     public int combatXp() { return combatXp; }
-    public void setCombatXpFromCharacter(long xp) { combatXp = (int) Math.max(0, Math.min(TroopProgression.MAX_XP, xp)); }
+    public void setCombatXpFromCharacter(long xp) {
+        combatXp=(int)Math.max(0,Math.min(TroopProgression.MAX_XP,xp));
+        syncCombatXp();
+    }
     public int veteranRank() { return TroopProgression.rank(combatXp); }
     public void awardCombatXp(int amount) {
         int before = veteranRank();
         combatXp = TroopProgression.addXp(combatXp, amount);
+        syncCombatXp();
         TroopsMod.syncPerson(this);
         if (veteranRank() > before && def != null) {
             float oldHealth = getHealth();
@@ -171,7 +188,8 @@ public class TroopEntity extends PathfinderMob {
         armyId = t.getInt("wf_army");
         fortId = t.getInt("wf_fort");
         combatXp = Math.max(0, Math.min(TroopProgression.MAX_XP, t.getInt("wf_combat_xp")));
-        characterId = t.getString("wf_character");
+        setCharacterId(t.getString("wf_character"));
+        syncCombatXp();
         TroopDefs.Unit u = TroopsMod.DEFS.units.get(t.getString("wf_unit"));
         if (u != null) {
             float hp = getHealth();
