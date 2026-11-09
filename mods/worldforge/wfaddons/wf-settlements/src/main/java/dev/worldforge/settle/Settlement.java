@@ -1382,8 +1382,7 @@ public final class Settlement {
         if (root.get("leave") instanceof Number n) s.leaveTimer = n.doubleValue();
         s.flow.load(root.get("flow"));
         if (root.get("resident_task_graph") instanceof String graph)
-            try { s.taskGraph.fromJson(graph); }
-            catch (RuntimeException ex) { /* keep the settlement snapshot; malformed task receipts are isolated */ }
+            s.taskGraph.fromJson(graph);
         if (root.get("raid_timer") instanceof Number rt) s.raidTimer = rt.doubleValue();
         if (root.get("raid_strength") instanceof Number rs) s.raidStrength = rs.doubleValue();
         if (root.get("raid_warn") instanceof Number rw) s.raidWarnLeft = rw.doubleValue();
