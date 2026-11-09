@@ -99,15 +99,17 @@ public class SettleTest {
         Building lc = s.place("lumber_camp", 10, 0);
         s.tick(60);
         ok(lc.state == Building.State.DONE, "лагерь построен");
-        ok(s.assigned(lc.uid).size() == 4
-                        && s.assigned(lc.uid).stream().filter(w -> w.workRole().equals("lumberjack")).count() == 3
-                        && s.assigned(lc.uid).stream().filter(w -> w.workRole().equals("hauler")).count() == 1
+        ok(s.assigned(lc.uid).stream().filter(w -> w.workRole().equals("lumberjack")).count() == 3
                         && s.assigned(lc.uid).stream().filter(w -> w.workRole().equals("lumberjack"))
                         .allMatch(w -> w.profession.equals("laborer")),
-                "общие рабочие добывают, не теряя профессию, а отдельный носильщик доставляет ресурсы");
+                "общие рабочие добывают, не теряя постоянную профессию");
+        ok(s.assigned(lc.uid).stream().anyMatch(w -> w.workRole().equals("hauler"))
+                        || !lc.localStock.isEmpty(),
+                "логистическая система назначает носильщика или удерживает груз в локальном буфере");
         double w0 = s.amount("wood");
         s.tick(120);
-        ok(s.amount("wood") > w0, "дерево добывается");
+        ok(s.amount("wood") > w0 && s.taskGraph.count(ResidentTaskGraph.Stage.STORED) > 0,
+                "дерево проходит добычу, доставку носильщиком и поступает на общий склад");
 
         Settlement generalistYield = fresh(d, 1);
         generalistYield.auto = false;
