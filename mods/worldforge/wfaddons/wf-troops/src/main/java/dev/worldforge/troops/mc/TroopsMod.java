@@ -338,6 +338,13 @@ public class TroopsMod {
         return true;
     }
 
+    /** Pushes live squad morale to the canonical Character without rebuilding profession or XP state. */
+    static void syncMilitaryMorale(TroopEntity troop) {
+        PersonBinding binding = bindPerson(troop, false);
+        if (binding == null) return;
+        CharacterDevelopment.setMilitaryMorale(binding.character(), troop.moralePct());
+    }
+
     /** Shared character identity, soldier duty, profession, combat XP and skill ranks. */
     static void syncPerson(TroopEntity troop) {
         PersonBinding binding = bindPerson(troop, true);
