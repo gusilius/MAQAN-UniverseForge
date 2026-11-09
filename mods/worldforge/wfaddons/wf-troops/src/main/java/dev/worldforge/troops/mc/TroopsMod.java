@@ -463,6 +463,25 @@ public class TroopsMod {
                     p.displayClientMessage(Component.literal(o.action() == OrderPacket.FORMATION ? "Строй: " + f.formation.title : "Поза: " + f.stance.title), true);
                 }
             }
+            case OrderPacket.APPOINT -> {
+                Map<String,TroopEntity> leaders=new LinkedHashMap<>();
+                for(String id:troopIds(o)){
+                    TroopEntity troop=LIVE.get(id);
+                    if(troop==null||!owner.equals(troop.ownerId()))continue;
+                    Squads.Squad squad=SQUADS.squadOf(id);
+                    if(squad!=null)leaders.putIfAbsent(squad.id,troop);
+                }
+                int changed=0;
+                for(Map.Entry<String,TroopEntity> entry:leaders.entrySet()){
+                    TroopEntity leader=entry.getValue();
+                    String character=o.arg()<0?"":leader.characterId;
+                    if(o.arg()>=0&&(character==null||character.isBlank()))continue;
+                    if(SQUADS.appointLeader(entry.getKey(),character,false,Math.max(0,o.arg())))changed++;
+                }
+                p.displayClientMessage(Component.literal(o.arg()<0
+                        ?"Командиры сняты: "+changed
+                        :"Назначено командиров: "+changed+" · V — назначить, Ctrl+V — снять"),true);
+            }
             case OrderPacket.GROUP -> {
                 List<String> ids = new ArrayList<>();
                 for (String id : troopIds(o)) { Squads.Squad s = SQUADS.squadOf(id); if (s != null && s.owner.equals(owner)) ids.add(id); }
