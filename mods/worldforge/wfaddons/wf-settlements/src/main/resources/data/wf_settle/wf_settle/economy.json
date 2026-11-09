@@ -96,7 +96,6 @@
       },
       "approval": 5,
       "upkeep": 1.5,
-      "limit": 2,
       "description": "Местное религиозное здание для молитв, обрядов и общинных собраний.",
       "effects": {
         "religion": 1,
@@ -150,7 +149,6 @@
       },
       "safety": 4,
       "upkeep": 0.8,
-      "limit": 3,
       "description": "Наблюдательная башня, усиливающая обзор и оборону поселения.",
       "effects": {
         "fortification": 1
