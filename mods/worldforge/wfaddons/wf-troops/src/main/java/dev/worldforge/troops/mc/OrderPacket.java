@@ -42,7 +42,7 @@ public record OrderPacket(int action, List<String> ids, int kind, double x, doub
         }
         if(action==BUILD&&(!Double.isFinite(x)||!Double.isFinite(z)||Math.abs(x)>30_000_000||Math.abs(z)>30_000_000))return false;
         if(action==WORK_AREA&&(!Double.isFinite(x)||!Double.isFinite(z)||Math.abs(x)>30_000_000||Math.abs(z)>30_000_000
-                ||kind<0||kind>4||arg<0||arg>64))return false;
+                ||kind<0||kind>4||arg< -1||arg>64))return false;
         if((action==WORK||action==WORK_STOP||action==WORK_HOLD||action==BUILD_LIST)
                 &&(!Double.isFinite(x)||!Double.isFinite(z)||Math.abs(x)>30_000_000||Math.abs(z)>30_000_000))return false;
         return true;
