@@ -35,6 +35,9 @@ public final class Worker {
     public boolean manualFollow;
     public String manualFollowOwner = "";
     public double orderX, orderZ;
+    /** Autonomous daily-life state temporarily suspends work without changing profession or job assignment. */
+    public String lifeAction = "";
+    public double lifeTargetX, lifeTargetZ;
 
     Worker(int id, String name) { this.id = id; this.name = name; }
 }
