@@ -268,11 +268,18 @@ public class WFWorker extends PathfinderMob {
         /** Search only inside the assigned footprint; the worker never picks an unrelated distant resource node. */
         private static BlockPos workWaypoint(WFWorker worker, Colony.WorkOrder order) {
             int radius = Math.max(0, Math.min(64, order.radius));
+            if (order.complete) return null;
             if (radius == 0) return order.cursor > 0 ? null : new BlockPos(order.x, order.level, order.z);
             int span = radius * 2 + 1, spacing = 12, columns = Math.max(1, (span + spacing - 1) / spacing);
-            int index = Math.floorMod(order.cursor, columns * columns);
+            if (order.cursor >= columns * columns) return null;
+            int index = order.cursor;
             int x = order.x - radius + Math.min(span - 1, (index % columns) * spacing + spacing / 2);
             int z = order.z - radius + Math.min(span - 1, (index / columns) * spacing + spacing / 2);
+            double dx = x - order.x, dz = z - order.z, distance = Math.hypot(dx, dz);
+            if (distance > radius && distance > 0) {
+                x = (int) Math.round(order.x + dx * radius / distance);
+                z = (int) Math.round(order.z + dz * radius / distance);
+            }
             return new BlockPos(x, worker.getBlockY(), z);
         }
 
