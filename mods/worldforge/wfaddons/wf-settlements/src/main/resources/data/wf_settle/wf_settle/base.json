@@ -437,7 +437,9 @@
         "scribe": 1
       },
       "description": "Общественный центр деревни, координация хозяйства и местного управления.",
-      "effects": {}
+      "effects": {
+        "administration": 1
+      }
     },
     "village_house": {
       "name": "Жилой дом",
