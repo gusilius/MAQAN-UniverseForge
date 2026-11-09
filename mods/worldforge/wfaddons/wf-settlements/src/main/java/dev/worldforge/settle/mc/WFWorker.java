@@ -155,7 +155,20 @@ public class WFWorker extends PathfinderMob {
             Building b = wk.building == 0 ? null : c.s.building(wk.building);
             BlockPos target;
             boolean working = false;
-            if (wk.manualOrder) {
+            if (wk.manualFollow) {
+                net.minecraft.server.MinecraftServer server = w.getServer();
+                net.minecraft.server.level.ServerPlayer owner = null;
+                if (server != null && w.ownerId() != null && !w.ownerId().isBlank()) {
+                    try { owner = server.getPlayerList().getPlayer(UUID.fromString(w.ownerId())); }
+                    catch (IllegalArgumentException ignored) { /* owner is offline or invalid */ }
+                }
+                if (owner == null || owner.serverLevel() != w.level()) {
+                    w.getNavigation().stop();
+                    w.setTarget(null);
+                    return;
+                }
+                target = owner.blockPosition();
+            } else if (wk.manualOrder) {
                 int tx = c.cx + (int) Math.floor(wk.orderX);
                 int tz = c.cz + (int) Math.floor(wk.orderZ);
                 BlockPos probe = new BlockPos(tx, w.getBlockY(), tz);
