@@ -23,7 +23,7 @@ Settlement stock remains a compatibility mirror for existing UI and simulation A
 - Settlement tax income, building upkeep, market purchases/sales, raid losses and character consumption are journaled.
 - Caravan routes transfer the commodity between settlement accounts and transfer silver between treasury accounts. The price spread is divided between seller proceeds and a recorded market fee.
 - A configured settlement crown share is remitted from its settlement account to realm:<id> as a paired TAX transfer. Unfunded remittances remain pending.
-- Statecraft realm taxes and vassal tribute are booked to realm accounts. Government expenditure is constrained by available funds.
+- Statecraft realm taxes and vassal tribute are booked to realm accounts. Realms with a numeric taxable_base property are assessed automatically on the shared world calendar; government expenditure is constrained by available funds.
 - Realm budgets can fund dedicated army accounts; army upkeep can be charged from those accounts.
 - Credit limits, loan origination, interest accrual, repayment and bankruptcy state are available through the same ledger.
 
@@ -40,7 +40,7 @@ Settlement markets retain their current local base-price and demand-pressure mod
 
 ## Stage IX remaining before acceptance
 
-- The collectTaxes API is implemented and journaled, but the world calendar does not yet run a complete tax assessment cycle from population, land, trade and vassal taxable bases.
+- Automatic realm assessment currently requires a configured taxable_base property. A derived tax base from population, land, trade and economic activity is not yet implemented.
 - Army funding/upkeep APIs exist, but the actual troop roster and soldier payroll/food/equipment upkeep adapter is not yet connected.
 - Warehouse nodes and each logistics leg need independent subaccounts/transfer entries so every intra-settlement warehouse movement is auditable, not only the aggregate settlement stock.
 - Caravan travel time, route risk, losses, tariffs/customs, border controls and transport costs still need to affect the route settlement.
