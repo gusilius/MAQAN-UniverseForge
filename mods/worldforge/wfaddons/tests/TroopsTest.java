@@ -332,7 +332,9 @@ public class TroopsTest {
         cam.focusOn(1000, 1000); cam.clamp(0, 0);
         check(Math.hypot(cam.fx, cam.fz) <= cam.leash + 1e-6, "привязь к игроку");
         cam.rotate(400, 500); check(cam.pitch == CameraRig.MAX_PITCH && Math.abs(cam.yaw) < 360, "поворот и наклон ограничены");
-        cam.cycle(); check(cam.view == CameraRig.View.TACTICS && cam.pitch == CameraRig.View.TACTICS.pitch, "смена вида камеры");
+        cam.cycle(); check(cam.view == CameraRig.View.TACTICS && cam.pitch == CameraRig.View.TACTICS.pitch, "переход со стратегической камеры на изометрическую");
+        cam.cycle(); check(cam.view == CameraRig.View.FREE && cam.pitch == CameraRig.View.FREE.pitch, "переход на свободную камеру");
+        cam.cycle(); check(cam.view == CameraRig.View.SKY && cam.pitch == CameraRig.View.SKY.pitch, "возврат к стратегической камере");
         double[] es = CameraRig.edgeScroll(2, 300, 1600, 900);
         check(es[0] == -1 && es[1] == 0, "скролл у левого края");
         check(CameraRig.edgeScroll(800, 450, 1600, 900)[0] == 0, "в центре не скроллит");
