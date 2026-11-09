@@ -880,6 +880,7 @@ public final class Settlement {
                 b.state = Building.State.DONE;
                 b.progress = b.def.work;
                 b.status = b.def.produces() ? "работает" : "готово";
+                taskGraph.built(b.uid, workerForRole(b.uid, Set.of("builder")), time);
                 for (Worker w : assigned(b.uid)) { w.building = 0; w.assignedProfession = ""; w.lifeAction = ""; w.status = "свободен"; }
                 say("Построено: " + b.def.name);
             }
