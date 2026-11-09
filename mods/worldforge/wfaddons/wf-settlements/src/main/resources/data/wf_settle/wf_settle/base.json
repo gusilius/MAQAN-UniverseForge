@@ -448,13 +448,23 @@
       "jobs": {
         "hauler": 2
       },
-      "description": "Центральное хранение урожая и продукции добывающих построек",
+      "description": "Общий склад поселения и обязательный узел приёма продукции от добывающих и производящих зданий",
       "effects": {
         "storage_hub": 1
       },
       "requires": [
         "village_hall"
-      ]
+      ],
+      "storage": {
+        "food": 300,
+        "grain": 200,
+        "flour": 100,
+        "wood": 200,
+        "planks": 200,
+        "stone": 200,
+        "meat": 100,
+        "fish": 100
+      }
     },
     "farm_district": {
       "name": "Сельский район — земледелие",
@@ -1271,13 +1281,27 @@
       "jobs": {
         "hauler": 2
       },
-      "description": "Городской централизованный склад и точка приёма добычи",
+      "description": "Городской логистический склад, связывающий производственные здания, торговлю и снабжение армии",
       "effects": {
         "storage_hub": 1
       },
       "requires": [
         "feudal_castle"
-      ]
+      ],
+      "storage": {
+        "food": 500,
+        "grain": 400,
+        "flour": 300,
+        "wood": 500,
+        "planks": 500,
+        "stone": 500,
+        "iron": 300,
+        "steel": 200,
+        "tools": 150,
+        "weapons": 100,
+        "armor": 100,
+        "cloth": 200
+      }
     },
     "town_hall": {
       "name": "Городская ратуша",
