@@ -309,6 +309,8 @@ public class TroopsMod {
             String armyOwner = key.armyId() > 0 ? Integer.toString(key.armyId()) : "garrison:" + key.realm();
             ledger.open(armyAccount, armyOwner, "silver", 0);
 
+            String wageReference = "payroll:" + key.realm() + ":" + key.armyId() + ":" + day;
+            if (ledger.hasTransaction(armyAccount, TreasuryLedger.Kind.WAGE, wageReference)) continue;
             double topUp = Math.max(0, costSilver - ledger.balance(armyAccount));
             boolean funded = topUp <= 1e-9 || ledger.transferOnce(
                     realmAccount, armyAccount, topUp, TreasuryLedger.Kind.ARMY_UPKEEP,
@@ -316,7 +318,7 @@ public class TroopsMod {
                     worldMinute, "daily military payroll appropriation");
             boolean paid = funded && ledger.withdrawOnce(
                     armyAccount, costSilver, TreasuryLedger.Kind.WAGE,
-                    "soldier-payroll", "payroll:" + key.realm() + ":" + key.armyId() + ":" + day,
+                    "soldier-payroll", wageReference,
                     worldMinute, "daily soldier wages");
             if (paid) continue;
 
