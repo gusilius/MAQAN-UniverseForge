@@ -39,6 +39,7 @@ public final class Colony {
     public Colony(Settlement s, String dim, int cx, int cz) {
         this.s = s;
         this.dim = dim;
+        if (s != null) s.setLedgerScope(dim);
         this.cx = cx;
         this.cz = cz;
     }
@@ -127,7 +128,7 @@ public final class Colony {
 
     @SuppressWarnings("unchecked")
     public static Colony fromMap(Map<String, Object> m, Defs defs) {
-        Settlement s = Settlement.fromJson(Json.write(m.get("settlement")), defs);
+        Settlement s = Settlement.fromJson(Json.write(m.get("settlement")), defs, (String) m.get("dim"));
         Colony c = new Colony(s, (String) m.get("dim"), ((Number) m.get("cx")).intValue(), ((Number) m.get("cz")).intValue());
         if (m.get("map") instanceof Map<?, ?> mapData) c.map = SettlementMap.fromJson(Json.write(mapData));
         if (m.get("owner") instanceof String ow) c.owner = ow;
