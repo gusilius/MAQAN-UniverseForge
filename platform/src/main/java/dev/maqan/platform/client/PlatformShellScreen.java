@@ -433,7 +433,6 @@ public final class PlatformShellScreen extends Screen {
         WorkspaceRuntime.SearchEntry entry = searchResults.get(index);
         PlatformSelectionContext.publish(entry.providerId(), entry.id(), entry.type(),
                 entry.name(), entry.worldId(), entry.summary());
-        Profile target = profileForDomain(entry.type());
         contextMenuVisible = false;
         searchVisible = false;
     }
@@ -639,6 +638,22 @@ public final class PlatformShellScreen extends Screen {
             g.drawString(font, trimInspector(selected.summary(), p.w - 24),
                     left, p.y + 192, TEXT, false);
         }
+        int y = p.y + 210;
+        for (WorkspaceRuntime.InspectorField field : WorkspaceRuntime.inspect(selected)) {
+            if (y + 24 > p.y + p.h - 8) break;
+            if (!field.section().isBlank()) {
+                g.drawString(font, trimInspector(field.section().toUpperCase(java.util.Locale.ROOT), p.w - 24),
+                        left, y, CYAN, false);
+                y += 13;
+            }
+            g.drawString(font, trimInspector(field.label(), p.w - 24), left, y, MUTED, false);
+            y += 11;
+            g.drawString(font, trimInspector(field.value(), p.w - 24), left, y, TEXT, false);
+            y += 16;
+        }
+        List<WorkspaceRuntime.Action> actions = WorkspaceRuntime.actionsFor(selected);
+        if (!actions.isEmpty() && y + 12 < p.y + p.h)
+            g.drawString(font, actions.size() + " CONTEXT ACTIONS · RIGHT CLICK", left, y, CYAN, false);
     }
 
     private String trimInspector(String value, int maxWidth) {
@@ -647,17 +662,34 @@ public final class PlatformShellScreen extends Screen {
     }
 
     private void drawTimelinePanel(GuiGraphics g, Panel p) {
-        int lineY=p.y+p.h-22;
-        g.drawString(font,"◷",p.x+12,p.y+38,CYAN,false);
-        g.drawString(font,"SIMULATION TIMELINE",p.x+30,p.y+38,MUTED,false);
-        g.fill(p.x+12,lineY,p.x+p.w-12,lineY+1,0x664A6579);
-        g.fill(p.x+28,lineY-3,p.x+34,lineY+3,CYAN);
+        g.drawString(font, "◷", p.x + 12, p.y + 38, CYAN, false);
+        g.drawString(font, "WORLD EVENT JOURNAL", p.x + 30, p.y + 38, MUTED, false);
+        List<WorkspaceRuntime.WorkspaceEvent> events = WorkspaceRuntime.journal(4);
+        int y = p.y + 54;
+        for (WorkspaceRuntime.WorkspaceEvent event : events) {
+            if (y + 11 > p.y + p.h - 4) break;
+            int color = switch (event.severity()) {
+                case SUCCESS -> WorkspaceTheme.SUCCESS;
+                case WARNING -> WorkspaceTheme.WARNING;
+                case ERROR -> WorkspaceTheme.DANGER;
+                case INFO -> MUTED;
+            };
+            g.fill(p.x + 12, y + 2, p.x + 15, y + 8, color);
+            g.drawString(font, trimInspector(event.message(), p.w - 36), p.x + 22, y, TEXT, false);
+            y += 13;
+        }
+        if (events.isEmpty())
+            g.drawString(font, "Events from connected providers appear here", p.x + 12, y, MUTED, false);
     }
 
     private void drawCommandPanel(GuiGraphics g, Panel p) {
-        g.drawString(font,"⌘",p.x+12,p.y+42,CYAN,false);
-        g.drawString(font,"Command registry",p.x+30,p.y+42,TEXT,false);
-        g.drawString(font,"Commands appear when providers register them.",p.x+12,p.y+67,MUTED,false);
+        g.drawString(font, "⌘", p.x + 12, p.y + 42, CYAN, false);
+        g.drawString(font, "WORKSPACE COMMANDS", p.x + 30, p.y + 42, TEXT, false);
+        g.drawString(font, "Ctrl+K  Global entity search", p.x + 12, p.y + 66, MUTED, false);
+        g.drawString(font, WorkspaceRuntime.shortcuts().size() + " registered shortcuts",
+                p.x + 12, p.y + 84, MUTED, false);
+        g.drawString(font, WorkspaceRuntime.components().size() + " registered UI components",
+                p.x + 12, p.y + 102, MUTED, false);
     }
 
     @Override public void tick() {
