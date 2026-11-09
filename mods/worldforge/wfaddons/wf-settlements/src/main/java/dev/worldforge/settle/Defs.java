@@ -143,7 +143,7 @@ public final class Defs {
         for (Building b : buildings.values()) {
             if (!CATEGORIES.contains(b.category)) p.add(b.id + ": неизвестная категория '" + b.category + "'");
             for (String r : b.requires) if (!buildings.containsKey(r)) p.add(b.id + ": requires неизвестное здание '" + r + "'");
-            for (String j : b.jobs.keySet()) if (!professions.containsKey(j)) p.add(b.id + ": неизвестная профессия '" + j + "'");
+            for (String j : b.jobs.keySet()) if (!professions.containsKey(j) && !j.equals("hauler")) p.add(b.id + ": неизвестная профессия '" + j + "'");
             for (Map<String, Integer> m : List.of(b.cost, b.in, b.out, b.storage)) for (String r : m.keySet()) if (!resourceNames.containsKey(r)) p.add(b.id + ": неизвестный ресурс '" + r + "'");
             if (!b.jobs.isEmpty() && !b.produces() && b.housing == 0 && b.storage.isEmpty() && b.trade == 0 && b.approval == 0 && b.safety == 0) p.add("Предупреждение: " + b.id + " даёт рабочие места, но ничего не делает");
             if (b.cycle > 0 && b.out.isEmpty()) p.add("Предупреждение: " + b.id + " имеет cycle, но нет out");
