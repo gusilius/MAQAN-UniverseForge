@@ -78,7 +78,9 @@ class WorkspaceDockTreeTest {
         assertEquals(2, WorkspaceDockTree.splitters(tree, bounds).size());
         tree = WorkspaceDockTree.resize(tree, "0", 600);
         assertInstanceOf(WorkspaceDockTree.Split.class, tree);
-        assertEquals(600, ((WorkspaceDockTree.Split) tree).firstWeight());
+        WorkspaceDockTree.Split root = (WorkspaceDockTree.Split) tree;
+        WorkspaceDockTree.Split nested = (WorkspaceDockTree.Split) root.first();
+        assertEquals(600, nested.firstWeight());
         WorkspaceDockTree.Node resized = tree;
         assertThrows(IllegalArgumentException.class,
                 () -> WorkspaceDockTree.resize(resized, "8", 500));
