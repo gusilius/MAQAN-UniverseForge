@@ -267,6 +267,33 @@ public class TroopsMod {
         SQUADS.remove(id);
     }
 
+    /** Unpaid soldiers desert; preserve the living Character and demobilize into a nearby settlement when possible. */
+    private static void onDesertion(TroopEntity troop) {
+        PersonBinding binding = bindPerson(troop, false);
+        if (binding != null) {
+            Character person = binding.character();
+            binding.registry().unbindEntity(person.id, "troop", troop.getUUID().toString());
+            boolean settled = false;
+            if (ModList.get().isLoaded("wf_settle") && troop.level() instanceof ServerLevel level) {
+                dev.worldforge.settle.mc.Colony nearest = dev.worldforge.settle.mc.SettleMod.nearest(level, troop.getX(), troop.getZ());
+                if (nearest != null) settled = dev.worldforge.settle.mc.SettleMod.attachExistingCharacter(nearest.s.id, person.id);
+            }
+            if (!settled) {
+                binding.registry().setDuty(person.id, Duty.SOLDIER, false, PeopleMod.YEAR);
+                person.props.put("population.status", "deserted");
+                person.props.remove("wf_troop_uuid");
+                person.props.remove("wf_troop_unit");
+                person.props.remove("wf_army_id");
+                person.props.remove("wf_combat_xp");
+                person.props.remove("wf_veteran_rank");
+            }
+        }
+        String id = troop.getUUID().toString();
+        LIVE.remove(id);
+        SQUADS.remove(id);
+        troop.discard();
+    }
+
     @SubscribeEvent
     public void tick(TickEvent.ServerTickEvent e) {
         if (e.phase != TickEvent.Phase.END || server == null) return;
