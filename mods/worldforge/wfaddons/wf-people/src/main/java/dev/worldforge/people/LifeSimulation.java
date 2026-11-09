@@ -63,13 +63,14 @@ public final class LifeSimulation {
             return new Decision(Action.IDLE, Outcome.SUCCESS, 0, "no-applicable-goal", plan, now + interval);
         }
 
+        double selectedUtility = utility(character, context, selected);
         Outcome outcome = executor.execute(character, selected, context);
         if (outcome == null) outcome = Outcome.BLOCKED;
         character.props.put("population.ai.last_action", selected.name().toLowerCase(Locale.ROOT));
         character.props.put("population.ai.last_outcome", outcome.name().toLowerCase(Locale.ROOT));
         character.props.put("population.ai.last_reason", reason(selected, context));
         if (outcome == Outcome.SUCCESS) applyEffects(character, selected);
-        return new Decision(selected, outcome, utility(character, context, selected), reason(selected, context), plan, now + interval);
+        return new Decision(selected, outcome, selectedUtility, reason(selected, context), plan, now + interval);
     }
 
     /** Behavior-tree emergency selector: critical survival branches always precede ordinary goals. */
@@ -93,7 +94,8 @@ public final class LifeSimulation {
             if (deficit > highest) { highest = deficit; target = need; }
         }
         if (target == null || highest < 20) return List.of();
-        return ops.stream().filter(o -> o.available() && o.goal() == target)
+        final PopulationSimulation.Need goal = target;
+        return ops.stream().filter(o -> o.available() && o.goal() == goal)
                 .sorted(Comparator.comparingInt(Operator::cost))
                 .map(Operator::action).limit(2).toList();
     }
