@@ -45,13 +45,22 @@ public final class WorkPriorities {
         return out;
     }
 
-    /** Профессия с наименьшим ненулевым значением (при равенстве - текущая, затем по порядку в наборе); null, если все нули. */
+    /** Lowest non-zero priority among actual settlement work roles; current role wins ties, then stable role order. */
     public String best(Settlement s, Worker w) {
+        Set<String> roles = new TreeSet<>();
+        roles.add("builder");
+        for (var building : s.defs.buildings.values()) roles.addAll(building.jobs.keySet());
         String best = null;
-        int bv = 99;
-        for (String p : s.defs.professions.keySet()) {
-            int v = get(w, p);
-            if (v > 0 && (v < bv || (v == bv && p.equals(w.workRole())))) { best = p; bv = v; }
+        int bestPriority = Integer.MAX_VALUE;
+        for (String role : roles) {
+            int priority = get(w, role);
+            if (priority <= 0) continue;
+            boolean current = role.equals(w.workRole());
+            boolean bestCurrent = best != null && best.equals(w.workRole());
+            if (priority < bestPriority || (priority == bestPriority && current && !bestCurrent)) {
+                best = role;
+                bestPriority = priority;
+            }
         }
         return best;
     }
