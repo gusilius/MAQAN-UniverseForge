@@ -235,7 +235,6 @@ public class PeopleMod {
         }
     }
 
-    @SubscribeEvent
     /**
      * Optional NPC-initiated conversation. Runs only for explicitly configured characters
      * or characters with unresolved semantic obligations. A per-character/player cooldown
