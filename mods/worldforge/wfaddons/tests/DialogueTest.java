@@ -82,6 +82,40 @@ public class DialogueTest {
         try { DialogueApi.registerEffect("log", (c, args) -> { }); } catch (IllegalStateException e) { dup = true; }
         ok(dup, "повторная регистрация id запрещена");
 
+        // Character-backed semantic memory: promises, requests, grievances, callbacks and canonical relationship scores.
+        Map<String,Object> characterProps = new LinkedHashMap<>();
+        DialogueMemory memory = new DialogueMemory(characterProps);
+        memory.remember("player.saved_family", "Вы спасли мою семью");
+        ok("Вы спасли мою семью".equals(memory.recall("player.saved_family")), "semantic fact is stored on owner Character.props");
+        memory.putRecord("promise", "repair_bridge", Map.of("id","repair_bridge","status","open","text","Починить мост"));
+        ok(memory.hasRecord("promise","repair_bridge") && "open".equals(memory.record("promise","repair_bridge").get("status")),
+                "promise is a durable semantic obligation");
+        ok(memory.resolveRecord("promise","repair_bridge","completed") && "resolved".equals(memory.record("promise","repair_bridge").get("status")),
+                "promise can be resolved and remembered");
+        memory.adjustRelationship("player-1", 12);
+        ok(memory.relationship("player-1") == 12 && characterProps.containsKey("social.relationships"),
+                "dialogue memory updates canonical Character social relationship state");
+        Dialogue semantic = Dialogue.parse("""
+            {"id":"semantic","start":"a","nodes":{
+              "a":{"text":"{memory:player.saved_family}","do":[
+                {"do":"remember","key":"player.met_before","value":"true"},
+                {"do":"promise","id":"repair_roof","text":"Починить крышу","target":"player","due":"tomorrow"},
+                {"do":"relationship_delta","target":"player-1","delta":5}],
+                "choices":[{"text":"Спасибо","next":"b","if":[{"if":"record_open","category":"promise","id":"repair_roof"}]}]},
+              "b":{"text":"Я помню нашу встречу: {memory:player.met_before}."}}}
+            """);
+        Ctx semanticCtx = new Ctx(null, memory).var("player_id","player-1");
+        Session semanticSession = new Session(semantic, semanticCtx);
+        ok(semanticSession.view().text.equals("Вы спасли мою семью") && semanticSession.view().choices.equals(List.of("Спасибо")),
+                "NPC recalls a meaningful past event and surfaces an open promise in conversation");
+        ok(memory.relationship("player-1") == 17 && memory.hasRecord("promise","repair_roof"),
+                "dialogue effects alter relationship and create an actionable promise record");
+        semanticSession.choose(0);
+        ok(semanticSession.view().text.equals("Я помню нашу встречу: true."),
+                "NPC can refer to a remembered fact in a later dialogue line");
+        ok(memory.recent(10).stream().anyMatch(e -> "choice".equals(e.get("kind"))),
+                "dialogue choice history is persisted with character memory");
+
         // примеры диалогов из ресурсов аддона должны проходить validate (запуск из папки wfaddons)
         try { dev.worldforge.people.bridge.DialogueBridge.register(); } catch (IllegalStateException e) { /* уже зарегистрировано */ }
         try { dev.worldforge.relations.bridge.RelationsBridge.register(); } catch (IllegalStateException e) { /* уже зарегистрировано */ }
