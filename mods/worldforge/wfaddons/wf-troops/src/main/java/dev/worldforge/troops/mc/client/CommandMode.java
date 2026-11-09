@@ -79,8 +79,12 @@ public final class CommandMode {
 
     /** Мои солдаты и рабочие поселений: то, что можно выделить. */
     static boolean selectable(Minecraft mc, LivingEntity e) {
-        if (e instanceof TroopEntity t) return t.ownerId().equals(mc.player.getUUID().toString());
-        return e.getType().builtInRegistryHolder().key().location().toString().equals("wf_settle:worker");
+        if (mc == null || mc.player == null || e == null) return false;
+        String owner=mc.player.getUUID().toString();
+        if (e instanceof TroopEntity t) return owner.equals(t.ownerId());
+        if (e instanceof dev.worldforge.settle.mc.WFWorker worker)
+            return owner.equals(worker.ownerId());
+        return false;
     }
 
     static List<UnitSelection.Screen> screenList(Minecraft mc) {
