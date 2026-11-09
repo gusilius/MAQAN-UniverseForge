@@ -15,6 +15,7 @@ else
 fi
 
 CP="$CORE/src/main/java"
+mkdir -p "$OUT/classes"
 mapfile -t SRC < <(find wf-*/src/main/java -name '*.java' -not -path '*/mc/*')
 javac -proc:none -encoding UTF-8 -d "$OUT/classes" -sourcepath "$CP" "${SRC[@]}" tests/*.java
 
