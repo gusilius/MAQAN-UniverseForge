@@ -664,12 +664,22 @@ public class SettleMod {
             if (person == null || !person.alive) continue;
             if (("sleeping".equals(worker.lifeAction) || "eating".equals(worker.lifeAction)
                     || "socializing".equals(worker.lifeAction)) && settlement.time >= worker.lifeActionUntil
-                    || "fleeing".equals(worker.lifeAction) && !settlement.raidIncoming) {
+                    || ("fleeing".equals(worker.lifeAction) || "defending".equals(worker.lifeAction)) && !settlement.raidIncoming) {
                 worker.lifeAction = "";
                 worker.lifeActionUntil = 0;
                 worker.status = worker.building == 0 ? "свободен" : "работает";
             }
             if (!worker.lifeAction.isBlank()) continue;
+            boolean brave = PopulationSimulation.hasDuty(person, Duty.SOLDIER)
+                    || person.traits.contains("brave") || person.traits.contains("courageous")
+                    || person.traits.contains("protective");
+            if (settlement.raidIncoming && brave) {
+                worker.lifeAction = "defending";
+                worker.lifeTargetX = 0; worker.lifeTargetZ = 0;
+                worker.lifeActionUntil = 1.0e12;
+                worker.status = "спешит на помощь поселению";
+                continue;
+            }
             boolean hasTraining = !worker.generalist() && !PopulationSimulation.trainingTarget(person).isBlank();
             boolean hasLeisure = settlement.buildings.stream().anyMatch(b -> b.state == Building.State.DONE
                     && !b.paused && b.def.category != null
