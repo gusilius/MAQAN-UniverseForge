@@ -436,7 +436,7 @@ public class TroopsMod {
                         default -> -1;
                     };
                     if (workerAction >= 0) {
-                        OrderPacket workerOrder = new OrderPacket(workerAction, o.ids(), 0, o.x(), o.z(), "", false, 0);
+                        OrderPacket workerOrder = new OrderPacket(workerAction,o.ids(),0,o.x(),o.z(),"",o.queue(),0);
                         p.displayClientMessage(Component.literal(WorkerControl.command(p, workerOrder)), true);
                     }
                 }
