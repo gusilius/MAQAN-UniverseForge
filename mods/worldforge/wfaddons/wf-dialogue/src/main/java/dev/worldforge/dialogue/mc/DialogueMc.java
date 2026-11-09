@@ -60,8 +60,14 @@ public final class DialogueMc {
     /** Opens a character conversation with durable memory stored in the canonical Character.props map. */
     public static boolean openCharacter(ServerPlayer player, String dialogueId, Map<String, String> vars,
                                         Map<String, Object> characterProps) {
-        return openInternal(player, dialogueId, vars, null, DEFAULT_MAX_DISTANCE,
-                new DialogueMemory(characterProps));
+        return openCharacterAt(player, dialogueId, vars, characterProps, null, DEFAULT_MAX_DISTANCE);
+    }
+
+    /** Character-backed dialogue that is physically bound to the speaker's position. */
+    public static boolean openCharacterAt(ServerPlayer player, String dialogueId, Map<String, String> vars,
+                                          Map<String, Object> characterProps, Vec3 speakerPos, double maxDistance) {
+        if (maxDistance <= 0 || !Double.isFinite(maxDistance)) return false;
+        return openInternal(player, dialogueId, vars, speakerPos, maxDistance, new DialogueMemory(characterProps));
     }
 
     /** Открывает диалог; speakerPos != null: разговор прервётся, если игрок отойдёт дальше maxDistance блоков. */
