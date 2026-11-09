@@ -503,6 +503,15 @@ public final class PlatformShellScreen extends Screen {
         g.fill(p.x,p.y+25,p.x+p.w,p.y+26,EDGE);
         String icon = panelIcon(p.id);
         g.drawString(font,icon,p.x+9,p.y+8,CYAN,false);
+        g.drawString(font, trimInspector(p.title, Math.max(24, p.w - 100)), p.x + 25, p.y + 8, TEXT, false);
+        if (p.id.equals("inspector") || p.id.equals("tools")) {
+            g.fill(p.x + 58, p.y + 22, p.x + 108, p.y + 24,
+                    p.visible && p.id.equals("inspector") ? CYAN : EDGE);
+            g.drawString(font, "INSPECT", p.x + 58, p.y + 15,
+                    p.id.equals("inspector") ? CYAN : MUTED, false);
+            g.drawString(font, "TOOLS", p.x + 112, p.y + 15,
+                    p.id.equals("tools") ? CYAN : MUTED, false);
+        }
         int bx=p.x+p.w-64;
         g.drawCenteredString(font,p.pinned?"◆":"◇",bx+8,p.y+8,p.pinned?CYAN:MUTED);
         g.drawCenteredString(font,p.minimized?"+":"–",bx+28,p.y+7,MUTED);
@@ -699,9 +708,45 @@ public final class PlatformShellScreen extends Screen {
     }
 
     @Override public boolean mouseClicked(double mx,double my,int button) {
-        if(button!=0) return activeView() != null
+        if (button == 1) {
+            PlatformSelectionContext.Selection selection = PlatformSelectionContext.current();
+            contextActions = WorkspaceRuntime.actionsFor(selection);
+            if (!contextActions.isEmpty()) {
+                contextMenuX = (int) mx; contextMenuY = (int) my;
+                contextMenuVisible = true;
+                return true;
+            }
+            return activeView() != null ? activeView().mouseClicked(mx, my, button) : true;
+        }
+        if (button != 0) return activeView() != null
                 ? activeView().mouseClicked(mx,my,button) : super.mouseClicked(mx,my,button);
-        if(my<34) {
+        if (searchVisible) {
+            int boxWidth = Math.min(520, width - 80);
+            int x = (width - boxWidth) / 2;
+            int y = Math.max(48, height / 5) + 40;
+            if (mx >= x && mx <= x + boxWidth && my >= y) {
+                int index = (int) ((my - y) / 25);
+                if (index >= 0 && index < searchResults.size()) chooseSearchResult(index);
+            } else searchVisible = false;
+            return true;
+        }
+        if (contextMenuVisible) {
+            int menuWidth = 190, rowHeight = 22;
+            int x = Math.max(4, Math.min(contextMenuX, width - menuWidth - 4));
+            int y = Math.max(38, Math.min(contextMenuY, height - contextActions.size() * rowHeight - 4));
+            int index = (int) ((my - y - 4) / rowHeight);
+            if (mx >= x && mx <= x + menuWidth && index >= 0 && index < contextActions.size())
+                WorkspaceRuntime.executeAction(contextActions.get(index).id(), PlatformSelectionContext.current());
+            contextMenuVisible = false;
+            return true;
+        }
+        for (WorkspaceDockTree.Splitter splitter : WorkspaceDockTree.splitters(workspaceRoot, workspaceBounds())) {
+            boolean hit = splitter.axis() == WorkspaceDockTree.Axis.HORIZONTAL
+                    ? Math.abs(mx - splitter.position()) <= 4 && my >= splitter.start() && my <= splitter.end()
+                    : Math.abs(my - splitter.position()) <= 4 && mx >= splitter.start() && mx <= splitter.end();
+            if (hit) { resizingSplitterPath = splitter.path(); return true; }
+        }
+        if (my<34) {
             if (mx >= width - 30 && mx < width - 6) {
                 Screen view = activeView();
                 if (view != null) detachProviderView(view);
@@ -748,12 +793,17 @@ public final class PlatformShellScreen extends Screen {
             if(!p.visible) continue;
             int ph=p.minimized?26:p.h;
             if(mx<p.x||mx>p.x+p.w||my<p.y||my>p.y+ph) continue;
-            if(my<=p.y+26) {
+            if (my <= p.y + 26) {
+                if ((p.id.equals("inspector") || p.id.equals("tools"))
+                        && mx >= p.x + 58 && mx < p.x + 158) {
+                    workspaceRoot = WorkspaceDockTree.activateTab(workspaceRoot,
+                            mx < p.x + 108 ? "inspector" : "tools");
+                    layoutWorkspace(); saveWorkspaceState(); return true;
+                }
                 int bx=p.x+p.w-64;
                 if(mx>=bx&&mx<bx+16) { p.pinned=!p.pinned; saveWorkspaceState(); return true; }
                 if(mx>=bx+18&&mx<bx+38) { p.minimized=!p.minimized; saveWorkspaceState(); return true; }
                 if(mx>=bx+38&&mx<bx+58) { if(!p.pinned) p.visible=false; saveWorkspaceState(); return true; }
-                draggingPanel=p.id; pointerOffsetX=(int)mx-p.x; pointerOffsetY=(int)my-p.y;
                 return true;
             }
             if(!p.minimized&&mx>=p.x+p.w-12&&my>=p.y+p.h-12) {
@@ -821,11 +871,7 @@ public final class PlatformShellScreen extends Screen {
         }
         // One shared compact panel geometry across all workspace modes.
         // The selected mode changes panel content, never the overall interaction model.
-        nav.x=52; nav.y=50; nav.w=230; nav.h=Math.min(440,Math.max(220,height-60));
-        inspector.x=width-250; inspector.y=50; inspector.w=232;
-        inspector.h=Math.min(260,Math.max(180,height-60));
-        timeline.x=Math.max(220,width/2-180); timeline.y=height-104;
-        timeline.w=Math.min(360,Math.max(220,width-260)); timeline.h=82;
+        layoutWorkspace();
         clampPanels();
     }
 
@@ -891,6 +937,19 @@ public final class PlatformShellScreen extends Screen {
                 handled = activeView().mouseDragged(mx,my,button,dx,dy) || handled;
             return handled;
         }
+        if (resizingSplitterPath != null) {
+            for (WorkspaceDockTree.Splitter splitter : WorkspaceDockTree.splitters(workspaceRoot, workspaceBounds())) {
+                if (!splitter.path().equals(resizingSplitterPath)) continue;
+                int span = Math.max(1, splitter.end() - splitter.start());
+                int coordinate = splitter.axis() == WorkspaceDockTree.Axis.HORIZONTAL ? (int) mx : (int) my;
+                int weight = Math.max(WorkspaceDockTree.MIN_SPLIT_WEIGHT,
+                        Math.min(WorkspaceDockTree.MAX_SPLIT_WEIGHT,
+                                (coordinate - splitter.start()) * WorkspaceDockTree.WEIGHT_SCALE / span));
+                workspaceRoot = WorkspaceDockTree.resize(workspaceRoot, resizingSplitterPath, weight);
+                layoutWorkspace();
+                return true;
+            }
+        }
         if(draggingPanel!=null) {
             Panel p=panels.get(draggingPanel);
             p.x=(int)mx-pointerOffsetX; p.y=(int)my-pointerOffsetY;
@@ -914,8 +973,8 @@ public final class PlatformShellScreen extends Screen {
 
     @Override public boolean mouseReleased(double mx,double my,int button) {
         if(button==0) {
-            boolean changed = draggingPanel != null || resizingPanel != null;
-            draggingPanel=null; resizingPanel=null;
+            boolean changed = draggingPanel != null || resizingPanel != null || resizingSplitterPath != null;
+            draggingPanel=null; resizingPanel=null; resizingSplitterPath = null;
             if (changed) saveWorkspaceState();
         }
         boolean handled = super.mouseReleased(mx,my,button);
@@ -932,6 +991,13 @@ public final class PlatformShellScreen extends Screen {
     }
 
     @Override public boolean charTyped(char codePoint,int modifiers) {
+        if (searchVisible) {
+            if (!Character.isISOControl(codePoint) && searchQuery.length() < 96) {
+                searchQuery += codePoint;
+                refreshSearch();
+            }
+            return true;
+        }
         boolean handled = super.charTyped(codePoint,modifiers);
         if (activeView() != null)
             handled = activeView().charTyped(codePoint,modifiers) || handled;
@@ -956,9 +1022,32 @@ public final class PlatformShellScreen extends Screen {
     }
 
     @Override public boolean keyPressed(int keyCode,int scanCode,int modifiers) {
-        // The global workspace toggle is F10 (not P): WorldForge progress and
-        // other provider screens retain their own P shortcut bindings.
-        if(keyCode==GLFW.GLFW_KEY_ESCAPE) { if(settingsVisible){settingsVisible=false;return true;} onClose(); return true; }
+        if (searchVisible) {
+            if (keyCode == GLFW.GLFW_KEY_ESCAPE) { searchVisible = false; return true; }
+            if (keyCode == GLFW.GLFW_KEY_BACKSPACE) {
+                if (!searchQuery.isEmpty()) searchQuery = searchQuery.substring(0, searchQuery.length() - 1);
+                refreshSearch(); return true;
+            }
+            if (keyCode == GLFW.GLFW_KEY_ENTER) { chooseSearchResult(0); return true; }
+            return true;
+        }
+        if (contextMenuVisible && keyCode == GLFW.GLFW_KEY_ESCAPE) {
+            contextMenuVisible = false; return true;
+        }
+        if (keyCode == GLFW.GLFW_KEY_K && (modifiers & GLFW.GLFW_MOD_CONTROL) != 0) {
+            searchVisible = true; searchQuery = ""; searchResults = List.of(); contextMenuVisible = false;
+            return true;
+        }
+        if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
+            if (settingsVisible) { settingsVisible = false; return true; }
+            if (contextMenuVisible) { contextMenuVisible = false; return true; }
+            onClose(); return true;
+        }
+        if (keyCode == GLFW.GLFW_KEY_F6) {
+            Panel timeline = panels.get("timeline");
+            if (timeline != null) timeline.visible = !timeline.visible;
+            return true;
+        }
         boolean handled = super.keyPressed(keyCode,scanCode,modifiers);
         if (activeView() != null)
             handled = activeView().keyPressed(keyCode,scanCode,modifiers) || handled;
