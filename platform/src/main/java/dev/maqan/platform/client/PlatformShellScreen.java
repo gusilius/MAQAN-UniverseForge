@@ -448,6 +448,10 @@ public final class PlatformShellScreen extends Screen {
         WorkspaceRuntime.SearchEntry entry = searchResults.get(index);
         PlatformSelectionContext.publish(entry.providerId(), entry.id(), entry.type(),
                 entry.name(), entry.worldId(), entry.summary());
+        try { WorkspaceRuntime.openSearchEntry(entry); }
+        catch (RuntimeException error) {
+            LOGGER.warn("Provider could not open search result {}", entry.id(), error);
+        }
         contextMenuVisible = false;
         searchVisible = false;
     }
