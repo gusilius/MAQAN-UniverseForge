@@ -67,6 +67,23 @@ class WorkspaceDockTreeTest {
     }
 
     @Test
+    void splittersExposeResizeHandlesAndUpdateNestedRatios() {
+        WorkspaceDockTree.Node tree = new WorkspaceDockTree.Panel("map");
+        tree = WorkspaceDockTree.dock(tree, "map", "inspector",
+                WorkspaceDockTree.Side.RIGHT, 300);
+        tree = WorkspaceDockTree.dock(tree, "map", "timeline",
+                WorkspaceDockTree.Side.BOTTOM, 250);
+        var bounds = new WorkspaceDockTree.Rect(0, 0, 1_000, 800);
+
+        assertEquals(2, WorkspaceDockTree.splitters(tree, bounds).size());
+        tree = WorkspaceDockTree.resize(tree, "0", 600);
+        assertInstanceOf(WorkspaceDockTree.Split.class, tree);
+        assertEquals(600, ((WorkspaceDockTree.Split) tree).firstWeight());
+        assertThrows(IllegalArgumentException.class,
+                () -> WorkspaceDockTree.resize(tree, "8", 500));
+    }
+
+    @Test
     void rejectsDuplicateIdsAndInvalidSplitWeights() {
         WorkspaceDockTree.Node duplicate = new WorkspaceDockTree.Split(
                 WorkspaceDockTree.Axis.HORIZONTAL, 500,
