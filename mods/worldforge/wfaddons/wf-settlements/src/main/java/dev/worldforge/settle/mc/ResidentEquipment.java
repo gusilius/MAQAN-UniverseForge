@@ -33,6 +33,28 @@ public final class ResidentEquipment {
     private enum Kind { AXE, PICKAXE, HOE, SHOVEL, SWORD }
     private record Tool(Kind kind, ItemStack[] tiers, String skill, String resource, int[] cost) { }
 
+    private static String requiredRole(Worker worker, Colony colony) {
+        Colony.WorkOrder order = colony.workOrders.get(worker.id);
+        if (order == null) return worker.workRole();
+        return switch (order.mode) {
+            case "wood" -> "lumberjack";
+            case "stone", "ore", "mine" -> "miner";
+            case "soil", "level" -> "builder";
+            case "harvest", "farm" -> "farmer";
+            case "herbs" -> "herbalist";
+            default -> worker.workRole();
+        };
+    }
+
+    private static Kind requiredKind(String mode) {
+        return switch (mode) {
+            case "wood" -> Kind.AXE;
+            case "stone", "ore", "mine" -> Kind.PICKAXE;
+            case "soil", "level" -> Kind.SHOVEL;
+            default -> null;
+        };
+    }
+
     private static Tool tool(String role) {
         return switch (role) {
             case "lumberjack", "sawyer", "woodcutter" -> new Tool(Kind.AXE,
@@ -166,7 +188,7 @@ public final class ResidentEquipment {
         Worker worker = body.worker();
         Character person = SettleMod.residentCharacter(body);
         if (colony == null || worker == null || person == null) return "Не удалось проверить данные жителя.";
-        Tool tool = tool(worker.workRole());
+        Tool tool = tool(requiredRole(worker, colony));
         if (tool == null) return "Для текущей профессии специальный инструмент не предусмотрен.";
         int allowed = maxTier(person, colony, worker, tool);
         ItemStack current = load(person);
@@ -185,12 +207,24 @@ public final class ResidentEquipment {
         int cost = tool.cost[chosen];
         if (!colony.s.consumeResource(resource, cost)) return "Материалы уже использованы другим заказом; изготовление отменено.";
         ItemStack crafted = tool.tiers[chosen].copy();
-        save(person, crafted, chosen, worker.workRole());
+        save(person, crafted, chosen, requiredRole(worker, colony));
         body.setItemSlot(EquipmentSlot.MAINHAND, crafted.copy());
         person.props.put("equipment.last_craft", colony.s.year());
         return "Изготовил " + crafted.getHoverName().getString() + " (уровень " + (chosen + 1) + "), потратил " + cost + " " + resource + ".";
     }
 
+
+    /** Refuse physical extraction when the required tool is missing or of the wrong type. */
+    public static boolean readyForWork(WFWorker body, String mode) {
+        Kind required = requiredKind(mode);
+        if (required == null) return true;
+        ItemStack held = body.getItemBySlot(EquipmentSlot.MAINHAND);
+        if (matches(held, required)) return true;
+        Worker worker = body.worker();
+        if (worker != null) worker.status = "не хватает инструмента " + required.name().toLowerCase(Locale.ROOT)
+                + ": ищет материалы для изготовления или ждёт инструмент от правителя";
+        return false;
+    }
 
     /** Autonomous maintenance: a resident crafts/upgrades a tool from settlement stock when work needs one. */
     public static void autoMaintain(WFWorker body) {
@@ -223,7 +257,7 @@ public final class ResidentEquipment {
                 person.props.remove(ROLE_KEY);
             } else {
                 int tier = person.props.get(TIER_KEY) instanceof Number n ? n.intValue() : 0;
-                save(person, stack, tier, worker.workRole());
+                save(person, stack, tier, requiredRole(worker, colony));
             }
         }
     }
@@ -233,7 +267,7 @@ public final class ResidentEquipment {
         Worker worker = body.worker();
         Character person = SettleMod.residentCharacter(body);
         if (worker == null || person == null) return "Данные жителя недоступны.";
-        Tool expected = tool(worker.workRole());
+        Tool expected = tool(requiredRole(worker, body.colony()));
         if (expected == null) return "Эта профессия не использует переносимый инструмент.";
         ItemStack offered = player.getMainHandItem();
         if (!matches(offered, expected.kind)) return "Нужен инструмент подходящего типа для профессии " + worker.workRole() + ".";
