@@ -101,7 +101,7 @@ public final class CommandScreen extends Screen {
                 if (!(o instanceof Map<?, ?> t)) continue;
                 constructionGhosts.add(new ConstructionGhost(
                         ((Number) t.get("x")).intValue(), ((Number) t.get("y")).intValue(),
-                        ((Number) t.get("z")).intValue(), String.valueOf(t.getOrDefault("block", "minecraft:stone"))));
+                        ((Number) t.get("z")).intValue(), (t.get("block") instanceof String block ? block : "minecraft:stone")));
             }
         } catch (RuntimeException ex) {
             buildError = "Не удалось прочитать список зданий";
@@ -361,7 +361,7 @@ public final class CommandScreen extends Screen {
                 Vec3 b = CommandMode.groundAt(minecraft, x, y);
                 if (a != null && b != null) {
                     int radius = UnitSelection.isBox(dragX, dragY, x, y)
-                            ? (int) Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) * 0.5) : 0;
+                            ? Math.min(64, (int) Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) * 0.5)) : 0;
                     sendWorkArea(a, b, radius);
                 }
                 return true;
