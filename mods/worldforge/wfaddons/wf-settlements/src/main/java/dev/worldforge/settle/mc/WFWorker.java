@@ -359,6 +359,31 @@ public class WFWorker extends PathfinderMob {
                     if (d < bestDistance) { bestDistance = d; best = pos; }
                 }
             }
+            return "wood".equals(order.mode) && best != null ? treeBaseTarget(worker, best) : best;
+        }
+
+        /** Resolve a clicked upper log to the lowest reachable trunk block so workers do not try to climb the canopy. */
+        private static BlockPos treeBaseTarget(WFWorker worker, BlockPos selected) {
+            Set<BlockPos> seen = new HashSet<>();
+            ArrayDeque<BlockPos> queue = new ArrayDeque<>();
+            queue.add(selected.immutable());
+            BlockPos best = selected;
+            while (!queue.isEmpty()) {
+                BlockPos current = queue.removeFirst();
+                if (!seen.add(current) || !worker.level().hasChunkAt(current)
+                        || !worker.level().getBlockState(current).is(BlockTags.LOGS)) continue;
+                if (current.getY() < best.getY()
+                        || (current.getY() == best.getY()
+                        && worker.distanceToSqr(current.getX() + 0.5, current.getY() + 0.5, current.getZ() + 0.5)
+                        < worker.distanceToSqr(best.getX() + 0.5, best.getY() + 0.5, best.getZ() + 0.5))) best = current;
+                for (int dx = -1; dx <= 1; dx++) for (int dy = -1; dy <= 1; dy++)
+                    for (int dz = -1; dz <= 1; dz++) {
+                        if (dx == 0 && dy == 0 && dz == 0) continue;
+                        BlockPos next = current.offset(dx, dy, dz);
+                        if (!seen.contains(next) && worker.level().hasChunkAt(next)
+                                && worker.level().getBlockState(next).is(BlockTags.LOGS)) queue.addLast(next);
+                    }
+            }
             return best;
         }
 
