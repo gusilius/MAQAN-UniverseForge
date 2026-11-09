@@ -34,7 +34,7 @@ public final class Colony {
     /** Persistent, exact work-area order assigned to one resident. Coordinates are world block coordinates. */
     public static final class WorkOrder {
         public String mode = "wood";
-        public int x, z, radius = 8, level, cursor, soil;
+        public int x, z, radius = 8, level, cursor, soil, halfX = -1, halfZ = -1;
         public boolean complete;
         /** 0=hidden, 1=subtle, 2=strong. */
         public int overlay = 2;
@@ -140,7 +140,7 @@ public final class Colony {
             WorkOrder o = e.getValue();
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("worker", e.getKey()); row.put("mode", o.mode); row.put("x", o.x); row.put("z", o.z);
-            row.put("radius", o.radius); row.put("level", o.level); row.put("overlay", o.overlay); row.put("cursor", o.cursor); row.put("soil", o.soil); row.put("complete", o.complete);
+            row.put("radius", o.radius); row.put("halfX", o.halfX); row.put("halfZ", o.halfZ); row.put("level", o.level); row.put("overlay", o.overlay); row.put("cursor", o.cursor); row.put("soil", o.soil); row.put("complete", o.complete);
             orders.add(row);
         }
         m.put("workOrders", orders);
@@ -167,6 +167,9 @@ public final class Colony {
                 o.x = xValue instanceof Number n ? n.intValue() : c.cx;
                 o.z = zValue instanceof Number n ? n.intValue() : c.cz;
                 o.radius = radiusValue instanceof Number n ? Math.max(0, Math.min(64, n.intValue())) : 8;
+                Object halfXValue = row.get("halfX"), halfZValue = row.get("halfZ");
+                o.halfX = halfXValue instanceof Number n ? Math.max(0, Math.min(64, n.intValue())) : o.radius;
+                o.halfZ = halfZValue instanceof Number n ? Math.max(0, Math.min(64, n.intValue())) : o.radius;
                 o.level = levelValue instanceof Number n ? n.intValue() : 0;
                 o.overlay = overlayValue instanceof Number n ? Math.max(0, Math.min(2, n.intValue())) : 2;
                 Object cursorValue = row.get("cursor");
