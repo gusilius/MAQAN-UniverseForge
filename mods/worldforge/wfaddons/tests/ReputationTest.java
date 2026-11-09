@@ -69,6 +69,42 @@ public class ReputationTest {
         boolean noPlayer = false;
         try { new Session(d, new Ctx(null).service(ReputationStore.class, live)).view(); new Session(d, new Ctx(null).service(ReputationStore.class, live)).choose(0); } catch (IllegalStateException e) { noPlayer = true; }
         ok(noPlayer, "без player_id в контексте понятная ошибка");
+        // Scoped reputation and resident-specific knowledge.
+        ReputationStore scoped = new ReputationStore();
+        scoped.add("p", ReputationStore.Scope.SETTLEMENT, "village_a", -70, "кража");
+        scoped.add("p", ReputationStore.Scope.SETTLEMENT, "village_b", 35, "помощь");
+        scoped.add("p", ReputationStore.Scope.POLITY, "kingdom_red", 10, "слухи");
+        ok(scoped.get("p", ReputationStore.Scope.SETTLEMENT, "village_a") == -70
+                        && scoped.get("p", ReputationStore.Scope.SETTLEMENT, "village_b") == 35
+                        && scoped.get("p", ReputationStore.Scope.POLITY, "kingdom_red") == 10
+                        && scoped.get("p", ReputationStore.Scope.WORLD, "") == 0,
+                "settlement, polity and world reputation remain independent unless explicitly linked");
+        scoped.link(ReputationStore.Scope.SETTLEMENT, "village_a",
+                ReputationStore.Scope.POLITY, "kingdom_red", 0.5);
+        scoped.add("p", ReputationStore.Scope.SETTLEMENT, "village_a", -20, "повторная кража");
+        ok(scoped.get("p", ReputationStore.Scope.SETTLEMENT, "village_a") == -90
+                        && scoped.get("p", ReputationStore.Scope.POLITY, "kingdom_red") == 0,
+                "only explicitly linked settlement reputation partially affects its polity");
+        scoped.observe("resident_a", "p", ReputationStore.Scope.SETTLEMENT, "village_a", 100, "witnessed");
+        ok(scoped.known("resident_a", "p", ReputationStore.Scope.SETTLEMENT, "village_a") != null
+                        && scoped.known("resident_b", "p", ReputationStore.Scope.SETTLEMENT, "village_a") == null
+                        && scoped.known("resident_a", "p", ReputationStore.Scope.SETTLEMENT, "village_b") == null,
+                "reputation knowledge is private to the observing resident and exact settlement");
+        scoped.add("p", ReputationStore.Scope.ORGANIZATION, "guild", 55, "помощь гильдии");
+        scoped.observe("resident_a", "p", ReputationStore.Scope.ORGANIZATION, "guild", 120, "member witness");
+        ok(scoped.shareWithinOrganization("resident_a", "resident_c", "p", "guild", 121)
+                        && scoped.known("resident_c", "p", ReputationStore.Scope.ORGANIZATION, "guild") != null
+                        && scoped.known("resident_c", "p", ReputationStore.Scope.SETTLEMENT, "village_a") == null
+                        && scoped.known("resident_d", "p", ReputationStore.Scope.ORGANIZATION, "guild") == null,
+                "gossip shares only the named organization reputation with the selected recipient");
+        String scopedJson = scoped.toJson();
+        ReputationStore scopedReload = new ReputationStore();
+        scopedReload.fromJson(scopedJson);
+        ok(scopedReload.get("p", ReputationStore.Scope.SETTLEMENT, "village_b") == 35
+                        && scopedReload.known("resident_a", "p", ReputationStore.Scope.SETTLEMENT, "village_a") != null
+                        && scopedReload.known("resident_c", "p", ReputationStore.Scope.ORGANIZATION, "guild") != null,
+                "scoped values and resident knowledge survive save/load");
+
         System.out.println(fails == 0 ? "ВСЕ ПРОВЕРКИ ПРОЙДЕНЫ" : "ПРОВАЛОВ: " + fails);
         if (fails > 0) System.exit(1);
     }
