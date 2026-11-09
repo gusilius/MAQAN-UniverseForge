@@ -323,7 +323,7 @@ public class WFWorker extends PathfinderMob {
                         // Do not push the NPC into a wall, cliff or unloaded chunk. Retry after a short
                         // cooldown so a temporary obstruction can clear without pathfinding every tick.
                         w.getNavigation().stop();
-                        lastNavigationTarget = null;
+                        lastNavigationTarget = route.immutable();
                         wk.status = "нет безопасного пути: ждёт и повторно ищет обход";
                         repath = 40;
                     }
