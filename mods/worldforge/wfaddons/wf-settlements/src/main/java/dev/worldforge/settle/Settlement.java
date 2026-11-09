@@ -1196,6 +1196,7 @@ public final class Settlement {
             s.departures.add(new WorkerDeparture(person, name, reason));
         }
         for (Object o : (List<Object>) root.get("log")) s.log.add((String) o);
+        s.syncAllResourceMirrors();
         return s;
     }
 }
