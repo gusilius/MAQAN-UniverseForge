@@ -235,7 +235,7 @@ public class WFWorker extends PathfinderMob {
             }
             if (arrived) {
                 w.getNavigation().stop();
-                if (area != null && resourceTarget == null && workScan > 0) {
+                if (area != null && !area.complete && resourceTarget == null && workScan > 0) {
                     BlockPos waypoint = workWaypoint(w, area);
                     if (w.distanceToSqr(waypoint.getX() + 0.5, w.getY(), waypoint.getZ() + 0.5) < 6.25) {
                         area.cursor++;
