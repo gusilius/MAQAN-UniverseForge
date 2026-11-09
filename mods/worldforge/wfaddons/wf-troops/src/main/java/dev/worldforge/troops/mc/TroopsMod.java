@@ -546,6 +546,10 @@ public class TroopsMod {
                 // WorkerControl проверяет владельца каждого поселения; глобальный операторский gate здесь неверен.
                 p.displayClientMessage(Component.literal(WorkerControl.command(p, o)), true);
             }
+            case OrderPacket.WORK_AREA -> {
+                if (!ModList.get().isLoaded("wf_settle") || !WorkerControl.anyWorker(p, o)) return;
+                p.displayClientMessage(Component.literal(WorkerControl.workArea(p, o)), true);
+            }
             case OrderPacket.BUILD_LIST -> {
                 if (!ModList.get().isLoaded("wf_settle")) { p.displayClientMessage(Component.literal("Нужен мод wf_settle"), true); return; }
                 BuildControl.sendList(p, o.x(), o.z());
