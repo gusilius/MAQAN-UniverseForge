@@ -66,6 +66,7 @@ public class WorldForgeMod {
 
     private static final Map<String, MapData> MAPS = new ConcurrentHashMap<>();
     private static volatile Registry<Biome> biomes;\n    private static volatile TreasuryLedger treasury = new TreasuryLedger();
+    private static volatile boolean treasuryLoadFailed;
 
     public WorldForgeMod() {
         IEventBus bus = FMLJavaModLoadingContext.get().getModEventBus();
