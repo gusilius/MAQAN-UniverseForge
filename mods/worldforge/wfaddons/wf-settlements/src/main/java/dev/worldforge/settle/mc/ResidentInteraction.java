@@ -7,9 +7,7 @@ import dev.worldforge.settle.ResidentQuest;
 import dev.worldforge.settle.Worker;
 import dev.worldforge.people.mc.PeopleMod;
 import net.minecraft.commands.Commands;
-import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.Style;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
@@ -121,13 +119,7 @@ public final class ResidentInteraction {
                 + ", а поселению нужны еда, безопасность и работа.";
     }
 
-    private static Component action(String label, String action, WFWorker worker) {
-        String command = "/wfresident " + action + " " + worker.getUUID();
-        return Component.literal("  › " + label).withStyle(Style.EMPTY
-                .withColor(net.minecraft.ChatFormatting.GOLD)
-                .withUnderlined(true)
-                .withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, command)));
-    }
+
 
     private static int execute(ServerPlayer player, String action, String entityId) {
         UUID id;
@@ -226,7 +218,6 @@ public final class ResidentInteraction {
                         "Принести 3 хлеба в поселение", 3, colony.s.year());
                 person.props.put(QUEST_KEY, next.toMap());
                 player.sendSystemMessage(Component.literal("§e" + person.name + ": В поселении не хватает хлеба. Принесите три буханки."));
-                player.sendSystemMessage(action("Принять поручение", "accept", worker));
             }
             case "abandon" -> {
                 ResidentQuest q = quest(person);
