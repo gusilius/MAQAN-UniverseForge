@@ -1,6 +1,7 @@
 {
- "key.wf_troops.command": "Command mode",
- "entity.wf_troops.troop": "Soldier",
- "key.categories.worldforge": "WorldForge",
- "key.categories.wf_troops": "WorldForge: troops"
+  "key.wf_troops.command": "Command mode",
+  "entity.wf_troops.troop": "Soldier",
+  "key.categories.worldforge": "WorldForge",
+  "key.categories.wf_troops": "WorldForge: troops",
+  "key.wf_troops.first_person_command": "First-person command mode"
 }
