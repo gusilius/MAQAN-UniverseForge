@@ -112,7 +112,7 @@ public final class CommandCard {
         if (ctx.equals("workers")) {
             List<Worker> ws = sel.workers(s);
             int busy = 0, builders = 0;
-            for (Worker w : ws) { if (w.building != 0) busy++; if (w.profession.equals("builder")) builders++; }
+            for (Worker w : ws) { if (w.building != 0) busy++; if (w.workRole().equals("builder")) builders++; }
             put(c, 0, "assign", Command.Kind.TARGET, "assign", "@flag", "Назначить",
                     anyBuilding ? tip("Назначить", "Затем щёлкните здание или стройку", "ПКМ по зданию делает то же") : tip("Назначить", "!Зданий пока нет"), anyBuilding, false);
             run(c, 1, "unassign", "@stop", "Снять", busy > 0, "Все выбранные уже свободны", "Снять с работы", "Выбранные станут свободными", "Сейчас заняты: " + busy);
@@ -121,7 +121,7 @@ public final class CommandCard {
             put(c, 4, "priorities", Command.Kind.OPEN, "priorities", "@scroll", "Работы", tip("Приоритеты работ", "Матрица: рабочий x профессия, 0-4", "Горячая клавиша окна: P"), true, false);
             run(c, 5, "selectSame", "@people", "Такие же", !ws.isEmpty(), null, "Все такой же профессии", "Выбрать всех с профессией первого выбранного", "Двойной щелчок по рабочему делает то же");
             run(c, 6, "selectIdle", "@alert", "Свободные", idle > 0, "Свободных рабочих нет", "Выбрать свободных", "Рабочие без работы: " + idle, "Клавиша [.]");
-            run(c, 7, "selectBuilders", "@build", "Строители", s.workers.stream().anyMatch(w -> w.profession.equals("builder")), "В поселении нет строителей", "Выбрать строителей", "Все рабочие-строители");
+            run(c, 7, "selectBuilders", "@build", "Строители", s.workers.stream().anyMatch(w -> w.workRole().equals("builder")), "В поселении нет строителей", "Выбрать строителей", "Все рабочие-строители");
             put(c, 8, "camera", Command.Kind.CAMERA, null, "@move", "Камера", tip("Камера на выбор", "Двойное нажатие цифры группы делает то же"), true, false);
             run(c, 9, "selectAll", "@people", "Все", !s.workers.isEmpty(), null, "Выбрать всех рабочих", "Ctrl+A");
             put(c, 10, "auto", Command.Kind.RUN, null, "@heart", s.auto ? "Авто: да" : "Авто: нет", tip("Автоназначение", "Сейчас: " + (s.auto ? "включено" : "выключено"), "Свободные рабочие сами идут на работу"), true, s.auto);
