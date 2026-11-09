@@ -378,8 +378,21 @@ public final class Settlement {
 
     private int assignedWith(int uid, String profession) {
         int n = 0;
-        for (Worker w : workers) if (w.building == uid && w.profession.equals(profession)) n++;
+        for (Worker w : workers) if (w.building == uid && w.workRole().equals(profession)) n++;
         return n;
+    }
+    private double assignedEfficiency(int uid, String profession) {
+        double value = 0;
+        for (Worker w : workers) if (w.building == uid && w.workRole().equals(profession))
+            value += w.productivity(profession);
+        return value;
+    }
+    private String availableRole(Worker worker, Building building) {
+        if (building.state == Building.State.BUILDING)
+            return worker.canPerform("builder") && assignedWith(building.uid, "builder") < building.def.builders ? "builder" : "";
+        for (Map.Entry<String,Integer> job : building.def.jobs.entrySet())
+            if (worker.canPerform(job.getKey()) && assignedWith(building.uid, job.getKey()) < job.getValue()) return job.getKey();
+        return "";
     }
 
     public Worker addWorker(String name) {
@@ -485,6 +498,9 @@ public final class Settlement {
             if (!w.profession.equals("builder")) throw new OrderException("Строить могут только строители");
             if (assignedWith(uid, "builder") >= b.def.builders && w.building != uid) throw new OrderException("На стройке уже максимум строителей (" + b.def.builders + ")");
         }
+        String role = availableRole(w, b);
+        if (role.isEmpty()) throw new OrderException(w.name + " не подходит для этой работы или нет свободных мест");
+        w.assignedProfession = role;
         w.building = uid;
         w.manualFollow = false;
         w.manualFollowOwner = "";
@@ -497,6 +513,7 @@ public final class Settlement {
         Worker w = worker(workerId);
         if (w == null) throw new OrderException("Нет рабочего " + workerId);
         w.building = 0;
+        w.assignedProfession = "";
         w.manualFollow = false;
         w.manualFollowOwner = "";
         w.manualOrder = false;
@@ -546,6 +563,7 @@ public final class Settlement {
         if (w == null) throw new OrderException("Нет рабочего " + workerId);
         if (!defs.professions.containsKey(profession)) throw new OrderException("Нет профессии " + profession);
         w.profession = profession;
+        w.assignedProfession = "";
         w.building = 0;
         w.manualFollow = false;
         w.manualFollowOwner = "";
@@ -708,27 +726,35 @@ public final class Settlement {
         for (Worker w : workers) if (w.building == 0 && !w.manualOrder && !w.manualFollow) idle.add(w);
         idle.sort(Comparator.comparingInt(w -> w.id));
         for (Worker w : idle) {
-            if (w.profession.equals("builder") || w.profession.equals("laborer")) {
-                Building site = null;
-                for (Building b : byPriority(x -> x.state == Building.State.BUILDING)) if (assignedWith(b.uid, "builder") < b.def.builders) { site = b; break; }
-                if (site != null) { w.profession = "builder"; w.building = site.uid; w.status = ""; continue; }
-            }
-            if (w.profession.equals("builder")) { w.profession = "laborer"; }        // стройка кончилась: строитель снова ищет работу
             Building best = null;
-            String prof = w.profession;
-            int bestPrio = 99;
-            double bestFill = 2;
-            for (Building b : byPriority(x -> x.state == Building.State.DONE && !x.paused && x.def.slots() > 0)) {
-                for (Map.Entry<String, Integer> j : b.def.jobs.entrySet()) {
-                    int have = assignedWith(b.uid, j.getKey());
-                    if (have >= j.getValue()) continue;
-                    int pr = workPriority(w, j.getKey());
-                    if (pr <= 0) continue;
-                    double fill = (double) have / j.getValue();
-                    if (best == null || pr < bestPrio || (pr == bestPrio && (b.priority > best.priority || (b.priority == best.priority && fill < bestFill)))) { best = b; prof = j.getKey(); bestPrio = pr; bestFill = fill; }
+            String role = "";
+            int bestPrio = Integer.MAX_VALUE;
+            double bestFill = Double.MAX_VALUE;
+            for (Building site : byPriority(x -> x.state == Building.State.BUILDING)) {
+                String candidate = availableRole(w, site);
+                if (!candidate.isEmpty()) { best = site; role = candidate; break; }
+            }
+            if (best == null) {
+                for (Building b : byPriority(x -> x.state == Building.State.DONE && !x.paused && x.def.slots() > 0)) {
+                    for (Map.Entry<String, Integer> job : b.def.jobs.entrySet()) {
+                        if (!w.canPerform(job.getKey())) continue;
+                        int have = assignedWith(b.uid, job.getKey());
+                        if (have >= job.getValue()) continue;
+                        int priority = workPriority(w, job.getKey());
+                        if (priority <= 0) continue;
+                        double fill = (double) have / job.getValue();
+                        if (best == null || priority < bestPrio || (priority == bestPrio
+                                && (b.priority > best.priority || (b.priority == best.priority && fill < bestFill)))) {
+                            best = b; role = job.getKey(); bestPrio = priority; bestFill = fill;
+                        }
+                    }
                 }
             }
-            if (best != null) { w.profession = prof; w.building = best.uid; w.status = ""; }
+            if (best != null) {
+                w.assignedProfession = role;
+                w.building = best.uid;
+                w.status = "";
+            }
         }
     }
 
@@ -739,7 +765,7 @@ public final class Settlement {
             Worker pick = null;
             int bestStaff = 1;
             for (Worker w : workers) {
-                if (w.building == 0 || w.manualOrder || w.manualFollow || w.profession.equals("builder")) continue;
+                if (w.building == 0 || w.manualOrder || w.manualFollow || !w.canPerform("builder")) continue;
                 Building from = building(w.building);
                 if (from == null || from.state != Building.State.DONE) continue;
                 int staff = assigned(from.uid).size();
@@ -774,7 +800,8 @@ public final class Settlement {
             if (b.unpaid) { b.status = "нет серебра"; continue; }
             if (!b.def.produces()) continue;
             double slots = b.def.slots(), eff = 0;
-            for (Map.Entry<String, Integer> j : b.def.jobs.entrySet()) eff += Math.min(assignedWith(b.uid, j.getKey()), j.getValue());
+            for (Map.Entry<String, Integer> j : b.def.jobs.entrySet())
+                eff += Math.min(assignedEfficiency(b.uid, j.getKey()), j.getValue());
             double rate = (slots == 0 ? 1 : eff / slots) * seasonMult(b);                      // без рабочих мест здание работает само (например, колодец)
             if (rate <= 0) { b.status = "нет работников"; continue; }
             b.cycleTime += dt * rate;
@@ -1200,7 +1227,7 @@ public final class Settlement {
         List<Object> ws = new ArrayList<>();
         for (Worker w : workers) {
             Map<String, Object> m = new LinkedHashMap<>();
-            m.put("id", w.id); m.put("name", w.name); m.put("profession", w.profession); m.put("person", w.person); m.put("building", w.building); m.put("status", w.status); m.put("x", w.x); m.put("z", w.z);
+            m.put("id", w.id); m.put("name", w.name); m.put("profession", w.profession); m.put("assigned_profession", w.assignedProfession); m.put("person", w.person); m.put("building", w.building); m.put("status", w.status); m.put("x", w.x); m.put("z", w.z);
             m.put("manual_order", w.manualOrder); m.put("manual_follow", w.manualFollow); m.put("manual_follow_owner", w.manualFollowOwner); m.put("order_x", w.orderX); m.put("order_z", w.orderZ);
             List<Object> queuedOrders=new ArrayList<>();
             for(Worker.ManualOrder order:w.orderQueue)queuedOrders.add(Map.of("x",order.x(),"z",order.z()));
@@ -1269,7 +1296,9 @@ public final class Settlement {
         for (Object o : (List<Object>) root.get("workers")) {
             Map<String, Object> m = (Map<String, Object>) o;
             Worker w = new Worker(((Number) m.get("id")).intValue(), (String) m.get("name"));
-            w.profession = (String) m.get("profession"); w.person = (String) m.get("person"); w.building = ((Number) m.get("building")).intValue(); w.status = (String) m.get("status");
+            w.profession = (String) m.get("profession");
+            w.assignedProfession = m.get("assigned_profession") instanceof String ap ? ap : "";
+            w.person = (String) m.get("person"); w.building = ((Number) m.get("building")).intValue(); w.status = (String) m.get("status");
             if (m.get("x") instanceof Number nx) w.x = nx.doubleValue();
             if (m.get("z") instanceof Number nz) w.z = nz.doubleValue();
             w.manualOrder = Boolean.TRUE.equals(m.get("manual_order")); w.manualFollow = Boolean.TRUE.equals(m.get("manual_follow")); w.manualFollowOwner = m.get("manual_follow_owner") instanceof String fo ? fo : "";
