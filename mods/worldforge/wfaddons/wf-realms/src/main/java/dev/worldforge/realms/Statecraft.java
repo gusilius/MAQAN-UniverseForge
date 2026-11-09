@@ -373,8 +373,10 @@ public final class Statecraft {
     }
 
     public boolean borrowForRealm(String realmId, double amount, String reference, long worldMinute) {
-        treasury(realmId);
-        return TreasuryService.current().borrow(treasuryAccountId(realmId), money(amount), worldMinute, reference);
+        Treasury snapshot = treasury(realmId);
+        boolean ok = TreasuryService.current().borrow(treasuryAccountId(realmId), money(amount), worldMinute, reference);
+        if (ok) snapshot.balance = TreasuryService.current().balance(treasuryAccountId(realmId));
+        return ok;
     }
 
     public boolean accrueRealmInterest(String realmId, double rate, long worldMinute) {
@@ -509,6 +511,10 @@ public final class Statecraft {
     // ---------------- Persistence ----------------
 
     public String toJson() {
+        for (Map.Entry<String, Treasury> entry : treasuries.entrySet()) {
+            TreasuryLedger.Account account = TreasuryService.current().account(treasuryAccountId(entry.getKey()));
+            if (account != null) entry.getValue().balance = account.balance;
+        }
         Map<String,Object> root=new LinkedHashMap<>();
         root.put("version",1); root.put("sequence",sequence);
         List<Object> ts=new ArrayList<>();
