@@ -3,7 +3,6 @@ package dev.worldforge.settle;
 import dev.worldforge.mod.Json;
 import dev.worldforge.mod.economy.TreasuryService;
 import dev.worldforge.mod.economy.TreasuryLedger;
-import dev.worldforge.mod.economy.TreasuryService;
 
 import java.util.*;
 
