@@ -346,7 +346,7 @@ public class SettleMod {
                 Blueprints.Plan plan = Blueprints.get(level, building.def);
                 if (plan == null || physicalSite.placed < plan.blocks().size()) continue;
                 boolean staffed = colony.s.assigned(building.uid).stream()
-                        .anyMatch(worker -> "trainer".equals(worker.workRole()));
+                        .anyMatch(worker -> worker.lifeAction.isBlank() && "trainer".equals(worker.workRole()));
                 if (!staffed) continue;
                 double x = colony.worldX(building), z = colony.worldZ(building);
                 double distance = (x - playerX) * (x - playerX) + (z - playerZ) * (z - playerZ);
@@ -672,7 +672,7 @@ public class SettleMod {
                         double[] shelter = residentShelter(settlement, worker);
                         worker.lifeAction = "fleeing";
                         worker.lifeTargetX = shelter[0]; worker.lifeTargetZ = shelter[1];
-                        worker.lifeActionUntil = Double.POSITIVE_INFINITY;
+                        worker.lifeActionUntil = 1.0e12;
                         worker.status = "бежит в укрытие";
                         return LifeSimulation.Outcome.SUCCESS;
                     }
