@@ -40,6 +40,7 @@ public class TroopEntity extends PathfinderMob {
     public static final EntityDataAccessor<String> OWNER = SynchedEntityData.defineId(TroopEntity.class, EntityDataSerializers.STRING);
     public static final EntityDataAccessor<Integer> MORALE = SynchedEntityData.defineId(TroopEntity.class, EntityDataSerializers.INT);
     private static final UUID MORALE_MOD = UUID.fromString("5b0a8e0e-6c3d-4a0e-9d0a-0d1f6f0c7a11");
+    private static final UUID INJURY_SPEED_MOD = UUID.fromString("c0b9d7b1-2b34-4c61-9b8a-91c2b6c43d2e");
     public static final EntityDataAccessor<String> SQUAD = SynchedEntityData.defineId(TroopEntity.class, EntityDataSerializers.STRING);
     public static final EntityDataAccessor<String> CHARACTER = SynchedEntityData.defineId(TroopEntity.class, EntityDataSerializers.STRING);
     public static final EntityDataAccessor<Integer> COMBAT_XP = SynchedEntityData.defineId(TroopEntity.class, EntityDataSerializers.INT);
@@ -102,11 +103,22 @@ public class TroopEntity extends PathfinderMob {
 
     /** Множитель урона от морали и ауры командира: добавочный модификатор, чтобы не трогать базу типа. */
     public void setDamageMult(double m) {
+        double injury=TroopsMod.injuryCombatMultiplier(this);
+        double effective=m*injury;
         var ai = getAttribute(Attributes.ATTACK_DAMAGE);
-        if (ai == null) return;
-        ai.removeModifier(MORALE_MOD);
-        if (Math.abs(m - 1) > 0.01) ai.addTransientModifier(new AttributeModifier(MORALE_MOD, "wf_morale", m - 1, AttributeModifier.Operation.MULTIPLY_TOTAL));
-        dmgMult = m;
+        if (ai != null) {
+            ai.removeModifier(MORALE_MOD);
+            if (Math.abs(effective - 1) > 0.01)
+                ai.addTransientModifier(new AttributeModifier(MORALE_MOD, "wf_morale_and_injury", effective - 1, AttributeModifier.Operation.MULTIPLY_TOTAL));
+        }
+        var speed=getAttribute(Attributes.MOVEMENT_SPEED);
+        if(speed!=null){
+            speed.removeModifier(INJURY_SPEED_MOD);
+            double speedFactor=Math.max(0.70,injury);
+            if(Math.abs(speedFactor-1)>0.01)
+                speed.addTransientModifier(new AttributeModifier(INJURY_SPEED_MOD,"wf_injury_mobility",speedFactor-1,AttributeModifier.Operation.MULTIPLY_TOTAL));
+        }
+        dmgMult = effective;
     }
 
     /** Враги вокруг точки: {сколько, x центра, z центра}. */
