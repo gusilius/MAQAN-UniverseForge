@@ -435,7 +435,7 @@ public class WFWorker extends PathfinderMob {
             Set<BlockPos> logs = new HashSet<>();
             ArrayDeque<BlockPos> queue = new ArrayDeque<>();
             queue.add(selected.immutable());
-            while (!queue.isEmpty() && logs.size() < 512) {
+            while (!queue.isEmpty()) {
                 BlockPos current = queue.removeFirst();
                 if (!logs.add(current) || !level.hasChunkAt(current)
                         || !level.getBlockState(current).is(BlockTags.LOGS)) continue;
