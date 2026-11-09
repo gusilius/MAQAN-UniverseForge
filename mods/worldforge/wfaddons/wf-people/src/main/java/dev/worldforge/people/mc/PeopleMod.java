@@ -270,6 +270,13 @@ public class PeopleMod {
                     if (!DialogueHook.open(player, body, person, dialogueId, ROLES, map.titles,
                             FLAGS.computeIfAbsent(player.getUUID(), k -> new HashSet<>()))) continue;
                     cooldowns.put(playerId, ticks);
+                    while (cooldowns.size() > 64) {
+                        String oldest = cooldowns.entrySet().stream()
+                                .min(Map.Entry.comparingByValue((a, b) -> Long.compare(((Number) a).longValue(), ((Number) b).longValue())))
+                                .map(Map.Entry::getKey).orElse(null);
+                        if (oldest == null) break;
+                        cooldowns.remove(oldest);
+                    }
                     person.props.put("social.initiative_cooldowns", cooldowns);
                     break;
                 }
