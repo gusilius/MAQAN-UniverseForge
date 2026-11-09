@@ -79,23 +79,23 @@ public final class TreasuryApi {
     }
 
     /** Transfer settlement silver into its realm treasury; conversion to gold is a display-only unit conversion. */
-    public static synchronized boolean remitSettlement(String settlementId, String realm, double silver, String label) {
-        if (settlementId == null || settlementId.isBlank() || !Double.isFinite(silver) || silver < 0) return false;
+    public static synchronized boolean remitSettlement(String settlementAccountId, String realm, double silver, String label) {
+        if (settlementAccountId == null || settlementAccountId.isBlank() || !Double.isFinite(silver) || silver < 0) return false;
         ensureRealm(realm);
-        String source = "settlement:" + settlementId;
+        String source = settlementAccountId;
         if (!ledger().hasAccount(source)) return false;
         return ledger().transfer(source, accountId(realm), silver, TreasuryLedger.Kind.TAX,
-                label, "city-tax:" + settlementId + ":" + realm, worldMinute(), "settlement crown tax");
+                label, "city-tax:" + settlementAccountId + ":" + realm, worldMinute(), "settlement crown tax");
     }
 
     /** Atomic realm-to-settlement grant in silver base units. */
-    public static synchronized boolean grantSettlement(String realm, String settlementId, double silver, String label) {
-        if (settlementId == null || settlementId.isBlank() || !Double.isFinite(silver) || silver < 0) return false;
+    public static synchronized boolean grantSettlement(String realm, String settlementAccountId, double silver, String label) {
+        if (settlementAccountId == null || settlementAccountId.isBlank() || !Double.isFinite(silver) || silver < 0) return false;
         ensureRealm(realm);
-        String target = "settlement:" + settlementId;
+        String target = settlementAccountId;
         if (!ledger().hasAccount(target)) return false;
         return ledger().transfer(accountId(realm), target, silver, TreasuryLedger.Kind.GRANT,
-                label, "city-grant:" + realm + ":" + settlementId, worldMinute(), "realm grant to settlement");
+                label, "city-grant:" + realm + ":" + settlementAccountId, worldMinute(), "realm grant to settlement");
     }
 
     /** Source-category projection of the canonical journal, displayed in gold. */
