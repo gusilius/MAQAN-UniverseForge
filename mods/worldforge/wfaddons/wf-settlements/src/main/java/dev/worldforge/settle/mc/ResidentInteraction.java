@@ -228,9 +228,9 @@ public final class ResidentInteraction {
     private static int assignCompatibleBuilding(Colony colony, Worker worker) {
         for (var building : colony.s.buildings) {
             boolean compatible = building.state == dev.worldforge.settle.Building.State.DONE
-                    && building.def.jobs.getOrDefault(worker.profession, 0) > 0;
+                    && building.def.jobs.keySet().stream().anyMatch(worker::canPerform);
             compatible |= building.state == dev.worldforge.settle.Building.State.BUILDING
-                    && "builder".equals(worker.profession);
+                    && worker.canPerform("builder");
             if (!compatible) continue;
             try {
                 colony.s.assign(worker.id, building.uid);
