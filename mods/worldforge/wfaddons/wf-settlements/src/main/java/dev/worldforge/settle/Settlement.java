@@ -776,13 +776,22 @@ public final class Settlement {
 
     /** Assigns one compatible porter/general worker to each active production buffer. */
     private void autoAssignHaulers() {
-        for (Building source : byPriority(b -> b.state == Building.State.DONE
-                && (b.def.produces() || !b.localStock.isEmpty()))) {
+        for (Worker worker : workers) {
+            if (!worker.workRole().equals("hauler")) continue;
+            Building source = building(worker.building);
+            if (source == null || source.localStock.isEmpty()) {
+                worker.building = 0;
+                worker.assignedProfession = "";
+                worker.status = "свободен";
+            }
+        }
+        for (Building source : byPriority(b -> b.state == Building.State.DONE && !b.localStock.isEmpty())) {
             if (assignedWith(source.uid, "hauler") > 0) continue;
             Worker pick = null;
             for (Worker worker : workers) {
-                if (worker.building != 0 || worker.manualOrder || worker.manualFollow
-                        || !worker.lifeAction.isBlank() || !worker.canPerform("hauler")) continue;
+                if (worker.manualOrder || worker.manualFollow || !worker.lifeAction.isBlank()
+                        || !worker.canPerform("hauler")) continue;
+                if (worker.building != 0 && worker.building != source.uid) continue;
                 if (pick == null || worker.id < pick.id) pick = worker;
             }
             if (pick == null) continue;
@@ -790,6 +799,24 @@ public final class Settlement {
             pick.assignedProfession = "hauler";
             pick.status = "переносит ресурсы";
         }
+    }
+
+    /** Explicit management command for a porter/general worker. */
+    public void assignHauler(int workerId, int buildingId) {
+        Worker worker = worker(workerId);
+        Building source = building(buildingId);
+        if (worker == null || source == null) throw new OrderException("Нет рабочего или здания");
+        if (source.state != Building.State.DONE || (!source.def.produces() && source.localStock.isEmpty()))
+            throw new OrderException("Носильщик назначается только на действующее производственное здание");
+        if (!worker.canPerform("hauler")) throw new OrderException(worker.name + " не может переносить ресурсы");
+        worker.building = buildingId;
+        worker.assignedProfession = "hauler";
+        worker.lifeAction = "";
+        worker.manualOrder = false;
+        worker.manualFollow = false;
+        worker.manualFollowOwner = "";
+        worker.orderQueue.clear();
+        worker.status = "переносит ресурсы";
     }
 
     /** Executes the haul leg: local production buffers become canonical stock only after a worker delivery. */
