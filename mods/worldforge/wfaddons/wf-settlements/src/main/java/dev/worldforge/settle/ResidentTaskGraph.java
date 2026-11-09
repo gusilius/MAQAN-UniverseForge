@@ -184,7 +184,9 @@ public final class ResidentTaskGraph {
                 long receipt = number(lot.get("receipt"), 0).longValue();
                 if (receipt > 0 && quantity > 0 && Double.isFinite(quantity)) queue.addLast(new Lot(receipt, quantity));
             }
-            if (!queue.isEmpty()) target.put(key, queue);
+            // Preserve empty FIFO buckets as well: their presence is part of the canonical
+            // serialized graph, and removing them on load breaks byte-stable save/reload.
+            target.put(key, queue);
         }
     }
 
