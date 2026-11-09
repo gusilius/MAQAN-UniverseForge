@@ -3,6 +3,7 @@ package dev.worldforge.settle.mc;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import dev.worldforge.settle.ResidentSocial;
 import dev.worldforge.people.Character;
+import dev.worldforge.people.PopulationSimulation;
 import dev.worldforge.settle.ResidentQuest;
 import dev.worldforge.settle.Worker;
 import dev.worldforge.people.mc.PeopleMod;
@@ -12,6 +13,8 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.event.entity.player.PlayerInteractEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -173,7 +176,7 @@ public final class ResidentInteraction {
                     player.sendSystemMessage(Component.literal("§eДля подарка нужен изумруд."));
                     return 0;
                 }
-                player.getInventory().removeItem(Items.EMERALD, 1);
+                removeMatching(player, Items.EMERALD, 1);
                 int score = ResidentSocial.adjust(person, player.getUUID().toString(), 10);
                 player.sendSystemMessage(Component.literal("§a" + person.name
                         + " благодарит за подарок. Отношение: " + score + "/100."));
@@ -294,17 +297,16 @@ public final class ResidentInteraction {
         }
         double accepted = colony.s.receiveResource(q.resourceId(), offered);
         int delivered = Math.min(offered, (int) Math.floor(accepted + 1e-9));
-        if (accepted > delivered) colony.s.consumeResource("food", accepted - delivered);
+        if (accepted > delivered) colony.s.consumeResource(q.resourceId(), accepted - delivered);
         if (delivered <= 0) {
             player.sendSystemMessage(Component.literal("§cСклад поселения не может принять этот ресурс."));
             return;
         }
         int acceptedWhole = delivered;
-        net.minecraft.world.item.ItemStack removed = player.getInventory().removeItem(item, acceptedWhole);
-        delivered = Math.min(acceptedWhole, removed.getCount());
-        if (delivered < acceptedWhole) colony.s.consumeResource("food", acceptedWhole - delivered);
+        delivered = removeMatching(player, item, acceptedWhole);
+        if (delivered < acceptedWhole) colony.s.consumeResource(q.resourceId(), acceptedWhole - delivered);
         if (delivered <= 0) {
-            player.sendSystemMessage(Component.literal("§cХлеб не удалось передать."));
+            player.sendSystemMessage(Component.literal("§cНе удалось передать ресурс."));
             return;
         }
         boolean completed = q.addProgress(delivered, colony.s.year());
@@ -316,6 +318,25 @@ public final class ResidentInteraction {
             player.sendSystemMessage(Component.literal("§aПередано хлеба: " + delivered + ". Осталось: "
                     + (q.required() - q.progress()) + "."));
         }
+    }
+
+    /** Remove an exact item count by scanning inventory slots; Minecraft Inventory has no removeItem(Item, count) overload. */
+    private static int removeMatching(ServerPlayer player, Item item, int amount) {
+        if (amount <= 0) return 0;
+        var inventory = player.getInventory();
+        int remaining = amount;
+        int removed = 0;
+        for (int slot = 0; slot < inventory.getContainerSize() && remaining > 0; slot++) {
+            ItemStack stack = inventory.getItem(slot);
+            if (!stack.is(item)) continue;
+            int take = Math.min(remaining, stack.getCount());
+            stack.shrink(take);
+            if (stack.isEmpty()) inventory.setItem(slot, ItemStack.EMPTY);
+            remaining -= take;
+            removed += take;
+        }
+        if (removed > 0) inventory.setChanged();
+        return removed;
     }
 
     private static net.minecraft.world.item.Item questItem(String resource) {
