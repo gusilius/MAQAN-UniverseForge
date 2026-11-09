@@ -156,14 +156,14 @@ public final class ResidentEquipment {
         int chosen = -1;
         for (int tier = allowed; tier >= 0; tier--) {
             if (tier <= currentTier) continue;
-            String resource = tier == 0 || tier == 1 ? tool.resource : tier == 2 ? "iron" : "diamond";
+            String resource = tier == 0 ? "wood" : tier == 1 ? "stone" : tier == 2 ? "iron" : "diamond";
             int cost = tool.cost[tier];
             if (colony.s.amount(resource) >= cost) { chosen = tier; break; }
         }
         if (chosen < 0) return current.isEmpty()
                 ? "Нет подходящих материалов для инструмента. Нужны ресурсы и навык " + tool.skill + "."
                 : "Текущий инструмент уже соответствует доступному уровню; для улучшения нужны уровень, навык и материалы.";
-        String resource = chosen <= 1 ? tool.resource : chosen == 2 ? "iron" : "diamond";
+        String resource = chosen == 0 ? "wood" : chosen == 1 ? "stone" : chosen == 2 ? "iron" : "diamond";
         int cost = tool.cost[chosen];
         if (!colony.s.consumeResource(resource, cost)) return "Материалы уже использованы другим заказом; изготовление отменено.";
         ItemStack crafted = tool.tiers[chosen].copy();
@@ -171,6 +171,43 @@ public final class ResidentEquipment {
         body.setItemSlot(EquipmentSlot.MAINHAND, crafted.copy());
         person.props.put("equipment.last_craft", colony.s.year());
         return "Изготовил " + crafted.getHoverName().getString() + " (уровень " + (chosen + 1) + "), потратил " + cost + " " + resource + ".";
+    }
+
+
+    /** Autonomous maintenance: a resident crafts/upgrades a tool from settlement stock when work needs one. */
+    public static void autoMaintain(WFWorker body) {
+        Colony colony = body.colony();
+        Worker worker = body.worker();
+        Character person = SettleMod.residentCharacter(body);
+        if (colony == null || worker == null || person == null || worker.manualFollow || worker.manualOrder) return;
+        if (worker.building <= 0 && !colony.workOrders.containsKey(worker.id)) return;
+        long now = (long) Math.floor(colony.s.time);
+        Object last = person.props.get("equipment.craft_attempt");
+        if (last instanceof Number n && now - n.longValue() < 120) return;
+        person.props.put("equipment.craft_attempt", now);
+        ItemStack before = load(person);
+        String result = craft(body);
+        if (result.startsWith("Изготовил")) worker.status = "самостоятельно " + result.toLowerCase(Locale.ROOT);
+        else if (before.isEmpty()) worker.status = "нужен инструмент: " + result;
+    }
+
+    /** Wear is applied only after the owning work-order confirms a successful world action. */
+    public static void onWork(WFWorker body, Colony colony, String mode) {
+        Character person = SettleMod.residentCharacter(body);
+        Worker worker = body.worker();
+        if (person == null || worker == null) return;
+        ItemStack stack = body.getItemBySlot(EquipmentSlot.MAINHAND);
+        if (!stack.isEmpty() && stack.getMaxDamage() > 0) {
+            stack.hurtAndBreak(1, body, entity -> entity.broadcastBreakEvent(EquipmentSlot.MAINHAND));
+            if (stack.isEmpty()) {
+                person.props.remove(ITEM_KEY);
+                person.props.remove(TIER_KEY);
+                person.props.remove(ROLE_KEY);
+            } else {
+                int tier = person.props.get(TIER_KEY) instanceof Number n ? n.intValue() : 0;
+                save(person, stack, tier, worker.workRole());
+            }
+        }
     }
 
     /** Accept a real player-supplied tool. It must match the resident's current work role. */
