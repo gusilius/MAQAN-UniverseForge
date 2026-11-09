@@ -79,6 +79,8 @@ public final class PlatformShellScreen extends Screen {
     private final Map<String, Screen> providerViews = new LinkedHashMap<>();
     private boolean embeddedViewReady;
     private boolean settingsVisible;
+    private boolean workspaceManagerVisible;
+    private boolean notificationCenterVisible;
     private boolean ambientGrid = true;
     private boolean panelShadows = true;
     private int previewLayer = 0;
@@ -375,6 +377,8 @@ public final class PlatformShellScreen extends Screen {
         drawDockSplitters(g, mouseX, mouseY);
         if (searchVisible) drawSearchOverlay(g, mouseX, mouseY);
         if (contextMenuVisible) drawContextMenu(g, mouseX, mouseY);
+        if (workspaceManagerVisible) drawWorkspaceManager(g, mouseX, mouseY);
+        if (notificationCenterVisible) drawNotificationCenter(g, mouseX, mouseY);
         super.render(g, mouseX, mouseY, partialTick);
     }
 
@@ -473,7 +477,13 @@ public final class PlatformShellScreen extends Screen {
             x += 52;
         }
         g.drawString(font, embeddedView != null && profile == Profile.COSMOS ? "ATLAS" : "WORKSPACE", 46, 13, MUTED, false);
+        g.drawCenteredString(font, "▤", width - 76, 13, workspaceManagerVisible ? CYAN : MUTED);
+        g.drawCenteredString(font, "◷", width - 48, 13, notificationCenterVisible ? CYAN : MUTED);
         g.drawCenteredString(font, "×", width - 18, 13, MUTED);
+        if (mx >= width - 88 && mx < width - 64 && my < 34)
+            g.renderTooltip(font, Component.literal("Workspace profiles"), mx, my);
+        if (mx >= width - 58 && mx < width - 38 && my < 34)
+            g.renderTooltip(font, Component.literal("Notifications and event history"), mx, my);
         if (mx >= width - 30 && mx < width - 6 && my < 34)
             g.renderTooltip(font, Component.literal(activeView() == null ? "Close workspace" : "Close current module view"), mx, my);
         if (mx >= 8 && mx < 30 && my < 34) g.renderTooltip(font, Component.literal("MAQAN workspace"), mx, my);
@@ -494,6 +504,67 @@ public final class PlatformShellScreen extends Screen {
         }
         g.drawCenteredString(font, "⚙", 22, height-25, settingsVisible ? CYAN : MUTED);
         if(mx<44 && my>=height-42) g.renderTooltip(font, Component.literal("Workspace settings"), mx, my);
+    }
+
+    private void drawWorkspaceManager(GuiGraphics g, int mx, int my) {
+        int w = Math.min(360, width - 32), h = Math.min(height - 70, 270);
+        int x = (width - w) / 2, y = Math.max(40, (height - h) / 2);
+        g.fill(0, 35, width, height, 0x99000000);
+        g.fill(x, y, x + w, y + h, SURFACE);
+        g.fill(x, y, x + w, y + 28, SURFACE_ALT);
+        g.fill(x, y + 27, x + w, y + 29, CYAN);
+        g.drawString(font, "WORKSPACE PROFILES", x + 12, y + 10, TEXT, false);
+        g.drawString(font, "×", x + w - 18, y + 10, MUTED, false);
+        g.drawString(font, "ACTIVE: " + activeWorkspaceName, x + 12, y + 39, CYAN, false);
+        List<String> names = workspaceProfiles();
+        int rowY = y + 58;
+        int visible = Math.max(1, Math.min(6, (h - 112) / 22));
+        for (int i = 0; i < Math.min(visible, names.size()); i++) {
+            String name = names.get(i);
+            int top = rowY + i * 22;
+            boolean hover = mx >= x + 8 && mx < x + w - 8 && my >= top && my < top + 20;
+            if (hover) g.fill(x + 8, top, x + w - 8, top + 20, 0x553B9FB5);
+            g.drawString(font, name, x + 16, top + 6, name.equalsIgnoreCase(activeWorkspaceName) ? CYAN : TEXT, false);
+        }
+        int buttonY = y + h - 38;
+        g.fill(x + 10, buttonY, x + 112, buttonY + 25, SURFACE_ALT);
+        g.drawCenteredString(font, "SAVE CURRENT", x + 61, buttonY + 9, TEXT);
+        g.fill(x + 120, buttonY, x + 222, buttonY + 25, SURFACE_ALT);
+        g.drawCenteredString(font, "NEW PROFILE", x + 171, buttonY + 9, TEXT);
+        g.fill(x + w - 112, buttonY, x + w - 10, buttonY + 25, SURFACE_ALT);
+        g.drawCenteredString(font, "DELETE", x + w - 61, buttonY + 9, TEXT);
+        g.drawString(font, "Select a profile to restore its dock layout", x + 12, y + h - 52, MUTED, false);
+    }
+
+    private void drawNotificationCenter(GuiGraphics g, int mx, int my) {
+        int w = Math.min(440, width - 32), h = Math.min(height - 70, 300);
+        int x = width - w - 12, y = 42;
+        g.fill(0, 35, width, height, 0x66000000);
+        g.fill(x, y, x + w, y + h, SURFACE);
+        g.fill(x, y, x + w, y + 28, SURFACE_ALT);
+        g.fill(x, y + 27, x + w, y + 29, CYAN);
+        g.drawString(font, "NOTIFICATIONS / EVENT HISTORY", x + 12, y + 10, TEXT, false);
+        g.drawString(font, "×", x + w - 18, y + 10, MUTED, false);
+        List<WorkspaceRuntime.WorkspaceEvent> events = WorkspaceRuntime.journal(40);
+        int rowY = y + 38;
+        int rows = Math.max(1, (h - 48) / 28);
+        int start = Math.max(0, events.size() - rows);
+        for (int i = start; i < events.size(); i++) {
+            WorkspaceRuntime.WorkspaceEvent event = events.get(i);
+            int top = rowY + (i - start) * 28;
+            int color = switch (event.severity()) {
+                case SUCCESS -> 0xFF62D69C;
+                case WARNING -> 0xFFE5B65C;
+                case ERROR -> 0xFFFF7777;
+                default -> CYAN;
+            };
+            g.fill(x + 10, top + 3, x + 13, top + 22, color);
+            g.drawString(font, trimInspector(event.message(), w - 42), x + 20, top + 3, TEXT, false);
+            String source = event.source() + " · " + event.category()
+                    + (event.worldId().isBlank() ? "" : " · " + event.worldId());
+            g.drawString(font, trimInspector(source, w - 42), x + 20, top + 14, MUTED, false);
+        }
+        if (events.isEmpty()) g.drawString(font, "No events have been published yet", x + 12, rowY + 8, MUTED, false);
     }
 
     private void drawSettings(GuiGraphics g, int mx, int my) {
@@ -751,6 +822,46 @@ public final class PlatformShellScreen extends Screen {
         }
         if (button != 0) return activeView() != null
                 ? activeView().mouseClicked(mx,my,button) : super.mouseClicked(mx,my,button);
+        if (workspaceManagerVisible) {
+            int w = Math.min(360, width - 32), h = Math.min(height - 70, 270);
+            int x = (width - w) / 2, y = Math.max(40, (height - h) / 2);
+            if (mx < x || mx >= x + w || my < y || my >= y + h) { workspaceManagerVisible = false; return true; }
+            if (my < y + 28 && mx >= x + w - 28) { workspaceManagerVisible = false; return true; }
+            int buttonY = y + h - 38;
+            if (my >= buttonY && my < buttonY + 25) {
+                if (mx >= x + 10 && mx < x + 112) {
+                    saveWorkspaceProfile(activeWorkspaceName);
+                } else if (mx >= x + 120 && mx < x + 222) {
+                    List<String> names = workspaceProfiles();
+                    String candidate = "Workspace " + (names.size() + 1);
+                    while (names.stream().anyMatch(n -> n.equalsIgnoreCase(candidate)))
+                        candidate = candidate + " 2";
+                    saveWorkspaceProfile(candidate);
+                } else if (mx >= x + w - 112 && mx < x + w - 10
+                        && !activeWorkspaceName.equalsIgnoreCase("Default")) {
+                    deleteWorkspaceProfile(activeWorkspaceName);
+                }
+                return true;
+            }
+            int rowY = y + 58;
+            int row = (int) ((my - rowY) / 22);
+            List<String> names = workspaceProfiles();
+            if (my >= rowY && row >= 0 && row < Math.min(6, names.size())) {
+                loadWorkspaceProfile(names.get(row));
+                return true;
+            }
+            return true;
+        }
+        if (notificationCenterVisible) {
+            int w = Math.min(440, width - 32), h = Math.min(height - 70, 300);
+            int x = width - w - 12, y = 42;
+            if (mx >= x + w - 28 && mx < x + w && my >= y && my < y + 28) {
+                notificationCenterVisible = false;
+            } else if (mx < x || mx >= x + w || my < y || my >= y + h) {
+                notificationCenterVisible = false;
+            }
+            return true;
+        }
         if (searchVisible) {
             int boxWidth = Math.min(520, width - 80);
             int x = (width - boxWidth) / 2;
@@ -778,6 +889,16 @@ public final class PlatformShellScreen extends Screen {
             if (hit) { resizingSplitterPath = splitter.path(); return true; }
         }
         if (my<34) {
+            if (mx >= width - 88 && mx < width - 64) {
+                workspaceManagerVisible = !workspaceManagerVisible;
+                notificationCenterVisible = false;
+                return true;
+            }
+            if (mx >= width - 58 && mx < width - 38) {
+                notificationCenterVisible = !notificationCenterVisible;
+                workspaceManagerVisible = false;
+                return true;
+            }
             if (mx >= width - 30 && mx < width - 6) {
                 Screen view = activeView();
                 if (view != null) detachProviderView(view);
@@ -1162,6 +1283,8 @@ public final class PlatformShellScreen extends Screen {
             return true;
         }
         if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
+            if (workspaceManagerVisible) { workspaceManagerVisible = false; return true; }
+            if (notificationCenterVisible) { notificationCenterVisible = false; return true; }
             if (settingsVisible) { settingsVisible = false; return true; }
             if (contextMenuVisible) { contextMenuVisible = false; return true; }
             onClose(); return true;
