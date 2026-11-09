@@ -243,7 +243,7 @@ public class PeopleTest {
         CharacterInventory.add(parent,"minecraft:iron_ingot",12);
         CharacterInventory.add(parent,"minecraft:iron_sword",1,"{Damage:7}");
         journal.marry(parent.id,heir.id,30);
-        PopulationSimulation.death(journal,parent.id,"illness",31);
+        PopulationSimulation.die(journal, parent.id, 31, "illness");
         ok(!parent.alive&&CharacterInventory.count(parent,"minecraft:iron_ingot")==0
                         &&CharacterInventory.count(heir,"minecraft:iron_ingot")==12
                         &&CharacterInventory.items(heir).stream().anyMatch(item->item.id().equals("minecraft:iron_sword")
@@ -253,7 +253,7 @@ public class PeopleTest {
         Character solitary = journal.create("Одинокий житель", "", "", "m", 0);
         solitary.props.put("population.location","settlement:oak");
         CharacterInventory.add(solitary,"minecraft:bread",4);
-        PopulationSimulation.death(journal,solitary.id,"natural",32);
+        PopulationSimulation.die(journal, solitary.id, 32, "natural");
         ok(!solitary.alive&&CharacterInventory.count(solitary,"minecraft:bread")==4
                         &&"awaiting_kin_or_home_claim".equals(solitary.props.get("estate.status"))
                         &&"settlement:oak".equals(solitary.props.get("estate.home")),
