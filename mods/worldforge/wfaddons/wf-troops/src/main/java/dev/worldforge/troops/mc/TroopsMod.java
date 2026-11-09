@@ -337,7 +337,7 @@ public class TroopsMod {
             ledger.open(armyAccount, armyOwner, "silver", 0);
 
             String wageReference = "payroll:" + key.realm() + ":" + key.armyId() + ":" + day;
-            if (ledger.hasTransaction(armyAccount, TreasuryLedger.Kind.WAGE, wageReference)) continue;
+            if (ledger.hasDebit(armyAccount, TreasuryLedger.Kind.WAGE, wageReference)) continue;
             double topUp = Math.max(0, costSilver - ledger.balance(armyAccount));
             boolean funded = topUp <= 1e-9 || ledger.transferOnce(
                     realmAccount, armyAccount, topUp, TreasuryLedger.Kind.ARMY_UPKEEP,
@@ -352,8 +352,7 @@ public class TroopsMod {
             List<TroopEntity> soldiers = entry.getValue();
             for (int index : Muster.deserters(soldiers.size(), RNG)) {
                 TroopEntity troop = soldiers.get(index);
-                onDeath(troop);
-                troop.discard();
+                onDesertion(troop);
             }
         }
     }
