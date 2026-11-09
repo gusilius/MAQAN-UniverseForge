@@ -486,6 +486,7 @@ public final class Settlement {
             if (assignedWith(uid, "builder") >= b.def.builders && w.building != uid) throw new OrderException("На стройке уже максимум строителей (" + b.def.builders + ")");
         }
         w.building = uid;
+        w.manualFollow = false;
         w.manualOrder = false;
         w.orderQueue.clear();
         w.status = "";
@@ -495,6 +496,7 @@ public final class Settlement {
         Worker w = worker(workerId);
         if (w == null) throw new OrderException("Нет рабочего " + workerId);
         w.building = 0;
+        w.manualFollow = false;
         w.manualOrder = false;
         w.orderQueue.clear();
         w.status = "свободен";
@@ -515,6 +517,7 @@ public final class Settlement {
             return;
         }
         w.orderQueue.clear();
+        w.manualFollow=false;
         w.building=0;w.manualOrder=true;w.orderX=x;w.orderZ=z;w.status="приказ: движение";
     }
 
