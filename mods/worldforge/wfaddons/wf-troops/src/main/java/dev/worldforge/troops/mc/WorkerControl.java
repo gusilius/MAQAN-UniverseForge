@@ -78,8 +78,11 @@ final class WorkerControl {
         }
         if (accepted == 0) return denied ? "Нельзя отдавать приказы рабочим чужого поселения"
                 : "Выберите подходящих рабочих (универсальные рабочие могут выполнять эту задачу)";
-        return "Участок назначен: " + labels[o.kind()] + " · рабочих: " + accepted
-                + " · радиус: " + o.arg() + " · отображение: " + (overlay == 0 ? "выкл." : overlay == 1 ? "слабое" : "яркое");
+        return o.arg() == -1
+                ? "Видимость назначенных рабочих зон обновлена: " + (overlay == 0 ? "выкл." : overlay == 1 ? "слабая" : "яркая")
+                    + " · рабочих: " + accepted
+                : "Участок назначен: " + labels[o.kind()] + " · рабочих: " + accepted
+                    + " · радиус: " + o.arg() + " · отображение: " + (overlay == 0 ? "выкл." : overlay == 1 ? "слабое" : "яркое");
     }
 
     static String command(ServerPlayer p, OrderPacket o) {
