@@ -60,6 +60,7 @@ public final class CommandMode {
     static final KeyMapping RADIAL_COMMAND = new KeyMapping("key.wf_troops.radial_command", GLFW.GLFW_KEY_LEFT_ALT, "key.categories.wf_troops");
     static boolean firstPersonCommand;
     static boolean active;
+    private static boolean radialSuppressed;
     static final UnitSelection SEL = new UnitSelection();
     static final CameraRig RIG = new CameraRig();
     static double[] vp, invVp;
@@ -89,6 +90,7 @@ public final class CommandMode {
     }
 
     static void send(OrderPacket p) { TroopsMod.NET.sendToServer(p); }
+    static void suppressRadialUntilRelease() { radialSuppressed = true; }
 
     private static boolean down(long window, int key) { return InputConstants.isKeyDown(window, key); }
 
@@ -341,14 +343,15 @@ public final class CommandMode {
             if (e.phase != TickEvent.Phase.END) return;
             Minecraft mc = Minecraft.getInstance();
             if (mc.player == null || mc.level == null) { active = false; firstPersonCommand = false; camEntity = null; return; }
-            boolean radialHeld = down(mc.getWindow().getWindow(), GLFW.GLFW_KEY_LEFT_ALT);
+            boolean radialHeld = RADIAL_COMMAND.isDown();
+            if (!radialHeld) radialSuppressed = false;
             if (mc.screen instanceof RadialCommandScreen radial) {
                 if (!radialHeld) {
                     radial.commit();
                     mc.setScreen(null);
                 }
             } else if (firstPersonCommand && !active && mc.screen == null
-                    && radialHeld && !SEL.selected().isEmpty()) {
+                    && radialHeld && !radialSuppressed && !SEL.selected().isEmpty()) {
                 mc.setScreen(new RadialCommandScreen());
             }
             while (FIRST_PERSON_COMMAND.consumeClick()) {
