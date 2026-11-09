@@ -3,6 +3,7 @@ package dev.worldforge.reputation;
 import dev.worldforge.mod.Json;
 
 import java.util.*;
+import java.util.function.Predicate;
 
 /**
  * Reputation values and reputation knowledge are deliberately separate.
@@ -59,7 +60,7 @@ public final class ReputationStore {
     /** Explicit propagation only. No settlement/polity/world leakage is implicit. */
     public void link(String child, String parent, double factor) {
         if (child == null || parent == null || child.equals(parent)) throw new IllegalArgumentException("invalid reputation link");
-        if (!Double.isFinite(factor) || factor < 0 || factor > 1) throw new IllegalArgumentException("Доля должна быть от 0 до 1");
+        if (!Double.isFinite(factor) || factor < -1 || factor > 1) throw new IllegalArgumentException("Коэффициент должен быть от -1 до 1");
         for (String c = parent; c != null; c = links.containsKey(c) ? links.get(c).parent : null) {
             if (c.equals(child)) throw new IllegalArgumentException("Цикл связей: " + child + " <-> " + parent);
         }
@@ -160,9 +161,10 @@ public final class ReputationStore {
      * no knowledge is broadcast to settlements, rival organizations or the whole world.
      */
     public boolean shareWithinOrganization(String witnessResidentId, String recipientResidentId,
-                                            String player, String organizationId, long sharedAt) {
+                                            String player, String organizationId, long sharedAt, Predicate<String> recipientMembershipCheck) {
         KnownReputation heard = known(witnessResidentId, player, Scope.ORGANIZATION, organizationId);
-        if (heard == null || recipientResidentId == null || recipientResidentId.isBlank()) return false;
+        if (heard == null || recipientResidentId == null || recipientResidentId.isBlank()
+                || recipientMembershipCheck == null || !recipientMembershipCheck.test(recipientResidentId)) return false;
         String key = target(Scope.ORGANIZATION, organizationId);
         Map<String, KnownReputation> recipient = knowledge
                 .computeIfAbsent(recipientResidentId, k -> new TreeMap<>())
