@@ -30,6 +30,8 @@ public final class Colony {
         public int x, y, z, sx, sy, sz, placed;
         /** Blueprint indices placed by the player before the simulated builders reach them. */
         public final Set<Integer> assisted = new LinkedHashSet<>();
+        /** Physical block placement phase after the economic work simulation reaches completion. */
+        public boolean physicalPending, wasPaused;
     }
     /** Persistent, exact work-area order assigned to one resident. Coordinates are world block coordinates. */
     public static final class WorkOrder {
@@ -132,6 +134,7 @@ public final class Colony {
             Map<String, Object> o = new LinkedHashMap<>();
             o.put("uid", e.getKey()); o.put("def", st.def);
             o.put("x", st.x); o.put("y", st.y); o.put("z", st.z); o.put("sx", st.sx); o.put("sy", st.sy); o.put("sz", st.sz); o.put("placed", st.placed); o.put("assisted", new ArrayList<>(st.assisted));
+            o.put("physicalPending", st.physicalPending); o.put("wasPaused", st.wasPaused);
             l.add(o);
         }
         m.put("sites", l);
@@ -190,6 +193,8 @@ public final class Colony {
                 st.x = ((Number) e.get("x")).intValue(); st.y = ((Number) e.get("y")).intValue(); st.z = ((Number) e.get("z")).intValue();
                 st.sx = ((Number) e.get("sx")).intValue(); st.sy = ((Number) e.get("sy")).intValue(); st.sz = ((Number) e.get("sz")).intValue();
                 st.placed = ((Number) e.get("placed")).intValue();
+                st.physicalPending = Boolean.TRUE.equals(e.get("physicalPending"));
+                st.wasPaused = Boolean.TRUE.equals(e.get("wasPaused"));
                 if (e.get("assisted") instanceof List<?> assisted) for (Object index : assisted) if (index instanceof Number n && n.intValue() >= st.placed) st.assisted.add(n.intValue());
                 c.sites.put(uid, st);
             }
