@@ -33,6 +33,11 @@ public final class ArmyHierarchy {
     public Collection<Corps> corps() { return Collections.unmodifiableCollection(corps.values()); }
     public ArmyNode army(int id) { return armies.get(id); }
     public Corps corps(String id) { return corps.get(id); }
+    public Corps corpsForSquad(String squadId) {
+        if (squadId == null) return null;
+        for (Corps value : corps.values()) if (value.squadIds.contains(squadId)) return value;
+        return null;
+    }
 
     public ArmyNode ensureArmy(int strategicId, String name, String owner, String realm) {
         if (strategicId <= 0 || blank(owner)) throw new IllegalArgumentException("army id and owner are required");
