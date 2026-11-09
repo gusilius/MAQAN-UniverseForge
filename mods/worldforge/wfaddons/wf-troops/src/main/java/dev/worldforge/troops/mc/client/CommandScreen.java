@@ -187,6 +187,7 @@ public final class CommandScreen extends Screen {
                 identity=w.characterId();
                 state=w.statusLabel();
                 if(w.assignedBuildingId()>0)state+=" · здание #"+w.assignedBuildingId();
+            }else role="Юнит";
             g.fill(INSPECT_X+3,y,INSPECT_X+INSPECT_W-3,y+INSPECT_ROW-1,
                     (row&1)==0?0x55333344:0x33222230);
             int health=entity instanceof LivingEntity living&&living.getMaxHealth()>0
