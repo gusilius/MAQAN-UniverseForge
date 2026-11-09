@@ -54,7 +54,9 @@ public final class Session {
         StringBuilder out=new StringBuilder();
         for(int i=0;i<s.length();i++){
             char ch=s.charAt(i);int close=ch=='{'?s.indexOf('}',i):-1;
-            if(close>0){String key=s.substring(i+1,close),value=ctx.vars.get(key);out.append(value==null?"{"+key+"}":value);i=close;}
+            if(close>0){String key=s.substring(i+1,close),value=ctx.vars.get(key);
+                if(value==null&&key.startsWith("memory:")){Object remembered=ctx.memory().recall(key.substring(7));value=remembered==null?null:String.valueOf(remembered);}
+                out.append(value==null?"{"+key+"}":value);i=close;}
             else out.append(ch);
         }
         return out.toString();
