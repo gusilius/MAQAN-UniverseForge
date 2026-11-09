@@ -13,7 +13,10 @@ deps = {}
 for d in dirs:
     p = os.path.join(root, d, "build.gradle")
     txt = open(p, encoding="utf-8").read() if os.path.exists(p) else ""
-    deps[d] = {modid[m] for m in re.findall(r"'(wf_\w+)-\*\.jar'", txt) if m in modid and modid[m] != d}
+    # Gradle dependency includes occur in both single- and double-quoted forms.
+    # Accept only known addon mod ids, so unrelated jar patterns cannot enter the graph.
+    referenced = re.findall(r"""['"](wf_[A-Za-z0-9_]+)-\*\.jar['"]""", txt)
+    deps[d] = {modid[m] for m in referenced if m in modid and modid[m] != d}
 order, state, stack = [], {}, []
 
 def visit(d):
