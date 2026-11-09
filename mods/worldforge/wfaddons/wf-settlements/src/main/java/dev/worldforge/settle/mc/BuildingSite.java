@@ -73,8 +73,9 @@ public final class BuildingSite {
             if (site.physicalPending) ensureBuilder(c, b);
             int buildersHere = buildersAtSite(lv, c, b);
             int target = done ? total : (int) Math.floor(total * Math.max(0, Math.min(1, b.progress / b.def.work)));
-            int cap = buildersHere > 0 ? Math.min(PER_CALL, buildersHere * 4) : 0;
+            int cap = buildersHere > 0 ? Math.min(PER_CALL, buildersHere * 4) : site.assisted.size();
             while (site.placed < target && cap-- > 0) {
+                if (buildersHere == 0 && !site.assisted.contains(site.placed)) break;
                 Blueprints.Entry en = plan.blocks().get(site.placed);
                 BlockPos pos = new BlockPos(site.x + en.x(), site.y + en.y(), site.z + en.z());
                 if (!lv.hasChunkAt(pos)) break;                                                       // чанк выгружен - ждём
