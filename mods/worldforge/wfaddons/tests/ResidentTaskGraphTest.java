@@ -21,6 +21,11 @@ public final class ResidentTaskGraphTest {
                 "delivery creates linked haul and storage receipts");
         check(graph.consume(ResidentTaskGraph.Stage.PROCESSED, 9, 33, "wood", 2, 3) == 2,
                 "production consumes stored goods through the task graph");
+        ResidentTaskGraph.Receipt produced = graph.produce(9, 33, "planks", 2, 3.5);
+        check(produced.stage() == ResidentTaskGraph.Stage.PRODUCED && produced.parentReceiptId() > 0,
+                "processed output links to the inputs consumed by its production building");
+        check(graph.deliver(9, 22, "planks", 1, 4) == 1,
+                "processed goods follow the same haul and storage pipeline");
         String saved = graph.toJson();
         ResidentTaskGraph restored = new ResidentTaskGraph();
         restored.fromJson(saved);
