@@ -193,9 +193,9 @@ public class SettleTest {
         m.tick(40);
         ok(f.state == Building.State.DONE, "один строитель достроил ферму (25 работы)");
         Worker w2 = m.workers.get(1);
-        ok(throwsOrder(() -> m.assign(w2.id, f.uid)), "laborer не нужен на ферме");
-        m.setProfession(w2.id, "farmer");
         m.assign(w2.id, f.uid);
+        ok(w2.profession.equals("laborer") && w2.workRole().equals("farmer"),
+                "универсальный рабочий может выполнять фермерскую работу без смены профессии");
         double f0 = m.amount("food");
         m.tick(100);
         ok(m.amount("food") > f0 - 4, "ферма работает с одним фермером медленнее, но идёт");
