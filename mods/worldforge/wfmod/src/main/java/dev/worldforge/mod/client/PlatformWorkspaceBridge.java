@@ -44,6 +44,39 @@ public final class PlatformWorkspaceBridge {
         return mc.level == null ? "" : mc.level.dimension().location().toString();
     }
 
+    /** Register an action that is shown in MAQAN's context menu for this provider's selection. */
+    public static void registerAction(String id, String label, String providerId, Runnable action) {
+        if (action == null) return;
+        try {
+            Class<?> runtime = Class.forName("dev.maqan.platform.client.WorkspaceRuntime");
+            Class<?> actionType = Class.forName("dev.maqan.platform.client.WorkspaceRuntime$Action");
+            java.util.function.Predicate<Object> visible = selection -> true;
+            java.util.function.Consumer<Object> execute = selection -> action.run();
+            Object descriptor = actionType.getConstructor(String.class, String.class, String.class,
+                    java.util.function.Predicate.class, java.util.function.Consumer.class)
+                    .newInstance(id, label, providerId, visible, execute);
+            runtime.getMethod("registerAction", actionType).invoke(null, descriptor);
+        } catch (ReflectiveOperationException | LinkageError ignored) {
+            // Optional host not installed; provider's own controls remain available.
+        }
+    }
+
+    /** Route a selected global-search result back to the provider's entity focus/navigation logic. */
+    public static void registerEntityOpener(String providerId, java.util.function.Consumer<String> opener) {
+        if (opener == null) return;
+        try {
+            Class<?> runtime = Class.forName("dev.maqan.platform.client.WorkspaceRuntime");
+            java.util.function.Consumer<Object> callback = entry -> {
+                try { opener.accept((String) entry.getClass().getMethod("id").invoke(entry)); }
+                catch (ReflectiveOperationException ignored) { }
+            };
+            runtime.getMethod("registerEntityOpener", String.class, java.util.function.Consumer.class)
+                    .invoke(null, providerId, callback);
+        } catch (ReflectiveOperationException | LinkageError ignored) {
+            // Optional host not installed.
+        }
+    }
+
     /** Detach a hosted view without closing the user's entire MAQAN workspace. */
     public static boolean closeEmbedded(Screen view) {
         try {
