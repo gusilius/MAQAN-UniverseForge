@@ -106,6 +106,20 @@ public class ReputationTest {
         ok(!scoped.shareWithinOrganization("resident_a", "outsider", "p", "guild", 122, id -> false)
                         && scoped.known("outsider", "p", ReputationStore.Scope.ORGANIZATION, "guild") == null,
                 "organization gossip is rejected for recipients not confirmed as members");
+        scoped.witness("resident_witness", "p", ReputationStore.Scope.SETTLEMENT,
+                "village_c", -25, 130, "caught_stealing");
+        ok(scoped.get("p", ReputationStore.Scope.SETTLEMENT, "village_c") == -25
+                        && scoped.known("resident_witness", "p", ReputationStore.Scope.SETTLEMENT, "village_c").value == -25
+                        && scoped.known("resident_a", "p", ReputationStore.Scope.SETTLEMENT, "village_c") == null,
+                "a witnessed event changes the real scoped value and informs only its witness");
+        ReputationStore capped = new ReputationStore();
+        capped.link(ReputationStore.Scope.SETTLEMENT, "outpost",
+                ReputationStore.Scope.POLITY, "crown", 0.5);
+        capped.set("p", ReputationStore.Scope.SETTLEMENT, "outpost", 95, "initial");
+        capped.add("p", ReputationStore.Scope.SETTLEMENT, "outpost", 20, "capped event");
+        ok(capped.get("p", ReputationStore.Scope.SETTLEMENT, "outpost") == 100
+                        && capped.get("p", ReputationStore.Scope.POLITY, "crown") == 2,
+                "propagation uses the actual applied delta after value clamping");
         Dialogue knownDialogue = Dialogue.parse("""
             {"id":"known_rep","start":"a","nodes":{
               "a":{"text":"Что я о вас знаю?","choices":[
