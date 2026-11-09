@@ -143,6 +143,10 @@ public class RealmsMod {
             if (ticks % 200 == 0) {
                 int days = WorldForgeApi.clock().pull("wf_realms");
                 for (TitleData.Realm r : realms()) {
+                    Object taxableBase = r.props.get("taxable_base");
+                    if (days > 0 && taxableBase instanceof Number base && base.doubleValue() > 0) {
+                        POLITICS.collectTaxes(REALMS, r.id, base.doubleValue(), days);
+                    }
                     if (days > 0 && !r.props.containsKey("player")) REALMS.autoDevelop(r.id, r.id.hashCode() + WorldForgeApi.clock().dayNumber());
                     else REALMS.tick(r.id);
                 }
