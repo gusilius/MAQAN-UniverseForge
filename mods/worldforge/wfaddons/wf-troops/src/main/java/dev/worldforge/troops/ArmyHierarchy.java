@@ -100,6 +100,11 @@ public final class ArmyHierarchy {
         return true;
     }
 
+    public void pruneSquads(Squads squads) {
+        if (squads == null) return;
+        for (Corps value : corps.values()) value.squadIds.removeIf(id -> squads.get(id) == null);
+    }
+
     public int commandArmy(int armyId, Squads squads, Squads.Order order, boolean queue) {
         ArmyNode army = armies.get(armyId);
         if (army == null || squads == null || order == null) return 0;
