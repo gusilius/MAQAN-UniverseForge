@@ -1,6 +1,7 @@
 package dev.worldforge.tests;
 
 import dev.worldforge.settle.*;
+import dev.worldforge.mod.Json;
 
 import java.nio.file.*;
 import java.util.*;
@@ -9,6 +10,26 @@ public class SettleTest {
     static int fails;
 
     static void ok(boolean c, String what) { System.out.println((c ? "ok   " : "FAIL ") + what); if (!c) fails++; }
+    static String firstDiff(Object a, Object b, String path) {
+        if (Objects.equals(a, b)) return "";
+        if (a instanceof Map<?, ?> am && b instanceof Map<?, ?> bm) {
+            Set<String> keys = new TreeSet<>();
+            am.keySet().forEach(k -> keys.add(String.valueOf(k)));
+            bm.keySet().forEach(k -> keys.add(String.valueOf(k)));
+            for (String key : keys) {
+                String diff = firstDiff(am.get(key), bm.get(key), path + "." + key);
+                if (!diff.isEmpty()) return diff;
+            }
+        }
+        if (a instanceof List<?> al && b instanceof List<?> bl) {
+            if (al.size() != bl.size()) return path + ".size: " + al.size() + " != " + bl.size();
+            for (int i = 0; i < al.size(); i++) {
+                String diff = firstDiff(al.get(i), bl.get(i), path + "[" + i + "]");
+                if (!diff.isEmpty()) return diff;
+            }
+        }
+        return path + ": " + a + " != " + b;
+    }
 
     static Defs defs() throws Exception {
         Defs d = new Defs();
@@ -197,8 +218,8 @@ public class SettleTest {
         ok(w2.profession.equals("laborer") && w2.workRole().equals("farmer"),
                 "универсальный рабочий может выполнять фермерскую работу без смены профессии");
         double f0 = m.amount("food");
-        m.tick(100);
-        ok(m.amount("food") > f0 - 4, "ферма работает с одним фермером медленнее, но идёт");
+        m.tick(140);
+        ok(m.amount("food") > f0, "ферма работает с одним фермером медленнее, но идёт");
 
         // рост и голод
         Settlement g = fresh(d, 2);
@@ -310,8 +331,12 @@ public class SettleTest {
         for (Settlement t : new Settlement[]{x, y}) { t.place("house", 0, 0); t.place("lumber_camp", 10, 0); t.place("farm", 20, 0); t.tick(500); }
         ok(x.toJson().replace(x.id, "<settlement-id>").equals(y.toJson().replace(y.id, "<settlement-id>")), "две одинаковые симуляции совпадают независимо от идентификатора поселения");
         if (!x.workers.isEmpty()) x.workers.get(0).person = "c-person-roundtrip";
-        Settlement r = Settlement.fromJson(x.toJson(), d);
-        ok(r.toJson().equals(x.toJson()), "сохранение и загрузка без потерь, включая ссылку на личность");
+        String beforeReload = x.toJson();
+        Settlement r = Settlement.fromJson(beforeReload, d);
+        String afterReload = r.toJson();
+        boolean roundTrip = afterReload.equals(beforeReload);
+        if (!roundTrip) System.out.println("ROUNDTRIP DIFF " + firstDiff(Json.parse(beforeReload), Json.parse(afterReload), "$"));
+        ok(roundTrip, "сохранение и загрузка без потерь, включая ссылку на личность");
         ok(!r.workers.isEmpty() && r.workers.get(0).person.equals("c-person-roundtrip"),
                 "ссылка рабочего на CharacterRegistry сохраняется как стабильный foreign key");
         x.tick(100); r.tick(100);
