@@ -41,6 +41,7 @@ public class WFWorker extends PathfinderMob {
     private static final EntityDataAccessor<Integer> SYNC_WORKER_ID = SynchedEntityData.defineId(WFWorker.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<Integer> SYNC_BUILDING = SynchedEntityData.defineId(WFWorker.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<String> SYNC_STATUS = SynchedEntityData.defineId(WFWorker.class, EntityDataSerializers.STRING);
+    private static final EntityDataAccessor<String> SYNC_WORK_AREA = SynchedEntityData.defineId(WFWorker.class, EntityDataSerializers.STRING);
     public String colonyId = "";
     public int workerId;
     private int age;
@@ -73,6 +74,7 @@ public class WFWorker extends PathfinderMob {
         entityData.define(SYNC_WORKER_ID, 0);
         entityData.define(SYNC_BUILDING,0);
         entityData.define(SYNC_STATUS,"");
+        entityData.define(SYNC_WORK_AREA,"");
     }
 
     public String syncedColonyId() { return entityData.get(SYNC_COLONY); }
@@ -82,6 +84,7 @@ public class WFWorker extends PathfinderMob {
     public int syncedWorkerId() { return entityData.get(SYNC_WORKER_ID); }
     public int assignedBuildingId() { return entityData.get(SYNC_BUILDING); }
     public String statusLabel() { return entityData.get(SYNC_STATUS); }
+    public String workAreaLabel() { return entityData.get(SYNC_WORK_AREA); }
 
     public Colony colony() { return SettleMod.colony(colonyId); }
 
@@ -102,12 +105,16 @@ public class WFWorker extends PathfinderMob {
             entityData.set(SYNC_PROFESSION, "");
             entityData.set(SYNC_BUILDING,0);
             entityData.set(SYNC_STATUS,"");
+            entityData.set(SYNC_WORK_AREA,"");
             return;
         }
         entityData.set(SYNC_PERSON, w.person == null ? "" : w.person);
         entityData.set(SYNC_PROFESSION, w.profession == null ? "" : w.profession);
         entityData.set(SYNC_BUILDING,Math.max(0,w.building));
         entityData.set(SYNC_STATUS,w.status==null?"":w.status);
+        Colony.WorkOrder area = c.workOrders.get(w.workerId);
+        entityData.set(SYNC_WORK_AREA, area == null ? "" : area.mode + "|" + area.x + "|" + area.z + "|"
+                + area.radius + "|" + area.level + "|" + area.overlay);
         setCustomName(Component.literal(w.name + " (" + c.s.defs.professionName(w.profession) + ")"));
         setCustomNameVisible(true);
     }
@@ -136,7 +143,8 @@ public class WFWorker extends PathfinderMob {
     /** Идёт к зданию рабочего (стройка или место работы), там машет рукой, пока здание строится или работает; без здания бродит у центра. */
     static final class WorkGoal extends Goal {
         private final WFWorker w;
-        private int repath, swing, idleTimer;
+        private int repath, swing, idleTimer, workScan;
+        private BlockPos cachedWorkTarget;
         private BlockPos idle;
 
         WorkGoal(WFWorker w) {
@@ -159,7 +167,17 @@ public class WFWorker extends PathfinderMob {
             BlockPos target;
             boolean working = false;
             Colony.WorkOrder area = c.workOrders.get(wk.id);
-            BlockPos resourceTarget = area == null ? null : findWorkTarget(w, area);
+            BlockPos resourceTarget = null;
+            if (area != null) {
+                if (--workScan <= 0 || cachedWorkTarget == null
+                        || !w.level().hasChunkAt(cachedWorkTarget)
+                        || !isWorkTarget(w.level().getBlockState(cachedWorkTarget), area.mode)
+                        || ("level".equals(area.mode) && cachedWorkTarget.getY() <= area.level)) {
+                    cachedWorkTarget = findWorkTarget(w, area);
+                    workScan = 30;
+                }
+                resourceTarget = cachedWorkTarget;
+            }
             if (area != null) {
                 if (resourceTarget != null) {
                     target = resourceTarget;
@@ -213,6 +231,8 @@ public class WFWorker extends PathfinderMob {
                 w.getNavigation().stop();
                 if (area != null && resourceTarget != null) {
                     if (performWork(w, c, area, resourceTarget)) {
+                        cachedWorkTarget = null;
+                        workScan = 0;
                         wk.status = switch (area.mode) {
                             case "wood" -> "добывает древесину";
                             case "stone" -> "добывает камень";
@@ -250,7 +270,7 @@ public class WFWorker extends PathfinderMob {
                 for (int y = fromY; y <= toY; y++) {
                     BlockPos pos = new BlockPos(x, y, z);
                     BlockState state = worker.level().getBlockState(pos);
-                    if (!isWorkTarget(state, order.mode)) continue;
+                    if (!isWorkTarget(state, order.mode) || ("level".equals(order.mode) && y <= order.level)) continue;
                     double d = worker.distanceToSqr(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
                     if (d < bestDistance) { bestDistance = d; best = pos; }
                 }
@@ -281,7 +301,7 @@ public class WFWorker extends PathfinderMob {
             BlockState state = level.getBlockState(pos);
             if (!isWorkTarget(state, order.mode)) return false;
             if ("clear".equals(order.mode)) {
-                if (level.destroyBlock(pos, false, worker)) { colony.s.receiveResource("wood", 0); return true; }
+                if (level.destroyBlock(pos, false, worker)) return true;
                 return false;
             }
             if ("level".equals(order.mode)) {
