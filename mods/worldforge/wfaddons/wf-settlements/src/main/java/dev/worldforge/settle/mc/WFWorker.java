@@ -3,6 +3,9 @@ package dev.worldforge.settle.mc;
 import dev.worldforge.settle.Building;
 import dev.worldforge.settle.Worker;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.syncher.EntityDataAccessor;
+import net.minecraft.network.syncher.EntityDataSerializers;
+import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.network.chat.Component;
 import net.minecraft.tags.DamageTypeTags;
 import net.minecraft.world.InteractionHand;
@@ -28,6 +31,11 @@ import java.util.UUID;
  * Не сохраняется в мир: тела создаёт и убирает {@link Bodies}.
  */
 public class WFWorker extends PathfinderMob {
+    private static final EntityDataAccessor<String> SYNC_COLONY = SynchedEntityData.defineId(WFWorker.class, EntityDataSerializers.STRING);
+    private static final EntityDataAccessor<String> SYNC_OWNER = SynchedEntityData.defineId(WFWorker.class, EntityDataSerializers.STRING);
+    private static final EntityDataAccessor<String> SYNC_PERSON = SynchedEntityData.defineId(WFWorker.class, EntityDataSerializers.STRING);
+    private static final EntityDataAccessor<String> SYNC_PROFESSION = SynchedEntityData.defineId(WFWorker.class, EntityDataSerializers.STRING);
+    private static final EntityDataAccessor<Integer> SYNC_WORKER_ID = SynchedEntityData.defineId(WFWorker.class, EntityDataSerializers.INT);
     public String colonyId = "";
     public int workerId;
     private int age;
@@ -50,6 +58,22 @@ public class WFWorker extends PathfinderMob {
         goalSelector.addGoal(3, new LookAtPlayerGoal(this, Player.class, 6.0f));
     }
 
+    @Override
+    protected void defineSynchedData() {
+        super.defineSynchedData();
+        entityData.define(SYNC_COLONY, "");
+        entityData.define(SYNC_OWNER, "");
+        entityData.define(SYNC_PERSON, "");
+        entityData.define(SYNC_PROFESSION, "");
+        entityData.define(SYNC_WORKER_ID, 0);
+    }
+
+    public String syncedColonyId() { return entityData.get(SYNC_COLONY); }
+    public String ownerId() { return entityData.get(SYNC_OWNER); }
+    public String characterId() { return entityData.get(SYNC_PERSON); }
+    public String professionId() { return entityData.get(SYNC_PROFESSION); }
+    public int syncedWorkerId() { return entityData.get(SYNC_WORKER_ID); }
+
     public Colony colony() { return SettleMod.colony(colonyId); }
 
     public Worker worker() {
@@ -59,8 +83,18 @@ public class WFWorker extends PathfinderMob {
 
     public void refreshName() {
         Colony c = colony();
-        Worker w = worker();
-        if (w == null) return;
+        if (c == null) return;
+        entityData.set(SYNC_COLONY, colonyId == null ? "" : colonyId);
+        entityData.set(SYNC_OWNER, c.owner == null ? "" : c.owner);
+        entityData.set(SYNC_WORKER_ID, Math.max(0, workerId));
+        Worker w = c.s.worker(workerId);
+        if (w == null) {
+            entityData.set(SYNC_PERSON, "");
+            entityData.set(SYNC_PROFESSION, "");
+            return;
+        }
+        entityData.set(SYNC_PERSON, w.person == null ? "" : w.person);
+        entityData.set(SYNC_PROFESSION, w.profession == null ? "" : w.profession);
         setCustomName(Component.literal(w.name + " (" + c.s.defs.professionName(w.profession) + ")"));
         setCustomNameVisible(true);
     }
