@@ -42,6 +42,7 @@ public final class ResidentDialogueScreen extends AbstractContainerScreen<Reside
         addRenderableWidget(action("Лесоруб", "work_lumberjack", left + w + gap, top + 90, w, h));
         addRenderableWidget(action("Добыча", "work_miner", left + (w + gap) * 2, top + 90, w, h));
         addRenderableWidget(action("Перевозка", "work_hauler", left + (w + gap) * 3, top + 90, w, h));
+        addRenderableWidget(action("Фермер", "work_farmer", left, top + 120, w, h));
     }
 
     private Button action(String label, String command, int x, int y, int width, int height) {
