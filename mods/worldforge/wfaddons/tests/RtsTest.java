@@ -48,8 +48,11 @@ public class RtsTest {
         int nb = sel.selectBuilders(s, false);
         ok(nb == s.workers.stream().filter(w -> w.workRole().equals("builder")).count(), "все строители по текущей работе: " + nb);
         ok(sel.selectAll(s) == s.workers.size(), "выбрать всех");
+        long lumberjackJobs = s.workers.stream().filter(w -> w.workRole().equals("lumberjack")).count();
         sel.selectProfession(s, "lumberjack", false);
-        ok(sel.size() == 3 && sel.workers(s).stream().allMatch(w -> w.workRole().equals("lumberjack")), "выбрать профессию по текущей работе");
+        ok(lumberjackJobs > 0 && sel.size() == lumberjackJobs
+                        && sel.workers(s).stream().allMatch(w -> w.workRole().equals("lumberjack")),
+                "выбрать всех работников по текущей работе");
         sel.clickWorker(s, 1, false, false, false);
         ok(sel.size() == 1, "обычный щелчок: один");
         sel.clickWorker(s, 1, false, true, false);
@@ -189,16 +192,18 @@ public class RtsTest {
         for (int i = 0; i < 5; i++) g.addWorker(null);
         g.auto = false;
         Building farm = g.place("farm", 20, 0);
+        g.tick(1);
         Selection q = new Selection();
         q.set(List.of(1, 2));
         r = Orders.rightClick(q, g, Target.building(farm.uid, 20, 0), null);
-        ok(r.isEmpty() && !r.message.isEmpty(), "ПКМ: рабочие-работники на стройку не годятся (" + r.message + ")");
-        g.setProfession(1, "builder"); g.setProfession(2, "builder");
-        r = Orders.rightClick(q, g, Target.building(farm.uid, 20, 0), null);
-        ok(r.ok && r.commands.equals(List.of("wfsettle assign 1 " + farm.uid, "wfsettle assign 2 " + farm.uid)), "ПКМ: строители на стройку -> assign: " + r.commands);
+        ok(r.ok && r.commands.equals(List.of("wfsettle assign 1 " + farm.uid, "wfsettle assign 2 " + farm.uid)),
+                "ПКМ: универсальные рабочие получают приказ строить без переучивания: " + r.commands);
         apply(g, null, r);
+        ok(g.worker(1).profession.equals("laborer") && g.worker(1).workRole().equals("builder"),
+                "приказ строить сохраняет постоянную профессию");
         g.tick(100);
         ok(farm.state == Building.State.DONE, "ферма достроена");
+        g.setProfession(2, "builder");
         g.setProfession(3, "farmer");
         q.set(List.of(3));
         r = Orders.rightClick(q, g, Target.building(farm.uid, 20, 0), null);
