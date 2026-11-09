@@ -131,9 +131,12 @@ public final class BuildingSite {
 
     private static void demolish(ServerLevel lv, Colony.Site site) {
         Defs.Building d = SettleMod.DEFS == null ? null : SettleMod.DEFS.buildings.get(site.def);
-        if (d == null || site.placed == 0) return;
+        if (d == null || site.placed == 0 && site.assisted.isEmpty()) return;
         Blueprints.Plan plan = Blueprints.get(lv, d);
-        for (int i = Math.min(site.placed, plan.blocks().size()) - 1; i >= 0; i--) {
+        java.util.Set<Integer> placed = new java.util.HashSet<>(site.assisted);
+        for (int i = 0; i < Math.min(site.placed, plan.blocks().size()); i++) placed.add(i);
+        for (int i : placed) {
+            if (i < 0 || i >= plan.blocks().size()) continue;
             Blueprints.Entry en = plan.blocks().get(i);
             if (en.y() == 0) continue;                                                                // пол остаётся фундаментом
             BlockPos pos = new BlockPos(site.x + en.x(), site.y + en.y(), site.z + en.z());
