@@ -24,7 +24,7 @@ Settlement stock remains a compatibility mirror for existing UI and simulation A
 - Caravan routes transfer the commodity between settlement accounts and transfer silver between treasury accounts. The price spread is divided between seller proceeds and a recorded market fee. Routes can configure an ad-valorem customs duty (0–50%) paid by the importer to a destination realm treasury.
 - CityTax remittance and grants transfer silver atomically between settlement and realm accounts. A configured settlement crown share is remitted as a paired TAX transfer; grants are paired GRANT transfers. The legacy TreasuryApi facade presents realm balances in gold while using the same silver-denominated account as Statecraft.
 - Statecraft realm taxes and vassal tribute are booked to realm accounts. Realms with a numeric taxable_base property are assessed automatically on the shared world calendar; government expenditure is constrained by available funds.
-- Realm budgets can fund dedicated army accounts; army upkeep can be charged from those accounts.
+- Realm budgets can fund dedicated army accounts; actual troop payroll is now grouped by realm and army/garrison, funded from the realm treasury into the dedicated army account, and debited as a WAGE entry. The daily funding and payroll references are idempotent and recover from a stale troop/Statecraft snapshot. Unit upkeep is authored in gold and converted to the canonical silver base unit at the 5:1 display rate.
 - Credit limits, loan origination, interest accrual, repayment and bankruptcy state are available through the same ledger.
 
 ## Price formation and logistics
@@ -40,10 +40,11 @@ Settlement markets retain their current local base-price and demand-pressure mod
 
 ## Stage IX remaining before acceptance
 
-- Automatic realm assessment currently requires a configured taxable_base property. A derived tax base from population, land, trade and economic activity is not yet implemented.
-- Army funding/upkeep APIs exist, but the actual troop roster and soldier payroll/food/equipment upkeep adapter is not yet connected.
+- Automatic realm assessment currently requires a configured taxable_base property. A derived tax base from population, land, trade and economic activity is not yet implemented. Tax and vassal tribute postings are idempotent across interrupted saves; settlement crown remittances reconcile their paid total from the canonical journal.
+- Troop roster payroll is connected to realm and dedicated army accounts. Individual soldier food/equipment consumption and the OperationalSupply ration store are not yet backed by resource accounts; field supply remains a separate abstract logistics state.
 - Warehouse nodes and each logistics leg need independent subaccounts/transfer entries so every intra-settlement warehouse movement is auditable, not only the aggregate settlement stock.
 - Configured route customs duties are supported, but border-derived tariff schedules, border controls, travel time, route risk, cargo losses and transport costs still need to affect route settlement.
 - Global cross-settlement price discovery and state budget dashboards are not yet unified across every UI workspace.
 - Long-running journal retention, archival/compaction and crash-recovery replay tests are required before production-scale world saves.
 - CI and Forge runtime tests must pass on the final head; no in-game acceptance is claimed by this contract.
+- Latest financial hardening changes add journal-backed idempotency and troop payroll integration. A new CI run for the final PR head has not yet been observed; compilation and tests remain unverified until that run completes.
