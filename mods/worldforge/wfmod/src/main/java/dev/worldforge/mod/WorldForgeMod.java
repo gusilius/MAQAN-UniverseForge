@@ -95,7 +95,35 @@ public class WorldForgeMod {
         });
     }
 
-    /** Canonical world-wide money ledger shared by settlements, realms, trade and military addons. */\n    public static TreasuryLedger treasury() { return treasury; }\n\n    private static Path treasuryFile(MinecraftServer server) {\n        return server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT).resolve("worldforge").resolve("wf_treasury.json");\n    }\n\n    private static void loadTreasury(MinecraftServer server) {\n        Path file = treasuryFile(server);\n        try {\n            treasury = Files.isRegularFile(file) ? TreasuryLedger.fromJson(Files.readString(file)) : new TreasuryLedger();\n            LOGGER.info("WorldForge treasury: loaded {} accounts and {} journal entries", treasury.accounts().size(), treasury.journal().size());\n        } catch (Exception ex) {\n            LOGGER.error("WorldForge treasury load failed; refusing to overwrite the existing ledger: {}", ex.toString());\n            treasury = new TreasuryLedger();\n        }\n    }\n\n    private static void saveTreasury(MinecraftServer server) {\n        Path file = treasuryFile(server);\n        try {\n            Files.createDirectories(file.getParent());\n            Path temp = file.resolveSibling(file.getFileName() + ".tmp");\n            Files.writeString(temp, treasury.toJson());\n            try { Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE); }\n            catch (java.nio.file.AtomicMoveNotSupportedException ignored) { Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING); }\n        } catch (IOException ex) { LOGGER.error("WorldForge treasury save failed: {}", ex.toString()); }\n    }\n\n    public static Map<String, MapData> loadedMaps() {
+    /** Canonical world-wide money ledger shared by settlements, realms, trade and military addons. */\n    public static TreasuryLedger treasury() { return treasury; }\n\n    private static Path treasuryFile(MinecraftServer server) {\n        return server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT).resolve("worldforge").resolve("wf_treasury.json");\n    }\n\n    private static void loadTreasury(MinecraftServer server) {
+        treasuryLoadFailed = false;
+        Path file = treasuryFile(server);
+        try {
+            treasury = Files.isRegularFile(file) ? TreasuryLedger.fromJson(Files.readString(file)) : new TreasuryLedger();
+            LOGGER.info("WorldForge treasury: loaded {} accounts and {} journal entries", treasury.accounts().size(), treasury.journal().size());
+        } catch (Exception ex) {
+            LOGGER.error("WorldForge treasury load failed; refusing to overwrite the existing ledger: {}", ex.toString());
+            treasuryLoadFailed = true;
+            treasury = new TreasuryLedger();
+        }
+    }
+
+    private static void saveTreasury(MinecraftServer server) {
+        if (treasuryLoadFailed) {
+            LOGGER.error("WorldForge treasury save skipped because the previous load failed; preserving the original file");
+            return;
+        }
+        Path file = treasuryFile(server);
+        try {
+            Files.createDirectories(file.getParent());
+            Path temp = file.resolveSibling(file.getFileName() + ".tmp");
+            Files.writeString(temp, treasury.toJson());
+            try { Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE); }
+            catch (java.nio.file.AtomicMoveNotSupportedException ignored) { Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING); }
+        } catch (IOException ex) { LOGGER.error("WorldForge treasury save failed: {}", ex.toString()); }
+    }
+
+    public static Map<String, MapData> loadedMaps() {
         return MAPS;
     }
 
