@@ -861,8 +861,12 @@ public final class Settlement {
                 int staff = assigned(from.uid).size();
                 if (staff > bestStaff || staff == bestStaff && pick != null && w.id > pick.id) { pick = w; bestStaff = staff; }
             }
-            if (pick == null) for (Worker w : workers) if (w.building != 0 && !w.profession.equals("builder")) { pick = w; break; }
-            if (pick != null) { pick.profession = "builder"; pick.building = site.uid; pick.status = ""; }
+            if (pick != null) {
+                pick.assignedProfession = "builder";
+                pick.lifeAction = "";
+                pick.building = site.uid;
+                pick.status = "";
+            }
         }
     }
 
