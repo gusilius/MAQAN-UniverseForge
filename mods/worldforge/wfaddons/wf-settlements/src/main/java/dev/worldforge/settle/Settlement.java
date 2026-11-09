@@ -18,6 +18,7 @@ public final class Settlement {
 
     public static final double BASE_CAP = 100, EAT = 0.02, GROW_EVERY = 45, STARVE_EVERY = 30, MAX_STEP = 2, MAX_TICK = 86400;
     public static final int BASE_HOUSING = 4, LOG_MAX = 60;
+    public static final double LOCAL_BUFFER_CAP = 50, HAUL_RATE = 0.5;
     /** Скорость рабочего (блоков в секунду), точка появления новых жителей, пороги настроения. */
     public static final double WORKER_SPEED = 2.5, SPAWN_X = -16, SPAWN_Z = 0, LEAVE_EVERY = 20;
     /** Торговля и казна: наценка рынка, налог с жителя в минуту (на уровне «обычный»), множители уровней налога. */
@@ -662,6 +663,7 @@ public final class Settlement {
         if (auto) { autoAssign(); draftBuilders(); }
         build(dt);
         produce(dt);
+        haul(dt);
         raidStep(dt);
         move(dt);
     }
@@ -760,6 +762,53 @@ public final class Settlement {
                 w.status = "";
             }
         }
+        autoAssignHaulers();
+    }
+
+    /** Assigns one compatible porter/general worker to each active production buffer. */
+    private void autoAssignHaulers() {
+        for (Building source : byPriority(b -> b.state == Building.State.DONE
+                && (b.def.produces() || !b.localStock.isEmpty()))) {
+            if (assignedWith(source.uid, "hauler") > 0) continue;
+            Worker pick = null;
+            for (Worker worker : workers) {
+                if (worker.building != 0 || worker.manualOrder || worker.manualFollow
+                        || !worker.lifeAction.isBlank() || !worker.canPerform("hauler")) continue;
+                if (pick == null || worker.id < pick.id) pick = worker;
+            }
+            if (pick == null) continue;
+            pick.building = source.uid;
+            pick.assignedProfession = "hauler";
+            pick.status = "переносит ресурсы";
+        }
+    }
+
+    /** Executes the haul leg: local production buffers become canonical stock only after a worker delivery. */
+    private void haul(double dt) {
+        for (Worker worker : workers) {
+            if (worker.building == 0 || !worker.lifeAction.isBlank() || !worker.workRole().equals("hauler")) continue;
+            Building source = building(worker.building);
+            if (source == null || source.state != Building.State.DONE) continue;
+            worker.haulProgress = Math.min(100, worker.haulProgress + dt * HAUL_RATE * worker.productivity("hauler"));
+            int capacity = (int) Math.floor(worker.haulProgress + 1e-9);
+            if (capacity <= 0) {
+                worker.status = source.localStock.isEmpty() ? "ждёт груз" : "собирает груз";
+                continue;
+            }
+            for (String resource : new ArrayList<>(source.localStock.keySet())) {
+                if (capacity <= 0) break;
+                double available = source.localStock.getOrDefault(resource, 0.0);
+                if (available <= 1e-9) { source.localStock.remove(resource); continue; }
+                double accepted = receiveResource(resource, Math.min(capacity, available));
+                if (accepted <= 0) break;
+                double remaining = available - accepted;
+                if (remaining <= 1e-9) source.localStock.remove(resource);
+                else source.localStock.put(resource, remaining);
+                worker.haulProgress -= accepted;
+                capacity -= (int) Math.floor(accepted + 1e-9);
+                worker.status = "доставляет: " + resourceName(resource);
+            }
+        }
     }
 
     /** Каждой стройке нужен хотя бы один строитель: если свободных нет, снимаем работника с самого укомплектованного здания. */
@@ -812,10 +861,12 @@ public final class Settlement {
             while (b.cycleTime >= b.def.cycle) {
                 if (!canPay(b.def.in)) { b.status = "нет сырья"; b.cycleTime = b.def.cycle; break; }
                 boolean room = true;
-                for (Map.Entry<String, Integer> o : b.def.out.entrySet()) if (amount(o.getKey()) + o.getValue() > capacity(o.getKey()) + 1e-9) room = false;
-                if (!room) { b.status = "склад полон"; b.cycleTime = b.def.cycle; break; }
+                for (Map.Entry<String, Integer> o : b.def.out.entrySet())
+                    if (b.localStock.getOrDefault(o.getKey(), 0.0) + o.getValue() > LOCAL_BUFFER_CAP + 1e-9) room = false;
+                if (!room) { b.status = "цеховой буфер полон: нужен носильщик"; b.cycleTime = b.def.cycle; break; }
                 if (!pay(b.def.in, "production-input", "building:" + b.uid)) { b.status = "нет сырья"; b.cycleTime = b.def.cycle; break; }
-                for (Map.Entry<String, Integer> o : b.def.out.entrySet()) flow.record(time, o.getKey(), produceResource(o.getKey(), o.getValue()), true);
+                for (Map.Entry<String, Integer> o : b.def.out.entrySet())
+                    b.localStock.merge(o.getKey(), (double) o.getValue(), Double::sum);
                 b.cycleTime -= b.def.cycle;
                 b.status = "работает";
             }
@@ -1226,6 +1277,7 @@ public final class Settlement {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("uid", b.uid); m.put("def", b.def.id); m.put("x", b.x); m.put("z", b.z); m.put("state", b.state.name());
             m.put("progress", b.progress); m.put("cycle", b.cycleTime); m.put("priority", b.priority); m.put("status", b.status); m.put("paused", b.paused);
+            m.put("local_stock", new LinkedHashMap<>(b.localStock));
             bs.add(m);
         }
         root.put("buildings", bs);
@@ -1234,7 +1286,7 @@ public final class Settlement {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", w.id); m.put("name", w.name); m.put("profession", w.profession); m.put("assigned_profession", w.assignedProfession); m.put("person", w.person); m.put("building", w.building); m.put("status", w.status); m.put("x", w.x); m.put("z", w.z);
             m.put("life_action", w.lifeAction); m.put("life_target_x", w.lifeTargetX); m.put("life_target_z", w.lifeTargetZ);
-            m.put("life_action_until", w.lifeActionUntil);
+            m.put("life_action_until", w.lifeActionUntil); m.put("haul_progress", w.haulProgress);
             m.put("manual_order", w.manualOrder); m.put("manual_follow", w.manualFollow); m.put("manual_follow_owner", w.manualFollowOwner); m.put("order_x", w.orderX); m.put("order_z", w.orderZ);
             List<Object> queuedOrders=new ArrayList<>();
             for(Worker.ManualOrder order:w.orderQueue)queuedOrders.add(Map.of("x",order.x(),"z",order.z()));
@@ -1298,6 +1350,12 @@ public final class Settlement {
             b.state = Building.State.valueOf((String) m.get("state"));
             b.progress = ((Number) m.get("progress")).doubleValue(); b.cycleTime = ((Number) m.get("cycle")).doubleValue();
             b.priority = ((Number) m.get("priority")).intValue(); b.status = (String) m.get("status"); b.paused = Boolean.TRUE.equals(m.get("paused"));
+            if (m.get("local_stock") instanceof Map<?, ?> local)
+                for (Map.Entry<?, ?> entry : local.entrySet())
+                    if (entry.getKey() instanceof String resource && entry.getValue() instanceof Number quantity
+                            && Double.isFinite(quantity.doubleValue()) && quantity.doubleValue() > 0
+                            && quantity.doubleValue() <= LOCAL_BUFFER_CAP)
+                        b.localStock.put(resource, quantity.doubleValue());
             s.buildings.add(b);
         }
         for (Object o : (List<Object>) root.get("workers")) {
@@ -1312,6 +1370,7 @@ public final class Settlement {
             if (m.get("life_target_x") instanceof Number lx) w.lifeTargetX = lx.doubleValue();
             if (m.get("life_target_z") instanceof Number lz) w.lifeTargetZ = lz.doubleValue();
             if (m.get("life_action_until") instanceof Number lu && Double.isFinite(lu.doubleValue())) w.lifeActionUntil = lu.doubleValue();
+            if (m.get("haul_progress") instanceof Number hp && Double.isFinite(hp.doubleValue())) w.haulProgress = Math.max(0, Math.min(100, hp.doubleValue()));
             if (!Set.of("", "sleeping", "fleeing", "socializing").contains(w.lifeAction)) w.lifeAction = "";
             w.manualOrder = Boolean.TRUE.equals(m.get("manual_order")); w.manualFollow = Boolean.TRUE.equals(m.get("manual_follow")); w.manualFollowOwner = m.get("manual_follow_owner") instanceof String fo ? fo : "";
             if (m.get("order_x") instanceof Number ox) w.orderX = ox.doubleValue();
