@@ -279,7 +279,7 @@ public final class ResidentInteraction {
             player.sendSystemMessage(Component.literal("§eСначала примите поручение жителя."));
             return;
         }
-        if (!colony.s.defs.resources.containsKey(q.resourceId())) {
+        if (!colony.s.defs.resourceNames.containsKey(q.resourceId())) {
             player.sendSystemMessage(Component.literal("§cРесурс этого поручения отсутствует в экономике поселения; запись сохранена."));
             return;
         }
