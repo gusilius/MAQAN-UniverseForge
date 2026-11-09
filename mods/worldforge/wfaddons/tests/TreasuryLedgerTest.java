@@ -50,6 +50,24 @@ public final class TreasuryLedgerTest {
                 ==false && close(ledger.account("merchant:caravan").debt,0),
                 "credit limit prevents an overdraw and leaves the account unchanged");
 
+        ledger.open("realm:debt-test","realm:debt-test","silver",0);
+        ledger.setCreditLimit("realm:debt-test",50);
+        ok(ledger.borrow("realm:debt-test",40,30,"sovereign-loan")
+                        && close(ledger.balance("realm:debt-test"),40)
+                        && close(ledger.account("realm:debt-test").debt,40),
+                "loan origination creates matched cash and liability");
+        ok(ledger.withdraw("realm:debt-test",30,TreasuryLedger.Kind.UPKEEP,"public-works","roads",31,"road program")
+                        && close(ledger.balance("realm:debt-test"),10),
+                "public spending consumes loan cash while preserving debt principal");
+        ok(ledger.accrueInterest("realm:debt-test",0.5,32,"interest-cycle")
+                        && close(ledger.account("realm:debt-test").debt,60)
+                        && ledger.account("realm:debt-test").bankrupt,
+                "interest can trigger a credit-limit breach and bankruptcy state");
+        ok(ledger.repayDebt("realm:debt-test",10,33,"partial-repayment")
+                        && close(ledger.account("realm:debt-test").debt,50)
+                        && !ledger.account("realm:debt-test").bankrupt,
+                "repayment restores solvency at the credit limit");
+
         TreasuryLedger restored=TreasuryLedger.fromJson(ledger.toJson());
         ok(close(restored.balance("realm:kingdom"),875)&&close(restored.balance("settlement:capital"),225)
                 && restored.journal().size()==ledger.journal().size(),
