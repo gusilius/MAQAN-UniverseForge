@@ -173,12 +173,14 @@ public class SettleMod {
                 buildingFeature.put("territory_id", provinceFeatureId);
                 buildingFeature.put("race_id", raceId);
                 buildingFeature.put("culture_id", cultureId);
-                int halfX = Math.max(1, footprintWidth) / 2;
-                int halfZ = Math.max(1, footprintDepth) / 2;
+                int minBuildingX=site!=null?site.x:x-footprintWidth/2;
+                int minBuildingZ=site!=null?site.z:z-footprintDepth/2;
+                int maxBuildingX=minBuildingX+Math.max(1,footprintWidth);
+                int maxBuildingZ=minBuildingZ+Math.max(1,footprintDepth);
                 List<Object> footprint = List.of(
-                        atlasVertex(x-halfX, by, z-halfZ), atlasVertex(x+halfX, by, z-halfZ),
-                        atlasVertex(x+halfX, by, z+halfZ), atlasVertex(x-halfX, by, z+halfZ),
-                        atlasVertex(x-halfX, by, z-halfZ));
+                        atlasVertex(minBuildingX,by,minBuildingZ),atlasVertex(maxBuildingX,by,minBuildingZ),
+                        atlasVertex(maxBuildingX,by,maxBuildingZ),atlasVertex(minBuildingX,by,maxBuildingZ),
+                        atlasVertex(minBuildingX,by,minBuildingZ));
                 buildingFeature.put("rings", List.of(footprint));
                 features.add(buildingFeature);
             }
