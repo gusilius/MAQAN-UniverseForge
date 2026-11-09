@@ -169,6 +169,16 @@ public class PeopleTest {
             @Override public void lifecycle(Character person, CharacterRegistry.LifecycleEvent event) { lifecycleCallbacks[1]++; }
         });
         Character journalPerson = journal.create("Житель журнала", "", "", "m", 1);
+        CharacterDevelopment.setMilitaryMorale(journalPerson, 15);
+        journalPerson.props.put("wf_unit_kind", "soldier");
+        int baseMartial = CharacterStats.value(journalPerson, "martial");
+        ok(CharacterDevelopment.militaryMorale(journalPerson) == 15
+                        && CharacterDevelopment.effectiveAttribute(journalPerson, "martial", 0) == Math.max(0, baseMartial - 3),
+                "soldier morale is persisted on canonical Character and affects effective martial ability");
+        CharacterDevelopment.setMilitaryMorale(journalPerson, 95);
+        ok(CharacterDevelopment.effectiveAttribute(journalPerson, "martial", 0) == Math.min(20, baseMartial + 1),
+                "high soldier morale positively affects the same character's effective martial ability");
+
         journal.appoint(journalPerson.id, "guard", "settlement:test", 10);
         journal.dismiss(journalPerson.id, "guard", "settlement:test", 11);
         journal.kill(journalPerson.id);
