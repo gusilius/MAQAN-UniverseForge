@@ -1,6 +1,6 @@
 {
   "id": "farmer",
-  "name": "Фермер",
-  "category": "worker",
+  "name": "Земледелец",
+  "category": "specialist",
   "required_skills": {}
 }
