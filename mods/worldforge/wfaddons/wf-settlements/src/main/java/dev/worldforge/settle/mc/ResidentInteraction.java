@@ -1,0 +1,281 @@
+package dev.worldforge.settle.mc;
+
+import com.mojang.brigadier.arguments.StringArgumentType;
+import dev.worldforge.mod.Json;
+import dev.worldforge.people.Character;
+import dev.worldforge.settle.ResidentQuest;
+import dev.worldforge.settle.Worker;
+import net.minecraft.commands.Commands;
+import net.minecraft.network.chat.ClickEvent;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.Style;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.Items;
+import net.minecraftforge.event.RegisterCommandsEvent;
+import net.minecraftforge.event.entity.player.PlayerInteractEvent;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.phys.AABB;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.UUID;
+
+/** First-person resident conversation, role-aware actions and Character-persisted resident contracts. */
+public final class ResidentInteraction {
+    private static final String QUEST_KEY = "wf_resident_quest";
+
+    @SubscribeEvent
+    public void interact(PlayerInteractEvent.EntityInteract event) {
+        if (!(event.getTarget() instanceof WFWorker worker) || event.getLevel().isClientSide
+                || !(event.getEntity() instanceof ServerPlayer player)
+                || event.getHand() != InteractionHand.MAIN_HAND) return;
+        Colony colony = SettleMod.colony(worker.colonyId);
+        if (!validApproach(player, worker, colony)) return;
+        event.setCanceled(true);
+        open(player, worker);
+    }
+
+    public static void register(RegisterCommandsEvent event) {
+        event.getDispatcher().register(Commands.literal("wfresident")
+                .then(Commands.argument("action", StringArgumentType.word())
+                        .then(Commands.argument("resident", StringArgumentType.word())
+                                .executes(ctx -> execute(ctx.getSource().getPlayerOrException(),
+                                        StringArgumentType.getString(ctx, "action"),
+                                        StringArgumentType.getString(ctx, "resident"))))));
+    }
+
+    private static boolean validApproach(ServerPlayer player, WFWorker worker, Colony colony) {
+        if (colony == null || worker.worker() == null || worker.level() != player.level()) return false;
+        if (!player.serverLevel().dimension().location().toString().equals(colony.dim)) return false;
+        return player.distanceToSqr(worker) <= 36.0;
+    }
+
+    private static Character person(WFWorker worker) {
+        return SettleMod.residentCharacter(worker);
+    }
+
+    private static void open(ServerPlayer player, WFWorker worker) {
+        Colony colony = SettleMod.colony(worker.colonyId);
+        Character person = person(worker);
+        Worker data = worker.worker();
+        if (colony == null || person == null || data == null || !person.alive) {
+            player.sendSystemMessage(Component.literal("Житель сейчас не может поговорить с вами."));
+            return;
+        }
+        player.sendSystemMessage(Component.literal("§6§l" + person.name + " §8· §7"
+                + colony.s.defs.professionName(data.profession)));
+        player.sendSystemMessage(Component.literal("§f" + greeting(person, data, colony)));
+        player.sendSystemMessage(action("Поговорить", "talk", worker));
+        player.sendSystemMessage(action("Попросить следовать за мной", "follow", worker));
+        player.sendSystemMessage(action("Остановиться здесь", "stop", worker));
+        player.sendSystemMessage(action("Вернуться к работе", "work", worker));
+        player.sendSystemMessage(action("Состояние и отношения", "status", worker));
+        ResidentQuest quest = quest(person);
+        if (quest == null || quest.status() == ResidentQuest.Status.ABANDONED) {
+            player.sendSystemMessage(action("Попросить поручение", "quest", worker));
+        } else {
+            player.sendSystemMessage(Component.literal("§eПоручение: " + quest.objective()
+                    + " · " + quest.progress() + "/" + quest.required() + " · " + quest.status()));
+            if (quest.status() == ResidentQuest.Status.OFFERED)
+                player.sendSystemMessage(action("Принять поручение", "accept", worker));
+            if (quest.status() == ResidentQuest.Status.ACCEPTED)
+                player.sendSystemMessage(action("Передать хлеб", "deliver", worker));
+            if (quest.status() == ResidentQuest.Status.COMPLETED)
+                player.sendSystemMessage(Component.literal("§aПоручение выполнено."));
+        }
+        player.sendSystemMessage(Component.literal("§8Вы можете продолжать играть от первого лица или управлять жителями через RTS."));
+    }
+
+    private static String greeting(Character person, Worker worker, Colony colony) {
+        String status = worker.status == null ? "" : worker.status;
+        if (status.contains("укрывается")) return "Сейчас опасно. Я стараюсь укрыть жителей.";
+        if (status.contains("спит")) return "Я отдыхал. Хорошо, что вы заглянули.";
+        if (status.contains("общается")) return "Мы обсуждали новости поселения.";
+        if (worker.profession.equals("guard") || worker.profession.equals("soldier"))
+            return "Я охраняю " + colony.s.name + ". Что прикажете?";
+        if (worker.profession.equals("builder")) return "Стройка требует материалов и рабочих рук.";
+        return "Рад вас видеть. У нас сейчас " + colony.s.seasonName().toLowerCase()
+                + ", а поселению нужны еда, безопасность и работа.";
+    }
+
+    private static Component action(String label, String action, WFWorker worker) {
+        String command = "/wfresident " + action + " " + worker.getUUID();
+        return Component.literal("  › " + label).withStyle(Style.EMPTY
+                .withColor(net.minecraft.ChatFormatting.GOLD)
+                .withUnderlined(true)
+                .withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, command)));
+    }
+
+    private static int execute(ServerPlayer player, String action, String entityId) {
+        UUID id;
+        try { id = UUID.fromString(entityId); }
+        catch (IllegalArgumentException ex) {
+            player.sendSystemMessage(Component.literal("Некорректный ID жителя."));
+            return 0;
+        }
+        Entity entity = player.serverLevel().getEntity(id);
+        if (!(entity instanceof WFWorker worker)) {
+            player.sendSystemMessage(Component.literal("Житель больше не находится рядом. Откройте диалог повторно."));
+            return 0;
+        }
+        Colony colony = SettleMod.colony(worker.colonyId);
+        if (!validApproach(player, worker, colony)) {
+            player.sendSystemMessage(Component.literal("Подойдите к жителю ближе, в том же измерении."));
+            return 0;
+        }
+        Character person = person(worker);
+        Worker data = worker.worker();
+        if (person == null || !person.alive || data == null) {
+            player.sendSystemMessage(Component.literal("Связь жителя с реестром персонажей повреждена; действие отменено."));
+            return 0;
+        }
+        boolean ruler = WorkerControlAccess.mayControl(player, colony);
+        switch (action) {
+            case "talk" -> player.sendSystemMessage(Component.literal("§f" + greeting(person, data, colony)
+                    + " §7(Отношение: " + relationship(person, player) + ")"));
+            case "status" -> {
+                player.sendSystemMessage(Component.literal("§6" + person.name + " §7· " + data.profession
+                        + " · " + data.status + " · поселение " + colony.s.name));
+                player.sendSystemMessage(Component.literal("§7Семья: " + family(person)
+                        + " · возраст: " + Math.max(0, dev.worldforge.people.PeopleMod.YEAR - person.birthYear) + " лет"));
+            }
+            case "follow" -> {
+                if (!ruler) { deny(player); return 0; }
+                data.manualFollow = true;
+                data.manualOrder = false;
+                data.building = 0;
+                data.orderQueue.clear();
+                data.status = "следует за правителем";
+                player.sendSystemMessage(Component.literal("§a" + person.name + " следует за вами."));
+            }
+            case "stop" -> {
+                if (!ruler) { deny(player); return 0; }
+                colony.s.holdAt(data.id, data.x, data.z);
+                data.manualFollow = false;
+                data.status = "удерживает позицию";
+                player.sendSystemMessage(Component.literal("§e" + person.name + " остановился."));
+            }
+            case "work" -> {
+                if (!ruler) { deny(player); return 0; }
+                data.manualFollow = false;
+                int assigned = assignCompatibleBuilding(colony, data);
+                player.sendSystemMessage(Component.literal(assigned > 0
+                        ? "§a" + person.name + " назначен на работу в здание #" + assigned
+                        : "§eПодходящего свободного рабочего места для профессии " + data.profession + " нет."));
+            }
+            case "quest" -> {
+                if (quest(person) != null && quest(person).status() != ResidentQuest.Status.ABANDONED) {
+                    player.sendSystemMessage(Component.literal("У этого жителя уже есть поручение."));
+                    return 0;
+                }
+                ResidentQuest next = new ResidentQuest("bread_supply_" + person.id,
+                        "Принести 3 хлеба в поселение", 3, colony.s.year());
+                person.props.put(QUEST_KEY, next.toMap());
+                player.sendSystemMessage(Component.literal("§e" + person.name + ": В поселении не хватает хлеба. Принесите три буханки."));
+                player.sendSystemMessage(action("Принять поручение", "accept", worker));
+            }
+            case "accept" -> {
+                ResidentQuest q = quest(person);
+                if (q == null || !q.accept()) {
+                    player.sendSystemMessage(Component.literal("Это поручение уже нельзя принять."));
+                    return 0;
+                }
+                saveQuest(person, q);
+                player.sendSystemMessage(Component.literal("§aПоручение принято: принести 3 хлеба. Вернитесь ко мне с хлебом."));
+            }
+            case "deliver" -> deliver(player, colony, person);
+            default -> {
+                player.sendSystemMessage(Component.literal("Неизвестная команда жителя."));
+                return 0;
+            }
+        }
+        return 1;
+    }
+
+    private static int assignCompatibleBuilding(Colony colony, Worker worker) {
+        for (var building : colony.s.buildings) {
+            if (building.state != dev.worldforge.settle.Building.State.DONE
+                    || building.def.jobs.getOrDefault(worker.profession, 0) <= 0) continue;
+            try {
+                colony.s.assign(worker.id, building.uid);
+                return building.uid;
+            } catch (RuntimeException ignored) { /* try next compatible job slot */ }
+        }
+        return 0;
+    }
+
+    private static void deliver(ServerPlayer player, Colony colony, Character person) {
+        ResidentQuest q = quest(person);
+        if (q == null || q.status() != ResidentQuest.Status.ACCEPTED) {
+            player.sendSystemMessage(Component.literal("§eСначала примите поручение жителя."));
+            return;
+        }
+        int available = player.getInventory().countItem(Items.BREAD);
+        int needed = q.required() - q.progress();
+        int offered = Math.min(available, needed);
+        if (offered <= 0) {
+            player.sendSystemMessage(Component.literal("§eУ вас нет хлеба для передачи."));
+            return;
+        }
+        double accepted = colony.s.receiveResource("food", offered);
+        int delivered = Math.min(offered, (int) Math.floor(accepted + 1e-9));
+        if (delivered <= 0) {
+            player.sendSystemMessage(Component.literal("§cСклад поселения не может принять хлеб."));
+            return;
+        }
+        player.getInventory().removeItem(Items.BREAD, delivered);
+        boolean completed = q.addProgress(delivered, colony.s.year());
+        saveQuest(person, q);
+        if (completed) {
+            colony.s.add("silver", 2.0);
+            player.sendSystemMessage(Component.literal("§aПоручение выполнено! Поселение получило хлеб, вы получили 2 серебра в казну."));
+        } else {
+            player.sendSystemMessage(Component.literal("§aПередано хлеба: " + delivered + ". Осталось: "
+                    + (q.required() - q.progress()) + "."));
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static ResidentQuest quest(Character person) {
+        Object raw = person.props.get(QUEST_KEY);
+        if (!(raw instanceof Map<?, ?> map)) return null;
+        try { return ResidentQuest.fromMap(map); }
+        catch (RuntimeException ex) {
+            person.props.remove(QUEST_KEY);
+            return null;
+        }
+    }
+
+    private static void saveQuest(Character person, ResidentQuest quest) {
+        person.props.put(QUEST_KEY, new LinkedHashMap<>(quest.toMap()));
+    }
+
+    private static String relationship(Character person, ServerPlayer player) {
+        Object raw = person.props.get("social.relationships");
+        if (raw instanceof Map<?, ?> relationships) {
+            Object score = relationships.get(player.getUUID().toString());
+            if (score instanceof Number n) return Integer.toString(Math.max(-100, Math.min(100, n.intValue())));
+        }
+        return "неизвестно";
+    }
+
+    private static String family(Character person) {
+        int members = person.children.size() + (person.spouse == null || person.spouse.isBlank() ? 0 : 1);
+        return members == 0 ? "не указана" : members + " близких связей";
+    }
+
+    private static void deny(ServerPlayer player) {
+        player.sendSystemMessage(Component.literal("§cУправлять работой этого жителя может только правитель поселения."));
+    }
+
+    private static final class WorkerControlAccess {
+        static boolean mayControl(ServerPlayer player, Colony colony) {
+            return player.hasPermissions(2) || player.server.isSingleplayerOwner(player.getGameProfile())
+                    || (colony != null && player.getUUID().toString().equals(colony.owner));
+        }
+    }
+}
