@@ -74,11 +74,11 @@ public final class ResidentInteraction {
         int age = Math.max(0, PeopleMod.YEAR - person.birthYear);
         net.minecraftforge.network.NetworkHooks.openScreen(player,
                 new net.minecraft.world.SimpleMenuProvider((windowId, inventory, viewer) ->
-                        new ResidentDialogueMenu(windowId, inventory, person.id, person.name, profession,
+                        new ResidentDialogueMenu(windowId, inventory, worker.getUUID().toString(), person.name, profession,
                                 status, residentProfile(person), relationship(person, player), questText, age),
                         Component.literal("Диалог · " + person.name)),
                 buffer -> {
-                    buffer.writeUtf(person.id, 128);
+                    buffer.writeUtf(worker.getUUID().toString(), 128);
                     buffer.writeUtf(person.name, 128);
                     buffer.writeUtf(profession, 128);
                     buffer.writeUtf(status, 256);
