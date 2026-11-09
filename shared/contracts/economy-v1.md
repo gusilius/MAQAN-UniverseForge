@@ -41,7 +41,7 @@ Settlement markets retain their current local base-price and demand-pressure mod
 ## Stage IX remaining before acceptance
 
 - Automatic realm assessment currently requires a configured taxable_base property. A derived tax base from population, land, trade and economic activity is not yet implemented. Tax and vassal tribute postings are idempotent across interrupted saves; settlement crown remittances reconcile their paid total from the canonical journal.
-- Troop roster payroll is connected to realm and dedicated army accounts. Individual soldier food/equipment consumption and the OperationalSupply ration store are not yet backed by resource accounts; field supply remains a separate abstract logistics state.
+- Troop roster payroll is connected to realm and dedicated army accounts. Failure to pay now triggers desertion rather than recording a false combat death; a deserter is demobilized into the nearest same-dimension settlement when available, retaining the same Character ID. Individual soldier food/equipment consumption and the OperationalSupply ration store are not yet backed by resource accounts; field supply remains a separate abstract logistics state.
 - Warehouse nodes and each logistics leg need independent subaccounts/transfer entries so every intra-settlement warehouse movement is auditable, not only the aggregate settlement stock.
 - Configured route customs duties are supported, but border-derived tariff schedules, border controls, travel time, route risk, cargo losses and transport costs still need to affect route settlement.
 - Global cross-settlement price discovery and state budget dashboards are not yet unified across every UI workspace.
