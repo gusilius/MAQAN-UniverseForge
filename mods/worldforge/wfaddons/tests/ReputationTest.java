@@ -106,6 +106,20 @@ public class ReputationTest {
         ok(!scoped.shareWithinOrganization("resident_a", "outsider", "p", "guild", 122, id -> false)
                         && scoped.known("outsider", "p", ReputationStore.Scope.ORGANIZATION, "guild") == null,
                 "organization gossip is rejected for recipients not confirmed as members");
+        Dialogue knownDialogue = Dialogue.parse("""
+            {"id":"known_rep","start":"a","nodes":{
+              "a":{"text":"Что я о вас знаю?","choices":[
+                {"text":"Я слышал о ваших преступлениях.","next":"known","if":[{"if":"known_rep_at_most","scope":"SETTLEMENT","scope_id":"village_a","value":-50}]},
+                {"text":"Я вас знаю.","next":"known","if":[{"if":"rep_known","scope":"SETTLEMENT","scope_id":"village_a"}]}]},
+              "known":{"text":"Я помню."}}}
+            """);
+        Ctx unknownSpeaker = new Ctx(null).var("player_id", "p").var("npc_id", "resident_b")
+                .service(ReputationStore.class, scoped);
+        Ctx informedSpeaker = new Ctx(null).var("player_id", "p").var("npc_id", "resident_a")
+                .service(ReputationStore.class, scoped);
+        ok(new Session(knownDialogue, unknownSpeaker).view().choices.isEmpty()
+                        && new Session(knownDialogue, informedSpeaker).view().choices.size() == 2,
+                "dialogue branches react to what this NPC knows, not the global reputation database");
         String scopedJson = scoped.toJson();
         ReputationStore scopedReload = new ReputationStore();
         scopedReload.fromJson(scopedJson);
