@@ -100,7 +100,12 @@ public final class Settlement {
                 String lost = "";
                 for (String r : new String[]{Defs.SILVER, "food", "wood", "planks"}) {
                     double take = Math.floor(amount(r) * k);
-                    if (take > 0) { stock.put(r, amount(r) - take); lost += (lost.isEmpty() ? "" : ", ") + (int) take + " " + defs.resourceNames.getOrDefault(r, r); }
+                    if (take > 0) {
+                        if (Defs.SILVER.equals(r)) debitSilver(take, TreasuryLedger.Kind.WRITE_OFF, "raid-loss", r);
+                        else stock.put(r, amount(r) - take);
+                        flow.record(time, r, take, false);
+                        lost += (lost.isEmpty() ? "" : ", ") + (int) take + " " + defs.resourceNames.getOrDefault(r, r);
+                    }
                 }
                 int dead = (int) Math.min(workers.size() - 1, Math.round((raidStrength - def) / 12.0));
                 for (int i = 0; i < dead && workers.size() > 1; i++) removeWorker(workers.get(workers.size() - 1), "death:raid");
@@ -769,7 +774,11 @@ public final class Settlement {
         int n = workers.size();
         for (var e : defs.comfort.entrySet()) {
             double c = Math.min(amount(e.getKey()), e.getValue().rate * n * dt);
-            if (c > 0) { stock.put(e.getKey(), amount(e.getKey()) - c); flow.record(time, e.getKey(), c, false); }
+            if (c > 0) {
+                if (Defs.SILVER.equals(e.getKey())) debitSilver(c, TreasuryLedger.Kind.WITHDRAWAL, "consumption", "comfort-goods");
+                else stock.put(e.getKey(), amount(e.getKey()) - c);
+                flow.record(time, e.getKey(), c, false);
+            }
         }
     }
 
