@@ -109,6 +109,23 @@ public class SettleTest {
         s.tick(120);
         ok(s.amount("wood") > w0, "дерево добывается");
 
+        Settlement bufferTest = fresh(d, 3);
+        Building bufferCamp = bufferTest.place("lumber_camp", 10, 0);
+        bufferTest.tick(60);
+        double storedBeforeHaul = bufferTest.amount("wood");
+        bufferTest.tick(120);
+        double localWood = bufferCamp.localStock.getOrDefault("wood", 0.0);
+        ok(localWood > 0 && bufferTest.amount("wood") == storedBeforeHaul,
+                "добытое дерево остаётся в буфере лесопилки, пока нет носильщика");
+        Settlement bufferRestored = Settlement.fromJson(bufferTest.toJson(), d);
+        ok(bufferRestored.building(bufferCamp.uid).localStock.getOrDefault("wood", 0.0) == localWood,
+                "локальный склад производства сохраняется после перезапуска");
+        bufferTest.addWorker("Носильщик");
+        bufferTest.tick(5);
+        ok(bufferTest.amount("wood") > storedBeforeHaul
+                        && bufferTest.building(bufferCamp.uid).localStock.getOrDefault("wood", 0.0) < localWood,
+                "назначенный общий рабочий доставляет древесину из локального буфера в общий склад");
+
         // зависимости и лимиты
         ok(throwsOrder(() -> s.place("granary", 30, 30)), "амбар требует лесопилку");
         ok(throwsOrder(() -> s.place("house", 1, 1)), "нельзя строить поверх другого здания");
