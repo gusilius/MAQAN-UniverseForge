@@ -4,6 +4,7 @@ import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.PopulationSimulation;
 import dev.worldforge.people.LifeSimulation;
+import dev.worldforge.people.CharacterDevelopment;
 import dev.worldforge.people.ProfessionDefs;
 import dev.worldforge.progress.Progress;
 import dev.worldforge.progress.ProgressDefs;
@@ -27,6 +28,25 @@ public final class PopulationSimulationTest {
             @Override public void lifecycle(Character c, CharacterRegistry.LifecycleEvent event) { lifecycle.add(event); }
         });
         Character smith = registry.create("Aldric", "House Forge", "north", "m", 280);
+        CharacterDevelopment.setRace(smith, "elf_forest");
+        CharacterDevelopment.setClass(smith, "ranger");
+        CharacterDevelopment.setRarity(smith, CharacterDevelopment.Rarity.RARE);
+        CharacterDevelopment.setLevel(smith, 12);
+        CharacterDevelopment.setMood(smith, CharacterDevelopment.Mood.INSPIRED, 100, 30, "won_a_tournament");
+        int calmLearning = CharacterStats.value(smith, "learning");
+        ok(CharacterDevelopment.race(smith).equals("elf_forest")
+                        && CharacterDevelopment.characterClass(smith).equals("ranger")
+                        && CharacterDevelopment.rarity(smith) == CharacterDevelopment.Rarity.RARE
+                        && CharacterDevelopment.level(smith) == 12,
+                "race, class, rarity and level are independent facets of one Character");
+        ok(CharacterDevelopment.effectiveAttribute(smith, "learning", 110) == Math.min(20, calmLearning + 1)
+                        && CharacterDevelopment.mood(smith, 131) == CharacterDevelopment.Mood.NEUTRAL,
+                "temporary mood modifies effective attributes and expires on the world clock");
+        ok(CharacterDevelopment.learnAbility(smith, "forest_sense")
+                        && !CharacterDevelopment.learnAbility(smith, "forest_sense")
+                        && CharacterDevelopment.abilities(smith).contains("forest_sense")
+                        && CharacterDevelopment.forgetAbility(smith, "forest_sense"),
+                "ability acquisition is idempotent and persists on the same Character");
         String stableId = smith.id;
         ok(lifecycle.size() == 1 && lifecycle.get(0).kind() == CharacterRegistry.LifecycleKind.BORN,
                 "birth emits one canonical lifecycle event");
