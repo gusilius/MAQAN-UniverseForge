@@ -100,6 +100,11 @@ public final class ArmyHierarchy {
         return true;
     }
 
+    public void unassignSquad(String squadId) {
+        if (squadId == null) return;
+        for (Corps value : corps.values()) value.squadIds.remove(squadId);
+    }
+
     public void pruneSquads(Squads squads) {
         if (squads == null) return;
         for (Corps value : corps.values()) value.squadIds.removeIf(id -> squads.get(id) == null);
