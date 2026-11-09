@@ -2,7 +2,6 @@ package dev.maqan.platform.client;
 
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.Font;
-import net.minecraft.network.chat.Component;
 
 /** Small shared drawing primitives for Platform, Atlas and WorldForge screens. */
 public final class WorkspaceUi {
@@ -16,13 +15,13 @@ public final class WorkspaceUi {
         graphics.fill(x, y + WorkspaceTheme.PANEL_HEADER_HEIGHT - 1,
                 x + width, y + WorkspaceTheme.PANEL_HEADER_HEIGHT,
                 WorkspaceTheme.BORDER);
-        graphics.drawString(font, Component.literal(title == null ? "" : title),
+        graphics.drawString(font, title == null ? "" : title,
                 x + 10, y + 8, WorkspaceTheme.TEXT, false);
     }
 
     public static void section(GuiGraphics graphics, int x, int y, int width,
                                String title, Font font) {
-        graphics.drawString(font, Component.literal(title == null ? "" : title.toUpperCase(java.util.Locale.ROOT)),
+        graphics.drawString(font, title == null ? "" : title.toUpperCase(java.util.Locale.ROOT),
                 x, y, WorkspaceTheme.ACCENT, false);
         graphics.fill(x, y + 11, x + Math.max(0, width), y + 12, WorkspaceTheme.BORDER_SUBTLE);
     }
