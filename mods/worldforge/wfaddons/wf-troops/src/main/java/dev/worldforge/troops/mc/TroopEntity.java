@@ -211,6 +211,15 @@ public class TroopEntity extends PathfinderMob {
     public boolean removeWhenFarAway(double d) { return false; }
 
     @Override
+    protected void actuallyHurt(DamageSource source,float amount) {
+        super.actuallyHurt(source,amount);
+        if(!level().isClientSide&&isAlive()&&amount>=1.5f){
+            int severity=amount>=8.0f?3:amount>=4.0f?2:1;
+            TroopsMod.recordInjury(this,severity,source.getMsgId());
+        }
+    }
+
+    @Override
     public void die(DamageSource src) {
         if (!level().isClientSide) TroopsMod.onDeath(this);
         super.die(src);
