@@ -415,6 +415,21 @@ public final class Settlement {
             value += w.productivity(profession);
         return value;
     }
+    private String availableRole(Worker worker, Building building, String requestedRole) {
+        if (requestedRole == null || requestedRole.isBlank()) return availableRole(worker, building);
+        if (!worker.canPerform(requestedRole)) return "";
+        if (building.state == Building.State.BUILDING) {
+            if (!"builder".equals(requestedRole)) return "";
+            int occupied = assignedWith(building.uid, "builder")
+                    - (worker.building == building.uid && worker.workRole().equals("builder") ? 1 : 0);
+            return occupied < building.def.builders ? "builder" : "";
+        }
+        if (building.state != Building.State.DONE || !building.def.jobs.containsKey(requestedRole)) return "";
+        int occupied = assignedWith(building.uid, requestedRole)
+                - (worker.building == building.uid && worker.workRole().equals(requestedRole) ? 1 : 0);
+        return occupied < building.def.jobs.get(requestedRole) ? requestedRole : "";
+    }
+
     private String availableRole(Worker worker, Building building) {
         if (building.state == Building.State.BUILDING) {
             int occupied = assignedWith(building.uid, "builder")
@@ -519,14 +534,19 @@ public final class Settlement {
         say((b.state == Building.State.DONE ? "Снесено: " : "Отменено: ") + b.def.name);
     }
 
-    public void assign(int workerId, int uid) {
+    public void assign(int workerId, int uid) { assign(workerId, uid, null); }
+
+    /** Assigns a resident to one exact role when requested by a direct dialogue/RTS order. */
+    public void assign(int workerId, int uid, String requestedRole) {
         Worker w = worker(workerId);
         Building b = building(uid);
         if (w == null) throw new OrderException("Нет рабочего " + workerId);
         if (b == null) throw new OrderException("Нет здания " + uid);
-        String role = availableRole(w, b);
+        String role = requestedRole == null || requestedRole.isBlank()
+                ? availableRole(w, b) : availableRole(w, b, requestedRole);
         if (role.isEmpty()) throw new OrderException(w.name + " (" + defs.professionName(w.profession)
-                + ") не подходит для этой работы или нет свободных мест в " + b.def.name);
+                + ") не подходит для роли " + (requestedRole == null ? "этого здания" : requestedRole)
+                + " или нет свободных мест в " + b.def.name);
         w.assignedProfession = role;
         w.manualHauler = false;
         w.lifeAction = "";
