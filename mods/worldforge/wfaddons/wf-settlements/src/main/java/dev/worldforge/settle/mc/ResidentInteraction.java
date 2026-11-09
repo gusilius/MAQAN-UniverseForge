@@ -74,7 +74,9 @@ public final class ResidentInteraction {
         player.sendSystemMessage(action("Состояние и отношения", "status", worker));
         player.sendSystemMessage(action("Подарить изумруд · улучшить отношения", "gift", worker));
         ResidentQuest quest = quest(person);
-        if (quest == null || quest.status() == ResidentQuest.Status.ABANDONED) {
+        if (quest == null && person.props.containsKey(QUEST_KEY)) {
+            player.sendSystemMessage(Component.literal("§cЗапись поручения повреждена. Она сохранена для восстановления; новое поручение пока недоступно."));
+        } else if (quest == null || quest.status() == ResidentQuest.Status.ABANDONED) {
             player.sendSystemMessage(action("Попросить поручение", "quest", worker));
         } else {
             player.sendSystemMessage(Component.literal("§eПоручение: " + quest.objective()
@@ -83,6 +85,8 @@ public final class ResidentInteraction {
                 player.sendSystemMessage(action("Принять поручение", "accept", worker));
             if (quest.status() == ResidentQuest.Status.ACCEPTED)
                 player.sendSystemMessage(action("Передать хлеб", "deliver", worker));
+            if (quest.status() == ResidentQuest.Status.OFFERED || quest.status() == ResidentQuest.Status.ACCEPTED)
+                player.sendSystemMessage(action("Отказаться от поручения", "abandon", worker));
             if (quest.status() == ResidentQuest.Status.COMPLETED)
                 player.sendSystemMessage(Component.literal("§aПоручение выполнено."));
         }
@@ -180,6 +184,10 @@ public final class ResidentInteraction {
                         : "§eПодходящего свободного рабочего места для профессии " + data.profession + " нет."));
             }
             case "quest" -> {
+                if (person.props.containsKey(QUEST_KEY) && quest(person) == null) {
+                    player.sendSystemMessage(Component.literal("§cСуществующая запись поручения повреждена; новое поручение не создано."));
+                    return 0;
+                }
                 if (quest(person) != null && quest(person).status() != ResidentQuest.Status.ABANDONED) {
                     player.sendSystemMessage(Component.literal("У этого жителя уже есть поручение."));
                     return 0;
@@ -189,6 +197,15 @@ public final class ResidentInteraction {
                 person.props.put(QUEST_KEY, next.toMap());
                 player.sendSystemMessage(Component.literal("§e" + person.name + ": В поселении не хватает хлеба. Принесите три буханки."));
                 player.sendSystemMessage(action("Принять поручение", "accept", worker));
+            }
+            case "abandon" -> {
+                ResidentQuest q = quest(person);
+                if (q == null || !q.abandon()) {
+                    player.sendSystemMessage(Component.literal("§eЭто поручение уже нельзя отменить."));
+                    return 0;
+                }
+                saveQuest(person, q);
+                player.sendSystemMessage(Component.literal("§7Поручение отменено. Житель может предложить новое позже."));
             }
             case "accept" -> {
                 ResidentQuest q = quest(person);
