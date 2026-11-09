@@ -162,7 +162,7 @@ public final class Settlement {
         if (!Double.isFinite(value) || value < 0) return false;
         if (value == 0) return true;
         resourceAccount(resource);
-        boolean ok = WorldForgeMod.treasury().withdraw(accountId(resource), value, kind, category, reference,
+        boolean ok = TreasuryService.current().withdraw(accountId(resource), value, kind, category, reference,
                 Math.max(0, (long) Math.floor(time / 60.0)), category);
         syncResourceMirror(resource);
         return ok;
@@ -171,7 +171,7 @@ public final class Settlement {
     private double creditResource(String resource, double value, TreasuryLedger.Kind kind, String category, String reference) {
         if (!Double.isFinite(value) || value <= 0) return 0;
         resourceAccount(resource);
-        TreasuryLedger ledger = WorldForgeMod.treasury();
+        TreasuryLedger ledger = TreasuryService.current();
         double before = ledger.balance(accountId(resource));
         if (!ledger.deposit(accountId(resource), value, kind, category, reference,
                 Math.max(0, (long) Math.floor(time / 60.0)), category)) return 0;
@@ -236,7 +236,7 @@ public final class Settlement {
                 || recipient.capacity(resource) - recipient.amount(resource) + 1e-9 < quantity) return false;
         resourceAccount(resource);
         recipient.resourceAccount(resource);
-        boolean ok = WorldForgeMod.treasury().transfer(accountId(resource), recipient.accountId(resource), quantity,
+        boolean ok = TreasuryService.current().transfer(accountId(resource), recipient.accountId(resource), quantity,
                 TreasuryLedger.Kind.TRADE, category, reference, Math.max(0, (long) Math.floor(time / 60.0)),
                 "settlement-to-settlement commodity transfer");
         syncResourceMirror(resource);
