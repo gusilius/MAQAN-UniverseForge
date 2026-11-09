@@ -264,7 +264,7 @@ public final class CommandCard {
             case "selectStaff": r.message = "Выбрано работников: " + sel.selectStaff(s, sel.building()); r.ok = true; return r;
             case "selectSame": {
                 List<Worker> ws = sel.workers(s);
-                if (!ws.isEmpty()) { String p = ws.get(0).profession; r.message = s.defs.professionName(p) + ": " + sel.selectProfession(s, p, false); r.ok = true; }
+                if (!ws.isEmpty()) { String p = ws.get(0).workRole(); r.message = s.defs.professionName(p) + ": " + sel.selectProfession(s, p, false); r.ok = true; }
                 return r;
             }
             default:
