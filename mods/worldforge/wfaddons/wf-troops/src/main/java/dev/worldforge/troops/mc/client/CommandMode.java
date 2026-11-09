@@ -102,6 +102,11 @@ public final class CommandMode {
         if (!attack && !use) return;
         event.setCanceled(true);
         event.setSwingHand(false);
+        if (use && mc.hitResult instanceof EntityHitResult residentHit
+                && residentHit.getEntity() instanceof LivingEntity resident && isWorkerEntity(resident)) {
+            mc.player.connection.sendCommand("wfresident open " + resident.getUUID());
+            return;
+        }
         if (attack) {
             if (mc.hitResult instanceof EntityHitResult hit && hit.getEntity() instanceof LivingEntity target
                     && target.isAlive() && selectable(mc, target)) {
