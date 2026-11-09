@@ -271,10 +271,12 @@ public final class Settlement {
         return true;
     }
 
-    private void pay(Map<String, Integer> cost) {
+    private void pay(Map<String, Integer> cost) { pay(cost, "settlement-spend", "resource-cost"); }
+
+    private void pay(Map<String, Integer> cost, String category, String reference) {
         for (Map.Entry<String, Integer> e : cost.entrySet()) {
             debitResource(e.getKey(), e.getValue(), Defs.SILVER.equals(e.getKey())
-                    ? TreasuryLedger.Kind.WITHDRAWAL : TreasuryLedger.Kind.CONSUMPTION, "construction", "building-cost");
+                    ? TreasuryLedger.Kind.WITHDRAWAL : TreasuryLedger.Kind.CONSUMPTION, category, reference);
             flow.record(time, e.getKey(), e.getValue(), false);
         }
     }
@@ -613,7 +615,7 @@ public final class Settlement {
     private void startConstruction() {
         for (Building b : byPriority(x -> x.state == Building.State.PLANNED)) {
             if (!canPay(b.def.cost)) { b.status = "ждёт материалов"; continue; }
-            pay(b.def.cost);
+            pay(b.def.cost, "construction", "building:" + b.uid);
             b.state = Building.State.BUILDING;
             b.status = "строится";
             say("Начата стройка: " + b.def.name);
@@ -700,8 +702,8 @@ public final class Settlement {
                 boolean room = true;
                 for (Map.Entry<String, Integer> o : b.def.out.entrySet()) if (amount(o.getKey()) + o.getValue() > capacity(o.getKey()) + 1e-9) room = false;
                 if (!room) { b.status = "склад полон"; b.cycleTime = b.def.cycle; break; }
-                pay(b.def.in);
-                for (Map.Entry<String, Integer> o : b.def.out.entrySet()) flow.record(time, o.getKey(), add(o.getKey(), o.getValue()), true);
+                pay(b.def.in, "production-input", "building:" + b.uid);
+                for (Map.Entry<String, Integer> o : b.def.out.entrySet()) flow.record(time, o.getKey(), produceResource(o.getKey(), o.getValue()), true);
                 b.cycleTime -= b.def.cycle;
                 b.status = "работает";
             }
