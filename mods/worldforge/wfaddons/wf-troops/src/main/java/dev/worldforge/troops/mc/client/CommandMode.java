@@ -250,6 +250,13 @@ public final class CommandMode {
 
     // ---- вход и выход ----
 
+    /** Public entry point used by the settlement HUD bridge; all management opens the same command workspace. */
+    public static void openUnified() {
+        Minecraft mc = Minecraft.getInstance();
+        if (!active && mc.screen == null) enter(mc);
+        else if (active && !(mc.screen instanceof CommandScreen)) mc.setScreen(new CommandScreen());
+    }
+
     static void enter(Minecraft mc) {
         if (active || mc.level == null || mc.player == null) return;
         active = true;
