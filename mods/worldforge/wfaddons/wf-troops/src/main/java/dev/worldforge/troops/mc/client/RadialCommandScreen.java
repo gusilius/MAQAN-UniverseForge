@@ -3,6 +3,7 @@ package dev.worldforge.troops.mc.client;
 import dev.worldforge.troops.Squads;
 import dev.worldforge.troops.mc.OrderPacket;
 import dev.worldforge.troops.mc.TroopEntity;
+import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
@@ -113,7 +114,9 @@ final class RadialCommandScreen extends Screen {
             z = point.z;
         }
 
-        boolean queue = hasShiftDown();
+        long window = mc.getWindow().getWindow();
+        boolean queue = InputConstants.isKeyDown(window, GLFW.GLFW_KEY_LEFT_SHIFT)
+                || InputConstants.isKeyDown(window, GLFW.GLFW_KEY_RIGHT_SHIFT);
         CommandMode.send(new OrderPacket(OrderPacket.ORDER, CommandMode.selected(),
                 kind.ordinal(), x, z, target, queue, 0));
         mc.player.displayClientMessage(Component.literal("Приказ: " + OPTIONS.get(hovered).label()), true);
