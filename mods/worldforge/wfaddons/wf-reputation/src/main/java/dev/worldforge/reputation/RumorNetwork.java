@@ -65,10 +65,11 @@ public final class RumorNetwork {
             if (!contact.canCommunicate() || recipient.equals(witnessId) || !seen.add(recipient)) continue;
             boolean success = false;
             String channel = "";
-            if (contact.sameOrganization() && !contact.organizationId().isBlank()
-                    && membership.isMember(recipient, contact.organizationId())
-                    && scope == ReputationStore.Scope.ORGANIZATION
+            if (scope == ReputationStore.Scope.ORGANIZATION && contact.sameOrganization()
                     && scopeId.equals(contact.organizationId())) {
+                // A contact claiming the same organization cannot fall back to a personal route
+                // when membership verification fails.
+                if (!membership.isMember(recipient, contact.organizationId())) continue;
                 success = store.shareWithinOrganization(witnessId, recipient, playerId,
                         contact.organizationId(), now, id -> membership.isMember(id, contact.organizationId()));
                 channel = "organization";
