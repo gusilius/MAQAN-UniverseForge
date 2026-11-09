@@ -218,7 +218,7 @@ public final class TreasuryLedger {
             long seq = requiredLong(m.get("seq"), "journal sequence");
             String tx = requiredString(m.get("tx"), "transaction id");
             String accountId = requiredString(m.get("account"), "journal account");
-            String other = requiredString(m.get("other"), "journal counterparty");
+            String other = stringOrEmpty(m.get("other"), "journal counterparty");
             String currency = requiredString(m.get("currency"), "journal currency");
             double value = requiredNumber(m.get("amount"), "journal amount");
             Object creditValue = m.get("credit");
@@ -274,6 +274,12 @@ public final class TreasuryLedger {
     }
     private static String optionalString(Object value) {
         return value instanceof String text ? text : "";
+    }
+    private static String stringOrEmpty(Object value, String field) {
+        if (value == null) return "";
+        if (!(value instanceof String text) || text.length() > 256)
+            throw new IllegalArgumentException("Invalid " + field);
+        return text.trim();
     }
     private static double requiredNumber(Object value, String field) {
         if (!(value instanceof Number n) || !Double.isFinite(n.doubleValue()))
