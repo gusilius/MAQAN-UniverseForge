@@ -20,7 +20,7 @@ public final class WorkPriorities {
     public int get(Worker w, String prof) {
         Map<String, Integer> m = values.get(w.id);
         if (m != null && m.containsKey(prof)) return m.get(prof);
-        return w.profession.equals(prof) ? 1 : 0;
+        return w.canPerform(prof) ? 1 : 0;
     }
 
     /** Установить значение (0..4); возвращает команду для сервера. */
@@ -51,7 +51,7 @@ public final class WorkPriorities {
         int bv = 99;
         for (String p : s.defs.professions.keySet()) {
             int v = get(w, p);
-            if (v > 0 && (v < bv || (v == bv && p.equals(w.profession)))) { best = p; bv = v; }
+            if (v > 0 && (v < bv || (v == bv && p.equals(w.workRole())))) { best = p; bv = v; }
         }
         return best;
     }
