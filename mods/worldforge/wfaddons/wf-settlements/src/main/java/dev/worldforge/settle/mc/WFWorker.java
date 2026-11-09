@@ -163,6 +163,10 @@ public class WFWorker extends PathfinderMob {
         private BlockPos cachedWorkTarget;
         private BlockPos idle;
         private final Set<BlockPos> temporarySteps = new HashSet<>();
+        private BlockPos lastPosition;
+        private int stuckTicks;
+        private BlockPos cachedApproachFor;
+        private BlockPos cachedApproachTarget;
 
         WorkGoal(WFWorker w) {
             this.w = w;
@@ -181,6 +185,18 @@ public class WFWorker extends PathfinderMob {
             Worker wk = w.worker();
             if (c == null || wk == null) return;
             cleanupTemporarySteps();
+            BlockPos currentPosition = w.blockPosition();
+            if (lastPosition != null && lastPosition.equals(currentPosition) && !w.getNavigation().isDone()) {
+                if (++stuckTicks >= 60) {
+                    w.getNavigation().stop();
+                    repath = 0;
+                    stuckTicks = 0;
+                    wk.status = "застрял: перестраивает маршрут";
+                }
+            } else {
+                stuckTicks = 0;
+            }
+            lastPosition = currentPosition;
             Building b = wk.building == 0 ? null : c.s.building(wk.building);
             BlockPos target;
             boolean working = false;
@@ -198,13 +214,18 @@ public class WFWorker extends PathfinderMob {
             }
             if (area != null) {
                 if (resourceTarget != null) {
-                    BlockPos approach = workApproachTarget(w, resourceTarget);
-                    if (approach == null) approach = placeTemporaryStep(w, resourceTarget);
-                    if (approach == null) {
+                    if (!resourceTarget.equals(cachedApproachFor) || cachedApproachTarget == null
+                            || !w.level().hasChunkAt(cachedApproachTarget) || --repath <= 0) {
+                        cachedApproachFor = resourceTarget.immutable();
+                        cachedApproachTarget = workApproachTarget(w, resourceTarget);
+                        if (cachedApproachTarget == null) cachedApproachTarget = placeTemporaryStep(w, resourceTarget);
+                        repath = 20;
+                    }
+                    if (cachedApproachTarget == null) {
                         target = w.blockPosition();
-                        wk.status = "ищет безопасный доступ к рабочему блоку";
+                        wk.status = "нет прямого доступа: ищет обход или безопасную опору";
                     } else {
-                        target = approach;
+                        target = cachedApproachTarget;
                         working = true;
                     }
                 } else {
@@ -266,12 +287,21 @@ public class WFWorker extends PathfinderMob {
                     if (road != null) route = road;
                 }
                 var path = w.getNavigation().createPath(route, 0);
+                if (path == null || !path.canReach()) {
+                    BlockPos detour = reachableDetour(w, target);
+                    path = detour == null ? null : w.getNavigation().createPath(detour, 0);
+                    if (path != null && path.canReach()) {
+                        wk.status = "обходит препятствие по безопасному маршруту";
+                    }
+                }
                 if (path != null && path.canReach()) {
                     w.getNavigation().moveTo(path, 1.0);
                 } else {
-                    // Never blindly walk toward an unreachable point or across unloaded chunks.
+                    // Do not push the NPC into a wall, cliff or unloaded chunk. Retry after a short
+                    // cooldown so a temporary obstruction can clear without pathfinding every tick.
                     w.getNavigation().stop();
-                    wk.status = "маршрут недоступен: ищет безопасный обход";
+                    wk.status = "нет безопасного пути: ждёт и повторно ищет обход";
+                    repath = 40;
                 }
             }
             if (arrived) {
@@ -294,6 +324,8 @@ public class WFWorker extends PathfinderMob {
                 if (area != null && resourceTarget != null) {
                     if (performWork(w, c, area, resourceTarget)) {
                         cachedWorkTarget = null;
+                        cachedApproachFor = null;
+                        cachedApproachTarget = null;
                         workScan = 0;
                         wk.status = switch (area.mode) {
                             case "wood" -> "вырубает целое дерево";
@@ -315,6 +347,33 @@ public class WFWorker extends PathfinderMob {
                     w.swing(InteractionHand.MAIN_HAND);
                 }
             }
+        }
+
+        /**
+         * If the requested tile is unreachable, search a small ring of safe, standable alternatives.
+         * The detour must remain close to the order destination and have a path the vanilla navigator
+         * can actually follow; this is a fallback, not permission to tunnel or jump across gaps.
+         */
+        private static BlockPos reachableDetour(WFWorker worker, BlockPos goal) {
+            BlockPos best = null;
+            double bestScore = Double.MAX_VALUE;
+            for (int radius = 1; radius <= 4; radius++) {
+                for (int dx = -radius; dx <= radius; dx++) for (int dz = -radius; dz <= radius; dz++) {
+                    if (Math.max(Math.abs(dx), Math.abs(dz)) != radius) continue;
+                    for (int dy = -1; dy <= 1; dy++) {
+                        BlockPos candidate = goal.offset(dx, dy, dz);
+                        if (!standable(worker, candidate)) continue;
+                        var path = worker.getNavigation().createPath(candidate, 0);
+                        if (path == null || !path.canReach()) continue;
+                        double goalDistance = candidate.distSqr(goal);
+                        double travelCost = path.getNodeCount();
+                        double score = goalDistance * 4.0 + travelCost;
+                        if (score < bestScore) { bestScore = score; best = candidate; }
+                    }
+                }
+                if (best != null) break;
+            }
+            return best;
         }
 
         /** Prefer existing roads when a long route has a reachable road tile that advances toward the goal. */
