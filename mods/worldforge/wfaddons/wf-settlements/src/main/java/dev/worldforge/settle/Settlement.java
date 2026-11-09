@@ -1,6 +1,8 @@
 package dev.worldforge.settle;
 
 import dev.worldforge.mod.Json;
+import dev.worldforge.mod.WorldForgeMod;
+import dev.worldforge.mod.economy.TreasuryLedger;
 
 import java.util.*;
 
@@ -125,20 +127,60 @@ public final class Settlement {
         return c;
     }
 
-    public double amount(String res) { return stock.getOrDefault(res, 0.0); }
+    private String treasuryAccountId() { return "settlement:" + id; }
+
+    /** Create or restore this settlement's canonical silver account; stock remains a compatibility mirror. */
+    private TreasuryLedger.Account treasuryAccount() {
+        TreasuryLedger ledger = WorldForgeMod.treasury();
+        TreasuryLedger.Account account = ledger.account(treasuryAccountId());
+        if (account == null) account = ledger.open(treasuryAccountId(), id, Defs.SILVER, stock.getOrDefault(Defs.SILVER, 0.0));
+        stock.put(Defs.SILVER, account.balance);
+        return account;
+    }
+
+    private void syncTreasuryMirror() { stock.put(Defs.SILVER, treasuryAccount().balance); }
+
+    public double amount(String res) {
+        if (Defs.SILVER.equals(res)) return treasuryAccount().balance;
+        return stock.getOrDefault(res, 0.0);
+    }
+
+    private boolean debitSilver(double value, TreasuryLedger.Kind kind, String category, String reference) {
+        if (value <= 0) return true;
+        TreasuryLedger ledger = WorldForgeMod.treasury();
+        treasuryAccount();
+        boolean ok = ledger.withdraw(treasuryAccountId(), value, kind, category, reference,
+                Math.max(0, (long) Math.floor(time / 60.0)), category);
+        syncTreasuryMirror();
+        return ok;
+    }
+
+    private double creditSilver(double value, TreasuryLedger.Kind kind, String category, String reference) {
+        if (!Double.isFinite(value) || value <= 0) return 0;
+        TreasuryLedger ledger = WorldForgeMod.treasury();
+        treasuryAccount();
+        double before = ledger.balance(treasuryAccountId());
+        if (!ledger.deposit(treasuryAccountId(), value, kind, category, reference,
+                Math.max(0, (long) Math.floor(time / 60.0)), category)) return 0;
+        syncTreasuryMirror();
+        return Math.max(0, ledger.balance(treasuryAccountId()) - before);
+    }
 
     /** Atomic fractional withdrawal for individual Character actions (meals, medicine, etc.). */
     public boolean consumeResource(String resource, double amount) {
         if (resource == null || resource.isBlank() || !Double.isFinite(amount) || amount < 0) return false;
         if (amount(resource) + 1e-9 < amount) return false;
         if (amount == 0) return true;
-        stock.put(resource, Math.max(0, amount(resource) - amount));
+        if (Defs.SILVER.equals(resource)) {
+            if (!debitSilver(amount, TreasuryLedger.Kind.WITHDRAWAL, "consumption", "character-consumption")) return false;
+        } else stock.put(resource, Math.max(0, amount(resource) - amount));
         flow.record(time, resource, amount, false);
         return true;
     }
 
     /** Кладёт на склад не больше вместимости; возвращает фактически положенное. */
     public double add(String res, double n) {
+        if (Defs.SILVER.equals(res)) return creditSilver(n, TreasuryLedger.Kind.DEPOSIT, "settlement-income", "settlement:" + id);
         double cur = amount(res), put = Math.max(0, Math.min(n, capacity(res) - cur));
         if (put > 0) stock.put(res, cur + put);
         return put;
@@ -158,7 +200,8 @@ public final class Settlement {
 
     private void pay(Map<String, Integer> cost) {
         for (Map.Entry<String, Integer> e : cost.entrySet()) {
-            stock.put(e.getKey(), amount(e.getKey()) - e.getValue());
+            if (Defs.SILVER.equals(e.getKey())) debitSilver(e.getValue(), TreasuryLedger.Kind.WITHDRAWAL, "construction", "building-cost");
+            else stock.put(e.getKey(), amount(e.getKey()) - e.getValue());
             flow.record(time, e.getKey(), e.getValue(), false);
         }
     }
@@ -657,7 +700,7 @@ public final class Settlement {
         double cost = buyPrice(res) * n;
         if (amount(Defs.SILVER) < cost) throw new OrderException("Не хватает серебра: " + (int) amount(Defs.SILVER) + " из " + (int) Math.ceil(cost));
         if (amount(res) + n > capacity(res) + 1e-9) throw new OrderException("Нет места на складе");
-        stock.put(Defs.SILVER, amount(Defs.SILVER) - cost);
+        if (!debitSilver(cost, TreasuryLedger.Kind.TRADE, "market-purchase", res)) throw new OrderException("Не хватает серебра");
         flow.record(time, Defs.SILVER, cost, false);
         add(res, n);
         moveDemand(res, n);
@@ -709,8 +752,10 @@ public final class Settlement {
             b.unpaid = false;
             if (b.state != Building.State.DONE || b.paused || b.def.upkeep <= 0) continue;
             double c = b.def.upkeep / 60 * dt;
-            if (amount(Defs.SILVER) >= c) { stock.put(Defs.SILVER, amount(Defs.SILVER) - c); flow.record(time, Defs.SILVER, c, false); }
-            else b.unpaid = true;
+            if (amount(Defs.SILVER) >= c) {
+                if (debitSilver(c, TreasuryLedger.Kind.UPKEEP, "building-upkeep", b.def.id)) flow.record(time, Defs.SILVER, c, false);
+                else b.unpaid = true;
+            } else b.unpaid = true;
         }
         tradeLeft = Math.min(tradeCap(), tradeLeft + tradePerMin() / 60 * dt);
         for (var e : autoSell.entrySet()) {
@@ -969,6 +1014,7 @@ public final class Settlement {
     // ------------------------------------------------------------------ сохранение
 
     public String toJson() {
+        syncTreasuryMirror();
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("format", "wf-settlement/2");
         root.put("schema_version", 2);
