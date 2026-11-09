@@ -833,9 +833,12 @@ public final class PlatformShellScreen extends Screen {
                     saveWorkspaceProfile(activeWorkspaceName);
                 } else if (mx >= x + 120 && mx < x + 222) {
                     List<String> names = workspaceProfiles();
-                    String candidate = "Workspace " + (names.size() + 1);
-                    while (names.stream().anyMatch(n -> n.equalsIgnoreCase(candidate)))
-                        candidate = candidate + " 2";
+                    int suffix = names.size() + 1;
+                    String candidate = "Workspace " + suffix;
+                    while (containsProfileName(names, candidate)) {
+                        suffix++;
+                        candidate = "Workspace " + suffix;
+                    }
                     saveWorkspaceProfile(candidate);
                 } else if (mx >= x + w - 112 && mx < x + w - 10
                         && !activeWorkspaceName.equalsIgnoreCase("Default")) {
@@ -1028,6 +1031,11 @@ public final class PlatformShellScreen extends Screen {
             workspaceRoot = WorkspaceDockTree.dock(remaining, targetId, sourceId, side, 300);
         }
         WorkspaceDockTree.validate(workspaceRoot);
+    }
+
+    private static boolean containsProfileName(List<String> names, String candidate) {
+        for (String name : names) if (name.equalsIgnoreCase(candidate)) return true;
+        return false;
     }
 
     public List<String> workspaceProfiles() {
