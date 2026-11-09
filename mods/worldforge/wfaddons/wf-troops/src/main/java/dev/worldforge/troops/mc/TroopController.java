@@ -45,7 +45,7 @@ final class TroopController {
                 continue;
             }
             switch (o.kind()) {
-                case MOVE, ATTACK_MOVE, RETREAT, PATROL -> {
+                case MOVE, ATTACK_MOVE, PATROL -> {
                     double yaw = Formations.yawTo(cx, cz, o.x(), o.z());
                     boolean far = Math.hypot(o.x() - cx, o.z() - cz) > 2;
                     if (!far) yaw = s.yaw; else s.yaw = yaw;
@@ -68,6 +68,28 @@ final class TroopController {
                         sum += Math.hypot(w[0] - t.getX(), w[1] - t.getZ());
                     }
                     if (sum / alive.size() < 3.0 && far == false || sum / alive.size() < 2.2) TroopsMod.SQUADS.completeCurrent(s.id);
+                }
+                case RETREAT -> {
+                    double[] enemies = alive.get(0).enemiesAround(cx, cz, 28);
+                    double[] destination;
+                    if (enemies[0] > 0) {
+                        destination = Morale.flee(cx, cz, enemies[1], enemies[2], 36);
+                    } else {
+                        UUID ownerId = safeUuid(s.owner);
+                        Entity owner = ownerId == null ? null : server.getPlayerList().getPlayer(ownerId);
+                        destination = owner == null ? new double[]{cx, cz} : new double[]{owner.getX(), owner.getZ()};
+                    }
+                    List<Formations.Slot> slots = Formations.slots(s.formation, alive.size(), SPACING);
+                    double yaw = Formations.yawTo(cx, cz, destination[0], destination[1]);
+                    List<double[]> world = Formations.place(slots, destination[0], destination[1], yaw);
+                    for (int i = 0; i < alive.size(); i++) {
+                        TroopEntity t = alive.get(i);
+                        double[] point = world.get(i);
+                        t.hasDest = true; t.destX = point[0]; t.destZ = point[1];
+                        t.destYaw = yaw; t.forced = null; t.engage = TroopEntity.Engage.NONE;
+                    }
+                    if (Math.hypot(destination[0] - cx, destination[1] - cz) < 3.0)
+                        TroopsMod.SQUADS.completeCurrent(s.id);
                 }
                 case ATTACK -> {
                     UUID targetId = safeUuid(o.target());
