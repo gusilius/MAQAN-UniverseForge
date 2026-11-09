@@ -603,6 +603,57 @@ public class TroopsMod {
                                                                 StringArgumentType.getString(ctx, "character"),
                                                                 com.mojang.brigadier.arguments.BoolArgumentType.getBool(ctx, "hero"),
                                                                 IntegerArgumentType.getInteger(ctx, "rank"))))))))
+                .then(Commands.literal("corps")
+                        .then(Commands.literal("create")
+                                .then(Commands.argument("army", IntegerArgumentType.integer(1))
+                                        .then(Commands.argument("name", StringArgumentType.greedyString())
+                                                .executes(ctx -> createCorps(ctx.getSource(),
+                                                        IntegerArgumentType.getInteger(ctx, "army"),
+                                                        StringArgumentType.getString(ctx, "name"))))))
+                        .then(Commands.literal("assign")
+                                .then(Commands.argument("corps", StringArgumentType.word())
+                                        .then(Commands.argument("squad", StringArgumentType.word())
+                                                .executes(ctx -> assignSquadToCorps(ctx.getSource(),
+                                                        StringArgumentType.getString(ctx, "corps"),
+                                                        StringArgumentType.getString(ctx, "squad"))))))
+                        .then(Commands.literal("order")
+                                .then(Commands.argument("corps", StringArgumentType.word())
+                                        .then(Commands.argument("kind", StringArgumentType.word())
+                                                .then(Commands.argument("x", com.mojang.brigadier.arguments.DoubleArgumentType.doubleArg(-30000000, 30000000))
+                                                        .then(Commands.argument("z", com.mojang.brigadier.arguments.DoubleArgumentType.doubleArg(-30000000, 30000000))
+                                                                .executes(ctx -> orderCorps(ctx.getSource(),
+                                                                        StringArgumentType.getString(ctx, "corps"),
+                                                                        StringArgumentType.getString(ctx, "kind"),
+                                                                        com.mojang.brigadier.arguments.DoubleArgumentType.getDouble(ctx, "x"),
+                                                                        com.mojang.brigadier.arguments.DoubleArgumentType.getDouble(ctx, "z"), false))
+                                                                .then(Commands.argument("queue", com.mojang.brigadier.arguments.BoolArgumentType.bool())
+                                                                        .executes(ctx -> orderCorps(ctx.getSource(),
+                                                                                StringArgumentType.getString(ctx, "corps"),
+                                                                                StringArgumentType.getString(ctx, "kind"),
+                                                                                com.mojang.brigadier.arguments.DoubleArgumentType.getDouble(ctx, "x"),
+                                                                                com.mojang.brigadier.arguments.DoubleArgumentType.getDouble(ctx, "z"),
+                                                                                com.mojang.brigadier.arguments.BoolArgumentType.getBool(ctx, "queue"))))))))))
+                .then(Commands.literal("order")
+                        .then(Commands.literal("army")
+                                .then(Commands.argument("army", IntegerArgumentType.integer(1))
+                                        .then(Commands.argument("kind", StringArgumentType.word())
+                                                .then(Commands.argument("x", com.mojang.brigadier.arguments.DoubleArgumentType.doubleArg(-30000000, 30000000))
+                                                        .then(Commands.argument("z", com.mojang.brigadier.arguments.DoubleArgumentType.doubleArg(-30000000, 30000000))
+                                                                .executes(ctx -> orderArmy(ctx.getSource(),
+                                                                        IntegerArgumentType.getInteger(ctx, "army"),
+                                                                        StringArgumentType.getString(ctx, "kind"),
+                                                                        com.mojang.brigadier.arguments.DoubleArgumentType.getDouble(ctx, "x"),
+                                                                        com.mojang.brigadier.arguments.DoubleArgumentType.getDouble(ctx, "z"), false))
+                                                                .then(Commands.argument("queue", com.mojang.brigadier.arguments.BoolArgumentType.bool())
+                                                                        .executes(ctx -> orderArmy(ctx.getSource(),
+                                                                                IntegerArgumentType.getInteger(ctx, "army"),
+                                                                                StringArgumentType.getString(ctx, "kind"),
+                                                                                com.mojang.brigadier.arguments.DoubleArgumentType.getDouble(ctx, "x"),
+                                                                                com.mojang.brigadier.arguments.DoubleArgumentType.getDouble(ctx, "z"),
+                                                                                com.mojang.brigadier.arguments.BoolArgumentType.getBool(ctx, "queue"))))))))))
+                .then(Commands.literal("hierarchy")
+                        .then(Commands.argument("army", IntegerArgumentType.integer(1))
+                                .executes(ctx -> showHierarchy(ctx.getSource(), IntegerArgumentType.getInteger(ctx, "army")))))
                 .then(Commands.literal("list").executes(c -> {
                     try {
                         String json = SQUADS.viewJson(c.getSource().getPlayerOrException().getUUID().toString());
