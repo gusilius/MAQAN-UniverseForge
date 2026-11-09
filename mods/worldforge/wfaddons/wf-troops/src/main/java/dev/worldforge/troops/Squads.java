@@ -28,7 +28,7 @@ public final class Squads {
         public String leaderCharacterId = "";
         public boolean leaderHero;
         public int leadershipRank;
-        public double patrolOriginX,patrolOriginZ;
+        public double patrolOriginX,patrolOriginZ,patrolDestinationX,patrolDestinationZ;
         public boolean patrolReturning;
         Squad(String id, String name, String owner) { this.id = id; this.name = name; this.owner = owner; }
         public Order current() { return queue.peekFirst(); }
@@ -93,6 +93,7 @@ public final class Squads {
         if(o.kind()==Kind.PATROL&&!queue){
             s.patrolOriginX=Double.isFinite(s.cx)?s.cx:0;
             s.patrolOriginZ=Double.isFinite(s.cz)?s.cz:0;
+            s.patrolDestinationX=o.x();s.patrolDestinationZ=o.z();
             s.patrolReturning=false;
         }
         if (!queue) s.queue.clear();
@@ -133,7 +134,9 @@ public final class Squads {
         from.initial = Math.max(from.members.size(), oldInitial - movedInitial);
         n.morale = oldMorale; n.routed = from.routed; n.realm = from.realm;
         n.formation=from.formation;n.stance=from.stance;n.cx=from.cx;n.cz=from.cz;n.yaw=from.yaw;
-        n.patrolOriginX=from.patrolOriginX;n.patrolOriginZ=from.patrolOriginZ;n.patrolReturning=from.patrolReturning;
+        n.patrolOriginX=from.patrolOriginX;n.patrolOriginZ=from.patrolOriginZ;
+        n.patrolDestinationX=from.patrolDestinationX;n.patrolDestinationZ=from.patrolDestinationZ;
+        n.patrolReturning=from.patrolReturning;
         return n;
     }
 
@@ -172,7 +175,7 @@ public final class Squads {
                 s.queue.addLast(new Order(Kind.PATROL,s.patrolOriginX,s.patrolOriginZ,""));
             }else{
                 s.patrolReturning=false;
-                s.queue.addLast(new Order(Kind.PATROL,o.x(),o.z(),""));
+                s.queue.addLast(new Order(Kind.PATROL,s.patrolDestinationX,s.patrolDestinationZ,""));
             }
         }
     }
@@ -242,6 +245,8 @@ public final class Squads {
                     .append(",\"yaw\":").append(Double.isFinite(s.yaw) ? s.yaw : 0)
                     .append(",\"patrolOriginX\":").append(Double.isFinite(s.patrolOriginX)?s.patrolOriginX:0)
                     .append(",\"patrolOriginZ\":").append(Double.isFinite(s.patrolOriginZ)?s.patrolOriginZ:0)
+                    .append(",\"patrolDestinationX\":").append(Double.isFinite(s.patrolDestinationX)?s.patrolDestinationX:0)
+                    .append(",\"patrolDestinationZ\":").append(Double.isFinite(s.patrolDestinationZ)?s.patrolDestinationZ:0)
                     .append(",\"patrolReturning\":").append(s.patrolReturning)
                     .append(",\"queue\":[");
             boolean firstOrder = true;
@@ -298,6 +303,8 @@ public final class Squads {
             s.yaw=finiteNumber(e.get("yaw"),0);
             s.patrolOriginX=finiteNumber(e.get("patrolOriginX"),s.cx);
             s.patrolOriginZ=finiteNumber(e.get("patrolOriginZ"),s.cz);
+            s.patrolDestinationX=finiteNumber(e.get("patrolDestinationX"),s.cx);
+            s.patrolDestinationZ=finiteNumber(e.get("patrolDestinationZ"),s.cz);
             s.patrolReturning=Boolean.TRUE.equals(e.get("patrolReturning"));
             s.morale = Math.max(0, Math.min(1, finiteNumber(e.get("morale"), 1)));
             s.routed = Boolean.TRUE.equals(e.get("routed"));
