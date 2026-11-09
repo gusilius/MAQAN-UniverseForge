@@ -1420,7 +1420,7 @@ public final class Settlement {
             if (m.get("life_target_z") instanceof Number lz) w.lifeTargetZ = lz.doubleValue();
             if (m.get("life_action_until") instanceof Number lu && Double.isFinite(lu.doubleValue())) w.lifeActionUntil = lu.doubleValue();
             if (m.get("haul_progress") instanceof Number hp && Double.isFinite(hp.doubleValue())) w.haulProgress = Math.max(0, Math.min(100, hp.doubleValue()));
-            if (!Set.of("", "sleeping", "fleeing", "socializing").contains(w.lifeAction)) w.lifeAction = "";
+            if (!Set.of("", "sleeping", "eating", "fleeing", "socializing").contains(w.lifeAction)) w.lifeAction = "";
             w.manualOrder = Boolean.TRUE.equals(m.get("manual_order")); w.manualFollow = Boolean.TRUE.equals(m.get("manual_follow")); w.manualFollowOwner = m.get("manual_follow_owner") instanceof String fo ? fo : "";
             if (m.get("order_x") instanceof Number ox) w.orderX = ox.doubleValue();
             if (m.get("order_z") instanceof Number oz) w.orderZ = oz.doubleValue();
