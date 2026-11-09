@@ -44,4 +44,8 @@ if len(order) != len(dirs):
     print("ERROR: аддоны не попали в порядок сборки: " + ", ".join(missing), file=sys.stderr)
     sys.exit(1)
 
-print(" ".join(order))
+if "--deps" in sys.argv:
+    for d in order:
+        print(d + "|" + ",".join(sorted(deps[d])))
+else:
+    print(" ".join(order))
