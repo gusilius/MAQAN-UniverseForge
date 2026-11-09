@@ -118,7 +118,7 @@ public final class CommandScreen extends Screen {
         picked = null;
         if (buildOpen) requestBuilds();
     }
-    private static final String[] WORK_LABELS = {"древесина", "камень", "руда", "расчистка", "выравнивание"};
+    private static final String[] WORK_LABELS = {"целые деревья", "камень", "руда", "расчистка", "выравнивание", "урожай"};
     private void cycleWorkMode() {
         workMode = (workMode + 1) % (WORK_LABELS.length + 1);
         if (workMode == WORK_LABELS.length) workMode = -1;
