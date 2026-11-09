@@ -490,15 +490,9 @@ public final class Settlement {
         Building b = building(uid);
         if (w == null) throw new OrderException("Нет рабочего " + workerId);
         if (b == null) throw new OrderException("Нет здания " + uid);
-        if (b.state == Building.State.DONE) {
-            int slots = b.def.jobs.getOrDefault(w.profession, 0);
-            if (slots == 0) throw new OrderException(w.name + " (" + defs.professionName(w.profession) + ") не нужен в здании " + b.def.name);
-            if (assignedWith(uid, w.profession) >= slots && w.building != uid) throw new OrderException("В здании " + b.def.name + " нет свободных мест для профессии " + defs.professionName(w.profession));
-        } else {
-            if (!w.profession.equals("builder")) throw new OrderException("Строить могут только строители");
-            if (assignedWith(uid, "builder") >= b.def.builders && w.building != uid) throw new OrderException("На стройке уже максимум строителей (" + b.def.builders + ")");
-        }
         String role = availableRole(w, b);
+        if (role.isEmpty()) throw new OrderException(w.name + " (" + defs.professionName(w.profession)
+                + ") не подходит для этой работы или нет свободных мест в " + b.def.name);
         if (role.isEmpty()) throw new OrderException(w.name + " не подходит для этой работы или нет свободных мест");
         w.assignedProfession = role;
         w.building = uid;
@@ -787,7 +781,7 @@ public final class Settlement {
                 b.state = Building.State.DONE;
                 b.progress = b.def.work;
                 b.status = b.def.produces() ? "работает" : "готово";
-                for (Worker w : assigned(b.uid)) { w.building = 0; w.status = "свободен"; }
+                for (Worker w : assigned(b.uid)) { w.building = 0; w.assignedProfession = ""; w.status = "свободен"; }
                 say("Построено: " + b.def.name);
             }
         }
@@ -982,9 +976,9 @@ public final class Settlement {
 
     /** Приоритет профессии для рабочего: 0 - не делает, 1 - самое важное .. 4. Без записи: подёнщик берётся за всё (1), остальные - только своё (1). */
     public int workPriority(Worker w, String prof) {
+        if (!w.canPerform(prof)) return 0;
         if (w.jobPrio != null && w.jobPrio.containsKey(prof)) return w.jobPrio.get(prof);
-        if (w.profession.equals("laborer")) return 1;
-        return w.profession.equals(prof) ? 1 : 0;
+        return 1;
     }
 
     public void setWorkPriority(int workerId, String prof, int n) {
