@@ -4,7 +4,7 @@
 
 TreasuryService.current() is the pure-Java access point to the single world-owned financial/resource ledger. WorldForgeMod owns its load/save lifecycle but addon simulation and tests do not depend on the Minecraft-bound mod entrypoint. It is persisted at worldforge/wf_treasury.json, loaded before addon state restoration, checkpointed every 6,000 server ticks, and atomically replaced on save. If the existing ledger cannot be read, saving is disabled for that session so the original file is not overwritten.
 
-Each account has a stable ID, owner, currency/resource, cash balance, credit limit, debt and bankruptcy flag. Transfers between accounts are atomic and create matching debit/credit entries with one transaction ID. Every entry carries a world-minute timestamp, category, reference and post-transaction balance.
+Silver is the world base money unit; the legacy CityTax UI's gold is a 5:1 display denomination over the same silver account, not a separate currency balance. Each account has a stable ID, owner, currency/resource, cash balance, credit limit, debt and bankruptcy flag. Transfers between accounts are atomic and create matching debit/credit entries with one transaction ID. Every entry carries a world-minute timestamp, category, reference and post-transaction balance.
 
 ## Account conventions
 
@@ -22,7 +22,7 @@ Settlement stock remains a compatibility mirror for existing UI and simulation A
 - Building production credits commodity accounts with PRODUCTION entries; recipe inputs, population food, comfort goods and construction materials debit the same resource accounts.
 - Settlement tax income, building upkeep, market purchases/sales, raid losses and character consumption are journaled.
 - Caravan routes transfer the commodity between settlement accounts and transfer silver between treasury accounts. The price spread is divided between seller proceeds and a recorded market fee.
-- A configured settlement crown share is remitted from its settlement account to realm:<id> as a paired TAX transfer. Unfunded remittances remain pending.
+- CityTax remittance and grants transfer silver atomically between settlement and realm accounts. A configured settlement crown share is remitted as a paired TAX transfer; grants are paired GRANT transfers. The legacy TreasuryApi facade presents realm balances in gold while using the same silver-denominated account as Statecraft.
 - Statecraft realm taxes and vassal tribute are booked to realm accounts. Realms with a numeric taxable_base property are assessed automatically on the shared world calendar; government expenditure is constrained by available funds.
 - Realm budgets can fund dedicated army accounts; army upkeep can be charged from those accounts.
 - Credit limits, loan origination, interest accrual, repayment and bankruptcy state are available through the same ledger.
@@ -34,7 +34,7 @@ Settlement markets retain their current local base-price and demand-pressure mod
 ## Migration and compatibility
 
 - The ledger is stored separately from addon JSON, so all modules can reference one source of truth.
-- Existing settlement stock is lazily migrated to resource accounts on load.
+- Existing settlement stock is lazily migrated to resource accounts on load. Public stock-map writes from older addons are reconciled into the account ledger when read or saved, preserving compatibility while the ledger remains authoritative.
 - Existing Statecraft treasury snapshots seed realm accounts only when the canonical account does not already exist.
 - Settlement.stock and Statecraft.Treasury.balance are read-compatible mirrors; new money/resource writes must go through the ledger API.
 
