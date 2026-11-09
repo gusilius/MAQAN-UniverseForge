@@ -164,7 +164,6 @@ public class WFWorker extends PathfinderMob {
         private int repath, swing, idleTimer, workScan;
         private BlockPos cachedWorkTarget;
         private BlockPos idle;
-        private final Map<BlockPos, String> temporarySteps = new HashMap<>();
         private BlockPos lastPosition;
         private int stuckTicks;
         private BlockPos cachedApproachFor;
@@ -501,7 +500,7 @@ public class WFWorker extends PathfinderMob {
                 if (!(at.isAir() || at.canBeReplaced()) || !at.getFluidState().isEmpty()
                         || !level.getBlockState(step.below()).isSolid() || !level.getBlockState(step.above()).isAir()) continue;
                 if (!level.setBlock(step, scaffold, 3)) continue;
-                temporarySteps.put(step.immutable(), material);
+                colony.temporaryScaffolds.put(step.immutable(), material);
                 placed = true;
                 BlockPos feet = step.above();
                 var path = worker.getNavigation().createPath(feet, 0);
@@ -515,7 +514,7 @@ public class WFWorker extends PathfinderMob {
         /** Remove only the exact temporary scaffold block we placed, then return its material to the colony. */
         private void cleanupTemporarySteps(Colony colony) {
             if (!(w.level() instanceof net.minecraft.server.level.ServerLevel level) || colony == null) return;
-            java.util.Iterator<Map.Entry<BlockPos, String>> iterator = temporarySteps.entrySet().iterator();
+            java.util.Iterator<Map.Entry<BlockPos, String>> iterator = colony.temporaryScaffolds.entrySet().iterator();
             while (iterator.hasNext()) {
                 Map.Entry<BlockPos, String> entry = iterator.next();
                 BlockPos step = entry.getKey();
@@ -526,10 +525,15 @@ public class WFWorker extends PathfinderMob {
                     iterator.remove();
                     continue;
                 }
-                if (w.distanceToSqr(step.getX() + 0.5, step.getY() + 1.0, step.getZ() + 0.5) <= 4.0) continue;
+                // Keep the scaffold while any worker is approaching it, or while any living entity
+                // occupies the standing cell. This also protects a worker after a world reload.
+                net.minecraft.world.phys.AABB nearby = new net.minecraft.world.phys.AABB(step).inflate(4.0);
+                boolean workerNearby = !level.getEntitiesOfClass(WFWorker.class, nearby,
+                        entity -> entity.isAlive()).isEmpty();
                 net.minecraft.world.phys.AABB standingSpace = new net.minecraft.world.phys.AABB(step.above());
-                if (!level.getEntitiesOfClass(net.minecraft.world.entity.LivingEntity.class, standingSpace,
-                        entity -> entity != w).isEmpty()) continue;
+                boolean occupied = !level.getEntitiesOfClass(net.minecraft.world.entity.LivingEntity.class, standingSpace,
+                        entity -> true).isEmpty();
+                if (workerNearby || occupied) continue;
                 if (level.setBlock(step, Blocks.AIR.defaultBlockState(), 3)) {
                     colony.s.receiveResource(entry.getValue(), 1);
                     iterator.remove();
