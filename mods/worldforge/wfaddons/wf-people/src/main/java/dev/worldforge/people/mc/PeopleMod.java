@@ -271,9 +271,14 @@ public class PeopleMod {
                             FLAGS.computeIfAbsent(player.getUUID(), k -> new HashSet<>()))) continue;
                     cooldowns.put(playerId, ticks);
                     while (cooldowns.size() > 64) {
-                        String oldest = cooldowns.entrySet().stream()
-                                .min(Map.Entry.comparingByValue((a, b) -> Long.compare(((Number) a).longValue(), ((Number) b).longValue())))
-                                .map(Map.Entry::getKey).orElse(null);
+                        String oldest = null;
+                        long oldestTick = Long.MAX_VALUE;
+                        for (Map.Entry<String,Object> entry : cooldowns.entrySet()) {
+                            if (entry.getValue() instanceof Number value && value.longValue() < oldestTick) {
+                                oldest = entry.getKey();
+                                oldestTick = value.longValue();
+                            }
+                        }
                         if (oldest == null) break;
                         cooldowns.remove(oldest);
                     }
