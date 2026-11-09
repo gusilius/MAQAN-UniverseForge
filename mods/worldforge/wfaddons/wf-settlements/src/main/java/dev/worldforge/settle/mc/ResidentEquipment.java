@@ -258,6 +258,18 @@ public final class ResidentEquipment {
         Character person = SettleMod.residentCharacter(body);
         Worker worker = body.worker();
         if (person == null || worker == null) return;
+        Tool used = tool(requiredRole(worker, colony));
+        if (used != null && !worker.generalist()) {
+            String canonicalProfession = PopulationSimulation.profession(person);
+            if (canonicalProfession.isBlank()) {
+                PopulationSimulation.assignProfession(person, worker.permanentProfession(), colony.s.year());
+                canonicalProfession = worker.permanentProfession();
+            }
+            if (canonicalProfession.equals(worker.permanentProfession())) {
+                try { PopulationSimulation.train(person, used.skill, 1); }
+                catch (IllegalStateException ignored) { /* A profession transition or maxed skill may reject practice. */ }
+            }
+        }
         ItemStack stack = body.getItemBySlot(EquipmentSlot.MAINHAND);
         if (!stack.isEmpty() && stack.getMaxDamage() > 0) {
             stack.hurtAndBreak(1, body, entity -> entity.broadcastBreakEvent(EquipmentSlot.MAINHAND));
