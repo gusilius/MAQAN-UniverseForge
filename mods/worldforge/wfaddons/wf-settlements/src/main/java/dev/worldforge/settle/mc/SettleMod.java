@@ -64,6 +64,10 @@ public class SettleMod {
 
     private static final DeferredRegister<Item> ITEMS = DeferredRegister.create(ForgeRegistries.ITEMS, MOD_ID);
     private static final DeferredRegister<EntityType<?>> ENTITIES = DeferredRegister.create(ForgeRegistries.ENTITY_TYPES, MOD_ID);
+    private static final DeferredRegister<net.minecraft.world.inventory.MenuType<?>> MENUS =
+            DeferredRegister.create(ForgeRegistries.MENU_TYPES, MOD_ID);
+    public static final RegistryObject<net.minecraft.world.inventory.MenuType<ResidentDialogueMenu>> RESIDENT_DIALOGUE_MENU =
+            MENUS.register("resident_dialogue", () -> net.minecraftforge.common.extensions.IForgeMenuType.create(ResidentDialogueMenu::new));
     public static final RegistryObject<Item> WAND = ITEMS.register("settle_wand", () -> new SettleWand(new Item.Properties().stacksTo(1)));
     public static final RegistryObject<EntityType<WFWorker>> WORKER = ENTITIES.register("worker",
             () -> EntityType.Builder.<WFWorker>of(WFWorker::new, MobCategory.MISC).sized(0.6f, 1.95f).clientTrackingRange(10).build(MOD_ID + ":worker"));
@@ -94,12 +98,24 @@ public class SettleMod {
         IEventBus bus = FMLJavaModLoadingContext.get().getModEventBus();
         ITEMS.register(bus);
         ENTITIES.register(bus);
+        MENUS.register(bus);
         bus.addListener(this::attributes);
         bus.addListener(this::tabs);
         MinecraftForge.EVENT_BUS.register(this);
         MinecraftForge.EVENT_BUS.register(new SettleWand.Events());
         MinecraftForge.EVENT_BUS.register(new ResidentInteraction());
         MinecraftForge.EVENT_BUS.register(new TaxService());
+    }
+
+    @net.minecraftforge.fml.common.Mod.EventBusSubscriber(modid = MOD_ID,
+            bus = net.minecraftforge.fml.common.Mod.EventBusSubscriber.Bus.MOD,
+            value = net.minecraftforge.api.distmarker.Dist.CLIENT)
+    public static final class ClientEvents {
+        @net.minecraftforge.eventbus.api.SubscribeEvent
+        public static void clientSetup(net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent event) {
+            event.enqueueWork(() -> net.minecraft.client.gui.screens.MenuScreens.register(
+                    RESIDENT_DIALOGUE_MENU.get(), ResidentDialogueScreen::new));
+        }
     }
 
     private void attributes(EntityAttributeCreationEvent e) {
