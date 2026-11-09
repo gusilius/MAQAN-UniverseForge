@@ -201,10 +201,23 @@ public class TroopsMod {
     /** Reconciles the physical squad projection with the strategic wf-army roster. */
     private static void syncArmyHierarchy() {
         if (server == null) return;
+        Set<String> reconciledSquads = new HashSet<>();
         for (TroopEntity troop : LIVE.values()) {
             if (troop == null || !troop.isAlive() || troop.armyId <= 0) continue;
             Squads.Squad squad = SQUADS.squadOf(troop.getUUID().toString());
-            if (squad == null) continue;
+            if (squad == null || !reconciledSquads.add(squad.id)) continue;
+            boolean oneStrategicArmy = true;
+            for (String memberId : squad.members) {
+                TroopEntity member = LIVE.get(memberId);
+                if (member != null && member.isAlive() && member.armyId != troop.armyId) {
+                    oneStrategicArmy = false;
+                    break;
+                }
+            }
+            if (!oneStrategicArmy) {
+                LOGGER.warn("wf-troops: squad {} contains units from multiple strategic armies; hierarchy link withheld", squad.id);
+                continue;
+            }
             ArmyLink.Found strategic = ArmyLink.find(troop.armyId);
             String name = strategic == null ? "Армия " + troop.armyId : strategic.army().name;
             String realm = strategic == null ? troop.realm : strategic.army().realm;
