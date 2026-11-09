@@ -2,14 +2,14 @@ name: MAQAN UniverseForge — Windows x64
 
 on:
   push:
-    branches: [main, feature/rts-phase-iv, feature/atlas-spatial-strategy-x]
+    branches: [main, feature/rts-phase-iv, feature/atlas-spatial-strategy-x, feature/rts-unified-control-stage-xi]
     paths:
       - "mods/**"
       - "shared/**"
       - "platform/**"
       - ".github/workflows/**"
   pull_request:
-    branches: [main, feature/rts-phase-iv]
+    branches: [main, feature/rts-phase-iv, feature/rts-unified-control-stage-xi]
     paths:
       - "mods/**"
       - "shared/**"
