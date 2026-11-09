@@ -58,10 +58,17 @@ public final class TradeNetwork {
             n = (int) Math.min(n, Math.min(a.tradeLeft, b.tradeLeft));
             if (pay > 0) n = (int) Math.min(n, Math.floor(b.amount(Defs.SILVER) / pay));
             if (n <= 0) { r.status = a.amount(r.res) - RESERVE < 1 ? "нет товара" : b.amount(Defs.SILVER) < pay ? "нет серебра" : "нет места"; continue; }
-            a.stock.put(r.res, a.amount(r.res) - n);
-            b.add(r.res, n);
-            a.add(Defs.SILVER, n * give);
-            b.stock.put(Defs.SILVER, b.amount(Defs.SILVER) - n * pay);
+            double sellerPayment = n * give;
+            double marketFee = n * Math.max(0, pay - give);
+            if (!b.transferSilverTo(a, sellerPayment, "caravan-trade", "route:" + r.id)
+                    || !b.chargeSilver(marketFee, "market-fee", "route:" + r.id)) {
+                r.status = "нет серебра";
+                continue;
+            }
+            if (!a.consumeResource(r.res, n) || Math.abs(b.receiveResource(r.res, n) - n) > 1e-9) {
+                // Preconditions above make this unreachable in the single-threaded server tick.
+                throw new TradeException("Inventory changed during route settlement " + r.id);
+            }
             a.tradeLeft -= n; b.tradeLeft -= n;
             a.shiftDemand(r.res, n); b.shiftDemand(r.res, -n);
             r.acc -= n; r.carried += n;
