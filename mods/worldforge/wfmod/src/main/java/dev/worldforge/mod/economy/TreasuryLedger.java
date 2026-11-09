@@ -9,7 +9,7 @@ import java.util.*;
  * The ledger is independent of Minecraft so economy rules can be tested deterministically.
  */
 public final class TreasuryLedger {
-    public enum Kind { OPENING, DEPOSIT, WITHDRAWAL, TRANSFER_IN, TRANSFER_OUT, TAX, DUTY, UPKEEP, WAGE, ARMY_UPKEEP, TRADE, VASSAL_TRIBUTE, GRANT, LOAN, REPAYMENT, INTEREST, WRITE_OFF }
+    public enum Kind { OPENING, DEPOSIT, WITHDRAWAL, TRANSFER_IN, TRANSFER_OUT, TAX, DUTY, UPKEEP, WAGE, ARMY_UPKEEP, TRADE, VASSAL_TRIBUTE, GRANT, LOAN, REPAYMENT, INTEREST, WRITE_OFF, PRODUCTION, CONSUMPTION, LOGISTICS, IMPORT, EXPORT }
     public static final class Account {
         public final String id, ownerId, currency;
         public double balance, creditLimit, debt;
