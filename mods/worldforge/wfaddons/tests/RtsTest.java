@@ -46,14 +46,14 @@ public class RtsTest {
         int idle = sel.selectIdle(s, false);
         ok(idle == s.idleWorkers().size() && idle > 0, "'.' выбирает свободных: " + idle);
         int nb = sel.selectBuilders(s, false);
-        ok(nb == s.workers.stream().filter(w -> w.profession.equals("builder")).count(), "все строители: " + nb);
+        ok(nb == s.workers.stream().filter(w -> w.workRole().equals("builder")).count(), "все строители по текущей работе: " + nb);
         ok(sel.selectAll(s) == s.workers.size(), "выбрать всех");
         sel.selectProfession(s, "lumberjack", false);
-        ok(sel.size() == 3 && sel.workers(s).stream().allMatch(w -> w.profession.equals("lumberjack")), "выбрать профессию");
+        ok(sel.size() == 3 && sel.workers(s).stream().allMatch(w -> w.workRole().equals("lumberjack")), "выбрать профессию по текущей работе");
         sel.clickWorker(s, 1, false, false, false);
         ok(sel.size() == 1, "обычный щелчок: один");
         sel.clickWorker(s, 1, false, true, false);
-        ok(sel.workers(s).stream().allMatch(w -> w.profession.equals(s.worker(1).profession)), "ctrl-щелчок: вся профессия");
+        ok(sel.workers(s).stream().allMatch(w -> w.workRole().equals(s.worker(1).workRole())), "ctrl-щелчок: все с той же текущей работой");
         // рамка
         List<Selection.Rect> rs = List.of(new Selection.Rect(Selection.Rect.WORKER, 1, 10, 10, 5, 5), new Selection.Rect(Selection.Rect.WORKER, 2, 30, 10, 5, 5),
                 new Selection.Rect(Selection.Rect.BUILDING, 7, 0, 0, 100, 100));
