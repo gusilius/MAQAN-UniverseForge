@@ -289,8 +289,8 @@ public class PeopleMod {
             MapData m = EditorManager.dataFor(level);
             Set<String> flags = FLAGS.computeIfAbsent(sp.getUUID(), k -> new HashSet<>());
             if (m != null && m.titles != null) {
-                if (DialogueHook.open(sp, c, did, ROLES, m.titles, flags)) return;
-                if (!did.equals("default") && DialogueHook.open(sp, c, "default", ROLES, m.titles, flags)) return;   // у роли нет файла диалога
+                if (DialogueHook.open(sp, npc, c, did, ROLES, m.titles, flags)) return;
+                if (!did.equals("default") && DialogueHook.open(sp, npc, c, "default", ROLES, m.titles, flags)) return;   // у роли нет файла диалога
             }
         }
         if (!ev.isHandled()) sp.sendSystemMessage(Component.literal(label(c)));
