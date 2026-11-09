@@ -29,6 +29,9 @@ import net.minecraft.world.level.Level;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.EnumSet;
+import java.util.ArrayDeque;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -380,9 +383,9 @@ public class WFWorker extends PathfinderMob {
             if (!isWorkTarget(state, order.mode)) return false;
             if (worker.distanceToSqr(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5) > 9.0) return false;
             if ("clear".equals(order.mode)) {
-                if (level.destroyBlock(pos, false, worker)) return true;
-                return false;
+                return level.destroyBlock(pos, false, worker);
             }
+            if ("wood".equals(order.mode)) return fellWholeTree(worker, colony, level, pos);
             if ("level".equals(order.mode)) {
                 int desired = order.level;
                 if (desired <= level.getMinBuildHeight() || desired >= level.getMaxBuildHeight()) return false;
@@ -404,6 +407,62 @@ public class WFWorker extends PathfinderMob {
             }
             if (!level.destroyBlock(pos, false, worker)) return false;
             colony.s.receiveResource(resource, 1);
+            return true;
+        }
+
+        /**
+         * Fell the connected tree, not one log. Starting from any selected trunk block, walk the
+         * connected log component, then remove leaves attached to that component. The area order
+         * selects which tree to fell; once selected, the whole tree is completed even if its crown
+         * extends beyond the rectangle.
+         */
+        private static boolean fellWholeTree(WFWorker worker, Colony colony,
+                                             net.minecraft.server.level.ServerLevel level, BlockPos selected) {
+            if (!level.getBlockState(selected).is(BlockTags.LOGS)) return false;
+            Set<BlockPos> logs = new HashSet<>();
+            ArrayDeque<BlockPos> queue = new ArrayDeque<>();
+            queue.add(selected.immutable());
+            while (!queue.isEmpty() && logs.size() < 512) {
+                BlockPos current = queue.removeFirst();
+                if (!logs.add(current) || !level.hasChunkAt(current)
+                        || !level.getBlockState(current).is(BlockTags.LOGS)) continue;
+                for (int dx = -1; dx <= 1; dx++) for (int dy = -1; dy <= 1; dy++)
+                    for (int dz = -1; dz <= 1; dz++) {
+                        if (dx == 0 && dy == 0 && dz == 0) continue;
+                        BlockPos next = current.offset(dx, dy, dz);
+                        if (!logs.contains(next) && level.hasChunkAt(next)
+                                && level.getBlockState(next).is(BlockTags.LOGS)) queue.addLast(next);
+                    }
+            }
+            if (logs.isEmpty()) return false;
+            String resource = "wood";
+            int accepted = (int) Math.min(logs.size(), Math.max(0,
+                    Math.floor(colony.s.capacity(resource) - colony.s.amount(resource))));
+            if (accepted <= 0) {
+                Worker resident = colony.s.worker(worker.workerId);
+                if (resident != null) resident.status = "склад древесины заполнен";
+                return false;
+            }
+            int felled = 0;
+            for (BlockPos log : logs) {
+                if (!level.hasChunkAt(log) || !level.getBlockState(log).is(BlockTags.LOGS)) continue;
+                if (level.destroyBlock(log, false, worker)) felled++;
+            }
+            if (felled == 0) return false;
+            colony.s.receiveResource(resource, Math.min(felled, accepted));
+            // Remove only leaves belonging to this tree's crown, never neighbouring trunks.
+            Set<BlockPos> leaves = new HashSet<>();
+            for (BlockPos log : logs) {
+                for (int dx = -4; dx <= 4; dx++) for (int dy = -4; dy <= 4; dy++)
+                    for (int dz = -4; dz <= 4; dz++) {
+                        if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) > 7) continue;
+                        BlockPos leaf = log.offset(dx, dy, dz);
+                        if (level.hasChunkAt(leaf) && level.getBlockState(leaf).is(BlockTags.LEAVES))
+                            leaves.add(leaf);
+                    }
+            }
+            for (BlockPos leaf : leaves) if (level.hasChunkAt(leaf)
+                    && level.getBlockState(leaf).is(BlockTags.LEAVES)) level.destroyBlock(leaf, false, worker);
             return true;
         }
 
