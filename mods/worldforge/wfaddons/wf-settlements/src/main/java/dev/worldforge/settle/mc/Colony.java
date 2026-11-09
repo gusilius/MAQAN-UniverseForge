@@ -42,6 +42,8 @@ public final class Colony {
         public int overlay = 2;
     }
     public final Map<Integer, WorkOrder> workOrders = new LinkedHashMap<>();
+    /** Temporary access scaffolds placed by workers; persisted so reloads cannot leave orphan blocks. */
+    public final Map<BlockPos, String> temporaryScaffolds = new LinkedHashMap<>();
 
     public final Settlement s;
     public final String dim;
@@ -147,6 +149,14 @@ public final class Colony {
             orders.add(row);
         }
         m.put("workOrders", orders);
+        List<Object> scaffolds = new ArrayList<>();
+        for (Map.Entry<BlockPos, String> e : temporaryScaffolds.entrySet()) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("x", e.getKey().getX()); row.put("y", e.getKey().getY()); row.put("z", e.getKey().getZ());
+            row.put("material", e.getValue());
+            scaffolds.add(row);
+        }
+        m.put("temporaryScaffolds", scaffolds);
         m.put("map", Json.parse(map.toJson()));
         return m;
     }
@@ -181,6 +191,15 @@ public final class Colony {
                 o.soil = soilValue instanceof Number n ? Math.max(0, n.intValue()) : 0;
                 o.complete = Boolean.TRUE.equals(row.get("complete"));
                 c.workOrders.put(workerId, o);
+            }
+        }
+        if (m.get("temporaryScaffolds") instanceof List<?> scaffolds) {
+            for (Object raw : scaffolds) {
+                if (!(raw instanceof Map<?, ?> row)) continue;
+                if (!(row.get("x") instanceof Number x) || !(row.get("y") instanceof Number y)
+                        || !(row.get("z") instanceof Number z) || !(row.get("material") instanceof String material)) continue;
+                if (!material.equals("wood") && !material.equals("stone")) continue;
+                c.temporaryScaffolds.put(new BlockPos(x.intValue(), y.intValue(), z.intValue()), material);
             }
         }
         if (m.get("sites") instanceof List) {
