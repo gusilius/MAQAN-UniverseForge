@@ -470,7 +470,8 @@ public class TroopsMod {
                     if(troop==null||!owner.equals(troop.ownerId()))continue;
                     Squads.Squad squad=SQUADS.squadOf(id);
                     boolean hasIdentity=troop.characterId!=null&&!troop.characterId.isBlank();
-                    if(squad!=null&&(o.arg()<0||hasIdentity))leaders.putIfAbsent(squad.id,troop);
+                    if(squad!=null&&owner.equals(squad.owner)&&(o.arg()<0||hasIdentity))
+                        leaders.putIfAbsent(squad.id,troop);
                 }
                 int changed=0;
                 for(Map.Entry<String,TroopEntity> entry:leaders.entrySet()){
