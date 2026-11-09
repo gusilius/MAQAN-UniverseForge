@@ -879,9 +879,10 @@ public final class Settlement {
     private void build(double dt) {
         for (Building b : new ArrayList<>(buildings)) {
             if (b.state != Building.State.BUILDING) continue;
-            int n = assignedWith(b.uid, "builder");
-            if (n == 0) { b.status = "нет строителей"; continue; }
-            b.progress += n * dt;
+            double builderWork = assignedEfficiency(b.uid, "builder");
+            if (builderWork <= 0) { b.status = "нет строителей"; continue; }
+            // A specialist builder contributes 1.5 work units per second; a general worker contributes 1.0.
+            b.progress += builderWork * dt;
             b.status = "строится " + (int) Math.min(99, 100 * b.progress / b.def.work) + "%";
             if (b.progress >= b.def.work) {
                 b.state = Building.State.DONE;
