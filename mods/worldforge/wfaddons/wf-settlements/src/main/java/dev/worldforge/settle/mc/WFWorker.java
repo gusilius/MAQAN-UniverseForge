@@ -180,7 +180,8 @@ public class WFWorker extends PathfinderMob {
             }
             if (area != null) {
                 if (resourceTarget != null) {
-                    target = resourceTarget;
+                    BlockPos approach = workApproachTarget(w, resourceTarget);
+                    target = approach == null ? resourceTarget : approach;
                     working = true;
                 } else {
                     BlockPos waypoint = workWaypoint(w, area);
@@ -228,7 +229,8 @@ public class WFWorker extends PathfinderMob {
                 }
                 target = idle;
             }
-            boolean arrived = w.distanceToSqr(target.getX() + 0.5, w.getY(), target.getZ() + 0.5) < 6.25;
+            double targetFeetY = area != null ? target.getY() : w.getY();
+            boolean arrived = w.distanceToSqr(target.getX() + 0.5, targetFeetY, target.getZ() + 0.5) < 6.25;
             if (!arrived && --repath <= 0) {
                 repath = 10;
                 w.getNavigation().moveTo(target.getX() + 0.5, target.getY(), target.getZ() + 0.5, 1.0);
@@ -289,6 +291,26 @@ public class WFWorker extends PathfinderMob {
             return new BlockPos(x, worker.getBlockY(), z);
         }
 
+        /** Find a walkable adjacent cell; pathfinding must never be asked to walk into the solid resource block. */
+        private static BlockPos workApproachTarget(WFWorker worker, BlockPos resource) {
+            List<BlockPos> candidates = new ArrayList<>();
+            BlockPos above = resource.above();
+            if (standable(worker, above)) candidates.add(above);
+            for (net.minecraft.core.Direction direction : net.minecraft.core.Direction.Plane.HORIZONTAL) {
+                BlockPos side = resource.relative(direction);
+                if (standable(worker, side)) candidates.add(side);
+            }
+            return candidates.stream().min(java.util.Comparator.comparingDouble(pos ->
+                    worker.distanceToSqr(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5))).orElse(null);
+        }
+
+        private static boolean standable(WFWorker worker, BlockPos feet) {
+            if (!worker.level().hasChunkAt(feet) || !worker.level().hasChunkAt(feet.below())) return false;
+            BlockState at = worker.level().getBlockState(feet);
+            BlockState floor = worker.level().getBlockState(feet.below());
+            return (at.isAir() || at.canBeReplaced()) && at.getFluidState().isEmpty() && floor.isSolid();
+        }
+
         /** Search a small local window, then sweep the larger selected area by persistent waypoints. */
         private static BlockPos findWorkTarget(WFWorker worker, Colony.WorkOrder order) {
             if (order.complete) return null;
@@ -323,6 +345,7 @@ public class WFWorker extends PathfinderMob {
                 for (int y = fromY; y <= toY; y++) {
                     BlockPos pos = new BlockPos(x, y, z);
                     if (!isWorkTarget(worker.level().getBlockState(pos), order.mode)) continue;
+                    if (workApproachTarget(worker, pos) == null) continue;
                     double d = worker.distanceToSqr(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
                     if (d < bestDistance) { bestDistance = d; best = pos; }
                 }
@@ -352,6 +375,7 @@ public class WFWorker extends PathfinderMob {
             if (!(worker.level() instanceof net.minecraft.server.level.ServerLevel level) || !level.hasChunkAt(pos)) return false;
             BlockState state = level.getBlockState(pos);
             if (!isWorkTarget(state, order.mode)) return false;
+            if (worker.distanceToSqr(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5) > 9.0) return false;
             if ("clear".equals(order.mode)) {
                 if (level.destroyBlock(pos, false, worker)) return true;
                 return false;
