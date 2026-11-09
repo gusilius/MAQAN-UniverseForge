@@ -38,6 +38,10 @@ public final class ResidentDialogueScreen extends AbstractContainerScreen<Reside
         addRenderableWidget(action("О работе", "talk_work", left + w + gap, top + 60, w, h));
         addRenderableWidget(action("О мире", "talk_world", left + (w + gap) * 2, top + 60, w, h));
         addRenderableWidget(action("Ваше мнение", "talk_opinion", left + (w + gap) * 3, top + 60, w, h));
+        addRenderableWidget(action("Строить", "work_builder", left, top + 90, w, h));
+        addRenderableWidget(action("Лесоруб", "work_lumberjack", left + w + gap, top + 90, w, h));
+        addRenderableWidget(action("Добыча", "work_miner", left + (w + gap) * 2, top + 90, w, h));
+        addRenderableWidget(action("Перевозка", "work_hauler", left + (w + gap) * 3, top + 90, w, h));
     }
 
     private Button action(String label, String command, int x, int y, int width, int height) {
