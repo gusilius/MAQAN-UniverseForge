@@ -59,8 +59,11 @@ class WorkspaceDockTreeTest {
         WorkspaceDockTree.validate(tree);
         assertEquals(Set.of("map", "inspector", "character", "events"),
                 WorkspaceDockTree.panelIds(tree));
-        assertEquals(4, WorkspaceDockTree.layout(tree,
-                new WorkspaceDockTree.Rect(0, 0, 1_200, 800)).size());
+        assertEquals(3, WorkspaceDockTree.layout(tree,
+                new WorkspaceDockTree.Rect(0, 0, 1_200, 800)).size(),
+                "Only active tabs occupy visible layout rectangles");
+        assertEquals(4, WorkspaceDockTree.panelIds(tree).size(),
+                "Inactive tabs must remain registered in the workspace tree");
     }
 
     @Test
