@@ -30,6 +30,53 @@ final class WorkerControl {
                 || (colony != null && p.getUUID().toString().equals(colony.owner));
     }
 
+    static String workArea(ServerPlayer p, OrderPacket o) {
+        int accepted = 0;
+        boolean denied = false;
+        String[] modes = {"wood", "stone", "ore", "clear", "level"};
+        String[] roles = {"lumberjack", "miner", "miner", "builder", "builder"};
+        String[] labels = {"добывать древесину", "добывать камень", "добывать руду", "расчищать растительность", "выравнивать участок"};
+        String[] params = o.target().split(":", 2);
+        int overlay = 2, level = 0;
+        try { if (params.length > 0) overlay = Math.max(0, Math.min(2, Integer.parseInt(params[0]))); }
+        catch (NumberFormatException ignored) {}
+        try { if (params.length > 1) level = Integer.parseInt(params[1]); }
+        catch (NumberFormatException ignored) {}
+        String mode = modes[o.kind()];
+        for (String id : o.ids()) {
+            Entity entity;
+            try { entity = p.serverLevel().getEntity(UUID.fromString(id)); }
+            catch (IllegalArgumentException ex) { continue; }
+            if (!(entity instanceof WFWorker body)) continue;
+            Colony colony = SettleMod.colony(body.colonyId);
+            Worker resident = body.worker();
+            if (colony == null || resident == null) continue;
+            if (!mayControl(p, colony)) { denied = true; continue; }
+            String role = roles[o.kind()];
+            if (!resident.canPerform(role)) continue;
+            Colony.WorkOrder work = new Colony.WorkOrder();
+            work.mode = mode;
+            work.x = (int) Math.floor(o.x());
+            work.z = (int) Math.floor(o.z());
+            work.radius = o.arg();
+            work.level = level;
+            work.overlay = overlay;
+            colony.workOrders.put(resident.id, work);
+            resident.manualFollow = false;
+            resident.manualOrder = false;
+            resident.manualHauler = false;
+            resident.orderQueue.clear();
+            resident.building = 0;
+            resident.assignedProfession = role;
+            resident.status = "приказ: " + labels[o.kind()];
+            accepted++;
+        }
+        if (accepted == 0) return denied ? "Нельзя отдавать приказы рабочим чужого поселения"
+                : "Выберите подходящих рабочих (универсальные рабочие могут выполнять эту задачу)";
+        return "Участок назначен: " + labels[o.kind()] + " · рабочих: " + accepted
+                + " · радиус: " + o.arg() + " · отображение: " + (overlay == 0 ? "выкл." : overlay == 1 ? "слабое" : "яркое");
+    }
+
     static String command(ServerPlayer p, OrderPacket o) {
         ServerLevel lv = p.serverLevel();
         int done = 0;
