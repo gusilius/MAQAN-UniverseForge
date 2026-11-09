@@ -82,8 +82,9 @@ public final class CommandMode {
         if (mc == null || mc.player == null || e == null) return false;
         String owner=mc.player.getUUID().toString();
         if (e instanceof TroopEntity t) return owner.equals(t.ownerId());
-        if (e instanceof dev.worldforge.settle.mc.WFWorker worker)
-            return owner.equals(worker.ownerId());
+        if(e instanceof dev.worldforge.settle.mc.WFWorker worker)
+            return owner.equals(worker.ownerId())
+                    ||(mc.hasSingleplayerServer()&&worker.ownerId().isBlank());
         return false;
     }
 
