@@ -161,6 +161,7 @@ public class PeopleTest {
 
         // Canonical Character lifecycle journal is shared by every subsystem and persisted with Character.props.
         CharacterRegistry journal = new CharacterRegistry();
+        Character carrier = journal.create("Переносчик", "", "", "m", 1);
         int[] lifecycleCallbacks = {0, 0};
         journal.addListener(new CharacterRegistry.Listener() {
             @Override public void lifecycle(Character person, CharacterRegistry.LifecycleEvent event) { lifecycleCallbacks[0]++; }
@@ -169,7 +170,6 @@ public class PeopleTest {
             @Override public void lifecycle(Character person, CharacterRegistry.LifecycleEvent event) { lifecycleCallbacks[1]++; }
         });
         Character journalPerson = journal.create("Житель журнала", "", "", "m", 1);
-        Character carrier = journal.create("Переносчик", "", "", "m", 1);
         CharacterInventory.add(journalPerson,"minecraft:bread",8);
         CharacterInventory.add(journalPerson,"minecraft:iron_sword",1,"{Damage:3}");
         ok(CharacterInventory.count(journalPerson,"minecraft:bread")==8
