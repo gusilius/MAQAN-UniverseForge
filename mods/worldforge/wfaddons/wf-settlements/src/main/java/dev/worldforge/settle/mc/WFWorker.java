@@ -8,6 +8,9 @@ import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.network.chat.Component;
 import net.minecraft.tags.DamageTypeTags;
+import net.minecraft.tags.BlockTags;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.EntityType;
@@ -155,7 +158,21 @@ public class WFWorker extends PathfinderMob {
             Building b = wk.building == 0 ? null : c.s.building(wk.building);
             BlockPos target;
             boolean working = false;
-            if (wk.manualFollow) {
+            Colony.WorkOrder area = c.workOrders.get(wk.id);
+            BlockPos resourceTarget = area == null ? null : findWorkTarget(w, area);
+            if (area != null) {
+                if (resourceTarget != null) {
+                    target = resourceTarget;
+                    working = true;
+                } else {
+                    int tx = area.x, tz = area.z;
+                    int ty = w.level().hasChunkAt(new BlockPos(tx, w.getBlockY(), tz))
+                            ? w.level().getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, tx, tz)
+                            : w.getBlockY();
+                    target = new BlockPos(tx, ty, tz);
+                    wk.status = "участок проверен: подходящих блоков рядом нет";
+                }
+            } else if (wk.manualFollow) {
                 net.minecraft.server.MinecraftServer server = w.getServer();
                 net.minecraft.server.level.ServerPlayer owner = null;
                 if (server != null && wk.manualFollowOwner != null && !wk.manualFollowOwner.isBlank()) {
@@ -194,13 +211,106 @@ public class WFWorker extends PathfinderMob {
             }
             if (arrived) {
                 w.getNavigation().stop();
-                if(wk.manualOrder)c.s.advanceManualOrder(wk.id);
+                if (area != null && resourceTarget != null) {
+                    if (performWork(w, c, area, resourceTarget)) {
+                        wk.status = switch (area.mode) {
+                            case "wood" -> "добывает древесину";
+                            case "stone" -> "добывает камень";
+                            case "ore" -> "добывает руду";
+                            case "clear" -> "расчищает участок";
+                            case "level" -> "выравнивает участок";
+                            default -> "работает на участке";
+                        };
+                        if (++swing >= 8) { swing = 0; w.swing(InteractionHand.MAIN_HAND); }
+                    }
+                } else if (area == null && wk.manualOrder) c.s.advanceManualOrder(wk.id);
                 if (b != null) w.getLookControl().setLookAt(c.worldX(b) + 0.5, w.getEyeY(), c.worldZ(b) + 0.5);
                 if (working && ++swing >= 15) {
                     swing = 0;
                     w.swing(InteractionHand.MAIN_HAND);
                 }
             }
+        }
+
+        /** Search only inside the assigned footprint; the worker never picks an unrelated distant resource node. */
+        private static BlockPos findWorkTarget(WFWorker worker, Colony.WorkOrder order) {
+            int radius = Math.max(0, Math.min(64, order.radius));
+            int yCenter = order.level > worker.level().getMinBuildHeight() && order.level < worker.level().getMaxBuildHeight()
+                    ? order.level : worker.getBlockY();
+            int yRange = order.level > worker.level().getMinBuildHeight() && order.level < worker.level().getMaxBuildHeight() ? 8 : 12;
+            int minX = order.x - radius, maxX = order.x + radius;
+            int minZ = order.z - radius, maxZ = order.z + radius;
+            if (radius == 0) { minX = maxX = order.x; minZ = maxZ = order.z; }
+            BlockPos best = null;
+            double bestDistance = Double.MAX_VALUE;
+            int fromY = Math.max(worker.level().getMinBuildHeight(), yCenter - yRange);
+            int toY = Math.min(worker.level().getMaxBuildHeight() - 1, yCenter + yRange);
+            for (int x = minX; x <= maxX; x++) for (int z = minZ; z <= maxZ; z++) {
+                if (!worker.level().hasChunkAt(new BlockPos(x, yCenter, z))) continue;
+                for (int y = fromY; y <= toY; y++) {
+                    BlockPos pos = new BlockPos(x, y, z);
+                    BlockState state = worker.level().getBlockState(pos);
+                    if (!isWorkTarget(state, order.mode)) continue;
+                    double d = worker.distanceToSqr(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
+                    if (d < bestDistance) { bestDistance = d; best = pos; }
+                }
+            }
+            return best;
+        }
+
+        private static boolean isWorkTarget(BlockState state, String mode) {
+            return switch (mode) {
+                case "wood" -> state.is(BlockTags.LOGS);
+                case "stone" -> state.is(Blocks.STONE) || state.is(Blocks.DEEPSLATE) || state.is(Blocks.COBBLESTONE)
+                        || state.is(Blocks.COBBLED_DEEPSLATE) || state.is(Blocks.ANDESITE) || state.is(Blocks.DIORITE)
+                        || state.is(Blocks.GRANITE) || state.is(Blocks.TUFF);
+                case "ore" -> state.is(BlockTags.COAL_ORES) || state.is(BlockTags.IRON_ORES) || state.is(BlockTags.COPPER_ORES)
+                        || state.is(BlockTags.GOLD_ORES) || state.is(BlockTags.REDSTONE_ORES) || state.is(BlockTags.LAPIS_ORES)
+                        || state.is(BlockTags.DIAMOND_ORES) || state.is(BlockTags.EMERALD_ORES);
+                case "clear" -> state.is(BlockTags.LEAVES) || state.is(BlockTags.FLOWERS) || state.is(BlockTags.SAPLINGS)
+                        || state.is(BlockTags.CROPS) || state.is(Blocks.GRASS) || state.is(Blocks.TALL_GRASS)
+                        || state.is(Blocks.FERN) || state.is(Blocks.LARGE_FERN) || state.is(Blocks.DEAD_BUSH)
+                        || state.is(Blocks.VINE);
+                case "level" -> true;
+                default -> false;
+            };
+        }
+
+        private static boolean performWork(WFWorker worker, Colony colony, Colony.WorkOrder order, BlockPos pos) {
+            if (!(worker.level() instanceof net.minecraft.server.level.ServerLevel level) || !level.hasChunkAt(pos)) return false;
+            BlockState state = level.getBlockState(pos);
+            if (!isWorkTarget(state, order.mode)) return false;
+            if ("clear".equals(order.mode)) {
+                if (level.destroyBlock(pos, false, worker)) { colony.s.receiveResource("wood", 0); return true; }
+                return false;
+            }
+            if ("level".equals(order.mode)) {
+                int desired = order.level;
+                if (desired <= level.getMinBuildHeight() || desired >= level.getMaxBuildHeight()) return false;
+                if (pos.getY() <= desired) return false;
+                return level.destroyBlock(pos, false, worker);
+            }
+            String resource = "wood".equals(order.mode) ? "wood" : "stone".equals(order.mode) ? "stone" : oreResource(state);
+            if (resource == null || !colony.s.defs.resourceNames.containsKey(resource)) resource = "stone";
+            if (colony.s.amount(resource) + 1 > colony.s.capacity(resource)) {
+                colony.s.worker(worker.workerId).status = "склад заполнен: " + resource;
+                return false;
+            }
+            if (!level.destroyBlock(pos, false, worker)) return false;
+            colony.s.receiveResource(resource, 1);
+            return true;
+        }
+
+        private static String oreResource(BlockState state) {
+            if (state.is(BlockTags.COAL_ORES)) return "coal";
+            if (state.is(BlockTags.IRON_ORES)) return "iron";
+            if (state.is(BlockTags.COPPER_ORES)) return "copper";
+            if (state.is(BlockTags.GOLD_ORES)) return "gold";
+            if (state.is(BlockTags.REDSTONE_ORES)) return "redstone";
+            if (state.is(BlockTags.LAPIS_ORES)) return "lapis";
+            if (state.is(BlockTags.DIAMOND_ORES)) return "diamond";
+            if (state.is(BlockTags.EMERALD_ORES)) return "emerald";
+            return "stone";
         }
     }
 }
