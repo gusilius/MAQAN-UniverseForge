@@ -298,13 +298,19 @@ public final class ResidentEquipment {
         Tool expected = tool(requiredRole(worker, body.colony()));
         if (expected == null) return "Эта профессия не использует переносимый инструмент.";
         ItemStack offered = player.getMainHandItem();
-        if (!matches(offered, expected.kind)) return "Нужен инструмент подходящего типа для профессии " + worker.workRole() + ".";
+        if (!matches(offered, expected.kind)) return "Нужен инструмент подходящего типа для профессии " + requiredRole(worker, body.colony()) + ".";
         ItemStack copy = offered.copy();
         copy.setCount(1);
         int tier = copy.getItem() instanceof TieredItem tiered ? Math.max(0, Math.min(4, tiered.getTier().getLevel())) : 0;
-        save(person, copy, tier, worker.workRole());
+        if (tier > maxTier(person, body.colony(), worker, expected))
+            return "Этот инструмент пока слишком высокого уровня. Нужны уровень персонажа и навык " + expected.skill + " выше.";
+        ItemStack previous = load(person);
+        if (!previous.isEmpty() && !player.getInventory().add(previous.copy()))
+            return "Освободите место в инвентаре: старый инструмент нужно вернуть вам перед заменой.";
+        save(person, copy, tier, requiredRole(worker, body.colony()));
         body.setItemSlot(EquipmentSlot.MAINHAND, copy.copy());
         offered.shrink(1);
-        return "Принял инструмент от игрока: " + copy.getHoverName().getString() + ".";
+        return "Принял инструмент от игрока: " + copy.getHoverName().getString()
+                + (previous.isEmpty() ? "." : "; прежний инструмент возвращён в ваш инвентарь.");
     }
 }
