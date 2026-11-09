@@ -57,7 +57,7 @@ public final class DialogueBridge {
             }
         }
         ctx.var("npc_roles", String.join(",", roles)).var("npc_traits", String.join(",", npc.traits)).var("npc_role", title)
-                .var("npc_title", title.isEmpty() ? npc.name : title + " " + npc.name).var("realm", realm).var("npc_id", npc.id).var("npc_org", npc.props.get("org") == null ? "" : String.valueOf(npc.props.get("org"))).var("npc_realm_id", realmId);
+                .var("npc_title", title.isEmpty() ? npc.name : title + " " + npc.name).var("realm", realm).var("npc_id", npc.id).var("social_intent", String.valueOf(npc.props.getOrDefault("social.initiative_intent", ""))).var("social_subject", String.valueOf(npc.props.getOrDefault("social.initiative_subject", ""))).var("npc_org", npc.props.get("org") == null ? "" : String.valueOf(npc.props.get("org"))).var("npc_realm_id", realmId);
         for (ContextExtender x : EXTENDERS) x.extend(ctx, npc, playerId, d);
         return ctx;
     }
