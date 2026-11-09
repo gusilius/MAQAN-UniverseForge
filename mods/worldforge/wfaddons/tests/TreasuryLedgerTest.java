@@ -15,7 +15,8 @@ public final class TreasuryLedgerTest {
         ledger.open("realm:kingdom","realm:kingdom","silver",1000);
         ledger.open("settlement:capital","settlement:capital","silver",100);
         ledger.open("army:royal","army:royal","silver",25);
-        ledger.open("merchant:caravan","merchant:caravan","silver",0);\n        ledger.open("foreign:account","foreign:account","gold",10);
+        ledger.open("merchant:caravan","merchant:caravan","silver",0);
+        ledger.open("foreign:account","foreign:account","gold",10);
         ok(ledger.transfer("realm:kingdom","settlement:capital",125,TreasuryLedger.Kind.GRANT,"budget","grant-1",10,"settlement grant"),
                 "government grant transfers funds between shared accounts");
         ok(close(ledger.balance("realm:kingdom"),875)&&close(ledger.balance("settlement:capital"),225),
