@@ -1,6 +1,8 @@
 package dev.worldforge.tests;
 
 import dev.worldforge.settle.ResidentQuest;
+import dev.worldforge.people.Character;
+import dev.worldforge.people.CharacterRegistry;
 import java.util.Map;
 
 public final class ResidentQuestTest {
@@ -28,6 +30,15 @@ public final class ResidentQuestTest {
         ResidentQuest restored = ResidentQuest.fromMap(quest.toMap());
         check(restored.complete() && restored.progress() == 3 && restored.completedYear() == 13,
                 "contract survives save and restore");
+        CharacterRegistry people = new CharacterRegistry();
+        Character resident = people.create("Mira", "", "", "f", 1);
+        resident.props.put("wf_resident_quest", quest.toMap());
+        CharacterRegistry peopleAfterSave = new CharacterRegistry();
+        peopleAfterSave.fromJson(people.toJson());
+        Character restoredResident = peopleAfterSave.get(resident.id);
+        ResidentQuest residentQuest = ResidentQuest.fromMap((Map<?, ?>) restoredResident.props.get("wf_resident_quest"));
+        check(residentQuest.complete() && residentQuest.progress() == 3,
+                "resident contract survives the canonical CharacterRegistry world save");
 
         ResidentQuest abandoned = new ResidentQuest("other", "Другое поручение", 2, 12);
         check(abandoned.abandon() && abandoned.status() == ResidentQuest.Status.ABANDONED,
