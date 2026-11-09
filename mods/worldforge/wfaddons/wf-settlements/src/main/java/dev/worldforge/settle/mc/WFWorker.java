@@ -23,7 +23,7 @@ import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.entity.ai.goal.LookAtPlayerGoal;
 import net.minecraft.world.entity.ai.goal.OpenDoorGoal;
 import net.minecraft.world.entity.ai.navigation.GroundPathNavigation;
-import net.minecraft.world.level.pathfinder.PathType;
+import net.minecraft.world.level.pathfinder.BlockPathTypes;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 
@@ -57,12 +57,12 @@ public class WFWorker extends PathfinderMob {
         super(type, level);
         this.setPersistenceRequired();
         this.setMaxUpStep(1.0F);
-        setPathfindingMalus(PathType.DANGER_FIRE, 16.0F);
-        setPathfindingMalus(PathType.DAMAGE_FIRE, 16.0F);
-        setPathfindingMalus(PathType.DAMAGE_OTHER, 12.0F);
-        setPathfindingMalus(PathType.LAVA, 16.0F);
-        setPathfindingMalus(PathType.POWDER_SNOW, 8.0F);
-        setPathfindingMalus(PathType.WATER, 3.0F);
+        setPathfindingMalus(BlockPathTypes.DANGER_FIRE, 16.0F);
+        setPathfindingMalus(BlockPathTypes.DAMAGE_FIRE, 16.0F);
+        setPathfindingMalus(BlockPathTypes.DAMAGE_OTHER, 12.0F);
+        setPathfindingMalus(BlockPathTypes.LAVA, 16.0F);
+        setPathfindingMalus(BlockPathTypes.POWDER_SNOW, 8.0F);
+        setPathfindingMalus(BlockPathTypes.WATER, 3.0F);
     }
 
     public static AttributeSupplier.Builder attributes() {
