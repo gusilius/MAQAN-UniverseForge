@@ -157,6 +157,10 @@ public class SettleTest {
                         && bufferTest.building(bufferCamp.uid).localStock.getOrDefault("wood", 0.0) < localWood
                         && bufferTest.taskGraph.count(ResidentTaskGraph.Stage.STORED) > 0,
                 "назначенный общий рабочий доставляет древесину из локального буфера в общий склад");
+        Settlement manualHaulerBack = Settlement.fromJson(bufferTest.toJson(), d);
+        ok(manualHaulerBack.worker(newHauler.id).manualHauler
+                        && manualHaulerBack.worker(newHauler.id).workRole().equals("hauler"),
+                "ручное назначение носильщика сохраняется после перезапуска поселения");
 
         // зависимости и лимиты
         ok(throwsOrder(() -> s.place("granary", 30, 30)), "амбар требует лесопилку");
