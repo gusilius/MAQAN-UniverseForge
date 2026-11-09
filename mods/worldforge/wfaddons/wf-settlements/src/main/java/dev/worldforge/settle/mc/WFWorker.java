@@ -324,9 +324,10 @@ public class WFWorker extends PathfinderMob {
             if (halfX == 0 && halfZ == 0) { minX = maxX = order.x; minZ = maxZ = order.z; }
             int yCenter = order.level > worker.level().getMinBuildHeight() && order.level < worker.level().getMaxBuildHeight()
                     ? order.level : worker.getBlockY();
-            int yRange = radius == 0 ? 16 : "ore".equals(order.mode) ? 32 : "stone".equals(order.mode) ? 20 : 10;
-            int fromY = radius == 0 ? yCenter : Math.max(worker.level().getMinBuildHeight(), yCenter - yRange);
-            int toY = radius == 0 ? yCenter : Math.min(worker.level().getMaxBuildHeight() - 1, yCenter + yRange);
+            boolean exactBlock = halfX == 0 && halfZ == 0;
+            int yRange = exactBlock ? 0 : "ore".equals(order.mode) ? 32 : "stone".equals(order.mode) ? 20 : 10;
+            int fromY = exactBlock ? yCenter : Math.max(worker.level().getMinBuildHeight(), yCenter - yRange);
+            int toY = exactBlock ? yCenter : Math.min(worker.level().getMaxBuildHeight() - 1, yCenter + yRange);
             BlockPos best = null;
             double bestDistance = Double.MAX_VALUE;
             for (int x = minX; x <= maxX; x++) for (int z = minZ; z <= maxZ; z++) {
