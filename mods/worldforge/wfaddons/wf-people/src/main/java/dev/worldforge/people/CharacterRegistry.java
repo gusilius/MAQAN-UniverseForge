@@ -49,7 +49,7 @@ public final class CharacterRegistry {
         byId.put(c.id, c);
         for (Listener l : listeners) {
             l.born(c);
-            l.lifecycle(c, new LifecycleEvent(LifecycleKind.BORN, c.id, "", "", birthYear));
+            publish(c, new LifecycleEvent(LifecycleKind.BORN, c.id, "", "", birthYear));
         }
         return c;
     }
@@ -63,7 +63,7 @@ public final class CharacterRegistry {
         c.posts.add(new Character.Post(role, place));
         for (Listener l : listeners) {
             l.appointed(c, role, place);
-            l.lifecycle(c, new LifecycleEvent(LifecycleKind.POST_APPOINTED, c.id, "", role + "@" + place, year));
+            publish(c, new LifecycleEvent(LifecycleKind.POST_APPOINTED, c.id, "", role + "@" + place, year));
         }
     }
 
@@ -74,7 +74,7 @@ public final class CharacterRegistry {
         if (c.posts.removeIf(p -> p.role.equals(role) && p.place.equals(place)))
             for (Listener l : listeners) {
                 l.dismissed(c, role, place);
-                l.lifecycle(c, new LifecycleEvent(LifecycleKind.POST_DISMISSED, c.id, role + "@" + place, "", year));
+                publish(c, new LifecycleEvent(LifecycleKind.POST_DISMISSED, c.id, role + "@" + place, "", year));
             }
     }
 
@@ -190,8 +190,46 @@ public final class CharacterRegistry {
     }
 
     private void emit(Character c, LifecycleKind kind, String from, String to, int year) {
-        LifecycleEvent event = new LifecycleEvent(kind, c.id, from == null ? "" : from, to == null ? "" : to, year);
-        for (Listener listener : listeners) listener.lifecycle(c, event);
+        publish(c, new LifecycleEvent(kind, c.id, from == null ? "" : from, to == null ? "" : to, year));
+    }
+
+    /**
+     * Canonical, bounded life-event journal on Character.props. Other systems can consume the
+     * same identity/history without inventing parallel NPC records.
+     */
+    private void publish(Character character, LifecycleEvent event) {
+        Object raw = character.props.get("character.lifecycle.events");
+        List<Object> history = new ArrayList<>();
+        if (raw instanceof List<?> existing) history.addAll(existing);
+        long sequence = character.props.get("character.lifecycle.sequence") instanceof Number n
+                ? n.longValue() + 1 : 1;
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("sequence", sequence);
+        entry.put("kind", event.kind().name());
+        entry.put("from", event.from());
+        entry.put("to", event.to());
+        entry.put("year", event.year());
+        history.add(entry);
+        while (history.size() > 64) history.remove(0);
+        character.props.put("character.lifecycle.sequence", sequence);
+        character.props.put("character.lifecycle.events", history);
+        for (Listener listener : listeners) listener.lifecycle(character, event);
+    }
+
+    public List<Map<String, Object>> recentLifecycle(String characterId, int limit) {
+        Character character = get(characterId);
+        if (character == null || limit <= 0) return List.of();
+        Object raw = character.props.get("character.lifecycle.events");
+        if (!(raw instanceof List<?> events)) return List.of();
+        int start = Math.max(0, events.size() - Math.min(64, limit));
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (int i = start; i < events.size(); i++) if (events.get(i) instanceof Map<?, ?> map) {
+            Map<String, Object> copy = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> e : map.entrySet())
+                if (e.getKey() instanceof String key) copy.put(key, e.getValue());
+            result.add(Collections.unmodifiableMap(copy));
+        }
+        return Collections.unmodifiableList(result);
     }
 
     private static String requireText(String value, String label) {
@@ -211,7 +249,7 @@ public final class CharacterRegistry {
         int deathYear = c.props.get("population.death_year") instanceof Number n ? n.intValue() : 0;
         for (Listener l : listeners) {
             l.died(c);
-            l.lifecycle(c, new LifecycleEvent(LifecycleKind.DIED, c.id, "", "", deathYear));
+            publish(c, new LifecycleEvent(LifecycleKind.DIED, c.id, "", "", deathYear));
         }
         return vacated;
     }
@@ -397,7 +435,7 @@ public final class CharacterRegistry {
         next = safeNext;
         for (Character character : byId.values()) {
             for (Listener listener : listeners)
-                listener.lifecycle(character, new LifecycleEvent(LifecycleKind.RESTORED, character.id, "", "", 0));
+                publish(character, new LifecycleEvent(LifecycleKind.RESTORED, character.id, "", "", 0));
         }
     }
 
