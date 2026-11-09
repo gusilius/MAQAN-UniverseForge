@@ -1,6 +1,8 @@
 package dev.worldforge.troops.mc.client;
 
 import dev.worldforge.mod.Json;
+import dev.worldforge.settle.Defs;
+import dev.worldforge.settle.Settlement;
 import dev.worldforge.troops.BuildGhost;
 import dev.worldforge.troops.CameraRig;
 import dev.worldforge.troops.Formations;
@@ -34,6 +36,9 @@ public final class CommandScreen extends Screen {
     private boolean dragging, midDrag;
     private double dragX, dragY, mx, my;
     // стройка
+    private static volatile Settlement incomingSettlement;
+    private Settlement settlement = incomingSettlement;
+    private boolean settlementOpen = true;
     private boolean buildOpen;
     private boolean workAreaDrag;
     private int workMode = -1;
@@ -48,6 +53,20 @@ public final class CommandScreen extends Screen {
     private String ghostMsg = "";
 
     public CommandScreen() { super(Component.literal("Командный режим")); }
+
+    @SuppressWarnings("unchecked")
+    public static void setSettlementPayload(String payload) {
+        try {
+            Map<String, Object> m = (Map<String, Object>) Json.parse(payload);
+            Defs defs = new Defs();
+            if (m.get("defs") instanceof List<?> raw) for (Object o : raw) if (o instanceof String id) defs.add(id);
+            incomingSettlement = Settlement.fromJson((String) m.get("s"), defs);
+            if (Minecraft.getInstance().screen instanceof CommandScreen screen) screen.setSettlement(incomingSettlement);
+        } catch (RuntimeException ex) {
+            org.slf4j.LoggerFactory.getLogger("wf_troops").error("Не удалось подключить модель поселения к общей RTS-панели", ex);
+        }
+    }
+    public void setSettlement(Settlement model) { settlement = model; }
 
     @Override public boolean isPauseScreen() { return false; }
     @Override public boolean shouldCloseOnEsc() { return false; }
@@ -164,7 +183,7 @@ public final class CommandScreen extends Screen {
     private int rowsFit() { return Math.max(3, (panelH() - 62) / ROW); }
 
     // ---------- инспектор выбранных персонажей ----------
-    private static final int INSPECT_X=4, INSPECT_Y=34, INSPECT_W=250, INSPECT_ROW=19;
+    private static final int INSPECT_X=4, INSPECT_Y=settlementOpen ? 148 : 34, INSPECT_W=250, INSPECT_ROW=19;
 
     private boolean inspectAt(double x,double y) {
         if(x<INSPECT_X||x>=INSPECT_X+INSPECT_W||y<INSPECT_Y+22)return false;
@@ -180,6 +199,27 @@ public final class CommandScreen extends Screen {
             return true;
         }
         return true;
+    }
+
+    private void drawSettlementPanel(GuiGraphics g) {
+        if (settlement == null) return;
+        int x = 4, y = 34, w = 250, h = 106;
+        g.fill(x, y, x + w, y + h, 0xD910121A);
+        g.fill(x, y, x + w, y + 1, 0xFF8A7040);
+        g.drawString(font, "ПОСЕЛЕНИЕ · " + settlement.name, x + 6, y + 5, 0xFFE6C875, false);
+        String pop = "Жители " + settlement.workers.size() + " / жильё " + settlement.housing()
+                + " · настроение " + settlement.approval() + " · здания " + settlement.buildings.size();
+        g.drawString(font, font.plainSubstrByWidth(pop, w - 12), x + 6, y + 17, 0xFFD7DCE8, false);
+        int rx = x + 6, ry = y + 31, col = 0;
+        for (var entry : settlement.defs.resourceNames.entrySet()) {
+            String text = entry.getValue() + " " + (int) settlement.amount(entry.getKey());
+            int tw = font.width(text) + 12;
+            if (rx + tw > x + w - 4) { rx = x + 6; ry += 14; col++; }
+            if (ry > y + h - 12) break;
+            g.drawString(font, text, rx, ry, 0xFFB8D8A0, false);
+            rx += tw;
+        }
+        g.drawString(font, "Рабочие, армия, стройка и приказы — в этом командном пространстве", x + 6, y + h - 11, 0xFF9EA4B5, false);
     }
 
     private void drawUnitInspector(GuiGraphics g) {
@@ -356,6 +396,7 @@ public final class CommandScreen extends Screen {
         boolean ctrl = hasControlDown();
         if (key == GLFW.GLFW_KEY_TAB) { CommandMode.RIG.cycle(); return true; }
         if (key == GLFW.GLFW_KEY_B) { toggleBuild(); return true; }
+        if (key == GLFW.GLFW_KEY_H) { settlementOpen = !settlementOpen; return true; }
         if (key == GLFW.GLFW_KEY_Y) { cycleWorkMode(); return true; }
         if (key == GLFW.GLFW_KEY_O) {
             workOverlay = (workOverlay + 1) % 3;
@@ -537,6 +578,7 @@ public final class CommandScreen extends Screen {
         }
         for (Btn b : buttons()) button(g, b, mxi, myi);
         drawSelection(g, h);
+        if (settlementOpen) drawSettlementPanel(g);
         drawUnitInspector(g);
         if (buildOpen) drawBuildPanel(g, mxi, myi);
         String hint = workMode >= 0 ? "Участок: " + WORK_LABELS[workMode] + " · ЛКМ/рамка — назначить выделенным рабочим · O — видимость зоны · Y — сменить задачу" : picked != null ? "ЛКМ - поставить здание (Shift - ещё одно) · ПКМ/Esc - отмена · колесо - высота камеры"
