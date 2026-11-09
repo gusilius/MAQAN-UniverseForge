@@ -498,6 +498,7 @@ public final class Settlement {
         if (w == null) throw new OrderException("Нет рабочего " + workerId);
         w.building = 0;
         w.manualFollow = false;
+        w.manualFollowOwner = "";
         w.manualOrder = false;
         w.orderQueue.clear();
         w.status = "свободен";
