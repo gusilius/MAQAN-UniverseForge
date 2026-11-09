@@ -190,6 +190,15 @@ public class SettleTest {
         Worker restoredFollower = followingBack.worker(follower.id);
         ok(restoredFollower.manualFollow && restoredFollower.manualFollowOwner.equals("player-uuid"),
                 "режим следования за игроком и его UUID сохраняются после загрузки");
+        follower.lifeAction = "sleeping";
+        follower.lifeTargetX = 4.5;
+        follower.lifeTargetZ = -3.25;
+        follower.lifeActionUntil = 9876;
+        Settlement dailyLifeBack = Settlement.fromJson(following.toJson(), d);
+        Worker restoredDailyLife = dailyLifeBack.worker(follower.id);
+        ok(restoredDailyLife.lifeAction.equals("sleeping") && restoredDailyLife.lifeTargetX == 4.5
+                        && restoredDailyLife.lifeTargetZ == -3.25 && restoredDailyLife.lifeActionUntil == 9876,
+                "сон жителя, цель дома и время пробуждения переживают сохранение");
         Settlement queued= fresh(d,1);
         Worker queuedWorker=queued.workers.get(0);
         queued.moveTo(queuedWorker.id,10,20);
