@@ -342,6 +342,14 @@ public class TroopsMod {
         return true;
     }
 
+    /** Records wounds on the canonical Character before a lethal hit can close the entity binding. */
+    static void recordInjury(TroopEntity troop,int severity,String cause) {
+        PersonBinding binding=bindPerson(troop,false);
+        if(binding==null||!binding.character().alive)return;
+        CharacterDevelopment.recordInjury(binding.character(),severity,cause,
+                Math.max(0,troop.level().getDayTime()));
+    }
+
     /** Pushes live squad morale to the canonical Character without rebuilding profession or XP state. */
     static void syncMilitaryMorale(TroopEntity troop) {
         PersonBinding binding = bindPerson(troop, false);
