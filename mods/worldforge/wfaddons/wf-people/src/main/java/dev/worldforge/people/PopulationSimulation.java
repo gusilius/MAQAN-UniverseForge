@@ -14,7 +14,7 @@ public final class PopulationSimulation {
     public static final int SKILL_XP_PER_RANK = 100;
     public static final int MAX_SKILL_RANK = 20;
 
-    public enum Need { HUNGER, REST, SAFETY, SOCIAL, PURPOSE }
+    public enum Need { HUNGER, REST, SAFETY, SOCIAL, PURPOSE, LEISURE }
     public enum Duty { WORKER, SPECIALIST, SOLDIER, HERO }
     public enum LifeStage { INFANT, CHILD, ADOLESCENT, ADULT, ELDER }
     public enum Intent { EAT, REST, SEEK_SAFETY, SOCIALIZE, WORK, TRAIN, PATROL, FOLLOW_COMMAND, IDLE }
@@ -304,6 +304,7 @@ public final class PopulationSimulation {
             changeNeed(character, Need.REST, drift(6, elapsedDays));
             changeNeed(character, Need.SOCIAL, drift(2, elapsedDays));
             changeNeed(character, Need.PURPOSE, drift(1, elapsedDays));
+            changeNeed(character, Need.LEISURE, drift(3, elapsedDays));
             updateIntent(character, year);
             Object previous = character.props.get("population.simulated_days");
             long simulated = previous instanceof Number n ? Math.max(0, n.longValue()) : 0;
