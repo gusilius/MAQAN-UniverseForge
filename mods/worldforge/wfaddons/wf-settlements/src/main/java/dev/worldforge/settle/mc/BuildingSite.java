@@ -66,20 +66,24 @@ public final class BuildingSite {
                 Blueprints.Entry en = plan.blocks().get(site.placed);
                 BlockPos pos = new BlockPos(site.x + en.x(), site.y + en.y(), site.z + en.z());
                 if (!lv.hasChunkAt(pos)) break;                                                       // чанк выгружен - ждём
-                place(lv, pos, en.state());
+                if (!place(lv, pos, en.state())) {
+                    b.status = "препятствие на чертеже: расчистите блоки";
+                    break; // Never advance the blueprint cursor past a block that was not placed.
+                }
                 site.placed++;
             }
         }
     }
 
     /** Ставит блок, не трогая чужие постройки: заменяются только воздух, заменяемые блоки, листва и природный грунт в рамке здания. */
-    private static void place(ServerLevel lv, BlockPos pos, BlockState st) {
+    private static boolean place(ServerLevel lv, BlockPos pos, BlockState st) {
         BlockState cur = lv.getBlockState(pos);
-        if (cur == st) return;
+        if (cur == st) return true;
         if (cur.isAir() || cur.canBeReplaced() || cur.is(BlockTags.LEAVES) || cur.is(BlockTags.DIRT) || cur.is(BlockTags.SAND)
                 || cur.is(BlockTags.BASE_STONE_OVERWORLD) || cur.is(Blocks.GRAVEL) || cur.is(Blocks.SNOW)) {
-            lv.setBlock(pos, st, 3);
+            return lv.setBlock(pos, st, 3);
         }
+        return false;
     }
 
     private static void demolish(ServerLevel lv, Colony.Site site) {
