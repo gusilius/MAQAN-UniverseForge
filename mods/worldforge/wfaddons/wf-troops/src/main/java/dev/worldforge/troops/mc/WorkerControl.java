@@ -36,11 +36,16 @@ final class WorkerControl {
         String[] modes = {"wood", "stone", "ore", "clear", "level"};
         String[] roles = {"lumberjack", "miner", "miner", "builder", "builder"};
         String[] labels = {"добывать древесину", "добывать камень", "добывать руду", "расчищать растительность", "выравнивать участок"};
-        String[] params = o.target().split(":", 2);
+        String[] params = o.target().split(":", 4);
         int overlay = 2, level = 0;
         try { if (params.length > 0) overlay = Math.max(0, Math.min(2, Integer.parseInt(params[0]))); }
         catch (NumberFormatException ignored) {}
+        int halfX = o.arg(), halfZ = o.arg();
         try { if (params.length > 1) level = Integer.parseInt(params[1]); }
+        catch (NumberFormatException ignored) {}
+        try { if (params.length > 2) halfX = Math.max(0, Math.min(64, Integer.parseInt(params[2]))); }
+        catch (NumberFormatException ignored) {}
+        try { if (params.length > 3) halfZ = Math.max(0, Math.min(64, Integer.parseInt(params[3]))); }
         catch (NumberFormatException ignored) {}
         String mode = modes[o.kind()];
         for (String id : o.ids()) {
@@ -64,6 +69,8 @@ final class WorkerControl {
             work.x = (int) Math.floor(o.x());
             work.z = (int) Math.floor(o.z());
             work.radius = o.arg();
+            work.halfX = halfX;
+            work.halfZ = halfZ;
             work.level = level;
             work.overlay = overlay;
             colony.workOrders.put(resident.id, work);
