@@ -390,6 +390,7 @@ public final class NavigatorSurfaceMapScreen extends Screen {
             double px=point[0]-drawTile/2.0,py=point[1]-drawTile/2.0;
             if(px+drawTile<left||px>right||py+drawTile<top||py>bottom)continue;
             int color;
+            int river=terrain.river_values[i];
             if(terrainLayer==1){
                 int index=terrain.biome_indices[i];
                 color=terrain.biome_colors.length>index?terrain.biome_colors[index]:0xFF657B68;
@@ -398,7 +399,6 @@ public final class NavigatorSurfaceMapScreen extends Screen {
                 int relief=Math.max(-70,Math.min(70,(height-64)/2));
                 color=shade(0xFF657B68,relief);
             }else{
-                int river=terrain.river_values[i];
                 if(river==0)continue;
                 color=river>=200?0xFF3C9EDB:0xFF65C8E8;
             }
