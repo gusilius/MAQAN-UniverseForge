@@ -29,6 +29,7 @@ final class RadialCommandScreen extends Screen {
             new Option(Squads.Kind.STOP, "Стоп"),
             new Option(Squads.Kind.PATROL, "Патруль"),
             new Option(Squads.Kind.FOLLOW, "Следовать"),
+            new Option(Squads.Kind.GUARD, "Охранять"),
             new Option(Squads.Kind.RETREAT, "Отступить")
     );
 
