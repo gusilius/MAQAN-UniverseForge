@@ -8,6 +8,7 @@ import dev.worldforge.settle.Settlement;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.PopulationSimulation;
+import dev.worldforge.people.LifeSimulation;
 import dev.worldforge.people.PopulationSimulation.Duty;
 import dev.worldforge.people.mc.PeopleMod;
 import net.minecraft.core.BlockPos;
@@ -481,6 +482,110 @@ public class SettleMod {
         }
     }
 
+    /** Resolve the Character registry which owns this settlement's province. */
+    private static CharacterRegistry registryForColony(Colony colony) {
+        if (colony == null || colony.s == null) return null;
+        for (dev.worldforge.mod.MapData map : dev.worldforge.mod.WorldForgeMod.loadedMaps().values()) {
+            if (map.titles == null || map.provinceAt(colony.cx, colony.cz) == null) continue;
+            CharacterRegistry registry = PeopleMod.registry(map);
+            if (registry != null) return registry;
+        }
+        return null;
+    }
+
+    /** World-space proximity determines simulation detail; no player is required for remote progress. */
+    private static LifeSimulation.LOD lifeLod(MinecraftServer server, Colony colony, dev.worldforge.settle.Worker worker) {
+        double best = Double.POSITIVE_INFINITY;
+        for (net.minecraft.server.level.ServerPlayer player : server.getPlayerList().getPlayers()) {
+            if (!player.serverLevel().dimension().location().toString().equals(colony.dim)) continue;
+            double dx = player.getX() - (colony.cx + worker.x);
+            double dz = player.getZ() - (colony.cz + worker.z);
+            best = Math.min(best, dx * dx + dz * dz);
+        }
+        if (best <= 64 * 64) return LifeSimulation.LOD.ACTIVE;
+        if (best <= 256 * 256) return LifeSimulation.LOD.SETTLEMENT;
+        if (best <= 1024 * 1024) return LifeSimulation.LOD.REGIONAL;
+        return LifeSimulation.LOD.REMOTE;
+    }
+
+    /** Executes Character AI against authoritative settlement stock, work assignments and nearby population. */
+    private static void runLifeAI(MinecraftServer server, Colony colony) {
+        if (!net.minecraftforge.fml.ModList.get().isLoaded("wf_people") || colony == null || colony.s == null) return;
+        CharacterRegistry registry = registryForColony(colony);
+        if (registry == null) return;
+        Settlement settlement = colony.s;
+        long worldMinute = Math.max(0L, (long) Math.floor(settlement.time / 60.0));
+        for (dev.worldforge.settle.Worker worker : new ArrayList<>(settlement.workers)) {
+            if (worker.person == null || worker.person.isBlank()) continue;
+            Character person = registry.get(worker.person);
+            if (person == null || !person.alive) continue;
+            boolean hasTraining = !PopulationSimulation.trainingTarget(person).isBlank();
+            boolean hasLeisure = settlement.buildings.stream().anyMatch(b -> b.state == Building.State.DONE
+                    && !b.paused && b.def.category != null
+                    && (b.def.category.equalsIgnoreCase("leisure") || b.def.id.contains("tavern") || b.def.id.contains("inn")));
+            boolean hasCompanion = settlement.workers.stream().anyMatch(other -> other != worker);
+            LifeSimulation.Context context = new LifeSimulation.Context(
+                    worldMinute,
+                    settlement.amount("food") >= 1.0,
+                    settlement.housing() > 0,
+                    !settlement.raidIncoming,
+                    hasCompanion,
+                    worker.building != 0,
+                    hasTraining,
+                    hasLeisure,
+                    settlement.raidIncoming,
+                    lifeLod(server, colony, worker));
+            LifeSimulation.tick(person, context, (character, action, ignored) -> {
+                switch (action) {
+                    case EAT -> {
+                        return settlement.consumeResource("food", 1.0)
+                                ? LifeSimulation.Outcome.SUCCESS : LifeSimulation.Outcome.BLOCKED;
+                    }
+                    case SLEEP -> {
+                        worker.status = "спит";
+                        return LifeSimulation.Outcome.SUCCESS;
+                    }
+                    case SEEK_SAFETY -> {
+                        if (!settlement.raidIncoming) return LifeSimulation.Outcome.BLOCKED;
+                        worker.status = "укрывается";
+                        return LifeSimulation.Outcome.SUCCESS;
+                    }
+                    case SOCIALIZE -> {
+                        dev.worldforge.settle.Worker companion = null;
+                        double nearest = 32 * 32;
+                        for (dev.worldforge.settle.Worker other : settlement.workers) {
+                            if (other == worker) continue;
+                            double dx = worker.x - other.x, dz = worker.z - other.z;
+                            double distance = dx * dx + dz * dz;
+                            if (distance < nearest) { nearest = distance; companion = other; }
+                        }
+                        if (companion == null) return LifeSimulation.Outcome.BLOCKED;
+                        worker.status = "общается";
+                        return LifeSimulation.Outcome.SUCCESS;
+                    }
+                    case WORK -> {
+                        return worker.building != 0
+                                ? LifeSimulation.Outcome.SUCCESS : LifeSimulation.Outcome.RETRY;
+                    }
+                    case TRAIN -> {
+                        String skill = PopulationSimulation.trainingTarget(character);
+                        if (skill.isBlank()) return LifeSimulation.Outcome.BLOCKED;
+                        PopulationSimulation.train(character, skill, 5);
+                        worker.status = "обучается";
+                        return LifeSimulation.Outcome.SUCCESS;
+                    }
+                    case RECREATE -> {
+                        if (!hasLeisure) return LifeSimulation.Outcome.BLOCKED;
+                        worker.status = "досуг";
+                        return LifeSimulation.Outcome.SUCCESS;
+                    }
+                    case IDLE -> { return LifeSimulation.Outcome.SUCCESS; }
+                }
+                return LifeSimulation.Outcome.BLOCKED;
+            });
+        }
+    }
+
     /** Removes the existing worker projection for a person entering military service; the departure is persisted. */
     public static boolean detachWorkerForMilitary(String characterId) {
         if (characterId == null || characterId.isBlank()) return false;
@@ -540,6 +645,7 @@ public class SettleMod {
                 try {
                     c.s.tick(speed);                                   // 1 секунда симуляции = 20 тиков
                     syncPeople(c);
+                    runLifeAI(server, c);
                     c.map.tick(c.s, speed);                             // глобальная логистика не зависит от загруженности чанков
                     if (ticks % (STEP_TICKS * 10) == 0) { c.s.types = TYPES; String rid = realmOf(c); c.s.refreshType(c.s.workers.size(), rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.terrain(rid), rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.races(rid)); }
                 } catch (RuntimeException ex) {
