@@ -142,8 +142,8 @@ public final class CommandScreen extends Screen {
     private boolean inspectAt(double x,double y) {
         if(x<INSPECT_X||x>=INSPECT_X+INSPECT_W||y<INSPECT_Y+22)return false;
         int row=(int)((y-(INSPECT_Y+22))/INSPECT_ROW);
-        if(row<0||row>=8)return false;
         List<String> ids=CommandMode.selected();
+        if(row<0||row>=Math.min(8,ids.size()))return false;
         if(row>=ids.size())return y<INSPECT_Y+22+8*INSPECT_ROW;
         String id=ids.get(row);
         for(net.minecraft.world.entity.Entity entity:minecraft.level.entitiesForRendering()){
@@ -178,7 +178,8 @@ public final class CommandScreen extends Screen {
             if(entity instanceof TroopEntity t){
                 role=t.def()==null?t.unitId():t.def().role();
                 morale=t.moralePct();xp=t.combatXp();
-                identity=t.characterId==null?"":t.characterId;
+                identity=t.syncedCharacterId()==null?"":t.syncedCharacterId();
+                xp=t.syncedCombatXp();
             }else if(entity instanceof dev.worldforge.settle.mc.WFWorker w){
                 role=w.professionId().isBlank()?"Рабочий":w.professionId();
                 identity=w.characterId();
