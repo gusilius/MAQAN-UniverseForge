@@ -75,18 +75,29 @@ public final class ResidentInteraction {
         net.minecraftforge.network.NetworkHooks.openScreen(player,
                 new net.minecraft.world.SimpleMenuProvider((windowId, inventory, viewer) ->
                         new ResidentDialogueMenu(windowId, inventory, person.id, person.name, profession,
-                                status, family(person), relationship(person, player), questText, age),
+                                status, residentProfile(person), relationship(person, player), questText, age),
                         Component.literal("Диалог · " + person.name)),
                 buffer -> {
                     buffer.writeUtf(person.id, 128);
                     buffer.writeUtf(person.name, 128);
                     buffer.writeUtf(profession, 128);
                     buffer.writeUtf(status, 256);
-                    buffer.writeUtf(family(person), 512);
+                    buffer.writeUtf(residentProfile(person), 512);
                     buffer.writeUtf(relationship(person, player), 128);
                     buffer.writeUtf(questText, 512);
                     buffer.writeVarInt(age);
                 });
+    }
+
+    private static String residentProfile(Character person) {
+        String traits = person.traits.isEmpty() ? "нет выраженных черт" : String.join(", ", person.traits);
+        Map<String,Integer> skills = PopulationSimulation.skillRanksSnapshot(person);
+        String skillText = skills.isEmpty() ? "навыки не развиты" : skills.entrySet().stream()
+                .sorted(Map.Entry.<String,Integer>comparingByValue().reversed())
+                .limit(4).map(e -> e.getKey() + " " + e.getValue()).collect(java.util.stream.Collectors.joining(", "));
+        return family(person) + " · " + ("f".equalsIgnoreCase(person.gender) ? "женщина" : "мужчина")
+                + " · культура: " + (person.culture == null || person.culture.isBlank() ? "не указана" : person.culture)
+                + " · черты: " + traits + " · навыки: " + skillText;
     }
 
     private static String greeting(Character person, Worker worker, Colony colony) {
@@ -293,7 +304,8 @@ public final class ResidentInteraction {
     }
 
     private static String relationship(Character person, ServerPlayer player) {
-        return Integer.toString(ResidentSocial.score(person, player.getUUID().toString()));
+        int score = ResidentSocial.score(person, player.getUUID().toString());
+        return score + "/100 · " + ResidentSocial.bond(person, player.getUUID().toString());
     }
 
     private static String family(Character person) {
