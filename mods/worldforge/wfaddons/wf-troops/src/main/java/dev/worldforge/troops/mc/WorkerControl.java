@@ -1,6 +1,7 @@
 package dev.worldforge.troops.mc;
 
 import dev.worldforge.settle.Building;
+import dev.worldforge.settle.Worker;
 import dev.worldforge.settle.mc.Colony;
 import dev.worldforge.settle.mc.SettleMod;
 import dev.worldforge.settle.mc.WFWorker;
@@ -43,19 +44,20 @@ final class WorkerControl {
             }
             if (!(e instanceof WFWorker w)) continue;
             Colony c = SettleMod.colony(w.colonyId);
-            if (c == null || w.worker() == null) continue;
+            Worker resident = w.worker();
+            if (c == null || resident == null) continue;
             if (!mayControl(p, c)) { denied = true; continue; }
             if (o.action() == OrderPacket.RELEASE) {
                 try { c.s.unassign(w.workerId); done++; } catch (RuntimeException ignored) {}
                 continue;
             }
             if (o.action() == OrderPacket.WORK_FOLLOW) {
-                w.manualFollow = true;
-                w.manualFollowOwner = p.getUUID().toString();
-                w.manualOrder = false;
-                w.building = 0;
-                w.orderQueue.clear();
-                w.status = "следует за правителем";
+                resident.manualFollow = true;
+                resident.manualFollowOwner = p.getUUID().toString();
+                resident.manualOrder = false;
+                resident.building = 0;
+                resident.orderQueue.clear();
+                resident.status = "следует за правителем";
                 done++;
                 where = "следовать за игроком";
                 continue;
