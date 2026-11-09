@@ -167,6 +167,15 @@ public class SettleTest {
         Worker restoredCommand = manualBack.worker(commanded.id);
         ok(restoredCommand.manualOrder && restoredCommand.orderX == 12.5 && restoredCommand.orderZ == -7.25,
                 "ручной приказ рабочего сохраняется и восстанавливается");
+        Settlement following = fresh(d, 1);
+        Worker follower = following.workers.get(0);
+        follower.manualFollow = true;
+        follower.manualFollowOwner = "player-uuid";
+        follower.building = 0;
+        Settlement followingBack = Settlement.fromJson(following.toJson(), d);
+        Worker restoredFollower = followingBack.worker(follower.id);
+        ok(restoredFollower.manualFollow && restoredFollower.manualFollowOwner.equals("player-uuid"),
+                "режим следования за игроком и его UUID сохраняются после загрузки");
         Settlement queued= fresh(d,1);
         Worker queuedWorker=queued.workers.get(0);
         queued.moveTo(queuedWorker.id,10,20);
