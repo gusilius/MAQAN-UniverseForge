@@ -149,6 +149,36 @@ public class ReputationTest {
                         && scoped.knownAt("resident_a", "p", ReputationStore.Scope.SETTLEMENT, "village_a",
                         500, 100, 0.5) == null,
                 "stale information expires instead of masquerading as current knowledge");
+        ReputationStore rumorStore = new ReputationStore();
+        rumorStore.witness("witness", "suspect", ReputationStore.Scope.SETTLEMENT,
+                "market_town", -60, 1000, "theft");
+        List<RumorNetwork.Delivery> personalRumors = RumorNetwork.spread(rumorStore,
+                "witness", "suspect", ReputationStore.Scope.SETTLEMENT, "market_town", 1010,
+                id -> List.of(
+                        new RumorNetwork.Contact("trusted_friend", 80, "", true, false),
+                        new RumorNetwork.Contact("stranger", 10, "", true, false),
+                        new RumorNetwork.Contact("offline_contact", 90, "", false, false),
+                        new RumorNetwork.Contact("rival", -70, "", true, false)),
+                (id, org) -> false);
+        ok(personalRumors.size() == 1 && personalRumors.get(0).recipientId().equals("trusted_friend")
+                        && rumorStore.known("trusted_friend", "suspect", ReputationStore.Scope.SETTLEMENT, "market_town") != null
+                        && rumorStore.known("trusted_friend", "suspect", ReputationStore.Scope.WORLD, "") == null,
+                "rumors travel only through trusted reachable contacts and retain the exact local scope");
+        rumorStore.witness("witness", "suspect", ReputationStore.Scope.ORGANIZATION,
+                "watch", -60, 1000, "watch investigation");
+        List<RumorNetwork.Delivery> orgRumors = RumorNetwork.spread(rumorStore,
+                "witness", "suspect", ReputationStore.Scope.ORGANIZATION, "watch", 1010,
+                id -> List.of(new RumorNetwork.Contact("guard", 5, "watch", true, true),
+                        new RumorNetwork.Contact("outsider", 90, "watch", true, true)),
+                (id, org) -> id.equals("guard") && org.equals("watch"));
+        ok(orgRumors.size() == 1 && orgRumors.get(0).recipientId().equals("guard")
+                        && orgRumors.get(0).channel().equals("organization"),
+                "organization rumors require confirmed membership and do not leak to outsiders");
+        ok(RumorNetwork.spread(rumorStore, "trusted_friend", "suspect",
+                        ReputationStore.Scope.SETTLEMENT, "market_town", 1020,
+                        id -> List.of(new RumorNetwork.Contact("second_hand_friend", 90, "", true, false)),
+                        (id, org) -> false).size() == 1,
+                "a received rumor may travel one bounded additional social hop");
         String scopedJson = scoped.toJson();
         ReputationStore scopedReload = new ReputationStore();
         scopedReload.fromJson(scopedJson);
