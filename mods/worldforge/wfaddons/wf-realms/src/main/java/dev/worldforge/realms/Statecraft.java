@@ -2,6 +2,8 @@ package dev.worldforge.realms;
 
 import dev.worldforge.mod.Json;
 import dev.worldforge.mod.TitleData;
+import dev.worldforge.mod.WorldForgeMod;
+import dev.worldforge.mod.economy.TreasuryLedger;
 
 import java.util.*;
 
@@ -307,15 +309,38 @@ public final class Statecraft {
 
     // ---------------- Treasury, taxes and expenditure ----------------
 
-    public Treasury treasury(String realmId) { return treasuries.computeIfAbsent(clean(realmId, "realm id"), k -> new Treasury()); }
+    private static String treasuryAccountId(String realmId) { return "realm:" + clean(realmId, "realm id"); }
+
+    /** Legacy view of the canonical core ledger, retained for UI and save compatibility. */
+    public Treasury treasury(String realmId) {
+        String id = clean(realmId, "realm id");
+        Treasury snapshot = treasuries.computeIfAbsent(id, k -> new Treasury());
+        TreasuryLedger ledger = WorldForgeMod.treasury();
+        TreasuryLedger.Account account = ledger.account(treasuryAccountId(id));
+        if (account == null) account = ledger.open(treasuryAccountId(id), id, "silver", snapshot.balance);
+        snapshot.balance = account.balance;
+        return snapshot;
+    }
+
+    public boolean fundTreasury(String realmId, double amount, String reference) {
+        Treasury t = treasury(realmId);
+        boolean ok = WorldForgeMod.treasury().deposit(treasuryAccountId(realmId), amount,
+                TreasuryLedger.Kind.DEPOSIT, "statecraft", reference, 0, "realm treasury funding");
+        if (ok) t.balance = WorldForgeMod.treasury().balance(treasuryAccountId(realmId));
+        return ok;
+    }
     public boolean setTaxRate(String realmId, double taxRate) {
         treasury(realmId).taxRate = rate(taxRate);
         return true;
     }
     public boolean spend(String realmId, double amount, String reason) {
-        Treasury t = treasury(realmId); double value = money(amount);
-        if (t.balance + 1e-9 < value) return fail("insufficient treasury");
-        t.balance -= value; t.lastExpenses += value;
+        Treasury t = treasury(realmId);
+        double value = money(amount);
+        boolean ok = WorldForgeMod.treasury().withdraw(treasuryAccountId(realmId), value,
+                TreasuryLedger.Kind.GRANT, "government", reason, 0, "statecraft expenditure");
+        if (!ok) return fail(WorldForgeMod.treasury().lastError());
+        t.balance = WorldForgeMod.treasury().balance(treasuryAccountId(realmId));
+        t.lastExpenses += value;
         return true;
     }
 
@@ -328,15 +353,24 @@ public final class Statecraft {
         double lawPct = realms.mods(realmId).getOrDefault("tax_pct", 0.0);
         double effectiveRate = Math.max(0, Math.min(1, t.taxRate * (1 + lawPct / 100.0)));
         double gross = base * effectiveRate * days;
+        TreasuryLedger ledger = WorldForgeMod.treasury();
+        long minute = 0;
+        if (gross > 0 && !ledger.deposit(treasuryAccountId(realmId), gross, TreasuryLedger.Kind.TAX,
+                "taxation", "tax:" + realmId + ":" + t.taxDays, minute, "realm tax collection"))
+            throw new IllegalStateException(ledger.lastError());
         double tribute = 0;
         for (VassalContract v : vassalsOf(realmId)) {
             Treasury vt = treasury(v.vassalRealm);
-            double payment = Math.min(vt.balance, vt.balance * v.taxShare * days / Math.max(1, days));
-            vt.balance -= payment;
-            tribute += payment;
+            String vassalAccount = treasuryAccountId(v.vassalRealm);
+            double available = ledger.balance(vassalAccount);
+            double payment = Math.min(available, available * v.taxShare);
+            if (payment > 0 && ledger.transfer(vassalAccount, treasuryAccountId(realmId), payment,
+                    TreasuryLedger.Kind.VASSAL_TRIBUTE, "feudal-obligation",
+                    "tribute:" + v.vassalRealm + ":" + t.taxDays, minute, "vassal tax obligation")) tribute += payment;
+            vt.balance = ledger.balance(vassalAccount);
         }
         double income = gross + tribute;
-        t.balance += income;
+        t.balance = ledger.balance(treasuryAccountId(realmId));
         t.lastIncome = income;
         t.taxDays += days;
         return income;
