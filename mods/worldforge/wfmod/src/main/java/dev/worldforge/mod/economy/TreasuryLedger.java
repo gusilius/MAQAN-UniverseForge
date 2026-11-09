@@ -26,6 +26,8 @@ public final class TreasuryLedger {
     private final Map<String, Account> accounts = new LinkedHashMap<>();
     private final List<Entry> journal = new ArrayList<>();
     private final Set<String> postedReferences = new HashSet<>();
+    private final Set<String> postedDebits = new HashSet<>();
+    private final Set<String> postedCredits = new HashSet<>();
     private long sequence=1, transactionSequence=1;
     private String lastError="";
 
@@ -63,6 +65,12 @@ public final class TreasuryLedger {
     public boolean hasTransaction(String accountId, Kind kind, String reference) {
         return postedReferences.contains(referenceKey(accountId, kind, reference));
     }
+    public boolean hasDebit(String accountId, Kind kind, String reference) {
+        return postedDebits.contains(referenceKey(accountId, kind, reference));
+    }
+    public boolean hasCredit(String accountId, Kind kind, String reference) {
+        return postedCredits.contains(referenceKey(accountId, kind, reference));
+    }
 
     public Account open(String id,String ownerId,String currency,double openingBalance) {
         id=required(id,"account id"); ownerId=required(ownerId,"owner id"); currency=required(currency,"currency");
@@ -87,7 +95,7 @@ public final class TreasuryLedger {
         updateBankruptcy(a); return true;
     }
     public boolean depositOnce(String accountId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
-        if (hasTransaction(accountId, kind, reference)) return true;
+        if (hasCredit(accountId, kind, reference)) return true;
         boolean ok = deposit(accountId,value,kind,category,reference,worldMinute,memo);
         return ok;
     }
@@ -103,7 +111,7 @@ public final class TreasuryLedger {
         updateBankruptcy(a); return true;
     }
     public boolean withdrawOnce(String accountId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
-        if (hasTransaction(accountId, kind, reference)) return true;
+        if (hasDebit(accountId, kind, reference)) return true;
         return withdraw(accountId,value,kind,category,reference,worldMinute,memo);
     }
     /** Atomic transfer: no balance changes occur unless both accounts and currency match and payer can cover it. */
@@ -127,7 +135,7 @@ public final class TreasuryLedger {
         updateBankruptcy(from); updateBankruptcy(to); return true;
     }
     public boolean transferOnce(String fromId,String toId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
-        if (hasTransaction(fromId, kind, reference)) return true;
+        if (hasDebit(fromId, kind, reference)) return true;
         return transfer(fromId,toId,value,kind,category,reference,worldMinute,memo);
     }
     /** Creates matched cash and debt; unlike a deposit, loan proceeds do not repay existing liabilities. */
@@ -162,7 +170,9 @@ public final class TreasuryLedger {
     private static String clean(String s) { return s==null?"":s.trim(); }
     private void append(String tx,String account,String other,String currency,double value,boolean credit,Kind kind,String category,String reference,long minute,double balance,String memo) {
         journal.add(new Entry(sequence++,tx,account,other,currency,value,credit,kind,category,reference,minute,balance,memo));
-        postedReferences.add(referenceKey(account, kind, reference));
+        String key = referenceKey(account, kind, reference);
+        postedReferences.add(key);
+        (credit ? postedCredits : postedDebits).add(key);
     }
 
     public String toJson() {
@@ -228,7 +238,9 @@ public final class TreasuryLedger {
             Entry entry = new Entry(seq, tx, accountId, other, currency, value, credit, kind,
                     category, reference, worldMinute, balanceAfter, memo);
             ledger.journal.add(entry);
-            ledger.postedReferences.add(referenceKey(accountId, kind, reference));
+            String referenceKey = referenceKey(accountId, kind, reference);
+            ledger.postedReferences.add(referenceKey);
+            (credit ? ledger.postedCredits : ledger.postedDebits).add(referenceKey);
             transactions.computeIfAbsent(tx, ignored -> new ArrayList<>()).add(entry);
             previousSequence = seq;
         }
