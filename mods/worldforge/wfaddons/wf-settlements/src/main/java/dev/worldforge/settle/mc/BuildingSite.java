@@ -79,6 +79,8 @@ public final class BuildingSite {
                 Blueprints.Entry en = plan.blocks().get(site.placed);
                 BlockPos pos = new BlockPos(site.x + en.x(), site.y + en.y(), site.z + en.z());
                 if (!lv.hasChunkAt(pos)) break;                                                       // чанк выгружен - ждём
+                if (buildersHere > 0 && buildersNearBlock(lv, c, b, pos) == 0
+                        && !site.assisted.contains(site.placed)) break;                               // не строить через всю площадку из одной точки
                 if (site.assisted.remove(site.placed)) {
                     if (lv.getBlockState(pos) == en.state()) { site.placed++; continue; }
                 }
@@ -172,6 +174,18 @@ public final class BuildingSite {
                 BlockPos workPoint = builderWorkPoint(level, colony, building, body);
                 if (entity.distanceToSqr(workPoint.getX() + 0.5, workPoint.getY(), workPoint.getZ() + 0.5) <= 36) count++;
             }
+        }
+        return count;
+    }
+
+    private static int buildersNearBlock(ServerLevel level, Colony colony, Building building, BlockPos block) {
+        int count = 0;
+        for (Worker worker : colony.s.workers) {
+            if (worker.building != building.uid || !worker.workRole().equals("builder")) continue;
+            java.util.UUID id = Bodies.LIVE.get(Bodies.key(colony.s.id, worker.id));
+            Entity entity = id == null ? null : level.getEntity(id);
+            if (entity != null && entity.isAlive()
+                    && entity.distanceToSqr(block.getX() + 0.5, block.getY() + 0.5, block.getZ() + 0.5) <= 36) count++;
         }
         return count;
     }
