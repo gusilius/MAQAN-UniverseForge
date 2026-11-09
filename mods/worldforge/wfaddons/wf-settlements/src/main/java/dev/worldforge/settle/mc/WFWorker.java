@@ -132,6 +132,7 @@ public class WFWorker extends PathfinderMob {
         Colony.WorkOrder area = c.workOrders.get(w.id);
         entityData.set(SYNC_WORK_AREA, area == null ? "" : area.mode + "|" + area.x + "|" + area.z + "|"
                 + area.radius + "|" + area.level + "|" + area.overlay + "|" + area.halfX + "|" + area.halfZ);
+        ResidentEquipment.sync(this);
         setCustomName(Component.literal(w.name + " (" + c.s.defs.professionName(w.profession) + ")"));
         setCustomNameVisible(true);
     }
