@@ -167,6 +167,39 @@ public class SettleTest {
         Worker restoredCommand = manualBack.worker(commanded.id);
         ok(restoredCommand.manualOrder && restoredCommand.orderX == 12.5 && restoredCommand.orderZ == -7.25,
                 "ручной приказ рабочего сохраняется и восстанавливается");
+        Settlement queued= fresh(d,1);
+        Worker queuedWorker=queued.workers.get(0);
+        queued.moveTo(queuedWorker.id,10,20);
+        queued.moveTo(queuedWorker.id,30,40,true);
+        queued.moveTo(queuedWorker.id,-5,8,true);
+        ok(queuedWorker.manualOrder&&queuedWorker.orderQueue.size()==2
+                &&queued.targetOf(queuedWorker)[0]==10,
+                "Shift+ПКМ добавляет две точки в очередь рабочего, не заменяя текущую");
+        Settlement queuedBack=Settlement.fromJson(queued.toJson(),d);
+        Worker queuedRestored=queuedBack.worker(queuedWorker.id);
+        ok(queuedRestored.orderQueue.size()==2,"очередь маршрута рабочего сохраняется в мире");
+        queuedBack.advanceManualOrder(queuedRestored.id);
+        ok(queuedRestored.orderX==30&&queuedRestored.orderZ==40&&queuedRestored.manualOrder,
+                "после достижения первой точки активируется следующая");
+        queuedBack.advanceManualOrder(queuedRestored.id);
+        ok(queuedRestored.orderX==-5&&queuedRestored.orderZ==8&&queuedRestored.orderQueue.isEmpty(),
+                "очередь последовательно активирует конечную точку");
+        queuedBack.advanceManualOrder(queuedRestored.id);
+        ok(!queuedRestored.manualOrder&&queuedRestored.status.equals("свободен"),
+                "после последней точки ручной приказ завершается");
+        queuedBack.moveTo(queuedRestored.id,1,1);
+        queuedBack.moveTo(queuedRestored.id,2,2,true);
+        queuedBack.holdAt(queuedRestored.id,4,4);
+        ok(queuedRestored.orderQueue.isEmpty()&&queuedRestored.orderX==4,
+                "приказ удержания отменяет оставшуюся очередь");
+        boolean queueLimit=false;
+        try{
+            queuedBack.moveTo(queuedRestored.id,0,0);
+            for(int i=0;i<Worker.MAX_MANUAL_ORDERS+1;i++)queuedBack.moveTo(queuedRestored.id,i+1,i+1,true);
+        }catch(Settlement.OrderException expectedQueue){queueLimit=true;}
+        ok(queueLimit&&queuedRestored.orderQueue.size()==Worker.MAX_MANUAL_ORDERS,
+                "очередь рабочего ограничена и не переполняется");
+
         manual.holdAt(commanded.id, 3.0, 4.0);
         ok(commanded.manualOrder && commanded.orderX == 3.0 && commanded.orderZ == 4.0
                 && commanded.status.contains("удерживать"), "приказ удержания фиксирует позицию рабочего");
