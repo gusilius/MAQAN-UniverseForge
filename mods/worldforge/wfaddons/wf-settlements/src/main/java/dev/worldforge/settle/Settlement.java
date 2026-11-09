@@ -1,8 +1,9 @@
 package dev.worldforge.settle;
 
 import dev.worldforge.mod.Json;
-import dev.worldforge.mod.WorldForgeMod;
+import dev.worldforge.mod.economy.TreasuryService;
 import dev.worldforge.mod.economy.TreasuryLedger;
+import dev.worldforge.mod.economy.TreasuryService;
 
 import java.util.*;
 
@@ -137,7 +138,7 @@ public final class Settlement {
 
     /** Every settlement resource, including silver, is an account in the shared economic ledger. */
     private TreasuryLedger.Account resourceAccount(String resource) {
-        TreasuryLedger ledger = WorldForgeMod.treasury();
+        TreasuryLedger ledger = TreasuryService.current();
         String accountId = accountId(resource);
         TreasuryLedger.Account account = ledger.account(accountId);
         if (account == null) account = ledger.open(accountId, id, resource, stock.getOrDefault(resource, 0.0));
