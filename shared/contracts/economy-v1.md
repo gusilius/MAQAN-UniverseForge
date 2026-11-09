@@ -2,7 +2,7 @@
 
 ## Canonical ledger
 
-WorldForgeMod.treasury() is the single world-owned financial/resource ledger. It is persisted at worldforge/wf_treasury.json, loaded before addon state restoration, checkpointed every 6,000 server ticks, and atomically replaced on save. If the existing ledger cannot be read, saving is disabled for that session so the original file is not overwritten.
+TreasuryService.current() is the pure-Java access point to the single world-owned financial/resource ledger. WorldForgeMod owns its load/save lifecycle but addon simulation and tests do not depend on the Minecraft-bound mod entrypoint. It is persisted at worldforge/wf_treasury.json, loaded before addon state restoration, checkpointed every 6,000 server ticks, and atomically replaced on save. If the existing ledger cannot be read, saving is disabled for that session so the original file is not overwritten.
 
 Each account has a stable ID, owner, currency/resource, cash balance, credit limit, debt and bankruptcy flag. Transfers between accounts are atomic and create matching debit/credit entries with one transaction ID. Every entry carries a world-minute timestamp, category, reference and post-transaction balance.
 
