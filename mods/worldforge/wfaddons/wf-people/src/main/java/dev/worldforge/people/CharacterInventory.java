@@ -84,17 +84,35 @@ public final class CharacterInventory {
     /** Atomic logical transfer: source is changed only after destination accepts the item. */
     public static boolean transfer(Character from,Character to,String itemId,int amount) {
         Objects.requireNonNull(from);Objects.requireNonNull(to);
-        if(from==to||amount<1||count(from,itemId)<amount)return false;
-        List<Item> payload=new ArrayList<>();
+        String id=validId(itemId);
+        if(from==to||amount<1||count(from,id)<amount)return false;
         int remaining=amount;
-        for(Item item:items(from))if(item.id().equals(validId(itemId))&&remaining>0) {
+        List<Item> sourceNext=new ArrayList<>();
+        List<Item> payload=new ArrayList<>();
+        for(Item item:items(from)) {
+            if(!item.id().equals(id)||remaining==0){sourceNext.add(item);continue;}
             int take=Math.min(remaining,item.count());
             payload.add(new Item(item.id(),take,item.data()));
+            if(item.count()>take)sourceNext.add(new Item(item.id(),item.count()-take,item.data()));
             remaining-=take;
         }
         if(remaining!=0)return false;
-        for(Item item:payload)add(to,item.id(),item.count(),item.data());
-        if(!remove(from,itemId,amount))throw new IllegalStateException("inventory changed during transfer");
+        List<Item> destinationNext=new ArrayList<>(items(to));
+        for(Item moved:payload) {
+            boolean merged=false;
+            for(int i=0;i<destinationNext.size();i++) {
+                Item existing=destinationNext.get(i);
+                if(existing.id().equals(moved.id())&&existing.data().equals(moved.data())) {
+                    destinationNext.set(i,new Item(existing.id(),Math.addExact(existing.count(),moved.count()),existing.data()));
+                    merged=true;break;
+                }
+            }
+            if(!merged)destinationNext.add(moved);
+        }
+        destinationNext.sort(Comparator.comparing(Item::id).thenComparing(Item::data));
+        // Commit both sides only after every validation and overflow check has succeeded.
+        write(to,destinationNext);
+        write(from,sourceNext);
         return true;
     }
 
