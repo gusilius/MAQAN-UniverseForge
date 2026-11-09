@@ -152,15 +152,18 @@ public final class Colony {
         if (m.get("workOrders") instanceof List<?> orders) {
             for (Object raw : orders) {
                 if (!(raw instanceof Map<?, ?> row)) continue;
-                int workerId = ((Number) row.getOrDefault("worker", 0)).intValue();
+                Object workerValue = row.get("worker");
+                int workerId = workerValue instanceof Number n ? n.intValue() : 0;
                 if (s.worker(workerId) == null) continue;
                 WorkOrder o = new WorkOrder();
-                o.mode = String.valueOf(row.getOrDefault("mode", "wood"));
-                o.x = ((Number) row.getOrDefault("x", c.cx)).intValue();
-                o.z = ((Number) row.getOrDefault("z", c.cz)).intValue();
-                o.radius = Math.max(1, Math.min(64, ((Number) row.getOrDefault("radius", 8)).intValue()));
-                o.level = ((Number) row.getOrDefault("level", 0)).intValue();
-                o.overlay = Math.max(0, Math.min(2, ((Number) row.getOrDefault("overlay", 2)).intValue()));
+                o.mode = row.get("mode") instanceof String mode ? mode : "wood";
+                Object xValue = row.get("x"), zValue = row.get("z"), radiusValue = row.get("radius");
+                Object levelValue = row.get("level"), overlayValue = row.get("overlay");
+                o.x = xValue instanceof Number n ? n.intValue() : c.cx;
+                o.z = zValue instanceof Number n ? n.intValue() : c.cz;
+                o.radius = radiusValue instanceof Number n ? Math.max(1, Math.min(64, n.intValue())) : 8;
+                o.level = levelValue instanceof Number n ? n.intValue() : 0;
+                o.overlay = overlayValue instanceof Number n ? Math.max(0, Math.min(2, n.intValue())) : 2;
                 c.workOrders.put(workerId, o);
             }
         }
