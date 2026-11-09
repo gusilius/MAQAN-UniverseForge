@@ -289,6 +289,19 @@ public final class Settlement {
         return transferResourceTo(recipient, Defs.SILVER, quantity, category, reference);
     }
 
+    /** Transfer settlement silver to a realm, army or other canonical treasury account. */
+    public boolean transferSilverToAccount(String targetAccountId, double quantity, TreasuryLedger.Kind kind,
+                                            String category, String reference) {
+        if (targetAccountId == null || targetAccountId.isBlank() || !Double.isFinite(quantity) || quantity < 0) return false;
+        amount(Defs.SILVER);
+        boolean ok = TreasuryService.current().transfer(accountId(Defs.SILVER), targetAccountId, quantity,
+                kind, category, reference, Math.max(0, (long) Math.floor(time / 60.0)),
+                "settlement treasury transfer");
+        syncResourceMirror(Defs.SILVER);
+        if (ok && quantity > 0) flow.record(time, Defs.SILVER, quantity, false);
+        return ok;
+    }
+
     /** Book market fees and other external charges against settlement cash. */
     public boolean chargeSilver(double quantity, String category, String reference) {
         if (!debitSilver(quantity, TreasuryLedger.Kind.TRADE, category, reference)) return false;
