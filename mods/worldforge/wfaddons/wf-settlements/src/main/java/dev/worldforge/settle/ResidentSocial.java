@@ -35,5 +35,35 @@ public final class ResidentSocial {
         return next;
     }
 
+    /** A real resident-to-resident interaction updates both sides of the relationship. */
+    public static int socialize(Character first, Character second, int delta) {
+        if (first == null || second == null || first == second || !first.alive || !second.alive) return 0;
+        int a = adjust(first, second.id, delta);
+        int b = adjust(second, first.id, delta);
+        updateBond(first, second.id, a);
+        updateBond(second, first.id, b);
+        return Math.min(a, b);
+    }
+
+    /** Stable social labels are derived from the durable score, not stored as a second source of truth. */
+    public static String bond(Character person, String otherId) {
+        int value = score(person, otherId);
+        if (value >= 70) return "друг";
+        if (value >= 35) return "приятель";
+        if (value <= -70) return "враг";
+        if (value <= -35) return "соперник";
+        return "знакомый";
+    }
+
+    private static void updateBond(Character person, String otherId, int score) {
+        Object raw = person.props.get("social.bonds");
+        Map<String,Object> bonds = new LinkedHashMap<>();
+        if (raw instanceof Map<?,?> map) for (Map.Entry<?,?> entry : map.entrySet())
+            if (entry.getKey() instanceof String key && entry.getValue() instanceof String value) bonds.put(key, value);
+        String label = score >= 70 ? "friend" : score >= 35 ? "companion" : score <= -70 ? "enemy" : score <= -35 ? "rival" : "acquaintance";
+        bonds.put(otherId, label);
+        person.props.put("social.bonds", bonds);
+    }
+
     private static int clamp(int value) { return Math.max(-100, Math.min(100, value)); }
 }
