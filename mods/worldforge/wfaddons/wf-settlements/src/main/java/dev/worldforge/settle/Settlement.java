@@ -141,7 +141,6 @@ public final class Settlement {
         String accountId = accountId(resource);
         TreasuryLedger.Account account = ledger.account(accountId);
         if (account == null) account = ledger.open(accountId, id, resource, stock.getOrDefault(resource, 0.0));
-        stock.put(resource, account.balance);
         return account;
     }
 
@@ -155,12 +154,28 @@ public final class Settlement {
 
     public double amount(String resource) {
         if (resource == null || resource.isBlank()) return 0;
-        return resourceAccount(resource).balance;
+        TreasuryLedger.Account account = resourceAccount(resource);
+        Double legacyMirror = stock.get(resource);
+        if (legacyMirror != null && Double.isFinite(legacyMirror)
+                && Math.abs(legacyMirror - account.balance) > 1e-9) {
+            double delta = legacyMirror - account.balance;
+            TreasuryLedger ledger = TreasuryService.current();
+            if (delta > 0) ledger.deposit(accountId(resource), delta, TreasuryLedger.Kind.IMPORT,
+                    "legacy-stock-mirror", "settlement:" + id + ":legacy-sync",
+                    Math.max(0, (long) Math.floor(time / 60.0)), "compatibility stock mirror reconciliation");
+            else ledger.withdraw(accountId(resource), -delta, TreasuryLedger.Kind.WRITE_OFF,
+                    "legacy-stock-mirror", "settlement:" + id + ":legacy-sync",
+                    Math.max(0, (long) Math.floor(time / 60.0)), "compatibility stock mirror reconciliation");
+            account = resourceAccount(resource);
+        }
+        stock.put(resource, account.balance);
+        return account.balance;
     }
 
     private boolean debitResource(String resource, double value, TreasuryLedger.Kind kind, String category, String reference) {
         if (!Double.isFinite(value) || value < 0) return false;
         if (value == 0) return true;
+        amount(resource);
         resourceAccount(resource);
         boolean ok = TreasuryService.current().withdraw(accountId(resource), value, kind, category, reference,
                 Math.max(0, (long) Math.floor(time / 60.0)), category);
@@ -170,6 +185,7 @@ public final class Settlement {
 
     private double creditResource(String resource, double value, TreasuryLedger.Kind kind, String category, String reference) {
         if (!Double.isFinite(value) || value <= 0) return 0;
+        amount(resource);
         resourceAccount(resource);
         TreasuryLedger ledger = TreasuryService.current();
         double before = ledger.balance(accountId(resource));
@@ -1093,6 +1109,8 @@ public final class Settlement {
     // ------------------------------------------------------------------ сохранение
 
     public String toJson() {
+        for (String resource : new TreeSet<>(stock.keySet())) amount(resource);
+        amount(Defs.SILVER);
         syncAllResourceMirrors();
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("format", "wf-settlement/2");
