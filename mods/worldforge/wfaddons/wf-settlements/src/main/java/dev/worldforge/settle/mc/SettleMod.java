@@ -811,6 +811,10 @@ public class SettleMod {
         dev.worldforge.settle.Worker worker = colony.s.addWorker(person.name);
         worker.person = person.id;
         worker.profession = profession;
+        // Keep the canonical Character's active profession in sync with the restored worker assignment.
+        // This records the military service interval in the normal profession history.
+        if (!profession.equals(PopulationSimulation.profession(person)))
+            PopulationSimulation.assignProfession(person, profession, PeopleMod.YEAR);
         person.props.remove("population.pre_military_profession");
         registry.setDuty(person.id, Duty.SOLDIER, false, PeopleMod.YEAR);
         registry.setDuty(person.id, Duty.WORKER, true, PeopleMod.YEAR);
