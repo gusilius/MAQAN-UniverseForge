@@ -158,9 +158,9 @@ public class WFWorker extends PathfinderMob {
             if (wk.manualFollow) {
                 net.minecraft.server.MinecraftServer server = w.getServer();
                 net.minecraft.server.level.ServerPlayer owner = null;
-                if (server != null && w.ownerId() != null && !w.ownerId().isBlank()) {
-                    try { owner = server.getPlayerList().getPlayer(UUID.fromString(w.ownerId())); }
-                    catch (IllegalArgumentException ignored) { /* owner is offline or invalid */ }
+                if (server != null && wk.manualFollowOwner != null && !wk.manualFollowOwner.isBlank()) {
+                    try { owner = server.getPlayerList().getPlayer(UUID.fromString(wk.manualFollowOwner)); }
+                    catch (IllegalArgumentException ignored) { /* follow target is invalid */ }
                 }
                 if (owner == null || owner.serverLevel() != w.level()) {
                     w.getNavigation().stop();
