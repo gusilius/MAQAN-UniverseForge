@@ -218,6 +218,19 @@ public final class CommandMode {
 
     static List<String> selected() { return new ArrayList<>(SEL.selected()); }
 
+    /** Resident under the RTS cursor; the same screen-space hitbox is used by click and box selection. */
+    static LivingEntity residentAt(Minecraft mc, double sx, double sy) {
+        for (UnitSelection.Screen point : screenList(mc)) {
+            if (Math.hypot(point.x() - sx, point.y() - sy) > Math.max(point.radius(), 8)) continue;
+            for (net.minecraft.world.entity.Entity entity : mc.level.entitiesForRendering()) {
+                if (entity instanceof LivingEntity living && living.isAlive()
+                        && entity.getUUID().toString().equals(point.id()) && isWorkerEntity(living)) return living;
+            }
+        }
+        return null;
+    }
+
+
     // ---- вход и выход ----
 
     static void enter(Minecraft mc) {
