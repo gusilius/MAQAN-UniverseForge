@@ -30,7 +30,7 @@ public final class Colony {
     /** Persistent, exact work-area order assigned to one resident. Coordinates are world block coordinates. */
     public static final class WorkOrder {
         public String mode = "wood";
-        public int x, z, radius = 8, level;
+        public int x, z, radius = 8, level, cursor;
         /** 0=hidden, 1=subtle, 2=strong. */
         public int overlay = 2;
     }
@@ -135,7 +135,7 @@ public final class Colony {
             WorkOrder o = e.getValue();
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("worker", e.getKey()); row.put("mode", o.mode); row.put("x", o.x); row.put("z", o.z);
-            row.put("radius", o.radius); row.put("level", o.level); row.put("overlay", o.overlay);
+            row.put("radius", o.radius); row.put("level", o.level); row.put("overlay", o.overlay); row.put("cursor", o.cursor);
             orders.add(row);
         }
         m.put("workOrders", orders);
@@ -161,9 +161,11 @@ public final class Colony {
                 Object levelValue = row.get("level"), overlayValue = row.get("overlay");
                 o.x = xValue instanceof Number n ? n.intValue() : c.cx;
                 o.z = zValue instanceof Number n ? n.intValue() : c.cz;
-                o.radius = radiusValue instanceof Number n ? Math.max(1, Math.min(64, n.intValue())) : 8;
+                o.radius = radiusValue instanceof Number n ? Math.max(0, Math.min(64, n.intValue())) : 8;
                 o.level = levelValue instanceof Number n ? n.intValue() : 0;
                 o.overlay = overlayValue instanceof Number n ? Math.max(0, Math.min(2, n.intValue())) : 2;
+                Object cursorValue = row.get("cursor");
+                o.cursor = cursorValue instanceof Number n ? Math.max(0, n.intValue()) : 0;
                 c.workOrders.put(workerId, o);
             }
         }
