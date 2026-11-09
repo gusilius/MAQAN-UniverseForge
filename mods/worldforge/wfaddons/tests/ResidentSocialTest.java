@@ -29,6 +29,7 @@ public final class ResidentSocialTest {
         Character restored = new CharacterRegistry().create("Mira", "", "", "f", 1);
         restored.props.put("social.relationships", saved);
         check(ResidentSocial.score(restored, player) == -100, "relationship state persists with Character");
+        check(ResidentSocial.adjust(restored, player, 10) == -90, "relationship remains mutable after Character restore");
         boolean invalidTargetRejected = false;
         try { ResidentSocial.adjust(resident, "", 1); }
         catch (IllegalArgumentException expected) { invalidTargetRejected = true; }
