@@ -46,6 +46,7 @@ final class RadialCommandScreen extends Screen {
     @Override
     public boolean keyPressed(int key, int scan, int mods) {
         if (key == GLFW.GLFW_KEY_ESCAPE) {
+            CommandMode.suppressRadialUntilRelease();
             Minecraft.getInstance().setScreen(null);
             return true;
         }
