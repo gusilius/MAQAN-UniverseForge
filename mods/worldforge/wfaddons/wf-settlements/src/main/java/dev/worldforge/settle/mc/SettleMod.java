@@ -346,7 +346,7 @@ public class SettleMod {
                 Blueprints.Plan plan = Blueprints.get(level, building.def);
                 if (plan == null || physicalSite.placed < plan.blocks().size()) continue;
                 boolean staffed = colony.s.assigned(building.uid).stream()
-                        .anyMatch(worker -> "trainer".equals(worker.profession));
+                        .anyMatch(worker -> "trainer".equals(worker.workRole()));
                 if (!staffed) continue;
                 double x = colony.worldX(building), z = colony.worldZ(building);
                 double distance = (x - playerX) * (x - playerX) + (z - playerZ) * (z - playerZ);
@@ -572,6 +572,7 @@ public class SettleMod {
             person.props.put("wf_settlement_id", colony.s.id);
             person.props.put("wf_worker_id", worker.id);
             person.props.put("wf_profession", worker.profession == null ? "laborer" : worker.profession);
+            person.props.put("wf_assigned_profession", worker.assignedProfession == null ? "" : worker.assignedProfession);
             person.props.put("wf_building_uid", worker.building);
             person.props.put("wf_race_id", race);
             person.props.put("wf_culture_id", culture);
@@ -648,15 +649,23 @@ public class SettleMod {
                     }
                     case SOCIALIZE -> {
                         dev.worldforge.settle.Worker companion = null;
+                        Character companionPerson = null;
                         double nearest = 32 * 32;
                         for (dev.worldforge.settle.Worker other : settlement.workers) {
                             if (other == worker) continue;
                             double dx = worker.x - other.x, dz = worker.z - other.z;
                             double distance = dx * dx + dz * dz;
-                            if (distance < nearest) { nearest = distance; companion = other; }
+                            if (distance < nearest && other.person != null && !other.person.isBlank()) {
+                                Character candidate = registry.get(other.person);
+                                if (candidate != null && candidate.alive) {
+                                    nearest = distance; companion = other; companionPerson = candidate;
+                                }
+                            }
                         }
-                        if (companion == null) return LifeSimulation.Outcome.BLOCKED;
-                        worker.status = "общается";
+                        if (companion == null || companionPerson == null) return LifeSimulation.Outcome.BLOCKED;
+                        dev.worldforge.settle.ResidentSocial.socialize(person, companionPerson, 1);
+                        worker.status = "общается: " + companionPerson.name;
+                        companion.status = "общается: " + person.name;
                         return LifeSimulation.Outcome.SUCCESS;
                     }
                     case WORK -> {
@@ -664,6 +673,7 @@ public class SettleMod {
                                 ? LifeSimulation.Outcome.SUCCESS : LifeSimulation.Outcome.RETRY;
                     }
                     case TRAIN -> {
+                        if (worker.generalist()) return LifeSimulation.Outcome.BLOCKED;
                         String skill = PopulationSimulation.trainingTarget(character);
                         if (skill.isBlank()) return LifeSimulation.Outcome.BLOCKED;
                         PopulationSimulation.train(character, skill, 5);
@@ -680,6 +690,7 @@ public class SettleMod {
                 return LifeSimulation.Outcome.BLOCKED;
             });
         }
+        dev.worldforge.settle.ResidentLifeEvents.yearly(registry, settlement.year());
     }
 
     /** Removes the existing worker projection for a person entering military service; the departure is persisted. */
