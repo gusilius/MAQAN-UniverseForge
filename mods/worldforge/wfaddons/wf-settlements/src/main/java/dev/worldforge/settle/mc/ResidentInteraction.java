@@ -149,6 +149,18 @@ public final class ResidentInteraction {
             case "open" -> { }
             case "talk" -> player.sendSystemMessage(Component.literal("§f" + greeting(person, data, colony)
                     + " §7(Отношение: " + relationship(person, player) + ")"));
+            case "talk_family" -> player.sendSystemMessage(Component.literal("§e" + person.name + ": §f"
+                    + family(person) + " · Дом: " + (person.house == null || person.house.isBlank() ? "не указан" : person.house)));
+            case "talk_work" -> player.sendSystemMessage(Component.literal("§e" + person.name + ": §fМоя профессия — "
+                    + colony.s.defs.professionName(data.profession) + ". Сейчас я "
+                    + (data.assignedProfession == null || data.assignedProfession.isBlank() ? "свободен" : "работаю как " + data.assignedProfession)
+                    + "; состояние: " + data.status + "."));
+            case "talk_world" -> player.sendSystemMessage(Component.literal("§e" + person.name + ": §fВ поселении "
+                    + colony.s.name + " · запас еды " + (int) colony.s.amount("food")
+                    + " · год " + colony.s.year() + " · "
+                    + (colony.s.raidIncoming ? "опасность рядом" : "сейчас спокойно") + "."));
+            case "talk_opinion" -> player.sendSystemMessage(Component.literal("§e" + person.name + ": §fК вам я отношусь так: "
+                    + relationship(person, player) + ". Мои знакомые и связи формируют собственное мнение обо мне и друг о друге."));
             case "status" -> {
                 player.sendSystemMessage(Component.literal("§6" + person.name + " §7· " + data.profession
                         + " · " + data.status + " · поселение " + colony.s.name));
