@@ -20,7 +20,7 @@ public final class ResidentQuest {
     private Status status;
 
     public ResidentQuest(String id, String objective, int required, int createdYear) {
-        this(id, objective, "bread", required, createdYear);
+        this(id, objective, "food", required, createdYear);
     }
 
     public ResidentQuest(String id, String objective, String resourceId, int required, int createdYear) {
@@ -91,7 +91,7 @@ public final class ResidentQuest {
             throw new IllegalArgumentException("Malformed resident quest");
         Object resource = raw.get("resource");
         ResidentQuest quest = new ResidentQuest((String) id, (String) objective,
-                resource instanceof String s && !s.isBlank() ? s : "bread",
+                resource instanceof String s && !s.isBlank() ? s : "food",
                 ((Number) required).intValue(), ((Number) created).intValue());
         Object progress = raw.get("progress");
         if (progress instanceof Number n) {
