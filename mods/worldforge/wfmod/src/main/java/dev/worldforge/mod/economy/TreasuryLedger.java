@@ -88,6 +88,16 @@ public final class TreasuryLedger {
         append(tx,to.id,from.id,to.currency,value,true,kind,clean(category),clean(reference),worldMinute,to.balance,clean(memo));
         updateBankruptcy(from); updateBankruptcy(to); return true;
     }
+    /** Creates matched cash and debt; unlike a deposit, loan proceeds do not repay existing liabilities. */
+    public boolean borrow(String accountId,double value,long worldMinute,String reference) {
+        Account a=accounts.get(accountId); if(a==null) return fail("unknown account");
+        value=amount(value); minute(worldMinute);
+        if(a.debt+value>a.creditLimit+1e-9) return fail("credit limit exceeded");
+        if(value==0) return true;
+        a.balance+=value; a.debt+=value;
+        append("tx:"+transactionSequence++,a.id,"lender",a.currency,value,true,Kind.LOAN,"finance",clean(reference),worldMinute,a.balance,"loan proceeds");
+        updateBankruptcy(a); return true;
+    }
     public boolean accrueInterest(String accountId,double rate,long worldMinute,String reference) {
         Account a=accounts.get(accountId); if(a==null) return fail("unknown account");
         if(!Double.isFinite(rate)||rate<0||rate>1) throw new IllegalArgumentException("interest rate must be 0..1");
