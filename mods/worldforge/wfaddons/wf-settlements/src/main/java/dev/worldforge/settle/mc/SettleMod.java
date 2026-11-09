@@ -286,6 +286,7 @@ public class SettleMod {
         String id = base;
         for (int i = 2; COLONIES.containsKey(id); i++) id = base + "_" + i;
         Settlement s = new Settlement(id, name, DEFS);
+        s.setLedgerScope(lv.dimension().location().toString());
         s.types = TYPES;
         for (int i = 0; i < 4; i++) s.addWorker(null);
         s.add("wood", 60);
