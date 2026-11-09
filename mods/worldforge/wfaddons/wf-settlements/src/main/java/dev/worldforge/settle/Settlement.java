@@ -547,6 +547,8 @@ public final class Settlement {
         if (!defs.professions.containsKey(profession)) throw new OrderException("Нет профессии " + profession);
         w.profession = profession;
         w.building = 0;
+        w.manualFollow = false;
+        w.manualFollowOwner = "";
         w.manualOrder = false;
         w.orderQueue.clear();
         w.status = "свободен";
@@ -703,7 +705,7 @@ public final class Settlement {
 
     private void autoAssign() {
         List<Worker> idle = new ArrayList<>();
-        for (Worker w : workers) if (w.building == 0 && !w.manualOrder) idle.add(w);
+        for (Worker w : workers) if (w.building == 0 && !w.manualOrder && !w.manualFollow) idle.add(w);
         idle.sort(Comparator.comparingInt(w -> w.id));
         for (Worker w : idle) {
             if (w.profession.equals("builder") || w.profession.equals("laborer")) {
@@ -737,7 +739,7 @@ public final class Settlement {
             Worker pick = null;
             int bestStaff = 1;
             for (Worker w : workers) {
-                if (w.building == 0 || w.manualOrder || w.profession.equals("builder")) continue;
+                if (w.building == 0 || w.manualOrder || w.manualFollow || w.profession.equals("builder")) continue;
                 Building from = building(w.building);
                 if (from == null || from.state != Building.State.DONE) continue;
                 int staff = assigned(from.uid).size();
@@ -972,6 +974,7 @@ public final class Settlement {
     /** Куда идёт рабочий: у здания - точка внутри его площадки (у каждого своя), свободный - у центра поселения. {x, z}. */
     public double[] targetOf(Worker w) {
         if (w.manualOrder) return new double[]{w.orderX, w.orderZ};
+        if (w.manualFollow) return new double[]{w.x, w.z};
         Building b = w.building == 0 ? null : building(w.building);
         double a = w.id * 2.399963;
         if (b == null) {
