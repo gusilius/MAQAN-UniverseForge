@@ -405,21 +405,27 @@ public final class Statecraft {
         double gross = base * effectiveRate * days;
         TreasuryLedger ledger = TreasuryService.current();
         long minute = Math.max(0, WorldForgeApi.clock().dayNumber()) * 1440L;
+        String taxReference = "tax:" + realmId + ":" + t.taxDays;
+        boolean taxAlreadyPosted = ledger.hasTransaction(treasuryAccountId(realmId), TreasuryLedger.Kind.TAX, taxReference);
         if (gross > 0 && !ledger.depositOnce(treasuryAccountId(realmId), gross, TreasuryLedger.Kind.TAX,
-                "taxation", "tax:" + realmId + ":" + t.taxDays, minute, "realm tax collection"))
+                "taxation", taxReference, minute, "realm tax collection"))
             throw new IllegalStateException(ledger.lastError());
+        double postedTax = taxAlreadyPosted ? 0 : gross;
         double tribute = 0;
         for (VassalContract v : vassalsOf(realmId)) {
             Treasury vt = treasury(v.vassalRealm);
             String vassalAccount = treasuryAccountId(v.vassalRealm);
-            double available = ledger.balance(vassalAccount);
-            double payment = Math.min(available, available * v.taxShare);
-            if (payment > 0 && ledger.transferOnce(vassalAccount, treasuryAccountId(realmId), payment,
-                    TreasuryLedger.Kind.VASSAL_TRIBUTE, "feudal-obligation",
-                    "tribute:" + v.vassalRealm + ":" + t.taxDays, minute, "vassal tax obligation")) tribute += payment;
+            String tributeReference = "tribute:" + v.vassalRealm + ":" + t.taxDays;
+            if (!ledger.hasTransaction(vassalAccount, TreasuryLedger.Kind.VASSAL_TRIBUTE, tributeReference)) {
+                double available = ledger.balance(vassalAccount);
+                double payment = Math.min(available, available * v.taxShare);
+                if (payment > 0 && ledger.transferOnce(vassalAccount, treasuryAccountId(realmId), payment,
+                        TreasuryLedger.Kind.VASSAL_TRIBUTE, "feudal-obligation",
+                        tributeReference, minute, "vassal tax obligation")) tribute += payment;
+            }
             vt.balance = ledger.balance(vassalAccount);
         }
-        double income = gross + tribute;
+        double income = postedTax + tribute;
         t.balance = ledger.balance(treasuryAccountId(realmId));
         t.lastIncome = income;
         t.taxDays += days;
