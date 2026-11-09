@@ -256,7 +256,9 @@ public final class TreasuryLedger {
             Entry a = entries.get(0), b = entries.get(1);
             if (a.accountId().equals(b.accountId()) || !a.counterpartyId().equals(b.accountId())
                     || !b.counterpartyId().equals(a.accountId()) || a.credit() == b.credit()
-                    || !a.currency().equals(b.currency()) || Math.abs(a.amount() - b.amount()) > 1e-8)
+                    || !a.currency().equals(b.currency()) || a.kind() != b.kind()
+                    || !a.category().equals(b.category()) || !a.reference().equals(b.reference())
+                    || a.worldMinute() != b.worldMinute() || Math.abs(a.amount() - b.amount()) > 1e-8)
                 throw new IllegalArgumentException("Unbalanced double-entry transaction: " + transaction.getKey());
         }
         ledger.sequence = Math.max(1, requiredLong(root.get("sequence"), "journal next sequence"));
