@@ -218,8 +218,9 @@ public class WFWorker extends PathfinderMob {
             }
             if (area != null) {
                 if (resourceTarget != null) {
-                    if (!resourceTarget.equals(cachedApproachFor) || cachedApproachTarget == null
-                            || !w.level().hasChunkAt(cachedApproachTarget) || --repath <= 0) {
+                    if (!resourceTarget.equals(cachedApproachFor)
+                            || (cachedApproachTarget != null && !w.level().hasChunkAt(cachedApproachTarget))
+                            || --repath <= 0) {
                         cachedApproachFor = resourceTarget.immutable();
                         cachedApproachTarget = workApproachTarget(w, resourceTarget);
                         if (cachedApproachTarget == null) cachedApproachTarget = placeTemporaryStep(w, c, resourceTarget);
