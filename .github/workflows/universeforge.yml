@@ -22,7 +22,7 @@ permissions:
 
 concurrency:
   group: universeforge-windows-quality-gate-${{ github.ref }}
-  # Keep only the newest validation for each ref; this remains the sole integration quality gate.
+  # Keep only the newest validation for each ref; one gate validates the unified resident task graph and army integration.
   cancel-in-progress: true
 
 jobs:
