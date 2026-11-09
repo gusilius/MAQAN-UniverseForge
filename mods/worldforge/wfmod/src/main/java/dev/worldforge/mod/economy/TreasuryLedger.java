@@ -246,7 +246,12 @@ public final class TreasuryLedger {
         }
         for (Map.Entry<String, List<Entry>> transaction : transactions.entrySet()) {
             List<Entry> entries = transaction.getValue();
-            if (entries.size() == 1) continue; // opening, external income/expense, loan or interest
+            if (entries.size() == 1) {
+                Entry single = entries.get(0);
+                if (ledger.accounts.containsKey(single.counterpartyId()))
+                    throw new IllegalArgumentException("Missing matching double-entry posting: " + transaction.getKey());
+                continue; // opening, external income/expense, loan or interest
+            }
             if (entries.size() != 2) throw new IllegalArgumentException("Invalid journal transaction cardinality: " + transaction.getKey());
             Entry a = entries.get(0), b = entries.get(1);
             if (a.accountId().equals(b.accountId()) || !a.counterpartyId().equals(b.accountId())
