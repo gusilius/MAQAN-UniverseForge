@@ -205,6 +205,7 @@ public final class ResidentInteraction {
                 if (!ruler) { deny(player); return 0; }
                 data.manualFollow = false;
                 int assigned = assignCompatibleBuilding(colony, data, null);
+                if (assigned > 0) colony.workOrders.remove(data.id);
                 player.sendSystemMessage(Component.literal(assigned > 0
                         ? "§a" + person.name + " назначен на подходящую работу в здании #" + assigned
                         : "§eПодходящего свободного рабочего места для профессии " + data.profession + " нет."));
@@ -219,6 +220,7 @@ public final class ResidentInteraction {
                 }
                 data.manualFollow = false;
                 int assigned = assignCompatibleBuilding(colony, data, role);
+                if (assigned > 0) colony.workOrders.remove(data.id);
                 player.sendSystemMessage(Component.literal(assigned > 0
                         ? "§aПоручение принято: " + person.name + " назначен на роль «" + role
                             + "» в здании #" + assigned + "."
