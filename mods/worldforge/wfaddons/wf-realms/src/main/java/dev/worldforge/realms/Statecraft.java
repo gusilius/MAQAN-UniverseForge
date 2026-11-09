@@ -2,9 +2,10 @@ package dev.worldforge.realms;
 
 import dev.worldforge.mod.Json;
 import dev.worldforge.mod.TitleData;
-import dev.worldforge.mod.WorldForgeMod;
+import dev.worldforge.mod.economy.TreasuryService;
 import dev.worldforge.mod.api.WorldForgeApi;
 import dev.worldforge.mod.economy.TreasuryLedger;
+import dev.worldforge.mod.economy.TreasuryService;
 
 import java.util.*;
 
@@ -316,7 +317,7 @@ public final class Statecraft {
     public Treasury treasury(String realmId) {
         String id = clean(realmId, "realm id");
         Treasury snapshot = treasuries.computeIfAbsent(id, k -> new Treasury());
-        TreasuryLedger ledger = WorldForgeMod.treasury();
+        TreasuryLedger ledger = TreasuryService.current();
         TreasuryLedger.Account account = ledger.account(treasuryAccountId(id));
         if (account == null) account = ledger.open(treasuryAccountId(id), id, "silver", snapshot.balance);
         snapshot.balance = account.balance;
