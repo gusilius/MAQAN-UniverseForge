@@ -133,8 +133,11 @@ public final class CommandScreen extends Screen {
         }
         double x = (a.x + b.x) * 0.5, z = (a.z + b.z) * 0.5;
         int y = (int) Math.floor((a.y + b.y) * 0.5);
+        int halfX = Math.min(64, (int) Math.ceil(Math.abs(b.x - a.x) * 0.5));
+        int halfZ = Math.min(64, (int) Math.ceil(Math.abs(b.z - a.z) * 0.5));
+        int extent = Math.max(halfX, halfZ);
         CommandMode.send(new OrderPacket(OrderPacket.WORK_AREA, CommandMode.selected(), workMode,
-                x, z, workOverlay + ":" + y, false, radius));
+                x, z, workOverlay + ":" + y + ":" + halfX + ":" + halfZ, false, extent));
         CommandMode.marker = new Vec3(x, y, z);
         CommandMode.markerUntil = System.currentTimeMillis() + 1800;
     }
@@ -648,11 +651,13 @@ public final class CommandScreen extends Screen {
                 int x = Integer.parseInt(p[1]), z = Integer.parseInt(p[2]);
                 int radius = Math.max(0, Math.min(64, Integer.parseInt(p[3])));
                 int level = Integer.parseInt(p[4]), visibility = Integer.parseInt(p[5]);
+                int halfX = p.length > 6 ? Math.max(0, Math.min(64, Integer.parseInt(p[6]))) : radius;
+                int halfZ = p.length > 7 ? Math.max(0, Math.min(64, Integer.parseInt(p[7]))) : radius;
                 if (visibility == 0) continue;
                 double y = level > minecraft.level.getMinBuildHeight() && level < minecraft.level.getMaxBuildHeight()
                         ? level + 0.15 : groundYFor(x, z);
                 int color = visibility == 1 ? 0x6688CCFF : 0xDD55DFFF;
-                outline(g, x, z, Math.max(1, radius * 2 + 1), Math.max(1, radius * 2 + 1), y, color, w, h);
+                outline(g, x, z, Math.max(1, halfX * 2 + 1), Math.max(1, halfZ * 2 + 1), y, color, w, h);
                 if (visibility == 2) {
                     double[] center = Projection.project(CommandMode.vp, x - CommandMode.cam.x, y - CommandMode.cam.y, z - CommandMode.cam.z, w, h);
                     if (center[2] > 0) g.drawString(font, p[0] + " · r" + radius, (int) center[0] + 4, (int) center[1] - 8, color, true);
