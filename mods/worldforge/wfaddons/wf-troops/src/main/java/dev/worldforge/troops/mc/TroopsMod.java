@@ -231,7 +231,7 @@ public class TroopsMod {
                 String culture = realm.props == null || realm.props.get("culture") == null ? "" : String.valueOf(realm.props.get("culture"));
                 String name = troop.def() == null ? troop.unitId() : troop.def().name();
                 person = registry.create(name + " " + troop.getUUID().toString().substring(0, 4), "", culture, "m", PeopleMod.YEAR - 20);
-                troop.characterId = person.id;
+                troop.setCharacterId(person.id);
             }
             registry.bindEntity(person.id, "troop", troop.getUUID().toString());
             return new PersonBinding(registry, person);
@@ -247,9 +247,9 @@ public class TroopsMod {
                 && !troop.characterId.equals(characterId)) return false;
         if (!troop.deferCharacterBinding && (troop.characterId == null || troop.characterId.isBlank())) return false;
         String previousId = troop.characterId;
-        troop.characterId = characterId;
+        troop.setCharacterId(characterId);
         PersonBinding binding = bindPerson(troop, false);
-        if (binding == null) { troop.characterId = previousId; return false; }
+        if (binding == null) { troop.setCharacterId(previousId); return false; }
         Character person = binding.character();
         boolean workerDuty = PopulationSimulation.hasDuty(person, Duty.WORKER);
         if (workerDuty) {
