@@ -167,7 +167,8 @@ public final class WorkspaceDockTree {
                 items.add(added);
                 return new Tabs(items, items.size() - 1);
             }
-            return new Tabs(List.of((Panel) target, added), 1);
+            if (target instanceof Panel panel) return new Tabs(List.of(panel, added), 1);
+            throw new IllegalStateException("A tab group can only replace a panel or tab group");
         });
     }
 
@@ -196,10 +197,11 @@ public final class WorkspaceDockTree {
             if (remaining.size() == tabs.panels().size()) return root;
             if (remaining.isEmpty()) return null;
             if (remaining.size() == 1) return remaining.get(0);
-            int active = Math.min(tabs.activeIndex(), remaining.size() - 1);
-            if (tabs.panels().get(tabs.activeIndex()).id().equals(panelId))
-                active = Math.max(0, active - 1);
-            return new Tabs(remaining, active);
+            String previouslyActive = tabs.panels().get(tabs.activeIndex()).id();
+            int active = previouslyActive.equals(panelId)
+                    ? Math.max(0, Math.min(tabs.activeIndex() - 1, remaining.size() - 1))
+                    : remaining.stream().map(Panel::id).toList().indexOf(previouslyActive);
+            return new Tabs(remaining, Math.max(0, active));
         }
         Split split = (Split) root;
         Node first = remove(split.first(), panelId);
