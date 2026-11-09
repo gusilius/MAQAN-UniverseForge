@@ -65,6 +65,7 @@ public final class PlatformShellScreen extends Screen {
     private int resizeStartX, resizeStartY, resizeStartW, resizeStartH;
     private WorkspaceDockTree.Node workspaceRoot;
     private WorkspaceProfileStore profileStore;
+    private String activeWorkspaceName = "Default";
     private boolean searchVisible;
     private String searchQuery = "";
     private List<WorkspaceRuntime.SearchEntry> searchResults = List.of();
@@ -241,9 +242,11 @@ public final class PlatformShellScreen extends Screen {
             panelShadows = prefs.getBoolean("panel_shadows", panelShadows);
         }
         try {
-            WorkspaceDockTree.Node saved = profileStore.load("Default");
-            if (saved != null) workspaceRoot = saved;
+            String activeName = profileStore.activeProfile();
+            if (activeName != null && !activeName.isBlank()) activeWorkspaceName = activeName;
+            workspaceRoot = profileStore.load(activeWorkspaceName);
         } catch (RuntimeException ignored) {
+            activeWorkspaceName = "Default";
             workspaceRoot = defaultWorkspaceTree();
         }
         workspaceStateLoaded = true;
@@ -273,7 +276,7 @@ public final class PlatformShellScreen extends Screen {
                 prefs.put(key + "dock", panel.dock);
             }
             prefs.flush();
-            if (profileStore != null && workspaceRoot != null) profileStore.save("Default", workspaceRoot);
+            if (profileStore != null && workspaceRoot != null) profileStore.save(activeWorkspaceName, workspaceRoot);
         } catch (Exception error) {
             LOGGER.warn("Unable to persist MAQAN workspace layout", error);
         }
@@ -900,6 +903,42 @@ public final class PlatformShellScreen extends Screen {
             workspaceRoot = WorkspaceDockTree.dock(remaining, targetId, sourceId, side, 300);
         }
         WorkspaceDockTree.validate(workspaceRoot);
+    }
+
+    public List<String> workspaceProfiles() {
+        if (profileStore == null) profileStore = new WorkspaceProfileStore(workspacePreferences().node("profiles"));
+        return profileStore.list();
+    }
+
+    public void saveWorkspaceProfile(String name) {
+        if (profileStore == null) profileStore = new WorkspaceProfileStore(workspacePreferences().node("profiles"));
+        profileStore.save(name, workspaceRoot);
+        activeWorkspaceName = name.trim();
+        saveWorkspaceState();
+    }
+
+    public boolean loadWorkspaceProfile(String name) {
+        if (profileStore == null) profileStore = new WorkspaceProfileStore(workspacePreferences().node("profiles"));
+        try {
+            workspaceRoot = profileStore.load(name);
+            activeWorkspaceName = name.trim();
+            layoutWorkspace();
+            saveWorkspaceState();
+            return true;
+        } catch (RuntimeException error) {
+            LOGGER.warn("Unable to load workspace profile {}", name, error);
+            return false;
+        }
+    }
+
+    public void deleteWorkspaceProfile(String name) {
+        if (profileStore == null) profileStore = new WorkspaceProfileStore(workspacePreferences().node("profiles"));
+        profileStore.delete(name);
+        if (activeWorkspaceName.equalsIgnoreCase(name)) {
+            activeWorkspaceName = "Default";
+            workspaceRoot = defaultWorkspaceTree();
+            saveWorkspaceState();
+        }
     }
 
     private void toggleWorkspacePanel(String id) {
