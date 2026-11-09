@@ -25,6 +25,7 @@ public final class TreasuryLedger {
 
     private final Map<String, Account> accounts = new LinkedHashMap<>();
     private final List<Entry> journal = new ArrayList<>();
+    private final Set<String> postedReferences = new HashSet<>();
     private long sequence=1, transactionSequence=1;
     private String lastError="";
 
@@ -43,6 +44,15 @@ public final class TreasuryLedger {
     public Account account(String id) { return accounts.get(id); }
     public boolean hasAccount(String id) { return accounts.containsKey(id); }
     public double balance(String id) { Account a=accounts.get(id); return a==null?0:a.balance; }
+
+    private static String referenceKey(String accountId, Kind kind, String reference) {
+        return String.valueOf(accountId) + "\\u0000" + String.valueOf(kind) + "\\u0000" + clean(reference);
+    }
+
+    /** True when this account already posted the same economic event; used for crash-safe retries. */
+    public boolean hasTransaction(String accountId, Kind kind, String reference) {
+        return postedReferences.contains(referenceKey(accountId, kind, reference));
+    }
 
     public Account open(String id,String ownerId,String currency,double openingBalance) {
         id=required(id,"account id"); ownerId=required(ownerId,"owner id"); currency=required(currency,"currency");
@@ -66,6 +76,11 @@ public final class TreasuryLedger {
         double offset=Math.min(a.debt,value); a.debt-=offset; a.balance+=value-offset; append("tx:"+transactionSequence++,a.id,"external",a.currency,value,true,kind,clean(category),clean(reference),worldMinute,a.balance,clean(memo));
         updateBankruptcy(a); return true;
     }
+    public boolean depositOnce(String accountId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
+        if (hasTransaction(accountId, kind, reference)) return true;
+        boolean ok = deposit(accountId,value,kind,category,reference,worldMinute,memo);
+        return ok;
+    }
     public boolean withdraw(String accountId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
         Account a=accounts.get(accountId); if(a==null) return fail("unknown account");
         value=amount(value); minute(worldMinute);
@@ -76,6 +91,10 @@ public final class TreasuryLedger {
         a.debt+=value-cash;
         append("tx:"+transactionSequence++,a.id,"external",a.currency,value,false,kind,clean(category),clean(reference),worldMinute,a.balance,clean(memo));
         updateBankruptcy(a); return true;
+    }
+    public boolean withdrawOnce(String accountId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
+        if (hasTransaction(accountId, kind, reference)) return true;
+        return withdraw(accountId,value,kind,category,reference,worldMinute,memo);
     }
     /** Atomic transfer: no balance changes occur unless both accounts and currency match and payer can cover it. */
     public boolean transfer(String fromId,String toId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
@@ -96,6 +115,10 @@ public final class TreasuryLedger {
         append(tx,from.id,to.id,from.currency,value,false,kind,clean(category),clean(reference),worldMinute,from.balance,clean(memo));
         append(tx,to.id,from.id,to.currency,value,true,kind,clean(category),clean(reference),worldMinute,to.balance,clean(memo));
         updateBankruptcy(from); updateBankruptcy(to); return true;
+    }
+    public boolean transferOnce(String fromId,String toId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
+        if (hasTransaction(fromId, kind, reference)) return true;
+        return transfer(fromId,toId,value,kind,category,reference,worldMinute,memo);
     }
     /** Creates matched cash and debt; unlike a deposit, loan proceeds do not repay existing liabilities. */
     public boolean borrow(String accountId,double value,long worldMinute,String reference) {
@@ -129,6 +152,7 @@ public final class TreasuryLedger {
     private static String clean(String s) { return s==null?"":s.trim(); }
     private void append(String tx,String account,String other,String currency,double value,boolean credit,Kind kind,String category,String reference,long minute,double balance,String memo) {
         journal.add(new Entry(sequence++,tx,account,other,currency,value,credit,kind,category,reference,minute,balance,memo));
+        postedReferences.add(referenceKey(account, kind, reference));
     }
 
     public String toJson() {
@@ -142,24 +166,97 @@ public final class TreasuryLedger {
     }
     @SuppressWarnings("unchecked")
     public static TreasuryLedger fromJson(String json) {
-        Map<String,Object> root=(Map<String,Object>)Json.parse(json);
-        if(!"wf-treasury-ledger/1".equals(root.get("format"))) throw new IllegalArgumentException("Unsupported treasury ledger format");
-        TreasuryLedger ledger=new TreasuryLedger();
-        if(root.get("accounts") instanceof List<?> list) for(Object o:list) {
-            if(!(o instanceof Map<?,?> m)) continue;
-            String id=String.valueOf(m.get("id")), owner=String.valueOf(m.get("owner")), currency=String.valueOf(m.get("currency"));
-            double balance=number(m.get("balance"),0);
-            Account a=ledger.open(id,owner,currency,Math.max(0,balance));
-            a.balance=Math.max(0,balance);a.creditLimit=number(m.get("creditLimit"),0);a.debt=number(m.get("debt"),0);a.bankrupt=Boolean.TRUE.equals(m.get("bankrupt"));
+        Object parsed = Json.parse(json);
+        if (!(parsed instanceof Map<?, ?> root)) throw new IllegalArgumentException("Treasury ledger root must be an object");
+        if (!"wf-treasury-ledger/1".equals(root.get("format"))) throw new IllegalArgumentException("Unsupported treasury ledger format");
+        if (!(root.get("accounts") instanceof List<?> accountRows) || !(root.get("journal") instanceof List<?> journalRows))
+            throw new IllegalArgumentException("Treasury ledger requires accounts and journal arrays");
+
+        TreasuryLedger ledger = new TreasuryLedger();
+        for (Object row : accountRows) {
+            if (!(row instanceof Map<?, ?> m)) throw new IllegalArgumentException("Invalid treasury account row");
+            String id = requiredString(m.get("id"), "account id");
+            String owner = requiredString(m.get("owner"), "account owner");
+            String currency = requiredString(m.get("currency"), "account currency");
+            double balance = requiredNumber(m.get("balance"), "account balance");
+            double creditLimit = requiredNumber(m.get("creditLimit"), "account credit limit");
+            double debt = requiredNumber(m.get("debt"), "account debt");
+            if (balance < 0 || creditLimit < 0 || debt < 0) throw new IllegalArgumentException("Negative treasury account value: " + id);
+            if (ledger.accounts.containsKey(id)) throw new IllegalArgumentException("Duplicate treasury account: " + id);
+            Account a = ledger.open(id, owner, currency, 0);
+            a.balance = balance;
+            a.creditLimit = creditLimit;
+            a.debt = debt;
+            a.bankrupt = debt > creditLimit + 1e-9;
         }
+
         ledger.journal.clear();
-        if(root.get("journal") instanceof List<?> list) for(Object o:list) {
-            if(!(o instanceof Map<?,?> m)) continue;
-            try { ledger.journal.add(new Entry(longNumber(m.get("seq"),0),String.valueOf(m.get("tx")),String.valueOf(m.get("account")),String.valueOf(m.get("other")),String.valueOf(m.get("currency")),number(m.get("amount"),0),Boolean.TRUE.equals(m.get("credit")),Kind.valueOf(String.valueOf(m.get("kind"))),String.valueOf(m.get("category")),String.valueOf(m.get("reference")),longNumber(m.get("minute"),0),number(m.get("balance"),0),String.valueOf(m.get("memo")))); } catch(IllegalArgumentException ignored) { }
+        long previousSequence = 0;
+        Map<String, List<Entry>> transactions = new HashMap<>();
+        for (Object row : journalRows) {
+            if (!(row instanceof Map<?, ?> m)) throw new IllegalArgumentException("Invalid treasury journal row");
+            long seq = requiredLong(m.get("seq"), "journal sequence");
+            String tx = requiredString(m.get("tx"), "transaction id");
+            String accountId = requiredString(m.get("account"), "journal account");
+            String other = requiredString(m.get("other"), "journal counterparty");
+            String currency = requiredString(m.get("currency"), "journal currency");
+            double value = requiredNumber(m.get("amount"), "journal amount");
+            Object creditValue = m.get("credit");
+            if (!(creditValue instanceof Boolean credit)) throw new IllegalArgumentException("Invalid journal debit/credit flag");
+            Kind kind;
+            try { kind = Kind.valueOf(requiredString(m.get("kind"), "journal kind")); }
+            catch (RuntimeException ex) { throw new IllegalArgumentException("Invalid treasury journal kind", ex); }
+            String category = optionalString(m.get("category"));
+            String reference = optionalString(m.get("reference"));
+            long worldMinute = requiredLong(m.get("minute"), "journal minute");
+            double balanceAfter = requiredNumber(m.get("balance"), "journal balance");
+            String memo = optionalString(m.get("memo"));
+            Account account = ledger.accounts.get(accountId);
+            if (account == null || !account.currency.equals(currency)) throw new IllegalArgumentException("Journal references unknown or mismatched account: " + accountId);
+            if (seq <= previousSequence || seq < 1 || worldMinute < 0 || value <= 0 || balanceAfter < 0)
+                throw new IllegalArgumentException("Invalid journal ordering or amount at sequence " + seq);
+            Entry entry = new Entry(seq, tx, accountId, other, currency, value, credit, kind,
+                    category, reference, worldMinute, balanceAfter, memo);
+            ledger.journal.add(entry);
+            ledger.postedReferences.add(referenceKey(accountId, kind, reference));
+            transactions.computeIfAbsent(tx, ignored -> new ArrayList<>()).add(entry);
+            previousSequence = seq;
         }
-        ledger.sequence=Math.max(1,longNumber(root.get("sequence"),ledger.journal.size()+1));
-        ledger.transactionSequence=Math.max(1,longNumber(root.get("transactionSequence"),ledger.sequence));
+        for (Map.Entry<String, List<Entry>> transaction : transactions.entrySet()) {
+            List<Entry> entries = transaction.getValue();
+            if (entries.size() == 1) continue; // opening, external income/expense, loan or interest
+            if (entries.size() != 2) throw new IllegalArgumentException("Invalid journal transaction cardinality: " + transaction.getKey());
+            Entry a = entries.get(0), b = entries.get(1);
+            if (a.accountId().equals(b.accountId()) || !a.counterpartyId().equals(b.accountId())
+                    || !b.counterpartyId().equals(a.accountId()) || a.credit() == b.credit()
+                    || !a.currency().equals(b.currency()) || Math.abs(a.amount() - b.amount()) > 1e-8)
+                throw new IllegalArgumentException("Unbalanced double-entry transaction: " + transaction.getKey());
+        }
+        ledger.sequence = Math.max(1, requiredLong(root.get("sequence"), "journal next sequence"));
+        ledger.transactionSequence = Math.max(1, requiredLong(root.get("transactionSequence"), "transaction next sequence"));
+        if (ledger.sequence <= previousSequence) throw new IllegalArgumentException("Treasury journal sequence is not ahead of the journal");
         return ledger;
+    }
+
+    private static String requiredString(Object value, String field) {
+        if (!(value instanceof String text) || text.isBlank() || text.length() > 256)
+            throw new IllegalArgumentException("Invalid " + field);
+        return text.trim();
+    }
+    private static String optionalString(Object value) {
+        return value instanceof String text ? text : "";
+    }
+    private static double requiredNumber(Object value, String field) {
+        if (!(value instanceof Number n) || !Double.isFinite(n.doubleValue()))
+            throw new IllegalArgumentException("Invalid " + field);
+        return n.doubleValue();
+    }
+    private static long requiredLong(Object value, String field) {
+        if (!(value instanceof Number n) || !Double.isFinite(n.doubleValue())
+                || n.doubleValue() != Math.rint(n.doubleValue()) || n.doubleValue() < 0
+                || n.doubleValue() > Long.MAX_VALUE)
+            throw new IllegalArgumentException("Invalid " + field);
+        return n.longValue();
     }
     private static double number(Object o,double d) { return o instanceof Number n && Double.isFinite(n.doubleValue())?n.doubleValue():d; }
     private static long longNumber(Object o,long d) { return o instanceof Number n?n.longValue():d; }
