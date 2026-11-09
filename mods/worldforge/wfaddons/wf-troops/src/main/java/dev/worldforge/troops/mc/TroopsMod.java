@@ -351,6 +351,7 @@ public class TroopsMod {
         person.props.put("wf_army_id", troop.armyId);
         person.props.put("wf_combat_xp", troop.combatXp());
         person.props.put("wf_veteran_rank", troop.veteranRank());
+        CharacterDevelopment.setMilitaryMorale(person, troop.moralePct());
         PopulationSimulation.updateIntent(person, PeopleMod.YEAR);
     }
 
