@@ -27,7 +27,7 @@ public final class Session {
         for(Call c:n.effects)DialogueApi.run(c,ctx);
         visible=new ArrayList<>();
         for(Dialogue.Choice ch:n.choices)if(DialogueApi.all(rawOf(ch),ctx))visible.add(ch);
-        ctx.memory().record("line",template(n.speaker)+": "+template(n.text));
+        ctx.memory().recordEvent("line",template(n.speaker)+": "+template(n.text));
     }
     private static Object rawOf(Dialogue.Choice ch){
         List<Object> l=new ArrayList<>();
@@ -46,7 +46,7 @@ public final class Session {
         if(node.choices.isEmpty()){if(node.next==null){ended=true;return;}enter(node.next);return;}
         if(i<0||i>=visible.size())throw new IllegalArgumentException("Нет ответа с номером "+i);
         Dialogue.Choice c=visible.get(i);
-        ctx.memory().record("choice",template(c.text));
+        ctx.memory().recordEvent("choice",template(c.text));
         for(Call e:c.effects)DialogueApi.run(e,ctx);
         if(c.next==null){ended=true;return;}enter(c.next);
     }
