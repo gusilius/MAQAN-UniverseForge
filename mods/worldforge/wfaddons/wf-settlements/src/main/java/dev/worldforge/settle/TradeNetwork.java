@@ -65,7 +65,7 @@ public final class TradeNetwork {
                 r.status = "нет серебра";
                 continue;
             }
-            if (!a.consumeResource(r.res, n) || Math.abs(b.receiveResource(r.res, n) - n) > 1e-9) {
+            if (!a.transferResourceTo(b, r.res, n, "caravan-goods", "route:" + r.id)) {
                 // Preconditions above make this unreachable in the single-threaded server tick.
                 throw new TradeException("Inventory changed during route settlement " + r.id);
             }
