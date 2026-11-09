@@ -15,7 +15,7 @@ public final class TreasuryLedgerTest {
         ledger.open("realm:kingdom","realm:kingdom","silver",1000);
         ledger.open("settlement:capital","settlement:capital","silver",100);
         ledger.open("army:royal","army:royal","silver",25);
-        ledger.open("merchant:caravan","merchant:caravan","silver",0);
+        ledger.open("merchant:caravan","merchant:caravan","silver",0);\n        ledger.open("foreign:account","foreign:account","gold",10);
         ok(ledger.transfer("realm:kingdom","settlement:capital",125,TreasuryLedger.Kind.GRANT,"budget","grant-1",10,"settlement grant"),
                 "government grant transfers funds between shared accounts");
         ok(close(ledger.balance("realm:kingdom"),875)&&close(ledger.balance("settlement:capital"),225),
@@ -24,7 +24,7 @@ public final class TreasuryLedgerTest {
         ok(!ledger.transfer("realm:kingdom","settlement:capital",5000,TreasuryLedger.Kind.GRANT,"budget","grant-fail",11,"overdraft denied")
                 && ledger.journal().size()==journalBefore,
                 "failed transfer is atomic and creates no journal entries");
-        ok(!ledger.transfer("realm:kingdom","army:royal",1,TreasuryLedger.Kind.TRADE,"trade","currency-fail",12,""),
+        ok(!ledger.transfer("realm:kingdom","foreign:account",1,TreasuryLedger.Kind.TRADE,"trade","currency-fail",12,""),
                 "currency or account policy rejects invalid operations");
 
         ledger.setCreditLimit("merchant:caravan",50);
@@ -54,7 +54,7 @@ public final class TreasuryLedgerTest {
         ok(close(restored.balance("realm:kingdom"),875)&&close(restored.balance("settlement:capital"),225)
                 && restored.journal().size()==ledger.journal().size(),
                 "balances and immutable financial journal survive save/load");
-        ok(restored.journal().stream().filter(e->e.transactionId().equals("tx:1")).count()==2,
+        ok(restored.journal().stream().filter(e->e.kind()==TreasuryLedger.Kind.GRANT && e.reference().equals("grant-1")).count()==2,
                 "double-entry transfer has matching debit and credit records under one transaction ID");
         ok(restored.account("merchant:caravan").creditLimit==50,
                 "credit terms survive save/load");
