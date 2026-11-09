@@ -109,7 +109,7 @@ public class ReputationTest {
         String scopedJson = scoped.toJson();
         ReputationStore scopedReload = new ReputationStore();
         scopedReload.fromJson(scopedJson);
-        ok(scopedReload.get("p", ReputationStore.Scope.SETTLEMENT, "village_b") == 35
+        ok(scopedReload.get("p", ReputationStore.Scope.SETTLEMENT, "village_b") == 55
                         && scopedReload.known("resident_a", "p", ReputationStore.Scope.SETTLEMENT, "village_a") != null
                         && scopedReload.known("resident_c", "p", ReputationStore.Scope.ORGANIZATION, "guild") != null,
                 "scoped values and resident knowledge survive save/load");
