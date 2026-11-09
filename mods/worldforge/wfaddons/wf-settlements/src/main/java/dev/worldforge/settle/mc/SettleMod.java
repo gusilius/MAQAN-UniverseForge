@@ -97,6 +97,7 @@ public class SettleMod {
         bus.addListener(this::tabs);
         MinecraftForge.EVENT_BUS.register(this);
         MinecraftForge.EVENT_BUS.register(new SettleWand.Events());
+        MinecraftForge.EVENT_BUS.register(new ResidentInteraction());
         MinecraftForge.EVENT_BUS.register(new TaxService());
     }
 
@@ -296,6 +297,16 @@ public class SettleMod {
     }
 
     public static Colony colony(String id) { return COLONIES.get(id); }
+
+    /** Resolve the one Character identity represented by this resident body. */
+    public static Character residentCharacter(WFWorker body) {
+        if (body == null) return null;
+        Colony colony = COLONIES.get(body.colonyId);
+        Worker worker = body.worker();
+        CharacterRegistry registry = registryForColony(colony);
+        return registry == null || worker == null || worker.person == null || worker.person.isBlank()
+                ? null : registry.get(worker.person);
+    }
 
     public static boolean ownsAny(String uuid) {
         for (Colony c : COLONIES.values()) if (uuid.equals(c.owner)) return true;
@@ -792,5 +803,6 @@ public class SettleMod {
     public void onCommands(RegisterCommandsEvent e) {
         SettleCommands.register(e.getDispatcher());
         SettleMapCommands.register(e.getDispatcher());
+        ResidentInteraction.register(e);
     }
 }
