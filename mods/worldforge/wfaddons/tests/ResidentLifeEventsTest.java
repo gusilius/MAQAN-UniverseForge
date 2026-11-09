@@ -29,6 +29,9 @@ public final class ResidentLifeEventsTest {
             married = father.id.equals(mother.spouse) && mother.id.equals(father.spouse);
         }
         check(married, "mutual high affinity can lead to a persistent marriage event");
+        check(father.name.equals(mother.props.get("family.spouse_name"))
+                        && mother.name.equals(father.props.get("family.spouse_name")),
+                "marriage stores reciprocal partner display names");
         check(registry.get(father.id) == father && registry.get(mother.id) == mother,
                 "family events retain the original Character identities");
 
@@ -44,6 +47,9 @@ public final class ResidentLifeEventsTest {
                     "child stores both canonical parent links");
             check(child != null && father.children.contains(child.id) && mother.children.contains(child.id),
                     "birth updates both family trees");
+            check(child != null && father.name.equals(child.props.get("family.father_name"))
+                            && mother.name.equals(child.props.get("family.mother_name")),
+                    "child stores readable canonical parent names");
         }
         CharacterRegistry restored = new CharacterRegistry();
         restored.fromJson(registry.toJson());
