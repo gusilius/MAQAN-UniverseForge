@@ -177,7 +177,7 @@ public final class CommandScreen extends Screen {
             int morale=-1,xp=-1;
             if(entity instanceof TroopEntity t){
                 role=t.def()==null?t.unitId():t.def().role();
-                morale=t.moralePct();xp=t.combatXp();
+                morale=t.moralePct();
                 identity=t.syncedCharacterId()==null?"":t.syncedCharacterId();
                 xp=t.syncedCombatXp();
             }else if(entity instanceof dev.worldforge.settle.mc.WFWorker w){
@@ -189,7 +189,8 @@ public final class CommandScreen extends Screen {
             int health=entity instanceof LivingEntity living&&living.getMaxHealth()>0
                     ?Math.round(100*living.getHealth()/living.getMaxHealth()):0;
             String detail=role+" · HP "+health+"%"+(morale>=0?" · Мораль "+morale+"%":"")+(xp>=0?" · XP "+xp:"");
-            g.drawString(font,font.plainSubstrByWidth(name,INSPECT_W-14),INSPECT_X+7,y+2,
+            int nameWidth=identity.isBlank()?INSPECT_W-14:INSPECT_W-88;
+            g.drawString(font,font.plainSubstrByWidth(name,nameWidth),INSPECT_X+7,y+2,
                     troop?0xFFE6C875:0xFFB8D8A0,false);
             g.drawString(font,font.plainSubstrByWidth(detail,INSPECT_W-14),INSPECT_X+7,y+11,0xFFB5B7C2,false);
             if(!identity.isBlank()){
