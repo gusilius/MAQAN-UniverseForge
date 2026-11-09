@@ -82,7 +82,9 @@ public class EconomyTest {
         p.unassign(w1.id);
         w1.profession = "laborer";
         p.tick(10);
-        ok(w1.profession.equals("farmer"), "работник с приоритетом выбрал ферму: " + w1.profession);
+        ok(w1.profession.equals("laborer") && w1.workRole().equals("farmer"),
+                "общий рабочий выполняет фермерскую работу без потери постоянной профессии: "
+                        + w1.profession + "/" + w1.workRole());
         ok(orderFails(() -> p.setWorkPriority(w1.id, "farmer", 9)) && orderFails(() -> p.setWorkPriority(999, "farmer", 1)), "неверные приоритеты отклоняются");
 
         // сохранение
