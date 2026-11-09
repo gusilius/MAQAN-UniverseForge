@@ -54,6 +54,22 @@ public class SettleTest {
     public static void main(String[] a) throws Exception {
         Defs d = defs();
         ok(d.validate().stream().noneMatch(m -> !m.startsWith("Предупреждение")), "набор данных без ошибок: " + d.validate());
+        ok(d.buildings.size() >= 90 && d.professions.size() >= 46,
+                "единый каталог содержит сельские и городские постройки и полный набор профессий");
+        ok(d.buildings.values().stream().noneMatch(b -> b.limit > 0),
+                "каталог не навязывает региональные и унаследованные лимиты построек");
+        ok(d.buildings.values().stream().allMatch(b -> b.description != null && !b.description.isBlank()),
+                "у каждой постройки определено назначение");
+        ok(d.buildings.containsKey("windmill") && d.buildings.get("windmill").in.containsKey("grain")
+                        && d.buildings.get("bakery").in.containsKey("flour"),
+                "зерно проходит цепочку мельница -> мука -> пекарня");
+        ok(d.buildings.containsKey("gold_mine") && d.buildings.containsKey("silver_mine")
+                        && d.buildings.containsKey("copper_mine")
+                        && d.buildings.get("mint").in.containsKey("gold"),
+                "добыча драгоценных и цветных металлов связана с ювелирным делом и чеканкой");
+        ok(d.buildings.get("village_granary").storage.getOrDefault("food", 0) > 0
+                        && d.buildings.get("city_storehouse").storage.getOrDefault("steel", 0) > 0,
+                "деревенский и городской склады реально увеличивают вместимость общего хранилища");
         ok(d.professions.containsKey("trainer") && d.buildings.get("barracks").jobs.getOrDefault("trainer", 0) == 1,
                 "казармы требуют рабочего-инструктора");
         Worker roleProbe = fresh(d, 1).workers.get(0);
