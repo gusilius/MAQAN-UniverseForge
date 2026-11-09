@@ -5,6 +5,7 @@ import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.PopulationSimulation;
 import dev.worldforge.people.LifeSimulation;
 import dev.worldforge.people.CharacterDevelopment;
+import dev.worldforge.people.CharacterStats;
 import dev.worldforge.people.ProfessionDefs;
 import dev.worldforge.progress.Progress;
 import dev.worldforge.progress.ProgressDefs;
