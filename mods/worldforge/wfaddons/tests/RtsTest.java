@@ -271,10 +271,10 @@ public class RtsTest {
         ok(sel.size() == g.workers.size(), "рамка на всю миникарту берёт всех рабочих");
 
         // ---- вид
-        Worker lj = s.workers.stream().filter(w -> w.profession.equals("lumberjack")).findFirst().get();
+        Worker lj = s.workers.stream().filter(w -> w.workRole().equals("lumberjack")).findFirst().orElseThrow();
         ok(Look.state(s, idleW) == Look.WorkerState.IDLE, "свободный - IDLE");
         ok(Look.glyph(d, "lumberjack").equals("Д") && Look.glyph(d, "unknown_prof").equals("U"), "знаки профессий");
-        ok(lj != null && lj.profession.equals("lumberjack"), "проверка профессии не маскирует ошибку безусловным true");
+        ok(lj.workRole().equals("lumberjack"), "RTS-вид проверяет активную работу, не постоянную профессию");
 
         System.out.println(fails == 0 ? "ALL OK" : fails + " FAILED");
         if (fails > 0) System.exit(1);
