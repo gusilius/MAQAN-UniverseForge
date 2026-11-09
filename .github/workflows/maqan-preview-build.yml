@@ -3,7 +3,7 @@ run-name: Preview validation · ${{ github.ref_name }}
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, feature/rts-phase-iv]
   push:
     branches: [main]
   workflow_dispatch:
