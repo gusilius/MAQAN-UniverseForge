@@ -3,5 +3,6 @@
   "entity.wf_troops.troop": "Солдат",
   "key.categories.worldforge": "WorldForge",
   "key.categories.wf_troops": "WorldForge: войска",
-  "key.wf_troops.first_person_command": "Командование от первого лица"
+  "key.wf_troops.first_person_command": "Командование от первого лица",
+  "key.wf_troops.radial_command": "Удерживать для колеса команд"
 }
