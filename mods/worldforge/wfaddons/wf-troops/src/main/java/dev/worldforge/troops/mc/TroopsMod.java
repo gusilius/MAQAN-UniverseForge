@@ -654,6 +654,19 @@ public class TroopsMod {
                 .then(Commands.literal("hierarchy")
                         .then(Commands.argument("army", IntegerArgumentType.integer(1))
                                 .executes(ctx -> showHierarchy(ctx.getSource(), IntegerArgumentType.getInteger(ctx, "army")))))
+                .then(Commands.literal("commander")
+                        .then(Commands.literal("army")
+                                .then(Commands.argument("army", IntegerArgumentType.integer(1))
+                                        .then(Commands.argument("character", StringArgumentType.word())
+                                                .executes(ctx -> appointArmyCommander(ctx.getSource(),
+                                                        IntegerArgumentType.getInteger(ctx, "army"),
+                                                        StringArgumentType.getString(ctx, "character"))))))
+                        .then(Commands.literal("corps")
+                                .then(Commands.argument("corps", StringArgumentType.word())
+                                        .then(Commands.argument("character", StringArgumentType.word())
+                                                .executes(ctx -> appointCorpsCommander(ctx.getSource(),
+                                                        StringArgumentType.getString(ctx, "corps"),
+                                                        StringArgumentType.getString(ctx, "character")))))))
                 .then(Commands.literal("list").executes(c -> {
                     try {
                         String json = SQUADS.viewJson(c.getSource().getPlayerOrException().getUUID().toString());
@@ -677,6 +690,144 @@ public class TroopsMod {
                     }
                     return 1;
                 })));
+    }
+
+    private static int createCorps(CommandSourceStack src, int armyId, String name) {
+        ServerPlayer player;
+        try { player = src.getPlayerOrException(); }
+        catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
+        syncArmyHierarchy();
+        ArmyHierarchy.ArmyNode army = HIERARCHY.army(armyId);
+        if (army == null || !army.owner.equals(player.getUUID().toString())) {
+            src.sendFailure(Component.literal("Армия не найдена или принадлежит другому игроку"));
+            return 0;
+        }
+        ArmyHierarchy.Corps corps = HIERARCHY.createCorps(armyId, name);
+        save();
+        src.sendSuccess(() -> Component.literal("Создан корпус «" + corps.name + "» в составе " + army.name), false);
+        return 1;
+    }
+
+    private static int assignSquadToCorps(CommandSourceStack src, String corpsId, String squadId) {
+        ServerPlayer player;
+        try { player = src.getPlayerOrException(); }
+        catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
+        ArmyHierarchy.Corps corps = HIERARCHY.corps(corpsId);
+        Squads.Squad squad = SQUADS.get(squadId);
+        ArmyHierarchy.ArmyNode army = corps == null ? null : HIERARCHY.army(corps.armyId);
+        if (corps == null || squad == null || army == null
+                || !army.owner.equals(player.getUUID().toString()) || !squad.owner.equals(army.owner)
+                || !HIERARCHY.assignSquad(corpsId, squadId, SQUADS)) {
+            src.sendFailure(Component.literal("Корпус или отряд не найден, либо нет прав на управление"));
+            return 0;
+        }
+        save();
+        src.sendSuccess(() -> Component.literal("Отряд «" + squad.name + "» назначен в корпус «" + corps.name + "»"), false);
+        return 1;
+    }
+
+    private static Squads.Order parseArmyOrder(String kind, double x, double z) {
+        try {
+            Squads.Kind value = Squads.Kind.valueOf(kind.toUpperCase(Locale.ROOT));
+            return value == Squads.Kind.STOP || value == Squads.Kind.HOLD
+                    || value == Squads.Kind.RETREAT ? Squads.Order.of(value)
+                    : new Squads.Order(value, x, z, "");
+        } catch (RuntimeException ex) {
+            throw new IllegalArgumentException("Неизвестный приказ: " + kind);
+        }
+    }
+
+    private static int orderArmy(CommandSourceStack src, int armyId, String kind, double x, double z, boolean queue) {
+        ServerPlayer player;
+        try { player = src.getPlayerOrException(); }
+        catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
+        ArmyHierarchy.ArmyNode army = HIERARCHY.army(armyId);
+        if (army == null || !army.owner.equals(player.getUUID().toString())) {
+            src.sendFailure(Component.literal("Армия не найдена или принадлежит другому игроку")); return 0;
+        }
+        try {
+            int count = HIERARCHY.commandArmy(armyId, SQUADS, parseArmyOrder(kind, x, z), queue);
+            save();
+            int issued = count;
+            src.sendSuccess(() -> Component.literal("Приказ передан корпусам и отрядам: " + issued), false);
+            return issued;
+        } catch (RuntimeException ex) {
+            src.sendFailure(Component.literal(ex.getMessage())); return 0;
+        }
+    }
+
+    private static int orderCorps(CommandSourceStack src, String corpsId, String kind, double x, double z, boolean queue) {
+        ServerPlayer player;
+        try { player = src.getPlayerOrException(); }
+        catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
+        ArmyHierarchy.Corps corps = HIERARCHY.corps(corpsId);
+        ArmyHierarchy.ArmyNode army = corps == null ? null : HIERARCHY.army(corps.armyId);
+        if (corps == null || army == null || !army.owner.equals(player.getUUID().toString())) {
+            src.sendFailure(Component.literal("Корпус не найден или принадлежит другому игроку")); return 0;
+        }
+        try {
+            int count = HIERARCHY.commandCorps(corpsId, SQUADS, parseArmyOrder(kind, x, z), queue);
+            save();
+            int issued = count;
+            src.sendSuccess(() -> Component.literal("Приказ передан отрядам корпуса: " + issued), false);
+            return issued;
+        } catch (RuntimeException ex) {
+            src.sendFailure(Component.literal(ex.getMessage())); return 0;
+        }
+    }
+
+    private static int showHierarchy(CommandSourceStack src, int armyId) {
+        ServerPlayer player;
+        try { player = src.getPlayerOrException(); }
+        catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
+        ArmyHierarchy.ArmyNode army = HIERARCHY.army(armyId);
+        if (army == null || !army.owner.equals(player.getUUID().toString())) {
+            src.sendFailure(Component.literal("Армия не найдена или принадлежит другому игроку")); return 0;
+        }
+        src.sendSuccess(() -> Component.literal(HIERARCHY.viewJson(armyId)), false);
+        return 1;
+    }
+
+    private static Character findArmyCharacter(ArmyHierarchy.ArmyNode army, String characterId) {
+        if (!ModList.get().isLoaded("wf_people") || army == null) return null;
+        for (MapData map : WorldForgeMod.loadedMaps().values()) {
+            if (map.titles == null || !army.realm.isBlank() && !map.titles.realms.containsKey(army.realm)) continue;
+            CharacterRegistry registry = PeopleMod.registry(map);
+            Character candidate = registry == null ? null : registry.get(characterId);
+            if (candidate != null && candidate.alive) return candidate;
+        }
+        return null;
+    }
+
+    private static int appointArmyCommander(CommandSourceStack src, int armyId, String characterId) {
+        ServerPlayer player;
+        try { player = src.getPlayerOrException(); }
+        catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
+        ArmyHierarchy.ArmyNode army = HIERARCHY.army(armyId);
+        Character character = findArmyCharacter(army, characterId);
+        if (army == null || !army.owner.equals(player.getUUID().toString()) || character == null
+                || !HIERARCHY.appointArmyCommander(armyId, characterId)) {
+            src.sendFailure(Component.literal("Живой Character из государства армии не найден или нет прав")); return 0;
+        }
+        save();
+        src.sendSuccess(() -> Component.literal("Командующий армией «" + army.name + "»: " + character.name), false);
+        return 1;
+    }
+
+    private static int appointCorpsCommander(CommandSourceStack src, String corpsId, String characterId) {
+        ServerPlayer player;
+        try { player = src.getPlayerOrException(); }
+        catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
+        ArmyHierarchy.Corps corps = HIERARCHY.corps(corpsId);
+        ArmyHierarchy.ArmyNode army = corps == null ? null : HIERARCHY.army(corps.armyId);
+        Character character = findArmyCharacter(army, characterId);
+        if (corps == null || army == null || !army.owner.equals(player.getUUID().toString())
+                || character == null || !HIERARCHY.appointCorpsCommander(corpsId, characterId)) {
+            src.sendFailure(Component.literal("Живой Character из государства армии не найден или нет прав")); return 0;
+        }
+        save();
+        src.sendSuccess(() -> Component.literal("Командир корпуса «" + corps.name + "»: " + character.name), false);
+        return 1;
     }
 
     /** Appoints a living canonical wf-people Character who is physically present in the squad. */
