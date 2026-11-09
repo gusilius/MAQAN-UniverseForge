@@ -13,6 +13,8 @@ public final class Building {
     public boolean unpaid;                   // не хватило серебра на содержание (не сохраняется)
     public boolean paused;                   // производство остановлено вручную
     public String status = "";
+    /** Produced goods waiting for a resident hauler to deliver them to the shared settlement store. */
+    public final java.util.Map<String, Double> localStock = new java.util.TreeMap<>();
 
     Building(int uid, Defs.Building def, int x, int z) { this.uid = uid; this.def = def; this.x = x; this.z = z; }
 }
