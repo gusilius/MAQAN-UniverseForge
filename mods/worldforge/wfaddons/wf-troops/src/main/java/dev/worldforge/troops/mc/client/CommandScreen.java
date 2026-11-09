@@ -357,10 +357,19 @@ public final class CommandScreen extends Screen {
             dragging = false;
             if (workAreaDrag) {
                 workAreaDrag = false;
+                boolean areaSelection = UnitSelection.isBox(dragX, dragY, x, y);
+                if (!areaSelection) {
+                    net.minecraft.core.BlockPos block = CommandMode.blockAt(minecraft, x, y);
+                    if (block != null) {
+                        Vec3 exact = new Vec3(block.getX() + 0.5, block.getY() + 0.5, block.getZ() + 0.5);
+                        sendWorkArea(exact, exact, 0);
+                        return true;
+                    }
+                }
                 Vec3 a = CommandMode.groundAt(minecraft, dragX, dragY);
                 Vec3 b = CommandMode.groundAt(minecraft, x, y);
                 if (a != null && b != null) {
-                    int radius = UnitSelection.isBox(dragX, dragY, x, y)
+                    int radius = areaSelection
                             ? Math.min(64, (int) Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) * 0.5)) : 0;
                     sendWorkArea(a, b, radius);
                 }
