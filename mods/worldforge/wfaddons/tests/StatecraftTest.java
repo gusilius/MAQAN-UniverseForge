@@ -62,7 +62,7 @@ public final class StatecraftTest {
         };
         realmRules.state("north").gov = "feudal_monarchy";
         check(realmRules.setLaw("north", "taxation", "heavy"), "existing taxation law can be activated");
-        state.treasury("north_duchy_realm").balance = 100;
+        state.fundTreasury("north_duchy_realm", 100, "seed-vassal-treasury");
         state.setTaxRate("north", 0.1);
         double income = state.collectTaxes(realmRules, "north", 1000, 1);
         check(income > 100 && state.treasury("north").balance == income,
