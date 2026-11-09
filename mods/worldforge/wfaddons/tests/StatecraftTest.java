@@ -70,6 +70,13 @@ public final class StatecraftTest {
         check(Math.abs(dev.worldforge.mod.api.TreasuryApi.balance("north")
                         - state.treasury("north").balance / 5.0) < 1e-9,
                 "legacy gold treasury facade and Statecraft silver treasury read the same canonical account");
+        double afterAssessment = state.treasury("north").balance;
+        int journalAfterAssessment = dev.worldforge.mod.economy.TreasuryService.current().journal().size();
+        state.treasury("north").taxDays = 0; // simulate stale Statecraft snapshot after a ledger commit
+        state.collectTaxes(realmRules, "north", 1000, 1);
+        check(Math.abs(state.treasury("north").balance - afterAssessment) < 1e-9
+                        && dev.worldforge.mod.economy.TreasuryService.current().journal().size() == journalAfterAssessment,
+                "replayed tax assessment cannot duplicate realm tax or vassal tribute after interrupted save");
         check(state.spend("north", 10, "roads") && !state.spend("north", 1_000_000, "unfunded"),
                 "treasury expenses are constrained by available funds");
 
