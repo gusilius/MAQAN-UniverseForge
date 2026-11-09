@@ -2,6 +2,7 @@ package dev.worldforge.troops.mc.client;
 
 import dev.worldforge.troops.Squads;
 import dev.worldforge.troops.mc.OrderPacket;
+import dev.worldforge.troops.mc.TroopEntity;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
@@ -102,7 +103,7 @@ final class RadialCommandScreen extends Screen {
             if (!(mc.hitResult instanceof EntityHitResult hit)
                     || !(hit.getEntity() instanceof LivingEntity living)
                     || !living.isAlive() || CommandMode.selectable(mc, living)
-                    || (!(living instanceof Enemy) && !CommandMode.isEnemyTroop(mc, living))) return;
+                    || (!(living instanceof Enemy) && !(living instanceof TroopEntity && !CommandMode.selectable(mc, living)))) return;
             target = living.getUUID().toString();
         } else if (kind == Squads.Kind.MOVE || kind == Squads.Kind.ATTACK_MOVE || kind == Squads.Kind.PATROL) {
             if (!(mc.hitResult instanceof BlockHitResult hit) || hit.getType() != HitResult.Type.BLOCK) return;
