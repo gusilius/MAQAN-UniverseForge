@@ -317,8 +317,13 @@ public final class WorldForgeSnapshotExporter {
         raster.put("heights", heights);
         raster.put("biome_indices", biomes);
         raster.put("river_values", rivers);
-        raster.put("biome_palette", map.keys);
-        raster.put("biome_colors", map.biomeRgb);
+        int paletteSize=Math.min(256,map.keys.length);
+        String[] palette=java.util.Arrays.copyOf(map.keys,paletteSize);
+        int[] paletteColors=map.biomeRgb==null?new int[paletteSize]
+                :java.util.Arrays.copyOf(map.biomeRgb,paletteSize);
+        for(int i=0;i<palette.length;i++)if(palette[i]==null||palette[i].isBlank())palette[i]="unknown";
+        raster.put("biome_palette", palette);
+        raster.put("biome_colors", paletteColors);
         return raster;
     }
 
