@@ -1,6 +1,7 @@
 package dev.worldforge.settle;
 
 import dev.worldforge.mod.Json;
+import dev.worldforge.mod.economy.TreasuryService;
 
 import java.util.*;
 
@@ -17,6 +18,8 @@ public final class TradeNetwork {
         public final String from, to, res;
         public double rate;            // единиц в минуту
         public double carried, profit, acc;
+        public String dutyRealm = "";
+        public double dutyRate;
         public String status = "ждёт";
 
         Route(int id, String from, String to, String res, double rate) { this.id = id; this.from = from; this.to = to; this.res = res; this.rate = rate; }
@@ -41,6 +44,16 @@ public final class TradeNetwork {
 
     public void remove(int id) { if (routes.remove(id) == null) throw new TradeException("Нет маршрута " + id); }
 
+    /** Configure an ad-valorem customs duty paid by the importing settlement to the destination realm. */
+    public void setDuty(int routeId, String realmId, double rate) {
+        Route route = routes.get(routeId);
+        if (route == null) throw new TradeException("Нет маршрута " + routeId);
+        if (!Double.isFinite(rate) || rate < 0 || rate > 0.5) throw new TradeException("Пошлина должна быть от 0 до 50%");
+        if (rate > 0 && (realmId == null || realmId.isBlank())) throw new TradeException("Для пошлины нужна казна государства");
+        route.dutyRealm = rate == 0 ? "" : realmId.trim();
+        route.dutyRate = rate;
+    }
+
     public void tick(Map<String, Settlement> cities, double dt) {
         if (!Double.isFinite(dt) || dt <= 0) return;
         for (Route r : routes.values()) {
@@ -53,15 +66,21 @@ public final class TradeNetwork {
             double pa = a.price(r.res), pb = b.price(r.res);
             if (pb < pa * MIN_SPREAD) { r.status = "нет разницы"; r.acc = Math.min(r.acc, 1); continue; }
             double mid = (pa + pb) / 2, give = mid * (1 - CUT), pay = mid * (1 + CUT * 0);
+            double dutyPerUnit = mid * r.dutyRate;
+            double buyerCostPerUnit = pay + dutyPerUnit;
             n = (int) Math.min(n, a.amount(r.res) - RESERVE);
             n = (int) Math.min(n, b.capacity(r.res) - b.amount(r.res));
             n = (int) Math.min(n, Math.min(a.tradeLeft, b.tradeLeft));
-            if (pay > 0) n = (int) Math.min(n, Math.floor(b.amount(Defs.SILVER) / pay));
+            if (buyerCostPerUnit > 0) n = (int) Math.min(n, Math.floor(b.amount(Defs.SILVER) / buyerCostPerUnit));
             if (n <= 0) { r.status = a.amount(r.res) - RESERVE < 1 ? "нет товара" : b.amount(Defs.SILVER) < pay ? "нет серебра" : "нет места"; continue; }
             double sellerPayment = n * give;
             double marketFee = n * Math.max(0, pay - give);
+            double duty = n * dutyPerUnit;
+            if (duty > 0) TreasuryService.current().open("realm:" + r.dutyRealm, r.dutyRealm, Defs.SILVER, 0);
             if (!b.transferSilverTo(a, sellerPayment, "caravan-trade", "route:" + r.id)
-                    || !b.chargeSilver(marketFee, "market-fee", "route:" + r.id)) {
+                    || !b.chargeSilver(marketFee, "market-fee", "route:" + r.id)
+                    || (duty > 0 && !b.transferSilverToAccount("realm:" + r.dutyRealm, duty,
+                    dev.worldforge.mod.economy.TreasuryLedger.Kind.DUTY, "customs-duty", "route:" + r.id))) {
                 r.status = "нет серебра";
                 continue;
             }
@@ -72,7 +91,7 @@ public final class TradeNetwork {
             a.tradeLeft -= n; b.tradeLeft -= n;
             a.shiftDemand(r.res, n); b.shiftDemand(r.res, -n);
             r.acc -= n; r.carried += n;
-            r.profit += n * (give - pa) + n * (pb - pay);
+            r.profit += n * (give - pa) + n * (pb - pay) - duty;
             r.status = "возит";
         }
     }
@@ -106,6 +125,7 @@ public final class TradeNetwork {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", r.id); m.put("from", r.from); m.put("to", r.to); m.put("res", r.res); m.put("rate", r.rate);
             m.put("carried", r.carried); m.put("profit", r.profit); m.put("acc", r.acc); m.put("status", r.status);
+            m.put("dutyRealm", r.dutyRealm); m.put("dutyRate", r.dutyRate);
             l.add(m);
         }
         root.put("routes", l);
@@ -122,6 +142,8 @@ public final class TradeNetwork {
             Map<String, Object> m = (Map<String, Object>) o;
             Route r = new Route(((Number) m.get("id")).intValue(), (String) m.get("from"), (String) m.get("to"), (String) m.get("res"), ((Number) m.get("rate")).doubleValue());
             r.carried = ((Number) m.get("carried")).doubleValue(); r.profit = ((Number) m.get("profit")).doubleValue(); r.acc = ((Number) m.get("acc")).doubleValue(); r.status = (String) m.get("status");
+            if (m.get("dutyRealm") instanceof String realm) r.dutyRealm = realm;
+            if (m.get("dutyRate") instanceof Number rate) r.dutyRate = Math.max(0, Math.min(0.5, rate.doubleValue()));
             n.routes.put(r.id, r);
         }
         return n;
