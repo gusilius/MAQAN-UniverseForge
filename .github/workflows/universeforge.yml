@@ -2,7 +2,7 @@ name: MAQAN UniverseForge — Windows x64
 
 on:
   push:
-    branches: [main]
+    branches: [main, integration/maqan-unified]
     paths:
       - "mods/**"
       - "shared/**"
