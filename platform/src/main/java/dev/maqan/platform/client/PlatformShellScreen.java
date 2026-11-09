@@ -707,6 +707,15 @@ public final class PlatformShellScreen extends Screen {
                 p.x + 12, p.y + 84, MUTED, false);
         g.drawString(font, WorkspaceRuntime.components().size() + " registered UI components",
                 p.x + 12, p.y + 102, MUTED, false);
+        int y = p.y + 122;
+        for (WorkspaceMapLayerRegistry.Layer layer : WorkspaceMapLayerRegistry.layers()) {
+            if (y + 14 > p.y + p.h - 6) break;
+            g.drawString(font, WorkspaceMapLayerRegistry.isVisible(layer.id()) ? "✓" : "—",
+                    p.x + 12, y, WorkspaceTheme.ACCENT, false);
+            g.drawString(font, trimInspector(layer.label(), p.w - 44),
+                    p.x + 28, y, TEXT, false);
+            y += 16;
+        }
     }
 
     @Override public void tick() {
@@ -818,12 +827,21 @@ public final class PlatformShellScreen extends Screen {
                 int bx=p.x+p.w-64;
                 if(mx>=bx&&mx<bx+16) { p.pinned=!p.pinned; saveWorkspaceState(); return true; }
                 if(mx>=bx+18&&mx<bx+38) { p.minimized=!p.minimized; saveWorkspaceState(); return true; }
-                if(mx>=bx+38&&mx<bx+58) { if(!p.pinned) p.visible=false; saveWorkspaceState(); return true; }
+                if(mx>=bx+38&&mx<bx+58) {
+                    if (!p.pinned) hiddenPanels.add(p.id);
+                    layoutWorkspace(); saveWorkspaceState(); return true;
+                }
                 return true;
             }
-            if(!p.minimized&&mx>=p.x+p.w-12&&my>=p.y+p.h-12) {
-                resizingPanel=p.id; resizeStartX=(int)mx; resizeStartY=(int)my; resizeStartW=p.w; resizeStartH=p.h;
-                return true;
+            if (p.id.equals("tools")) {
+                List<WorkspaceMapLayerRegistry.Layer> layers = WorkspaceMapLayerRegistry.layers();
+                int layerIndex = (int) ((my - (p.y + 122)) / 16);
+                if (layerIndex >= 0 && layerIndex < layers.size()) {
+                    WorkspaceMapLayerRegistry.Layer layer = layers.get(layerIndex);
+                    WorkspaceMapLayerRegistry.setVisible(layer.id(), !WorkspaceMapLayerRegistry.isVisible(layer.id()));
+                    saveWorkspaceState();
+                    return true;
+                }
             }
             if(p.id.equals("navigation")) {
                 int top = navigationViewportTop(p);
@@ -1070,8 +1088,13 @@ public final class PlatformShellScreen extends Screen {
             onClose(); return true;
         }
         if (keyCode == GLFW.GLFW_KEY_F6) {
-            Panel timeline = panels.get("timeline");
-            if (timeline != null) timeline.visible = !timeline.visible;
+            toggleWorkspacePanel("timeline");
+            return true;
+        }
+        java.util.Optional<WorkspaceRuntime.Shortcut> registered =
+                WorkspaceRuntime.shortcutFor(keyCode, modifiers);
+        if (registered.isPresent()) {
+            WorkspaceRuntime.executeAction(registered.get().actionId(), PlatformSelectionContext.current());
             return true;
         }
         boolean handled = super.keyPressed(keyCode,scanCode,modifiers);
