@@ -103,6 +103,7 @@ public class SettleMod {
         bus.addListener(this::tabs);
         MinecraftForge.EVENT_BUS.register(this);
         MinecraftForge.EVENT_BUS.register(new SettleWand.Events());
+        MinecraftForge.EVENT_BUS.register(new BuildingSite.Events());
         MinecraftForge.EVENT_BUS.register(new ResidentInteraction());
         MinecraftForge.EVENT_BUS.register(new TaxService());
     }
