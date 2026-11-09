@@ -207,6 +207,16 @@ public final class CommandMode {
         return hit.getType() == HitResult.Type.MISS ? null : hit.getLocation();
     }
 
+    /** Exact block under the cursor; used for single-tree/single-vein orders rather than a nearby surface point. */
+    static net.minecraft.core.BlockPos blockAt(Minecraft mc, double sx, double sy) {
+        if (mc == null || mc.level == null || invVp == null) return null;
+        double[] d = Projection.ray(invVp, sx, sy, mc.getWindow().getGuiScaledWidth(), mc.getWindow().getGuiScaledHeight());
+        Vec3 direction = new Vec3(d[0], d[1], d[2]);
+        HitResult hit = mc.level.clip(new ClipContext(cam, cam.add(direction.scale(250)),
+                ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mc.player));
+        return hit instanceof BlockHitResult block ? block.getBlockPos() : null;
+    }
+
     /** Живой объект под курсором, по которому можно ударить (монстр или чужой солдат). */
     static LivingEntity enemyAt(Minecraft mc, double sx, double sy) {
         int w = mc.getWindow().getGuiScaledWidth(), h = mc.getWindow().getGuiScaledHeight();
