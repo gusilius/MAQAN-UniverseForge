@@ -25,8 +25,15 @@ public final class ReputationStore {
         public final int value;
         public final long observedAt;
         public final String source;
+        public final double confidence;
+        public final int depth;
         KnownReputation(int value, long observedAt, String source) {
+            this(value, observedAt, source, 1.0, 0);
+        }
+        KnownReputation(int value, long observedAt, String source, double confidence, int depth) {
             this.value = value; this.observedAt = observedAt; this.source = source;
+            this.confidence = Math.max(0.0, Math.min(1.0, confidence));
+            this.depth = Math.max(0, depth);
         }
     }
 
@@ -142,6 +149,8 @@ public final class ReputationStore {
     /** Apply a witnessed event and record the resulting scoped reputation for that witness only. */
     public void witness(String residentId, String player, Scope scope, String scopeId, int delta,
                         long worldTime, String source) {
+        if (residentId == null || residentId.isBlank() || player == null || player.isBlank() || worldTime < 0)
+            throw new IllegalArgumentException("invalid witnessed reputation event");
         String key = target(scope, scopeId);
         add(player, key, delta, source);
         observe(residentId, player, scope, scopeId, worldTime, source);
@@ -165,6 +174,38 @@ public final class ReputationStore {
         return byPlayer.get(player).get(target(scope, scopeId));
     }
 
+    /** Time-aware knowledge query. Expired information is unknown, never silently current. */
+    public KnownReputation knownAt(String residentId, String player, Scope scope, String scopeId,
+                                   long now, long maxAge, double minConfidence) {
+        if (now < 0 || maxAge < 0 || !Double.isFinite(minConfidence)
+                || minConfidence < 0 || minConfidence > 1) throw new IllegalArgumentException("invalid knowledge query");
+        KnownReputation value = known(residentId, player, scope, scopeId);
+        if (value == null || value.confidence < minConfidence || now < value.observedAt
+                || now - value.observedAt > maxAge) return null;
+        return value;
+    }
+
+    /** A trusted personal contact may pass one exact scoped rumor; no other scope is disclosed. */
+    public boolean shareWithTrustedContact(String witnessResidentId, String recipientResidentId,
+                                            String player, Scope scope, String scopeId,
+                                            long sharedAt, int relationship, double trustFactor) {
+        KnownReputation heard = known(witnessResidentId, player, scope, scopeId);
+        if (heard == null || recipientResidentId == null || recipientResidentId.isBlank()
+                || relationship < 35 || !Double.isFinite(trustFactor)
+                || trustFactor <= 0 || trustFactor > 1 || sharedAt < heard.observedAt) return false;
+        String key = target(scope, scopeId);
+        Map<String, KnownReputation> recipient = knowledge
+                .computeIfAbsent(recipientResidentId, k -> new TreeMap<>())
+                .computeIfAbsent(player, k -> new TreeMap<>());
+        KnownReputation old = recipient.get(key);
+        if (old != null && old.observedAt > sharedAt) return false;
+        double confidence = heard.confidence * trustFactor * Math.max(0.35, Math.min(1.0, relationship / 100.0));
+        if (confidence < 0.1) return false;
+        recipient.put(key, new KnownReputation(heard.value, sharedAt,
+                "rumor:" + witnessResidentId, confidence, heard.depth + 1));
+        return true;
+    }
+
     /**
      * Deliberate gossip within one named organization. Only the specified target is shared;
      * no knowledge is broadcast to settlements, rival organizations or the whole world.
@@ -180,7 +221,8 @@ public final class ReputationStore {
                 .computeIfAbsent(player, k -> new TreeMap<>());
         KnownReputation old = recipient.get(key);
         if (old != null && old.observedAt > sharedAt) return false;
-        recipient.put(key, new KnownReputation(heard.value, sharedAt, "rumor:" + witnessResidentId));
+        recipient.put(key, new KnownReputation(heard.value, sharedAt, "organization:" + organizationId
+                + ":from:" + witnessResidentId, heard.confidence * 0.85, heard.depth + 1));
         return true;
     }
 
@@ -207,6 +249,10 @@ public final class ReputationStore {
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("format", "wf-reputation/2");
         root.put("values", values);
+        Map<String, Object> savedLinks = new TreeMap<>();
+        links.forEach((child, link) -> savedLinks.put(child, Map.of("parent", link.parent, "factor", link.factor)));
+        root.put("links", savedLinks);
+        root.put("names", new TreeMap<>(names));
         Map<String, Object> people = new TreeMap<>();
         knowledge.forEach((resident, players) -> {
             Map<String, Object> p = new TreeMap<>();
@@ -215,6 +261,7 @@ public final class ReputationStore {
                 observations.forEach((key, v) -> {
                     Map<String, Object> item = new LinkedHashMap<>();
                     item.put("value", v.value); item.put("time", v.observedAt); item.put("source", v.source);
+                    item.put("confidence", v.confidence); item.put("depth", v.depth);
                     o.put(key, item);
                 });
                 p.put(player, o);
@@ -241,6 +288,14 @@ public final class ReputationStore {
             }
             if (!m.isEmpty()) values.put(e.getKey(), m);
         }
+        if (root.get("links") instanceof Map<?, ?> savedLinks) for (Map.Entry<?, ?> e : savedLinks.entrySet()) {
+            if (!(e.getKey() instanceof String child) || !(e.getValue() instanceof Map<?, ?> item)
+                    || !(item.get("parent") instanceof String parent) || !(item.get("factor") instanceof Number factor))
+                continue;
+            link(child, parent, factor.doubleValue());
+        }
+        if (root.get("names") instanceof Map<?, ?> savedNames) for (Map.Entry<?, ?> e : savedNames.entrySet())
+            if (e.getKey() instanceof String key && e.getValue() instanceof String value) names.put(key, value);
         if (root.get("knowledge") instanceof Map<?, ?> residents) for (Map.Entry<?, ?> re : residents.entrySet()) {
             if (!(re.getValue() instanceof Map<?, ?> players)) continue;
             Map<String, Map<String, KnownReputation>> playerMap = new TreeMap<>();
@@ -252,7 +307,9 @@ public final class ReputationStore {
                     long time = item.get("time") instanceof Number n ? n.longValue() : 0L;
                     obs.put(String.valueOf(oe.getKey()), new KnownReputation(
                             Math.max(MIN, Math.min(MAX, value.intValue())), time,
-                            String.valueOf(item.containsKey("source") ? item.get("source") : "legacy")));
+                            String.valueOf(item.containsKey("source") ? item.get("source") : "legacy"),
+                            item.get("confidence") instanceof Number confidence ? confidence.doubleValue() : 1.0,
+                            item.get("depth") instanceof Number depth ? depth.intValue() : 0));
                 }
                 if (!obs.isEmpty()) playerMap.put(String.valueOf(pe.getKey()), obs);
             }
