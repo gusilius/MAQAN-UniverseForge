@@ -35,7 +35,7 @@ public final class WorkspaceUi {
             case INFO -> WorkspaceTheme.INFORMATION;
         };
         graphics.fill(x, y + 2, x + 5, y + 7, color);
-        graphics.drawString(font, Component.literal(label == null ? "" : label), x + 9, y, color, false);
+        graphics.drawString(font, label == null ? "" : label, x + 9, y, color, false);
     }
 
     public static boolean contains(double mouseX, double mouseY,
