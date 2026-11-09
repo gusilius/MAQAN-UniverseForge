@@ -12,6 +12,7 @@ public final class ResidentQuest {
 
     private final String id;
     private final String objective;
+    private final String resourceId;
     private final int required;
     private final int createdYear;
     private int progress;
@@ -19,11 +20,17 @@ public final class ResidentQuest {
     private Status status;
 
     public ResidentQuest(String id, String objective, int required, int createdYear) {
+        this(id, objective, "bread", required, createdYear);
+    }
+
+    public ResidentQuest(String id, String objective, String resourceId, int required, int createdYear) {
         if (id == null || id.isBlank()) throw new IllegalArgumentException("quest id is required");
         if (objective == null || objective.isBlank()) throw new IllegalArgumentException("quest objective is required");
+        if (resourceId == null || resourceId.isBlank()) throw new IllegalArgumentException("quest resource is required");
         if (required < 1 || required > 10000) throw new IllegalArgumentException("quest target out of range");
         this.id = id;
         this.objective = objective;
+        this.resourceId = resourceId;
         this.required = required;
         this.createdYear = Math.max(0, createdYear);
         this.status = Status.OFFERED;
@@ -31,6 +38,7 @@ public final class ResidentQuest {
 
     public String id() { return id; }
     public String objective() { return objective; }
+    public String resourceId() { return resourceId; }
     public int required() { return required; }
     public int progress() { return progress; }
     public int createdYear() { return createdYear; }
@@ -66,6 +74,7 @@ public final class ResidentQuest {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("id", id);
         out.put("objective", objective);
+        out.put("resource", resourceId);
         out.put("required", required);
         out.put("progress", progress);
         out.put("created_year", createdYear);
@@ -80,7 +89,9 @@ public final class ResidentQuest {
         if (!(id instanceof String) || !(objective instanceof String)
                 || !(required instanceof Number) || !(created instanceof Number))
             throw new IllegalArgumentException("Malformed resident quest");
+        Object resource = raw.get("resource");
         ResidentQuest quest = new ResidentQuest((String) id, (String) objective,
+                resource instanceof String s && !s.isBlank() ? s : "bread",
                 ((Number) required).intValue(), ((Number) created).intValue());
         Object progress = raw.get("progress");
         if (progress instanceof Number n) {
