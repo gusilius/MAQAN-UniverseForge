@@ -508,6 +508,7 @@ public final class Settlement {
         if (role.isEmpty()) throw new OrderException(w.name + " (" + defs.professionName(w.profession)
                 + ") не подходит для этой работы или нет свободных мест в " + b.def.name);
         w.assignedProfession = role;
+        w.manualHauler = false;
         w.lifeAction = "";
         w.building = uid;
         w.manualFollow = false;
@@ -522,6 +523,7 @@ public final class Settlement {
         if (w == null) throw new OrderException("Нет рабочего " + workerId);
         w.building = 0;
         w.assignedProfession = "";
+        w.manualHauler = false;
         w.lifeAction = "";
         w.manualFollow = false;
         w.manualFollowOwner = "";
@@ -545,6 +547,7 @@ public final class Settlement {
             return;
         }
         w.orderQueue.clear();
+        w.manualHauler = false;
         w.lifeAction = "";
         w.manualFollow=false;
         w.manualFollowOwner="";
@@ -574,6 +577,7 @@ public final class Settlement {
         if (!defs.professions.containsKey(profession)) throw new OrderException("Нет профессии " + profession);
         w.profession = profession;
         w.assignedProfession = "";
+        w.manualHauler = false;
         w.lifeAction = "";
         w.building = 0;
         w.manualFollow = false;
@@ -778,7 +782,7 @@ public final class Settlement {
         for (Worker worker : workers) {
             if (!worker.workRole().equals("hauler")) continue;
             Building source = building(worker.building);
-            if (source == null || source.localStock.isEmpty()) {
+            if ((source == null || source.localStock.isEmpty()) && !worker.manualHauler) {
                 worker.building = 0;
                 worker.assignedProfession = "";
                 if (!worker.manualOrder && !worker.manualFollow && worker.lifeAction.isBlank())
@@ -811,6 +815,7 @@ public final class Settlement {
         if (!worker.canPerform("hauler")) throw new OrderException(worker.name + " не может переносить ресурсы");
         worker.building = buildingId;
         worker.assignedProfession = "hauler";
+        worker.manualHauler = true;
         worker.lifeAction = "";
         worker.manualOrder = false;
         worker.manualFollow = false;
@@ -855,7 +860,8 @@ public final class Settlement {
             Worker pick = null;
             int bestStaff = 1;
             for (Worker w : workers) {
-                if (w.building == 0 || w.manualOrder || w.manualFollow || !w.lifeAction.isBlank() || !w.canPerform("builder")) continue;
+                if (w.building == 0 || w.manualOrder || w.manualFollow || w.manualHauler
+                        || !w.lifeAction.isBlank() || !w.canPerform("builder")) continue;
                 Building from = building(w.building);
                 if (from == null || from.state != Building.State.DONE) continue;
                 int staff = assigned(from.uid).size();
@@ -1336,6 +1342,7 @@ public final class Settlement {
             m.put("id", w.id); m.put("name", w.name); m.put("profession", w.profession); m.put("assigned_profession", w.assignedProfession); m.put("person", w.person); m.put("building", w.building); m.put("status", w.status); m.put("x", w.x); m.put("z", w.z);
             m.put("life_action", w.lifeAction); m.put("life_target_x", w.lifeTargetX); m.put("life_target_z", w.lifeTargetZ);
             m.put("life_action_until", w.lifeActionUntil); m.put("haul_progress", w.haulProgress);
+            m.put("manual_hauler", w.manualHauler);
             m.put("manual_order", w.manualOrder); m.put("manual_follow", w.manualFollow); m.put("manual_follow_owner", w.manualFollowOwner); m.put("order_x", w.orderX); m.put("order_z", w.orderZ);
             List<Object> queuedOrders=new ArrayList<>();
             for(Worker.ManualOrder order:w.orderQueue)queuedOrders.add(Map.of("x",order.x(),"z",order.z()));
@@ -1423,6 +1430,7 @@ public final class Settlement {
             if (m.get("life_target_z") instanceof Number lz) w.lifeTargetZ = lz.doubleValue();
             if (m.get("life_action_until") instanceof Number lu && Double.isFinite(lu.doubleValue())) w.lifeActionUntil = lu.doubleValue();
             if (m.get("haul_progress") instanceof Number hp && Double.isFinite(hp.doubleValue())) w.haulProgress = Math.max(0, Math.min(100, hp.doubleValue()));
+            w.manualHauler = Boolean.TRUE.equals(m.get("manual_hauler"));
             if (!Set.of("", "sleeping", "eating", "fleeing", "defending", "socializing").contains(w.lifeAction)) w.lifeAction = "";
             w.manualOrder = Boolean.TRUE.equals(m.get("manual_order")); w.manualFollow = Boolean.TRUE.equals(m.get("manual_follow")); w.manualFollowOwner = m.get("manual_follow_owner") instanceof String fo ? fo : "";
             if (m.get("order_x") instanceof Number ox) w.orderX = ox.doubleValue();
