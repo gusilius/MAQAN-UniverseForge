@@ -117,8 +117,14 @@ public class RtsTest {
         c = CommandCard.menu(CommandCard.ROOT, sel, s);
         ok(!c.byId("unassign").enabled && c.byId("unassign").tooltip.stream().anyMatch(x -> x.startsWith("!")), "свободного нельзя снять: красная причина");
         c = CommandCard.menu(CommandCard.PROF, sel, s);
-        ok(c.all().size() == d.professions.size() + 1 && c.byId("back").slot == 11, "подменю профессий + назад");
-        ok(!c.byId("prof:" + idleW.profession).enabled && c.byId("prof:smith").enabled, "своя профессия недоступна, чужая доступна");
+        ok(c.all().size() == 12 && c.byId("prof:next") != null && c.byId("back").slot == 11,
+                "профессии разбиты на страницы и не выходят за сетку 4x3");
+        ok(!c.byId("prof:" + idleW.profession).enabled && c.byId("prof:smith").enabled,
+                "своя профессия недоступна, чужая доступна");
+        CommandCard.Card professionPage2 = CommandCard.menu("prof:1", sel, s);
+        ok(professionPage2.byId("prof:prev") != null && professionPage2.byId("back").slot == 11
+                        && professionPage2.all().size() <= 12,
+                "в подменю профессий есть переходы вперёд и назад");
         c = CommandCard.menu(CommandCard.BUILD, sel, s);
         List<String> cats = new ArrayList<>();
         for (Command k : c.all()) cats.add(k.id);
@@ -127,9 +133,15 @@ public class RtsTest {
                 && CommandCard.category(d.buildings.get("sawmill")).equals("process") && CommandCard.category(d.buildings.get("granary")).equals("storage")
                 && CommandCard.category(d.buildings.get("barracks")).equals("defense"), "категории выводятся из содержимого");
         c = CommandCard.menu("build:process", sel, s);
-        Command saw = c.byId("place:sawmill"), smith = c.byId("place:smithy");
+        Command saw = c.byId("place:sawmill");
+        Command smith = null;
+        for (int page = 0; page < 12 && smith == null; page++) {
+            String menu = page == 0 ? "build:process" : "build:process:" + page;
+            smith = CommandCard.menu(menu, sel, s).byId("place:smithy");
+        }
         ok(saw != null && saw.enabled && saw.kind == Command.Kind.PLACE && saw.arg.equals("sawmill"), "лесопилка доступна (лагерь стоит)");
-        ok(smith != null && !smith.enabled && smith.tooltip.stream().anyMatch(x -> x.startsWith("!") && x.contains("Рудник")), "кузница недоступна: нужен рудник");
+        ok(smith != null && !smith.enabled && smith.tooltip.stream().anyMatch(x -> x.startsWith("!") && x.contains("Рудник")),
+                "кузница на одной из страниц недоступна без рудника");
         ok(saw.tooltip.stream().anyMatch(x -> x.startsWith("Цена")) && saw.tooltip.stream().anyMatch(x -> x.startsWith("Берёт")), "в подсказке цена и сырьё");
         Settlement poor = new Settlement("p", "Бедные", d);
         ok(CommandCard.buildingTip(poor, d.buildings.get("house")).stream().anyMatch(x -> x.startsWith("!Не хватает")), "нехватка денег - красная строка");
