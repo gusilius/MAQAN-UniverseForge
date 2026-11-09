@@ -268,6 +268,8 @@ public class WFWorker extends PathfinderMob {
                             case "clear" -> "расчищает участок";
                             case "level" -> "выравнивает участок";
                             case "harvest" -> "собирает урожай";
+                            case "honey" -> "собирает мёд";
+                            case "herbs" -> "собирает лекарственные растения";
                             default -> "работает на участке";
                         };
                         if (++swing >= 8) { swing = 0; w.swing(InteractionHand.MAIN_HAND); }
@@ -375,6 +377,10 @@ public class WFWorker extends PathfinderMob {
                         || state.is(Blocks.VINE);
                 case "level" -> true;
                 case "harvest" -> isMatureHarvest(state);
+                case "honey" -> state.getBlock() instanceof net.minecraft.world.level.block.BeehiveBlock
+                        && state.getValue(net.minecraft.world.level.block.BeehiveBlock.HONEY_LEVEL) >= 5;
+                case "herbs" -> state.is(BlockTags.FLOWERS) || state.is(Blocks.BROWN_MUSHROOM)
+                        || state.is(Blocks.RED_MUSHROOM) || state.is(Blocks.CRIMSON_FUNGUS) || state.is(Blocks.WARPED_FUNGUS);
                 default -> false;
             };
         }
@@ -388,6 +394,22 @@ public class WFWorker extends PathfinderMob {
                 return level.destroyBlock(pos, false, worker);
             }
             if ("wood".equals(order.mode)) return fellWholeTree(worker, colony, level, pos);
+            if ("honey".equals(order.mode)) {
+                if (!(state.getBlock() instanceof net.minecraft.world.level.block.BeehiveBlock)
+                        || state.getValue(net.minecraft.world.level.block.BeehiveBlock.HONEY_LEVEL) < 5) return false;
+                if (colony.s.amount("honey") + 1 > colony.s.capacity("honey")) return false;
+                if (!level.setBlock(pos, state.setValue(net.minecraft.world.level.block.BeehiveBlock.HONEY_LEVEL, 0), 3)) return false;
+                colony.s.receiveResource("honey", 1);
+                return true;
+            }
+            if ("herbs".equals(order.mode)) {
+                if (!(state.is(BlockTags.FLOWERS) || state.is(Blocks.BROWN_MUSHROOM) || state.is(Blocks.RED_MUSHROOM)
+                        || state.is(Blocks.CRIMSON_FUNGUS) || state.is(Blocks.WARPED_FUNGUS))) return false;
+                if (colony.s.amount("medicine") + 1 > colony.s.capacity("medicine")) return false;
+                if (!level.destroyBlock(pos, false, worker)) return false;
+                colony.s.receiveResource("medicine", 1);
+                return true;
+            }
             if ("harvest".equals(order.mode)) {
                 if (!isMatureHarvest(state)) return false;
                 if (colony.s.amount("food") + 1 > colony.s.capacity("food")) {
