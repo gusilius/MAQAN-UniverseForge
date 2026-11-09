@@ -102,6 +102,23 @@ def build_world() -> dict[str, bytes]:
             "area_blocks": (WIDTH // REALMS) * HEIGHT, "props": {}
         })
 
+    # Connect baronies inside each realm and across realm borders. Army/path tests
+    # rely on the same adjacency graph as the political map, not on fake proximity.
+    by_id = {item["id"]: item for item in titles if item["tier"] == 0}
+    for realm_index in range(REALMS):
+        for row in range(BARONIES_PER_REALM):
+            barony_id = realm_index * BARONIES_PER_REALM + row + 1
+            neighbors = []
+            if row > 0:
+                neighbors.append(barony_id - 1)
+            if row + 1 < BARONIES_PER_REALM:
+                neighbors.append(barony_id + 1)
+            if realm_index > 0:
+                neighbors.append((realm_index - 1) * BARONIES_PER_REALM + row + 1)
+            if realm_index + 1 < REALMS:
+                neighbors.append((realm_index + 1) * BARONIES_PER_REALM + row + 1)
+            by_id[barony_id]["neighbors"] = neighbors
+
     # IDs are contiguous but the array is deliberately sorted by ID because
     # TitleData indexes titles by their numeric identifier.
     titles.sort(key=lambda item: item["id"])
