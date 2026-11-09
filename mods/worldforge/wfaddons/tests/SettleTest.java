@@ -154,6 +154,22 @@ public class SettleTest {
         double specialistWood = specialistCamp.localStock.getOrDefault("wood", 0.0);
         ok(specialistWood > generalistWood,
                 "профильный дровосек добывает больше общего рабочего за одинаковое время");
+        Settlement generalBuilder = fresh(d, 1);
+        generalBuilder.auto = false;
+        Building generalSite = generalBuilder.place("house", 0, 0);
+        generalBuilder.tick(1);
+        generalBuilder.assign(generalBuilder.workers.get(0).id, generalSite.uid);
+        generalBuilder.tick(10);
+        double generalBuildProgress = generalSite.progress;
+        Settlement specialistBuilder = fresh(d, 1);
+        specialistBuilder.auto = false;
+        Building specialistSite = specialistBuilder.place("house", 0, 0);
+        specialistBuilder.tick(1);
+        specialistBuilder.setProfession(specialistBuilder.workers.get(0).id, "builder");
+        specialistBuilder.assign(specialistBuilder.workers.get(0).id, specialistSite.uid);
+        specialistBuilder.tick(10);
+        ok(specialistSite.progress > generalBuildProgress,
+                "профильный строитель реально строит быстрее общего рабочего");
 
         Settlement bufferTest = fresh(d, 3);
         bufferTest.auto = false;
