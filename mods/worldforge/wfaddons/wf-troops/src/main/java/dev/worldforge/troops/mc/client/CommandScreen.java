@@ -172,7 +172,7 @@ public final class CommandScreen extends Screen {
         g.fill(x, y + 3, x + ZOOM_SLIDER_W, y + 6, 0xFF596273);
         g.fill(x, y + 3, knob, y + 6, 0xFF72C7FF);
         g.fill(knob - 4, y, knob + 5, y + 10, 0xFFFFFFFF);
-        String value = String.format(java.util.Locale.ROOT, "%.0f м", CommandMode.RIG.zoom);
+        String value = String.format(java.util.Locale.ROOT, "%.0f бл.", CommandMode.RIG.zoom);
         g.drawString(font, value, x + ZOOM_SLIDER_W + 12, y - 8, 0xFFE6E8EE, false);
     }
 
