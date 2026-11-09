@@ -57,7 +57,7 @@ public final class ReputationStore {
 
     public void addListener(Listener l) { listeners.add(Objects.requireNonNull(l)); }
 
-    /** Explicit propagation only. No settlement/polity/world leakage is implicit. */
+    /** Explicit propagation only. Positive and negative factors support allies and rivals; no scope leakage is implicit. */
     public void link(String child, String parent, double factor) {
         if (child == null || parent == null || child.equals(parent)) throw new IllegalArgumentException("invalid reputation link");
         if (!Double.isFinite(factor) || factor < -1 || factor > 1) throw new IllegalArgumentException("Коэффициент должен быть от -1 до 1");
