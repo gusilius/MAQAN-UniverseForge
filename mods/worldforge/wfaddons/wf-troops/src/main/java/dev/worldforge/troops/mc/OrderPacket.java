@@ -26,10 +26,29 @@ public record OrderPacket(int action, List<String> ids, int kind, double x, doub
         return new OrderPacket(a, ids, b.readVarInt(), b.readDouble(), b.readDouble(), b.readUtf(40), b.readBoolean(), b.readVarInt());
     }
 
+    public boolean valid() {
+        if(ids==null||ids.size()>200||target==null||target.length()>40)return false;
+        java.util.HashSet<String> unique=new java.util.HashSet<>();
+        for(String id:ids)if(id==null||id.isBlank()||id.length()>40||!unique.add(id))return false;
+        if(action<ORDER||action>WORK_HOLD)return false;
+        if(action==ORDER){
+            if(kind<0||kind>=dev.worldforge.troops.Squads.Kind.values().length)return false;
+            if(kind!=dev.worldforge.troops.Squads.Kind.ATTACK.ordinal()
+                    &&(!Double.isFinite(x)||!Double.isFinite(z)||Math.abs(x)>30_000_000||Math.abs(z)>30_000_000))return false;
+            if(kind==dev.worldforge.troops.Squads.Kind.ATTACK.ordinal()){
+                try{java.util.UUID.fromString(target);}catch(RuntimeException ex){return false;}
+            }
+        }
+        if(action==BUILD&&(!Double.isFinite(x)||!Double.isFinite(z)||Math.abs(x)>30_000_000||Math.abs(z)>30_000_000))return false;
+        if((action==WORK||action==WORK_STOP||action==WORK_HOLD||action==BUILD_LIST)
+                &&(!Double.isFinite(x)||!Double.isFinite(z)||Math.abs(x)>30_000_000||Math.abs(z)>30_000_000))return false;
+        return true;
+    }
+
     public static void handle(OrderPacket p, Supplier<NetworkEvent.Context> ctx) {
         NetworkEvent.Context c = ctx.get();
         ServerPlayer sp = c.getSender();
-        if (sp != null) c.enqueueWork(() -> TroopsMod.handleOrder(sp, p));
+        if (sp != null && p != null && p.valid()) c.enqueueWork(() -> TroopsMod.handleOrder(sp, p));
         c.setPacketHandled(true);
     }
 }
