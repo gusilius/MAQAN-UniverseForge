@@ -451,11 +451,11 @@ public class WFWorker extends PathfinderMob {
             }
             if (logs.isEmpty()) return false;
             String resource = "wood";
-            int accepted = (int) Math.min(logs.size(), Math.max(0,
-                    Math.floor(colony.s.capacity(resource) - colony.s.amount(resource))));
-            if (accepted <= 0) {
+            int freeCapacity = (int) Math.max(0,
+                    Math.floor(colony.s.capacity(resource) - colony.s.amount(resource)));
+            if (freeCapacity < logs.size()) {
                 Worker resident = colony.s.worker(worker.workerId);
-                if (resident != null) resident.status = "склад древесины заполнен";
+                if (resident != null) resident.status = "нужно место на складе для всего дерева (" + logs.size() + " древесины)";
                 return false;
             }
             int felled = 0;
@@ -464,7 +464,7 @@ public class WFWorker extends PathfinderMob {
                 if (level.destroyBlock(log, false, worker)) felled++;
             }
             if (felled == 0) return false;
-            colony.s.receiveResource(resource, Math.min(felled, accepted));
+            colony.s.receiveResource(resource, felled);
             // Remove only leaves belonging to this tree's crown, never neighbouring trunks.
             Set<BlockPos> leaves = new HashSet<>();
             for (BlockPos log : logs) {
