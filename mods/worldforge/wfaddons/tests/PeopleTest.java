@@ -237,6 +237,30 @@ public class PeopleTest {
                         .anyMatch(item->item.id().equals("minecraft:iron_sword")&&item.data().equals("{Damage:3}")),
                 "canonical personal inventories and item data survive CharacterRegistry save/load");
 
+        Character heir = journal.create("Наследник", "", "", "m", 20);
+        Character parent = journal.create("Умерший житель", "", "", "m", 0);
+        parent.props.put("population.location","settlement:oak");
+        CharacterInventory.add(parent,"minecraft:iron_ingot",12);
+        CharacterInventory.add(parent,"minecraft:iron_sword",1,"{Damage:7}");
+        journal.marry(parent.id,heir.id,30);
+        PopulationSimulation.death(journal,parent.id,"illness",31);
+        ok(!parent.alive&&CharacterInventory.count(parent,"minecraft:iron_ingot")==0
+                        &&CharacterInventory.count(heir,"minecraft:iron_ingot")==12
+                        &&CharacterInventory.items(heir).stream().anyMatch(item->item.id().equals("minecraft:iron_sword")
+                        &&item.data().equals("{Damage:7}"))
+                        &&heir.id.equals(parent.props.get("estate.recipient")),
+                "death from illness transfers the deceased's complete item estate to the surviving spouse");
+        Character solitary = journal.create("Одинокий житель", "", "", "m", 0);
+        solitary.props.put("population.location","settlement:oak");
+        CharacterInventory.add(solitary,"minecraft:bread",4);
+        PopulationSimulation.death(journal,solitary.id,"natural",32);
+        ok(!solitary.alive&&CharacterInventory.count(solitary,"minecraft:bread")==4
+                        &&"awaiting_kin_or_home_claim".equals(solitary.props.get("estate.status"))
+                        &&"settlement:oak".equals(solitary.props.get("estate.home")),
+                "death without heirs preserves all belongings as a recoverable estate at the recorded home");
+        Character laterKin = journal.create("Поздний наследник", "", "", "m", 40);
+        journal.addChild(laterKin,solitary,"Потомок", "m", 41);
+
         // диалог с персонажем
         DialogueBridge.register();
         Character chancellor = reg.holder("chancellor", Courts.realmPlace(d.realmList().get(3).id));
