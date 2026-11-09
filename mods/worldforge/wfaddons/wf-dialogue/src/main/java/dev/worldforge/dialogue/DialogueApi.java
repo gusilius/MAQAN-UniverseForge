@@ -67,17 +67,8 @@ public final class DialogueApi {
     private static void adjustRelationship(Ctx c,String target,int delta){
         if(target.isBlank())target=c.vars.getOrDefault("player_id","");
         if(target.isBlank())return;
-        Object raw=c.vars.get("__character_props");
-        if(!(raw instanceof Map<?,?> props))return;
-        Object values=props.get("social.relationships");
-        Map<String,Object> relationships=new LinkedHashMap<>();
-        if(values instanceof Map<?,?> map)for(Map.Entry<?,?> e:map.entrySet())
-            if(e.getKey() instanceof String k&&e.getValue() instanceof Number n)relationships.put(k,n.intValue());
-        int old=relationships.get(target) instanceof Number n?n.intValue():0;
-        relationships.put(target,Math.max(-100,Math.min(100,old+delta)));
-        @SuppressWarnings("unchecked") Map<String,Object> mutable=(Map<String,Object>)props;
-        mutable.put("social.relationships",relationships);
-        c.memory().record("relationship",target+"="+relationships.get(target));
+        int next=c.memory().adjustRelationship(target,delta);
+        c.memory().record("relationship",target+"="+next);
     }
     private static String str(Map<String,Object> a,String key){Object v=a.get(key);return v==null?"":String.valueOf(v);}
     private static int integer(Object v,int fallback){return v instanceof Number n?n.intValue():fallback;}
