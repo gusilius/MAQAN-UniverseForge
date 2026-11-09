@@ -2295,6 +2295,40 @@
       "effects": {
         "mining": 1
       }
+    },
+    "brewery": {
+      "name": "Пивоварня",
+      "category": "food",
+      "cost": {
+        "wood": 30,
+        "stone": 12
+      },
+      "work": 48,
+      "size": [
+        5,
+        5
+      ],
+      "blueprint": "wf_settle:brewery",
+      "requires": [
+        "farm_district"
+      ],
+      "jobs": {
+        "brewer": 2
+      },
+      "description": "Пивоварня превращает зерно в эль. Пивовары ведут дробление, брожение, выдержку и хранение напитка.",
+      "recipe": {
+        "in": {
+          "grain": 2
+        },
+        "out": {
+          "ale": 2
+        },
+        "cycle": 24
+      },
+      "effects": {
+        "food_processing": 1,
+        "social_hub": 1
+      }
     }
   }
 }
