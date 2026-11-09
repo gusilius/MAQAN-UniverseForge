@@ -1192,7 +1192,7 @@ public final class Settlement {
         for (Worker w : workers) {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", w.id); m.put("name", w.name); m.put("profession", w.profession); m.put("person", w.person); m.put("building", w.building); m.put("status", w.status); m.put("x", w.x); m.put("z", w.z);
-            m.put("manual_order", w.manualOrder); m.put("order_x", w.orderX); m.put("order_z", w.orderZ);
+            m.put("manual_order", w.manualOrder); m.put("manual_follow", w.manualFollow); m.put("order_x", w.orderX); m.put("order_z", w.orderZ);
             List<Object> queuedOrders=new ArrayList<>();
             for(Worker.ManualOrder order:w.orderQueue)queuedOrders.add(Map.of("x",order.x(),"z",order.z()));
             m.put("order_queue",queuedOrders);
@@ -1263,7 +1263,7 @@ public final class Settlement {
             w.profession = (String) m.get("profession"); w.person = (String) m.get("person"); w.building = ((Number) m.get("building")).intValue(); w.status = (String) m.get("status");
             if (m.get("x") instanceof Number nx) w.x = nx.doubleValue();
             if (m.get("z") instanceof Number nz) w.z = nz.doubleValue();
-            w.manualOrder = Boolean.TRUE.equals(m.get("manual_order"));
+            w.manualOrder = Boolean.TRUE.equals(m.get("manual_order")); w.manualFollow = Boolean.TRUE.equals(m.get("manual_follow"));
             if (m.get("order_x") instanceof Number ox) w.orderX = ox.doubleValue();
             if (m.get("order_z") instanceof Number oz) w.orderZ = oz.doubleValue();
             if(m.get("order_queue") instanceof List<?> queued){
