@@ -42,9 +42,11 @@ public final class ArmyHierarchyTest {
                         && restored.corps(reserve.id).squadIds.contains(second.id)
                         && restored.corpsForSquad(second.id).id.equals(reserve.id),
                 "army/corps hierarchy and custom squad membership survive save/reload");
-        check(!restored.assignSquad(reserve.id, first.id, new Squads())
+        Squads foreignSquads = new Squads();
+        Squads.Squad foreignSquad = foreignSquads.create("another-player", "Чужой отряд", List.of("foreign-unit"));
+        check(!restored.assignSquad(reserve.id, foreignSquad.id, foreignSquads)
                         && !restored.appointArmyCommander(999, "c1"),
-                "invalid army ownership and missing army references are rejected");
+                "foreign player squads and missing army references are rejected");
         squads.remove("unit-3");
         restored.pruneSquads(squads);
         check(restored.corps(reserve.id).squadIds.isEmpty(),
