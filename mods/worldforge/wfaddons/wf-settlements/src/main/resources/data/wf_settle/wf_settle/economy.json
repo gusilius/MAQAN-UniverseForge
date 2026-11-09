@@ -49,8 +49,9 @@
       "jobs": {
         "merchant": 2
       },
-      "trade": 4,
-      "upkeep": 1
+      "trade": 24,
+      "upkeep": 1,
+      "description": "Торговый рынок: обмен ресурсами между поселением, жителями и торговцами."
     },
     "tavern": {
       "name": "Трактир",
@@ -65,13 +66,18 @@
         5
       ],
       "jobs": {
-        "innkeeper": 1
+        "innkeeper": 2
       },
       "approval": 6,
       "upkeep": 2,
       "requires": [
         "market"
-      ]
+      ],
+      "description": "Таверна для отдыха, питания, встреч и распространения слухов.",
+      "effects": {
+        "social_hub": 1,
+        "approval": 2
+      }
     },
     "chapel": {
       "name": "Часовня",
@@ -90,7 +96,12 @@
       },
       "approval": 5,
       "upkeep": 1.5,
-      "limit": 2
+      "limit": 2,
+      "description": "Местное религиозное здание для молитв, обрядов и общинных собраний.",
+      "effects": {
+        "religion": 1,
+        "stability": 1
+      }
     },
     "brewery": {
       "name": "Пивоварня",
@@ -109,14 +120,18 @@
       },
       "recipe": {
         "in": {
-          "food": 2
+          "grain": 1
         },
         "out": {
           "ale": 1
         },
-        "cycle": 12
+        "cycle": 20
       },
-      "upkeep": 0.5
+      "upkeep": 0.5,
+      "description": "Пивоварня, перерабатывающая зерно в эль и другие напитки.",
+      "effects": {
+        "manufacturing": 1
+      }
     },
     "watchtower": {
       "name": "Сторожевая башня",
@@ -135,7 +150,11 @@
       },
       "safety": 4,
       "upkeep": 0.8,
-      "limit": 3
+      "limit": 3,
+      "description": "Наблюдательная башня, усиливающая обзор и оборону поселения.",
+      "effects": {
+        "fortification": 1
+      }
     }
   }
 }
