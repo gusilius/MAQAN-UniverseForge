@@ -910,7 +910,9 @@ public final class Settlement {
                     taskGraph.consume(ResidentTaskGraph.Stage.PROCESSED, b.uid, workerForRole(b.uid, b.def.jobs.keySet()), input.getKey(), input.getValue(), time);
                 for (Map.Entry<String, Integer> o : b.def.out.entrySet()) {
                     b.localStock.merge(o.getKey(), (double) o.getValue(), Double::sum);
-                    taskGraph.extract(b.uid, workerForRole(b.uid, b.def.jobs.keySet()), o.getKey(), o.getValue(), time);
+                    int producerId = workerForRole(b.uid, b.def.jobs.keySet());
+                    if (b.def.in.isEmpty()) taskGraph.extract(b.uid, producerId, o.getKey(), o.getValue(), time);
+                    else taskGraph.produce(b.uid, producerId, o.getKey(), o.getValue(), time);
                 }
                 b.cycleTime -= b.def.cycle;
                 b.status = "работает";
