@@ -422,12 +422,13 @@ public class WFWorker extends PathfinderMob {
                 for (int y = fromY; y <= toY; y++) {
                     BlockPos pos = new BlockPos(x, y, z);
                     if (!isWorkTarget(worker.level().getBlockState(pos), order.mode)) continue;
-                    if (workApproachTarget(worker, pos) == null) continue;
                     double d = worker.distanceToSqr(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
                     if (d < bestDistance) { bestDistance = d; best = pos; }
                 }
             }
-            return "wood".equals(order.mode) && best != null ? treeBaseTarget(worker, best) : best;
+            if (best == null) return null;
+            BlockPos selected = "wood".equals(order.mode) ? treeBaseTarget(worker, best) : best;
+            return workApproachTarget(worker, selected) == null ? null : selected;
         }
 
         /** Resolve a clicked upper log to the lowest reachable trunk block so workers do not try to climb the canopy. */
