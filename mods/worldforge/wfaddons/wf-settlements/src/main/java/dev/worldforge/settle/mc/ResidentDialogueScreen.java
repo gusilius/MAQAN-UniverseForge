@@ -8,7 +8,7 @@ import net.minecraft.world.entity.player.Inventory;
 
 /** Dedicated, keyboard/mouse accessible resident conversation workspace. */
 public final class ResidentDialogueScreen extends AbstractContainerScreen<ResidentDialogueMenu> {
-    private static final int PANEL_W = 430, PANEL_H = 276;
+    private static final int PANEL_W = 430, PANEL_H = 330;
 
     public ResidentDialogueScreen(ResidentDialogueMenu menu, Inventory inventory, Component title) {
         super(menu, inventory, title);
@@ -21,7 +21,7 @@ public final class ResidentDialogueScreen extends AbstractContainerScreen<Reside
     @Override protected void init() {
         super.init();
         int left = leftPos + 18;
-        int top = topPos + 166;
+        int top = topPos + 248;
         int w = 94, h = 22, gap = 8;
         addRenderableWidget(action("Поговорить", "talk", left, top, w, h));
         addRenderableWidget(action("Следовать", "follow", left + w + gap, top, w, h));
@@ -49,7 +49,7 @@ public final class ResidentDialogueScreen extends AbstractContainerScreen<Reside
         graphics.fill(x + 1, y + 1, x + imageWidth - 1, y + 3, 0xFF69C7D5);
         graphics.fill(x + 12, y + 12, x + 146, y + 150, 0xFF151F2B);
         graphics.fill(x + 156, y + 12, x + imageWidth - 12, y + 150, 0xFF111A25);
-        graphics.fill(x + 12, y + 158, x + imageWidth - 12, y + 232, 0xFF101925);
+        graphics.fill(x + 12, y + 158, x + imageWidth - 12, y + 318, 0xFF101925);
         graphics.fill(x + 12, y + 240, x + imageWidth - 12, y + imageHeight - 12, 0xFF172431);
         graphics.fill(x + 12, y + 12, x + 146, y + 13, 0xFF355568);
         graphics.fill(x + 156, y + 12, x + imageWidth - 12, y + 13, 0xFF355568);
@@ -64,8 +64,8 @@ public final class ResidentDialogueScreen extends AbstractContainerScreen<Reside
         graphics.drawString(font, Component.literal(menu.relationship), 160, 124, 0xFFD6E2E8, false);
         graphics.drawString(font, Component.literal("СЕМЬЯ И СВЯЗИ"), 24, 166, 0xFF69C7D5, false);
         graphics.drawString(font, Component.literal(menu.family), 24, 182, 0xFFD6E2E8, false);
-        graphics.drawString(font, Component.literal("ПОРУЧЕНИЕ"), 24, 210, 0xFF69C7D5, false);
-        graphics.drawString(font, Component.literal(menu.quest), 24, 226, 0xFFD6E2E8, false);
+        graphics.drawString(font, Component.literal("ПОРУЧЕНИЕ"), 24, 206, 0xFF69C7D5, false);
+        graphics.drawString(font, Component.literal(menu.quest), 24, 222, 0xFFD6E2E8, false);
         graphics.drawString(font, Component.literal("МАQAN · ЖИВОЙ МИР"), 24, 24, 0xFF8DA7B6, false);
     }
 
