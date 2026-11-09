@@ -57,6 +57,19 @@ public final class ResidentLifeEventsTest {
         check(savedMother != null && !savedMother.children.isEmpty()
                         && savedMother.spouse.equals(father.id),
                 "marriage and children survive CharacterRegistry world save");
+
+        Character datingA = registry.create("Лея", "", "north", "f", 1982);
+        Character datingB = registry.create("Тарен", "", "north", "m", 1981);
+        ResidentSocial.socialize(datingA, datingB, 60);
+        for (int year = 2000; year < 2004; year++) ResidentLifeEvents.yearly(registry, year);
+        check(datingB.id.equals(datingA.props.get("family.dating"))
+                        && datingA.id.equals(datingB.props.get("family.dating")),
+                "mutual affinity can start a reciprocal dating relationship");
+        ResidentSocial.adjust(datingA, datingB.id, -100);
+        ResidentSocial.adjust(datingB, datingA.id, -100);
+        ResidentLifeEvents.yearly(registry, 2004);
+        check(!datingA.props.containsKey("family.dating") && !datingB.props.containsKey("family.dating"),
+                "severe relationship damage ends the dating relationship with a separation event");
         if (failures > 0) throw new AssertionError(failures + " resident life event tests failed");
     }
 }
