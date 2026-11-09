@@ -10,10 +10,12 @@ public final class Worker {
     /** Current assigned job, separate from permanent profession/specialization. */
     public String assignedProfession = "";
     /** General workers are versatile but intentionally do not gain profession skill ranks. */
-    public boolean generalist() { return "laborer".equals(profession) || "general_worker".equals(profession); }
-    public String workRole() { return assignedProfession == null || assignedProfession.isBlank() ? profession : assignedProfession; }
+    public String permanentProfession() { return profession == null || profession.isBlank() ? "laborer" : profession; }
+    public boolean generalist() { return "laborer".equals(permanentProfession()) || "general_worker".equals(permanentProfession()); }
+    public String workRole() { return assignedProfession == null || assignedProfession.isBlank() ? permanentProfession() : assignedProfession; }
     public boolean canPerform(String role) {
-        return generalist() || profession.equals(role) || ("porter".equals(profession) && "hauler".equals(role));
+        String permanent = permanentProfession();
+        return role != null && (generalist() || permanent.equals(role) || ("porter".equals(permanent) && "hauler".equals(role)));
     }
     public double productivity(String role) {
         if (!canPerform(role)) return 0;
@@ -22,7 +24,7 @@ public final class Worker {
             case "lumberjack" -> 1.5;
             case "builder" -> 1.5;
             case "miner" -> 1.35;
-            case "hauler" -> "porter".equals(profession) ? 1.25 : 1.0;
+            case "hauler" -> "porter".equals(permanentProfession()) ? 1.25 : 1.0;
             case "farmer" -> 1.25;
             default -> 1.2;
         };
