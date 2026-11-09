@@ -33,7 +33,7 @@ public final class CommandScreen extends Screen {
     private static final Map<String, String> RES = Map.of("wood", "дерево", "stone", "камень", "food", "еда", "iron", "железо", "gold", "золото", "planks", "доски", "bread", "хлеб", "tools", "инструменты");
     private static final int BTN_W = 70, BTN_H = 16, PANEL_W = 184, ROW = 12;
 
-    private boolean dragging, midDrag;
+    private boolean dragging, midDrag, zoomDragging;
     private double dragX, dragY, mx, my;
     // стройка
     private static volatile Settlement incomingSettlement;
@@ -152,6 +152,30 @@ public final class CommandScreen extends Screen {
         CommandMode.markerUntil = System.currentTimeMillis() + 1800;
     }
 
+    private int zoomSliderX() { return width / 2 - 100; }
+    private int zoomSliderY() { return height - 25; }
+    private static final int ZOOM_SLIDER_W = 200;
+    private void setZoomFromMouse(double x) {
+        double t = Math.max(0, Math.min(1, (x - zoomSliderX()) / ZOOM_SLIDER_W));
+        CommandMode.RIG.zoom = CameraRig.MIN_ZOOM + t * (CameraRig.MAX_ZOOM - CameraRig.MIN_ZOOM);
+    }
+    private boolean onZoomSlider(double x, double y) {
+        return x >= zoomSliderX() - 8 && x <= zoomSliderX() + ZOOM_SLIDER_W + 8
+                && y >= zoomSliderY() - 8 && y <= zoomSliderY() + 8;
+    }
+    private void drawZoomSlider(GuiGraphics g) {
+        int x = zoomSliderX(), y = zoomSliderY();
+        double t = (CommandMode.RIG.zoom - CameraRig.MIN_ZOOM) / (CameraRig.MAX_ZOOM - CameraRig.MIN_ZOOM);
+        int knob = x + (int) Math.round(t * ZOOM_SLIDER_W);
+        g.fill(x - 8, y - 10, x + ZOOM_SLIDER_W + 8, y + 11, 0xB910121A);
+        g.drawString(font, "КАМЕРА", x - 7, y - 8, 0xFF9CCCFF, false);
+        g.fill(x, y + 3, x + ZOOM_SLIDER_W, y + 6, 0xFF596273);
+        g.fill(x, y + 3, knob, y + 6, 0xFF72C7FF);
+        g.fill(knob - 4, y, knob + 5, y + 10, 0xFFFFFFFF);
+        String value = String.format(java.util.Locale.ROOT, "%.0f м", CommandMode.RIG.zoom);
+        g.drawString(font, value, x + ZOOM_SLIDER_W + 12, y - 8, 0xFFE6E8EE, false);
+    }
+
     // ---------- раскладка ----------
     private record Btn(String label, int x, int y, int w, boolean on, Runnable run) {
         boolean hit(double px, double py) { return px >= x && px < x + w && py >= y && py < y + BTN_H; }
@@ -184,6 +208,7 @@ public final class CommandScreen extends Screen {
 
     boolean overPanel(double px, double py) {
         if (py < 4 + BTN_H + 2 && px > width - 6 * (BTN_W + 4) - 4) return true;
+        if (onZoomSlider(px, py)) return true;
         return inBuildPanel(px, py) || inSelPanel(px, py);
     }
 
@@ -303,6 +328,7 @@ public final class CommandScreen extends Screen {
     public boolean mouseClicked(double x, double y, int button) {
         mx = x; my = y;
         boolean shift = hasShiftDown(), ctrl = hasControlDown();
+        if(button==0&&onZoomSlider(x,y)){zoomDragging=true;setZoomFromMouse(x);return true;}
         if(button==0&&inspectAt(x,y))return true;
         if (button == 0) {
             for (Btn b : buttons()) if (b.hit(x, y)) { b.run().run(); return true; }
@@ -366,6 +392,7 @@ public final class CommandScreen extends Screen {
     public boolean mouseReleased(double x, double y, int button) {
         mx = x; my = y;
         if (button == 2) midDrag = false;
+        if (button == 0) zoomDragging = false;
         if (button == 0 && dragging) {
             dragging = false;
             if (workAreaDrag) {
@@ -400,6 +427,7 @@ public final class CommandScreen extends Screen {
     public boolean mouseDragged(double x, double y, int button, double dx, double dy) {
         mx = x; my = y;
         if (button == 2) CommandMode.RIG.rotate(dx * 0.35, dy * 0.25);
+        if (button == 0 && zoomDragging) setZoomFromMouse(x);
         return true;
     }
 
@@ -616,6 +644,7 @@ public final class CommandScreen extends Screen {
         drawSelection(g, h);
         if (settlementOpen) drawSettlementPanel(g);
         drawUnitInspector(g);
+        drawZoomSlider(g);
         if (buildOpen) drawBuildPanel(g, mxi, myi);
         String hint = workMode >= 0 ? "Участок: " + WORK_LABELS[workMode] + " · ЛКМ/рамка — назначить выделенным рабочим · O — видимость зоны · Y — сменить задачу" : picked != null ? "ЛКМ - поставить здание (Shift - ещё одно) · ПКМ/Esc - отмена · колесо - высота камеры"
                 : "ЛКМ выбор/рамка · ПКМ приказ · WASD и края экрана - камера · колесо - высота · СКМ - вращать · Q/E поворот · Tab вид · Space к выбранным · V командир / Ctrl+V снять · P патруль · B стройка · R выход";
