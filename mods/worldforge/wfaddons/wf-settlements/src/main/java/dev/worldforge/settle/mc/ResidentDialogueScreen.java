@@ -22,7 +22,7 @@ public final class ResidentDialogueScreen extends AbstractContainerScreen<Reside
         super.init();
         int left = leftPos + 18;
         int top = topPos + 166;
-        int w = 126, h = 22, gap = 8;
+        int w = 94, h = 22, gap = 8;
         addRenderableWidget(action("Поговорить", "talk", left, top, w, h));
         addRenderableWidget(action("Следовать", "follow", left + w + gap, top, w, h));
         addRenderableWidget(action("Остановиться", "stop", left + (w + gap) * 2, top, w, h));
@@ -31,7 +31,7 @@ public final class ResidentDialogueScreen extends AbstractContainerScreen<Reside
         addRenderableWidget(action("Поручение", "quest", left + w + gap, top + 30, w, h));
         String questAction = menu.quest.startsWith("ACCEPTED") ? "deliver"
                 : menu.quest.startsWith("OFFERED") ? "accept" : "status";
-        String questLabel = "ACCEPTED".equals(questAction) ? "Передать" : "OFFERED".equals(questAction) ? "Принять" : "Состояние";
+        String questLabel = menu.quest.startsWith("ACCEPTED") ? "Передать" : menu.quest.startsWith("OFFERED") ? "Принять" : "Состояние";
         addRenderableWidget(action(questLabel, questAction, left + (w + gap) * 2, top + 30, w, h));
         addRenderableWidget(action("Отношения и семья", "status", left + (w + gap) * 3, top + 30, w, h));
     }
