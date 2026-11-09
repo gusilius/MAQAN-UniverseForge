@@ -129,6 +129,24 @@ public final class SettlementMapTest {
                         && e.kind() == TreasuryLedger.Kind.TRADE).count() == 4,
                 "caravan goods and silver produce paired auditable ledger entries");
 
+        Settlement overworldCity = new Settlement("shared_name_test", "Overworld city", defs);
+        Settlement netherCity = new Settlement("shared_name_test", "Nether city", defs);
+        overworldCity.setLedgerScope("minecraft:overworld");
+        netherCity.setLedgerScope("minecraft:the_nether");
+        overworldCity.add(Defs.SILVER, 100);
+        netherCity.add(Defs.SILVER, 10);
+        ok(overworldCity.amount(Defs.SILVER) == 100 && netherCity.amount(Defs.SILVER) == 10
+                        && !overworldCity.ledgerAccountId(Defs.SILVER).equals(netherCity.ledgerAccountId(Defs.SILVER)),
+                "dimension-scoped settlement accounts isolate identical IDs across worlds");
+
+        Settlement legacyCity = new Settlement("legacy_scope_test", "Legacy city", defs);
+        legacyCity.add(Defs.SILVER, 25);
+        legacyCity.add("wood", 12);
+        Settlement migratedCity = Settlement.fromJson(legacyCity.toJson(), defs, "minecraft:overworld");
+        ok(migratedCity.amount(Defs.SILVER) == 25 && migratedCity.amount("wood") == 12
+                        && TreasuryService.current().balance("settlement:legacy_scope_test") == 0,
+                "legacy unscoped money and commodity accounts migrate once into dimension-scoped accounts");
+
         SettlementMap restored = SettlementMap.fromJson(map.toJson());
         ok(restored.cells().size() == map.cells().size() && restored.roads.size() == 1
                 && restored.parcels.size() == 1 && restored.plans.containsKey(house.uid),
