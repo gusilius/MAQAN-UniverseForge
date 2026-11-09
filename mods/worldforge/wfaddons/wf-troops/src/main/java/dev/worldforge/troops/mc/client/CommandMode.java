@@ -56,6 +56,8 @@ public final class CommandMode {
     static final KeyMapping TOGGLE = new KeyMapping("key.wf_troops.command", GLFW.GLFW_KEY_R, "key.categories.wf_troops");
     /** Direct command layer while remaining in first-person; LMB selects owned people, RMB issues orders. */
     static final KeyMapping FIRST_PERSON_COMMAND = new KeyMapping("key.wf_troops.first_person_command", GLFW.GLFW_KEY_G, "key.categories.wf_troops");
+    /** Hold Alt to open the contextual radial order wheel while in first-person command mode. */
+    static final KeyMapping RADIAL_COMMAND = new KeyMapping("key.wf_troops.radial_command", GLFW.GLFW_KEY_LEFT_ALT, "key.categories.wf_troops");
     static boolean firstPersonCommand;
     static boolean active;
     static final UnitSelection SEL = new UnitSelection();
@@ -75,6 +77,7 @@ public final class CommandMode {
     public static void keys(RegisterKeyMappingsEvent e) {
         e.register(TOGGLE);
         e.register(FIRST_PERSON_COMMAND);
+        e.register(RADIAL_COMMAND);
         MinecraftForge.EVENT_BUS.register(new Runtime());
     }
 
@@ -325,6 +328,16 @@ public final class CommandMode {
             if (e.phase != TickEvent.Phase.END) return;
             Minecraft mc = Minecraft.getInstance();
             if (mc.player == null || mc.level == null) { active = false; firstPersonCommand = false; camEntity = null; return; }
+            boolean radialHeld = down(mc.getWindow().getWindow(), GLFW.GLFW_KEY_LEFT_ALT);
+            if (mc.screen instanceof RadialCommandScreen radial) {
+                if (!radialHeld) {
+                    radial.commit();
+                    mc.setScreen(null);
+                }
+            } else if (firstPersonCommand && !active && mc.screen == null
+                    && radialHeld && !SEL.selected().isEmpty()) {
+                mc.setScreen(new RadialCommandScreen());
+            }
             while (FIRST_PERSON_COMMAND.consumeClick()) {
                 if (!active && mc.screen == null) {
                     firstPersonCommand = !firstPersonCommand;
