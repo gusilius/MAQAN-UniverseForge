@@ -162,6 +162,7 @@ public class WFWorker extends PathfinderMob {
         private int repath, swing, idleTimer, workScan;
         private BlockPos cachedWorkTarget;
         private BlockPos idle;
+        private final Set<BlockPos> temporarySteps = new HashSet<>();
 
         WorkGoal(WFWorker w) {
             this.w = w;
@@ -179,6 +180,7 @@ public class WFWorker extends PathfinderMob {
             Colony c = w.colony();
             Worker wk = w.worker();
             if (c == null || wk == null) return;
+            cleanupTemporarySteps();
             Building b = wk.building == 0 ? null : c.s.building(wk.building);
             BlockPos target;
             boolean working = false;
@@ -197,8 +199,14 @@ public class WFWorker extends PathfinderMob {
             if (area != null) {
                 if (resourceTarget != null) {
                     BlockPos approach = workApproachTarget(w, resourceTarget);
-                    target = approach == null ? resourceTarget : approach;
-                    working = true;
+                    if (approach == null) approach = placeTemporaryStep(w, resourceTarget);
+                    if (approach == null) {
+                        target = w.blockPosition();
+                        wk.status = "ищет безопасный доступ к рабочему блоку";
+                    } else {
+                        target = approach;
+                        working = true;
+                    }
                 } else {
                     BlockPos waypoint = workWaypoint(w, area);
                     if (waypoint == null) {
@@ -382,6 +390,57 @@ public class WFWorker extends PathfinderMob {
                     .orElse(null);
         }
 
+        /** Check whether one temporary, removable step can safely bridge a short vertical reach gap. */
+        private static boolean canPlaceTemporaryStep(WFWorker worker, BlockPos resource) {
+            int rise = resource.getY() - worker.getBlockY();
+            if (rise < 1 || rise > 4) return false;
+            for (net.minecraft.core.Direction direction : net.minecraft.core.Direction.Plane.HORIZONTAL) {
+                BlockPos step = worker.blockPosition().relative(direction);
+                if (!worker.level().hasChunkAt(step) || !worker.level().hasChunkAt(step.below())) continue;
+                BlockState at = worker.level().getBlockState(step);
+                BlockState floor = worker.level().getBlockState(step.below());
+                if ((at.isAir() || at.canBeReplaced()) && at.getFluidState().isEmpty()
+                        && floor.isSolid() && worker.level().getBlockState(step.above()).isAir()) return true;
+            }
+            return false;
+        }
+
+        private BlockPos placeTemporaryStep(WFWorker worker, BlockPos resource) {
+            if (!canPlaceTemporaryStep(worker, resource) || !(worker.level() instanceof net.minecraft.server.level.ServerLevel level)) return null;
+            for (net.minecraft.core.Direction direction : net.minecraft.core.Direction.Plane.HORIZONTAL) {
+                BlockPos step = worker.blockPosition().relative(direction);
+                if (!level.hasChunkAt(step) || !level.hasChunkAt(step.below())) continue;
+                BlockState at = level.getBlockState(step);
+                if (!(at.isAir() || at.canBeReplaced()) || !at.getFluidState().isEmpty()
+                        || !level.getBlockState(step.below()).isSolid() || !level.getBlockState(step.above()).isAir()) continue;
+                if (!level.setBlock(step, Blocks.DIRT.defaultBlockState(), 3)) continue;
+                temporarySteps.add(step.immutable());
+                BlockPos feet = step.above();
+                var path = worker.getNavigation().createPath(feet, 0);
+                if (path != null && path.canReach()) return feet;
+            }
+            return null;
+        }
+
+        /** Remove only our own temporary dirt steps, and never while any living entity is standing on them. */
+        private void cleanupTemporarySteps() {
+            if (!(w.level() instanceof net.minecraft.server.level.ServerLevel level)) return;
+            java.util.Iterator<BlockPos> iterator = temporarySteps.iterator();
+            while (iterator.hasNext()) {
+                BlockPos step = iterator.next();
+                if (!level.hasChunkAt(step) || !level.getBlockState(step).is(Blocks.DIRT)) {
+                    iterator.remove();
+                    continue;
+                }
+                if (w.distanceToSqr(step.getX() + 0.5, step.getY() + 1.0, step.getZ() + 0.5) <= 4.0) continue;
+                net.minecraft.world.phys.AABB standingSpace = new net.minecraft.world.phys.AABB(step.above());
+                if (!level.getEntitiesOfClass(net.minecraft.world.entity.LivingEntity.class, standingSpace,
+                        entity -> entity != w).isEmpty()) continue;
+                level.setBlock(step, Blocks.AIR.defaultBlockState(), 3);
+                iterator.remove();
+            }
+        }
+
         private static boolean standable(WFWorker worker, BlockPos feet) {
             if (!worker.level().hasChunkAt(feet) || !worker.level().hasChunkAt(feet.below())) return false;
             BlockState at = worker.level().getBlockState(feet);
@@ -430,7 +489,8 @@ public class WFWorker extends PathfinderMob {
             }
             if (best == null) return null;
             BlockPos selected = "wood".equals(order.mode) ? treeBaseTarget(worker, best) : best;
-            return workApproachTarget(worker, selected) == null ? null : selected;
+            if (workApproachTarget(worker, selected) != null) return selected;
+            return canPlaceTemporaryStep(worker, selected) ? selected : null;
         }
 
         /** Resolve a clicked upper log to the lowest reachable trunk block so workers do not try to climb the canopy. */
