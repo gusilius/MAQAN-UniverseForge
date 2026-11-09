@@ -892,7 +892,7 @@ public final class PlatformShellScreen extends Screen {
         double ny = relativeY / (double) Math.max(1, targetRect.height());
         WorkspaceDockTree.Node remaining = WorkspaceDockTree.remove(workspaceRoot, sourceId);
         if (remaining == null) remaining = new WorkspaceDockTree.Panel(targetId);
-        if (nx > 0.3 && nx < 0.7 && ny > 0.3 && ny < 0.7) {
+        if (!targetId.equals("content") && nx > 0.3 && nx < 0.7 && ny > 0.3 && ny < 0.7) {
             workspaceRoot = WorkspaceDockTree.group(remaining, targetId, sourceId);
         } else {
             double left = nx, right = 1.0 - nx, top = ny, bottom = 1.0 - ny;
