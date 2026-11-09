@@ -35,6 +35,9 @@ import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.lang.reflect.Method;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Командный режим (R): камера отвязывается от игрока и летает над миром как в стратегии (вид «Сверху» и «Тактика»; Tab - переключить),
@@ -77,14 +80,35 @@ public final class CommandMode {
 
     static String typeOf(LivingEntity e) { return e.getType().builtInRegistryHolder().key().location().toString() + (e instanceof TroopEntity t ? ":" + t.unitId() : ""); }
 
+    private static final Map<Class<?>,Map<String,Method>> OPTIONAL_WORKER_METHODS=new ConcurrentHashMap<>();
+    static boolean isWorkerEntity(LivingEntity e){
+        return e!=null&&"wf_settle:worker".equals(e.getType().builtInRegistryHolder().key().location().toString());
+    }
+    private static Object workerValue(LivingEntity e,String method){
+        if(!isWorkerEntity(e))return null;
+        try{
+            Map<String,Method> methods=OPTIONAL_WORKER_METHODS.computeIfAbsent(e.getClass(),k->new ConcurrentHashMap<>());
+            Method accessor=methods.get(method);
+            if(accessor==null){accessor=e.getClass().getMethod(method);methods.put(method,accessor);}
+            return accessor.invoke(e);
+        }catch(ReflectiveOperationException|RuntimeException ignored){return null;}
+    }
+    static String workerString(LivingEntity e,String method){
+        Object value=workerValue(e,method);return value instanceof String text?text:"";
+    }
+    static int workerInt(LivingEntity e,String method){
+        Object value=workerValue(e,method);return value instanceof Number number?number.intValue():0;
+    }
+
     /** Мои солдаты и рабочие поселений: то, что можно выделить. */
     static boolean selectable(Minecraft mc, LivingEntity e) {
         if (mc == null || mc.player == null || e == null) return false;
         String owner=mc.player.getUUID().toString();
         if (e instanceof TroopEntity t) return owner.equals(t.ownerId());
-        if(e instanceof dev.worldforge.settle.mc.WFWorker worker)
-            return owner.equals(worker.ownerId())
-                    ||(mc.hasSingleplayerServer()&&worker.ownerId().isBlank());
+        if(isWorkerEntity(e)){
+            String workerOwner=workerString(e,"ownerId");
+            return owner.equals(workerOwner)||(mc.hasSingleplayerServer()&&workerOwner.isBlank());
+        }
         return false;
     }
 
