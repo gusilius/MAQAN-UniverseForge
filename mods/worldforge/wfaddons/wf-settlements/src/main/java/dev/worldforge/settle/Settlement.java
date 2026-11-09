@@ -191,6 +191,37 @@ public final class Settlement {
         return put;
     }
 
+    /** Receive physical goods into canonical settlement stock and record the inbound flow. */
+    public double receiveResource(String resource, double quantity) {
+        double accepted = add(resource, quantity);
+        if (accepted > 0) flow.record(time, resource, accepted, true);
+        return accepted;
+    }
+
+    /** Double-entry transfer between settlement silver accounts; both stock mirrors update atomically. */
+    public boolean transferSilverTo(Settlement recipient, double quantity, String category, String reference) {
+        if (recipient == null || recipient == this || !Double.isFinite(quantity) || quantity < 0) return false;
+        treasuryAccount();
+        recipient.treasuryAccount();
+        boolean ok = WorldForgeMod.treasury().transfer(treasuryAccountId(), recipient.treasuryAccountId(), quantity,
+                TreasuryLedger.Kind.TRADE, category, reference, Math.max(0, (long) Math.floor(time / 60.0)),
+                "settlement-to-settlement trade");
+        syncTreasuryMirror();
+        recipient.syncTreasuryMirror();
+        if (ok && quantity > 0) {
+            flow.record(time, Defs.SILVER, quantity, false);
+            recipient.flow.record(recipient.time, Defs.SILVER, quantity, true);
+        }
+        return ok;
+    }
+
+    /** Book market fees and other external charges against settlement cash. */
+    public boolean chargeSilver(double quantity, String category, String reference) {
+        if (!debitSilver(quantity, TreasuryLedger.Kind.TRADE, category, reference)) return false;
+        if (quantity > 0) flow.record(time, Defs.SILVER, quantity, false);
+        return true;
+    }
+
     public boolean canPay(Map<String, Integer> cost) {
         for (Map.Entry<String, Integer> e : cost.entrySet()) if (amount(e.getKey()) + 1e-9 < e.getValue()) return false;
         return true;
