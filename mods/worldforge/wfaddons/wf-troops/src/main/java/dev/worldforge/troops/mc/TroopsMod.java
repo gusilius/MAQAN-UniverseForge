@@ -215,6 +215,7 @@ public class TroopsMod {
                 }
             }
             if (!oneStrategicArmy) {
+                HIERARCHY.unassignSquad(squad.id);
                 LOGGER.warn("wf-troops: squad {} contains units from multiple strategic armies; hierarchy link withheld", squad.id);
                 continue;
             }
