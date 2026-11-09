@@ -7,7 +7,7 @@ package dev.worldforge.troops;
  */
 public final class CameraRig {
     public enum View {
-        SKY("Сверху", 72, 34), TACTICS("Тактика", 42, 16);
+        FREE("Свободная", 18, 8), TACTICS("Изометрия", 42, 16), SKY("Стратегия", 72, 34);
         public final String title; public final double pitch, zoom;
         View(String t, double p, double z) { title = t; pitch = p; zoom = z; }
     }
@@ -23,7 +23,7 @@ public final class CameraRig {
 
     public void setView(View v) { view = v; pitch = v.pitch; zoom = v.zoom; }
 
-    public void cycle() { setView(view == View.SKY ? View.TACTICS : View.SKY); }
+    public void cycle() { setView(View.values()[(view.ordinal() + 1) % View.values().length]); }
 
     /** Сдвиг по экрану: forward/right в [-1,1]; скорость растёт с высотой, чтобы на большом приближении не ползти. */
     public void pan(double forward, double right, double dt, boolean fast) {
