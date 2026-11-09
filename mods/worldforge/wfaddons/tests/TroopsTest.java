@@ -6,7 +6,11 @@ import java.util.*;
 
 public class TroopsTest {
     static int fails = 0;
-    static void check(boolean ok, String msg) { if (!ok) { fails++; System.out.println("FAIL " + msg); } }
+    static int checks = 0;
+    static void check(boolean ok, String msg) {
+        checks++;
+        if (!ok) { fails++; System.out.println("FAIL #" + checks + " " + msg); }
+    }
 
     public static void main(String[] a) throws Exception {
         TroopDefs d = new TroopDefs();
