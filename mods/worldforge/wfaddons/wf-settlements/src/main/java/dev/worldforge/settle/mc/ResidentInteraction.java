@@ -5,6 +5,7 @@ import dev.worldforge.mod.Json;
 import dev.worldforge.people.Character;
 import dev.worldforge.settle.ResidentQuest;
 import dev.worldforge.settle.Worker;
+import dev.worldforge.people.mc.PeopleMod;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
@@ -12,13 +13,10 @@ import net.minecraft.network.chat.Style;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.Items;
 import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.event.entity.player.PlayerInteractEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.phys.AABB;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -141,7 +139,7 @@ public final class ResidentInteraction {
                 player.sendSystemMessage(Component.literal("§6" + person.name + " §7· " + data.profession
                         + " · " + data.status + " · поселение " + colony.s.name));
                 player.sendSystemMessage(Component.literal("§7Семья: " + family(person)
-                        + " · возраст: " + Math.max(0, dev.worldforge.people.PeopleMod.YEAR - person.birthYear) + " лет"));
+                        + " · возраст: " + Math.max(0, PeopleMod.YEAR - person.birthYear) + " лет"));
             }
             case "follow" -> {
                 if (!ruler) { deny(player); return 0; }
