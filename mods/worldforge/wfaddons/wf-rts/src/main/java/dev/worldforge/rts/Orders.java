@@ -190,8 +190,8 @@ public final class Orders {
     }
 
     /**
-     * Заполнить свободные места здания свободными рабочими: сперва подходящей профессии, потом «работники» (laborer) переучиваются
-     * командой profession и сразу назначаются. Возвращает приказы или объяснение.
+     * Fill vacancies without changing permanent professions: compatible specialists first,
+     * then versatile general workers at baseline productivity.
      */
     public static Result fillFromIdle(Settlement s, int uid) {
         Building b = s.building(uid);
@@ -203,19 +203,20 @@ public final class Orders {
         int n = 0;
         for (Map.Entry<String, Integer> f : free.entrySet()) {
             int need = f.getValue();
-            for (Iterator<Worker> it = idle.iterator(); it.hasNext() && need > 0; ) {
-                Worker w = it.next();
-                if (!w.profession.equals(f.getKey())) continue;
-                r.commands.add(assignCmd(w.id, uid)); it.remove(); need--; n++;
-            }
-            for (Iterator<Worker> it = idle.iterator(); it.hasNext() && need > 0; ) {
-                Worker w = it.next();
-                if (!w.profession.equals("laborer")) continue;
-                r.commands.add(professionCmd(w.id, f.getKey())); r.commands.add(assignCmd(w.id, uid)); it.remove(); need--; n++;
+            for (int pass = 0; pass < 2 && need > 0; pass++) {
+                for (Iterator<Worker> it = idle.iterator(); it.hasNext() && need > 0; ) {
+                    Worker worker = it.next();
+                    if (!worker.canPerform(f.getKey())) continue;
+                    if ((pass == 0) == worker.generalist()) continue;
+                    r.commands.add(assignCmd(worker.id, uid));
+                    it.remove();
+                    need--;
+                    n++;
+                }
             }
         }
         r.ok = n > 0;
-        r.message = r.ok ? "Отправлено рабочих: " + n : "Нет свободных рабочих нужной профессии";
+        r.message = r.ok ? "Отправлено рабочих: " + n : "Нет свободных совместимых рабочих";
         return r;
     }
 
