@@ -78,6 +78,32 @@ public final class TreasuryLedgerTest {
         ok(restored.account("merchant:caravan").creditLimit==50,
                 "credit terms survive save/load");
 
+        TreasuryLedger retry = new TreasuryLedger();
+        retry.open("realm:retry", "realm:retry", "silver", 100);
+        retry.open("army:retry", "army:retry", "silver", 0);
+        ok(retry.transferOnce("realm:retry", "army:retry", 25, TreasuryLedger.Kind.ARMY_UPKEEP,
+                        "payroll-funding", "payroll-fund:retry:1", 1440, "daily army funding")
+                        && retry.transferOnce("realm:retry", "army:retry", 25, TreasuryLedger.Kind.ARMY_UPKEEP,
+                        "payroll-funding", "payroll-fund:retry:1", 1440, "retry after interrupted save")
+                        && close(retry.balance("realm:retry"), 75) && close(retry.balance("army:retry"), 25),
+                "replaying a committed army funding reference cannot transfer funds twice");
+        int journalCount = retry.journal().size();
+        ok(retry.withdrawOnce("army:retry", 10, TreasuryLedger.Kind.WAGE, "soldier-payroll",
+                        "payroll:retry:1", 1440, "daily wages")
+                        && retry.withdrawOnce("army:retry", 10, TreasuryLedger.Kind.WAGE, "soldier-payroll",
+                        "payroll:retry:1", 1440, "retry after interrupted save")
+                        && close(retry.balance("army:retry"), 15) && retry.journal().size() == journalCount + 1,
+                "daily wage posting is idempotent and cannot pay twice after a retry");
+        ok(close(retry.totalDebits("army:retry", TreasuryLedger.Kind.ARMY_UPKEEP, "payroll-funding"), 0)
+                        && close(retry.totalDebits("realm:retry", TreasuryLedger.Kind.ARMY_UPKEEP, "payroll-funding"), 25),
+                "journal-derived debit totals reconcile source-account tax and funding outflows");
+        TreasuryLedger retryRestored = TreasuryLedger.fromJson(retry.toJson());
+        int restoredCount = retryRestored.journal().size();
+        ok(retryRestored.transferOnce("realm:retry", "army:retry", 25, TreasuryLedger.Kind.ARMY_UPKEEP,
+                        "payroll-funding", "payroll-fund:retry:1", 1440, "retry after world reload")
+                        && retryRestored.journal().size() == restoredCount,
+                "idempotency keys are rebuilt from the persisted journal after world reload");
+
         System.out.println(failures==0?"ALL OK":failures+" FAILED");
         if(failures>0) System.exit(1);
     }
