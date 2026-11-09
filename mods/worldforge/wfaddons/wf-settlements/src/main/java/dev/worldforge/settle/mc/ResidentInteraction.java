@@ -89,6 +89,14 @@ public final class ResidentInteraction {
                 });
     }
 
+    private static String socialSummary(Character person) {
+        Object raw = person.props.get("social.bonds");
+        if (!(raw instanceof Map<?,?> bonds) || bonds.isEmpty()) return "пока мало знакомых";
+        return bonds.entrySet().stream().limit(6)
+                .map(entry -> String.valueOf(entry.getKey()) + " — " + String.valueOf(entry.getValue()))
+                .collect(java.util.stream.Collectors.joining(", "));
+    }
+
     private static String residentProfile(Character person) {
         String traits = person.traits.isEmpty() ? "нет выраженных черт" : String.join(", ", person.traits);
         Map<String,Integer> skills = PopulationSimulation.skillRanksSnapshot(person);
@@ -160,7 +168,7 @@ public final class ResidentInteraction {
                     + " · год " + colony.s.year() + " · "
                     + (colony.s.raidIncoming ? "опасность рядом" : "сейчас спокойно") + "."));
             case "talk_opinion" -> player.sendSystemMessage(Component.literal("§e" + person.name + ": §fК вам я отношусь так: "
-                    + relationship(person, player) + ". Мои знакомые и связи формируют собственное мнение обо мне и друг о друге."));
+                    + relationship(person, player) + ". Мои связи: " + socialSummary(person) + "."));
             case "status" -> {
                 player.sendSystemMessage(Component.literal("§6" + person.name + " §7· " + data.profession
                         + " · " + data.status + " · поселение " + colony.s.name));
