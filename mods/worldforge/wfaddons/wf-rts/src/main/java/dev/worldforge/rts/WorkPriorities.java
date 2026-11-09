@@ -52,14 +52,17 @@ public final class WorkPriorities {
         for (var building : s.defs.buildings.values()) roles.addAll(building.jobs.keySet());
         String best = null;
         int bestPriority = Integer.MAX_VALUE;
+        int bestTieRank = Integer.MAX_VALUE;
         for (String role : roles) {
             int priority = get(w, role);
             if (priority <= 0) continue;
-            boolean current = role.equals(w.workRole());
-            boolean bestCurrent = best != null && best.equals(w.workRole());
-            if (priority < bestPriority || (priority == bestPriority && current && !bestCurrent)) {
+            // A resident's current assignment wins ties; otherwise generalists prefer construction
+            // over arbitrary alphabetical roles, keeping the settlement productive and deterministic.
+            int tieRank = role.equals(w.workRole()) ? 0 : role.equals("builder") ? 1 : 2;
+            if (priority < bestPriority || (priority == bestPriority && tieRank < bestTieRank)) {
                 best = role;
                 bestPriority = priority;
+                bestTieRank = tieRank;
             }
         }
         return best;
