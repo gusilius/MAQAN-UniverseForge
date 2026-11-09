@@ -347,7 +347,10 @@
       "jobs": {
         "guard": 2
       },
-      "description": "Дозорный пост для наблюдения, охраны дорог и раннего обнаружения угроз."
+      "description": "Дозорный пост для наблюдения, охраны дорог и раннего обнаружения угроз.",
+      "effects": {
+        "fortification": 1
+      }
     },
     "archery_range": {
       "name": "Стрельбище",
@@ -2195,6 +2198,102 @@
       },
       "effects": {
         "food_processing": 1
+      }
+    },
+    "gold_mine": {
+      "name": "Золотой рудник",
+      "category": "industry",
+      "cost": {
+        "wood": 35,
+        "stone": 20,
+        "tools": 3
+      },
+      "work": 70,
+      "size": [
+        6,
+        6
+      ],
+      "blueprint": "wf_settle:gold_mine",
+      "requires": [
+        "mining_settlement"
+      ],
+      "jobs": {
+        "miner": 2
+      },
+      "description": "Разработка золотой жилы и доставка золота в ювелирные мастерские и монетный двор.",
+      "recipe": {
+        "in": {},
+        "out": {
+          "gold": 1
+        },
+        "cycle": 30
+      },
+      "effects": {
+        "mining": 1
+      }
+    },
+    "silver_mine": {
+      "name": "Серебряный рудник",
+      "category": "industry",
+      "cost": {
+        "wood": 35,
+        "stone": 20,
+        "tools": 3
+      },
+      "work": 70,
+      "size": [
+        6,
+        6
+      ],
+      "blueprint": "wf_settle:silver_mine",
+      "requires": [
+        "mining_settlement"
+      ],
+      "jobs": {
+        "miner": 2
+      },
+      "description": "Разработка серебряной жилы для ювелирного дела и чеканки монет.",
+      "recipe": {
+        "in": {},
+        "out": {
+          "silver_ore": 1
+        },
+        "cycle": 30
+      },
+      "effects": {
+        "mining": 1
+      }
+    },
+    "copper_mine": {
+      "name": "Медный рудник",
+      "category": "industry",
+      "cost": {
+        "wood": 35,
+        "stone": 20,
+        "tools": 3
+      },
+      "work": 70,
+      "size": [
+        6,
+        6
+      ],
+      "blueprint": "wf_settle:copper_mine",
+      "requires": [
+        "mining_settlement"
+      ],
+      "jobs": {
+        "miner": 2
+      },
+      "description": "Добыча медной руды для литейного производства, сплавов и монет.",
+      "recipe": {
+        "in": {},
+        "out": {
+          "copper": 1
+        },
+        "cycle": 30
+      },
+      "effects": {
+        "mining": 1
       }
     }
   }
