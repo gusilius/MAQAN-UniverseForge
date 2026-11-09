@@ -183,7 +183,8 @@ public class WFWorker extends PathfinderMob {
                     target = resourceTarget;
                     working = true;
                 } else {
-                    int tx = area.x, tz = area.z;
+                    BlockPos waypoint = workWaypoint(w, area);
+                    int tx = waypoint.getX(), tz = waypoint.getZ();
                     int ty = w.level().hasChunkAt(new BlockPos(tx, w.getBlockY(), tz))
                             ? w.level().getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, tx, tz)
                             : w.getBlockY();
@@ -229,6 +230,13 @@ public class WFWorker extends PathfinderMob {
             }
             if (arrived) {
                 w.getNavigation().stop();
+                if (area != null && resourceTarget == null && workScan > 0) {
+                    BlockPos waypoint = workWaypoint(w, area);
+                    if (w.distanceToSqr(waypoint.getX() + 0.5, w.getY(), waypoint.getZ() + 0.5) < 6.25) {
+                        area.cursor++;
+                        workScan = 0;
+                    }
+                }
                 if (area != null && resourceTarget != null) {
                     if (performWork(w, c, area, resourceTarget)) {
                         cachedWorkTarget = null;
@@ -253,24 +261,49 @@ public class WFWorker extends PathfinderMob {
         }
 
         /** Search only inside the assigned footprint; the worker never picks an unrelated distant resource node. */
+        private static BlockPos workWaypoint(WFWorker worker, Colony.WorkOrder order) {
+            int radius = Math.max(0, Math.min(64, order.radius));
+            if (radius == 0) return new BlockPos(order.x, order.level > 0 ? order.level : worker.getBlockY(), order.z);
+            int span = radius * 2 + 1, spacing = 12, columns = Math.max(1, (span + spacing - 1) / spacing);
+            int index = Math.floorMod(order.cursor, columns * columns);
+            int x = order.x - radius + Math.min(span - 1, (index % columns) * spacing + spacing / 2);
+            int z = order.z - radius + Math.min(span - 1, (index / columns) * spacing + spacing / 2);
+            return new BlockPos(x, worker.getBlockY(), z);
+        }
+
+        /** Search a small local window, then sweep the larger selected area by persistent waypoints. */
         private static BlockPos findWorkTarget(WFWorker worker, Colony.WorkOrder order) {
             int radius = Math.max(0, Math.min(64, order.radius));
+            int scan = radius == 0 ? 0 : 8;
+            int minX = Math.max(order.x - radius, worker.getBlockX() - scan);
+            int maxX = Math.min(order.x + radius, worker.getBlockX() + scan);
+            int minZ = Math.max(order.z - radius, worker.getBlockZ() - scan);
+            int maxZ = Math.min(order.z + radius, worker.getBlockZ() + scan);
+            if (radius == 0) { minX = maxX = order.x; minZ = maxZ = order.z; }
             int yCenter = order.level > worker.level().getMinBuildHeight() && order.level < worker.level().getMaxBuildHeight()
                     ? order.level : worker.getBlockY();
-            int yRange = order.level > worker.level().getMinBuildHeight() && order.level < worker.level().getMaxBuildHeight() ? 8 : 12;
-            int minX = order.x - radius, maxX = order.x + radius;
-            int minZ = order.z - radius, maxZ = order.z + radius;
-            if (radius == 0) { minX = maxX = order.x; minZ = maxZ = order.z; }
-            BlockPos best = null;
-            double bestDistance = Double.MAX_VALUE;
+            int yRange = radius == 0 ? 16 : 10;
             int fromY = Math.max(worker.level().getMinBuildHeight(), yCenter - yRange);
             int toY = Math.min(worker.level().getMaxBuildHeight() - 1, yCenter + yRange);
+            BlockPos best = null;
+            double bestDistance = Double.MAX_VALUE;
             for (int x = minX; x <= maxX; x++) for (int z = minZ; z <= maxZ; z++) {
-                if (!worker.level().hasChunkAt(new BlockPos(x, yCenter, z))) continue;
+                if (Math.hypot(x - order.x, z - order.z) > radius + 0.75 && radius > 0) continue;
+                BlockPos probe = new BlockPos(x, worker.getBlockY(), z);
+                if (!worker.level().hasChunkAt(probe)) continue;
+                if ("level".equals(order.mode)) {
+                    int surface = worker.level().getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z) - 1;
+                    BlockPos candidate = surface > order.level ? new BlockPos(x, surface, z)
+                            : surface < order.level && order.soil > 0 ? new BlockPos(x, surface + 1, z) : null;
+                    if (candidate != null && candidate.getY() >= fromY && candidate.getY() <= toY) {
+                        double d = worker.distanceToSqr(candidate.getX() + 0.5, candidate.getY() + 0.5, candidate.getZ() + 0.5);
+                        if (d < bestDistance) { bestDistance = d; best = candidate; }
+                    }
+                    continue;
+                }
                 for (int y = fromY; y <= toY; y++) {
                     BlockPos pos = new BlockPos(x, y, z);
-                    BlockState state = worker.level().getBlockState(pos);
-                    if (!isWorkTarget(state, order.mode) || ("level".equals(order.mode) && y <= order.level)) continue;
+                    if (!isWorkTarget(worker.level().getBlockState(pos), order.mode)) continue;
                     double d = worker.distanceToSqr(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
                     if (d < bestDistance) { bestDistance = d; best = pos; }
                 }
@@ -307,7 +340,14 @@ public class WFWorker extends PathfinderMob {
             if ("level".equals(order.mode)) {
                 int desired = order.level;
                 if (desired <= level.getMinBuildHeight() || desired >= level.getMaxBuildHeight()) return false;
+                if (state.isAir()) {
+                    if (order.soil <= 0 || !level.getBlockState(pos.below()).isSolid()) return false;
+                    if (!level.setBlock(pos, Blocks.DIRT.defaultBlockState(), 3)) return false;
+                    order.soil--;
+                    return true;
+                }
                 if (pos.getY() <= desired) return false;
+                if (state.is(BlockTags.DIRT) || state.is(Blocks.GRASS_BLOCK)) order.soil++;
                 return level.destroyBlock(pos, false, worker);
             }
             String resource = "wood".equals(order.mode) ? "wood" : "stone".equals(order.mode) ? "stone" : oreResource(state);
