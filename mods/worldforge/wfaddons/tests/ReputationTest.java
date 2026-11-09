@@ -182,11 +182,7 @@ public class ReputationTest {
         String scopedJson = scoped.toJson();
         ReputationStore scopedReload = new ReputationStore();
         scopedReload.fromJson(scopedJson);
-        System.out.println("REPUTATION_RELOAD_DEBUG villageB=" + scopedReload.get("p", ReputationStore.Scope.SETTLEMENT, "village_b")
-                + " red=" + scopedReload.get("p", ReputationStore.Scope.POLITY, "kingdom_red")
-                + " rival=" + scopedReload.get("p", ReputationStore.Scope.POLITY, "kingdom_rival")
-                + " friend=" + (scopedReload.known("friend_resident", "p", ReputationStore.Scope.SETTLEMENT, "village_a") == null
-                    ? "null" : scopedReload.known("friend_resident", "p", ReputationStore.Scope.SETTLEMENT, "village_a").depth));
+        scopedReload.add("p", ReputationStore.Scope.SETTLEMENT, "village_a", -2, "after load");
         ok(scopedReload.get("p", ReputationStore.Scope.SETTLEMENT, "village_b") == 55
                         && scopedReload.get("p", ReputationStore.Scope.POLITY, "kingdom_red") == -1
                         && scopedReload.get("p", ReputationStore.Scope.POLITY, "kingdom_rival") == -10
