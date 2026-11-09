@@ -241,6 +241,14 @@ public class SettleTest {
         ok(restoredDailyLife.lifeAction.equals("sleeping") && restoredDailyLife.lifeTargetX == 4.5
                         && restoredDailyLife.lifeTargetZ == -3.25 && restoredDailyLife.lifeActionUntil == 9876,
                 "сон жителя, цель дома и время пробуждения переживают сохранение");
+        follower.lifeAction = "defending";
+        follower.lifeTargetX = 0;
+        follower.lifeTargetZ = 0;
+        follower.lifeActionUntil = 1.0e12;
+        Settlement defenceBack = Settlement.fromJson(following.toJson(), d);
+        ok(defenceBack.worker(follower.id).lifeAction.equals("defending")
+                        && defenceBack.worker(follower.id).lifeActionUntil == 1.0e12,
+                "приказ жителя защищать поселение сохраняется и восстанавливается");
         Settlement queued= fresh(d,1);
         Worker queuedWorker=queued.workers.get(0);
         queued.moveTo(queuedWorker.id,10,20);
