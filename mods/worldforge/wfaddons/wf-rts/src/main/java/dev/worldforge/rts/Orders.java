@@ -94,7 +94,7 @@ public final class Orders {
                     boolean compatible = building.def.jobs.keySet().stream().anyMatch(worker::canPerform);
                     why = compatible
                             ? "В здании " + building.def.name + " нет свободных мест для " + worker.name
-                            : worker.name + " (" + s.defs.professionName(worker.profession) + ") не подходит для работ в " + building.def.name;
+                            : worker.name + " (" + s.defs.professionName(worker.profession) + ") не нужен для работ в " + building.def.name;
                 }
             }
             if (role.isEmpty()) {
