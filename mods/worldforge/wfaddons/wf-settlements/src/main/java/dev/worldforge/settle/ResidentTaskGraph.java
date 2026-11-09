@@ -9,7 +9,7 @@ import java.util.*;
  * Domain effects are committed by Settlement only after stock or work services accept them.
  */
 public final class ResidentTaskGraph {
-    public enum Stage { EXTRACTED, HAULED, STORED, PROCESSED, CONSTRUCTION }
+    public enum Stage { EXTRACTED, HAULED, STORED, PROCESSED, CONSTRUCTION, BUILT }
     public record Receipt(long id, Stage stage, int buildingId, int workerId, String resource,
                           double quantity, long parentReceiptId, double worldTime) { }
     private record Lot(long receiptId, double quantity) { }
@@ -84,6 +84,19 @@ public final class ResidentTaskGraph {
             consumed += remaining;
         }
         return consumed;
+    }
+
+    /** Records the completed construction after all required material and work commits succeeded. */
+    public Receipt built(int buildingId, int workerId, double time) {
+        long parent = 0;
+        for (int i = receipts.size() - 1; i >= 0; i--) {
+            Receipt receipt = receipts.get(i);
+            if (receipt.stage() == Stage.CONSTRUCTION && receipt.buildingId() == buildingId) {
+                parent = receipt.id();
+                break;
+            }
+        }
+        return record(Stage.BUILT, buildingId, workerId, "building:" + buildingId, 1, parent, time);
     }
 
     private Receipt record(Stage stage, int buildingId, int workerId, String resource,
