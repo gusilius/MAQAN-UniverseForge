@@ -109,6 +109,22 @@ public class SettleTest {
         s.tick(120);
         ok(s.amount("wood") > w0, "дерево добывается");
 
+        Settlement generalistYield = fresh(d, 1);
+        Building generalistCamp = generalistYield.place("lumber_camp", 10, 0);
+        generalistYield.tick(60);
+        generalistYield.tick(120);
+        double generalistWood = generalistCamp.localStock.getOrDefault("wood", 0.0);
+        Settlement specialistYield = fresh(d, 1);
+        Building specialistCamp = specialistYield.place("lumber_camp", 10, 0);
+        specialistYield.tick(60);
+        Worker lumberjack = specialistYield.workers.get(0);
+        specialistYield.setProfession(lumberjack.id, "lumberjack");
+        specialistYield.assign(lumberjack.id, specialistCamp.uid);
+        specialistYield.tick(120);
+        double specialistWood = specialistCamp.localStock.getOrDefault("wood", 0.0);
+        ok(specialistWood > generalistWood,
+                "профильный дровосек добывает больше общего рабочего за одинаковое время");
+
         Settlement bufferTest = fresh(d, 3);
         Building bufferCamp = bufferTest.place("lumber_camp", 10, 0);
         bufferTest.tick(60);
