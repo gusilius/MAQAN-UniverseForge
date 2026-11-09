@@ -47,13 +47,13 @@ public final class DialogueApi {
         EFFECTS.put("clear_flag",(c,a)->c.flags.remove(str(a,"name")));
         EFFECTS.put("remember",(c,a)->c.memory().remember(str(a,"key"),value(a.get("value"))));
         EFFECTS.put("forget",(c,a)->c.memory().forget(str(a,"key")));
-        EFFECTS.put("record_event",(c,a)->c.memory().record(str(a,"kind"),str(a,"text")));
+        EFFECTS.put("record_event",(c,a)->c.memory().recordEvent(str(a,"kind"),str(a,"text")));
         EFFECTS.put("promise",(c,a)->createRecord(c,a,"promise"));
         EFFECTS.put("request",(c,a)->createRecord(c,a,"request"));
         EFFECTS.put("grievance",(c,a)->createRecord(c,a,"grievance"));
         EFFECTS.put("resolve_record",(c,a)->{
             String category=str(a,"category"),id=str(a,"id"),resolution=str(a,"resolution");
-            if(c.memory().resolveRecord(category,id,resolution))c.memory().record(category+"_resolved",id+": "+resolution);
+            if(c.memory().resolveRecord(category,id,resolution))c.memory().recordEvent(category+"_resolved",id+": "+resolution);
         });
         EFFECTS.put("relationship_delta",(c,a)->adjustRelationship(c,str(a,"target"),integer(a.get("delta"),0)));
     }
@@ -62,13 +62,13 @@ public final class DialogueApi {
         record.put("id",id);record.put("category",category);record.put("status","open");
         record.put("text",str(a,"text"));record.put("created_by",c.vars.getOrDefault("npc_id",""));
         record.put("target",str(a,"target"));record.put("due",str(a,"due"));
-        c.memory().putRecord(category,id,record);c.memory().record(category+"_created",id+": "+record.get("text"));
+        c.memory().putRecord(category,id,record);c.memory().recordEvent(category+"_created",id+": "+record.get("text"));
     }
     private static void adjustRelationship(Ctx c,String target,int delta){
         if(target.isBlank())target=c.vars.getOrDefault("player_id","");
         if(target.isBlank())return;
         int next=c.memory().adjustRelationship(target,delta);
-        c.memory().record("relationship",target+"="+next);
+        c.memory().recordEvent("relationship",target+"="+next);
     }
     private static String str(Map<String,Object> a,String key){Object v=a.get(key);return v==null?"":String.valueOf(v);}
     private static int integer(Object v,int fallback){return v instanceof Number n?n.intValue():fallback;}
