@@ -30,6 +30,10 @@ public final class ResidentQuestTest {
         ResidentQuest restored = ResidentQuest.fromMap(quest.toMap());
         check(restored.complete() && restored.progress() == 3 && restored.completedYear() == 13,
                 "contract survives save and restore");
+        ResidentQuest resourceContract = new ResidentQuest("wood-1", "Deliver wood", "wood", 4, 12);
+        ResidentQuest restoredResource = ResidentQuest.fromMap(resourceContract.toMap());
+        check("wood".equals(restoredResource.resourceId()) && restoredResource.required() == 4,
+                "profession-specific resource objective survives save and restore");
         CharacterRegistry people = new CharacterRegistry();
         Character resident = people.create("Mira", "", "", "f", 1);
         resident.props.put("wf_resident_quest", quest.toMap());
