@@ -542,8 +542,7 @@ public class WFWorker extends PathfinderMob {
             int yRange = exactBlock ? 0 : "ore".equals(order.mode) ? 32 : "stone".equals(order.mode) ? 20 : 10;
             int fromY = exactBlock ? yCenter : Math.max(worker.level().getMinBuildHeight(), yCenter - yRange);
             int toY = exactBlock ? yCenter : Math.min(worker.level().getMaxBuildHeight() - 1, yCenter + yRange);
-            BlockPos best = null;
-            double bestDistance = Double.MAX_VALUE;
+            List<BlockPos> candidates = new ArrayList<>();
             for (int x = minX; x <= maxX; x++) for (int z = minZ; z <= maxZ; z++) {
                 BlockPos probe = new BlockPos(x, worker.getBlockY(), z);
                 if (!worker.level().hasChunkAt(probe)) continue;
@@ -551,23 +550,30 @@ public class WFWorker extends PathfinderMob {
                     int surface = worker.level().getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z) - 1;
                     BlockPos candidate = surface > order.level ? new BlockPos(x, surface, z)
                             : surface < order.level && order.soil > 0 ? new BlockPos(x, surface + 1, z) : null;
-                    if (candidate != null) {
-                        double d = worker.distanceToSqr(candidate.getX() + 0.5, candidate.getY() + 0.5, candidate.getZ() + 0.5);
-                        if (d < bestDistance) { bestDistance = d; best = candidate; }
-                    }
+                    if (candidate != null) candidates.add(candidate);
                     continue;
                 }
                 for (int y = fromY; y <= toY; y++) {
                     BlockPos pos = new BlockPos(x, y, z);
                     if (!isWorkTarget(worker.level().getBlockState(pos), order.mode)) continue;
-                    double d = worker.distanceToSqr(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
-                    if (d < bestDistance) { bestDistance = d; best = pos; }
+                    candidates.add(pos);
                 }
             }
-            if (best == null) return null;
-            BlockPos selected = "wood".equals(order.mode) ? treeBaseTarget(worker, best) : best;
-            if (workApproachTarget(worker, selected) != null) return selected;
-            return canPlaceTemporaryStep(worker, selected) ? selected : null;
+            if (candidates.isEmpty()) return null;
+            // Do not give up because the closest block is behind a wall or over a gap.
+            // Try nearby candidates in distance order and choose the first with a real safe approach.
+            candidates.sort(java.util.Comparator.comparingDouble(pos ->
+                    worker.distanceToSqr(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5)));
+            Set<BlockPos> evaluated = new HashSet<>();
+            int checked = 0;
+            for (BlockPos candidate : candidates) {
+                BlockPos selected = "wood".equals(order.mode) ? treeBaseTarget(worker, candidate) : candidate;
+                if (!evaluated.add(selected.immutable())) continue;
+                if (workApproachTarget(worker, selected) != null) return selected;
+                if (canPlaceTemporaryStep(worker, selected)) return selected;
+                if (++checked >= 24) break;
+            }
+            return null;
         }
 
         /** Resolve a clicked upper log to the lowest reachable trunk block so workers do not try to climb the canopy. */
