@@ -230,11 +230,13 @@ public class RtsTest {
         // ---- приоритеты работ
         WorkPriorities wp = new WorkPriorities();
         Worker w1 = g.worker(1);
-        ok(wp.get(w1, "builder") == 1 && wp.get(w1, "farmer") == 0, "умолчание: своя профессия 1");
+        ok(wp.get(w1, "builder") == 1 && wp.get(w1, "farmer") == 1,
+                "умолчание: универсальный рабочий имеет базовый приоритет для каждой доступной роли");
         String cmd = wp.cycle(w1, "farmer", false);
-        ok(cmd.equals("wfsettle priority-work 1 farmer 1") && wp.get(w1, "farmer") == 1, "клик: 0 -> 1 + команда");
-        for (int i = 0; i < 4; i++) wp.cycle(w1, "farmer", false);
-        ok(wp.get(w1, "farmer") == 0, "цикл замыкается 5 нажатий");
+        ok(cmd.equals("wfsettle priority-work 1 farmer 2") && wp.get(w1, "farmer") == 2,
+                "клик повышает базовый приоритет универсального рабочего: 1 -> 2");
+        for (int i = 0; i < 3; i++) wp.cycle(w1, "farmer", false);
+        ok(wp.get(w1, "farmer") == 0, "цикл приоритетов замыкается после пяти значений");
         wp.cycle(w1, "farmer", true);
         ok(wp.get(w1, "farmer") == 4, "ПКМ - назад");
         Dispatch.apply(g, wp, "wfsettle priority-work 1 smith 3");
