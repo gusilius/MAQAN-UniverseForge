@@ -27,6 +27,14 @@ public final class Colony {
         public String def = "";
         public int x, y, z, sx, sy, sz, placed;
     }
+    /** Persistent, exact work-area order assigned to one resident. Coordinates are world block coordinates. */
+    public static final class WorkOrder {
+        public String mode = "wood";
+        public int x, z, radius = 8, level;
+        /** 0=hidden, 1=subtle, 2=strong. */
+        public int overlay = 2;
+    }
+    public final Map<Integer, WorkOrder> workOrders = new LinkedHashMap<>();
 
     public final Settlement s;
     public final String dim;
@@ -122,6 +130,15 @@ public final class Colony {
             l.add(o);
         }
         m.put("sites", l);
+        List<Object> orders = new ArrayList<>();
+        for (Map.Entry<Integer, WorkOrder> e : workOrders.entrySet()) {
+            WorkOrder o = e.getValue();
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("worker", e.getKey()); row.put("mode", o.mode); row.put("x", o.x); row.put("z", o.z);
+            row.put("radius", o.radius); row.put("level", o.level); row.put("overlay", o.overlay);
+            orders.add(row);
+        }
+        m.put("workOrders", orders);
         m.put("map", Json.parse(map.toJson()));
         return m;
     }
@@ -132,6 +149,21 @@ public final class Colony {
         Colony c = new Colony(s, (String) m.get("dim"), ((Number) m.get("cx")).intValue(), ((Number) m.get("cz")).intValue());
         if (m.get("map") instanceof Map<?, ?> mapData) c.map = SettlementMap.fromJson(Json.write(mapData));
         if (m.get("owner") instanceof String ow) c.owner = ow;
+        if (m.get("workOrders") instanceof List<?> orders) {
+            for (Object raw : orders) {
+                if (!(raw instanceof Map<?, ?> row)) continue;
+                int workerId = ((Number) row.getOrDefault("worker", 0)).intValue();
+                if (s.worker(workerId) == null) continue;
+                WorkOrder o = new WorkOrder();
+                o.mode = String.valueOf(row.getOrDefault("mode", "wood"));
+                o.x = ((Number) row.getOrDefault("x", c.cx)).intValue();
+                o.z = ((Number) row.getOrDefault("z", c.cz)).intValue();
+                o.radius = Math.max(1, Math.min(64, ((Number) row.getOrDefault("radius", 8)).intValue()));
+                o.level = ((Number) row.getOrDefault("level", 0)).intValue();
+                o.overlay = Math.max(0, Math.min(2, ((Number) row.getOrDefault("overlay", 2)).intValue()));
+                c.workOrders.put(workerId, o);
+            }
+        }
         if (m.get("sites") instanceof List) {
             for (Object o : (List<Object>) m.get("sites")) {
                 Map<String, Object> e = (Map<String, Object>) o;
