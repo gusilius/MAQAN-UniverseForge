@@ -107,7 +107,7 @@ public final class CommandMode {
         if (e instanceof TroopEntity t) return owner.equals(t.ownerId());
         if(isWorkerEntity(e)){
             String workerOwner=workerString(e,"ownerId");
-            return owner.equals(workerOwner)||(mc.hasSingleplayerServer()&&workerOwner.isBlank());
+            return owner.equals(workerOwner)||mc.hasSingleplayerServer();
         }
         return false;
     }
