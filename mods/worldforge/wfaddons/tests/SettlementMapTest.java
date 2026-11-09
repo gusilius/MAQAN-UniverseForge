@@ -1,8 +1,9 @@
 package dev.worldforge.tests;
 
 import dev.worldforge.settle.*;
-import dev.worldforge.mod.WorldForgeMod;
+import dev.worldforge.mod.economy.TreasuryService;
 import dev.worldforge.mod.economy.TreasuryLedger;
+import dev.worldforge.mod.economy.TreasuryService;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -103,7 +104,7 @@ public final class SettlementMapTest {
 
         Settlement funded = new Settlement("treasury_settlement_test", "Treasury settlement test", defs);
         funded.add(Defs.SILVER, 100);
-        ok(WorldForgeMod.treasury().balance("settlement:treasury_settlement_test") == 100,
+        ok(TreasuryService.current().balance("settlement:treasury_settlement_test") == 100,
                 "settlement silver is held in the canonical world treasury account");
         funded.consumeResource(Defs.SILVER, 15);
         ok(funded.amount(Defs.SILVER) == 85
