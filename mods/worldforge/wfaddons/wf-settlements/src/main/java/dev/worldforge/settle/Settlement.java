@@ -487,6 +487,7 @@ public final class Settlement {
         }
         w.building = uid;
         w.manualOrder = false;
+        w.orderQueue.clear();
         w.status = "";
     }
 
@@ -495,23 +496,43 @@ public final class Settlement {
         if (w == null) throw new OrderException("Нет рабочего " + workerId);
         w.building = 0;
         w.manualOrder = false;
+        w.orderQueue.clear();
         w.status = "свободен";
     }
 
     /** Прямой приказ RTS; координаты относительно центра поселения. */
-    public void moveTo(int workerId, double x, double z) {
-        Worker w = worker(workerId);
-        if (w == null) throw new OrderException("Нет рабочего " + workerId);
-        if (!Double.isFinite(x) || !Double.isFinite(z) || Math.abs(x) > 100000 || Math.abs(z) > 100000)
+    public void moveTo(int workerId,double x,double z){moveTo(workerId,x,z,false);}
+
+    /** Queue appends a bounded waypoint; otherwise the current manual route is replaced. */
+    public void moveTo(int workerId,double x,double z,boolean queue) {
+        Worker w=worker(workerId);
+        if(w==null)throw new OrderException("Нет рабочего "+workerId);
+        if(!Double.isFinite(x)||!Double.isFinite(z)||Math.abs(x)>100000||Math.abs(z)>100000)
             throw new OrderException("Некорректная точка приказа");
-        w.building = 0; w.manualOrder = true; w.orderX = x; w.orderZ = z; w.status = "приказ: движение";
+        if(queue&&w.manualOrder){
+            if(w.orderQueue.size()>=Worker.MAX_MANUAL_ORDERS)throw new OrderException("Очередь рабочего заполнена (максимум "+Worker.MAX_MANUAL_ORDERS+")");
+            w.orderQueue.addLast(new Worker.ManualOrder(x,z));
+            return;
+        }
+        w.orderQueue.clear();
+        w.building=0;w.manualOrder=true;w.orderX=x;w.orderZ=z;w.status="приказ: движение";
     }
 
-    /** Остановить рабочего в текущей точке; ручное удержание не перехватывается автоназначением. */
-    public void holdAt(int workerId, double x, double z) {
-        moveTo(workerId, x, z);
-        Worker w = worker(workerId);
-        w.status = "приказ: удерживать позицию";
+    /** Called by the physical worker after reaching its active waypoint. */
+    public boolean advanceManualOrder(int workerId) {
+        Worker w=worker(workerId);
+        if(w==null||!w.manualOrder)return false;
+        Worker.ManualOrder next=w.orderQueue.pollFirst();
+        if(next==null){w.manualOrder=false;w.status="свободен";return false;}
+        w.orderX=next.x();w.orderZ=next.z();w.status="приказ: движение";
+        return true;
+    }
+
+    /** Stop means hold here and discard all queued waypoints. */
+    public void holdAt(int workerId,double x,double z) {
+        moveTo(workerId,x,z,false);
+        Worker w=worker(workerId);
+        w.status="приказ: удерживать позицию";
     }
 
     public void setProfession(int workerId, String profession) {
@@ -521,6 +542,7 @@ public final class Settlement {
         w.profession = profession;
         w.building = 0;
         w.manualOrder = false;
+        w.orderQueue.clear();
         w.status = "свободен";
     }
 
@@ -1171,6 +1193,9 @@ public final class Settlement {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", w.id); m.put("name", w.name); m.put("profession", w.profession); m.put("person", w.person); m.put("building", w.building); m.put("status", w.status); m.put("x", w.x); m.put("z", w.z);
             m.put("manual_order", w.manualOrder); m.put("order_x", w.orderX); m.put("order_z", w.orderZ);
+            List<Object> queuedOrders=new ArrayList<>();
+            for(Worker.ManualOrder order:w.orderQueue)queuedOrders.add(Map.of("x",order.x(),"z",order.z()));
+            m.put("order_queue",queuedOrders);
             if (w.jobPrio != null) m.put("prio", new LinkedHashMap<String, Object>(w.jobPrio));
             ws.add(m);
         }
@@ -1241,6 +1266,15 @@ public final class Settlement {
             w.manualOrder = Boolean.TRUE.equals(m.get("manual_order"));
             if (m.get("order_x") instanceof Number ox) w.orderX = ox.doubleValue();
             if (m.get("order_z") instanceof Number oz) w.orderZ = oz.doubleValue();
+            if(m.get("order_queue") instanceof List<?> queued){
+                for(Object item:queued){
+                    if(w.orderQueue.size()>=Worker.MAX_MANUAL_ORDERS)break;
+                    if(!(item instanceof Map<?,?> point)||!(point.get("x") instanceof Number qx)||!(point.get("z") instanceof Number qz))continue;
+                    double qxx=qx.doubleValue(),qzz=qz.doubleValue();
+                    if(Double.isFinite(qxx)&&Double.isFinite(qzz)&&Math.abs(qxx)<=100000&&Math.abs(qzz)<=100000)
+                        w.orderQueue.addLast(new Worker.ManualOrder(qxx,qzz));
+                }
+            }
             if (m.get("prio") instanceof Map<?, ?> pm) { w.jobPrio = new TreeMap<>(); for (var e : pm.entrySet()) w.jobPrio.put(String.valueOf(e.getKey()), ((Number) e.getValue()).intValue()); }
             if (w.building != 0 && s.building(w.building) == null) w.building = 0;
             s.workers.add(w);
