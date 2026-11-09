@@ -35,6 +35,20 @@ public final class ResidentSocial {
         return next;
     }
 
+    /** Trait/culture compatibility shapes the result of an actual conversation. */
+    public static int interactionDelta(Character first, Character second) {
+        if (first == null || second == null) return 0;
+        int delta = 1;
+        if (first.traits.contains("kind") || first.traits.contains("generous")) delta++;
+        if (second.traits.contains("kind") || second.traits.contains("generous")) delta++;
+        if (first.traits.contains("aggressive") || first.traits.contains("cruel")
+                || first.traits.contains("arrogant") || second.traits.contains("aggressive")
+                || second.traits.contains("cruel") || second.traits.contains("arrogant")) delta -= 3;
+        if (first.culture != null && second.culture != null && !first.culture.isBlank()
+                && !second.culture.isBlank() && !first.culture.equals(second.culture)) delta--;
+        return Math.max(-4, Math.min(4, delta));
+    }
+
     /** A real resident-to-resident interaction updates both sides of the relationship. */
     public static int socialize(Character first, Character second, int delta) {
         if (first == null || second == null || first == second || !first.alive || !second.alive) return 0;
