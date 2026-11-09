@@ -183,14 +183,15 @@ public final class CommandScreen extends Screen {
     private int rowsFit() { return Math.max(3, (panelH() - 62) / ROW); }
 
     // ---------- инспектор выбранных персонажей ----------
-    private static final int INSPECT_X=4, INSPECT_Y=settlementOpen ? 148 : 34, INSPECT_W=250, INSPECT_ROW=19;
+    private static final int INSPECT_X=4, INSPECT_W=250, INSPECT_ROW=19;
+    private int inspectY() { return settlementOpen ? 148 : 34; }
 
     private boolean inspectAt(double x,double y) {
-        if(x<INSPECT_X||x>=INSPECT_X+INSPECT_W||y<INSPECT_Y+22)return false;
-        int row=(int)((y-(INSPECT_Y+22))/INSPECT_ROW);
+        if(x<INSPECT_X||x>=INSPECT_X+INSPECT_W||y<inspectY()+22)return false;
+        int row=(int)((y-(inspectY()+22))/INSPECT_ROW);
         List<String> ids=CommandMode.selected();
         if(row<0||row>=Math.min(8,ids.size()))return false;
-        if(row>=ids.size())return y<INSPECT_Y+22+8*INSPECT_ROW;
+        if(row>=ids.size())return y<inspectY()+22+8*INSPECT_ROW;
         String id=ids.get(row);
         for(net.minecraft.world.entity.Entity entity:minecraft.level.entitiesForRendering()){
             if(!entity.isAlive()||!entity.getUUID().toString().equals(id))continue;
@@ -227,16 +228,16 @@ public final class CommandScreen extends Screen {
         if(ids.isEmpty())return;
         int rows=Math.min(8,ids.size());
         int h=24+rows*INSPECT_ROW;
-        g.fill(INSPECT_X,INSPECT_Y,INSPECT_X+INSPECT_W,INSPECT_Y+h,0xD910121A);
-        g.fill(INSPECT_X,INSPECT_Y,INSPECT_X+INSPECT_W,INSPECT_Y+1,0xFF8A7040);
-        g.drawString(font,"ИНСПЕКТОР · "+ids.size()+" ВЫБРАНО",INSPECT_X+6,INSPECT_Y+6,0xFFE6C875,false);
+        g.fill(INSPECT_X,inspectY(),INSPECT_X+INSPECT_W,inspectY()+h,0xD910121A);
+        g.fill(INSPECT_X,inspectY(),INSPECT_X+INSPECT_W,inspectY()+1,0xFF8A7040);
+        g.drawString(font,"ИНСПЕКТОР · "+ids.size()+" ВЫБРАНО",INSPECT_X+6,inspectY()+6,0xFFE6C875,false);
         int row=0;
         for(String id:ids){
             if(row>=8)break;
             net.minecraft.world.entity.Entity entity=null;
             for(net.minecraft.world.entity.Entity candidate:minecraft.level.entitiesForRendering())
                 if(candidate.getUUID().toString().equals(id)){entity=candidate;break;}
-            int y=INSPECT_Y+22+row*INSPECT_ROW;
+            int y=inspectY()+22+row*INSPECT_ROW;
             if(entity==null){g.drawString(font,"Недоступен · "+id.substring(0,Math.min(8,id.length())),INSPECT_X+6,y+4,0xFF888888,false);row++;continue;}
             boolean troop=entity instanceof TroopEntity;
             String name=entity.getDisplayName().getString();
@@ -273,7 +274,7 @@ public final class CommandScreen extends Screen {
             row++;
         }
         if(ids.size()>8)g.drawString(font,"Ещё "+(ids.size()-8)+" · выберите строку для фокуса",
-                INSPECT_X+6,INSPECT_Y+h-10,0xFF9EA4B5,false);
+                INSPECT_X+6,inspectY()+h-10,0xFF9EA4B5,false);
     }
 
     // ---------- ввод ----------
