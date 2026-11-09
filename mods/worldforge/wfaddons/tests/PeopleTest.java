@@ -179,6 +179,23 @@ public class PeopleTest {
         ok(CharacterDevelopment.effectiveAttribute(journalPerson, "martial", 0) == Math.min(20, baseMartial + 1),
                 "high soldier morale positively affects the same character's effective martial ability");
 
+        int severity=CharacterDevelopment.recordInjury(journalPerson,2,"arrow",120);
+        ok(severity==2&&CharacterDevelopment.injurySeverity(journalPerson)==2
+                        &&CharacterDevelopment.injuryCount(journalPerson)==1
+                        &&Math.abs(CharacterDevelopment.injuryCombatMultiplier(journalPerson)-0.82)<1e-9,
+                "combat injury is persisted on canonical Character and reduces combat readiness");
+        CharacterDevelopment.recordInjury(journalPerson,1,"sword",121);
+        ok(CharacterDevelopment.injurySeverity(journalPerson)==3&&CharacterDevelopment.injuryCount(journalPerson)==2,
+                "repeated wounds accumulate and retain individual injury history");
+        CharacterDevelopment.healInjury(journalPerson,2);
+        ok(CharacterDevelopment.injurySeverity(journalPerson)==1,
+                "medical recovery gradually reduces injury severity without erasing history");
+        CharacterDevelopment.healInjury(journalPerson,1);
+        ok(CharacterDevelopment.injurySeverity(journalPerson)==0
+                        &&CharacterDevelopment.injuryCount(journalPerson)==2
+                        &&Math.abs(CharacterDevelopment.injuryCombatMultiplier(journalPerson)-1.0)<1e-9,
+                "fully healed soldier regains readiness while keeping lifetime injury count");
+
         journal.appoint(journalPerson.id, "guard", "settlement:test", 10);
         journal.dismiss(journalPerson.id, "guard", "settlement:test", 11);
         journal.kill(journalPerson.id);
