@@ -172,7 +172,12 @@ public final class ResidentInteraction {
                 player.sendSystemMessage(Component.literal("§7Отношение к вам: " + relationship(person, player)));
                 player.sendSystemMessage(Component.literal("§7Инструмент: " + ResidentEquipment.summary(person, colony, data)));
             }
-            case "repair" -> {\n                if (!ruler) { deny(player); return 0; }\n                String result = ResidentEquipment.repair(worker);\n                player.sendSystemMessage(Component.literal((result.startsWith("Отремонтировал") ? "§a" : "§e") + person.name + ": " + result));\n            }\n            case "tool" -> {
+            case "repair" -> {
+                if (!ruler) { deny(player); return 0; }
+                String result = ResidentEquipment.repair(worker);
+                player.sendSystemMessage(Component.literal((result.startsWith("Отремонтировал") ? "§a" : "§e") + person.name + ": " + result));
+            }
+            case "tool" -> {
                 if (!ruler) { deny(player); return 0; }
                 String result = ResidentEquipment.craft(worker);
                 player.sendSystemMessage(Component.literal((result.startsWith("Изготовил") ? "§a" : "§e") + person.name + ": " + result));
