@@ -231,6 +231,11 @@ public class PeopleTest {
                 "canonical character event sequence survives save/load without synthetic restore events");
         ok(journalReload.toJson().equals(journalSave),
                 "loading a character registry does not mutate its persisted lifecycle history");
+        ok(CharacterInventory.count(journalReload.get(journalPerson.id),"minecraft:bread")==5
+                        &&CharacterInventory.count(journalReload.get(carrier.id),"minecraft:bread")==3
+                        &&CharacterInventory.items(journalReload.get(journalPerson.id)).stream()
+                        .anyMatch(item->item.id().equals("minecraft:iron_sword")&&item.data().equals("{Damage:3}")),
+                "canonical personal inventories and item data survive CharacterRegistry save/load");
 
         // диалог с персонажем
         DialogueBridge.register();
