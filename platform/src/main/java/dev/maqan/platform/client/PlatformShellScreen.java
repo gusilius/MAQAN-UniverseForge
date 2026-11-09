@@ -883,18 +883,22 @@ public final class PlatformShellScreen extends Screen {
             case SETTLEMENTS -> "SETTLEMENTS";
             case RTS -> "TACTICAL";
         };
-        saveWorkspaceState();
-        Panel nav=panels.get("navigation"), inspector=panels.get("inspector"), timeline=panels.get("timeline");
-        switch(next) {
-            case COSMOS -> { nav.title="COSMIC CATALOGUE"; inspector.title="BODY INSPECTOR"; timeline.title="ORBIT / TIME"; }
-            case POLITICS -> { nav.title="REALMS & DIPLOMACY"; inspector.title="CHARACTER / REALM"; timeline.title="DYNASTY / CHRONICLE"; }
-            case SETTLEMENTS -> { nav.title="SETTLEMENT LAYERS"; inspector.title="BUILDING / HOUSEHOLD"; timeline.title="PRODUCTION"; }
-            case RTS -> { nav.title="UNITS / FORMATIONS"; inspector.title="UNIT COMMAND"; timeline.title="ORDERS / BATTLE LOG"; }
+        if (!panels.isEmpty()) {
+            Panel nav = panels.get("navigation");
+            Panel inspector = panels.get("inspector");
+            Panel timeline = panels.get("timeline");
+            if (nav != null && inspector != null && timeline != null) {
+                switch (next) {
+                    case COSMOS -> { nav.title = "COSMIC CATALOGUE"; inspector.title = "BODY INSPECTOR"; timeline.title = "ORBIT / TIME"; }
+                    case POLITICS -> { nav.title = "REALMS & DIPLOMACY"; inspector.title = "CHARACTER / REALM"; timeline.title = "DYNASTY / CHRONICLE"; }
+                    case SETTLEMENTS -> { nav.title = "SETTLEMENT LAYERS"; inspector.title = "BUILDING / HOUSEHOLD"; timeline.title = "PRODUCTION"; }
+                    case RTS -> { nav.title = "UNITS / FORMATIONS"; inspector.title = "UNIT COMMAND"; timeline.title = "ORDERS / BATTLE LOG"; }
+                }
+            }
+            layoutWorkspace();
+            clampPanels();
         }
-        // One shared compact panel geometry across all workspace modes.
-        // The selected mode changes panel content, never the overall interaction model.
-        layoutWorkspace();
-        clampPanels();
+        saveWorkspaceState();
     }
 
     /**
