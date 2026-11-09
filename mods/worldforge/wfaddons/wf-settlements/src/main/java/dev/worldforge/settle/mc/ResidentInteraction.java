@@ -214,10 +214,21 @@ public final class ResidentInteraction {
                     player.sendSystemMessage(Component.literal("У этого жителя уже есть поручение."));
                     return 0;
                 }
-                ResidentQuest next = new ResidentQuest("bread_supply_" + person.id,
-                        "Принести 3 хлеба в поселение", 3, colony.s.year());
+                String resource = switch (data.profession) {
+                    case "lumberjack", "sawyer" -> "wood";
+                    case "miner", "builder" -> "stone";
+                    case "smith", "blacksmith", "armorer" -> "iron";
+                    case "farmer" -> "food";
+                    default -> "food";
+                };
+                int required = "iron".equals(resource) ? 2 : "stone".equals(resource) || "wood".equals(resource) ? 4 : 3;
+                String resourceName = colony.s.defs.resourceName(resource);
+                ResidentQuest next = new ResidentQuest("supply_" + resource + "_" + person.id + "_" + colony.s.year(),
+                        "Доставить " + required + " ед. ресурса «" + resourceName + "» в поселение",
+                        resource, required, colony.s.year());
                 person.props.put(QUEST_KEY, next.toMap());
-                player.sendSystemMessage(Component.literal("§e" + person.name + ": В поселении не хватает хлеба. Принесите три буханки."));
+                player.sendSystemMessage(Component.literal("§e" + person.name + ": Нам нужны " + required
+                        + " ед. ресурса «" + resourceName + "». Поможете доставить?"));
             }
             case "abandon" -> {
                 ResidentQuest q = quest(person);
@@ -235,7 +246,7 @@ public final class ResidentInteraction {
                     return 0;
                 }
                 saveQuest(person, q);
-                player.sendSystemMessage(Component.literal("§aПоручение принято: принести 3 хлеба. Вернитесь ко мне с хлебом."));
+                player.sendSystemMessage(Component.literal("§aПоручение принято: " + q.objective() + ". Вернитесь ко мне с грузом."));
             }
             case "deliver" -> deliver(player, colony, person);
             default -> {
@@ -268,22 +279,23 @@ public final class ResidentInteraction {
             player.sendSystemMessage(Component.literal("§eСначала примите поручение жителя."));
             return;
         }
-        int available = player.getInventory().countItem(Items.BREAD);
+        net.minecraft.world.item.Item item = questItem(q.resourceId());
+        int available = player.getInventory().countItem(item);
         int needed = q.required() - q.progress();
         int offered = Math.min(available, needed);
         if (offered <= 0) {
-            player.sendSystemMessage(Component.literal("§eУ вас нет хлеба для передачи."));
+            player.sendSystemMessage(Component.literal("§eУ вас нет ресурса «" + colony.s.defs.resourceName(q.resourceId()) + "» для передачи."));
             return;
         }
-        double accepted = colony.s.receiveResource("food", offered);
+        double accepted = colony.s.receiveResource(q.resourceId(), offered);
         int delivered = Math.min(offered, (int) Math.floor(accepted + 1e-9));
         if (accepted > delivered) colony.s.consumeResource("food", accepted - delivered);
         if (delivered <= 0) {
-            player.sendSystemMessage(Component.literal("§cСклад поселения не может принять хлеб."));
+            player.sendSystemMessage(Component.literal("§cСклад поселения не может принять этот ресурс."));
             return;
         }
         int acceptedWhole = delivered;
-        net.minecraft.world.item.ItemStack removed = player.getInventory().removeItem(Items.BREAD, acceptedWhole);
+        net.minecraft.world.item.ItemStack removed = player.getInventory().removeItem(item, acceptedWhole);
         delivered = Math.min(acceptedWhole, removed.getCount());
         if (delivered < acceptedWhole) colony.s.consumeResource("food", acceptedWhole - delivered);
         if (delivered <= 0) {
@@ -294,11 +306,21 @@ public final class ResidentInteraction {
         saveQuest(person, q);
         if (completed) {
             colony.s.add("silver", 2.0);
-            player.sendSystemMessage(Component.literal("§aПоручение выполнено! Хлеб доставлен, в казну поселения зачислено 2 серебра."));
+            player.sendSystemMessage(Component.literal("§aПоручение выполнено! Ресурс доставлен, в казну поселения зачислено 2 серебра."));
         } else {
             player.sendSystemMessage(Component.literal("§aПередано хлеба: " + delivered + ". Осталось: "
                     + (q.required() - q.progress()) + "."));
         }
+    }
+
+    private static net.minecraft.world.item.Item questItem(String resource) {
+        return switch (resource) {
+            case "wood" -> Items.OAK_LOG;
+            case "stone" -> Items.COBBLESTONE;
+            case "iron" -> Items.IRON_INGOT;
+            case "food" -> Items.BREAD;
+            default -> Items.BREAD;
+        };
     }
 
     @SuppressWarnings("unchecked")
