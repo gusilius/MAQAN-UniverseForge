@@ -20,6 +20,7 @@ import dev.worldforge.troops.Muster;
 import dev.worldforge.troops.MixedOrders;
 import dev.worldforge.troops.Wars;
 import dev.worldforge.troops.Squads;
+import dev.worldforge.troops.ArmyHierarchy;
 import dev.worldforge.troops.TroopDefs;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -77,6 +78,7 @@ public class TroopsMod {
 
     public static volatile TroopDefs DEFS = load(null);
     public static final Squads SQUADS = new Squads();
+    public static final ArmyHierarchy HIERARCHY = new ArmyHierarchy();
     public static final Forts FORTS = new Forts();
     public static final Map<String, TroopEntity> LIVE = new ConcurrentHashMap<>();
     private static MinecraftServer server;
@@ -171,8 +173,11 @@ public class TroopsMod {
         try {
             Path f = dir(server).resolve("wf_squads.json");
             if (Files.exists(f)) SQUADS.fromJson(Files.readString(f));
+            Path hf = dir(server).resolve("wf_army_hierarchy.json");
+            if (Files.exists(hf)) HIERARCHY.fromJson(Files.readString(hf));
             Path ff = dir(server).resolve("wf_forts.json");
             if (Files.exists(ff)) FORTS.fromJson(Files.readString(ff));
+            syncArmyHierarchy();
         } catch (Exception ex) {
             LOGGER.error("wf_squads.json: {}", ex.toString());
         }
@@ -186,9 +191,30 @@ public class TroopsMod {
         try {
             Files.createDirectories(dir(server));
             Files.writeString(dir(server).resolve("wf_squads.json"), SQUADS.toJson());
+            Files.writeString(dir(server).resolve("wf_army_hierarchy.json"), HIERARCHY.toJson());
             Files.writeString(dir(server).resolve("wf_forts.json"), FORTS.toJson());
         } catch (Exception ex) {
             LOGGER.error("save squads: {}", ex.toString());
+        }
+    }
+
+    /** Reconciles the physical squad projection with the strategic wf-army roster. */
+    private static void syncArmyHierarchy() {
+        if (server == null) return;
+        for (TroopEntity troop : LIVE.values()) {
+            if (troop == null || !troop.isAlive() || troop.armyId <= 0) continue;
+            Squads.Squad squad = SQUADS.squadOf(troop.getUUID().toString());
+            if (squad == null) continue;
+            ArmyLink.Found strategic = ArmyLink.find(troop.armyId);
+            String name = strategic == null ? "Армия " + troop.armyId : strategic.army().name;
+            String realm = strategic == null ? troop.realm : strategic.army().realm;
+            try {
+                HIERARCHY.ensureArmy(troop.armyId, name, troop.ownerId(), realm);
+                ArmyHierarchy.Corps corps = HIERARCHY.defaultCorps(troop.armyId);
+                HIERARCHY.assignSquad(corps.id, squad.id, SQUADS);
+            } catch (RuntimeException ex) {
+                LOGGER.warn("wf-troops: hierarchy reconcile failed for army {}: {}", troop.armyId, ex.toString());
+            }
         }
     }
 
@@ -360,6 +386,7 @@ public class TroopsMod {
         if (e.phase != TickEvent.Phase.END || server == null) return;
         ticks++;
         if (ticks % 10 == 0) TroopController.step(server);
+        if (ticks % 100 == 0) syncArmyHierarchy();
         if (ticks % 1200 == 0) for (TroopEntity troop : LIVE.values()) syncPerson(troop);
         if (ticks % 100 == 0) payroll();
         if (ticks % 20 == 0) FortService.step(server, ticks);
