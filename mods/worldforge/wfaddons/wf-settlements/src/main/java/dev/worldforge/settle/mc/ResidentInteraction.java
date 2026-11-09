@@ -64,33 +64,29 @@ public final class ResidentInteraction {
             player.sendSystemMessage(Component.literal("Житель сейчас не может поговорить с вами."));
             return;
         }
-        player.sendSystemMessage(Component.literal("§6§l" + person.name + " §8· §7"
-                + colony.s.defs.professionName(data.profession)));
-        player.sendSystemMessage(Component.literal("§f" + greeting(person, data, colony)));
-        player.sendSystemMessage(action("Поговорить", "talk", worker));
-        player.sendSystemMessage(action("Попросить следовать за мной", "follow", worker));
-        player.sendSystemMessage(action("Остановиться здесь", "stop", worker));
-        player.sendSystemMessage(action("Вернуться к работе", "work", worker));
-        player.sendSystemMessage(action("Состояние и отношения", "status", worker));
-        player.sendSystemMessage(action("Подарить изумруд · улучшить отношения", "gift", worker));
-        ResidentQuest quest = quest(person);
-        if (quest == null && person.props.containsKey(QUEST_KEY)) {
-            player.sendSystemMessage(Component.literal("§cЗапись поручения повреждена. Она сохранена для восстановления; новое поручение пока недоступно."));
-        } else if (quest == null || quest.status() == ResidentQuest.Status.ABANDONED) {
-            player.sendSystemMessage(action("Попросить поручение", "quest", worker));
-        } else {
-            player.sendSystemMessage(Component.literal("§eПоручение: " + quest.objective()
-                    + " · " + quest.progress() + "/" + quest.required() + " · " + quest.status()));
-            if (quest.status() == ResidentQuest.Status.OFFERED)
-                player.sendSystemMessage(action("Принять поручение", "accept", worker));
-            if (quest.status() == ResidentQuest.Status.ACCEPTED)
-                player.sendSystemMessage(action("Передать хлеб", "deliver", worker));
-            if (quest.status() == ResidentQuest.Status.OFFERED || quest.status() == ResidentQuest.Status.ACCEPTED)
-                player.sendSystemMessage(action("Отказаться от поручения", "abandon", worker));
-            if (quest.status() == ResidentQuest.Status.COMPLETED)
-                player.sendSystemMessage(Component.literal("§aПоручение выполнено."));
-        }
-        player.sendSystemMessage(Component.literal("§8Вы можете продолжать играть от первого лица или управлять жителями через RTS."));
+        ResidentQuest currentQuest = quest(person);
+        String questText = currentQuest == null
+                ? (person.props.containsKey(QUEST_KEY) ? "Повреждённая запись · сохранена для восстановления" : "Нет активного поручения")
+                : currentQuest.status().name() + " · " + currentQuest.objective()
+                    + " · " + currentQuest.progress() + "/" + currentQuest.required();
+        String profession = colony.s.defs.professionName(data.profession);
+        String status = data.status == null || data.status.isBlank() ? "Повседневная жизнь" : data.status;
+        int age = Math.max(0, PeopleMod.YEAR - person.birthYear);
+        net.minecraftforge.network.NetworkHooks.openScreen(player,
+                new net.minecraft.world.SimpleMenuProvider((windowId, inventory, viewer) ->
+                        new ResidentDialogueMenu(windowId, inventory, person.id, person.name, profession,
+                                status, family(person), relationship(person, player), questText, age),
+                        Component.literal("Диалог · " + person.name)),
+                buffer -> {
+                    buffer.writeUtf(person.id, 128);
+                    buffer.writeUtf(person.name, 128);
+                    buffer.writeUtf(profession, 128);
+                    buffer.writeUtf(status, 256);
+                    buffer.writeUtf(family(person), 512);
+                    buffer.writeUtf(relationship(person, player), 128);
+                    buffer.writeUtf(questText, 512);
+                    buffer.writeVarInt(age);
+                });
     }
 
     private static String greeting(Character person, Worker worker, Colony colony) {
@@ -138,7 +134,7 @@ public final class ResidentInteraction {
         }
         boolean ruler = WorkerControlAccess.mayControl(player, colony);
         switch (action) {
-            case "open" -> open(player, worker);
+            case "open" -> { }
             case "talk" -> player.sendSystemMessage(Component.literal("§f" + greeting(person, data, colony)
                     + " §7(Отношение: " + relationship(person, player) + ")"));
             case "status" -> {
@@ -163,6 +159,8 @@ public final class ResidentInteraction {
                 data.manualFollow = true;
                 data.manualFollowOwner = player.getUUID().toString();
                 data.manualOrder = false;
+                data.assignedProfession = "";
+                data.lifeAction = "";
                 data.building = 0;
                 data.orderQueue.clear();
                 data.status = "следует за правителем";
@@ -222,6 +220,7 @@ public final class ResidentInteraction {
                 return 0;
             }
         }
+        open(player, worker);
         return 1;
     }
 
