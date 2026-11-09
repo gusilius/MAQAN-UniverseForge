@@ -52,7 +52,12 @@ public final class CameraRig {
         pitch = Math.max(MIN_PITCH, Math.min(MAX_PITCH, pitch + dPitch));
     }
 
-    public void zoomBy(double steps) { zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom * Math.pow(0.88, steps))); }
+    public void setZoom(double distance) {
+        if (!Double.isFinite(distance)) return;
+        zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, distance));
+    }
+
+    public void zoomBy(double steps) { setZoom(zoom * Math.pow(0.88, steps)); }
 
     public void focusOn(double x, double z) { fx = x; fz = z; }
 
