@@ -1410,7 +1410,7 @@ public final class Settlement {
         for (Object o : (List<Object>) root.get("workers")) {
             Map<String, Object> m = (Map<String, Object>) o;
             Worker w = new Worker(((Number) m.get("id")).intValue(), (String) m.get("name"));
-            w.profession = (String) m.get("profession");
+            w.profession = m.get("profession") instanceof String profession && !profession.isBlank() ? profession : "laborer";
             w.assignedProfession = m.get("assigned_profession") instanceof String ap ? ap : "";
             w.person = (String) m.get("person"); w.building = ((Number) m.get("building")).intValue(); w.status = (String) m.get("status");
             if (m.get("x") instanceof Number nx) w.x = nx.doubleValue();
