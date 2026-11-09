@@ -95,9 +95,10 @@ public final class ResidentInteraction {
         String skillText = skills.isEmpty() ? "навыки не развиты" : skills.entrySet().stream()
                 .sorted(Map.Entry.<String,Integer>comparingByValue().reversed())
                 .limit(4).map(e -> e.getKey() + " " + e.getValue()).collect(java.util.stream.Collectors.joining(", "));
-        return family(person) + " · " + ("f".equalsIgnoreCase(person.gender) ? "женщина" : "мужчина")
+        String profile = family(person) + " · " + ("f".equalsIgnoreCase(person.gender) ? "женщина" : "мужчина")
                 + " · культура: " + (person.culture == null || person.culture.isBlank() ? "не указана" : person.culture)
                 + " · черты: " + traits + " · навыки: " + skillText;
+        return profile.length() > 500 ? profile.substring(0, 497) + "..." : profile;
     }
 
     private static String greeting(Character person, Worker worker, Colony colony) {
