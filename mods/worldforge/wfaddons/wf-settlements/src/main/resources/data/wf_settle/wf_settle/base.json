@@ -6,11 +6,52 @@
     "food": "Еда",
     "iron": "Железо",
     "tools": "Инструменты",
-    "cloth": "Ткань"
+    "cloth": "Ткань",
+    "grain": "Зерно",
+    "flour": "Мука",
+    "meat": "Мясо",
+    "fish": "Рыба",
+    "milk": "Молоко",
+    "eggs": "Яйца",
+    "wool": "Шерсть",
+    "leather": "Кожа",
+    "rawhide": "Сыромять",
+    "textiles": "Ткань",
+    "thread": "Нить",
+    "honey": "Мёд",
+    "fruit": "Фрукты",
+    "clay": "Глина",
+    "sand": "Песок",
+    "gravel": "Гравий",
+    "silicon": "Кремний",
+    "salt": "Соль",
+    "ore": "Руда",
+    "gold": "Золото",
+    "silver_ore": "Серебряная руда",
+    "copper": "Медь",
+    "processed_stone": "Обработанный камень",
+    "pottery": "Керамика",
+    "glass": "Стекло",
+    "steel": "Сталь",
+    "bronze": "Бронза",
+    "brass": "Латунь",
+    "weapons": "Оружие",
+    "armor": "Броня",
+    "jewelry": "Украшения",
+    "tools_advanced": "Сложные инструменты",
+    "bread": "Хлеб",
+    "ale": "Эль",
+    "medicine": "Лекарства",
+    "potions": "Зелья",
+    "magic_items": "Магические предметы",
+    "coins": "Монеты",
+    "ships": "Корабли",
+    "timber": "Пиломатериалы",
+    "charcoal": "Древесный уголь"
   },
   "professions": {
     "lumberjack": {
-      "name": "Дровосек"
+      "name": "Лесоруб"
     },
     "porter": {
       "name": "Носильщик"
@@ -22,7 +63,7 @@
       "name": "Земледелец"
     },
     "miner": {
-      "name": "Каменотёс"
+      "name": "Шахтёр"
     },
     "smith": {
       "name": "Кузнец"
@@ -32,6 +73,117 @@
     },
     "trainer": {
       "name": "Военный инструктор"
+    },
+    "laborer": {
+      "name": "Разнорабочий"
+    },
+    "builder": {
+      "name": "Строитель"
+    },
+    "stonemason": {
+      "name": "Каменотёс"
+    },
+    "rancher": {
+      "name": "Скотовод"
+    },
+    "shepherd": {
+      "name": "Овцевод"
+    },
+    "butcher": {
+      "name": "Мясник"
+    },
+    "hunter": {
+      "name": "Охотник"
+    },
+    "beekeeper": {
+      "name": "Пасечник"
+    },
+    "gardener": {
+      "name": "Садовод"
+    },
+    "fisher": {
+      "name": "Рыбак"
+    },
+    "miller": {
+      "name": "Мельник"
+    },
+    "baker": {
+      "name": "Пекарь"
+    },
+    "tanner": {
+      "name": "Кожевник"
+    },
+    "weaver": {
+      "name": "Ткач"
+    },
+    "jeweler": {
+      "name": "Ювелир"
+    },
+    "armorer": {
+      "name": "Бронник"
+    },
+    "weaponsmith": {
+      "name": "Оружейник"
+    },
+    "alchemist": {
+      "name": "Алхимик"
+    },
+    "herbalist": {
+      "name": "Травник"
+    },
+    "mage": {
+      "name": "Чародей"
+    },
+    "priest": {
+      "name": "Священнослужитель"
+    },
+    "merchant": {
+      "name": "Торговец"
+    },
+    "innkeeper": {
+      "name": "Трактирщик"
+    },
+    "healer": {
+      "name": "Лекарь"
+    },
+    "sailor": {
+      "name": "Моряк"
+    },
+    "shipwright": {
+      "name": "Корабел"
+    },
+    "potter": {
+      "name": "Гончар"
+    },
+    "mint_worker": {
+      "name": "Чеканщик"
+    },
+    "foundryman": {
+      "name": "Литейщик"
+    },
+    "metallurgist": {
+      "name": "Металлург"
+    },
+    "siege_engineer": {
+      "name": "Осадный инженер"
+    },
+    "stablehand": {
+      "name": "Конюх"
+    },
+    "administrator": {
+      "name": "Управляющий"
+    },
+    "scribe": {
+      "name": "Писарь"
+    },
+    "fisherman": {
+      "name": "Рыбак"
+    },
+    "forester": {
+      "name": "Лесничий"
+    },
+    "militia": {
+      "name": "Ополченец"
     }
   },
   "buildings": {
@@ -259,6 +411,1659 @@
         "smith": 1
       },
       "upkeep": 2
+    },
+    "village_hall": {
+      "name": "Деревенское поселение",
+      "category": "civic",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "administrator": 2
+      },
+      "description": "Общий центр сельского поселения",
+      "effects": {}
+    },
+    "village_house": {
+      "name": "Жилой дом",
+      "category": "housing",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {},
+      "description": "Жильё семьи и бытовая жизнь жителей",
+      "effects": {
+        "housing": 1
+      },
+      "requires": [
+        "village_hall"
+      ]
+    },
+    "village_granary": {
+      "name": "Деревенский амбар",
+      "category": "storage",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "porter": 2
+      },
+      "description": "Центральное хранение урожая и продукции добывающих построек",
+      "effects": {
+        "storage_hub": 1
+      },
+      "requires": [
+        "village_hall"
+      ]
+    },
+    "farm_district": {
+      "name": "Сельский район — земледелие",
+      "category": "food",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "farmer": 2
+      },
+      "description": "Поля, мельница, выращивание культур и обеспечение поселения продовольствием",
+      "effects": {
+        "prosperity": 1
+      },
+      "requires": [
+        "village_hall"
+      ],
+      "recipe": {
+        "in": {},
+        "out": {
+          "grain": 3,
+          "food": 2
+        },
+        "cycle": 20
+      }
+    },
+    "livestock_district": {
+      "name": "Сельский район — животноводство",
+      "category": "food",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "rancher": 2
+      },
+      "description": "Содержание и разведение сельскохозяйственных животных",
+      "effects": {
+        "livestock": 1
+      },
+      "requires": [
+        "village_hall"
+      ],
+      "recipe": {
+        "in": {},
+        "out": {
+          "meat": 2,
+          "milk": 1,
+          "leather": 1
+        },
+        "cycle": 20
+      }
+    },
+    "apiary_orchard": {
+      "name": "Пасека и фруктовые сады",
+      "category": "food",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "beekeeper": 2
+      },
+      "description": "Пасека, цветники, фруктовые деревья и садоводство",
+      "effects": {
+        "food_diversity": 1
+      },
+      "requires": [
+        "village_hall"
+      ],
+      "recipe": {
+        "in": {},
+        "out": {
+          "honey": 1,
+          "fruit": 2
+        },
+        "cycle": 20
+      }
+    },
+    "hunting_lodge": {
+      "name": "Охотничий район",
+      "category": "food",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "hunter": 2
+      },
+      "description": "Охотничьи угодья, разделка добычи и снабжение шкурами",
+      "effects": {
+        "hunting": 1
+      },
+      "requires": [
+        "village_hall"
+      ],
+      "recipe": {
+        "in": {},
+        "out": {
+          "meat": 2,
+          "leather": 1
+        },
+        "cycle": 20
+      }
+    },
+    "mining_district": {
+      "name": "Шахтёрский район",
+      "category": "industry",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "miner": 2
+      },
+      "description": "Разработка месторождений, штолен и подземных выработок",
+      "effects": {
+        "mining": 1
+      },
+      "requires": [
+        "village_hall"
+      ],
+      "recipe": {
+        "in": {},
+        "out": {
+          "ore": 2,
+          "stone": 1
+        },
+        "cycle": 20
+      }
+    },
+    "fishing_district": {
+      "name": "Рыбацкий район",
+      "category": "food",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "fisher": 2
+      },
+      "description": "Промысел на реке, озере или море",
+      "effects": {
+        "fishing": 1
+      },
+      "requires": [
+        "village_hall"
+      ],
+      "recipe": {
+        "in": {},
+        "out": {
+          "fish": 3
+        },
+        "cycle": 20
+      }
+    },
+    "feudal_castle": {
+      "name": "Замок феодала",
+      "category": "civic",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "administrator": 2
+      },
+      "description": "Резиденция правителя, двор, оружейная, залы и стратегическая оборона",
+      "effects": {
+        "domain_governance": 1,
+        "politics": 1,
+        "fortification": 1
+      }
+    },
+    "blacksmith_shop": {
+      "name": "Малая кузница",
+      "category": "industry",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "smith": 2
+      },
+      "description": "Базовая обработка металла, инструменты, щиты и защитное снаряжение",
+      "effects": {
+        "crafting_tier": "uncommon"
+      },
+      "requires": [
+        "village_hall"
+      ],
+      "recipe": {
+        "in": {
+          "ore": 1
+        },
+        "out": {
+          "tools": 1,
+          "steel": 1
+        },
+        "cycle": 20
+      }
+    },
+    "jewelry_workshop": {
+      "name": "Ювелирная мастерская",
+      "category": "industry",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "jeweler": 2
+      },
+      "description": "Изготовление украшений и ювелирных изделий",
+      "effects": {
+        "crafting_tier": "uncommon"
+      },
+      "requires": [
+        "village_hall"
+      ],
+      "recipe": {
+        "in": {
+          "gold": 1
+        },
+        "out": {
+          "jewelry": 1
+        },
+        "cycle": 20
+      }
+    },
+    "armor_workshop": {
+      "name": "Бронная мастерская",
+      "category": "industry",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "armorer": 2
+      },
+      "description": "Изготовление средней и тяжёлой брони",
+      "effects": {
+        "crafting_tier": "uncommon"
+      },
+      "requires": [
+        "village_hall"
+      ],
+      "recipe": {
+        "in": {
+          "steel": 1
+        },
+        "out": {
+          "armor": 1
+        },
+        "cycle": 20
+      }
+    },
+    "weapon_workshop": {
+      "name": "Оружейная мастерская",
+      "category": "industry",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "weaponsmith": 2
+      },
+      "description": "Изготовление холодного и стрелкового оружия",
+      "effects": {
+        "crafting_tier": "uncommon"
+      },
+      "requires": [
+        "village_hall"
+      ],
+      "recipe": {
+        "in": {
+          "steel": 1
+        },
+        "out": {
+          "weapons": 1
+        },
+        "cycle": 20
+      }
+    },
+    "weaving_workshop": {
+      "name": "Ткацкая мастерская",
+      "category": "industry",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "weaver": 2
+      },
+      "description": "Ткань, нити, сумки и тканевое снаряжение",
+      "effects": {
+        "crafting_tier": "uncommon"
+      },
+      "requires": [
+        "village_hall"
+      ],
+      "recipe": {
+        "in": {
+          "wool": 1
+        },
+        "out": {
+          "textiles": 2,
+          "thread": 2
+        },
+        "cycle": 20
+      }
+    },
+    "mage_tower": {
+      "name": "Башня чародея",
+      "category": "civic",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "mage": 2
+      },
+      "description": "Магические исследования, библиотека, алтарь и создание магических предметов",
+      "effects": {
+        "magic": 1
+      },
+      "requires": [
+        "village_hall"
+      ],
+      "recipe": {
+        "in": {},
+        "out": {
+          "magic_items": 1
+        },
+        "cycle": 20
+      }
+    },
+    "herbalist_hut": {
+      "name": "Хижина травника",
+      "category": "food",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "herbalist": 2
+      },
+      "description": "Сбор и обработка трав, простые лечебные средства и зелья",
+      "effects": {
+        "alchemy": 1
+      },
+      "requires": [
+        "village_hall"
+      ],
+      "recipe": {
+        "in": {
+          "fruit": 1
+        },
+        "out": {
+          "medicine": 1,
+          "potions": 1
+        },
+        "cycle": 20
+      }
+    },
+    "inn": {
+      "name": "Трактир",
+      "category": "trade",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "innkeeper": 2
+      },
+      "description": "Общественное место, питание, ночлег и встречи жителей",
+      "effects": {
+        "social_hub": 1
+      },
+      "requires": [
+        "village_hall"
+      ]
+    },
+    "food_market": {
+      "name": "Продовольственный рынок",
+      "category": "trade",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "merchant": 2
+      },
+      "description": "Торговая площадь для обмена продовольствием и товарами",
+      "effects": {
+        "market": 1
+      },
+      "requires": [
+        "village_hall",
+        "inn"
+      ]
+    },
+    "monastery": {
+      "name": "Монастырь",
+      "category": "civic",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "priest": 2
+      },
+      "description": "Религиозная община, служения, молитвы и духовная поддержка",
+      "effects": {
+        "religion": 1,
+        "stability": 1
+      }
+    },
+    "militia_camp": {
+      "name": "Лагерь ополчения",
+      "category": "military",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "guard": 2
+      },
+      "description": "Сбор, размещение и подготовка ополчения",
+      "effects": {
+        "militia": 1
+      },
+      "requires": [
+        "village_hall"
+      ]
+    },
+    "village_stable": {
+      "name": "Конюшня",
+      "category": "military",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "stablehand": 2
+      },
+      "description": "Содержание, уход и подготовка верховых и тягловых лошадей",
+      "effects": {
+        "mounted_units": 1
+      },
+      "requires": [
+        "village_hall"
+      ]
+    },
+    "village_port": {
+      "name": "Деревенский порт",
+      "category": "industry",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "shipwright": 2
+      },
+      "description": "Причалы, склад, верфь и строительство малых кораблей",
+      "effects": {
+        "shipbuilding": 1
+      },
+      "requires": [
+        "village_hall"
+      ],
+      "recipe": {
+        "in": {
+          "wood": 2
+        },
+        "out": {
+          "ships": 1
+        },
+        "cycle": 20
+      }
+    },
+    "sand_quarry": {
+      "name": "Карьер",
+      "category": "industry",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "miner": 2
+      },
+      "description": "Добыча сыпучих материалов и глины",
+      "effects": {
+        "extraction": 1
+      },
+      "requires": [
+        "village_hall"
+      ],
+      "recipe": {
+        "in": {},
+        "out": {
+          "sand": 2,
+          "gravel": 2,
+          "clay": 1,
+          "silicon": 1
+        },
+        "cycle": 20
+      }
+    },
+    "stone_quarry": {
+      "name": "Каменоломня",
+      "category": "industry",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "stonemason": 2
+      },
+      "description": "Добыча и первичная сортировка каменных материалов",
+      "effects": {
+        "extraction": 1
+      },
+      "requires": [
+        "village_hall"
+      ],
+      "recipe": {
+        "in": {},
+        "out": {
+          "stone": 3
+        },
+        "cycle": 20
+      }
+    },
+    "saltworks": {
+      "name": "Солеварня",
+      "category": "industry",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "laborer": 2
+      },
+      "description": "Выпаривание морской воды и получение соли",
+      "effects": {
+        "extraction": 1
+      },
+      "requires": [
+        "village_hall"
+      ],
+      "recipe": {
+        "in": {},
+        "out": {
+          "salt": 2
+        },
+        "cycle": 20
+      }
+    },
+    "lumber_mill": {
+      "name": "Лесопилка",
+      "category": "industry",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "lumberjack": 2
+      },
+      "description": "Заготовка древесины и распиловка лесоматериалов",
+      "effects": {
+        "extraction": 1
+      },
+      "requires": [
+        "village_hall"
+      ],
+      "recipe": {
+        "in": {},
+        "out": {
+          "timber": 3,
+          "wood": 2
+        },
+        "cycle": 20
+      }
+    },
+    "pottery_workshop": {
+      "name": "Гончарная мастерская",
+      "category": "industry",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "potter": 2
+      },
+      "description": "Обжиг керамики, посуды и производство стекла",
+      "effects": {
+        "manufacturing": 1
+      },
+      "requires": [
+        "sand_quarry"
+      ],
+      "recipe": {
+        "in": {
+          "clay": 1,
+          "sand": 1
+        },
+        "out": {
+          "pottery": 2,
+          "glass": 1
+        },
+        "cycle": 20
+      }
+    },
+    "stonemason_workshop": {
+      "name": "Мастерская камнетёсов",
+      "category": "industry",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "stonemason": 2
+      },
+      "description": "Резка и обработка строительного камня",
+      "effects": {
+        "manufacturing": 1
+      },
+      "requires": [
+        "stone_quarry"
+      ],
+      "recipe": {
+        "in": {
+          "stone": 2
+        },
+        "out": {
+          "processed_stone": 2
+        },
+        "cycle": 20
+      }
+    },
+    "tannery": {
+      "name": "Кожевенная мастерская",
+      "category": "industry",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "tanner": 2
+      },
+      "description": "Выделка шкур и производство кожи",
+      "effects": {
+        "manufacturing": 1
+      },
+      "requires": [
+        "livestock_district"
+      ],
+      "recipe": {
+        "in": {
+          "meat": 1
+        },
+        "out": {
+          "rawhide": 2,
+          "leather": 2
+        },
+        "cycle": 20
+      }
+    },
+    "textile_workshop": {
+      "name": "Текстильная мастерская",
+      "category": "industry",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "weaver": 2
+      },
+      "description": "Производство тканей, нитей и обработанной кожи",
+      "effects": {
+        "manufacturing": 1
+      },
+      "requires": [
+        "weaving_workshop"
+      ],
+      "recipe": {
+        "in": {
+          "wool": 1
+        },
+        "out": {
+          "textiles": 2,
+          "thread": 2
+        },
+        "cycle": 20
+      }
+    },
+    "bakery": {
+      "name": "Пекарня",
+      "category": "food",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "baker": 2
+      },
+      "description": "Выпечка хлеба и приготовление теста",
+      "effects": {
+        "food_processing": 1
+      },
+      "requires": [
+        "farm_district"
+      ],
+      "recipe": {
+        "in": {
+          "flour": 2
+        },
+        "out": {
+          "bread": 3
+        },
+        "cycle": 20
+      }
+    },
+    "mint_workshop": {
+      "name": "Мастерская чеканщиков",
+      "category": "industry",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "mint_worker": 2
+      },
+      "description": "Чеканка монет из добытых драгоценных и цветных металлов",
+      "effects": {
+        "minting": 1
+      },
+      "requires": [
+        "mining_district"
+      ],
+      "recipe": {
+        "in": {
+          "gold": 1
+        },
+        "out": {
+          "coins": 3
+        },
+        "cycle": 20
+      }
+    },
+    "urban_residential_district": {
+      "name": "Городской жилой район",
+      "category": "housing",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {},
+      "description": "Жилые кварталы, дома и уличная сеть",
+      "effects": {
+        "housing": 1
+      }
+    },
+    "city_storehouse": {
+      "name": "Городской склад",
+      "category": "storage",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "porter": 2
+      },
+      "description": "Городской централизованный склад и точка приёма добычи",
+      "effects": {
+        "storage_hub": 1
+      },
+      "requires": [
+        "feudal_castle"
+      ]
+    },
+    "town_hall": {
+      "name": "Городская ратуша",
+      "category": "civic",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "administrator": 2
+      },
+      "description": "Муниципальное управление, приём граждан и городские службы",
+      "effects": {
+        "administration": 1
+      },
+      "requires": [
+        "urban_residential_district"
+      ]
+    },
+    "city_forge": {
+      "name": "Городская кузница",
+      "category": "industry",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "smith": 2
+      },
+      "description": "Развитая кузнечная мастерская редкого качества",
+      "effects": {
+        "crafting_tier": "rare"
+      },
+      "requires": [
+        "urban_residential_district"
+      ],
+      "recipe": {
+        "in": {
+          "ore": 1
+        },
+        "out": {
+          "tools_advanced": 1,
+          "steel": 1
+        },
+        "cycle": 20
+      }
+    },
+    "city_jeweler": {
+      "name": "Городская ювелирная мастерская",
+      "category": "industry",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "jeweler": 2
+      },
+      "description": "Ювелирное производство редкого качества",
+      "effects": {
+        "crafting_tier": "rare"
+      },
+      "requires": [
+        "urban_residential_district"
+      ],
+      "recipe": {
+        "in": {
+          "gold": 1
+        },
+        "out": {
+          "jewelry": 2
+        },
+        "cycle": 20
+      }
+    },
+    "city_armory": {
+      "name": "Городская бронная",
+      "category": "industry",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "armorer": 2
+      },
+      "description": "Производство брони редкого качества",
+      "effects": {
+        "crafting_tier": "rare"
+      },
+      "requires": [
+        "urban_residential_district"
+      ],
+      "recipe": {
+        "in": {
+          "steel": 1
+        },
+        "out": {
+          "armor": 2
+        },
+        "cycle": 20
+      }
+    },
+    "city_armory_weapons": {
+      "name": "Городская оружейная",
+      "category": "industry",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "weaponsmith": 2
+      },
+      "description": "Производство оружия редкого качества",
+      "effects": {
+        "crafting_tier": "rare"
+      },
+      "requires": [
+        "urban_residential_district"
+      ],
+      "recipe": {
+        "in": {
+          "steel": 1
+        },
+        "out": {
+          "weapons": 2
+        },
+        "cycle": 20
+      }
+    },
+    "mage_guild": {
+      "name": "Гильдия магов",
+      "category": "civic",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "mage": 2
+      },
+      "description": "Гильдия, библиотека, хранилище знаний и магические исследования",
+      "effects": {
+        "crafting_tier": "rare"
+      },
+      "requires": [
+        "urban_residential_district"
+      ],
+      "recipe": {
+        "in": {},
+        "out": {
+          "magic_items": 2
+        },
+        "cycle": 20
+      }
+    },
+    "city_weaving": {
+      "name": "Городская ткацкая",
+      "category": "industry",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "weaver": 2
+      },
+      "description": "Городское текстильное производство",
+      "effects": {
+        "crafting_tier": "rare"
+      },
+      "requires": [
+        "urban_residential_district"
+      ],
+      "recipe": {
+        "in": {
+          "wool": 1
+        },
+        "out": {
+          "textiles": 3,
+          "thread": 2
+        },
+        "cycle": 20
+      }
+    },
+    "alchemy_lab": {
+      "name": "Алхимическая лаборатория",
+      "category": "industry",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "alchemist": 2
+      },
+      "description": "Лабораторная алхимия и сложные зелья",
+      "effects": {
+        "alchemy": 1
+      },
+      "requires": [
+        "urban_residential_district"
+      ],
+      "recipe": {
+        "in": {
+          "fruit": 1
+        },
+        "out": {
+          "potions": 2,
+          "medicine": 1
+        },
+        "cycle": 20
+      }
+    },
+    "siege_workshop_advanced": {
+      "name": "Осадная мастерская",
+      "category": "military",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "siege_engineer": 2
+      },
+      "description": "Проектирование и изготовление осадных орудий",
+      "effects": {
+        "siege_engineering": 1
+      },
+      "requires": [
+        "city_forge"
+      ],
+      "recipe": {
+        "in": {
+          "steel": 2,
+          "wood": 2
+        },
+        "out": {
+          "weapons": 1
+        },
+        "cycle": 20
+      }
+    },
+    "smithing_guild": {
+      "name": "Кузнечный цех",
+      "category": "industry",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "smith": 2
+      },
+      "description": "Гильдейская кузница и производство эпического качества",
+      "effects": {
+        "crafting_tier": "epic"
+      },
+      "requires": [
+        "city_forge"
+      ],
+      "recipe": {
+        "in": {
+          "ore": 2
+        },
+        "out": {
+          "steel": 3,
+          "tools_advanced": 2
+        },
+        "cycle": 20
+      }
+    },
+    "jewelry_guild": {
+      "name": "Ювелирный цех",
+      "category": "industry",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "jeweler": 2
+      },
+      "description": "Гильдейское ювелирное производство эпического качества",
+      "effects": {
+        "crafting_tier": "epic"
+      },
+      "requires": [
+        "city_jeweler"
+      ],
+      "recipe": {
+        "in": {
+          "gold": 2
+        },
+        "out": {
+          "jewelry": 3
+        },
+        "cycle": 20
+      }
+    },
+    "armor_guild": {
+      "name": "Бронный цех",
+      "category": "industry",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "armorer": 2
+      },
+      "description": "Гильдейское производство эпической брони",
+      "effects": {
+        "crafting_tier": "epic"
+      },
+      "requires": [
+        "city_armory"
+      ],
+      "recipe": {
+        "in": {
+          "steel": 2
+        },
+        "out": {
+          "armor": 3
+        },
+        "cycle": 20
+      }
+    },
+    "weapons_guild": {
+      "name": "Оружейный цех",
+      "category": "industry",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "weaponsmith": 2
+      },
+      "description": "Гильдейское производство эпического оружия",
+      "effects": {
+        "crafting_tier": "epic"
+      },
+      "requires": [
+        "city_armory_weapons"
+      ],
+      "recipe": {
+        "in": {
+          "steel": 2
+        },
+        "out": {
+          "weapons": 3
+        },
+        "cycle": 20
+      }
+    },
+    "enchanters_guild": {
+      "name": "Чародейский цех",
+      "category": "civic",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "mage": 2
+      },
+      "description": "Магическая практика и создание эпических посохов",
+      "effects": {
+        "crafting_tier": "epic"
+      },
+      "requires": [
+        "mage_guild"
+      ],
+      "recipe": {
+        "in": {},
+        "out": {
+          "magic_items": 3
+        },
+        "cycle": 20
+      }
+    },
+    "weavers_guild": {
+      "name": "Ткацкий цех",
+      "category": "industry",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "weaver": 2
+      },
+      "description": "Производство зачарованных тканей и эпического снаряжения",
+      "effects": {
+        "crafting_tier": "epic"
+      },
+      "requires": [
+        "city_weaving"
+      ],
+      "recipe": {
+        "in": {
+          "wool": 2
+        },
+        "out": {
+          "textiles": 3,
+          "thread": 3
+        },
+        "cycle": 20
+      }
+    },
+    "city_tavern": {
+      "name": "Таверна",
+      "category": "trade",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "innkeeper": 2
+      },
+      "description": "Городская таверна, сцена, бар и ночлег",
+      "effects": {
+        "social_hub": 1
+      },
+      "requires": [
+        "urban_residential_district"
+      ]
+    },
+    "hospital": {
+      "name": "Госпиталь",
+      "category": "civic",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "healer": 2
+      },
+      "description": "Лечение, уход за ранеными, палаты и хирургическая помощь",
+      "effects": {
+        "healthcare": 1
+      },
+      "requires": [
+        "urban_residential_district"
+      ],
+      "recipe": {
+        "in": {},
+        "out": {
+          "medicine": 1
+        },
+        "cycle": 20
+      }
+    },
+    "city_market": {
+      "name": "Городской рынок",
+      "category": "trade",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "merchant": 2
+      },
+      "description": "Крупная торговая площадь и торговая гильдия",
+      "effects": {
+        "market": 1
+      },
+      "requires": [
+        "urban_residential_district"
+      ]
+    },
+    "cathedral": {
+      "name": "Собор",
+      "category": "civic",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "priest": 2
+      },
+      "description": "Главный религиозный центр города",
+      "effects": {
+        "religion": 1,
+        "stability": 1
+      },
+      "requires": [
+        "urban_residential_district"
+      ]
+    },
+    "barracks": {
+      "name": "Казармы",
+      "category": "military",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "guard": 2
+      },
+      "description": "Размещение, снабжение и обучение постоянных войск",
+      "effects": {
+        "military": 1
+      },
+      "requires": [
+        "urban_residential_district"
+      ]
+    },
+    "city_walls": {
+      "name": "Городские стены",
+      "category": "military",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "builder": 2
+      },
+      "description": "Оборонительный периметр, башни, ворота и укрепления",
+      "effects": {
+        "fortification": 1
+      },
+      "requires": [
+        "urban_residential_district"
+      ]
+    },
+    "mercenary_guild": {
+      "name": "Гильдия наёмников",
+      "category": "military",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "guard": 2
+      },
+      "description": "Контракты, набор и снабжение наёмных отрядов",
+      "effects": {
+        "mercenaries": 1
+      },
+      "requires": [
+        "urban_residential_district"
+      ]
+    },
+    "seaport": {
+      "name": "Порт",
+      "category": "industry",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "sailor": 2
+      },
+      "description": "Портовая администрация, причалы, склад и снабжение флота",
+      "effects": {
+        "naval_hub": 1
+      },
+      "requires": [
+        "urban_residential_district"
+      ]
+    },
+    "shipyard": {
+      "name": "Верфь",
+      "category": "industry",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "shipwright": 2
+      },
+      "description": "Строительство и ремонт кораблей всех классов",
+      "effects": {
+        "shipbuilding": 1
+      },
+      "requires": [
+        "seaport"
+      ],
+      "recipe": {
+        "in": {
+          "wood": 3,
+          "steel": 1
+        },
+        "out": {
+          "ships": 2
+        },
+        "cycle": 20
+      }
+    },
+    "mining_settlement": {
+      "name": "Шахтёрский посёлок",
+      "category": "industry",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "miner": 2
+      },
+      "description": "Автономное поселение при месторождении и горнодобывающая инфраструктура",
+      "effects": {
+        "mining": 1
+      },
+      "requires": [
+        "village_hall"
+      ],
+      "recipe": {
+        "in": {},
+        "out": {
+          "ore": 3,
+          "stone": 1
+        },
+        "cycle": 20
+      }
+    },
+    "farm_stall": {
+      "name": "Фермерская лавка",
+      "category": "trade",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "merchant": 2
+      },
+      "description": "Продажа урожая, мяса, молока и иных продуктов сельского хозяйства",
+      "effects": {
+        "food_trade": 1
+      },
+      "requires": [
+        "farm_district",
+        "city_market"
+      ]
+    },
+    "rural_fishing_settlement": {
+      "name": "Рыбацкий посёлок",
+      "category": "food",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "fisher": 2
+      },
+      "description": "Рыбацкое поселение с пристанями и промысловыми лодками",
+      "effects": {
+        "fishing": 1
+      },
+      "requires": [
+        "village_hall"
+      ],
+      "recipe": {
+        "in": {},
+        "out": {
+          "fish": 3
+        },
+        "cycle": 20
+      }
+    },
+    "mint": {
+      "name": "Монетный двор",
+      "category": "industry",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "mint_worker": 2
+      },
+      "description": "Государственная чеканка монеты, казна и монетное производство",
+      "effects": {
+        "minting": 1
+      },
+      "requires": [
+        "mining_settlement"
+      ],
+      "recipe": {
+        "in": {
+          "gold": 2
+        },
+        "out": {
+          "coins": 5
+        },
+        "cycle": 20
+      }
+    },
+    "foundry": {
+      "name": "Литейный цех",
+      "category": "industry",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "foundryman": 2
+      },
+      "description": "Плавка сплавов и литьё металлических заготовок",
+      "effects": {
+        "metallurgy": 1
+      },
+      "requires": [
+        "city_forge"
+      ],
+      "recipe": {
+        "in": {
+          "ore": 2
+        },
+        "out": {
+          "steel": 2,
+          "brass": 1,
+          "bronze": 1
+        },
+        "cycle": 20
+      }
+    },
+    "metallurgy_shop": {
+      "name": "Металлургический цех",
+      "category": "industry",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "metallurgist": 2
+      },
+      "description": "Термообработка, пластины, инструменты и ремонтные комплекты",
+      "effects": {
+        "metallurgy": 1
+      },
+      "requires": [
+        "city_forge"
+      ],
+      "recipe": {
+        "in": {
+          "iron": 2
+        },
+        "out": {
+          "steel": 2,
+          "tools_advanced": 1
+        },
+        "cycle": 20
+      }
+    },
+    "textile_factory": {
+      "name": "Текстильный цех",
+      "category": "industry",
+      "work": 45,
+      "size": [
+        5,
+        5
+      ],
+      "jobs": {
+        "weaver": 2
+      },
+      "description": "Промышленная обработка кожи и текстиля",
+      "effects": {
+        "manufacturing": 1
+      },
+      "requires": [
+        "city_weaving"
+      ],
+      "recipe": {
+        "in": {
+          "wool": 2
+        },
+        "out": {
+          "textiles": 3,
+          "leather": 2
+        },
+        "cycle": 20
+      }
     }
   }
 }
