@@ -347,11 +347,14 @@ public final class ResidentInteraction {
     }
 
     private static String family(Character person) {
-        int members = person.children.size()
-                + (person.spouse == null || person.spouse.isBlank() ? 0 : 1)
-                + (person.father == null || person.father.isBlank() ? 0 : 1)
-                + (person.mother == null || person.mother.isBlank() ? 0 : 1);
-        return members == 0 ? "не указана" : members + " близких связей";
+        List<String> links = new java.util.ArrayList<>();
+        if (person.spouse != null && !person.spouse.isBlank()) links.add("супруг: " + person.spouse);
+        Object dating = person.props.get("family.dating_name");
+        if (dating instanceof String name && !name.isBlank()) links.add("встречается: " + name);
+        if (person.children.size() > 0) links.add("детей: " + person.children.size());
+        if (person.father != null && !person.father.isBlank()) links.add("отец: " + person.father);
+        if (person.mother != null && !person.mother.isBlank()) links.add("мать: " + person.mother);
+        return links.isEmpty() ? "не указана" : String.join(" · ", links);
     }
 
     private static void deny(ServerPlayer player) {
