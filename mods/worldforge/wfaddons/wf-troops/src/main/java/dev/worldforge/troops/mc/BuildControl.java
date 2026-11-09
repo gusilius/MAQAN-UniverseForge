@@ -6,6 +6,7 @@ import dev.worldforge.settle.Building;
 import dev.worldforge.settle.Defs;
 import dev.worldforge.settle.Settlement;
 import dev.worldforge.settle.mc.Colony;
+import dev.worldforge.settle.mc.Blueprints;
 import dev.worldforge.settle.mc.SettleMod;
 import dev.worldforge.settle.mc.WFWorker;
 import net.minecraft.server.level.ServerPlayer;
