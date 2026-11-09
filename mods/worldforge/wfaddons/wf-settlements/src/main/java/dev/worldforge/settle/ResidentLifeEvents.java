@@ -47,13 +47,34 @@ public final class ResidentLifeEvents {
             for (int j = i + 1; j < people.size(); j++) {
                 Character second = people.get(j);
                 if (!second.alive || second.spouse != null && !second.spouse.isBlank()
-                        || PopulationSimulation.age(second, year) < 18
-                        || Objects.equals(first.gender, second.gender)
-                        || closeFamily(first, second)) continue;
+                        || PopulationSimulation.age(second, year) < 18 || closeFamily(first, second)) continue;
                 int affinity = Math.min(ResidentSocial.score(first, second.id), ResidentSocial.score(second, first.id));
-                if (affinity < 75 || Math.floorMod(Objects.hash(first.id, second.id, year, "marriage"), 4) != 0) continue;
+                String firstDating = string(first.props.get("family.dating"));
+                String secondDating = string(second.props.get("family.dating"));
+                boolean mutualDating = second.id.equals(firstDating) && first.id.equals(secondDating);
+                if (mutualDating && affinity < 20) {
+                    first.props.remove("family.dating");
+                    second.props.remove("family.dating");
+                    first.props.put("family.last_event", "separated:" + second.id);
+                    second.props.put("family.last_event", "separated:" + first.id);
+                    continue;
+                }
+                if (!firstDating.isBlank() && !firstDating.equals(second.id)
+                        || !secondDating.isBlank() && !secondDating.equals(first.id)) continue;
+                if (!mutualDating && affinity >= 50
+                        && Math.floorMod(Objects.hash(first.id, second.id, year, "dating"), 3) == 0) {
+                    first.props.put("family.dating", second.id);
+                    second.props.put("family.dating", first.id);
+                    first.props.put("family.last_event", "dating:" + second.id);
+                    second.props.put("family.last_event", "dating:" + first.id);
+                    mutualDating = true;
+                }
+                if (Objects.equals(first.gender, second.gender) || affinity < 75
+                        || Math.floorMod(Objects.hash(first.id, second.id, year, "marriage"), 4) != 0) continue;
                 try {
                     registry.marry(first.id, second.id, year);
+                    first.props.remove("family.dating");
+                    second.props.remove("family.dating");
                     first.props.put("family.last_event", "married:" + second.id);
                     second.props.put("family.last_event", "married:" + first.id);
                 } catch (RuntimeException ignored) {
@@ -70,6 +91,8 @@ public final class ResidentLifeEvents {
         return !a.father.isBlank() && (a.father.equals(b.father) || a.father.equals(b.mother))
                 || !a.mother.isBlank() && (a.mother.equals(b.father) || a.mother.equals(b.mother));
     }
+
+    private static String string(Object value) { return value instanceof String s ? s : ""; }
 
     private static int number(Object value, int fallback) {
         return value instanceof Number n ? n.intValue() : fallback;
