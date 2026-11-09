@@ -749,6 +749,8 @@ public class TroopsMod {
     private static Squads.Order parseArmyOrder(String kind, double x, double z) {
         try {
             Squads.Kind value = Squads.Kind.valueOf(kind.toUpperCase(Locale.ROOT));
+            if (value == Squads.Kind.ATTACK || value == Squads.Kind.FOLLOW || value == Squads.Kind.GUARD)
+                throw new IllegalArgumentException("Этот приказ требует явную цель; используйте RTS-приказ по выбранной цели");
             return value == Squads.Kind.STOP || value == Squads.Kind.HOLD
                     || value == Squads.Kind.RETREAT ? Squads.Order.of(value)
                     : new Squads.Order(value, x, z, "");
