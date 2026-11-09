@@ -107,7 +107,7 @@ public final class SettlementMapTest {
                 "settlement silver is held in the canonical world treasury account");
         funded.consumeResource(Defs.SILVER, 15);
         ok(funded.amount(Defs.SILVER) == 85
-                        && WorldForgeMod.treasury().journal().stream().anyMatch(e ->
+                        && TreasuryService.current().journal().stream().anyMatch(e ->
                         e.accountId().equals("settlement:treasury_settlement_test")
                                 && e.kind() == TreasuryLedger.Kind.WITHDRAWAL),
                 "settlement silver consumption is booked in the persistent financial journal");
@@ -125,7 +125,7 @@ public final class SettlementMapTest {
         ok(destinationCity.transferSilverTo(sourceCity, 45, "caravan-payment", "test-route")
                         && destinationCity.amount(Defs.SILVER) == 55 && sourceCity.amount(Defs.SILVER) == 45,
                 "caravan payment moves money between settlement treasury accounts");
-        ok(WorldForgeMod.treasury().journal().stream().filter(e -> e.reference().equals("test-route")
+        ok(TreasuryService.current().journal().stream().filter(e -> e.reference().equals("test-route")
                         && e.kind() == TreasuryLedger.Kind.TRADE).count() == 4,
                 "caravan goods and silver produce paired auditable ledger entries");
 
