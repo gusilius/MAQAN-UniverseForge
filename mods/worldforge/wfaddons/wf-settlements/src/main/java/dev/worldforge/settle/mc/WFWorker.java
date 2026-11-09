@@ -184,12 +184,17 @@ public class WFWorker extends PathfinderMob {
                     working = true;
                 } else {
                     BlockPos waypoint = workWaypoint(w, area);
-                    int tx = waypoint.getX(), tz = waypoint.getZ();
-                    int ty = w.level().hasChunkAt(new BlockPos(tx, w.getBlockY(), tz))
-                            ? w.level().getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, tx, tz)
-                            : w.getBlockY();
-                    target = new BlockPos(tx, ty, tz);
-                    wk.status = "участок проверен: подходящих блоков рядом нет";
+                    if (waypoint == null) {
+                        target = w.blockPosition();
+                        wk.status = "участок обработан";
+                    } else {
+                        int tx = waypoint.getX(), tz = waypoint.getZ();
+                        int ty = w.level().hasChunkAt(new BlockPos(tx, w.getBlockY(), tz))
+                                ? w.level().getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, tx, tz)
+                                : w.getBlockY();
+                        target = new BlockPos(tx, ty, tz);
+                        wk.status = "проверяет назначенный участок";
+                    }
                 }
             } else if (wk.manualFollow) {
                 net.minecraft.server.MinecraftServer server = w.getServer();
@@ -273,6 +278,7 @@ public class WFWorker extends PathfinderMob {
 
         /** Search a small local window, then sweep the larger selected area by persistent waypoints. */
         private static BlockPos findWorkTarget(WFWorker worker, Colony.WorkOrder order) {
+            if (order.complete) return null;
             int radius = Math.max(0, Math.min(64, order.radius));
             int scan = radius == 0 ? 0 : 8;
             int minX = Math.max(order.x - radius, worker.getBlockX() - scan);
@@ -282,7 +288,7 @@ public class WFWorker extends PathfinderMob {
             if (radius == 0) { minX = maxX = order.x; minZ = maxZ = order.z; }
             int yCenter = order.level > worker.level().getMinBuildHeight() && order.level < worker.level().getMaxBuildHeight()
                     ? order.level : worker.getBlockY();
-            int yRange = radius == 0 ? 16 : 10;
+            int yRange = radius == 0 ? 16 : "ore".equals(order.mode) ? 32 : "stone".equals(order.mode) ? 20 : 10;
             int fromY = Math.max(worker.level().getMinBuildHeight(), yCenter - yRange);
             int toY = Math.min(worker.level().getMaxBuildHeight() - 1, yCenter + yRange);
             BlockPos best = null;
