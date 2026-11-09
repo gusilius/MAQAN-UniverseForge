@@ -1,17 +1,26 @@
 package dev.worldforge.people;
 
 import dev.worldforge.mod.Json;
-
 import java.util.*;
 
-/** Profession catalog loaded from data/<namespace>/wf_professions/*.json. */
+/** Data-driven profession catalog. Accepts one definition or an array of definitions. */
 public final class ProfessionDefs {
     private final Map<String, ProfessionDef> definitions = new LinkedHashMap<>();
 
-    @SuppressWarnings("unchecked")
     public void add(String json) {
         Object raw = Json.parse(json);
-        if (!(raw instanceof Map<?, ?> map)) throw new IllegalArgumentException("Profession must be a JSON object");
+        if (raw instanceof List<?> list) {
+            for (Object item : list) {
+                if (!(item instanceof Map<?, ?> map)) throw new IllegalArgumentException("Profession catalog entries must be objects");
+                addDefinition(map);
+            }
+            return;
+        }
+        if (!(raw instanceof Map<?, ?> map)) throw new IllegalArgumentException("Profession must be a JSON object or array");
+        addDefinition(map);
+    }
+
+    private void addDefinition(Map<?, ?> map) {
         String id = required(map, "id").toLowerCase(Locale.ROOT);
         if (!id.matches("[a-z0-9_.:-]{1,64}")) throw new IllegalArgumentException("Invalid profession id: " + id);
         String name = required(map, "name");
@@ -28,7 +37,8 @@ public final class ProfessionDefs {
                 skills.put(skill, n.intValue());
             }
         }
-        definitions.put(id, new ProfessionDef(id, name, category, skills, duty));
+        if (definitions.putIfAbsent(id, new ProfessionDef(id, name, category, skills, duty)) != null)
+            throw new IllegalArgumentException("Duplicate profession id: " + id);
     }
 
     public ProfessionDef get(String id) { return id == null ? null : definitions.get(id.toLowerCase(Locale.ROOT)); }
