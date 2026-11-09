@@ -5,6 +5,7 @@ import dev.worldforge.mod.Json;
 import dev.worldforge.settle.Building;
 import dev.worldforge.settle.Defs;
 import dev.worldforge.settle.Settlement;
+import dev.worldforge.settle.Worker;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.PopulationSimulation;
