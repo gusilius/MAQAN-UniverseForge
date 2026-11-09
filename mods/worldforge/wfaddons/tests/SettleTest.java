@@ -192,10 +192,12 @@ public class SettleTest {
         Building exactCamp = exactRole.place("lumber_camp", 12, 0);
         exactRole.tick(2);
         Worker exactHauler = exactRole.workers.get(0);
-        exactRole.assign(exactHauler.id, exactCamp.uid, "hauler");
-        ok("hauler".equals(exactHauler.workRole()),
+        exactRole.setProfession(exactHauler.id, "lumberjack");
+        exactRole.assign(exactHauler.id, exactCamp.uid, "lumberjack");
+        ok("lumberjack".equals(exactHauler.workRole()),
                 "прямое поручение назначает именно выбранную роль, а не первую свободную вакансию");
         Worker wrongRole = exactRole.workers.get(1);
+        exactRole.setProfession(wrongRole.id, "lumberjack");
         ok(throwsOrder(() -> exactRole.assign(wrongRole.id, exactCamp.uid, "builder")),
                 "прямое поручение отклоняет роль, которой нет среди вакансий здания");
 
