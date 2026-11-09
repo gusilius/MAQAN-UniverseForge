@@ -83,6 +83,15 @@ public final class PopulationSimulationTest {
         ok(PopulationSimulation.skillRank(smith, "smithing") == 3 && PopulationSimulation.trainingXp(smith, "smithing") == 50,
                 "training remainder and skill rank persist in Character data");
 
+        Character generalWorker = registry.create("General", "", "", "m", 280);
+        professionDefs.add("{\"id\":\"laborer\",\"name\":\"General Worker\",\"category\":\"worker\"}");
+        PopulationSimulation.assignProfession(generalWorker, professionDefs, "laborer", 300);
+        boolean generalTrainingBlocked = false;
+        try { PopulationSimulation.train(generalWorker, "smithing", 100); }
+        catch (IllegalStateException expected) { generalTrainingBlocked = true; }
+        ok(generalTrainingBlocked && PopulationSimulation.skillRank(generalWorker, "smithing") == 0,
+                "general workers cannot gain specialist skill ranks through any training caller");
+
         professionDefs.add("{\"id\":\"armorer\",\"name\":\"Armorer\",\"category\":\"specialist\"}");
         PopulationSimulation.assignProfession(smith, professionDefs, "armorer", 302);
         ok(PopulationSimulation.profession(smith).equals("armorer"), "profession can change without replacing Character");
