@@ -53,7 +53,7 @@ public final class ResidentTaskGraphTest {
                 "missing inventory cannot be represented as a successful consumption");
         boolean rejectedCorrupt = false;
         try {
-            bounded.fromJson("{\\"format\\":\\"wf-resident-task-graph/1\\",\\"next\\":2,\\"receipts\\":[{\\"id\\":1,\\"stage\\":\\"UNKNOWN\\",\\"building\\":1,\\"worker\\":1,\\"resource\\":\\"wood\\",\\"quantity\\":1,\\"parent\\":0,\\"time\\":1}],\\"local\\":{},\\"stored\\":{}}");
+            bounded.fromJson("{\"format\":\"wf-resident-task-graph/1\",\"next\":2,\"receipts\":[{\"id\":1,\"stage\":\"UNKNOWN\",\"building\":1,\"worker\":1,\"resource\":\"wood\",\"quantity\":1,\"parent\":0,\"time\":1}],\"local\":{},\"stored\":{}}");
         } catch (RuntimeException expected) { rejectedCorrupt = true; }
         check(rejectedCorrupt, "corrupt receipt stages fail closed instead of being silently discarded");
         if (failures > 0) throw new AssertionError(failures + " resident task graph tests failed");
