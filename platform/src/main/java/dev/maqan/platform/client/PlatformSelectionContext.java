@@ -49,6 +49,10 @@ public final class PlatformSelectionContext {
                 && current.worldId().equals(world)
                 && current.summary().equals(details)) return;
         current = new Selection(provider, entityId, type, name, world, details, ++revision);
+        WorkspaceRuntime.index(new WorkspaceRuntime.SearchEntry(
+                entityId, provider, type, name, world, details, java.util.List.of(type, provider)));
+        WorkspaceRuntime.publish(WorkspaceRuntime.Severity.INFO, provider, "selection",
+                "Selected " + name, entityId, world);
     }
 
     public static synchronized void clear(String providerId) {
