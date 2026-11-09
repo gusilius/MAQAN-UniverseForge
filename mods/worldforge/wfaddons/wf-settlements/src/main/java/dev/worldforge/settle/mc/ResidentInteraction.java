@@ -255,11 +255,11 @@ public final class ResidentInteraction {
         }
         double accepted = colony.s.receiveResource("food", offered);
         int delivered = Math.min(offered, (int) Math.floor(accepted + 1e-9));
+        if (accepted > delivered) colony.s.consumeResource("food", accepted - delivered);
         if (delivered <= 0) {
             player.sendSystemMessage(Component.literal("§cСклад поселения не может принять хлеб."));
             return;
         }
-        if (accepted > delivered) colony.s.consumeResource("food", accepted - delivered);
         int acceptedWhole = delivered;
         net.minecraft.world.item.ItemStack removed = player.getInventory().removeItem(Items.BREAD, acceptedWhole);
         delivered = Math.min(acceptedWhole, removed.getCount());
