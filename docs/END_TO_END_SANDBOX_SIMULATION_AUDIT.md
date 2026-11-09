@@ -278,3 +278,26 @@ The deterministic CI fixture now has a connected barony adjacency graph. Recent 
 also exposed a null-liege economy report edge case and over-sized court client snapshots;
 both have been corrected in the integration line. Final acceptance depends on the current
 single MAQAN UniverseForge Windows quality-gate run.
+
+## Resident + army command vertical slice — 2026-11-09
+
+Implemented on the same central integration branch:
+
+### RTS and first-person control
+- RTS now has Ctrl+A to select all controllable bodies in the current dimension and Ctrl+Shift+A to select the current troop army/squad or the current settlement's residents.
+- Existing click/box selection, Shift add/remove, double-click type selection, groups 1–9, formations, stances, mixed worker/troop movement and construction remain the same selection/order path.
+- Right-clicking a resident body in RTS opens the same resident conversation used by first-person interaction.
+- First-person G mode keeps LMB selection / Shift+LMB multi-selection; holding Alt opens the radial wheel. Follow is now a distinct mixed-order action for residents rather than a move to (0,0); military retreat maps to civilian stop, never a false march to origin.
+- Resident follow stores the issuing player's UUID, survives settlement save/reload, and the physical worker body executes the follow target while the owner is online.
+
+### Resident conversation and social loop
+- Interacting with a resident opens a contextual clickable conversation menu.
+- The same menu can be opened from RTS by right-clicking a resident.
+- Available actions: talk, inspect status/family/age/relationship, gift an emerald to improve the persistent Character relationship, follow, stop, and return to a compatible job/building.
+- Builder residents can resume a building under construction; other professions are assigned only to compatible completed job slots.
+- Resident contracts are stored on the canonical Character properties: offer, accept, deliver bread, track partial progress, complete and reward the settlement treasury.
+- Delivery is committed against settlement stock and player inventory; quest progress changes only after the stock accepts the goods.
+- Quest and relationship services have pure logic tests; settlement save tests cover the resident follow target and player UUID.
+
+### Acceptance boundary
+This is a connected gameplay slice, not a claim that all family/social simulation or every worker profession is complete. Conversation is currently a contextual in-game chat menu rather than a dedicated cinematic dialogue screen. Full multiplayer runtime playtest, loaded-chunk navigation, save/restart verification, and the latest Windows CI run are still required before calling this feature set accepted.
