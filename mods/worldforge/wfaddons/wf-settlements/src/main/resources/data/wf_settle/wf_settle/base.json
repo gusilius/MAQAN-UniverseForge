@@ -12,6 +12,9 @@
     "lumberjack": {
       "name": "Дровосек"
     },
+    "porter": {
+      "name": "Носильщик"
+    },
     "sawyer": {
       "name": "Пильщик"
     },
