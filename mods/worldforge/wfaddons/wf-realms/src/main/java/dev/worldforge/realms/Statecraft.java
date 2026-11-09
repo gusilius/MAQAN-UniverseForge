@@ -325,9 +325,9 @@ public final class Statecraft {
 
     public boolean fundTreasury(String realmId, double amount, String reference) {
         Treasury t = treasury(realmId);
-        boolean ok = WorldForgeMod.treasury().deposit(treasuryAccountId(realmId), amount,
+        boolean ok = TreasuryService.current().deposit(treasuryAccountId(realmId), amount,
                 TreasuryLedger.Kind.DEPOSIT, "statecraft", reference, 0, "realm treasury funding");
-        if (ok) t.balance = WorldForgeMod.treasury().balance(treasuryAccountId(realmId));
+        if (ok) t.balance = TreasuryService.current().balance(treasuryAccountId(realmId));
         return ok;
     }
     public boolean setTaxRate(String realmId, double taxRate) {
@@ -337,10 +337,10 @@ public final class Statecraft {
     public boolean spend(String realmId, double amount, String reason) {
         Treasury t = treasury(realmId);
         double value = money(amount);
-        boolean ok = WorldForgeMod.treasury().withdraw(treasuryAccountId(realmId), value,
+        boolean ok = TreasuryService.current().withdraw(treasuryAccountId(realmId), value,
                 TreasuryLedger.Kind.WITHDRAWAL, "government", reason, 0, "statecraft expenditure");
-        if (!ok) return fail(WorldForgeMod.treasury().lastError());
-        t.balance = WorldForgeMod.treasury().balance(treasuryAccountId(realmId));
+        if (!ok) return fail(TreasuryService.current().lastError());
+        t.balance = TreasuryService.current().balance(treasuryAccountId(realmId));
         t.lastExpenses += value;
         return true;
     }
@@ -350,7 +350,7 @@ public final class Statecraft {
         String realm = clean(realmId, "realm id");
         String army = "army:" + clean(armyId, "army id");
         Treasury snapshot = treasury(realm);
-        TreasuryLedger ledger = WorldForgeMod.treasury();
+        TreasuryLedger ledger = TreasuryService.current();
         ledger.open(army, armyId, "silver", 0);
         boolean ok = ledger.transfer(treasuryAccountId(realm), army, money(amount),
                 TreasuryLedger.Kind.ARMY_UPKEEP, "military-budget", armyId, worldMinute, "realm military appropriation");
@@ -361,7 +361,7 @@ public final class Statecraft {
     /** Pay soldier/army upkeep from the dedicated military account; never silently overdraw. */
     public boolean payArmyUpkeep(String armyId, double amount, long worldMinute, String reference) {
         String account = "army:" + clean(armyId, "army id");
-        TreasuryLedger ledger = WorldForgeMod.treasury();
+        TreasuryLedger ledger = TreasuryService.current();
         if (!ledger.hasAccount(account)) ledger.open(account, armyId, "silver", 0);
         return ledger.withdraw(account, money(amount), TreasuryLedger.Kind.ARMY_UPKEEP,
                 "military-upkeep", reference, worldMinute, "army maintenance");
@@ -369,26 +369,26 @@ public final class Statecraft {
 
     public boolean setRealmCreditLimit(String realmId, double limit) {
         treasury(realmId);
-        return WorldForgeMod.treasury().setCreditLimit(treasuryAccountId(realmId), money(limit));
+        return TreasuryService.current().setCreditLimit(treasuryAccountId(realmId), money(limit));
     }
 
     public boolean borrowForRealm(String realmId, double amount, String reference, long worldMinute) {
         treasury(realmId);
-        return WorldForgeMod.treasury().borrow(treasuryAccountId(realmId), money(amount), worldMinute, reference);
+        return TreasuryService.current().borrow(treasuryAccountId(realmId), money(amount), worldMinute, reference);
     }
 
     public boolean accrueRealmInterest(String realmId, double rate, long worldMinute) {
         treasury(realmId);
-        return WorldForgeMod.treasury().accrueInterest(treasuryAccountId(realmId), rate, worldMinute, "realm-interest");
+        return TreasuryService.current().accrueInterest(treasuryAccountId(realmId), rate, worldMinute, "realm-interest");
     }
 
     public double realmDebt(String realmId) {
-        TreasuryLedger.Account account = WorldForgeMod.treasury().account(treasuryAccountId(realmId));
+        TreasuryLedger.Account account = TreasuryService.current().account(treasuryAccountId(realmId));
         return account == null ? 0 : account.debt;
     }
 
     public boolean realmBankrupt(String realmId) {
-        TreasuryLedger.Account account = WorldForgeMod.treasury().account(treasuryAccountId(realmId));
+        TreasuryLedger.Account account = TreasuryService.current().account(treasuryAccountId(realmId));
         return account != null && account.bankrupt;
     }
 
@@ -401,7 +401,7 @@ public final class Statecraft {
         double lawPct = realms.mods(realmId).getOrDefault("tax_pct", 0.0);
         double effectiveRate = Math.max(0, Math.min(1, t.taxRate * (1 + lawPct / 100.0)));
         double gross = base * effectiveRate * days;
-        TreasuryLedger ledger = WorldForgeMod.treasury();
+        TreasuryLedger ledger = TreasuryService.current();
         long minute = Math.max(0, WorldForgeApi.clock().dayNumber()) * 1440L;
         if (gross > 0 && !ledger.deposit(treasuryAccountId(realmId), gross, TreasuryLedger.Kind.TAX,
                 "taxation", "tax:" + realmId + ":" + t.taxDays, minute, "realm tax collection"))
