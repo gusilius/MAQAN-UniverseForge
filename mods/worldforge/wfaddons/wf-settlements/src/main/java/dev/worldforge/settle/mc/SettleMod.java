@@ -605,6 +605,22 @@ public class SettleMod {
         return LifeSimulation.LOD.REMOTE;
     }
 
+    /** Residents meet for meals at the nearest finished food/civic building. */
+    private static double[] residentMealPlace(Settlement settlement, dev.worldforge.settle.Worker worker) {
+        Building best = null;
+        double distance = Double.POSITIVE_INFINITY;
+        for (Building building : settlement.buildings) {
+            if (building.state != Building.State.DONE || building.paused) continue;
+            String category = building.def.category == null ? "" : building.def.category;
+            if (!category.equalsIgnoreCase("food") && !category.equalsIgnoreCase("civic")
+                    && !building.def.id.contains("tavern") && !building.def.id.contains("inn")) continue;
+            double dx = building.x - worker.x, dz = building.z - worker.z;
+            double d = dx * dx + dz * dz;
+            if (d < distance) { distance = d; best = building; }
+        }
+        return best == null ? new double[]{0, 0} : new double[]{best.x, best.z};
+    }
+
     /** A completed house is the preferred safe/rest destination; the settlement centre is a fallback. */
     private static double[] residentShelter(Settlement settlement, dev.worldforge.settle.Worker worker) {
         Building best = null;
@@ -629,8 +645,8 @@ public class SettleMod {
             if (worker.person == null || worker.person.isBlank()) continue;
             Character person = registry.get(worker.person);
             if (person == null || !person.alive) continue;
-            if ("sleeping".equals(worker.lifeAction) && settlement.time >= worker.lifeActionUntil
-                    || "socializing".equals(worker.lifeAction) && settlement.time >= worker.lifeActionUntil
+            if (("sleeping".equals(worker.lifeAction) || "eating".equals(worker.lifeAction)
+                    || "socializing".equals(worker.lifeAction)) && settlement.time >= worker.lifeActionUntil
                     || "fleeing".equals(worker.lifeAction) && !settlement.raidIncoming) {
                 worker.lifeAction = "";
                 worker.lifeActionUntil = 0;
@@ -656,8 +672,13 @@ public class SettleMod {
             LifeSimulation.tick(person, context, (character, action, ignored) -> {
                 switch (action) {
                     case EAT -> {
-                        return settlement.consumeResource("food", 1.0)
-                                ? LifeSimulation.Outcome.SUCCESS : LifeSimulation.Outcome.BLOCKED;
+                        if (!settlement.consumeResource("food", 1.0)) return LifeSimulation.Outcome.BLOCKED;
+                        double[] meal = residentMealPlace(settlement, worker);
+                        worker.lifeAction = "eating";
+                        worker.lifeTargetX = meal[0]; worker.lifeTargetZ = meal[1];
+                        worker.lifeActionUntil = settlement.time + 30;
+                        worker.status = "ест";
+                        return LifeSimulation.Outcome.SUCCESS;
                     }
                     case SLEEP -> {
                         double[] home = residentShelter(settlement, worker);
@@ -692,7 +713,8 @@ public class SettleMod {
                             }
                         }
                         if (companion == null || companionPerson == null) return LifeSimulation.Outcome.BLOCKED;
-                        dev.worldforge.settle.ResidentSocial.socialize(person, companionPerson, 1);
+                        int opinion = dev.worldforge.settle.ResidentSocial.interactionDelta(person, companionPerson);
+                        dev.worldforge.settle.ResidentSocial.socialize(person, companionPerson, opinion);
                         worker.lifeAction = "socializing";
                         worker.lifeTargetX = companion.x; worker.lifeTargetZ = companion.z;
                         worker.lifeActionUntil = settlement.time + 3 * 60;
