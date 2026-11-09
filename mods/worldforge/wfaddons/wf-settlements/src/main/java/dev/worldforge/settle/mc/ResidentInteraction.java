@@ -222,7 +222,7 @@ public final class ResidentInteraction {
                     default -> "food";
                 };
                 int required = "iron".equals(resource) ? 2 : "stone".equals(resource) || "wood".equals(resource) ? 4 : 3;
-                String resourceName = colony.s.defs.resourceName(resource);
+                String resourceName = colony.s.defs.resourceNames.getOrDefault(resource, resource);
                 ResidentQuest next = new ResidentQuest("supply_" + resource + "_" + person.id + "_" + colony.s.year(),
                         "Доставить " + required + " ед. ресурса «" + resourceName + "» в поселение",
                         resource, required, colony.s.year());
@@ -288,7 +288,7 @@ public final class ResidentInteraction {
         int needed = q.required() - q.progress();
         int offered = Math.min(available, needed);
         if (offered <= 0) {
-            player.sendSystemMessage(Component.literal("§eУ вас нет ресурса «" + colony.s.defs.resourceName(q.resourceId()) + "» для передачи."));
+            player.sendSystemMessage(Component.literal("§eУ вас нет ресурса «" + colony.s.defs.resourceNames.getOrDefault(q.resourceId(), q.resourceId()) + "» для передачи."));
             return;
         }
         double accepted = colony.s.receiveResource(q.resourceId(), offered);
