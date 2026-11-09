@@ -150,7 +150,11 @@ public class SettleMod {
 
             for (dev.worldforge.settle.Building building : colony.s.buildings) {
                 if (building == null || building.def == null) continue;
-                int x = colony.worldX(building), z = colony.worldZ(building);
+                Colony.Site site=colony.sites.get(building.uid);
+                int footprintWidth=site!=null&&site.sx>0?site.sx:building.def.sizeX;
+                int footprintDepth=site!=null&&site.sz>0?site.sz:building.def.sizeZ;
+                int x=site!=null?site.x+footprintWidth/2:colony.worldX(building);
+                int z=site!=null?site.z+footprintDepth/2:colony.worldZ(building);
                 int by = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,x,z);
                 Map<String, String> buildingAttrs = new java.util.LinkedHashMap<>();
                 buildingAttrs.put("settlement_id", colony.s.id);
@@ -169,8 +173,8 @@ public class SettleMod {
                 buildingFeature.put("territory_id", provinceFeatureId);
                 buildingFeature.put("race_id", raceId);
                 buildingFeature.put("culture_id", cultureId);
-                int halfX = Math.max(1, building.def.sizeX) / 2;
-                int halfZ = Math.max(1, building.def.sizeZ) / 2;
+                int halfX = Math.max(1, footprintWidth) / 2;
+                int halfZ = Math.max(1, footprintDepth) / 2;
                 List<Object> footprint = List.of(
                         atlasVertex(x-halfX, by, z-halfZ), atlasVertex(x+halfX, by, z-halfZ),
                         atlasVertex(x+halfX, by, z+halfZ), atlasVertex(x-halfX, by, z+halfZ),
