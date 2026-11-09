@@ -8,7 +8,7 @@
   {
     "id": "porter",
     "name": "Носильщик",
-    "category": "worker",
+    "category": "specialist",
     "required_skills": {}
   },
   {
