@@ -32,6 +32,9 @@ public final class ResidentTaskGraphTest {
         ResidentTaskGraph.Receipt construction = restored.receipts().get(restored.receipts().size() - 1);
         check(construction.stage() == ResidentTaskGraph.Stage.CONSTRUCTION && construction.parentReceiptId() > 0,
                 "construction receipt links back to the stored resource provenance");
+        ResidentTaskGraph.Receipt built = restored.built(12, 55, 5);
+        check(built.stage() == ResidentTaskGraph.Stage.BUILT && built.parentReceiptId() == construction.id(),
+                "completed construction records the worker and links to its committed materials");
         if (failures > 0) throw new AssertionError(failures + " resident task graph tests failed");
     }
 }
