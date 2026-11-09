@@ -22,6 +22,13 @@ final class DialogueHook {
         DialogueBridge.register();
     }
 
+    static boolean hasSession(ServerPlayer player) {
+        try {
+            Class<?> c = Class.forName("dev.worldforge.dialogue.mc.DialogueMc");
+            return Boolean.TRUE.equals(c.getMethod("hasSession", ServerPlayer.class).invoke(null, player));
+        } catch (Throwable ignored) { return false; }
+    }
+
     /** true, если вызов дошёл до DialogueMc.open без исключения. */
     static boolean open(ServerPlayer player, WFNpc body, Character npc, String dialogueId, RoleDefs defs, TitleData d, Set<String> flags) {
         try {
