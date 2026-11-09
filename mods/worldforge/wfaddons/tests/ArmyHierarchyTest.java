@@ -39,8 +39,9 @@ public final class ArmyHierarchyTest {
         ArmyHierarchy restored = new ArmyHierarchy();
         restored.fromJson(hierarchy.toJson());
         check(restored.army(42) != null && restored.corps(vanguard.id) != null
-                        && restored.corps(reserve.id).squadIds.contains(second.id),
-                "army/corps hierarchy and squad membership survive save/reload");
+                        && restored.corps(reserve.id).squadIds.contains(second.id)
+                        && restored.corpsForSquad(second.id).id.equals(reserve.id),
+                "army/corps hierarchy and custom squad membership survive save/reload");
         check(!restored.assignSquad(reserve.id, first.id, new Squads())
                         && !restored.appointArmyCommander(999, "c1"),
                 "invalid army ownership and missing army references are rejected");
