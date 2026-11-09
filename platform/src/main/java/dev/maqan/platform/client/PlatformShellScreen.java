@@ -61,7 +61,8 @@ public final class PlatformShellScreen extends Screen {
     private String draggingPanel;
     private String resizingPanel;
     private String resizingSplitterPath;
-    private int pointerOffsetX, pointerOffsetY, resizeStartX, resizeStartY, resizeStartW, resizeStartH;
+    private int pointerOffsetX, pointerOffsetY, dragMouseX, dragMouseY;
+    private int resizeStartX, resizeStartY, resizeStartW, resizeStartH;
     private WorkspaceDockTree.Node workspaceRoot;
     private WorkspaceProfileStore profileStore;
     private boolean searchVisible;
@@ -383,6 +384,12 @@ public final class PlatformShellScreen extends Screen {
             int bottom = horizontal ? splitter.end() : splitter.position() + 2;
             boolean hover = mx >= left - 3 && mx <= right + 3 && my >= top - 3 && my <= bottom + 3;
             g.fill(left, top, right, bottom, hover ? CYAN : 0xAA34495B);
+        }
+        if (draggingPanel != null) {
+            g.fill(dragMouseX - 56, dragMouseY - 18, dragMouseX + 56, dragMouseY + 18, 0xAA173847);
+            g.fill(dragMouseX - 56, dragMouseY - 18, dragMouseX + 56, dragMouseY - 16, CYAN);
+            g.drawCenteredString(font, "DOCK " + draggingPanel.toUpperCase(java.util.Locale.ROOT),
+                    dragMouseX, dragMouseY - 4, TEXT);
         }
     }
 
@@ -862,6 +869,39 @@ public final class PlatformShellScreen extends Screen {
                 ? activeView().mouseClicked(mx,my,button) : true;
     }
 
+    private void applyPanelDrop(String sourceId, int mouseX, int mouseY) {
+        if (sourceId == null || sourceId.equals("content")) return;
+        Map<String, WorkspaceDockTree.Rect> rectangles =
+                WorkspaceDockTree.layout(workspaceRoot, workspaceBounds());
+        String targetId = null;
+        WorkspaceDockTree.Rect targetRect = null;
+        for (Map.Entry<String, WorkspaceDockTree.Rect> entry : rectangles.entrySet()) {
+            if (entry.getKey().equals(sourceId)) continue;
+            WorkspaceDockTree.Rect rect = entry.getValue();
+            if (WorkspaceUi.contains(mouseX, mouseY, rect.x(), rect.y(), rect.width(), rect.height())) {
+                targetId = entry.getKey(); targetRect = rect; break;
+            }
+        }
+        if (targetId == null || targetRect == null) return;
+        int relativeX = mouseX - targetRect.x();
+        int relativeY = mouseY - targetRect.y();
+        double nx = relativeX / (double) Math.max(1, targetRect.width());
+        double ny = relativeY / (double) Math.max(1, targetRect.height());
+        WorkspaceDockTree.Node remaining = WorkspaceDockTree.remove(workspaceRoot, sourceId);
+        if (remaining == null) remaining = new WorkspaceDockTree.Panel(targetId);
+        if (nx > 0.3 && nx < 0.7 && ny > 0.3 && ny < 0.7) {
+            workspaceRoot = WorkspaceDockTree.group(remaining, targetId, sourceId);
+        } else {
+            double left = nx, right = 1.0 - nx, top = ny, bottom = 1.0 - ny;
+            double nearest = Math.min(Math.min(left, right), Math.min(top, bottom));
+            WorkspaceDockTree.Side side = nearest == left ? WorkspaceDockTree.Side.LEFT
+                    : nearest == right ? WorkspaceDockTree.Side.RIGHT
+                    : nearest == top ? WorkspaceDockTree.Side.TOP : WorkspaceDockTree.Side.BOTTOM;
+            workspaceRoot = WorkspaceDockTree.dock(remaining, targetId, sourceId, side, 300);
+        }
+        WorkspaceDockTree.validate(workspaceRoot);
+    }
+
     private void toggleWorkspacePanel(String id) {
         if (hiddenPanels.contains(id)) hiddenPanels.remove(id);
         else hiddenPanels.add(id);
@@ -994,14 +1034,9 @@ public final class PlatformShellScreen extends Screen {
                 return true;
             }
         }
-        if(draggingPanel!=null) {
-            Panel p=panels.get(draggingPanel);
-            p.x=(int)mx-pointerOffsetX; p.y=(int)my-pointerOffsetY;
-            if(p.x<=48) p.dock="LEFT";
-            else if(p.x+p.w>=width-12) p.dock="RIGHT";
-            else if(p.y+p.h>=height-12) p.dock="BOTTOM";
-            else p.dock="FLOAT";
-            clampPanels(); return true;
+        if (draggingPanel != null) {
+            dragMouseX = (int) mx; dragMouseY = (int) my;
+            return true;
         }
         if(resizingPanel!=null) {
             Panel p=panels.get(resizingPanel);
@@ -1016,10 +1051,11 @@ public final class PlatformShellScreen extends Screen {
     }
 
     @Override public boolean mouseReleased(double mx,double my,int button) {
-        if(button==0) {
+        if (button == 0) {
             boolean changed = draggingPanel != null || resizingPanel != null || resizingSplitterPath != null;
-            draggingPanel=null; resizingPanel=null; resizingSplitterPath = null;
-            if (changed) saveWorkspaceState();
+            if (draggingPanel != null) applyPanelDrop(draggingPanel, (int) mx, (int) my);
+            draggingPanel = null; resizingPanel = null; resizingSplitterPath = null;
+            if (changed) { layoutWorkspace(); saveWorkspaceState(); }
         }
         boolean handled = super.mouseReleased(mx,my,button);
         if (activeView() != null)
