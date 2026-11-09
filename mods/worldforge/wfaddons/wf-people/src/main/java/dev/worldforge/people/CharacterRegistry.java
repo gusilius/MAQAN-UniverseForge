@@ -242,10 +242,8 @@ public final class CharacterRegistry {
         for (Character.Post p : vacated) for (Listener l : listeners) l.dismissed(c, p.role, p.place);
         c.props.remove("population.entity_bindings");
         int deathYear = c.props.get("population.death_year") instanceof Number n ? n.intValue() : 0;
-        for (Listener l : listeners) {
-            l.died(c);
-            publish(c, new LifecycleEvent(LifecycleKind.DIED, c.id, "", "", deathYear));
-        }
+        for (Listener l : listeners) l.died(c);
+        publish(c, new LifecycleEvent(LifecycleKind.DIED, c.id, "", "", deathYear));
         return vacated;
     }
 
