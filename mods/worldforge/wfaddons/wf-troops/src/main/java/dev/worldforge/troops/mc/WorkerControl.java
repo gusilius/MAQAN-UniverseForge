@@ -49,6 +49,17 @@ final class WorkerControl {
                 try { c.s.unassign(w.workerId); done++; } catch (RuntimeException ignored) {}
                 continue;
             }
+            if (o.action() == OrderPacket.WORK_FOLLOW) {
+                w.manualFollow = true;
+                w.manualFollowOwner = p.getUUID().toString();
+                w.manualOrder = false;
+                w.building = 0;
+                w.orderQueue.clear();
+                w.status = "следует за правителем";
+                done++;
+                where = "следовать за игроком";
+                continue;
+            }
             if (o.action() == OrderPacket.WORK_STOP || o.action() == OrderPacket.WORK_HOLD) {
                 try {
                     double x = w.getX() - c.cx, z = w.getZ() - c.cz;
