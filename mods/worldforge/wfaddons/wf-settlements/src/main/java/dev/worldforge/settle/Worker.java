@@ -16,6 +16,7 @@ public final class Worker {
     public boolean manualOrder;
     /** Follow the settlement ruler/player instead of the assigned workplace. */
     public boolean manualFollow;
+    public String manualFollowOwner = "";
     public double orderX, orderZ;
 
     Worker(int id, String name) { this.id = id; this.name = name; }
