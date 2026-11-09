@@ -120,8 +120,23 @@ final class NpcSpawner {
         npc.moveTo(x + 0.5, y, z + 0.5, rnd.nextFloat() * 360F, 0F);
         npc.bind(t.c());
         npc.setPost(x, z);
-        level.addFreshEntity(npc);
+        if (!level.addFreshEntity(npc)) {
+            npc.discard();
+            return null;
+        }
+        if (!regBind(level, t.c(), npc)) return null;
         return npc;
+    }
+
+    private static boolean regBind(ServerLevel level, Character character, WFNpc npc) {
+        CharacterRegistry registry = PeopleMod.peek(level);
+        if (registry == null) return false;
+        if (!registry.bindEntity(character.id, "npc", npc.getUUID().toString())) {
+            PeopleMod.LOGGER.error("wf_people: NPC entity {} already belongs to another Character; removing duplicate body", npc.getUUID());
+            npc.discard();
+            return false;
+        }
+        return true;
     }
 
     private static double sq(double dx, double dz) { return dx * dx + dz * dz; }

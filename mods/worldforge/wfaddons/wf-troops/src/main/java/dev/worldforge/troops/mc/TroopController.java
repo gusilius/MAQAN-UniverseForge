@@ -2,6 +2,7 @@ package dev.worldforge.troops.mc;
 
 import dev.worldforge.troops.Formations;
 import dev.worldforge.troops.Morale;
+import dev.worldforge.troops.Leadership;
 import dev.worldforge.troops.Squads;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.entity.Entity;
@@ -44,7 +45,7 @@ final class TroopController {
                 continue;
             }
             switch (o.kind()) {
-                case MOVE, ATTACK_MOVE, RETREAT, PATROL -> {
+                case MOVE, ATTACK_MOVE, PATROL -> {
                     double yaw = Formations.yawTo(cx, cz, o.x(), o.z());
                     boolean far = Math.hypot(o.x() - cx, o.z() - cz) > 2;
                     if (!far) yaw = s.yaw; else s.yaw = yaw;
@@ -67,6 +68,28 @@ final class TroopController {
                         sum += Math.hypot(w[0] - t.getX(), w[1] - t.getZ());
                     }
                     if (sum / alive.size() < 3.0 && far == false || sum / alive.size() < 2.2) TroopsMod.SQUADS.completeCurrent(s.id);
+                }
+                case RETREAT -> {
+                    double[] enemies = alive.get(0).enemiesAround(cx, cz, 28);
+                    double[] destination;
+                    if (enemies[0] > 0) {
+                        destination = Morale.flee(cx, cz, enemies[1], enemies[2], 36);
+                    } else {
+                        UUID ownerId = safeUuid(s.owner);
+                        Entity owner = ownerId == null ? null : server.getPlayerList().getPlayer(ownerId);
+                        destination = owner == null ? new double[]{cx, cz} : new double[]{owner.getX(), owner.getZ()};
+                    }
+                    List<Formations.Slot> slots = Formations.slots(s.formation, alive.size(), SPACING);
+                    double yaw = Formations.yawTo(cx, cz, destination[0], destination[1]);
+                    List<double[]> world = Formations.place(slots, destination[0], destination[1], yaw);
+                    for (int i = 0; i < alive.size(); i++) {
+                        TroopEntity t = alive.get(i);
+                        double[] point = world.get(i);
+                        t.hasDest = true; t.destX = point[0]; t.destZ = point[1];
+                        t.destYaw = yaw; t.forced = null; t.engage = TroopEntity.Engage.NONE;
+                    }
+                    if (Math.hypot(destination[0] - cx, destination[1] - cz) < 3.0)
+                        TroopsMod.SQUADS.completeCurrent(s.id);
                 }
                 case ATTACK -> {
                     UUID targetId = safeUuid(o.target());
@@ -101,7 +124,12 @@ final class TroopController {
         double lost = Math.max(0, s.lastAlive - n) / (double) Math.max(1, s.initial);
         s.lastAlive = n;
         List<TroopEntity> leaders = new ArrayList<>();
-        for (TroopEntity t : alive) if (t.def() != null && t.def().aura() > 0) leaders.add(t);
+        for (TroopEntity t : alive) {
+            boolean appointed = !s.leaderCharacterId.isEmpty() && s.leaderCharacterId.equals(t.characterId);
+            double aura = Leadership.aura(t.def() == null ? 0 : t.def().aura(),
+                    appointed, appointed && s.leaderHero, appointed ? s.leadershipRank : 0);
+            if (aura > 0) leaders.add(t);
+        }
         s.morale = Morale.step(s.morale, n / (double) Math.max(1, s.initial), lost, near ? en[0] / n : 0, !leaders.isEmpty(), near, 0.5);
         boolean was = s.routed;
         s.routed = Morale.routed(was, s.morale, near);
@@ -112,9 +140,17 @@ final class TroopController {
         }
         for (TroopEntity t : alive) {
             boolean led = false;
-            for (TroopEntity l : leaders) if (t.distanceToSqr(l) <= l.def().aura() * l.def().aura()) { led = true; break; }
+            for (TroopEntity l : leaders) {
+                boolean appointed = !s.leaderCharacterId.isEmpty() && s.leaderCharacterId.equals(l.characterId);
+                double aura = Leadership.aura(l.def() == null ? 0 : l.def().aura(),
+                        appointed, appointed && s.leaderHero, appointed ? s.leadershipRank : 0);
+                if (t.distanceToSqr(l) <= aura * aura) { led = true; break; }
+            }
             t.setDamageMult(Morale.damage(s.morale, led));
             t.setMorale((int) Math.round(s.morale * 100));
+            // Squad morale is gameplay state: keep the soldier's canonical Character in sync
+            // so personality, dialogue, leadership and future decisions observe the same value.
+            TroopsMod.syncMilitaryMorale(t);
         }
         for (TroopEntity h : alive) {                                               // лекари лечат раненых своего отряда рядом
             if (h.def() == null || h.def().heal() <= 0) continue;

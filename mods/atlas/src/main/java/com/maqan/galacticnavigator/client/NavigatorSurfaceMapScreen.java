@@ -33,14 +33,16 @@ public final class NavigatorSurfaceMapScreen extends Screen {
     private boolean terrain3D;
     private double cameraYaw=Math.toRadians(35),cameraPitch=Math.toRadians(48),terrainHeightScale=0.055;
     private boolean cameraDrag;
-    private Button viewModeButton;
-    private Button layerButton,depthDownButton,depthUpButton,routeModeButton,clearRouteButton,politicalLayerButton;
+    private Button viewModeButton,refreshSnapshotButton;
+    private Button layerButton,depthDownButton,depthUpButton,routeModeButton,clearRouteButton,politicalLayerButton,terrainLayerButton;
     private ExploredSurfaceRoutePlanner.Mode routeMode=ExploredSurfaceRoutePlanner.Mode.WALK;
     private ExploredSurfaceRoutePlanner.Result surfaceRoute;
     private String selectedWaypointId="";
     private String selectedWorldForgeEntityId="";
     /** 0 provinces, 1 realms, 2 both, 3 political overlays hidden. */
     private int politicalLayer;
+    /** 0 off, 1 biome, 2 elevation, 3 hydrography. */
+    private int terrainLayer;
     private int routeStartX=Integer.MIN_VALUE,routeStartZ=Integer.MIN_VALUE;
     private static final int BACKGROUND=0xF0060B16;
 
@@ -92,9 +94,22 @@ public final class NavigatorSurfaceMapScreen extends Screen {
                 default -> "POLITICAL: OFF";
             }));
         }).bounds(586,48,154,20).build());
+        refreshSnapshotButton=addRenderableWidget(Button.builder(Component.literal("REFRESH WORLD DATA"),b->{
+            boolean loaded=NavigatorWorldForgeMapStore.reload();
+            b.setMessage(Component.literal(loaded?"WORLD DATA: UPDATED":"REFRESH FAILED · LAST GOOD KEPT"));
+        }).bounds(18,height-68,148,20).build());
         addRenderableWidget(Button.builder(Component.literal("OPEN 3D PLANET MAP"),
                 b->MaqanScreenHost.open(minecraft, new NavigatorTerrain3DScreen(dimension,this)))
                 .bounds(Math.max(18,width-190),height-68,172,20).build());
+        terrainLayerButton=addRenderableWidget(Button.builder(Component.literal("MAP: OFF"),b->{
+            terrainLayer=(terrainLayer+1)%4;
+            b.setMessage(Component.literal(switch(terrainLayer){
+                case 1 -> "MAP: BIOME";
+                case 2 -> "MAP: RELIEF";
+                case 3 -> "MAP: WATER";
+                default -> "MAP: OFF";
+            }));
+        }).bounds(744,48,94,20).build());
         updateDepthButtons();
     }
     private void updateDepthButtons(){
@@ -235,6 +250,7 @@ public final class NavigatorSurfaceMapScreen extends Screen {
         List<WorldForgeMapSnapshot.Feature> features=
                 NavigatorWorldForgeMapStore.features(dimension);
         int drawnTerritories=0,drawnFeatures=0;
+        if(terrainLayer!=0)renderWorldForgeTerrain(g,snapshot.terrainInDimension(dimension),cell,left,top,right,bottom,player);
         if(politicalLayer==0||politicalLayer==2)for(WorldForgeMapSnapshot.Territory territory:territories){
             List<List<WorldForgeMapGeometry.Point>> rings=new ArrayList<>();
             List<List<WorldForgeMapSnapshot.Vertex>> sourceRings=territory.rings;
@@ -293,12 +309,35 @@ public final class NavigatorSurfaceMapScreen extends Screen {
             drawnRealms++;
         }
         for(WorldForgeMapSnapshot.Feature feature:features){
+            if(!featureVisibleAtScale(feature))continue;
+            int color=feature.id.equals(selectedWorldForgeEntityId)
+                    ?0xFF65E6FF:(feature.color==0?0xFFFFC66D:(feature.color|0xFF000000));
+            if(feature.rings!=null)for(List<WorldForgeMapSnapshot.Vertex> sourceRing:feature.rings){
+                if(sourceRing==null||sourceRing.size()<3)continue;
+                List<WorldForgeMapGeometry.Point> ring=new ArrayList<>(sourceRing.size());
+                for(WorldForgeMapSnapshot.Vertex vertex:sourceRing){
+                    double[] point=project(vertex.x/16.0,vertex.z/16.0,cell,left,top,right,bottom,player);
+                    ring.add(new WorldForgeMapGeometry.Point(point[0],point[1]));
+                }
+                List<WorldForgeMapGeometry.Point> clipped=WorldForgeMapGeometry.clipPolygon(ring,left,top,right,bottom);
+                for(int i=0;i<clipped.size();i++){
+                    var a=clipped.get(i);var b=clipped.get((i+1)%clipped.size());
+                    drawLine(g,(int)Math.round(a.x()),(int)Math.round(a.y()),
+                            (int)Math.round(b.x()),(int)Math.round(b.y()),color);
+                }
+            }
+            if(feature.path!=null&&feature.path.size()>1){
+                for(int i=1;i<feature.path.size();i++){
+                    var a=feature.path.get(i-1);var b=feature.path.get(i);
+                    double[] pa=project(a.x/16.0,a.z/16.0,cell,left,top,right,bottom,player);
+                    double[] pb=project(b.x/16.0,b.z/16.0,cell,left,top,right,bottom,player);
+                    drawClippedLine(g,pa[0],pa[1],pb[0],pb[1],left,top,right,bottom,color);
+                }
+            }
             double[] projected=project(feature.x/16.0,feature.z/16.0,cell,
                     left,top,right,bottom,player);
             if(!insideMap(projected[0],projected[1],left,top,right,bottom))continue;
             int x=(int)Math.round(projected[0]),y=(int)Math.round(projected[1]);
-            int color=feature.id.equals(selectedWorldForgeEntityId)
-                    ?0xFF65E6FF:(feature.color==0?0xFFFFC66D:(feature.color|0xFF000000));
             g.fill(x-4,y-4,x+5,y+5,0xDD07101A);
             g.fill(x-2,y-2,x+3,y+3,color);
             drawnFeatures++;
@@ -308,6 +347,75 @@ public final class NavigatorSurfaceMapScreen extends Screen {
                     +drawnRealms+" REALMS  ·  "+drawnFeatures+" FEATURES",left+8,top+8,0xFF9BD7F1,false);
     }
 
+
+    /** Strategic LOD keeps settlement/army anchors visible; local infrastructure appears as zoom increases. */
+    private boolean featureVisibleAtScale(WorldForgeMapSnapshot.Feature feature){
+        if(feature==null)return false;
+        if(feature.id!=null&&feature.id.equals(selectedWorldForgeEntityId))return true;
+        String kind=feature.kind==null?"":feature.kind;
+        if(zoom<0.30)return kind.equals("settlement")||kind.equals("army")
+                ||kind.equals("administrative_title")||kind.equals("region_capital");
+        if(zoom<0.65)return !kind.equals("settlement_building")&&!kind.equals("land_parcel")
+                &&!kind.equals("army_unit");
+        if(zoom<1.25)return !kind.equals("settlement_building")&&!kind.equals("land_parcel")
+                &&!kind.equals("army_unit");
+        if(zoom<2.0)return !kind.equals("army_unit");
+        return true;
+    }
+
+    /** Draws only the downsampled, bounded WorldForge planet raster in the visible viewport. */
+    private void renderWorldForgeTerrain(GuiGraphics g,WorldForgeMapSnapshot.Terrain terrain,double cell,
+                                         int left,int top,int right,int bottom,NavigatorPlayerPosition player){
+        if(terrain==null||terrain.sampleCount()<=0)return;
+        double sampleBlocks=terrain.step_pixels*terrain.blocks_per_pixel;
+        double sampleChunks=sampleBlocks/16.0;
+        double tile=Math.max(1.0,cell*sampleChunks);
+        // Convert the viewport's conservative world-space bounding circle to raster indices.
+        // This avoids scanning a 256x256 planet raster on every frame while panning/zooming.
+        double radiusChunks=Math.hypot((right-left)/2.0,(bottom-top)/2.0)/Math.max(0.01,cell)
+                +Math.hypot(panX,panY)/Math.max(0.01,cell)+2.0;
+        double minWorldX=(centerChunkX-radiusChunks)*16.0,maxWorldX=(centerChunkX+radiusChunks)*16.0;
+        double minWorldZ=(centerChunkZ-radiusChunks)*16.0,maxWorldZ=(centerChunkZ+radiusChunks)*16.0;
+        int minX=Math.max(0,(int)Math.floor((minWorldX-terrain.origin_x)/sampleBlocks)-1);
+        int maxX=Math.min(terrain.width-1,(int)Math.ceil((maxWorldX-terrain.origin_x)/sampleBlocks)+1);
+        int minZ=Math.max(0,(int)Math.floor((minWorldZ-terrain.origin_z)/sampleBlocks)-1);
+        int maxZ=Math.min(terrain.height-1,(int)Math.ceil((maxWorldZ-terrain.origin_z)/sampleBlocks)+1);
+        int sampleStride=tile<2.0?Math.max(1,(int)Math.ceil(2.0/tile)):1;
+        for(int rz=minZ;rz<=maxZ;rz+=sampleStride)for(int rx=minX;rx<=maxX;rx+=sampleStride){
+            int i=rz*terrain.width+rx;
+            double drawTile=tile*sampleStride;
+            double worldX=terrain.origin_x+(rx*terrain.step_pixels+terrain.step_pixels*sampleStride*0.5)*terrain.blocks_per_pixel;
+            double worldZ=terrain.origin_z+(rz*terrain.step_pixels+terrain.step_pixels*sampleStride*0.5)*terrain.blocks_per_pixel;
+            double[] point=project(worldX/16.0,worldZ/16.0,cell,left,top,right,bottom,player);
+            double px=point[0]-drawTile/2.0,py=point[1]-drawTile/2.0;
+            if(px+drawTile<left||px>right||py+drawTile<top||py>bottom)continue;
+            int color;
+            int river=terrain.river_values[i];
+            if(terrainLayer==1){
+                int index=terrain.biome_indices[i];
+                color=terrain.biome_colors.length>index?terrain.biome_colors[index]:0xFF657B68;
+            }else if(terrainLayer==2){
+                int height=terrain.heights[i];
+                int relief=Math.max(-70,Math.min(70,(height-64)/2));
+                color=shade(0xFF657B68,relief);
+            }else{
+                if(river==0)continue;
+                color=river>=200?0xFF3C9EDB:0xFF65C8E8;
+            }
+            int inset=drawTile>=3?1:0;
+            int x0=Math.max(left,(int)Math.floor(px)+inset),y0=Math.max(top,(int)Math.floor(py)+inset);
+            int x1=Math.min(right,(int)Math.ceil(px+drawTile)),y1=Math.min(bottom,(int)Math.ceil(py+drawTile));
+            if(x1>x0&&y1>y0)g.fill(x0,y0,x1,y1,0xFF000000|(color&0x00FFFFFF));
+            if(terrainLayer==3&&drawTile>=8){
+                int strength=Math.max(1,Math.min(3,river/80));
+                g.fill((int)(point[0]-strength),(int)(point[1]-strength),
+                        (int)(point[0]+strength+1),(int)(point[1]+strength+1),0xFF8BDCF4);
+            }
+        }
+        String label=switch(terrainLayer){case 1->"BIOME MAP";case 2->"ELEVATION";case 3->"RIVERS & WATER";default->"";};
+        g.drawString(font,"WORLDFORGE TERRAIN  ·  "+label+"  ·  "+terrain.width+"×"+terrain.height,
+                left+8,top+20,0xFFD0E7F2,false);
+    }
 
     /** Selects an imported WorldForge feature or territory and publishes its identity to MAQAN Inspector. */
     private boolean selectWorldForgeAt(double mouseX,double mouseY) {
@@ -323,9 +431,33 @@ public final class NavigatorSurfaceMapScreen extends Screen {
         WorldForgeMapSnapshot.Feature nearest=null;
         double bestDistance=64.0;
         for(WorldForgeMapSnapshot.Feature feature:NavigatorWorldForgeMapStore.features(dimension)){
-            double[] point=project(feature.x/16.0,feature.z/16.0,cell,left,top,right,bottom,player);
-            double dx=point[0]-mouseX,dy=point[1]-mouseY,distance=dx*dx+dy*dy;
+            if(!featureVisibleAtScale(feature))continue;
+            double[] anchor=project(feature.x/16.0,feature.z/16.0,cell,left,top,right,bottom,player);
+            double dx=anchor[0]-mouseX,dy=anchor[1]-mouseY,distance=dx*dx+dy*dy;
             if(distance<=bestDistance){bestDistance=distance;nearest=feature;}
+            if(feature.path!=null)for(int i=1;i<feature.path.size();i++){
+                var va=feature.path.get(i-1);var vb=feature.path.get(i);
+                double[] pa=project(va.x/16.0,va.z/16.0,cell,left,top,right,bottom,player);
+                double[] pb=project(vb.x/16.0,vb.z/16.0,cell,left,top,right,bottom,player);
+                distance=segmentDistanceSquared(mouseX,mouseY,pa[0],pa[1],pb[0],pb[1]);
+                if(distance<=bestDistance){bestDistance=distance;nearest=feature;}
+            }
+            if(feature.rings!=null)for(List<WorldForgeMapSnapshot.Vertex> sourceRing:feature.rings){
+                if(sourceRing==null||sourceRing.size()<3)continue;
+                List<WorldForgeMapGeometry.Point> ring=new ArrayList<>(sourceRing.size());
+                for(WorldForgeMapSnapshot.Vertex vertex:sourceRing){
+                    double[] point=project(vertex.x/16.0,vertex.z/16.0,cell,left,top,right,bottom,player);
+                    ring.add(new WorldForgeMapGeometry.Point(point[0],point[1]));
+                }
+                if(WorldForgeMapGeometry.containsPoint(ring,mouseX,mouseY)){
+                    bestDistance=0;nearest=feature;break;
+                }
+                for(int i=0;i<ring.size();i++){
+                    var va=ring.get(i);var vb=ring.get((i+1)%ring.size());
+                    distance=segmentDistanceSquared(mouseX,mouseY,va.x(),va.y(),vb.x(),vb.y());
+                    if(distance<=bestDistance){bestDistance=distance;nearest=feature;}
+                }
+            }
         }
         if(nearest!=null){
             selectedWorldForgeEntityId=nearest.id;
@@ -566,6 +698,21 @@ public final class NavigatorSurfaceMapScreen extends Screen {
             g.drawString(font,String.format(java.util.Locale.ROOT,"%.2f blocks/t",player.speed()),
                     x+radius+8,y+radius+2,0xFF9BB4C8,false);
     }
+    /** Liang-Barsky clipping prevents distant world-scale road segments from causing huge raster loops. */
+    private static void drawClippedLine(GuiGraphics g,double x0,double y0,double x1,double y1,
+                                        int left,int top,int right,int bottom,int color){
+        double dx=x1-x0,dy=y1-y0,t0=0.0,t1=1.0;
+        double[] p={-dx,dx,-dy,dy},q={x0-left,right-x0,y0-top,bottom-y0};
+        for(int i=0;i<4;i++){
+            if(Math.abs(p[i])<1e-12){if(q[i]<0)return;continue;}
+            double r=q[i]/p[i];
+            if(p[i]<0){if(r>t1)return;t0=Math.max(t0,r);}
+            else{if(r<t0)return;t1=Math.min(t1,r);}
+        }
+        drawLine(g,(int)Math.round(x0+t0*dx),(int)Math.round(y0+t0*dy),
+                (int)Math.round(x0+t1*dx),(int)Math.round(y0+t1*dy),color);
+    }
+
     private static void drawLine(GuiGraphics g,int x1,int y1,int x2,int y2,int color){
         int steps=Math.max(1,Math.max(Math.abs(x2-x1),Math.abs(y2-y1)));
         for(int i=0;i<=steps;i++){

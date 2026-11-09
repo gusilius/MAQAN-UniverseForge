@@ -89,6 +89,55 @@ public class CourtScreen extends Screen {
         return l;
     }
 
+    private boolean embeddedInMaqan;
+
+    public void setEmbeddedInMaqan(boolean embedded) { this.embeddedInMaqan = embedded; }
+
+    private void publishWorkspaceSelection() {
+        Character ruler = s.ruler(realm);
+        Character selected = ruler;
+        String context = "Ruler · " + realmName(realm);
+        if (tab == 2) {
+            List<Character> candidates = targets(ruler);
+            if (!candidates.isEmpty()) {
+                selected = candidates.get(Math.min(selTarget, candidates.size() - 1));
+                context = "Scheme target · " + realmName(s.realmOf(selected));
+            }
+        } else if (tab == 4) {
+            if (!partners.isEmpty()) {
+                selected = (Character) partners.get(Math.min(selPartner, partners.size() - 1))[0];
+                context = "Marriage candidate · " + realmName(Marriages.family(s, selected));
+            } else {
+                List<Character> own = Marriages.candidates(s, realm);
+                if (!own.isEmpty()) {
+                    selected = own.get(Math.min(selMine, own.size() - 1));
+                    context = "Dynasty candidate · " + realmName(realm);
+                }
+            }
+        }
+        if (selected == null) {
+            dev.worldforge.mod.client.PlatformWorkspaceBridge.publish("wf_court",
+                    "realm:" + realm, "realm", realmName(realm), "Realm court · year " + s.year());
+            return;
+        }
+        dev.worldforge.mod.client.PlatformWorkspaceBridge.publish("wf_court",
+                selected.id, "character", selected.name,
+                context + " · age " + CharacterStats.age(selected, s.year())
+                        + (selected.alive ? " · alive" : " · deceased"));
+    }
+
+    @Override
+    public void removed() {
+        dev.worldforge.mod.client.PlatformWorkspaceBridge.clear("wf_court");
+        super.removed();
+    }
+
+    @Override
+    public void onClose() {
+        if (embeddedInMaqan && dev.worldforge.mod.client.PlatformWorkspaceBridge.closeEmbedded(this)) return;
+        super.onClose();
+    }
+
     @Override
     public void render(GuiGraphics g, int mx, int my, float pt) {
         hits.clear();
@@ -112,6 +161,7 @@ public class CourtScreen extends Screen {
             case 4 -> marriages(g, cx, top, cw, h, mx, my);
             default -> chronicle(g, cx, top, cw, h);
         }
+        publishWorkspaceSelection();
         if (System.currentTimeMillis() < msgUntil && !msg.isEmpty()) {
             int w = font.width(msg) + 16;
             WFUi.bevel(g, x + (W - w) / 2, y + H - 22, w, 15, true);

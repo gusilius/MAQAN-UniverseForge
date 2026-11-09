@@ -58,34 +58,60 @@ public final class Orders {
 
     // ------------------------------------------------------------------ проверки
 
-    private static int assignedWith(Settlement s, int uid, String prof, int except) {
+    private static int assignedWith(Settlement s, int uid, String role, int except) {
         int n = 0;
-        for (Worker w : s.workers) if (w.building == uid && w.id != except && w.profession.equals(prof)) n++;
+        for (Worker w : s.workers) if (w.building == uid && w.id != except && w.workRole().equals(role)) n++;
         return n;
     }
 
-    /** Те же правила, что у {@code Settlement.assign}, но с учётом тех, кого этим же приказом уже отправили (места считаются сразу). */
+    /** Mirrors Settlement.assign: specialists first by compatibility, general workers may fill any compatible vacancy. */
     public static AssignPlan planAssign(Settlement s, Collection<Integer> workerIds, int uid) {
-        AssignPlan p = new AssignPlan();
-        Building b = s.building(uid);
-        if (b == null) { p.firstReason = "Нет здания"; p.skipped = workerIds.size(); return p; }
+        AssignPlan plan = new AssignPlan();
+        Building building = s.building(uid);
+        if (building == null) { plan.firstReason = "Нет здания"; plan.skipped = workerIds.size(); return plan; }
         Map<String, Integer> added = new HashMap<>();
         for (int id : new LinkedHashSet<>(workerIds)) {
-            Worker w = s.worker(id);
-            if (w == null) continue;
+            Worker worker = s.worker(id);
+            if (worker == null) continue;
+            if (worker.building == uid) {
+                plan.skipped++;
+                if (plan.firstReason.isEmpty()) plan.firstReason = worker.name + " уже работает здесь";
+                continue;
+            }
+            String role = "";
             String why = null;
-            if (w.building == uid) { p.skipped++; if (p.firstReason.isEmpty()) p.firstReason = w.name + " уже работает здесь"; continue; }
-            if (b.state == Building.State.DONE) {
-                int slots = b.def.jobs.getOrDefault(w.profession, 0);
-                if (slots == 0) why = w.name + " (" + s.defs.professionName(w.profession) + ") не нужен в здании " + b.def.name;
-                else if (assignedWith(s, uid, w.profession, id) + added.getOrDefault(w.profession, 0) >= slots) why = "В здании " + b.def.name + " нет свободных мест для профессии " + s.defs.professionName(w.profession);
-            } else if (!w.profession.equals("builder")) why = "Строить могут только строители";
-            else if (assignedWith(s, uid, "builder", id) + added.getOrDefault("builder", 0) >= b.def.builders) why = "На стройке уже максимум строителей (" + b.def.builders + ")";
-            if (why != null) { p.skipped++; if (p.firstReason.isEmpty()) p.firstReason = why; continue; }
-            added.merge(w.profession, 1, Integer::sum);
-            p.ok.add(id);
+            if (building.state == Building.State.BUILDING) {
+                if (!worker.canPerform("builder")) why = worker.name + " не может строить";
+                else role = "builder";
+            } else {
+                for (Map.Entry<String, Integer> job : building.def.jobs.entrySet()) {
+                    String candidate = job.getKey();
+                    if (!worker.canPerform(candidate)) continue;
+                    int occupied = assignedWith(s, uid, candidate, id) + added.getOrDefault(candidate, 0);
+                    if (occupied < job.getValue()) { role = candidate; break; }
+                }
+                if (role.isEmpty()) {
+                    boolean compatible = building.def.jobs.keySet().stream().anyMatch(worker::canPerform);
+                    why = compatible
+                            ? "В здании " + building.def.name + " нет свободных мест для " + worker.name
+                            : worker.name + " (" + s.defs.professionName(worker.profession) + ") не нужен для работ в " + building.def.name;
+                }
+            }
+            if (role.isEmpty()) {
+                plan.skipped++;
+                if (plan.firstReason.isEmpty()) plan.firstReason = why == null ? "Нет совместимой работы" : why;
+                continue;
+            }
+            if (building.state == Building.State.BUILDING
+                    && assignedWith(s, uid, role, id) + added.getOrDefault(role, 0) >= building.def.builders) {
+                plan.skipped++;
+                if (plan.firstReason.isEmpty()) plan.firstReason = "На стройке уже максимум строителей (" + building.def.builders + ")";
+                continue;
+            }
+            added.merge(role, 1, Integer::sum);
+            plan.ok.add(id);
         }
-        return p;
+        return plan;
     }
 
     /** Свободные места в здании по профессиям (для стройки - строители). Пустая карта: мест нет. */
@@ -190,8 +216,8 @@ public final class Orders {
     }
 
     /**
-     * Заполнить свободные места здания свободными рабочими: сперва подходящей профессии, потом «работники» (laborer) переучиваются
-     * командой profession и сразу назначаются. Возвращает приказы или объяснение.
+     * Fill vacancies without changing permanent professions: compatible specialists first,
+     * then versatile general workers at baseline productivity.
      */
     public static Result fillFromIdle(Settlement s, int uid) {
         Building b = s.building(uid);
@@ -203,19 +229,20 @@ public final class Orders {
         int n = 0;
         for (Map.Entry<String, Integer> f : free.entrySet()) {
             int need = f.getValue();
-            for (Iterator<Worker> it = idle.iterator(); it.hasNext() && need > 0; ) {
-                Worker w = it.next();
-                if (!w.profession.equals(f.getKey())) continue;
-                r.commands.add(assignCmd(w.id, uid)); it.remove(); need--; n++;
-            }
-            for (Iterator<Worker> it = idle.iterator(); it.hasNext() && need > 0; ) {
-                Worker w = it.next();
-                if (!w.profession.equals("laborer")) continue;
-                r.commands.add(professionCmd(w.id, f.getKey())); r.commands.add(assignCmd(w.id, uid)); it.remove(); need--; n++;
+            for (int pass = 0; pass < 2 && need > 0; pass++) {
+                for (Iterator<Worker> it = idle.iterator(); it.hasNext() && need > 0; ) {
+                    Worker worker = it.next();
+                    if (!worker.canPerform(f.getKey())) continue;
+                    if ((pass == 0) == worker.generalist()) continue;
+                    r.commands.add(assignCmd(worker.id, uid));
+                    it.remove();
+                    need--;
+                    n++;
+                }
             }
         }
         r.ok = n > 0;
-        r.message = r.ok ? "Отправлено рабочих: " + n : "Нет свободных рабочих нужной профессии";
+        r.message = r.ok ? "Отправлено рабочих: " + n : "Нет свободных совместимых рабочих";
         return r;
     }
 

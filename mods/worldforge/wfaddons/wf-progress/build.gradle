@@ -47,6 +47,9 @@ dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
     // Ядро WorldForge: только чистые классы (api, TitleData, TitleEditor, Json), поэтому деобфускация не нужна.
     compileOnly fileTree(dir: 'libs', include: ['worldforge-*.jar'])
+    // Shared character identity and population skills; build_order.py resolves wf_people before wf_progress.
+    compileOnly fileTree(dir: 'libs', include: ['wf_people-*.jar'])
+    compileOnly fileTree(dir: '../wf-people/build/libs', include: ['wf_people-*.jar'])
     // Мягкая зависимость: мост к диалогам компилируется против jar wf_dialogue (libs/ или соседний проект, собранный раньше: tools/build-all.sh идёт по алфавиту).
     compileOnly fileTree(dir: 'libs', include: ['wf_dialogue-*.jar'])
     compileOnly fileTree(dir: '../wf-dialogue/build/libs', include: ['wf_dialogue-*.jar'])

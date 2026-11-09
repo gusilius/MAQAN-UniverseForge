@@ -40,7 +40,10 @@ public class TroopEntity extends PathfinderMob {
     public static final EntityDataAccessor<String> OWNER = SynchedEntityData.defineId(TroopEntity.class, EntityDataSerializers.STRING);
     public static final EntityDataAccessor<Integer> MORALE = SynchedEntityData.defineId(TroopEntity.class, EntityDataSerializers.INT);
     private static final UUID MORALE_MOD = UUID.fromString("5b0a8e0e-6c3d-4a0e-9d0a-0d1f6f0c7a11");
+    private static final UUID INJURY_SPEED_MOD = UUID.fromString("c0b9d7b1-2b34-4c61-9b8a-91c2b6c43d2e");
     public static final EntityDataAccessor<String> SQUAD = SynchedEntityData.defineId(TroopEntity.class, EntityDataSerializers.STRING);
+    public static final EntityDataAccessor<String> CHARACTER = SynchedEntityData.defineId(TroopEntity.class, EntityDataSerializers.STRING);
+    public static final EntityDataAccessor<Integer> COMBAT_XP = SynchedEntityData.defineId(TroopEntity.class, EntityDataSerializers.INT);
 
     /** Режим боя во время приказа. */
     public enum Engage { NONE, RANGE, NEAR, FULL }
@@ -54,6 +57,10 @@ public class TroopEntity extends PathfinderMob {
     public String realm = "";
     public int fortId;                     // защитник крепости (0 - полевой солдат)
     public int armyId;                     // из какой армии wf-army призван (0 - нанят за золото)
+    /** Stable foreign key into wf-people.CharacterRegistry; empty when wf-people is absent. */
+    public String characterId = "";
+    /** Recruitment sets this until all stock/payments commit; legacy saved troops still bind on load. */
+    public boolean deferCharacterBinding;
     private int cooldown, seek;
     private int combatXp;
     private TroopDefs.Unit def;
@@ -75,21 +82,43 @@ public class TroopEntity extends PathfinderMob {
         entityData.define(OWNER, "");
         entityData.define(SQUAD, "");
         entityData.define(MORALE, 100);
+        entityData.define(CHARACTER, "");
+        entityData.define(COMBAT_XP, 0);
     }
 
     public String unitId() { return entityData.get(UNIT); }
     public String ownerId() { return entityData.get(OWNER); }
     public int moralePct() { return entityData.get(MORALE); }
     public void setMorale(int pct) { if (entityData.get(MORALE) != pct) entityData.set(MORALE, pct); }
+    public String syncedCharacterId() { return entityData.get(CHARACTER); }
+    public void setCharacterId(String id) {
+        characterId=id==null?"":id;
+        if(!level().isClientSide&&!characterId.equals(entityData.get(CHARACTER)))entityData.set(CHARACTER,characterId);
+    }
+    public int syncedCombatXp() { return entityData.get(COMBAT_XP); }
+    private void syncCombatXp() {
+        if(!level().isClientSide&&entityData.get(COMBAT_XP)!=combatXp)entityData.set(COMBAT_XP,combatXp);
+    }
     public double dmgMult = 1;
 
     /** Множитель урона от морали и ауры командира: добавочный модификатор, чтобы не трогать базу типа. */
     public void setDamageMult(double m) {
+        double injury=TroopsMod.injuryCombatMultiplier(this);
+        double effective=m*injury;
         var ai = getAttribute(Attributes.ATTACK_DAMAGE);
-        if (ai == null) return;
-        ai.removeModifier(MORALE_MOD);
-        if (Math.abs(m - 1) > 0.01) ai.addTransientModifier(new AttributeModifier(MORALE_MOD, "wf_morale", m - 1, AttributeModifier.Operation.MULTIPLY_TOTAL));
-        dmgMult = m;
+        if (ai != null) {
+            ai.removeModifier(MORALE_MOD);
+            if (Math.abs(effective - 1) > 0.01)
+                ai.addTransientModifier(new AttributeModifier(MORALE_MOD, "wf_morale_and_injury", effective - 1, AttributeModifier.Operation.MULTIPLY_TOTAL));
+        }
+        var speed=getAttribute(Attributes.MOVEMENT_SPEED);
+        if(speed!=null){
+            speed.removeModifier(INJURY_SPEED_MOD);
+            double speedFactor=Math.max(0.70,injury);
+            if(Math.abs(speedFactor-1)>0.01)
+                speed.addTransientModifier(new AttributeModifier(INJURY_SPEED_MOD,"wf_injury_mobility",speedFactor-1,AttributeModifier.Operation.MULTIPLY_TOTAL));
+        }
+        dmgMult = effective;
     }
 
     /** Враги вокруг точки: {сколько, x центра, z центра}. */
@@ -105,10 +134,16 @@ public class TroopEntity extends PathfinderMob {
     public void setSquadId(String s) { entityData.set(SQUAD, s); }
     public TroopDefs.Unit def() { return def; }
     public int combatXp() { return combatXp; }
+    public void setCombatXpFromCharacter(long xp) {
+        combatXp=(int)Math.max(0,Math.min(TroopProgression.MAX_XP,xp));
+        syncCombatXp();
+    }
     public int veteranRank() { return TroopProgression.rank(combatXp); }
     public void awardCombatXp(int amount) {
         int before = veteranRank();
         combatXp = TroopProgression.addXp(combatXp, amount);
+        syncCombatXp();
+        TroopsMod.syncPerson(this);
         if (veteranRank() > before && def != null) {
             float oldHealth = getHealth();
             double oldMax = getMaxHealth();
@@ -155,6 +190,7 @@ public class TroopEntity extends PathfinderMob {
         t.putInt("wf_army", armyId);
         t.putInt("wf_fort", fortId);
         t.putInt("wf_combat_xp", combatXp);
+        t.putString("wf_character", characterId == null ? "" : characterId);
     }
 
     @Override
@@ -164,6 +200,8 @@ public class TroopEntity extends PathfinderMob {
         armyId = t.getInt("wf_army");
         fortId = t.getInt("wf_fort");
         combatXp = Math.max(0, Math.min(TroopProgression.MAX_XP, t.getInt("wf_combat_xp")));
+        setCharacterId(t.getString("wf_character"));
+        syncCombatXp();
         TroopDefs.Unit u = TroopsMod.DEFS.units.get(t.getString("wf_unit"));
         if (u != null) {
             float hp = getHealth();
@@ -183,6 +221,15 @@ public class TroopEntity extends PathfinderMob {
 
     @Override
     public boolean removeWhenFarAway(double d) { return false; }
+
+    @Override
+    protected void actuallyHurt(DamageSource source,float amount) {
+        super.actuallyHurt(source,amount);
+        if(!level().isClientSide&&isAlive()&&amount>=1.5f){
+            int severity=amount>=8.0f?3:amount>=4.0f?2:1;
+            TroopsMod.recordInjury(this,severity,source.getMsgId());
+        }
+    }
 
     @Override
     public void die(DamageSource src) {

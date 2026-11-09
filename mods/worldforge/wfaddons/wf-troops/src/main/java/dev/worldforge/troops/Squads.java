@@ -24,6 +24,12 @@ public final class Squads {
         public double morale = 1.0;
         public boolean routed;
         public int lastAlive = -1;               // для шага морали (не сохраняется)
+        /** Canonical wf-people Character ID appointed to command this squad. */
+        public String leaderCharacterId = "";
+        public boolean leaderHero;
+        public int leadershipRank;
+        public double patrolOriginX,patrolOriginZ,patrolDestinationX,patrolDestinationZ;
+        public boolean patrolReturning;
         Squad(String id, String name, String owner) { this.id = id; this.name = name; this.owner = owner; }
         public Order current() { return queue.peekFirst(); }
     }
@@ -48,6 +54,24 @@ public final class Squads {
         return s;
     }
 
+    /** Assigns the canonical character identity; empty id clears the appointment. */
+    public boolean appointLeader(String squadId, String characterId, boolean hero, int rank) {
+        Squad squad = squads.get(squadId);
+        if (squad == null) return false;
+        String id = characterId == null ? "" : characterId.trim();
+        if (id.isEmpty()) {
+            squad.leaderCharacterId = "";
+            squad.leaderHero = false;
+            squad.leadershipRank = 0;
+            return true;
+        }
+        if (id.length() > 64 || !id.matches("[A-Za-z0-9_.:-]+")) return false;
+        squad.leaderCharacterId = id;
+        squad.leaderHero = hero;
+        squad.leadershipRank = Math.max(0, Math.min(10, rank));
+        return true;
+    }
+
     public Squad get(String id) { return squads.get(id); }
     public Collection<Squad> all() { return squads.values(); }
     public List<Squad> of(String owner) { List<Squad> l = new ArrayList<>(); for (Squad s : squads.values()) if (s.owner.equals(owner)) l.add(s); return l; }
@@ -65,7 +89,13 @@ public final class Squads {
     public void command(String squadId, Order o, boolean queue) {
         Squad s = squads.get(squadId);
         if (s == null) return;
-        if (o.kind() == Kind.STOP) { s.queue.clear(); return; }
+        if (o.kind() == Kind.STOP) { s.queue.clear(); s.patrolReturning=false; return; }
+        if(o.kind()==Kind.PATROL&&!queue){
+            s.patrolOriginX=Double.isFinite(s.cx)?s.cx:0;
+            s.patrolOriginZ=Double.isFinite(s.cz)?s.cz:0;
+            s.patrolDestinationX=o.x();s.patrolDestinationZ=o.z();
+            s.patrolReturning=false;
+        }
         if (!queue) s.queue.clear();
         s.queue.addLast(o);
     }
@@ -103,7 +133,10 @@ public final class Squads {
         n.initial = movedInitial;
         from.initial = Math.max(from.members.size(), oldInitial - movedInitial);
         n.morale = oldMorale; n.routed = from.routed; n.realm = from.realm;
-        n.formation = from.formation; n.stance = from.stance; n.cx = from.cx; n.cz = from.cz; n.yaw = from.yaw;
+        n.formation=from.formation;n.stance=from.stance;n.cx=from.cx;n.cz=from.cz;n.yaw=from.yaw;
+        n.patrolOriginX=from.patrolOriginX;n.patrolOriginZ=from.patrolOriginZ;
+        n.patrolDestinationX=from.patrolDestinationX;n.patrolDestinationZ=from.patrolDestinationZ;
+        n.patrolReturning=from.patrolReturning;
         return n;
     }
 
@@ -135,8 +168,16 @@ public final class Squads {
     public void completeCurrent(String squadId) {
         Squad s = squads.get(squadId);
         if (s == null || s.queue.isEmpty()) return;
-        Order o = s.queue.pollFirst();
-        if (o.kind() == Kind.PATROL) s.queue.addLast(new Order(Kind.PATROL, s.cx, s.cz, ""));     // патруль зацикливается: вернуться на старт
+        Order o=s.queue.pollFirst();
+        if(o.kind()==Kind.PATROL){
+            if(!s.patrolReturning){
+                s.patrolReturning=true;
+                s.queue.addLast(new Order(Kind.PATROL,s.patrolOriginX,s.patrolOriginZ,""));
+            }else{
+                s.patrolReturning=false;
+                s.queue.addLast(new Order(Kind.PATROL,s.patrolDestinationX,s.patrolDestinationZ,""));
+            }
+        }
     }
 
     private static String jsonString(String value) {
@@ -196,9 +237,17 @@ public final class Squads {
                     .append(",\"initial\":").append(Math.max(s.members.size(), s.initial))
                     .append(",\"morale\":").append(Double.isFinite(s.morale) ? Math.max(0, Math.min(1, s.morale)) : 1.0)
                     .append(",\"routed\":").append(s.routed)
+                    .append(",\"leaderCharacterId\":").append(jsonString(s.leaderCharacterId))
+                    .append(",\"leaderHero\":").append(s.leaderHero)
+                    .append(",\"leadershipRank\":").append(Math.max(0, Math.min(10, s.leadershipRank)))
                     .append(",\"cx\":").append(Double.isFinite(s.cx) ? s.cx : 0)
                     .append(",\"cz\":").append(Double.isFinite(s.cz) ? s.cz : 0)
                     .append(",\"yaw\":").append(Double.isFinite(s.yaw) ? s.yaw : 0)
+                    .append(",\"patrolOriginX\":").append(Double.isFinite(s.patrolOriginX)?s.patrolOriginX:0)
+                    .append(",\"patrolOriginZ\":").append(Double.isFinite(s.patrolOriginZ)?s.patrolOriginZ:0)
+                    .append(",\"patrolDestinationX\":").append(Double.isFinite(s.patrolDestinationX)?s.patrolDestinationX:0)
+                    .append(",\"patrolDestinationZ\":").append(Double.isFinite(s.patrolDestinationZ)?s.patrolDestinationZ:0)
+                    .append(",\"patrolReturning\":").append(s.patrolReturning)
                     .append(",\"queue\":[");
             boolean firstOrder = true;
             for (Order order : s.queue) {
@@ -251,9 +300,18 @@ public final class Squads {
             try { s.stance = Stance.valueOf(String.valueOf(e.get("stance"))); } catch (RuntimeException ignored) {}
             s.cx = finiteNumber(e.get("cx"), 0);
             s.cz = finiteNumber(e.get("cz"), 0);
-            s.yaw = finiteNumber(e.get("yaw"), 0);
+            s.yaw=finiteNumber(e.get("yaw"),0);
+            s.patrolOriginX=finiteNumber(e.get("patrolOriginX"),s.cx);
+            s.patrolOriginZ=finiteNumber(e.get("patrolOriginZ"),s.cz);
+            s.patrolDestinationX=finiteNumber(e.get("patrolDestinationX"),s.cx);
+            s.patrolDestinationZ=finiteNumber(e.get("patrolDestinationZ"),s.cz);
+            s.patrolReturning=Boolean.TRUE.equals(e.get("patrolReturning"));
             s.morale = Math.max(0, Math.min(1, finiteNumber(e.get("morale"), 1)));
             s.routed = Boolean.TRUE.equals(e.get("routed"));
+            s.leaderCharacterId = e.get("leaderCharacterId") instanceof String leader ? leader : "";
+            if (s.leaderCharacterId.length() > 64 || !s.leaderCharacterId.matches("[A-Za-z0-9_.:-]*")) s.leaderCharacterId = "";
+            s.leaderHero = Boolean.TRUE.equals(e.get("leaderHero")) && !s.leaderCharacterId.isEmpty();
+            s.leadershipRank = Math.max(0, Math.min(10, (int) finiteNumber(e.get("leadershipRank"), 0)));
             if (e.get("queue") instanceof List<?> orders) {
                 for (Object rawOrder : orders) {
                     if (s.queue.size() >= 64) break;

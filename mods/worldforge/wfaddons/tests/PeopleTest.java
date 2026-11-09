@@ -159,6 +159,115 @@ public class PeopleTest {
                 "устаревший счётчик автоматически продолжает последовательность ID");
 
 
+        // Canonical Character lifecycle journal is shared by every subsystem and persisted with Character.props.
+        CharacterRegistry journal = new CharacterRegistry();
+        Character carrier = journal.create("Переносчик", "", "", "m", 1);
+        int[] lifecycleCallbacks = {0, 0};
+        journal.addListener(new CharacterRegistry.Listener() {
+            @Override public void lifecycle(Character person, CharacterRegistry.LifecycleEvent event) { lifecycleCallbacks[0]++; }
+        });
+        journal.addListener(new CharacterRegistry.Listener() {
+            @Override public void lifecycle(Character person, CharacterRegistry.LifecycleEvent event) { lifecycleCallbacks[1]++; }
+        });
+        Character journalPerson = journal.create("Житель журнала", "", "", "m", 1);
+        CharacterInventory.add(journalPerson,"minecraft:bread",8);
+        CharacterInventory.add(journalPerson,"minecraft:iron_sword",1,"{Damage:3}");
+        ok(CharacterInventory.count(journalPerson,"minecraft:bread")==8
+                        &&CharacterInventory.items(journalPerson).size()==2,
+                "canonical Character inventory stores stack counts and distinct item data");
+        ok(CharacterInventory.transfer(journalPerson,carrier,"minecraft:bread",3)
+                        &&CharacterInventory.count(journalPerson,"minecraft:bread")==5
+                        &&CharacterInventory.count(carrier,"minecraft:bread")==3,
+                "inventory items transfer between two canonical people without duplicating identity");
+        ok(!CharacterInventory.remove(journalPerson,"minecraft:bread",99)
+                        &&CharacterInventory.count(journalPerson,"minecraft:bread")==5,
+                "failed inventory removal is atomic and cannot create negative stock");
+        CharacterDevelopment.setMilitaryMorale(journalPerson, 15);
+        journalPerson.props.put("wf_unit_kind", "soldier");
+        int baseMartial = CharacterStats.value(journalPerson, "martial");
+        ok(CharacterDevelopment.militaryMorale(journalPerson) == 15
+                        && CharacterDevelopment.effectiveAttribute(journalPerson, "martial", 0) == Math.max(0, baseMartial - 3),
+                "soldier morale is persisted on canonical Character and affects effective martial ability");
+        CharacterDevelopment.setMilitaryMorale(journalPerson, 95);
+        ok(CharacterDevelopment.effectiveAttribute(journalPerson, "martial", 0) == Math.min(20, baseMartial + 1),
+                "high soldier morale positively affects the same character's effective martial ability");
+
+        int severity=CharacterDevelopment.recordInjury(journalPerson,2,"arrow",120);
+        ok(severity==2&&CharacterDevelopment.injurySeverity(journalPerson)==2
+                        &&CharacterDevelopment.injuryCount(journalPerson)==1
+                        &&Math.abs(CharacterDevelopment.injuryCombatMultiplier(journalPerson)-0.82)<1e-9,
+                "combat injury is persisted on canonical Character and reduces combat readiness");
+        CharacterDevelopment.recordInjury(journalPerson,1,"sword",121);
+        ok(CharacterDevelopment.injurySeverity(journalPerson)==3&&CharacterDevelopment.injuryCount(journalPerson)==2,
+                "repeated wounds accumulate and retain individual injury history");
+        CharacterDevelopment.healInjury(journalPerson,2);
+        ok(CharacterDevelopment.injurySeverity(journalPerson)==1,
+                "medical recovery gradually reduces injury severity without erasing history");
+        CharacterDevelopment.healInjury(journalPerson,1);
+        ok(CharacterDevelopment.injurySeverity(journalPerson)==0
+                        &&CharacterDevelopment.injuryCount(journalPerson)==2
+                        &&Math.abs(CharacterDevelopment.injuryCombatMultiplier(journalPerson)-1.0)<1e-9,
+                "fully healed soldier regains readiness while keeping lifetime injury count");
+
+        journal.appoint(journalPerson.id, "guard", "settlement:test", 10);
+        journal.dismiss(journalPerson.id, "guard", "settlement:test", 11);
+        journal.kill(journalPerson.id);
+        List<Map<String, Object>> lifeHistory = journal.recentLifecycle(journalPerson.id, 20);
+        ok(lifeHistory.size() == 4
+                        && "BORN".equals(lifeHistory.get(0).get("kind"))
+                        && "POST_APPOINTED".equals(lifeHistory.get(1).get("kind"))
+                        && "POST_DISMISSED".equals(lifeHistory.get(2).get("kind"))
+                        && "DIED".equals(lifeHistory.get(3).get("kind")),
+                "one canonical per-character journal records birth, appointment, dismissal and death");
+        ok(lifecycleCallbacks[0] == 4 && lifecycleCallbacks[1] == 4,
+                "lifecycle event bus notifies each listener exactly once per transition");
+        String journalSave = journal.toJson();
+        CharacterRegistry journalReload = new CharacterRegistry();
+        journalReload.fromJson(journalSave);
+        List<Map<String, Object>> restoredHistory = journalReload.recentLifecycle(journalPerson.id, 20);
+        ok(restoredHistory.size() == lifeHistory.size()
+                        && restoredHistory.stream().map(e -> String.valueOf(e.get("kind"))).toList()
+                        .equals(lifeHistory.stream().map(e -> String.valueOf(e.get("kind"))).toList()),
+                "canonical character event sequence survives save/load without synthetic restore events");
+        ok(journalReload.toJson().equals(journalSave),
+                "loading a character registry does not mutate its persisted lifecycle history");
+        ok(CharacterInventory.count(journalReload.get(journalPerson.id),"minecraft:bread")==5
+                        &&CharacterInventory.count(journalReload.get(carrier.id),"minecraft:bread")==3
+                        &&CharacterInventory.items(journalReload.get(journalPerson.id)).stream()
+                        .anyMatch(item->item.id().equals("minecraft:iron_sword")&&item.data().equals("{Damage:3}")),
+                "canonical personal inventories and item data survive CharacterRegistry save/load");
+
+        Character heir = journal.create("Наследник", "", "", "m", 20);
+        Character parent = journal.create("Умерший житель", "", "", "m", 0);
+        parent.props.put("population.location","settlement:oak");
+        CharacterInventory.add(parent,"minecraft:iron_ingot",12);
+        CharacterInventory.add(parent,"minecraft:iron_sword",1,"{Damage:7}");
+        journal.marry(parent.id,heir.id,30);
+        PopulationSimulation.die(journal, parent.id, 31, "illness");
+        ok(!parent.alive&&CharacterInventory.count(parent,"minecraft:iron_ingot")==0
+                        &&CharacterInventory.count(heir,"minecraft:iron_ingot")==12
+                        &&CharacterInventory.items(heir).stream().anyMatch(item->item.id().equals("minecraft:iron_sword")
+                        &&item.data().equals("{Damage:7}"))
+                        &&heir.id.equals(parent.props.get("estate.recipient")),
+                "death from illness transfers the deceased's complete item estate to the surviving spouse");
+        Character solitary = journal.create("Одинокий житель", "", "", "m", 0);
+        solitary.props.put("population.location","settlement:oak");
+        CharacterInventory.add(solitary,"minecraft:bread",4);
+        PopulationSimulation.die(journal, solitary.id, 32, "natural");
+        ok(!solitary.alive&&CharacterInventory.count(solitary,"minecraft:bread")==4
+                        &&"awaiting_kin_or_home_claim".equals(solitary.props.get("estate.status"))
+                        &&"settlement:oak".equals(solitary.props.get("estate.home")),
+                "death without heirs preserves all belongings as a recoverable estate at the recorded home");
+        Character laterKin = journal.create("Поздний наследник", "", "", "m", 40);
+        Character descendant = journal.addChild(laterKin,solitary,"Потомок", "m", 41);
+        ok(CharacterInventory.claimEstate(solitary,descendant)
+                        &&CharacterInventory.count(solitary,"minecraft:bread")==0
+                        &&CharacterInventory.count(descendant,"minecraft:bread")==4
+                        &&"inherited".equals(solitary.props.get("estate.status")),
+                "a later-registered descendant can claim the preserved home estate exactly once");
+        ok(!CharacterInventory.claimEstate(solitary,heir),
+                "estate cannot be claimed again after inheritance has been settled");
+
         // диалог с персонажем
         DialogueBridge.register();
         Character chancellor = reg.holder("chancellor", Courts.realmPlace(d.realmList().get(3).id));

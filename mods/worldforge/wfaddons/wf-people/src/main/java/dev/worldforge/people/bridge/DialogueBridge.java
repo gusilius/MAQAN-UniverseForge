@@ -44,7 +44,7 @@ public final class DialogueBridge {
     }
 
     public static Ctx context(Character npc, RoleDefs defs, TitleData d, String playerName, String playerId, Set<String> playerFlags) {
-        Ctx ctx = new Ctx(playerFlags).var("npc", npc.name).var("npc_house", npc.house).var("player", playerName).var("player_id", playerId);
+        Ctx ctx = new Ctx(playerFlags).var("npc", npc.name).var("npc_name", npc.name).var("npc_house", npc.house).var("player", playerName).var("player_id", playerId);
         List<String> roles = new ArrayList<>();
         String realm = "", title = "", realmId = "";
         for (Character.Post p : npc.posts) {
@@ -57,7 +57,7 @@ public final class DialogueBridge {
             }
         }
         ctx.var("npc_roles", String.join(",", roles)).var("npc_traits", String.join(",", npc.traits)).var("npc_role", title)
-                .var("npc_title", title.isEmpty() ? npc.name : title + " " + npc.name).var("realm", realm).var("npc_id", npc.id).var("npc_org", npc.props.get("org") == null ? "" : String.valueOf(npc.props.get("org"))).var("npc_realm_id", realmId);
+                .var("npc_title", title.isEmpty() ? npc.name : title + " " + npc.name).var("realm", realm).var("npc_id", npc.id).var("social_intent", String.valueOf(npc.props.getOrDefault("social.initiative_intent", ""))).var("social_subject", String.valueOf(npc.props.getOrDefault("social.initiative_subject", ""))).var("npc_org", npc.props.get("org") == null ? "" : String.valueOf(npc.props.get("org"))).var("npc_realm_id", realmId);
         for (ContextExtender x : EXTENDERS) x.extend(ctx, npc, playerId, d);
         return ctx;
     }

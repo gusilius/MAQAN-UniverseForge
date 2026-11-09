@@ -94,7 +94,7 @@ public final class Selection {
     }
 
     /** Все рабочие этой профессии (Ctrl+щелчок и двойной щелчок). */
-    public int selectProfession(Settlement s, String profession, boolean additive) { return selectWhere(s, w -> w.profession.equals(profession), additive); }
+    public int selectProfession(Settlement s, String profession, boolean additive) { return selectWhere(s, w -> w.workRole().equals(profession), additive); }
 
     /** Клавиша «.»: свободные рабочие. */
     public int selectIdle(Settlement s, boolean additive) { return selectWhere(s, w -> w.building == 0, additive); }
@@ -112,7 +112,7 @@ public final class Selection {
     public void clickWorker(Settlement s, int id, boolean shift, boolean ctrl, boolean doubleClick) {
         Worker w = s.worker(id);
         if (w == null) return;
-        if (ctrl || doubleClick) selectProfession(s, w.profession, shift);
+        if (ctrl || doubleClick) selectProfession(s, w.workRole(), shift);
         else if (shift) toggle(id);
         else { clear(); workers.add(id); }
     }
@@ -136,7 +136,7 @@ public final class Selection {
     /** Сводка «профессия -> сколько», больше - раньше (для надписи «Дровосек x3»). */
     public LinkedHashMap<String, Integer> byProfession(Settlement s) {
         Map<String, Integer> m = new HashMap<>();
-        for (Worker w : workers(s)) m.merge(w.profession, 1, Integer::sum);
+        for (Worker w : workers(s)) m.merge(w.workRole(), 1, Integer::sum);
         List<Map.Entry<String, Integer>> l = new ArrayList<>(m.entrySet());
         l.sort((a, b) -> a.getValue().equals(b.getValue()) ? a.getKey().compareTo(b.getKey()) : b.getValue() - a.getValue());
         LinkedHashMap<String, Integer> out = new LinkedHashMap<>();

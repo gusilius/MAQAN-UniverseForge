@@ -537,11 +537,11 @@ public final class CourtSim {
         for (Scheme sc : schemes.values()) if (me != null && sc.owner.equals(me.id)) { ids.add(sc.owner); ids.add(sc.target); }
         for (Pending p : pending) if (p.realm.equals(realm)) ids.add(p.character);
         List<Character> own = Marriages.candidates(this, realm);
-        for (int i = 0; i < own.size() && i < 8; i++) ids.add(own.get(i).id);
+        for (int i = 0; i < own.size() && i < 4; i++) ids.add(own.get(i).id);
         for (TitleData.Realm r : d.realmList()) {
             if (r.id.equals(realm)) continue;
             List<Character> cs = Marriages.candidates(this, r.id);
-            for (int i = 0; i < cs.size() && i < 3; i++) ids.add(cs.get(i).id);
+            for (int i = 0; i < cs.size() && i < 1; i++) ids.add(cs.get(i).id);
         }
         CourtSim v = new CourtSim(d, null, reg, defs, names, seed, startYear);
         v.day = day;

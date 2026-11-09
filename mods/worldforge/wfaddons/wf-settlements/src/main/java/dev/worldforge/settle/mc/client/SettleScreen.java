@@ -5,6 +5,7 @@ import dev.worldforge.mod.client.WFUi;
 import dev.worldforge.settle.Building;
 import dev.worldforge.settle.Defs;
 import dev.worldforge.settle.Settlement;
+import dev.worldforge.settle.SettlementMap;
 import dev.worldforge.settle.Worker;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
@@ -23,6 +24,7 @@ public class SettleScreen extends Screen {
     private static final int W = 640, H = 400;
     private static final String[] TABS = {"Обзор", "Здания", "Люди", "Строить", "Торговля", "Бюджет", "Города", "Журнал", "Карта"};
     private Settlement s;
+    private SettlementMap map = new SettlementMap();
     private final Consumer<String> cmd;
     private int tab, selWorker, selBuilding, scroll, cat;
     private final List<Object[]> hits = new ArrayList<>();   // {x,y,w,h,Runnable,title,tipLines}
@@ -33,7 +35,11 @@ public class SettleScreen extends Screen {
         this.cmd = cmd;
     }
 
-    public void setModel(Settlement n) { this.s = n; mapZoom = 1.0; mapPanX = 0; mapPanY = 0; }
+    public void setModel(Settlement n) {
+        if (s == null || !s.id.equals(n.id)) { mapZoom = 1.0; mapPanX = 0; mapPanY = 0; }
+        this.s = n;
+    }
+    public void setMap(SettlementMap map) { this.map = map == null ? new SettlementMap() : map; }
 
     private java.util.List<dev.worldforge.settle.CityRow> cities = new ArrayList<>();
     private String citySort = "pop";
@@ -58,8 +64,49 @@ public class SettleScreen extends Screen {
 
     private static int sev(int v) { return v >= 2 ? WFUi.BAD : v == 1 ? WFUi.GOLD : WFUi.MUTED; }
 
+    private boolean embeddedInMaqan;
+
+    public void setEmbeddedInMaqan(boolean embedded) { this.embeddedInMaqan = embedded; }
+
+    private void publishWorkspaceSelection() {
+        if (selBuilding != 0) {
+            Building b = s.building(selBuilding);
+            if (b != null) {
+                dev.worldforge.mod.client.PlatformWorkspaceBridge.publish("wf_settlements",
+                        "settlement:" + s.id + ":building:" + b.uid, "building", b.def.name,
+                        "Settlement building · " + b.state + " · " + b.x + ", " + b.z);
+                return;
+            }
+        }
+        if (selWorker != 0) {
+            Worker w = s.worker(selWorker);
+            if (w != null) {
+                String id = w.person == null || w.person.isBlank() ? "settlement:" + s.id + ":worker:" + w.id : w.person;
+                dev.worldforge.mod.client.PlatformWorkspaceBridge.publish("wf_settlements", id,
+                        w.person == null || w.person.isBlank() ? "worker" : "character",
+                        w.name, "Profession: " + s.defs.professionName(w.profession)
+                                + " · " + (w.status == null ? "" : w.status));
+                return;
+            }
+        }
+        dev.worldforge.mod.client.PlatformWorkspaceBridge.clear("wf_settlements");
+    }
+
+    @Override
+    public void removed() {
+        dev.worldforge.mod.client.PlatformWorkspaceBridge.clear("wf_settlements");
+        super.removed();
+    }
+
+    @Override
+    public void onClose() {
+        if (embeddedInMaqan && dev.worldforge.mod.client.PlatformWorkspaceBridge.closeEmbedded(this)) return;
+        super.onClose();
+    }
+
     @Override
     public void render(GuiGraphics g, int mx, int my, float pt) {
+        publishWorkspaceSelection();
         hits.clear();
         int x = (width - W) / 2, y = (height - H) / 2;
         int ap = s.approval();
@@ -145,7 +192,7 @@ public class SettleScreen extends Screen {
             boolean hov = WFUi.over(mx, my, x + 4, cy - 1, lw - 8, 11) && a.building != 0;
             WFUi.dot(g, x + 6, cy + 2, 5, sev(a.severity));
             g.drawString(font, font.plainSubstrByWidth(a.text, lw - 26), x + 16, cy, hov ? WFUi.GOLD : WFUi.TX);
-            if (a.building != 0) { final int b = a.building; hit(x + 4, cy - 1, lw - 8, 11, () -> { selBuilding = b; tab = 1; }, null, null); }
+            if (a.building != 0) { final int b = a.building; hit(x + 4, cy - 1, lw - 8, 11, () -> { selBuilding = b; selWorker = 0; tab = 1; }, null, null); }
             cy += 11;
         }
         WFUi.bevel(g, rx, top, rw, h, true);
@@ -190,7 +237,7 @@ public class SettleScreen extends Screen {
             if (b.state == Building.State.DONE && b.def.produces()) g.drawString(font, Math.round(ch.efficiency * 100) + "%", col[3], ry + 2, ch.efficiency > 0.7 ? WFUi.GOOD : ch.efficiency > 0 ? WFUi.GOLD : WFUi.BAD);
             g.drawString(font, String.valueOf(b.priority), col[4], ry + 2, WFUi.TX);
             final int uid = b.uid;
-            hit(x + 3, ry - 1, lw - 6, 14, () -> selBuilding = uid, null, null);
+            hit(x + 3, ry - 1, lw - 6, 14, () -> { selBuilding = uid; selWorker = 0; }, null, null);
             ry += 14;
         }
         if (s.buildings.isEmpty()) g.drawString(font, "Пока ничего нет: вкладка «Строить».", x + 8, top + 22, WFUi.MUTED);
@@ -250,7 +297,7 @@ public class SettleScreen extends Screen {
             g.drawString(font, font.plainSubstrByWidth(wb == null ? "свободен" : wb.def.name, 106), col[2], ry + 2, wb == null ? WFUi.OFF : WFUi.TX);
             g.drawString(font, font.plainSubstrByWidth(w.status, 96), col[3], ry + 2, WFUi.MUTED);
             final int id = w.id;
-            hit(x + 3, ry - 1, lw - 6, 14, () -> selWorker = id, null, null);
+            hit(x + 3, ry - 1, lw - 6, 14, () -> { selWorker = id; selBuilding = 0; }, null, null);
             ry += 14;
         }
         WFUi.scrollbar(g, x + lw - 5, top + 19, h - 22, s.workers.size() * 14, scroll * 14);
@@ -520,6 +567,20 @@ public class SettleScreen extends Screen {
             minX = Math.min(minX, w.x); maxX = Math.max(maxX, w.x);
             minZ = Math.min(minZ, w.z); maxZ = Math.max(maxZ, w.z);
         }
+        for (SettlementMap.Cell cell : map.cells()) {
+            minX = Math.min(minX, cell.x() - SettlementMap.CELL_SIZE / 2.0);
+            maxX = Math.max(maxX, cell.x() + SettlementMap.CELL_SIZE / 2.0);
+            minZ = Math.min(minZ, cell.z() - SettlementMap.CELL_SIZE / 2.0);
+            maxZ = Math.max(maxZ, cell.z() + SettlementMap.CELL_SIZE / 2.0);
+        }
+        for (SettlementMap.Parcel parcel : map.parcels.values()) {
+            minX = Math.min(minX, parcel.x); maxX = Math.max(maxX, parcel.x + parcel.width);
+            minZ = Math.min(minZ, parcel.z); maxZ = Math.max(maxZ, parcel.z + parcel.depth);
+        }
+        for (SettlementMap.Warehouse warehouse : map.warehouses.values()) {
+            minX = Math.min(minX, warehouse.x); maxX = Math.max(maxX, warehouse.x);
+            minZ = Math.min(minZ, warehouse.z); maxZ = Math.max(maxZ, warehouse.z);
+        }
         minX -= 10; maxX += 10; minZ -= 10; maxZ += 10;
         double spanX = Math.max(48, maxX - minX), spanZ = Math.max(48, maxZ - minZ);
         double baseScale = Math.min((cw - 24.0) / spanX, (h - 24.0) / spanZ);
@@ -532,6 +593,64 @@ public class SettleScreen extends Screen {
         WFUi.bevel(g, x, top, cw, h, true);
         g.enableScissor(x + 2, top + 2, x + cw - 2, top + h - 2);
         g.fill(x + 2, top + 2, x + cw - 2, top + h - 2, 0xFF17231F);
+
+        // Sampled world terrain, not a synthetic background. Elevation subtly shades the biome base.
+        int minHeight = Integer.MAX_VALUE, maxHeight = Integer.MIN_VALUE;
+        for (SettlementMap.Cell cell : map.cells()) { minHeight = Math.min(minHeight, cell.height); maxHeight = Math.max(maxHeight, cell.height); }
+        double heightRange = Math.max(1, maxHeight - minHeight);
+        for (SettlementMap.Cell cell : map.cells()) {
+            int sx = (int) Math.round(originX + cell.x() * scale - SettlementMap.CELL_SIZE * scale / 2.0);
+            int sy = (int) Math.round(originY + cell.z() * scale - SettlementMap.CELL_SIZE * scale / 2.0);
+            int size = Math.max(1, (int) Math.ceil(SettlementMap.CELL_SIZE * scale));
+            int color = cell.water ? 0xFF315F83 : cell.slope > 1.0 ? 0xFF6A5A45
+                    : cell.fertility > 0.7 ? 0xFF456B48 : cell.fertility > 0.4 ? 0xFF53634A : 0xFF6C6549;
+            if (!cell.water) {
+                int shade = (int) Math.round((cell.height - minHeight) / heightRange * 36.0) - 18;
+                int red = Math.max(0, Math.min(255, ((color >> 16) & 255) + shade));
+                int green = Math.max(0, Math.min(255, ((color >> 8) & 255) + shade));
+                int blue = Math.max(0, Math.min(255, (color & 255) + shade));
+                color = 0xFF000000 | (red << 16) | (green << 8) | blue;
+            }
+            g.fill(sx, sy, sx + size, sy + size, color);
+        }
+        for (SettlementMap.Parcel parcel : map.parcels.values()) {
+            int px = (int) Math.round(originX + parcel.x * scale);
+            int pz = (int) Math.round(originY + parcel.z * scale);
+            int pw = Math.max(1, (int) Math.round(parcel.width * scale));
+            int ph = Math.max(1, (int) Math.round(parcel.depth * scale));
+            int color = switch (parcel.zone) {
+                case RESIDENTIAL -> 0x443E8BD0; case AGRICULTURE -> 0x4478B84C;
+                case INDUSTRY -> 0x44B87942; case COMMERCE -> 0x44D6B64A;
+                case CIVIC -> 0x448B75C4; case MILITARY -> 0x44C44B4B;
+                case STORAGE -> 0x448B9299; case NONE -> 0x22000000;
+            };
+            g.fill(px, pz, px + pw, pz + ph, color);
+            g.renderOutline(px, pz, pw, ph, 0x99D5D0B8);
+        }
+        // Spatial warehouses are separate from the settlement-wide inventory ledger.
+        for (SettlementMap.Warehouse warehouse : map.warehouses.values()) {
+            int wx = (int) Math.round(originX + warehouse.x * scale);
+            int wz = (int) Math.round(originY + warehouse.z * scale);
+            g.fill(wx - 4, wz - 4, wx + 5, wz + 5, 0xFFFFD36A);
+            g.renderOutline(wx - 4, wz - 4, 9, 9, 0xFF4A3214);
+            List<String> stock = new ArrayList<>();
+            stock.add("Вместимость: " + Math.round(warehouse.capacity));
+            for (var entry : warehouse.stock.entrySet()) stock.add(entry.getKey() + ": " + Math.round(entry.getValue()));
+            hit(wx - 6, wz - 6, 12, 12, null, "Склад " + warehouse.id, stock);
+        }
+
+        for (SettlementMap.Road road : map.roads.values()) {
+            for (int i = 1; i < road.path.size(); i++) {
+                SettlementMap.Node a = road.path.get(i - 1), b = road.path.get(i);
+                int ax = (int) Math.round(originX + (a.gx() * SettlementMap.CELL_SIZE + SettlementMap.CELL_SIZE / 2.0) * scale);
+                int ay = (int) Math.round(originY + (a.gz() * SettlementMap.CELL_SIZE + SettlementMap.CELL_SIZE / 2.0) * scale);
+                int bx = (int) Math.round(originX + (b.gx() * SettlementMap.CELL_SIZE + SettlementMap.CELL_SIZE / 2.0) * scale);
+                int by = (int) Math.round(originY + (b.gz() * SettlementMap.CELL_SIZE + SettlementMap.CELL_SIZE / 2.0) * scale);
+                int thickness = Math.max(2, (int) Math.ceil(scale * 2.2));
+                g.fill(Math.min(ax,bx)-thickness/2, Math.min(ay,by)-thickness/2,
+                        Math.max(ax,bx)+thickness/2+1, Math.max(ay,by)+thickness/2+1, 0xFFB49A70);
+            }
+        }
 
         // Масштабируемая координатная сетка помогает читать план и соотносить его с координатами мира.
         double rawStep = 48.0 / Math.max(0.0001, scale);
@@ -573,6 +692,7 @@ public class SettleScreen extends Screen {
             final int uid = b.uid;
             hit(bx - 3, by - 3, bw + 6, bh + 6, () -> {
                 selBuilding = uid;
+                selWorker = 0;
                 tab = 1;
                 scroll = Math.max(0, s.buildings.indexOf(s.building(uid)));
             }, b.def.name, List.of("Координаты: " + b.x + ", " + b.z,
@@ -590,6 +710,7 @@ public class SettleScreen extends Screen {
             final int workerId = w.id;
             hit(wx - 5, wy - 5, 10, 10, () -> {
                 selWorker = workerId;
+                selBuilding = 0;
                 tab = 2;
                 scroll = Math.max(0, s.workers.indexOf(s.worker(workerId)));
             }, w.name, List.of("Профессия: " + s.defs.professionName(w.profession),
@@ -601,9 +722,9 @@ public class SettleScreen extends Screen {
 
         String heading = "ПЛАН ПОСЕЛЕНИЯ";
         g.drawString(font, heading, x + 8, top + 7, WFUi.GOLD);
-        String stats = s.buildings.size() + " зданий  ·  " + s.workers.size() + " жителей";
+        String stats = s.buildings.size() + " зданий  ·  " + s.workers.size() + " жителей  ·  " + map.roads.size() + " дорог  ·  " + map.parcels.size() + " участков  ·  " + map.warehouses.size() + " складов";
         g.drawString(font, stats, x + cw - 8 - font.width(stats), top + 7, WFUi.MUTED);
-        String hint = "Колесо — масштаб  ·  ЛКМ + перетаскивание — перемещение  ·  Выберите здание или жителя";
+        String hint = "Рельеф  ·  участки  ·  дороги  ·  ЛКМ + перетаскивание — перемещение  ·  выбор здания/жителя";
         g.drawString(font, font.plainSubstrByWidth(hint, cw - 16), x + 8, top + h - 12, WFUi.MUTED);
         String zoomLabel = Math.round(mapZoom * 100) + "%";
         g.drawString(font, zoomLabel, x + cw - 8 - font.width(zoomLabel), top + h - 12, WFUi.GOLD_DIM);

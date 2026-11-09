@@ -100,7 +100,7 @@ public class LedgerTest {
         ok(L.view("nope", true, "").size() == L.rows.size(), "неизвестная колонка не ломает");
 
         // фильтр
-        String part = ra.name.substring(1, Math.min(5, ra.name.length())).toUpperCase();
+        String part = ra.name.substring(ra.name.length() - 1).toUpperCase(); // unique realm suffix in the synthetic fixture
         v = L.view("name", true, part);
         ok(v.contains(ra) && v.size() < L.rows.size() && v.stream().allMatch(r -> r.name.toUpperCase().contains(part) || r.id.toUpperCase().contains(part)), "фильтр по подстроке без учёта регистра");
         ok(L.view("name", true, "zzzz_nothing").isEmpty(), "фильтр без совпадений");

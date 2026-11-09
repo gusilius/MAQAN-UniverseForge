@@ -1,6 +1,8 @@
 package dev.worldforge.troops.mc.client;
 
 import dev.worldforge.mod.Json;
+import dev.worldforge.settle.Defs;
+import dev.worldforge.settle.Settlement;
 import dev.worldforge.troops.BuildGhost;
 import dev.worldforge.troops.CameraRig;
 import dev.worldforge.troops.Formations;
@@ -31,11 +33,19 @@ public final class CommandScreen extends Screen {
     private static final Map<String, String> RES = Map.of("wood", "дерево", "stone", "камень", "food", "еда", "iron", "железо", "gold", "золото", "planks", "доски", "bread", "хлеб", "tools", "инструменты");
     private static final int BTN_W = 70, BTN_H = 16, PANEL_W = 184, ROW = 12;
 
-    private boolean dragging, midDrag;
+    private boolean dragging, midDrag, zoomDragging;
     private double dragX, dragY, mx, my;
     // стройка
+    private static volatile Settlement incomingSettlement;
+    private Settlement settlement = incomingSettlement;
+    private boolean settlementOpen = true;
     private boolean buildOpen;
+    private boolean workAreaDrag;
+    private int workMode = -1;
+    private int workOverlay = 2;
     private final List<BuildGhost.Def> defs = new ArrayList<>();
+    private record ConstructionGhost(int x, int y, int z, String block) {}
+    private final List<ConstructionGhost> constructionGhosts = new ArrayList<>();
     private final Map<String, Integer> stock = new HashMap<>();
     private final List<BuildGhost.Rect> taken = new ArrayList<>();
     private int colX, colZ, scroll, refreshIn;
@@ -45,6 +55,20 @@ public final class CommandScreen extends Screen {
     private String ghostMsg = "";
 
     public CommandScreen() { super(Component.literal("Командный режим")); }
+
+    @SuppressWarnings("unchecked")
+    public static void setSettlementPayload(String payload) {
+        try {
+            Map<String, Object> m = (Map<String, Object>) Json.parse(payload);
+            Defs defs = new Defs();
+            if (m.get("defs") instanceof List<?> raw) for (Object o : raw) if (o instanceof String id) defs.add(id);
+            incomingSettlement = Settlement.fromJson((String) m.get("s"), defs);
+            if (Minecraft.getInstance().screen instanceof CommandScreen screen) screen.setSettlement(incomingSettlement);
+        } catch (RuntimeException ex) {
+            org.slf4j.LoggerFactory.getLogger("wf_troops").error("Не удалось подключить модель поселения к общей RTS-панели", ex);
+        }
+    }
+    public void setSettlement(Settlement model) { settlement = model; }
 
     @Override public boolean isPauseScreen() { return false; }
     @Override public boolean shouldCloseOnEsc() { return false; }
@@ -59,7 +83,7 @@ public final class CommandScreen extends Screen {
     // ---------- данные стройки ----------
     @SuppressWarnings("unchecked")
     void setBuilds(String json) {
-        defs.clear(); stock.clear(); taken.clear();
+        defs.clear(); stock.clear(); taken.clear(); constructionGhosts.clear();
         buildError = "";
         try {
             Map<String, Object> m = (Map<String, Object>) Json.parse(json);
@@ -72,6 +96,12 @@ public final class CommandScreen extends Screen {
             if (m.get("taken") instanceof List<?> l) for (Object o : l) {
                 Map<String, Object> t = (Map<String, Object>) o;
                 taken.add(new BuildGhost.Rect(((Number) t.get("x")).doubleValue(), ((Number) t.get("z")).doubleValue(), ((Number) t.get("sx")).intValue(), ((Number) t.get("sz")).intValue()));
+            }
+            if (m.get("construction") instanceof List<?> blocks) for (Object o : blocks) {
+                if (!(o instanceof Map<?, ?> t)) continue;
+                constructionGhosts.add(new ConstructionGhost(
+                        ((Number) t.get("x")).intValue(), ((Number) t.get("y")).intValue(),
+                        ((Number) t.get("z")).intValue(), (t.get("block") instanceof String block ? block : "minecraft:stone")));
             }
         } catch (RuntimeException ex) {
             buildError = "Не удалось прочитать список зданий";
@@ -88,6 +118,63 @@ public final class CommandScreen extends Screen {
         picked = null;
         if (buildOpen) requestBuilds();
     }
+    private static final String[] WORK_LABELS = {"целые деревья", "камень", "руда", "расчистка", "выравнивание", "урожай", "мёд", "лекарственные растения"};
+    private void cycleWorkMode() {
+        workMode = (workMode + 1) % (WORK_LABELS.length + 1);
+        if (workMode == WORK_LABELS.length) workMode = -1;
+        if (minecraft.player != null) minecraft.player.displayClientMessage(Component.literal(
+                workMode < 0 ? "Режим выбора участков выключен" :
+                        "Выделите участок для задачи: " + WORK_LABELS[workMode] + " · Y — сменить задачу · O — видимость"), true);
+    }
+    private List<String> selectedWorkerIds() {
+        List<String> ids = new ArrayList<>();
+        Set<String> selected = new HashSet<>(CommandMode.selected());
+        for (net.minecraft.world.entity.Entity entity : minecraft.level.entitiesForRendering())
+            if (entity instanceof LivingEntity living && CommandMode.isWorkerEntity(living)
+                    && selected.contains(entity.getUUID().toString())) ids.add(entity.getUUID().toString());
+        return ids;
+    }
+
+    private void sendWorkArea(Vec3 a, Vec3 b, int radius) {
+        List<String> workers = selectedWorkerIds();
+        if (workers.isEmpty()) {
+            minecraft.player.displayClientMessage(Component.literal("Для добычи и земляных работ выделите рабочих поселения"), true);
+            return;
+        }
+        double x = (a.x + b.x) * 0.5, z = (a.z + b.z) * 0.5;
+        int y = (int) Math.floor((a.y + b.y) * 0.5);
+        int halfX = Math.min(64, (int) Math.ceil(Math.abs(b.x - a.x) * 0.5));
+        int halfZ = Math.min(64, (int) Math.ceil(Math.abs(b.z - a.z) * 0.5));
+        int extent = Math.max(halfX, halfZ);
+        CommandMode.send(new OrderPacket(OrderPacket.WORK_AREA, workers, workMode,
+                x, z, workOverlay + ":" + y + ":" + halfX + ":" + halfZ, false, extent));
+        CommandMode.marker = new Vec3(x, y, z);
+        CommandMode.markerUntil = System.currentTimeMillis() + 1800;
+    }
+
+    private int zoomSliderX() { return width / 2 - 100; }
+    private int zoomSliderY() { return height - 25; }
+    private static final int ZOOM_SLIDER_W = 200;
+    private void setZoomFromMouse(double x) {
+        double t = Math.max(0, Math.min(1, (x - zoomSliderX()) / ZOOM_SLIDER_W));
+        CommandMode.RIG.setZoom(CameraRig.MIN_ZOOM + t * (CameraRig.MAX_ZOOM - CameraRig.MIN_ZOOM));
+    }
+    private boolean onZoomSlider(double x, double y) {
+        return x >= zoomSliderX() - 8 && x <= zoomSliderX() + ZOOM_SLIDER_W + 8
+                && y >= zoomSliderY() - 8 && y <= zoomSliderY() + 8;
+    }
+    private void drawZoomSlider(GuiGraphics g) {
+        int x = zoomSliderX(), y = zoomSliderY();
+        double t = (CommandMode.RIG.zoom - CameraRig.MIN_ZOOM) / (CameraRig.MAX_ZOOM - CameraRig.MIN_ZOOM);
+        int knob = x + (int) Math.round(t * ZOOM_SLIDER_W);
+        g.fill(x - 8, y - 10, x + ZOOM_SLIDER_W + 8, y + 11, 0xB910121A);
+        g.drawString(font, "КАМЕРА", x - 7, y - 8, 0xFF9CCCFF, false);
+        g.fill(x, y + 3, x + ZOOM_SLIDER_W, y + 6, 0xFF596273);
+        g.fill(x, y + 3, knob, y + 6, 0xFF72C7FF);
+        g.fill(knob - 4, y, knob + 5, y + 10, 0xFFFFFFFF);
+        String value = String.format(java.util.Locale.ROOT, "%.0f бл.", CommandMode.RIG.zoom);
+        g.drawString(font, value, x + ZOOM_SLIDER_W + 12, y - 8, 0xFFE6E8EE, false);
+    }
 
     // ---------- раскладка ----------
     private record Btn(String label, int x, int y, int w, boolean on, Runnable run) {
@@ -97,13 +184,17 @@ public final class CommandScreen extends Screen {
     private List<Btn> buttons() {
         List<Btn> l = new ArrayList<>();
         int x = width - 4 - BTN_W;
-        l.add(new Btn("Выйти (R)", x, 4, BTN_W, false, () -> CommandMode.exit(minecraft)));
+        l.add(new Btn("Выход (R)", x, 4, BTN_W, false, () -> CommandMode.exit(minecraft)));
         x -= BTN_W + 4;
-        l.add(new Btn("Строить (B)", x, 4, BTN_W, buildOpen, this::toggleBuild));
+        l.add(new Btn("Стройка (B)", x, 4, BTN_W, buildOpen, this::toggleBuild));
         x -= BTN_W + 4;
-        l.add(new Btn("Тактика", x, 4, BTN_W, CommandMode.RIG.view == CameraRig.View.TACTICS, () -> CommandMode.RIG.setView(CameraRig.View.TACTICS)));
+        l.add(new Btn("Участки (Y)", x, 4, BTN_W, workMode >= 0, this::cycleWorkMode));
         x -= BTN_W + 4;
-        l.add(new Btn("Сверху", x, 4, BTN_W, CommandMode.RIG.view == CameraRig.View.SKY, () -> CommandMode.RIG.setView(CameraRig.View.SKY)));
+        l.add(new Btn("Стратегия", x, 4, BTN_W, CommandMode.RIG.view == CameraRig.View.SKY, () -> CommandMode.RIG.setView(CameraRig.View.SKY)));
+        x -= BTN_W + 4;
+        l.add(new Btn("Изометрия", x, 4, BTN_W, CommandMode.RIG.view == CameraRig.View.TACTICS, () -> CommandMode.RIG.setView(CameraRig.View.TACTICS)));
+        x -= BTN_W + 4;
+        l.add(new Btn("Свободная", x, 4, BTN_W, CommandMode.RIG.view == CameraRig.View.FREE, () -> CommandMode.RIG.setView(CameraRig.View.FREE)));
         return l;
     }
 
@@ -116,7 +207,8 @@ public final class CommandScreen extends Screen {
     private boolean inSelPanel(double px, double py) { return px < 192 && py > height - 90; }
 
     boolean overPanel(double px, double py) {
-        if (py < 4 + BTN_H + 2 && px > width - 4 * (BTN_W + 4) - 4) return true;
+        if (py < 4 + BTN_H + 2 && px > width - 6 * (BTN_W + 4) - 4) return true;
+        if (onZoomSlider(px, py)) return true;
         return inBuildPanel(px, py) || inSelPanel(px, py);
     }
 
@@ -136,29 +228,133 @@ public final class CommandScreen extends Screen {
 
     private int rowsFit() { return Math.max(3, (panelH() - 62) / ROW); }
 
+    // ---------- инспектор выбранных персонажей ----------
+    private static final int INSPECT_X=4, INSPECT_W=250, INSPECT_ROW=19;
+    private int inspectY() { return settlementOpen ? 148 : 34; }
+
+    private boolean inspectAt(double x,double y) {
+        if(x<INSPECT_X||x>=INSPECT_X+INSPECT_W||y<inspectY()+22)return false;
+        int row=(int)((y-(inspectY()+22))/INSPECT_ROW);
+        List<String> ids=CommandMode.selected();
+        if(row<0||row>=Math.min(8,ids.size()))return false;
+        if(row>=ids.size())return y<inspectY()+22+8*INSPECT_ROW;
+        String id=ids.get(row);
+        for(net.minecraft.world.entity.Entity entity:minecraft.level.entitiesForRendering()){
+            if(!entity.isAlive()||!entity.getUUID().toString().equals(id))continue;
+            CommandMode.SEL.set(List.of(id));
+            CommandMode.RIG.focusOn(entity.getX(),entity.getZ());
+            return true;
+        }
+        return true;
+    }
+
+    private void drawSettlementPanel(GuiGraphics g) {
+        if (settlement == null) return;
+        int x = 4, y = 34, w = 250, h = 106;
+        g.fill(x, y, x + w, y + h, 0xD910121A);
+        g.fill(x, y, x + w, y + 1, 0xFF8A7040);
+        g.drawString(font, "ПОСЕЛЕНИЕ · " + settlement.name, x + 6, y + 5, 0xFFE6C875, false);
+        String pop = "Жители " + settlement.workers.size() + " / жильё " + settlement.housing()
+                + " · настроение " + settlement.approval() + " · здания " + settlement.buildings.size();
+        g.drawString(font, font.plainSubstrByWidth(pop, w - 12), x + 6, y + 17, 0xFFD7DCE8, false);
+        int rx = x + 6, ry = y + 31, col = 0;
+        for (var entry : settlement.defs.resourceNames.entrySet()) {
+            String text = entry.getValue() + " " + (int) settlement.amount(entry.getKey());
+            int tw = font.width(text) + 12;
+            if (rx + tw > x + w - 4) { rx = x + 6; ry += 14; col++; }
+            if (ry > y + h - 12) break;
+            g.drawString(font, text, rx, ry, 0xFFB8D8A0, false);
+            rx += tw;
+        }
+        g.drawString(font, "Рабочие, армия, стройка и приказы — в этом командном пространстве", x + 6, y + h - 11, 0xFF9EA4B5, false);
+    }
+
+    private void drawUnitInspector(GuiGraphics g) {
+        List<String> ids=CommandMode.selected();
+        if(ids.isEmpty())return;
+        int rows=Math.min(8,ids.size());
+        int h=24+rows*INSPECT_ROW;
+        g.fill(INSPECT_X,inspectY(),INSPECT_X+INSPECT_W,inspectY()+h,0xD910121A);
+        g.fill(INSPECT_X,inspectY(),INSPECT_X+INSPECT_W,inspectY()+1,0xFF8A7040);
+        g.drawString(font,"ИНСПЕКТОР · "+ids.size()+" ВЫБРАНО",INSPECT_X+6,inspectY()+6,0xFFE6C875,false);
+        int row=0;
+        for(String id:ids){
+            if(row>=8)break;
+            net.minecraft.world.entity.Entity entity=null;
+            for(net.minecraft.world.entity.Entity candidate:minecraft.level.entitiesForRendering())
+                if(candidate.getUUID().toString().equals(id)){entity=candidate;break;}
+            int y=inspectY()+22+row*INSPECT_ROW;
+            if(entity==null){g.drawString(font,"Недоступен · "+id.substring(0,Math.min(8,id.length())),INSPECT_X+6,y+4,0xFF888888,false);row++;continue;}
+            boolean troop=entity instanceof TroopEntity;
+            String name=entity.getDisplayName().getString();
+            String role,identity="";
+            int morale=-1,xp=-1;
+            String state="";
+            if(entity instanceof TroopEntity t){
+                role=t.def()==null?t.unitId():t.def().role();
+                morale=t.moralePct();
+                identity=t.syncedCharacterId()==null?"":t.syncedCharacterId();
+                xp=t.syncedCombatXp();
+                state=t.squadId()==null||t.squadId().isBlank()?"":"Отряд "+t.squadId();
+            }else if(entity instanceof LivingEntity worker&&CommandMode.isWorkerEntity(worker)){
+                role=CommandMode.workerString(worker,"professionId");
+                if(role.isBlank())role="Рабочий";
+                identity=CommandMode.workerString(worker,"characterId");
+                state=CommandMode.workerString(worker,"statusLabel");
+                int assigned=CommandMode.workerInt(worker,"assignedBuildingId");
+                if(assigned>0)state+=" · здание #"+assigned;
+            }else role="Юнит";
+            g.fill(INSPECT_X+3,y,INSPECT_X+INSPECT_W-3,y+INSPECT_ROW-1,
+                    (row&1)==0?0x55333344:0x33222230);
+            int health=entity instanceof LivingEntity living&&living.getMaxHealth()>0
+                    ?Math.round(100*living.getHealth()/living.getMaxHealth()):0;
+            String detail=role+" · HP "+health+"%"+(morale>=0?" · Мораль "+morale+"%":"")+(xp>=0?" · XP "+xp:"")+(state.isBlank()?"":" · "+state);
+            int nameWidth=identity.isBlank()?INSPECT_W-14:INSPECT_W-88;
+            g.drawString(font,font.plainSubstrByWidth(name,nameWidth),INSPECT_X+7,y+2,
+                    troop?0xFFE6C875:0xFFB8D8A0,false);
+            g.drawString(font,font.plainSubstrByWidth(detail,INSPECT_W-14),INSPECT_X+7,y+11,0xFFB5B7C2,false);
+            if(!identity.isBlank()){
+                String shortId=identity.length()>16?identity.substring(0,16)+"…":identity;
+                g.drawString(font,shortId,INSPECT_X+INSPECT_W-7-font.width(shortId),y+2,0xFF777F91,false);
+            }
+            row++;
+        }
+        if(ids.size()>8)g.drawString(font,"Ещё "+(ids.size()-8)+" · выберите строку для фокуса",
+                INSPECT_X+6,inspectY()+h-10,0xFF9EA4B5,false);
+    }
+
     // ---------- ввод ----------
     @Override
     public boolean mouseClicked(double x, double y, int button) {
         mx = x; my = y;
         boolean shift = hasShiftDown(), ctrl = hasControlDown();
+        if(button==0&&onZoomSlider(x,y)){zoomDragging=true;setZoomFromMouse(x);return true;}
+        if(button==0&&inspectAt(x,y))return true;
         if (button == 0) {
             for (Btn b : buttons()) if (b.hit(x, y)) { b.run().run(); return true; }
             if (buildOpen && inBuildPanel(x, y)) { panelClick(x, y); return true; }
             if (inSelPanel(x, y)) return true;
             if (picked != null) { place(shift); return true; }
+            if (workMode >= 0) { workAreaDrag = true; dragging = true; dragX = x; dragY = y; return true; }
             dragging = true; dragX = x; dragY = y;
             return true;
         }
         if (button == 2) { midDrag = true; return true; }
         if (button == 1) {
             if (picked != null) { picked = null; return true; }
-            if (overPanel(x, y) || CommandMode.SEL.selected().isEmpty()) return true;
+            if (overPanel(x, y)) return true;
+            LivingEntity resident = CommandMode.residentAt(minecraft, x, y);
+            if (resident != null && minecraft.player != null) {
+                minecraft.player.connection.sendCommand("wfresident open " + resident.getUUID());
+                return true;
+            }
+            if (CommandMode.SEL.selected().isEmpty()) return true;
             LivingEntity foe = CommandMode.enemyAt(minecraft, x, y);
             Vec3 g = CommandMode.groundAt(minecraft, x, y);
             if (foe != null) {
                 CommandMode.send(new OrderPacket(OrderPacket.ORDER, CommandMode.selected(), Squads.Kind.ATTACK.ordinal(), 0, 0, foe.getUUID().toString(), shift, 0));
             } else if (g != null) {
-                CommandMode.send(new OrderPacket(OrderPacket.WORK, CommandMode.selected(), 0, g.x, g.z, "", false, 0));      // рабочие: в здание под курсором
+                // The single ORDER packet is routed by the server to workers and troops independently.
                 Squads.Kind k = ctrl ? Squads.Kind.ATTACK_MOVE : Squads.Kind.MOVE;
                 CommandMode.send(new OrderPacket(OrderPacket.ORDER, CommandMode.selected(), k.ordinal(), g.x, g.z, "", shift, 0));
                 CommandMode.marker = g;
@@ -196,8 +392,29 @@ public final class CommandScreen extends Screen {
     public boolean mouseReleased(double x, double y, int button) {
         mx = x; my = y;
         if (button == 2) midDrag = false;
+        if (button == 0) zoomDragging = false;
         if (button == 0 && dragging) {
             dragging = false;
+            if (workAreaDrag) {
+                workAreaDrag = false;
+                boolean areaSelection = UnitSelection.isBox(dragX, dragY, x, y);
+                if (!areaSelection) {
+                    net.minecraft.core.BlockPos block = CommandMode.blockAt(minecraft, x, y);
+                    if (block != null) {
+                        Vec3 exact = new Vec3(block.getX() + 0.5, block.getY() + 0.5, block.getZ() + 0.5);
+                        sendWorkArea(exact, exact, 0);
+                        return true;
+                    }
+                }
+                Vec3 a = CommandMode.groundAt(minecraft, dragX, dragY);
+                Vec3 b = CommandMode.groundAt(minecraft, x, y);
+                if (a != null && b != null) {
+                    int radius = areaSelection
+                            ? Math.min(64, (int) Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) * 0.5)) : 0;
+                    sendWorkArea(a, b, radius);
+                }
+                return true;
+            }
             List<UnitSelection.Screen> all = CommandMode.screenList(minecraft);
             boolean shift = hasShiftDown();
             if (UnitSelection.isBox(dragX, dragY, x, y)) CommandMode.SEL.box(all, dragX, dragY, x, y, shift);
@@ -210,6 +427,7 @@ public final class CommandScreen extends Screen {
     public boolean mouseDragged(double x, double y, int button, double dx, double dy) {
         mx = x; my = y;
         if (button == 2) CommandMode.RIG.rotate(dx * 0.35, dy * 0.25);
+        if (button == 0 && zoomDragging) setZoomFromMouse(x);
         return true;
     }
 
@@ -237,8 +455,28 @@ public final class CommandScreen extends Screen {
         boolean ctrl = hasControlDown();
         if (key == GLFW.GLFW_KEY_TAB) { CommandMode.RIG.cycle(); return true; }
         if (key == GLFW.GLFW_KEY_B) { toggleBuild(); return true; }
+        if (key == GLFW.GLFW_KEY_H) {
+            settlementOpen = !settlementOpen;
+            if (settlement == null && minecraft.player != null) minecraft.player.connection.sendCommand("wfsettle view hud");
+            return true;
+        }
+        if (key == GLFW.GLFW_KEY_Y) { cycleWorkMode(); return true; }
+        if (key == GLFW.GLFW_KEY_O) {
+            workOverlay = (workOverlay + 1) % 3;
+            if (!CommandMode.SEL.selected().isEmpty()) {
+                CommandMode.send(new OrderPacket(OrderPacket.WORK_AREA, selectedWorkerIds(), 0,
+                        0, 0, workOverlay + ":0", false, -1));
+            }
+            if (minecraft.player != null) minecraft.player.displayClientMessage(Component.literal(
+                    "Видимость рабочих зон: " + (workOverlay == 0 ? "выключена" : workOverlay == 1 ? "слабая" : "яркая")), true);
+            return true;
+        }
         if (key == GLFW.GLFW_KEY_HOME) { CommandMode.RIG.focusOn(minecraft.player.getX(), minecraft.player.getZ()); return true; }
         if (key == GLFW.GLFW_KEY_SPACE) { focusSelection(); return true; }
+        if (ctrl && key == GLFW.GLFW_KEY_A) {
+            selectForce(hasShiftDown());
+            return true;
+        }
         if (key >= GLFW.GLFW_KEY_1 && key <= GLFW.GLFW_KEY_9) {
             int n = key - GLFW.GLFW_KEY_0;
             if (ctrl) {
@@ -254,14 +492,10 @@ public final class CommandScreen extends Screen {
         if (CommandMode.SEL.selected().isEmpty()) return true;
         List<String> sel = CommandMode.selected();
         switch (key) {
-            case GLFW.GLFW_KEY_Z -> {
-                CommandMode.send(new OrderPacket(OrderPacket.ORDER, sel, Squads.Kind.STOP.ordinal(), 0, 0, "", false, 0));
-                CommandMode.send(new OrderPacket(OrderPacket.WORK_STOP, sel, 0, 0, 0, "", false, 0));
-            }
-            case GLFW.GLFW_KEY_X -> {
-                CommandMode.send(new OrderPacket(OrderPacket.ORDER, sel, Squads.Kind.HOLD.ordinal(), 0, 0, "", false, 0));
-                CommandMode.send(new OrderPacket(OrderPacket.WORK_HOLD, sel, 0, 0, 0, "", false, 0));
-            }
+            case GLFW.GLFW_KEY_Z ->
+                    CommandMode.send(new OrderPacket(OrderPacket.ORDER, sel, Squads.Kind.STOP.ordinal(), 0, 0, "", false, 0));
+            case GLFW.GLFW_KEY_X ->
+                    CommandMode.send(new OrderPacket(OrderPacket.ORDER, sel, Squads.Kind.HOLD.ordinal(), 0, 0, "", false, 0));
             case GLFW.GLFW_KEY_C -> {
                 CommandMode.formation = (CommandMode.formation + 1) % Formations.Type.values().length;
                 CommandMode.send(new OrderPacket(OrderPacket.FORMATION, sel, 0, 0, 0, "", false, CommandMode.formation));
@@ -271,6 +505,18 @@ public final class CommandScreen extends Screen {
                 CommandMode.send(new OrderPacket(OrderPacket.STANCE, sel, 0, 0, 0, "", false, CommandMode.stance));
             }
             case GLFW.GLFW_KEY_F -> CommandMode.send(new OrderPacket(OrderPacket.GROUP, sel, 0, 0, 0, "", false, 0));
+            case GLFW.GLFW_KEY_V -> CommandMode.send(new OrderPacket(OrderPacket.APPOINT,sel,0,0,0,"",false,ctrl?-1:1));
+            case GLFW.GLFW_KEY_P -> {
+                if(!overPanel(mx,my)){
+                    Vec3 patrol=CommandMode.groundAt(minecraft,mx,my);
+                    if(patrol!=null){
+                        CommandMode.send(new OrderPacket(OrderPacket.ORDER,sel,Squads.Kind.PATROL.ordinal(),
+                                patrol.x,patrol.z,"",hasShiftDown(),0));
+                        CommandMode.marker=patrol;
+                        CommandMode.markerUntil=System.currentTimeMillis()+1500;
+                    }
+                }
+            }
             case GLFW.GLFW_KEY_DELETE -> CommandMode.send(new OrderPacket(OrderPacket.RELEASE, sel, 0, 0, 0, "", false, 0));
             default -> {}
         }
@@ -279,6 +525,42 @@ public final class CommandScreen extends Screen {
 
     @Override public boolean keyReleased(int key, int scan, int mods) { return true; }
     @Override public boolean charTyped(char c, int mods) { return true; }
+
+    /** Ctrl+A selects every controllable body; Ctrl+Shift+A selects the selected army or settlement population. */
+    private void selectForce(boolean currentGroupOnly) {
+        if (minecraft.level == null) return;
+        net.minecraft.world.entity.Entity anchor = null;
+        if (currentGroupOnly) {
+            for (String selected : CommandMode.selected()) {
+                for (net.minecraft.world.entity.Entity entity : minecraft.level.entitiesForRendering()) {
+                    if (entity.getUUID().toString().equals(selected)) { anchor = entity; break; }
+                }
+                if (anchor != null) break;
+            }
+        }
+        List<String> ids = new ArrayList<>();
+        int armyId = anchor instanceof TroopEntity troop ? troop.armyId : 0;
+        String squadId = anchor instanceof TroopEntity troop ? troop.squadId() : "";
+        String colonyId = anchor instanceof LivingEntity living && CommandMode.isWorkerEntity(living)
+                ? CommandMode.workerString(living, "syncedColonyId") : "";
+        for (net.minecraft.world.entity.Entity entity : minecraft.level.entitiesForRendering()) {
+            if (!(entity instanceof LivingEntity living) || !living.isAlive() || !CommandMode.selectable(minecraft, living)) continue;
+            if (currentGroupOnly && anchor instanceof TroopEntity) {
+                if (!(living instanceof TroopEntity troop)) continue;
+                if (armyId > 0 ? troop.armyId != armyId : !squadId.equals(troop.squadId())) continue;
+            } else if (currentGroupOnly && anchor instanceof LivingEntity selectedWorker
+                    && CommandMode.isWorkerEntity(selectedWorker)) {
+                if (!CommandMode.isWorkerEntity(living)
+                        || !colonyId.equals(CommandMode.workerString(living, "syncedColonyId"))) continue;
+            }
+            ids.add(entity.getUUID().toString());
+            if (ids.size() >= 200) break;
+        }
+        CommandMode.SEL.set(ids);
+        focusSelection();
+        if (minecraft.player != null) minecraft.player.displayClientMessage(Component.literal(
+                currentGroupOnly ? "Выделена армия/поселение: " + ids.size() : "Все подконтрольные: " + ids.size()), true);
+    }
 
     private void focusSelection() {
         double sx = 0, sz = 0;
@@ -349,6 +631,8 @@ public final class CommandScreen extends Screen {
             }
             drawGhost(g, mxi, myi, w, h);
             drawTaken(g, w, h);
+            drawWorkAreas(g, w, h);
+            drawConstructionGhosts(g, w, h, mxi, myi);
         }
         if (dragging) {
             int x1 = (int) Math.min(dragX, mx), x2 = (int) Math.max(dragX, mx), y1 = (int) Math.min(dragY, my), y2 = (int) Math.max(dragY, my);
@@ -358,9 +642,12 @@ public final class CommandScreen extends Screen {
         }
         for (Btn b : buttons()) button(g, b, mxi, myi);
         drawSelection(g, h);
+        if (settlementOpen) drawSettlementPanel(g);
+        drawUnitInspector(g);
+        drawZoomSlider(g);
         if (buildOpen) drawBuildPanel(g, mxi, myi);
-        String hint = picked != null ? "ЛКМ - поставить здание (Shift - ещё одно) · ПКМ/Esc - отмена · колесо - высота камеры"
-                : "ЛКМ выбор/рамка · ПКМ приказ · WASD и края экрана - камера · колесо - высота · СКМ - вращать · Q/E поворот · Tab вид · Space к выбранным · B стройка · R выход";
+        String hint = workMode >= 0 ? "Участок: " + WORK_LABELS[workMode] + " · ЛКМ/рамка — назначить выделенным рабочим · O — видимость зоны · Y — сменить задачу" : picked != null ? "ЛКМ - поставить здание (Shift - ещё одно) · ПКМ/Esc - отмена · колесо - высота камеры"
+                : "ЛКМ выбор/рамка · ПКМ приказ · WASD и края экрана - камера · колесо - высота · СКМ - вращать · Q/E поворот · Tab вид · Space к выбранным · V командир / Ctrl+V снять · P патруль · B стройка · R выход";
         g.drawString(font, hint, 6, 6, 0xFFC8C8C8, true);
         g.drawString(font, "Вид: " + CommandMode.RIG.view.title + "   Строй: " + Formations.Type.values()[CommandMode.formation].title + "   Поза: " + Squads.Stance.values()[CommandMode.stance].title,
                 6, 18, 0xFF9CCCFF, true);
@@ -370,6 +657,62 @@ public final class CommandScreen extends Screen {
     private void drawTaken(GuiGraphics g, int w, int h) {
         if (!buildOpen || picked == null) return;
         for (BuildGhost.Rect r : taken) outline(g, (int) Math.floor(r.cx()), (int) Math.floor(r.cz()), r.sx(), r.sz(), groundYFor(r.cx(), r.cz()), 0x88BBBBBB, w, h);
+    }
+
+    private void drawConstructionGhosts(GuiGraphics g, int w, int h, int mouseX, int mouseY) {
+        if (constructionGhosts.isEmpty() || CommandMode.vp == null || minecraft.level == null) return;
+        int visible = 0;
+        for (ConstructionGhost ghost : constructionGhosts) {
+            double[] p = Projection.project(CommandMode.vp,
+                    ghost.x() + 0.5 - CommandMode.cam.x,
+                    ghost.y() + 0.5 - CommandMode.cam.y,
+                    ghost.z() + 0.5 - CommandMode.cam.z, w, h);
+            if (p[2] <= 0 || p[2] > 180) continue;
+            int x = (int) p[0], y = (int) p[1];
+            int size = Math.max(2, Math.min(6, (int) (18 / p[2])));
+            g.fill(x - size, y - size, x + size + 1, y + size + 1, 0x6638CFFF);
+            g.fill(x - 1, y - 1, x + 2, y + 2, 0xFF9BE8FF);
+            if (Math.hypot(mouseX - x, mouseY - y) <= Math.max(8, size + 3)) {
+                String label = ghost.block() + " · " + ghost.x() + " " + ghost.y() + " " + ghost.z();
+                int tx = Math.min(w - font.width(label) - 8, mouseX + 12), ty = Math.max(28, mouseY + 10);
+                g.fill(tx - 3, ty - 2, tx + font.width(label) + 4, ty + 11, 0xDD101820);
+                g.drawString(font, label, tx, ty, 0xFF9BE8FF, false);
+            }
+            visible++;
+        }
+        if (visible > 0) {
+            String label = "Чертёж · недостающих блоков: " + constructionGhosts.size() + " · в кадре: " + visible;
+            g.fill(6, height - 34, 6 + font.width(label) + 12, height - 19, 0xCC101018);
+            g.drawString(font, label, 12, height - 30, 0xFF9BE8FF, false);
+        }
+    }
+
+    private void drawWorkAreas(GuiGraphics g, int w, int h) {
+        if (CommandMode.vp == null || minecraft.level == null) return;
+        for (net.minecraft.world.entity.Entity entity : minecraft.level.entitiesForRendering()) {
+            if (!(entity instanceof LivingEntity living) || !CommandMode.SEL.isSelected(entity.getUUID().toString())
+                    || !CommandMode.isWorkerEntity(living)) continue;
+            String data = CommandMode.workerString(living, "workAreaLabel");
+            if (data.isBlank()) continue;
+            String[] p = data.split("\\|");
+            if (p.length < 6) continue;
+            try {
+                int x = Integer.parseInt(p[1]), z = Integer.parseInt(p[2]);
+                int radius = Math.max(0, Math.min(64, Integer.parseInt(p[3])));
+                int level = Integer.parseInt(p[4]), visibility = Integer.parseInt(p[5]);
+                int halfX = p.length > 6 ? Math.max(0, Math.min(64, Integer.parseInt(p[6]))) : radius;
+                int halfZ = p.length > 7 ? Math.max(0, Math.min(64, Integer.parseInt(p[7]))) : radius;
+                if (visibility == 0) continue;
+                double y = level > minecraft.level.getMinBuildHeight() && level < minecraft.level.getMaxBuildHeight()
+                        ? level + 0.15 : groundYFor(x, z);
+                int color = visibility == 1 ? 0x6688CCFF : 0xDD55DFFF;
+                outline(g, x, z, Math.max(1, halfX * 2 + 1), Math.max(1, halfZ * 2 + 1), y, color, w, h);
+                if (visibility == 2) {
+                    double[] center = Projection.project(CommandMode.vp, x - CommandMode.cam.x, y - CommandMode.cam.y, z - CommandMode.cam.z, w, h);
+                    if (center[2] > 0) g.drawString(font, p[0] + " · r" + radius, (int) center[0] + 4, (int) center[1] - 8, color, true);
+                }
+            } catch (NumberFormatException ignored) { }
+        }
     }
 
     private double groundYFor(double x, double z) {

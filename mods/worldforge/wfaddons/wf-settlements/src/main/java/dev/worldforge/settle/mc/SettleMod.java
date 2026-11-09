@@ -5,8 +5,14 @@ import dev.worldforge.mod.Json;
 import dev.worldforge.settle.Building;
 import dev.worldforge.settle.Defs;
 import dev.worldforge.settle.Settlement;
+import dev.worldforge.settle.Worker;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
+import dev.worldforge.people.PopulationSimulation;
+import dev.worldforge.people.LifeSimulation;
+import dev.worldforge.mod.WorldForgeMod;
+import dev.worldforge.mod.economy.TreasuryLedger;
+import dev.worldforge.people.PopulationSimulation.Duty;
 import dev.worldforge.people.mc.PeopleMod;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
@@ -58,6 +64,10 @@ public class SettleMod {
 
     private static final DeferredRegister<Item> ITEMS = DeferredRegister.create(ForgeRegistries.ITEMS, MOD_ID);
     private static final DeferredRegister<EntityType<?>> ENTITIES = DeferredRegister.create(ForgeRegistries.ENTITY_TYPES, MOD_ID);
+    private static final DeferredRegister<net.minecraft.world.inventory.MenuType<?>> MENUS =
+            DeferredRegister.create(ForgeRegistries.MENU_TYPES, MOD_ID);
+    public static final RegistryObject<net.minecraft.world.inventory.MenuType<ResidentDialogueMenu>> RESIDENT_DIALOGUE_MENU =
+            MENUS.register("resident_dialogue", () -> net.minecraftforge.common.extensions.IForgeMenuType.create(ResidentDialogueMenu::new));
     public static final RegistryObject<Item> WAND = ITEMS.register("settle_wand", () -> new SettleWand(new Item.Properties().stacksTo(1)));
     public static final RegistryObject<EntityType<WFWorker>> WORKER = ENTITIES.register("worker",
             () -> EntityType.Builder.<WFWorker>of(WFWorker::new, MobCategory.MISC).sized(0.6f, 1.95f).clientTrackingRange(10).build(MOD_ID + ":worker"));
@@ -88,11 +98,25 @@ public class SettleMod {
         IEventBus bus = FMLJavaModLoadingContext.get().getModEventBus();
         ITEMS.register(bus);
         ENTITIES.register(bus);
+        MENUS.register(bus);
         bus.addListener(this::attributes);
         bus.addListener(this::tabs);
         MinecraftForge.EVENT_BUS.register(this);
         MinecraftForge.EVENT_BUS.register(new SettleWand.Events());
+        MinecraftForge.EVENT_BUS.register(new BuildingSite.Events());
+        MinecraftForge.EVENT_BUS.register(new ResidentInteraction());
         MinecraftForge.EVENT_BUS.register(new TaxService());
+    }
+
+    @net.minecraftforge.fml.common.Mod.EventBusSubscriber(modid = MOD_ID,
+            bus = net.minecraftforge.fml.common.Mod.EventBusSubscriber.Bus.MOD,
+            value = net.minecraftforge.api.distmarker.Dist.CLIENT)
+    public static final class ClientEvents {
+        @net.minecraftforge.eventbus.api.SubscribeEvent
+        public static void clientSetup(net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent event) {
+            event.enqueueWork(() -> net.minecraft.client.gui.screens.MenuScreens.register(
+                    RESIDENT_DIALOGUE_MENU.get(), ResidentDialogueScreen::new));
+        }
     }
 
     private void attributes(EntityAttributeCreationEvent e) {
@@ -145,7 +169,11 @@ public class SettleMod {
 
             for (dev.worldforge.settle.Building building : colony.s.buildings) {
                 if (building == null || building.def == null) continue;
-                int x = colony.worldX(building), z = colony.worldZ(building);
+                Colony.Site site=colony.sites.get(building.uid);
+                int footprintWidth=site!=null&&site.sx>0?site.sx:building.def.sizeX;
+                int footprintDepth=site!=null&&site.sz>0?site.sz:building.def.sizeZ;
+                int x=site!=null?site.x+footprintWidth/2:colony.worldX(building);
+                int z=site!=null?site.z+footprintDepth/2:colony.worldZ(building);
                 int by = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,x,z);
                 Map<String, String> buildingAttrs = new java.util.LinkedHashMap<>();
                 buildingAttrs.put("settlement_id", colony.s.id);
@@ -164,9 +192,86 @@ public class SettleMod {
                 buildingFeature.put("territory_id", provinceFeatureId);
                 buildingFeature.put("race_id", raceId);
                 buildingFeature.put("culture_id", cultureId);
+                int minBuildingX=site!=null?site.x:x-footprintWidth/2;
+                int minBuildingZ=site!=null?site.z:z-footprintDepth/2;
+                int maxBuildingX=minBuildingX+Math.max(1,footprintWidth);
+                int maxBuildingZ=minBuildingZ+Math.max(1,footprintDepth);
+                List<Object> footprint = List.of(
+                        atlasVertex(minBuildingX,by,minBuildingZ),atlasVertex(maxBuildingX,by,minBuildingZ),
+                        atlasVertex(maxBuildingX,by,maxBuildingZ),atlasVertex(minBuildingX,by,maxBuildingZ),
+                        atlasVertex(minBuildingX,by,minBuildingZ));
+                buildingFeature.put("rings", List.of(footprint));
                 features.add(buildingFeature);
             }
+
+            // Planned parcels and road centre-lines share the exact colony/world coordinate frame.
+            for (dev.worldforge.settle.SettlementMap.Parcel parcel : colony.map.parcels.values()) {
+                int x0=colony.cx+parcel.x, z0=colony.cz+parcel.z;
+                int x1=x0+parcel.width, z1=z0+parcel.depth;
+                int py=level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+                        x0+parcel.width/2,z0+parcel.depth/2);
+                Map<String,String> parcelAttrs=new java.util.LinkedHashMap<>();
+                parcelAttrs.put("settlement_id",colony.s.id);
+                parcelAttrs.put("parcel_id",parcel.id);
+                parcelAttrs.put("zone",parcel.zone.name().toLowerCase(java.util.Locale.ROOT));
+                parcelAttrs.put("owner",parcel.owner==null?"":parcel.owner);
+                Map<String,Object> parcelFeature=atlasFeature(
+                        "worldforge:settlement:"+dimension+":"+colony.s.id+":parcel:"+parcel.id,
+                        "land_parcel",parcel.id,dimension,x0+parcel.width/2,py,z0+parcel.depth/2,
+                        realmId,parcel.zone.name().toLowerCase(java.util.Locale.ROOT),parcelAttrs);
+                parcelFeature.put("territory_id",provinceFeatureId);
+                parcelFeature.put("rings",List.of(List.of(atlasVertex(x0,py,z0),atlasVertex(x1,py,z0),
+                        atlasVertex(x1,py,z1),atlasVertex(x0,py,z1),atlasVertex(x0,py,z0))));
+                features.add(parcelFeature);
+            }
+            for (dev.worldforge.settle.SettlementMap.Road road : colony.map.roads.values()) {
+                if (road.path==null||road.path.size()<2) continue;
+                List<Object> path=new ArrayList<>();
+                int pathStep=Math.max(1,(int)Math.ceil((road.path.size()-1)/4095.0));
+                for (int index=0;index<road.path.size();index+=pathStep) {
+                    dev.worldforge.settle.SettlementMap.Node node=road.path.get(index);
+                    int wx=colony.cx+node.gx()*dev.worldforge.settle.SettlementMap.CELL_SIZE
+                            +dev.worldforge.settle.SettlementMap.CELL_SIZE/2;
+                    int wz=colony.cz+node.gz()*dev.worldforge.settle.SettlementMap.CELL_SIZE
+                            +dev.worldforge.settle.SettlementMap.CELL_SIZE/2;
+                    dev.worldforge.settle.SettlementMap.Cell cell=colony.map.cell(node.gx(),node.gz());
+                    int ry=cell==null?y:cell.height;
+                    path.add(atlasVertex(wx,ry,wz));
+                }
+                if((road.path.size()-1)%pathStep!=0){
+                    dev.worldforge.settle.SettlementMap.Node node=road.path.get(road.path.size()-1);
+                    int wx=colony.cx+node.gx()*dev.worldforge.settle.SettlementMap.CELL_SIZE
+                            +dev.worldforge.settle.SettlementMap.CELL_SIZE/2;
+                    int wz=colony.cz+node.gz()*dev.worldforge.settle.SettlementMap.CELL_SIZE
+                            +dev.worldforge.settle.SettlementMap.CELL_SIZE/2;
+                    dev.worldforge.settle.SettlementMap.Cell cell=colony.map.cell(node.gx(),node.gz());
+                    path.add(atlasVertex(wx,cell==null?y:cell.height,wz));
+                }
+                var first=road.path.get(0);
+                int rx=colony.cx+first.gx()*dev.worldforge.settle.SettlementMap.CELL_SIZE
+                        +dev.worldforge.settle.SettlementMap.CELL_SIZE/2;
+                int rz=colony.cz+first.gz()*dev.worldforge.settle.SettlementMap.CELL_SIZE
+                        +dev.worldforge.settle.SettlementMap.CELL_SIZE/2;
+                Map<String,String> roadAttrs=new java.util.LinkedHashMap<>();
+                roadAttrs.put("settlement_id",colony.s.id);
+                roadAttrs.put("road_id",Integer.toString(road.id));
+                roadAttrs.put("surface",road.surface);
+                roadAttrs.put("built_segments",Integer.toString(road.builtSegments));
+                roadAttrs.put("segments",Integer.toString(road.path.size()-1));
+                Map<String,Object> roadFeature=atlasFeature(
+                        "worldforge:settlement:"+dimension+":"+colony.s.id+":road:"+road.id,
+                        "settlement_road","Road "+road.id,dimension,rx,y,rz,realmId,road.surface,roadAttrs);
+                roadFeature.put("territory_id",provinceFeatureId);
+                roadFeature.put("path",path);
+                features.add(roadFeature);
+            }
         }
+    }
+
+    private static Map<String,Object> atlasVertex(double x,double y,double z) {
+        Map<String,Object> vertex=new java.util.LinkedHashMap<>();
+        vertex.put("x",x);vertex.put("y",y);vertex.put("z",z);
+        return vertex;
     }
 
     private static String propertyString(Map<String, Object> properties, String key) {
@@ -211,6 +316,16 @@ public class SettleMod {
 
     public static Colony colony(String id) { return COLONIES.get(id); }
 
+    /** Resolve the one Character identity represented by this resident body. */
+    public static Character residentCharacter(WFWorker body) {
+        if (body == null) return null;
+        Colony colony = COLONIES.get(body.colonyId);
+        Worker worker = body.worker();
+        CharacterRegistry registry = registryForColony(colony);
+        return registry == null || worker == null || worker.person == null || worker.person.isBlank()
+                ? null : registry.get(worker.person);
+    }
+
     public static boolean ownsAny(String uuid) {
         for (Colony c : COLONIES.values()) if (uuid.equals(c.owner)) return true;
         return false;
@@ -248,7 +363,7 @@ public class SettleMod {
                 Blueprints.Plan plan = Blueprints.get(level, building.def);
                 if (plan == null || physicalSite.placed < plan.blocks().size()) continue;
                 boolean staffed = colony.s.assigned(building.uid).stream()
-                        .anyMatch(worker -> "trainer".equals(worker.profession));
+                        .anyMatch(worker -> worker.lifeAction.isBlank() && "trainer".equals(worker.workRole()));
                 if (!staffed) continue;
                 double x = colony.worldX(building), z = colony.worldZ(building);
                 double distance = (x - playerX) * (x - playerX) + (z - playerZ) * (z - playerZ);
@@ -281,12 +396,14 @@ public class SettleMod {
         String id = base;
         for (int i = 2; COLONIES.containsKey(id); i++) id = base + "_" + i;
         Settlement s = new Settlement(id, name, DEFS);
+        s.setLedgerScope(lv.dimension().location().toString());
         s.types = TYPES;
         for (int i = 0; i < 4; i++) s.addWorker(null);
         s.add("wood", 60);
         s.add("food", 40);
         s.add("stone", 10);
         Colony c = new Colony(s, lv.dimension().location().toString(), p.getX(), p.getZ());
+        c.captureTerrain(lv);
         COLONIES.put(id, c);
         return c;
     }
@@ -403,21 +520,335 @@ public class SettleMod {
         String race = realm == null ? "" : propertyString(realm.props, "race");
         String culture = realm == null ? "" : propertyString(realm.props, "culture");
         String place = "settlement:" + colony.s.id;
-        for (dev.worldforge.settle.Worker worker : colony.s.workers) {
-            Character person = worker.person == null || worker.person.isBlank() ? null : registry.get(worker.person);
-            if (person == null || !person.alive) {
-                person = registry.create(worker.name, "", culture, "m", colony.s.year());
+
+        // Consume persisted departures before reconciling current workers. A crash/reload cannot erase a death or migration.
+        for (Settlement.WorkerDeparture departure : new ArrayList<>(colony.s.pendingDepartures())) {
+            if (departure.personId().isBlank()) {
+                colony.s.acknowledgeDeparture(departure); // legacy worker had no Character identity
+                continue;
+            }
+            Character departed = registry.get(departure.personId());
+            if (departed == null) {
+                LOGGER.warn("wf_settle: departure references missing Character {}; retaining event for repair", departure.personId());
+                continue;
+            }
+            if (departed.alive) {
+                try {
+                    if (departure.reason().startsWith("death:"))
+                        PopulationSimulation.die(registry, departed.id, PeopleMod.YEAR, departure.reason().substring("death:".length()));
+                    else if (departure.reason().startsWith("transfer:"))
+                        registry.fire(departed.id, place, PeopleMod.YEAR);
+                    else registry.migrate(departed.id, "outside:" + colony.s.id, PeopleMod.YEAR);
+                } catch (RuntimeException ex) {
+                    LOGGER.error("wf_settle: lifecycle transition failed for {}: {}", departed.id, ex.toString());
+                    continue;
+                }
+            }
+            colony.s.acknowledgeDeparture(departure);
+        }
+
+        for (dev.worldforge.settle.Worker worker : new ArrayList<>(colony.s.workers)) {
+            boolean hasPersonId = worker.person != null && !worker.person.isBlank();
+            Character person = hasPersonId ? registry.get(worker.person) : null;
+            if (hasPersonId && person == null) {
+                LOGGER.warn("wf_settle: worker {} references missing Character {}; not creating a replacement", worker.id, worker.person);
+                continue;
+            }
+            if (person != null && !person.alive) {
+                colony.s.workers.remove(worker);
+                continue;
+            }
+            if (person == null) {
+                person = registry.create(worker.name, "", culture, "m", PeopleMod.YEAR - 20);
                 worker.person = person.id;
             }
-            if (!person.has("settlement_worker", place)) registry.appoint(person.id, "settlement_worker", place);
+            if (!person.has("settlement_worker", place)) registry.appoint(person.id, "settlement_worker", place, PeopleMod.YEAR);
+            person.props.put("population.employer", place);
+            person.props.put("population.location", colony.s.id);
             if (person.culture == null || person.culture.isBlank()) person.culture = culture;
+            if (person.culture == null || person.culture.isBlank()) person.culture = culture;
+            String profession = worker.profession == null || worker.profession.isBlank() ? "laborer" : worker.profession;
+            if (!profession.equals(PopulationSimulation.profession(person))) registry.changeProfession(person.id, profession, PeopleMod.YEAR);
+            registry.setDuty(person.id, Duty.WORKER, true, PeopleMod.YEAR);
+            boolean settlementSoldier = java.util.Set.of("guard", "soldier", "archer", "knight").contains(profession);
+            if (settlementSoldier && !PopulationSimulation.hasDuty(person, Duty.SOLDIER)) {
+                registry.setDuty(person.id, Duty.SOLDIER, true, PeopleMod.YEAR);
+                person.props.put("population.settlement_soldier_duty", true);
+            } else if (!settlementSoldier && Boolean.TRUE.equals(person.props.remove("population.settlement_soldier_duty"))) {
+                registry.setDuty(person.id, Duty.SOLDIER, false, PeopleMod.YEAR);
+            }
+            boolean settlementSpecialist = java.util.Set.of("lumberjack", "sawyer", "farmer", "miner", "smith",
+                    "builder", "blacksmith", "armorer", "trainer", "healer", "merchant", "scholar", "porter").contains(profession);
+            if (settlementSpecialist && !PopulationSimulation.hasDuty(person, Duty.SPECIALIST)) {
+                registry.setDuty(person.id, Duty.SPECIALIST, true, PeopleMod.YEAR);
+                person.props.put("population.settlement_specialist_duty", true);
+            } else if (!settlementSpecialist && Boolean.TRUE.equals(person.props.remove("population.settlement_specialist_duty"))) {
+                registry.setDuty(person.id, Duty.SPECIALIST, false, PeopleMod.YEAR);
+            }
+            PopulationSimulation.updateIntent(person, PeopleMod.YEAR);
             person.props.put("wf_unit_kind", "worker");
             person.props.put("wf_settlement_id", colony.s.id);
             person.props.put("wf_worker_id", worker.id);
             person.props.put("wf_profession", worker.profession == null ? "laborer" : worker.profession);
+            person.props.put("wf_assigned_profession", worker.assignedProfession == null ? "" : worker.assignedProfession);
             person.props.put("wf_building_uid", worker.building);
             person.props.put("wf_race_id", race);
             person.props.put("wf_culture_id", culture);
+        }
+    }
+
+    /** Resolve the Character registry which owns this settlement's province. */
+    private static CharacterRegistry registryForColony(Colony colony) {
+        if (colony == null || colony.s == null) return null;
+        for (dev.worldforge.mod.MapData map : dev.worldforge.mod.WorldForgeMod.loadedMaps().values()) {
+            if (map.titles == null || map.provinceAt(colony.cx, colony.cz) == null) continue;
+            CharacterRegistry registry = PeopleMod.registry(map);
+            if (registry != null) return registry;
+        }
+        return null;
+    }
+
+    /** World-space proximity determines simulation detail; no player is required for remote progress. */
+    private static LifeSimulation.LOD lifeLod(MinecraftServer server, Colony colony, dev.worldforge.settle.Worker worker) {
+        double best = Double.POSITIVE_INFINITY;
+        for (net.minecraft.server.level.ServerPlayer player : server.getPlayerList().getPlayers()) {
+            if (!player.serverLevel().dimension().location().toString().equals(colony.dim)) continue;
+            double dx = player.getX() - (colony.cx + worker.x);
+            double dz = player.getZ() - (colony.cz + worker.z);
+            best = Math.min(best, dx * dx + dz * dz);
+        }
+        if (best <= 64 * 64) return LifeSimulation.LOD.ACTIVE;
+        if (best <= 256 * 256) return LifeSimulation.LOD.SETTLEMENT;
+        if (best <= 1024 * 1024) return LifeSimulation.LOD.REGIONAL;
+        return LifeSimulation.LOD.REMOTE;
+    }
+
+    /** Residents meet for meals at the nearest finished food/civic building. */
+    private static double[] residentMealPlace(Settlement settlement, dev.worldforge.settle.Worker worker) {
+        Building best = null;
+        double distance = Double.POSITIVE_INFINITY;
+        for (Building building : settlement.buildings) {
+            if (building.state != Building.State.DONE || building.paused) continue;
+            String category = building.def.category == null ? "" : building.def.category;
+            if (!category.equalsIgnoreCase("food") && !category.equalsIgnoreCase("civic")
+                    && !building.def.id.contains("tavern") && !building.def.id.contains("inn")) continue;
+            double dx = building.x - worker.x, dz = building.z - worker.z;
+            double d = dx * dx + dz * dz;
+            if (d < distance) { distance = d; best = building; }
+        }
+        return best == null ? new double[]{0, 0} : new double[]{best.x, best.z};
+    }
+
+    /** A completed house is the preferred safe/rest destination; the settlement centre is a fallback. */
+    private static double[] residentShelter(Settlement settlement, dev.worldforge.settle.Worker worker) {
+        Building best = null;
+        double distance = Double.POSITIVE_INFINITY;
+        for (Building building : settlement.buildings) {
+            if (building.state != Building.State.DONE || !"housing".equalsIgnoreCase(building.def.category)) continue;
+            double dx = building.x - worker.x, dz = building.z - worker.z;
+            double d = dx * dx + dz * dz;
+            if (d < distance) { distance = d; best = building; }
+        }
+        return best == null ? new double[]{0, 0} : new double[]{best.x, best.z};
+    }
+
+    /** Executes Character AI against authoritative settlement stock, work assignments and nearby population. */
+    private static void runLifeAI(MinecraftServer server, Colony colony) {
+        if (!net.minecraftforge.fml.ModList.get().isLoaded("wf_people") || colony == null || colony.s == null) return;
+        CharacterRegistry registry = registryForColony(colony);
+        if (registry == null) return;
+        Settlement settlement = colony.s;
+        long worldMinute = Math.max(0L, (long) Math.floor(settlement.time / 60.0));
+        for (dev.worldforge.settle.Worker worker : new ArrayList<>(settlement.workers)) {
+            if (worker.person == null || worker.person.isBlank()) continue;
+            Character person = registry.get(worker.person);
+            if (person == null || !person.alive) continue;
+            if (("sleeping".equals(worker.lifeAction) || "eating".equals(worker.lifeAction)
+                    || "socializing".equals(worker.lifeAction)) && settlement.time >= worker.lifeActionUntil
+                    || ("fleeing".equals(worker.lifeAction) || "defending".equals(worker.lifeAction)) && !settlement.raidIncoming) {
+                worker.lifeAction = "";
+                worker.lifeActionUntil = 0;
+                worker.status = worker.building == 0 ? "свободен" : "работает";
+            }
+            if (!worker.lifeAction.isBlank()) continue;
+            boolean brave = PopulationSimulation.hasDuty(person, Duty.SOLDIER)
+                    || person.traits.contains("brave") || person.traits.contains("courageous")
+                    || person.traits.contains("protective");
+            if (settlement.raidIncoming && brave) {
+                worker.lifeAction = "defending";
+                worker.lifeTargetX = 0; worker.lifeTargetZ = 0;
+                worker.lifeActionUntil = 1.0e12;
+                worker.status = "спешит на помощь поселению";
+                continue;
+            }
+            boolean hasTraining = !worker.generalist() && !PopulationSimulation.trainingTarget(person).isBlank();
+            boolean hasLeisure = settlement.buildings.stream().anyMatch(b -> b.state == Building.State.DONE
+                    && !b.paused && b.def.category != null
+                    && (b.def.category.equalsIgnoreCase("leisure") || b.def.id.contains("tavern") || b.def.id.contains("inn")));
+            boolean hasCompanion = settlement.workers.stream().anyMatch(other -> other != worker);
+            LifeSimulation.Context context = new LifeSimulation.Context(
+                    worldMinute,
+                    settlement.amount("food") >= 1.0,
+                    settlement.housing() > 0,
+                    !settlement.raidIncoming,
+                    hasCompanion,
+                    worker.building != 0,
+                    hasTraining,
+                    hasLeisure,
+                    settlement.raidIncoming,
+                    lifeLod(server, colony, worker));
+            LifeSimulation.tick(person, context, (character, action, ignored) -> {
+                switch (action) {
+                    case EAT -> {
+                        if (!settlement.consumeResource("food", 1.0)) return LifeSimulation.Outcome.BLOCKED;
+                        double[] meal = residentMealPlace(settlement, worker);
+                        worker.lifeAction = "eating";
+                        worker.lifeTargetX = meal[0]; worker.lifeTargetZ = meal[1];
+                        worker.lifeActionUntil = settlement.time + 30;
+                        worker.status = "ест";
+                        return LifeSimulation.Outcome.SUCCESS;
+                    }
+                    case SLEEP -> {
+                        double[] home = residentShelter(settlement, worker);
+                        worker.lifeAction = "sleeping";
+                        worker.lifeTargetX = home[0]; worker.lifeTargetZ = home[1];
+                        worker.lifeActionUntil = settlement.time + 8 * 60;
+                        worker.status = "спит";
+                        return LifeSimulation.Outcome.SUCCESS;
+                    }
+                    case SEEK_SAFETY -> {
+                        if (!settlement.raidIncoming) return LifeSimulation.Outcome.BLOCKED;
+                        double[] shelter = residentShelter(settlement, worker);
+                        worker.lifeAction = "fleeing";
+                        worker.lifeTargetX = shelter[0]; worker.lifeTargetZ = shelter[1];
+                        worker.lifeActionUntil = 1.0e12;
+                        worker.status = "бежит в укрытие";
+                        return LifeSimulation.Outcome.SUCCESS;
+                    }
+                    case SOCIALIZE -> {
+                        dev.worldforge.settle.Worker companion = null;
+                        Character companionPerson = null;
+                        double nearest = 32 * 32;
+                        for (dev.worldforge.settle.Worker other : settlement.workers) {
+                            if (other == worker) continue;
+                            double dx = worker.x - other.x, dz = worker.z - other.z;
+                            double distance = dx * dx + dz * dz;
+                            if (distance < nearest && other.person != null && !other.person.isBlank()) {
+                                Character candidate = registry.get(other.person);
+                                if (candidate != null && candidate.alive) {
+                                    nearest = distance; companion = other; companionPerson = candidate;
+                                }
+                            }
+                        }
+                        if (companion == null || companionPerson == null) return LifeSimulation.Outcome.BLOCKED;
+                        int opinion = dev.worldforge.settle.ResidentSocial.interactionDelta(person, companionPerson);
+                        dev.worldforge.settle.ResidentSocial.socialize(person, companionPerson, opinion);
+                        worker.lifeAction = "socializing";
+                        worker.lifeTargetX = companion.x; worker.lifeTargetZ = companion.z;
+                        worker.lifeActionUntil = settlement.time + 3 * 60;
+                        worker.status = "общается: " + companionPerson.name;
+                        companion.status = "общается: " + person.name;
+                        return LifeSimulation.Outcome.SUCCESS;
+                    }
+                    case WORK -> {
+                        return worker.building != 0
+                                ? LifeSimulation.Outcome.SUCCESS : LifeSimulation.Outcome.RETRY;
+                    }
+                    case TRAIN -> {
+                        if (worker.generalist()) return LifeSimulation.Outcome.BLOCKED;
+                        String skill = PopulationSimulation.trainingTarget(character);
+                        if (skill.isBlank()) return LifeSimulation.Outcome.BLOCKED;
+                        PopulationSimulation.train(character, skill, 5);
+                        worker.status = "обучается";
+                        return LifeSimulation.Outcome.SUCCESS;
+                    }
+                    case RECREATE -> {
+                        if (!hasLeisure) return LifeSimulation.Outcome.BLOCKED;
+                        worker.status = "досуг";
+                        return LifeSimulation.Outcome.SUCCESS;
+                    }
+                    case IDLE -> { return LifeSimulation.Outcome.SUCCESS; }
+                }
+                return LifeSimulation.Outcome.BLOCKED;
+            });
+        }
+        dev.worldforge.settle.ResidentLifeEvents.yearly(registry, settlement.year());
+    }
+
+    /** Removes the existing worker projection for a person entering military service; the departure is persisted. */
+    public static boolean detachWorkerForMilitary(String characterId) {
+        if (characterId == null || characterId.isBlank()) return false;
+        for (Colony colony : COLONIES.values()) {
+            if (colony != null && colony.s != null
+                    && colony.s.removeWorkerByPerson(characterId, "transfer:military")) return true;
+        }
+        return false;
+    }
+
+    /** Reinstates an existing living Character as a settlement worker; no new Character is allocated. */
+    public static boolean attachExistingCharacter(String colonyId, String characterId) {
+        Colony colony = COLONIES.get(colonyId);
+        if (colony == null || colony.s == null || characterId == null || characterId.isBlank()
+                || !net.minecraftforge.fml.ModList.get().isLoaded("wf_people")) return false;
+        for (Colony other : COLONIES.values()) {
+            if (other == null || other.s == null) continue;
+            for (dev.worldforge.settle.Worker worker : other.s.workers)
+                if (characterId.equals(worker.person)) return false;
+        }
+        CharacterRegistry registry = null;
+        Character person = null;
+        for (dev.worldforge.mod.MapData map : dev.worldforge.mod.WorldForgeMod.loadedMaps().values()) {
+            if (map.titles == null || map.provinceAt(colony.cx, colony.cz) == null) continue;
+            CharacterRegistry candidate = PeopleMod.registry(map);
+            Character found = candidate == null ? null : candidate.get(characterId);
+            if (found != null) { registry = candidate; person = found; break; }
+        }
+        if (person == null || !person.alive) return false;
+        String profession = person.props.get("population.pre_military_profession") instanceof String p && !p.isBlank()
+                ? p : PopulationSimulation.profession(person);
+        if (profession == null || profession.isBlank() || DEFS == null || !DEFS.professions.containsKey(profession))
+            profession = "laborer";
+        dev.worldforge.settle.Worker worker = colony.s.addWorker(person.name);
+        worker.person = person.id;
+        worker.profession = profession;
+        // Keep the canonical Character's active profession in sync with the restored worker assignment.
+        // This records the military service interval in the normal profession history.
+        if (!profession.equals(PopulationSimulation.profession(person)))
+            PopulationSimulation.assignProfession(person, profession, PeopleMod.YEAR);
+        person.props.remove("population.pre_military_profession");
+        registry.setDuty(person.id, Duty.SOLDIER, false, PeopleMod.YEAR);
+        registry.setDuty(person.id, Duty.WORKER, true, PeopleMod.YEAR);
+        String place = "settlement:" + colony.s.id;
+        person.props.put("population.location", colony.s.id);
+        person.props.put("population.employer", place);
+        if (!person.has("settlement_worker", place)) registry.appoint(person.id, "settlement_worker", place, PeopleMod.YEAR);
+        return true;
+    }
+
+    /** Remit the configured settlement tax share to the owning realm through the global ledger. */
+    private static void remitCrownTaxes(Colony colony) {
+        if (colony == null || colony.s == null || colony.s.crownShare <= 0) return;
+        String realmId = realmOf(colony);
+        if (realmId == null || realmId.isBlank()) return;
+        Settlement settlement = colony.s;
+        String source = settlement.ledgerAccountId(Defs.SILVER);
+        String target = "realm:" + realmId;
+        TreasuryLedger ledger = WorldForgeMod.treasury();
+        settlement.amount(Defs.SILVER); // ensures/migrates the settlement account
+        ledger.open(target, realmId, Defs.SILVER, 0);
+        // The financial journal is authoritative: recover remittances even if the settlement snapshot
+        // was not saved after the ledger transfer (crash between the two world files).
+        settlement.remittedSilver = ledger.totalDebits(source, TreasuryLedger.Kind.TAX, "crown-remittance");
+        double due = Math.max(0, settlement.taxCollected * Math.max(0, Math.min(100, settlement.crownShare)) / 100.0
+                - settlement.remittedSilver);
+        double payment = Math.min(due, ledger.balance(source));
+        if (payment <= 1e-9) return;
+        boolean transferred = ledger.transfer(source, target, payment, TreasuryLedger.Kind.TAX,
+                "crown-remittance", settlement.id + ":" + Double.toHexString(settlement.remittedSilver),
+                Math.max(0, (long) Math.floor(settlement.time / 60.0)), "settlement tax remitted to realm treasury");
+        if (transferred) {
+            settlement.remittedSilver = ledger.totalDebits(source, TreasuryLedger.Kind.TAX, "crown-remittance");
+            settlement.stock.put(Defs.SILVER, ledger.balance(source));
         }
     }
 
@@ -433,7 +864,10 @@ public class SettleMod {
                 if (speed <= 0) break;
                 try {
                     c.s.tick(speed);                                   // 1 секунда симуляции = 20 тиков
+                    remitCrownTaxes(c);
                     syncPeople(c);
+                    runLifeAI(server, c);
+                    c.map.tick(c.s, speed);                             // глобальная логистика не зависит от загруженности чанков
                     if (ticks % (STEP_TICKS * 10) == 0) { c.s.types = TYPES; String rid = realmOf(c); c.s.refreshType(c.s.workers.size(), rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.terrain(rid), rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.races(rid)); }
                 } catch (RuntimeException ex) {
                     LOGGER.error("wf_settle: ошибка симуляции поселения {}: {}", c.s.id, ex.toString());
@@ -453,6 +887,7 @@ public class SettleMod {
                 if (lv == null) continue;
                 try {
                     BuildingSite.tick(lv, c);
+                    RoadSite.tick(lv, c);
                 } catch (RuntimeException ex) {
                     LOGGER.error("wf_settle: ошибка стройки {}: {}", c.s.id, ex.toString());
                 }
@@ -465,5 +900,7 @@ public class SettleMod {
     @SubscribeEvent
     public void onCommands(RegisterCommandsEvent e) {
         SettleCommands.register(e.getDispatcher());
+        SettleMapCommands.register(e.getDispatcher());
+        ResidentInteraction.register(e);
     }
 }

@@ -17,13 +17,14 @@ import net.minecraft.client.gui.screens.Screen;
  * optional native library is available; every method has an equivalent Java fallback.
  */
 public final class MaqanUiTheme {
+    // Canonical tokens mirrored from shared/contracts/ui-theme.json.
     public static final int TEXT = 0xFFE8EEF5;
     public static final int MUTED = 0xFF8292A5;
     public static final int CYAN = 0xFF69CDE2;
     public static final int GOLD = 0xFFE5BD78;
     public static final int BACKGROUND = 0xFF080D14;
-    private static final int PANEL = 0xD9101823;
-    private static final int PANEL_EDGE = 0x66566B80;
+    private static final int PANEL = 0xD9101923;
+    private static final int PANEL_EDGE = 0x6634495B;
     private static final int CONTROL = 0xCC172330;
     private static final int CONTROL_HOVER = 0xE0253948;
 

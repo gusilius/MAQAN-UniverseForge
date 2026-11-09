@@ -3,57 +3,96 @@ package dev.worldforge.reputation;
 import dev.worldforge.mod.Json;
 
 import java.util.*;
+import java.util.function.Predicate;
 
 /**
- * Отношение игроков к государствам, домам и фракциям. Ключ цели - строка вида "realm:stark", "house:lannister", "faction:guild".
- * Значения от -100 до 100. Фракции связаны: отношение к дому отчасти переходит на его государство (см. {@link #link}).
- * Не зависит от Minecraft; хозяин мода сохраняет {@link #toJson()} вместе с миром.
+ * Reputation values and reputation knowledge are deliberately separate.
+ * A value is scoped to the world, a settlement, a polity or an organization.
+ * Residents only know values they personally witnessed or received through an explicit
+ * organization rumor-sharing operation. Merely sharing a world or map does not reveal it.
  */
 public final class ReputationStore {
     public static final int MIN = -100, MAX = 100, RIPPLE_DEPTH = 3;
+
+    public enum Scope { WORLD, SETTLEMENT, POLITY, ORGANIZATION }
 
     @FunctionalInterface
     public interface Listener {
         void changed(String player, String target, int oldValue, int newValue, String reason);
     }
 
+    public static final class KnownReputation {
+        public final int value;
+        public final long observedAt;
+        public final String source;
+        public final double confidence;
+        public final int depth;
+        KnownReputation(int value, long observedAt, String source) {
+            this(value, observedAt, source, 1.0, 0);
+        }
+        KnownReputation(int value, long observedAt, String source, double confidence, int depth) {
+            this.value = value; this.observedAt = observedAt; this.source = source;
+            this.confidence = Math.max(0.0, Math.min(1.0, confidence));
+            this.depth = Math.max(0, depth);
+        }
+    }
+
     private static final class Link {
         final String parent;
         final double factor;
-
         Link(String parent, double factor) { this.parent = parent; this.factor = factor; }
     }
 
     private final Map<String, Map<String, Integer>> values = new TreeMap<>();
+    // resident -> player -> target -> observation
+    private final Map<String, Map<String, Map<String, KnownReputation>>> knowledge = new TreeMap<>();
     private final Map<String, Link> links = new HashMap<>();
     private final Map<String, String> names = new HashMap<>();
     private final List<Listener> listeners = new ArrayList<>();
 
-    public void addListener(Listener l) { listeners.add(l); }
+    public static String target(Scope scope, String id) {
+        Objects.requireNonNull(scope, "scope");
+        if (scope == Scope.WORLD) return "world";
+        if (id == null || id.isBlank() || id.length() > 128) throw new IllegalArgumentException("invalid scope id");
+        return switch (scope) {
+            case SETTLEMENT -> "settlement:" + id;
+            case POLITY -> "polity:" + id;
+            case ORGANIZATION -> "organization:" + id;
+            case WORLD -> "world";
+        };
+    }
 
-    /** Связь child -> parent: доля изменения (0..1), которая переходит на родителя. Циклы запрещены. */
+    public void addListener(Listener l) { listeners.add(Objects.requireNonNull(l)); }
+
+    /** Explicit propagation only. Positive and negative factors support allies and rivals; no scope leakage is implicit. */
     public void link(String child, String parent, double factor) {
-        if (factor < 0 || factor > 1) throw new IllegalArgumentException("Доля должна быть от 0 до 1");
+        if (child == null || parent == null || child.equals(parent)) throw new IllegalArgumentException("invalid reputation link");
+        if (!Double.isFinite(factor) || factor < -1 || factor > 1) throw new IllegalArgumentException("Коэффициент должен быть от -1 до 1");
         for (String c = parent; c != null; c = links.containsKey(c) ? links.get(c).parent : null) {
             if (c.equals(child)) throw new IllegalArgumentException("Цикл связей: " + child + " <-> " + parent);
         }
         links.put(child, new Link(parent, factor));
     }
 
-    public void name(String target, String name) { names.put(target, name); }
+    public void link(Scope childScope, String childId, Scope parentScope, String parentId, double factor) {
+        link(target(childScope, childId), target(parentScope, parentId), factor);
+    }
 
+    public void name(String target, String name) { names.put(target, name); }
     public String nameOf(String target) { return names.getOrDefault(target, target); }
 
-    /** Загружает фракции: {"factions":[{"id":"house:stark","name":"Старк","parent":"realm:north","factor":0.5}]}. */
+    /** Legacy faction configuration remains supported. */
     @SuppressWarnings("unchecked")
     public void loadFactions(String json) {
         Object root = Json.parse(json);
-        if (!(root instanceof Map) || !(((Map<String, Object>) root).get("factions") instanceof List)) throw new IllegalArgumentException("Нужен список factions");
+        if (!(root instanceof Map) || !(((Map<String, Object>) root).get("factions") instanceof List))
+            throw new IllegalArgumentException("Нужен список factions");
         for (Object o : (List<Object>) ((Map<String, Object>) root).get("factions")) {
             Map<String, Object> f = (Map<String, Object>) o;
             String id = String.valueOf(f.get("id"));
             if (f.get("name") != null) name(id, String.valueOf(f.get("name")));
-            if (f.get("parent") != null) link(id, String.valueOf(f.get("parent")), f.get("factor") instanceof Number n ? n.doubleValue() : 0.5);
+            if (f.get("parent") != null) link(id, String.valueOf(f.get("parent")),
+                    f.get("factor") instanceof Number n ? n.doubleValue() : 0.5);
         }
     }
 
@@ -61,8 +100,9 @@ public final class ReputationStore {
         Map<String, Integer> m = values.get(player);
         return m == null ? 0 : m.getOrDefault(target, 0);
     }
-
+    public int get(String player, Scope scope, String id) { return get(player, target(scope, id)); }
     public Standing standing(String player, String target) { return Standing.of(get(player, target)); }
+    public Standing standing(String player, Scope scope, String id) { return Standing.of(get(player, scope, id)); }
 
     public Map<String, Integer> all(String player) {
         Map<String, Integer> m = values.get(player);
@@ -73,29 +113,132 @@ public final class ReputationStore {
         int nv = Math.max(MIN, Math.min(MAX, value)), old = get(player, target);
         if (nv == old) return;
         if (nv == 0) {
-            values.get(player).remove(target);
-            if (values.get(player).isEmpty()) values.remove(player);
+            Map<String, Integer> current = values.get(player);
+            if (current != null) {
+                current.remove(target);
+                if (current.isEmpty()) values.remove(player);
+            }
         } else values.computeIfAbsent(player, k -> new TreeMap<>()).put(target, nv);
         for (Listener l : listeners) l.changed(player, target, old, nv, reason == null ? "" : reason);
     }
 
-    /** Меняет отношение и передаёт долю изменения родителям (округляя к нулю, мелочь меньше 1 пропадает). */
+    public void set(String player, Scope scope, String id, int value, String reason) {
+        set(player, target(scope, id), value, reason);
+    }
+
+    /** Apply configured propagation links only; unlinked scopes remain completely independent. */
     public void add(String player, String target, int delta, String reason) {
-        set(player, target, get(player, target) + delta, reason);
-        double d = delta;
+        int before = get(player, target);
+        set(player, target, before + delta, reason);
+        double d = get(player, target) - before;
         String cur = target;
         for (int depth = 0; depth < RIPPLE_DEPTH && links.containsKey(cur); depth++) {
             Link l = links.get(cur);
             d *= l.factor;
-            int step = (int) d;                        // к нулю
+            int step = (int) d;
             if (step == 0) break;
             set(player, l.parent, get(player, l.parent) + step, reason);
             cur = l.parent;
         }
     }
 
-    /** Все отношения игрока сдвигаются к нулю на points (слухи забываются). */
+    public void add(String player, Scope scope, String id, int delta, String reason) {
+        add(player, target(scope, id), delta, reason);
+    }
+
+    /** Apply a witnessed event and record the resulting scoped reputation for that witness only. */
+    public void witness(String residentId, String player, Scope scope, String scopeId, int delta,
+                        long worldTime, String source) {
+        if (residentId == null || residentId.isBlank() || player == null || player.isBlank() || worldTime < 0)
+            throw new IllegalArgumentException("invalid witnessed reputation event");
+        String key = target(scope, scopeId);
+        add(player, key, delta, source);
+        observe(residentId, player, scope, scopeId, worldTime, source);
+    }
+
+    /** A resident learns only what they witnessed/heard. This does not alter actual reputation. */
+    public void observe(String residentId, String player, Scope scope, String scopeId,
+                        long worldTime, String source) {
+        if (residentId == null || residentId.isBlank() || player == null || player.isBlank() || worldTime < 0)
+            throw new IllegalArgumentException("invalid reputation observation");
+        String key = target(scope, scopeId);
+        knowledge.computeIfAbsent(residentId, k -> new TreeMap<>())
+                .computeIfAbsent(player, k -> new TreeMap<>())
+                .put(key, new KnownReputation(get(player, key), worldTime, source == null ? "witnessed" : source));
+    }
+
+    /** Null means the resident has no knowledge; unknown is not treated as neutral. */
+    public KnownReputation known(String residentId, String player, Scope scope, String scopeId) {
+        Map<String, Map<String, KnownReputation>> byPlayer = knowledge.get(residentId);
+        if (byPlayer == null || byPlayer.get(player) == null) return null;
+        return byPlayer.get(player).get(target(scope, scopeId));
+    }
+
+    /** Time-aware knowledge query. Expired information is unknown, never silently current. */
+    public KnownReputation knownAt(String residentId, String player, Scope scope, String scopeId,
+                                   long now, long maxAge, double minConfidence) {
+        if (now < 0 || maxAge < 0 || !Double.isFinite(minConfidence)
+                || minConfidence < 0 || minConfidence > 1) throw new IllegalArgumentException("invalid knowledge query");
+        KnownReputation value = known(residentId, player, scope, scopeId);
+        if (value == null || value.confidence < minConfidence || now < value.observedAt
+                || now - value.observedAt > maxAge) return null;
+        return value;
+    }
+
+    /** A trusted personal contact may pass one exact scoped rumor; no other scope is disclosed. */
+    public boolean shareWithTrustedContact(String witnessResidentId, String recipientResidentId,
+                                            String player, Scope scope, String scopeId,
+                                            long sharedAt, int relationship, double trustFactor) {
+        KnownReputation heard = known(witnessResidentId, player, scope, scopeId);
+        if (heard == null || recipientResidentId == null || recipientResidentId.isBlank()
+                || relationship < 35 || !Double.isFinite(trustFactor)
+                || trustFactor <= 0 || trustFactor > 1 || sharedAt < heard.observedAt) return false;
+        String key = target(scope, scopeId);
+        Map<String, KnownReputation> recipient = knowledge
+                .computeIfAbsent(recipientResidentId, k -> new TreeMap<>())
+                .computeIfAbsent(player, k -> new TreeMap<>());
+        KnownReputation old = recipient.get(key);
+        if (old != null && old.observedAt > sharedAt) return false;
+        double confidence = heard.confidence * trustFactor * Math.max(0.35, Math.min(1.0, relationship / 100.0));
+        if (confidence < 0.1) return false;
+        recipient.put(key, new KnownReputation(heard.value, sharedAt,
+                "rumor:" + witnessResidentId, confidence, heard.depth + 1));
+        return true;
+    }
+
+    /**
+     * Deliberate gossip within one named organization. Only the specified target is shared;
+     * no knowledge is broadcast to settlements, rival organizations or the whole world.
+     */
+    public boolean shareWithinOrganization(String witnessResidentId, String recipientResidentId,
+                                            String player, String organizationId, long sharedAt, Predicate<String> recipientMembershipCheck) {
+        KnownReputation heard = known(witnessResidentId, player, Scope.ORGANIZATION, organizationId);
+        if (heard == null || recipientResidentId == null || recipientResidentId.isBlank()
+                || recipientMembershipCheck == null || sharedAt < heard.observedAt
+                || heard.depth >= 3 || heard.confidence < 0.2
+                || !recipientMembershipCheck.test(recipientResidentId)) return false;
+        String key = target(Scope.ORGANIZATION, organizationId);
+        Map<String, KnownReputation> recipient = knowledge
+                .computeIfAbsent(recipientResidentId, k -> new TreeMap<>())
+                .computeIfAbsent(player, k -> new TreeMap<>());
+        KnownReputation old = recipient.get(key);
+        if (old != null && old.observedAt > sharedAt) return false;
+        recipient.put(key, new KnownReputation(heard.value, sharedAt, "organization:" + organizationId
+                + ":from:" + witnessResidentId, heard.confidence * 0.85, heard.depth + 1));
+        return true;
+    }
+
+    public Map<String, Integer> knownValues(String residentId, String player) {
+        Map<String, Map<String, KnownReputation>> byPlayer = knowledge.get(residentId);
+        if (byPlayer == null || byPlayer.get(player) == null) return Map.of();
+        Map<String, Integer> result = new TreeMap<>();
+        byPlayer.get(player).forEach((k, v) -> result.put(k, v.value));
+        return Collections.unmodifiableMap(result);
+    }
+
+    /** World-wide reputation drift is intentionally opt-in and never changes residents' knowledge automatically. */
     public void decay(int points) {
+        if (points < 0) throw new IllegalArgumentException("points must be non-negative");
         for (String p : new ArrayList<>(values.keySet())) {
             for (Map.Entry<String, Integer> e : new ArrayList<>(values.get(p).entrySet())) {
                 int v = e.getValue(), nv = v > 0 ? Math.max(0, v - points) : Math.min(0, v + points);
@@ -106,23 +249,73 @@ public final class ReputationStore {
 
     public String toJson() {
         Map<String, Object> root = new LinkedHashMap<>();
-        root.put("format", "wf-reputation/1");
+        root.put("format", "wf-reputation/2");
         root.put("values", values);
+        Map<String, Object> savedLinks = new TreeMap<>();
+        links.forEach((child, link) -> savedLinks.put(child, Map.of("parent", link.parent, "factor", link.factor)));
+        root.put("links", savedLinks);
+        root.put("names", new TreeMap<>(names));
+        Map<String, Object> people = new TreeMap<>();
+        knowledge.forEach((resident, players) -> {
+            Map<String, Object> p = new TreeMap<>();
+            players.forEach((player, observations) -> {
+                Map<String, Object> o = new TreeMap<>();
+                observations.forEach((key, v) -> {
+                    Map<String, Object> item = new LinkedHashMap<>();
+                    item.put("value", v.value); item.put("time", v.observedAt); item.put("source", v.source);
+                    item.put("confidence", v.confidence); item.put("depth", v.depth);
+                    o.put(key, item);
+                });
+                p.put(player, o);
+            });
+            people.put(resident, p);
+        });
+        root.put("knowledge", people);
         return Json.write(root);
     }
 
     @SuppressWarnings("unchecked")
     public void fromJson(String json) {
-        values.clear();
-        Object root = Json.parse(json);
-        if (!(root instanceof Map) || !(((Map<String, Object>) root).get("values") instanceof Map)) throw new IllegalArgumentException("Неверный формат репутации");
-        for (Map.Entry<String, Object> e : ((Map<String, Object>) ((Map<String, Object>) root).get("values")).entrySet()) {
+        values.clear(); knowledge.clear(); links.clear(); names.clear();
+        Object parsed = Json.parse(json);
+        if (!(parsed instanceof Map) || !(((Map<String, Object>) parsed).get("values") instanceof Map))
+            throw new IllegalArgumentException("Неверный формат репутации");
+        Map<String, Object> root = (Map<String, Object>) parsed;
+        for (Map.Entry<String, Object> e : ((Map<String, Object>) root.get("values")).entrySet()) {
+            if (!(e.getValue() instanceof Map<?, ?> raw)) continue;
             Map<String, Integer> m = new TreeMap<>();
-            for (Map.Entry<String, Object> t : ((Map<String, Object>) e.getValue()).entrySet()) {
+            for (Map.Entry<?, ?> t : raw.entrySet()) {
                 int v = ((Number) t.getValue()).intValue();
-                if (v != 0) m.put(t.getKey(), Math.max(MIN, Math.min(MAX, v)));
+                if (v != 0) m.put(String.valueOf(t.getKey()), Math.max(MIN, Math.min(MAX, v)));
             }
             if (!m.isEmpty()) values.put(e.getKey(), m);
+        }
+        if (root.get("links") instanceof Map<?, ?> savedLinks) for (Map.Entry<?, ?> e : savedLinks.entrySet()) {
+            if (!(e.getKey() instanceof String child) || !(e.getValue() instanceof Map<?, ?> item)
+                    || !(item.get("parent") instanceof String parent) || !(item.get("factor") instanceof Number factor))
+                continue;
+            link(child, parent, factor.doubleValue());
+        }
+        if (root.get("names") instanceof Map<?, ?> savedNames) for (Map.Entry<?, ?> e : savedNames.entrySet())
+            if (e.getKey() instanceof String key && e.getValue() instanceof String value) names.put(key, value);
+        if (root.get("knowledge") instanceof Map<?, ?> residents) for (Map.Entry<?, ?> re : residents.entrySet()) {
+            if (!(re.getValue() instanceof Map<?, ?> players)) continue;
+            Map<String, Map<String, KnownReputation>> playerMap = new TreeMap<>();
+            for (Map.Entry<?, ?> pe : players.entrySet()) {
+                if (!(pe.getValue() instanceof Map<?, ?> observations)) continue;
+                Map<String, KnownReputation> obs = new TreeMap<>();
+                for (Map.Entry<?, ?> oe : observations.entrySet()) {
+                    if (!(oe.getValue() instanceof Map<?, ?> item) || !(item.get("value") instanceof Number value)) continue;
+                    long time = item.get("time") instanceof Number n ? n.longValue() : 0L;
+                    obs.put(String.valueOf(oe.getKey()), new KnownReputation(
+                            Math.max(MIN, Math.min(MAX, value.intValue())), time,
+                            String.valueOf(item.containsKey("source") ? item.get("source") : "legacy"),
+                            item.get("confidence") instanceof Number confidence ? confidence.doubleValue() : 1.0,
+                            item.get("depth") instanceof Number depth ? depth.intValue() : 0));
+                }
+                if (!obs.isEmpty()) playerMap.put(String.valueOf(pe.getKey()), obs);
+            }
+            if (!playerMap.isEmpty()) knowledge.put(String.valueOf(re.getKey()), playerMap);
         }
     }
 }

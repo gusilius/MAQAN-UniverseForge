@@ -9,14 +9,17 @@ import java.util.*;
  * и спрашивают, что разрешает должность ({@link #unlocked}), не зная ничего о ролях друг друга.
  */
 public final class CharacterRegistry {
+    public enum LifecycleKind { BORN, CHILD_BORN, MARRIED, LIFE_STAGE_CHANGED, POST_APPOINTED, POST_DISMISSED, PROFESSION_CHANGED,
+        HIRED, FIRED, MIGRATED, DUTY_ASSIGNED, DUTY_REMOVED, DIED, RESTORED }
+
+    public record LifecycleEvent(LifecycleKind kind, String characterId, String from, String to, int year) { }
+
     public interface Listener {
         default void appointed(Character c, String role, String place) { }
-
         default void dismissed(Character c, String role, String place) { }
-
         default void died(Character c) { }
-
         default void born(Character c) { }
+        default void lifecycle(Character c, LifecycleEvent event) { }
     }
 
     private final Map<String, Character> byId = new LinkedHashMap<>();
@@ -33,6 +36,11 @@ public final class CharacterRegistry {
     public int size() { return byId.size(); }
 
     public Character create(String name, String house, String culture, String gender, int birthYear) {
+        while (byId.containsKey("c" + next)) {
+            if (next == Integer.MAX_VALUE) throw new IllegalStateException("Исчерпаны ID персонажей");
+            next++;
+        }
+        if (next == Integer.MAX_VALUE) throw new IllegalStateException("Исчерпаны ID персонажей");
         Character c = new Character("c" + next++, name);
         c.house = house == null ? "" : house;
         c.culture = culture == null ? "" : culture;
@@ -40,30 +48,203 @@ public final class CharacterRegistry {
         c.birthYear = birthYear;
         byId.put(c.id, c);
         for (Listener l : listeners) l.born(c);
+        publish(c, new LifecycleEvent(LifecycleKind.BORN, c.id, "", "", birthYear));
         return c;
     }
 
-    public void appoint(String id, String role, String place) {
+    public void appoint(String id, String role, String place) { appoint(id, role, place, 0); }
+
+    public void appoint(String id, String role, String place, int year) {
         Character c = require(id);
         if (!c.alive) throw new IllegalStateException(c.name + " мёртв и не может занять должность");
         if (c.has(role, place)) return;
         c.posts.add(new Character.Post(role, place));
         for (Listener l : listeners) l.appointed(c, role, place);
+        publish(c, new LifecycleEvent(LifecycleKind.POST_APPOINTED, c.id, "", role + "@" + place, year));
     }
 
-    public void dismiss(String id, String role, String place) {
+    public void dismiss(String id, String role, String place) { dismiss(id, role, place, 0); }
+
+    public void dismiss(String id, String role, String place, int year) {
         Character c = require(id);
-        if (c.posts.removeIf(p -> p.role.equals(role) && p.place.equals(place))) for (Listener l : listeners) l.dismissed(c, role, place);
+        if (c.posts.removeIf(p -> p.role.equals(role) && p.place.equals(place))) {
+            for (Listener l : listeners) l.dismissed(c, role, place);
+            publish(c, new LifecycleEvent(LifecycleKind.POST_DISMISSED, c.id, role + "@" + place, "", year));
+        }
+    }
+
+    /** Updates calendar-derived life stages and emits only real stage transitions. */
+    public void refreshLifeStages(int year) {
+        for (Character character : byId.values()) {
+            if (!character.alive) continue;
+            String current = PopulationSimulation.lifeStage(character, year).name().toLowerCase(Locale.ROOT);
+            Object previous = character.props.put("population.life_stage", current);
+            if (previous instanceof String old && !old.equals(current))
+                emit(character, LifecycleKind.LIFE_STAGE_CHANGED, old, current, year);
+            character.props.put("population.age_years", PopulationSimulation.age(character, year));
+        }
+    }
+
+    public void changeProfession(String id, String professionId, int year) {
+        Character c = require(id);
+        String previous = PopulationSimulation.profession(c);
+        PopulationSimulation.assignProfession(c, professionId, year);
+        String current = PopulationSimulation.profession(c);
+        if (!previous.equals(current))
+            emit(c, LifecycleKind.PROFESSION_CHANGED, previous, current, year);
+    }
+
+    /** Employment is an assignment on the existing person, never a new population record. */
+    public void hire(String id, String employerId, String professionId, int year) {
+        Character c = require(id);
+        if (!c.alive) throw new IllegalStateException(c.name + " is dead");
+        String employer = requireText(employerId, "employer");
+        String profession = requireText(professionId, "profession");
+        String previous = String.valueOf(c.props.getOrDefault("population.employer", ""));
+        boolean changed = !employer.equals(previous)
+                || !profession.equals(PopulationSimulation.profession(c))
+                || !c.has("settlement_worker", employer)
+                || !PopulationSimulation.hasDuty(c, PopulationSimulation.Duty.WORKER);
+        if (!previous.isEmpty() && !previous.equals(employer)) fire(id, previous, year);
+        changeProfession(id, profession, year);
+        setDuty(id, PopulationSimulation.Duty.WORKER, true, year);
+        c.props.put("population.employer", employer);
+        appoint(id, "settlement_worker", employer, year);
+        if (changed) emit(c, LifecycleKind.HIRED, previous, employer, year);
+    }
+
+    /** Releases employment without deleting the Character or any skills/family/history. */
+    public void fire(String id, String employerId, int year) {
+        Character c = require(id);
+        String employer = employerId == null || employerId.isBlank()
+                ? String.valueOf(c.props.getOrDefault("population.employer", "")) : employerId.trim();
+        boolean employed = !employer.isEmpty() || PopulationSimulation.hasDuty(c, PopulationSimulation.Duty.WORKER);
+        if (!employer.isEmpty()) dismiss(id, "settlement_worker", employer, year);
+        c.props.remove("population.employer");
+        setDuty(id, PopulationSimulation.Duty.WORKER, false, year);
+        if (employed) emit(c, LifecycleKind.FIRED, employer, "", year);
+    }
+
+    /** Moves the same person to another population scope and releases the old settlement post. */
+    public void migrate(String id, String destinationId, int year) {
+        Character c = require(id);
+        if (!c.alive) throw new IllegalStateException(c.name + " is dead");
+        String destination = requireText(destinationId, "destination");
+        String previous = String.valueOf(c.props.getOrDefault("population.location", ""));
+        String employer = String.valueOf(c.props.getOrDefault("population.employer", ""));
+        if (!employer.isEmpty()) fire(id, employer, year);
+        c.props.put("population.location", destination);
+        emit(c, LifecycleKind.MIGRATED, previous, destination, year);
+    }
+
+    public void setDuty(String id, PopulationSimulation.Duty duty, boolean assigned, int year) {
+        Character c = require(id);
+        if (!c.alive && assigned) throw new IllegalStateException(c.name + " is dead");
+        boolean before = PopulationSimulation.hasDuty(c, duty);
+        if (before == assigned) return;
+        if (assigned) PopulationSimulation.addDuty(c, duty);
+        else PopulationSimulation.removeDuty(c, duty);
+        emit(c, assigned ? LifecycleKind.DUTY_ASSIGNED : LifecycleKind.DUTY_REMOVED,
+                duty.name().toLowerCase(Locale.ROOT), "", year);
+    }
+
+    /** Entity UUID is a replaceable body reference, scoped by body kind; Character.id remains authoritative. */
+    public boolean bindEntity(String id, String bodyKind, String entityUuid) {
+        Character c = require(id);
+        if (!c.alive) return false;
+        String kind = requireText(bodyKind, "body kind").toLowerCase(Locale.ROOT);
+        String uuid = requireText(entityUuid, "entity UUID");
+        for (Character other : byId.values()) {
+            if (other == c) continue;
+            Object raw = other.props.get("population.entity_bindings");
+            if (raw instanceof Map<?, ?> bindings && bindings.containsValue(uuid)) return false;
+        }
+        Object raw = c.props.get("population.entity_bindings");
+        Map<String, Object> bindings;
+        if (raw instanceof Map<?, ?> map) {
+            bindings = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : map.entrySet())
+                if (entry.getKey() instanceof String key) bindings.put(key, entry.getValue());
+        } else bindings = new LinkedHashMap<>();
+        bindings.put(kind, uuid);
+        c.props.put("population.entity_bindings", bindings);
+        return true;
+    }
+
+    public void unbindEntity(String id, String bodyKind, String entityUuid) {
+        Character c = require(id);
+        Object raw = c.props.get("population.entity_bindings");
+        if (!(raw instanceof Map<?, ?> map)) return;
+        Object current = map.get(bodyKind);
+        if (!Objects.equals(current, entityUuid)) return;
+        Map<String, Object> bindings = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : map.entrySet())
+            if (entry.getKey() instanceof String key && !key.equals(bodyKind)) bindings.put(key, entry.getValue());
+        if (bindings.isEmpty()) c.props.remove("population.entity_bindings");
+        else c.props.put("population.entity_bindings", bindings);
+    }
+
+    private void emit(Character c, LifecycleKind kind, String from, String to, int year) {
+        publish(c, new LifecycleEvent(kind, c.id, from == null ? "" : from, to == null ? "" : to, year));
+    }
+
+    /**
+     * Canonical, bounded life-event journal on Character.props. Other systems can consume the
+     * same identity/history without inventing parallel NPC records.
+     */
+    private void publish(Character character, LifecycleEvent event) {
+        Object raw = character.props.get("character.lifecycle.events");
+        List<Object> history = new ArrayList<>();
+        if (raw instanceof List<?> existing) history.addAll(existing);
+        long sequence = character.props.get("character.lifecycle.sequence") instanceof Number n
+                ? n.longValue() + 1 : 1;
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("sequence", sequence);
+        entry.put("kind", event.kind().name());
+        entry.put("from", event.from());
+        entry.put("to", event.to());
+        entry.put("year", event.year());
+        history.add(entry);
+        while (history.size() > 64) history.remove(0);
+        character.props.put("character.lifecycle.sequence", sequence);
+        character.props.put("character.lifecycle.events", history);
+        for (Listener listener : listeners) listener.lifecycle(character, event);
+    }
+
+    public List<Map<String, Object>> recentLifecycle(String characterId, int limit) {
+        Character character = get(characterId);
+        if (character == null || limit <= 0) return List.of();
+        Object raw = character.props.get("character.lifecycle.events");
+        if (!(raw instanceof List<?> events)) return List.of();
+        int start = Math.max(0, events.size() - Math.min(64, limit));
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (int i = start; i < events.size(); i++) if (events.get(i) instanceof Map<?, ?> map) {
+            Map<String, Object> copy = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> e : map.entrySet())
+                if (e.getKey() instanceof String key) copy.put(key, e.getValue());
+            result.add(Collections.unmodifiableMap(copy));
+        }
+        return Collections.unmodifiableList(result);
+    }
+
+    private static String requireText(String value, String label) {
+        if (value == null || value.isBlank()) throw new IllegalArgumentException(label + " is required");
+        return value.trim();
     }
 
     /** Смерть освобождает все должности. Возвращает их список (чтобы назначить преемников). */
     public List<Character.Post> kill(String id) {
         Character c = require(id);
+        if (!c.alive) return List.of();
         List<Character.Post> vacated = new ArrayList<>(c.posts);
         c.alive = false;
+        CharacterInventory.settleEstate(this,c);
         c.posts.clear();
         for (Character.Post p : vacated) for (Listener l : listeners) l.dismissed(c, p.role, p.place);
+        c.props.remove("population.entity_bindings");
+        int deathYear = c.props.get("population.death_year") instanceof Number n ? n.intValue() : 0;
         for (Listener l : listeners) l.died(c);
+        publish(c, new LifecycleEvent(LifecycleKind.DIED, c.id, "", "", deathYear));
         return vacated;
     }
 
@@ -87,7 +268,9 @@ public final class CharacterRegistry {
         return false;
     }
 
-    public void marry(String a, String b) {
+    public void marry(String a, String b) { marry(a, b, 0); }
+
+    public void marry(String a, String b, int year) {
         Character x = require(a), y = require(b);
         if (x == y) throw new IllegalArgumentException("Персонаж не может вступить в брак с самим собой");
         if (!x.alive || !y.alive) throw new IllegalStateException("Умерший персонаж не может вступить в брак");
@@ -97,6 +280,8 @@ public final class CharacterRegistry {
         if (!y.spouse.isEmpty()) throw new IllegalStateException(y.name + " уже состоит в браке");
         x.spouse = y.id;
         y.spouse = x.id;
+        emit(x, LifecycleKind.MARRIED, "", y.id, year);
+        emit(y, LifecycleKind.MARRIED, "", x.id, year);
     }
 
     /** A deceased or missing spouse does not permanently prevent remarriage. */
@@ -114,6 +299,7 @@ public final class CharacterRegistry {
         c.mother = mother.id;
         father.children.add(c.id);
         mother.children.add(c.id);
+        emit(c, LifecycleKind.CHILD_BORN, father.id, mother.id, year);
         return c;
     }
 
@@ -130,7 +316,8 @@ public final class CharacterRegistry {
     /** Только перечисленные персонажи (null - все): для окон на клиенте, которым не нужен весь мир. */
     public String toJson(Set<String> only) {
         Map<String, Object> root = new LinkedHashMap<>();
-        root.put("format", "wf-people/1");
+        root.put("format", "wf-people/2");
+        root.put("schema_version", 2);
         root.put("next", next);
         List<Object> list = new ArrayList<>();
         for (Character c : byId.values()) {
@@ -156,7 +343,11 @@ public final class CharacterRegistry {
         // until the entire save has been accepted.
         Object parsed = Json.parse(json == null ? "" : json);
         if (!(parsed instanceof Map<?, ?> raw)) throw new IllegalArgumentException("Повреждён корень сохранения людей");
-        if (!"wf-people/1".equals(raw.get("format"))) throw new IllegalArgumentException("Неверный формат людей");
+        String format = raw.get("format") instanceof String f ? f : "";
+        if (!"wf-people/1".equals(format) && !"wf-people/2".equals(format))
+            throw new IllegalArgumentException("Неверный формат людей: " + format);
+        // wf-people/1 is migrated in memory without regenerating IDs, family links or existing props.
+        // Missing Phase-VII extension fields are intentionally defaulted by their accessors.
         Object rawNext = raw.get("next");
         if (!(rawNext instanceof Number nextNumber)) throw new IllegalArgumentException("Отсутствует счётчик персонажей");
         long requestedNext = nextNumber.longValue();
@@ -164,6 +355,7 @@ public final class CharacterRegistry {
         if (!(raw.get("characters") instanceof List<?> entries)) throw new IllegalArgumentException("Отсутствует список персонажей");
 
         Map<String, Character> loaded = new LinkedHashMap<>();
+        Map<String, String> entityOwners = new HashMap<>();
         int maxNumericId = 0;
         for (Object value : entries) {
             if (!(value instanceof Map<?, ?> m)) throw new IllegalArgumentException("Повреждена запись персонажа");
@@ -212,6 +404,18 @@ public final class CharacterRegistry {
                     c.props.put(key, entry.getValue());
                 }
             }
+            Object bindingsRaw = c.props.get("population.entity_bindings");
+            if (bindingsRaw != null && !(bindingsRaw instanceof Map<?, ?>))
+                throw new IllegalArgumentException("Некорректная таблица привязок Minecraft Entity персонажа " + id);
+            if (bindingsRaw instanceof Map<?, ?> bindings) {
+                for (Object bindingValue : bindings.values()) {
+                    if (!(bindingValue instanceof String uuid) || uuid.isBlank())
+                        throw new IllegalArgumentException("Повреждена привязка Minecraft Entity персонажа " + id);
+                    String previousOwner = entityOwners.putIfAbsent(uuid, id);
+                    if (previousOwner != null && !previousOwner.equals(id))
+                        throw new IllegalArgumentException("Minecraft Entity UUID " + uuid + " привязан к двум персонажам: " + previousOwner + " и " + id);
+                }
+            }
             if (loaded.putIfAbsent(id, c) != null) throw new IllegalArgumentException("Повторный ID персонажа: " + id);
             if (id.matches("c[0-9]+")) {
                 try { maxNumericId = Math.max(maxNumericId, Integer.parseInt(id.substring(1))); }
@@ -223,6 +427,10 @@ public final class CharacterRegistry {
         byId.clear();
         byId.putAll(loaded);
         next = safeNext;
+        for (Character character : byId.values()) {
+            LifecycleEvent restored = new LifecycleEvent(LifecycleKind.RESTORED, character.id, "", "", 0);
+            for (Listener listener : listeners) listener.lifecycle(character, restored);
+        }
     }
 
     private static String requiredString(Map<?, ?> map, String key) {

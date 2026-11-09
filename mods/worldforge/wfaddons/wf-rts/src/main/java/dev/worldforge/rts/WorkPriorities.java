@@ -20,7 +20,7 @@ public final class WorkPriorities {
     public int get(Worker w, String prof) {
         Map<String, Integer> m = values.get(w.id);
         if (m != null && m.containsKey(prof)) return m.get(prof);
-        return w.profession.equals(prof) ? 1 : 0;
+        return w.canPerform(prof) ? 1 : 0;
     }
 
     /** Установить значение (0..4); возвращает команду для сервера. */
@@ -45,13 +45,25 @@ public final class WorkPriorities {
         return out;
     }
 
-    /** Профессия с наименьшим ненулевым значением (при равенстве - текущая, затем по порядку в наборе); null, если все нули. */
+    /** Lowest non-zero priority among actual settlement work roles; current role wins ties, then stable role order. */
     public String best(Settlement s, Worker w) {
+        Set<String> roles = new TreeSet<>();
+        roles.add("builder");
+        for (var building : s.defs.buildings.values()) roles.addAll(building.jobs.keySet());
         String best = null;
-        int bv = 99;
-        for (String p : s.defs.professions.keySet()) {
-            int v = get(w, p);
-            if (v > 0 && (v < bv || (v == bv && p.equals(w.profession)))) { best = p; bv = v; }
+        int bestPriority = Integer.MAX_VALUE;
+        int bestTieRank = Integer.MAX_VALUE;
+        for (String role : roles) {
+            int priority = get(w, role);
+            if (priority <= 0) continue;
+            // A resident's current assignment wins ties; otherwise generalists prefer construction
+            // over arbitrary alphabetical roles, keeping the settlement productive and deterministic.
+            int tieRank = role.equals(w.workRole()) ? 0 : role.equals("builder") ? 1 : 2;
+            if (priority < bestPriority || (priority == bestPriority && tieRank < bestTieRank)) {
+                best = role;
+                bestPriority = priority;
+                bestTieRank = tieRank;
+            }
         }
         return best;
     }

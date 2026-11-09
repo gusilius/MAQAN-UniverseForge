@@ -29,6 +29,7 @@ import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.event.RegisterCommandsEvent;
+import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.level.LevelEvent;
 import net.minecraftforge.event.server.ServerAboutToStartEvent;
 import net.minecraftforge.event.server.ServerStoppedEvent;
@@ -40,10 +41,13 @@ import net.minecraftforge.fml.loading.FMLPaths;
 import net.minecraftforge.registries.DeferredRegister;
 import net.minecraftforge.server.ServerLifecycleHooks;
 import org.slf4j.Logger;
+import dev.worldforge.mod.economy.TreasuryLedger;
+import dev.worldforge.mod.economy.TreasuryService;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Path;
+import java.nio.file.Files;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -66,6 +70,8 @@ public class WorldForgeMod {
 
     private static final Map<String, MapData> MAPS = new ConcurrentHashMap<>();
     private static volatile Registry<Biome> biomes;
+    private static volatile boolean treasuryLoadFailed;
+    private static long treasuryTicks;
 
     public WorldForgeMod() {
         IEventBus bus = FMLJavaModLoadingContext.get().getModEventBus();
@@ -90,6 +96,41 @@ public class WorldForgeMod {
             for (MapData m : new java.util.ArrayList<>(MAPS.values())) if (m.titles == c.data) EditorManager.touch(m);
             MinecraftForge.EVENT_BUS.post(new MapChangedEvent(c));
         });
+    }
+
+    /** Canonical world-wide money ledger shared by settlements, realms, trade and military addons. */
+    public static TreasuryLedger treasury() { return TreasuryService.current(); }
+
+    private static Path treasuryFile(MinecraftServer server) {
+        return server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT).resolve("worldforge").resolve("wf_treasury.json");
+    }
+
+    private static void loadTreasury(MinecraftServer server) {
+        treasuryLoadFailed = false;
+        Path file = treasuryFile(server);
+        try {
+            TreasuryService.replace(Files.isRegularFile(file) ? TreasuryLedger.fromJson(Files.readString(file)) : new TreasuryLedger());
+            LOGGER.info("WorldForge treasury: loaded {} accounts and {} journal entries", TreasuryService.current().accounts().size(), TreasuryService.current().journal().size());
+        } catch (Exception ex) {
+            LOGGER.error("WorldForge treasury load failed; refusing to overwrite the existing ledger: {}", ex.toString());
+            treasuryLoadFailed = true;
+            TreasuryService.replace(new TreasuryLedger());
+        }
+    }
+
+    private static void saveTreasury(MinecraftServer server) {
+        if (treasuryLoadFailed) {
+            LOGGER.error("WorldForge treasury save skipped because the previous load failed; preserving the original file");
+            return;
+        }
+        Path file = treasuryFile(server);
+        try {
+            Files.createDirectories(file.getParent());
+            Path temp = file.resolveSibling(file.getFileName() + ".tmp");
+            Files.writeString(temp, TreasuryService.current().toJson());
+            try { Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE); }
+            catch (java.nio.file.AtomicMoveNotSupportedException ignored) { Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING); }
+        } catch (IOException ex) { LOGGER.error("WorldForge treasury save failed: {}", ex.toString()); }
     }
 
     public static Map<String, MapData> loadedMaps() {
@@ -155,10 +196,16 @@ public class WorldForgeMod {
     }
 
     @SubscribeEvent
-    public void onServerStarted(ServerStartedEvent e) { ContentCommands.load(e.getServer()); }
+    public void onServerStarted(ServerStartedEvent e) { loadTreasury(e.getServer()); ContentCommands.load(e.getServer()); }
 
     @SubscribeEvent
-    public void onServerStopping(ServerStoppingEvent e) { ContentCommands.save(e.getServer()); }
+    public void onTreasuryTick(TickEvent.ServerTickEvent e) {
+        if (e.phase != TickEvent.Phase.END) return;
+        if (++treasuryTicks % 6000 == 0) saveTreasury(e.getServer());
+    }
+
+    @SubscribeEvent
+    public void onServerStopping(ServerStoppingEvent e) { saveTreasury(e.getServer()); ContentCommands.save(e.getServer()); }
 
     @SubscribeEvent
     public void onServerStopped(ServerStoppedEvent e) {

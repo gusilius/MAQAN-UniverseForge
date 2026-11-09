@@ -62,7 +62,7 @@ public class CourtTest {
         // козни
         Character v = s.reg.holder("chancellor", Courts.realmPlace(realm));
         Scheme sc = s.startScheme(a1.id, v.id, Scheme.Kind.MURDER);
-        ok(s.schemeChance(sc) > 0.05 && s.schemeChance(sc) < 0.96, "шанс козней " + Math.round(s.schemeChance(sc) * 100) + "%");
+        ok(s.schemeChance(sc) >= 0.05 && s.schemeChance(sc) <= 0.95, "шанс козней ограничен диапазоном 5–95%: " + Math.round(s.schemeChance(sc) * 100) + "%");
         boolean tooMany = false;
         s.startScheme(a1.id, steward.id, Scheme.Kind.BEFRIEND);
         try { s.startScheme(a1.id, b1.id, Scheme.Kind.SWAY); } catch (TitleEditor.EditException e) { tooMany = true; }

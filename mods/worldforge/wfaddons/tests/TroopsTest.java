@@ -6,7 +6,11 @@ import java.util.*;
 
 public class TroopsTest {
     static int fails = 0;
-    static void check(boolean ok, String msg) { if (!ok) { fails++; System.out.println("FAIL " + msg); } }
+    static int checks = 0;
+    static void check(boolean ok, String msg) {
+        checks++;
+        if (!ok) { fails++; System.out.println("FAIL #" + checks + " " + msg); }
+    }
 
     public static void main(String[] a) throws Exception {
         TroopDefs d = new TroopDefs();
@@ -80,6 +84,69 @@ public class TroopsTest {
         check(nonFinite.validate().stream().anyMatch(x -> x.contains("здоровье"))
                 && nonFinite.validate().stream().anyMatch(x -> x.contains("скорость")),
                 "валидация отклоняет NaN и бесконечные характеристики");
+
+        // mixed civilian + military command routing
+        MixedOrders.Plan mixedMove = MixedOrders.plan(Squads.Kind.MOVE, true, true);
+        check(mixedMove.commandTroops() && mixedMove.workers() == MixedOrders.WorkerAction.MOVE,
+                "one move order routes independently to selected workers and troops");
+        MixedOrders.Plan mixedAttack = MixedOrders.plan(Squads.Kind.ATTACK, true, true);
+        check(mixedAttack.commandTroops() && mixedAttack.workers() == MixedOrders.WorkerAction.NONE,
+                "direct attack never turns civilian workers into combat units");
+        MixedOrders.Plan mixedHold = MixedOrders.plan(Squads.Kind.HOLD, true, true);
+        check(mixedHold.commandTroops() && mixedHold.workers() == MixedOrders.WorkerAction.HOLD,
+                "hold order reaches both military and civilian selection");
+        MixedOrders.Plan workerOnly = MixedOrders.plan(Squads.Kind.MOVE, true, false);
+        check(!workerOnly.commandTroops() && workerOnly.workers() == MixedOrders.WorkerAction.MOVE,
+                "worker-only selection receives movement without creating a military squad");
+        check(MixedOrders.plan(Squads.Kind.STOP, true, true).workers() == MixedOrders.WorkerAction.STOP,
+                "stop order is routed to both selected unit categories");
+        check(MixedOrders.plan(Squads.Kind.FOLLOW, true, true).workers() == MixedOrders.WorkerAction.FOLLOW,
+                "follow order remains a follow command for selected residents, not a move to world origin");
+        check(MixedOrders.plan(Squads.Kind.RETREAT, true, true).workers() == MixedOrders.WorkerAction.STOP,
+                "military retreat never sends civilian workers to world origin");
+
+        // appointed commander / hero leadership
+        check(Leadership.aura(8, true, false, 0) == 20,
+                "appointed commander adds command aura to the unit's native aura");
+        check(Leadership.aura(0, true, true, 4) == 22,
+                "hero leadership combines appointment, hero status and skill rank");
+        check(Leadership.commandCapacity(false, 0) == 20
+                        && Leadership.commandCapacity(true, 5) == 50,
+                "hero and leadership rank increase command capacity");
+        check(Leadership.moraleMultiplier(true, 5) > Leadership.moraleMultiplier(false, 0),
+                "hero leadership improves squad morale");
+
+        // field supply and operational readiness
+        OperationalSupply.State supply = new OperationalSupply.State();
+        OperationalSupply.Report emptySupply = OperationalSupply.step(supply, 10, 1);
+        check(emptySupply.status() == OperationalSupply.Status.LOW
+                        && emptySupply.shortage() == 10 && supply.readiness < 1,
+                "unsupplied squads lose readiness according to ration deficit");
+        OperationalSupply.deliver(supply, 20);
+        OperationalSupply.Report supplied = OperationalSupply.step(supply, 10, 1);
+        check(supplied.status() == OperationalSupply.Status.SUPPLIED
+                        && supplied.consumed() == 10 && supply.rations == 10,
+                "delivered field rations cover squad demand and leave a reserve");
+        check(OperationalSupply.combatMultiplier(supply) > 0.65
+                        && OperationalSupply.movementMultiplier(supply) > 0.70,
+                "readiness controls combat and movement effectiveness");
+        boolean invalidSupplyRejected = false;
+        try { OperationalSupply.deliver(supply, Double.NaN); }
+        catch (IllegalArgumentException expected) { invalidSupplyRejected = true; }
+        check(invalidSupplyRejected, "invalid supply deliveries are rejected");
+
+        // campaign operations state machine
+        CampaignOperation operation = new CampaignOperation("op-1", "owner", CampaignOperation.Objective.SIEGE, 120, -40);
+        check(operation.assign("s1", "owner") && !operation.assign("s2", "enemy"),
+                "operation accepts only friendly assigned squads");
+        check(operation.waypoint(20, 10) && operation.waypoint(60, -10) && operation.start(),
+                "operation assembles assigned squads along explicit waypoints");
+        check(!operation.advance(0.3) && operation.phase == CampaignOperation.Phase.RESUPPLYING,
+                "operation pauses its advance below the supply readiness threshold");
+        check(operation.advance(0.9) && operation.engage() && operation.hold(),
+                "operation transitions from advance to engagement and tactical hold");
+        check(operation.complete("objective secured") && operation.terminal(),
+                "operation records a terminal outcome exactly once");
 
         // строи
         for (Formations.Type t : Formations.Type.values()) {
@@ -171,6 +238,24 @@ public class TroopsTest {
         check(damagedOrders.get("s1").queue.size() == 1 && damagedOrders.get("s1").current().x() == 4,
                 "повреждённая команда не скрывает последующие корректные команды");
 
+        // commander Character ID persistence
+        Squads ledSquads = new Squads();
+        Squads.Squad ledSquad = ledSquads.create("owner", "Vanguard", List.of("unit-commander", "unit-guard"));
+        check(ledSquads.appointLeader(ledSquad.id, "c42", true, 7)
+                        && ledSquad.leaderCharacterId.equals("c42") && ledSquad.leaderHero && ledSquad.leadershipRank == 7,
+                "squad commander references the canonical character id and hero progression");
+        check(!ledSquads.appointLeader(ledSquad.id, "invalid id", false, 0),
+                "invalid commander character ids are rejected");
+        Squads ledRestored = new Squads();
+        ledRestored.fromJson(ledSquads.toJson());
+        Squads.Squad loadedLeader = ledRestored.get(ledSquad.id);
+        check(loadedLeader != null && loadedLeader.leaderCharacterId.equals("c42")
+                        && loadedLeader.leaderHero && loadedLeader.leadershipRank == 7,
+                "commander identity and hero leadership survive save/load");
+        check(ledRestored.appointLeader(ledSquad.id, "", false, 0)
+                        && loadedLeader.leaderCharacterId.isEmpty() && !loadedLeader.leaderHero,
+                "commander can be safely relieved from command");
+
         // выделение
         UnitSelection sel = new UnitSelection();
         List<UnitSelection.Screen> sc = List.of(
@@ -244,10 +329,15 @@ public class TroopsTest {
         check(cam.zoom < d1 && cam.zoom >= CameraRig.MIN_ZOOM, "приближение");
         cam.zoomBy(-100); check(cam.zoom == CameraRig.MAX_ZOOM, "потолок высоты");
         cam.zoomBy(500); check(cam.zoom == CameraRig.MIN_ZOOM, "пол высоты");
+        cam.setZoom(31); check(cam.zoom == 31, "ползунок задаёт точную дистанцию камеры");
+        cam.setZoom(1000); check(cam.zoom == CameraRig.MAX_ZOOM, "ползунок ограничен максимальной дистанцией");
+        cam.setZoom(Double.NaN); check(cam.zoom == CameraRig.MAX_ZOOM, "некорректное значение дистанции игнорируется");
         cam.focusOn(1000, 1000); cam.clamp(0, 0);
         check(Math.hypot(cam.fx, cam.fz) <= cam.leash + 1e-6, "привязь к игроку");
         cam.rotate(400, 500); check(cam.pitch == CameraRig.MAX_PITCH && Math.abs(cam.yaw) < 360, "поворот и наклон ограничены");
-        cam.cycle(); check(cam.view == CameraRig.View.TACTICS && cam.pitch == CameraRig.View.TACTICS.pitch, "смена вида камеры");
+        cam.cycle(); check(cam.view == CameraRig.View.TACTICS && cam.pitch == CameraRig.View.TACTICS.pitch, "переход со стратегической камеры на изометрическую");
+        cam.cycle(); check(cam.view == CameraRig.View.FREE && cam.pitch == CameraRig.View.FREE.pitch, "переход на свободную камеру");
+        cam.cycle(); check(cam.view == CameraRig.View.SKY && cam.pitch == CameraRig.View.SKY.pitch, "возврат к стратегической камере");
         double[] es = CameraRig.edgeScroll(2, 300, 1600, 900);
         check(es[0] == -1 && es[1] == 0, "скролл у левого края");
         check(CameraRig.edgeScroll(800, 450, 1600, 900)[0] == 0, "в центре не скроллит");
@@ -317,6 +407,27 @@ public class TroopsTest {
         check(ms2.initial == 4 && Math.abs(ms2.morale - 0.3) < 1e-9 && ms2.routed, "мораль сохраняется");
         Squads.Squad part2 = sm.commandUnits("p", List.of("a"), Squads.Order.move(1, 1), false);
         check(part2.morale == 0.3 && part2.routed && ms.initial == 3, "часть отряда наследует мораль, состав пересчитан " + ms.initial);
+
+        Squads patrols=new Squads();
+        Squads.Squad patrol=patrols.create("p","Patrol",List.of("u1","u2"));
+        patrol.cx=10;patrol.cz=20;
+        patrols.command(patrol.id,new Squads.Order(Squads.Kind.PATROL,30,40,""),false);
+        check(patrol.patrolOriginX==10&&patrol.patrolOriginZ==20,
+                "патруль фиксирует исходную позицию отряда");
+        patrols.completeCurrent(patrol.id);
+        check(patrol.queue.peekFirst()!=null&&patrol.queue.peekFirst().kind()==Squads.Kind.PATROL
+                        &&patrol.queue.peekFirst().x()==10&&patrol.queue.peekFirst().z()==20
+                        &&patrol.patrolReturning,
+                "после достижения конца патруль возвращается к сохранённому началу");
+        Squads patrolRestore=new Squads();patrolRestore.fromJson(patrols.toJson());
+        Squads.Squad restoredPatrol=patrolRestore.get(patrol.id);
+        check(restoredPatrol!=null&&restoredPatrol.patrolReturning
+                        &&restoredPatrol.patrolOriginX==10&&restoredPatrol.patrolOriginZ==20,
+                "состояние патруля сохраняется между загрузками");
+        patrolRestore.completeCurrent(patrol.id);
+        check(restoredPatrol.queue.peekFirst()!=null&&restoredPatrol.queue.peekFirst().x()==30
+                        &&restoredPatrol.queue.peekFirst().z()==40&&!restoredPatrol.patrolReturning,
+                "патруль после возврата снова идёт к конечной точке");
 
         // укрепления
         Forts fs = new Forts();

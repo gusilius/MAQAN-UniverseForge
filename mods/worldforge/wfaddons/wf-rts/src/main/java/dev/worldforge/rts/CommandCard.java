@@ -78,11 +78,28 @@ public final class CommandCard {
 
     public static Card menu(String menu, Selection sel, Settlement s) {
         if (menu == null || menu.equals(ROOT)) return root(sel, s);
-        if (menu.equals(PROF)) return professions(sel, s);
+        if (menu.equals(PROF)) return professions(sel, s, 0);
+        if (menu.startsWith(PROF + ":")) return professions(sel, s, pageOf(menu));
         if (menu.equals(BUILD)) return categories(s);
-        if (menu.startsWith("build:")) return buildItems(s, menu.substring(6));
+        if (menu.startsWith("build:")) {
+            String[] parts = menu.substring(6).split(":");
+            return buildItems(s, parts[0], parts.length > 1 ? safePage(parts[1]) : 0);
+        }
         return root(sel, s);
     }
+
+    private static int safePage(String value) {
+        try { return Math.max(0, Integer.parseInt(value)); }
+        catch (NumberFormatException ignored) { return 0; }
+    }
+
+    private static int pageOf(String menu) {
+        int separator = menu.lastIndexOf(':');
+        return separator < 0 ? 0 : safePage(menu.substring(separator + 1));
+    }
+
+    private static int pageStart(int page) { return page == 0 ? 0 : 10 + (page - 1) * 9; }
+    private static int pageSize(int page) { return page == 0 ? 10 : 9; }
 
     private static List<String> tip(String title, String... more) { List<String> l = new ArrayList<>(); l.add(title); l.addAll(Arrays.asList(more)); return l; }
 
@@ -112,7 +129,7 @@ public final class CommandCard {
         if (ctx.equals("workers")) {
             List<Worker> ws = sel.workers(s);
             int busy = 0, builders = 0;
-            for (Worker w : ws) { if (w.building != 0) busy++; if (w.profession.equals("builder")) builders++; }
+            for (Worker w : ws) { if (w.building != 0) busy++; if (w.workRole().equals("builder")) builders++; }
             put(c, 0, "assign", Command.Kind.TARGET, "assign", "@flag", "Назначить",
                     anyBuilding ? tip("Назначить", "Затем щёлкните здание или стройку", "ПКМ по зданию делает то же") : tip("Назначить", "!Зданий пока нет"), anyBuilding, false);
             run(c, 1, "unassign", "@stop", "Снять", busy > 0, "Все выбранные уже свободны", "Снять с работы", "Выбранные станут свободными", "Сейчас заняты: " + busy);
@@ -121,7 +138,7 @@ public final class CommandCard {
             put(c, 4, "priorities", Command.Kind.OPEN, "priorities", "@scroll", "Работы", tip("Приоритеты работ", "Матрица: рабочий x профессия, 0-4", "Горячая клавиша окна: P"), true, false);
             run(c, 5, "selectSame", "@people", "Такие же", !ws.isEmpty(), null, "Все такой же профессии", "Выбрать всех с профессией первого выбранного", "Двойной щелчок по рабочему делает то же");
             run(c, 6, "selectIdle", "@alert", "Свободные", idle > 0, "Свободных рабочих нет", "Выбрать свободных", "Рабочие без работы: " + idle, "Клавиша [.]");
-            run(c, 7, "selectBuilders", "@build", "Строители", s.workers.stream().anyMatch(w -> w.profession.equals("builder")), "В поселении нет строителей", "Выбрать строителей", "Все рабочие-строители");
+            run(c, 7, "selectBuilders", "@build", "Строители", s.workers.stream().anyMatch(w -> w.workRole().equals("builder")), "В поселении нет строителей", "Выбрать строителей", "Все рабочие-строители");
             put(c, 8, "camera", Command.Kind.CAMERA, null, "@move", "Камера", tip("Камера на выбор", "Двойное нажатие цифры группы делает то же"), true, false);
             run(c, 9, "selectAll", "@people", "Все", !s.workers.isEmpty(), null, "Выбрать всех рабочих", "Ctrl+A");
             put(c, 10, "auto", Command.Kind.RUN, null, "@heart", s.auto ? "Авто: да" : "Авто: нет", tip("Автоназначение", "Сейчас: " + (s.auto ? "включено" : "выключено"), "Свободные рабочие сами идут на работу"), true, s.auto);
@@ -154,21 +171,30 @@ public final class CommandCard {
         return c;
     }
 
-    private static Card professions(Selection sel, Settlement s) {
-        Card c = new Card(PROF, "Профессия");
+    private static Card professions(Selection sel, Settlement s, int requestedPage) {
+        List<Defs.Profession> all = new ArrayList<>(s.defs.professions.values());
+        int lastPage = all.size() <= 10 ? 0 : 1 + (int) Math.ceil((all.size() - 10) / 9.0) - 1;
+        int page = Math.min(Math.max(0, requestedPage), lastPage);
+        int start = pageStart(page), size = pageSize(page);
+        Card c = new Card(page == 0 ? PROF : PROF + ":" + page,
+                "Профессии " + (start + 1) + "–" + Math.min(all.size(), start + size) + " / " + all.size());
         List<Worker> ws = sel.workers(s);
-        int i = 0;
-        for (Defs.Profession p : s.defs.professions.values()) {
-            if (i >= BACK) break;
+        int slot = 0;
+        for (int index = start; index < Math.min(all.size(), start + size); index++) {
+            Defs.Profession p = all.get(index);
             int change = 0;
             for (Worker w : ws) if (!w.profession.equals(p.id)) change++;
             List<String> jobs = new ArrayList<>();
             for (Defs.Building d : s.defs.buildings.values()) if (d.jobs.containsKey(p.id)) jobs.add(d.name);
             List<String> t = tip(p.name, jobs.isEmpty() ? (p.id.equals("builder") ? "Строит здания" : "Работает без здания") : "Работа: " + String.join(", ", jobs));
             if (change > 0) t.add("Сменят: " + change + " (будут сняты с работы)"); else t.add("!Все выбранные уже " + p.name.toLowerCase());
-            put(c, i, "prof:" + p.id, Command.Kind.RUN, p.id, Look.glyph(s.defs, p.id), p.name, t, change > 0, ws.stream().allMatch(w -> w.profession.equals(p.id)) && !ws.isEmpty());
-            i++;
+            put(c, slot++, "prof:" + p.id, Command.Kind.RUN, p.id, Look.glyph(s.defs, p.id), p.name, t,
+                    change > 0, ws.stream().allMatch(w -> w.profession.equals(p.id)) && !ws.isEmpty());
         }
+        if (page > 0) put(c, 9, "prof:prev", Command.Kind.SUBMENU, page == 1 ? PROF : PROF + ":" + (page - 1),
+                "@move", "Предыдущие", tip("Предыдущая страница", "Вернуться к предыдущим профессиям"), true, false);
+        if (page < lastPage) put(c, 10, "prof:next", Command.Kind.SUBMENU, PROF + ":" + (page + 1),
+                "@move", "Следующие", tip("Следующая страница", "Показать следующие профессии"), true, false);
         back(c);
         return c;
     }
@@ -227,16 +253,24 @@ public final class CommandCard {
         return t;
     }
 
-    private static Card buildItems(Settlement s, String cat) {
-        Card c = new Card("build:" + cat, categoryName(cat));
-        int i = 0;
-        for (Defs.Building d : buildingsIn(s.defs, cat)) {
-            if (i >= BACK) break;
+    private static Card buildItems(Settlement s, String cat, int requestedPage) {
+        List<Defs.Building> all = buildingsIn(s.defs, cat);
+        int lastPage = all.size() <= 10 ? 0 : 1 + (int) Math.ceil((all.size() - 10) / 9.0) - 1;
+        int page = Math.min(Math.max(0, requestedPage), lastPage);
+        int start = pageStart(page), size = pageSize(page);
+        Card c = new Card(page == 0 ? "build:" + cat : "build:" + cat + ":" + page,
+                categoryName(cat) + " " + (start + 1) + "–" + Math.min(all.size(), start + size) + " / " + all.size());
+        int slot = 0;
+        for (int index = start; index < Math.min(all.size(), start + size); index++) {
+            Defs.Building d = all.get(index);
             String blocker = Orders.buildBlocker(s, d.id);
             List<String> t = buildingTip(s, d);
-            put(c, i, "place:" + d.id, Command.Kind.PLACE, d.id, Look.initial(d.name), d.name, t, blocker == null, false);
-            i++;
+            put(c, slot++, "place:" + d.id, Command.Kind.PLACE, d.id, Look.initial(d.name), d.name, t, blocker == null, false);
         }
+        if (page > 0) put(c, 9, "build:prev", Command.Kind.SUBMENU, page == 1 ? "build:" + cat : "build:" + cat + ":" + (page - 1),
+                "@move", "Предыдущие", tip("Предыдущая страница", "Вернуться к предыдущим постройкам"), true, false);
+        if (page < lastPage) put(c, 10, "build:next", Command.Kind.SUBMENU, "build:" + cat + ":" + (page + 1),
+                "@move", "Следующие", tip("Следующая страница", "Показать следующие постройки"), true, false);
         back(c);
         return c;
     }
@@ -264,7 +298,7 @@ public final class CommandCard {
             case "selectStaff": r.message = "Выбрано работников: " + sel.selectStaff(s, sel.building()); r.ok = true; return r;
             case "selectSame": {
                 List<Worker> ws = sel.workers(s);
-                if (!ws.isEmpty()) { String p = ws.get(0).profession; r.message = s.defs.professionName(p) + ": " + sel.selectProfession(s, p, false); r.ok = true; }
+                if (!ws.isEmpty()) { String p = ws.get(0).workRole(); r.message = s.defs.professionName(p) + ": " + sel.selectProfession(s, p, false); r.ok = true; }
                 return r;
             }
             default:

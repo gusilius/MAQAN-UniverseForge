@@ -2,7 +2,7 @@ name: MAQAN UniverseForge — Windows x64
 
 on:
   push:
-    branches: [main]
+    branches: [main, integration/maqan-unified]
     paths:
       - "mods/**"
       - "shared/**"
@@ -22,8 +22,7 @@ permissions:
 
 concurrency:
   group: universeforge-windows-quality-gate-${{ github.ref }}
-  # New commits supersede older PR builds; avoid queueing full addon matrices
-  # for stale snapshots while keeping the newest branch revision fully gated.
+  # Keep only the newest validation for each ref; one gate validates the unified resident task graph and army integration.
   cancel-in-progress: true
 
 jobs:
@@ -49,9 +48,6 @@ jobs:
       - name: Stage Windows native library
         shell: pwsh
         run: |
-          # Embed the native library in the JAR at the exact resource path
-          # consumed by NavigatorNativeBridge. Staging under build/ before
-          # "clean build" would be deleted by Gradle's clean task.
           $nativeDir = "mods/atlas/src/main/resources/maqan-native-windows-x86_64"
           New-Item -ItemType Directory -Force -Path $nativeDir | Out-Null
           Copy-Item "mods/atlas/native/maqan-core/target/x86_64-pc-windows-msvc/release/maqan_core.dll" "$nativeDir/maqan_core.dll" -Force
@@ -129,6 +125,9 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: Compile and run WorldForge logic tests
         working-directory: mods/worldforge/wfaddons
         shell: bash

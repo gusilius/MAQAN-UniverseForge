@@ -4,6 +4,7 @@ import com.mojang.blaze3d.platform.InputConstants;
 import dev.worldforge.mod.client.ClientViews;
 import dev.worldforge.troops.CameraRig;
 import dev.worldforge.troops.Projection;
+import dev.worldforge.troops.Squads;
 import dev.worldforge.troops.UnitSelection;
 import dev.worldforge.troops.mc.OrderPacket;
 import dev.worldforge.troops.mc.TroopEntity;
@@ -11,6 +12,7 @@ import dev.worldforge.troops.mc.TroopsMod;
 import net.minecraft.client.CameraType;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Marker;
@@ -18,9 +20,12 @@ import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
+import net.minecraftforge.client.event.InputEvent;
 import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
 import net.minecraftforge.client.event.RenderGuiOverlayEvent;
 import net.minecraftforge.client.event.RenderHandEvent;
@@ -30,11 +35,15 @@ import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.ModList;
 import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
 import org.lwjgl.glfw.GLFW;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.lang.reflect.Method;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Командный режим (R): камера отвязывается от игрока и летает над миром как в стратегии (вид «Сверху» и «Тактика»; Tab - переключить),
@@ -46,7 +55,13 @@ public final class CommandMode {
     private CommandMode() {}
 
     static final KeyMapping TOGGLE = new KeyMapping("key.wf_troops.command", GLFW.GLFW_KEY_R, "key.categories.wf_troops");
+    /** Direct command layer while remaining in first-person; LMB selects owned people, RMB issues orders. */
+    static final KeyMapping FIRST_PERSON_COMMAND = new KeyMapping("key.wf_troops.first_person_command", GLFW.GLFW_KEY_G, "key.categories.wf_troops");
+    /** Hold Alt to open the contextual radial order wheel while in first-person command mode. */
+    static final KeyMapping RADIAL_COMMAND = new KeyMapping("key.wf_troops.radial_command", GLFW.GLFW_KEY_LEFT_ALT, "key.categories.wf_troops");
+    static boolean firstPersonCommand;
     static boolean active;
+    private static boolean radialSuppressed;
     static final UnitSelection SEL = new UnitSelection();
     static final CameraRig RIG = new CameraRig();
     static double[] vp, invVp;
@@ -63,6 +78,8 @@ public final class CommandMode {
     @SubscribeEvent
     public static void keys(RegisterKeyMappingsEvent e) {
         e.register(TOGGLE);
+        e.register(FIRST_PERSON_COMMAND);
+        e.register(RADIAL_COMMAND);
         MinecraftForge.EVENT_BUS.register(new Runtime());
     }
 
@@ -74,13 +91,99 @@ public final class CommandMode {
     }
 
     static void send(OrderPacket p) { TroopsMod.NET.sendToServer(p); }
+    static void suppressRadialUntilRelease() { radialSuppressed = true; }
+
+    private static boolean down(long window, int key) { return InputConstants.isKeyDown(window, key); }
+
+    /** First-person command input uses the vanilla crosshair hit result and the exact same server order pipeline as RTS. */
+    private static void firstPersonInput(Minecraft mc, InputEvent.InteractionKeyMappingTriggered event) {
+        if (!firstPersonCommand || active || mc.player == null || mc.level == null || mc.screen != null) return;
+        boolean attack = event.isAttack();
+        boolean use = event.isUseItem();
+        if (!attack && !use) return;
+        event.setCanceled(true);
+        event.setSwingHand(false);
+        if (use && mc.hitResult instanceof EntityHitResult residentHit
+                && residentHit.getEntity() instanceof LivingEntity resident && isWorkerEntity(resident)) {
+            mc.player.connection.sendCommand("wfresident open " + resident.getUUID());
+            return;
+        }
+        if (attack) {
+            if (mc.hitResult instanceof EntityHitResult hit && hit.getEntity() instanceof LivingEntity target
+                    && target.isAlive() && selectable(mc, target)) {
+                boolean shift = down(mc.getWindow().getWindow(), GLFW.GLFW_KEY_LEFT_SHIFT)
+                        || down(mc.getWindow().getWindow(), GLFW.GLFW_KEY_RIGHT_SHIFT);
+                String id = target.getUUID().toString();
+                if (shift && SEL.isSelected(id)) {
+                    List<String> next = new ArrayList<>(SEL.selected());
+                    next.remove(id);
+                    SEL.set(next);
+                } else if (shift) {
+                    List<String> next = new ArrayList<>(SEL.selected());
+                    if (next.size() < 200 && !next.contains(id)) next.add(id);
+                    SEL.set(next);
+                } else SEL.set(List.of(id));
+                mc.player.displayClientMessage(Component.literal("Выбрано: " + SEL.selected().size()), true);
+            } else if (!down(mc.getWindow().getWindow(), GLFW.GLFW_KEY_LEFT_SHIFT)
+                    && !down(mc.getWindow().getWindow(), GLFW.GLFW_KEY_RIGHT_SHIFT)) {
+                SEL.clear();
+                mc.player.displayClientMessage(Component.literal("Выделение снято"), true);
+            }
+            return;
+        }
+        if (SEL.selected().isEmpty()) {
+            mc.player.displayClientMessage(Component.literal("Сначала выберите рабочих или солдат: ЛКМ, Shift+ЛКМ"), true);
+            return;
+        }
+        if (mc.hitResult instanceof EntityHitResult hit && hit.getEntity() instanceof LivingEntity target
+                && target.isAlive() && !selectable(mc, target)) {
+            send(new OrderPacket(OrderPacket.ORDER, selected(), Squads.Kind.ATTACK.ordinal(),
+                    0, 0, target.getUUID().toString(), false, 0));
+            mc.player.displayClientMessage(Component.literal("Приказ: атаковать цель"), true);
+            return;
+        }
+        if (mc.hitResult instanceof BlockHitResult hit && hit.getType() == HitResult.Type.BLOCK) {
+            Vec3 point = hit.getLocation();
+            boolean queue = down(mc.getWindow().getWindow(), GLFW.GLFW_KEY_LEFT_SHIFT)
+                    || down(mc.getWindow().getWindow(), GLFW.GLFW_KEY_RIGHT_SHIFT);
+            send(new OrderPacket(OrderPacket.ORDER, selected(), Squads.Kind.MOVE.ordinal(),
+                    point.x, point.z, "", queue, 0));
+            mc.player.displayClientMessage(Component.literal(queue ? "Добавлена точка маршрута" : "Приказ: перемещение"), true);
+        }
+    }
 
     static String typeOf(LivingEntity e) { return e.getType().builtInRegistryHolder().key().location().toString() + (e instanceof TroopEntity t ? ":" + t.unitId() : ""); }
 
+    private static final Map<Class<?>,Map<String,Method>> OPTIONAL_WORKER_METHODS=new ConcurrentHashMap<>();
+    static boolean isWorkerEntity(LivingEntity e){
+        return e!=null&&"wf_settle:worker".equals(e.getType().builtInRegistryHolder().key().location().toString());
+    }
+    private static Object workerValue(LivingEntity e,String method){
+        if(!isWorkerEntity(e))return null;
+        try{
+            Map<String,Method> methods=OPTIONAL_WORKER_METHODS.computeIfAbsent(e.getClass(),k->new ConcurrentHashMap<>());
+            Method accessor=methods.get(method);
+            if(accessor==null){accessor=e.getClass().getMethod(method);methods.put(method,accessor);}
+            return accessor.invoke(e);
+        }catch(ReflectiveOperationException|RuntimeException ignored){return null;}
+    }
+    static String workerString(LivingEntity e,String method){
+        Object value=workerValue(e,method);return value instanceof String text?text:"";
+    }
+    static int workerInt(LivingEntity e,String method){
+        Object value=workerValue(e,method);return value instanceof Number number?number.intValue():0;
+    }
+
     /** Мои солдаты и рабочие поселений: то, что можно выделить. */
     static boolean selectable(Minecraft mc, LivingEntity e) {
-        if (e instanceof TroopEntity t) return t.ownerId().equals(mc.player.getUUID().toString());
-        return e.getType().builtInRegistryHolder().key().location().toString().equals("wf_settle:worker");
+        if (mc == null || mc.player == null || e == null) return false;
+        String owner=mc.player.getUUID().toString();
+        if (e instanceof TroopEntity t) return owner.equals(t.ownerId());
+        if(isWorkerEntity(e)){
+            String workerOwner=workerString(e,"ownerId");
+            return owner.equals(workerOwner)||mc.hasSingleplayerServer();
+        }
+        return false;
     }
 
     static List<UnitSelection.Screen> screenList(Minecraft mc) {
@@ -105,6 +208,16 @@ public final class CommandMode {
         return hit.getType() == HitResult.Type.MISS ? null : hit.getLocation();
     }
 
+    /** Exact block under the cursor; used for single-tree/single-vein orders rather than a nearby surface point. */
+    static net.minecraft.core.BlockPos blockAt(Minecraft mc, double sx, double sy) {
+        if (mc == null || mc.level == null || invVp == null) return null;
+        double[] d = Projection.ray(invVp, sx, sy, mc.getWindow().getGuiScaledWidth(), mc.getWindow().getGuiScaledHeight());
+        Vec3 direction = new Vec3(d[0], d[1], d[2]);
+        HitResult hit = mc.level.clip(new ClipContext(cam, cam.add(direction.scale(250)),
+                ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mc.player));
+        return hit instanceof BlockHitResult block ? block.getBlockPos() : null;
+    }
+
     /** Живой объект под курсором, по которому можно ударить (монстр или чужой солдат). */
     static LivingEntity enemyAt(Minecraft mc, double sx, double sy) {
         int w = mc.getWindow().getGuiScaledWidth(), h = mc.getWindow().getGuiScaledHeight();
@@ -123,7 +236,37 @@ public final class CommandMode {
 
     static List<String> selected() { return new ArrayList<>(SEL.selected()); }
 
+    /** Resident under the RTS cursor; the same screen-space hitbox is used by click and box selection. */
+    static LivingEntity residentAt(Minecraft mc, double sx, double sy) {
+        if (mc == null || mc.level == null || vp == null) return null;
+        int width = mc.getWindow().getGuiScaledWidth();
+        int height = mc.getWindow().getGuiScaledHeight();
+        LivingEntity best = null;
+        double bestDistance = Double.MAX_VALUE;
+        for (net.minecraft.world.entity.Entity entity : mc.level.entitiesForRendering()) {
+            if (!(entity instanceof LivingEntity living) || !living.isAlive() || !isWorkerEntity(living)) continue;
+            double[] point = Projection.project(vp, living.getX() - cam.x,
+                    living.getY() + living.getBbHeight() * 0.5 - cam.y,
+                    living.getZ() - cam.z, width, height);
+            if (point[2] <= 0) continue;
+            double distance = Math.hypot(point[0] - sx, point[1] - sy);
+            if (distance <= Math.max(8, 90 / point[2]) && distance < bestDistance) {
+                best = living;
+                bestDistance = distance;
+            }
+        }
+        return best;
+    }
+
+
     // ---- вход и выход ----
+
+    /** Public entry point used by the settlement HUD bridge; all management opens the same command workspace. */
+    public static void openUnified() {
+        Minecraft mc = Minecraft.getInstance();
+        if (!active && mc.screen == null) enter(mc);
+        else if (active && !(mc.screen instanceof CommandScreen)) mc.setScreen(new CommandScreen());
+    }
 
     static void enter(Minecraft mc) {
         if (active || mc.level == null || mc.player == null) return;
@@ -138,6 +281,7 @@ public final class CommandMode {
         frame(mc);
         mc.setCameraEntity(camEntity);
         mc.setScreen(new CommandScreen());
+        if (ModList.get().isLoaded("wf_settle")) mc.player.connection.sendCommand("wfsettle view hud");
     }
 
     static void exit(Minecraft mc) {
@@ -221,14 +365,42 @@ public final class CommandMode {
         }
 
         @SubscribeEvent
-        public void logout(ClientPlayerNetworkEvent.LoggingOut e) { active = false; camEntity = null; SEL.clear(); }
+        public void logout(ClientPlayerNetworkEvent.LoggingOut e) { active = false; firstPersonCommand = false; camEntity = null; SEL.clear(); }
+
+        @SubscribeEvent
+        public void interaction(InputEvent.InteractionKeyMappingTriggered e) {
+            firstPersonInput(Minecraft.getInstance(), e);
+        }
 
         @SubscribeEvent
         public void tick(TickEvent.ClientTickEvent e) {
             if (e.phase != TickEvent.Phase.END) return;
             Minecraft mc = Minecraft.getInstance();
-            if (mc.player == null || mc.level == null) { active = false; camEntity = null; return; }
-            while (TOGGLE.consumeClick()) if (mc.screen == null && !active) enter(mc);
+            if (mc.player == null || mc.level == null) { active = false; firstPersonCommand = false; camEntity = null; return; }
+            boolean radialHeld = RADIAL_COMMAND.isDown();
+            if (!radialHeld) radialSuppressed = false;
+            if (mc.screen instanceof RadialCommandScreen radial) {
+                if (!radialHeld) {
+                    radial.commit();
+                    mc.setScreen(null);
+                }
+            } else if (firstPersonCommand && !active && mc.screen == null
+                    && radialHeld && !radialSuppressed && !SEL.selected().isEmpty()) {
+                mc.setScreen(new RadialCommandScreen());
+            }
+            while (FIRST_PERSON_COMMAND.consumeClick()) {
+                if (!active && mc.screen == null) {
+                    firstPersonCommand = !firstPersonCommand;
+                    SEL.clear();
+                    mc.player.displayClientMessage(Component.literal(firstPersonCommand
+                            ? "Командование от первого лица: ЛКМ — выбрать, Shift+ЛКМ — добавить, ПКМ — приказ, G — выход"
+                            : "Командование от первого лица выключено"), true);
+                }
+            }
+            while (TOGGLE.consumeClick()) if (mc.screen == null && !active) {
+                firstPersonCommand = false;
+                enter(mc);
+            }
             if (active && !(mc.screen instanceof CommandScreen)) exit(mc);                     // открылось другое окно (смерть, меню): выходим
             if (active) {
                 java.util.Set<String> alive = new java.util.HashSet<>();

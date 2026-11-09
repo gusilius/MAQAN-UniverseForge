@@ -1,6 +1,8 @@
 package dev.worldforge.tests;
 
 import dev.worldforge.settle.*;
+import dev.worldforge.mod.Json;
+import java.util.*;
 
 import java.nio.file.*;
 
@@ -10,6 +12,26 @@ public class EconomyTest {
     static void ok(boolean c, String what) { System.out.println((c ? "ok   " : "FAIL ") + what); if (!c) fails++; }
 
     static boolean orderFails(Runnable r) { try { r.run(); return false; } catch (Settlement.OrderException e) { return true; } }
+    static String firstDiff(Object a, Object b, String path) {
+        if (Objects.equals(a, b)) return "";
+        if (a instanceof Map<?, ?> am && b instanceof Map<?, ?> bm) {
+            Set<String> keys = new TreeSet<>();
+            am.keySet().forEach(k -> keys.add(String.valueOf(k)));
+            bm.keySet().forEach(k -> keys.add(String.valueOf(k)));
+            for (String key : keys) {
+                String diff = firstDiff(am.get(key), bm.get(key), path + "." + key);
+                if (!diff.isEmpty()) return diff;
+            }
+        }
+        if (a instanceof List<?> al && b instanceof List<?> bl) {
+            if (al.size() != bl.size()) return path + ".size: " + al.size() + " != " + bl.size();
+            for (int i = 0; i < al.size(); i++) {
+                String diff = firstDiff(al.get(i), bl.get(i), path + "[" + i + "]");
+                if (!diff.isEmpty()) return diff;
+            }
+        }
+        return path + ": " + a + " != " + b;
+    }
 
     static Defs defs() throws Exception {
         Defs d = new Defs();
@@ -82,14 +104,18 @@ public class EconomyTest {
         p.unassign(w1.id);
         w1.profession = "laborer";
         p.tick(10);
-        ok(w1.profession.equals("farmer"), "работник с приоритетом выбрал ферму: " + w1.profession);
+        ok(w1.profession.equals("laborer") && w1.workRole().equals("farmer"),
+                "общий рабочий выполняет фермерскую работу без потери постоянной профессии: "
+                        + w1.profession + "/" + w1.workRole());
         ok(orderFails(() -> p.setWorkPriority(w1.id, "farmer", 9)) && orderFails(() -> p.setWorkPriority(999, "farmer", 1)), "неверные приоритеты отклоняются");
 
         // сохранение
         s.setTax(1); s.setAutoTrade("stone", "buy", 30);
         String js = s.toJson();
         Settlement back = Settlement.fromJson(js, d);
-        ok(back.taxLevel == 1 && back.autoBuy.get("stone") == 30 && back.toJson().equals(js), "сохранение экономики совпадает");
+        boolean economyRoundTrip = back.toJson().equals(js);
+        if (!economyRoundTrip) System.out.println("ECONOMY ROUNDTRIP DIFF " + firstDiff(Json.parse(js), Json.parse(back.toJson()), "$"));
+        ok(back.taxLevel == 1 && back.autoBuy.get("stone") == 30 && economyRoundTrip, "сохранение экономики совпадает");
         Settlement pb = Settlement.fromJson(p.toJson(), d);
         ok(pb.workers.get(0).jobPrio != null && pb.workers.get(0).jobPrio.get("farmer") == 1, "приоритеты работ сохраняются");
 

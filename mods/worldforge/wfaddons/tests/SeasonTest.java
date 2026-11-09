@@ -8,10 +8,11 @@ public class SeasonTest {
     static int fails;
     static void ok(boolean c, String what) { System.out.println((c ? "ok   " : "FAIL ") + what); if (!c) fails++; }
 
+    static int nextSettlementId = 1;
     static Settlement make(boolean guards) throws Exception {
         Defs d = new Defs();
         for (String f : new String[]{"base", "extra", "economy"}) d.add(Files.readString(Path.of("wf-settlements/src/main/resources/data/wf_settle/wf_settle/" + f + ".json")));
-        Settlement s = new Settlement("r", "Тест", d);
+        Settlement s = new Settlement("season_test_" + (nextSettlementId++), "Тест", d);
         s.add("wood", 300); s.add("planks", 100); s.add("stone", 100); s.add("food", 400); s.add("silver", 500);
         for (int i = 0; i < 10; i++) s.addWorker(null);
         s.place("house", 0, 0); s.place("house", 10, 0);

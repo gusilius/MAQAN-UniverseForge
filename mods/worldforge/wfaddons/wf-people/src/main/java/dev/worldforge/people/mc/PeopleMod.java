@@ -5,10 +5,12 @@ import dev.worldforge.mod.EditorManager;
 import dev.worldforge.mod.MapData;
 import dev.worldforge.mod.TitleData;
 import dev.worldforge.mod.WorldForgeMod;
+import dev.worldforge.mod.api.WorldForgeApi;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.Courts;
 import dev.worldforge.people.NameBank;
+import dev.worldforge.people.PopulationSimulation;
 import dev.worldforge.people.Role;
 import dev.worldforge.people.RoleDefs;
 import dev.worldforge.people.bridge.DialogueBridge;
@@ -20,6 +22,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.packs.resources.Resource;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.MobCategory;
+import net.minecraft.world.phys.AABB;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.RegisterCommandsEvent;
 import net.minecraftforge.event.TickEvent;
@@ -42,7 +45,9 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
@@ -55,7 +60,8 @@ import java.util.concurrent.ConcurrentHashMap;
 public class PeopleMod {
     public static final String ID = "wf_people";
     public static final Logger LOGGER = LogUtils.getLogger();
-    public static final int YEAR = 300, SAVE_EVERY = 6000, SPAWN_EVERY = 100;
+    public static volatile int YEAR = 300;
+    public static final int SAVE_EVERY = 6000, SPAWN_EVERY = 100;
     public static final String LAW = "primogeniture";
 
     public static final DeferredRegister<EntityType<?>> ENTITIES = DeferredRegister.create(ForgeRegistries.ENTITY_TYPES, ID);
@@ -63,10 +69,13 @@ public class PeopleMod {
             () -> EntityType.Builder.of(WFNpc::new, MobCategory.CREATURE).sized(0.6F, 1.95F).clientTrackingRange(10).build(ID + ":npc"));
 
     public static volatile RoleDefs ROLES = new RoleDefs();
+    public static volatile dev.worldforge.people.ProfessionDefs PROFESSIONS = new dev.worldforge.people.ProfessionDefs();
     /** Исходные JSON ролей и событий: уходят клиенту, чтобы окно двора собрало те же определения. */
     public static volatile java.util.List<String> ROLES_RAW = java.util.List.of();
     public static volatile NameBank NAMES = new NameBank();
     private static final Map<MapData, CharacterRegistry> REGS = new ConcurrentHashMap<>();
+    /** Corrupt saves fail closed: never regenerate courts over unreadable identity data. */
+    private static final Set<MapData> INVALID_REGS = ConcurrentHashMap.newKeySet();
     public static final int TICKS_PER_DAY = 1200;
     private static final Map<UUID, Set<String>> FLAGS = new ConcurrentHashMap<>();
     private static long ticks;
@@ -106,17 +115,21 @@ public class PeopleMod {
     @SubscribeEvent
     public void onAboutToStart(ServerAboutToStartEvent e) {
         REGS.clear();
+        INVALID_REGS.clear();
         FLAGS.clear();
         ticks = 0;
         RoleDefs roles = new RoleDefs();
+        dev.worldforge.people.ProfessionDefs professions = new dev.worldforge.people.ProfessionDefs();
         NameBank names = new NameBank();
         java.util.List<String> rawRoles = new java.util.ArrayList<>();
         load(e.getServer(), "wf_roles", j -> { roles.add(j); rawRoles.add(j); });
+        load(e.getServer(), "wf_professions", professions::add);
         ROLES_RAW = rawRoles;
         load(e.getServer(), "wf_names", names::add);
         ROLES = roles;
+        PROFESSIONS = professions;
         NAMES = names;
-        LOGGER.info("wf_people: загружено ролей: {}", roles.all().size());
+        LOGGER.info("wf_people: загружено ролей: {}, профессий: {}", roles.all().size(), professions.all().size());
     }
 
     private interface Sink {
@@ -136,12 +149,13 @@ public class PeopleMod {
 
     @SubscribeEvent
     public void onStarted(ServerStartedEvent e) {
+        YEAR = WorldForgeApi.clock().year();
         for (MapData m : WorldForgeMod.loadedMaps().values()) registry(m);
     }
 
     /** Реестр людей карты: читается из папки мира, при первом обращении достраивается дворами (Courts.ensure). Null, если у карты нет титулов. */
     public static CharacterRegistry registry(MapData m) {
-        if (m == null || m.titles == null) return null;
+        if (m == null || m.titles == null || INVALID_REGS.contains(m)) return null;
         CharacterRegistry have = REGS.get(m);
         if (have != null) return have;
         MinecraftServer server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
@@ -151,8 +165,9 @@ public class PeopleMod {
             try {
                 if (Files.exists(f)) reg.fromJson(Files.readString(f));
             } catch (Exception ex) {
-                LOGGER.error("wf_people: не удалось прочитать {}: {}", f, ex.toString());
-                reg = new CharacterRegistry();
+                LOGGER.error("wf_people: сохранение {} повреждено; генерация персонажей заблокирована во избежание потери данных: {}", f, ex.toString());
+                INVALID_REGS.add(m);
+                return null;
             }
         }
         int before = reg.size();
@@ -169,6 +184,9 @@ public class PeopleMod {
     public static long seed(MapData m) {
         return 0x57464F52L ^ ((long) m.name.hashCode() * 0x9E3779B97F4A7C15L);
     }
+
+    /** Read-only snapshot for optional population/progression bridges. */
+    public static Map<MapData, CharacterRegistry> registries() { return java.util.Collections.unmodifiableMap(new HashMap<>(REGS)); }
 
     public static CharacterRegistry registryFor(ServerLevel level) {
         return registry(EditorManager.dataFor(level));
@@ -204,7 +222,13 @@ public class PeopleMod {
         if (e.phase != TickEvent.Phase.END) return;
         ticks++;
         try {
+            int elapsedDays = WorldForgeApi.clock().pull("wf-people");
+            YEAR = WorldForgeApi.clock().year();
+            if (elapsedDays > 0) {
+                for (CharacterRegistry registry : REGS.values()) PopulationSimulation.advance(registry, elapsedDays, YEAR);
+            }
             if (ticks % SPAWN_EVERY == 0) NpcSpawner.pass(e.getServer());
+            if (ticks % 20 == 0) socialInitiatives(e.getServer());
             if (ticks % SAVE_EVERY == 0) saveAll(e.getServer());
         } catch (Exception ex) {
             LOGGER.error("wf_people: ошибка тика: {}", ex.toString());
@@ -212,6 +236,76 @@ public class PeopleMod {
     }
 
     @SubscribeEvent
+    /**
+     * Optional NPC-initiated conversation. Runs only for explicitly configured characters
+     * or characters with unresolved semantic obligations. A per-character/player cooldown
+     * prevents repeated popups.
+     */
+    private static void socialInitiatives(MinecraftServer server) {
+        if (!dialogueLoaded()) return;
+        for (ServerLevel level : server.getAllLevels()) {
+            CharacterRegistry registry = peek(level);
+            if (registry == null) continue;
+            MapData map = EditorManager.dataFor(level);
+            if (map == null || map.titles == null) continue;
+            for (ServerPlayer player : level.players()) {
+                if (DialogueHook.hasSession(player)) continue;
+                List<WFNpc> nearby = level.getEntitiesOfClass(WFNpc.class, player.getBoundingBox().inflate(3.0));
+                for (WFNpc body : nearby) {
+                    if (player.distanceToSqr(body) > 9.0) continue;
+                    Character person = registry.get(body.characterId());
+                    if (person == null || !person.alive) continue;
+                    Object configured = person.props.get("social.initiative_dialogue");
+                    if (!(configured instanceof String dialogueId) || dialogueId.isBlank()) continue;
+                    String intent = pendingSocialIntent(person);
+                    if (!Boolean.TRUE.equals(person.props.get("social.initiative_enabled")) && intent.isEmpty()) continue;
+                    Map<String,Object> cooldowns = new HashMap<>();
+                    Object raw = person.props.get("social.initiative_cooldowns");
+                    if (raw instanceof Map<?,?> values) for (Map.Entry<?,?> entry : values.entrySet())
+                        if (entry.getKey() instanceof String key && entry.getValue() instanceof Number n) cooldowns.put(key,n.longValue());
+                    String playerId = player.getUUID().toString();
+                    Object last = cooldowns.get(playerId);
+                    if (last instanceof Number n && ticks - n.longValue() < 2400) continue;
+                    person.props.put("social.initiative_intent", intent.isEmpty() ? "greeting" : intent);
+                    if (!DialogueHook.open(player, body, person, dialogueId, ROLES, map.titles,
+                            FLAGS.computeIfAbsent(player.getUUID(), k -> new HashSet<>()))) continue;
+                    cooldowns.put(playerId, ticks);
+                    while (cooldowns.size() > 64) {
+                        String oldest = null;
+                        long oldestTick = Long.MAX_VALUE;
+                        for (Map.Entry<String,Object> entry : cooldowns.entrySet()) {
+                            if (entry.getValue() instanceof Number value && value.longValue() < oldestTick) {
+                                oldest = entry.getKey();
+                                oldestTick = value.longValue();
+                            }
+                        }
+                        if (oldest == null) break;
+                        cooldowns.remove(oldest);
+                    }
+                    person.props.put("social.initiative_cooldowns", cooldowns);
+                    break;
+                }
+            }
+        }
+    }
+
+    /** First unresolved promise/request/grievance category for a follow-up conversation. */
+    private static String pendingSocialIntent(Character person) {
+        Object raw = person.props.get("dialogue.memory");
+        if (!(raw instanceof Map<?,?> root) || !(root.get("records") instanceof Map<?,?> records)) return "";
+        for (String category : List.of("grievance", "request", "promise")) {
+            String prefix = category + ".";
+            for (Map.Entry<?,?> entry : records.entrySet()) {
+                if (!(entry.getKey() instanceof String key) || !key.startsWith(prefix)
+                        || !(entry.getValue() instanceof Map<?,?> record)) continue;
+                if (!"open".equals(String.valueOf(record.get("status")))) continue;
+                person.props.put("social.initiative_subject", String.valueOf(record.containsKey("text") ? record.get("text") : ""));
+                return category + "_followup";
+            }
+        }
+        return "";
+    }
+
     public void onCommands(RegisterCommandsEvent e) {
         PeopleCommands.register(e.getDispatcher());
     }
@@ -269,8 +363,8 @@ public class PeopleMod {
             MapData m = EditorManager.dataFor(level);
             Set<String> flags = FLAGS.computeIfAbsent(sp.getUUID(), k -> new HashSet<>());
             if (m != null && m.titles != null) {
-                if (DialogueHook.open(sp, c, did, ROLES, m.titles, flags)) return;
-                if (!did.equals("default") && DialogueHook.open(sp, c, "default", ROLES, m.titles, flags)) return;   // у роли нет файла диалога
+                if (DialogueHook.open(sp, npc, c, did, ROLES, m.titles, flags)) return;
+                if (!did.equals("default") && DialogueHook.open(sp, npc, c, "default", ROLES, m.titles, flags)) return;   // у роли нет файла диалога
             }
         }
         if (!ev.isHandled()) sp.sendSystemMessage(Component.literal(label(c)));

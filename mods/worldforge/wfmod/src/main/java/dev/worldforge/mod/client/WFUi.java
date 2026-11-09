@@ -12,22 +12,23 @@ public final class WFUi {
     private WFUi() {}
 
     // ---- цвета
-    public static final int BG = 0xFF080D14;          // фон экрана вокруг карты
-    public static final int PANEL = 0xFF101923;       // выпуклая поверхность
-    public static final int INSET = 0xFF0B121A;       // вдавленная поверхность (поля, нажатые кнопки, полосы)
-    public static final int HI = 0xFF34495B;          // светлая грань скоса
-    public static final int LO = 0xFF060A10;          // тёмная грань скоса
-    public static final int EDGE = 0xFF000000;        // внешний контур
-    public static final int TX = 0xFFE8EEF5;          // основной текст
-    public static final int MUTED = 0xFF8292A5;       // второстепенный текст
-    public static final int OFF = 0xFF556474;         // недоступное
-    public static final int GOLD = 0xFF69CDE2;        // акцент: заголовки, выбранное
-    public static final int GOLD_DIM = 0xFF477F91;    // подзаголовки разделов
-    public static final int GOOD = 0xFF67B85C;        // союз, готово, прибыль
-    public static final int BAD = 0xFFD9503A;         // война, нехватка, потеря
-    public static final int INFO = 0xFF5AA0D8;        // подчинённые, сведения
-    public static final int HOVER = 0x30FFFFFF;       // подсветка под курсором
-    public static final int SCRIM = 0xEE100E0B;       // полупрозрачная тёмная панель поверх мира
+    // Canonical token values mirrored from shared/contracts/ui-theme.json.
+    public static final int BG = MaqanUiPalette.BACKGROUND;
+    public static final int PANEL = MaqanUiPalette.SURFACE;
+    public static final int INSET = MaqanUiPalette.SURFACE_INSET;
+    public static final int HI = MaqanUiPalette.BORDER;
+    public static final int LO = MaqanUiPalette.BORDER_SUBTLE;
+    public static final int EDGE = MaqanUiPalette.BACKGROUND;
+    public static final int TX = MaqanUiPalette.TEXT;
+    public static final int MUTED = MaqanUiPalette.TEXT_MUTED;
+    public static final int OFF = MaqanUiPalette.TEXT_DISABLED;
+    public static final int GOLD = MaqanUiPalette.ACCENT;
+    public static final int GOLD_DIM = MaqanUiPalette.ACCENT_SOFT;
+    public static final int GOOD = MaqanUiPalette.SUCCESS;
+    public static final int BAD = MaqanUiPalette.DANGER;
+    public static final int INFO = MaqanUiPalette.INFORMATION;
+    public static final int HOVER = 0x33253948;
+    public static final int SCRIM = 0xEE080D14;
 
     private static int mix(int a, int b, double t) {
         t = Math.max(0.0, Math.min(1.0, t));

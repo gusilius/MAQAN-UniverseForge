@@ -28,6 +28,8 @@ public final class Defs {
 
     public static final class Building {
         public final String id, name, blueprint;
+        public String description = "";
+        public final Map<String, Double> effects = new LinkedHashMap<>();
         public final Map<String, Integer> cost = new LinkedHashMap<>(), storage = new LinkedHashMap<>(), jobs = new LinkedHashMap<>(), in = new LinkedHashMap<>(), out = new LinkedHashMap<>();
         public final List<String> requires = new ArrayList<>();
         /** Раздел меню стройки: один из {@link Defs#CATEGORIES}. */
@@ -120,6 +122,10 @@ public final class Defs {
                 }
                 if (m.get("requires") instanceof List) for (Object o : (List<Object>) m.get("requires")) b.requires.add(String.valueOf(o));
                 if (m.get("category") != null) b.category = String.valueOf(m.get("category"));
+                if (m.get("description") != null) b.description = String.valueOf(m.get("description"));
+                if (m.get("effects") instanceof Map<?,?> effectMap) for (Map.Entry<?,?> effect : effectMap.entrySet()) {
+                    if (effect.getKey() instanceof String key && effect.getValue() instanceof Number value) b.effects.put(key, value.doubleValue());
+                }
                 if (m.get("work") instanceof Number n) b.work = n.doubleValue();
                 if (m.get("upkeep") instanceof Number n) b.upkeep = n.doubleValue();
                 if (m.get("trade") instanceof Number n) b.trade = n.intValue();
@@ -143,9 +149,9 @@ public final class Defs {
         for (Building b : buildings.values()) {
             if (!CATEGORIES.contains(b.category)) p.add(b.id + ": неизвестная категория '" + b.category + "'");
             for (String r : b.requires) if (!buildings.containsKey(r)) p.add(b.id + ": requires неизвестное здание '" + r + "'");
-            for (String j : b.jobs.keySet()) if (!professions.containsKey(j)) p.add(b.id + ": неизвестная профессия '" + j + "'");
+            for (String j : b.jobs.keySet()) if (!professions.containsKey(j) && !j.equals("hauler")) p.add(b.id + ": неизвестная профессия '" + j + "'");
             for (Map<String, Integer> m : List.of(b.cost, b.in, b.out, b.storage)) for (String r : m.keySet()) if (!resourceNames.containsKey(r)) p.add(b.id + ": неизвестный ресурс '" + r + "'");
-            if (!b.jobs.isEmpty() && !b.produces() && b.housing == 0 && b.storage.isEmpty() && b.trade == 0 && b.approval == 0 && b.safety == 0) p.add("Предупреждение: " + b.id + " даёт рабочие места, но ничего не делает");
+            if (!b.jobs.isEmpty() && !b.produces() && b.housing == 0 && b.storage.isEmpty() && b.trade == 0 && b.approval == 0 && b.safety == 0 && b.effects.isEmpty()) p.add("Предупреждение: " + b.id + " даёт рабочие места, но ничего не делает");
             if (b.cycle > 0 && b.out.isEmpty()) p.add("Предупреждение: " + b.id + " имеет cycle, но нет out");
             if (b.upkeep < 0) p.add(b.id + ": upkeep не может быть отрицательным");
             if (b.trade > 0 && prices.isEmpty()) p.add("Предупреждение: " + b.id + " торгует, но нет цен (prices)");

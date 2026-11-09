@@ -6,9 +6,12 @@ import dev.worldforge.settle.Building;
 import dev.worldforge.settle.Defs;
 import dev.worldforge.settle.Settlement;
 import dev.worldforge.settle.mc.Colony;
+import dev.worldforge.settle.mc.Blueprints;
 import dev.worldforge.settle.mc.SettleMod;
 import dev.worldforge.settle.mc.WFWorker;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.Entity;
 
 import java.util.*;
@@ -53,6 +56,23 @@ final class BuildControl {
         List<Object> taken = new ArrayList<>();
         for (Building b : c.s.buildings) taken.add(Map.of("x", c.worldX(b), "z", c.worldZ(b), "sx", b.def.sizeX, "sz", b.def.sizeZ));
         m.put("taken", taken);
+        List<Object> construction = new ArrayList<>();
+        for (Building building : c.s.buildings) {
+            if (building.state != Building.State.BUILDING) continue;
+            Colony.Site site = c.sites.get(building.uid);
+            if (site == null) continue;
+            Blueprints.Plan plan = Blueprints.get(p.serverLevel(), building.def);
+            for (int i = Math.max(0, site.placed); i < plan.blocks().size(); i++) {
+                Blueprints.Entry entry = plan.blocks().get(i);
+                BlockPos pos = new BlockPos(site.x + entry.x(), site.y + entry.y(), site.z + entry.z());
+                if (p.serverLevel().hasChunkAt(pos) && p.serverLevel().getBlockState(pos).equals(entry.state())) continue;
+                Map<String, Object> ghost = new LinkedHashMap<>();
+                ghost.put("x", pos.getX()); ghost.put("y", pos.getY()); ghost.put("z", pos.getZ());
+                ghost.put("block", BuiltInRegistries.BLOCK.getKey(entry.state().getBlock()).toString());
+                construction.add(ghost);
+            }
+        }
+        m.put("construction", construction);
         WFNet.sendView(p, VIEW, Json.write(m));
     }
 

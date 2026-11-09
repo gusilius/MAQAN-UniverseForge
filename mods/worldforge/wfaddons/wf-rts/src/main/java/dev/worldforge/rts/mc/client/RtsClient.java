@@ -50,6 +50,17 @@ public final class RtsClient {
             for (Object o : (List<Object>) m.get("defs")) d.add((String) o);
             Settlement s = Settlement.fromJson((String) m.get("s"), d);
             Minecraft mc = Minecraft.getInstance();
+            // When wf_troops is present, H opens the same command workspace used for the army.
+            // Reflection keeps wf_rts optional and avoids a hard module dependency.
+            try {
+                Class<?> mode = Class.forName("dev.worldforge.troops.mc.client.CommandMode");
+                Class<?> screen = Class.forName("dev.worldforge.troops.mc.client.CommandScreen");
+                mode.getMethod("openUnified").invoke(null);
+                screen.getMethod("setSettlementPayload", String.class).invoke(null, payload);
+                return;
+            } catch (ReflectiveOperationException ignored) {
+                // Standalone settlement management remains available without wf_troops.
+            }
             if (mc.screen instanceof RtsHud h) h.setModel(s); else mc.setScreen(new RtsHud(s, ClientViews::command));
         } catch (RuntimeException ex) {
             org.slf4j.LoggerFactory.getLogger("wf_rts").error("wf_rts: не удалось открыть панель: {}", ex.toString());

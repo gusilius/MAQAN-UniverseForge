@@ -62,6 +62,41 @@ class WorldForgeMapSnapshotTest {
     }
 
     @Test
+    void indexesTerrainRastersAndKeepsFeatureGeometryInSnapshot() {
+        WorldForgeMapSnapshot snapshot = new WorldForgeMapSnapshot();
+        WorldForgeMapSnapshot.Terrain terrain = new WorldForgeMapSnapshot.Terrain();
+        terrain.dimension_id = "minecraft:overworld";
+        terrain.width = 2;
+        terrain.height = 1;
+        terrain.step_pixels = 1;
+        terrain.blocks_per_pixel = 2;
+        terrain.origin_x = -2;
+        terrain.origin_z = -1;
+        terrain.heights = new int[]{64, 92};
+        terrain.biome_indices = new int[]{0, 1};
+        terrain.river_values = new int[]{0, 255};
+        terrain.biome_palette = new String[]{"plains", "river"};
+        terrain.biome_colors = new int[]{0x779955, 0x3366AA};
+        snapshot.terrain = List.of(terrain);
+
+        WorldForgeMapSnapshot.Feature road = new WorldForgeMapSnapshot.Feature();
+        road.id = "road:main";
+        road.dimension_id = "minecraft:overworld";
+        road.path.add(new WorldForgeMapSnapshot.Vertex());
+        road.path.get(0).x = 10;
+        road.path.get(0).z = 20;
+        snapshot.features = List.of(road);
+        snapshot.rebuildIndexes();
+
+        assertSame(terrain, snapshot.terrainInDimension("minecraft:overworld"));
+        assertNull(snapshot.terrainInDimension("minecraft:the_nether"));
+        assertEquals(-1.0, terrain.sampleX(0));
+        assertEquals(1.0, terrain.sampleX(1));
+        assertEquals(road, snapshot.featuresInDimension("minecraft:overworld").get(0));
+        assertEquals(10.0, road.path.get(0).x);
+    }
+
+    @Test
     void dimensionIndexesAreImmutableAndIgnoreUnboundRecords() {
         WorldForgeMapSnapshot snapshot = new WorldForgeMapSnapshot();
         WorldForgeMapSnapshot.Territory unbound = new WorldForgeMapSnapshot.Territory();

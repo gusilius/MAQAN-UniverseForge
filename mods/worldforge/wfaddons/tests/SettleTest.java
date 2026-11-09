@@ -1,6 +1,7 @@
 package dev.worldforge.tests;
 
 import dev.worldforge.settle.*;
+import dev.worldforge.mod.Json;
 
 import java.nio.file.*;
 import java.util.*;
@@ -9,6 +10,26 @@ public class SettleTest {
     static int fails;
 
     static void ok(boolean c, String what) { System.out.println((c ? "ok   " : "FAIL ") + what); if (!c) fails++; }
+    static String firstDiff(Object a, Object b, String path) {
+        if (Objects.equals(a, b)) return "";
+        if (a instanceof Map<?, ?> am && b instanceof Map<?, ?> bm) {
+            Set<String> keys = new TreeSet<>();
+            am.keySet().forEach(k -> keys.add(String.valueOf(k)));
+            bm.keySet().forEach(k -> keys.add(String.valueOf(k)));
+            for (String key : keys) {
+                String diff = firstDiff(am.get(key), bm.get(key), path + "." + key);
+                if (!diff.isEmpty()) return diff;
+            }
+        }
+        if (a instanceof List<?> al && b instanceof List<?> bl) {
+            if (al.size() != bl.size()) return path + ".size: " + al.size() + " != " + bl.size();
+            for (int i = 0; i < al.size(); i++) {
+                String diff = firstDiff(al.get(i), bl.get(i), path + "[" + i + "]");
+                if (!diff.isEmpty()) return diff;
+            }
+        }
+        return path + ": " + a + " != " + b;
+    }
 
     static Defs defs() throws Exception {
         Defs d = new Defs();
@@ -18,8 +39,9 @@ public class SettleTest {
         return d;
     }
 
+    static int nextSettlementId = 1;
     static Settlement fresh(Defs d, int workers) {
-        Settlement s = new Settlement("s1", "Тест", d);
+        Settlement s = new Settlement("settle_test_" + (nextSettlementId++), "Тест", d);
         s.add("wood", 100); s.add("stone", 20); s.add("food", 50);
         for (int i = 0; i < workers; i++) s.addWorker(null);
         return s;
@@ -32,8 +54,36 @@ public class SettleTest {
     public static void main(String[] a) throws Exception {
         Defs d = defs();
         ok(d.validate().stream().noneMatch(m -> !m.startsWith("Предупреждение")), "набор данных без ошибок: " + d.validate());
+        ok(d.buildings.size() >= 90 && d.professions.size() >= 46,
+                "единый каталог содержит сельские и городские постройки и полный набор профессий");
+        ok(d.buildings.values().stream().noneMatch(b -> b.limit > 0),
+                "каталог не навязывает региональные и унаследованные лимиты построек");
+        ok(d.buildings.values().stream().allMatch(b -> b.description != null && !b.description.isBlank()),
+                "у каждой постройки определено назначение");
+        ok(d.buildings.containsKey("windmill") && d.buildings.get("windmill").in.containsKey("grain")
+                        && d.buildings.get("bakery").in.containsKey("flour"),
+                "зерно проходит цепочку мельница -> мука -> пекарня");
+        ok(d.buildings.containsKey("gold_mine") && d.buildings.containsKey("silver_mine")
+                        && d.buildings.containsKey("copper_mine")
+                        && d.buildings.get("mint").in.containsKey("gold"),
+                "добыча драгоценных и цветных металлов связана с ювелирным делом и чеканкой");
+        ok(d.buildings.get("village_granary").storage.getOrDefault("food", 0) > 0
+                        && d.buildings.get("city_storehouse").storage.getOrDefault("steel", 0) > 0,
+                "деревенский и городской склады реально увеличивают вместимость общего хранилища");
+        ok(d.professions.containsKey("brewer") && d.buildings.containsKey("brewery")
+                        && d.buildings.get("brewery").jobs.getOrDefault("brewer", 0) == 2
+                        && d.buildings.get("brewery").in.containsKey("grain")
+                        && d.buildings.get("brewery").out.containsKey("ale"),
+                "пивовар имеет полноценную производственную цепочку и рабочее место");
         ok(d.professions.containsKey("trainer") && d.buildings.get("barracks").jobs.getOrDefault("trainer", 0) == 1,
                 "казармы требуют рабочего-инструктора");
+        Worker roleProbe = fresh(d, 1).workers.get(0);
+        ok(roleProbe.generalist() && roleProbe.canPerform("lumberjack") && roleProbe.canPerform("builder")
+                        && roleProbe.productivity("lumberjack") == 1.0,
+                "общий рабочий универсален, но работает без профессионального бонуса");
+        roleProbe.profession = "lumberjack";
+        ok(!roleProbe.canPerform("builder") && roleProbe.productivity("lumberjack") > 1.0,
+                "дровосек не подменяет профессию строителем и добывает быстрее");
         ok(d.buildings.get("archery_range") != null && d.buildings.get("stable") != null
                 && d.buildings.get("siege_workshop") != null,
                 "стрельбище, конюшня и осадная мастерская загружаются из датапака");
@@ -91,10 +141,101 @@ public class SettleTest {
         Building lc = s.place("lumber_camp", 10, 0);
         s.tick(60);
         ok(lc.state == Building.State.DONE, "лагерь построен");
-        ok(s.assigned(lc.uid).size() == 3 && s.assigned(lc.uid).stream().allMatch(w -> w.profession.equals("lumberjack")), "свободные работники сами стали дровосеками");
+        ok(s.assigned(lc.uid).stream().filter(w -> w.workRole().equals("lumberjack")).count() == 3
+                        && s.assigned(lc.uid).stream().filter(w -> w.workRole().equals("lumberjack"))
+                        .allMatch(w -> w.profession.equals("laborer")),
+                "общие рабочие добывают, не теряя постоянную профессию");
+        ok(s.assigned(lc.uid).stream().anyMatch(w -> w.workRole().equals("hauler"))
+                        || !lc.localStock.isEmpty(),
+                "логистическая система назначает носильщика или удерживает груз в локальном буфере");
         double w0 = s.amount("wood");
         s.tick(120);
-        ok(s.amount("wood") > w0, "дерево добывается");
+        ok(s.amount("wood") > w0 && s.taskGraph.count(ResidentTaskGraph.Stage.STORED) > 0,
+                "дерево проходит добычу, доставку носильщиком и поступает на общий склад");
+
+        Settlement generalistYield = fresh(d, 1);
+        generalistYield.auto = false;
+        Building generalistCamp = generalistYield.place("lumber_camp", 10, 0);
+        generalistYield.tick(2);
+        generalistYield.assign(generalistYield.workers.get(0).id, generalistCamp.uid);
+        generalistYield.tick(30);
+        generalistYield.assign(generalistYield.workers.get(0).id, generalistCamp.uid);
+        generalistYield.tick(120);
+        double generalistWood = generalistCamp.localStock.getOrDefault("wood", 0.0);
+        Settlement specialistYield = fresh(d, 1);
+        specialistYield.auto = false;
+        Building specialistCamp = specialistYield.place("lumber_camp", 10, 0);
+        specialistYield.tick(2);
+        specialistYield.assign(specialistYield.workers.get(0).id, specialistCamp.uid);
+        specialistYield.tick(30);
+        Worker lumberjack = specialistYield.workers.get(0);
+        specialistYield.setProfession(lumberjack.id, "lumberjack");
+        specialistYield.assign(lumberjack.id, specialistCamp.uid);
+        specialistYield.tick(120);
+        double specialistWood = specialistCamp.localStock.getOrDefault("wood", 0.0);
+        ok(specialistWood > generalistWood,
+                "профильный дровосек добывает больше общего рабочего за одинаковое время");
+        Settlement generalBuilder = fresh(d, 1);
+        generalBuilder.auto = false;
+        Building generalSite = generalBuilder.place("house", 0, 0);
+        generalBuilder.tick(1);
+        generalBuilder.assign(generalBuilder.workers.get(0).id, generalSite.uid);
+        generalBuilder.tick(10);
+        double generalBuildProgress = generalSite.progress;
+        Settlement specialistBuilder = fresh(d, 1);
+        specialistBuilder.auto = false;
+        Building specialistSite = specialistBuilder.place("house", 0, 0);
+        specialistBuilder.tick(1);
+        specialistBuilder.setProfession(specialistBuilder.workers.get(0).id, "builder");
+        specialistBuilder.assign(specialistBuilder.workers.get(0).id, specialistSite.uid);
+        specialistBuilder.tick(10);
+        ok(specialistSite.progress > generalBuildProgress,
+                "профильный строитель реально строит быстрее общего рабочего");
+
+        Settlement exactRole = fresh(d, 2);
+        exactRole.auto = false;
+        Building exactCamp = exactRole.place("lumber_camp", 12, 0);
+        exactRole.tick(2);
+        Worker exactHauler = exactRole.workers.get(0);
+        exactRole.setProfession(exactHauler.id, "builder");
+        exactRole.assign(exactHauler.id, exactCamp.uid, "builder");
+        exactRole.tick(200);
+        exactRole.setProfession(exactHauler.id, "lumberjack");
+        exactRole.assign(exactHauler.id, exactCamp.uid, "lumberjack");
+        ok("lumberjack".equals(exactHauler.workRole()),
+                "прямое поручение назначает именно выбранную роль, а не первую свободную вакансию");
+        Worker wrongRole = exactRole.workers.get(1);
+        exactRole.setProfession(wrongRole.id, "lumberjack");
+        ok(throwsOrder(() -> exactRole.assign(wrongRole.id, exactCamp.uid, "builder")),
+                "прямое поручение отклоняет роль, которой нет среди вакансий здания");
+
+        Settlement bufferTest = fresh(d, 3);
+        bufferTest.auto = false;
+        Building bufferCamp = bufferTest.place("lumber_camp", 10, 0);
+        bufferTest.tick(2);
+        bufferTest.assign(bufferTest.workers.get(0).id, bufferCamp.uid);
+        bufferTest.tick(30);
+        for (Worker worker : bufferTest.workers) bufferTest.assign(worker.id, bufferCamp.uid);
+        double storedBeforeHaul = bufferTest.amount("wood");
+        bufferTest.tick(120);
+        double localWood = bufferCamp.localStock.getOrDefault("wood", 0.0);
+        ok(localWood > 0 && bufferTest.amount("wood") == storedBeforeHaul,
+                "добытое дерево остаётся в буфере лесопилки, пока нет носильщика");
+        Settlement bufferRestored = Settlement.fromJson(bufferTest.toJson(), d);
+        ok(bufferRestored.building(bufferCamp.uid).localStock.getOrDefault("wood", 0.0) == localWood
+                        && bufferRestored.taskGraph.count(ResidentTaskGraph.Stage.EXTRACTED) > 0,
+                "локальный склад и граф добычи сохраняются после перезапуска");
+        Worker newHauler = bufferTest.addWorker("Носильщик");
+        bufferTest.assignHauler(newHauler.id, bufferCamp.uid);
+        bufferTest.tick(5);
+        ok(bufferTest.amount("wood") > storedBeforeHaul
+                        && bufferTest.building(bufferCamp.uid).localStock.getOrDefault("wood", 0.0) < localWood
+                        && bufferTest.taskGraph.count(ResidentTaskGraph.Stage.STORED) > 0,
+                "назначенный общий рабочий доставляет древесину из локального буфера в общий склад");
+        Settlement manualHaulerBack = Settlement.fromJson(bufferTest.toJson(), d);
+        ok(manualHaulerBack.worker(newHauler.id).manualHauler
+                        && manualHaulerBack.worker(newHauler.id).workRole().equals("hauler"),
+                "ручное назначение носильщика сохраняется после перезапуска поселения");
 
         // зависимости и лимиты
         ok(throwsOrder(() -> s.place("granary", 30, 30)), "амбар требует лесопилку");
@@ -121,18 +262,19 @@ public class SettleTest {
         Building f = m.place("farm", 0, 0);
         m.tick(5);
         Worker w1 = m.workers.get(0);
-        ok(throwsOrder(() -> m.assign(w1.id, f.uid)), "не-строитель не может строить");
-        m.setProfession(w1.id, "builder");
         m.assign(w1.id, f.uid);
+        ok(w1.profession.equals("laborer") && w1.workRole().equals("builder"),
+                "универсальный рабочий может строить без смены постоянной профессии");
         m.tick(40);
-        ok(f.state == Building.State.DONE, "один строитель достроил ферму (25 работы)");
+        ok(f.state == Building.State.DONE, "один универсальный строитель достроил ферму");
         Worker w2 = m.workers.get(1);
-        ok(throwsOrder(() -> m.assign(w2.id, f.uid)), "laborer не нужен на ферме");
-        m.setProfession(w2.id, "farmer");
         m.assign(w2.id, f.uid);
+        ok(w2.profession.equals("laborer") && w2.workRole().equals("farmer"),
+                "универсальный рабочий может выполнять фермерскую работу без смены профессии");
         double f0 = m.amount("food");
-        m.tick(100);
-        ok(m.amount("food") > f0 - 4, "ферма работает с одним фермером медленнее, но идёт");
+        m.tick(140);
+        ok(f.localStock.getOrDefault("food", 0.0) > 0,
+                "ферма работает с одним универсальным фермером, а урожай ждёт носильщика в локальном буфере");
 
         // рост и голод
         Settlement g = fresh(d, 2);
@@ -166,6 +308,69 @@ public class SettleTest {
         Worker restoredCommand = manualBack.worker(commanded.id);
         ok(restoredCommand.manualOrder && restoredCommand.orderX == 12.5 && restoredCommand.orderZ == -7.25,
                 "ручной приказ рабочего сохраняется и восстанавливается");
+        Settlement following = fresh(d, 1);
+        Worker follower = following.workers.get(0);
+        follower.manualFollow = true;
+        follower.manualFollowOwner = "player-uuid";
+        follower.building = 0;
+        following.auto = true;
+        following.tick(1);
+        ok(follower.manualFollow && follower.building == 0,
+                "automatic staffing does not steal a resident following the player");
+        Settlement followingBack = Settlement.fromJson(following.toJson(), d);
+        Worker restoredFollower = followingBack.worker(follower.id);
+        ok(restoredFollower.manualFollow && restoredFollower.manualFollowOwner.equals("player-uuid"),
+                "режим следования за игроком и его UUID сохраняются после загрузки");
+        follower.lifeAction = "sleeping";
+        follower.lifeTargetX = 4.5;
+        follower.lifeTargetZ = -3.25;
+        follower.lifeActionUntil = 9876;
+        Settlement dailyLifeBack = Settlement.fromJson(following.toJson(), d);
+        Worker restoredDailyLife = dailyLifeBack.worker(follower.id);
+        ok(restoredDailyLife.lifeAction.equals("sleeping") && restoredDailyLife.lifeTargetX == 4.5
+                        && restoredDailyLife.lifeTargetZ == -3.25 && restoredDailyLife.lifeActionUntil == 9876,
+                "сон жителя, цель дома и время пробуждения переживают сохранение");
+        follower.lifeAction = "defending";
+        follower.lifeTargetX = 0;
+        follower.lifeTargetZ = 0;
+        follower.lifeActionUntil = 1.0e12;
+        Settlement defenceBack = Settlement.fromJson(following.toJson(), d);
+        ok(defenceBack.worker(follower.id).lifeAction.equals("defending")
+                        && defenceBack.worker(follower.id).lifeActionUntil == 1.0e12,
+                "приказ жителя защищать поселение сохраняется и восстанавливается");
+        Settlement queued= fresh(d,1);
+        Worker queuedWorker=queued.workers.get(0);
+        queued.moveTo(queuedWorker.id,10,20);
+        queued.moveTo(queuedWorker.id,30,40,true);
+        queued.moveTo(queuedWorker.id,-5,8,true);
+        ok(queuedWorker.manualOrder&&queuedWorker.orderQueue.size()==2
+                &&queued.targetOf(queuedWorker)[0]==10,
+                "Shift+ПКМ добавляет две точки в очередь рабочего, не заменяя текущую");
+        Settlement queuedBack=Settlement.fromJson(queued.toJson(),d);
+        Worker queuedRestored=queuedBack.worker(queuedWorker.id);
+        ok(queuedRestored.orderQueue.size()==2,"очередь маршрута рабочего сохраняется в мире");
+        queuedBack.advanceManualOrder(queuedRestored.id);
+        ok(queuedRestored.orderX==30&&queuedRestored.orderZ==40&&queuedRestored.manualOrder,
+                "после достижения первой точки активируется следующая");
+        queuedBack.advanceManualOrder(queuedRestored.id);
+        ok(queuedRestored.orderX==-5&&queuedRestored.orderZ==8&&queuedRestored.orderQueue.isEmpty(),
+                "очередь последовательно активирует конечную точку");
+        queuedBack.advanceManualOrder(queuedRestored.id);
+        ok(!queuedRestored.manualOrder&&queuedRestored.status.equals("свободен"),
+                "после последней точки ручной приказ завершается");
+        queuedBack.moveTo(queuedRestored.id,1,1);
+        queuedBack.moveTo(queuedRestored.id,2,2,true);
+        queuedBack.holdAt(queuedRestored.id,4,4);
+        ok(queuedRestored.orderQueue.isEmpty()&&queuedRestored.orderX==4,
+                "приказ удержания отменяет оставшуюся очередь");
+        boolean queueLimit=false;
+        try{
+            queuedBack.moveTo(queuedRestored.id,0,0);
+            for(int i=0;i<Worker.MAX_MANUAL_ORDERS+1;i++)queuedBack.moveTo(queuedRestored.id,i+1,i+1,true);
+        }catch(Settlement.OrderException expectedQueue){queueLimit=true;}
+        ok(queueLimit&&queuedRestored.orderQueue.size()==Worker.MAX_MANUAL_ORDERS,
+                "очередь рабочего ограничена и не переполняется");
+
         manual.holdAt(commanded.id, 3.0, 4.0);
         ok(commanded.manualOrder && commanded.orderX == 3.0 && commanded.orderZ == 4.0
                 && commanded.status.contains("удерживать"), "приказ удержания фиксирует позицию рабочего");
@@ -179,10 +384,14 @@ public class SettleTest {
         // детерминизм и сохранение
         Settlement x = fresh(d, 5), y = fresh(d, 5);
         for (Settlement t : new Settlement[]{x, y}) { t.place("house", 0, 0); t.place("lumber_camp", 10, 0); t.place("farm", 20, 0); t.tick(500); }
-        ok(x.toJson().equals(y.toJson()), "две одинаковые симуляции совпадают");
+        ok(x.toJson().replace(x.id, "<settlement-id>").equals(y.toJson().replace(y.id, "<settlement-id>")), "две одинаковые симуляции совпадают независимо от идентификатора поселения");
         if (!x.workers.isEmpty()) x.workers.get(0).person = "c-person-roundtrip";
-        Settlement r = Settlement.fromJson(x.toJson(), d);
-        ok(r.toJson().equals(x.toJson()), "сохранение и загрузка без потерь, включая ссылку на личность");
+        String beforeReload = x.toJson();
+        Settlement r = Settlement.fromJson(beforeReload, d);
+        String afterReload = r.toJson();
+        boolean roundTrip = afterReload.equals(beforeReload);
+        if (!roundTrip) System.out.println("ROUNDTRIP DIFF " + firstDiff(Json.parse(beforeReload), Json.parse(afterReload), "$"));
+        ok(roundTrip, "сохранение и загрузка без потерь, включая ссылку на личность");
         ok(!r.workers.isEmpty() && r.workers.get(0).person.equals("c-person-roundtrip"),
                 "ссылка рабочего на CharacterRegistry сохраняется как стабильный foreign key");
         x.tick(100); r.tick(100);

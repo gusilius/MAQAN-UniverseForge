@@ -96,9 +96,60 @@ public class RtsHud extends Screen {
 
     // ------------------------------------------------------------------ рисование
 
+    private boolean embeddedInMaqan;
+
+    public void setEmbeddedInMaqan(boolean embedded) { this.embeddedInMaqan = embedded; }
+
+    private void publishWorkspaceSelection() {
+        if (sel.hasBuilding()) {
+            Building b = sel.building(s);
+            if (b == null) { dev.worldforge.mod.client.PlatformWorkspaceBridge.clear("wf_rts"); return; }
+            dev.worldforge.mod.client.PlatformWorkspaceBridge.publish("wf_rts",
+                    "settlement:" + s.id + ":building:" + b.uid, "building", b.def.name,
+                    "Settlement building · " + Look.stateName(b) + " · " + b.x + ", " + b.z);
+            return;
+        }
+        List<Worker> workers = sel.workers(s);
+        if (workers.isEmpty()) {
+            dev.worldforge.mod.client.PlatformWorkspaceBridge.clear("wf_rts");
+            return;
+        }
+        if (workers.size() == 1) {
+            Worker worker = workers.get(0);
+            String id = worker.person == null || worker.person.isBlank()
+                    ? "settlement:" + s.id + ":worker:" + worker.id : worker.person;
+            dev.worldforge.mod.client.PlatformWorkspaceBridge.publish("wf_rts", id,
+                    worker.person == null || worker.person.isBlank() ? "worker" : "character",
+                    worker.name, "Profession: " + s.defs.professionName(worker.profession) + " · Job: " + s.defs.professionName(worker.workRole())
+                            + " · " + (worker.status == null ? "" : worker.status));
+            return;
+        }
+        String ids = workers.stream().map(w -> String.valueOf(w.id)).sorted()
+                .collect(java.util.stream.Collectors.joining(","));
+        String professions = sel.byProfession(s).entrySet().stream()
+                .map(e -> s.defs.professionName(e.getKey()) + " ×" + e.getValue())
+                .collect(java.util.stream.Collectors.joining(" · "));
+        dev.worldforge.mod.client.PlatformWorkspaceBridge.publish("wf_rts",
+                "settlement:" + s.id + ":worker-group:" + ids, "worker group", workers.size() + " selected",
+                workers.size() + " workers · " + professions);
+    }
+
+    @Override
+    public void removed() {
+        dev.worldforge.mod.client.PlatformWorkspaceBridge.clear("wf_rts");
+        super.removed();
+    }
+
+    @Override
+    public void onClose() {
+        if (embeddedInMaqan && dev.worldforge.mod.client.PlatformWorkspaceBridge.closeEmbedded(this)) return;
+        super.onClose();
+    }
+
     @Override
     public void render(GuiGraphics g, int mx, int my, float pt) {
         sel.prune(s);
+        publishWorkspaceSelection();
         hits.clear();
         tipTitle = null;
         curX = mx; curY = my;
@@ -404,12 +455,13 @@ public class RtsHud extends Screen {
         boolean hov = WFUi.over(mx, my, x, y, 22, 22);
         WFUi.bevel(g, x, y, 22, 22, false);
         if (hov) g.fill(x + 2, y + 2, x + 20, y + 20, WFUi.HOVER);
-        String gl = Look.glyph(s.defs, w.profession);
-        g.drawString(font, gl, x + (22 - font.width(gl)) / 2, y + 7, Look.professionColor(w.profession));
+        String gl = Look.glyph(s.defs, w.workRole());
+        g.drawString(font, gl, x + (22 - font.width(gl)) / 2, y + 7, Look.professionColor(w.workRole()));
         g.fill(x + 2, y + 17, x + 20, y + 19, Look.stateColor(st));
         final int id = w.id;
         List<String> tip = new ArrayList<>();
-        tip.add(s.defs.professionName(w.profession) + " - " + Look.stateName(st));
+        tip.add("Профессия: " + s.defs.professionName(w.profession));
+        tip.add("Работа: " + s.defs.professionName(w.workRole()) + " - " + Look.stateName(st));
         Building b = w.building == 0 ? null : s.building(w.building);
         tip.add(b == null ? "Нет места работы" : "Место: " + b.def.name);
         tip.add("ЛКМ - оставить только его, Shift - убрать");
@@ -445,7 +497,7 @@ public class RtsHud extends Screen {
                 final String p = profs.get(i);
                 int v = prio.get(wk, p), cx = x + 12 + nameW + i * cw;
                 boolean hov = WFUi.over(mx, my, cx, ry - 1, cw - 2, rowH - 1);
-                WFUi.bevel(g, cx + 6, ry, cw - 14, rowH - 3, v > 0 && p.equals(wk.profession));
+                WFUi.bevel(g, cx + 6, ry, cw - 14, rowH - 3, v > 0 && p.equals(wk.workRole()));
                 if (hov) g.fill(cx + 8, ry + 2, cx + cw - 10, ry + rowH - 5, WFUi.HOVER);
                 String t = v == 0 ? "-" : String.valueOf(v);
                 g.drawString(font, t, cx + (cw - 2 - font.width(t)) / 2, ry + 2, v == 0 ? 0xFF55575F : v == 1 ? WFUi.GOLD : v == 2 ? WFUi.TX : v == 3 ? WFUi.INFO : WFUi.MUTED);

@@ -22,12 +22,15 @@ import java.util.Set;
  */
 public final class NavigatorWorldForgeMapStore {
     private static final Gson GSON = new GsonBuilder().create();
-    private static final long MAX_FILE_BYTES = 8L * 1024L * 1024L;
+    private static final long MAX_FILE_BYTES = 32L * 1024L * 1024L;
     private static final int MAX_TERRITORIES = 10_000;
     private static final int MAX_FEATURES = 50_000;
     private static final int MAX_POLITICAL_BOUNDARIES = 10_000;
     private static final int MAX_VERTICES_PER_TERRITORY = 4_096;
     private static final int MAX_RINGS_PER_TERRITORY = 1_024;
+    private static final int MAX_TERRAIN_SAMPLES = 65_536;
+    private static final int MAX_FEATURE_GEOMETRY_VERTICES = 250_000;
+    private static final double MAX_WORLD_COORDINATE = 30_000_000.0;
 
     private static volatile WorldForgeMapSnapshot snapshot;
     private static volatile String status = "WorldForge snapshot not loaded";
@@ -60,7 +63,7 @@ public final class NavigatorWorldForgeMapStore {
         try {
             long size = Files.size(path);
             if (size <= 0 || size > MAX_FILE_BYTES)
-                throw new IllegalArgumentException("Snapshot size must be between 1 byte and 8 MiB");
+                throw new IllegalArgumentException("Snapshot size must be between 1 byte and 32 MiB");
             WorldForgeMapSnapshot parsed;
             try (Reader reader = Files.newBufferedReader(path)) {
                 parsed = GSON.fromJson(reader, WorldForgeMapSnapshot.class);
@@ -117,9 +120,41 @@ public final class NavigatorWorldForgeMapStore {
         if (value.territories == null) value.territories = new ArrayList<>();
         if (value.features == null) value.features = new ArrayList<>();
         if (value.political_boundaries == null) value.political_boundaries = new ArrayList<>();
+        if (value.terrain == null) value.terrain = new ArrayList<>();
         if (value.territories.size() > MAX_TERRITORIES || value.features.size() > MAX_FEATURES
                 || value.political_boundaries.size() > MAX_POLITICAL_BOUNDARIES)
             throw new IllegalArgumentException("Snapshot contains too many map records");
+
+        Set<String> terrainDimensions = new HashSet<>();
+        for (WorldForgeMapSnapshot.Terrain terrain : value.terrain) {
+            if (terrain == null) throw new IllegalArgumentException("Null terrain raster");
+            terrain.dimension_id = required(terrain.dimension_id, "terrain.dimension_id");
+            if (!terrainDimensions.add(terrain.dimension_id))
+                throw new IllegalArgumentException("Duplicate terrain raster: " + terrain.dimension_id);
+            if (terrain.width < 1 || terrain.height < 1 || terrain.step_pixels < 1
+                    || (long) terrain.width * terrain.height > MAX_TERRAIN_SAMPLES
+                    || !finite(terrain.blocks_per_pixel) || terrain.blocks_per_pixel <= 0
+                    || !validWorldCoordinate(terrain.origin_x) || !validWorldCoordinate(terrain.origin_z)
+                    || terrain.blocks_per_pixel > MAX_WORLD_COORDINATE || terrain.step_pixels > 1_000_000)
+                throw new IllegalArgumentException("Invalid terrain raster geometry: " + terrain.dimension_id);
+            int count = terrain.width * terrain.height;
+            if (terrain.heights == null || terrain.heights.length != count
+                    || terrain.biome_indices == null || terrain.biome_indices.length != count
+                    || terrain.river_values == null || terrain.river_values.length != count)
+                throw new IllegalArgumentException("Terrain raster arrays have inconsistent lengths: " + terrain.dimension_id);
+            if (terrain.biome_palette == null || terrain.biome_colors == null
+                    || terrain.biome_palette.length > 256 || terrain.biome_colors.length != terrain.biome_palette.length)
+                throw new IllegalArgumentException("Invalid terrain biome palette: " + terrain.dimension_id);
+            for (int i = 0; i < count; i++) {
+                if (terrain.heights[i] < -2048 || terrain.heights[i] > 4096
+                        || terrain.biome_indices[i] < 0 || terrain.biome_indices[i] >= Math.max(1, terrain.biome_palette.length)
+                        || terrain.river_values[i] < 0 || terrain.river_values[i] > 255)
+                    throw new IllegalArgumentException("Invalid terrain sample at " + i + " in " + terrain.dimension_id);
+            }
+            for (String biome : terrain.biome_palette)
+                if (biome == null || biome.length() > 128)
+                    throw new IllegalArgumentException("Invalid biome palette entry in " + terrain.dimension_id);
+        }
 
         Set<String> territoryIds = new HashSet<>();
         for (WorldForgeMapSnapshot.Territory territory : value.territories) {
@@ -139,7 +174,8 @@ public final class NavigatorWorldForgeMapStore {
                 if (ring == null || ring.size() < 3 || ring.size() > MAX_VERTICES_PER_TERRITORY)
                     throw new IllegalArgumentException("Invalid vertex count for territory " + territory.id);
                 for (WorldForgeMapSnapshot.Vertex vertex : ring)
-                    if (vertex == null || !finite(vertex.x) || !finite(vertex.y) || !finite(vertex.z))
+                    if (vertex == null || !validWorldCoordinate(vertex.x) || !validHeight(vertex.y)
+                            || !validWorldCoordinate(vertex.z))
                         throw new IllegalArgumentException("Non-finite territory vertex: " + territory.id);
             }
             territory.fill_alpha = Math.max(0, Math.min(160, territory.fill_alpha));
@@ -164,7 +200,7 @@ public final class NavigatorWorldForgeMapStore {
                 if (ring == null || ring.size() < 3 || ring.size() > MAX_VERTICES_PER_TERRITORY)
                     throw new IllegalArgumentException("Invalid vertex count for political boundary " + boundary.id);
                 for (WorldForgeMapSnapshot.Vertex vertex : ring)
-                    if (vertex == null || !finite(vertex.x) || !finite(vertex.y) || !finite(vertex.z))
+                    if (vertex == null || !validWorldCoordinate(vertex.x) || !validHeight(vertex.y) || !validWorldCoordinate(vertex.z))
                         throw new IllegalArgumentException("Non-finite political boundary vertex: " + boundary.id);
             }
             if (boundary.subjects == null) boundary.subjects = new ArrayList<>();
@@ -174,6 +210,7 @@ public final class NavigatorWorldForgeMapStore {
         }
 
         Set<String> featureIds = new HashSet<>();
+        int geometryVertices = 0;
         for (WorldForgeMapSnapshot.Feature feature : value.features) {
             if (feature == null) throw new IllegalArgumentException("Null feature record");
             feature.id = required(feature.id, "feature.id");
@@ -182,11 +219,30 @@ public final class NavigatorWorldForgeMapStore {
             feature.dimension_id = required(feature.dimension_id, "feature.dimension_id");
             if (!featureIds.add(feature.id))
                 throw new IllegalArgumentException("Duplicate feature id: " + feature.id);
-            if (!finite(feature.x) || !finite(feature.y) || !finite(feature.z))
+            if (!validWorldCoordinate(feature.x) || !validHeight(feature.y) || !validWorldCoordinate(feature.z))
                 throw new IllegalArgumentException("Non-finite feature coordinates: " + feature.id);
             if (feature.attributes == null) feature.attributes = new java.util.LinkedHashMap<>();
             if (feature.attributes.size() > 64)
                 throw new IllegalArgumentException("Too many attributes on feature " + feature.id);
+            if (feature.path == null) feature.path = new ArrayList<>();
+            if (feature.rings == null) feature.rings = new ArrayList<>();
+            if (feature.path.size() > MAX_VERTICES_PER_TERRITORY
+                    || feature.rings.size() > 128)
+                throw new IllegalArgumentException("Feature geometry exceeds limits: " + feature.id);
+            geometryVertices += feature.path.size();
+            for (WorldForgeMapSnapshot.Vertex vertex : feature.path)
+                if (vertex == null || !validWorldCoordinate(vertex.x) || !validHeight(vertex.y) || !validWorldCoordinate(vertex.z))
+                    throw new IllegalArgumentException("Invalid feature path vertex: " + feature.id);
+            for (List<WorldForgeMapSnapshot.Vertex> ring : feature.rings) {
+                if (ring == null || ring.size() < 3 || ring.size() > MAX_VERTICES_PER_TERRITORY)
+                    throw new IllegalArgumentException("Invalid feature ring: " + feature.id);
+                geometryVertices += ring.size();
+                for (WorldForgeMapSnapshot.Vertex vertex : ring)
+                    if (vertex == null || !validWorldCoordinate(vertex.x) || !validHeight(vertex.y) || !validWorldCoordinate(vertex.z))
+                        throw new IllegalArgumentException("Invalid feature polygon vertex: " + feature.id);
+            }
+            if (geometryVertices > MAX_FEATURE_GEOMETRY_VERTICES)
+                throw new IllegalArgumentException("Snapshot feature geometry budget exceeded");
         }
     }
 
@@ -197,6 +253,12 @@ public final class NavigatorWorldForgeMapStore {
     }
 
     private static boolean finite(double value) { return Double.isFinite(value); }
+    private static boolean validWorldCoordinate(double value) {
+        return finite(value) && Math.abs(value) <= MAX_WORLD_COORDINATE;
+    }
+    private static boolean validHeight(double value) {
+        return finite(value) && value >= -2048.0 && value <= 4096.0;
+    }
 
     private static String safeMessage(Exception error) {
         String message = error.getMessage();

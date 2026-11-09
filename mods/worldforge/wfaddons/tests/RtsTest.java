@@ -46,14 +46,17 @@ public class RtsTest {
         int idle = sel.selectIdle(s, false);
         ok(idle == s.idleWorkers().size() && idle > 0, "'.' выбирает свободных: " + idle);
         int nb = sel.selectBuilders(s, false);
-        ok(nb == s.workers.stream().filter(w -> w.profession.equals("builder")).count(), "все строители: " + nb);
+        ok(nb == s.workers.stream().filter(w -> w.workRole().equals("builder")).count(), "все строители по текущей работе: " + nb);
         ok(sel.selectAll(s) == s.workers.size(), "выбрать всех");
+        long lumberjackJobs = s.workers.stream().filter(w -> w.workRole().equals("lumberjack")).count();
         sel.selectProfession(s, "lumberjack", false);
-        ok(sel.size() == 3 && sel.workers(s).stream().allMatch(w -> w.profession.equals("lumberjack")), "выбрать профессию");
+        ok(lumberjackJobs > 0 && sel.size() == lumberjackJobs
+                        && sel.workers(s).stream().allMatch(w -> w.workRole().equals("lumberjack")),
+                "выбрать всех работников по текущей работе");
         sel.clickWorker(s, 1, false, false, false);
         ok(sel.size() == 1, "обычный щелчок: один");
         sel.clickWorker(s, 1, false, true, false);
-        ok(sel.workers(s).stream().allMatch(w -> w.profession.equals(s.worker(1).profession)), "ctrl-щелчок: вся профессия");
+        ok(sel.workers(s).stream().allMatch(w -> w.workRole().equals(s.worker(1).workRole())), "ctrl-щелчок: все с той же текущей работой");
         // рамка
         List<Selection.Rect> rs = List.of(new Selection.Rect(Selection.Rect.WORKER, 1, 10, 10, 5, 5), new Selection.Rect(Selection.Rect.WORKER, 2, 30, 10, 5, 5),
                 new Selection.Rect(Selection.Rect.BUILDING, 7, 0, 0, 100, 100));
@@ -114,8 +117,14 @@ public class RtsTest {
         c = CommandCard.menu(CommandCard.ROOT, sel, s);
         ok(!c.byId("unassign").enabled && c.byId("unassign").tooltip.stream().anyMatch(x -> x.startsWith("!")), "свободного нельзя снять: красная причина");
         c = CommandCard.menu(CommandCard.PROF, sel, s);
-        ok(c.all().size() == d.professions.size() + 1 && c.byId("back").slot == 11, "подменю профессий + назад");
-        ok(!c.byId("prof:" + idleW.profession).enabled && c.byId("prof:smith").enabled, "своя профессия недоступна, чужая доступна");
+        ok(c.all().size() == 12 && c.byId("prof:next") != null && c.byId("back").slot == 11,
+                "профессии разбиты на страницы и не выходят за сетку 4x3");
+        ok(!c.byId("prof:" + idleW.profession).enabled && c.byId("prof:smith").enabled,
+                "своя профессия недоступна, чужая доступна");
+        CommandCard.Card professionPage2 = CommandCard.menu("prof:1", sel, s);
+        ok(professionPage2.byId("prof:prev") != null && professionPage2.byId("back").slot == 11
+                        && professionPage2.all().size() <= 12,
+                "в подменю профессий есть переходы вперёд и назад");
         c = CommandCard.menu(CommandCard.BUILD, sel, s);
         List<String> cats = new ArrayList<>();
         for (Command k : c.all()) cats.add(k.id);
@@ -124,9 +133,15 @@ public class RtsTest {
                 && CommandCard.category(d.buildings.get("sawmill")).equals("process") && CommandCard.category(d.buildings.get("granary")).equals("storage")
                 && CommandCard.category(d.buildings.get("barracks")).equals("defense"), "категории выводятся из содержимого");
         c = CommandCard.menu("build:process", sel, s);
-        Command saw = c.byId("place:sawmill"), smith = c.byId("place:smithy");
+        Command saw = c.byId("place:sawmill");
+        Command smith = null;
+        for (int page = 0; page < 12 && smith == null; page++) {
+            String menu = page == 0 ? "build:process" : "build:process:" + page;
+            smith = CommandCard.menu(menu, sel, s).byId("place:smithy");
+        }
         ok(saw != null && saw.enabled && saw.kind == Command.Kind.PLACE && saw.arg.equals("sawmill"), "лесопилка доступна (лагерь стоит)");
-        ok(smith != null && !smith.enabled && smith.tooltip.stream().anyMatch(x -> x.startsWith("!") && x.contains("Рудник")), "кузница недоступна: нужен рудник");
+        ok(smith != null && !smith.enabled && smith.tooltip.stream().anyMatch(x -> x.startsWith("!") && x.contains("Рудник")),
+                "кузница на одной из страниц недоступна без рудника");
         ok(saw.tooltip.stream().anyMatch(x -> x.startsWith("Цена")) && saw.tooltip.stream().anyMatch(x -> x.startsWith("Берёт")), "в подсказке цена и сырьё");
         Settlement poor = new Settlement("p", "Бедные", d);
         ok(CommandCard.buildingTip(poor, d.buildings.get("house")).stream().anyMatch(x -> x.startsWith("!Не хватает")), "нехватка денег - красная строка");
@@ -163,7 +178,9 @@ public class RtsTest {
         r = CommandCard.execute(c2.byId("fill"), s2, t2);
         ok(r.ok && r.commands.stream().filter(x -> x.contains(" assign ")).count() == 4, "назначить рабочих: 4 места - 4 приказа: " + r.commands);
         apply(t2, null, r);
-        ok(t2.assigned(f.uid).size() == 4 && t2.assigned(f.uid).stream().allMatch(w -> w.profession.equals("farmer")), "laborers переучились и встали на ферму");
+        ok(t2.assigned(f.uid).size() == 4
+                        && t2.assigned(f.uid).stream().allMatch(w -> w.profession.equals("laborer") && w.workRole().equals("farmer")),
+                "RTS назначает универсальных рабочих на ферму, сохраняя их постоянную профессию");
         c2 = CommandCard.menu(CommandCard.ROOT, s2, t2);
         ok(!c2.byId("fill").enabled, "мест нет: назначить недоступно");
 
@@ -187,16 +204,18 @@ public class RtsTest {
         for (int i = 0; i < 5; i++) g.addWorker(null);
         g.auto = false;
         Building farm = g.place("farm", 20, 0);
+        g.tick(1);
         Selection q = new Selection();
         q.set(List.of(1, 2));
         r = Orders.rightClick(q, g, Target.building(farm.uid, 20, 0), null);
-        ok(r.isEmpty() && !r.message.isEmpty(), "ПКМ: рабочие-работники на стройку не годятся (" + r.message + ")");
-        g.setProfession(1, "builder"); g.setProfession(2, "builder");
-        r = Orders.rightClick(q, g, Target.building(farm.uid, 20, 0), null);
-        ok(r.ok && r.commands.equals(List.of("wfsettle assign 1 " + farm.uid, "wfsettle assign 2 " + farm.uid)), "ПКМ: строители на стройку -> assign: " + r.commands);
+        ok(r.ok && r.commands.equals(List.of("wfsettle assign 1 " + farm.uid, "wfsettle assign 2 " + farm.uid)),
+                "ПКМ: универсальные рабочие получают приказ строить без переучивания: " + r.commands);
         apply(g, null, r);
+        ok(g.worker(1).profession.equals("laborer") && g.worker(1).workRole().equals("builder"),
+                "приказ строить сохраняет постоянную профессию");
         g.tick(100);
         ok(farm.state == Building.State.DONE, "ферма достроена");
+        g.setProfession(2, "builder");
         g.setProfession(3, "farmer");
         q.set(List.of(3));
         r = Orders.rightClick(q, g, Target.building(farm.uid, 20, 0), null);
@@ -223,11 +242,13 @@ public class RtsTest {
         // ---- приоритеты работ
         WorkPriorities wp = new WorkPriorities();
         Worker w1 = g.worker(1);
-        ok(wp.get(w1, "builder") == 1 && wp.get(w1, "farmer") == 0, "умолчание: своя профессия 1");
+        ok(wp.get(w1, "builder") == 1 && wp.get(w1, "farmer") == 1,
+                "умолчание: универсальный рабочий имеет базовый приоритет для каждой доступной роли");
         String cmd = wp.cycle(w1, "farmer", false);
-        ok(cmd.equals("wfsettle priority-work 1 farmer 1") && wp.get(w1, "farmer") == 1, "клик: 0 -> 1 + команда");
-        for (int i = 0; i < 4; i++) wp.cycle(w1, "farmer", false);
-        ok(wp.get(w1, "farmer") == 0, "цикл замыкается 5 нажатий");
+        ok(cmd.equals("wfsettle priority-work 1 farmer 2") && wp.get(w1, "farmer") == 2,
+                "клик повышает базовый приоритет универсального рабочего: 1 -> 2");
+        for (int i = 0; i < 3; i++) wp.cycle(w1, "farmer", false);
+        ok(wp.get(w1, "farmer") == 0, "цикл приоритетов замыкается после пяти значений");
         wp.cycle(w1, "farmer", true);
         ok(wp.get(w1, "farmer") == 4, "ПКМ - назад");
         Dispatch.apply(g, wp, "wfsettle priority-work 1 smith 3");
@@ -262,10 +283,10 @@ public class RtsTest {
         ok(sel.size() == g.workers.size(), "рамка на всю миникарту берёт всех рабочих");
 
         // ---- вид
-        Worker lj = s.workers.stream().filter(w -> w.profession.equals("lumberjack")).findFirst().get();
+        Worker lj = s.workers.stream().filter(w -> w.workRole().equals("lumberjack")).findFirst().orElseThrow();
         ok(Look.state(s, idleW) == Look.WorkerState.IDLE, "свободный - IDLE");
         ok(Look.glyph(d, "lumberjack").equals("Д") && Look.glyph(d, "unknown_prof").equals("U"), "знаки профессий");
-        ok(lj != null && lj.profession.equals("lumberjack"), "проверка профессии не маскирует ошибку безусловным true");
+        ok(lj.workRole().equals("lumberjack"), "RTS-вид проверяет активную работу, не постоянную профессию");
 
         System.out.println(fails == 0 ? "ALL OK" : fails + " FAILED");
         if (fails > 0) System.exit(1);

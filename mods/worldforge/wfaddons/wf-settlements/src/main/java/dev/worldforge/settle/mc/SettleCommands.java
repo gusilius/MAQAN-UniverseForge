@@ -16,7 +16,7 @@ import net.minecraft.server.level.ServerLevel;
 
 import java.util.Map;
 
-/** /wfsettle found|list|info|build|cancel|assign|unassign|profession|priority|auto|disband. Приказы действуют на ближайшее к игроку поселение. */
+/** /wfsettle found|list|info|build|cancel|assign|hauler|move|unassign|profession|priority|auto|disband. Приказы действуют на ближайшее к игроку поселение. */
 public final class SettleCommands {
     private SettleCommands() {}
 
@@ -58,6 +58,7 @@ public final class SettleCommands {
                         .then(Commands.argument("uid", IntegerArgumentType.integer(1)).executes(c -> order(c, col -> {
                             int uid = IntegerArgumentType.getInteger(c, "uid");
                             col.s.cancel(uid);
+                            col.map.removeBuilding(uid);
                             return "Отменено здание #" + uid;
                         }))))
                 .then(Commands.literal("assign").requires(SettleCommands::op)
@@ -66,6 +67,14 @@ public final class SettleCommands {
                                     int w = IntegerArgumentType.getInteger(c, "worker"), uid = IntegerArgumentType.getInteger(c, "uid");
                                     col.s.assign(w, uid);
                                     return "Рабочий #" + w + " отправлен в здание #" + uid;
+                                })))))
+                .then(Commands.literal("hauler").requires(SettleCommands::op)
+                        .then(Commands.argument("worker", IntegerArgumentType.integer(1))
+                                .then(Commands.argument("uid", IntegerArgumentType.integer(1)).executes(c -> order(c, col -> {
+                                    int w = IntegerArgumentType.getInteger(c, "worker");
+                                    int uid = IntegerArgumentType.getInteger(c, "uid");
+                                    col.s.assignHauler(w, uid);
+                                    return "Носильщик #" + w + " назначен на доставку ресурсов из здания #" + uid;
                                 })))))
                 .then(Commands.literal("move").requires(SettleCommands::op)
                         .then(Commands.argument("worker", IntegerArgumentType.integer(1))
@@ -264,7 +273,13 @@ public final class SettleCommands {
         int px = (int) Math.floor(s.getPosition().x), pz = (int) Math.floor(s.getPosition().z);
         return order(c, col -> {
             int x = dx != null ? dx : px - col.cx, z = dz != null ? dz : pz - col.cz;   // без аргументов - там, где стоит игрок
+            ServerLevel lv = col.level(c.getSource().getServer());
+            if (lv != null) col.captureTerrain(lv, x - 16, z - 16, x + 16, z + 16);
+            dev.worldforge.settle.Defs.Building definition = SettleMod.DEFS.buildings.get(def);
+            if (definition != null && !col.map.cells().isEmpty())
+                col.map.validatePlacement(definition.category, x, z, definition.sizeX, definition.sizeZ);
             Building b = col.s.place(def, x, z);
+            if (!col.map.cells().isEmpty()) col.map.planBuilding(b);
             return "Заложено: " + b.def.name + " #" + b.uid + " (смещение " + x + ", " + z + ")";
         });
     }
