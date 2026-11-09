@@ -19,6 +19,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.LinkedHashSet;
 
 /** Поселение в мире: симуляция + центр (x, z) + состояние стройки блоками по каждому зданию. Здания хранят смещения от центра. */
 public final class Colony {
@@ -26,6 +28,8 @@ public final class Colony {
     public static final class Site {
         public String def = "";
         public int x, y, z, sx, sy, sz, placed;
+        /** Blueprint indices placed by the player before the simulated builders reach them. */
+        public final Set<Integer> assisted = new LinkedHashSet<>();
     }
     /** Persistent, exact work-area order assigned to one resident. Coordinates are world block coordinates. */
     public static final class WorkOrder {
@@ -127,7 +131,7 @@ public final class Colony {
             Site st = e.getValue();
             Map<String, Object> o = new LinkedHashMap<>();
             o.put("uid", e.getKey()); o.put("def", st.def);
-            o.put("x", st.x); o.put("y", st.y); o.put("z", st.z); o.put("sx", st.sx); o.put("sy", st.sy); o.put("sz", st.sz); o.put("placed", st.placed);
+            o.put("x", st.x); o.put("y", st.y); o.put("z", st.z); o.put("sx", st.sx); o.put("sy", st.sy); o.put("sz", st.sz); o.put("placed", st.placed); o.put("assisted", new ArrayList<>(st.assisted));
             l.add(o);
         }
         m.put("sites", l);
@@ -183,6 +187,7 @@ public final class Colony {
                 st.x = ((Number) e.get("x")).intValue(); st.y = ((Number) e.get("y")).intValue(); st.z = ((Number) e.get("z")).intValue();
                 st.sx = ((Number) e.get("sx")).intValue(); st.sy = ((Number) e.get("sy")).intValue(); st.sz = ((Number) e.get("sz")).intValue();
                 st.placed = ((Number) e.get("placed")).intValue();
+                if (e.get("assisted") instanceof List<?> assisted) for (Object index : assisted) if (index instanceof Number n && n.intValue() >= st.placed) st.assisted.add(n.intValue());
                 c.sites.put(uid, st);
             }
         }
