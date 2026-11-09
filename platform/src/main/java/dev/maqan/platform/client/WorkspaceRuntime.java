@@ -94,6 +94,7 @@ public final class WorkspaceRuntime {
     private static final AtomicLong EVENT_SEQUENCE = new AtomicLong();
     private static final Deque<WorkspaceEvent> JOURNAL = new ArrayDeque<>();
     private static final Map<String, SearchEntry> SEARCH_INDEX = new ConcurrentHashMap<>();
+    private static final Map<String, Consumer<SearchEntry>> ENTITY_OPENERS = new ConcurrentHashMap<>();
     private static final Map<String, InspectorProvider> INSPECTORS = new ConcurrentHashMap<>();
     private static final Map<String, Action> ACTIONS = new ConcurrentHashMap<>();
     private static final Map<String, Shortcut> SHORTCUTS = new ConcurrentHashMap<>();
@@ -107,6 +108,19 @@ public final class WorkspaceRuntime {
     public static void index(SearchEntry entry) {
         Objects.requireNonNull(entry, "entry");
         SEARCH_INDEX.put(key(entry.providerId(), entry.id()), entry);
+    }
+
+    /** Provider callback that opens/highlights an indexed entity in its owning module. */
+    public static void registerEntityOpener(String providerId, Consumer<SearchEntry> opener) {
+        ENTITY_OPENERS.put(required(providerId, "providerId"), Objects.requireNonNull(opener, "opener"));
+    }
+
+    public static boolean openSearchEntry(SearchEntry entry) {
+        if (entry == null) return false;
+        Consumer<SearchEntry> opener = ENTITY_OPENERS.get(entry.providerId());
+        if (opener == null) return false;
+        opener.accept(entry);
+        return true;
     }
 
     public static void removeIndexed(String providerId, String entityId) {
@@ -272,6 +286,7 @@ public final class WorkspaceRuntime {
         if (id.isBlank()) return;
         removeProviderIndex(id);
         unregisterInspector(id);
+        ENTITY_OPENERS.remove(id);
         ACTIONS.entrySet().removeIf(entry -> entry.getValue().providerId().equals(id));
         SHORTCUTS.entrySet().removeIf(entry -> {
             Shortcut shortcut = entry.getValue();
@@ -285,6 +300,7 @@ public final class WorkspaceRuntime {
     /** Test/support hook; clears transient registries without changing installed modules. */
     static void clearTransientState() {
         SEARCH_INDEX.clear();
+        ENTITY_OPENERS.clear();
         INSPECTORS.clear();
         ACTIONS.clear();
         SHORTCUTS.clear();
