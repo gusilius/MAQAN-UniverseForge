@@ -157,7 +157,7 @@ public final class CommandScreen extends Screen {
     private static final int ZOOM_SLIDER_W = 200;
     private void setZoomFromMouse(double x) {
         double t = Math.max(0, Math.min(1, (x - zoomSliderX()) / ZOOM_SLIDER_W));
-        CommandMode.RIG.zoom = CameraRig.MIN_ZOOM + t * (CameraRig.MAX_ZOOM - CameraRig.MIN_ZOOM);
+        CommandMode.RIG.setZoom(CameraRig.MIN_ZOOM + t * (CameraRig.MAX_ZOOM - CameraRig.MIN_ZOOM));
     }
     private boolean onZoomSlider(double x, double y) {
         return x >= zoomSliderX() - 8 && x <= zoomSliderX() + ZOOM_SLIDER_W + 8
