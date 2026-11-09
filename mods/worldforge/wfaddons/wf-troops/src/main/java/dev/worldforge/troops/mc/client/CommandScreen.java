@@ -175,20 +175,23 @@ public final class CommandScreen extends Screen {
             String name=entity.getDisplayName().getString();
             String role,identity="";
             int morale=-1,xp=-1;
+            String state="";
             if(entity instanceof TroopEntity t){
                 role=t.def()==null?t.unitId():t.def().role();
                 morale=t.moralePct();
                 identity=t.syncedCharacterId()==null?"":t.syncedCharacterId();
                 xp=t.syncedCombatXp();
+                state=t.squadId()==null||t.squadId().isBlank()?"":"Отряд "+t.squadId();
             }else if(entity instanceof dev.worldforge.settle.mc.WFWorker w){
                 role=w.professionId().isBlank()?"Рабочий":w.professionId();
                 identity=w.characterId();
-            }else role="Юнит";
+                state=w.statusLabel();
+                if(w.assignedBuildingId()>0)state+=" · здание #"+w.assignedBuildingId();
             g.fill(INSPECT_X+3,y,INSPECT_X+INSPECT_W-3,y+INSPECT_ROW-1,
                     (row&1)==0?0x55333344:0x33222230);
             int health=entity instanceof LivingEntity living&&living.getMaxHealth()>0
                     ?Math.round(100*living.getHealth()/living.getMaxHealth()):0;
-            String detail=role+" · HP "+health+"%"+(morale>=0?" · Мораль "+morale+"%":"")+(xp>=0?" · XP "+xp:"");
+            String detail=role+" · HP "+health+"%"+(morale>=0?" · Мораль "+morale+"%":"")+(xp>=0?" · XP "+xp:"")+(state.isBlank()?"":" · "+state);
             int nameWidth=identity.isBlank()?INSPECT_W-14:INSPECT_W-88;
             g.drawString(font,font.plainSubstrByWidth(name,nameWidth),INSPECT_X+7,y+2,
                     troop?0xFFE6C875:0xFFB8D8A0,false);
