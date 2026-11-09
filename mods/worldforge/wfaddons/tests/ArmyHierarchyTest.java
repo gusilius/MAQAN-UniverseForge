@@ -45,6 +45,10 @@ public final class ArmyHierarchyTest {
         check(!restored.assignSquad(reserve.id, first.id, new Squads())
                         && !restored.appointArmyCommander(999, "c1"),
                 "invalid army ownership and missing army references are rejected");
+        squads.remove("unit-3");
+        restored.pruneSquads(squads);
+        check(restored.corps(reserve.id).squadIds.isEmpty(),
+                "destroyed/disbanded tactical squads are pruned from the strategic hierarchy");
         if (failures > 0) throw new AssertionError(failures + " army hierarchy tests failed");
     }
 }
