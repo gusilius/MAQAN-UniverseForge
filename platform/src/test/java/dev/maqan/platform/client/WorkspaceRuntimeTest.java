@@ -21,7 +21,7 @@ class WorkspaceRuntimeTest {
                 "person-1", "wf_people", "CHARACTER", "Faramir", "middle-earth",
                 "Captain of Gondor", List.of("steward")));
 
-        assertEquals("Minas Tirith", WorkspaceRuntime.search("minas", 10).getFirst().name());
+        assertEquals("Minas Tirith", WorkspaceRuntime.search("minas", 10).get(0).name());
         assertEquals("Faramir", WorkspaceRuntime.search("steward", 10).getFirst().name());
         WorkspaceRuntime.unregisterProvider("wf_settle");
         assertTrue(WorkspaceRuntime.search("minas", 10).isEmpty());
@@ -58,7 +58,7 @@ class WorkspaceRuntimeTest {
         List<WorkspaceRuntime.WorkspaceEvent> events = WorkspaceRuntime.journal(1_000);
         assertEquals(500, events.size());
         assertEquals("event-10", events.getFirst().message());
-        assertEquals("event-509", events.getLast().message());
+        assertEquals("event-509", events.get(events.size() - 1).message());
         assertEquals(510, delivered.get());
     }
 
