@@ -47,6 +47,19 @@ class WorkspaceRuntimeTest {
     }
 
     @Test
+    void searchResultsCanOpenThroughTheirOwningProvider() {
+        var entry = new WorkspaceRuntime.SearchEntry(
+                "planet-1", "maqan_atlas", "PLANET", "Arrakis", "dune-system",
+                "Desert world", List.of("dune"));
+        AtomicInteger opened = new AtomicInteger();
+        WorkspaceRuntime.registerEntityOpener("maqan_atlas", ignored -> opened.incrementAndGet());
+        assertTrue(WorkspaceRuntime.openSearchEntry(entry));
+        assertEquals(1, opened.get());
+        WorkspaceRuntime.unregisterProvider("maqan_atlas");
+        assertFalse(WorkspaceRuntime.openSearchEntry(entry));
+    }
+
+    @Test
     void eventJournalIsOrderedBoundedAndNotBrokenByListeners() throws Exception {
         AtomicInteger delivered = new AtomicInteger();
         AutoCloseable subscription = WorkspaceRuntime.subscribe(event -> delivered.incrementAndGet());
