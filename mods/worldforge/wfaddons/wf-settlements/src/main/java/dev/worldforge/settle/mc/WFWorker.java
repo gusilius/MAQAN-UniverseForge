@@ -32,6 +32,8 @@ import java.util.List;
 import java.util.EnumSet;
 import java.util.ArrayDeque;
 import java.util.HashSet;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -162,7 +164,7 @@ public class WFWorker extends PathfinderMob {
         private int repath, swing, idleTimer, workScan;
         private BlockPos cachedWorkTarget;
         private BlockPos idle;
-        private final Set<BlockPos> temporarySteps = new HashSet<>();
+        private final Map<BlockPos, String> temporarySteps = new HashMap<>();
         private BlockPos lastPosition;
         private int stuckTicks;
         private BlockPos cachedApproachFor;
@@ -186,7 +188,7 @@ public class WFWorker extends PathfinderMob {
             Colony c = w.colony();
             Worker wk = w.worker();
             if (c == null || wk == null) return;
-            cleanupTemporarySteps();
+            cleanupTemporarySteps(w.colony());
             BlockPos currentPosition = w.blockPosition();
             if (lastPosition != null && lastPosition.equals(currentPosition) && !w.getNavigation().isDone()) {
                 if (++stuckTicks >= 60) {
@@ -209,7 +211,7 @@ public class WFWorker extends PathfinderMob {
                         || !w.level().hasChunkAt(cachedWorkTarget)
                         || !isWorkTarget(w.level().getBlockState(cachedWorkTarget), area.mode)
                         || ("level".equals(area.mode) && cachedWorkTarget.getY() <= area.level)) {
-                    cachedWorkTarget = findWorkTarget(w, area);
+                    cachedWorkTarget = findWorkTarget(w, c, area);
                     workScan = 30;
                 }
                 resourceTarget = cachedWorkTarget;
@@ -220,7 +222,7 @@ public class WFWorker extends PathfinderMob {
                             || !w.level().hasChunkAt(cachedApproachTarget) || --repath <= 0) {
                         cachedApproachFor = resourceTarget.immutable();
                         cachedApproachTarget = workApproachTarget(w, resourceTarget);
-                        if (cachedApproachTarget == null) cachedApproachTarget = placeTemporaryStep(w, resourceTarget);
+                        if (cachedApproachTarget == null) cachedApproachTarget = placeTemporaryStep(w, c, resourceTarget);
                         repath = 20;
                     }
                     if (cachedApproachTarget == null) {
@@ -468,9 +470,10 @@ public class WFWorker extends PathfinderMob {
         }
 
         /** Check whether one temporary, removable step can safely bridge a short vertical reach gap. */
-        private static boolean canPlaceTemporaryStep(WFWorker worker, BlockPos resource) {
+        private static boolean canPlaceTemporaryStep(WFWorker worker, Colony colony, BlockPos resource) {
             int rise = resource.getY() - worker.getBlockY();
-            if (rise < 1 || rise > 4) return false;
+            if (colony == null || (colony.s.amount("wood") < 1 && colony.s.amount("stone") < 1)
+                    || rise < 1 || rise > 4) return false;
             for (net.minecraft.core.Direction direction : net.minecraft.core.Direction.Plane.HORIZONTAL) {
                 BlockPos step = worker.blockPosition().relative(direction);
                 if (!worker.level().hasChunkAt(step) || !worker.level().hasChunkAt(step.below())) continue;
@@ -482,30 +485,41 @@ public class WFWorker extends PathfinderMob {
             return false;
         }
 
-        private BlockPos placeTemporaryStep(WFWorker worker, BlockPos resource) {
-            if (!canPlaceTemporaryStep(worker, resource) || !(worker.level() instanceof net.minecraft.server.level.ServerLevel level)) return null;
+        private BlockPos placeTemporaryStep(WFWorker worker, Colony colony, BlockPos resource) {
+            if (!canPlaceTemporaryStep(worker, colony, resource)
+                    || !(worker.level() instanceof net.minecraft.server.level.ServerLevel level)) return null;
+            String material = colony.s.amount("wood") >= 1 ? "wood" : "stone";
+            BlockState scaffold = "wood".equals(material)
+                    ? Blocks.OAK_PLANKS.defaultBlockState() : Blocks.COBBLESTONE.defaultBlockState();
+            if (!colony.s.consumeResource(material, 1)) return null;
             for (net.minecraft.core.Direction direction : net.minecraft.core.Direction.Plane.HORIZONTAL) {
                 BlockPos step = worker.blockPosition().relative(direction);
                 if (!level.hasChunkAt(step) || !level.hasChunkAt(step.below())) continue;
                 BlockState at = level.getBlockState(step);
                 if (!(at.isAir() || at.canBeReplaced()) || !at.getFluidState().isEmpty()
                         || !level.getBlockState(step.below()).isSolid() || !level.getBlockState(step.above()).isAir()) continue;
-                if (!level.setBlock(step, Blocks.DIRT.defaultBlockState(), 3)) continue;
-                temporarySteps.add(step.immutable());
+                if (!level.setBlock(step, scaffold, 3)) continue;
+                temporarySteps.put(step.immutable(), material);
                 BlockPos feet = step.above();
                 var path = worker.getNavigation().createPath(feet, 0);
                 if (path != null && path.canReach()) return feet;
+                break;
             }
+            colony.s.receiveResource(material, 1);
             return null;
         }
 
-        /** Remove only our own temporary dirt steps, and never while any living entity is standing on them. */
-        private void cleanupTemporarySteps() {
-            if (!(w.level() instanceof net.minecraft.server.level.ServerLevel level)) return;
-            java.util.Iterator<BlockPos> iterator = temporarySteps.iterator();
+        /** Remove only the exact temporary scaffold block we placed, then return its material to the colony. */
+        private void cleanupTemporarySteps(Colony colony) {
+            if (!(w.level() instanceof net.minecraft.server.level.ServerLevel level) || colony == null) return;
+            java.util.Iterator<Map.Entry<BlockPos, String>> iterator = temporarySteps.entrySet().iterator();
             while (iterator.hasNext()) {
-                BlockPos step = iterator.next();
-                if (!level.hasChunkAt(step) || !level.getBlockState(step).is(Blocks.DIRT)) {
+                Map.Entry<BlockPos, String> entry = iterator.next();
+                BlockPos step = entry.getKey();
+                if (!level.hasChunkAt(step)) continue;
+                BlockState expected = "wood".equals(entry.getValue())
+                        ? Blocks.OAK_PLANKS.defaultBlockState() : Blocks.COBBLESTONE.defaultBlockState();
+                if (!level.getBlockState(step).equals(expected)) {
                     iterator.remove();
                     continue;
                 }
@@ -513,9 +527,17 @@ public class WFWorker extends PathfinderMob {
                 net.minecraft.world.phys.AABB standingSpace = new net.minecraft.world.phys.AABB(step.above());
                 if (!level.getEntitiesOfClass(net.minecraft.world.entity.LivingEntity.class, standingSpace,
                         entity -> entity != w).isEmpty()) continue;
-                level.setBlock(step, Blocks.AIR.defaultBlockState(), 3);
-                iterator.remove();
+                if (level.setBlock(step, Blocks.AIR.defaultBlockState(), 3)) {
+                    colony.s.receiveResource(entry.getValue(), 1);
+                    iterator.remove();
+                }
             }
+        }
+
+        @Override
+        public void stop() {
+            cleanupTemporarySteps(w.colony());
+            super.stop();
         }
 
         private static boolean standable(WFWorker worker, BlockPos feet) {
@@ -526,7 +548,7 @@ public class WFWorker extends PathfinderMob {
         }
 
         /** Search a small local window, then sweep the larger selected area by persistent waypoints. */
-        private static BlockPos findWorkTarget(WFWorker worker, Colony.WorkOrder order) {
+        private static BlockPos findWorkTarget(WFWorker worker, Colony colony, Colony.WorkOrder order) {
             if (order.complete) return null;
             int halfX = Math.max(0, Math.min(64, order.halfX < 0 ? order.radius : order.halfX));
             int halfZ = Math.max(0, Math.min(64, order.halfZ < 0 ? order.radius : order.halfZ));
@@ -570,7 +592,7 @@ public class WFWorker extends PathfinderMob {
                 BlockPos selected = "wood".equals(order.mode) ? treeBaseTarget(worker, candidate) : candidate;
                 if (!evaluated.add(selected.immutable())) continue;
                 if (workApproachTarget(worker, selected) != null) return selected;
-                if (canPlaceTemporaryStep(worker, selected)) return selected;
+                if (canPlaceTemporaryStep(worker, colony, selected)) return selected;
                 if (++checked >= 24) break;
             }
             return null;
