@@ -10,7 +10,7 @@ import java.util.function.Supplier;
 
 /** Клиент -> сервер: приказ выделенным. action: 0 приказ, 1 строй, 2 поза, 3 рабочих в здание (x,z), 4 освободить рабочих, 5 собрать в отряд, 6 запросить меню стройки (x,z - где камера), 7 заложить здание (target - id, x,z - центр; ids - рабочие-строители). */
 public record OrderPacket(int action, List<String> ids, int kind, double x, double z, String target, boolean queue, int arg) {
-    public static final int ORDER=0,FORMATION=1,STANCE=2,WORK=3,RELEASE=4,GROUP=5,BUILD_LIST=6,BUILD=7,WORK_STOP=8,WORK_HOLD=9,APPOINT=10,WORK_FOLLOW=11;
+    public static final int ORDER=0,FORMATION=1,STANCE=2,WORK=3,RELEASE=4,GROUP=5,BUILD_LIST=6,BUILD=7,WORK_STOP=8,WORK_HOLD=9,APPOINT=10,WORK_FOLLOW=11,WORK_AREA=12;
 
     public static void encode(OrderPacket p, FriendlyByteBuf b) {
         b.writeVarInt(p.action);
@@ -30,7 +30,7 @@ public record OrderPacket(int action, List<String> ids, int kind, double x, doub
         if(ids==null||ids.size()>200||target==null||target.length()>40)return false;
         java.util.HashSet<String> unique=new java.util.HashSet<>();
         for(String id:ids)if(id==null||id.isBlank()||id.length()>40||!unique.add(id))return false;
-        if(action<ORDER||action>WORK_FOLLOW)return false;
+        if(action<ORDER||action>WORK_AREA)return false;
         if(action==APPOINT&&(arg< -1||arg>10))return false;
         if(action==ORDER){
             if(kind<0||kind>=dev.worldforge.troops.Squads.Kind.values().length)return false;
@@ -41,6 +41,8 @@ public record OrderPacket(int action, List<String> ids, int kind, double x, doub
             }
         }
         if(action==BUILD&&(!Double.isFinite(x)||!Double.isFinite(z)||Math.abs(x)>30_000_000||Math.abs(z)>30_000_000))return false;
+        if(action==WORK_AREA&&(!Double.isFinite(x)||!Double.isFinite(z)||Math.abs(x)>30_000_000||Math.abs(z)>30_000_000
+                ||kind<0||kind>4||arg<0||arg>64))return false;
         if((action==WORK||action==WORK_STOP||action==WORK_HOLD||action==BUILD_LIST)
                 &&(!Double.isFinite(x)||!Double.isFinite(z)||Math.abs(x)>30_000_000||Math.abs(z)>30_000_000))return false;
         return true;
