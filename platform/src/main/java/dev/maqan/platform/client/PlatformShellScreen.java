@@ -507,14 +507,17 @@ public final class PlatformShellScreen extends Screen {
         g.fill(p.x,p.y+25,p.x+p.w,p.y+26,EDGE);
         String icon = panelIcon(p.id);
         g.drawString(font,icon,p.x+9,p.y+8,CYAN,false);
-        g.drawString(font, trimInspector(p.title, Math.max(24, p.w - 100)), p.x + 25, p.y + 8, TEXT, false);
         if (p.id.equals("inspector") || p.id.equals("tools")) {
-            g.fill(p.x + 58, p.y + 22, p.x + 108, p.y + 24,
-                    p.visible && p.id.equals("inspector") ? CYAN : EDGE);
-            g.drawString(font, "INSPECT", p.x + 58, p.y + 15,
+            g.drawString(font, "INSPECT", p.x + 30, p.y + 8,
                     p.id.equals("inspector") ? CYAN : MUTED, false);
-            g.drawString(font, "TOOLS", p.x + 112, p.y + 15,
+            g.drawString(font, "TOOLS", p.x + 82, p.y + 8,
                     p.id.equals("tools") ? CYAN : MUTED, false);
+            g.fill(p.x + 28, p.y + 23, p.x + 76, p.y + 25,
+                    p.id.equals("inspector") ? CYAN : EDGE);
+            g.fill(p.x + 80, p.y + 23, p.x + 116, p.y + 25,
+                    p.id.equals("tools") ? CYAN : EDGE);
+        } else {
+            g.drawString(font, trimInspector(p.title, Math.max(24, p.w - 100)), p.x + 25, p.y + 8, TEXT, false);
         }
         int bx=p.x+p.w-64;
         g.drawCenteredString(font,p.pinned?"◆":"◇",bx+8,p.y+8,p.pinned?CYAN:MUTED);
@@ -801,14 +804,14 @@ public final class PlatformShellScreen extends Screen {
         List<Panel> reverse=new ArrayList<>(panels.values());
         java.util.Collections.reverse(reverse);
         for(Panel p:reverse) {
-            if(!p.visible) continue;
+            if(!p.visible || p.id.equals("content")) continue;
             int ph=p.minimized?26:p.h;
             if(mx<p.x||mx>p.x+p.w||my<p.y||my>p.y+ph) continue;
             if (my <= p.y + 26) {
                 if ((p.id.equals("inspector") || p.id.equals("tools"))
-                        && mx >= p.x + 58 && mx < p.x + 158) {
+                        && mx >= p.x + 28 && mx < p.x + 116) {
                     workspaceRoot = WorkspaceDockTree.activateTab(workspaceRoot,
-                            mx < p.x + 108 ? "inspector" : "tools");
+                            mx < p.x + 80 ? "inspector" : "tools");
                     layoutWorkspace(); saveWorkspaceState(); return true;
                 }
                 int bx=p.x+p.w-64;
