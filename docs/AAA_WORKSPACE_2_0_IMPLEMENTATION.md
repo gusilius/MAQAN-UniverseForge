@@ -167,3 +167,17 @@ The seven follow-up tasks should now be read as follows:
 5. Notification center — a visible event-history overlay is now present; durable notification-center behavior remains outstanding.
 6. Responsive behavior — only shared scaling primitives and layout minimums exist; no completed in-game matrix of resolutions, aspect ratios, GUI scales, keyboard navigation and accessibility has been certified.
 7. Embedded routes — some provider screens mount inside the shell, while other capabilities still invoke provider-owned commands because no embeddable view factory is registered. Those routes are functional provider commands, not proof of a unified embedded workspace. Each remaining route needs an actual embedded view or an explicitly documented non-UI action; never substitute a decorative preview for missing domain functionality.
+
+## Mandatory cross-system architecture contract
+
+The five non-negotiable architecture invariants and their acceptance tests are now maintained in [`MAQAN_ARCHITECTURE_INVARIANTS.md`](MAQAN_ARCHITECTURE_INVARIANTS.md). They apply to every Stage VII–XII integration:
+
+1. Character is the sole person identity; worker/soldier/hero/ruler are roles on that character.
+2. Every authoritative resource/concept has one owner and one source of truth (including treasury/ledger, calendar, skills, needs, inventory and geography).
+3. Simulation work is complete only after the owning service validates, commits and returns a durable execution receipt; AI intentions are not completed actions.
+4. Atlas is the canonical geography and spatial identity owner; WorldForge publishes domain overlays and must not maintain a competing map.
+5. Platform is the sole workspace/UI host; modules contribute typed views/providers/actions and retain domain authority without launching competing workspaces.
+
+Implementation order is now: (a) inventory authoritative owners and duplicate records; (b) world-level CharacterId/WorldId registry and role migration; (c) canonical resource/time/skills/needs authorities and ledger reconciliation; (d) confirmed action/task execution; (e) Atlas canonical spatial IDs and live WorldForge overlays; (f) complete Platform provider lifecycle; (g) full-world search, universal inspector, durable notifications and real embedded views; (h) migrate legacy UI and complete responsive/accessibility QA.
+
+Do not implement UI adapters over duplicate models. Where the authoritative domain service is missing, record the integration as Blocked and implement the owner first. Do not claim the architecture is implemented merely because this contract is documented.
