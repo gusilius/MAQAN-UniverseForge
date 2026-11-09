@@ -106,7 +106,7 @@ public final class ResidentInteraction {
         String profile = family(person) + " · " + ("f".equalsIgnoreCase(person.gender) ? "женщина" : "мужчина")
                 + " · культура: " + (person.culture == null || person.culture.isBlank() ? "не указана" : person.culture)
                 + " · черты: " + traits + " · навыки: " + skillText;
-        return profile.length() > 500 ? profile.substring(0, 497) + "..." : profile;
+        return profile.length() > 220 ? profile.substring(0, 217) + "..." : profile;
     }
 
     private static String greeting(Character person, Worker worker, Colony colony) {
