@@ -1,6 +1,7 @@
 package dev.worldforge.tests;
 
 import dev.worldforge.settle.*;
+import dev.worldforge.mod.economy.TreasuryService;
 
 import java.nio.file.*;
 import java.util.*;
@@ -34,6 +35,7 @@ public class TradeNetTest {
         try { n.add(cs, "A", "B", "wood", Double.NaN); ok(false, "NaN скорость запрещена"); } catch (TradeNetwork.TradeException e) { ok(true, "NaN скорость запрещена"); }
         try { n.add(cs, "A", "B", "wood", Double.POSITIVE_INFINITY); ok(false, "бесконечная скорость запрещена"); } catch (TradeNetwork.TradeException e) { ok(true, "бесконечная скорость запрещена"); }
         var r = n.add(cs, "A", "B", "wood", 10);
+        n.setDuty(r.id, "north", 0.05);
         try { n.add(cs, "A", "B", "wood", 10); ok(false, "дубликат"); } catch (TradeNetwork.TradeException e) { ok(true, "дубликат отклонён"); }
         double accBeforeInvalidTicks = r.acc;
         n.tick(cs, Double.NaN);
@@ -41,10 +43,13 @@ public class TradeNetTest {
         n.tick(cs, -1);
         ok(r.acc == accBeforeInvalidTicks && r.carried == 0, "невалидный шаг времени не портит торговый маршрут");
         double sa = A.amount("silver"), sb = B.amount("silver"), spread0 = B.price("wood") / A.price("wood");
+        double dutyBefore = TreasuryService.current().balance("realm:north");
         double wa = A.amount("wood"), wb = B.amount("wood");
         for (int i = 0; i < 20; i++) { A.tradeLeft = 100; B.tradeLeft = 100; n.tick(cs, 30); }
         ok(r.carried > 0 && A.amount("wood") < wa && B.amount("wood") > wb, "караван возит: " + (int) r.carried + " ед.");
         ok(A.amount("silver") > sa - 1 && r.profit > 0, "обе стороны в плюсе, прибыль " + Math.round(r.profit));
+        ok(TreasuryService.current().balance("realm:north") > dutyBefore,
+                "customs duty is transferred into the destination realm treasury");
         double spread1 = B.price("wood") / A.price("wood");
         ok(spread1 < spread0, "цены сближаются: x" + Math.round(spread0 * 100) / 100.0 + " -> x" + Math.round(spread1 * 100) / 100.0);
         for (int i = 0; i < 60; i++) { A.tradeLeft = 100; B.tradeLeft = 100; n.tick(cs, 30); }
@@ -56,7 +61,9 @@ public class TradeNetTest {
         ok(r2.status.equals("нет рынка") && r2.carried == 0, "без рынка торговли нет");
         // сохранение
         TradeNetwork back = TradeNetwork.fromJson(n.toJson());
-        ok(back.routes.size() == n.routes.size() && back.toJson().equals(n.toJson()), "маршруты сохраняются");
+        ok(back.routes.size() == n.routes.size() && back.toJson().equals(n.toJson())
+                        && back.routes.get(r.id).dutyRate == 0.05 && back.routes.get(r.id).dutyRealm.equals("north"),
+                "маршруты и параметры пошлин сохраняются");
         n.remove(r.id);
         ok(n.routes.size() == 1, "маршрут можно убрать");
         System.out.println(fails == 0 ? "ALL OK" : fails + " FAILED");
