@@ -171,6 +171,7 @@ public class WFWorker extends PathfinderMob {
             }
             if (arrived) {
                 w.getNavigation().stop();
+                if(wk.manualOrder)c.s.advanceManualOrder(wk.id);
                 if (b != null) w.getLookControl().setLookAt(c.worldX(b) + 0.5, w.getEyeY(), c.worldZ(b) + 0.5);
                 if (working && ++swing >= 15) {
                     swing = 0;
