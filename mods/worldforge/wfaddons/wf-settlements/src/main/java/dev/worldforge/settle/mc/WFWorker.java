@@ -23,6 +23,7 @@ import net.minecraft.world.entity.ai.goal.Goal;
 import net.minecraft.world.entity.ai.goal.LookAtPlayerGoal;
 import net.minecraft.world.entity.ai.goal.OpenDoorGoal;
 import net.minecraft.world.entity.ai.navigation.GroundPathNavigation;
+import net.minecraft.world.level.pathfinder.PathType;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 
@@ -54,6 +55,13 @@ public class WFWorker extends PathfinderMob {
     public WFWorker(EntityType<? extends WFWorker> type, Level level) {
         super(type, level);
         this.setPersistenceRequired();
+        this.setMaxUpStep(1.0F);
+        setPathfindingMalus(PathType.DANGER_FIRE, 16.0F);
+        setPathfindingMalus(PathType.DAMAGE_FIRE, 16.0F);
+        setPathfindingMalus(PathType.DAMAGE_OTHER, 12.0F);
+        setPathfindingMalus(PathType.LAVA, 16.0F);
+        setPathfindingMalus(PathType.POWDER_SNOW, 8.0F);
+        setPathfindingMalus(PathType.WATER, 3.0F);
     }
 
     public static AttributeSupplier.Builder attributes() {
@@ -62,7 +70,10 @@ public class WFWorker extends PathfinderMob {
 
     @Override
     protected void registerGoals() {
-        if (getNavigation() instanceof GroundPathNavigation g) g.setCanOpenDoors(true);
+        if (getNavigation() instanceof GroundPathNavigation g) {
+            g.setCanOpenDoors(true);
+            g.setCanFloat(true);
+        }
         goalSelector.addGoal(0, new FloatGoal(this));
         goalSelector.addGoal(1, new OpenDoorGoal(this, true));
         goalSelector.addGoal(2, new WorkGoal(this));
@@ -238,7 +249,20 @@ public class WFWorker extends PathfinderMob {
             boolean arrived = w.distanceToSqr(target.getX() + 0.5, targetFeetY, target.getZ() + 0.5) < 6.25;
             if (!arrived && --repath <= 0) {
                 repath = 10;
-                w.getNavigation().moveTo(target.getX() + 0.5, target.getY(), target.getZ() + 0.5, 1.0);
+                BlockPos route = target;
+                if (w.distanceToSqr(target.getX() + 0.5, target.getY(), target.getZ() + 0.5) > 400
+                        && w.tickCount % 40 == 0) {
+                    BlockPos road = roadWaypoint(w, target);
+                    if (road != null) route = road;
+                }
+                var path = w.getNavigation().createPath(route, 0);
+                if (path != null && path.canReach()) {
+                    w.getNavigation().moveTo(path, 1.0);
+                } else {
+                    // Never blindly walk toward an unreachable point or across unloaded chunks.
+                    w.getNavigation().stop();
+                    wk.status = "маршрут недоступен: ищет безопасный обход";
+                }
             }
             if (arrived) {
                 w.getNavigation().stop();
@@ -283,6 +307,34 @@ public class WFWorker extends PathfinderMob {
             }
         }
 
+        /** Prefer existing roads when a long route has a reachable road tile that advances toward the goal. */
+        private static BlockPos roadWaypoint(WFWorker worker, BlockPos target) {
+            double current = Math.hypot(target.getX() - worker.getX(), target.getZ() - worker.getZ());
+            BlockPos best = null;
+            double bestScore = Double.MAX_VALUE;
+            for (int x = worker.getBlockX() - 6; x <= worker.getBlockX() + 6; x++)
+                for (int z = worker.getBlockZ() - 6; z <= worker.getBlockZ() + 6; z++) {
+                    BlockPos probe = new BlockPos(x, worker.getBlockY(), z);
+                    if (!worker.level().hasChunkAt(probe)) continue;
+                    int surface = worker.level().getHeight(
+                            net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+                    BlockPos feet = new BlockPos(x, surface, z);
+                    BlockState road = worker.level().getBlockState(feet.below());
+                    if (!(road.is(Blocks.DIRT_PATH) || road.is(Blocks.GRAVEL) || road.is(Blocks.COBBLESTONE)
+                            || road.is(Blocks.STONE_BRICKS) || road.is(Blocks.BRICKS)
+                            || road.is(Blocks.OAK_PLANKS) || road.is(Blocks.SPRUCE_PLANKS)
+                            || road.is(Blocks.DARK_OAK_PLANKS))) continue;
+                    if (!standable(worker, feet)) continue;
+                    double remaining = Math.hypot(target.getX() - (x + 0.5), target.getZ() - (z + 0.5));
+                    if (remaining > current - 2.0) continue;
+                    var path = worker.getNavigation().createPath(feet, 0);
+                    if (path == null || !path.canReach()) continue;
+                    double score = path.getNodeCount() + remaining - 5.0;
+                    if (score < bestScore) { bestScore = score; best = feet; }
+                }
+            return best;
+        }
+
         /** Search only inside the assigned footprint; the worker never picks an unrelated distant resource node. */
         private static BlockPos workWaypoint(WFWorker worker, Colony.WorkOrder order) {
             if (order.complete) return null;
@@ -308,8 +360,24 @@ public class WFWorker extends PathfinderMob {
                 BlockPos side = resource.relative(direction);
                 if (standable(worker, side)) candidates.add(side);
             }
-            return candidates.stream().min(java.util.Comparator.comparingDouble(pos ->
-                    worker.distanceToSqr(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5))).orElse(null);
+            // A resource may be surrounded by plants, slabs or irregular terrain. Search a small
+            // safe ring, but accept only positions the navigation system can actually reach.
+            for (int dy = -1; dy <= 1; dy++) for (int dx = -2; dx <= 2; dx++)
+                for (int dz = -2; dz <= 2; dz++) {
+                    if (Math.abs(dx) + Math.abs(dz) > 3) continue;
+                    BlockPos candidate = resource.offset(dx, dy, dz);
+                    if (standable(worker, candidate) && worker.distanceToSqr(
+                            candidate.getX() + 0.5, candidate.getY(), candidate.getZ() + 0.5) <= 100)
+                        candidates.add(candidate);
+                }
+            return candidates.stream().distinct()
+                    .filter(pos -> {
+                        var path = worker.getNavigation().createPath(pos, 0);
+                        return path != null && path.canReach();
+                    })
+                    .min(java.util.Comparator.comparingDouble(pos ->
+                            worker.distanceToSqr(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5)))
+                    .orElse(null);
         }
 
         private static boolean standable(WFWorker worker, BlockPos feet) {
