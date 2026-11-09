@@ -53,6 +53,7 @@ for d in $ORDER; do
   fi
 done
 mkdir -p dist
+rm -f dist/wf_*.jar
 cp "$CORE_JAR" dist/
 for d in $OK; do
   for jar in "$d"/build/libs/wf_*.jar; do
