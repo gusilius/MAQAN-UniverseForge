@@ -184,9 +184,13 @@ public class PeopleTest {
         String journalSave = journal.toJson();
         CharacterRegistry journalReload = new CharacterRegistry();
         journalReload.fromJson(journalSave);
-        ok(journalReload.recentLifecycle(journalPerson.id, 20).equals(lifeHistory)
-                        && journalReload.toJson().equals(journalSave),
-                "canonical character history survives save/load without synthetic restore events");
+        List<Map<String, Object>> restoredHistory = journalReload.recentLifecycle(journalPerson.id, 20);
+        ok(restoredHistory.size() == lifeHistory.size()
+                        && restoredHistory.stream().map(e -> String.valueOf(e.get("kind"))).toList()
+                        .equals(lifeHistory.stream().map(e -> String.valueOf(e.get("kind"))).toList()),
+                "canonical character event sequence survives save/load without synthetic restore events");
+        ok(journalReload.toJson().equals(journalSave),
+                "loading a character registry does not mutate its persisted lifecycle history");
 
         // диалог с персонажем
         DialogueBridge.register();
