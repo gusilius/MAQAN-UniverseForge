@@ -186,7 +186,6 @@ public class WFWorker extends PathfinderMob {
             Colony c = w.colony();
             Worker wk = w.worker();
             if (c == null || wk == null) return;
-            cleanupTemporarySteps(w.colony());
             BlockPos currentPosition = w.blockPosition();
             if (lastPosition != null && lastPosition.equals(currentPosition) && !w.getNavigation().isDone()) {
                 if (++stuckTicks >= 60) {
@@ -508,42 +507,6 @@ public class WFWorker extends PathfinderMob {
             }
             if (!placed) colony.s.receiveResource(material, 1);
             return null;
-        }
-
-        /** Remove only the exact temporary scaffold block we placed, then return its material to the colony. */
-        private void cleanupTemporarySteps(Colony colony) {
-            if (!(w.level() instanceof net.minecraft.server.level.ServerLevel level) || colony == null) return;
-            java.util.Iterator<Map.Entry<BlockPos, String>> iterator = colony.temporaryScaffolds.entrySet().iterator();
-            while (iterator.hasNext()) {
-                Map.Entry<BlockPos, String> entry = iterator.next();
-                BlockPos step = entry.getKey();
-                if (!level.hasChunkAt(step)) continue;
-                BlockState expected = "wood".equals(entry.getValue())
-                        ? Blocks.OAK_PLANKS.defaultBlockState() : Blocks.COBBLESTONE.defaultBlockState();
-                if (!level.getBlockState(step).equals(expected)) {
-                    iterator.remove();
-                    continue;
-                }
-                // Keep the scaffold while any worker is approaching it, or while any living entity
-                // occupies the standing cell. This also protects a worker after a world reload.
-                net.minecraft.world.phys.AABB nearby = new net.minecraft.world.phys.AABB(step).inflate(4.0);
-                boolean workerNearby = !level.getEntitiesOfClass(WFWorker.class, nearby,
-                        entity -> entity.isAlive()).isEmpty();
-                net.minecraft.world.phys.AABB standingSpace = new net.minecraft.world.phys.AABB(step.above());
-                boolean occupied = !level.getEntitiesOfClass(net.minecraft.world.entity.LivingEntity.class, standingSpace,
-                        entity -> true).isEmpty();
-                if (workerNearby || occupied) continue;
-                if (level.setBlock(step, Blocks.AIR.defaultBlockState(), 3)) {
-                    colony.s.receiveResource(entry.getValue(), 1);
-                    iterator.remove();
-                }
-            }
-        }
-
-        @Override
-        public void stop() {
-            cleanupTemporarySteps(w.colony());
-            super.stop();
         }
 
         private static boolean standable(WFWorker worker, BlockPos feet) {
