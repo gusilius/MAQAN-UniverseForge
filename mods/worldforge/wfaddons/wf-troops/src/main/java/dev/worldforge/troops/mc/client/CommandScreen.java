@@ -226,7 +226,13 @@ public final class CommandScreen extends Screen {
         if (button == 2) { midDrag = true; return true; }
         if (button == 1) {
             if (picked != null) { picked = null; return true; }
-            if (overPanel(x, y) || CommandMode.SEL.selected().isEmpty()) return true;
+            if (overPanel(x, y)) return true;
+            LivingEntity resident = CommandMode.residentAt(minecraft, x, y);
+            if (resident != null && minecraft.player != null) {
+                minecraft.player.connection.sendCommand("wfresident open " + resident.getUUID());
+                return true;
+            }
+            if (CommandMode.SEL.selected().isEmpty()) return true;
             LivingEntity foe = CommandMode.enemyAt(minecraft, x, y);
             Vec3 g = CommandMode.groundAt(minecraft, x, y);
             if (foe != null) {
