@@ -16,6 +16,7 @@ public final class ResidentQuestTest {
 
     public static void main(String[] args) {
         ResidentQuest quest = new ResidentQuest("bread_supply_c1", "Принести 3 хлеба", 3, 12);
+        check("food".equals(quest.resourceId()), "legacy bread contracts map to canonical food resource");
         check(quest.status() == ResidentQuest.Status.OFFERED, "new contract starts as offered");
         check(!quest.addProgress(1, 12), "offered contract cannot receive unaccepted progress");
         check(quest.accept(), "offered contract can be accepted");
