@@ -225,7 +225,7 @@ public class WFWorker extends PathfinderMob {
                 target = new BlockPos(tx, ty, tz);
             } else if (b != null) {
                 target = c.workPoint(w.level(), b);
-                working = b.state == Building.State.BUILDING ? b.status.startsWith("строится") : "работает".equals(b.status);
+                working = b.state == Building.State.BUILDING || b.status.startsWith("строится: укладка");
             } else {
                 if (idle == null || --idleTimer <= 0) {
                     idleTimer = 100 + w.random.nextInt(100);
