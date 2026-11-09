@@ -22,7 +22,7 @@ permissions:
 
 concurrency:
   group: universeforge-windows-quality-gate-${{ github.ref }}
-  # Keep only the newest validation for each ref; this is the single MAQAN quality gate.
+  # Keep only the newest validation for each ref; the single MAQAN quality gate validates the current integration head.
   cancel-in-progress: true
 
 jobs:
