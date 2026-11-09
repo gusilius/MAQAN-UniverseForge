@@ -170,6 +170,17 @@ public final class ResidentInteraction {
                 player.sendSystemMessage(Component.literal("§7Семья: " + family(person)
                         + " · возраст: " + Math.max(0, PeopleMod.YEAR - person.birthYear) + " лет"));
                 player.sendSystemMessage(Component.literal("§7Отношение к вам: " + relationship(person, player)));
+                player.sendSystemMessage(Component.literal("§7Инструмент: " + ResidentEquipment.summary(person)));
+            }
+            case "tool" -> {
+                if (!ruler) { deny(player); return 0; }
+                String result = ResidentEquipment.craft(worker);
+                player.sendSystemMessage(Component.literal((result.startsWith("Изготовил") ? "§a" : "§e") + person.name + ": " + result));
+            }
+            case "equip" -> {
+                if (!ruler) { deny(player); return 0; }
+                String result = ResidentEquipment.receive(worker, player);
+                player.sendSystemMessage(Component.literal((result.startsWith("Принял") ? "§a" : "§e") + person.name + ": " + result));
             }
             case "gift" -> {
                 if (player.getInventory().countItem(Items.EMERALD) < 1) {
