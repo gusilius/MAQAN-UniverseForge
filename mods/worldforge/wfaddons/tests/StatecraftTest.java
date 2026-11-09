@@ -70,6 +70,17 @@ public final class StatecraftTest {
         check(state.spend("north", 10, "roads") && !state.spend("north", 1_000_000, "unfunded"),
                 "treasury expenses are constrained by available funds");
 
+        check(state.fundArmy("north", 25, "north_guard", 2000)
+                        && state.payArmyUpkeep("north_guard", 5, 2001, "garrison-month")
+                        && dev.worldforge.mod.WorldForgeMod.treasury().balance("army:north_guard") == 20,
+                "realm budget funds a dedicated army account and upkeep is paid from it");
+        state.treasury("debt_realm");
+        check(state.setRealmCreditLimit("debt_realm", 10)
+                        && state.borrowForRealm("debt_realm", 10, "emergency-loan", 2002)
+                        && state.accrueRealmInterest("debt_realm", 0.5, 2003)
+                        && state.realmBankrupt("debt_realm") && state.realmDebt("debt_realm") == 15,
+                "sovereign borrowing, interest and bankruptcy are tracked by the shared ledger");
+
         // Diplomacy, treaties and truces
         state.setOpinion("north", "dorne", 80);
         state.setTreaty("north", "dorne", Statecraft.Treaty.NON_AGGRESSION, true);
