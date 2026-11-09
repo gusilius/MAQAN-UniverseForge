@@ -279,6 +279,10 @@ public final class ResidentInteraction {
             player.sendSystemMessage(Component.literal("§eСначала примите поручение жителя."));
             return;
         }
+        if (!colony.s.defs.resources.containsKey(q.resourceId())) {
+            player.sendSystemMessage(Component.literal("§cРесурс этого поручения отсутствует в экономике поселения; запись сохранена."));
+            return;
+        }
         net.minecraft.world.item.Item item = questItem(q.resourceId());
         int available = player.getInventory().countItem(item);
         int needed = q.required() - q.progress();
