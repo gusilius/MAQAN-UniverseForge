@@ -171,8 +171,14 @@ public final class WorkspaceRuntime {
         if (selection == null) return List.of();
         InspectorProvider provider = INSPECTORS.get(selection.providerId());
         if (provider == null) return List.of();
-        List<InspectorField> fields = provider.inspect(selection);
-        return fields == null ? List.of() : List.copyOf(fields);
+        try {
+            List<InspectorField> fields = provider.inspect(selection);
+            return fields == null ? List.of() : List.copyOf(fields);
+        } catch (RuntimeException error) {
+            publish(Severity.WARNING, selection.providerId(), "inspector",
+                    "Inspector provider failed", selection.entityId(), selection.worldId());
+            return List.of();
+        }
     }
 
     public static void registerAction(Action action) {
