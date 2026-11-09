@@ -646,15 +646,18 @@ public class SettleMod {
         TreasuryLedger ledger = WorldForgeMod.treasury();
         settlement.amount(Defs.SILVER); // ensures/migrates the settlement account
         ledger.open(target, realmId, Defs.SILVER, 0);
+        // The financial journal is authoritative: recover remittances even if the settlement snapshot
+        // was not saved after the ledger transfer (crash between the two world files).
+        settlement.remittedSilver = ledger.totalDebits(source, TreasuryLedger.Kind.TAX, "crown-remittance");
         double due = Math.max(0, settlement.taxCollected * Math.max(0, Math.min(100, settlement.crownShare)) / 100.0
                 - settlement.remittedSilver);
         double payment = Math.min(due, ledger.balance(source));
         if (payment <= 1e-9) return;
         boolean transferred = ledger.transfer(source, target, payment, TreasuryLedger.Kind.TAX,
-                "crown-remittance", settlement.id + ":" + Math.round(settlement.remittedSilver),
+                "crown-remittance", settlement.id + ":" + Double.toHexString(settlement.remittedSilver),
                 Math.max(0, (long) Math.floor(settlement.time / 60.0)), "settlement tax remitted to realm treasury");
         if (transferred) {
-            settlement.remittedSilver += payment;
+            settlement.remittedSilver = ledger.totalDebits(source, TreasuryLedger.Kind.TAX, "crown-remittance");
             settlement.stock.put(Defs.SILVER, ledger.balance(source));
         }
     }
