@@ -22,7 +22,7 @@ class WorkspaceRuntimeTest {
                 "Captain of Gondor", List.of("steward")));
 
         assertEquals("Minas Tirith", WorkspaceRuntime.search("minas", 10).get(0).name());
-        assertEquals("Faramir", WorkspaceRuntime.search("steward", 10).getFirst().name());
+        assertEquals("Faramir", WorkspaceRuntime.search("steward", 10).get(0).name());
         WorkspaceRuntime.unregisterProvider("wf_settle");
         assertTrue(WorkspaceRuntime.search("minas", 10).isEmpty());
     }
@@ -39,7 +39,7 @@ class WorkspaceRuntimeTest {
                 "wf_people.inspect", "Inspect", "wf_people", ignored -> true,
                 ignored -> executions.incrementAndGet()));
 
-        assertEquals("Faramir", WorkspaceRuntime.inspect(selection).getFirst().value());
+        assertEquals("Faramir", WorkspaceRuntime.inspect(selection).get(0).value());
         assertEquals(1, WorkspaceRuntime.actionsFor(selection).size());
         assertTrue(WorkspaceRuntime.executeAction("wf_people.inspect", selection));
         assertEquals(1, executions.get());
@@ -57,7 +57,7 @@ class WorkspaceRuntimeTest {
 
         List<WorkspaceRuntime.WorkspaceEvent> events = WorkspaceRuntime.journal(1_000);
         assertEquals(500, events.size());
-        assertEquals("event-10", events.getFirst().message());
+        assertEquals("event-10", events.get(0).message());
         assertEquals("event-509", events.get(events.size() - 1).message());
         assertEquals(510, delivered.get());
     }
