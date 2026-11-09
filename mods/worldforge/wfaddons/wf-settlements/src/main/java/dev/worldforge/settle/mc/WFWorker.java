@@ -492,6 +492,7 @@ public class WFWorker extends PathfinderMob {
             BlockState scaffold = "wood".equals(material)
                     ? Blocks.OAK_PLANKS.defaultBlockState() : Blocks.COBBLESTONE.defaultBlockState();
             if (!colony.s.consumeResource(material, 1)) return null;
+            boolean placed = false;
             for (net.minecraft.core.Direction direction : net.minecraft.core.Direction.Plane.HORIZONTAL) {
                 BlockPos step = worker.blockPosition().relative(direction);
                 if (!level.hasChunkAt(step) || !level.hasChunkAt(step.below())) continue;
@@ -500,12 +501,13 @@ public class WFWorker extends PathfinderMob {
                         || !level.getBlockState(step.below()).isSolid() || !level.getBlockState(step.above()).isAir()) continue;
                 if (!level.setBlock(step, scaffold, 3)) continue;
                 temporarySteps.put(step.immutable(), material);
+                placed = true;
                 BlockPos feet = step.above();
                 var path = worker.getNavigation().createPath(feet, 0);
                 if (path != null && path.canReach()) return feet;
                 break;
             }
-            colony.s.receiveResource(material, 1);
+            if (!placed) colony.s.receiveResource(material, 1);
             return null;
         }
 
