@@ -64,7 +64,8 @@ final class WorkerControl {
                 continue;
             }
             boolean gardenerHarvest = "harvest".equals(mode) && resident.canPerform("gardener");
-            if (!resident.canPerform(role) && !gardenerHarvest) continue;
+            boolean forestry = "wood".equals(mode) && resident.canPerform("forester");
+            if (!resident.canPerform(role) && !gardenerHarvest && !forestry) continue;
             Colony.WorkOrder work = new Colony.WorkOrder();
             work.mode = mode;
             work.x = (int) Math.floor(o.x());
@@ -80,7 +81,8 @@ final class WorkerControl {
             resident.manualHauler = false;
             resident.orderQueue.clear();
             resident.building = 0;
-            resident.assignedProfession = gardenerHarvest && !resident.canPerform(role) ? "gardener" : role;
+            resident.assignedProfession = gardenerHarvest && !resident.canPerform(role) ? "gardener"
+                    : forestry && !resident.canPerform(role) ? "forester" : role;
             resident.status = "приказ: " + labels[o.kind()];
             accepted++;
         }
