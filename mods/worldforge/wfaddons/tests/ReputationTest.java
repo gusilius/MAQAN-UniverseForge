@@ -92,11 +92,20 @@ public class ReputationTest {
                 "reputation knowledge is private to the observing resident and exact settlement");
         scoped.add("p", ReputationStore.Scope.ORGANIZATION, "guild", 55, "помощь гильдии");
         scoped.observe("resident_a", "p", ReputationStore.Scope.ORGANIZATION, "guild", 120, "member witness");
-        ok(scoped.shareWithinOrganization("resident_a", "resident_c", "p", "guild", 121)
+        ok(scoped.shareWithinOrganization("resident_a", "resident_c", "p", "guild", 121, id -> id.equals("resident_c"))
                         && scoped.known("resident_c", "p", ReputationStore.Scope.ORGANIZATION, "guild") != null
                         && scoped.known("resident_c", "p", ReputationStore.Scope.SETTLEMENT, "village_a") == null
                         && scoped.known("resident_d", "p", ReputationStore.Scope.ORGANIZATION, "guild") == null,
                 "gossip shares only the named organization reputation with the selected recipient");
+        scoped.link(ReputationStore.Scope.SETTLEMENT, "village_b",
+                ReputationStore.Scope.POLITY, "kingdom_rival", -0.5);
+        scoped.add("p", ReputationStore.Scope.SETTLEMENT, "village_b", 20, "помощь жителям");
+        ok(scoped.get("p", ReputationStore.Scope.SETTLEMENT, "village_b") == 55
+                        && scoped.get("p", ReputationStore.Scope.POLITY, "kingdom_rival") == -10,
+                "explicit rival links may invert the reputation effect without global propagation");
+        ok(!scoped.shareWithinOrganization("resident_a", "outsider", "p", "guild", 122, id -> false)
+                        && scoped.known("outsider", "p", ReputationStore.Scope.ORGANIZATION, "guild") == null,
+                "organization gossip is rejected for recipients not confirmed as members");
         String scopedJson = scoped.toJson();
         ReputationStore scopedReload = new ReputationStore();
         scopedReload.fromJson(scopedJson);
