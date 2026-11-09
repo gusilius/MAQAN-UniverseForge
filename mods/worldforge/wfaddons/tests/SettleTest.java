@@ -192,6 +192,9 @@ public class SettleTest {
         Building exactCamp = exactRole.place("lumber_camp", 12, 0);
         exactRole.tick(2);
         Worker exactHauler = exactRole.workers.get(0);
+        exactRole.setProfession(exactHauler.id, "builder");
+        exactRole.assign(exactHauler.id, exactCamp.uid, "builder");
+        exactRole.tick(200);
         exactRole.setProfession(exactHauler.id, "lumberjack");
         exactRole.assign(exactHauler.id, exactCamp.uid, "lumberjack");
         ok("lumberjack".equals(exactHauler.workRole()),
