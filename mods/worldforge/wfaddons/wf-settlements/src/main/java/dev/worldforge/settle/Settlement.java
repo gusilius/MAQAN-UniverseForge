@@ -127,6 +127,16 @@ public final class Settlement {
 
     public double amount(String res) { return stock.getOrDefault(res, 0.0); }
 
+    /** Atomic fractional withdrawal for individual Character actions (meals, medicine, etc.). */
+    public boolean consumeResource(String resource, double amount) {
+        if (resource == null || resource.isBlank() || !Double.isFinite(amount) || amount < 0) return false;
+        if (amount(resource) + 1e-9 < amount) return false;
+        if (amount == 0) return true;
+        stock.put(resource, Math.max(0, amount(resource) - amount));
+        flow.record(time, resource, amount, false);
+        return true;
+    }
+
     /** Кладёт на склад не больше вместимости; возвращает фактически положенное. */
     public double add(String res, double n) {
         double cur = amount(res), put = Math.max(0, Math.min(n, capacity(res) - cur));
