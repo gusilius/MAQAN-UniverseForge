@@ -10,6 +10,7 @@ import dev.worldforge.mod.MapData;
 import dev.worldforge.mod.TitleData;
 import dev.worldforge.mod.WorldForgeMod;
 import dev.worldforge.people.Character;
+import dev.worldforge.people.CharacterDevelopment;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.PopulationSimulation;
 import dev.worldforge.people.PopulationSimulation.Duty;
