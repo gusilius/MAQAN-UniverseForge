@@ -1,6 +1,8 @@
 package dev.worldforge.tests;
 
 import dev.worldforge.mod.economy.TreasuryLedger;
+import dev.worldforge.mod.Json;
+import java.util.*;
 
 public final class TreasuryLedgerTest {
     private static int failures;
@@ -103,6 +105,16 @@ public final class TreasuryLedgerTest {
                         "payroll-funding", "payroll-fund:retry:1", 1440, "retry after world reload")
                         && retryRestored.journal().size() == restoredCount,
                 "idempotency keys are rebuilt from the persisted journal after world reload");
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> damaged = (Map<String, Object>) Json.parse(retry.toJson());
+        List<Object> damagedJournal = new ArrayList<>((List<Object>) damaged.get("journal"));
+        damagedJournal.remove(damagedJournal.size() - 1);
+        damaged.put("journal", damagedJournal);
+        boolean rejectedUnbalanced = false;
+        try { TreasuryLedger.fromJson(Json.write(damaged)); }
+        catch (IllegalArgumentException expected) { rejectedUnbalanced = true; }
+        ok(rejectedUnbalanced, "ledger restore rejects a transfer whose matching debit/credit entry is missing");
 
         System.out.println(failures==0?"ALL OK":failures+" FAILED");
         if(failures>0) System.exit(1);
