@@ -200,6 +200,9 @@ public final class PopulationSimulation {
     /** Adds training XP and returns the number of ranks gained. */
     public static int train(Character character, String skillId, long xp) {
         requireAlive(character);
+        String profession = profession(character);
+        if ("laborer".equals(profession) || "general_worker".equals(profession))
+            throw new IllegalStateException("General workers do not gain specialist profession ranks");
         String id = normalizeId(skillId, "skill");
         if (xp <= 0) throw new IllegalArgumentException("Training XP must be positive");
         int rank = skillRank(character, id);
