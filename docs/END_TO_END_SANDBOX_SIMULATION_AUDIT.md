@@ -258,3 +258,23 @@ The fixture is synthetic and test-only; it does not replace or modify production
 CI installs Python 3.12 in the WorldForge logic-test job because the fixture generator uses only the Python standard library. No additional workflow was added; this remains inside the single `universeforge.yml` quality gate.
 
 **Verification status:** changes are committed to `integration/maqan-unified`; the corresponding GitHub Actions run must finish before this is considered green. The repository integration tools do not provide a local Windows/Gradle execution environment, so no claim of local test execution is made here.
+
+## Next-build implementation update — 2026-11-09
+
+The central integration line now includes a first-person command layer that shares the
+existing RTS order packet and server-side troop controller:
+
+- Hold **Alt** while first-person command mode (**G**) is active to open the radial order wheel.
+- The wheel exposes move, attack-move, attack target, hold, stop, patrol, follow, guard and retreat.
+- Shift while confirming queues the selected order through the existing squad order queue.
+- Retreat is resolved server-side from nearby enemy positions; without nearby enemies the squad falls back toward its owner instead of moving to world origin.
+- The existing RTS screen continues to provide box selection, control groups 1–9, formations, stances, patrol, worker selection and construction controls.
+
+This is an implementation checkpoint, not a claim that the whole sandbox loop is complete.
+Resident conversation/quest commands, unified Character-backed task execution, end-to-end
+worker job chains, and in-game multiplayer/save-reload acceptance remain open.
+
+The deterministic CI fixture now has a connected barony adjacency graph. Recent CI failures
+also exposed a null-liege economy report edge case and over-sized court client snapshots;
+both have been corrected in the integration line. Final acceptance depends on the current
+single MAQAN UniverseForge Windows quality-gate run.
