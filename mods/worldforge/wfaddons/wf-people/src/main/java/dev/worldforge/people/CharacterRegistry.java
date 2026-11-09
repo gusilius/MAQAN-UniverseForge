@@ -426,8 +426,10 @@ public final class CharacterRegistry {
         byId.clear();
         byId.putAll(loaded);
         next = safeNext;
-        for (Character character : byId.values())
-            publish(character, new LifecycleEvent(LifecycleKind.RESTORED, character.id, "", "", 0));
+        for (Character character : byId.values()) {
+            LifecycleEvent restored = new LifecycleEvent(LifecycleKind.RESTORED, character.id, "", "", 0);
+            for (Listener listener : listeners) listener.lifecycle(character, restored);
+        }
     }
 
     private static String requiredString(Map<?, ?> map, String key) {
