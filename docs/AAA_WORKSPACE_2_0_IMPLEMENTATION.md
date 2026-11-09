@@ -75,3 +75,68 @@ This PR is a foundation plus a first live-shell integration pass. It does not cl
 - Map layers: provider registration, visibility, opacity and unload.
 
 The PR remains a draft until the Windows build, all unit tests, and in-game acceptance checks pass.
+
+## Expanded acceptance backlog supplied for the MAQAN world platform
+
+The following requirements are explicitly **not certified as complete by PR #14**. They are cross-stage dependencies and must remain visible in the release gate. Workspace infrastructure must not be confused with completion of the game-domain systems that consume it.
+
+### Earlier stages that must be closed or integrated
+
+| Stage | Required outcome | Current verified status in this PR |
+|---|---|---|
+| VII — World Character Registry | One world-level identity/character registry shared by every map, settlement, court, army and simulation; stable IDs, lifecycle, ownership/location references, deduplication and cross-map lookup | Not implemented here. Current workspace search index is only a presentation/search index, not the authoritative character registry |
+| VIII — Population and Court AI | Executable AI for court NPCs and population outside settlements, including decision loops, needs/goals, schedules, movement, task assignment and persistence | Not implemented here. Provider bridge does not supply an AI runtime |
+| IX — Economy and Logistics | Global price formation, market connectivity, transport/logistics, stockpiles, supply/demand, financial ledger recovery/reconciliation and auditable transactions | Not implemented here. Workspace journal is an event display, not the financial ledger |
+| X — Live Spatial Platform | Live authoritative spatial state and synchronization between world simulation, map projections, selection, layers and clients; eliminate raster-snapshot/manual-export dependency | Not implemented here. Map layer registry is a rendering extension point, not spatial synchronization |
+| XI — RTS and Hero Progression | Full combat abilities panel, hero progression branches, and one task graph shared by workers, specialists, soldiers and heroes; order queues and execution feedback | Not implemented here. Workspace shortcuts/actions do not constitute the RTS task graph or ability system |
+
+### Stage XII — required substage gates
+
+| Substage | Acceptance criteria | Status from PR #14 |
+|---|---|---|
+| XII-A — Docking Engine | Nested split tree, tab groups, drag/drop docking, resize, collapse/restore, stable panel identity, keyboard and pointer behavior | Core tree and shell interaction implemented; in-game edge cases and full visual QA remain |
+| XII-B — Workspaces and profiles | Named layouts, save/load/delete/rename, active profile, migration/versioning, recovery from corrupt data, persistence across restart and provider removal | Store and save/load API implemented; visible profile manager and full in-game lifecycle QA remain |
+| XII-C — Provider registry and component library | Dynamic provider lifecycle, capability discovery, versioned component catalog, shared reusable controls, no duplicated legacy UI primitives | Runtime hooks exist; provider self-registration and migration of legacy screens remain |
+| XII-D — Universal inspector | One inspector contract for all domain entities, common identity/location/ownership/status sections, provider-specific sections, live refresh and safe empty/error states | Generic provider inspector exists; domain-wide adapters and shared entity schema remain |
+| XII-E — Global search and context actions | Search across all registered world entities with paging/filtering/permissions; open result in owner view; context actions validated against current selection and authority | Local in-memory index, provider opener and action registry exist; full-world indexing, paging and provider migration remain |
+| XII-F — Notifications, events and history | Unified notification center, severity/category filters, read/unread state, durable event history, subscriptions and domain-specific audit trails | Bounded in-memory event journal and shell rendering exist; durable history, notification center and audit integration remain |
+| XII-G — Maps, layers, selection and shortcuts | Live map data source, composable layers, shared selection across all views, stable coordinate transforms, shortcut scopes/conflict UI and provider registration | Layer registry, selection context and shortcut registry exist; live spatial synchronization and provider-wide integration remain |
+| XII-H — Responsive, accessibility and polish | Multiple resolutions/aspect ratios/GUI scales, minimum sizes, keyboard-only navigation, focus order, screen-reader labels where supported, contrast, tooltip and input clipping QA | Shared scaling/drawing primitives exist; systematic accessibility and visual acceptance testing remain |
+
+### Universal inspector entity contract
+
+The inspector is one shared shell component, not a separate screen per entity type. It must resolve a stable entity reference (providerId, entityId, canonical entityKind, worldId) and compose common fields with provider-owned domain sections.
+
+Required entity coverage:
+
+- Characters and families.
+- Workers, soldiers and heroes.
+- Buildings and settlements.
+- Armies and squads.
+- States, titles and territories.
+- Planets, stars and other space objects.
+- Resources, production chains and trade/market records.
+
+Minimum common inspector behavior:
+
+1. Stable identity and canonical kind; display name and owning provider.
+2. Current world/location and map focus action where spatially meaningful.
+3. Ownership, faction/house/state/settlement relations where applicable.
+4. Lifecycle/status and current activity/order where applicable.
+5. Provider-contributed domain sections with typed values, not only preformatted strings.
+6. Context actions gated by entity kind, current selection, permissions and simulation authority.
+7. Cross-view selection synchronization and a provider opener that focuses the actual entity.
+8. Graceful behavior when a provider is absent, an entity unloads, or an inspector contribution fails.
+
+The existing SearchEntry and InspectorField are presentation contracts only. They must not become a second source of truth for world entities. The authoritative identity and simulation state stay with the owning world/domain services; Platform consumes stable references and typed snapshots.
+
+### Release rule
+
+Do not mark Stage XII complete merely because the shell builds or its unit tests pass. Completion requires:
+- all XII-A through XII-H gates above;
+- real provider adapters for every listed inspector entity family;
+- cross-stage VII-XI integration where those systems supply registry, AI, economy, spatial and RTS data;
+- automated tests plus in-game acceptance on representative resolutions and GUI scales;
+- no dead-end/placeholder routes and no duplicate authoritative registries or ledgers.
+
+This backlog supersedes any narrower interpretation of “all game systems available in one interface.” PR #14 is an infrastructure increment, not evidence that Stages VII-XI or every XII substage are complete.
