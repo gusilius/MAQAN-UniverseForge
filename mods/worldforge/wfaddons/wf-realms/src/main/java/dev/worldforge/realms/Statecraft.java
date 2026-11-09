@@ -405,7 +405,7 @@ public final class Statecraft {
         double gross = base * effectiveRate * days;
         TreasuryLedger ledger = TreasuryService.current();
         long minute = Math.max(0, WorldForgeApi.clock().dayNumber()) * 1440L;
-        if (gross > 0 && !ledger.deposit(treasuryAccountId(realmId), gross, TreasuryLedger.Kind.TAX,
+        if (gross > 0 && !ledger.depositOnce(treasuryAccountId(realmId), gross, TreasuryLedger.Kind.TAX,
                 "taxation", "tax:" + realmId + ":" + t.taxDays, minute, "realm tax collection"))
             throw new IllegalStateException(ledger.lastError());
         double tribute = 0;
@@ -414,7 +414,7 @@ public final class Statecraft {
             String vassalAccount = treasuryAccountId(v.vassalRealm);
             double available = ledger.balance(vassalAccount);
             double payment = Math.min(available, available * v.taxShare);
-            if (payment > 0 && ledger.transfer(vassalAccount, treasuryAccountId(realmId), payment,
+            if (payment > 0 && ledger.transferOnce(vassalAccount, treasuryAccountId(realmId), payment,
                     TreasuryLedger.Kind.VASSAL_TRIBUTE, "feudal-obligation",
                     "tribute:" + v.vassalRealm + ":" + t.taxDays, minute, "vassal tax obligation")) tribute += payment;
             vt.balance = ledger.balance(vassalAccount);
