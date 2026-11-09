@@ -378,12 +378,12 @@ public final class Settlement {
 
     private int assignedWith(int uid, String profession) {
         int n = 0;
-        for (Worker w : workers) if (w.building == uid && w.workRole().equals(profession)) n++;
+        for (Worker w : workers) if (w.building == uid && w.lifeAction.isBlank() && w.workRole().equals(profession)) n++;
         return n;
     }
     private double assignedEfficiency(int uid, String profession) {
         double value = 0;
-        for (Worker w : workers) if (w.building == uid && w.workRole().equals(profession))
+        for (Worker w : workers) if (w.building == uid && w.lifeAction.isBlank() && w.workRole().equals(profession))
             value += w.productivity(profession);
         return value;
     }
@@ -495,6 +495,7 @@ public final class Settlement {
                 + ") не подходит для этой работы или нет свободных мест в " + b.def.name);
         if (role.isEmpty()) throw new OrderException(w.name + " не подходит для этой работы или нет свободных мест");
         w.assignedProfession = role;
+        w.lifeAction = "";
         w.building = uid;
         w.manualFollow = false;
         w.manualFollowOwner = "";
@@ -508,6 +509,7 @@ public final class Settlement {
         if (w == null) throw new OrderException("Нет рабочего " + workerId);
         w.building = 0;
         w.assignedProfession = "";
+        w.lifeAction = "";
         w.manualFollow = false;
         w.manualFollowOwner = "";
         w.manualOrder = false;
@@ -530,6 +532,7 @@ public final class Settlement {
             return;
         }
         w.orderQueue.clear();
+        w.lifeAction = "";
         w.manualFollow=false;
         w.manualFollowOwner="";
         w.building=0;w.manualOrder=true;w.orderX=x;w.orderZ=z;w.status="приказ: движение";
@@ -558,6 +561,7 @@ public final class Settlement {
         if (!defs.professions.containsKey(profession)) throw new OrderException("Нет профессии " + profession);
         w.profession = profession;
         w.assignedProfession = "";
+        w.lifeAction = "";
         w.building = 0;
         w.manualFollow = false;
         w.manualFollowOwner = "";
@@ -717,7 +721,7 @@ public final class Settlement {
 
     private void autoAssign() {
         List<Worker> idle = new ArrayList<>();
-        for (Worker w : workers) if (w.building == 0 && !w.manualOrder && !w.manualFollow) idle.add(w);
+        for (Worker w : workers) if (w.building == 0 && !w.manualOrder && !w.manualFollow && w.lifeAction.isBlank()) idle.add(w);
         idle.sort(Comparator.comparingInt(w -> w.id));
         for (Worker w : idle) {
             Building best = null;
@@ -759,7 +763,7 @@ public final class Settlement {
             Worker pick = null;
             int bestStaff = 1;
             for (Worker w : workers) {
-                if (w.building == 0 || w.manualOrder || w.manualFollow || !w.canPerform("builder")) continue;
+                if (w.building == 0 || w.manualOrder || w.manualFollow || !w.lifeAction.isBlank() || !w.canPerform("builder")) continue;
                 Building from = building(w.building);
                 if (from == null || from.state != Building.State.DONE) continue;
                 int staff = assigned(from.uid).size();
@@ -781,7 +785,7 @@ public final class Settlement {
                 b.state = Building.State.DONE;
                 b.progress = b.def.work;
                 b.status = b.def.produces() ? "работает" : "готово";
-                for (Worker w : assigned(b.uid)) { w.building = 0; w.assignedProfession = ""; w.status = "свободен"; }
+                for (Worker w : assigned(b.uid)) { w.building = 0; w.assignedProfession = ""; w.lifeAction = ""; w.status = "свободен"; }
                 say("Построено: " + b.def.name);
             }
         }
@@ -996,6 +1000,7 @@ public final class Settlement {
     public double[] targetOf(Worker w) {
         if (w.manualOrder) return new double[]{w.orderX, w.orderZ};
         if (w.manualFollow) return new double[]{w.x, w.z};
+        if (!w.lifeAction.isBlank()) return new double[]{w.lifeTargetX, w.lifeTargetZ};
         Building b = w.building == 0 ? null : building(w.building);
         double a = w.id * 2.399963;
         if (b == null) {
@@ -1222,6 +1227,7 @@ public final class Settlement {
         for (Worker w : workers) {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", w.id); m.put("name", w.name); m.put("profession", w.profession); m.put("assigned_profession", w.assignedProfession); m.put("person", w.person); m.put("building", w.building); m.put("status", w.status); m.put("x", w.x); m.put("z", w.z);
+            m.put("life_action", w.lifeAction); m.put("life_target_x", w.lifeTargetX); m.put("life_target_z", w.lifeTargetZ);
             m.put("manual_order", w.manualOrder); m.put("manual_follow", w.manualFollow); m.put("manual_follow_owner", w.manualFollowOwner); m.put("order_x", w.orderX); m.put("order_z", w.orderZ);
             List<Object> queuedOrders=new ArrayList<>();
             for(Worker.ManualOrder order:w.orderQueue)queuedOrders.add(Map.of("x",order.x(),"z",order.z()));
@@ -1295,6 +1301,10 @@ public final class Settlement {
             w.person = (String) m.get("person"); w.building = ((Number) m.get("building")).intValue(); w.status = (String) m.get("status");
             if (m.get("x") instanceof Number nx) w.x = nx.doubleValue();
             if (m.get("z") instanceof Number nz) w.z = nz.doubleValue();
+            w.lifeAction = m.get("life_action") instanceof String la ? la : "";
+            if (m.get("life_target_x") instanceof Number lx) w.lifeTargetX = lx.doubleValue();
+            if (m.get("life_target_z") instanceof Number lz) w.lifeTargetZ = lz.doubleValue();
+            if (!Set.of("", "sleeping", "fleeing", "socializing").contains(w.lifeAction)) w.lifeAction = "";
             w.manualOrder = Boolean.TRUE.equals(m.get("manual_order")); w.manualFollow = Boolean.TRUE.equals(m.get("manual_follow")); w.manualFollowOwner = m.get("manual_follow_owner") instanceof String fo ? fo : "";
             if (m.get("order_x") instanceof Number ox) w.orderX = ox.doubleValue();
             if (m.get("order_z") instanceof Number oz) w.orderZ = oz.doubleValue();
