@@ -86,7 +86,8 @@ public final class Settlement {
     public double defense() {
         int guards = 0;
         for (Worker w : workers) if (w.profession.equals("guard")) guards++;
-        return guards * 3.0 + (guards > 0 ? count("watchtower", true) * 6.0 : count("watchtower", true) * 2.0);
+        return guards * 3.0 + (guards > 0 ? count("watchtower", true) * 6.0 : count("watchtower", true) * 2.0)
+                + effect("fortification") * 2.0 + effect("military");
     }
     private void raidStep(double dt) {
         if (!raids || workers.size() < RAID_MIN_PEOPLE) return;
@@ -343,10 +344,29 @@ public final class Settlement {
 
     private void refund(Map<String, Integer> cost, double share) { for (Map.Entry<String, Integer> e : cost.entrySet()) add(e.getKey(), Math.floor(e.getValue() * share)); }
 
+    /** Sum of active building capabilities. Effects are data-driven and shared with domain/UI integrations. */
+    public double effect(String key) {
+        if (key == null || key.isBlank()) return 0;
+        double total = 0;
+        for (Building b : buildings) {
+            if (b.state == Building.State.DONE && !b.unpaid)
+                total += b.def.effects.getOrDefault(key, 0.0);
+        }
+        return total;
+    }
+
+    /** Immutable snapshot of all active numeric building effects. */
+    public Map<String, Double> effects() {
+        Map<String, Double> totals = new TreeMap<>();
+        for (Building b : buildings) if (b.state == Building.State.DONE && !b.unpaid)
+            b.def.effects.forEach((key, value) -> totals.merge(key, value, Double::sum));
+        return Collections.unmodifiableMap(totals);
+    }
+
     public int housing() {
         int h = BASE_HOUSING;
-        for (Building b : buildings) if (b.state == Building.State.DONE) h += b.def.housing;
-        return h;
+        for (Building b : buildings) if (b.state == Building.State.DONE && !b.unpaid) h += b.def.housing;
+        return h + (int) Math.floor(effect("housing"));
     }
 
     private void say(String s) {
@@ -1078,6 +1098,8 @@ public final class Settlement {
         if (crown != 0) l.add(new Factor("Подать в казну: " + crownShare + "%", crown));
         int ap = 0, safe = 0;
         for (Building b : buildings) if (b.state == Building.State.DONE && !b.unpaid) { ap += b.def.approval; safe += b.def.safety; }
+        ap += (int) Math.floor(effect("approval"));
+        safe += (int) Math.floor(effect("safety"));
         if (ap != 0) l.add(new Factor("Трактиры и храмы", Math.min(20, ap)));
         if (safe != 0) l.add(new Factor("Укрепления", Math.min(10, safe)));
         int comfort = 0;
