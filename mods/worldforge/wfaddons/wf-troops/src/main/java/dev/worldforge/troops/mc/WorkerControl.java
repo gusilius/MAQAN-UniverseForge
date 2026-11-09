@@ -100,10 +100,12 @@ final class WorkerControl {
             if (c == null || resident == null) continue;
             if (!mayControl(p, c)) { denied = true; continue; }
             if (o.action() == OrderPacket.RELEASE) {
+                c.workOrders.remove(w.workerId);
                 try { c.s.unassign(w.workerId); done++; } catch (RuntimeException ignored) {}
                 continue;
             }
             if (o.action() == OrderPacket.WORK_FOLLOW) {
+                c.workOrders.remove(w.workerId);
                 resident.manualFollow = true;
                 resident.manualFollowOwner = p.getUUID().toString();
                 resident.manualOrder = false;
@@ -115,6 +117,7 @@ final class WorkerControl {
                 continue;
             }
             if (o.action() == OrderPacket.WORK_STOP || o.action() == OrderPacket.WORK_HOLD) {
+                c.workOrders.remove(w.workerId);
                 try {
                     double x = w.getX() - c.cx, z = w.getZ() - c.cz;
                     c.s.holdAt(w.workerId, x, z);
@@ -123,6 +126,7 @@ final class WorkerControl {
                 } catch (RuntimeException ex) { where = ex.getMessage(); }
                 continue;
             }
+            c.workOrders.remove(w.workerId);
             Building b = c.buildingAt((int) Math.floor(o.x()), (int) Math.floor(o.z()));
             try {
                 if (b == null) {
