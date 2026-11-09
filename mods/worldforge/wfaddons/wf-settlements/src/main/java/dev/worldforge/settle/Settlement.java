@@ -794,8 +794,7 @@ public final class Settlement {
             Worker pick = null;
             for (Worker worker : workers) {
                 if (worker.manualOrder || worker.manualFollow || !worker.lifeAction.isBlank()
-                        || !worker.canPerform("hauler")) continue;
-                if (worker.building != 0 && worker.building != source.uid) continue;
+                        || worker.building != 0 || !worker.canPerform("hauler")) continue;
                 if (pick == null || worker.id < pick.id) pick = worker;
             }
             if (pick == null) continue;
