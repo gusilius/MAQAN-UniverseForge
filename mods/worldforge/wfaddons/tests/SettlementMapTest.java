@@ -115,6 +115,20 @@ public final class SettlementMapTest {
         ok(fundedRestored.amount(Defs.SILVER) == 85,
                 "settlement save/load restores the shared treasury balance rather than a divergent silver copy");
 
+        Settlement sourceCity = new Settlement("commodity_source_test", "Commodity source", defs);
+        Settlement destinationCity = new Settlement("commodity_destination_test", "Commodity destination", defs);
+        sourceCity.add("wood", 80);
+        destinationCity.add(Defs.SILVER, 100);
+        ok(sourceCity.transferResourceTo(destinationCity, "wood", 30, "caravan-goods", "test-route")
+                        && sourceCity.amount("wood") == 50 && destinationCity.amount("wood") == 30,
+                "commodity trade transfers inventory between settlement resource accounts");
+        ok(destinationCity.transferSilverTo(sourceCity, 45, "caravan-payment", "test-route")
+                        && destinationCity.amount(Defs.SILVER) == 55 && sourceCity.amount(Defs.SILVER) == 45,
+                "caravan payment moves money between settlement treasury accounts");
+        ok(WorldForgeMod.treasury().journal().stream().filter(e -> e.reference().equals("test-route")
+                        && e.kind() == TreasuryLedger.Kind.TRADE).count() == 4,
+                "caravan goods and silver produce paired auditable ledger entries");
+
         SettlementMap restored = SettlementMap.fromJson(map.toJson());
         ok(restored.cells().size() == map.cells().size() && restored.roads.size() == 1
                 && restored.parcels.size() == 1 && restored.plans.containsKey(house.uid),
