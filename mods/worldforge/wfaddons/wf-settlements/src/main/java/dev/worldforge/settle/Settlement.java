@@ -1149,7 +1149,7 @@ public final class Settlement {
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("format", "wf-settlement/2");
         root.put("schema_version", 2);
-        root.put("id", id); root.put("name", name); root.put("time", time); root.put("auto", auto);
+        root.put("id", id); root.put("name", name); root.put("ledger_scope", ledgerScope); root.put("time", time); root.put("auto", auto);
         root.put("next_building", nextBuilding); root.put("next_worker", nextWorker); root.put("grow", growTimer); root.put("starve", starveTimer); root.put("leave", leaveTimer);
         root.put("flow", flow.save());
         root.put("raid_timer", raidTimer); root.put("raid_strength", raidStrength); root.put("raid_warn", raidWarnLeft); root.put("raid_in", raidIncoming); root.put("raid_ok", raidsRepelled); root.put("raid_bad", raidsLost); root.put("raids", raids);
