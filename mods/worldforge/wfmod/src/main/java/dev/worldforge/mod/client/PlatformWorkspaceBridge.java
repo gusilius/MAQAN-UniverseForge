@@ -77,6 +77,65 @@ public final class PlatformWorkspaceBridge {
         }
     }
 
+    /** Provider-specific inspector fields. Each row is {section, label, value}. */
+    public static void registerInspector(String providerId,
+                                         java.util.function.Function<String, java.util.List<String[]>> fields) {
+        if (fields == null) return;
+        try {
+            Class<?> runtime = Class.forName("dev.maqan.platform.client.WorkspaceRuntime");
+            Class<?> providerType = Class.forName("dev.maqan.platform.client.WorkspaceRuntime$InspectorProvider");
+            Class<?> fieldType = Class.forName("dev.maqan.platform.client.WorkspaceRuntime$InspectorField");
+            Object provider = java.lang.reflect.Proxy.newProxyInstance(providerType.getClassLoader(),
+                    new Class<?>[]{providerType}, (proxy, method, args) -> {
+                        if (!method.getName().equals("inspect")) return null;
+                        Object selection = args[0];
+                        String entityId = (String) selection.getClass().getMethod("entityId").invoke(selection);
+                        java.util.List<String[]> values = fields.apply(entityId);
+                        java.util.List<Object> result = new java.util.ArrayList<>();
+                        if (values != null) for (String[] row : values) {
+                            if (row == null || row.length < 3) continue;
+                            result.add(fieldType.getConstructor(String.class, String.class, String.class)
+                                    .newInstance(row[0], row[1], row[2]));
+                        }
+                        return result;
+                    });
+            runtime.getMethod("registerInspector", String.class, providerType)
+                    .invoke(null, providerId, provider);
+        } catch (ReflectiveOperationException | LinkageError ignored) {
+            // Optional host not installed.
+        }
+    }
+
+    @FunctionalInterface
+    public interface MapLayerRenderer {
+        void render(Object graphics, int x, int y, int width, int height, float opacity);
+    }
+
+    /** Register a map overlay without linking WorldForge against the optional Platform jar. */
+    public static void registerMapLayer(String id, String label, String providerId, int order,
+                                        boolean visible, float opacity, MapLayerRenderer renderer) {
+        if (renderer == null) return;
+        try {
+            Class<?> registry = Class.forName("dev.maqan.platform.client.WorkspaceMapLayerRegistry");
+            Class<?> rendererType = Class.forName("dev.maqan.platform.client.WorkspaceMapLayerRegistry$Renderer");
+            Class<?> layerType = Class.forName("dev.maqan.platform.client.WorkspaceMapLayerRegistry$Layer");
+            Object callback = java.lang.reflect.Proxy.newProxyInstance(rendererType.getClassLoader(),
+                    new Class<?>[]{rendererType}, (proxy, method, args) -> {
+                        if (method.getName().equals("render")) {
+                            renderer.render(args[0], (Integer) args[1], (Integer) args[2],
+                                    (Integer) args[3], (Integer) args[4], (Float) args[5]);
+                        }
+                        return null;
+                    });
+            Object layer = layerType.getConstructor(String.class, String.class, String.class,
+                    int.class, boolean.class, float.class, rendererType)
+                    .newInstance(id, label, providerId, order, visible, opacity, callback);
+            registry.getMethod("register", layerType).invoke(null, layer);
+        } catch (ReflectiveOperationException | LinkageError ignored) {
+            // Optional host not installed.
+        }
+    }
+
     /** Detach a hosted view without closing the user's entire MAQAN workspace. */
     public static boolean closeEmbedded(Screen view) {
         try {
