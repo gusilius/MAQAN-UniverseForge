@@ -388,10 +388,16 @@ public final class Settlement {
         return value;
     }
     private String availableRole(Worker worker, Building building) {
-        if (building.state == Building.State.BUILDING)
-            return worker.canPerform("builder") && assignedWith(building.uid, "builder") < building.def.builders ? "builder" : "";
-        for (Map.Entry<String,Integer> job : building.def.jobs.entrySet())
-            if (worker.canPerform(job.getKey()) && assignedWith(building.uid, job.getKey()) < job.getValue()) return job.getKey();
+        if (building.state == Building.State.BUILDING) {
+            int occupied = assignedWith(building.uid, "builder")
+                    - (worker.building == building.uid && worker.workRole().equals("builder") ? 1 : 0);
+            return worker.canPerform("builder") && occupied < building.def.builders ? "builder" : "";
+        }
+        for (Map.Entry<String,Integer> job : building.def.jobs.entrySet()) {
+            int occupied = assignedWith(building.uid, job.getKey())
+                    - (worker.building == building.uid && worker.workRole().equals(job.getKey()) ? 1 : 0);
+            if (worker.canPerform(job.getKey()) && occupied < job.getValue()) return job.getKey();
+        }
         return "";
     }
 
