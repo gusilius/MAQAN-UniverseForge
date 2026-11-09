@@ -605,6 +605,19 @@ public class SettleMod {
         return LifeSimulation.LOD.REMOTE;
     }
 
+    /** A completed house is the preferred safe/rest destination; the settlement centre is a fallback. */
+    private static double[] residentShelter(Settlement settlement, dev.worldforge.settle.Worker worker) {
+        Building best = null;
+        double distance = Double.POSITIVE_INFINITY;
+        for (Building building : settlement.buildings) {
+            if (building.state != Building.State.DONE || !"housing".equalsIgnoreCase(building.def.category)) continue;
+            double dx = building.x - worker.x, dz = building.z - worker.z;
+            double d = dx * dx + dz * dz;
+            if (d < distance) { distance = d; best = building; }
+        }
+        return best == null ? new double[]{0, 0} : new double[]{best.x, best.z};
+    }
+
     /** Executes Character AI against authoritative settlement stock, work assignments and nearby population. */
     private static void runLifeAI(MinecraftServer server, Colony colony) {
         if (!net.minecraftforge.fml.ModList.get().isLoaded("wf_people") || colony == null || colony.s == null) return;
@@ -616,7 +629,15 @@ public class SettleMod {
             if (worker.person == null || worker.person.isBlank()) continue;
             Character person = registry.get(worker.person);
             if (person == null || !person.alive) continue;
-            boolean hasTraining = !PopulationSimulation.trainingTarget(person).isBlank();
+            if ("sleeping".equals(worker.lifeAction) && settlement.time >= worker.lifeActionUntil
+                    || "socializing".equals(worker.lifeAction) && settlement.time >= worker.lifeActionUntil
+                    || "fleeing".equals(worker.lifeAction) && !settlement.raidIncoming) {
+                worker.lifeAction = "";
+                worker.lifeActionUntil = 0;
+                worker.status = worker.building == 0 ? "свободен" : "работает";
+            }
+            if (!worker.lifeAction.isBlank()) continue;
+            boolean hasTraining = !worker.generalist() && !PopulationSimulation.trainingTarget(person).isBlank();
             boolean hasLeisure = settlement.buildings.stream().anyMatch(b -> b.state == Building.State.DONE
                     && !b.paused && b.def.category != null
                     && (b.def.category.equalsIgnoreCase("leisure") || b.def.id.contains("tavern") || b.def.id.contains("inn")));
@@ -639,12 +660,20 @@ public class SettleMod {
                                 ? LifeSimulation.Outcome.SUCCESS : LifeSimulation.Outcome.BLOCKED;
                     }
                     case SLEEP -> {
+                        double[] home = residentShelter(settlement, worker);
+                        worker.lifeAction = "sleeping";
+                        worker.lifeTargetX = home[0]; worker.lifeTargetZ = home[1];
+                        worker.lifeActionUntil = settlement.time + 8 * 60;
                         worker.status = "спит";
                         return LifeSimulation.Outcome.SUCCESS;
                     }
                     case SEEK_SAFETY -> {
                         if (!settlement.raidIncoming) return LifeSimulation.Outcome.BLOCKED;
-                        worker.status = "укрывается";
+                        double[] shelter = residentShelter(settlement, worker);
+                        worker.lifeAction = "fleeing";
+                        worker.lifeTargetX = shelter[0]; worker.lifeTargetZ = shelter[1];
+                        worker.lifeActionUntil = Double.POSITIVE_INFINITY;
+                        worker.status = "бежит в укрытие";
                         return LifeSimulation.Outcome.SUCCESS;
                     }
                     case SOCIALIZE -> {
@@ -664,6 +693,9 @@ public class SettleMod {
                         }
                         if (companion == null || companionPerson == null) return LifeSimulation.Outcome.BLOCKED;
                         dev.worldforge.settle.ResidentSocial.socialize(person, companionPerson, 1);
+                        worker.lifeAction = "socializing";
+                        worker.lifeTargetX = companion.x; worker.lifeTargetZ = companion.z;
+                        worker.lifeActionUntil = settlement.time + 3 * 60;
                         worker.status = "общается: " + companionPerson.name;
                         companion.status = "общается: " + person.name;
                         return LifeSimulation.Outcome.SUCCESS;
