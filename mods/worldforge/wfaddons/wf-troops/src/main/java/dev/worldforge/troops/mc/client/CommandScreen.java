@@ -44,6 +44,8 @@ public final class CommandScreen extends Screen {
     private int workMode = -1;
     private int workOverlay = 2;
     private final List<BuildGhost.Def> defs = new ArrayList<>();
+    private record ConstructionGhost(int x, int y, int z, String block) {}
+    private final List<ConstructionGhost> constructionGhosts = new ArrayList<>();
     private final Map<String, Integer> stock = new HashMap<>();
     private final List<BuildGhost.Rect> taken = new ArrayList<>();
     private int colX, colZ, scroll, refreshIn;
@@ -81,7 +83,7 @@ public final class CommandScreen extends Screen {
     // ---------- данные стройки ----------
     @SuppressWarnings("unchecked")
     void setBuilds(String json) {
-        defs.clear(); stock.clear(); taken.clear();
+        defs.clear(); stock.clear(); taken.clear(); constructionGhosts.clear();
         buildError = "";
         try {
             Map<String, Object> m = (Map<String, Object>) Json.parse(json);
@@ -94,6 +96,12 @@ public final class CommandScreen extends Screen {
             if (m.get("taken") instanceof List<?> l) for (Object o : l) {
                 Map<String, Object> t = (Map<String, Object>) o;
                 taken.add(new BuildGhost.Rect(((Number) t.get("x")).doubleValue(), ((Number) t.get("z")).doubleValue(), ((Number) t.get("sx")).intValue(), ((Number) t.get("sz")).intValue()));
+            }
+            if (m.get("construction") instanceof List<?> blocks) for (Object o : blocks) {
+                if (!(o instanceof Map<?, ?> t)) continue;
+                constructionGhosts.add(new ConstructionGhost(
+                        ((Number) t.get("x")).intValue(), ((Number) t.get("y")).intValue(),
+                        ((Number) t.get("z")).intValue(), String.valueOf(t.getOrDefault("block", "minecraft:stone"))));
             }
         } catch (RuntimeException ex) {
             buildError = "Не удалось прочитать список зданий";
@@ -570,6 +578,7 @@ public final class CommandScreen extends Screen {
             drawGhost(g, mxi, myi, w, h);
             drawTaken(g, w, h);
             drawWorkAreas(g, w, h);
+            drawConstructionGhosts(g, w, h);
         }
         if (dragging) {
             int x1 = (int) Math.min(dragX, mx), x2 = (int) Math.max(dragX, mx), y1 = (int) Math.min(dragY, my), y2 = (int) Math.max(dragY, my);
@@ -593,6 +602,28 @@ public final class CommandScreen extends Screen {
     private void drawTaken(GuiGraphics g, int w, int h) {
         if (!buildOpen || picked == null) return;
         for (BuildGhost.Rect r : taken) outline(g, (int) Math.floor(r.cx()), (int) Math.floor(r.cz()), r.sx(), r.sz(), groundYFor(r.cx(), r.cz()), 0x88BBBBBB, w, h);
+    }
+
+    private void drawConstructionGhosts(GuiGraphics g, int w, int h) {
+        if (constructionGhosts.isEmpty() || CommandMode.vp == null || minecraft.level == null) return;
+        int visible = 0;
+        for (ConstructionGhost ghost : constructionGhosts) {
+            double[] p = Projection.project(CommandMode.vp,
+                    ghost.x() + 0.5 - CommandMode.cam.x,
+                    ghost.y() + 0.5 - CommandMode.cam.y,
+                    ghost.z() + 0.5 - CommandMode.cam.z, w, h);
+            if (p[2] <= 0 || p[2] > 180) continue;
+            int x = (int) p[0], y = (int) p[1];
+            int size = Math.max(2, Math.min(6, (int) (18 / p[2])));
+            g.fill(x - size, y - size, x + size + 1, y + size + 1, 0x6638CFFF);
+            g.fill(x - 1, y - 1, x + 2, y + 2, 0xFF9BE8FF);
+            visible++;
+        }
+        if (visible > 0) {
+            String label = "Чертёж · недостающих блоков: " + constructionGhosts.size() + " · в кадре: " + visible;
+            g.fill(6, height - 34, 6 + font.width(label) + 12, height - 19, 0xCC101018);
+            g.drawString(font, label, 12, height - 30, 0xFF9BE8FF, false);
+        }
     }
 
     private void drawWorkAreas(GuiGraphics g, int w, int h) {
