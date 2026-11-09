@@ -1,6 +1,8 @@
 package dev.worldforge.tests;
 
 import dev.worldforge.settle.*;
+import dev.worldforge.mod.WorldForgeMod;
+import dev.worldforge.mod.economy.TreasuryLedger;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -98,6 +100,20 @@ public final class SettlementMapTest {
         try { disconnected.addLogistics("west", "east", "wood", 10); }
         catch (IllegalArgumentException expected) { disconnectedRejected = true; }
         ok(disconnectedRejected, "logistics cannot connect warehouses on separate road components");
+
+        Settlement funded = new Settlement("treasury_settlement_test", "Treasury settlement test", defs);
+        funded.add(Defs.SILVER, 100);
+        ok(WorldForgeMod.treasury().balance("settlement:treasury_settlement_test") == 100,
+                "settlement silver is held in the canonical world treasury account");
+        funded.consumeResource(Defs.SILVER, 15);
+        ok(funded.amount(Defs.SILVER) == 85
+                        && WorldForgeMod.treasury().journal().stream().anyMatch(e ->
+                        e.accountId().equals("settlement:treasury_settlement_test")
+                                && e.kind() == TreasuryLedger.Kind.WITHDRAWAL),
+                "settlement silver consumption is booked in the persistent financial journal");
+        Settlement fundedRestored = Settlement.fromJson(funded.toJson(), defs);
+        ok(fundedRestored.amount(Defs.SILVER) == 85,
+                "settlement save/load restores the shared treasury balance rather than a divergent silver copy");
 
         SettlementMap restored = SettlementMap.fromJson(map.toJson());
         ok(restored.cells().size() == map.cells().size() && restored.roads.size() == 1
