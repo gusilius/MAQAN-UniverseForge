@@ -184,6 +184,9 @@
     },
     "salt_worker": {
       "name": "Солевар"
+    },
+    "brewer": {
+      "name": "Пивовар"
     }
   },
   "buildings": {
