@@ -204,10 +204,25 @@ public final class ResidentInteraction {
             case "work" -> {
                 if (!ruler) { deny(player); return 0; }
                 data.manualFollow = false;
-                int assigned = assignCompatibleBuilding(colony, data);
+                int assigned = assignCompatibleBuilding(colony, data, null);
                 player.sendSystemMessage(Component.literal(assigned > 0
-                        ? "§a" + person.name + " назначен на работу в здание #" + assigned
+                        ? "§a" + person.name + " назначен на подходящую работу в здании #" + assigned
                         : "§eПодходящего свободного рабочего места для профессии " + data.profession + " нет."));
+            }
+            case "work_builder", "work_lumberjack", "work_miner", "work_farmer", "work_hauler" -> {
+                if (!ruler) { deny(player); return 0; }
+                String role = action.substring("work_".length());
+                if (!data.canPerform(role)) {
+                    player.sendSystemMessage(Component.literal("§c" + person.name + " не обучен работе: " + role
+                            + ". Нужен соответствующий специалист или универсальный рабочий."));
+                    return 0;
+                }
+                data.manualFollow = false;
+                int assigned = assignCompatibleBuilding(colony, data, role);
+                player.sendSystemMessage(Component.literal(assigned > 0
+                        ? "§aПоручение принято: " + person.name + " назначен на роль «" + role
+                            + "» в здании #" + assigned + "."
+                        : "§eНет готового здания или свободного места для роли «" + role + "»."));
             }
             case "quest" -> {
                 if (person.props.containsKey(QUEST_KEY) && quest(person) == null) {
@@ -262,15 +277,26 @@ public final class ResidentInteraction {
         return 1;
     }
 
-    private static int assignCompatibleBuilding(Colony colony, Worker worker) {
+    private static int assignCompatibleBuilding(Colony colony, Worker worker, String requestedRole) {
         for (var building : colony.s.buildings) {
-            boolean compatible = building.state == dev.worldforge.settle.Building.State.DONE
-                    && building.def.jobs.keySet().stream().anyMatch(worker::canPerform);
-            compatible |= building.state == dev.worldforge.settle.Building.State.BUILDING
-                    && worker.canPerform("builder");
+            boolean construction = building.state == dev.worldforge.settle.Building.State.BUILDING;
+            boolean complete = building.state == dev.worldforge.settle.Building.State.DONE;
+            boolean compatible;
+            if (requestedRole != null && !requestedRole.isBlank()) {
+                compatible = "builder".equals(requestedRole)
+                        ? construction && worker.canPerform("builder")
+                        : complete && building.def.jobs.containsKey(requestedRole) && worker.canPerform(requestedRole);
+            } else {
+                compatible = complete && building.def.jobs.keySet().stream().anyMatch(worker::canPerform);
+                compatible |= construction && worker.canPerform("builder");
+            }
             if (!compatible) continue;
             try {
                 colony.s.assign(worker.id, building.uid);
+                if (requestedRole != null && !requestedRole.isBlank()) {
+                    Worker assigned = colony.s.worker(worker.id);
+                    if (assigned != null) assigned.assignedProfession = requestedRole;
+                }
                 return building.uid;
             } catch (RuntimeException ignored) { /* try next compatible job slot */ }
         }
