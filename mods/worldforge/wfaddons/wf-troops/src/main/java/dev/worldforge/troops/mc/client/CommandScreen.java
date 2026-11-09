@@ -334,6 +334,17 @@ public final class CommandScreen extends Screen {
                 CommandMode.send(new OrderPacket(OrderPacket.STANCE, sel, 0, 0, 0, "", false, CommandMode.stance));
             }
             case GLFW.GLFW_KEY_F -> CommandMode.send(new OrderPacket(OrderPacket.GROUP, sel, 0, 0, 0, "", false, 0));
+            case GLFW.GLFW_KEY_P -> {
+                if(!overPanel(mx,my)){
+                    Vec3 patrol=CommandMode.groundAt(minecraft,mx,my);
+                    if(patrol!=null){
+                        CommandMode.send(new OrderPacket(OrderPacket.ORDER,sel,Squads.Kind.PATROL.ordinal(),
+                                patrol.x,patrol.z,"",hasShiftDown(),0));
+                        CommandMode.marker=patrol;
+                        CommandMode.markerUntil=System.currentTimeMillis()+1500;
+                    }
+                }
+            }
             case GLFW.GLFW_KEY_DELETE -> CommandMode.send(new OrderPacket(OrderPacket.RELEASE, sel, 0, 0, 0, "", false, 0));
             default -> {}
         }
@@ -424,7 +435,7 @@ public final class CommandScreen extends Screen {
         drawUnitInspector(g);
         if (buildOpen) drawBuildPanel(g, mxi, myi);
         String hint = picked != null ? "ЛКМ - поставить здание (Shift - ещё одно) · ПКМ/Esc - отмена · колесо - высота камеры"
-                : "ЛКМ выбор/рамка · ПКМ приказ · WASD и края экрана - камера · колесо - высота · СКМ - вращать · Q/E поворот · Tab вид · Space к выбранным · B стройка · R выход";
+                : "ЛКМ выбор/рамка · ПКМ приказ · WASD и края экрана - камера · колесо - высота · СКМ - вращать · Q/E поворот · Tab вид · Space к выбранным · P патруль · B стройка · R выход";
         g.drawString(font, hint, 6, 6, 0xFFC8C8C8, true);
         g.drawString(font, "Вид: " + CommandMode.RIG.view.title + "   Строй: " + Formations.Type.values()[CommandMode.formation].title + "   Поза: " + Squads.Stance.values()[CommandMode.stance].title,
                 6, 18, 0xFF9CCCFF, true);
