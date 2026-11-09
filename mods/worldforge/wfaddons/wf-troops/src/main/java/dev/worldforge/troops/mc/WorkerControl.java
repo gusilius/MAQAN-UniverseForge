@@ -34,7 +34,7 @@ final class WorkerControl {
         int accepted = 0;
         boolean denied = false;
         String[] modes = {"wood", "stone", "ore", "clear", "level", "harvest"};
-        String[] roles = {"lumberjack", "miner", "miner", "builder", "builder", "farmer"};
+        String[] roles = {"lumberjack", "stonemason", "miner", "builder", "builder", "farmer"};
         String[] labels = {"вырубать целые деревья", "добывать камень", "добывать руду", "расчищать растительность", "выравнивать участок", "собирать зрелые культуры"};
         String[] params = o.target().split(":", 4);
         int overlay = 2, level = 0;
@@ -63,7 +63,8 @@ final class WorkerControl {
                 if (existing != null) { existing.overlay = overlay; accepted++; }
                 continue;
             }
-            if (!resident.canPerform(role)) continue;
+            boolean gardenerHarvest = "harvest".equals(mode) && resident.canPerform("gardener");
+            if (!resident.canPerform(role) && !gardenerHarvest) continue;
             Colony.WorkOrder work = new Colony.WorkOrder();
             work.mode = mode;
             work.x = (int) Math.floor(o.x());
@@ -79,7 +80,7 @@ final class WorkerControl {
             resident.manualHauler = false;
             resident.orderQueue.clear();
             resident.building = 0;
-            resident.assignedProfession = role;
+            resident.assignedProfession = gardenerHarvest && !resident.canPerform(role) ? "gardener" : role;
             resident.status = "приказ: " + labels[o.kind()];
             accepted++;
         }
