@@ -260,10 +260,11 @@ public final class ResidentInteraction {
             return;
         }
         if (accepted > delivered) colony.s.consumeResource("food", accepted - delivered);
-        net.minecraft.world.item.ItemStack removed = player.getInventory().removeItem(Items.BREAD, delivered);
-        delivered = Math.min(delivered, removed.getCount());
+        int acceptedWhole = delivered;
+        net.minecraft.world.item.ItemStack removed = player.getInventory().removeItem(Items.BREAD, acceptedWhole);
+        delivered = Math.min(acceptedWhole, removed.getCount());
+        if (delivered < acceptedWhole) colony.s.consumeResource("food", acceptedWhole - delivered);
         if (delivered <= 0) {
-            colony.s.consumeResource("food", Math.floor(accepted + 1e-9));
             player.sendSystemMessage(Component.literal("§cХлеб не удалось передать."));
             return;
         }
@@ -297,7 +298,10 @@ public final class ResidentInteraction {
     }
 
     private static String family(Character person) {
-        int members = person.children.size() + (person.spouse == null || person.spouse.isBlank() ? 0 : 1);
+        int members = person.children.size()
+                + (person.spouse == null || person.spouse.isBlank() ? 0 : 1)
+                + (person.father == null || person.father.isBlank() ? 0 : 1)
+                + (person.mother == null || person.mother.isBlank() ? 0 : 1);
         return members == 0 ? "не указана" : members + " близких связей";
     }
 
