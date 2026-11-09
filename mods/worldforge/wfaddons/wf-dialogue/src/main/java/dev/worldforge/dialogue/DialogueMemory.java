@@ -27,6 +27,24 @@ public final class DialogueMemory {
     public Object recall(String key){return facts().get(key(key));}
     public boolean knows(String key){return facts().containsKey(key(key));}
     public void forget(String key){facts().remove(key(key));}
+    /** Canonical relationship score lives beside other social state in the same Character.props map. */
+    public int relationship(String otherId){
+        if(otherId==null||otherId.isBlank())return 0;
+        Object raw=storage.get("social.relationships");
+        if(!(raw instanceof Map<?,?> map)||!(map.get(otherId) instanceof Number n))return 0;
+        return Math.max(-100,Math.min(100,n.intValue()));
+    }
+    public int adjustRelationship(String otherId,int delta){
+        if(otherId==null||otherId.isBlank())return 0;
+        Map<String,Object> relationships=new LinkedHashMap<>();
+        Object raw=storage.get("social.relationships");
+        if(raw instanceof Map<?,?> map)for(Map.Entry<?,?> e:map.entrySet())
+            if(e.getKey() instanceof String k&&e.getValue() instanceof Number n)
+                relationships.put(k,Math.max(-100,Math.min(100,n.intValue())));
+        int next=Math.max(-100,Math.min(100,relationship(otherId)+delta));
+        relationships.put(otherId,next);storage.put("social.relationships",relationships);
+        return next;
+    }
 
     /** Store a semantic record such as an open promise, request or grievance. */
     public void putRecord(String category,String id,Map<String,Object> value){
