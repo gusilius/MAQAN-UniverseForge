@@ -172,6 +172,10 @@ public class SettleTest {
         follower.manualFollow = true;
         follower.manualFollowOwner = "player-uuid";
         follower.building = 0;
+        following.auto = true;
+        following.tick(1);
+        ok(follower.manualFollow && follower.building == 0,
+                "automatic staffing does not steal a resident following the player");
         Settlement followingBack = Settlement.fromJson(following.toJson(), d);
         Worker restoredFollower = followingBack.worker(follower.id);
         ok(restoredFollower.manualFollow && restoredFollower.manualFollowOwner.equals("player-uuid"),
