@@ -250,5 +250,11 @@
     "name": "Солевар",
     "category": "specialist",
     "required_skills": {}
+  },
+  {
+    "id": "brewer",
+    "name": "Пивовар",
+    "category": "specialist",
+    "required_skills": {}
   }
 ]
