@@ -640,7 +640,7 @@ public class SettleMod {
         String realmId = realmOf(colony);
         if (realmId == null || realmId.isBlank()) return;
         Settlement settlement = colony.s;
-        String source = "settlement:" + settlement.id;
+        String source = settlement.ledgerAccountId(Defs.SILVER);
         String target = "realm:" + realmId;
         TreasuryLedger ledger = WorldForgeMod.treasury();
         settlement.amount(Defs.SILVER); // ensures/migrates the settlement account
