@@ -27,7 +27,7 @@ public final class Defs {
     }
 
     public static final class Building {
-        public final String id, name, blueprint;
+        public final String id, name, blueprint;\n        public String description = "";\n        public final Map<String, Double> effects = new LinkedHashMap<>();
         public final Map<String, Integer> cost = new LinkedHashMap<>(), storage = new LinkedHashMap<>(), jobs = new LinkedHashMap<>(), in = new LinkedHashMap<>(), out = new LinkedHashMap<>();
         public final List<String> requires = new ArrayList<>();
         /** Раздел меню стройки: один из {@link Defs#CATEGORIES}. */
@@ -119,7 +119,7 @@ public final class Defs {
                     b.cycle = r.get("cycle") instanceof Number n ? n.doubleValue() : 0;
                 }
                 if (m.get("requires") instanceof List) for (Object o : (List<Object>) m.get("requires")) b.requires.add(String.valueOf(o));
-                if (m.get("category") != null) b.category = String.valueOf(m.get("category"));
+                if (m.get("category") != null) b.category = String.valueOf(m.get("category"));\n                if (m.get("description") != null) b.description = String.valueOf(m.get("description"));\n                if (m.get("effects") instanceof Map<?,?> effectMap) for (Map.Entry<?,?> effect : effectMap.entrySet()) {\n                    if (effect.getKey() instanceof String key && effect.getValue() instanceof Number value) b.effects.put(key, value.doubleValue());\n                }
                 if (m.get("work") instanceof Number n) b.work = n.doubleValue();
                 if (m.get("upkeep") instanceof Number n) b.upkeep = n.doubleValue();
                 if (m.get("trade") instanceof Number n) b.trade = n.intValue();
