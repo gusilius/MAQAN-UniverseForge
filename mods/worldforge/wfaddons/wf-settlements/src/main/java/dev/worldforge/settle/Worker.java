@@ -38,6 +38,7 @@ public final class Worker {
     /** Autonomous daily-life state temporarily suspends work without changing profession or job assignment. */
     public String lifeAction = "";
     public double lifeTargetX, lifeTargetZ;
+    public double lifeActionUntil;
 
     Worker(int id, String name) { this.id = id; this.name = name; }
 }
