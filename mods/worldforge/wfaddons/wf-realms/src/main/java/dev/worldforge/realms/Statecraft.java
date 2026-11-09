@@ -374,8 +374,7 @@ public final class Statecraft {
 
     public boolean borrowForRealm(String realmId, double amount, String reference, long worldMinute) {
         treasury(realmId);
-        return WorldForgeMod.treasury().withdraw(treasuryAccountId(realmId), money(amount),
-                TreasuryLedger.Kind.LOAN, "sovereign-debt", reference, worldMinute, "realm credit draw");
+        return WorldForgeMod.treasury().borrow(treasuryAccountId(realmId), money(amount), worldMinute, reference);
     }
 
     public boolean accrueRealmInterest(String realmId, double rate, long worldMinute) {
