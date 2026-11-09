@@ -347,7 +347,7 @@ public final class ResidentInteraction {
     }
 
     private static String family(Character person) {
-        List<String> links = new java.util.ArrayList<>();
+        java.util.List<String> links = new java.util.ArrayList<>();
         if (person.spouse != null && !person.spouse.isBlank()) {
             Object spouseName = person.props.get("family.spouse_name");
             links.add("супруг: " + (spouseName instanceof String name ? name : person.spouse));
