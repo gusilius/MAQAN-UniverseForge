@@ -299,14 +299,19 @@ public class TroopsMod {
         if (binding == null) { troop.setCharacterId(previousId); return false; }
         Character person = binding.character();
         boolean workerDuty = PopulationSimulation.hasDuty(person, Duty.WORKER);
+        // Preserve the civilian profession for every recruit, not only current settlement workers.
+        // A specialist without a worker duty must also be able to return to their former life.
+        boolean hadSavedProfession = person.props.containsKey("population.pre_military_profession");
+        if (!hadSavedProfession) person.props.put("population.pre_military_profession",
+                PopulationSimulation.profession(person));
         if (workerDuty) {
             if (!ModList.get().isLoaded("wf_settle")
                     || !dev.worldforge.settle.mc.SettleMod.detachWorkerForMilitary(person.id)) {
                 binding.registry().unbindEntity(person.id, "troop", troop.getUUID().toString());
                 troop.characterId = previousId;
+                if (!hadSavedProfession) person.props.remove("population.pre_military_profession");
                 return false;
             }
-            person.props.put("population.pre_military_profession", PopulationSimulation.profession(person));
             binding.registry().setDuty(person.id, Duty.WORKER, false, PeopleMod.YEAR);
         }
         binding.registry().setDuty(person.id, Duty.SOLDIER, true, PeopleMod.YEAR);
