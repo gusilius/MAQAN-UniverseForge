@@ -29,6 +29,8 @@ public final class WorkspaceMapLayerRegistry {
     private static final Map<String, Layer> LAYERS = new ConcurrentHashMap<>();
     private static final Map<String, Boolean> VISIBILITY = new ConcurrentHashMap<>();
     private static final Map<String, Float> OPACITY = new ConcurrentHashMap<>();
+    private static final java.util.prefs.Preferences PREFS =
+            java.util.prefs.Preferences.userNodeForPackage(WorkspaceMapLayerRegistry.class).node("map-layers");
 
     private WorkspaceMapLayerRegistry() {}
 
@@ -38,8 +40,8 @@ public final class WorkspaceMapLayerRegistry {
         if (previous != null && !previous.providerId().equals(layer.providerId()))
             throw new IllegalArgumentException("Map layer id belongs to another provider: " + layer.id());
         if (previous != null) LAYERS.put(layer.id(), layer);
-        VISIBILITY.putIfAbsent(layer.id(), layer.defaultVisible());
-        OPACITY.putIfAbsent(layer.id(), layer.defaultOpacity());
+        VISIBILITY.putIfAbsent(layer.id(), PREFS.getBoolean("visible." + layer.id(), layer.defaultVisible()));
+        OPACITY.putIfAbsent(layer.id(), PREFS.getFloat("opacity." + layer.id(), layer.defaultOpacity()));
     }
 
     public static void unregister(String layerId) {
@@ -66,6 +68,11 @@ public final class WorkspaceMapLayerRegistry {
     public static void setVisible(String layerId, boolean visible) {
         if (!LAYERS.containsKey(layerId)) throw new IllegalArgumentException("Unknown map layer: " + layerId);
         VISIBILITY.put(layerId, visible);
+        try { PREFS.putBoolean("visible." + layerId, visible); PREFS.flush(); }
+        catch (java.util.prefs.BackingStoreException error) {
+            WorkspaceRuntime.publish(WorkspaceRuntime.Severity.WARNING, "platform", "map-layer",
+                    "Could not save map layer visibility", layerId, "");
+        }
     }
 
     public static float opacity(String layerId) {
@@ -78,6 +85,11 @@ public final class WorkspaceMapLayerRegistry {
         if (!Float.isFinite(opacity) || opacity < 0f || opacity > 1f)
             throw new IllegalArgumentException("Layer opacity must be between 0 and 1");
         OPACITY.put(layerId, opacity);
+        try { PREFS.putFloat("opacity." + layerId, opacity); PREFS.flush(); }
+        catch (java.util.prefs.BackingStoreException error) {
+            WorkspaceRuntime.publish(WorkspaceRuntime.Severity.WARNING, "platform", "map-layer",
+                    "Could not save map layer opacity", layerId, "");
+        }
     }
 
     public static void render(GuiGraphics graphics, int x, int y, int width, int height) {
