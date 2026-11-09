@@ -23,7 +23,13 @@ public final class CameraRig {
 
     public void setView(View v) { view = v; pitch = v.pitch; zoom = v.zoom; }
 
-    public void cycle() { setView(View.values()[(view.ordinal() + 1) % View.values().length]); }
+    public void cycle() {
+        setView(switch (view) {
+            case SKY -> View.TACTICS;
+            case TACTICS -> View.FREE;
+            case FREE -> View.SKY;
+        });
+    }
 
     /** Сдвиг по экрану: forward/right в [-1,1]; скорость растёт с высотой, чтобы на большом приближении не ползти. */
     public void pan(double forward, double right, double dt, boolean fast) {
