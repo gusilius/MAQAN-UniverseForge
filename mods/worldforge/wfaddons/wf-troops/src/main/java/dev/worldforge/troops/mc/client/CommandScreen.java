@@ -313,6 +313,10 @@ public final class CommandScreen extends Screen {
         if (key == GLFW.GLFW_KEY_B) { toggleBuild(); return true; }
         if (key == GLFW.GLFW_KEY_HOME) { CommandMode.RIG.focusOn(minecraft.player.getX(), minecraft.player.getZ()); return true; }
         if (key == GLFW.GLFW_KEY_SPACE) { focusSelection(); return true; }
+        if (ctrl && key == GLFW.GLFW_KEY_A) {
+            selectForce(hasShiftDown());
+            return true;
+        }
         if (key >= GLFW.GLFW_KEY_1 && key <= GLFW.GLFW_KEY_9) {
             int n = key - GLFW.GLFW_KEY_0;
             if (ctrl) {
@@ -361,6 +365,42 @@ public final class CommandScreen extends Screen {
 
     @Override public boolean keyReleased(int key, int scan, int mods) { return true; }
     @Override public boolean charTyped(char c, int mods) { return true; }
+
+    /** Ctrl+A selects every controllable body; Ctrl+Shift+A selects the selected army or settlement population. */
+    private void selectForce(boolean currentGroupOnly) {
+        if (minecraft.level == null) return;
+        net.minecraft.world.entity.Entity anchor = null;
+        if (currentGroupOnly) {
+            for (String selected : CommandMode.selected()) {
+                for (net.minecraft.world.entity.Entity entity : minecraft.level.entitiesForRendering()) {
+                    if (entity.getUUID().toString().equals(selected)) { anchor = entity; break; }
+                }
+                if (anchor != null) break;
+            }
+        }
+        List<String> ids = new ArrayList<>();
+        int armyId = anchor instanceof TroopEntity troop ? troop.armyId : 0;
+        String squadId = anchor instanceof TroopEntity troop ? troop.squadId() : "";
+        String colonyId = anchor instanceof LivingEntity living && CommandMode.isWorkerEntity(living)
+                ? CommandMode.workerString(living, "syncedColonyId") : "";
+        for (net.minecraft.world.entity.Entity entity : minecraft.level.entitiesForRendering()) {
+            if (!(entity instanceof LivingEntity living) || !living.isAlive() || !CommandMode.selectable(minecraft, living)) continue;
+            if (currentGroupOnly && anchor instanceof TroopEntity) {
+                if (!(living instanceof TroopEntity troop)) continue;
+                if (armyId > 0 ? troop.armyId != armyId : !squadId.equals(troop.squadId())) continue;
+            } else if (currentGroupOnly && anchor instanceof LivingEntity selectedWorker
+                    && CommandMode.isWorkerEntity(selectedWorker)) {
+                if (!CommandMode.isWorkerEntity(living)
+                        || !colonyId.equals(CommandMode.workerString(living, "syncedColonyId"))) continue;
+            }
+            ids.add(entity.getUUID().toString());
+            if (ids.size() >= 200) break;
+        }
+        CommandMode.SEL.set(ids);
+        focusSelection();
+        if (minecraft.player != null) minecraft.player.displayClientMessage(Component.literal(
+                currentGroupOnly ? "Выделена армия/поселение: " + ids.size() : "Все подконтрольные: " + ids.size()), true);
+    }
 
     private void focusSelection() {
         double sx = 0, sz = 0;
