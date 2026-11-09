@@ -55,8 +55,8 @@ public final class CityTax {
             double take = Math.min(due, Math.max(0, s.amount(Defs.SILVER) - reserve(s)));
             if (take <= 0) { s.taxCollected = 0; continue; }
             double gold = take / SILVER_PER_GOLD;
-            if (!TreasuryApi.remitSettlement(s.id, realm, take, LABEL_TAX)) continue;
-            s.stock.put(Defs.SILVER, TreasuryService.current().balance("settlement:" + s.id));
+            if (!TreasuryApi.remitSettlement(s.ledgerAccountId(Defs.SILVER), realm, take, LABEL_TAX)) continue;
+            s.stock.put(Defs.SILVER, TreasuryService.current().balance(s.ledgerAccountId(Defs.SILVER)));
             s.taxCollected = 0;
             s.remittedSilver += take;
             Stat st = stat(realm);
@@ -71,7 +71,7 @@ public final class CityTax {
         if (gold <= 0 || !Double.isFinite(gold)) { lastError = "Нужна положительная сумма."; return false; }
         double silver = gold * SILVER_PER_GOLD;
         s.amount(Defs.SILVER); // ensure the destination account exists before the atomic transfer
-        if (!TreasuryApi.grantSettlement(realm, s.id, silver, LABEL_GRANT)) {
+        if (!TreasuryApi.grantSettlement(realm, s.ledgerAccountId(Defs.SILVER), silver, LABEL_GRANT)) {
             lastError = "В казне нет столько золота (" + Math.round(TreasuryApi.balance(realm)) + ").";
             return false;
         }
