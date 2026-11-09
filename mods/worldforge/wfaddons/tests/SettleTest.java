@@ -35,6 +35,13 @@ public class SettleTest {
         ok(d.validate().stream().noneMatch(m -> !m.startsWith("Предупреждение")), "набор данных без ошибок: " + d.validate());
         ok(d.professions.containsKey("trainer") && d.buildings.get("barracks").jobs.getOrDefault("trainer", 0) == 1,
                 "казармы требуют рабочего-инструктора");
+        Worker roleProbe = fresh(d, 1).workers.get(0);
+        ok(roleProbe.generalist() && roleProbe.canPerform("lumberjack") && roleProbe.canPerform("builder")
+                        && roleProbe.productivity("lumberjack") == 1.0,
+                "общий рабочий универсален, но работает без профессионального бонуса");
+        roleProbe.profession = "lumberjack";
+        ok(!roleProbe.canPerform("builder") && roleProbe.productivity("lumberjack") > 1.0,
+                "дровосек не подменяет профессию строителем и добывает быстрее");
         ok(d.buildings.get("archery_range") != null && d.buildings.get("stable") != null
                 && d.buildings.get("siege_workshop") != null,
                 "стрельбище, конюшня и осадная мастерская загружаются из датапака");
@@ -92,7 +99,10 @@ public class SettleTest {
         Building lc = s.place("lumber_camp", 10, 0);
         s.tick(60);
         ok(lc.state == Building.State.DONE, "лагерь построен");
-        ok(s.assigned(lc.uid).size() == 3 && s.assigned(lc.uid).stream().allMatch(w -> w.profession.equals("lumberjack")), "свободные работники сами стали дровосеками");
+        ok(s.assigned(lc.uid).size() == 3
+                        && s.assigned(lc.uid).stream().allMatch(w -> w.profession.equals("laborer")
+                        && w.assignedProfession.equals("lumberjack")),
+                "общие рабочие назначаются на добычу, не теряя постоянную профессию");
         double w0 = s.amount("wood");
         s.tick(120);
         ok(s.amount("wood") > w0, "дерево добывается");
