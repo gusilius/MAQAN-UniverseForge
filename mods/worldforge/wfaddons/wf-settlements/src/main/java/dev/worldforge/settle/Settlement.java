@@ -39,6 +39,8 @@ public final class Settlement {
     }
 
     public final String id;
+    /** Dimension/world namespace prevents settlement IDs from colliding across maps. */
+    private String ledgerScope = "";
     public String name;
     public final Defs defs;
     public final Map<String, Double> stock = new TreeMap<>();
@@ -122,6 +124,10 @@ public final class Settlement {
 
     public Settlement(String id, String name, Defs defs) { this.id = id; this.name = name; this.defs = defs; }
 
+    public void setLedgerScope(String scope) { ledgerScope = scope == null ? "" : scope.trim(); }
+    public String ledgerOwnerId() { return ledgerScope.isBlank() ? id : ledgerScope + ":" + id; }
+    public String ledgerAccountId(String resource) { return accountId(resource); }
+
     // ------------------------------------------------------------------ склад
 
     public double capacity(String res) {
@@ -132,6 +138,11 @@ public final class Settlement {
     }
 
     private String accountId(String resource) {
+        String owner = ledgerOwnerId();
+        return Defs.SILVER.equals(resource) ? "settlement:" + owner : "stock:" + owner + ":" + resource;
+    }
+
+    private String legacyAccountId(String resource) {
         return Defs.SILVER.equals(resource) ? "settlement:" + id : "stock:" + id + ":" + resource;
     }
 
@@ -140,7 +151,17 @@ public final class Settlement {
         TreasuryLedger ledger = TreasuryService.current();
         String accountId = accountId(resource);
         TreasuryLedger.Account account = ledger.account(accountId);
-        if (account == null) account = ledger.open(accountId, id, resource, stock.getOrDefault(resource, 0.0));
+        if (account == null && !ledgerScope.isBlank()) {
+            TreasuryLedger.Account legacy = ledger.account(legacyAccountId(resource));
+            account = ledger.open(accountId, ledgerOwnerId(), resource, 0);
+            if (legacy != null && legacy.balance > 0) {
+                ledger.transfer(legacy.id, accountId, legacy.balance, TreasuryLedger.Kind.TRANSFER_IN,
+                        "settlement-scope-migration", id + ":" + resource,
+                        Math.max(0, (long) Math.floor(time / 60.0)), "migrate legacy unscoped settlement account");
+            } else if (legacy == null) {
+                account = ledger.open(accountId, ledgerOwnerId(), resource, stock.getOrDefault(resource, 0.0));
+            }
+        } else if (account == null) account = ledger.open(accountId, ledgerOwnerId(), resource, stock.getOrDefault(resource, 0.0));
         return account;
     }
 
@@ -1151,13 +1172,17 @@ public final class Settlement {
         return Json.write(root);
     }
 
+    public static Settlement fromJson(String json, Defs defs) { return fromJson(json, defs, null); }
+
     @SuppressWarnings("unchecked")
-    public static Settlement fromJson(String json, Defs defs) {
+    public static Settlement fromJson(String json, Defs defs, String scope) {
         Map<String, Object> root = (Map<String, Object>) Json.parse(json);
         String format = root.get("format") instanceof String f ? f : "";
         if (!"wf-settlement/1".equals(format) && !"wf-settlement/2".equals(format))
             throw new IllegalArgumentException("Неверный формат поселения: " + format);
         Settlement s = new Settlement((String) root.get("id"), (String) root.get("name"), defs);
+        Object savedScope = root.get("ledger_scope");
+        s.setLedgerScope(scope != null && !scope.isBlank() ? scope : savedScope instanceof String v ? v : "");
         s.time = ((Number) root.get("time")).doubleValue();
         s.auto = Boolean.TRUE.equals(root.get("auto"));
         s.nextBuilding = ((Number) root.get("next_building")).intValue();
