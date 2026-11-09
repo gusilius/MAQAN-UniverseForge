@@ -126,20 +126,27 @@ public class SettleTest {
                 "профильный дровосек добывает больше общего рабочего за одинаковое время");
 
         Settlement bufferTest = fresh(d, 3);
+        bufferTest.auto = false;
         Building bufferCamp = bufferTest.place("lumber_camp", 10, 0);
-        bufferTest.tick(60);
+        bufferTest.tick(2);
+        bufferTest.assign(bufferTest.workers.get(0).id, bufferCamp.uid);
+        bufferTest.tick(30);
+        for (Worker worker : bufferTest.workers) bufferTest.assign(worker.id, bufferCamp.uid);
         double storedBeforeHaul = bufferTest.amount("wood");
         bufferTest.tick(120);
         double localWood = bufferCamp.localStock.getOrDefault("wood", 0.0);
         ok(localWood > 0 && bufferTest.amount("wood") == storedBeforeHaul,
                 "добытое дерево остаётся в буфере лесопилки, пока нет носильщика");
         Settlement bufferRestored = Settlement.fromJson(bufferTest.toJson(), d);
-        ok(bufferRestored.building(bufferCamp.uid).localStock.getOrDefault("wood", 0.0) == localWood,
-                "локальный склад производства сохраняется после перезапуска");
-        bufferTest.addWorker("Носильщик");
+        ok(bufferRestored.building(bufferCamp.uid).localStock.getOrDefault("wood", 0.0) == localWood
+                        && bufferRestored.taskGraph.count(ResidentTaskGraph.Stage.EXTRACTED) > 0,
+                "локальный склад и граф добычи сохраняются после перезапуска");
+        Worker newHauler = bufferTest.addWorker("Носильщик");
+        bufferTest.assignHauler(newHauler.id, bufferCamp.uid);
         bufferTest.tick(5);
         ok(bufferTest.amount("wood") > storedBeforeHaul
-                        && bufferTest.building(bufferCamp.uid).localStock.getOrDefault("wood", 0.0) < localWood,
+                        && bufferTest.building(bufferCamp.uid).localStock.getOrDefault("wood", 0.0) < localWood
+                        && bufferTest.taskGraph.count(ResidentTaskGraph.Stage.STORED) > 0,
                 "назначенный общий рабочий доставляет древесину из локального буфера в общий склад");
 
         // зависимости и лимиты
