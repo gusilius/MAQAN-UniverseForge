@@ -259,7 +259,14 @@ public class PeopleTest {
                         &&"settlement:oak".equals(solitary.props.get("estate.home")),
                 "death without heirs preserves all belongings as a recoverable estate at the recorded home");
         Character laterKin = journal.create("Поздний наследник", "", "", "m", 40);
-        journal.addChild(laterKin,solitary,"Потомок", "m", 41);
+        Character descendant = journal.addChild(laterKin,solitary,"Потомок", "m", 41);
+        ok(CharacterInventory.claimEstate(solitary,descendant)
+                        &&CharacterInventory.count(solitary,"minecraft:bread")==0
+                        &&CharacterInventory.count(descendant,"minecraft:bread")==4
+                        &&"inherited".equals(solitary.props.get("estate.status")),
+                "a later-registered descendant can claim the preserved home estate exactly once");
+        ok(!CharacterInventory.claimEstate(solitary,heir),
+                "estate cannot be claimed again after inheritance has been settled");
 
         // диалог с персонажем
         DialogueBridge.register();
