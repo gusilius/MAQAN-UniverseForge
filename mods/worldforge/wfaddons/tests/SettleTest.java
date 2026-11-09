@@ -187,11 +187,11 @@ public class SettleTest {
         Building f = m.place("farm", 0, 0);
         m.tick(5);
         Worker w1 = m.workers.get(0);
-        ok(throwsOrder(() -> m.assign(w1.id, f.uid)), "не-строитель не может строить");
-        m.setProfession(w1.id, "builder");
         m.assign(w1.id, f.uid);
+        ok(w1.profession.equals("laborer") && w1.workRole().equals("builder"),
+                "универсальный рабочий может строить без смены постоянной профессии");
         m.tick(40);
-        ok(f.state == Building.State.DONE, "один строитель достроил ферму (25 работы)");
+        ok(f.state == Building.State.DONE, "один универсальный строитель достроил ферму");
         Worker w2 = m.workers.get(1);
         m.assign(w2.id, f.uid);
         ok(w2.profession.equals("laborer") && w2.workRole().equals("farmer"),
