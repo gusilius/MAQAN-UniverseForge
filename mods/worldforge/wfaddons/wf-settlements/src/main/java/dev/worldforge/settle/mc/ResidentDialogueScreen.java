@@ -8,7 +8,7 @@ import net.minecraft.world.entity.player.Inventory;
 
 /** Dedicated, keyboard/mouse accessible resident conversation workspace. */
 public final class ResidentDialogueScreen extends AbstractContainerScreen<ResidentDialogueMenu> {
-    private static final int PANEL_W = 430, PANEL_H = 380;
+    private static final int PANEL_W = 430, PANEL_H = 400;
 
     public ResidentDialogueScreen(ResidentDialogueMenu menu, Inventory inventory, Component title) {
         super(menu, inventory, title);
