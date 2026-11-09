@@ -1228,6 +1228,7 @@ public final class Settlement {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", w.id); m.put("name", w.name); m.put("profession", w.profession); m.put("assigned_profession", w.assignedProfession); m.put("person", w.person); m.put("building", w.building); m.put("status", w.status); m.put("x", w.x); m.put("z", w.z);
             m.put("life_action", w.lifeAction); m.put("life_target_x", w.lifeTargetX); m.put("life_target_z", w.lifeTargetZ);
+            m.put("life_action_until", w.lifeActionUntil);
             m.put("manual_order", w.manualOrder); m.put("manual_follow", w.manualFollow); m.put("manual_follow_owner", w.manualFollowOwner); m.put("order_x", w.orderX); m.put("order_z", w.orderZ);
             List<Object> queuedOrders=new ArrayList<>();
             for(Worker.ManualOrder order:w.orderQueue)queuedOrders.add(Map.of("x",order.x(),"z",order.z()));
@@ -1304,6 +1305,7 @@ public final class Settlement {
             w.lifeAction = m.get("life_action") instanceof String la ? la : "";
             if (m.get("life_target_x") instanceof Number lx) w.lifeTargetX = lx.doubleValue();
             if (m.get("life_target_z") instanceof Number lz) w.lifeTargetZ = lz.doubleValue();
+            if (m.get("life_action_until") instanceof Number lu && Double.isFinite(lu.doubleValue())) w.lifeActionUntil = lu.doubleValue();
             if (!Set.of("", "sleeping", "fleeing", "socializing").contains(w.lifeAction)) w.lifeAction = "";
             w.manualOrder = Boolean.TRUE.equals(m.get("manual_order")); w.manualFollow = Boolean.TRUE.equals(m.get("manual_follow")); w.manualFollowOwner = m.get("manual_follow_owner") instanceof String fo ? fo : "";
             if (m.get("order_x") instanceof Number ox) w.orderX = ox.doubleValue();
