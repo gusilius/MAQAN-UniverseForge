@@ -3,6 +3,7 @@ package dev.worldforge.realms;
 import dev.worldforge.mod.Json;
 import dev.worldforge.mod.TitleData;
 import dev.worldforge.mod.WorldForgeMod;
+import dev.worldforge.mod.api.WorldForgeApi;
 import dev.worldforge.mod.economy.TreasuryLedger;
 
 import java.util.*;
@@ -354,7 +355,7 @@ public final class Statecraft {
         double effectiveRate = Math.max(0, Math.min(1, t.taxRate * (1 + lawPct / 100.0)));
         double gross = base * effectiveRate * days;
         TreasuryLedger ledger = WorldForgeMod.treasury();
-        long minute = 0;
+        long minute = Math.max(0, WorldForgeApi.clock().dayNumber()) * 1440L;
         if (gross > 0 && !ledger.deposit(treasuryAccountId(realmId), gross, TreasuryLedger.Kind.TAX,
                 "taxation", "tax:" + realmId + ":" + t.taxDays, minute, "realm tax collection"))
             throw new IllegalStateException(ledger.lastError());
