@@ -163,7 +163,9 @@ public class RtsTest {
         r = CommandCard.execute(c2.byId("fill"), s2, t2);
         ok(r.ok && r.commands.stream().filter(x -> x.contains(" assign ")).count() == 4, "назначить рабочих: 4 места - 4 приказа: " + r.commands);
         apply(t2, null, r);
-        ok(t2.assigned(f.uid).size() == 4 && t2.assigned(f.uid).stream().allMatch(w -> w.profession.equals("farmer")), "laborers переучились и встали на ферму");
+        ok(t2.assigned(f.uid).size() == 4
+                        && t2.assigned(f.uid).stream().allMatch(w -> w.profession.equals("laborer") && w.workRole().equals("farmer")),
+                "RTS назначает универсальных рабочих на ферму, сохраняя их постоянную профессию");
         c2 = CommandCard.menu(CommandCard.ROOT, s2, t2);
         ok(!c2.byId("fill").enabled, "мест нет: назначить недоступно");
 
