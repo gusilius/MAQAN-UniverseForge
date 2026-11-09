@@ -507,7 +507,6 @@ public final class Settlement {
         String role = availableRole(w, b);
         if (role.isEmpty()) throw new OrderException(w.name + " (" + defs.professionName(w.profession)
                 + ") не подходит для этой работы или нет свободных мест в " + b.def.name);
-        if (role.isEmpty()) throw new OrderException(w.name + " не подходит для этой работы или нет свободных мест");
         w.assignedProfession = role;
         w.lifeAction = "";
         w.building = uid;
