@@ -55,6 +55,8 @@ public final class ResidentLifeEvents {
                 if (mutualDating && affinity < 20) {
                     first.props.remove("family.dating");
                     second.props.remove("family.dating");
+                    first.props.remove("family.dating_name");
+                    second.props.remove("family.dating_name");
                     first.props.put("family.last_event", "separated:" + second.id);
                     second.props.put("family.last_event", "separated:" + first.id);
                     continue;
@@ -65,6 +67,8 @@ public final class ResidentLifeEvents {
                         && Math.floorMod(Objects.hash(first.id, second.id, year, "dating"), 3) == 0) {
                     first.props.put("family.dating", second.id);
                     second.props.put("family.dating", first.id);
+                    first.props.put("family.dating_name", second.name);
+                    second.props.put("family.dating_name", first.name);
                     first.props.put("family.last_event", "dating:" + second.id);
                     second.props.put("family.last_event", "dating:" + first.id);
                     mutualDating = true;
@@ -75,6 +79,8 @@ public final class ResidentLifeEvents {
                     registry.marry(first.id, second.id, year);
                     first.props.remove("family.dating");
                     second.props.remove("family.dating");
+                    first.props.remove("family.dating_name");
+                    second.props.remove("family.dating_name");
                     first.props.put("family.last_event", "married:" + second.id);
                     second.props.put("family.last_event", "married:" + first.id);
                 } catch (RuntimeException ignored) {
