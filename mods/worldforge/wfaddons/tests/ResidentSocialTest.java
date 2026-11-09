@@ -36,6 +36,19 @@ public final class ResidentSocialTest {
         catch (IllegalArgumentException expected) { invalidTargetRejected = true; }
         check(invalidTargetRejected, "empty relationship target is rejected");
 
+        Character kind = registry.create("Kind", "", "north", "m", 1);
+        Character aggressive = registry.create("Rival", "", "south", "m", 1);
+        kind.traits.add("kind");
+        aggressive.traits.add("aggressive");
+        check(ResidentSocial.interactionDelta(kind, resident) > 0,
+                "kind personalities improve the outcome of social encounters");
+        check(ResidentSocial.interactionDelta(aggressive, resident) < 0,
+                "aggressive personalities and cultural difference can create rivalry");
+        check(ResidentSocial.socialize(aggressive, resident,
+                        ResidentSocial.interactionDelta(aggressive, resident)) < 0
+                        && ResidentSocial.score(resident, aggressive.id) < 0,
+                "negative resident encounters create reciprocal rivalry/enmity");
+
         System.out.println("ResidentSocialTest: " + (failures == 0 ? "OK" : failures + " failure(s)"));
         if (failures > 0) throw new AssertionError("ResidentSocialTest failed: " + failures);
     }
