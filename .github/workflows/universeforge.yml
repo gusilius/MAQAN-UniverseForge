@@ -19,6 +19,11 @@ on:
       - "mods/**"
       - "shared/**"
       - "platform/**"
+      - "build.gradle"
+      - "settings.gradle"
+      - "gradle.properties"
+      - "gradle/**"
+      - "mods/worldforge/wfaddons/tools/**"
       - ".github/workflows/**"
   workflow_dispatch:
 
