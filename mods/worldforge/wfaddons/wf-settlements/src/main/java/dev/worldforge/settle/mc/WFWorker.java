@@ -235,7 +235,9 @@ public class WFWorker extends PathfinderMob {
                         : w.getBlockY();
                 target = new BlockPos(tx, ty, tz);
             } else if (b != null) {
-                target = c.workPoint(w.level(), b);
+                target = b.state == Building.State.BUILDING || b.status.startsWith("строится: укладка")
+                        ? BuildingSite.builderWorkPoint((net.minecraft.server.level.ServerLevel) w.level(), c, b, w)
+                        : c.workPoint(w.level(), b);
                 working = b.state == Building.State.BUILDING || b.status.startsWith("строится: укладка");
             } else {
                 if (idle == null || --idleTimer <= 0) {
@@ -245,7 +247,7 @@ public class WFWorker extends PathfinderMob {
                 }
                 target = idle;
             }
-            double targetFeetY = area != null ? target.getY() : w.getY();
+            double targetFeetY = target.getY();
             boolean arrived = w.distanceToSqr(target.getX() + 0.5, targetFeetY, target.getZ() + 0.5) < 6.25;
             if (!arrived && --repath <= 0) {
                 repath = 10;
