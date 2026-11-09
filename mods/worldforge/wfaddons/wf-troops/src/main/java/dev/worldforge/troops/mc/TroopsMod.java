@@ -332,6 +332,10 @@ public class TroopsMod {
         person.props.remove("wf_army_id");
         person.props.remove("wf_combat_xp");
         person.props.remove("wf_veteran_rank");
+        person.props.remove("wf_unit_kind");
+        Object lastMorale = person.props.remove("military.morale");
+        if (lastMorale instanceof Number n)
+            person.props.put("military.last_service_morale", Math.max(0, Math.min(100, n.intValue())));
         LIVE.remove(troop.getUUID().toString());
         SQUADS.remove(troop.getUUID().toString());
         troop.discard();
