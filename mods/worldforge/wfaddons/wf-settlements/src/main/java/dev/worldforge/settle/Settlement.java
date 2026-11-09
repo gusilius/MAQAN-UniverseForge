@@ -781,7 +781,8 @@ public final class Settlement {
             if (source == null || source.localStock.isEmpty()) {
                 worker.building = 0;
                 worker.assignedProfession = "";
-                worker.status = "свободен";
+                if (!worker.manualOrder && !worker.manualFollow && worker.lifeAction.isBlank())
+                    worker.status = "свободен";
             }
         }
         for (Building source : byPriority(b -> b.state == Building.State.DONE && !b.localStock.isEmpty())) {
