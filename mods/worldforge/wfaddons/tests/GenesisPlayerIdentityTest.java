@@ -37,6 +37,12 @@ public final class GenesisPlayerIdentityTest {
                 "Genesis resolves the existing player Character in a map partition");
         check(PlayerCharacterBinding.resolveExisting(playerUuid, player.globalId, authority, List.of(map), players) == player,
                 "player UUID and saved global Character UUID resolve to the same person");
+        String newPlayerUuid = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+        Character newPlayer = PlayerCharacterBinding.resolveOrCreate(newPlayerUuid, "", authority,
+                List.of(map), players, "NewPlayer", "human", "f", 90);
+        check(authority.registryForGlobal(newPlayer.globalId) == players
+                        && newPlayerUuid.equals(newPlayer.props.get("genesis.player_uuid")),
+                "new Genesis players are created in the dedicated world-wide player partition");
 
         CharacterRegistry restoredPlayers = new CharacterRegistry();
         Character persistedPlayer = players.create("PersistentPlayer", "", "human", "f", 81);
