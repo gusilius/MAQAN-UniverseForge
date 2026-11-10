@@ -85,6 +85,17 @@ public final class ActionExecutionTest {
                 "duplicate original request remains idempotent after execution was replanned");
 
         int[] protectedExecutions = {0};
+        boolean invalidPlanRejected = false;
+        try {
+            new ActionExecutionService.Plan("settlement.build", "alternate", java.util.Collections.nCopies(65, "x"), "too many arguments");
+        } catch (IllegalArgumentException expected) { invalidPlanRejected = true; }
+        check(invalidPlanRejected, "replanner cannot create a plan exceeding the request argument limit");
+        boolean invalidReasonRejected = false;
+        try {
+            new ActionExecutionService.Plan("settlement.build", "alternate", List.of("bridge"), "x".repeat(1025));
+        } catch (IllegalArgumentException expected) { invalidReasonRejected = true; }
+        check(invalidReasonRejected, "replanner reason is bounded before it can enter task execution");
+
         ActionExecutionService.Task replannedDenied = service.execute(new ActionExecutionService.Request(
                 "request-replan-denied", "settlement.build", "player-1", "settlement-4", List.of("bridge"), 106),
                 r -> r.targetId().equals("forbidden-alternative") ? "alternative is not authorized" : null,
