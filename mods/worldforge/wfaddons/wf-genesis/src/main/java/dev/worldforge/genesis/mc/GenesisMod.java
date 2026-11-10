@@ -299,13 +299,22 @@ public class GenesisMod {
         og.resetRace(o);
         Origins.Build b = og.build(o);
         b.prof.clear(); b.history.clear(); b.cls = "";
-        og.setRace(o, d.race);
-        // очки прокачки
+        if (!og.setRace(o, d.race)) {
+            throw new IllegalStateException("Не удалось применить расу " + d.race + ": " + og.lastError);
+        }
+        // Очки прокачки применяются строго: Genesis не может подтвердить частично собранный профиль.
         var pg = ProgressMod.PROGRESS;
         Profile pr = pg.profile(o);
         pr.attrs.clear(); pr.skills.clear(); pr.nodes.clear(); pr.archetype = "";
         pr.attrFree = GENESIS.budget(d);
-        for (var e : d.attrs.entrySet()) if (e.getValue() > 0) pg.addAttr(o, e.getKey(), e.getValue());
+        for (var e : d.attrs.entrySet()) {
+            if (e.getValue() > 0 && !pg.addAttr(o, e.getKey(), e.getValue())) {
+                throw new IllegalStateException("Не удалось применить атрибут " + e.getKey() + ": " + pg.lastError);
+            }
+            if (pr.attr(e.getKey()) != e.getValue()) {
+                throw new IllegalStateException("Атрибут " + e.getKey() + " применён не полностью");
+            }
+        }
         pr.skillFree = GENESIS.skillBudget(d);
         Map<String, Integer> want = new LinkedHashMap<>(d.skills);
         for (int guard = 0; guard < 200 && !want.isEmpty(); guard++) {
@@ -317,12 +326,30 @@ public class GenesisMod {
             }
             if (!any) break;
         }
-        // профессии и класс
-        for (String p : d.profs) {
-            if (!og.learn(o, p)) LOGGER.warn("wf_genesis: профессия {} не освоена: {}", p, og.lastError);
-            else if (st != null && st.profXp() > 0) og.work(o, p, st.profXp());
+        for (var e : want.entrySet()) {
+            if (pr.skill(e.getKey()) < e.getValue()) {
+                throw new IllegalStateException("Не удалось полностью применить навык " + e.getKey()
+                        + ": " + pg.canSkill(o, e.getKey()));
+            }
         }
-        if (!d.cls.isEmpty() && !og.chooseClass(o, d.cls)) LOGGER.warn("wf_genesis: класс {} не выбран: {}", d.cls, og.lastError);
+        // Профессии и класс обязательны: ошибка должна остановить подтверждение.
+        for (String p : d.profs) {
+            if (!og.learn(o, p)) {
+                throw new IllegalStateException("Не удалось применить профессию " + p + ": " + og.lastError);
+            }
+            if (st != null && st.profXp() > 0) og.work(o, p, st.profXp());
+            if (!og.build(o).prof.containsKey(p)) {
+                throw new IllegalStateException("Профессия " + p + " не сохранилась в профиле Origins");
+            }
+        }
+        if (!d.cls.isEmpty()) {
+            if (!og.chooseClass(o, d.cls)) {
+                throw new IllegalStateException("Не удалось применить класс " + d.cls + ": " + og.lastError);
+            }
+            if (!d.cls.equals(og.build(o).cls)) {
+                throw new IllegalStateException("Класс " + d.cls + " не сохранился в профиле Origins");
+            }
+        }
         person.props.put("genesis.race", d.race);
         person.props.put("genesis.start", d.start);
         person.props.put("genesis.class", d.cls);
