@@ -63,7 +63,15 @@ public final class Settlement {
     private double growTimer, starveTimer, leaveTimer;
 
     // ---- времена года и набеги
-    public static final double SEASON_LEN = 600;                    // секунд поселения на одно время года
+    public static final double SEASON_LEN = 5475;                   // 91.25 world days at 60 simulation seconds/day
+    private long externalWorldMinute = -1;
+    private int externalWorldYear = -1;
+    public void setWorldCalendar(long worldMinute, int worldYear) {
+        if (worldMinute < 0 || worldYear < 1) throw new IllegalArgumentException("invalid world calendar");
+        externalWorldMinute = worldMinute;
+        externalWorldYear = worldYear;
+    }
+    public long worldMinute() { return externalWorldMinute >= 0 ? externalWorldMinute : Math.max(0L, (long) Math.floor(time * 24.0)); }
     public static final String[] SEASONS = {"Весна", "Лето", "Осень", "Зима"};
     public static final double[] FARM_MULT = {1.0, 1.25, 1.5, 0.2};   // выход зданий без сырья в категории «food»
     public static final double RAID_FIRST = 1500, RAID_EVERY = 900, RAID_WARN = 90, RAID_MIN_PEOPLE = 8;
@@ -71,9 +79,21 @@ public final class Settlement {
     public boolean raidIncoming;
     public int raidsRepelled, raidsLost;
     public boolean raids = true;
-    public int seasonIndex() { return (int) (time / SEASON_LEN) % 4; }
-    public int year() { return (int) (time / (SEASON_LEN * 4)) + 1; }
-    public double seasonProgress() { return (time % SEASON_LEN) / SEASON_LEN; }
+    public int seasonIndex() {
+        if (externalWorldMinute >= 0) return (int) ((externalWorldMinute / 1440L / 91L) % 4L);
+        return (int) (time / SEASON_LEN) % 4;
+    }
+    public int year() {
+        if (externalWorldYear >= 0) return externalWorldYear;
+        return (int) (time / (SEASON_LEN * 4)) + 1;
+    }
+    public double seasonProgress() {
+        if (externalWorldMinute >= 0) {
+            long day = externalWorldMinute / 1440L;
+            return (day % 91L + (externalWorldMinute % 1440L) / 1440.0) / 91.0;
+        }
+        return (time % SEASON_LEN) / SEASON_LEN;
+    }
     public String seasonName() { return SEASONS[seasonIndex()]; }
     public double seasonMult(Building b) { return b.def.category.equals("food") && b.def.in.isEmpty() ? FARM_MULT[seasonIndex()] : 1.0; }
     /** Богатство, привлекающее налётчиков: запасы и построенное. */
@@ -160,7 +180,7 @@ public final class Settlement {
             if (legacy != null && legacy.balance > 0) {
                 ledger.transfer(legacy.id, accountId, legacy.balance, TreasuryLedger.Kind.TRANSFER_IN,
                         "settlement-scope-migration", id + ":" + resource,
-                        Math.max(0, (long) Math.floor(time / 60.0)), "migrate legacy unscoped settlement account");
+                        Math.max(0, (long) worldMinute()), "migrate legacy unscoped settlement account");
             } else if (legacy == null) {
                 account = ledger.open(accountId, ledgerOwnerId(), resource, stock.getOrDefault(resource, 0.0));
             }
@@ -1371,6 +1391,7 @@ public final class Settlement {
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("format", "wf-settlement/2");
         root.put("schema_version", 2);
+        root.put("time_scale_version", 2);
         root.put("id", id); root.put("name", name); root.put("ledger_scope", ledgerScope); root.put("time", time); root.put("auto", auto);
         root.put("next_building", nextBuilding); root.put("next_worker", nextWorker); root.put("grow", growTimer); root.put("starve", starveTimer); root.put("leave", leaveTimer);
         root.put("flow", flow.save());
@@ -1427,6 +1448,8 @@ public final class Settlement {
         Object savedScope = root.get("ledger_scope");
         s.setLedgerScope(scope != null && !scope.isBlank() ? scope : savedScope instanceof String v ? v : "");
         s.time = ((Number) root.get("time")).doubleValue();
+        int timeScaleVersion = root.get("time_scale_version") instanceof Number version ? version.intValue() : 1;
+        if (timeScaleVersion < 2) s.time *= (SEASON_LEN / 600.0);
         s.auto = Boolean.TRUE.equals(root.get("auto"));
         s.nextBuilding = ((Number) root.get("next_building")).intValue();
         s.nextWorker = ((Number) root.get("next_worker")).intValue();
