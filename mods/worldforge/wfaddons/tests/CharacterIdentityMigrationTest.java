@@ -41,6 +41,12 @@ public final class CharacterIdentityMigrationTest {
         check(migratedChild.father.equals(father.id) && migratedChild.mother.equals(mother.id)
                         && migratedFather.children.contains(child.id) && migratedMother.children.contains(child.id),
                 "family links remain intact through legacy identity migration");
+        check(migratedChild.props.get("family.father_global_id").equals(migratedFather.globalId)
+                        && migratedChild.props.get("family.mother_global_id").equals(migratedMother.globalId),
+                "parent links are upgraded to immutable global Character UUIDs");
+        check(migratedFather.props.get("family.spouse_global_id").equals(migratedMother.globalId)
+                        && ((java.util.List<?>) migratedFather.props.get("family.children_global_ids")).contains(migratedChild.globalId),
+                "spouse and descendant indexes use global Character UUIDs");
         check(migratedFather.spouse.equals(mother.id) && migratedMother.spouse.equals(father.id),
                 "marriage links remain intact through migration");
 
