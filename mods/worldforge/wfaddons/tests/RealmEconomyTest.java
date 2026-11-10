@@ -44,7 +44,7 @@ public class RealmEconomyTest {
         ok(eco.net(A) > before, "развитие повышает доход: " + before + " -> " + eco.net(A));
         ok(eco.developCost(b) > c1, "следующий уровень дороже");
         for (int i = 0; i < 10 && eco.level(b) < Economy.MAX_DEV; i++) { setGold(e, A, 1000.0); eco.develop(A, b); }
-        e.gold.put(A, 1000.0);
+        setGold(e, A, 1000.0);
         ok(eco.level(b) == Economy.MAX_DEV && fails(() -> eco.develop(A, b)), "предел развития " + Economy.MAX_DEV);
         int foreign = e.baroniesOf(B).get(0);
         ok(fails(() -> eco.develop(A, foreign)), "чужое баронство развивать нельзя");
