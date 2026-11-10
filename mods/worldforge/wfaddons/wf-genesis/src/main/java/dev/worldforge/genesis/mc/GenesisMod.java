@@ -288,7 +288,7 @@ public class GenesisMod {
         try {
             // Genesis uses the one shared durable action journal; it does not own a second executor.
             long worldMinute = WorldForgeApi.clock().worldMinute();
-            String requestId = "genesis:" + UUID.nameUUIDFromBytes((sp.getUUID() + "|" + GENESIS.viewJson(d)).getBytes(StandardCharsets.UTF_8));
+            String requestId = "genesis:" + sp.getUUID();
             ActionExecutionService.Request request = new ActionExecutionService.Request(
                     requestId, "genesis.confirm", "player:" + sp.getUUID(), sp.getUUID().toString(),
                     List.of(d.race, d.start, d.cls), worldMinute);
