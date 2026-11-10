@@ -39,6 +39,7 @@ public final class CharacterAuthorityTest {
         Character late = north.create("Late arrival", "", "", "m", 1);
         check(authority.getGlobal(late.globalId) == late,
                 "characters created after map registration are indexed without a second registration");
+
         CharacterRegistry reload = new CharacterRegistry();
         Character beforeReload = reload.create("Before reload", "", "", "m", 1);
         authority.registerMap("reload", reload);
@@ -48,6 +49,7 @@ public final class CharacterAuthorityTest {
         check(authority.getGlobal(beforeReload.globalId) == null
                         && authority.getGlobal(afterReload.globalId) == reload.get(afterReload.id),
                 "global identity index refreshes after a same-size registry replacement");
+
         CharacterRegistry players = new CharacterRegistry();
         Character player = players.create("PlayerOne", "", "human", "m", 80);
         player.props.put("genesis.player_uuid", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
@@ -61,17 +63,24 @@ public final class CharacterAuthorityTest {
                         && "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".equals(restoredPlayer.props.get("genesis.player_uuid"))
                         && authority.getGlobal(player.globalId) == restoredPlayer,
                 "Genesis player identity and player UUID survive registry restart without duplication");
+
+        CharacterRegistry duplicate = new CharacterRegistry();
+        Character clone = duplicate.create("Clone", "", "", "m", 0);
+        String duplicateSave = duplicate.toJson().replace(clone.globalId, a.globalId);
+        duplicate.fromJson(duplicateSave, world + "|duplicate");
         boolean duplicateRejected = false;
         try {
-            CharacterRegistry duplicate = new CharacterRegistry();
-            Character clone = duplicate.create("Clone", "", "", "m", 0);
-            // Build a duplicate global UUID through a persisted snapshot and verify authority rejects it.
-            String json = north.toJson().replace(a.globalId, clone.globalId);
-            duplicate.fromJson(json, "duplicate-test");
             authority.registerMap("duplicate", duplicate);
-        } catch (RuntimeException expected) { duplicateRejected = true; }
-        check(duplicateRejected && authority.getGlobal(a.globalId) == a,
-                "duplicate global UUID is rejected without corrupting the existing authority index");
+        } catch (IllegalStateException expected) {
+            duplicateRejected = expected.getMessage().contains("Global Character UUID collision");
+        }
+        check(duplicateRejected, "registration rejects a real duplicate global UUID from another map");
+        check(authority.getGlobal(a.globalId) == a
+                        && authority.getGlobal(late.globalId) == late
+                        && authority.size() == 5
+                        && authority.mapCount() == 5,
+                "failed map registration preserves every previously indexed Character and registry");
+
         authority.clear();
         check(authority.size() == 0 && authority.worldId() == null, "world shutdown clears authority index");
         if (failures > 0) throw new AssertionError(failures + " CharacterAuthority tests failed");
