@@ -4,6 +4,7 @@ import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.logging.LogUtils;
 import dev.worldforge.mod.Json;
+import dev.worldforge.mod.api.WorldForgeApi;
 import dev.worldforge.reputation.ReputationStore;
 import dev.worldforge.reputation.Standing;
 import net.minecraft.commands.CommandSourceStack;
