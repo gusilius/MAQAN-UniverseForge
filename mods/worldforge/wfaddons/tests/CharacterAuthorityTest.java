@@ -42,6 +42,15 @@ public final class CharacterAuthorityTest {
                 "one physical entity UUID cannot be attached to two Characters across map partitions");
         check(authority.bindEntity(b.globalId, "troop", "another-physical-entity"),
                 "a distinct physical body can bind to a different map-owned Character");
+        boolean registryAliasRejected = false;
+        try {
+            authority.registerMap("north-alias", north);
+        } catch (IllegalStateException expected) {
+            registryAliasRejected = expected.getMessage().contains("already registered as map north");
+        }
+        check(registryAliasRejected && authority.mapCount() == 2
+                        && authority.getGlobal(a.globalId) == a,
+                "one Character persistence partition cannot be aliased under two map IDs");
         Character late = north.create("Late arrival", "", "", "m", 1);
         check(authority.getGlobal(late.globalId) == late,
                 "characters created after map registration are indexed without a second registration");
