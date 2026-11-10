@@ -23,24 +23,46 @@ public final class PeopleProgressBridge {
     }
 
     public static Profile profile(Progress progress, Character character, String populationScopeId) {
+        return profile(progress, character, populationScopeId, loadedRegistries());
+    }
+
+    /** Explicit world-registry overload used by adapters that already hold a registry snapshot. */
+    public static Profile profile(Progress progress, Character character, String populationScopeId,
+                                  java.util.Collection<CharacterRegistry> worldRegistries) {
         Objects.requireNonNull(progress, "progress");
         Objects.requireNonNull(character, "character");
+        Objects.requireNonNull(worldRegistries, "worldRegistries");
         String owner = owner(character, populationScopeId);
         Profile profile = progress.profile(owner);
-        migrateLegacyProfile(progress, character, populationScopeId, profile);
+        migrateLegacyProfile(progress, character, populationScopeId, profile, worldRegistries);
         syncFromCharacter(character, profile);
         return profile;
+    }
+
+    private static java.util.Collection<CharacterRegistry> loadedRegistries() {
+        try {
+            Class<?> peopleMod = Class.forName("dev.worldforge.people.mc.PeopleMod");
+            Object raw = peopleMod.getMethod("registries").invoke(null);
+            if (!(raw instanceof Map<?, ?> registries)) return java.util.List.of();
+            java.util.List<CharacterRegistry> result = new java.util.ArrayList<>();
+            for (Object value : registries.values())
+                if (value instanceof CharacterRegistry registry) result.add(registry);
+            return result;
+        } catch (ReflectiveOperationException ex) {
+            return java.util.List.of();
+        }
     }
 
     /**
      * Move the former map-scoped key to the global Character UUID key.
      * The old unscoped n:cN format is migrated only when it resolves to exactly one loaded person.
      */
-    private static void migrateLegacyProfile(Progress progress, Character character, String scope, Profile target) {
+    private static void migrateLegacyProfile(Progress progress, Character character, String scope,
+                                              Profile target,
+                                              java.util.Collection<CharacterRegistry> worldRegistries) {
         if (!isFresh(target)) return;
 
-        // Same-scope legacy data is unambiguous: map scope + local cN uniquely identifies
-        // the old profile within this world's former per-map progression namespace.
+        // Same-scope legacy data is unambiguous: map scope + local cN identifies its old partition.
         String scopedOwner = PopulationSimulation.legacyProgressOwner(character, scope);
         Profile scopedLegacy = progress.peek(scopedOwner);
         if (scopedLegacy != null && scopedLegacy != target) {
@@ -49,11 +71,9 @@ public final class PeopleProgressBridge {
             return;
         }
 
-        // A character may have moved since its old profile was written. Search all old
-        // n:<scope>:<cN> keys only when cN is unique across the currently loaded maps.
-        // More than one candidate indicates duplicated/ambiguous legacy state: preserve
-        // every source profile rather than assigning one arbitrarily.
-        if (isUniqueCharacterId(character.id)) {
+        // A Character may have moved since its old profile was written. Search all old
+        // n:<scope>:<cN> keys only if cN resolves to one Character in the live world snapshot.
+        if (isUniqueCharacterId(character.id, worldRegistries)) {
             String suffix = ":" + character.id;
             java.util.List<Profile> candidates = new java.util.ArrayList<>();
             for (Profile candidate : progress.all()) {
@@ -72,14 +92,26 @@ public final class PeopleProgressBridge {
             if (candidates.size() > 1) return;
         }
 
-        // The oldest format had no map scope at all. It is safe only for a globally
-        // unique legacy cN and only when no scoped predecessor was found.
+        // The oldest format had no scope at all. It is safe only when cN is unambiguous.
         String unscopedOwner = "n:" + character.id;
         Profile unscopedLegacy = progress.peek(unscopedOwner);
-        if (unscopedLegacy != null && unscopedLegacy != target && isUniqueCharacterId(character.id)) {
+        if (unscopedLegacy != null && unscopedLegacy != target
+                && isUniqueCharacterId(character.id, worldRegistries)) {
             copyProfile(unscopedLegacy, target);
             progress.removeProfile(unscopedOwner);
         }
+    }
+
+    private static boolean isUniqueCharacterId(String id,
+                                               java.util.Collection<CharacterRegistry> registries) {
+        int matches = 0;
+        for (CharacterRegistry registry : registries) {
+            if (registry == null) continue;
+            for (Character candidate : registry.all()) {
+                if (id.equals(candidate.id) && ++matches > 1) return false;
+            }
+        }
+        return matches == 1;
     }
 
     private static boolean isFresh(Profile target) {
@@ -100,22 +132,6 @@ public final class PeopleProgressBridge {
         target.skills.putAll(source.skills);
         target.nodes.addAll(source.nodes);
         target.respecs = source.respecs;
-    }
-
-    private static boolean isUniqueCharacterId(String id) {
-        try {
-            Class<?> peopleMod = Class.forName("dev.worldforge.people.mc.PeopleMod");
-            Object raw = peopleMod.getMethod("registries").invoke(null);
-            if (!(raw instanceof Map<?, ?> registries)) return false;
-            int matches = 0;
-            for (Object value : registries.values()) {
-                if (!(value instanceof CharacterRegistry registry)) continue;
-                for (Character character : registry.all()) if (id.equals(character.id) && ++matches > 1) return false;
-            }
-            return matches == 1;
-        } catch (ReflectiveOperationException ex) {
-            return false;
-        }
     }
 
     /** NPC practice updates the Character first, then mirrors the resulting ranks into the RPG sheet. */
@@ -152,6 +168,9 @@ public final class PeopleProgressBridge {
             Class<?> peopleMod = Class.forName("dev.worldforge.people.mc.PeopleMod");
             Object raw = peopleMod.getMethod("registries").invoke(null);
             if (!(raw instanceof Map<?, ?> registries)) return;
+            java.util.List<CharacterRegistry> registrySnapshot = new java.util.ArrayList<>();
+            for (Object value : registries.values())
+                if (value instanceof CharacterRegistry registry) registrySnapshot.add(registry);
             for (Map.Entry<?, ?> entry : registries.entrySet()) {
                 Object mapData = entry.getKey();
                 Object rawRegistry = entry.getValue();
@@ -164,7 +183,7 @@ public final class PeopleProgressBridge {
                     if (profile == null && ranks.isEmpty()
                             && progress.peek(PopulationSimulation.legacyProgressOwner(character, scope)) == null
                             && progress.peek("n:" + character.id) == null) continue;
-                    profile = profile(progress, character, scope);
+                    profile = profile(progress, character, scope, registrySnapshot);
                     if (ranks.isEmpty() && !profile.skills.isEmpty()) syncToCharacter(character, profile);
                     else syncFromCharacter(character, profile);
                 }
