@@ -85,6 +85,10 @@ public final class TreasuryApi {
     }
 
     /** Net gold balance includes any carried deficit as debt, preserving the legacy army economy contract. */
+    public static synchronized boolean hasRealmAccount(String realm) {
+        return realm != null && !realm.isBlank() && ledger().hasAccount(accountId(realm));
+    }
+
     public static synchronized double netBalance(String realm) {
         if (realm == null || realm.isBlank()) return 0;
         TreasuryLedger.Account account = ensureRealm(realm);
