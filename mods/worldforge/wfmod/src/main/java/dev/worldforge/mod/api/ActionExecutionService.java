@@ -44,7 +44,11 @@ public final class ActionExecutionService {
             if (targetId == null || targetId.length() > 256)
                 throw new IllegalArgumentException("Invalid replanned target");
             args = List.copyOf(args == null ? List.of() : args);
+            if (args.size() > 64 || args.stream().anyMatch(a -> a == null || a.length() > 1024))
+                throw new IllegalArgumentException("Invalid replanned action arguments");
             reason = reason == null ? "" : reason;
+            if (reason.length() > 1024)
+                throw new IllegalArgumentException("Invalid replanning reason");
         }
     }
 
