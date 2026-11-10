@@ -1394,7 +1394,6 @@ public final class Settlement {
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("format", "wf-settlement/2");
         root.put("schema_version", 2);
-        root.put("time_scale_version", 2);
         root.put("id", id); root.put("name", name); root.put("ledger_scope", ledgerScope); root.put("time", time); root.put("auto", auto);
         root.put("next_building", nextBuilding); root.put("next_worker", nextWorker); root.put("grow", growTimer); root.put("starve", starveTimer); root.put("leave", leaveTimer);
         root.put("flow", flow.save());
@@ -1451,8 +1450,6 @@ public final class Settlement {
         Object savedScope = root.get("ledger_scope");
         s.setLedgerScope(scope != null && !scope.isBlank() ? scope : savedScope instanceof String v ? v : "");
         s.time = ((Number) root.get("time")).doubleValue();
-        int timeScaleVersion = root.get("time_scale_version") instanceof Number version ? version.intValue() : 1;
-        if (timeScaleVersion < 2) s.time *= (SEASON_LEN / 600.0);
         s.auto = Boolean.TRUE.equals(root.get("auto"));
         s.nextBuilding = ((Number) root.get("next_building")).intValue();
         s.nextWorker = ((Number) root.get("next_worker")).intValue();
