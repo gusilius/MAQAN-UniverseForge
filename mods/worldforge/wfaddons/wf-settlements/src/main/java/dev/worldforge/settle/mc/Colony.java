@@ -56,6 +56,9 @@ public final class Colony {
     public String genesisOperationId = "";
     /** Provisioning is guarded across retries; an interrupted phase requires reconciliation, never replay. */
     public boolean genesisProvisioningStarted, genesisProvisioned;
+    /** Durable cursor and immutable input fingerprint for resumable Genesis provisioning. */
+    public int genesisProvisioningStep;
+    public String genesisProvisioningSpec = "";
 
     public Colony(Settlement s, String dim, int cx, int cz) {
         this.s = s;
@@ -136,6 +139,8 @@ public final class Colony {
         m.put("genesisOperationId", genesisOperationId);
         m.put("genesisProvisioningStarted", genesisProvisioningStarted);
         m.put("genesisProvisioned", genesisProvisioned);
+        m.put("genesisProvisioningStep", genesisProvisioningStep);
+        m.put("genesisProvisioningSpec", genesisProvisioningSpec);
         m.put("settlement", Json.parse(s.toJson()));
         List<Object> l = new ArrayList<>();
         for (Map.Entry<Integer, Site> e : sites.entrySet()) {
@@ -177,6 +182,8 @@ public final class Colony {
         if (m.get("genesisOperationId") instanceof String operationId) c.genesisOperationId = operationId;
         c.genesisProvisioningStarted = Boolean.TRUE.equals(m.get("genesisProvisioningStarted"));
         c.genesisProvisioned = Boolean.TRUE.equals(m.get("genesisProvisioned"));
+        if (m.get("genesisProvisioningStep") instanceof Number step) c.genesisProvisioningStep = Math.max(0, step.intValue());
+        if (m.get("genesisProvisioningSpec") instanceof String spec) c.genesisProvisioningSpec = spec;
         if (m.get("workOrders") instanceof List<?> orders) {
             for (Object raw : orders) {
                 if (!(raw instanceof Map<?, ?> row)) continue;
