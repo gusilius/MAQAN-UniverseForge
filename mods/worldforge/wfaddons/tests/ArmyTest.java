@@ -4,6 +4,7 @@ import dev.worldforge.mod.*;
 import dev.worldforge.war.*;
 import dev.worldforge.army.*;
 import dev.worldforge.mod.api.TreasuryApi;
+import dev.worldforge.mod.api.WorldForgeApi;
 import dev.worldforge.mod.economy.TreasuryService;
 
 import java.nio.file.*;
@@ -76,7 +77,11 @@ public class ArmyTest {
         ok(Math.abs(e.gold(A) - ArmyEngine.START_GOLD) < 1e-8, "new realm receives its opening treasury balance exactly once");
         ok(fails(() -> e.raise(A, "levy", 1_000_000)), "нельзя набрать больше запаса");
         double g0 = e.gold(A);
+        WorldForgeApi.clock().reset();
+        WorldForgeApi.clock().advance(dev.worldforge.mod.api.GameClock.TICKS_PER_DAY * 3 + dev.worldforge.mod.api.GameClock.TICKS_PER_DAY / 2);
         e.raise(A, "archer", 20);
+        ok(TreasuryService.current().journal().get(TreasuryService.current().journal().size() - 1).worldMinute() == 5040L,
+                "army treasury journal timestamps use canonical world minutes, not the local war-day counter");
         ok(e.gold(A) < g0, "профессионалы стоят золота");
         ok(Math.abs(TreasuryService.current().balance("realm:" + A) - e.gold(A) * 5.0) < 1e-8,
                 "army recruitment posts its debit to the canonical silver treasury");
