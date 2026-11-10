@@ -214,13 +214,43 @@ public class ReputationMod {
         }
     }
 
-    private static int add(CommandSourceStack s, ServerPlayer p, String faction, int amount) {
-        ReputationStore st = store;
-        if (st == null) return 0;
-        String id = p.getUUID().toString();
-        st.add(id, faction, amount, "команда");
-        int v = st.get(id, faction);
-        s.sendSuccess(() -> Component.literal(p.getGameProfile().getName() + " / " + st.nameOf(faction) + ": " + v + " (" + st.standing(id, faction).label + ")"), true);
-        return 1;
+    private static int add(CommandSourceStack source, ServerPlayer target, String faction, int amount) {
+        ReputationStore reputation = store;
+        if (reputation == null) return 0;
+        String actor = source.getEntity() instanceof ServerPlayer player
+                ? player.getUUID().toString() : source.getTextName();
+        String playerId = target.getUUID().toString();
+        long minute = WorldForgeApi.clock().worldMinute();
+        String payload = playerId + "|" + faction + "|" + amount;
+        String requestId = "reputation:" + java.util.UUID.nameUUIDFromBytes(
+                (actor + ":" + source.getServer().getTickCount() + ":" + payload)
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        try {
+            var task = WorldForgeApi.actionExecution().execute(
+                    new dev.worldforge.mod.api.ActionExecutionService.Request(
+                            requestId, "reputation.adjust", actor, playerId, java.util.List.of(faction, Integer.toString(amount)), minute),
+                    req -> {
+                        if (!source.hasPermission(2)) return "Нужны права оператора";
+                        if (source.getServer().getPlayerList().getPlayer(target.getUUID()) == null)
+                            return "Целевой игрок отключился до изменения репутации";
+                        return null;
+                    },
+                    (req, attempt) -> {
+                        reputation.add(playerId, faction, amount, "команда");
+                        int value = reputation.get(playerId, faction);
+                        return dev.worldforge.mod.api.ActionResult.ok(
+                                target.getGameProfile().getName() + " / " + reputation.nameOf(faction) + ": " + value
+                                        + " (" + reputation.standing(playerId, faction).label + ")");
+                    }, null, minute, dev.worldforge.mod.WorldForgeMod.actionExecutionFile(source.getServer()));
+            if (task.status() != dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED) {
+                source.sendFailure(Component.literal(task.message()));
+                return 0;
+            }
+            source.sendSuccess(() -> Component.literal(task.message()), true);
+            return 1;
+        } catch (RuntimeException ex) {
+            source.sendFailure(Component.literal("Не удалось изменить репутацию: " + ex.getMessage()));
+            return 0;
+        }
     }
 }
