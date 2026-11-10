@@ -39,6 +39,15 @@ public final class CharacterAuthorityTest {
         Character late = north.create("Late arrival", "", "", "m", 1);
         check(authority.getGlobal(late.globalId) == late,
                 "characters created after map registration are indexed without a second registration");
+        CharacterRegistry reload = new CharacterRegistry();
+        Character beforeReload = reload.create("Before reload", "", "", "m", 1);
+        authority.registerMap("reload", reload);
+        CharacterRegistry replacement = new CharacterRegistry();
+        Character afterReload = replacement.create("After reload", "", "", "m", 2);
+        reload.fromJson(replacement.toJson(), world + "|reload");
+        check(authority.getGlobal(beforeReload.globalId) == null
+                        && authority.getGlobal(afterReload.globalId) == reload.get(afterReload.id),
+                "global identity index refreshes after a same-size registry replacement");
         CharacterRegistry players = new CharacterRegistry();
         Character player = players.create("PlayerOne", "", "human", "m", 80);
         player.props.put("genesis.player_uuid", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
