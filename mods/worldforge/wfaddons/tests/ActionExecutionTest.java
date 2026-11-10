@@ -72,8 +72,9 @@ public final class ActionExecutionTest {
                 }, 104, file);
         check(replanned.status() == ActionExecutionService.Status.SUCCEEDED && plans[0] == 1
                         && service.receipts().stream().anyMatch(r -> r.requestId().equals("request-replan")
-                        && r.targetId().equals("alternate-settlement")),
-                "retryable failure triggers one alternate plan and receipt records the actual target");
+                        && r.targetId().equals("alternate-settlement")
+                        && r.message().contains("alternate reachable settlement")),
+                "retryable failure triggers one alternate plan and receipt records the actual target and reason");
 
         int beforeDuplicateReplan = executions[0];
         ActionExecutionService.Task replanDuplicate = service.execute(new ActionExecutionService.Request(
