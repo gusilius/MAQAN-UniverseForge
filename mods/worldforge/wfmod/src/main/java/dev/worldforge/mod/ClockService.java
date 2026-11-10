@@ -27,13 +27,15 @@ public final class ClockService {
     @SubscribeEvent
     public void onStart(ServerStartingEvent e) {
         ticks = 0;
+        WorldForgeApi.clock().reset();
         try {
             Path f = file(e.getServer());
             if (Files.exists(f)) WorldForgeApi.clock().load(Files.readString(f));
             Path t = ledgerFile(e.getServer());
             if (Files.exists(t)) loadLedger(Files.readString(t));
         } catch (Exception ex) {
-            WorldForgeMod.LOGGER.error("WorldForge: часы не прочитаны: {}", ex.toString());
+            WorldForgeMod.LOGGER.error("WorldForge: отказ запуска — сохранённое время мира не удалось проверить: {}", ex.toString());
+            throw new IllegalStateException("WorldForge cannot start with an unreadable or invalid world clock; refusing to reset world time", ex);
         }
     }
 
