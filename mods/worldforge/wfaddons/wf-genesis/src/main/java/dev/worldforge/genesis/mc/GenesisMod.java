@@ -289,10 +289,11 @@ public class GenesisMod {
         try {
             // Genesis uses the one shared durable action journal; it does not own a second executor.
             long worldMinute = WorldForgeApi.clock().worldMinute();
-            String requestId = "genesis:" + sp.getUUID();
+            String draftFingerprint = UUID.nameUUIDFromBytes((sp.getUUID() + "|" + GENESIS.viewJson(d)).getBytes(StandardCharsets.UTF_8)).toString();
+            String requestId = "genesis:" + sp.getUUID() + ":" + draftFingerprint;
             ActionExecutionService.Request request = new ActionExecutionService.Request(
                     requestId, "genesis.confirm", "player:" + sp.getUUID(), sp.getUUID().toString(),
-                    List.of(d.race, d.start, d.cls), worldMinute);
+                    List.of(d.race, d.start, d.cls, draftFingerprint), worldMinute);
             ActionExecutionService.Task task = WorldForgeApi.actionExecution().execute(
                     request,
                     req -> req.actorId().equals("player:" + sp.getUUID())
@@ -488,7 +489,7 @@ public class GenesisMod {
     private static void place(ServerPlayer sp, Draft d, GenesisDefs.Start st) {
         if (st == null) return;
         ServerLevel lv = sp.serverLevel();
-        Random rng = new Random(sp.getUUID().getMostSignificantBits() ^ System.nanoTime());
+        Random rng = new Random(sp.getUUID().getMostSignificantBits() ^ sp.getUUID().getLeastSignificantBits());
         BlockPos spawn = lv.getSharedSpawnPos();
         boolean settle = settleLoaded() && SettleBridge.ready();
         switch (st.spawn()) {
