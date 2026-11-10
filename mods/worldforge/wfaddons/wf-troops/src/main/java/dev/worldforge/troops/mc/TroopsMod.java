@@ -72,7 +72,7 @@ public class TroopsMod {
     public static final Logger LOGGER = LogUtils.getLogger();
     private static final String PROTO = "2";
     public static final SimpleChannel NET = NetworkRegistry.newSimpleChannel(new ResourceLocation(MOD_ID, "main"), () -> PROTO,
-            NetworkRegistry.acceptVersion(PROTO), NetworkRegistry.acceptVersion(PROTO));
+            PROTO::equals, PROTO::equals);
 
     private static final DeferredRegister<EntityType<?>> ENTITIES = DeferredRegister.create(ForgeRegistries.ENTITY_TYPES, MOD_ID);
     public static final RegistryObject<EntityType<TroopEntity>> TROOP = ENTITIES.register("troop",
