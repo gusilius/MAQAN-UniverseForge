@@ -87,7 +87,7 @@ public final class ArmyEngine {
         if (realm == null || realm.isBlank()) return 0;
         Double legacy = gold.remove(realm);
         if (legacy != null) TreasuryApi.migrateLegacyRealmBalance(realm, legacy);
-        else TreasuryApi.ensureRealmAccount(realm, START_GOLD);
+        TreasuryApi.ensureRealmAccount(realm, legacy == null ? START_GOLD : 0);
         return TreasuryApi.netBalance(realm);
     }
 
