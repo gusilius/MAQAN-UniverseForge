@@ -85,7 +85,11 @@ public final class EditorCommands {
         try {
             int before = ed.modCount();
             int r = a.run(p, m, ed, s);
-            if (ed.modCount() != before) EditorManager.touch(m);
+            if (ed.modCount() != before) {
+                EditorManager.touch(m);
+                EditorManager.saveDirty(p.server);
+                if (ed.isDirty()) throw new Failure("Изменение карты не удалось надёжно сохранить; операция отмечена как неуспешная");
+            }
             return r;
         } catch (TitleEditor.EditException | Failure e) {
             src.sendFailure(Component.literal(e.getMessage()));
