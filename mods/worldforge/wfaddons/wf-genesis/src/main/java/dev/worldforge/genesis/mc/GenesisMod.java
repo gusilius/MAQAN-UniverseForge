@@ -258,23 +258,43 @@ public class GenesisMod {
     }
 
     private static int reset(CommandSourceStack s, ServerPlayer t) {
-        // A completed or partially applied Genesis character must never be reset by
-        // deleting only the wizard flag: that would leave Origins, Progress, inventory,
-        // settlements and world changes behind and allow a second starter grant.
-        boolean hasCanonicalCharacter = !t.getPersistentData()
-                .getString("worldforge_character_global_id").isBlank();
-        if (GENESIS.isDone(owner(t)) || hasCanonicalCharacter) {
-            s.sendFailure(Component.literal(
-                    "Сброс завершённого или частично применённого персонажа заблокирован: "
-                    + "сначала требуется согласованный сброс Character, Origins, Progress, имущества и поселения."));
+        String actor = s.getEntity() instanceof ServerPlayer player
+                ? player.getUUID().toString() : s.getTextName();
+        String target = t.getUUID().toString();
+        long minute = WorldForgeApi.clock().worldMinute();
+        String requestId = "genesis-reset:" + UUID.nameUUIDFromBytes(
+                (actor + ":" + s.getServer().getTickCount() + ":" + target).getBytes(StandardCharsets.UTF_8));
+        ActionExecutionService.Request request = new ActionExecutionService.Request(
+                requestId, "genesis.reset_draft", actor, target, List.of(target), minute);
+        try {
+            ActionExecutionService.Task task = WorldForgeApi.actionExecution().execute(request,
+                    req -> {
+                        if (!WFPerm.trusted(s)) return "Для сброса черновика нужны права оператора";
+                        if (s.getServer().getPlayerList().getPlayer(t.getUUID()) != t)
+                            return "Игрок больше не подключён";
+                        boolean hasCanonicalCharacter = !t.getPersistentData()
+                                .getString("worldforge_character_global_id").isBlank();
+                        return GENESIS.isDone(owner(t)) || hasCanonicalCharacter
+                                ? "Сброс завершённого или частично применённого персонажа запрещён без согласованной миграции всех доменов"
+                                : null;
+                    },
+                    (req, attempt) -> {
+                        GENESIS.forget(owner(t));
+                        t.refreshDimensions();
+                        broadcastLook(t);
+                        begin(t);
+                        return ActionResult.ok("Создание персонажа сброшено для " + t.getName().getString());
+                    }, null, minute, WorldForgeMod.actionExecutionFile(s.getServer()));
+            if (task.status() == ActionExecutionService.Status.SUCCEEDED) {
+                s.sendSuccess(() -> Component.literal(task.message()), true);
+                return 1;
+            }
+            s.sendFailure(Component.literal(task.message()));
+            return 0;
+        } catch (RuntimeException ex) {
+            s.sendFailure(Component.literal("Не удалось сбросить черновик Genesis: " + ex.getMessage()));
             return 0;
         }
-        GENESIS.forget(owner(t));
-        t.refreshDimensions();
-        broadcastLook(t);
-        begin(t);
-        s.sendSuccess(() -> Component.literal("Создание персонажа сброшено для " + t.getName().getString()), true);
-        return 1;
     }
 
     // ------------------------------------------------------------------ применение
