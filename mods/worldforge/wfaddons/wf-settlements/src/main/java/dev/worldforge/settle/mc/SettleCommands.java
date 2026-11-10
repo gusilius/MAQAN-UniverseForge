@@ -262,8 +262,7 @@ public final class SettleCommands {
         String actor = source.getEntity() instanceof net.minecraft.server.level.ServerPlayer player
                 ? player.getUUID().toString() : "console";
         long minute = dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute();
-        String requestId = "settlement-admin:" + actor + ":" + source.getServer().getTickCount() + ":"
-                + Integer.toUnsignedString(java.util.Objects.hash(actionId, target, payload), 16);
+        String requestId = "settlement-admin:" + java.util.UUID.randomUUID();
         try {
             var task = dev.worldforge.mod.api.WorldForgeApi.actionExecution().execute(
                     new dev.worldforge.mod.api.ActionExecutionService.Request(
