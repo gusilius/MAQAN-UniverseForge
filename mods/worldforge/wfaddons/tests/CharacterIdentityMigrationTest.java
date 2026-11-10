@@ -13,7 +13,7 @@ public final class CharacterIdentityMigrationTest {
 
     private static String legacyV2(CharacterRegistry registry) {
         return registry.toJson().replace("\"format\":\"wf-people/3\"", "\"format\":\"wf-people/2\"")
-                .replaceAll("\"global_id\":\"[^\"]+\",?", "");
+                .replaceAll(",\"global_id\":\"[^\"]+\"", "");
     }
 
     public static void main(String[] args) {
