@@ -73,6 +73,7 @@ public class ArmyTest {
         double p0 = e.pool(A);
         Army ar = e.raise(A, "levy", 50);
         ok(ar.men() == 50 && e.pool(A) == p0 - 50, "ополчение берётся из запаса");
+        ok(Math.abs(e.gold(A) - ArmyEngine.START_GOLD) < 1e-8, "new realm receives its opening treasury balance exactly once");
         ok(fails(() -> e.raise(A, "levy", 1_000_000)), "нельзя набрать больше запаса");
         double g0 = e.gold(A);
         e.raise(A, "archer", 20);
