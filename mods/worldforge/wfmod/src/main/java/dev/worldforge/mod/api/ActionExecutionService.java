@@ -103,8 +103,9 @@ public final class ActionExecutionService {
             if (attemptDenied != null)
                 return finish(current, task, Status.FAILED, attempt - 1, attemptDenied, nowMinute, durableFile);
 
-            task = new Task(original.requestId(), current.actionId(), original.actorId(), current.targetId(),
-                    current.args(), Status.RUNNING, attempt, "Running", original.requestedMinute(), nowMinute, "");
+            // Task identity always describes the submitted request; the final Receipt records any replanned target.
+            task = new Task(original.requestId(), original.actionId(), original.actorId(), original.targetId(),
+                    original.args(), Status.RUNNING, attempt, "Running", original.requestedMinute(), nowMinute, "");
             tasks.put(requestId, task);
             persistOrRollback(durableFile, requestId);
 
@@ -155,8 +156,8 @@ public final class ActionExecutionService {
         Receipt receipt = new Receipt(receiptId, request.requestId(), request.actionId(), request.actorId(),
                 request.targetId(), status, attempts, message == null ? "" : message, nowMinute);
         receipts.put(receiptId, receipt);
-        Task done = new Task(prior.requestId(), request.actionId(), request.actorId(), request.targetId(),
-                request.args(), status, attempts, message == null ? "" : message,
+        Task done = new Task(prior.requestId(), prior.actionId(), prior.actorId(), prior.targetId(),
+                prior.args(), status, attempts, message == null ? "" : message,
                 prior.createdMinute(), nowMinute, receiptId);
         tasks.put(request.requestId(), done);
         persistOrRollback(durableFile, request.requestId());
