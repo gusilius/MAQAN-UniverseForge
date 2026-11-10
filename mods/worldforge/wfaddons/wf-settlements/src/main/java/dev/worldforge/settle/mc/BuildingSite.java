@@ -226,7 +226,6 @@ public final class BuildingSite {
 
     /** Player placement that matches a blueprint block contributes through the shared action journal. */
     public static boolean assist(ServerPlayer player, ServerLevel level, BlockPos pos, BlockState placedState) {
-        if (SettleMod.actionsBlocked()) return false;
         String dimension = level.dimension().location().toString();
         String actor = player.getUUID().toString();
         for (Colony colony : SettleMod.COLONIES.values()) {
