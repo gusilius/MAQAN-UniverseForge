@@ -327,7 +327,7 @@ public final class ArmyEngine {
         Set<String> realms = new LinkedHashSet<>();
         for (TitleData.Realm r : d().realmList()) if (!r.titleKeys.isEmpty()) realms.add(r.id);
         for (String r : realms) {
-            if (!gold.containsKey(r) && !pool.containsKey(r) && armiesOf(r).isEmpty() && !isAtWar(r)) continue;   // спящие государства не считаем
+            if (!TreasuryApi.hasRealmAccount(r) && !pool.containsKey(r) && armiesOf(r).isEmpty() && !isAtWar(r)) continue;   // спящие государства не считаем
             gold(r); // initialize or migrate the canonical opening balance before the first daily posting
             double inc = eco.net(r), cost = 0;
             for (Army a : armiesOf(r)) for (Map.Entry<String, Integer> e : a.units.entrySet()) {
