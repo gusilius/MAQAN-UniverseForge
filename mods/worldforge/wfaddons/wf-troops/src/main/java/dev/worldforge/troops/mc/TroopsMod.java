@@ -309,6 +309,15 @@ public class TroopsMod {
     public void join(EntityJoinLevelEvent e) {
         if (e.getLevel().isClientSide || !(e.getEntity() instanceof TroopEntity t)) return;
         String entityId = t.getUUID().toString();
+        if (ModList.get().isLoaded("wf_people") && t.characterId != null && !t.characterId.isBlank()) {
+            Character existingCharacter = PeopleMod.authority().getGlobal(t.characterId);
+            if (existingCharacter != null && !existingCharacter.alive) {
+                LIVE.remove(entityId);
+                SQUADS.remove(entityId);
+                t.discard();
+                return; // A previously committed death must never be resurrected by a late chunk load.
+            }
+        }
         MilitaryDeathLedger.Pending pending = t.characterId == null || t.characterId.isBlank()
                 ? null : DEATHS.get(t.characterId);
         if (pending != null && pending.troopEntityId().equals(entityId)) {
