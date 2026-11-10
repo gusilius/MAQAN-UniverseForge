@@ -294,7 +294,7 @@ public class TroopsMod {
                 ownerRegistry = registry;
             }
             troop.setCharacterId(person.globalId); // canonicalize legacy local ID before saving the entity
-            if (!ownerRegistry.bindEntity(person.id, "troop", troop.getUUID().toString())) return null;
+            if (!PeopleMod.authority().bindEntity(person.globalId, "troop", troop.getUUID().toString())) return null;
             return new PersonBinding(ownerRegistry, person);
         }
         return null;
