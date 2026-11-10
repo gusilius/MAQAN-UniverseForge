@@ -3,6 +3,7 @@ package dev.worldforge.troops.mc;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.logging.LogUtils;
+import dev.worldforge.mod.api.ActionResult;
 import dev.worldforge.mod.api.TreasuryApi;
 import dev.worldforge.mod.api.WorldForgeApi;
 import dev.worldforge.mod.economy.TreasuryLedger;
@@ -506,8 +507,7 @@ public class TroopsMod {
 
     // ---- приказы от клиента ----
     static void handleOrder(ServerPlayer p, OrderPacket o) {
-        // BUILD_LIST is a read-only UI query; all state-changing troop/worker/build orders
-        // are recorded in the same durable, idempotent world action journal.
+        // BUILD_LIST is a read-only UI query and intentionally does not create a mutation receipt.
         if (o.action() == OrderPacket.BUILD_LIST) {
             handleOrderDirect(p, o);
             return;
@@ -525,10 +525,7 @@ public class TroopsMod {
             var task = dev.worldforge.mod.api.WorldForgeApi.actionExecution().execute(request,
                     req -> p.server.getPlayerList().getPlayer(p.getUUID()) == null
                             ? "Игрок отключился до исполнения приказа" : null,
-                    (req, attempt) -> {
-                        handleOrderDirect(p, o);
-                        return dev.worldforge.mod.api.ActionResult.ok("Приказ обработан");
-                    }, null, minute,
+                    (req, attempt) -> handleOrderDirect(p, o), null, minute,
                     dev.worldforge.mod.WorldForgeMod.actionExecutionFile(p.server));
             if (task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.FAILED)
                 p.displayClientMessage(Component.literal("Приказ отклонён: " + task.message()), true);
@@ -537,15 +534,18 @@ public class TroopsMod {
         }
     }
 
-    private static void handleOrderDirect(ServerPlayer p, OrderPacket o) {
+    private static ActionResult handleOrderDirect(ServerPlayer p, OrderPacket o) {
         String owner = p.getUUID().toString();
         switch (o.action()) {
             case OrderPacket.ORDER -> {
-                Squads.Order ord = o.kind() == Squads.Kind.ATTACK.ordinal() ? new Squads.Order(Squads.Kind.ATTACK, 0, 0, o.target())
-                        : new Squads.Order(Squads.Kind.values()[Math.max(0, Math.min(o.kind(), Squads.Kind.values().length - 1))], o.x(), o.z(), o.target());
+                Squads.Order ord = o.kind() == Squads.Kind.ATTACK.ordinal()
+                        ? new Squads.Order(Squads.Kind.ATTACK, 0, 0, o.target())
+                        : new Squads.Order(Squads.Kind.values()[Math.max(0, Math.min(o.kind(), Squads.Kind.values().length - 1))],
+                                o.x(), o.z(), o.target());
                 List<String> selectedTroops = troopIds(o);
                 boolean selectedWorkers = ModList.get().isLoaded("wf_settle") && WorkerControl.anyWorker(p, o);
                 MixedOrders.Plan mixed = MixedOrders.plan(ord.kind(), selectedWorkers, !selectedTroops.isEmpty());
+                ActionResult workerResult = null;
                 if (mixed.workers() != MixedOrders.WorkerAction.NONE) {
                     int workerAction = switch (mixed.workers()) {
                         case MOVE -> OrderPacket.WORK;
@@ -555,82 +555,111 @@ public class TroopsMod {
                         default -> -1;
                     };
                     if (workerAction >= 0) {
-                        OrderPacket workerOrder = new OrderPacket(workerAction,o.ids(),0,o.x(),o.z(),"",o.queue(),0);
-                        p.displayClientMessage(Component.literal(WorkerControl.command(p, workerOrder)), true);
+                        OrderPacket workerOrder = new OrderPacket(workerAction, o.ids(), 0, o.x(), o.z(), "", o.queue(), 0);
+                        workerResult = WorkerControl.command(p, workerOrder);
+                        p.displayClientMessage(Component.literal(workerResult.message), true);
                     }
                 }
-                if (!mixed.commandTroops()) return;
+                if (!mixed.commandTroops())
+                    return workerResult != null ? workerResult : ActionResult.fail("Не выбраны подходящие рабочие или военные подразделения");
                 for (String id : selectedTroops) {
-                    Squads.Squad rs = SQUADS.squadOf(id);
-                    if (rs != null && rs.owner.equals(owner) && rs.routed && ord.kind() != Squads.Kind.STOP) {
-                        p.displayClientMessage(Component.literal("Отряд «" + rs.name + "» бежит и не слушает приказов"), true);
-                        return;
+                    Squads.Squad routed = SQUADS.squadOf(id);
+                    if (routed != null && routed.owner.equals(owner) && routed.routed && ord.kind() != Squads.Kind.STOP) {
+                        String reason = "Отряд «" + routed.name + "» бежит и не слушает приказов";
+                        p.displayClientMessage(Component.literal(reason), true);
+                        return workerResult != null && workerResult.ok
+                                ? ActionResult.ok("Приказ рабочим выполнен частично; " + reason)
+                                : ActionResult.fail(reason);
                     }
                 }
-                Squads.Squad s = SQUADS.commandUnits(owner, selectedTroops, ord, o.queue());
-                if (s != null) p.displayClientMessage(Component.literal(s.name + " (" + s.members.size() + "): " + ord.kind().title), true);
+                Squads.Squad squad = SQUADS.commandUnits(owner, selectedTroops, ord, o.queue());
+                if (squad != null) {
+                    String message = squad.name + " (" + squad.members.size() + "): " + ord.kind().title;
+                    p.displayClientMessage(Component.literal(message), true);
+                    return ActionResult.ok(workerResult != null && !workerResult.ok
+                            ? message + "; приказ рабочим не выполнен: " + workerResult.message : message);
+                }
+                return workerResult != null && workerResult.ok ? workerResult
+                        : ActionResult.fail(workerResult == null
+                                ? "Не найдено принадлежащих игроку подразделений для приказа" : workerResult.message);
             }
             case OrderPacket.FORMATION, OrderPacket.STANCE -> {
                 Set<Squads.Squad> hit = new LinkedHashSet<>();
-                for (String id : troopIds(o)) { Squads.Squad s = SQUADS.squadOf(id); if (s != null && s.owner.equals(owner)) hit.add(s); }
-                for (Squads.Squad s : hit) {
-                    if (o.action() == OrderPacket.FORMATION) s.formation = Formations.Type.values()[Math.floorMod(o.arg(), Formations.Type.values().length)];
-                    else s.stance = Squads.Stance.values()[Math.floorMod(o.arg(), Squads.Stance.values().length)];
+                for (String id : troopIds(o)) {
+                    Squads.Squad squad = SQUADS.squadOf(id);
+                    if (squad != null && squad.owner.equals(owner)) hit.add(squad);
                 }
-                if (!hit.isEmpty()) {
-                    Squads.Squad f = hit.iterator().next();
-                    p.displayClientMessage(Component.literal(o.action() == OrderPacket.FORMATION ? "Строй: " + f.formation.title : "Поза: " + f.stance.title), true);
+                for (Squads.Squad squad : hit) {
+                    if (o.action() == OrderPacket.FORMATION)
+                        squad.formation = Formations.Type.values()[Math.floorMod(o.arg(), Formations.Type.values().length)];
+                    else squad.stance = Squads.Stance.values()[Math.floorMod(o.arg(), Squads.Stance.values().length)];
                 }
+                if (hit.isEmpty()) return ActionResult.fail("Не выбрано принадлежащих игроку отрядов");
+                Squads.Squad first = hit.iterator().next();
+                String message = o.action() == OrderPacket.FORMATION ? "Строй: " + first.formation.title : "Поза: " + first.stance.title;
+                p.displayClientMessage(Component.literal(message), true);
+                return ActionResult.ok(message + " · отрядов: " + hit.size());
             }
             case OrderPacket.APPOINT -> {
-                Map<String,TroopEntity> leaders=new LinkedHashMap<>();
-                for(String id:troopIds(o)){
-                    TroopEntity troop=LIVE.get(id);
-                    if(troop==null||!owner.equals(troop.ownerId()))continue;
-                    Squads.Squad squad=SQUADS.squadOf(id);
-                    boolean hasIdentity=troop.characterId!=null&&!troop.characterId.isBlank();
-                    if(squad!=null&&owner.equals(squad.owner)&&(o.arg()<0||hasIdentity))
-                        leaders.putIfAbsent(squad.id,troop);
+                Map<String, TroopEntity> leaders = new LinkedHashMap<>();
+                for (String id : troopIds(o)) {
+                    TroopEntity troop = LIVE.get(id);
+                    if (troop == null || !owner.equals(troop.ownerId())) continue;
+                    Squads.Squad squad = SQUADS.squadOf(id);
+                    boolean hasIdentity = troop.characterId != null && !troop.characterId.isBlank();
+                    if (squad != null && owner.equals(squad.owner) && (o.arg() < 0 || hasIdentity))
+                        leaders.putIfAbsent(squad.id, troop);
                 }
-                int changed=0;
-                for(Map.Entry<String,TroopEntity> entry:leaders.entrySet()){
-                    TroopEntity leader=entry.getValue();
-                    String character=o.arg()<0?"":leader.characterId;
-                    if(o.arg()>=0&&(character==null||character.isBlank()))continue;
-                    if(SQUADS.appointLeader(entry.getKey(),character,false,Math.max(0,o.arg())))changed++;
+                int changed = 0;
+                for (Map.Entry<String, TroopEntity> entry : leaders.entrySet()) {
+                    TroopEntity leader = entry.getValue();
+                    String character = o.arg() < 0 ? "" : leader.characterId;
+                    if (o.arg() >= 0 && (character == null || character.isBlank())) continue;
+                    if (SQUADS.appointLeader(entry.getKey(), character, false, Math.max(0, o.arg()))) changed++;
                 }
-                p.displayClientMessage(Component.literal(o.arg()<0
-                        ?"Командиры сняты: "+changed
-                        :"Назначено командиров: "+changed+" · V — назначить, Ctrl+V — снять"),true);
+                String message = o.arg() < 0 ? "Командиры сняты: " + changed
+                        : "Назначено командиров: " + changed + " · V — назначить, Ctrl+V — снять";
+                p.displayClientMessage(Component.literal(message), true);
+                return changed > 0 ? ActionResult.ok(message)
+                        : ActionResult.fail("Не удалось изменить назначение командиров: подходящие отряды не выбраны");
             }
             case OrderPacket.GROUP -> {
                 List<String> ids = new ArrayList<>();
-                for (String id : troopIds(o)) { Squads.Squad s = SQUADS.squadOf(id); if (s != null && s.owner.equals(owner)) ids.add(id); }
-                if (!ids.isEmpty()) {
-                    Squads.Squad n = SQUADS.create(owner, null, ids);
-                    for (String id : ids) { TroopEntity t = LIVE.get(id); if (t != null) t.setSquadId(n.id); }
-                    p.displayClientMessage(Component.literal("Собран " + n.name + " (" + n.members.size() + ")"), true);
+                for (String id : troopIds(o)) {
+                    Squads.Squad squad = SQUADS.squadOf(id);
+                    if (squad != null && squad.owner.equals(owner)) ids.add(id);
                 }
+                if (ids.isEmpty()) return ActionResult.fail("Не выбраны принадлежащие игроку солдаты для новой группы");
+                Squads.Squad created = SQUADS.create(owner, null, ids);
+                for (String id : ids) {
+                    TroopEntity troop = LIVE.get(id);
+                    if (troop != null) troop.setSquadId(created.id);
+                }
+                String message = "Собран " + created.name + " (" + created.members.size() + ")";
+                p.displayClientMessage(Component.literal(message), true);
+                return ActionResult.ok(message);
             }
             case OrderPacket.WORK, OrderPacket.RELEASE, OrderPacket.WORK_STOP, OrderPacket.WORK_HOLD, OrderPacket.WORK_FOLLOW -> {
-                if (!ModList.get().isLoaded("wf_settle") || !WorkerControl.anyWorker(p, o)) return;
-                // WorkerControl проверяет владельца каждого поселения; глобальный операторский gate здесь неверен.
-                p.displayClientMessage(Component.literal(WorkerControl.command(p, o)), true);
+                if (!ModList.get().isLoaded("wf_settle")) return ActionResult.fail("Для управления рабочими нужен мод wf_settle");
+                if (!WorkerControl.anyWorker(p, o)) return ActionResult.fail("В выборе нет рабочих");
+                ActionResult result = WorkerControl.command(p, o);
+                p.displayClientMessage(Component.literal(result.message), true);
+                return result;
             }
             case OrderPacket.WORK_AREA -> {
-                if (!ModList.get().isLoaded("wf_settle") || !WorkerControl.anyWorker(p, o)) return;
-                p.displayClientMessage(Component.literal(WorkerControl.workArea(p, o)), true);
-            }
-            case OrderPacket.BUILD_LIST -> {
-                if (!ModList.get().isLoaded("wf_settle")) { p.displayClientMessage(Component.literal("Нужен мод wf_settle"), true); return; }
-                BuildControl.sendList(p, o.x(), o.z());
+                if (!ModList.get().isLoaded("wf_settle")) return ActionResult.fail("Для рабочих зон нужен мод wf_settle");
+                if (!WorkerControl.anyWorker(p, o)) return ActionResult.fail("В выборе нет рабочих");
+                ActionResult result = WorkerControl.workArea(p, o);
+                p.displayClientMessage(Component.literal(result.message), true);
+                return result;
             }
             case OrderPacket.BUILD -> {
-                if (!ModList.get().isLoaded("wf_settle")) return;
-                // BuildControl validates the target colony owner and every assigned worker.
-                p.displayClientMessage(Component.literal(BuildControl.place(p, o.target(), (int) Math.floor(o.x()), (int) Math.floor(o.z()), o.ids())), true);
+                if (!ModList.get().isLoaded("wf_settle")) return ActionResult.fail("Для строительства нужен мод wf_settle");
+                ActionResult result = BuildControl.place(p, o.target(), (int) Math.floor(o.x()), (int) Math.floor(o.z()), o.ids());
+                p.displayClientMessage(Component.literal(result.message), true);
+                return result;
             }
-            default -> {}
+            default -> { return ActionResult.fail("Неизвестный тип военного приказа: " + o.action()); }
         }
     }
 

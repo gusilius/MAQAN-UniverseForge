@@ -49,6 +49,15 @@ public final class ActionExecutionTest {
                 "authorization denial is terminal and executor is never invoked");
 
         int[] plans = {0};
+        ActionExecutionService.Task rejected = service.execute(new ActionExecutionService.Request(
+                "request-rejected", "military.client_order", "player-1", "selection", List.of("invalid-order"), 102),
+                r -> null, (r, attempt) -> ActionResult.fail("order rejected"), null, 103, file);
+        check(rejected.status() == ActionExecutionService.Status.FAILED
+                        && rejected.receiptId().equals("receipt:request-rejected")
+                        && service.receipts().stream().anyMatch(receipt -> receipt.requestId().equals("request-rejected")
+                        && receipt.outcome() == ActionExecutionService.Status.FAILED),
+                "rejected domain action is recorded as FAILED with a failure receipt");
+
         ActionExecutionService.Task replanned = service.execute(new ActionExecutionService.Request(
                 "request-replan", "settlement.build", "player-1", "settlement-4", List.of("bridge"), 103),
                 r -> r.targetId().equals("blocked") ? "target unavailable" : null,
