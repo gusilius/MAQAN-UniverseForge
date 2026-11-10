@@ -31,6 +31,39 @@ public final class EditorCommands {
     }
 
     private static int exec(com.mojang.brigadier.context.CommandContext<CommandSourceStack> c, boolean needsOn, Action a) throws CommandSyntaxException {
+        if (!needsOn) return execDirect(c, needsOn, a);
+        ServerPlayer player = c.getSource().getPlayerOrException();
+        long minute = WorldForgeApi.clock().worldMinute();
+        String actor = player.getUUID().toString();
+        String requestId = "editor:" + java.util.UUID.nameUUIDFromBytes(
+                (actor + ":" + player.server.getTickCount() + ":" + c.getInput())
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        String target = player.serverLevel().dimension().location().toString();
+        var request = new dev.worldforge.mod.api.ActionExecutionService.Request(
+                requestId, "worldforge.editor_mutation", actor, target, List.of(c.getInput()), minute);
+        try {
+            var task = WorldForgeApi.actionExecution().execute(request,
+                    req -> !EditorManager.canEdit(player) || !EditorManager.session(player).on
+                            ? "Полномочия редактора отозваны до исполнения" : null,
+                    (req, attempt) -> {
+                        try {
+                            return execDirect(c, needsOn, a) == 1
+                                    ? dev.worldforge.mod.api.ActionResult.ok("Изменение карты выполнено")
+                                    : dev.worldforge.mod.api.ActionResult.fail("Изменение карты отклонено");
+                        } catch (CommandSyntaxException ex) {
+                            return dev.worldforge.mod.api.ActionResult.fail(ex.getMessage());
+                        }
+                    }, null, minute, WorldForgeMod.actionExecutionFile(player.server));
+            if (task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.FAILED)
+                c.getSource().sendFailure(Component.literal("Команда не выполнена: " + task.message()));
+            return task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED ? 1 : 0;
+        } catch (RuntimeException ex) {
+            c.getSource().sendFailure(Component.literal("Не удалось принять команду: " + ex.getMessage()));
+            return 0;
+        }
+    }
+
+    private static int execDirect(com.mojang.brigadier.context.CommandContext<CommandSourceStack> c, boolean needsOn, Action a) throws CommandSyntaxException {
         CommandSourceStack src = c.getSource();
         ServerPlayer p = src.getPlayerOrException();
         if (!EditorManager.canEdit(p)) {
