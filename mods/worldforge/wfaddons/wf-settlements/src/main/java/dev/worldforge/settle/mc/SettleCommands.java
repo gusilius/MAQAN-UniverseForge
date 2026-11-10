@@ -225,8 +225,7 @@ public final class SettleCommands {
         }
 
         String input = c.getInput();
-        String requestId = "settlement:" + actorId + ":" + source.getServer().getTickCount() + ":"
-                + Integer.toUnsignedString(java.util.Objects.hash(colony.s.id, input), 16);
+        String requestId = "settlement:" + java.util.UUID.randomUUID();
         long minute = dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute();
         var request = new dev.worldforge.mod.api.ActionExecutionService.Request(
                 requestId, "settlement.command", actorId, colony.s.id, java.util.List.of(input), minute);
