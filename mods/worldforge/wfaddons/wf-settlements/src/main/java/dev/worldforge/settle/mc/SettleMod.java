@@ -535,6 +535,12 @@ public class SettleMod {
         }
     }
 
+    /** True while any settlement has an uncommitted mutation; all settlement writers must then fail closed. */
+    public static boolean actionsBlocked() {
+        return COLONIES.values().stream().anyMatch(colony -> colony != null
+                && (colony.actionPersistenceBlocked || colony.genesisProvisioningRuntimeBlocked));
+    }
+
     /** Persist a player-issued domain mutation before its ActionExecution receipt can succeed. */
     public static boolean persistActionMutation(MinecraftServer server, Colony colony) {
         if (colony == null || colony.actionPersistenceBlocked || colony.genesisProvisioningRuntimeBlocked) return false;
@@ -937,6 +943,7 @@ public class SettleMod {
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server == null) return;
         ticks++;
+        if (actionsBlocked()) return;
         if (ticks % STEP_TICKS == 0) {
             double speed = dev.worldforge.mod.api.WorldForgeApi.clock().multiplier();
             for (Colony c : COLONIES.values()) {
