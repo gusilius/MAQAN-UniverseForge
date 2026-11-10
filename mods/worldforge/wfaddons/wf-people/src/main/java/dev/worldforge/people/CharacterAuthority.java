@@ -29,54 +29,74 @@ public final class CharacterAuthority {
     public WorldId worldId() { return worldId; }
 
     public synchronized void registerMap(String mapId, CharacterRegistry registry) {
-        WorldId currentWorld = worldId;
-        if (currentWorld == null) throw new IllegalStateException("World identity has not been initialized");
+        if (worldId == null) throw new IllegalStateException("World identity has not been initialized");
         if (mapId == null || mapId.isBlank()) throw new IllegalArgumentException("mapId is required");
         Objects.requireNonNull(registry, "registry");
         String key = mapId.trim();
         CharacterRegistry previous = registries.putIfAbsent(key, registry);
         if (previous != null && previous != registry)
             throw new IllegalStateException("A different CharacterRegistry is already registered for map " + key);
-        for (Character character : registry.all()) {
-            CharacterIdentity identity = new CharacterIdentity(currentWorld, key, character.id, character.globalId);
-            CharacterIdentity globalOwner = byGlobalId.putIfAbsent(character.globalId, identity);
-            if (globalOwner != null && !globalOwner.equals(identity))
-                throw new IllegalStateException("Global Character UUID collision " + character.globalId
-                        + " between " + globalOwner.mapId() + "/" + globalOwner.characterId()
-                        + " and " + key + "/" + character.id);
-            Character existing = byIdentity.putIfAbsent(identity, character);
-            if (existing != null && existing != character)
-                throw new IllegalStateException("Duplicate Character identity " + identity);
-            byLegacyId.computeIfAbsent(character.id, ignored -> ConcurrentHashMap.newKeySet()).add(identity);
+        refreshIndex();
+    }
+
+    /** Rebuilds indexes so Characters created after map registration become immediately authoritative. */
+    private void refreshIndex() {
+        WorldId currentWorld = worldId;
+        if (currentWorld == null) return;
+        byIdentity.clear();
+        byGlobalId.clear();
+        byLegacyId.clear();
+        for (Map.Entry<String, CharacterRegistry> entry : registries.entrySet()) {
+            String mapId = entry.getKey();
+            for (Character character : entry.getValue().all()) {
+                CharacterIdentity identity = new CharacterIdentity(currentWorld, mapId, character.id, character.globalId);
+                CharacterIdentity globalOwner = byGlobalId.putIfAbsent(character.globalId, identity);
+                if (globalOwner != null && !globalOwner.equals(identity))
+                    throw new IllegalStateException("Global Character UUID collision " + character.globalId
+                            + " between " + globalOwner.mapId() + "/" + globalOwner.characterId()
+                            + " and " + mapId + "/" + character.id);
+                Character existing = byIdentity.putIfAbsent(identity, character);
+                if (existing != null && existing != character)
+                    throw new IllegalStateException("Duplicate Character identity " + identity);
+                byLegacyId.computeIfAbsent(character.id, ignored -> ConcurrentHashMap.newKeySet()).add(identity);
+            }
         }
     }
 
-    public Character get(CharacterIdentity identity) {
+    public synchronized Character get(CharacterIdentity identity) {
+        refreshIndex();
         return identity == null ? null : byIdentity.get(identity);
     }
 
-    public Character getGlobal(String globalCharacterId) {
+    public synchronized Character getGlobal(String globalCharacterId) {
+        refreshIndex();
         CharacterIdentity identity = byGlobalId.get(globalCharacterId);
         return identity == null ? null : byIdentity.get(identity);
     }
 
-    public CharacterIdentity identityOf(String globalCharacterId) { return byGlobalId.get(globalCharacterId); }
+    public synchronized CharacterIdentity identityOf(String globalCharacterId) {
+        refreshIndex();
+        return byGlobalId.get(globalCharacterId);
+    }
 
-    public CharacterRegistry registryForGlobal(String globalCharacterId) {
+    public synchronized CharacterRegistry registryForGlobal(String globalCharacterId) {
+        refreshIndex();
         CharacterIdentity identity = byGlobalId.get(globalCharacterId);
         return identity == null ? null : registries.get(identity.mapId());
     }
 
     /** Returns null for an ambiguous legacy cN id; callers must provide map identity. */
-    public Character getLegacy(String characterId) {
+    public synchronized Character getLegacy(String characterId) {
+        refreshIndex();
         Set<CharacterIdentity> matches = byLegacyId.get(characterId);
         if (matches == null || matches.size() != 1) return null;
         return byIdentity.get(matches.iterator().next());
     }
 
-    public CharacterRegistry registry(String mapId) { return registries.get(mapId); }
+    public synchronized CharacterRegistry registry(String mapId) { return registries.get(mapId); }
 
-    public Collection<CharacterIdentity> identities() {
+    public synchronized Collection<CharacterIdentity> identities() {
+        refreshIndex();
         List<CharacterIdentity> result = new ArrayList<>(byIdentity.keySet());
         result.sort(Comparator.comparing((CharacterIdentity id) -> id.worldId().toString())
                 .thenComparing(CharacterIdentity::mapId)
@@ -84,6 +104,6 @@ public final class CharacterAuthority {
         return Collections.unmodifiableList(result);
     }
 
-    public int size() { return byIdentity.size(); }
-    public int mapCount() { return registries.size(); }
+    public synchronized int size() { refreshIndex(); return byIdentity.size(); }
+    public synchronized int mapCount() { return registries.size(); }
 }
