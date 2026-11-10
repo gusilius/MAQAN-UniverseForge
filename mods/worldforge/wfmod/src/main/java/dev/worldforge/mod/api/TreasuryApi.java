@@ -55,20 +55,19 @@ public final class TreasuryApi {
     public static synchronized boolean migrateLegacyRealmBalance(String realm, double legacyGold) {
         if (realm == null || realm.isBlank() || !Double.isFinite(legacyGold)) return false;
         String id = accountId(realm);
-        if (ledger().hasAccount(id)) return false;
-        TreasuryLedger.Account account = ledger().open(id, realm, "silver",
-                Math.max(0, legacyGold) * SILVER_PER_GOLD);
-        ledger().setCreditLimit(id, 250.0);
-        if (legacyGold < 0) {
-            double deficit = -legacyGold * SILVER_PER_GOLD;
-            if (!ledger().withdraw(id, deficit, TreasuryLedger.Kind.OPENING, "legacy-army-deficit",
-                    "legacy-army-opening:" + realm, worldMinute(), "migrate legacy negative army balance")) {
-                throw new IllegalStateException("Cannot migrate legacy army deficit for " + realm + ": " + ledger().lastError());
-            }
-        }
+        if (!ledger().hasAccount(id)) ledger().open(id, realm, "silver", 0);
+        ledger().setCreditLimit(id, 250.0 * SILVER_PER_GOLD);
+        double silver = Math.abs(legacyGold) * SILVER_PER_GOLD;
+        if (silver <= 1e-9) return true;
+        String reference = "legacy-army-balance:" + realm;
+        boolean posted = legacyGold > 0
+                ? ledger().depositOnce(id, silver, TreasuryLedger.Kind.IMPORT, "legacy-army-balance",
+                        reference, worldMinute(), "migrate legacy army gold balance")
+                : ledger().withdrawOnce(id, silver, TreasuryLedger.Kind.OPENING, "legacy-army-deficit",
+                        reference, worldMinute(), "migrate legacy negative army balance");
+        if (!posted) throw new IllegalStateException("Cannot migrate legacy army balance for " + realm + ": " + ledger().lastError());
         return true;
     }
-
     /** Creates a new realm account with an opening gold balance if no canonical account exists. */
     public static synchronized void ensureRealmAccount(String realm, double openingGold) {
         if (realm == null || realm.isBlank() || !Double.isFinite(openingGold) || openingGold < 0)
