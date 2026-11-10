@@ -37,7 +37,6 @@ import net.minecraft.server.packs.resources.ResourceManager;
 import net.minecraft.server.packs.resources.ResourceManagerReloadListener;
 import net.minecraft.world.entity.EntityDimensions;
 import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -470,20 +469,29 @@ public class GenesisMod {
                 alreadyGranted += stack.getCount();
             }
         }
-        // Inventory overflow is dropped with the same marker, so a retry in the same
-        // loaded area can still recognize the grant instead of duplicating it.
-        for (ItemEntity entity : sp.serverLevel().getEntitiesOfClass(ItemEntity.class,
-                sp.getBoundingBox().inflate(64.0),
-                itemEntity -> itemEntity.getItem().is(it) && itemEntity.getItem().hasTag()
-                        && grantId.equals(itemEntity.getItem().getTag().getString("wf_genesis_grant")))) {
-            alreadyGranted += entity.getItem().getCount();
-        }
         int remaining = Math.max(0, n - alreadyGranted);
+        if (remaining == 0) return;
+        int freeCapacity = 0;
+        for (int slot = 0; slot < sp.getInventory().getContainerSize(); slot++) {
+            ItemStack stack = sp.getInventory().getItem(slot);
+            if (stack.isEmpty()) freeCapacity += it.getMaxStackSize();
+            else if (stack.is(it) && stack.hasTag()
+                    && grantId.equals(stack.getTag().getString("wf_genesis_grant"))) {
+                freeCapacity += Math.max(0, it.getMaxStackSize() - stack.getCount());
+            }
+        }
+        if (freeCapacity < remaining) {
+            throw new IllegalStateException("Not enough inventory space for Genesis grant " + grantId
+                    + "; clear " + (remaining - freeCapacity) + " item capacity and retry after server reconciliation");
+        }
         while (remaining > 0) {
             ItemStack stack = new ItemStack(it, Math.min(remaining, it.getMaxStackSize()));
             stack.getOrCreateTag().putString("wf_genesis_grant", grantId);
-            remaining -= stack.getCount();
-            if (!sp.getInventory().add(stack)) sp.drop(stack, false);
+            int count = stack.getCount();
+            if (!sp.getInventory().add(stack)) {
+                throw new IllegalStateException("Could not complete Genesis grant " + grantId);
+            }
+            remaining -= count;
         }
     }
 
