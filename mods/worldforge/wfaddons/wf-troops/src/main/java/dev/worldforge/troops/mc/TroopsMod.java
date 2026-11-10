@@ -256,8 +256,8 @@ public class TroopsMod {
     private static Character resolvePerson(CharacterRegistry registry, String id) {
         if (registry == null || id == null || id.isBlank()) return null;
         Character global = PeopleMod.authority().getGlobal(id);
-        if (global != null) return PeopleMod.authority().registryForGlobal(id) == registry ? global : null;
-        return registry.get(id); // compatibility with pre-global-UUID troop NBT
+        if (global != null) return global; // physical troop bodies may travel away from the Character's storage map
+        return registry.get(id); // compatibility with pre-global-UUID troop NBT in its original map
     }
 
     /** Resolves a physical soldier to the one authoritative Character in the map owning its realm. */
@@ -276,6 +276,11 @@ public class TroopsMod {
             if (registry == null) continue;
             boolean hasIdentity = troop.characterId != null && !troop.characterId.isBlank();
             Character person = hasIdentity ? resolvePerson(registry, troop.characterId) : null;
+            CharacterRegistry ownerRegistry = registry;
+            if (hasIdentity && person != null && PeopleMod.authority().getGlobal(troop.characterId) != null) {
+                ownerRegistry = PeopleMod.authority().registryForGlobal(troop.characterId);
+                if (ownerRegistry == null) return null;
+            }
             if (hasIdentity && (person == null || !person.alive)) {
                 // A missing/dead foreign key is a data-integrity fault, not permission to invent a replacement person.
                 return null;
@@ -286,10 +291,11 @@ public class TroopsMod {
                 String name = troop.def() == null ? troop.unitId() : troop.def().name();
                 person = registry.create(name + " " + troop.getUUID().toString().substring(0, 4), "", culture, "m", PeopleMod.YEAR - 20);
                 troop.setCharacterId(person.globalId);
+                ownerRegistry = registry;
             }
             troop.setCharacterId(person.globalId); // canonicalize legacy local ID before saving the entity
-            registry.bindEntity(person.id, "troop", troop.getUUID().toString());
-            return new PersonBinding(registry, person);
+            if (!ownerRegistry.bindEntity(person.id, "troop", troop.getUUID().toString())) return null;
+            return new PersonBinding(ownerRegistry, person);
         }
         return null;
     }
