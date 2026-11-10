@@ -13,7 +13,7 @@ import java.util.Objects;
  * Optional bridge between wf-people and wf-progress.
  * The Character owns the stable identity and the canonical skill/attribute ranks.
  * Progression profiles keep XP, levels, points and perk nodes, but are keyed by
- * the world-scoped Character ID and mirror ranks back to the Character.
+ * the immutable global Character UUID and mirror ranks back to the Character.
  */
 public final class PeopleProgressBridge {
     private PeopleProgressBridge() { }
@@ -37,20 +37,46 @@ public final class PeopleProgressBridge {
      * The old unscoped n:cN format is migrated only when it resolves to exactly one loaded person.
      */
     private static void migrateLegacyProfile(Progress progress, Character character, String scope, Profile target) {
+        if (!isFresh(target)) return;
+
+        // Same-scope legacy data is unambiguous: map scope + local cN uniquely identifies
+        // the old profile within this world's former per-map progression namespace.
         String scopedOwner = PopulationSimulation.legacyProgressOwner(character, scope);
         Profile scopedLegacy = progress.peek(scopedOwner);
         if (scopedLegacy != null && scopedLegacy != target) {
-            if (isFresh(target)) {
-                copyProfile(scopedLegacy, target);
-                progress.removeProfile(scopedOwner);
-            }
+            copyProfile(scopedLegacy, target);
+            progress.removeProfile(scopedOwner);
             return;
         }
 
+        // A character may have moved since its old profile was written. Search all old
+        // n:<scope>:<cN> keys only when cN is unique across the currently loaded maps.
+        // More than one candidate indicates duplicated/ambiguous legacy state: preserve
+        // every source profile rather than assigning one arbitrarily.
+        if (isUniqueCharacterId(character.id)) {
+            String suffix = ":" + character.id;
+            java.util.List<Profile> candidates = new java.util.ArrayList<>();
+            for (Profile candidate : progress.all()) {
+                String legacyOwner = candidate.owner;
+                if (candidate != target && legacyOwner.startsWith("n:")
+                        && legacyOwner.indexOf(':', 2) >= 0 && legacyOwner.endsWith(suffix)) {
+                    candidates.add(candidate);
+                }
+            }
+            if (candidates.size() == 1) {
+                Profile previousScope = candidates.get(0);
+                copyProfile(previousScope, target);
+                progress.removeProfile(previousScope.owner);
+                return;
+            }
+            if (candidates.size() > 1) return;
+        }
+
+        // The oldest format had no map scope at all. It is safe only for a globally
+        // unique legacy cN and only when no scoped predecessor was found.
         String unscopedOwner = "n:" + character.id;
         Profile unscopedLegacy = progress.peek(unscopedOwner);
-        if (unscopedLegacy == null || unscopedLegacy == target || !isUniqueCharacterId(character.id)) return;
-        if (isFresh(target)) {
+        if (unscopedLegacy != null && unscopedLegacy != target && isUniqueCharacterId(character.id)) {
             copyProfile(unscopedLegacy, target);
             progress.removeProfile(unscopedOwner);
         }
