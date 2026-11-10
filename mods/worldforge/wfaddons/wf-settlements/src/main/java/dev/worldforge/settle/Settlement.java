@@ -45,6 +45,10 @@ public final class Settlement {
     public String name;
     public final Defs defs;
     public final Map<String, Double> stock = new TreeMap<>();
+    /** Number of world-ledger journal entries represented by the last durable stock snapshot; -1 means legacy. */
+    private long stockLedgerEntries = -1;
+    private boolean stockReconciliationChecked;
+    private boolean reconcileStockMirror;
     public final List<Building> buildings = new ArrayList<>();
     public final List<Worker> workers = new ArrayList<>();
     public final List<String> log = new ArrayList<>();
@@ -201,10 +205,42 @@ public final class Settlement {
 
     public double amount(String resource) {
         if (resource == null || resource.isBlank()) return 0;
-        // The shared TreasuryLedger is the economic source of truth. Stock is a saved compatibility
-        // projection only: replaying an older settlement mirror must never mint back a committed
-        // ration transfer, estate charge, wage, production input or trade transaction.
+        TreasuryLedger ledger = TreasuryService.current();
+        String sourceAccountId = accountId(resource);
+        if (!stockReconciliationChecked) {
+            if (stockLedgerEntries >= 0) {
+                // The settlement file may have been committed after the treasury file.
+                // Decide once per loaded snapshot, before any imports append reconciliation entries.
+                reconcileStockMirror = stockLedgerEntries > ledger.journal().size();
+            } else {
+                // Legacy snapshots have no sequence marker. Keep their old one-time mirror
+                // reconciliation unless a durable army food transfer proves the ledger is newer.
+                reconcileStockMirror = ledger.journal().stream().noneMatch(entry ->
+                        entry.accountId().equals(sourceAccountId) && !entry.credit()
+                                && entry.kind() == TreasuryLedger.Kind.LOGISTICS
+                                && entry.category().equals("army-field-rations"));
+            }
+            stockReconciliationChecked = true;
+        }
+
         TreasuryLedger.Account account = resourceAccount(resource);
+        Double legacyMirror = stock.get(resource);
+        boolean committedArmyFoodTransfer = ledger.journal().stream().anyMatch(entry ->
+                entry.accountId().equals(sourceAccountId) && !entry.credit()
+                        && entry.kind() == TreasuryLedger.Kind.LOGISTICS
+                        && entry.category().equals("army-field-rations"));
+        if (reconcileStockMirror && !committedArmyFoodTransfer
+                && legacyMirror != null && Double.isFinite(legacyMirror)
+                && Math.abs(legacyMirror - account.balance) > 1e-9) {
+            double delta = legacyMirror - account.balance;
+            if (delta > 0) ledger.deposit(sourceAccountId, delta, TreasuryLedger.Kind.IMPORT,
+                    "legacy-stock-mirror", "settlement:" + id + ":snapshot-reconcile",
+                    worldMinute(), "reconcile legacy settlement snapshot newer than treasury");
+            else ledger.withdraw(sourceAccountId, -delta, TreasuryLedger.Kind.WRITE_OFF,
+                    "legacy-stock-mirror", "settlement:" + id + ":snapshot-reconcile",
+                    worldMinute(), "reconcile legacy settlement snapshot newer than treasury");
+            account = resourceAccount(resource);
+        }
         stock.put(resource, account.balance);
         return account.balance;
     }
@@ -1428,6 +1464,9 @@ public final class Settlement {
         for (String resource : new TreeSet<>(stock.keySet())) amount(resource);
         amount(Defs.SILVER);
         syncAllResourceMirrors();
+        stockLedgerEntries = TreasuryService.current().journal().size();
+        stockReconciliationChecked = true;
+        reconcileStockMirror = false;
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("format", "wf-settlement/2");
         root.put("schema_version", 2);
@@ -1440,6 +1479,7 @@ public final class Settlement {
         root.put("tax_got", taxCollected); root.put("remitted", remittedSilver); root.put("granted", grantedSilver); root.put("crown", crownShare);
         root.put("auto_sell", new LinkedHashMap<String, Object>(autoSell)); root.put("auto_buy", new LinkedHashMap<String, Object>(autoBuy));
         root.put("stock", stock);
+        root.put("stock_ledger_entries", stockLedgerEntries);
         List<Object> bs = new ArrayList<>();
         for (Building b : buildings) {
             Map<String, Object> m = new LinkedHashMap<>();
@@ -1513,6 +1553,8 @@ public final class Settlement {
         if (root.get("auto_sell") instanceof Map<?, ?> am) for (var e : am.entrySet()) s.autoSell.put(String.valueOf(e.getKey()), ((Number) e.getValue()).intValue());
         if (root.get("auto_buy") instanceof Map<?, ?> bm) for (var e : bm.entrySet()) s.autoBuy.put(String.valueOf(e.getKey()), ((Number) e.getValue()).intValue());
         for (Map.Entry<String, Object> e : ((Map<String, Object>) root.get("stock")).entrySet()) s.stock.put(e.getKey(), ((Number) e.getValue()).doubleValue());
+        if (root.get("stock_ledger_entries") instanceof Number entries)
+            s.stockLedgerEntries = Math.max(0, entries.longValue());
         for (Object o : (List<Object>) root.get("buildings")) {
             Map<String, Object> m = (Map<String, Object>) o;
             Defs.Building d = defs.buildings.get((String) m.get("def"));
