@@ -19,8 +19,19 @@ final class SettleBridge {
     static boolean ready() { return SettleMod.DEFS != null; }
 
     /** Основывает поселение уровня tier в точке. Правитель-игрок (owner) получает управление без прав оператора. */
-    static Colony found(ServerLevel lv, BlockPos pos, String name, GenesisDefs.Tier tier, GenesisDefs.Focus focus, ServerPlayer owner, Draft d) {
-        Colony c = SettleMod.found(lv, name, pos);
+    static Colony found(ServerLevel lv, BlockPos pos, String name, GenesisDefs.Tier tier, GenesisDefs.Focus focus,
+                        ServerPlayer owner, Draft d, String operationId) {
+        Colony c = SettleMod.found(lv, name, pos, operationId);
+        if (c.genesisProvisioned) return c;
+        if (c.genesisProvisioningStarted) {
+            throw new IllegalStateException("Genesis settlement provisioning was interrupted; operation "
+                    + operationId + " is blocked for reconciliation");
+        }
+        c.genesisProvisioningStarted = true;
+        if (!SettleMod.saveDurably(lv.getServer())) {
+            c.genesisProvisioningStarted = false;
+            throw new IllegalStateException("Could not persist Genesis settlement operation before provisioning");
+        }
         Settlement s = c.s;
         for (int i = 4; i < tier.workers(); i++) s.addWorker(null);
         for (Map.Entry<String, Integer> e : tier.stock().entrySet()) s.add(e.getKey(), e.getValue() - (e.getKey().equals("wood") ? 60 : e.getKey().equals("food") ? 40 : e.getKey().equals("stone") ? 10 : 0));
@@ -44,6 +55,11 @@ final class SettleBridge {
             s.setTax(d.tax);
             s.raids = d.raids;
             s.auto = d.auto;
+        }
+        c.genesisProvisioned = true;
+        if (!SettleMod.saveDurably(lv.getServer())) {
+            c.genesisProvisioned = false;
+            throw new IllegalStateException("Could not persist completed Genesis settlement provisioning");
         }
         return c;
     }
