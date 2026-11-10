@@ -14,6 +14,10 @@ import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.mc.PeopleMod;
 import dev.worldforge.mod.WFNet;
 import dev.worldforge.mod.WFPerm;
+import dev.worldforge.mod.WorldForgeMod;
+import dev.worldforge.mod.api.ActionExecutionService;
+import dev.worldforge.mod.api.ActionResult;
+import dev.worldforge.mod.api.WorldForgeApi;
 import dev.worldforge.origins.Origins;
 import dev.worldforge.origins.mc.OriginsMod;
 import dev.worldforge.progress.Profile;
@@ -270,14 +274,30 @@ public class GenesisMod {
             return 0;
         }
         try {
-            // Do not publish the draft as completed until every application step succeeds.
-            apply(sp, d);
-            String err = GENESIS.confirm(d);
-            if (!err.isEmpty()) {
-                s.sendFailure(Component.literal(err));
+            // Genesis uses the one shared durable action journal; it does not own a second executor.
+            long worldMinute = WorldForgeApi.clock().worldMinute();
+            String requestId = "genesis:" + sp.getUUID() + ":" + UUID.randomUUID();
+            ActionExecutionService.Request request = new ActionExecutionService.Request(
+                    requestId, "genesis.confirm", "player:" + sp.getUUID(), sp.getUUID().toString(),
+                    List.of(d.race, d.start, d.cls), worldMinute);
+            ActionExecutionService.Task task = WorldForgeApi.actionExecution().execute(
+                    request,
+                    req -> req.actorId().equals("player:" + sp.getUUID())
+                            && req.targetId().equals(sp.getUUID().toString()) && !sp.isRemoved()
+                            ? null : "Genesis confirmation actor/target is no longer authorized",
+                    (req, attempt) -> {
+                        // Do not publish the draft as completed until every application step succeeds.
+                        apply(sp, d);
+                        String err = GENESIS.confirm(d);
+                        if (!err.isEmpty()) return ActionResult.fail(err);
+                        save(sp.getServer());
+                        return ActionResult.ok("Genesis character created");
+                    },
+                    null, worldMinute, WorldForgeMod.actionExecutionFile(sp.getServer()));
+            if (task.status() != ActionExecutionService.Status.SUCCEEDED) {
+                s.sendFailure(Component.literal("Создание персонажа не завершено: " + task.message()));
                 return 0;
             }
-            save(sp.getServer());
         } catch (RuntimeException ex) {
             LOGGER.error("wf_genesis: ошибка применения персонажа {}: {}", sp.getName().getString(), ex.toString(), ex);
             s.sendFailure(Component.literal("Ошибка применения. Мастер создания оставлен открытым: " + ex.getMessage()));
