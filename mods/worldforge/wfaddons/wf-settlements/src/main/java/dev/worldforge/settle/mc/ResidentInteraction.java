@@ -1,5 +1,7 @@
 package dev.worldforge.settle.mc;
 
+import dev.worldforge.mod.api.ActionResult;
+
 import com.mojang.brigadier.arguments.StringArgumentType;
 import dev.worldforge.settle.ResidentSocial;
 import dev.worldforge.people.Character;
