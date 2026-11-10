@@ -56,12 +56,12 @@ public class ClockTest {
         strict.advance(GameClock.TICKS_PER_DAY * 12);
         String validBeforeBadLoad = strict.toJson();
         boolean invalidClockRejected = false;
-        try { strict.load("{\\"format\\":\\"wf-clock/1\\",\\"elapsed\\":-1,\\"speed\\":1,\\"last\\":1,\\"start\\":300}"); }
+        try { strict.load("{\"format\":\"wf-clock/1\",\"elapsed\":-1,\"speed\":1,\"last\":1,\"start\":300}"); }
         catch (IllegalArgumentException expected) { invalidClockRejected = true; }
         ok(invalidClockRejected && strict.toJson().equals(validBeforeBadLoad),
                 "invalid clock save is rejected without partially mutating the running calendar");
         boolean nonFiniteRejected = false;
-        try { strict.load("{\\"format\\":\\"wf-clock/1\\",\\"elapsed\\":1e999,\\"speed\\":1,\\"last\\":1,\\"start\\":300}"); }
+        try { strict.load("{\"format\":\"wf-clock/1\",\"elapsed\":1e999,\"speed\":1,\"last\":1,\"start\":300}"); }
         catch (IllegalArgumentException expected) { nonFiniteRejected = true; }
         ok(nonFiniteRejected && strict.toJson().equals(validBeforeBadLoad),
                 "non-finite clock elapsed time is rejected without resetting world time");
