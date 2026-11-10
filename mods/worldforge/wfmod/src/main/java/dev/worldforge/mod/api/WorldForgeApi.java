@@ -33,7 +33,7 @@ public final class WorldForgeApi {
     private static final List<Guard> GUARDS = new CopyOnWriteArrayList<>();
     private static final List<Consumer<MapChange>> LISTENERS = new CopyOnWriteArrayList<>();
     private static final EventLog EVENTS = new EventLog();
-    private static final ActionExecutionService ACTION_EXECUTION = new ActionExecutionService();
+    private static ActionExecutionService ACTION_EXECUTION = new ActionExecutionService();
     private static boolean builtinsDone;
 
     private WorldForgeApi() {}
@@ -60,9 +60,15 @@ public final class WorldForgeApi {
 
     /** Shared durable action queue. WorldForgeMod loads/saves it with the active world. */
     public static ActionExecutionService actionExecution() { return ACTION_EXECUTION; }
+    public static synchronized void resetActionExecution() { ACTION_EXECUTION = new ActionExecutionService(); }
 
     public static ActionExecutionService.Task submitAction(String requestId, String id, ActionContext base,
             Path journalFile, long worldMinute) {
+        return submitAction(requestId, id, base, journalFile, worldMinute, null);
+    }
+
+    public static ActionExecutionService.Task submitAction(String requestId, String id, ActionContext base,
+            Path journalFile, long worldMinute, ActionExecutionService.Replanner replanner) {
         MapAction initial = action(id);
         if (initial == null) throw new IllegalArgumentException("Нет такого действия: " + id);
         String target = initial.scope == MapAction.Scope.REALM ? base.realmId
@@ -90,7 +96,7 @@ public final class WorldForgeApi {
             ActionResult result = candidate.handler.run(context);
             if (result.ok) fireChange(new MapChange(context.data(), "action", candidate.id));
             return result;
-        }, null, worldMinute, journalFile);
+        }, replanner, worldMinute, journalFile);
     }
 
     private static ActionContext actionContext(ActionContext base, MapAction action, String target, List<String> args) {
