@@ -61,6 +61,8 @@ public final class Colony {
     public String genesisProvisioningSpec = "";
     /** Runtime-only poison flag: do not retry unsaved mutations until the last durable snapshot is reloaded. */
     public transient boolean genesisProvisioningRuntimeBlocked;
+    /** Runtime-only freeze after a settlement action changed state but could not persist its receipt-side snapshot. */
+    public transient boolean actionPersistenceBlocked;
 
     public Colony(Settlement s, String dim, int cx, int cz) {
         this.s = s;
