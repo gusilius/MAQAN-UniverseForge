@@ -303,7 +303,6 @@ public class GenesisMod {
                         String err = GENESIS.confirm(d);
                         if (!err.isEmpty()) return ActionResult.fail(err);
                         if (!save(sp.getServer())) {
-                            GENESIS.forget(owner(sp));
                             return ActionResult.fail("Genesis state could not be saved; confirmation remains blocked for reconciliation");
                         }
                         return ActionResult.ok("Genesis character created");
