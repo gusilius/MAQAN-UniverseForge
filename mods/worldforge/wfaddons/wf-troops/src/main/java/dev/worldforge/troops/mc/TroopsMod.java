@@ -70,9 +70,9 @@ import java.util.concurrent.ConcurrentHashMap;
 public class TroopsMod {
     public static final String MOD_ID = "wf_troops";
     public static final Logger LOGGER = LogUtils.getLogger();
-    private static final String PROTO = "1";
+    private static final String PROTO = "2";
     public static final SimpleChannel NET = NetworkRegistry.newSimpleChannel(new ResourceLocation(MOD_ID, "main"), () -> PROTO,
-            NetworkRegistry.acceptMissingOr(PROTO), NetworkRegistry.acceptMissingOr(PROTO));
+            NetworkRegistry.acceptVersion(PROTO), NetworkRegistry.acceptVersion(PROTO));
 
     private static final DeferredRegister<EntityType<?>> ENTITIES = DeferredRegister.create(ForgeRegistries.ENTITY_TYPES, MOD_ID);
     public static final RegistryObject<EntityType<TroopEntity>> TROOP = ENTITIES.register("troop",
@@ -514,11 +514,7 @@ public class TroopsMod {
         }
         String actor = p.getUUID().toString();
         long minute = dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute();
-        String payload = o.toString();
-        String nonce = java.util.UUID.nameUUIDFromBytes(
-                (actor + ":" + p.server.getTickCount() + ":" + payload)
-                        .getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString();
-        String requestId = "troop:" + nonce;
+        String requestId = "troop:" + o.requestId();
         var request = new dev.worldforge.mod.api.ActionExecutionService.Request(
                 requestId, "military.client_order", actor, "selection", List.of(payload), minute);
         try {
