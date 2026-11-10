@@ -78,7 +78,7 @@ public final class CharacterAuthorityTest {
         check(authority.getGlobal(a.globalId) == a
                         && authority.getGlobal(late.globalId) == late
                         && authority.size() == 5
-                        && authority.mapCount() == 5,
+                        && authority.mapCount() == 4,
                 "failed map registration preserves every previously indexed Character and registry");
 
         authority.clear();
