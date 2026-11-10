@@ -156,12 +156,12 @@ public class WorldForgeMod {
     }
 
     /** Flushes the canonical ledger after addons have migrated their legacy balances during shutdown. */
-    public static void saveTreasuryNow(MinecraftServer server) { saveTreasury(server); }
+    public static boolean saveTreasuryNow(MinecraftServer server) { return saveTreasury(server); }
 
-    private static void saveTreasury(MinecraftServer server) {
-        if (treasuryLoadFailed) {
+    private static boolean saveTreasury(MinecraftServer server) {
+        if (server == null || treasuryLoadFailed) {
             LOGGER.error("WorldForge treasury save skipped because the previous load failed; preserving the original file");
-            return;
+            return false;
         }
         Path file = treasuryFile(server);
         try {
@@ -170,7 +170,11 @@ public class WorldForgeMod {
             Files.writeString(temp, TreasuryService.current().toJson());
             try { Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE); }
             catch (java.nio.file.AtomicMoveNotSupportedException ignored) { Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING); }
-        } catch (IOException ex) { LOGGER.error("WorldForge treasury save failed: {}", ex.toString()); }
+            return true;
+        } catch (IOException ex) {
+            LOGGER.error("WorldForge treasury save failed: {}", ex.toString());
+            return false;
+        }
     }
 
     public static Map<String, MapData> loadedMaps() {

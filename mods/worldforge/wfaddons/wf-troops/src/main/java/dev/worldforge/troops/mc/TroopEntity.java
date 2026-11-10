@@ -41,6 +41,8 @@ public class TroopEntity extends PathfinderMob {
     public static final EntityDataAccessor<Integer> MORALE = SynchedEntityData.defineId(TroopEntity.class, EntityDataSerializers.INT);
     private static final UUID MORALE_MOD = UUID.fromString("5b0a8e0e-6c3d-4a0e-9d0a-0d1f6f0c7a11");
     private static final UUID INJURY_SPEED_MOD = UUID.fromString("c0b9d7b1-2b34-4c61-9b8a-91c2b6c43d2e");
+    private static final UUID SUPPLY_DAMAGE_MOD = UUID.fromString("32a112a3-6a87-46ca-9d62-0a2c4b3bcf31");
+    private static final UUID SUPPLY_SPEED_MOD = UUID.fromString("6f8d16a1-3e13-480f-b24f-9280a1c0fdb9");
     public static final EntityDataAccessor<String> SQUAD = SynchedEntityData.defineId(TroopEntity.class, EntityDataSerializers.STRING);
     public static final EntityDataAccessor<String> CHARACTER = SynchedEntityData.defineId(TroopEntity.class, EntityDataSerializers.STRING);
     public static final EntityDataAccessor<Integer> COMBAT_XP = SynchedEntityData.defineId(TroopEntity.class, EntityDataSerializers.INT);
@@ -101,6 +103,36 @@ public class TroopEntity extends PathfinderMob {
         if(!level().isClientSide&&entityData.get(COMBAT_XP)!=combatXp)entityData.set(COMBAT_XP,combatXp);
     }
     public double dmgMult = 1;
+    private double supplyCombatMultiplier = 1.0;
+    private double supplyMovementMultiplier = 1.0;
+
+    /** Applies operational ration readiness without overwriting morale or injury modifiers. */
+    public void setSupplyReadiness(double combatMultiplier, double movementMultiplier) {
+        if (!Double.isFinite(combatMultiplier) || !Double.isFinite(movementMultiplier))
+            throw new IllegalArgumentException("supply multipliers must be finite");
+        supplyCombatMultiplier = Math.max(0.65, Math.min(1.0, combatMultiplier));
+        supplyMovementMultiplier = Math.max(0.70, Math.min(1.0, movementMultiplier));
+        var attack = getAttribute(Attributes.ATTACK_DAMAGE);
+        if (attack != null) {
+            attack.removeModifier(SUPPLY_DAMAGE_MOD);
+            if (Math.abs(supplyCombatMultiplier - 1.0) > 0.001)
+                attack.addTransientModifier(new AttributeModifier(SUPPLY_DAMAGE_MOD,
+                        "wf_field_supply_combat", supplyCombatMultiplier - 1.0,
+                        AttributeModifier.Operation.MULTIPLY_TOTAL));
+        }
+        var speed = getAttribute(Attributes.MOVEMENT_SPEED);
+        if (speed != null) {
+            speed.removeModifier(SUPPLY_SPEED_MOD);
+            if (Math.abs(supplyMovementMultiplier - 1.0) > 0.001)
+                speed.addTransientModifier(new AttributeModifier(SUPPLY_SPEED_MOD,
+                        "wf_field_supply_mobility", supplyMovementMultiplier - 1.0,
+                        AttributeModifier.Operation.MULTIPLY_TOTAL));
+        }
+    }
+
+    public double supplyCombatMultiplier() { return supplyCombatMultiplier; }
+    public double supplyMovementMultiplier() { return supplyMovementMultiplier; }
+
 
     /** Множитель урона от морали и ауры командира: добавочный модификатор, чтобы не трогать базу типа. */
     public void setDamageMult(double m) {

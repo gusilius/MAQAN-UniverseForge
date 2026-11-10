@@ -201,20 +201,10 @@ public final class Settlement {
 
     public double amount(String resource) {
         if (resource == null || resource.isBlank()) return 0;
+        // The shared TreasuryLedger is the economic source of truth. Stock is a saved compatibility
+        // projection only: replaying an older settlement mirror must never mint back a committed
+        // ration transfer, estate charge, wage, production input or trade transaction.
         TreasuryLedger.Account account = resourceAccount(resource);
-        Double legacyMirror = stock.get(resource);
-        if (legacyMirror != null && Double.isFinite(legacyMirror)
-                && Math.abs(legacyMirror - account.balance) > 1e-9) {
-            double delta = legacyMirror - account.balance;
-            TreasuryLedger ledger = TreasuryService.current();
-            if (delta > 0) ledger.deposit(accountId(resource), delta, TreasuryLedger.Kind.IMPORT,
-                    "legacy-stock-mirror", "settlement:" + id + ":legacy-sync",
-                    worldMinute(), "compatibility stock mirror reconciliation");
-            else ledger.withdraw(accountId(resource), -delta, TreasuryLedger.Kind.WRITE_OFF,
-                    "legacy-stock-mirror", "settlement:" + id + ":legacy-sync",
-                    worldMinute(), "compatibility stock mirror reconciliation");
-            account = resourceAccount(resource);
-        }
         stock.put(resource, account.balance);
         return account.balance;
     }
@@ -313,6 +303,53 @@ public final class Settlement {
 
     public boolean transferSilverTo(Settlement recipient, double quantity, String category, String reference) {
         return transferResourceTo(recipient, Defs.SILVER, quantity, category, reference);
+    }
+
+    /**
+     * Transfers a settlement resource to a durable external ledger account.
+     * A retry is accepted only when both persisted journal legs match the same target,
+     * currency, category and quantity. The TreasuryLedger remains the source of truth.
+     */
+    public boolean transferResourceToAccount(String resource, String targetAccountId, String targetOwnerId,
+                                             double quantity, TreasuryLedger.Kind kind,
+                                             String category, String reference) {
+        if (resource == null || resource.isBlank() || targetAccountId == null || targetAccountId.isBlank()
+                || targetOwnerId == null || targetOwnerId.isBlank() || !Double.isFinite(quantity)
+                || quantity < 0 || kind == null || category == null || category.isBlank()
+                || reference == null || reference.isBlank()) return false;
+        String sourceId = accountId(resource);
+        String cleanCategory = category.trim(), cleanReference = reference.trim();
+        TreasuryLedger ledger = TreasuryService.current();
+        List<TreasuryLedger.Entry> debits = ledger.journal().stream()
+                .filter(entry -> entry.accountId().equals(sourceId) && !entry.credit()
+                        && entry.kind() == kind && entry.reference().equals(cleanReference)).toList();
+        if (!debits.isEmpty()) {
+            List<TreasuryLedger.Entry> credits = ledger.journal().stream()
+                    .filter(entry -> entry.accountId().equals(targetAccountId) && entry.credit()
+                            && entry.kind() == kind && entry.reference().equals(cleanReference)).toList();
+            if (debits.size() != 1 || credits.size() != 1) return false;
+            TreasuryLedger.Entry debit = debits.get(0), credit = credits.get(0);
+            boolean match = debit.counterpartyId().equals(targetAccountId)
+                    && credit.counterpartyId().equals(sourceId)
+                    && debit.transactionId().equals(credit.transactionId())
+                    && debit.currency().equals(resource) && credit.currency().equals(resource)
+                    && debit.category().equals(cleanCategory) && credit.category().equals(cleanCategory)
+                    && Math.abs(debit.amount() - quantity) <= 1e-8
+                    && Math.abs(credit.amount() - quantity) <= 1e-8;
+            if (!match) return false;
+            syncResourceMirror(resource);
+            return true;
+        }
+        if (ledger.hasCredit(targetAccountId, kind, cleanReference)) return false;
+        if (amount(resource) + 1e-9 < quantity) return false;
+        TreasuryLedger.Account target = ledger.account(targetAccountId);
+        if (target == null) target = ledger.open(targetAccountId, targetOwnerId, resource, 0);
+        else if (!target.ownerId.equals(targetOwnerId) || !target.currency.equals(resource)) return false;
+        boolean transferred = ledger.transferOnce(sourceId, targetAccountId, quantity, kind,
+                cleanCategory, cleanReference, worldMinute(), "settlement resource transfer to external account");
+        syncResourceMirror(resource);
+        if (transferred && quantity > 0) flow.record(time, resource, quantity, false);
+        return transferred;
     }
 
     /** Transfer settlement silver to a realm, army or other canonical treasury account. */
