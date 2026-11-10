@@ -243,8 +243,15 @@ public final class SettleCommands {
                     (req, attempt) -> {
                         Colony current = SettleMod.colony(req.targetId());
                         if (current == null) return dev.worldforge.mod.api.ActionResult.fail("Поселение больше не существует");
-                        try { return dev.worldforge.mod.api.ActionResult.ok(o.run(current)); }
-                        catch (Settlement.OrderException ex) { return dev.worldforge.mod.api.ActionResult.fail(ex.getMessage()); }
+                        try {
+                            String message = o.run(current);
+                            if (!SettleMod.persistActionMutation(source.getServer(), current))
+                                return dev.worldforge.mod.api.ActionResult.fail(
+                                        "Приказ применён в памяти, но снимок поселения не сохранён; изменения заблокированы до сверки");
+                            return dev.worldforge.mod.api.ActionResult.ok(message);
+                        } catch (Settlement.OrderException ex) {
+                            return dev.worldforge.mod.api.ActionResult.fail(ex.getMessage());
+                        }
                     }, null, minute, dev.worldforge.mod.WorldForgeMod.actionExecutionFile(source.getServer()));
             if (task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED) {
                 String message = task.message();
@@ -278,8 +285,14 @@ public final class SettleCommands {
                             return "Все изменения поселений заблокированы после ошибки сохранения; требуется перезапуск и сверка";
                         return op(source) ? null : "Для этой операции нужны права владельца поселения или оператора";
                     },
-                    (req, attempt) -> operation.get(), null, minute,
-                    dev.worldforge.mod.WorldForgeMod.actionExecutionFile(source.getServer()));
+                    (req, attempt) -> {
+                        dev.worldforge.mod.api.ActionResult result = operation.get();
+                        if (!result.ok) return result;
+                        if (!SettleMod.persistActionMutation(source.getServer()))
+                            return dev.worldforge.mod.api.ActionResult.fail(
+                                    "Операция применена в памяти, но снимок поселений не сохранён; изменения заблокированы до сверки");
+                        return result;
+                    }, null, minute, dev.worldforge.mod.WorldForgeMod.actionExecutionFile(source.getServer()));
             if (task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED) {
                 source.sendSuccess(() -> Component.literal(task.message()), true);
                 return 1;
