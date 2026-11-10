@@ -195,22 +195,50 @@ public final class SettleCommands {
     }
 
     private static int order(CommandContext<CommandSourceStack> c, Order o) {
-        CommandSourceStack s = c.getSource();
-        Colony col = SettleMod.nearest(s.getLevel(), s.getPosition().x, s.getPosition().z);
-        if (col == null) {
-            s.sendFailure(Component.literal("Рядом нет поселения. Основать: /wfsettle found <имя>"));
+        CommandSourceStack source = c.getSource();
+        Colony colony = SettleMod.nearest(source.getLevel(), source.getPosition().x, source.getPosition().z);
+        if (colony == null) {
+            source.sendFailure(Component.literal("Рядом нет поселения. Основать: /wfsettle found <имя>"));
             return 0;
         }
-        if (!dev.worldforge.mod.WFPerm.trusted(s) && !(s.getEntity() instanceof net.minecraft.server.level.ServerPlayer pl && pl.getUUID().toString().equals(col.owner))) {
-            s.sendFailure(Component.literal("Это поселение не ваше: приказы отдаёт его правитель"));
+        String actorId = source.getEntity() instanceof net.minecraft.server.level.ServerPlayer player
+                ? player.getUUID().toString() : "console";
+        boolean operator = dev.worldforge.mod.WFPerm.trusted(source);
+        if (!operator && !actorId.equals(colony.owner)) {
+            source.sendFailure(Component.literal("Это поселение не ваше: приказы отдаёт его правитель"));
             return 0;
         }
+
+        String input = c.getInput();
+        String requestId = "settlement:" + actorId + ":" + source.getServer().getTickCount() + ":"
+                + Integer.toUnsignedString(java.util.Objects.hash(colony.s.id, input), 16);
+        long minute = dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute();
+        var request = new dev.worldforge.mod.api.ActionExecutionService.Request(
+                requestId, "settlement.command", actorId, colony.s.id, java.util.List.of(input), minute);
         try {
-            String msg = o.run(col);
-            s.sendSuccess(() -> Component.literal(msg), true);
-            return 1;
-        } catch (Settlement.OrderException ex) {
-            s.sendFailure(Component.literal(ex.getMessage()));
+            var task = dev.worldforge.mod.api.WorldForgeApi.actionExecution().execute(request,
+                    req -> {
+                        Colony current = SettleMod.colony(req.targetId());
+                        if (current == null) return "Поселение больше не существует";
+                        if (!operator && !req.actorId().equals(current.owner))
+                            return "Полномочия на это поселение изменились";
+                        return null;
+                    },
+                    (req, attempt) -> {
+                        Colony current = SettleMod.colony(req.targetId());
+                        if (current == null) return dev.worldforge.mod.api.ActionResult.fail("Поселение больше не существует");
+                        try { return dev.worldforge.mod.api.ActionResult.ok(o.run(current)); }
+                        catch (Settlement.OrderException ex) { return dev.worldforge.mod.api.ActionResult.fail(ex.getMessage()); }
+                    }, null, minute, dev.worldforge.mod.WorldForgeMod.actionExecutionFile(source.getServer()));
+            if (task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED) {
+                String message = task.message();
+                source.sendSuccess(() -> Component.literal(message), true);
+                return 1;
+            }
+            source.sendFailure(Component.literal(task.message()));
+            return 0;
+        } catch (RuntimeException ex) {
+            source.sendFailure(Component.literal("Не удалось выполнить приказ: " + ex.getMessage()));
             return 0;
         }
     }
