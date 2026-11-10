@@ -63,51 +63,55 @@ public final class ActionExecutionService {
     private final LinkedHashMap<String, Task> tasks = new LinkedHashMap<>();
     private final LinkedHashMap<String, Receipt> receipts = new LinkedHashMap<>();
 
-    /** Existing request IDs return their original task and never execute the domain action twice. */
-    public synchronized Task execute(Request request, Authorizer authorizer, Executor executor,
-                                     Replanner replanner, long nowMinute, Path durableFile) {
+    /** Enqueue durably without executing; server tick/adapter can process it later. */
+    public synchronized Task enqueue(Request request, long nowMinute, Path durableFile) {
         Objects.requireNonNull(request, "request");
-        Objects.requireNonNull(authorizer, "authorizer");
-        Objects.requireNonNull(executor, "executor");
         if (nowMinute < request.requestedMinute()) throw new IllegalArgumentException("Action time moved backwards");
         Task prior = tasks.get(request.requestId());
         if (prior != null) {
-            if (!prior.actorId().equals(request.actorId())
-                    || !prior.actionId().equals(request.actionId())
-                    || !prior.targetId().equals(request.targetId())
-                    || !prior.args().equals(request.args()))
+            if (!prior.actorId().equals(request.actorId()) || !prior.actionId().equals(request.actionId())
+                    || !prior.targetId().equals(request.targetId()) || !prior.args().equals(request.args()))
                 throw new IllegalStateException("Action request id was reused with a different payload: " + request.requestId());
             return prior;
         }
         if (tasks.size() >= MAX_RECORDS) throw new IllegalStateException("Action task journal is full");
-
-        Task task = new Task(request.requestId(), request.actionId(), request.actorId(), request.targetId(),
+        Task queued = new Task(request.requestId(), request.actionId(), request.actorId(), request.targetId(),
                 request.args(), Status.QUEUED, 0, "Queued", request.requestedMinute(), nowMinute, "");
-        tasks.put(request.requestId(), task);
+        tasks.put(request.requestId(), queued);
         persistOrRollback(durableFile, request.requestId());
+        return queued;
+    }
 
-        String denied = authorizer.denyReason(request);
-        if (denied != null) return finish(request, task, Status.FAILED, 0, denied, nowMinute, durableFile);
+    /** Executes an already queued task once. Duplicate calls return its existing state/receipt. */
+    public synchronized Task process(String requestId, Authorizer authorizer, Executor executor,
+                                     Replanner replanner, long nowMinute, Path durableFile) {
+        Objects.requireNonNull(authorizer, "authorizer");
+        Objects.requireNonNull(executor, "executor");
+        Task task = tasks.get(requestId);
+        if (task == null) throw new IllegalArgumentException("Unknown action request: " + requestId);
+        if (task.status() != Status.QUEUED) return task;
+        Request original = new Request(task.requestId(), task.actionId(), task.actorId(), task.targetId(),
+                task.args(), task.createdMinute());
+        if (nowMinute < task.createdMinute()) throw new IllegalArgumentException("Action time moved backwards");
 
-        Request current = request;
+        String denied = authorizer.denyReason(original);
+        if (denied != null) return finish(original, task, Status.FAILED, 0, denied, nowMinute, durableFile);
+
+        Request current = original;
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-            task = new Task(request.requestId(), current.actionId(), request.actorId(), current.targetId(),
-                    current.args(), Status.RUNNING, attempt, "Running", request.requestedMinute(), nowMinute, "");
-            tasks.put(request.requestId(), task);
-            persistOrRollback(durableFile, request.requestId());
-
             String attemptDenied = authorizer.denyReason(current);
             if (attemptDenied != null)
                 return finish(current, task, Status.FAILED, attempt - 1, attemptDenied, nowMinute, durableFile);
 
-            ActionResult result;
-            try {
-                result = Objects.requireNonNull(executor.execute(current, attempt), "Action executor returned null");
-            } catch (RuntimeException ex) {
-                result = ActionResult.fail("Action executor error: " + ex.getMessage());
-            }
-            if (result.ok) return finish(current, task, Status.SUCCEEDED, attempt, result.message, nowMinute, durableFile);
+            task = new Task(original.requestId(), current.actionId(), original.actorId(), current.targetId(),
+                    current.args(), Status.RUNNING, attempt, "Running", original.requestedMinute(), nowMinute, "");
+            tasks.put(requestId, task);
+            persistOrRollback(durableFile, requestId);
 
+            ActionResult result;
+            try { result = Objects.requireNonNull(executor.execute(current, attempt), "Action executor returned null"); }
+            catch (RuntimeException ex) { result = ActionResult.fail("Action executor error: " + ex.getMessage()); }
+            if (result.ok) return finish(current, task, Status.SUCCEEDED, attempt, result.message, nowMinute, durableFile);
             if (!result.retryable || replanner == null || attempt == MAX_ATTEMPTS)
                 return finish(current, task, Status.FAILED, attempt, result.message, nowMinute, durableFile);
 
@@ -116,10 +120,18 @@ public final class ActionExecutionService {
             catch (RuntimeException ex) { next = null; }
             if (next == null)
                 return finish(current, task, Status.FAILED, attempt, result.message, nowMinute, durableFile);
-            current = new Request(request.requestId(), next.actionId(), request.actorId(), next.targetId(),
-                    next.args(), request.requestedMinute());
+            current = new Request(original.requestId(), next.actionId(), original.actorId(), next.targetId(),
+                    next.args(), original.requestedMinute());
         }
-        return tasks.get(request.requestId());
+        return tasks.get(requestId);
+    }
+
+    /** Compatibility convenience: enqueue and immediately process through the same durable path. */
+    public synchronized Task execute(Request request, Authorizer authorizer, Executor executor,
+                                      Replanner replanner, long nowMinute, Path durableFile) {
+        Task task = enqueue(request, nowMinute, durableFile);
+        if (task.status() != Status.QUEUED) return task;
+        return process(request.requestId(), authorizer, executor, replanner, nowMinute, durableFile);
     }
 
     public synchronized boolean cancel(String requestId, String actorId, boolean operator, long nowMinute, Path durableFile) {
