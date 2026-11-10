@@ -1,6 +1,8 @@
 package dev.worldforge.tests;
 
 import dev.worldforge.mod.economy.TreasuryLedger;
+import dev.worldforge.mod.economy.TreasuryService;
+import dev.worldforge.mod.api.TreasuryApi;
 import dev.worldforge.mod.Json;
 import java.util.*;
 
@@ -116,6 +118,25 @@ public final class TreasuryLedgerTest {
         catch (IllegalArgumentException expected) { rejectedUnbalanced = true; }
         ok(rejectedUnbalanced, "ledger restore rejects a transfer whose matching debit/credit entry is missing");
 
+        TreasuryApi.resetForTests();
+        ok(TreasuryApi.migrateLegacyRealmBalance("legacy-positive", 25)
+                        && TreasuryApi.migrateLegacyRealmBalance("legacy-positive", 25)
+                        && close(TreasuryApi.netBalance("legacy-positive"), 25),
+                "legacy positive army balance migrates exactly once into an existing-capable realm account");
+        ok(TreasuryService.current().journal().stream().filter(e -> e.reference().equals("legacy-army-balance:legacy-positive")).count() == 1,
+                "legacy positive migration is protected by the durable journal idempotency key");
+        ok(TreasuryApi.migrateLegacyRealmBalance("legacy-negative", -20)
+                        && TreasuryApi.migrateLegacyRealmBalance("legacy-negative", -20)
+                        && close(TreasuryApi.netBalance("legacy-negative"), -20),
+                "legacy negative army balance becomes treasury debt without losing the deficit");
+        TreasuryApi.ensureRealmAccount("legacy-existing", 50);
+        ok(TreasuryApi.migrateLegacyRealmBalance("legacy-existing", 20)
+                        && close(TreasuryApi.netBalance("legacy-existing"), 70),
+                "legacy army balance merges once into a realm treasury already opened by settlements");
+        ok(TreasuryApi.spendOnce("legacy-positive", 5, "army-test", "army-spend-once", 10)
+                        && TreasuryApi.spendOnce("legacy-positive", 5, "army-test", "army-spend-once", 10)
+                        && close(TreasuryApi.netBalance("legacy-positive"), 20),
+                "idempotent military spending cannot debit twice");
         System.out.println(failures==0?"ALL OK":failures+" FAILED");
         if(failures>0) System.exit(1);
     }
