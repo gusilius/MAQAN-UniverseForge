@@ -300,12 +300,13 @@ public class RealmsMod {
             } catch (Exception ex) {
                 return dev.worldforge.mod.api.ActionResult.fail("Политическая операция отклонена: " + ex.getMessage());
             }
-        }, true);
+        }, () -> null, true);
     }
 
     private static int executePoliticalMutation(CommandSourceStack source, String action, String target,
                                                 String payload,
                                                 java.util.function.Supplier<dev.worldforge.mod.api.ActionResult> operation,
+                                                java.util.function.Supplier<String> domainAuthorization,
                                                 boolean operatorOnly) {
         String actor = source.getEntity() instanceof ServerPlayer player
                 ? player.getUUID().toString() : "console";
@@ -323,7 +324,7 @@ public class RealmsMod {
                             return "Игрок отключился до политической операции";
                         if (operatorOnly && !source.hasPermission(2))
                             return "Нужны права оператора";
-                        return null;
+                        return domainAuthorization.get();
                     },
                     (req, attempt) -> operation.get(), null, minute,
                     WorldForgeMod.actionExecutionFile(source.getServer()));
@@ -364,8 +365,6 @@ public class RealmsMod {
         String actor = player.getUUID().toString();
         String payload = what + "|" + realm + "|" + a + "|" + b;
         int result = executePoliticalMutation(source, "realm_" + what, realm, payload, () -> {
-            if (!rules(player, realm))
-                return dev.worldforge.mod.api.ActionResult.fail("Это решение правителя.");
             boolean ok = switch (what) {
                 case "gov" -> REALMS.setGov(realm, a, false);
                 case "unlock" -> REALMS.unlock(realm, a);
@@ -373,7 +372,7 @@ public class RealmsMod {
             };
             if (!ok) return dev.worldforge.mod.api.ActionResult.fail(REALMS.lastError);
             return dev.worldforge.mod.api.ActionResult.ok("Готово.");
-        }, false);
+        }, () -> rules(player, realm) ? null : "Это решение правителя.", false);
         if (result == 0) return 0;
         return info(source, realm);
     }
