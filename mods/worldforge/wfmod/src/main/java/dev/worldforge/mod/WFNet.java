@@ -29,6 +29,8 @@ public final class WFNet {
                 NetworkRegistry.acceptMissingOr(PROTO), NetworkRegistry.acceptMissingOr(PROTO));
         CHANNEL.registerMessage(0, Blob.class, Blob::encode, Blob::decode, Blob::handle);
         CHANNEL.registerMessage(1, NeedTerrain.class, (m, b) -> { }, b -> new NeedTerrain(), NeedTerrain::handle);
+        CHANNEL.registerMessage(2, RequestAtlasSnapshot.class, (m, b) -> { }, b -> new RequestAtlasSnapshot(),
+                RequestAtlasSnapshot::handle);
     }
 
     /** Кусок большой передачи (сервер -> клиент). */
@@ -69,6 +71,24 @@ public final class WFNet {
             ctx.get().enqueueWork(() -> { if (sp != null) SyncService.sendTerrain(sp); });
             ctx.get().setPacketHandled(true);
         }
+    }
+
+    /** Client request for a fresh, server-authoritative Atlas snapshot. */
+    public static final class RequestAtlasSnapshot {
+        static void handle(RequestAtlasSnapshot message, Supplier<NetworkEvent.Context> ctx) {
+            NetworkEvent.Context context = ctx.get();
+            ServerPlayer player = context.getSender();
+            context.enqueueWork(() -> {
+                if (player != null) WorldForgeSnapshotExporter.sendTo(player);
+            });
+            context.setPacketHandled(true);
+        }
+    }
+
+    /** Optional client bridge invoked reflectively by Atlas to avoid a hard mod dependency. */
+    public static void requestAtlasSnapshot() {
+        SimpleChannel channel = CHANNEL;
+        if (channel != null) channel.sendToServer(new RequestAtlasSnapshot());
     }
 
     /** Открыть у игрока окно аддона: id окна и произвольный текст (обычно JSON); клиент отдаёт их тому, кто вызвал {@link dev.worldforge.mod.client.ClientViews#register}. */

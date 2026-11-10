@@ -12,6 +12,8 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Consumer;
+import java.nio.charset.StandardCharsets;
 
 /**
  * Read-only client cache for an explicitly exported WorldForge map snapshot.
@@ -40,6 +42,9 @@ public final class NavigatorWorldForgeMapStore {
     private static volatile long lastAttemptAt;
     /** True when the last reload attempt failed or the source file disappeared. */
     private static volatile boolean stale;
+    private static volatile String snapshotSource = "none";
+    private static boolean liveViewRegistered;
+    private static long lastLiveRequestAttemptAt;
 
     private NavigatorWorldForgeMapStore() {}
 
@@ -49,41 +54,88 @@ public final class NavigatorWorldForgeMapStore {
                 .resolve("map_snapshot.json");
     }
 
-    /** Reloads the optional snapshot. Invalid input is rejected as a whole, never partially trusted. */
+    /** Reloads the optional file cache. Network and file snapshots share the same validator and publisher. */
     public static synchronized boolean reload() {
         lastAttemptAt = System.currentTimeMillis();
         Path path = file();
         if (!Files.isRegularFile(path)) {
-            stale = snapshot != null;
-            status = stale
-                    ? "WorldForge snapshot missing; keeping last known-good data"
-                    : "No WorldForge map snapshot";
+            reject("No WorldForge map snapshot file");
             return false;
         }
         try {
             long size = Files.size(path);
             if (size <= 0 || size > MAX_FILE_BYTES)
                 throw new IllegalArgumentException("Snapshot size must be between 1 byte and 32 MiB");
-            WorldForgeMapSnapshot parsed;
-            try (Reader reader = Files.newBufferedReader(path)) {
-                parsed = GSON.fromJson(reader, WorldForgeMapSnapshot.class);
+            return publishJson(Files.readString(path, StandardCharsets.UTF_8), "file");
+        } catch (Exception error) {
+            reject(safeMessage(error));
+            return false;
+        }
+    }
+
+    /** Called by the optional WorldForge ClientViews transport after the complete chunked response arrives. */
+    public static synchronized boolean acceptNetworkSnapshot(String json) {
+        lastAttemptAt = System.currentTimeMillis();
+        return publishJson(json, "network");
+    }
+
+    /** Registers the optional WorldForge view and requests a refresh at most once per 15 seconds. */
+    public static synchronized void ensureLiveFeed() {
+        long now = System.currentTimeMillis();
+        if (now - lastLiveRequestAttemptAt < 15_000L) return;
+        lastLiveRequestAttemptAt = now;
+        try {
+            if (!liveViewRegistered) {
+                Class<?> views = Class.forName("dev.worldforge.mod.client.ClientViews");
+                Consumer<String> snapshotReceiver = NavigatorWorldForgeMapStore::acceptNetworkSnapshot;
+                Consumer<String> errorReceiver = message -> {
+                    synchronized (NavigatorWorldForgeMapStore.class) {
+                        reject("WorldForge export failed: " + (message == null ? "unknown error" : message));
+                    }
+                };
+                views.getMethod("register", String.class, Consumer.class)
+                        .invoke(null, "worldforge:atlas_snapshot", snapshotReceiver);
+                views.getMethod("register", String.class, Consumer.class)
+                        .invoke(null, "worldforge:atlas_snapshot_error", errorReceiver);
+                liveViewRegistered = true;
             }
+            Class<?> network = Class.forName("dev.worldforge.mod.WFNet");
+            network.getMethod("requestAtlasSnapshot").invoke(null);
+            if (snapshot == null) status = "Requesting live WorldForge snapshot";
+        } catch (ClassNotFoundException ignored) {
+            // WorldForge is optional; the last validated file snapshot remains available.
+        } catch (ReflectiveOperationException | LinkageError error) {
+            reject("Live WorldForge bridge unavailable: " + error.getClass().getSimpleName());
+        }
+    }
+
+    private static boolean publishJson(String json, String source) {
+        try {
+            if (json == null) throw new IllegalArgumentException("Empty JSON document");
+            byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
+            if (bytes.length == 0 || bytes.length > MAX_FILE_BYTES)
+                throw new IllegalArgumentException("Snapshot size must be between 1 byte and 32 MiB");
+            WorldForgeMapSnapshot parsed = GSON.fromJson(json, WorldForgeMapSnapshot.class);
             validate(parsed);
             parsed.rebuildIndexes();
             snapshot = parsed;
+            snapshotSource = source;
             stale = false;
             status = "WorldForge · " + parsed.features.size() + " objects · "
-                    + parsed.territories.size() + " territories";
+                    + parsed.territories.size() + " territories · " + source;
             lastLoadedAt = System.currentTimeMillis();
             return true;
         } catch (Exception error) {
-            // Keep the last known-good snapshot available during transient or malformed updates.
-            stale = snapshot != null;
-            status = stale
-                    ? "WorldForge snapshot rejected; keeping last known-good data: " + safeMessage(error)
-                    : "WorldForge snapshot rejected: " + safeMessage(error);
+            reject(safeMessage(error));
             return false;
         }
+    }
+
+    private static void reject(String message) {
+        stale = snapshot != null;
+        status = stale
+                ? "WorldForge snapshot rejected; keeping last known-good data: " + message
+                : "WorldForge snapshot rejected: " + message;
     }
 
     public static WorldForgeMapSnapshot current() { return snapshot; }
@@ -94,6 +146,18 @@ public final class NavigatorWorldForgeMapStore {
     public static long lastAttemptAt() { return lastAttemptAt; }
     /** Whether the displayed snapshot is retained from an earlier successful import. */
     public static boolean isStale() { return stale; }
+    public static String snapshotSource() { return snapshotSource; }
+
+    static synchronized void clearForTests() {
+        snapshot = null;
+        status = "WorldForge snapshot not loaded";
+        lastLoadedAt = 0;
+        lastAttemptAt = 0;
+        stale = false;
+        snapshotSource = "none";
+        liveViewRegistered = false;
+        lastLiveRequestAttemptAt = 0;
+    }
 
     public static List<WorldForgeMapSnapshot.Territory> territories(String dimensionId) {
         WorldForgeMapSnapshot value = snapshot;
