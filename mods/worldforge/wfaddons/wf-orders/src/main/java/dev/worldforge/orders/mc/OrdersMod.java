@@ -127,9 +127,7 @@ public class OrdersMod {
                     p.getGameProfile().getName(), WFPerm.trusted(p.createCommandSourceStack()), realm, 0, args);
             String actor = p.getUUID().toString();
             String payload = action + "|" + realm + "|" + String.join("|", args);
-            String requestId = "orders:" + UUID.nameUUIDFromBytes(
-                    (actor + ":" + WorldForgeApi.clock().worldMinute() + ":" + payload)
-                            .getBytes(StandardCharsets.UTF_8));
+            String requestId = "orders:" + java.util.UUID.randomUUID();
             try {
                 var task = WorldForgeApi.submitAction(requestId, action, context,
                         WorldForgeMod.actionExecutionFile(p.server), WorldForgeApi.clock().worldMinute());
