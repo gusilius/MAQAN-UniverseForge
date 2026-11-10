@@ -124,9 +124,15 @@ public final class SettleMapCommands {
                         if (!operator && !actor.equals(current.owner)) return "Settlement ownership changed";
                         return null;
                     },
-                    (req, attempt) -> runDirect(context, order) == 1
-                            ? dev.worldforge.mod.api.ActionResult.ok("Settlement map order applied")
-                            : dev.worldforge.mod.api.ActionResult.fail("Settlement map order rejected"),
+                    (req, attempt) -> {
+                        if (runDirect(context, order) != 1)
+                            return dev.worldforge.mod.api.ActionResult.fail("Settlement map order rejected");
+                        Colony current = SettleMod.colony(req.targetId());
+                        if (!SettleMod.persistActionMutation(source.getServer(), current))
+                            return dev.worldforge.mod.api.ActionResult.fail(
+                                    "Settlement map order applied in memory but its snapshot could not be saved; changes are frozen for reconciliation");
+                        return dev.worldforge.mod.api.ActionResult.ok("Settlement map order applied");
+                    },
                     null, minute, dev.worldforge.mod.WorldForgeMod.actionExecutionFile(source.getServer()));
             if (task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.FAILED)
                 source.sendFailure(Component.literal(task.message()));
