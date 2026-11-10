@@ -118,7 +118,13 @@ public class GenesisMod {
         sendAllLooks(sp);
         if (GENESIS.isDone(owner(sp))) {
             Draft finished = GENESIS.finished(owner(sp));
-            if (finished != null) ensurePlayerCharacter(sp, finished);
+            try {
+                if (finished != null) ensurePlayerCharacter(sp, finished);
+            } catch (RuntimeException ex) {
+                LOGGER.error("wf_genesis: cannot resolve canonical Character for player {}: {}", sp.getName().getString(), ex.toString(), ex);
+                sp.sendSystemMessage(Component.literal("Персонаж загружен, но его WorldForge Character не удалось восстановить. Сохранение не перезаписано; обратитесь к администратору."));
+                return;
+            }
             broadcastLook(sp); sp.refreshDimensions(); return;
         }
         // игроки с уже выбранной расой (из старых миров) мастер не видят: они уже играют
