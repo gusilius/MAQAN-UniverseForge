@@ -70,7 +70,8 @@ public final class CharacterAuthorityTest {
             duplicate.fromJson(json, "duplicate-test");
             authority.registerMap("duplicate", duplicate);
         } catch (RuntimeException expected) { duplicateRejected = true; }
-        check(duplicateRejected, "duplicate global UUID across maps is rejected");
+        check(duplicateRejected && authority.getGlobal(a.globalId) == a,
+                "duplicate global UUID is rejected without corrupting the existing authority index");
         authority.clear();
         check(authority.size() == 0 && authority.worldId() == null, "world shutdown clears authority index");
         if (failures > 0) throw new AssertionError(failures + " CharacterAuthority tests failed");
