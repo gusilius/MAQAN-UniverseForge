@@ -126,18 +126,22 @@ public final class EditorEvents {
 
     /** Command path is already inside ActionExecutionService; returns false for a rejected edit. */
     static boolean applyTool(ServerPlayer sp, EditorManager.Session s, MapData m, TitleEditor ed, double bx, double bz) {
-        dev.worldforge.mod.api.ActionResult result = applyToolAction(s, m, ed, bx, bz);
+        dev.worldforge.mod.api.ActionResult result = applyToolAction(sp, s, m, ed, bx, bz);
         sp.displayClientMessage(Component.literal(result.message), true);
         return result.ok;
     }
 
     private static dev.worldforge.mod.api.ActionResult applyToolAction(
-            EditorManager.Session s, MapData m, TitleEditor ed, double bx, double bz) {
+            ServerPlayer player, EditorManager.Session s, MapData m, TitleEditor ed, double bx, double bz) {
         try {
             switch (s.tool) {
                 case "smooth" -> {
                     int n = ed.smoothAtBlock(bx, bz, s.brush);
-                    if (n > 0) EditorManager.touch(m);
+                    if (n > 0) {
+                        EditorManager.touch(m);
+                        if (!persistEditorChanges(player, ed)) return dev.worldforge.mod.api.ActionResult.fail(
+                                "Изменение границ не сохранено на диск; операция требует сверки");
+                    }
                     return dev.worldforge.mod.api.ActionResult.ok(n == 0 ? "Границы здесь уже гладкие" : "Сглажено пикселей: " + n);
                 }
                 case "assign" -> {
@@ -146,13 +150,19 @@ public final class EditorEvents {
                             "Титул для назначения не выбран: /worldforge editor tool assign <уровень>");
                     TitleData.Title moved = ed.assignAtBlock(bx, bz, target.id);
                     EditorManager.touch(m);
+                    if (!persistEditorChanges(player, ed)) return dev.worldforge.mod.api.ActionResult.fail(
+                            "Перенос титула не сохранён на диск; операция требует сверки");
                     return dev.worldforge.mod.api.ActionResult.ok(moved.name + " → " + target.name);
                 }
                 default -> {
                     if (m.titles.get(s.province) == null) return dev.worldforge.mod.api.ActionResult.fail(
                             "Сначала выберите провинцию: Shift+ПКМ или ЛКМ по блоку");
                     int n = ed.paintAtBlock(bx, bz, s.brush, s.province);
-                    if (n > 0) EditorManager.touch(m);
+                    if (n > 0) {
+                        EditorManager.touch(m);
+                        if (!persistEditorChanges(player, ed)) return dev.worldforge.mod.api.ActionResult.fail(
+                                "Закраска не сохранена на диск; операция требует сверки");
+                    }
                     return dev.worldforge.mod.api.ActionResult.ok(n == 0 ? "Здесь нечего менять"
                             : "Закрашено: " + n + " px → " + m.titles.get(s.province).name);
                 }
@@ -160,6 +170,11 @@ public final class EditorEvents {
         } catch (TitleEditor.EditException ex) {
             return dev.worldforge.mod.api.ActionResult.fail(ex.getMessage());
         }
+    }
+
+    private static boolean persistEditorChanges(ServerPlayer player, TitleEditor editor) {
+        EditorManager.saveDirty(player.server);
+        return !editor.isDirty();
     }
 
     /** The wand is a direct player input path, so its world mutations must use the shared executor too. */
@@ -190,7 +205,7 @@ public final class EditorEvents {
                             return "Карта или измерение изменились до применения инструмента";
                         return null;
                     },
-                    (req, attempt) -> applyToolAction(session, map, editor, x, z),
+                    (req, attempt) -> applyToolAction(player, session, map, editor, x, z),
                     null, minute, WorldForgeMod.actionExecutionFile(player.server));
             player.displayClientMessage(Component.literal(task.message()), true);
         } catch (RuntimeException ex) {
