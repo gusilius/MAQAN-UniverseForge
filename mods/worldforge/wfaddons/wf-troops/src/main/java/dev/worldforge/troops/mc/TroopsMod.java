@@ -506,6 +506,38 @@ public class TroopsMod {
 
     // ---- приказы от клиента ----
     static void handleOrder(ServerPlayer p, OrderPacket o) {
+        // BUILD_LIST is a read-only UI query; all state-changing troop/worker/build orders
+        // are recorded in the same durable, idempotent world action journal.
+        if (o.action() == OrderPacket.BUILD_LIST) {
+            handleOrderDirect(p, o);
+            return;
+        }
+        String actor = p.getUUID().toString();
+        long minute = dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute();
+        String payload = o.toString();
+        String nonce = java.util.UUID.nameUUIDFromBytes(
+                (actor + ":" + p.server.getTickCount() + ":" + payload)
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString();
+        String requestId = "troop:" + nonce;
+        var request = new dev.worldforge.mod.api.ActionExecutionService.Request(
+                requestId, "military.client_order", actor, "selection", List.of(payload), minute);
+        try {
+            var task = dev.worldforge.mod.api.WorldForgeApi.actionExecution().execute(request,
+                    req -> p.server.getPlayerList().getPlayer(p.getUUID()) == null
+                            ? "Игрок отключился до исполнения приказа" : null,
+                    (req, attempt) -> {
+                        handleOrderDirect(p, o);
+                        return dev.worldforge.mod.api.ActionResult.ok("Приказ обработан");
+                    }, null, minute,
+                    dev.worldforge.mod.WorldForgeMod.actionExecutionFile(p.server));
+            if (task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.FAILED)
+                p.displayClientMessage(Component.literal("Приказ отклонён: " + task.message()), true);
+        } catch (RuntimeException ex) {
+            p.displayClientMessage(Component.literal("Не удалось принять приказ: " + ex.getMessage()), true);
+        }
+    }
+
+    private static void handleOrderDirect(ServerPlayer p, OrderPacket o) {
         String owner = p.getUUID().toString();
         switch (o.action()) {
             case OrderPacket.ORDER -> {
