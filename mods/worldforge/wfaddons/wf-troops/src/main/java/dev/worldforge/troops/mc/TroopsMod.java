@@ -333,7 +333,7 @@ public class TroopsMod {
         PersonBinding binding = bindPerson(troop, false);
         if (binding == null) return false;
         Character person = binding.character();
-        if (!dev.worldforge.settle.mc.SettleMod.attachExistingCharacter(colonyId, person.id)) return false;
+        if (!dev.worldforge.settle.mc.SettleMod.attachExistingCharacter(colonyId, person.globalId)) return false;
         binding.registry().unbindEntity(person.id, "troop", troop.getUUID().toString());
         person.props.remove("wf_troop_uuid");
         person.props.remove("wf_troop_unit");
