@@ -360,9 +360,24 @@ public class GenesisMod {
             String name = sp.getGameProfile().getName();
             person = registry.create(name, "", draft.race, "m", PeopleMod.YEAR - 20);
         }
+        boolean firstGenesisSync = !Boolean.TRUE.equals(person.props.get("genesis.initialized"));
         person.props.put("genesis.player_uuid", playerUuid);
         person.props.put("genesis.profile_owner", owner(sp));
         person.props.put("genesis.race", draft.race);
+        person.props.put("genesis.start", draft.start);
+        person.props.put("genesis.class", draft.cls);
+        person.props.put("genesis.professions", new ArrayList<>(draft.profs));
+        person.props.put("genesis.attributes", new LinkedHashMap<>(draft.attrs));
+        person.props.put("genesis.skills", new LinkedHashMap<>(draft.skills));
+        person.props.put("genesis.features", new ArrayList<>(draft.features));
+        person.props.put("genesis.appearance", new LinkedHashMap<>(draft.look));
+        if (person.culture == null || person.culture.isBlank()) person.culture = draft.race;
+        if (firstGenesisSync && !draft.profs.isEmpty()) {
+            CharacterRegistry ownerRegistry = PeopleMod.authority().registryForGlobal(person.globalId);
+            if (ownerRegistry != null)
+                ownerRegistry.changeProfession(person.id, draft.profs.iterator().next(), PeopleMod.YEAR);
+        }
+        person.props.put("genesis.initialized", true);
         sp.getPersistentData().putString("worldforge_character_global_id", person.globalId);
         return person;
     }
