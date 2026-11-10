@@ -27,30 +27,53 @@ public final class PeopleProgressBridge {
         Objects.requireNonNull(character, "character");
         String owner = owner(character, populationScopeId);
         Profile profile = progress.profile(owner);
-        migrateLegacyProfile(progress, character, profile);
+        migrateLegacyProfile(progress, character, populationScopeId, profile);
         syncFromCharacter(character, profile);
         return profile;
     }
 
-    /** Migrate the pre-scope NPC key only when that Character ID is unique across loaded map registries. */
-    private static void migrateLegacyProfile(Progress progress, Character character, Profile target) {
-        Profile legacy = progress.peek("n:" + character.id);
-        if (legacy == null || legacy == target || !isUniqueCharacterId(character.id)) return;
-        boolean fresh = target.level == 1 && target.xp == 0 && target.totalXp == 0
+    /**
+     * Move the former map-scoped key to the global Character UUID key.
+     * The old unscoped n:cN format is migrated only when it resolves to exactly one loaded person.
+     */
+    private static void migrateLegacyProfile(Progress progress, Character character, String scope, Profile target) {
+        String scopedOwner = PopulationSimulation.legacyProgressOwner(character, scope);
+        Profile scopedLegacy = progress.peek(scopedOwner);
+        if (scopedLegacy != null && scopedLegacy != target) {
+            if (isFresh(target)) {
+                copyProfile(scopedLegacy, target);
+                progress.removeProfile(scopedOwner);
+            }
+            return;
+        }
+
+        String unscopedOwner = "n:" + character.id;
+        Profile unscopedLegacy = progress.peek(unscopedOwner);
+        if (unscopedLegacy == null || unscopedLegacy == target || !isUniqueCharacterId(character.id)) return;
+        if (isFresh(target)) {
+            copyProfile(unscopedLegacy, target);
+            progress.removeProfile(unscopedOwner);
+        }
+    }
+
+    private static boolean isFresh(Profile target) {
+        return target.level == 1 && target.xp == 0 && target.totalXp == 0
                 && target.attrFree == 0 && target.skillFree == 0 && target.passiveFree == 0
                 && target.attrs.isEmpty() && target.skills.isEmpty() && target.nodes.isEmpty();
-        if (!fresh) return;
-        target.level = legacy.level;
-        target.xp = legacy.xp;
-        target.totalXp = legacy.totalXp;
-        target.attrFree = legacy.attrFree;
-        target.skillFree = legacy.skillFree;
-        target.passiveFree = legacy.passiveFree;
-        target.archetype = legacy.archetype;
-        target.attrs.putAll(legacy.attrs);
-        target.skills.putAll(legacy.skills);
-        target.nodes.addAll(legacy.nodes);
-        target.respecs = legacy.respecs;
+    }
+
+    private static void copyProfile(Profile source, Profile target) {
+        target.level = source.level;
+        target.xp = source.xp;
+        target.totalXp = source.totalXp;
+        target.attrFree = source.attrFree;
+        target.skillFree = source.skillFree;
+        target.passiveFree = source.passiveFree;
+        target.archetype = source.archetype;
+        target.attrs.putAll(source.attrs);
+        target.skills.putAll(source.skills);
+        target.nodes.addAll(source.nodes);
+        target.respecs = source.respecs;
     }
 
     private static boolean isUniqueCharacterId(String id) {
@@ -112,7 +135,9 @@ public final class PeopleProgressBridge {
                     String owner = owner(character, scope);
                     Profile profile = progress.peek(owner);
                     Map<String, Integer> ranks = PopulationSimulation.skillRanksSnapshot(character);
-                    if (profile == null && ranks.isEmpty() && progress.peek("n:" + character.id) == null) continue;
+                    if (profile == null && ranks.isEmpty()
+                            && progress.peek(PopulationSimulation.legacyProgressOwner(character, scope)) == null
+                            && progress.peek("n:" + character.id) == null) continue;
                     profile = profile(progress, character, scope);
                     if (ranks.isEmpty() && !profile.skills.isEmpty()) syncToCharacter(character, profile);
                     else syncFromCharacter(character, profile);
