@@ -59,6 +59,8 @@ public final class Colony {
     /** Durable cursor and immutable input fingerprint for resumable Genesis provisioning. */
     public int genesisProvisioningStep;
     public String genesisProvisioningSpec = "";
+    /** Runtime-only poison flag: do not retry unsaved mutations until the last durable snapshot is reloaded. */
+    public transient boolean genesisProvisioningRuntimeBlocked;
 
     public Colony(Settlement s, String dim, int cx, int cz) {
         this.s = s;
