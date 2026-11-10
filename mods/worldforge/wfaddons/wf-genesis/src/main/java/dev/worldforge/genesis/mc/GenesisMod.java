@@ -484,7 +484,7 @@ public class GenesisMod {
                     BlockPos where = scatter(lv, spawn, 120, 400, rng);
                     var tier = DEFS.tiers.get(st.tier().isEmpty() ? "village" : st.tier());
                     String name = GENESIS.randomName(d, rng);
-                    var col = SettleBridge.found(lv, where, name, tier, null, null, d);
+                    var col = SettleBridge.found(lv, where, name, tier, null, null, d, "genesis:" + sp.getUUID() + ":origin-settlement");
                     at = new BlockPos(SettleBridge.cx(col), where.getY(), SettleBridge.cz(col));
                     sp.sendSystemMessage(Component.literal("§7Вы родом из поселения «" + name + "»."));
                 }
@@ -504,7 +504,7 @@ public class GenesisMod {
     private static void foundFor(ServerPlayer sp, Draft d, GenesisDefs.Start st, ServerLevel lv, BlockPos at) {
         var tier = DEFS.tiers.get(st.tier());
         var focus = DEFS.focus.get(d.focus);
-        var col = SettleBridge.found(lv, at, d.settleName, tier, focus, sp, d);
+        var col = SettleBridge.found(lv, at, d.settleName, tier, focus, sp, d, "genesis:" + sp.getUUID() + ":ruler-settlement");
         sp.sendSystemMessage(Component.literal("§6" + GENESIS.rulerTitle(d, st.tier()) + " " + d.settleName + "§7: основано (" + GENESIS.settleNoun(d, st.tier()) + "). Панель правителя открыта, дальше - J."));
         if (st.panel()) SettleBridge.panel(sp, col);
     }
