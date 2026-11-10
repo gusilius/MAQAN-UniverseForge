@@ -8,6 +8,7 @@ import dev.worldforge.mod.Json;
 import dev.worldforge.mod.TitleData;
 import dev.worldforge.mod.TitleEditor;
 import dev.worldforge.mod.api.TreasuryApi;
+import dev.worldforge.mod.api.WorldForgeApi;
 
 import java.util.*;
 
@@ -92,7 +93,7 @@ public final class ArmyEngine {
     }
 
     boolean postGoldDelta(String realm, double delta, String category, String reference) {
-        long minute = Math.max(0L, war.day) * 1440L;
+        long minute = WorldForgeApi.clock().worldMinute();
         return TreasuryApi.postDeltaOnce(realm, delta, category, reference, minute);
     }
 
