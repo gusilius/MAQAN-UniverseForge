@@ -106,6 +106,24 @@ public final class ActionExecutionTest {
         check(replannedDenied.status() == ActionExecutionService.Status.FAILED && protectedExecutions[0] == 1,
                 "authorization is rechecked after replanning before any alternate side effect");
 
+        int[] partialEffects = {0};
+        ActionExecutionService.Task partial = service.execute(new ActionExecutionService.Request(
+                "request-partial", "genesis.confirm", "player-1", "player-1", List.of("human", "village"), 108),
+                r -> null, (r, attempt) -> {
+                    partialEffects[0]++;
+                    throw new IllegalStateException("simulated failure after a partial domain mutation");
+                }, null, 109, file);
+        check(partial.status() == ActionExecutionService.Status.FAILED && partialEffects[0] == 1
+                        && service.receipts().stream().anyMatch(r -> r.requestId().equals("request-partial")
+                        && r.outcome() == ActionExecutionService.Status.FAILED),
+                "exception during a domain mutation is recorded as FAILED with a receipt");
+        ActionExecutionService.Task partialDuplicate = service.execute(new ActionExecutionService.Request(
+                "request-partial", "genesis.confirm", "player-1", "player-1", List.of("human", "village"), 108),
+                r -> null, (r, attempt) -> { partialEffects[0]++; return ActionResult.ok("must not replay"); },
+                null, 110, file);
+        check(partialDuplicate.status() == ActionExecutionService.Status.FAILED && partialEffects[0] == 1,
+                "retrying the same Genesis operation ID never replays uncertain partial side effects");
+
         ActionExecutionService restored = new ActionExecutionService();
         restored.load(file);
         check(restored.task("request-1") != null && restored.task("request-1").status() == ActionExecutionService.Status.SUCCEEDED
