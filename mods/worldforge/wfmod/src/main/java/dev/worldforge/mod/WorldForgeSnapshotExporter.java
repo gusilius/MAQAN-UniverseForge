@@ -3,6 +3,7 @@ package dev.worldforge.mod;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.chunk.ChunkGenerator;
 import net.minecraftforge.fml.loading.FMLPaths;
 
@@ -40,6 +41,33 @@ public final class WorldForgeSnapshotExporter {
 
     public static void unregisterContributor(Contributor contributor) {
         CONTRIBUTORS.remove(contributor);
+    }
+
+    /** Builds the current authoritative world snapshot and streams it only to the requesting player. */
+    public static void sendTo(ServerPlayer player) {
+        if (player == null || player.getServer() == null) return;
+        MinecraftServer server = player.getServer();
+        try {
+            Path snapshot = null;
+            for (ServerLevel level : server.getAllLevels()) {
+                ChunkGenerator generator = level.getChunkSource().getGenerator();
+                if (generator instanceof MapChunkGenerator mapGenerator && mapGenerator.data() != null) {
+                    snapshot = export(server, level, mapGenerator.data());
+                    break;
+                }
+            }
+            if (snapshot == null) throw new IllegalStateException("No loaded WorldForge map dimensions are available");
+            long size = Files.size(snapshot);
+            if (size <= 0 || size > 32L * 1024L * 1024L)
+                throw new IllegalStateException("Atlas snapshot exceeds the 32 MiB transfer limit");
+            String payload = Files.readString(snapshot, StandardCharsets.UTF_8);
+            WFNet.sendView(player, "worldforge:atlas_snapshot", payload);
+        } catch (Exception error) {
+            String message = error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage();
+            if (message.length() > 180) message = message.substring(0, 180);
+            WFNet.sendView(player, "worldforge:atlas_snapshot_error", message);
+            WorldForgeMod.LOGGER.warn("Atlas snapshot request failed for {}: {}", player.getGameProfile().getName(), message);
+        }
     }
 
     public static Path export(MinecraftServer server, ServerLevel level, MapData map) throws IOException {

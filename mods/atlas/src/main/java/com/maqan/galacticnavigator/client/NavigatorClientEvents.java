@@ -7,6 +7,7 @@ import com.maqan.galacticnavigator.navigation.NavigatorPlayerPosition;
 import com.maqan.galacticnavigator.navigation.NavigatorPlayerPositionTracker;
 import com.maqan.galacticnavigator.navigation.NavigatorWaypoint;
 import com.maqan.galacticnavigator.navigation.NavigatorWaypointStore;
+import com.maqan.galacticnavigator.navigation.NavigatorWorldForgeMapStore;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
@@ -34,6 +35,7 @@ public final class NavigatorClientEvents {
         if (event.phase != TickEvent.Phase.END) return;
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.level != null) {
+            NavigatorWorldForgeMapStore.ensureLiveFeed();
             CosmicHorizonsScanner.refreshFromCosmicHorizons(minecraft.level);
             updatePlayerPosition(minecraft);
             CosmicPlayerSpaceAdapter.tick(minecraft);
