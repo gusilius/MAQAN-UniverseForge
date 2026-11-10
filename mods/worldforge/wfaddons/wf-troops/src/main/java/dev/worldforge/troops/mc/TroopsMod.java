@@ -525,9 +525,22 @@ public class TroopsMod {
                 requestId, "military.client_order", actor, "selection", List.of(o.toString()), minute);
         try {
             var task = dev.worldforge.mod.api.WorldForgeApi.actionExecution().execute(request,
-                    req -> p.server.getPlayerList().getPlayer(p.getUUID()) == null
-                            ? "Игрок отключился до исполнения приказа" : null,
-                    (req, attempt) -> handleOrderDirect(p, o), null, minute,
+                    req -> {
+                        if (p.server.getPlayerList().getPlayer(p.getUUID()) == null)
+                            return "Игрок отключился до исполнения приказа";
+                        if (ModList.get().isLoaded("wf_settle") && WorkerControl.anyWorker(p, o)
+                                && dev.worldforge.settle.mc.SettleMod.actionsBlocked())
+                            return "Изменения поселений заблокированы после ошибки сохранения; требуется перезапуск и сверка";
+                        return null;
+                    },
+                    (req, attempt) -> {
+                        ActionResult result = handleOrderDirect(p, o);
+                        if (!result.ok) return result;
+                        if (ModList.get().isLoaded("wf_settle") && WorkerControl.anyWorker(p, o)
+                                && !dev.worldforge.settle.mc.SettleMod.persistActionMutation(p.server))
+                            return ActionResult.fail("Приказ изменил состояние рабочих в памяти, но снимок поселений не сохранён; изменения заблокированы до сверки");
+                        return result;
+                    }, null, minute,
                     dev.worldforge.mod.WorldForgeMod.actionExecutionFile(p.server));
             if (task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.FAILED)
                 p.displayClientMessage(Component.literal("Приказ отклонён: " + task.message()), true);
