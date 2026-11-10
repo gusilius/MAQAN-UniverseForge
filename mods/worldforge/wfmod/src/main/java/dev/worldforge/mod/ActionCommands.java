@@ -106,4 +106,5 @@ public final class ActionCommands {
         // Legacy UI buttons use the same durable execution pipeline. The explicit submit
         // command remains available to clients that can retain a request ID across retries.
         return submit(s, requestId, id, target, rawArgs);
-    }}
+    }
+}
