@@ -3,8 +3,6 @@ package dev.worldforge.tests;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
 
-import java.util.UUID;
-
 /** Proves deterministic migration of old per-map saves without losing family references. */
 public final class CharacterIdentityMigrationTest {
     private static int failures;
@@ -14,8 +12,8 @@ public final class CharacterIdentityMigrationTest {
     }
 
     private static String legacyV2(CharacterRegistry registry) {
-        return registry.toJson().replace("\\"format\\":\\"wf-people/3\\"","\\"format\\":\\"wf-people/2\\"")
-                .replaceAll("\\"global_id\\":\\"[^\\"]+\\",?", "");
+        return registry.toJson().replace("\"format\":\"wf-people/3\"", "\"format\":\"wf-people/2\"")
+                .replaceAll("\"global_id\":\"[^\"]+\",?", "");
     }
 
     public static void main(String[] args) {
