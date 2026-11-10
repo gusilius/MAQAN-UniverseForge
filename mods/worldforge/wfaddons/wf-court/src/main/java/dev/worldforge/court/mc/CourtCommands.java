@@ -57,6 +57,34 @@ final class CourtCommands {
     }
 
     private static int play(CommandSourceStack s, String q, boolean realm) {
+        ServerPlayer player = s.getPlayer();
+        if (player == null) return 0;
+        String actor = player.getUUID().toString();
+        long minute = dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute();
+        String requestId = "court-play:" + java.util.UUID.nameUUIDFromBytes(
+                (actor + ":" + s.getServer().getTickCount() + ":" + q + ":" + realm)
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        var request = new dev.worldforge.mod.api.ActionExecutionService.Request(
+                requestId, "court.play_character", actor, q, java.util.List.of(Boolean.toString(realm)), minute);
+        try {
+            var task = dev.worldforge.mod.api.WorldForgeApi.actionExecution().execute(request,
+                    req -> dev.worldforge.mod.WFPerm.trusted(s)
+                            && s.getServer().getPlayerList().getPlayer(player.getUUID()) != null
+                            ? null : "Недостаточно полномочий или игрок отключился",
+                    (req, attempt) -> playDirect(s, q, realm) == 1
+                            ? dev.worldforge.mod.api.ActionResult.ok("Персонаж выбран")
+                            : dev.worldforge.mod.api.ActionResult.fail("Не удалось выбрать персонажа"),
+                    null, minute, dev.worldforge.mod.WorldForgeMod.actionExecutionFile(s.getServer()));
+            if (task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.FAILED)
+                s.sendFailure(Component.literal(task.message()));
+            return task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED ? 1 : 0;
+        } catch (RuntimeException ex) {
+            s.sendFailure(Component.literal("Не удалось выполнить приказ: " + ex.getMessage()));
+            return 0;
+        }
+    }
+
+    private static int playDirect(CommandSourceStack s, String q, boolean realm) {
         MapData m = map(s);
         ServerPlayer sp = s.getPlayer();
         if (m == null || sp == null) return 0;
@@ -79,6 +107,33 @@ final class CourtCommands {
     }
 
     private static int release(CommandSourceStack s) {
+        ServerPlayer player = s.getPlayer();
+        if (player == null) return 0;
+        String actor = player.getUUID().toString();
+        long minute = dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute();
+        String requestId = "court-release:" + java.util.UUID.nameUUIDFromBytes(
+                (actor + ":" + s.getServer().getTickCount())
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        var request = new dev.worldforge.mod.api.ActionExecutionService.Request(
+                requestId, "court.release_character", actor, "player-session", java.util.List.of(), minute);
+        try {
+            var task = dev.worldforge.mod.api.WorldForgeApi.actionExecution().execute(request,
+                    req -> s.getServer().getPlayerList().getPlayer(player.getUUID()) != null
+                            ? null : "Игрок отключился до исполнения команды",
+                    (req, attempt) -> releaseDirect(s) == 1
+                            ? dev.worldforge.mod.api.ActionResult.ok("Управление персонажем завершено")
+                            : dev.worldforge.mod.api.ActionResult.fail("Не удалось завершить управление персонажем"),
+                    null, minute, dev.worldforge.mod.WorldForgeMod.actionExecutionFile(s.getServer()));
+            if (task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.FAILED)
+                s.sendFailure(Component.literal(task.message()));
+            return task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED ? 1 : 0;
+        } catch (RuntimeException ex) {
+            s.sendFailure(Component.literal("Не удалось выполнить команду: " + ex.getMessage()));
+            return 0;
+        }
+    }
+
+    private static int releaseDirect(CommandSourceStack s) {
         MapData m = map(s);
         ServerPlayer sp = s.getPlayer();
         if (m == null || sp == null) return 0;
