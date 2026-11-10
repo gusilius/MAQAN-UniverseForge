@@ -288,6 +288,9 @@ public final class BuildingSite {
                                                 "Строительный вклад применён в памяти, но не сохранён; поселения заблокированы до сверки");
                                     return dev.worldforge.mod.api.ActionResult.ok("Строительный вклад учтён");
                                 }, null, minute, dev.worldforge.mod.WorldForgeMod.actionExecutionFile(player.server));
+                        if (task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.FAILED)
+                            player.displayClientMessage(net.minecraft.network.chat.Component.literal(
+                                    "Строительный вклад не учтён: " + task.message()), true);
                         return task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED;
                     } catch (RuntimeException ex) {
                         SettleMod.LOGGER.error("wf_settle: не удалось учесть строительный вклад {}: {}", payload, ex.toString());
