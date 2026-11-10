@@ -322,6 +322,8 @@ public class GenesisMod {
     private static Character ensurePlayerCharacter(ServerPlayer sp, Draft draft) {
         if (!ModList.get().isLoaded("wf_people"))
             throw new IllegalStateException("Genesis requires wf_people to create the canonical player Character");
+        if (!PeopleMod.playerRegistryAvailable())
+            throw new IllegalStateException("Player Character registry is corrupt; refusing to create a duplicate or overwrite its save");
         String playerUuid = sp.getUUID().toString();
         String savedGlobalId = sp.getPersistentData().getString("worldforge_character_global_id");
         Character person = savedGlobalId.isBlank() ? null : PeopleMod.authority().getGlobal(savedGlobalId);
@@ -337,9 +339,18 @@ public class GenesisMod {
             }
         }
         if (person == null) {
+            for (Character candidate : PeopleMod.playerRegistry().all()) {
+                if (playerUuid.equals(String.valueOf(candidate.props.get("genesis.player_uuid")))) {
+                    person = candidate;
+                    break;
+                }
+            }
+        }
+        if (person == null) {
             CharacterRegistry registry = PeopleMod.registryFor(sp.serverLevel());
+            if (registry == null) registry = PeopleMod.playerRegistry();
             if (registry == null)
-                throw new IllegalStateException("No WorldForge people registry exists at the player's current location");
+                throw new IllegalStateException("No WorldForge people registry exists for the player");
             String name = sp.getGameProfile().getName();
             person = registry.create(name, "", draft.race, "m", PeopleMod.YEAR - 20);
         }
