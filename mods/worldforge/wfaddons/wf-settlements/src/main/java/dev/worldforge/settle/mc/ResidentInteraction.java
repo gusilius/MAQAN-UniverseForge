@@ -151,10 +151,20 @@ public final class ResidentInteraction {
                             return "Недостаточно полномочий для этого приказа";
                         return null;
                     },
-                    (req, attempt) -> executeDirect(player, req.args().get(0), req.targetId()) == 1
-                            ? dev.worldforge.mod.api.ActionResult.ok("Действие жителя выполнено")
-                            : dev.worldforge.mod.api.ActionResult.fail("Действие жителя отклонено без изменения состояния"),
-                    null, minute, dev.worldforge.mod.WorldForgeMod.actionExecutionFile(player.server));
+                    (req, attempt) -> {
+                        int result = executeDirect(player, req.args().get(0), req.targetId());
+                        if (result == 1) return dev.worldforge.mod.api.ActionResult.ok("Действие жителя выполнено");
+                        if (result == 2) return dev.worldforge.mod.api.ActionResult.retry("Нет свободного места для выбранной роли");
+                        return dev.worldforge.mod.api.ActionResult.fail("Действие жителя отклонено без изменения состояния");
+                    },
+                    (req, failure, attempt) -> {
+                        String requested = req.args().isEmpty() ? "" : req.args().get(0);
+                        if (requested.startsWith("work_"))
+                            return new dev.worldforge.mod.api.ActionExecutionService.Plan(
+                                    req.actionId(), req.targetId(), List.of("work"),
+                                    "Пробуем автоматически подобрать другую совместимую профессию и рабочее место");
+                        return null;
+                    }, minute, dev.worldforge.mod.WorldForgeMod.actionExecutionFile(player.server));
             if (task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.FAILED)
                 player.sendSystemMessage(Component.literal("Действие не выполнено: " + task.message()));
             return task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED ? 1 : 0;
@@ -270,10 +280,12 @@ public final class ResidentInteraction {
                 if (!ruler) { deny(player); return 0; }
                 data.manualFollow = false;
                 int assigned = assignCompatibleBuilding(colony, data, null);
-                if (assigned > 0) colony.workOrders.remove(data.id);
-                player.sendSystemMessage(Component.literal(assigned > 0
-                        ? "§a" + person.name + " назначен на подходящую работу в здании #" + assigned
-                        : "§eПодходящего свободного рабочего места для профессии " + data.profession + " нет."));
+                if (assigned <= 0) {
+                    player.sendSystemMessage(Component.literal("§eПодходящего свободного рабочего места для профессии " + data.profession + " нет."));
+                    return 2;
+                }
+                colony.workOrders.remove(data.id);
+                player.sendSystemMessage(Component.literal("§a" + person.name + " назначен на подходящую работу в здании #" + assigned));
             }
             case "work_builder", "work_lumberjack", "work_miner", "work_farmer", "work_hauler" -> {
                 if (!ruler) { deny(player); return 0; }
@@ -285,11 +297,13 @@ public final class ResidentInteraction {
                 }
                 data.manualFollow = false;
                 int assigned = assignCompatibleBuilding(colony, data, role);
-                if (assigned > 0) colony.workOrders.remove(data.id);
-                player.sendSystemMessage(Component.literal(assigned > 0
-                        ? "§aПоручение принято: " + person.name + " назначен на роль «" + role
-                            + "» в здании #" + assigned + "."
-                        : "§eНет готового здания или свободного места для роли «" + role + "»."));
+                if (assigned <= 0) {
+                    player.sendSystemMessage(Component.literal("§eНет готового здания или свободного места для роли «" + role + "». Ищу совместимую альтернативу."));
+                    return 2;
+                }
+                colony.workOrders.remove(data.id);
+                player.sendSystemMessage(Component.literal("§aПоручение принято: " + person.name + " назначен на роль «" + role
+                        + "» в здании #" + assigned + "."));
             }
             case "work_area_resume" -> {
                 if (!ruler) { deny(player); return 0; }
