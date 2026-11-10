@@ -317,13 +317,23 @@ public class SettleMod {
     public static Colony colony(String id) { return COLONIES.get(id); }
 
     /** Resolve the one Character identity represented by this resident body. */
+    private static Character resolvePerson(CharacterRegistry registry, String id) {
+        if (registry == null || id == null || id.isBlank()) return null;
+        Character global = PeopleMod.authority().getGlobal(id);
+        if (global != null) {
+            CharacterRegistry owner = PeopleMod.authority().registryForGlobal(id);
+            return owner == registry ? global : null;
+        }
+        return registry.get(id); // one-time compatibility for old map-local worker saves
+    }
+
     public static Character residentCharacter(WFWorker body) {
         if (body == null) return null;
         Colony colony = COLONIES.get(body.colonyId);
         Worker worker = body.worker();
         CharacterRegistry registry = registryForColony(colony);
         return registry == null || worker == null || worker.person == null || worker.person.isBlank()
-                ? null : registry.get(worker.person);
+                ? null : resolvePerson(registry, worker.person);
     }
 
     public static boolean ownsAny(String uuid) {
@@ -527,7 +537,7 @@ public class SettleMod {
                 colony.s.acknowledgeDeparture(departure); // legacy worker had no Character identity
                 continue;
             }
-            Character departed = registry.get(departure.personId());
+            Character departed = resolvePerson(registry, departure.personId());
             if (departed == null) {
                 LOGGER.warn("wf_settle: departure references missing Character {}; retaining event for repair", departure.personId());
                 continue;
@@ -549,7 +559,7 @@ public class SettleMod {
 
         for (dev.worldforge.settle.Worker worker : new ArrayList<>(colony.s.workers)) {
             boolean hasPersonId = worker.person != null && !worker.person.isBlank();
-            Character person = hasPersonId ? registry.get(worker.person) : null;
+            Character person = hasPersonId ? resolvePerson(registry, worker.person) : null;
             if (hasPersonId && person == null) {
                 LOGGER.warn("wf_settle: worker {} references missing Character {}; not creating a replacement", worker.id, worker.person);
                 continue;
@@ -560,8 +570,9 @@ public class SettleMod {
             }
             if (person == null) {
                 person = registry.create(worker.name, "", culture, "m", PeopleMod.YEAR - 20);
-                worker.person = person.id;
+                worker.person = person.globalId;
             }
+            worker.person = person.globalId; // migrate legacy local cN reference to canonical global UUID
             if (!person.has("settlement_worker", place)) registry.appoint(person.id, "settlement_worker", place, PeopleMod.YEAR);
             person.props.put("population.employer", place);
             person.props.put("population.location", colony.s.id);
@@ -661,7 +672,7 @@ public class SettleMod {
         long worldMinute = Math.max(0L, (long) Math.floor(settlement.time / 60.0));
         for (dev.worldforge.settle.Worker worker : new ArrayList<>(settlement.workers)) {
             if (worker.person == null || worker.person.isBlank()) continue;
-            Character person = registry.get(worker.person);
+            Character person = resolvePerson(registry, worker.person);
             if (person == null || !person.alive) continue;
             if (("sleeping".equals(worker.lifeAction) || "eating".equals(worker.lifeAction)
                     || "socializing".equals(worker.lifeAction)) && settlement.time >= worker.lifeActionUntil
@@ -734,7 +745,7 @@ public class SettleMod {
                             double dx = worker.x - other.x, dz = worker.z - other.z;
                             double distance = dx * dx + dz * dz;
                             if (distance < nearest && other.person != null && !other.person.isBlank()) {
-                                Character candidate = registry.get(other.person);
+                                Character candidate = resolvePerson(registry, other.person);
                                 if (candidate != null && candidate.alive) {
                                     nearest = distance; companion = other; companionPerson = candidate;
                                 }
@@ -801,6 +812,10 @@ public class SettleMod {
             if (map.titles == null || map.provinceAt(colony.cx, colony.cz) == null) continue;
             CharacterRegistry candidate = PeopleMod.registry(map);
             Character found = candidate == null ? null : candidate.get(characterId);
+            if (found == null) {
+                Character global = PeopleMod.authority().getGlobal(characterId);
+                if (global != null && PeopleMod.authority().registryForGlobal(characterId) == candidate) found = global;
+            }
             if (found != null) { registry = candidate; person = found; break; }
         }
         if (person == null || !person.alive) return false;
@@ -809,7 +824,7 @@ public class SettleMod {
         if (profession == null || profession.isBlank() || DEFS == null || !DEFS.professions.containsKey(profession))
             profession = "laborer";
         dev.worldforge.settle.Worker worker = colony.s.addWorker(person.name);
-        worker.person = person.id;
+        worker.person = person.globalId;
         worker.profession = profession;
         // Keep the canonical Character's active profession in sync with the restored worker assignment.
         // This records the military service interval in the normal profession history.
