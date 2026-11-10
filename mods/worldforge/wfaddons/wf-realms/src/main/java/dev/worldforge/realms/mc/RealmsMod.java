@@ -311,9 +311,7 @@ public class RealmsMod {
         String actor = source.getEntity() instanceof ServerPlayer player
                 ? player.getUUID().toString() : "console";
         long minute = WorldForgeApi.clock().worldMinute();
-        String requestId = "politics:" + UUID.nameUUIDFromBytes(
-                (actor + ":" + source.getServer().getTickCount() + ":" + action + ":" + payload)
-                        .getBytes(StandardCharsets.UTF_8));
+        String requestId = "politics:" + java.util.UUID.randomUUID();
         try {
             var task = WorldForgeApi.actionExecution().execute(
                     new dev.worldforge.mod.api.ActionExecutionService.Request(
