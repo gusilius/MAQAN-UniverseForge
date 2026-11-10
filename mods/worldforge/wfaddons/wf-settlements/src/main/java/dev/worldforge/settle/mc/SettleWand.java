@@ -84,14 +84,48 @@ public class SettleWand extends Item {
             say(pl, "Нет поселения: /wfsettle found <имя>", true);
             return InteractionResult.FAIL;
         }
+        ServerPlayer sp = (ServerPlayer) pl;
         String def = selected(ctx.getItemInHand());
-        try {
-            Building b = c.s.place(def, pos.getX() - c.cx, pos.getZ() - c.cz);
-            say(pl, "Заложено: " + b.def.name + " #" + b.uid, false);
-        } catch (Settlement.OrderException ex) {
-            say(pl, ex.getMessage(), true);
-        }
-        return InteractionResult.SUCCESS;
+        String payload = def + "|" + pos.getX() + "|" + pos.getZ();
+        var task = executeWandAction(sp, c, "settlement.wand_place", payload,
+                (req, attempt) -> {
+                    try {
+                        Building building = c.s.place(def, pos.getX() - c.cx, pos.getZ() - c.cz);
+                        if (!SettleMod.persistActionMutation(sp.server, c))
+                            return dev.worldforge.mod.api.ActionResult.fail("Здание создано в памяти, но снимок поселения не сохранён; дальнейшие изменения заблокированы до сверки");
+                        return dev.worldforge.mod.api.ActionResult.ok("Заложено: " + building.def.name + " #" + building.uid);
+                    } catch (Settlement.OrderException ex) {
+                        return dev.worldforge.mod.api.ActionResult.fail(ex.getMessage());
+                    }
+                });
+        say(pl, task.message(), task.status() != dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED);
+        return task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED
+                ? InteractionResult.SUCCESS : InteractionResult.FAIL;
+    }
+
+    private static dev.worldforge.mod.api.ActionExecutionService.Task executeWandAction(
+            ServerPlayer player, Colony colony, String actionId, String payload,
+            dev.worldforge.mod.api.ActionExecutionService.Executor executor) {
+        long minute = dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute();
+        String actor = player.getUUID().toString();
+        String dimension = player.serverLevel().dimension().location().toString();
+        String requestId = "settle-wand:" + java.util.UUID.nameUUIDFromBytes(
+                (actor + ":" + player.server.getTickCount() + ":" + dimension + ":" + actionId + ":" + payload)
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        var request = new dev.worldforge.mod.api.ActionExecutionService.Request(
+                requestId, actionId, actor, colony.s.id, List.of(payload), minute);
+        return dev.worldforge.mod.api.WorldForgeApi.actionExecution().execute(request,
+                req -> {
+                    if (player.server.getPlayerList().getPlayer(player.getUUID()) == null)
+                        return "Игрок отключился до исполнения приказа";
+                    if (!dev.worldforge.mod.WFPerm.trusted(player)) return "Нужны права оператора";
+                    Colony current = SettleMod.colony(req.targetId());
+                    if (current != colony || !dimension.equals(current.dim))
+                        return "Поселение или измерение изменились до исполнения приказа";
+                    if (current.actionPersistenceBlocked || current.genesisProvisioningRuntimeBlocked)
+                        return "Изменения поселения заблокированы после ошибки сохранения; требуется сверка";
+                    return null;
+                }, executor, null, minute, dev.worldforge.mod.WorldForgeMod.actionExecutionFile(player.server));
     }
 
     /** Жезл не ломает блоки в творческом режиме (ЛКМ - это приказ). */
@@ -115,13 +149,21 @@ public class SettleWand extends Item {
                 say(pl, "Здесь нет здания", true);
                 return;
             }
-            try {
-                String name = b.def.name;
-                c.s.cancel(b.uid);
-                say(pl, "Отменено: " + name, false);
-            } catch (Settlement.OrderException ex) {
-                say(pl, ex.getMessage(), true);
-            }
+            ServerPlayer sp = (ServerPlayer) pl;
+            String payload = Integer.toString(b.uid);
+            var task = executeWandAction(sp, c, "settlement.wand_cancel", payload,
+                    (req, attempt) -> {
+                        try {
+                            String name = b.def.name;
+                            c.s.cancel(b.uid);
+                            if (!SettleMod.persistActionMutation(sp.server, c))
+                                return dev.worldforge.mod.api.ActionResult.fail("Изменение поселения не сохранено; дальнейшие изменения заблокированы до сверки");
+                            return dev.worldforge.mod.api.ActionResult.ok("Отменено: " + name);
+                        } catch (Settlement.OrderException ex) {
+                            return dev.worldforge.mod.api.ActionResult.fail(ex.getMessage());
+                        }
+                    });
+            say(pl, task.message(), task.status() != dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED);
         }
     }
 }
