@@ -36,6 +36,9 @@ public final class CharacterAuthorityTest {
         check(authority.getGlobal(a.globalId) == a && authority.registryForGlobal(b.globalId) == south,
                 "global UUID resolves person and owning map registry");
         check(authority.getLegacy("c1") == null, "ambiguous bare legacy ID fails closed");
+        Character late = north.create("Late arrival", "", "", "m", 1);
+        check(authority.getGlobal(late.globalId) == late,
+                "characters created after map registration are indexed without a second registration");
         boolean duplicateRejected = false;
         try {
             CharacterRegistry duplicate = new CharacterRegistry();
