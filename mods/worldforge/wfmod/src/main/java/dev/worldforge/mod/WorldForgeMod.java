@@ -124,6 +124,9 @@ public class WorldForgeMod {
         }
     }
 
+    /** Flushes the canonical ledger after addons have migrated their legacy balances during shutdown. */
+    public static void saveTreasuryNow(MinecraftServer server) { saveTreasury(server); }
+
     private static void saveTreasury(MinecraftServer server) {
         if (treasuryLoadFailed) {
             LOGGER.error("WorldForge treasury save skipped because the previous load failed; preserving the original file");
