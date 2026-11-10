@@ -43,6 +43,8 @@ import net.minecraftforge.server.ServerLifecycleHooks;
 import org.slf4j.Logger;
 import dev.worldforge.mod.economy.TreasuryLedger;
 import dev.worldforge.mod.economy.TreasuryService;
+import dev.worldforge.mod.identity.WorldId;
+import dev.worldforge.mod.identity.WorldIdentityStore;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -71,6 +73,8 @@ public class WorldForgeMod {
     private static final Map<String, MapData> MAPS = new ConcurrentHashMap<>();
     private static volatile Registry<Biome> biomes;
     private static volatile boolean treasuryLoadFailed;
+    private static volatile boolean actionExecutionLoadFailed;
+    private static volatile WorldId worldId;
     private static long treasuryTicks;
 
     public WorldForgeMod() {
@@ -101,8 +105,41 @@ public class WorldForgeMod {
     /** Canonical world-wide money ledger shared by settlements, realms, trade and military addons. */
     public static TreasuryLedger treasury() { return TreasuryService.current(); }
 
+    /** Stable identity for the currently loaded save; null until the save identity is validated. */
+    public static WorldId worldId() { return worldId; }
+
     private static Path treasuryFile(MinecraftServer server) {
         return server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT).resolve("worldforge").resolve("wf_treasury.json");
+    }
+
+    public static Path actionExecutionFile(MinecraftServer server) {
+        return server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
+                .resolve("worldforge").resolve("wf_action_execution.json");
+    }
+
+    private static void loadActionExecution(MinecraftServer server) {
+        dev.worldforge.mod.api.WorldForgeApi.resetActionExecution();
+        Path file = actionExecutionFile(server);
+        try {
+            dev.worldforge.mod.api.WorldForgeApi.actionExecution().load(file);
+            actionExecutionLoadFailed = false;
+            LOGGER.info("WorldForge actions: loaded {} tasks and {} receipts",
+                    dev.worldforge.mod.api.WorldForgeApi.actionExecution().tasks().size(),
+                    dev.worldforge.mod.api.WorldForgeApi.actionExecution().receipts().size());
+        } catch (Exception ex) {
+            actionExecutionLoadFailed = true;
+            LOGGER.error("WorldForge action journal is invalid; refusing to overwrite it: {}", ex.toString());
+            throw new IllegalStateException("WorldForge cannot start with a corrupt action execution journal", ex);
+        }
+    }
+
+    private static void saveActionExecution(MinecraftServer server) {
+        if (actionExecutionLoadFailed) {
+            LOGGER.error("WorldForge action journal save skipped because the previous load failed; preserving original file");
+            return;
+        }
+        try { dev.worldforge.mod.api.WorldForgeApi.actionExecution().save(actionExecutionFile(server)); }
+        catch (IOException ex) { LOGGER.error("WorldForge action journal save failed: {}", ex.toString()); }
     }
 
     private static void loadTreasury(MinecraftServer server) {
@@ -117,6 +154,9 @@ public class WorldForgeMod {
             TreasuryService.replace(new TreasuryLedger());
         }
     }
+
+    /** Flushes the canonical ledger after addons have migrated their legacy balances during shutdown. */
+    public static void saveTreasuryNow(MinecraftServer server) { saveTreasury(server); }
 
     private static void saveTreasury(MinecraftServer server) {
         if (treasuryLoadFailed) {
@@ -193,23 +233,35 @@ public class WorldForgeMod {
     public void onServerAboutToStart(ServerAboutToStartEvent e) {
         biomes = e.getServer().registryAccess().registryOrThrow(Registries.BIOME);
         MAPS.clear();
+        try {
+            Path identityFile = e.getServer().getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
+                    .resolve("worldforge").resolve("world_id.txt");
+            worldId = WorldIdentityStore.loadOrCreate(identityFile);
+            LOGGER.info("WorldForge: world identity {}", worldId);
+        } catch (IOException ex) {
+            worldId = null;
+            throw new IllegalStateException("WorldForge cannot start without a valid stable WorldId; refusing to fork this save's identity", ex);
+        }
     }
 
     @SubscribeEvent
-    public void onServerStarted(ServerStartedEvent e) { loadTreasury(e.getServer()); ContentCommands.load(e.getServer()); }
+    public void onServerStarted(ServerStartedEvent e) { loadTreasury(e.getServer()); loadActionExecution(e.getServer()); ContentCommands.load(e.getServer()); }
 
     @SubscribeEvent
     public void onTreasuryTick(TickEvent.ServerTickEvent e) {
         if (e.phase != TickEvent.Phase.END) return;
-        if (++treasuryTicks % 6000 == 0) saveTreasury(e.getServer());
+        if (++treasuryTicks % 6000 == 0) { saveTreasury(e.getServer()); saveActionExecution(e.getServer()); }
     }
 
     @SubscribeEvent
-    public void onServerStopping(ServerStoppingEvent e) { saveTreasury(e.getServer()); ContentCommands.save(e.getServer()); }
+    public void onServerStopping(ServerStoppingEvent e) { saveTreasury(e.getServer()); saveActionExecution(e.getServer()); ContentCommands.save(e.getServer()); }
 
     @SubscribeEvent
     public void onServerStopped(ServerStoppedEvent e) {
         EditorManager.forget();
+        worldId = null;
+        dev.worldforge.mod.api.WorldForgeApi.resetActionExecution();
+        actionExecutionLoadFailed = false;
         biomes = null;
         MAPS.clear();
     }

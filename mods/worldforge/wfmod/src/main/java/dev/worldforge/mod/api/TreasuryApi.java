@@ -45,16 +45,87 @@ public final class TreasuryApi {
         String id = accountId(realm);
         TreasuryLedger.Account account = ledger().account(id);
         if (account == null) account = ledger().open(id, realm, "silver", 0);
+        ledger().setCreditLimit(id, 250.0);
         return account;
     }
 
+    /**
+     * Opens the canonical realm account once. Army legacy balances are denominated in gold;
+     * the world ledger stores silver (5 silver = 1 gold) and represents old deficits as debt.
+     */
+    public static synchronized boolean migrateLegacyRealmBalance(String realm, double legacyGold) {
+        if (realm == null || realm.isBlank() || !Double.isFinite(legacyGold)) return false;
+        String id = accountId(realm);
+        if (!ledger().hasAccount(id)) ledger().open(id, realm, "silver", 0);
+        ledger().setCreditLimit(id, 250.0);
+        double silver = Math.abs(legacyGold) * SILVER_PER_GOLD;
+        if (silver <= 1e-9) return true;
+        String reference = "legacy-army-balance:" + realm;
+        boolean posted = legacyGold > 0
+                ? ledger().depositOnce(id, silver, TreasuryLedger.Kind.IMPORT, "legacy-army-balance",
+                        reference, worldMinute(), "migrate legacy army gold balance")
+                : ledger().withdrawOnce(id, silver, TreasuryLedger.Kind.OPENING, "legacy-army-deficit",
+                        reference, worldMinute(), "migrate legacy negative army balance");
+        if (!posted) throw new IllegalStateException("Cannot migrate legacy army balance for " + realm + ": " + ledger().lastError());
+        return true;
+    }
+    /** Creates a new realm account with an opening gold balance if no canonical account exists. */
+    public static synchronized void ensureRealmAccount(String realm, double openingGold) {
+        if (realm == null || realm.isBlank() || !Double.isFinite(openingGold) || openingGold < 0)
+            throw new IllegalArgumentException("valid realm and nonnegative opening gold are required");
+        String id = accountId(realm);
+        TreasuryLedger.Account account = ledger().account(id);
+        if (account == null) account = ledger().open(id, realm, "silver", openingGold * SILVER_PER_GOLD);
+        else if (openingGold > 0 && account.balance <= 1e-9 && account.debt <= 1e-9
+                && ledger().journal().stream().noneMatch(entry -> id.equals(entry.accountId()))) {
+            ledger().depositOnce(id, openingGold * SILVER_PER_GOLD, TreasuryLedger.Kind.OPENING,
+                    "realm-opening", "realm-opening:" + realm, worldMinute(), "initial realm treasury");
+        }
+        ledger().setCreditLimit(id, 250.0);
+    }
+
+    /** Net gold balance includes any carried deficit as debt, preserving the legacy army economy contract. */
+    public static synchronized boolean hasRealmAccount(String realm) {
+        return realm != null && !realm.isBlank() && ledger().hasAccount(accountId(realm));
+    }
+
+    public static synchronized double netBalance(String realm) {
+        if (realm == null || realm.isBlank()) return 0;
+        TreasuryLedger.Account account = ensureRealm(realm);
+        return (account.balance - account.debt) / SILVER_PER_GOLD;
+    }
+
+    /** Idempotent gold-denominated posting used by daily army income and upkeep. */
+    public static synchronized boolean postDeltaOnce(String realm, double deltaGold, String label,
+                                                       String reference, long worldMinute) {
+        if (realm == null || realm.isBlank() || !Double.isFinite(deltaGold) || !Double.isFinite(worldMinute)
+                || worldMinute < 0 || reference == null || reference.isBlank()) return false;
+        ensureRealmAccount(realm, 0);
+        double silver = Math.abs(deltaGold) * SILVER_PER_GOLD;
+        if (silver <= 1e-9) return true;
+        String category = label == null || label.isBlank() ? "army" : label;
+        return deltaGold > 0
+                ? ledger().depositOnce(accountId(realm), silver, TreasuryLedger.Kind.DEPOSIT,
+                        category, reference, worldMinute, "army treasury posting")
+                : ledger().withdrawOnce(accountId(realm), silver, TreasuryLedger.Kind.ARMY_UPKEEP,
+                        category, reference, worldMinute, "army treasury posting");
+    }
+
+    /** Idempotent spending for a named military transaction. */
+    public static synchronized boolean spendOnce(String realm, double amountGold, String label,
+                                                  String reference, long worldMinute) {
+        if (!Double.isFinite(amountGold) || amountGold < 0) return false;
+        return postDeltaOnce(realm, -amountGold, label, reference, worldMinute);
+    }
+
     private static long worldMinute() {
-        return Math.max(0, WorldForgeApi.clock().dayNumber()) * 1440L;
+        return WorldForgeApi.clock().worldMinute();
     }
 
     public static synchronized double balance(String realm) {
         if (realm == null || realm.isBlank()) return 0;
-        return ledger().balance(accountId(realm)) / SILVER_PER_GOLD;
+        TreasuryLedger.Account account = ledger().account(accountId(realm));
+        return account == null ? 0 : (account.balance - account.debt) / SILVER_PER_GOLD;
     }
 
     /** Adds/removes gold from the canonical realm account; negative values cannot bypass credit limits. */

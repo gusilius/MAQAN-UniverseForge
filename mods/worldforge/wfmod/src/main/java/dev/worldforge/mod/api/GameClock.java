@@ -9,7 +9,8 @@ import java.util.*;
  * ({@link #pull}), поэтому пауза и ускорение действуют на все системы сразу. Чистая логика, без Minecraft.
  */
 public final class GameClock {
-    public static final int TICKS_PER_DAY = 1200, YEAR_DAYS = 365, MONTH_DAYS = 30;
+    public static final int TICKS_PER_DAY = 1200, YEAR_DAYS = 365;
+    private static final int[] MONTH_LENGTHS = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
     public static final int[] SPEEDS = {0, 1, 2, 5, 10};
     public static final String[] SPEED_NAMES = {"Пауза", "x1", "x2", "x5", "x10"};
     public static final String[] MONTHS = {"Января", "Февраля", "Марта", "Апреля", "Мая", "Июня", "Июля", "Августа", "Сентября", "Октября", "Ноября", "Декабря"};
@@ -21,6 +22,15 @@ public final class GameClock {
     private final Map<String, Long> pulled = new HashMap<>();
 
     public double elapsedDays() { return elapsed; }
+
+    /** Reset the singleton clock before a different server save is loaded in the same JVM. */
+    public void reset() {
+        elapsed = 0;
+        speed = 1;
+        lastSpeed = 1;
+        startYear = 300;
+        pulled.clear();
+    }
     public int speedIndex() { return speed; }
     public boolean paused() { return speed == 0; }
     public String speedName() { return SPEED_NAMES[speed]; }
@@ -38,7 +48,10 @@ public final class GameClock {
     public void slower() { if (speed > 1) setSpeed(speed - 1); }
 
     /** Прошло столько серверных тиков (1 тик = 1/1200 дня при скорости x1). */
-    public void advance(int ticks) { elapsed += (double) SPEEDS[speed] * ticks / TICKS_PER_DAY; }
+    public void advance(int ticks) {
+        if (ticks < 0) throw new IllegalArgumentException("ticks cannot be negative");
+        elapsed += (double) SPEEDS[speed] * ticks / TICKS_PER_DAY;
+    }
 
     /** Сколько целых игровых дней прошло с прошлого вызова для этого потребителя; первый вызов возвращает 0. */
     public int pull(String consumer) {
@@ -53,10 +66,34 @@ public final class GameClock {
     // ------------------------------------------------------------------ календарь
 
     public long dayNumber() { return (long) Math.floor(elapsed); }
+    /** Canonical elapsed world minute, including the fractional day. */
+    public long worldMinute() { return Math.max(0L, (long) Math.floor(elapsed * 1440.0)); }
+    public int seasonIndex() { return Math.min(3, dayOfYear() / 91); }
+    public double seasonProgress() {
+        int index = seasonIndex();
+        int start = index * 91;
+        int duration = index == 3 ? 92 : 91;
+        double within = dayOfYear() - start + (elapsed - Math.floor(elapsed));
+        return Math.max(0, Math.min(1, within / duration));
+    }
     public int year() { return startYear + (int) (dayNumber() / YEAR_DAYS); }
     public int dayOfYear() { return (int) (dayNumber() % YEAR_DAYS); }
-    public int month() { return Math.min(11, dayOfYear() / MONTH_DAYS); }
-    public int dayOfMonth() { return dayOfYear() - month() * MONTH_DAYS + 1; }
+    public int month() {
+        int remaining = dayOfYear();
+        for (int i = 0; i < MONTH_LENGTHS.length; i++) {
+            if (remaining < MONTH_LENGTHS[i]) return i;
+            remaining -= MONTH_LENGTHS[i];
+        }
+        return 11;
+    }
+    public int dayOfMonth() {
+        int remaining = dayOfYear();
+        for (int i = 0; i < MONTH_LENGTHS.length; i++) {
+            if (remaining < MONTH_LENGTHS[i]) return remaining + 1;
+            remaining -= MONTH_LENGTHS[i];
+        }
+        return 31;
+    }
     public String dateText() { return dayOfMonth() + " " + MONTHS[month()] + " " + year(); }
 
     // ------------------------------------------------------------------ сохранение
@@ -69,12 +106,34 @@ public final class GameClock {
 
     @SuppressWarnings("unchecked")
     public void load(String json) {
-        Map<String, Object> m = (Map<String, Object>) Json.parse(json);
+        Object parsed = Json.parse(json);
+        if (!(parsed instanceof Map<?, ?> raw)) throw new IllegalArgumentException("Clock save must be a JSON object");
+        Map<String, Object> m = (Map<String, Object>) raw;
         if (!"wf-clock/1".equals(m.get("format"))) throw new IllegalArgumentException("Неверный формат часов");
-        elapsed = ((Number) m.get("elapsed")).doubleValue();
-        speed = Math.max(0, Math.min(SPEEDS.length - 1, ((Number) m.get("speed")).intValue()));
-        lastSpeed = Math.max(1, ((Number) m.get("last")).intValue());
-        startYear = ((Number) m.get("start")).intValue();
+        if (!(m.get("elapsed") instanceof Number elapsedValue)
+                || !(m.get("speed") instanceof Number speedValue)
+                || !(m.get("last") instanceof Number lastValue)
+                || !(m.get("start") instanceof Number startValue))
+            throw new IllegalArgumentException("Clock save is missing numeric state fields");
+
+        double nextElapsed = elapsedValue.doubleValue();
+        int nextSpeed = speedValue.intValue();
+        int nextLast = lastValue.intValue();
+        int nextStart = startValue.intValue();
+        if (!Double.isFinite(nextElapsed) || nextElapsed < 0
+                || nextElapsed > (Integer.MAX_VALUE - (double) Math.max(1, nextStart)) * YEAR_DAYS)
+            throw new IllegalArgumentException("Clock elapsed time is outside the supported range");
+        if (nextSpeed < 0 || nextSpeed >= SPEEDS.length)
+            throw new IllegalArgumentException("Clock speed is outside the supported range");
+        if (nextLast < 1 || nextLast >= SPEEDS.length)
+            throw new IllegalArgumentException("Clock resume speed is outside the supported range");
+        if (nextStart < 1) throw new IllegalArgumentException("Clock start year must be positive");
+
+        // Commit only after every field has passed validation: malformed saves never partially mutate time.
+        elapsed = nextElapsed;
+        speed = nextSpeed;
+        lastSpeed = nextLast;
+        startYear = nextStart;
         pulled.clear();
     }
 }

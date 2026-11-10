@@ -56,7 +56,7 @@ public class ArmyMod {
             }
             @Override public boolean has(String realm) { return of(realm) != null; }
             @Override public double balance(String realm) { ArmyEngine e = of(realm); return e == null ? 0 : e.gold(realm); }
-            @Override public void add(String realm, double delta) { ArmyEngine e = of(realm); if (e != null) e.gold.put(realm, e.gold(realm) + delta); }
+            @Override public void add(String realm, double delta) { if (of(realm) != null) dev.worldforge.mod.api.TreasuryApi.add(realm, delta, "army-provider-compatibility"); }
         });
         ArmyActions.registerArmies(editor -> {
             for (MapData m : WorldForgeMod.loadedMaps().values()) if (EditorManager.editorFor(m) == editor) return armies(m);
@@ -108,7 +108,11 @@ public class ArmyMod {
     }
 
     @SubscribeEvent
-    public void onStopping(ServerStoppingEvent e) { saveAll(e.getServer()); ARMIES.clear(); }
+    public void onStopping(ServerStoppingEvent e) {
+        saveAll(e.getServer()); // wf-army/1 balances are migrated while snapshots are written
+        WorldForgeMod.saveTreasuryNow(e.getServer()); // persist those migrations after the army addon has completed
+        ARMIES.clear();
+    }
 
     @SubscribeEvent
     public void onTick(TickEvent.ServerTickEvent e) {

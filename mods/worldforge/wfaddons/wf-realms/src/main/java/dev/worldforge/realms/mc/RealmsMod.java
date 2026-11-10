@@ -274,28 +274,66 @@ public class RealmsMod {
     }
 
     private static int politics(CommandSourceStack source, String action, String a, String b, String c, String d) {
-        try {
-            switch (action) {
-                case "title_create" -> POLITICS.createTitle(a, b, Statecraft.Rank.valueOf(c.toUpperCase(Locale.ROOT)), d);
-                case "title_grant" -> { if (!POLITICS.grantTitle(a, b)) throw new IllegalArgumentException(POLITICS.lastError); }
-                case "title_claim" -> { if (!POLITICS.addClaim(a, b)) throw new IllegalArgumentException(POLITICS.lastError); }
-                case "vassal" -> { if (!POLITICS.setVassalage(a, b, Double.parseDouble(c), Double.parseDouble(d))) throw new IllegalArgumentException(POLITICS.lastError); }
-                case "tax" -> POLITICS.setTaxRate(a, Double.parseDouble(b));
-                case "opinion" -> POLITICS.setOpinion(a, b, Integer.parseInt(c));
-                case "treaty" -> POLITICS.setTreaty(a, b, Statecraft.Treaty.valueOf(c.toUpperCase(Locale.ROOT)), Boolean.parseBoolean(d));
-                case "war" -> POLITICS.declareWar(a, b, c, d, (int) WorldForgeApi.clock().dayNumber());
-                case "succession" -> POLITICS.setInheritanceLaw(a, Statecraft.InheritanceLaw.valueOf(b.toUpperCase(Locale.ROOT)));
-                case "dynasty" -> POLITICS.registerDynasty(a, b);
-                case "dynasty_member" -> { if (!POLITICS.addDynastyMember(a, b)) throw new IllegalArgumentException(POLITICS.lastError); }
-                case "plot" -> POLITICS.createPlot(a, b, c, Statecraft.PlotKind.valueOf(d.toUpperCase(Locale.ROOT)));
-                case "inherit" -> { if (!POLITICS.inheritTitle(a, b, c)) throw new IllegalArgumentException(POLITICS.lastError); }
-                default -> throw new IllegalArgumentException("Неизвестная политическая операция");
+        String actor = source.getEntity() instanceof ServerPlayer player
+                ? player.getUUID().toString() : "console";
+        String payload = String.join("|", action, a, b, c, d);
+        return executePoliticalMutation(source, action, a, payload, () -> {
+            try {
+                switch (action) {
+                    case "title_create" -> POLITICS.createTitle(a, b, Statecraft.Rank.valueOf(c.toUpperCase(Locale.ROOT)), d);
+                    case "title_grant" -> { if (!POLITICS.grantTitle(a, b)) throw new IllegalArgumentException(POLITICS.lastError); }
+                    case "title_claim" -> { if (!POLITICS.addClaim(a, b)) throw new IllegalArgumentException(POLITICS.lastError); }
+                    case "vassal" -> { if (!POLITICS.setVassalage(a, b, Double.parseDouble(c), Double.parseDouble(d))) throw new IllegalArgumentException(POLITICS.lastError); }
+                    case "tax" -> POLITICS.setTaxRate(a, Double.parseDouble(b));
+                    case "opinion" -> POLITICS.setOpinion(a, b, Integer.parseInt(c));
+                    case "treaty" -> POLITICS.setTreaty(a, b, Statecraft.Treaty.valueOf(c.toUpperCase(Locale.ROOT)), Boolean.parseBoolean(d));
+                    case "war" -> POLITICS.declareWar(a, b, c, d, (int) WorldForgeApi.clock().dayNumber());
+                    case "succession" -> POLITICS.setInheritanceLaw(a, Statecraft.InheritanceLaw.valueOf(b.toUpperCase(Locale.ROOT)));
+                    case "dynasty" -> POLITICS.registerDynasty(a, b);
+                    case "dynasty_member" -> { if (!POLITICS.addDynastyMember(a, b)) throw new IllegalArgumentException(POLITICS.lastError); }
+                    case "plot" -> POLITICS.createPlot(a, b, c, Statecraft.PlotKind.valueOf(d.toUpperCase(Locale.ROOT)));
+                    case "inherit" -> { if (!POLITICS.inheritTitle(a, b, c)) throw new IllegalArgumentException(POLITICS.lastError); }
+                    default -> { return dev.worldforge.mod.api.ActionResult.fail("Неизвестная политическая операция"); }
+                }
+                save(source.getServer());
+                return dev.worldforge.mod.api.ActionResult.ok("Политическое состояние обновлено: " + action);
+            } catch (Exception ex) {
+                return dev.worldforge.mod.api.ActionResult.fail("Политическая операция отклонена: " + ex.getMessage());
             }
-            save(source.getServer());
-            source.sendSuccess(() -> Component.literal("Политическое состояние обновлено: " + action), true);
-            return 1;
-        } catch (Exception ex) {
-            source.sendFailure(Component.literal("Политическая операция отклонена: " + ex.getMessage()));
+        }, () -> null, true);
+    }
+
+    private static int executePoliticalMutation(CommandSourceStack source, String action, String target,
+                                                String payload,
+                                                java.util.function.Supplier<dev.worldforge.mod.api.ActionResult> operation,
+                                                java.util.function.Supplier<String> domainAuthorization,
+                                                boolean operatorOnly) {
+        String actor = source.getEntity() instanceof ServerPlayer player
+                ? player.getUUID().toString() : "console";
+        long minute = WorldForgeApi.clock().worldMinute();
+        String requestId = "politics:" + java.util.UUID.randomUUID();
+        try {
+            var task = WorldForgeApi.actionExecution().execute(
+                    new dev.worldforge.mod.api.ActionExecutionService.Request(
+                            requestId, "politics." + action, actor, target, List.of(payload), minute),
+                    req -> {
+                        if (source.getEntity() instanceof ServerPlayer player
+                                && source.getServer().getPlayerList().getPlayer(player.getUUID()) == null)
+                            return "Игрок отключился до политической операции";
+                        if (operatorOnly && !source.hasPermission(2))
+                            return "Нужны права оператора";
+                        return domainAuthorization.get();
+                    },
+                    (req, attempt) -> operation.get(), null, minute,
+                    WorldForgeMod.actionExecutionFile(source.getServer()));
+            if (task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED) {
+                source.sendSuccess(() -> Component.literal(task.message()), true);
+                return 1;
+            }
+            source.sendFailure(Component.literal(task.message()));
+            return 0;
+        } catch (RuntimeException ex) {
+            source.sendFailure(Component.literal("Не удалось выполнить политическую операцию: " + ex.getMessage()));
             return 0;
         }
     }
@@ -317,19 +355,23 @@ public class RealmsMod {
         return 1;
     }
 
-    private static int act(CommandSourceStack s, String what, String a, String b) {
-        ServerPlayer sp = s.getPlayer();
-        if (sp == null) return 0;
-        String realm = realmOfPlayer(sp);
-        if (realm.isEmpty()) { s.sendFailure(Component.literal("Вы не правите государством.")); return 0; }
-        if (!rules(sp, realm)) { s.sendFailure(Component.literal("Это решение правителя.")); return 0; }
-        boolean ok = switch (what) {
-            case "gov" -> REALMS.setGov(realm, a, false);
-            case "unlock" -> REALMS.unlock(realm, a);
-            default -> REALMS.setLaw(realm, a, b);
-        };
-        if (!ok) { s.sendFailure(Component.literal(REALMS.lastError)); return 0; }
-        s.sendSuccess(() -> Component.literal("Готово."), false);
-        return info(s, realm);
+    private static int act(CommandSourceStack source, String what, String a, String b) {
+        ServerPlayer player = source.getPlayer();
+        if (player == null) return 0;
+        String realm = realmOfPlayer(player);
+        if (realm.isEmpty()) { source.sendFailure(Component.literal("Вы не правите государством.")); return 0; }
+        String actor = player.getUUID().toString();
+        String payload = what + "|" + realm + "|" + a + "|" + b;
+        int result = executePoliticalMutation(source, "realm_" + what, realm, payload, () -> {
+            boolean ok = switch (what) {
+                case "gov" -> REALMS.setGov(realm, a, false);
+                case "unlock" -> REALMS.unlock(realm, a);
+                default -> REALMS.setLaw(realm, a, b);
+            };
+            if (!ok) return dev.worldforge.mod.api.ActionResult.fail(REALMS.lastError);
+            return dev.worldforge.mod.api.ActionResult.ok("Готово.");
+        }, () -> rules(player, realm) ? null : "Это решение правителя.", false);
+        if (result == 0) return 0;
+        return info(source, realm);
     }
 }

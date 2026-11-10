@@ -8,6 +8,8 @@ import dev.worldforge.mod.WorldForgeMod;
 import dev.worldforge.mod.api.WorldForgeApi;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
+import dev.worldforge.people.CharacterAuthority;
+import dev.worldforge.mod.identity.WorldId;
 import dev.worldforge.people.Courts;
 import dev.worldforge.people.NameBank;
 import dev.worldforge.people.PopulationSimulation;
@@ -74,6 +76,12 @@ public class PeopleMod {
     public static volatile java.util.List<String> ROLES_RAW = java.util.List.of();
     public static volatile NameBank NAMES = new NameBank();
     private static final Map<MapData, CharacterRegistry> REGS = new ConcurrentHashMap<>();
+    private static final CharacterAuthority AUTHORITY = new CharacterAuthority();
+    private static final CharacterRegistry PLAYER_REGISTRY = new CharacterRegistry();
+    private static volatile boolean playerRegistryAvailable = true;
+    public static CharacterAuthority authority() { return AUTHORITY; }
+    public static CharacterRegistry playerRegistry() { return PLAYER_REGISTRY; }
+    public static boolean playerRegistryAvailable() { return playerRegistryAvailable; }
     /** Corrupt saves fail closed: never regenerate courts over unreadable identity data. */
     private static final Set<MapData> INVALID_REGS = ConcurrentHashMap.newKeySet();
     public static final int TICKS_PER_DAY = 1200;
@@ -98,12 +106,10 @@ public class PeopleMod {
 
     /** Персонаж по id в любой загруженной карте (аддоны поверх людей ищут собеседников по нему). */
     public static Character findNpc(String id) {
-        for (MapData m : WorldForgeMod.loadedMaps().values()) {
-            CharacterRegistry reg = registry(m);
-            Character c = reg == null ? null : reg.get(id);
-            if (c != null) return c;
-        }
-        return null;
+        if (id == null || id.isBlank()) return null;
+        for (MapData map : WorldForgeMod.loadedMaps().values()) registry(map);
+        Character global = AUTHORITY.getGlobal(id);
+        return global != null ? global : AUTHORITY.getLegacy(id);
     }
 
     public static boolean dialogueLoaded() {
@@ -116,6 +122,8 @@ public class PeopleMod {
     public void onAboutToStart(ServerAboutToStartEvent e) {
         REGS.clear();
         INVALID_REGS.clear();
+        if (WorldForgeMod.worldId() != null) AUTHORITY.beginWorld(WorldForgeMod.worldId());
+        else AUTHORITY.clear();
         FLAGS.clear();
         ticks = 0;
         RoleDefs roles = new RoleDefs();
@@ -150,6 +158,22 @@ public class PeopleMod {
     @SubscribeEvent
     public void onStarted(ServerStartedEvent e) {
         YEAR = WorldForgeApi.clock().year();
+        if (WorldForgeMod.worldId() != null) AUTHORITY.beginWorld(WorldForgeMod.worldId());
+        MinecraftServer server = e.getServer();
+        playerRegistryAvailable = true;
+        try {
+            Path playerFile = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
+                    .resolve("worldforge").resolve("wf_players.json");
+            if (Files.exists(playerFile)) {
+                WorldId world = WorldForgeMod.worldId();
+                if (world == null) throw new IllegalStateException("WorldId is unavailable for player identity migration");
+                PLAYER_REGISTRY.fromJson(Files.readString(playerFile), world + "|__players__");
+            }
+            AUTHORITY.registerMap("__players__", PLAYER_REGISTRY);
+        } catch (Exception ex) {
+            playerRegistryAvailable = false;
+            LOGGER.error("wf_people: player Character registry failed to load; player identity creation and overwrite are disabled: {}", ex.toString());
+        }
         for (MapData m : WorldForgeMod.loadedMaps().values()) registry(m);
     }
 
@@ -163,7 +187,11 @@ public class PeopleMod {
         if (server != null) {
             Path f = EditorManager.overlayDir(server, m).resolve("wf_people.json");
             try {
-                if (Files.exists(f)) reg.fromJson(Files.readString(f));
+                if (Files.exists(f)) {
+                    WorldId world = WorldForgeMod.worldId();
+                    if (world == null) throw new IllegalStateException("WorldId is unavailable; refusing to migrate Character identities");
+                    reg.fromJson(Files.readString(f), world + "|" + m.name);
+                }
             } catch (Exception ex) {
                 LOGGER.error("wf_people: сохранение {} повреждено; генерация персонажей заблокирована во избежание потери данных: {}", f, ex.toString());
                 INVALID_REGS.add(m);
@@ -178,7 +206,21 @@ public class PeopleMod {
             LOGGER.error("wf_people: Courts.ensure для карты '{}' не удался: {}", m.name, ex.toString());
         }
         CharacterRegistry prev = REGS.putIfAbsent(m, reg);
-        return prev != null ? prev : reg;
+        CharacterRegistry selected = prev != null ? prev : reg;
+        if (WorldForgeMod.worldId() != null) {
+            try {
+                AUTHORITY.registerMap(m.name, selected);
+            } catch (RuntimeException ex) {
+                // Keep a rejected map out of the local cache as well as the global index.
+                // Callers must not resolve Characters through a partition that failed identity validation.
+                REGS.remove(m, selected);
+                INVALID_REGS.add(m);
+                LOGGER.error("wf_people: global Character authority rejected map '{}'; map registry is disabled: {}",
+                        m.name, ex.toString());
+                return null;
+            }
+        }
+        return selected;
     }
 
     public static long seed(MapData m) {
@@ -198,12 +240,62 @@ public class PeopleMod {
         return m == null ? null : REGS.get(m);
     }
 
+    private static void writeAtomic(Path file, String content) throws java.io.IOException {
+        Files.createDirectories(file.getParent());
+        Path temp = file.resolveSibling(file.getFileName() + ".tmp");
+        try {
+            Files.writeString(temp, content);
+            try {
+                Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                        java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+            } catch (java.nio.file.AtomicMoveNotSupportedException ex) {
+                Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            Files.deleteIfExists(temp);
+        }
+    }
+
+    /** Persist the exact Character partition that owns this player before Genesis reports success. */
+    public static boolean persistCharacter(Character character, MinecraftServer server) {
+        if (character == null || server == null) return false;
+        CharacterRegistry owner = AUTHORITY.registryForGlobal(character.globalId);
+        if (owner == null) return false;
+        try {
+            if (owner == PLAYER_REGISTRY) {
+                if (!playerRegistryAvailable) return false;
+                Path playerFile = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
+                        .resolve("worldforge").resolve("wf_players.json");
+                writeAtomic(playerFile, PLAYER_REGISTRY.toJson());
+                return true;
+            }
+            for (Map.Entry<MapData, CharacterRegistry> entry : REGS.entrySet()) {
+                if (entry.getValue() != owner) continue;
+                Path file = EditorManager.overlayDir(server, entry.getKey()).resolve("wf_people.json");
+                writeAtomic(file, owner.toJson());
+                return true;
+            }
+            return false;
+        } catch (Exception ex) {
+            if (owner == PLAYER_REGISTRY) playerRegistryAvailable = false;
+            LOGGER.error("wf_people: failed to persist canonical Character {}: {}", character.globalId, ex.toString());
+            return false;
+        }
+    }
+
     static void saveAll(MinecraftServer server) {
+        if (playerRegistryAvailable) try {
+            Path playerFile = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
+                    .resolve("worldforge").resolve("wf_players.json");
+            writeAtomic(playerFile, PLAYER_REGISTRY.toJson());
+        } catch (Exception ex) {
+            playerRegistryAvailable = false;
+            LOGGER.error("wf_people: failed to save player Character registry; further Genesis identity writes are disabled: {}", ex.toString());
+        }
         for (Map.Entry<MapData, CharacterRegistry> en : REGS.entrySet()) {
             try {
                 Path dir = EditorManager.overlayDir(server, en.getKey());
-                Files.createDirectories(dir);
-                Files.writeString(dir.resolve("wf_people.json"), en.getValue().toJson());
+                writeAtomic(dir.resolve("wf_people.json"), en.getValue().toJson());
             } catch (Exception ex) {
                 LOGGER.error("wf_people: не удалось сохранить людей карты '{}': {}", en.getKey().name, ex.toString());
             }
@@ -214,6 +306,9 @@ public class PeopleMod {
     public void onStopping(ServerStoppingEvent e) {
         saveAll(e.getServer());
         REGS.clear();
+        PLAYER_REGISTRY.fromJson("{\"format\":\"wf-people/3\",\"schema_version\":3,\"next\":1,\"characters\":[]}");
+        playerRegistryAvailable = true;
+        AUTHORITY.clear();
         FLAGS.clear();
     }
 
@@ -226,6 +321,7 @@ public class PeopleMod {
             YEAR = WorldForgeApi.clock().year();
             if (elapsedDays > 0) {
                 for (CharacterRegistry registry : REGS.values()) PopulationSimulation.advance(registry, elapsedDays, YEAR);
+                PopulationSimulation.advance(PLAYER_REGISTRY, elapsedDays, YEAR);
             }
             if (ticks % SPAWN_EVERY == 0) NpcSpawner.pass(e.getServer());
             if (ticks % 20 == 0) socialInitiatives(e.getServer());
@@ -235,7 +331,6 @@ public class PeopleMod {
         }
     }
 
-    @SubscribeEvent
     /**
      * Optional NPC-initiated conversation. Runs only for explicitly configured characters
      * or characters with unresolved semantic obligations. A per-character/player cooldown

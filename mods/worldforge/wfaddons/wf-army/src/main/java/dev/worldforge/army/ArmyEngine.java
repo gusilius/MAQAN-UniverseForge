@@ -7,6 +7,8 @@ import dev.worldforge.war.Attitude;
 import dev.worldforge.mod.Json;
 import dev.worldforge.mod.TitleData;
 import dev.worldforge.mod.TitleEditor;
+import dev.worldforge.mod.api.TreasuryApi;
+import dev.worldforge.mod.api.WorldForgeApi;
 
 import java.util.*;
 
@@ -78,7 +80,22 @@ public final class ArmyEngine {
 
     public double pool(String realm) { return pool.computeIfAbsent(realm, r -> levyCap(r)); }
 
-    public double gold(String realm) { return gold.computeIfAbsent(realm, r -> START_GOLD); }
+    /**
+     * Canonical realm wealth is held by TreasuryLedger in silver; this adapter preserves
+     * ArmyEngine's historic gold-facing API and migrates a wf_army/1 balance exactly once.
+     */
+    public double gold(String realm) {
+        if (realm == null || realm.isBlank()) return 0;
+        Double legacy = gold.remove(realm);
+        if (legacy != null) TreasuryApi.migrateLegacyRealmBalance(realm, legacy);
+        TreasuryApi.ensureRealmAccount(realm, legacy == null ? START_GOLD : 0);
+        return TreasuryApi.netBalance(realm);
+    }
+
+    boolean postGoldDelta(String realm, double delta, String category, String reference) {
+        long minute = WorldForgeApi.clock().worldMinute();
+        return TreasuryApi.postDeltaOnce(realm, delta, category, reference, minute);
+    }
 
     public int capital(String realm) {
         TitleData.Realm re = d().realms.get(realm);
@@ -126,8 +143,9 @@ public final class ArmyEngine {
         if (gold(realm) < c) throw new TitleEditor.EditException("Не хватает золота: " + (int) gold(realm) + " из " + Math.ceil(c));
         int cap = capital(realm);
         if (cap == 0) throw new TitleEditor.EditException("У государства нет земель");
+        if (c > 0 && !postGoldDelta(realm, -c, "army-recruitment", "army-recruit:" + nextArmy + ":" + type + ":" + n))
+            throw new TitleEditor.EditException("Казна отклонила оплату набора армии");
         pool.put(realm, pool(realm) - n);
-        gold.put(realm, gold(realm) - c);
         Army a = armyAt(realm, cap, false);
         a.add(type, n);
         say(realmName(realm) + " набирает " + n + " " + u.name.toLowerCase());
@@ -143,7 +161,8 @@ public final class ArmyEngine {
         if (cap == 0) throw new TitleEditor.EditException("У государства нет земель для размещения наёмников");
         double c = Math.max(1, cost(type, n, true));
         if (gold(realm) < c) throw new TitleEditor.EditException("Не хватает золота: " + (int) gold(realm) + " из " + Math.ceil(c));
-        gold.put(realm, gold(realm) - c);
+        if (!postGoldDelta(realm, -c, "army-mercenary-hiring", "army-mercenary:" + nextArmy + ":" + type + ":" + n))
+            throw new TitleEditor.EditException("Казна отклонила оплату наёмников");
         Army a = armyAt(realm, cap, true);
         a.add(type, n);
         say(realmName(realm) + " нанимает " + n + " " + u.name.toLowerCase() + " (наёмники)");
@@ -309,14 +328,16 @@ public final class ArmyEngine {
         Set<String> realms = new LinkedHashSet<>();
         for (TitleData.Realm r : d().realmList()) if (!r.titleKeys.isEmpty()) realms.add(r.id);
         for (String r : realms) {
-            if (!gold.containsKey(r) && !pool.containsKey(r) && armiesOf(r).isEmpty() && !isAtWar(r)) continue;   // спящие государства не считаем
+            if (!TreasuryApi.hasRealmAccount(r) && !pool.containsKey(r) && armiesOf(r).isEmpty() && !isAtWar(r)) continue;   // спящие государства не считаем
+            gold(r); // initialize or migrate the canonical opening balance before the first daily posting
             double inc = eco.net(r), cost = 0;
             for (Army a : armiesOf(r)) for (Map.Entry<String, Integer> e : a.units.entrySet()) {
                 UnitType u = types.get(e.getKey());
                 if (u != null) cost += e.getValue() * u.upkeep * (a.mercenary ? 2 : 1) / 10.0;
             }
-            double g = gold(r) + inc - cost;
-            gold.put(r, Math.max(-50, g));
+            double g = inc - cost;
+            boolean treasuryPosted = postGoldDelta(r, g, "army-daily-net", "army-day:" + (war.day + 1));
+            if (!treasuryPosted) say("Казна " + realmName(r) + " достигла кредитного лимита; армейские расходы не оплачены");
             double cap = levyCap(r);
             pool.put(r, Math.min(cap, pool(r) + cap * POOL_REGEN));
             if (g < 0) for (Army a : armiesOf(r)) {
@@ -640,11 +661,11 @@ public final class ArmyEngine {
     // ------------------------------------------------------------------ сохранение
 
     public String toJson() {
+        for (String realm : new ArrayList<>(gold.keySet())) gold(realm); // migrate every wf-army/1 balance before dropping the legacy field
         Map<String, Object> root = new LinkedHashMap<>();
-        root.put("format", "wf-army/1");
+        root.put("format", "wf-army/2");
         root.put("next", nextArmy);
         root.put("dayAccumulator", dayAccumulator);
-        root.put("gold", new LinkedHashMap<String, Object>(gold));
         root.put("pool", new LinkedHashMap<String, Object>(pool));
         root.put("humans", new ArrayList<Object>(humans)); root.put("pacts", new ArrayList<Object>(pacts)); root.put("eco", eco.save());
         List<Object> al = new ArrayList<>();
@@ -666,12 +687,16 @@ public final class ArmyEngine {
     @SuppressWarnings("unchecked")
     public void fromJson(String json) {
         Map<String, Object> root = (Map<String, Object>) Json.parse(json);
-        if (!"wf-army/1".equals(root.get("format"))) throw new IllegalArgumentException("Неверный формат армий");
+        String format = String.valueOf(root.get("format"));
+        if (!"wf-army/1".equals(format) && !"wf-army/2".equals(format)) throw new IllegalArgumentException("Неверный формат армий");
         armies.clear(); sieges.clear(); pacts.clear(); gold.clear(); pool.clear(); humans.clear();
         nextArmy = ((Number) root.get("next")).intValue();
         Object savedAccumulator = root.get("dayAccumulator");
         dayAccumulator = savedAccumulator instanceof Number n && Double.isFinite(n.doubleValue()) && n.doubleValue() >= 0 && n.doubleValue() < 1 ? n.doubleValue() : 0;
-        for (Map.Entry<String, Object> e : ((Map<String, Object>) root.get("gold")).entrySet()) gold.put(e.getKey(), ((Number) e.getValue()).doubleValue());
+        if ("wf-army/1".equals(format) && root.get("gold") instanceof Map<?, ?> legacyGold)
+            for (Map.Entry<?, ?> e : legacyGold.entrySet())
+                if (e.getKey() instanceof String realm && e.getValue() instanceof Number amount && Double.isFinite(amount.doubleValue()))
+                    gold.put(realm, amount.doubleValue());
         for (Map.Entry<String, Object> e : ((Map<String, Object>) root.get("pool")).entrySet()) pool.put(e.getKey(), ((Number) e.getValue()).doubleValue());
         for (Object o : (List<Object>) root.get("humans")) humans.add((String) o);
         eco.load(root.get("eco"));

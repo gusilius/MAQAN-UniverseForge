@@ -42,6 +42,9 @@ public final class Progress {
 
     public Profile peek(String owner) { return profiles.get(owner); }
 
+    /** Removes a superseded compatibility profile after its data has migrated to the canonical owner key. */
+    public boolean removeProfile(String owner) { return profiles.remove(owner) != null; }
+
     public Collection<Profile> all() { return profiles.values(); }
 
     // ---------- опыт и уровни ----------

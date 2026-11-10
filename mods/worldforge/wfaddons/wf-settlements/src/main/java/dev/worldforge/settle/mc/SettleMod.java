@@ -316,14 +316,33 @@ public class SettleMod {
 
     public static Colony colony(String id) { return COLONIES.get(id); }
 
-    /** Resolve the one Character identity represented by this resident body. */
+    private record PersonBinding(CharacterRegistry registry, Character character) {}
+
+    /** Resolve a resident body to the Character and the persistence partition that actually owns that person. */
+    private static PersonBinding resolvePersonBinding(CharacterRegistry fallbackRegistry, String id) {
+        if (id == null || id.isBlank()) return null;
+        Character global = PeopleMod.authority().getGlobal(id);
+        if (global != null) {
+            CharacterRegistry owner = PeopleMod.authority().registryForGlobal(id);
+            return owner == null ? null : new PersonBinding(owner, global);
+        }
+        // Pre-global UUID worker saves can only be resolved in their original local map partition.
+        Character legacy = fallbackRegistry == null ? null : fallbackRegistry.get(id);
+        return legacy == null ? null : new PersonBinding(fallbackRegistry, legacy);
+    }
+
+    private static Character resolvePerson(CharacterRegistry fallbackRegistry, String id) {
+        PersonBinding binding = resolvePersonBinding(fallbackRegistry, id);
+        return binding == null ? null : binding.character();
+    }
+
     public static Character residentCharacter(WFWorker body) {
         if (body == null) return null;
         Colony colony = COLONIES.get(body.colonyId);
         Worker worker = body.worker();
         CharacterRegistry registry = registryForColony(colony);
         return registry == null || worker == null || worker.person == null || worker.person.isBlank()
-                ? null : registry.get(worker.person);
+                ? null : resolvePerson(registry, worker.person);
     }
 
     public static boolean ownsAny(String uuid) {
@@ -391,21 +410,67 @@ public class SettleMod {
 
     /** Закладывает поселение: 4 рабочих, склад дерево 60 / еда 40 / камень 10. */
     public static Colony found(ServerLevel lv, String name, BlockPos p) {
+        return found(lv, name, p, "");
+    }
+
+    /** Idempotent Genesis-aware variant. The same operation always resolves to the same colony. */
+    public static Colony found(ServerLevel lv, String name, BlockPos p, String genesisOperationId) {
+        String dimension = lv.dimension().location().toString();
+        if (genesisOperationId != null && !genesisOperationId.isBlank()) {
+            for (Colony existing : COLONIES.values()) {
+                if (!genesisOperationId.equals(existing.genesisOperationId)) continue;
+                if (dimension.equals(existing.dim)) return existing;
+                throw new IllegalStateException("Genesis operation " + genesisOperationId
+                        + " is already bound to dimension " + existing.dim + " and cannot create a second colony in " + dimension);
+            }
+        }
         String base = name.toLowerCase(Locale.ROOT).replaceAll("[^\\p{L}\\p{N}]+", "_").replaceAll("^_+|_+$", "");
         if (base.isEmpty()) base = "settlement";
         String id = base;
         for (int i = 2; COLONIES.containsKey(id); i++) id = base + "_" + i;
         Settlement s = new Settlement(id, name, DEFS);
-        s.setLedgerScope(lv.dimension().location().toString());
+        s.setLedgerScope(dimension);
         s.types = TYPES;
         for (int i = 0; i < 4; i++) s.addWorker(null);
         s.add("wood", 60);
         s.add("food", 40);
         s.add("stone", 10);
-        Colony c = new Colony(s, lv.dimension().location().toString(), p.getX(), p.getZ());
+        Colony c = new Colony(s, dimension, p.getX(), p.getZ());
+        c.genesisOperationId = genesisOperationId == null ? "" : genesisOperationId;
         c.captureTerrain(lv);
         COLONIES.put(id, c);
         return c;
+    }
+
+    /** Atomic settlement snapshot used when a domain action must persist before returning success. */
+    public static boolean saveDurably(MinecraftServer server) {
+        if (COLONIES.values().stream().anyMatch(colony -> colony != null && (colony.genesisProvisioningRuntimeBlocked || colony.actionPersistenceBlocked))) {
+            LOGGER.error("wf_settle: durable save blocked because a settlement operation has uncommitted in-memory mutations");
+            return false;
+        }
+        Path target = file(server);
+        Path temporary = target.resolveSibling(target.getFileName() + ".tmp");
+        try {
+            Files.createDirectories(target.getParent());
+            List<Object> colonies = new ArrayList<>();
+            for (Colony colony : COLONIES.values()) colonies.add(colony.toMap());
+            Map<String, Object> root = new java.util.LinkedHashMap<>();
+            root.put("format", "wf-settle-world/1");
+            root.put("colonies", colonies);
+            root.put("trade", NETWORK.toJson());
+            Files.writeString(temporary, Json.write(root), StandardCharsets.UTF_8);
+            try {
+                Files.move(temporary, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                        java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+            } catch (java.nio.file.AtomicMoveNotSupportedException unsupported) {
+                Files.move(temporary, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
+            return true;
+        } catch (Exception ex) {
+            LOGGER.error("wf_settle: не удалось атомарно сохранить поселения: {}", ex.toString(), ex);
+            try { Files.deleteIfExists(temporary); } catch (Exception ignored) { }
+            return false;
+        }
     }
 
     // ------------------------------------------------------------------ загрузка и сохранение
@@ -462,6 +527,10 @@ public class SettleMod {
     }
 
     public static void save(MinecraftServer server) {
+        if (COLONIES.values().stream().anyMatch(colony -> colony != null && (colony.genesisProvisioningRuntimeBlocked || colony.actionPersistenceBlocked))) {
+            LOGGER.error("wf_settle: periodic/shutdown save skipped to preserve the last durable settlement checkpoint");
+            return;
+        }
         try {
             List<Object> l = new ArrayList<>();
             for (Colony c : COLONIES.values()) l.add(c.toMap());
@@ -473,6 +542,30 @@ public class SettleMod {
         } catch (Exception ex) {
             LOGGER.error("wf_settle: не удалось сохранить поселения: {}", ex.toString());
         }
+    }
+
+    /** True while any settlement has an uncommitted mutation; all settlement writers must then fail closed. */
+    public static boolean actionsBlocked() {
+        return COLONIES.values().stream().anyMatch(colony -> colony != null
+                && (colony.actionPersistenceBlocked || colony.genesisProvisioningRuntimeBlocked));
+    }
+
+    /** Persist a player-issued domain mutation before its ActionExecution receipt can succeed. */
+    public static boolean persistActionMutation(MinecraftServer server, Colony colony) {
+        if (colony == null || colony.actionPersistenceBlocked || colony.genesisProvisioningRuntimeBlocked) return false;
+        if (saveDurably(server)) return true;
+        colony.actionPersistenceBlocked = true;
+        return false;
+    }
+
+    /** Persist one mixed RTS action that may have changed workers in several settlements. */
+    public static boolean persistActionMutation(MinecraftServer server) {
+        if (actionsBlocked()) return false;
+        if (saveDurably(server)) return true;
+        for (Colony colony : COLONIES.values()) {
+            if (colony != null) colony.actionPersistenceBlocked = true;
+        }
+        return false;
     }
 
     // ------------------------------------------------------------------ события сервера
@@ -527,18 +620,20 @@ public class SettleMod {
                 colony.s.acknowledgeDeparture(departure); // legacy worker had no Character identity
                 continue;
             }
-            Character departed = registry.get(departure.personId());
-            if (departed == null) {
+            PersonBinding departedBinding = resolvePersonBinding(registry, departure.personId());
+            Character departed = departedBinding == null ? null : departedBinding.character();
+            if (departedBinding == null) {
                 LOGGER.warn("wf_settle: departure references missing Character {}; retaining event for repair", departure.personId());
                 continue;
             }
             if (departed.alive) {
+                CharacterRegistry departedRegistry = departedBinding.registry();
                 try {
                     if (departure.reason().startsWith("death:"))
-                        PopulationSimulation.die(registry, departed.id, PeopleMod.YEAR, departure.reason().substring("death:".length()));
+                        PopulationSimulation.die(departedRegistry, departed.id, PeopleMod.YEAR, departure.reason().substring("death:".length()));
                     else if (departure.reason().startsWith("transfer:"))
-                        registry.fire(departed.id, place, PeopleMod.YEAR);
-                    else registry.migrate(departed.id, "outside:" + colony.s.id, PeopleMod.YEAR);
+                        departedRegistry.fire(departed.id, place, PeopleMod.YEAR);
+                    else departedRegistry.migrate(departed.id, "outside:" + colony.s.id, PeopleMod.YEAR);
                 } catch (RuntimeException ex) {
                     LOGGER.error("wf_settle: lifecycle transition failed for {}: {}", departed.id, ex.toString());
                     continue;
@@ -549,7 +644,9 @@ public class SettleMod {
 
         for (dev.worldforge.settle.Worker worker : new ArrayList<>(colony.s.workers)) {
             boolean hasPersonId = worker.person != null && !worker.person.isBlank();
-            Character person = hasPersonId ? registry.get(worker.person) : null;
+            PersonBinding personBinding = hasPersonId ? resolvePersonBinding(registry, worker.person) : null;
+            Character person = personBinding == null ? null : personBinding.character();
+            CharacterRegistry personRegistry = personBinding == null ? registry : personBinding.registry();
             if (hasPersonId && person == null) {
                 LOGGER.warn("wf_settle: worker {} references missing Character {}; not creating a replacement", worker.id, worker.person);
                 continue;
@@ -560,30 +657,32 @@ public class SettleMod {
             }
             if (person == null) {
                 person = registry.create(worker.name, "", culture, "m", PeopleMod.YEAR - 20);
-                worker.person = person.id;
+                personRegistry = registry;
+                worker.person = person.globalId;
             }
-            if (!person.has("settlement_worker", place)) registry.appoint(person.id, "settlement_worker", place, PeopleMod.YEAR);
+            worker.person = person.globalId; // migrate legacy local cN reference to canonical global UUID
+            if (!person.has("settlement_worker", place)) personRegistry.appoint(person.id, "settlement_worker", place, PeopleMod.YEAR);
             person.props.put("population.employer", place);
             person.props.put("population.location", colony.s.id);
             if (person.culture == null || person.culture.isBlank()) person.culture = culture;
             if (person.culture == null || person.culture.isBlank()) person.culture = culture;
             String profession = worker.profession == null || worker.profession.isBlank() ? "laborer" : worker.profession;
-            if (!profession.equals(PopulationSimulation.profession(person))) registry.changeProfession(person.id, profession, PeopleMod.YEAR);
-            registry.setDuty(person.id, Duty.WORKER, true, PeopleMod.YEAR);
+            if (!profession.equals(PopulationSimulation.profession(person))) personRegistry.changeProfession(person.id, profession, PeopleMod.YEAR);
+            personRegistry.setDuty(person.id, Duty.WORKER, true, PeopleMod.YEAR);
             boolean settlementSoldier = java.util.Set.of("guard", "soldier", "archer", "knight").contains(profession);
             if (settlementSoldier && !PopulationSimulation.hasDuty(person, Duty.SOLDIER)) {
-                registry.setDuty(person.id, Duty.SOLDIER, true, PeopleMod.YEAR);
+                personRegistry.setDuty(person.id, Duty.SOLDIER, true, PeopleMod.YEAR);
                 person.props.put("population.settlement_soldier_duty", true);
             } else if (!settlementSoldier && Boolean.TRUE.equals(person.props.remove("population.settlement_soldier_duty"))) {
-                registry.setDuty(person.id, Duty.SOLDIER, false, PeopleMod.YEAR);
+                personRegistry.setDuty(person.id, Duty.SOLDIER, false, PeopleMod.YEAR);
             }
             boolean settlementSpecialist = java.util.Set.of("lumberjack", "sawyer", "farmer", "miner", "smith",
                     "builder", "blacksmith", "armorer", "trainer", "healer", "merchant", "scholar", "porter").contains(profession);
             if (settlementSpecialist && !PopulationSimulation.hasDuty(person, Duty.SPECIALIST)) {
-                registry.setDuty(person.id, Duty.SPECIALIST, true, PeopleMod.YEAR);
+                personRegistry.setDuty(person.id, Duty.SPECIALIST, true, PeopleMod.YEAR);
                 person.props.put("population.settlement_specialist_duty", true);
             } else if (!settlementSpecialist && Boolean.TRUE.equals(person.props.remove("population.settlement_specialist_duty"))) {
-                registry.setDuty(person.id, Duty.SPECIALIST, false, PeopleMod.YEAR);
+                personRegistry.setDuty(person.id, Duty.SPECIALIST, false, PeopleMod.YEAR);
             }
             PopulationSimulation.updateIntent(person, PeopleMod.YEAR);
             person.props.put("wf_unit_kind", "worker");
@@ -658,10 +757,10 @@ public class SettleMod {
         CharacterRegistry registry = registryForColony(colony);
         if (registry == null) return;
         Settlement settlement = colony.s;
-        long worldMinute = Math.max(0L, (long) Math.floor(settlement.time / 60.0));
+        long worldMinute = settlement.worldMinute();
         for (dev.worldforge.settle.Worker worker : new ArrayList<>(settlement.workers)) {
             if (worker.person == null || worker.person.isBlank()) continue;
-            Character person = registry.get(worker.person);
+            Character person = resolvePerson(registry, worker.person);
             if (person == null || !person.alive) continue;
             if (("sleeping".equals(worker.lifeAction) || "eating".equals(worker.lifeAction)
                     || "socializing".equals(worker.lifeAction)) && settlement.time >= worker.lifeActionUntil
@@ -734,7 +833,7 @@ public class SettleMod {
                             double dx = worker.x - other.x, dz = worker.z - other.z;
                             double distance = dx * dx + dz * dz;
                             if (distance < nearest && other.person != null && !other.person.isBlank()) {
-                                Character candidate = registry.get(other.person);
+                                Character candidate = resolvePerson(registry, other.person);
                                 if (candidate != null && candidate.alive) {
                                     nearest = distance; companion = other; companionPerson = candidate;
                                 }
@@ -796,12 +895,13 @@ public class SettleMod {
                 if (characterId.equals(worker.person)) return false;
         }
         CharacterRegistry registry = null;
-        Character person = null;
-        for (dev.worldforge.mod.MapData map : dev.worldforge.mod.WorldForgeMod.loadedMaps().values()) {
-            if (map.titles == null || map.provinceAt(colony.cx, colony.cz) == null) continue;
-            CharacterRegistry candidate = PeopleMod.registry(map);
-            Character found = candidate == null ? null : candidate.get(characterId);
-            if (found != null) { registry = candidate; person = found; break; }
+        Character person = PeopleMod.authority().getGlobal(characterId);
+        if (person != null) {
+            registry = PeopleMod.authority().registryForGlobal(characterId);
+        } else {
+            // Legacy local cN references are only meaningful inside the destination colony's map.
+            registry = registryForColony(colony);
+            person = registry == null ? null : registry.get(characterId);
         }
         if (person == null || !person.alive) return false;
         String profession = person.props.get("population.pre_military_profession") instanceof String p && !p.isBlank()
@@ -809,7 +909,7 @@ public class SettleMod {
         if (profession == null || profession.isBlank() || DEFS == null || !DEFS.professions.containsKey(profession))
             profession = "laborer";
         dev.worldforge.settle.Worker worker = colony.s.addWorker(person.name);
-        worker.person = person.id;
+        worker.person = person.globalId;
         worker.profession = profession;
         // Keep the canonical Character's active profession in sync with the restored worker assignment.
         // This records the military service interval in the normal profession history.
@@ -822,6 +922,12 @@ public class SettleMod {
         person.props.put("population.location", colony.s.id);
         person.props.put("population.employer", place);
         if (!person.has("settlement_worker", place)) registry.appoint(person.id, "settlement_worker", place, PeopleMod.YEAR);
+        // Reattachment supersedes the queued transfer departure in the old settlement.
+        // A later sync must not interpret that stale event as a second firing.
+        for (Colony other : COLONIES.values()) {
+            if (other != null && other.s != null)
+                other.s.acknowledgeDepartureForPerson(person.globalId, "transfer:military");
+        }
         return true;
     }
 
@@ -845,7 +951,7 @@ public class SettleMod {
         if (payment <= 1e-9) return;
         boolean transferred = ledger.transfer(source, target, payment, TreasuryLedger.Kind.TAX,
                 "crown-remittance", settlement.id + ":" + Double.toHexString(settlement.remittedSilver),
-                Math.max(0, (long) Math.floor(settlement.time / 60.0)), "settlement tax remitted to realm treasury");
+                settlement.worldMinute(), "settlement tax remitted to realm treasury");
         if (transferred) {
             settlement.remittedSilver = ledger.totalDebits(source, TreasuryLedger.Kind.TAX, "crown-remittance");
             settlement.stock.put(Defs.SILVER, ledger.balance(source));
@@ -858,12 +964,15 @@ public class SettleMod {
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server == null) return;
         ticks++;
+        if (actionsBlocked()) return;
         if (ticks % STEP_TICKS == 0) {
             double speed = dev.worldforge.mod.api.WorldForgeApi.clock().multiplier();
             for (Colony c : COLONIES.values()) {
                 if (speed <= 0) break;
                 try {
-                    c.s.tick(speed);                                   // 1 секунда симуляции = 20 тиков
+                    c.s.setWorldCalendar(dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute(),
+                            dev.worldforge.mod.api.WorldForgeApi.clock().year());
+                    c.s.tick(speed);                                   // 1 симуляционная секунда = 20 тиков, 24 мировые минуты
                     remitCrownTaxes(c);
                     syncPeople(c);
                     runLifeAI(server, c);

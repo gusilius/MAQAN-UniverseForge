@@ -9,8 +9,16 @@ import com.mojang.logging.LogUtils;
 import dev.worldforge.genesis.Draft;
 import dev.worldforge.genesis.Genesis;
 import dev.worldforge.genesis.GenesisDefs;
+import dev.worldforge.genesis.GenesisActionIds;
+import dev.worldforge.people.Character;
+import dev.worldforge.people.CharacterRegistry;
+import dev.worldforge.people.mc.PeopleMod;
 import dev.worldforge.mod.WFNet;
 import dev.worldforge.mod.WFPerm;
+import dev.worldforge.mod.WorldForgeMod;
+import dev.worldforge.mod.api.ActionExecutionService;
+import dev.worldforge.mod.api.ActionResult;
+import dev.worldforge.mod.api.WorldForgeApi;
 import dev.worldforge.origins.Origins;
 import dev.worldforge.origins.mc.OriginsMod;
 import dev.worldforge.progress.Profile;
@@ -70,6 +78,8 @@ public class GenesisMod {
     /** Клиент подставляет сюда чтение облика по игроку (рост и ширина в долях от 1). */
     public static volatile java.util.function.BiFunction<Player, String, Double> CLIENT_SCALE = (p, k) -> 1.0;
     private static final String WAIT = "wf_genesis_wait";
+    /** Changes once per server process so a restart can resume an interrupted, idempotent Genesis operation. */
+    private static volatile String ACTION_SESSION_ID = "";
 
     public GenesisMod() { MinecraftForge.EVENT_BUS.register(this); }
 
@@ -91,7 +101,10 @@ public class GenesisMod {
         LOGGER.info("wf_genesis: стартов {}, ползунков {}, особенностей {}", DEFS.starts.size(), DEFS.sliders.size(), DEFS.features.size());
     }
 
-    @SubscribeEvent public void onStarting(ServerStartingEvent e) { loadDefs(e.getServer().getResourceManager()); }
+    @SubscribeEvent public void onStarting(ServerStartingEvent e) {
+        ACTION_SESSION_ID = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+        loadDefs(e.getServer().getResourceManager());
+    }
     @SubscribeEvent public void onReload(AddReloadListenerEvent e) { e.addListener((ResourceManagerReloadListener) GenesisMod::loadDefs); }
 
     @SubscribeEvent
@@ -102,9 +115,23 @@ public class GenesisMod {
 
     @SubscribeEvent public void onStopping(ServerStoppingEvent e) { save(e.getServer()); }
 
-    private static void save(MinecraftServer s) {
-        try { Path f = file(s); Files.createDirectories(f.getParent()); Files.writeString(f, GENESIS.toJson()); }
-        catch (Exception ex) { LOGGER.error("wf_genesis: не удалось сохранить персонажей: {}", ex.toString()); }
+    private static boolean save(MinecraftServer s) {
+        Path f = file(s);
+        Path tmp = f.resolveSibling(f.getFileName() + ".tmp");
+        try {
+            Files.createDirectories(f.getParent());
+            Files.writeString(tmp, GENESIS.toJson(), StandardCharsets.UTF_8);
+            try { Files.move(tmp, f, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE); }
+            catch (java.nio.file.AtomicMoveNotSupportedException unsupported) {
+                Files.move(tmp, f, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
+            return true;
+        } catch (Exception ex) {
+            LOGGER.error("wf_genesis: не удалось сохранить персонажей: {}", ex.toString(), ex);
+            return false;
+        } finally {
+            try { Files.deleteIfExists(tmp); } catch (Exception ignored) { }
+        }
     }
 
     // ------------------------------------------------------------------ вход игрока
@@ -113,7 +140,17 @@ public class GenesisMod {
     public void onLogin(PlayerEvent.PlayerLoggedInEvent e) {
         if (!(e.getEntity() instanceof ServerPlayer sp)) return;
         sendAllLooks(sp);
-        if (GENESIS.isDone(owner(sp))) { broadcastLook(sp); sp.refreshDimensions(); return; }
+        if (GENESIS.isDone(owner(sp))) {
+            Draft finished = GENESIS.finished(owner(sp));
+            try {
+                if (finished != null) ensurePlayerCharacter(sp, finished);
+            } catch (RuntimeException ex) {
+                LOGGER.error("wf_genesis: cannot resolve canonical Character for player {}: {}", sp.getName().getString(), ex.toString(), ex);
+                sp.sendSystemMessage(Component.literal("Персонаж загружен, но его WorldForge Character не удалось восстановить. Сохранение не перезаписано; обратитесь к администратору."));
+                return;
+            }
+            broadcastLook(sp); sp.refreshDimensions(); return;
+        }
         // игроки с уже выбранной расой (из старых миров) мастер не видят: они уже играют
         Origins.Build b = OriginsMod.ORIGINS.peek(owner(sp));
         if (b != null && !b.race.isEmpty()) return;
@@ -224,12 +261,44 @@ public class GenesisMod {
     }
 
     private static int reset(CommandSourceStack s, ServerPlayer t) {
-        GENESIS.forget(owner(t));
-        t.refreshDimensions();
-        broadcastLook(t);
-        begin(t);
-        s.sendSuccess(() -> Component.literal("Создание персонажа сброшено для " + t.getName().getString()), true);
-        return 1;
+        String actor = s.getEntity() instanceof ServerPlayer player
+                ? player.getUUID().toString() : s.getTextName();
+        String target = t.getUUID().toString();
+        long minute = WorldForgeApi.clock().worldMinute();
+        String draftFingerprint = UUID.nameUUIDFromBytes(
+                (target + "|" + GENESIS.viewJson(GENESIS.draft(owner(t)))).getBytes(StandardCharsets.UTF_8)).toString();
+        String requestId = GenesisActionIds.resetDraft(actor, target, draftFingerprint);
+        ActionExecutionService.Request request = new ActionExecutionService.Request(
+                requestId, "genesis.reset_draft", actor, target, List.of(target), minute);
+        try {
+            ActionExecutionService.Task task = WorldForgeApi.actionExecution().execute(request,
+                    req -> {
+                        if (!WFPerm.trusted(s)) return "Для сброса черновика нужны права оператора";
+                        if (s.getServer().getPlayerList().getPlayer(t.getUUID()) != t)
+                            return "Игрок больше не подключён";
+                        boolean hasCanonicalCharacter = !t.getPersistentData()
+                                .getString("worldforge_character_global_id").isBlank();
+                        return GENESIS.isDone(owner(t)) || hasCanonicalCharacter
+                                ? "Сброс завершённого или частично применённого персонажа запрещён без согласованной миграции всех доменов"
+                                : null;
+                    },
+                    (req, attempt) -> {
+                        GENESIS.forget(owner(t));
+                        t.refreshDimensions();
+                        broadcastLook(t);
+                        begin(t);
+                        return ActionResult.ok("Создание персонажа сброшено для " + t.getName().getString());
+                    }, null, minute, WorldForgeMod.actionExecutionFile(s.getServer()));
+            if (task.status() == ActionExecutionService.Status.SUCCEEDED) {
+                s.sendSuccess(() -> Component.literal(task.message()), true);
+                return 1;
+            }
+            s.sendFailure(Component.literal(task.message()));
+            return 0;
+        } catch (RuntimeException ex) {
+            s.sendFailure(Component.literal("Не удалось сбросить черновик Genesis: " + ex.getMessage()));
+            return 0;
+        }
     }
 
     // ------------------------------------------------------------------ применение
@@ -237,20 +306,76 @@ public class GenesisMod {
     private static int confirm(CommandSourceStack s) {
         ServerPlayer sp = s.getPlayer();
         if (sp == null) return 0;
-        if (GENESIS.isDone(owner(sp))) { s.sendFailure(Component.literal("Персонаж уже создан.")); return 0; }
         Draft d = GENESIS.draft(owner(sp));
-        String err = GENESIS.confirm(d);
-        if (!err.isEmpty()) { push(sp, d); s.sendFailure(Component.literal(err)); return 0; }
-        try { apply(sp, d); }
-        catch (RuntimeException ex) { LOGGER.error("wf_genesis: ошибка применения персонажа {}: {}", sp.getName().getString(), ex.toString(), ex); s.sendFailure(Component.literal("Ошибка применения: " + ex.getMessage())); }
+        List<String> problems = GENESIS.problems(d);
+        if (!problems.isEmpty()) {
+            push(sp, d);
+            s.sendFailure(Component.literal(problems.get(0)));
+            return 0;
+        }
+        try {
+            // Genesis uses the one shared durable action journal; it does not own a second executor.
+            long worldMinute = WorldForgeApi.clock().worldMinute();
+            String draftFingerprint = UUID.nameUUIDFromBytes((sp.getUUID() + "|" + GENESIS.viewJson(d)).getBytes(StandardCharsets.UTF_8)).toString();
+            String actorId = "player:" + sp.getUUID();
+            int recoveryAttempt = 0;
+            for (ActionExecutionService.Task previous : WorldForgeApi.actionExecution().tasks()) {
+                if (!"genesis.confirm".equals(previous.actionId()) || !actorId.equals(previous.actorId())
+                        || previous.status() != ActionExecutionService.Status.FAILED || previous.args().isEmpty()) continue;
+                String previousFingerprint = previous.args().get(previous.args().size() - 1);
+                if (!draftFingerprint.equals(previousFingerprint)) {
+                    s.sendFailure(Component.literal("Предыдущее создание персонажа завершилось частично. Изменение черновика заблокировано до восстановления предыдущей операции."));
+                    return 0;
+                }
+                recoveryAttempt++;
+            }
+            if (GENESIS.isDone(owner(sp)) && recoveryAttempt == 0) {
+                s.sendFailure(Component.literal("Персонаж уже создан."));
+                return 0;
+            }
+            // Re-applying this exact draft is safe: Origins/Progress are rebuilt, starter grants
+            // carry stable grant IDs, and the settlement bridge resumes its durable phase cursor.
+            String requestId = GenesisActionIds.confirm(
+                    sp.getUUID().toString(), ACTION_SESSION_ID, draftFingerprint, recoveryAttempt);
+            ActionExecutionService.Request request = new ActionExecutionService.Request(
+                    requestId, "genesis.confirm", actorId, sp.getUUID().toString(),
+                    List.of(d.race, d.start, d.cls, draftFingerprint), worldMinute);
+            ActionExecutionService.Task task = WorldForgeApi.actionExecution().execute(
+                    request,
+                    req -> sp.getServer() != null
+                            && sp.getServer().getPlayerList().getPlayer(sp.getUUID()) == sp
+                            && req.actorId().equals("player:" + sp.getUUID())
+                            && req.targetId().equals(sp.getUUID().toString()) && !sp.isRemoved()
+                            ? null : "Genesis confirmation actor/target is no longer authorized",
+                    (req, attempt) -> {
+                        // Do not publish the draft as completed until every application step succeeds.
+                        apply(sp, d);
+                        String err = GENESIS.confirm(d);
+                        if (!err.isEmpty()) return ActionResult.fail(err);
+                        if (!save(sp.getServer())) {
+                            return ActionResult.fail("Genesis state could not be saved; confirmation remains blocked for reconciliation");
+                        }
+                        return ActionResult.ok("Genesis character created");
+                    },
+                    null, worldMinute, WorldForgeMod.actionExecutionFile(sp.getServer()));
+            if (task.status() != ActionExecutionService.Status.SUCCEEDED) {
+                s.sendFailure(Component.literal("Создание персонажа не завершено: " + task.message()));
+                return 0;
+            }
+        } catch (RuntimeException ex) {
+            LOGGER.error("wf_genesis: ошибка применения персонажа {}: {}", sp.getName().getString(), ex.toString(), ex);
+            s.sendFailure(Component.literal("Ошибка применения. Мастер создания оставлен открытым: " + ex.getMessage()));
+            return 0;
+        }
         sp.getPersistentData().remove(WAIT);
-        save(sp.getServer());
+        broadcastLook(sp);
         sp.sendSystemMessage(Component.literal("§6Персонаж создан. §7Окно происхождения - K, прокачка - P."));
         WFNet.sendView(sp, VIEW + "_close", "");
         return 1;
     }
 
     private static void apply(ServerPlayer sp, Draft d) {
+        Character person = ensurePlayerCharacter(sp, d);
         String o = owner(sp);
         GenesisDefs.Start st = DEFS.starts.get(d.start);
         Origins og = OriginsMod.ORIGINS;
@@ -258,13 +383,22 @@ public class GenesisMod {
         og.resetRace(o);
         Origins.Build b = og.build(o);
         b.prof.clear(); b.history.clear(); b.cls = "";
-        og.setRace(o, d.race);
-        // очки прокачки
+        if (!og.setRace(o, d.race)) {
+            throw new IllegalStateException("Не удалось применить расу " + d.race + ": " + og.lastError);
+        }
+        // Очки прокачки применяются строго: Genesis не может подтвердить частично собранный профиль.
         var pg = ProgressMod.PROGRESS;
         Profile pr = pg.profile(o);
         pr.attrs.clear(); pr.skills.clear(); pr.nodes.clear(); pr.archetype = "";
         pr.attrFree = GENESIS.budget(d);
-        for (var e : d.attrs.entrySet()) if (e.getValue() > 0) pg.addAttr(o, e.getKey(), e.getValue());
+        for (var e : d.attrs.entrySet()) {
+            if (e.getValue() > 0 && !pg.addAttr(o, e.getKey(), e.getValue())) {
+                throw new IllegalStateException("Не удалось применить атрибут " + e.getKey() + ": " + pg.lastError);
+            }
+            if (pr.attr(e.getKey()) != e.getValue()) {
+                throw new IllegalStateException("Атрибут " + e.getKey() + " применён не полностью");
+            }
+        }
         pr.skillFree = GENESIS.skillBudget(d);
         Map<String, Integer> want = new LinkedHashMap<>(d.skills);
         for (int guard = 0; guard < 200 && !want.isEmpty(); guard++) {
@@ -276,34 +410,147 @@ public class GenesisMod {
             }
             if (!any) break;
         }
-        // профессии и класс
-        for (String p : d.profs) {
-            if (!og.learn(o, p)) LOGGER.warn("wf_genesis: профессия {} не освоена: {}", p, og.lastError);
-            else if (st != null && st.profXp() > 0) og.work(o, p, st.profXp());
+        for (var e : want.entrySet()) {
+            if (pr.skill(e.getKey()) < e.getValue()) {
+                throw new IllegalStateException("Не удалось полностью применить навык " + e.getKey()
+                        + ": " + pg.canSkill(o, e.getKey()));
+            }
         }
-        if (!d.cls.isEmpty() && !og.chooseClass(o, d.cls)) LOGGER.warn("wf_genesis: класс {} не выбран: {}", d.cls, og.lastError);
+        // Профессии и класс обязательны: ошибка должна остановить подтверждение.
+        for (String p : d.profs) {
+            if (!og.learn(o, p)) {
+                throw new IllegalStateException("Не удалось применить профессию " + p + ": " + og.lastError);
+            }
+            if (st != null && st.profXp() > 0) og.work(o, p, st.profXp());
+            if (!og.build(o).prof.containsKey(p)) {
+                throw new IllegalStateException("Профессия " + p + " не сохранилась в профиле Origins");
+            }
+        }
+        if (!d.cls.isEmpty()) {
+            if (!og.chooseClass(o, d.cls)) {
+                throw new IllegalStateException("Не удалось применить класс " + d.cls + ": " + og.lastError);
+            }
+            if (!d.cls.equals(og.build(o).cls)) {
+                throw new IllegalStateException("Класс " + d.cls + " не сохранился в профиле Origins");
+            }
+        }
+        person.props.put("genesis.race", d.race);
+        person.props.put("genesis.start", d.start);
+        person.props.put("genesis.class", d.cls);
+        person.props.put("genesis.professions", new ArrayList<>(d.profs));
+        person.props.put("genesis.attributes", new LinkedHashMap<>(d.attrs));
+        person.props.put("genesis.skills", new LinkedHashMap<>(d.skills));
+        person.props.put("genesis.features", new ArrayList<>(d.features));
+        person.props.put("genesis.appearance", new LinkedHashMap<>(d.look));
+        person.props.put("genesis.profile_owner", o);
         ProgressMod.apply(sp);
         sp.setHealth(sp.getMaxHealth());
-        // вещи
+        // Стартовые предметы помечаются стабильным Genesis grant ID; повторный вызов
+        // учитывает уже выданные стопки и не создаёт дубликаты.
         if (st != null) {
-            give(sp, Items.GOLD_NUGGET, st.gold() * 10);
+            String grantBase = "genesis:" + sp.getUUID();
+            give(sp, Items.GOLD_NUGGET, st.gold() * 10, grantBase + ":gold");
             for (var e : st.items().entrySet()) {
                 Item it = BuiltInRegistries.ITEM.get(new ResourceLocation(e.getKey().contains(":") ? e.getKey() : "minecraft:" + e.getKey()));
-                if (it != Items.AIR) give(sp, it, e.getValue()); else LOGGER.warn("wf_genesis: нет предмета {}", e.getKey());
+                if (it != Items.AIR) give(sp, it, e.getValue(), grantBase + ":item:" + e.getKey());
+                else LOGGER.warn("wf_genesis: нет предмета {}", e.getKey());
             }
         }
         // место старта
         place(sp, d, st);
         sp.refreshDimensions();
-        broadcastLook(sp);
     }
 
-    private static void give(ServerPlayer sp, Item it, int n) {
-        while (n > 0) {
-            ItemStack s = new ItemStack(it, Math.min(n, it.getMaxStackSize()));
-            n -= s.getCount();
-            if (!sp.getInventory().add(s)) sp.drop(s, false);
+    /**
+     * Genesis creates the player's one canonical Character. Player UUID and progression owner
+     * remain external account/profile keys; they point to this same world-wide person record.
+     */
+    private static Character ensurePlayerCharacter(ServerPlayer sp, Draft draft) {
+        if (!ModList.get().isLoaded("wf_people"))
+            throw new IllegalStateException("Genesis requires wf_people to create the canonical player Character");
+        if (!PeopleMod.playerRegistryAvailable())
+            throw new IllegalStateException("Player Character registry is corrupt; refusing to create a duplicate or overwrite its save");
+        String playerUuid = sp.getUUID().toString();
+        String savedGlobalId = sp.getPersistentData().getString("worldforge_character_global_id");
+        String name = sp.getGameProfile().getName();
+        CharacterRegistry playerRegistry = PeopleMod.playerRegistry();
+        if (playerRegistry == null || !PeopleMod.playerRegistryAvailable())
+            throw new IllegalStateException("Dedicated player Character partition is unavailable");
+        Character person = dev.worldforge.genesis.PlayerCharacterBinding.resolveOrCreate(
+                playerUuid, savedGlobalId, PeopleMod.authority(),
+                PeopleMod.registries().values(), playerRegistry,
+                name, draft.race, "m", PeopleMod.YEAR - 20);
+        boolean firstGenesisSync = !Boolean.TRUE.equals(person.props.get("genesis.initialized"));
+        person.props.put("genesis.player_uuid", playerUuid);
+        person.props.put("genesis.profile_owner", owner(sp));
+        person.props.put("genesis.race", draft.race);
+        person.props.put("genesis.start", draft.start);
+        person.props.put("genesis.class", draft.cls);
+        person.props.put("genesis.professions", new ArrayList<>(draft.profs));
+        person.props.put("genesis.attributes", new LinkedHashMap<>(draft.attrs));
+        person.props.put("genesis.skills", new LinkedHashMap<>(draft.skills));
+        person.props.put("genesis.features", new ArrayList<>(draft.features));
+        person.props.put("genesis.appearance", new LinkedHashMap<>(draft.look));
+        if (person.culture == null || person.culture.isBlank()) person.culture = draft.race;
+        if (firstGenesisSync && !draft.profs.isEmpty()) {
+            CharacterRegistry ownerRegistry = PeopleMod.authority().registryForGlobal(person.globalId);
+            if (ownerRegistry != null)
+                ownerRegistry.changeProfession(person.id, draft.profs.iterator().next(), PeopleMod.YEAR);
         }
+        person.props.put("genesis.initialized", true);
+        sp.getPersistentData().putString("worldforge_character_global_id", person.globalId);
+        if (!PeopleMod.persistCharacter(person, sp.getServer()))
+            throw new IllegalStateException("Canonical player Character could not be durably saved");
+        return person;
+    }
+
+    private static void give(ServerPlayer sp, Item it, int n, String grantId) {
+        if (it == Items.AIR || n <= 0) return;
+        net.minecraft.nbt.CompoundTag playerData = sp.getPersistentData();
+        net.minecraft.nbt.CompoundTag grantLedger = playerData.getCompound("wf_genesis_grants");
+        int ledgerGranted = Math.max(0, grantLedger.getInt(grantId));
+        int inventoryGranted = 0;
+        for (int slot = 0; slot < sp.getInventory().getContainerSize(); slot++) {
+            ItemStack stack = sp.getInventory().getItem(slot);
+            if (stack.is(it) && stack.hasTag() && grantId.equals(stack.getTag().getString("wf_genesis_grant"))) {
+                inventoryGranted += stack.getCount();
+            }
+        }
+        // The player NBT ledger follows the inventory into chests, containers and later sessions.
+        // Marked inventory stacks recover the narrow crash window before that ledger is saved.
+        int alreadyGranted = Math.max(ledgerGranted, inventoryGranted);
+        int remaining = Math.max(0, n - alreadyGranted);
+        if (remaining == 0) {
+            if (ledgerGranted < n) {
+                grantLedger.putInt(grantId, n);
+                playerData.put("wf_genesis_grants", grantLedger);
+            }
+            return;
+        }
+        int freeCapacity = 0;
+        for (int slot = 0; slot < sp.getInventory().getContainerSize(); slot++) {
+            ItemStack stack = sp.getInventory().getItem(slot);
+            if (stack.isEmpty()) freeCapacity += it.getMaxStackSize();
+            else if (stack.is(it) && stack.hasTag()
+                    && grantId.equals(stack.getTag().getString("wf_genesis_grant"))) {
+                freeCapacity += Math.max(0, it.getMaxStackSize() - stack.getCount());
+            }
+        }
+        if (freeCapacity < remaining) {
+            throw new IllegalStateException("Not enough inventory space for Genesis grant " + grantId
+                    + "; clear " + (remaining - freeCapacity) + " item capacity and retry after server reconciliation");
+        }
+        while (remaining > 0) {
+            ItemStack stack = new ItemStack(it, Math.min(remaining, it.getMaxStackSize()));
+            stack.getOrCreateTag().putString("wf_genesis_grant", grantId);
+            int count = stack.getCount();
+            if (!sp.getInventory().add(stack)) {
+                throw new IllegalStateException("Could not complete Genesis grant " + grantId);
+            }
+            remaining -= count;
+        }
+        grantLedger.putInt(grantId, Math.max(ledgerGranted, n));
+        playerData.put("wf_genesis_grants", grantLedger);
     }
 
     // ------------------------------------------------------------------ место старта
@@ -313,7 +560,7 @@ public class GenesisMod {
     private static void place(ServerPlayer sp, Draft d, GenesisDefs.Start st) {
         if (st == null) return;
         ServerLevel lv = sp.serverLevel();
-        Random rng = new Random(sp.getUUID().getMostSignificantBits() ^ System.nanoTime());
+        Random rng = new Random(sp.getUUID().getMostSignificantBits() ^ sp.getUUID().getLeastSignificantBits());
         BlockPos spawn = lv.getSharedSpawnPos();
         boolean settle = settleLoaded() && SettleBridge.ready();
         switch (st.spawn()) {
@@ -331,7 +578,7 @@ public class GenesisMod {
                     BlockPos where = scatter(lv, spawn, 120, 400, rng);
                     var tier = DEFS.tiers.get(st.tier().isEmpty() ? "village" : st.tier());
                     String name = GENESIS.randomName(d, rng);
-                    var col = SettleBridge.found(lv, where, name, tier, null, null, d);
+                    var col = SettleBridge.found(lv, where, name, tier, null, null, d, "genesis:" + sp.getUUID() + ":origin-settlement");
                     at = new BlockPos(SettleBridge.cx(col), where.getY(), SettleBridge.cz(col));
                     sp.sendSystemMessage(Component.literal("§7Вы родом из поселения «" + name + "»."));
                 }
@@ -351,7 +598,7 @@ public class GenesisMod {
     private static void foundFor(ServerPlayer sp, Draft d, GenesisDefs.Start st, ServerLevel lv, BlockPos at) {
         var tier = DEFS.tiers.get(st.tier());
         var focus = DEFS.focus.get(d.focus);
-        var col = SettleBridge.found(lv, at, d.settleName, tier, focus, sp, d);
+        var col = SettleBridge.found(lv, at, d.settleName, tier, focus, sp, d, "genesis:" + sp.getUUID() + ":ruler-settlement");
         sp.sendSystemMessage(Component.literal("§6" + GENESIS.rulerTitle(d, st.tier()) + " " + d.settleName + "§7: основано (" + GENESIS.settleNoun(d, st.tier()) + "). Панель правителя открыта, дальше - J."));
         if (st.panel()) SettleBridge.panel(sp, col);
     }

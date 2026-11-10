@@ -219,18 +219,26 @@ public class ProgressMod {
                 .then(Commands.literal("archetype").then(Commands.argument("id", StringArgumentType.word()).executes(c -> act(c.getSource(), "archetype", StringArgumentType.getString(c, "id")))))
                 .then(Commands.literal("respec").executes(c -> act(c.getSource(), "respec", "")))
                 .then(Commands.literal("xp").requires(WFPerm::trusted).then(Commands.argument("player", EntityArgument.player()).then(Commands.argument("n", IntegerArgumentType.integer(1)).executes(c -> {
-                    ServerPlayer t = EntityArgument.getPlayer(c, "player");
-                    int up = PROGRESS.award(owner(t), IntegerArgumentType.getInteger(c, "n"));
-                    if (up > 0) levelUp(t, PROGRESS.profile(owner(t)));
-                    return 1;
+                    ServerPlayer target = EntityArgument.getPlayer(c, "player");
+                    int amount = IntegerArgumentType.getInteger(c, "n");
+                    return executeMutation(c.getSource(), target, "progress.award_xp",
+                            target.getUUID() + "|" + amount, true, () -> {
+                                int levels = PROGRESS.award(owner(target), amount);
+                                if (levels > 0) levelUp(target, PROGRESS.profile(owner(target)));
+                                return dev.worldforge.mod.api.ActionResult.ok("Опыт начислен: " + amount);
+                            });
                 }))))
                 .then(Commands.literal("level").requires(WFPerm::trusted).then(Commands.argument("player", EntityArgument.player()).then(Commands.argument("n", IntegerArgumentType.integer(1, 200)).executes(c -> {
-                    ServerPlayer t = EntityArgument.getPlayer(c, "player");
-                    Profile pr = PROGRESS.profile(owner(t));
-                    int target = IntegerArgumentType.getInteger(c, "n");
-                    while (pr.level < Math.min(target, PROGRESS.defs.maxLevel)) PROGRESS.award(owner(t), PROGRESS.defs.xpFor(pr.level) - pr.xp);
-                    levelUp(t, pr);
-                    return 1;
+                    ServerPlayer targetPlayer = EntityArgument.getPlayer(c, "player");
+                    int targetLevel = IntegerArgumentType.getInteger(c, "n");
+                    return executeMutation(c.getSource(), targetPlayer, "progress.set_level",
+                            targetPlayer.getUUID() + "|" + targetLevel, true, () -> {
+                                Profile profile = PROGRESS.profile(owner(targetPlayer));
+                                while (profile.level < Math.min(targetLevel, PROGRESS.defs.maxLevel))
+                                    PROGRESS.award(owner(targetPlayer), PROGRESS.defs.xpFor(profile.level) - profile.xp);
+                                levelUp(targetPlayer, profile);
+                                return dev.worldforge.mod.api.ActionResult.ok("Уровень установлен: " + profile.level);
+                            });
                 })))));
     }
 
@@ -242,21 +250,61 @@ public class ProgressMod {
         return 1;
     }
 
-    private static int act(CommandSourceStack s, String what, String id) {
-        ServerPlayer sp = s.getPlayer();
-        if (sp == null) return 0;
-        String o = owner(sp);
-        boolean ok = switch (what) {
-            case "attr" -> PROGRESS.addAttr(o, id, 1);
-            case "skill" -> PROGRESS.learnSkill(o, id);
-            case "node" -> PROGRESS.allocate(o, id);
-            case "refund" -> PROGRESS.refund(o, id);
-            case "archetype" -> PROGRESS.chooseArchetype(o, id);
-            case "respec" -> PROGRESS.respec(o);
-            default -> false;
-        };
-        if (!ok) s.sendFailure(Component.literal(PROGRESS.lastError));
-        apply(sp);
-        return open(s, false);
+    private static int act(CommandSourceStack source, String what, String id) {
+        ServerPlayer player = source.getPlayer();
+        if (player == null) return 0;
+        String profileOwner = owner(player);
+        int result = executeMutation(source, player, "progress." + what, what + "|" + id, false, () -> {
+            boolean ok = switch (what) {
+                case "attr" -> PROGRESS.addAttr(profileOwner, id, 1);
+                case "skill" -> PROGRESS.learnSkill(profileOwner, id);
+                case "node" -> PROGRESS.allocate(profileOwner, id);
+                case "refund" -> PROGRESS.refund(profileOwner, id);
+                case "archetype" -> PROGRESS.chooseArchetype(profileOwner, id);
+                case "respec" -> PROGRESS.respec(profileOwner);
+                default -> false;
+            };
+            return ok ? dev.worldforge.mod.api.ActionResult.ok("Прогресс персонажа обновлён")
+                    : dev.worldforge.mod.api.ActionResult.fail(PROGRESS.lastError.isBlank()
+                            ? "Операция развития отклонена" : PROGRESS.lastError);
+        });
+        if (result == 0) return 0;
+        apply(player);
+        return open(source, false);
+    }
+
+    private static int executeMutation(CommandSourceStack source, ServerPlayer target, String actionId,
+                                       String payload, boolean operatorOnly,
+                                       java.util.function.Supplier<dev.worldforge.mod.api.ActionResult> operation) {
+        String actor = source.getEntity() instanceof ServerPlayer player
+                ? player.getUUID().toString() : source.getTextName();
+        long minute = dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute();
+        String requestId = "progress:" + java.util.UUID.randomUUID();
+        try {
+            var task = dev.worldforge.mod.api.WorldForgeApi.actionExecution().execute(
+                    new dev.worldforge.mod.api.ActionExecutionService.Request(
+                            requestId, actionId, actor, target.getUUID().toString(), java.util.List.of(payload), minute),
+                    req -> {
+                        if (source.getServer().getPlayerList().getPlayer(target.getUUID()) == null)
+                            return "Целевой игрок отключился до изменения прогресса";
+                        if (operatorOnly && !dev.worldforge.mod.WFPerm.trusted(source))
+                            return "Нужны права оператора";
+                        if (!operatorOnly && source.getEntity() instanceof ServerPlayer player
+                                && !player.getUUID().equals(target.getUUID()))
+                            return "Нельзя менять прогресс другого игрока";
+                        return null;
+                    },
+                    (req, attempt) -> operation.get(), null, minute,
+                    dev.worldforge.mod.WorldForgeMod.actionExecutionFile(source.getServer()));
+            if (task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED) {
+                source.sendSuccess(() -> Component.literal(task.message()), false);
+                return 1;
+            }
+            source.sendFailure(Component.literal(task.message()));
+            return 0;
+        } catch (RuntimeException ex) {
+            source.sendFailure(Component.literal("Не удалось изменить прогресс: " + ex.getMessage()));
+            return 0;
+        }
     }
 }

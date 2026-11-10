@@ -1,6 +1,7 @@
 package dev.worldforge.troops.mc;
 
 import dev.worldforge.mod.Json;
+import dev.worldforge.mod.api.ActionResult;
 import dev.worldforge.mod.WFNet;
 import dev.worldforge.settle.Building;
 import dev.worldforge.settle.Defs;
@@ -77,15 +78,15 @@ final class BuildControl {
     }
 
     /** Закладывает здание с центром в (wx, wz) и отправляет выбранных рабочих его строить. Возвращает сообщение игроку. */
-    static String place(ServerPlayer p, String defId, int wx, int wz, List<String> workerIds) {
+    static ActionResult place(ServerPlayer p, String defId, int wx, int wz, List<String> workerIds) {
         Colony c = SettleMod.nearest(p.serverLevel(), wx, wz);
-        if (c == null) return "Рядом нет поселения";
-        if (!WorkerControl.mayControl(p, c)) return "Это поселение вам не принадлежит";
+        if (c == null) return ActionResult.fail("Рядом нет поселения");
+        if (!WorkerControl.mayControl(p, c)) return ActionResult.fail("Это поселение вам не принадлежит");
         Building b;
         try {
             b = c.s.place(defId, wx - c.cx, wz - c.cz);
         } catch (Settlement.OrderException ex) {
-            return ex.getMessage();
+            return ActionResult.fail(ex.getMessage());
         }
         int builders = 0;
         for (String id : workerIds) {
@@ -97,6 +98,6 @@ final class BuildControl {
                 builders++;
             } catch (RuntimeException ignored) {}
         }
-        return "Заложено: " + b.def.name + (builders > 0 ? ", строителей отправлено: " + builders : ". Назначьте строителей: выберите рабочих и ПКМ по стройке");
+        return ActionResult.ok("Заложено: " + b.def.name + (builders > 0 ? ", строителей отправлено: " + builders : ". Назначьте строителей: выберите рабочих и ПКМ по стройке"));
     }
 }

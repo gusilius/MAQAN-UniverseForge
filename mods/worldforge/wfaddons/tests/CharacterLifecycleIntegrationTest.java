@@ -16,9 +16,9 @@ public final class CharacterLifecycleIntegrationTest {
     public static void main(String[] args) {
         Settlement settlement = new Settlement("forge", "Forge", new Defs());
         Worker worker = settlement.addWorker("Aldric");
-        worker.person = "c42";
+        worker.person = "42424242-4242-4242-8424-424242424242";
 
-        ok(settlement.removeWorkerByPerson("c42", "death:starvation"),
+        ok(settlement.removeWorkerByPerson("42424242-4242-4242-8424-424242424242", "death:starvation"),
                 "worker departure is resolved by canonical Character ID");
         ok(settlement.workers.isEmpty() && settlement.pendingDepartures().size() == 1,
                 "departure removes the worker projection but keeps a pending lifecycle event");
@@ -27,18 +27,33 @@ public final class CharacterLifecycleIntegrationTest {
         ok(saved.contains("wf-settlement/2"), "settlement writes the versioned lifecycle schema");
         Settlement restored = Settlement.fromJson(saved, new Defs());
         ok(restored.pendingDepartures().size() == 1
-                        && restored.pendingDepartures().get(0).personId().equals("c42")
+                        && restored.pendingDepartures().get(0).personId().equals("42424242-4242-4242-8424-424242424242")
                         && restored.pendingDepartures().get(0).reason().equals("death:starvation"),
                 "pending Character death survives settlement save/load");
 
         String legacy = saved.replace("wf-settlement/2", "wf-settlement/1");
         Settlement migrated = Settlement.fromJson(legacy, new Defs());
         ok(migrated.pendingDepartures().size() == 1
-                        && migrated.pendingDepartures().get(0).personId().equals("c42"),
+                        && migrated.pendingDepartures().get(0).personId().equals("42424242-4242-4242-8424-424242424242"),
                 "wf-settlement/1 saves migrate with pending identity references intact");
 
         migrated.acknowledgeDeparture(migrated.pendingDepartures().get(0));
         ok(migrated.pendingDepartures().isEmpty(), "lifecycle event is removed only after registry acknowledgement");
+
+        Settlement oldColony = new Settlement("old-forge", "Old Forge", new Defs());
+        Worker transferred = oldColony.addWorker("Aldric");
+        transferred.person = "51515151-5151-4151-8151-515151515151";
+        ok(oldColony.removeWorkerByPerson(transferred.person, "transfer:military"),
+                "military enlistment records a durable pending departure");
+        Settlement returnColony = new Settlement("return-forge", "Return Forge", new Defs());
+        Worker returned = returnColony.addWorker("Aldric");
+        returned.person = transferred.person;
+        int cleared = oldColony.acknowledgeDepartureForPerson(returned.person, "transfer:military");
+        ok(cleared == 1 && oldColony.pendingDepartures().isEmpty()
+                        && returned.person.equals(transferred.person),
+                "reattaching the same Character cancels the stale military departure event");
+        ok(oldColony.acknowledgeDepartureForPerson(returned.person, "transfer:military") == 0,
+                "stale military departure acknowledgement is idempotent");
         System.out.println(failures == 0 ? "ALL OK" : failures + " FAILED");
         if (failures > 0) System.exit(1);
     }

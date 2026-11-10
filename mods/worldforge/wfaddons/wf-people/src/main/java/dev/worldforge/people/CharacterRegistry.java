@@ -25,6 +25,10 @@ public final class CharacterRegistry {
     private final Map<String, Character> byId = new LinkedHashMap<>();
     private final List<Listener> listeners = new ArrayList<>();
     private int next = 1;
+    private long revision;
+
+    /** Changes only when registry membership or identity records are replaced. */
+    public long revision() { return revision; }
 
     public void addListener(Listener l) { listeners.add(l); }
 
@@ -47,6 +51,7 @@ public final class CharacterRegistry {
         c.gender = gender;
         c.birthYear = birthYear;
         byId.put(c.id, c);
+        revision++;
         for (Listener l : listeners) l.born(c);
         publish(c, new LifecycleEvent(LifecycleKind.BORN, c.id, "", "", birthYear));
         return c;
@@ -184,6 +189,18 @@ public final class CharacterRegistry {
         else c.props.put("population.entity_bindings", bindings);
     }
 
+    private static void addGlobalChild(Character parent, String childGlobalId) {
+        Object raw = parent.props.get("family.children_global_ids");
+        List<String> children = new ArrayList<>();
+        if (raw instanceof List<?> list)
+            for (Object value : list) if (value instanceof String id) {
+                try { children.add(java.util.UUID.fromString(id).toString()); }
+                catch (IllegalArgumentException ignored) { /* discard malformed legacy extension entry */ }
+            }
+        if (!children.contains(childGlobalId)) children.add(childGlobalId);
+        parent.props.put("family.children_global_ids", children);
+    }
+
     private void emit(Character c, LifecycleKind kind, String from, String to, int year) {
         publish(c, new LifecycleEvent(kind, c.id, from == null ? "" : from, to == null ? "" : to, year));
     }
@@ -280,6 +297,8 @@ public final class CharacterRegistry {
         if (!y.spouse.isEmpty()) throw new IllegalStateException(y.name + " уже состоит в браке");
         x.spouse = y.id;
         y.spouse = x.id;
+        x.props.put("family.spouse_global_id", y.globalId);
+        y.props.put("family.spouse_global_id", x.globalId);
         emit(x, LifecycleKind.MARRIED, "", y.id, year);
         emit(y, LifecycleKind.MARRIED, "", x.id, year);
     }
@@ -289,8 +308,12 @@ public final class CharacterRegistry {
         if (character.spouse.isEmpty()) return;
         Character spouse = byId.get(character.spouse);
         if (spouse != null && spouse.alive) return;
-        if (spouse != null && character.id.equals(spouse.spouse)) spouse.spouse = "";
+        if (spouse != null && character.id.equals(spouse.spouse)) {
+            spouse.spouse = "";
+            spouse.props.remove("family.spouse_global_id");
+        }
         character.spouse = "";
+        character.props.remove("family.spouse_global_id");
     }
 
     public Character addChild(Character father, Character mother, String name, String gender, int year) {
@@ -299,6 +322,10 @@ public final class CharacterRegistry {
         c.mother = mother.id;
         father.children.add(c.id);
         mother.children.add(c.id);
+        c.props.put("family.father_global_id", father.globalId);
+        c.props.put("family.mother_global_id", mother.globalId);
+        addGlobalChild(father, c.globalId);
+        addGlobalChild(mother, c.globalId);
         emit(c, LifecycleKind.CHILD_BORN, father.id, mother.id, year);
         return c;
     }
@@ -316,14 +343,14 @@ public final class CharacterRegistry {
     /** Только перечисленные персонажи (null - все): для окон на клиенте, которым не нужен весь мир. */
     public String toJson(Set<String> only) {
         Map<String, Object> root = new LinkedHashMap<>();
-        root.put("format", "wf-people/2");
-        root.put("schema_version", 2);
+        root.put("format", "wf-people/3");
+        root.put("schema_version", 3);
         root.put("next", next);
         List<Object> list = new ArrayList<>();
         for (Character c : byId.values()) {
             if (only != null && !only.contains(c.id)) continue;
             Map<String, Object> m = new LinkedHashMap<>();
-            m.put("id", c.id); m.put("name", c.name); m.put("house", c.house); m.put("culture", c.culture); m.put("gender", c.gender);
+            m.put("id", c.id); m.put("global_id", c.globalId); m.put("name", c.name); m.put("house", c.house); m.put("culture", c.culture); m.put("gender", c.gender);
             m.put("birth", c.birthYear); m.put("alive", c.alive); m.put("father", c.father); m.put("mother", c.mother); m.put("spouse", c.spouse);
             m.put("children", new ArrayList<Object>(c.children));
             List<Object> posts = new ArrayList<>();
@@ -338,13 +365,17 @@ public final class CharacterRegistry {
     }
 
     @SuppressWarnings("unchecked")
-    public void fromJson(String json) {
+    public void fromJson(String json) { fromJson(json, "legacy-unscoped"); }
+
+    /** Loads old map-local saves and deterministically assigns stable IDs within the supplied world/map namespace. */
+    public void fromJson(String json, String identityNamespace) {
+        if (identityNamespace == null || identityNamespace.isBlank()) throw new IllegalArgumentException("identityNamespace is required");
         // Parse and validate into an isolated snapshot. Never destroy the live registry
         // until the entire save has been accepted.
         Object parsed = Json.parse(json == null ? "" : json);
         if (!(parsed instanceof Map<?, ?> raw)) throw new IllegalArgumentException("Повреждён корень сохранения людей");
         String format = raw.get("format") instanceof String f ? f : "";
-        if (!"wf-people/1".equals(format) && !"wf-people/2".equals(format))
+        if (!"wf-people/1".equals(format) && !"wf-people/2".equals(format) && !"wf-people/3".equals(format))
             throw new IllegalArgumentException("Неверный формат людей: " + format);
         // wf-people/1 is migrated in memory without regenerating IDs, family links or existing props.
         // Missing Phase-VII extension fields are intentionally defaulted by their accessors.
@@ -355,6 +386,7 @@ public final class CharacterRegistry {
         if (!(raw.get("characters") instanceof List<?> entries)) throw new IllegalArgumentException("Отсутствует список персонажей");
 
         Map<String, Character> loaded = new LinkedHashMap<>();
+        Map<String, String> globalOwners = new HashMap<>();
         Map<String, String> entityOwners = new HashMap<>();
         int maxNumericId = 0;
         for (Object value : entries) {
@@ -362,7 +394,18 @@ public final class CharacterRegistry {
             String id = requiredString(m, "id");
             String name = requiredString(m, "name");
             if (id.isBlank() || name.isBlank()) throw new IllegalArgumentException("Пустой ID или имя персонажа");
-            Character c = new Character(id, name);
+            String globalId = optionalString(m, "global_id");
+            if (globalId.isBlank()) {
+                globalId = java.util.UUID.nameUUIDFromBytes((identityNamespace + "|" + id)
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString();
+            } else {
+                try { globalId = java.util.UUID.fromString(globalId).toString(); }
+                catch (IllegalArgumentException ex) { throw new IllegalArgumentException("Некорректный global_id персонажа " + id, ex); }
+            }
+            String previousGlobalOwner = globalOwners.putIfAbsent(globalId, id);
+            if (previousGlobalOwner != null)
+                throw new IllegalArgumentException("Повторный global_id персонажа: " + globalId + " (" + previousGlobalOwner + ", " + id + ")");
+            Character c = new Character(id, globalId, name);
             c.house = optionalString(m, "house");
             c.culture = optionalString(m, "culture");
             c.gender = optionalString(m, "gender");
@@ -424,9 +467,25 @@ public final class CharacterRegistry {
         }
         if (maxNumericId == Integer.MAX_VALUE) throw new IllegalArgumentException("Исчерпаны ID персонажей");
         int safeNext = (int) Math.max(requestedNext, (long) maxNumericId + 1L);
+        // Upgrade legacy map-local family references to stable global UUID references.
+        for (Character character : loaded.values()) {
+            Character father = loaded.get(character.father);
+            Character mother = loaded.get(character.mother);
+            Character spouse = loaded.get(character.spouse);
+            if (father != null) {
+                character.props.putIfAbsent("family.father_global_id", father.globalId);
+                addGlobalChild(father, character.globalId);
+            }
+            if (mother != null) {
+                character.props.putIfAbsent("family.mother_global_id", mother.globalId);
+                addGlobalChild(mother, character.globalId);
+            }
+            if (spouse != null) character.props.putIfAbsent("family.spouse_global_id", spouse.globalId);
+        }
         byId.clear();
         byId.putAll(loaded);
         next = safeNext;
+        revision++;
         for (Character character : byId.values()) {
             LifecycleEvent restored = new LifecycleEvent(LifecycleKind.RESTORED, character.id, "", "", 0);
             for (Listener listener : listeners) listener.lifecycle(character, restored);

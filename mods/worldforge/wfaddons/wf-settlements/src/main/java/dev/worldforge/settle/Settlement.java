@@ -63,7 +63,15 @@ public final class Settlement {
     private double growTimer, starveTimer, leaveTimer;
 
     // ---- времена года и набеги
-    public static final double SEASON_LEN = 600;                    // секунд поселения на одно время года
+    public static final double SEASON_LEN = 5475;                   // 91.25 world days at 60 simulation seconds/day
+    private long externalWorldMinute = -1;
+    private int externalWorldYear = -1;
+    public void setWorldCalendar(long worldMinute, int worldYear) {
+        if (worldMinute < 0 || worldYear < 1) throw new IllegalArgumentException("invalid world calendar");
+        externalWorldMinute = worldMinute;
+        externalWorldYear = worldYear;
+    }
+    public long worldMinute() { return externalWorldMinute >= 0 ? externalWorldMinute : Math.max(0L, (long) Math.floor(time * 24.0)); }
     public static final String[] SEASONS = {"Весна", "Лето", "Осень", "Зима"};
     public static final double[] FARM_MULT = {1.0, 1.25, 1.5, 0.2};   // выход зданий без сырья в категории «food»
     public static final double RAID_FIRST = 1500, RAID_EVERY = 900, RAID_WARN = 90, RAID_MIN_PEOPLE = 8;
@@ -71,9 +79,24 @@ public final class Settlement {
     public boolean raidIncoming;
     public int raidsRepelled, raidsLost;
     public boolean raids = true;
-    public int seasonIndex() { return (int) (time / SEASON_LEN) % 4; }
-    public int year() { return (int) (time / (SEASON_LEN * 4)) + 1; }
-    public double seasonProgress() { return (time % SEASON_LEN) / SEASON_LEN; }
+    public int seasonIndex() {
+        if (externalWorldMinute >= 0) return (int) Math.min(3L, (externalWorldMinute / 1440L % 365L) / 91L);
+        return (int) (time / SEASON_LEN) % 4;
+    }
+    public int year() {
+        if (externalWorldYear >= 0) return externalWorldYear;
+        return (int) (time / (SEASON_LEN * 4)) + 1;
+    }
+    public double seasonProgress() {
+        if (externalWorldMinute >= 0) {
+            long day = externalWorldMinute / 1440L % 365L;
+            int season = seasonIndex();
+            int start = season * 91;
+            int duration = season == 3 ? 92 : 91;
+            return Math.max(0, Math.min(1, (day - start + (externalWorldMinute % 1440L) / 1440.0) / duration));
+        }
+        return (time % SEASON_LEN) / SEASON_LEN;
+    }
     public String seasonName() { return SEASONS[seasonIndex()]; }
     public double seasonMult(Building b) { return b.def.category.equals("food") && b.def.in.isEmpty() ? FARM_MULT[seasonIndex()] : 1.0; }
     /** Богатство, привлекающее налётчиков: запасы и построенное. */
@@ -160,7 +183,7 @@ public final class Settlement {
             if (legacy != null && legacy.balance > 0) {
                 ledger.transfer(legacy.id, accountId, legacy.balance, TreasuryLedger.Kind.TRANSFER_IN,
                         "settlement-scope-migration", id + ":" + resource,
-                        Math.max(0, (long) Math.floor(time / 60.0)), "migrate legacy unscoped settlement account");
+                        Math.max(0, (long) worldMinute()), "migrate legacy unscoped settlement account");
             } else if (legacy == null) {
                 account = ledger.open(accountId, ledgerOwnerId(), resource, stock.getOrDefault(resource, 0.0));
             }
@@ -186,10 +209,10 @@ public final class Settlement {
             TreasuryLedger ledger = TreasuryService.current();
             if (delta > 0) ledger.deposit(accountId(resource), delta, TreasuryLedger.Kind.IMPORT,
                     "legacy-stock-mirror", "settlement:" + id + ":legacy-sync",
-                    Math.max(0, (long) Math.floor(time / 60.0)), "compatibility stock mirror reconciliation");
+                    worldMinute(), "compatibility stock mirror reconciliation");
             else ledger.withdraw(accountId(resource), -delta, TreasuryLedger.Kind.WRITE_OFF,
                     "legacy-stock-mirror", "settlement:" + id + ":legacy-sync",
-                    Math.max(0, (long) Math.floor(time / 60.0)), "compatibility stock mirror reconciliation");
+                    worldMinute(), "compatibility stock mirror reconciliation");
             account = resourceAccount(resource);
         }
         stock.put(resource, account.balance);
@@ -202,7 +225,7 @@ public final class Settlement {
         amount(resource);
         resourceAccount(resource);
         boolean ok = TreasuryService.current().withdraw(accountId(resource), value, kind, category, reference,
-                Math.max(0, (long) Math.floor(time / 60.0)), category);
+                worldMinute(), category);
         syncResourceMirror(resource);
         return ok;
     }
@@ -214,7 +237,7 @@ public final class Settlement {
         TreasuryLedger ledger = TreasuryService.current();
         double before = ledger.balance(accountId(resource));
         if (!ledger.deposit(accountId(resource), value, kind, category, reference,
-                Math.max(0, (long) Math.floor(time / 60.0)), category)) return 0;
+                worldMinute(), category)) return 0;
         syncResourceMirror(resource);
         return Math.max(0, ledger.balance(accountId(resource)) - before);
     }
@@ -277,7 +300,7 @@ public final class Settlement {
         resourceAccount(resource);
         recipient.resourceAccount(resource);
         boolean ok = TreasuryService.current().transfer(accountId(resource), recipient.accountId(resource), quantity,
-                TreasuryLedger.Kind.TRADE, category, reference, Math.max(0, (long) Math.floor(time / 60.0)),
+                TreasuryLedger.Kind.TRADE, category, reference, worldMinute(),
                 "settlement-to-settlement commodity transfer");
         syncResourceMirror(resource);
         recipient.syncResourceMirror(resource);
@@ -298,7 +321,7 @@ public final class Settlement {
         if (targetAccountId == null || targetAccountId.isBlank() || !Double.isFinite(quantity) || quantity < 0) return false;
         amount(Defs.SILVER);
         boolean ok = TreasuryService.current().transfer(accountId(Defs.SILVER), targetAccountId, quantity,
-                kind, category, reference, Math.max(0, (long) Math.floor(time / 60.0)),
+                kind, category, reference, worldMinute(),
                 "settlement treasury transfer");
         syncResourceMirror(Defs.SILVER);
         if (ok && quantity > 0) flow.record(time, Defs.SILVER, quantity, false);
@@ -472,6 +495,17 @@ public final class Settlement {
     /** Drained only after the owning CharacterRegistry confirms the lifecycle transition. */
     public List<WorkerDeparture> pendingDepartures() { return Collections.unmodifiableList(departures); }
     public void acknowledgeDeparture(WorkerDeparture departure) { departures.remove(departure); }
+
+    /**
+     * Cancels a stale departure after the same canonical person has been reattached.
+     * A military transfer is a temporary projection change, not a death or migration.
+     */
+    public int acknowledgeDepartureForPerson(String personId, String reason) {
+        if (personId == null || personId.isBlank() || reason == null || reason.isBlank()) return 0;
+        int before = departures.size();
+        departures.removeIf(event -> personId.equals(event.personId()) && reason.equals(event.reason()));
+        return before - departures.size();
+    }
 
     // ------------------------------------------------------------------ приказы
 

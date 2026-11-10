@@ -101,6 +101,49 @@ public final class SettleMapCommands {
     private interface MapOrder { String run(Colony colony); }
 
     private static int run(CommandContext<CommandSourceStack> context, MapOrder order) {
+        if (context.getInput().endsWith(" info")) return runDirect(context, order);
+        CommandSourceStack source = context.getSource();
+        Colony initial = SettleMod.nearest(source.getLevel(), source.getPosition().x, source.getPosition().z);
+        if (initial == null) { source.sendFailure(Component.literal("No settlement nearby")); return 0; }
+        String actor = source.getEntity() instanceof ServerPlayer player
+                ? player.getUUID().toString() : source.getTextName();
+        long minute = dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute();
+        String requestId = "settlement-map:" + java.util.UUID.nameUUIDFromBytes(
+                (actor + ":" + source.getServer().getTickCount() + ":" + context.getInput())
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        var request = new dev.worldforge.mod.api.ActionExecutionService.Request(
+                requestId, "settlement.map_order", actor, initial.s.id,
+                java.util.List.of(context.getInput()), minute);
+        boolean operator = dev.worldforge.mod.WFPerm.trusted(source);
+        try {
+            var task = dev.worldforge.mod.api.WorldForgeApi.actionExecution().execute(request,
+                    req -> {
+                        Colony current = SettleMod.colony(req.targetId());
+                        if (current == null) return "Settlement no longer exists";
+                        if (SettleMod.actionsBlocked()) return "Settlement changes are frozen after a persistence failure; restart and reconcile";
+                        if (!operator && !actor.equals(current.owner)) return "Settlement ownership changed";
+                        return null;
+                    },
+                    (req, attempt) -> {
+                        if (runDirect(context, order) != 1)
+                            return dev.worldforge.mod.api.ActionResult.fail("Settlement map order rejected");
+                        Colony current = SettleMod.colony(req.targetId());
+                        if (!SettleMod.persistActionMutation(source.getServer(), current))
+                            return dev.worldforge.mod.api.ActionResult.fail(
+                                    "Settlement map order applied in memory but its snapshot could not be saved; changes are frozen for reconciliation");
+                        return dev.worldforge.mod.api.ActionResult.ok("Settlement map order applied");
+                    },
+                    null, minute, dev.worldforge.mod.WorldForgeMod.actionExecutionFile(source.getServer()));
+            if (task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.FAILED)
+                source.sendFailure(Component.literal(task.message()));
+            return task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED ? 1 : 0;
+        } catch (RuntimeException ex) {
+            source.sendFailure(Component.literal("Map order failed: " + ex.getMessage()));
+            return 0;
+        }
+    }
+
+    private static int runDirect(CommandContext<CommandSourceStack> context, MapOrder order) {
         CommandSourceStack source = context.getSource();
         Colony colony = SettleMod.nearest(source.getLevel(), source.getPosition().x, source.getPosition().z);
         if (colony == null) { source.sendFailure(Component.literal("No settlement nearby")); return 0; }

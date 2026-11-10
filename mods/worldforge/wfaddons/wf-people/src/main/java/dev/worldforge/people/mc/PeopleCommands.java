@@ -124,6 +124,10 @@ final class PeopleCommands {
     }
 
     private static int kill(CommandSourceStack s, String id) {
+        return mutate(s, "people.character_death", id, "kill:" + id, () -> killDirect(s, id));
+    }
+
+    private static int killDirect(CommandSourceStack s, String id) {
         MapData m = map(s);
         if (m == null) return 0;
         CharacterRegistry reg = PeopleMod.registry(m);
@@ -152,7 +156,37 @@ final class PeopleCommands {
     }
 
     /** /wfpeople org <id> <организация|none>: делает персонажа представителем организации (диалог wf_orders:master). */
+    private static int mutate(CommandSourceStack source, String actionId, String target, String payload,
+                               java.util.function.IntSupplier action) {
+        String actor = source.getEntity() instanceof ServerPlayer player
+                ? player.getUUID().toString() : source.getTextName();
+        long minute = dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute();
+        String requestId = "people:" + java.util.UUID.nameUUIDFromBytes(
+                (actor + ":" + source.getServer().getTickCount() + ":" + actionId + ":" + target + ":" + payload)
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        var request = new dev.worldforge.mod.api.ActionExecutionService.Request(
+                requestId, actionId, actor, target, List.of(payload), minute);
+        try {
+            var task = dev.worldforge.mod.api.WorldForgeApi.actionExecution().execute(request,
+                    req -> source.hasPermission(2) ? null : "Недостаточно полномочий для изменения персонажа",
+                    (req, attempt) -> action.getAsInt() == 1
+                            ? dev.worldforge.mod.api.ActionResult.ok("Изменение персонажа выполнено")
+                            : dev.worldforge.mod.api.ActionResult.fail("Изменение персонажа отклонено"),
+                    null, minute, dev.worldforge.mod.WorldForgeMod.actionExecutionFile(source.getServer()));
+            if (task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.FAILED)
+                source.sendFailure(Component.literal(task.message()));
+            return task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED ? 1 : 0;
+        } catch (RuntimeException ex) {
+            source.sendFailure(Component.literal("Не удалось выполнить изменение персонажа: " + ex.getMessage()));
+            return 0;
+        }
+    }
+
     private static int setOrg(CommandSourceStack s, String id, String org) {
+        return mutate(s, "people.assign_organization", id, "org:" + org, () -> setOrgDirect(s, id, org));
+    }
+
+    private static int setOrgDirect(CommandSourceStack s, String id, String org) {
         Character c = PeopleMod.findNpc(id);
         if (c == null) { s.sendFailure(Component.literal("Нет персонажа " + id)); return 0; }
         if (org.equals("none")) c.props.remove("org"); else c.props.put("org", org);

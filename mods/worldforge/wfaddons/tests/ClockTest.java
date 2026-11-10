@@ -37,15 +37,37 @@ public class ClockTest {
         GameClock d = new GameClock();
         d.setSpeed(1);
         d.advance(GameClock.TICKS_PER_DAY * 45);
-        ok(d.month() == 1 && d.dayOfMonth() == 16 && d.dateText().equals("16 Февраля 300"), "45-й день: " + d.dateText());
+        ok(d.month() == 1 && d.dayOfMonth() == 15 && d.dateText().equals("15 Февраля 300"), "45-й день: " + d.dateText());
         d.advance(GameClock.TICKS_PER_DAY * 365);
         ok(d.year() == 301, "год сменился: " + d.dateText());
         d.advance(GameClock.TICKS_PER_DAY * 315);
         ok(d.month() == 11, "последние дни года остаются в декабре: " + d.dateText());
+        ok(d.worldMinute() == d.dayNumber() * 1440L, "canonical world minute is derived from the 365-day clock");
+        GameClock seasons = new GameClock();
+        seasons.advance(GameClock.TICKS_PER_DAY * 91);
+        ok(seasons.seasonIndex() == 1 && seasons.seasonProgress() == 0.0, "season boundary follows the shared world year");
+        seasons.advance(GameClock.TICKS_PER_DAY * 182);
+        ok(seasons.seasonIndex() == 3, "winter begins at day 273 and the final season spans 92 days");
         // сохранение
         GameClock r = new GameClock();
         r.load(d.toJson());
         ok(r.dateText().equals(d.dateText()) && r.speedIndex() == d.speedIndex() && r.pull("x") == 0, "часы сохраняются, потребители начинают заново");
+        GameClock strict = new GameClock();
+        strict.advance(GameClock.TICKS_PER_DAY * 12);
+        String validBeforeBadLoad = strict.toJson();
+        boolean invalidClockRejected = false;
+        try { strict.load("{\"format\":\"wf-clock/1\",\"elapsed\":-1,\"speed\":1,\"last\":1,\"start\":300}"); }
+        catch (IllegalArgumentException expected) { invalidClockRejected = true; }
+        ok(invalidClockRejected && strict.toJson().equals(validBeforeBadLoad),
+                "invalid clock save is rejected without partially mutating the running calendar");
+        boolean nonFiniteRejected = false;
+        try { strict.load("{\"format\":\"wf-clock/1\",\"elapsed\":1e999,\"speed\":1,\"last\":1,\"start\":300}"); }
+        catch (IllegalArgumentException expected) { nonFiniteRejected = true; }
+        ok(nonFiniteRejected && strict.toJson().equals(validBeforeBadLoad),
+                "non-finite clock elapsed time is rejected without resetting world time");
+        strict.reset();
+        ok(strict.dayNumber() == 0 && strict.year() == 300 && strict.speedIndex() == 1,
+                "clock singleton can be safely reset before loading a different save");
         System.out.println(fails == 0 ? "ALL OK" : fails + " FAILED");
         if (fails > 0) System.exit(1);
     }

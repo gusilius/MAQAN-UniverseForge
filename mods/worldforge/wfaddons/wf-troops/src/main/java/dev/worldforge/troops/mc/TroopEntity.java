@@ -58,6 +58,7 @@ public class TroopEntity extends PathfinderMob {
     public int fortId;                     // защитник крепости (0 - полевой солдат)
     public int armyId;                     // из какой армии wf-army призван (0 - нанят за золото)
     /** Stable foreign key into wf-people.CharacterRegistry; empty when wf-people is absent. */
+    /** Canonical global wf-people Character UUID; entity UUID identifies only this physical body. */
     public String characterId = "";
     /** Recruitment sets this until all stock/payments commit; legacy saved troops still bind on load. */
     public boolean deferCharacterBinding;

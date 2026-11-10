@@ -3,6 +3,9 @@ package dev.worldforge.tests;
 import dev.worldforge.mod.*;
 import dev.worldforge.war.*;
 import dev.worldforge.army.*;
+import dev.worldforge.mod.api.TreasuryApi;
+import dev.worldforge.mod.api.WorldForgeApi;
+import dev.worldforge.mod.economy.TreasuryService;
 
 import java.nio.file.*;
 import java.util.*;
@@ -15,6 +18,7 @@ public class ArmyTest {
     static boolean fails(Runnable r) { try { r.run(); return false; } catch (TitleEditor.EditException e) { return true; } }
 
     static ArmyEngine fresh(String pack, String[] ids) throws Exception {
+        TreasuryApi.resetForTests();
         MapData m = MapData.load("t", name -> {
             try (var zf = new java.util.zip.ZipFile(pack)) {
                 var e = zf.getEntry("data/planets/worldforge_maps/game_of_thrones/" + name);
@@ -70,10 +74,17 @@ public class ArmyTest {
         double p0 = e.pool(A);
         Army ar = e.raise(A, "levy", 50);
         ok(ar.men() == 50 && e.pool(A) == p0 - 50, "ополчение берётся из запаса");
+        ok(Math.abs(e.gold(A) - ArmyEngine.START_GOLD) < 1e-8, "new realm receives its opening treasury balance exactly once");
         ok(fails(() -> e.raise(A, "levy", 1_000_000)), "нельзя набрать больше запаса");
         double g0 = e.gold(A);
+        WorldForgeApi.clock().reset();
+        WorldForgeApi.clock().advance(dev.worldforge.mod.api.GameClock.TICKS_PER_DAY * 3 + dev.worldforge.mod.api.GameClock.TICKS_PER_DAY / 2);
         e.raise(A, "archer", 20);
+        ok(TreasuryService.current().journal().get(TreasuryService.current().journal().size() - 1).worldMinute() == 5040L,
+                "army treasury journal timestamps use canonical world minutes, not the local war-day counter");
         ok(e.gold(A) < g0, "профессионалы стоят золота");
+        ok(Math.abs(TreasuryService.current().balance("realm:" + A) - e.gold(A) * 5.0) < 1e-8,
+                "army recruitment posts its debit to the canonical silver treasury");
         ok(fails(() -> e.raise(A, "knight", 100_000)), "не хватает золота");
         ok(fails(() -> e.hire("missing_realm", "cavalry", 10)), "нельзя нанимать войско государству без земель");
         Army merc = e.hire(A, "cavalry", 10);
@@ -160,6 +171,19 @@ public class ArmyTest {
         ArmyEngine back = new ArmyEngine(ai.war);
         back.fromJson(js);
         ok(back.armies.size() == ai.armies.size() && back.toJson().equals(js), "сохранение и загрузка совпадают");
+        ok(!js.contains("\"gold\"") && js.contains("wf-army/2"), "new army snapshots no longer persist a duplicate local gold balance");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> legacyRoot = (Map<String, Object>) Json.parse(js);
+        legacyRoot.put("format", "wf-army/1");
+        legacyRoot.put("gold", Map.of("legacy-army-realm", 17.0));
+        ArmyEngine legacyReload = new ArmyEngine(ai.war);
+        legacyReload.fromJson(Json.write(legacyRoot));
+        ok(Math.abs(legacyReload.gold("legacy-army-realm") - 17.0) < 1e-8,
+                "wf-army/1 legacy gold migrates into the shared treasury on first access");
+        String upgradedLegacySave = legacyReload.toJson();
+        ok(upgradedLegacySave.contains("wf-army/2") && !upgradedLegacySave.contains("\"gold\"")
+                        && Math.abs(legacyReload.gold("legacy-army-realm") - 17.0) < 1e-8,
+                "legacy army save upgrades without persisting or importing its gold balance twice");
 
         System.out.println(fails == 0 ? "ALL OK" : fails + " FAILED");
         if (fails > 0) System.exit(1);

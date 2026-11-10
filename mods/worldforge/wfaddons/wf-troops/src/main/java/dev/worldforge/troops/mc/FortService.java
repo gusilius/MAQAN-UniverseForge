@@ -98,15 +98,23 @@ final class FortService {
                 .then(Commands.literal("list").executes(c -> list(c.getSource())))
                 .then(Commands.literal("remove").then(Commands.argument("id", IntegerArgumentType.integer(1)).executes(c -> {
                     int id = IntegerArgumentType.getInteger(c, "id");
-                    boolean ok = TroopsMod.FORTS.remove(id);
-                    c.getSource().sendSuccess(() -> Component.literal(ok ? "Крепость удалена" : "Нет такой крепости"), false);
-                    return ok ? 1 : 0;
+                    return TroopsMod.executeMilitaryCommand(c.getSource(), "military.fort_remove",
+                            Integer.toString(id), "remove", () -> {
+                                boolean ok = TroopsMod.FORTS.remove(id);
+                                c.getSource().sendSuccess(() -> Component.literal(ok ? "Крепость удалена" : "Нет такой крепости"), false);
+                                return ok ? 1 : 0;
+                            });
                 })))
                 .then(Commands.literal("garrison").then(Commands.argument("id", IntegerArgumentType.integer(1)).then(Commands.argument("type", StringArgumentType.word())
                         .then(Commands.argument("n", IntegerArgumentType.integer(1, Squads.MAX_SIZE)).executes(c -> garrison(c.getSource(), IntegerArgumentType.getInteger(c, "id"), StringArgumentType.getString(c, "type"), IntegerArgumentType.getInteger(c, "n")))))));
     }
 
     private static int create(CommandSourceStack src, String name, double radius, int towers, String realm) {
+        return TroopsMod.executeMilitaryCommand(src, "military.fort_create", name,
+                radius + "|" + towers + "|" + realm, () -> createDirect(src, name, radius, towers, realm));
+    }
+
+    private static int createDirect(CommandSourceStack src, String name, double radius, int towers, String realm) {
         ServerPlayer p;
         try {
             p = src.getPlayerOrException();
@@ -131,6 +139,11 @@ final class FortService {
     }
 
     private static int garrison(CommandSourceStack src, int id, String type, int n) {
+        return TroopsMod.executeMilitaryCommand(src, "military.fort_garrison", Integer.toString(id),
+                type + "|" + n, () -> garrisonDirect(src, id, type, n));
+    }
+
+    private static int garrisonDirect(CommandSourceStack src, int id, String type, int n) {
         Forts.Fort f = TroopsMod.FORTS.get(id);
         TroopDefs.Unit u = TroopsMod.DEFS.units.get(type);
         if (f == null) { src.sendFailure(Component.literal("Нет крепости " + id)); return 0; }
@@ -153,10 +166,25 @@ final class FortService {
             made.add(t);
             ids.add(t.getUUID().toString());
         }
+        if (made.isEmpty()) {
+            src.sendFailure(Component.literal("Не удалось создать ни одного бойца гарнизона; состав не изменён."));
+            return 0;
+        }
         Squads.Squad s = TroopsMod.SQUADS.create(owner, "Гарнизон " + f.name, ids);
         s.realm = f.realm; s.stance = Squads.Stance.HOLD; s.cx = f.x; s.cz = f.z;
-        for (TroopEntity t : made) { t.setSquadId(s.id); lv.addFreshEntity(t); }
-        src.sendSuccess(() -> Component.literal("Гарнизон «" + f.name + "»: +" + made.size() + " × " + u.name()), false);
+        for (TroopEntity t : made) {
+            t.setSquadId(s.id);
+            if (!lv.addFreshEntity(t)) {
+                for (TroopEntity prepared : made) prepared.discard();
+                TroopsMod.SQUADS.disband(s.id);
+                TroopsMod.save();
+                src.sendFailure(Component.literal("Мир отклонил создание гарнизона; подготовленные бойцы и отряд отменены."));
+                return 0;
+            }
+        }
+        TroopsMod.save();
+        String quantity = made.size() == n ? "+" + made.size() : "+" + made.size() + " из " + n;
+        src.sendSuccess(() -> Component.literal("Гарнизон «" + f.name + "»: " + quantity + " × " + u.name()), false);
         return made.size();
     }
 }

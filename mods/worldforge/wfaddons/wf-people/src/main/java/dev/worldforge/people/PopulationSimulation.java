@@ -33,6 +33,20 @@ public final class PopulationSimulation {
     /** Canonical owner key understood by wf-progress for NPC profiles. */
     public static String progressOwner(Character character, String populationScopeId) {
         Objects.requireNonNull(character, "character");
+        // Keep validating the adapter's scope argument for API compatibility, but identity no longer
+        // depends on a map/settlement scope. A Character keeps one RPG profile while moving.
+        Objects.requireNonNull(populationScopeId, "populationScopeId");
+        if (populationScopeId.isBlank()) throw new IllegalArgumentException("population scope id is required");
+        try {
+            return "n:" + UUID.fromString(character.globalId);
+        } catch (RuntimeException ex) {
+            throw new IllegalStateException("Character has no valid immutable global UUID", ex);
+        }
+    }
+
+    /** Previous per-map key, used only to migrate existing progression saves. */
+    public static String legacyProgressOwner(Character character, String populationScopeId) {
+        Objects.requireNonNull(character, "character");
         String rawScope = Objects.requireNonNull(populationScopeId, "populationScopeId").trim().toLowerCase(Locale.ROOT);
         if (rawScope.isEmpty()) throw new IllegalArgumentException("population scope id is required");
         String scope = rawScope.matches("[a-z0-9_.:-]{1,64}") ? rawScope

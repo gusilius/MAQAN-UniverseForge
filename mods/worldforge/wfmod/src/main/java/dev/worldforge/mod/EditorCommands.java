@@ -1,6 +1,7 @@
 package dev.worldforge.mod;
 
 import com.mojang.brigadier.arguments.DoubleArgumentType;
+import dev.worldforge.mod.api.WorldForgeApi;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.builder.RequiredArgumentBuilder;
@@ -31,6 +32,39 @@ public final class EditorCommands {
     }
 
     private static int exec(com.mojang.brigadier.context.CommandContext<CommandSourceStack> c, boolean needsOn, Action a) throws CommandSyntaxException {
+        if (!needsOn) return execDirect(c, needsOn, a);
+        ServerPlayer player = c.getSource().getPlayerOrException();
+        long minute = WorldForgeApi.clock().worldMinute();
+        String actor = player.getUUID().toString();
+        String requestId = "editor:" + java.util.UUID.nameUUIDFromBytes(
+                (actor + ":" + player.server.getTickCount() + ":" + c.getInput())
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        String target = player.serverLevel().dimension().location().toString();
+        var request = new dev.worldforge.mod.api.ActionExecutionService.Request(
+                requestId, "worldforge.editor_mutation", actor, target, List.of(c.getInput()), minute);
+        try {
+            var task = WorldForgeApi.actionExecution().execute(request,
+                    req -> !EditorManager.canEdit(player) || !EditorManager.session(player).on
+                            ? "Полномочия редактора отозваны до исполнения" : null,
+                    (req, attempt) -> {
+                        try {
+                            return execDirect(c, needsOn, a) == 1
+                                    ? dev.worldforge.mod.api.ActionResult.ok("Изменение карты выполнено")
+                                    : dev.worldforge.mod.api.ActionResult.fail("Изменение карты отклонено");
+                        } catch (CommandSyntaxException ex) {
+                            return dev.worldforge.mod.api.ActionResult.fail(ex.getMessage());
+                        }
+                    }, null, minute, WorldForgeMod.actionExecutionFile(player.server));
+            if (task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.FAILED)
+                c.getSource().sendFailure(Component.literal("Команда не выполнена: " + task.message()));
+            return task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED ? 1 : 0;
+        } catch (RuntimeException ex) {
+            c.getSource().sendFailure(Component.literal("Не удалось принять команду: " + ex.getMessage()));
+            return 0;
+        }
+    }
+
+    private static int execDirect(com.mojang.brigadier.context.CommandContext<CommandSourceStack> c, boolean needsOn, Action a) throws CommandSyntaxException {
         CommandSourceStack src = c.getSource();
         ServerPlayer p = src.getPlayerOrException();
         if (!EditorManager.canEdit(p)) {
@@ -48,10 +82,21 @@ public final class EditorCommands {
             src.sendFailure(Component.literal("В этом измерении нет карты с титулами (нужны provinces.png и titles.json)"));
             return 0;
         }
+        if (needsOn && EditorManager.mutationsBlocked(m)) {
+            src.sendFailure(Component.literal("Правки этой карты заблокированы после ошибки сохранения; требуется перезапуск и сверка"));
+            return 0;
+        }
         try {
             int before = ed.modCount();
             int r = a.run(p, m, ed, s);
-            if (ed.modCount() != before) EditorManager.touch(m);
+            if (ed.modCount() != before) {
+                EditorManager.touch(m);
+                EditorManager.saveDirty(p.server);
+                if (ed.isDirty()) {
+                    EditorManager.blockMutations(m);
+                    throw new Failure("Изменение карты не удалось надёжно сохранить; операция отмечена как неуспешная");
+                }
+            }
             return r;
         } catch (TitleEditor.EditException | Failure e) {
             src.sendFailure(Component.literal(e.getMessage()));
@@ -200,8 +245,8 @@ public final class EditorCommands {
                                     return 1;
                                 })))
                                 .then(Commands.literal("apply").executes(c -> exec(c, true, (p, m, ed, s) -> {
-                                    EditorEvents.applyTool(p, s, m, ed, DoubleArgumentType.getDouble(c, "x"), DoubleArgumentType.getDouble(c, "z"));
-                                    return 1;
+                                    return EditorEvents.applyTool(p, s, m, ed,
+                                            DoubleArgumentType.getDouble(c, "x"), DoubleArgumentType.getDouble(c, "z")) ? 1 : 0;
                                 }))))))
                 .then(Commands.literal("info").executes(c -> exec(c, false, (p, m, ed, s) -> {
                     TitleData.Title t = province(p, m, s);

@@ -47,6 +47,8 @@ dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
     // Ядро WorldForge: только чистые классы (api, TitleData, TitleEditor, Json), поэтому деобфускация не нужна.
     compileOnly fileTree(dir: 'libs', include: ['worldforge-*.jar'])
+    compileOnly fileTree(dir: 'libs', include: ['wf_people-*.jar'])
+    compileOnly fileTree(dir: '../wf-people/build/libs', include: ['wf_people-*.jar'])
     compileOnly fileTree(dir: 'libs', include: ['wf_origins-*.jar'])
     compileOnly fileTree(dir: '../wf-origins/build/libs', include: ['wf_origins-*.jar'])
     compileOnly fileTree(dir: 'libs', include: ['wf_progress-*.jar'])
