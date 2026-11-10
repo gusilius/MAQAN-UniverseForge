@@ -42,7 +42,7 @@ public final class ClockService {
 
     @SubscribeEvent
     public void onTick(TickEvent.ServerTickEvent e) {
-        if (e.phase != TickEvent.Phase.END) return;
+        if (e.phase != TickEvent.Phase.START) return;
         WorldForgeApi.clock().advance(1);
         ticks++;
         if (ticks % 40 == 0) {
