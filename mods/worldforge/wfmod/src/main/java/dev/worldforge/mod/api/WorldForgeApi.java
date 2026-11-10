@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
+import java.nio.file.Path;
 
 /**
  * Точки расширения для аддонов (дипломатия, войны, NPC):
@@ -32,6 +33,7 @@ public final class WorldForgeApi {
     private static final List<Guard> GUARDS = new CopyOnWriteArrayList<>();
     private static final List<Consumer<MapChange>> LISTENERS = new CopyOnWriteArrayList<>();
     private static final EventLog EVENTS = new EventLog();
+    private static final ActionExecutionService ACTION_EXECUTION = new ActionExecutionService();
     private static boolean builtinsDone;
 
     private WorldForgeApi() {}
@@ -55,6 +57,51 @@ public final class WorldForgeApi {
 
     /** Общие часы мира: пауза, скорость, календарь; все симуляции берут дни отсюда (GameClock.pull). */
     public static GameClock clock() { return CLOCK; }
+
+    /** Shared durable action queue. WorldForgeMod loads/saves it with the active world. */
+    public static ActionExecutionService actionExecution() { return ACTION_EXECUTION; }
+
+    public static ActionExecutionService.Task submitAction(String requestId, String id, ActionContext base,
+            Path journalFile, long worldMinute) {
+        MapAction initial = action(id);
+        if (initial == null) throw new IllegalArgumentException("Нет такого действия: " + id);
+        String target = initial.scope == MapAction.Scope.REALM ? base.realmId
+                : initial.scope == MapAction.Scope.TITLE ? Integer.toString(base.titleId) : "map";
+        if (target == null || target.equals("0")) throw new IllegalArgumentException("Для действия не выбрана цель");
+        ActionExecutionService.Request request = new ActionExecutionService.Request(requestId, id,
+                base.actor, target, base.args, worldMinute);
+        ActionExecutionService service = ACTION_EXECUTION;
+        ActionExecutionService.Task queued = service.enqueue(request, worldMinute, journalFile);
+        if (queued.status() != ActionExecutionService.Status.QUEUED) return queued;
+        return service.process(requestId, req -> {
+            MapAction candidate = action(req.actionId());
+            if (candidate == null) return "Действие больше не зарегистрировано: " + req.actionId();
+            if (candidate.perm == MapAction.Perm.OP && !base.operator) return "Нужны права оператора";
+            ActionContext context = actionContext(base, candidate, req.targetId(), req.args());
+            for (Guard guard : GUARDS) {
+                String denied = guard.check(candidate, context);
+                if (denied != null) return denied;
+            }
+            return null;
+        }, (req, attempt) -> {
+            MapAction candidate = action(req.actionId());
+            if (candidate == null) return ActionResult.fail("Действие не найдено: " + req.actionId());
+            ActionContext context = actionContext(base, candidate, req.targetId(), req.args());
+            ActionResult result = candidate.handler.run(context);
+            if (result.ok) fireChange(new MapChange(context.data(), "action", candidate.id));
+            return result;
+        }, null, worldMinute, journalFile);
+    }
+
+    private static ActionContext actionContext(ActionContext base, MapAction action, String target, List<String> args) {
+        String realmId = action.scope == MapAction.Scope.REALM ? target : null;
+        int titleId = 0;
+        if (action.scope == MapAction.Scope.TITLE) {
+            try { titleId = Integer.parseInt(target); }
+            catch (NumberFormatException ex) { throw new TitleEditor.EditException("Для действия нужен корректный ID титула"); }
+        }
+        return new ActionContext(base.editor, base.actor, base.operator, realmId, titleId, args);
+    }
 
     /** Общий журнал событий мира (аддоны пишут сюда войны, браки, стройки; клиент показывает всплывающие сообщения и окно журнала). */
     public static EventLog events() { return EVENTS; }
