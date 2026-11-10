@@ -3,6 +3,8 @@ package dev.worldforge.tests;
 import dev.worldforge.mod.*;
 import dev.worldforge.war.*;
 import dev.worldforge.army.*;
+import dev.worldforge.mod.api.TreasuryApi;
+import dev.worldforge.mod.economy.TreasuryService;
 
 import java.nio.file.*;
 import java.util.*;
@@ -15,6 +17,7 @@ public class ArmyTest {
     static boolean fails(Runnable r) { try { r.run(); return false; } catch (TitleEditor.EditException e) { return true; } }
 
     static ArmyEngine fresh(String pack, String[] ids) throws Exception {
+        TreasuryApi.resetForTests();
         MapData m = MapData.load("t", name -> {
             try (var zf = new java.util.zip.ZipFile(pack)) {
                 var e = zf.getEntry("data/planets/worldforge_maps/game_of_thrones/" + name);
@@ -74,6 +77,8 @@ public class ArmyTest {
         double g0 = e.gold(A);
         e.raise(A, "archer", 20);
         ok(e.gold(A) < g0, "профессионалы стоят золота");
+        ok(Math.abs(TreasuryService.current().balance("realm:" + A) - e.gold(A) * 5.0) < 1e-8,
+                "army recruitment posts its debit to the canonical silver treasury");
         ok(fails(() -> e.raise(A, "knight", 100_000)), "не хватает золота");
         ok(fails(() -> e.hire("missing_realm", "cavalry", 10)), "нельзя нанимать войско государству без земель");
         Army merc = e.hire(A, "cavalry", 10);
@@ -160,6 +165,7 @@ public class ArmyTest {
         ArmyEngine back = new ArmyEngine(ai.war);
         back.fromJson(js);
         ok(back.armies.size() == ai.armies.size() && back.toJson().equals(js), "сохранение и загрузка совпадают");
+        ok(!js.contains("\\\"gold\\\"") && js.contains("wf-army/2"), "new army snapshots no longer persist a duplicate local gold balance");
 
         System.out.println(fails == 0 ? "ALL OK" : fails + " FAILED");
         if (fails > 0) System.exit(1);
