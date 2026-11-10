@@ -127,7 +127,23 @@ public final class ActionExecutionService {
             task = new Task(original.requestId(), original.actionId(), original.actorId(), original.targetId(),
                     original.args(), Status.RUNNING, attempt, "Running", original.requestedMinute(), nowMinute, "");
             tasks.put(requestId, task);
-            persistOrRollback(durableFile, requestId);
+            try {
+                persistOrRollback(durableFile, requestId);
+            } catch (IllegalStateException ex) {
+                // The executor has not run. Convert the in-memory RUNNING transition into a
+                // terminal receipt so callers never observe an unreceipted task or retry it.
+                String message = "Action execution blocked before domain mutation because RUNNING state could not be persisted";
+                String receiptId = "receipt:" + requestId;
+                Task failed = new Task(original.requestId(), original.actionId(), original.actorId(),
+                        original.targetId(), original.args(), Status.FAILED, attempt - 1,
+                        message, original.requestedMinute(), nowMinute, receiptId);
+                Receipt receipt = new Receipt(receiptId, original.requestId(), original.actionId(),
+                        original.actorId(), original.targetId(), Status.FAILED, attempt - 1,
+                        message, nowMinute);
+                tasks.put(requestId, failed);
+                receipts.put(receiptId, receipt);
+                return failed;
+            }
 
             ActionResult result;
             try { result = Objects.requireNonNull(executor.execute(current, attempt), "Action executor returned null"); }
