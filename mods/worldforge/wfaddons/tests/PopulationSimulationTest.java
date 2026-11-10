@@ -84,7 +84,7 @@ public final class PopulationSimulationTest {
         ok(restoredBindings.get(stableId).props.containsKey("population.entity_bindings"),
                 "Minecraft entity bindings survive registry save/load");
 
-        ok(PopulationSimulation.progressOwner(smith, "middle_earth").equals("n:middle_earth:" + stableId), "NPC progression owner derives from the one Character ID");
+        ok(PopulationSimulation.progressOwner(smith, "middle_earth").equals("n:" + smith.globalId), "NPC progression owner derives from the immutable global Character UUID");
         ok(PopulationSimulation.age(smith, 300) == 20, "age derives from the shared world calendar");
         ok(PopulationSimulation.lifeStage(smith, 300) == LifeStage.ADULT, "life-stage thresholds are deterministic");
 
@@ -232,7 +232,7 @@ public final class PopulationSimulationTest {
         int bridgeRanks = PeopleProgressBridge.train(progress, smith, "middle_earth", "tactics", 200);
         ok(bridgeRanks == 2, "NPC training uses the unified Character-backed skill record");
         String npcOwner = PeopleProgressBridge.owner(smith, "middle_earth");
-        ok(npcOwner.equals("n:middle_earth:" + stableId), "progress profile owner is derived from scoped Character ID");
+        ok(npcOwner.equals("n:" + smith.globalId), "progress profile owner is derived from global Character UUID");
         ok(progress.profile(npcOwner).skill("tactics") == PopulationSimulation.skillRank(smith, "tactics"), "RPG profile mirrors canonical Character skill ranks");
         progress.profile(npcOwner).skills.put("tactics", 3);
         PeopleProgressBridge.syncToCharacter(smith, progress.profile(npcOwner));
