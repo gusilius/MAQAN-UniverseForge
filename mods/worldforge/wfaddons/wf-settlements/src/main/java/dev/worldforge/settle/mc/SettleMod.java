@@ -837,6 +837,12 @@ public class SettleMod {
         person.props.put("population.location", colony.s.id);
         person.props.put("population.employer", place);
         if (!person.has("settlement_worker", place)) registry.appoint(person.id, "settlement_worker", place, PeopleMod.YEAR);
+        // Reattachment supersedes the queued transfer departure in the old settlement.
+        // A later sync must not interpret that stale event as a second firing.
+        for (Colony other : COLONIES.values()) {
+            if (other != null && other.s != null)
+                other.s.acknowledgeDepartureForPerson(person.globalId, "transfer:military");
+        }
         return true;
     }
 
