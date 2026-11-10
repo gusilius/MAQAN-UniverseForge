@@ -8,6 +8,7 @@ import dev.worldforge.mod.WorldForgeMod;
 import dev.worldforge.mod.api.WorldForgeApi;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
+import dev.worldforge.people.CharacterAuthority;
 import dev.worldforge.people.Courts;
 import dev.worldforge.people.NameBank;
 import dev.worldforge.people.PopulationSimulation;
@@ -74,6 +75,8 @@ public class PeopleMod {
     public static volatile java.util.List<String> ROLES_RAW = java.util.List.of();
     public static volatile NameBank NAMES = new NameBank();
     private static final Map<MapData, CharacterRegistry> REGS = new ConcurrentHashMap<>();
+    private static final CharacterAuthority AUTHORITY = new CharacterAuthority();
+    public static CharacterAuthority authority() { return AUTHORITY; }
     /** Corrupt saves fail closed: never regenerate courts over unreadable identity data. */
     private static final Set<MapData> INVALID_REGS = ConcurrentHashMap.newKeySet();
     public static final int TICKS_PER_DAY = 1200;
@@ -116,6 +119,8 @@ public class PeopleMod {
     public void onAboutToStart(ServerAboutToStartEvent e) {
         REGS.clear();
         INVALID_REGS.clear();
+        if (WorldForgeMod.worldId() != null) AUTHORITY.beginWorld(WorldForgeMod.worldId());
+        else AUTHORITY.clear();
         FLAGS.clear();
         ticks = 0;
         RoleDefs roles = new RoleDefs();
@@ -150,6 +155,7 @@ public class PeopleMod {
     @SubscribeEvent
     public void onStarted(ServerStartedEvent e) {
         YEAR = WorldForgeApi.clock().year();
+        if (WorldForgeMod.worldId() != null) AUTHORITY.beginWorld(WorldForgeMod.worldId());
         for (MapData m : WorldForgeMod.loadedMaps().values()) registry(m);
     }
 
@@ -178,7 +184,12 @@ public class PeopleMod {
             LOGGER.error("wf_people: Courts.ensure для карты '{}' не удался: {}", m.name, ex.toString());
         }
         CharacterRegistry prev = REGS.putIfAbsent(m, reg);
-        return prev != null ? prev : reg;
+        CharacterRegistry selected = prev != null ? prev : reg;
+        if (WorldForgeMod.worldId() != null) {
+            try { AUTHORITY.registerMap(m.name, selected); }
+            catch (RuntimeException ex) { LOGGER.error("wf_people: global Character authority rejected map '{}': {}", m.name, ex.toString()); }
+        }
+        return selected;
     }
 
     public static long seed(MapData m) {
@@ -214,6 +225,7 @@ public class PeopleMod {
     public void onStopping(ServerStoppingEvent e) {
         saveAll(e.getServer());
         REGS.clear();
+        AUTHORITY.clear();
         FLAGS.clear();
     }
 
