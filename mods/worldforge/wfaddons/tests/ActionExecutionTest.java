@@ -141,6 +141,25 @@ public final class ActionExecutionTest {
                         && !enqueueTombstone.receiptId().isEmpty() && forbiddenReplay[0] == 0,
                 "failed durable enqueue creates a terminal tombstone and cannot execute on same-process retry");
 
+        Path runningBlockedFile = dir.resolve("running-blocked.json");
+        ActionExecutionService runningBlocked = new ActionExecutionService();
+        ActionExecutionService.Request runningBlockedRequest = new ActionExecutionService.Request(
+                "request-running-no-journal", "settlement.build", "player-3", "settlement-5", List.of("hall"), 112);
+        runningBlocked.enqueue(runningBlockedRequest, 112, runningBlockedFile);
+        Files.delete(runningBlockedFile);
+        Files.createDirectory(runningBlockedFile);
+        int[] unstartedEffects = {0};
+        ActionExecutionService.Task runningTombstone = runningBlocked.process(
+                "request-running-no-journal", r -> null,
+                (r, attempt) -> { unstartedEffects[0]++; return ActionResult.ok("must not run"); },
+                null, 113, runningBlockedFile);
+        check(runningTombstone.status() == ActionExecutionService.Status.FAILED
+                        && !runningTombstone.receiptId().isEmpty()
+                        && runningBlocked.receipts().stream().anyMatch(r -> r.requestId().equals("request-running-no-journal")
+                        && r.outcome() == ActionExecutionService.Status.FAILED)
+                        && unstartedEffects[0] == 0,
+                "failed RUNNING checkpoint produces an in-memory FAILED receipt and never enters the executor");
+
         ActionExecutionService restored = new ActionExecutionService();
         restored.load(file);
         check(restored.task("request-1") != null && restored.task("request-1").status() == ActionExecutionService.Status.SUCCEEDED
