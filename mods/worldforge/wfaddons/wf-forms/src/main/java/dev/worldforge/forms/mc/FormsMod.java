@@ -209,8 +209,7 @@ public class FormsMod {
         String owner = owner(player);
         String payload = what + "|" + id + "|" + arg;
         long minute = WorldForgeApi.clock().worldMinute();
-        String requestId = "forms:" + UUID.nameUUIDFromBytes(
-                (actor + ":" + source.getServer().getTickCount() + ":" + payload).getBytes(StandardCharsets.UTF_8));
+        String requestId = "forms:" + java.util.UUID.randomUUID();
         try {
             var task = WorldForgeApi.actionExecution().execute(
                     new dev.worldforge.mod.api.ActionExecutionService.Request(
