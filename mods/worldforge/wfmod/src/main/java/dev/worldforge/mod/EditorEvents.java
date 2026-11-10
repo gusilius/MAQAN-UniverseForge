@@ -190,7 +190,7 @@ public final class EditorEvents {
                         .getBytes(java.nio.charset.StandardCharsets.UTF_8));
         var request = new dev.worldforge.mod.api.ActionExecutionService.Request(
                 requestId, "worldforge.editor_wand", actor, dimension,
-                java.util.List.of(session.tool, session.province, session.assignTitle, payload), minute);
+                java.util.List.of(session.tool, Integer.toString(session.province), Integer.toString(session.assignTitle), payload), minute);
         try {
             var task = dev.worldforge.mod.api.WorldForgeApi.actionExecution().execute(request,
                     req -> {
