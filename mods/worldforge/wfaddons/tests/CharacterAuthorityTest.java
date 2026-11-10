@@ -39,6 +39,19 @@ public final class CharacterAuthorityTest {
         Character late = north.create("Late arrival", "", "", "m", 1);
         check(authority.getGlobal(late.globalId) == late,
                 "characters created after map registration are indexed without a second registration");
+        CharacterRegistry players = new CharacterRegistry();
+        Character player = players.create("PlayerOne", "", "human", "m", 80);
+        player.props.put("genesis.player_uuid", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+        player.props.put("genesis.initialized", true);
+        String playerSave = players.toJson();
+        CharacterRegistry restoredPlayers = new CharacterRegistry();
+        restoredPlayers.fromJson(playerSave, world + "|__players__");
+        authority.registerMap("__players__", restoredPlayers);
+        Character restoredPlayer = restoredPlayers.all().iterator().next();
+        check(restoredPlayer.globalId.equals(player.globalId)
+                        && "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".equals(restoredPlayer.props.get("genesis.player_uuid"))
+                        && authority.getGlobal(player.globalId) == restoredPlayer,
+                "Genesis player identity and player UUID survive registry restart without duplication");
         boolean duplicateRejected = false;
         try {
             CharacterRegistry duplicate = new CharacterRegistry();
