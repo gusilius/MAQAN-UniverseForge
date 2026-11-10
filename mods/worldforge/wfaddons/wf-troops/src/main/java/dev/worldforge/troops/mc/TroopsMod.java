@@ -517,7 +517,7 @@ public class TroopsMod {
         String requestId = "troop:" + java.util.UUID.nameUUIDFromBytes(
                 (actor + ":" + o.requestId()).getBytes(java.nio.charset.StandardCharsets.UTF_8));
         var request = new dev.worldforge.mod.api.ActionExecutionService.Request(
-                requestId, "military.client_order", actor, "selection", List.of(payload), minute);
+                requestId, "military.client_order", actor, "selection", List.of(o.toString()), minute);
         try {
             var task = dev.worldforge.mod.api.WorldForgeApi.actionExecution().execute(request,
                     req -> p.server.getPlayerList().getPlayer(p.getUUID()) == null
