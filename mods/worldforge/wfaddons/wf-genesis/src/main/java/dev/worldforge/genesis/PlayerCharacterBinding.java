@@ -23,8 +23,11 @@ public final class PlayerCharacterBinding {
         Objects.requireNonNull(mapRegistries, "mapRegistries");
         Objects.requireNonNull(playerRegistry, "playerRegistry");
 
-        Character saved = savedGlobalId == null || savedGlobalId.isBlank()
-                ? null : authority.getGlobal(savedGlobalId);
+        String savedId = savedGlobalId == null || savedGlobalId.isBlank()
+                ? "" : canonicalUuid(savedGlobalId, "saved Character UUID");
+        Character saved = savedId.isEmpty() ? null : authority.getGlobal(savedId);
+        if (!savedId.isEmpty() && saved == null)
+            throw new IllegalStateException("Saved Character UUID does not exist; refusing to create a replacement");
         Character match = null;
         for (CharacterRegistry registry : mapRegistries) {
             if (registry == null) continue;
@@ -34,7 +37,7 @@ public final class PlayerCharacterBinding {
 
         if (saved != null) {
             String boundPlayer = String.valueOf(saved.props.getOrDefault("genesis.player_uuid", ""));
-            if (boundPlayer.isBlank() || !playerUuid.equals(boundPlayer))
+            if (boundPlayer.isBlank() || !playerUuid.equals(canonicalUuid(boundPlayer, "bound player UUID")))
                 throw new IllegalStateException("Saved Character UUID is not bound to this Genesis player");
         }
         if (saved != null && match != null && !saved.globalId.equals(match.globalId))
@@ -53,8 +56,13 @@ public final class PlayerCharacterBinding {
         if (authority.registry("__players__") != playerRegistry)
             throw new IllegalStateException("Dedicated world-wide player Character partition is not registered");
         Character created = playerRegistry.create(name, "", culture, gender, birthYear);
-        created.props.put("genesis.player_uuid", playerUuid);
+        created.props.put("genesis.player_uuid", canonicalUuid(playerUuid, "player UUID"));
         return created;
+    }
+
+    private static String canonicalUuid(String value, String label) {
+        try { return java.util.UUID.fromString(Objects.requireNonNull(value, label)).toString(); }
+        catch (RuntimeException ex) { throw new IllegalArgumentException("Invalid " + label, ex); }
     }
 
     private static Character matchPlayer(Character current, CharacterRegistry registry, String playerUuid) {
