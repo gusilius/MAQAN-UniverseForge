@@ -436,7 +436,7 @@ public class SettleMod {
     /** Atomic settlement snapshot used when a domain action must persist before returning success. */
     public static boolean saveDurably(MinecraftServer server) {
         if (COLONIES.values().stream().anyMatch(colony -> colony != null && (colony.genesisProvisioningRuntimeBlocked || colony.actionPersistenceBlocked))) {
-            LOGGER.error("wf_settle: durable save blocked because a Genesis provisioning operation has uncommitted in-memory mutations");
+            LOGGER.error("wf_settle: durable save blocked because a settlement operation has uncommitted in-memory mutations");
             return false;
         }
         Path target = file(server);
@@ -519,7 +519,7 @@ public class SettleMod {
 
     public static void save(MinecraftServer server) {
         if (COLONIES.values().stream().anyMatch(colony -> colony != null && (colony.genesisProvisioningRuntimeBlocked || colony.actionPersistenceBlocked))) {
-            LOGGER.error("wf_settle: periodic/shutdown save skipped to preserve the last durable Genesis provisioning checkpoint");
+            LOGGER.error("wf_settle: periodic/shutdown save skipped to preserve the last durable settlement checkpoint");
             return;
         }
         try {
