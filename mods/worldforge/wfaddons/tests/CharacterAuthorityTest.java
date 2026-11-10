@@ -36,6 +36,12 @@ public final class CharacterAuthorityTest {
         check(authority.getGlobal(a.globalId) == a && authority.registryForGlobal(b.globalId) == south,
                 "global UUID resolves person and owning map registry");
         check(authority.getLegacy("c1") == null, "ambiguous bare legacy ID fails closed");
+        check(authority.bindEntity(a.globalId, "npc", "shared-physical-entity"),
+                "global authority binds a body to its canonical Character");
+        check(!authority.bindEntity(b.globalId, "troop", "shared-physical-entity"),
+                "one physical entity UUID cannot be attached to two Characters across map partitions");
+        check(authority.bindEntity(b.globalId, "troop", "another-physical-entity"),
+                "a distinct physical body can bind to a different map-owned Character");
         Character late = north.create("Late arrival", "", "", "m", 1);
         check(authority.getGlobal(late.globalId) == late,
                 "characters created after map registration are indexed without a second registration");
