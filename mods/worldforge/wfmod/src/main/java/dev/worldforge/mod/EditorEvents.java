@@ -150,7 +150,7 @@ public final class EditorEvents {
                             "Титул для назначения не выбран: /worldforge editor tool assign <уровень>");
                     TitleData.Title moved = ed.assignAtBlock(bx, bz, target.id);
                     EditorManager.touch(m);
-                    if (!persistEditorChanges(player, ed)) return dev.worldforge.mod.api.ActionResult.fail(
+                    if (persist && !persistEditorChanges(player, ed)) return dev.worldforge.mod.api.ActionResult.fail(
                             "Перенос титула не сохранён на диск; операция требует сверки");
                     return dev.worldforge.mod.api.ActionResult.ok(moved.name + " → " + target.name);
                 }
