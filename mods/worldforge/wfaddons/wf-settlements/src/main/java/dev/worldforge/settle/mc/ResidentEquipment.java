@@ -325,21 +325,25 @@ public final class ResidentEquipment {
 
     public static ActionResult receiveAction(WFWorker body, net.minecraft.server.level.ServerPlayer player) {
         Worker worker = body.worker();
+        Colony colony = body.colony();
         Character person = SettleMod.residentCharacter(body);
-        if (worker == null || person == null) return ActionResult.fail("Данные жителя недоступны.");
-        Tool expected = tool(requiredRole(worker, body.colony()));
+        if (worker == null || colony == null || person == null)
+            return ActionResult.fail("Данные жителя или поселения недоступны.");
+        String role = requiredRole(worker, colony);
+        Tool expected = tool(role);
         if (expected == null) return ActionResult.fail("Эта профессия не использует переносимый инструмент.");
         ItemStack offered = player.getMainHandItem();
-        if (!matches(offered, expected.kind)) return ActionResult.fail("Нужен инструмент подходящего типа для профессии " + requiredRole(worker, body.colony()) + ".");
+        if (!matches(offered, expected.kind))
+            return ActionResult.fail("Нужен инструмент подходящего типа для профессии " + role + ".");
         ItemStack copy = offered.copy();
         copy.setCount(1);
         int tier = copy.getItem() instanceof TieredItem tiered ? Math.max(0, Math.min(4, tiered.getTier().getLevel())) : 0;
-        if (tier > maxTier(person, body.colony(), worker, expected))
+        if (tier > maxTier(person, colony, worker, expected))
             return ActionResult.fail("Этот инструмент пока слишком высокого уровня. Нужны уровень персонажа и навык " + expected.skill + " выше.");
         ItemStack previous = load(person);
         if (!previous.isEmpty() && !player.getInventory().add(previous.copy()))
             return ActionResult.fail("Освободите место в инвентаре: старый инструмент нужно вернуть вам перед заменой.");
-        save(person, copy, tier, requiredRole(worker, body.colony()));
+        save(person, copy, tier, role);
         body.setItemSlot(EquipmentSlot.MAINHAND, copy.copy());
         offered.shrink(1);
         return ActionResult.ok("Принял инструмент от игрока: " + copy.getHoverName().getString()
