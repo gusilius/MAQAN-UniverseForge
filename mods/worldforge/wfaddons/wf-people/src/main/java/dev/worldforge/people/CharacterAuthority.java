@@ -38,7 +38,20 @@ public final class CharacterAuthority {
         CharacterRegistry previous = registries.putIfAbsent(key, registry);
         if (previous != null && previous != registry)
             throw new IllegalStateException("A different CharacterRegistry is already registered for map " + key);
-        refreshIndex();
+        try {
+            refreshIndex();
+        } catch (RuntimeException ex) {
+            // A rejected new partition must not poison the authority with a half-indexed registry.
+            if (previous == null) {
+                registries.remove(key, registry);
+                byIdentity.clear();
+                byGlobalId.clear();
+                byLegacyId.clear();
+                indexedRevisions.clear();
+                refreshIndex();
+            }
+            throw ex;
+        }
     }
 
     /** Rebuilds indexes so Characters created after map registration become immediately authoritative. */
