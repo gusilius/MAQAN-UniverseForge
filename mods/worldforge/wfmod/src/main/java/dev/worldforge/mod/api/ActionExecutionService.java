@@ -82,7 +82,23 @@ public final class ActionExecutionService {
         Task queued = new Task(request.requestId(), request.actionId(), request.actorId(), request.targetId(),
                 request.args(), Status.QUEUED, 0, "Queued", request.requestedMinute(), nowMinute, "");
         tasks.put(request.requestId(), queued);
-        persistOrRollback(durableFile, request.requestId());
+        if (durableFile != null) {
+            try {
+                save(durableFile);
+            } catch (IOException ex) {
+                // The domain executor has not run yet. Keep an in-memory terminal tombstone so
+                // a same-process retry cannot bypass the failed durable QUEUED write.
+                String receiptId = "receipt:" + request.requestId();
+                String message = "Could not durably persist queued action; execution is blocked until reconciliation";
+                Task blocked = new Task(queued.requestId(), queued.actionId(), queued.actorId(), queued.targetId(),
+                        queued.args(), Status.FAILED, 0, message, queued.createdMinute(), nowMinute, receiptId);
+                Receipt receipt = new Receipt(receiptId, queued.requestId(), queued.actionId(), queued.actorId(),
+                        queued.targetId(), Status.FAILED, 0, message, nowMinute);
+                tasks.put(request.requestId(), blocked);
+                receipts.put(receiptId, receipt);
+                throw new IllegalStateException(message + ": " + request.requestId(), ex);
+            }
+        }
         return queued;
     }
 
