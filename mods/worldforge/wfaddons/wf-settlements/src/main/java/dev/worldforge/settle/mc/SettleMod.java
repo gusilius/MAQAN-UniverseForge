@@ -435,7 +435,7 @@ public class SettleMod {
 
     /** Atomic settlement snapshot used when a domain action must persist before returning success. */
     public static boolean saveDurably(MinecraftServer server) {
-        if (COLONIES.values().stream().anyMatch(colony -> colony != null && colony.genesisProvisioningRuntimeBlocked)) {
+        if (COLONIES.values().stream().anyMatch(colony -> colony != null && (colony.genesisProvisioningRuntimeBlocked || colony.actionPersistenceBlocked))) {
             LOGGER.error("wf_settle: durable save blocked because a Genesis provisioning operation has uncommitted in-memory mutations");
             return false;
         }
@@ -518,7 +518,7 @@ public class SettleMod {
     }
 
     public static void save(MinecraftServer server) {
-        if (COLONIES.values().stream().anyMatch(colony -> colony != null && colony.genesisProvisioningRuntimeBlocked)) {
+        if (COLONIES.values().stream().anyMatch(colony -> colony != null && (colony.genesisProvisioningRuntimeBlocked || colony.actionPersistenceBlocked))) {
             LOGGER.error("wf_settle: periodic/shutdown save skipped to preserve the last durable Genesis provisioning checkpoint");
             return;
         }
@@ -533,6 +533,14 @@ public class SettleMod {
         } catch (Exception ex) {
             LOGGER.error("wf_settle: не удалось сохранить поселения: {}", ex.toString());
         }
+    }
+
+    /** Persist a player-issued domain mutation before its ActionExecution receipt can succeed. */
+    public static boolean persistActionMutation(MinecraftServer server, Colony colony) {
+        if (colony == null || colony.actionPersistenceBlocked || colony.genesisProvisioningRuntimeBlocked) return false;
+        if (saveDurably(server)) return true;
+        colony.actionPersistenceBlocked = true;
+        return false;
     }
 
     // ------------------------------------------------------------------ события сервера
