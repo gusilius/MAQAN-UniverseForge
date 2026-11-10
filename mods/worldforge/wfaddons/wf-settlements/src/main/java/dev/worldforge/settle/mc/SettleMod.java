@@ -409,7 +409,10 @@ public class SettleMod {
         String dimension = lv.dimension().location().toString();
         if (genesisOperationId != null && !genesisOperationId.isBlank()) {
             for (Colony existing : COLONIES.values()) {
-                if (dimension.equals(existing.dim) && genesisOperationId.equals(existing.genesisOperationId)) return existing;
+                if (!genesisOperationId.equals(existing.genesisOperationId)) continue;
+                if (dimension.equals(existing.dim)) return existing;
+                throw new IllegalStateException("Genesis operation " + genesisOperationId
+                        + " is already bound to dimension " + existing.dim + " and cannot create a second colony in " + dimension);
             }
         }
         String base = name.toLowerCase(Locale.ROOT).replaceAll("[^\\p{L}\\p{N}]+", "_").replaceAll("^_+|_+$", "");
