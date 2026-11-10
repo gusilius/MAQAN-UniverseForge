@@ -114,7 +114,7 @@ public final class TreasuryApi {
     }
 
     private static long worldMinute() {
-        return Math.max(0, WorldForgeApi.clock().dayNumber()) * 1440L;
+        return WorldForgeApi.clock().worldMinute();
     }
 
     public static synchronized double balance(String realm) {
