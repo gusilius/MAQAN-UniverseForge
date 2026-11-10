@@ -771,20 +771,7 @@ public class TroopsMod {
                     }
                     return 1;
                 }))
-                .then(Commands.literal("disband").executes(c -> {
-                    try {
-                        ServerPlayer p = c.getSource().getPlayerOrException();
-                        int n = 0;
-                        for (Squads.Squad s : new ArrayList<>(SQUADS.of(p.getUUID().toString()))) {
-                            for (String id : new ArrayList<>(s.members)) { TroopEntity t = LIVE.get(id); if (t != null) { releaseBody(t); t.discard(); n++; } SQUADS.remove(id); }
-                        }
-                        int cnt = n;
-                        c.getSource().sendSuccess(() -> Component.literal("Распущено солдат: " + cnt), false);
-                    } catch (Exception ex) {
-                        c.getSource().sendFailure(Component.literal("Только для игрока"));
-                    }
-                    return 1;
-                })));
+                .then(Commands.literal("disband").executes(c -> disband(c.getSource()))));
     }
 
     static int executeMilitaryCommand(CommandSourceStack source, String actionId, String target, String payload,
@@ -813,6 +800,29 @@ public class TroopsMod {
             source.sendFailure(Component.literal("Не удалось выполнить военный приказ: " + ex.getMessage()));
             return 0;
         }
+    }
+
+    private static int disband(CommandSourceStack source) {
+        String actor = source.getEntity() instanceof ServerPlayer player ? player.getUUID().toString() : "console";
+        return executeMilitaryCommand(source, "military.disband", actor, "disband", () -> {
+            try {
+                ServerPlayer player = source.getPlayerOrException();
+                int n = 0;
+                for (Squads.Squad squad : new ArrayList<>(SQUADS.of(player.getUUID().toString()))) {
+                    for (String id : new ArrayList<>(squad.members)) {
+                        TroopEntity troop = LIVE.get(id);
+                        if (troop != null) { releaseBody(troop); troop.discard(); n++; }
+                        SQUADS.remove(id);
+                    }
+                }
+                int count = n;
+                source.sendSuccess(() -> Component.literal("Распущено солдат: " + count), false);
+                return 1;
+            } catch (Exception ex) {
+                source.sendFailure(Component.literal("Только для игрока"));
+                return 0;
+            }
+        });
     }
 
     private static int createCorps(CommandSourceStack src, int armyId, String name) {
