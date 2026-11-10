@@ -37,6 +37,7 @@ import net.minecraft.server.packs.resources.ResourceManager;
 import net.minecraft.server.packs.resources.ResourceManagerReloadListener;
 import net.minecraft.world.entity.EntityDimensions;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
@@ -395,12 +396,15 @@ public class GenesisMod {
         person.props.put("genesis.profile_owner", o);
         ProgressMod.apply(sp);
         sp.setHealth(sp.getMaxHealth());
-        // вещи
+        // Стартовые предметы помечаются стабильным Genesis grant ID; повторный вызов
+        // учитывает уже выданные стопки и не создаёт дубликаты.
         if (st != null) {
-            give(sp, Items.GOLD_NUGGET, st.gold() * 10);
+            String grantBase = "genesis:" + sp.getUUID();
+            give(sp, Items.GOLD_NUGGET, st.gold() * 10, grantBase + ":gold");
             for (var e : st.items().entrySet()) {
                 Item it = BuiltInRegistries.ITEM.get(new ResourceLocation(e.getKey().contains(":") ? e.getKey() : "minecraft:" + e.getKey()));
-                if (it != Items.AIR) give(sp, it, e.getValue()); else LOGGER.warn("wf_genesis: нет предмета {}", e.getKey());
+                if (it != Items.AIR) give(sp, it, e.getValue(), grantBase + ":item:" + e.getKey());
+                else LOGGER.warn("wf_genesis: нет предмета {}", e.getKey());
             }
         }
         // место старта
@@ -451,11 +455,29 @@ public class GenesisMod {
         return person;
     }
 
-    private static void give(ServerPlayer sp, Item it, int n) {
-        while (n > 0) {
-            ItemStack s = new ItemStack(it, Math.min(n, it.getMaxStackSize()));
-            n -= s.getCount();
-            if (!sp.getInventory().add(s)) sp.drop(s, false);
+    private static void give(ServerPlayer sp, Item it, int n, String grantId) {
+        if (it == Items.AIR || n <= 0) return;
+        int alreadyGranted = 0;
+        for (int slot = 0; slot < sp.getInventory().getContainerSize(); slot++) {
+            ItemStack stack = sp.getInventory().getItem(slot);
+            if (stack.is(it) && stack.hasTag() && grantId.equals(stack.getTag().getString("wf_genesis_grant"))) {
+                alreadyGranted += stack.getCount();
+            }
+        }
+        // Inventory overflow is dropped with the same marker, so a retry in the same
+        // loaded area can still recognize the grant instead of duplicating it.
+        for (ItemEntity entity : sp.serverLevel().getEntitiesOfClass(ItemEntity.class,
+                sp.getBoundingBox().inflate(64.0),
+                itemEntity -> itemEntity.getItem().is(it) && itemEntity.getItem().hasTag()
+                        && grantId.equals(itemEntity.getItem().getTag().getString("wf_genesis_grant")))) {
+            alreadyGranted += entity.getItem().getCount();
+        }
+        int remaining = Math.max(0, n - alreadyGranted);
+        while (remaining > 0) {
+            ItemStack stack = new ItemStack(it, Math.min(remaining, it.getMaxStackSize()));
+            stack.getOrCreateTag().putString("wf_genesis_grant", grantId);
+            remaining -= stack.getCount();
+            if (!sp.getInventory().add(stack)) sp.drop(stack, false);
         }
     }
 
