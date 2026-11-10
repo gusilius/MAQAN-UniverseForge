@@ -118,6 +118,59 @@ public final class TreasuryLedgerTest {
         catch (IllegalArgumentException expected) { rejectedUnbalanced = true; }
         ok(rejectedUnbalanced, "ledger restore rejects a transfer whose matching debit/credit entry is missing");
 
+        TreasuryLedger collision = new TreasuryLedger();
+        collision.open("source", "source", "silver", 100);
+        collision.open("destination-a", "destination-a", "silver", 0);
+        collision.open("destination-b", "destination-b", "silver", 0);
+        ok(collision.withdrawOnce("source", 12, TreasuryLedger.Kind.LOGISTICS,
+                        "ration-feed", "ration-day-1", 50, "army food issue")
+                        && collision.withdrawOnce("source", 12, TreasuryLedger.Kind.LOGISTICS,
+                        "ration-feed", "ration-day-1", 50, "retry after restart")
+                        && close(collision.balance("source"), 88),
+                "same durable withdrawal payload is idempotent across retries");
+        double beforeCollision = collision.balance("source");
+        ok(!collision.withdrawOnce("source", 13, TreasuryLedger.Kind.LOGISTICS,
+                        "ration-feed", "ration-day-1", 50, "changed quantity")
+                        && close(collision.balance("source"), beforeCollision)
+                        && collision.lastError().contains("idempotency key collision"),
+                "reusing a withdrawal key with a different amount fails closed without another debit");
+        ok(!collision.withdrawOnce("source", 12, TreasuryLedger.Kind.LOGISTICS,
+                        "different-category", "ration-day-1", 50, "changed category")
+                        && close(collision.balance("source"), beforeCollision),
+                "reusing a withdrawal key with a different category fails closed");
+        ok(collision.depositOnce("source", 5, TreasuryLedger.Kind.IMPORT,
+                        "estate-return", "estate-1", 51, "return property")
+                        && collision.depositOnce("source", 5, TreasuryLedger.Kind.IMPORT,
+                        "estate-return", "estate-1", 51, "retry property")
+                        && close(collision.balance("source"), 93),
+                "same durable deposit payload is idempotent across retries");
+        ok(!collision.depositOnce("source", 7, TreasuryLedger.Kind.IMPORT,
+                        "estate-return", "estate-1", 51, "changed property value")
+                        && close(collision.balance("source"), 93),
+                "reusing a deposit key with different value fails closed");
+        ok(collision.transferOnce("source", "destination-a", 20, TreasuryLedger.Kind.LOGISTICS,
+                        "army-resupply", "supply:army-9:day-2", 2880, "field ration transfer")
+                        && collision.transferOnce("source", "destination-a", 20, TreasuryLedger.Kind.LOGISTICS,
+                        "army-resupply", "supply:army-9:day-2", 2880, "retry field ration transfer")
+                        && close(collision.balance("source"), 73)
+                        && close(collision.balance("destination-a"), 20),
+                "same double-entry transfer payload is idempotent across retries");
+        double sourceAfterTransfer = collision.balance("source");
+        ok(!collision.transferOnce("source", "destination-b", 20, TreasuryLedger.Kind.LOGISTICS,
+                        "army-resupply", "supply:army-9:day-2", 2880, "redirected destination")
+                        && !collision.transferOnce("source", "destination-a", 21, TreasuryLedger.Kind.LOGISTICS,
+                        "army-resupply", "supply:army-9:day-2", 2880, "changed amount")
+                        && close(collision.balance("source"), sourceAfterTransfer)
+                        && close(collision.balance("destination-a"), 20)
+                        && close(collision.balance("destination-b"), 0),
+                "reusing a transfer key with a changed destination or amount fails closed");
+        TreasuryLedger collisionRestored = TreasuryLedger.fromJson(collision.toJson());
+        ok(collisionRestored.transferOnce("source", "destination-a", 20, TreasuryLedger.Kind.LOGISTICS,
+                        "army-resupply", "supply:army-9:day-2", 2880, "retry after reload")
+                        && !collisionRestored.transferOnce("source", "destination-b", 20, TreasuryLedger.Kind.LOGISTICS,
+                        "army-resupply", "supply:army-9:day-2", 2880, "collision after reload"),
+                "transfer payload identity is rebuilt from persisted journal after restart");
+
         TreasuryApi.resetForTests();
         ok(TreasuryApi.migrateLegacyRealmBalance("legacy-positive", 25)
                         && TreasuryApi.migrateLegacyRealmBalance("legacy-positive", 25)

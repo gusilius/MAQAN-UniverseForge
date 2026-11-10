@@ -94,10 +94,38 @@ public final class TreasuryLedger {
         double offset=Math.min(a.debt,value); a.debt-=offset; a.balance+=value-offset; append("tx:"+transactionSequence++,a.id,"external",a.currency,value,true,kind,clean(category),clean(reference),worldMinute,a.balance,clean(memo));
         updateBankruptcy(a); return true;
     }
+    private static boolean sameAmount(double left, double right) {
+        return Double.isFinite(left) && Double.isFinite(right) && Math.abs(left - right) <= 1e-8;
+    }
+
+    private List<Entry> entriesForReference(String accountId, Kind kind, String reference) {
+        String cleanReference = clean(reference);
+        List<Entry> matches = new ArrayList<>();
+        for (Entry entry : journal) {
+            if (entry.accountId().equals(accountId) && entry.kind() == kind
+                    && entry.reference().equals(cleanReference)) matches.add(entry);
+        }
+        return matches;
+    }
+
+    private boolean matchesExternalPosting(String accountId, double value, Kind kind,
+                                           String category, String reference, boolean credit) {
+        List<Entry> matches = entriesForReference(accountId, kind, reference);
+        if (matches.isEmpty()) return false;
+        if (matches.size() != 1) return fail("idempotency key collision: ambiguous existing posting");
+        Entry entry = matches.get(0);
+        if (entry.credit() != credit || !entry.counterpartyId().equals("external")
+                || !entry.category().equals(clean(category)) || !sameAmount(entry.amount(), value))
+            return fail("idempotency key collision: existing posting payload differs");
+        return true;
+    }
+
     public boolean depositOnce(String accountId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
-        if (hasCredit(accountId, kind, reference)) return true;
-        boolean ok = deposit(accountId,value,kind,category,reference,worldMinute,memo);
-        return ok;
+        if (hasTransaction(accountId, kind, reference)) {
+            if (matchesExternalPosting(accountId, value, kind, category, reference, true)) return true;
+            return false;
+        }
+        return deposit(accountId,value,kind,category,reference,worldMinute,memo);
     }
     public boolean withdraw(String accountId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
         Account a=accounts.get(accountId); if(a==null) return fail("unknown account");
@@ -111,7 +139,10 @@ public final class TreasuryLedger {
         updateBankruptcy(a); return true;
     }
     public boolean withdrawOnce(String accountId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
-        if (hasDebit(accountId, kind, reference)) return true;
+        if (hasTransaction(accountId, kind, reference)) {
+            if (matchesExternalPosting(accountId, value, kind, category, reference, false)) return true;
+            return false;
+        }
         return withdraw(accountId,value,kind,category,reference,worldMinute,memo);
     }
     /** Atomic transfer: no balance changes occur unless both accounts and currency match and payer can cover it. */
@@ -134,8 +165,33 @@ public final class TreasuryLedger {
         append(tx,to.id,from.id,to.currency,value,true,kind,clean(category),clean(reference),worldMinute,to.balance,clean(memo));
         updateBankruptcy(from); updateBankruptcy(to); return true;
     }
+    private boolean matchesExistingTransfer(String fromId, String toId, double value,
+                                            Kind kind, String category, String reference) {
+        List<Entry> debits = entriesForReference(fromId, kind, reference).stream()
+                .filter(entry -> !entry.credit()).toList();
+        List<Entry> credits = entriesForReference(toId, kind, reference).stream()
+                .filter(Entry::credit).toList();
+        if (debits.size() != 1 || credits.size() != 1)
+            return fail("idempotency key collision: existing transfer is incomplete or ambiguous");
+        Entry debit = debits.get(0), credit = credits.get(0);
+        boolean valid = debit.counterpartyId().equals(toId)
+                && credit.counterpartyId().equals(fromId)
+                && debit.transactionId().equals(credit.transactionId())
+                && debit.currency().equals(credit.currency())
+                && debit.category().equals(clean(category))
+                && credit.category().equals(clean(category))
+                && sameAmount(debit.amount(), value)
+                && sameAmount(credit.amount(), value);
+        if (!valid) return fail("idempotency key collision: existing transfer payload differs");
+        return true;
+    }
+
     public boolean transferOnce(String fromId,String toId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
-        if (hasDebit(fromId, kind, reference)) return true;
+        if (hasTransaction(fromId, kind, reference)) {
+            return matchesExistingTransfer(fromId,toId,value,kind,category,reference);
+        }
+        if (hasTransaction(toId, kind, reference))
+            return fail("idempotency key collision: destination already has a posting for this reference");
         return transfer(fromId,toId,value,kind,category,reference,worldMinute,memo);
     }
     /** Creates matched cash and debt; unlike a deposit, loan proceeds do not repay existing liabilities. */
