@@ -124,6 +124,23 @@ public final class ActionExecutionTest {
         check(partialDuplicate.status() == ActionExecutionService.Status.FAILED && partialEffects[0] == 1,
                 "retrying the same Genesis operation ID never replays uncertain partial side effects");
 
+        Path blockedParent = dir.resolve("blocked-parent");
+        Files.writeString(blockedParent, "not a directory");
+        Path blockedJournal = blockedParent.resolve("actions.json");
+        ActionExecutionService blockedEnqueue = new ActionExecutionService();
+        ActionExecutionService.Request blockedRequest = new ActionExecutionService.Request(
+                "request-no-journal", "genesis.confirm", "player-2", "player-2", List.of("draft"), 111);
+        boolean enqueueFailed = false;
+        try { blockedEnqueue.enqueue(blockedRequest, 111, blockedJournal); }
+        catch (IllegalStateException expected) { enqueueFailed = true; }
+        int[] forbiddenReplay = {0};
+        ActionExecutionService.Task enqueueTombstone = blockedEnqueue.execute(blockedRequest,
+                r -> null, (r, attempt) -> { forbiddenReplay[0]++; return ActionResult.ok("must not execute"); },
+                null, 112, blockedJournal);
+        check(enqueueFailed && enqueueTombstone.status() == ActionExecutionService.Status.FAILED
+                        && !enqueueTombstone.receiptId().isEmpty() && forbiddenReplay[0] == 0,
+                "failed durable enqueue creates a terminal tombstone and cannot execute on same-process retry");
+
         ActionExecutionService restored = new ActionExecutionService();
         restored.load(file);
         check(restored.task("request-1") != null && restored.task("request-1").status() == ActionExecutionService.Status.SUCCEEDED
