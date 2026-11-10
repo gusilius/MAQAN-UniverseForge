@@ -11,6 +11,8 @@ public final class Character {
         public Post(String role, String place) { this.role = role; this.place = place; }
     }
 
+    /** Stable world-wide UUID; legacy id remains only as a map-local compatibility key. */
+    public final String globalId;
     public final String id;
     public String name, house = "", culture = "", gender = "m";
     public int birthYear;
@@ -21,7 +23,14 @@ public final class Character {
     public final Set<String> traits = new TreeSet<>();
     public final Map<String, Object> props = new LinkedHashMap<>();
 
-    Character(String id, String name) { this.id = id; this.name = name; }
+    Character(String id, String name) { this(id, java.util.UUID.randomUUID().toString(), name); }
+
+    Character(String id, String globalId, String name) {
+        this.id = Objects.requireNonNull(id, "id");
+        this.globalId = Objects.requireNonNull(globalId, "globalId");
+        java.util.UUID.fromString(this.globalId);
+        this.name = name;
+    }
 
     public boolean has(String role, String place) {
         for (Post p : posts) if (p.role.equals(role) && p.place.equals(place)) return true;
