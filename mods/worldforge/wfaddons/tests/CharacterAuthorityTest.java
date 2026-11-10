@@ -80,6 +80,9 @@ public final class CharacterAuthorityTest {
                         && authority.size() == 5
                         && authority.mapCount() == 4,
                 "failed map registration preserves every previously indexed Character and registry");
+        authority.beginWorld(world);
+        check(authority.getGlobal(a.globalId) == a && authority.size() == 5 && authority.mapCount() == 4,
+                "re-entering the same WorldId preserves already registered Character partitions");
 
         authority.clear();
         check(authority.size() == 0 && authority.worldId() == null, "world shutdown clears authority index");
