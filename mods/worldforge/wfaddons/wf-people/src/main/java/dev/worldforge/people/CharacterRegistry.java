@@ -316,14 +316,14 @@ public final class CharacterRegistry {
     /** Только перечисленные персонажи (null - все): для окон на клиенте, которым не нужен весь мир. */
     public String toJson(Set<String> only) {
         Map<String, Object> root = new LinkedHashMap<>();
-        root.put("format", "wf-people/2");
-        root.put("schema_version", 2);
+        root.put("format", "wf-people/3");
+        root.put("schema_version", 3);
         root.put("next", next);
         List<Object> list = new ArrayList<>();
         for (Character c : byId.values()) {
             if (only != null && !only.contains(c.id)) continue;
             Map<String, Object> m = new LinkedHashMap<>();
-            m.put("id", c.id); m.put("name", c.name); m.put("house", c.house); m.put("culture", c.culture); m.put("gender", c.gender);
+            m.put("id", c.id); m.put("global_id", c.globalId); m.put("name", c.name); m.put("house", c.house); m.put("culture", c.culture); m.put("gender", c.gender);
             m.put("birth", c.birthYear); m.put("alive", c.alive); m.put("father", c.father); m.put("mother", c.mother); m.put("spouse", c.spouse);
             m.put("children", new ArrayList<Object>(c.children));
             List<Object> posts = new ArrayList<>();
@@ -338,13 +338,17 @@ public final class CharacterRegistry {
     }
 
     @SuppressWarnings("unchecked")
-    public void fromJson(String json) {
+    public void fromJson(String json) { fromJson(json, "legacy-unscoped"); }
+
+    /** Loads old map-local saves and deterministically assigns stable IDs within the supplied world/map namespace. */
+    public void fromJson(String json, String identityNamespace) {
+        if (identityNamespace == null || identityNamespace.isBlank()) throw new IllegalArgumentException("identityNamespace is required");
         // Parse and validate into an isolated snapshot. Never destroy the live registry
         // until the entire save has been accepted.
         Object parsed = Json.parse(json == null ? "" : json);
         if (!(parsed instanceof Map<?, ?> raw)) throw new IllegalArgumentException("Повреждён корень сохранения людей");
         String format = raw.get("format") instanceof String f ? f : "";
-        if (!"wf-people/1".equals(format) && !"wf-people/2".equals(format))
+        if (!"wf-people/1".equals(format) && !"wf-people/2".equals(format) && !"wf-people/3".equals(format))
             throw new IllegalArgumentException("Неверный формат людей: " + format);
         // wf-people/1 is migrated in memory without regenerating IDs, family links or existing props.
         // Missing Phase-VII extension fields are intentionally defaulted by their accessors.
@@ -355,6 +359,7 @@ public final class CharacterRegistry {
         if (!(raw.get("characters") instanceof List<?> entries)) throw new IllegalArgumentException("Отсутствует список персонажей");
 
         Map<String, Character> loaded = new LinkedHashMap<>();
+        Map<String, String> globalOwners = new HashMap<>();
         Map<String, String> entityOwners = new HashMap<>();
         int maxNumericId = 0;
         for (Object value : entries) {
@@ -362,7 +367,18 @@ public final class CharacterRegistry {
             String id = requiredString(m, "id");
             String name = requiredString(m, "name");
             if (id.isBlank() || name.isBlank()) throw new IllegalArgumentException("Пустой ID или имя персонажа");
-            Character c = new Character(id, name);
+            String globalId = optionalString(m, "global_id");
+            if (globalId.isBlank()) {
+                globalId = java.util.UUID.nameUUIDFromBytes((identityNamespace + "|" + id)
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString();
+            } else {
+                try { globalId = java.util.UUID.fromString(globalId).toString(); }
+                catch (IllegalArgumentException ex) { throw new IllegalArgumentException("Некорректный global_id персонажа " + id, ex); }
+            }
+            String previousGlobalOwner = globalOwners.putIfAbsent(globalId, id);
+            if (previousGlobalOwner != null)
+                throw new IllegalArgumentException("Повторный global_id персонажа: " + globalId + " (" + previousGlobalOwner + ", " + id + ")");
+            Character c = new Character(id, globalId, name);
             c.house = optionalString(m, "house");
             c.culture = optionalString(m, "culture");
             c.gender = optionalString(m, "gender");
