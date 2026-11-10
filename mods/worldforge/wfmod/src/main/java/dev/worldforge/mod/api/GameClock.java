@@ -9,7 +9,8 @@ import java.util.*;
  * ({@link #pull}), поэтому пауза и ускорение действуют на все системы сразу. Чистая логика, без Minecraft.
  */
 public final class GameClock {
-    public static final int TICKS_PER_DAY = 1200, YEAR_DAYS = 365, MONTH_DAYS = 30;
+    public static final int TICKS_PER_DAY = 1200, YEAR_DAYS = 365;
+    private static final int[] MONTH_LENGTHS = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
     public static final int[] SPEEDS = {0, 1, 2, 5, 10};
     public static final String[] SPEED_NAMES = {"Пауза", "x1", "x2", "x5", "x10"};
     public static final String[] MONTHS = {"Января", "Февраля", "Марта", "Апреля", "Мая", "Июня", "Июля", "Августа", "Сентября", "Октября", "Ноября", "Декабря"};
@@ -38,7 +39,10 @@ public final class GameClock {
     public void slower() { if (speed > 1) setSpeed(speed - 1); }
 
     /** Прошло столько серверных тиков (1 тик = 1/1200 дня при скорости x1). */
-    public void advance(int ticks) { elapsed += (double) SPEEDS[speed] * ticks / TICKS_PER_DAY; }
+    public void advance(int ticks) {
+        if (ticks < 0) throw new IllegalArgumentException("ticks cannot be negative");
+        elapsed += (double) SPEEDS[speed] * ticks / TICKS_PER_DAY;
+    }
 
     /** Сколько целых игровых дней прошло с прошлого вызова для этого потребителя; первый вызов возвращает 0. */
     public int pull(String consumer) {
@@ -53,10 +57,31 @@ public final class GameClock {
     // ------------------------------------------------------------------ календарь
 
     public long dayNumber() { return (long) Math.floor(elapsed); }
+    /** Canonical elapsed world minute, including the fractional day. */
+    public long worldMinute() { return Math.max(0L, (long) Math.floor(elapsed * 1440.0)); }
+    public int seasonIndex() { return Math.min(3, dayOfYear() / (YEAR_DAYS / 4 + 1)); }
+    public double seasonProgress() {
+        int seasonDay = dayOfYear() % 91;
+        return Math.min(1.0, (seasonDay + (elapsed - Math.floor(elapsed))) / (dayOfYear() < 273 ? 91.0 : 92.0));
+    }
     public int year() { return startYear + (int) (dayNumber() / YEAR_DAYS); }
     public int dayOfYear() { return (int) (dayNumber() % YEAR_DAYS); }
-    public int month() { return Math.min(11, dayOfYear() / MONTH_DAYS); }
-    public int dayOfMonth() { return dayOfYear() - month() * MONTH_DAYS + 1; }
+    public int month() {
+        int remaining = dayOfYear();
+        for (int i = 0; i < MONTH_LENGTHS.length; i++) {
+            if (remaining < MONTH_LENGTHS[i]) return i;
+            remaining -= MONTH_LENGTHS[i];
+        }
+        return 11;
+    }
+    public int dayOfMonth() {
+        int remaining = dayOfYear();
+        for (int i = 0; i < MONTH_LENGTHS.length; i++) {
+            if (remaining < MONTH_LENGTHS[i]) return remaining + 1;
+            remaining -= MONTH_LENGTHS[i];
+        }
+        return 31;
+    }
     public String dateText() { return dayOfMonth() + " " + MONTHS[month()] + " " + year(); }
 
     // ------------------------------------------------------------------ сохранение
