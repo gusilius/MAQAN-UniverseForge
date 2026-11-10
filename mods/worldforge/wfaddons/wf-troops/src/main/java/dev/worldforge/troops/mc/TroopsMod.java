@@ -189,14 +189,56 @@ public class TroopsMod {
     public void stopping(ServerStoppingEvent e) { save(); LIVE.clear(); server = null; }
 
     static void save() {
-        if (server == null) return;
+        if (!saveDurably()) LOGGER.error("wf_troops: durable save failed; latest military mutations must not be acknowledged as committed");
+    }
+
+    /** Writes all three military snapshots as one staged transaction and restores prior files on failure. */
+    static boolean saveDurably() {
+        if (server == null) return false;
+        Map<Path, String> snapshots = new LinkedHashMap<>();
+        Path root = dir(server);
+        snapshots.put(root.resolve("wf_squads.json"), SQUADS.toJson());
+        snapshots.put(root.resolve("wf_army_hierarchy.json"), HIERARCHY.toJson());
+        snapshots.put(root.resolve("wf_forts.json"), FORTS.toJson());
+        Map<Path, Path> staged = new LinkedHashMap<>(), backups = new LinkedHashMap<>();
+        Set<Path> replaced = new LinkedHashSet<>();
         try {
-            Files.createDirectories(dir(server));
-            Files.writeString(dir(server).resolve("wf_squads.json"), SQUADS.toJson());
-            Files.writeString(dir(server).resolve("wf_army_hierarchy.json"), HIERARCHY.toJson());
-            Files.writeString(dir(server).resolve("wf_forts.json"), FORTS.toJson());
+            Files.createDirectories(root);
+            for (Map.Entry<Path, String> entry : snapshots.entrySet()) {
+                Path target = entry.getKey();
+                Path temp = target.resolveSibling(target.getFileName() + ".action.tmp");
+                Path backup = target.resolveSibling(target.getFileName() + ".action.bak");
+                Files.deleteIfExists(temp);
+                Files.deleteIfExists(backup);
+                Files.writeString(temp, entry.getValue(), StandardCharsets.UTF_8);
+                staged.put(target, temp);
+                if (Files.isRegularFile(target)) {
+                    Files.copy(target, backup, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    backups.put(target, backup);
+                }
+            }
+            for (Map.Entry<Path, Path> entry : staged.entrySet()) {
+                Files.move(entry.getValue(), entry.getKey(), java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                        java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+                replaced.add(entry.getKey());
+            }
+            return true;
         } catch (Exception ex) {
-            LOGGER.error("save squads: {}", ex.toString());
+            LOGGER.error("wf_troops: atomic military snapshot failed: {}", ex.toString());
+            for (Path target : replaced) {
+                try {
+                    Path backup = backups.get(target);
+                    if (backup != null && Files.exists(backup))
+                        Files.copy(backup, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    else Files.deleteIfExists(target);
+                } catch (Exception rollback) {
+                    LOGGER.error("wf_troops: military snapshot rollback failed for {}: {}", target, rollback.toString());
+                }
+            }
+            return false;
+        } finally {
+            for (Path temp : staged.values()) try { Files.deleteIfExists(temp); } catch (Exception ignored) {}
+            for (Path backup : backups.values()) try { Files.deleteIfExists(backup); } catch (Exception ignored) {}
         }
     }
 
@@ -536,9 +578,12 @@ public class TroopsMod {
                     (req, attempt) -> {
                         ActionResult result = handleOrderDirect(p, o);
                         if (!result.ok) return result;
-                        if (ModList.get().isLoaded("wf_settle") && WorkerControl.anyWorker(p, o)
+                        if (!saveDurably())
+                            return ActionResult.fail("Приказ применён в памяти, но военные снимки не сохранены; требуется сверка");
+                        if (ModList.get().isLoaded("wf_settle")
+                                && (o.action() == OrderPacket.BUILD || WorkerControl.anyWorker(p, o))
                                 && !dev.worldforge.settle.mc.SettleMod.persistActionMutation(p.server))
-                            return ActionResult.fail("Приказ изменил состояние рабочих в памяти, но снимок поселений не сохранён; изменения заблокированы до сверки");
+                            return ActionResult.fail("Приказ изменил состояние поселения в памяти, но снимок не сохранён; изменения заблокированы до сверки");
                         return result;
                     }, null, minute,
                     dev.worldforge.mod.WorldForgeMod.actionExecutionFile(p.server));
@@ -840,9 +885,14 @@ public class TroopsMod {
                             return "Для этого военного приказа нужны права оператора";
                         return null;
                     },
-                    (req, attempt) -> action.getAsInt() > 0
-                            ? dev.worldforge.mod.api.ActionResult.ok("Военный приказ выполнен")
-                            : dev.worldforge.mod.api.ActionResult.fail("Военный приказ отклонён"),
+                    (req, attempt) -> {
+                        if (action.getAsInt() <= 0)
+                            return dev.worldforge.mod.api.ActionResult.fail("Военный приказ отклонён");
+                        if (!saveDurably())
+                            return dev.worldforge.mod.api.ActionResult.fail(
+                                    "Военный приказ применён в памяти, но военные снимки не сохранены; требуется сверка");
+                        return dev.worldforge.mod.api.ActionResult.ok("Военный приказ выполнен");
+                    },
                     null, minute, WorldForgeMod.actionExecutionFile(source.getServer()));
             if (task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.FAILED)
                 source.sendFailure(Component.literal(task.message()));
