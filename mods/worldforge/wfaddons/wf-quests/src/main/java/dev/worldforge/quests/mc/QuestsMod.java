@@ -167,10 +167,25 @@ public class QuestsMod {
             ServerPlayer p = player(pl);
             MapData m = p == null ? null : EditorManager.dataFor(p.serverLevel());
             if (m == null) { QUESTS.lastError = "Карта недоступна."; return null; }
-            ActionResult r = WorldForgeApi.run(action, new ActionContext(EditorManager.editorFor(m), p.getGameProfile().getName(), WFPerm.trusted(p.createCommandSourceStack()), realm, 0, args));
-            if (!r.ok) { QUESTS.lastError = r.message; return null; }
-            EditorManager.touch(m);
-            return r.message;
+            ActionContext context = new ActionContext(EditorManager.editorFor(m),
+                    p.getGameProfile().getName(), WFPerm.trusted(p.createCommandSourceStack()), realm, 0, args);
+            String actor = p.getUUID().toString();
+            String payload = action + "|" + realm + "|" + String.join("|", args);
+            long minute = WorldForgeApi.clock().worldMinute();
+            String requestId = "quests-action:" + java.util.UUID.randomUUID();
+            try {
+                var task = WorldForgeApi.submitAction(requestId, action, context,
+                        WorldForgeMod.actionExecutionFile(p.server), minute);
+                if (task.status() != dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED) {
+                    QUESTS.lastError = task.message();
+                    return null;
+                }
+                EditorManager.touch(m);
+                return task.message();
+            } catch (RuntimeException ex) {
+                QUESTS.lastError = "Не удалось выполнить действие задания: " + ex.getMessage();
+                return null;
+            }
         }
         @Override public void news(String text) { WorldForgeApi.postEvent("quests", text, List.of()); }
         @Override public void notify(String pl, String text) { ServerPlayer p = player(pl); if (p != null) p.sendSystemMessage(Component.literal(text)); }
@@ -266,9 +281,32 @@ public class QuestsMod {
                 .then(Commands.literal("fire").requires(s -> s.hasPermission(2)).then(Commands.argument("event", StringArgumentType.word()).then(Commands.argument("realm", StringArgumentType.word()).executes(c -> {
                     QuestDefs.Event ev = DEFS.events.get(StringArgumentType.getString(c, "event"));
                     if (ev == null) { c.getSource().sendFailure(Component.literal("Нет такого события.")); return 0; }
-                    QUESTS.fire(ev, StringArgumentType.getString(c, "realm"), day(), RNG);
-                    c.getSource().sendSuccess(() -> Component.literal("Событие запущено."), true);
-                    return 1;
+                    CommandSourceStack source = c.getSource();
+                    String realm = StringArgumentType.getString(c, "realm");
+                    String actor = source.getEntity() instanceof ServerPlayer player ? player.getUUID().toString() : "console";
+                    long minute = WorldForgeApi.clock().worldMinute();
+                    String requestId = "quests-fire:" + UUID.nameUUIDFromBytes(
+                            (actor + ":" + source.getServer().getTickCount() + ":" + ev.id() + ":" + realm)
+                                    .getBytes(StandardCharsets.UTF_8));
+                    try {
+                        var task = WorldForgeApi.actionExecution().execute(
+                                new dev.worldforge.mod.api.ActionExecutionService.Request(
+                                        requestId, "quests.fire_event", actor, realm, List.of(ev.id()), minute),
+                                req -> source.hasPermission(2) ? null : "Нужны права оператора",
+                                (req, attempt) -> {
+                                    QUESTS.fire(ev, realm, day(), RNG);
+                                    return ActionResult.ok("Событие запущено.");
+                                }, null, minute, WorldForgeMod.actionExecutionFile(source.getServer()));
+                        if (task.status() != dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED) {
+                            source.sendFailure(Component.literal(task.message()));
+                            return 0;
+                        }
+                        source.sendSuccess(() -> Component.literal(task.message()), true);
+                        return 1;
+                    } catch (RuntimeException ex) {
+                        source.sendFailure(Component.literal("Не удалось запустить событие: " + ex.getMessage()));
+                        return 0;
+                    }
                 })))));
     }
 
@@ -282,14 +320,35 @@ public class QuestsMod {
     private static int act(CommandSourceStack s, String what, int id, String opt) {
         ServerPlayer sp = s.getPlayer();
         if (sp == null) return 0;
-        String p = sp.getUUID().toString();
-        boolean ok = switch (what) {
-            case "choose" -> QUESTS.choose(p, id, opt, day());
-            case "resolve" -> QUESTS.resolve(p, id, opt, day());
-            case "abandon" -> QUESTS.abandon(p, id, day());
-            default -> true;
-        };
-        if (!ok) s.sendFailure(Component.literal(QUESTS.lastError));
-        return open(s);
+        String actor = sp.getUUID().toString();
+        long minute = WorldForgeApi.clock().worldMinute();
+        String payload = what + "|" + id + "|" + opt;
+        String requestId = "quests-command:" + java.util.UUID.randomUUID();
+        try {
+            var task = WorldForgeApi.actionExecution().execute(
+                    new dev.worldforge.mod.api.ActionExecutionService.Request(
+                            requestId, "quests." + what, actor, Integer.toString(id), List.of(payload), minute),
+                    req -> s.getServer().getPlayerList().getPlayer(sp.getUUID()) == null
+                            ? "Игрок отключился до исполнения команды задания" : null,
+                    (req, attempt) -> {
+                        boolean ok = switch (what) {
+                            case "choose" -> QUESTS.choose(actor, id, opt, day());
+                            case "resolve" -> QUESTS.resolve(actor, id, opt, day());
+                            case "abandon" -> QUESTS.abandon(actor, id, day());
+                            default -> false;
+                        };
+                        return ok ? ActionResult.ok("Задание обновлено")
+                                : ActionResult.fail(QUESTS.lastError.isBlank() ? "Действие задания отклонено" : QUESTS.lastError);
+                    }, null, minute, WorldForgeMod.actionExecutionFile(s.getServer()));
+            boolean ok = task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED;
+            if (ok) s.sendSuccess(() -> Component.literal(task.message()), false);
+            else s.sendFailure(Component.literal(task.message()));
+            open(s);
+            return ok ? 1 : 0;
+        } catch (RuntimeException ex) {
+            s.sendFailure(Component.literal("Не удалось выполнить действие задания: " + ex.getMessage()));
+            open(s);
+            return 0;
+        }
     }
 }

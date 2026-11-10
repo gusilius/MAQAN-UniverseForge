@@ -52,6 +52,17 @@ public final class Colony {
     public SettlementMap map = new SettlementMap();
     /** UUID игрока-правителя (пусто - поселение без правителя-игрока). Правитель управляет своим поселением без прав оператора. */
     public String owner = "";
+    /** Stable origin operation that created this colony; empty for ordinary settlements. */
+    public String genesisOperationId = "";
+    /** Provisioning is guarded across retries; an interrupted phase requires reconciliation, never replay. */
+    public boolean genesisProvisioningStarted, genesisProvisioned;
+    /** Durable cursor and immutable input fingerprint for resumable Genesis provisioning. */
+    public int genesisProvisioningStep;
+    public String genesisProvisioningSpec = "";
+    /** Runtime-only poison flag: do not retry unsaved mutations until the last durable snapshot is reloaded. */
+    public transient boolean genesisProvisioningRuntimeBlocked;
+    /** Runtime-only freeze after a settlement action changed state but could not persist its receipt-side snapshot. */
+    public transient boolean actionPersistenceBlocked;
 
     public Colony(Settlement s, String dim, int cx, int cz) {
         this.s = s;
@@ -129,6 +140,11 @@ public final class Colony {
         m.put("cx", cx);
         m.put("cz", cz);
         m.put("owner", owner);
+        m.put("genesisOperationId", genesisOperationId);
+        m.put("genesisProvisioningStarted", genesisProvisioningStarted);
+        m.put("genesisProvisioned", genesisProvisioned);
+        m.put("genesisProvisioningStep", genesisProvisioningStep);
+        m.put("genesisProvisioningSpec", genesisProvisioningSpec);
         m.put("settlement", Json.parse(s.toJson()));
         List<Object> l = new ArrayList<>();
         for (Map.Entry<Integer, Site> e : sites.entrySet()) {
@@ -167,6 +183,11 @@ public final class Colony {
         Colony c = new Colony(s, (String) m.get("dim"), ((Number) m.get("cx")).intValue(), ((Number) m.get("cz")).intValue());
         if (m.get("map") instanceof Map<?, ?> mapData) c.map = SettlementMap.fromJson(Json.write(mapData));
         if (m.get("owner") instanceof String ow) c.owner = ow;
+        if (m.get("genesisOperationId") instanceof String operationId) c.genesisOperationId = operationId;
+        c.genesisProvisioningStarted = Boolean.TRUE.equals(m.get("genesisProvisioningStarted"));
+        c.genesisProvisioned = Boolean.TRUE.equals(m.get("genesisProvisioned"));
+        if (m.get("genesisProvisioningStep") instanceof Number step) c.genesisProvisioningStep = Math.max(0, step.intValue());
+        if (m.get("genesisProvisioningSpec") instanceof String spec) c.genesisProvisioningSpec = spec;
         if (m.get("workOrders") instanceof List<?> orders) {
             for (Object raw : orders) {
                 if (!(raw instanceof Map<?, ?> row)) continue;

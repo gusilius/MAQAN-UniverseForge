@@ -166,10 +166,25 @@ final class FortService {
             made.add(t);
             ids.add(t.getUUID().toString());
         }
+        if (made.isEmpty()) {
+            src.sendFailure(Component.literal("Не удалось создать ни одного бойца гарнизона; состав не изменён."));
+            return 0;
+        }
         Squads.Squad s = TroopsMod.SQUADS.create(owner, "Гарнизон " + f.name, ids);
         s.realm = f.realm; s.stance = Squads.Stance.HOLD; s.cx = f.x; s.cz = f.z;
-        for (TroopEntity t : made) { t.setSquadId(s.id); lv.addFreshEntity(t); }
-        src.sendSuccess(() -> Component.literal("Гарнизон «" + f.name + "»: +" + made.size() + " × " + u.name()), false);
+        for (TroopEntity t : made) {
+            t.setSquadId(s.id);
+            if (!lv.addFreshEntity(t)) {
+                for (TroopEntity prepared : made) prepared.discard();
+                TroopsMod.SQUADS.disband(s.id);
+                TroopsMod.save();
+                src.sendFailure(Component.literal("Мир отклонил создание гарнизона; подготовленные бойцы и отряд отменены."));
+                return 0;
+            }
+        }
+        TroopsMod.save();
+        String quantity = made.size() == n ? "+" + made.size() : "+" + made.size() + " из " + n;
+        src.sendSuccess(() -> Component.literal("Гарнизон «" + f.name + "»: " + quantity + " × " + u.name()), false);
         return made.size();
     }
 }

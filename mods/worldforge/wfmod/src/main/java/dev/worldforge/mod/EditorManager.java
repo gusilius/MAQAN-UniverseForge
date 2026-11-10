@@ -41,6 +41,8 @@ public final class EditorManager {
     private static final Map<UUID, Session> SESSIONS = new ConcurrentHashMap<>();
     private static final Map<MapData, TitleEditor> EDITORS = Collections.synchronizedMap(new IdentityHashMap<>());
     private static final Set<MapData> STALE = Collections.synchronizedSet(Collections.newSetFromMap(new IdentityHashMap<>()));
+    /** Maps with an uncommitted editor mutation are frozen until server restart/reload. */
+    private static final Set<MapData> BLOCKED = Collections.synchronizedSet(Collections.newSetFromMap(new IdentityHashMap<>()));
 
     private static final Map<MapData, Integer> VERSIONS = Collections.synchronizedMap(new IdentityHashMap<>());
     private static final Map<MapData, Markers> MARKERS = Collections.synchronizedMap(new IdentityHashMap<>());
@@ -109,6 +111,14 @@ public final class EditorManager {
         return FMLPaths.CONFIGDIR.get().resolve(WorldForgeMod.MOD_ID).resolve("export").resolve(safeName(m));
     }
 
+    public static void blockMutations(MapData map) {
+        if (map != null) BLOCKED.add(map);
+    }
+
+    public static boolean mutationsBlocked(MapData map) {
+        return map != null && BLOCKED.contains(map);
+    }
+
     /** Помечает карты-предметы устаревшими после правки. */
     public static void touch(MapData m) {
         STALE.add(m);
@@ -135,7 +145,7 @@ public final class EditorManager {
         }
         synchronized (EDITORS) {
             for (Map.Entry<MapData, TitleEditor> e : EDITORS.entrySet()) {
-                if (!e.getValue().isDirty()) continue;
+                if (BLOCKED.contains(e.getKey()) || !e.getValue().isDirty()) continue;
                 try {
                     TitleStore.save(e.getKey(), overlayDir(server, e.getKey()));
                     e.getValue().clearDirty();
@@ -154,6 +164,7 @@ public final class EditorManager {
         VERSIONS.clear();
         EDITORS.clear();
         STALE.clear();
+        BLOCKED.clear();
     }
 
     /** Накладывает сохранённые правки при загрузке карты. */

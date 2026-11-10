@@ -13,7 +13,8 @@ import java.util.List;
 /** Экран диалога: тёмная панель внизу, имя говорящего, текст с переносом, нумерованные ответы. Рисуется как MapScreen, без виджетов. Esc закрывает. */
 public class DialogueScreen extends Screen {
     private static final int PAD = 10, LINE = 10, MARGIN = 20;
-    private int sessionId;
+    private long sessionId;
+    private int revision;
     private String speaker, text;
     private byte mode;
     private List<String> choices;
@@ -24,10 +25,10 @@ public class DialogueScreen extends Screen {
         update(v);
     }
 
-    public int sessionId() { return sessionId; }
+    public long sessionId() { return sessionId; }
 
     public void update(DialogueNet.OpenView v) {
-        sessionId = v.sessionId; speaker = v.speaker; text = v.text; mode = v.mode; choices = v.choices;
+        sessionId = v.sessionId; revision = v.revision; speaker = v.speaker; text = v.text; mode = v.mode; choices = v.choices;
     }
 
     @Override
@@ -47,7 +48,7 @@ public class DialogueScreen extends Screen {
 
     private void pick(int i) {
         if (mode == DialogueNet.MODE_END) { onClose(); return; }
-        if (DialogueNet.CHANNEL != null) DialogueNet.CHANNEL.sendToServer(new DialogueNet.Choose(sessionId, i));
+        if (DialogueNet.CHANNEL != null) DialogueNet.CHANNEL.sendToServer(new DialogueNet.Choose(sessionId, revision, i));
     }
 
     @Override

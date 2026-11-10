@@ -1,5 +1,6 @@
 package dev.worldforge.troops.mc;
 
+import dev.worldforge.mod.api.ActionResult;
 import dev.worldforge.settle.Building;
 import dev.worldforge.settle.Worker;
 import dev.worldforge.settle.mc.Colony;
@@ -30,7 +31,7 @@ final class WorkerControl {
                 || (colony != null && p.getUUID().toString().equals(colony.owner));
     }
 
-    static String workArea(ServerPlayer p, OrderPacket o) {
+    static ActionResult workArea(ServerPlayer p, OrderPacket o) {
         int accepted = 0;
         boolean denied = false;
         String[] modes = {"wood", "stone", "ore", "clear", "level", "harvest", "honey", "herbs"};
@@ -86,16 +87,17 @@ final class WorkerControl {
             resident.status = "приказ: " + labels[o.kind()];
             accepted++;
         }
-        if (accepted == 0) return denied ? "Нельзя отдавать приказы рабочим чужого поселения"
-                : "Выберите подходящих рабочих (универсальные рабочие могут выполнять эту задачу)";
-        return o.arg() == -1
+        if (accepted == 0) return ActionResult.fail(denied ? "Нельзя отдавать приказы рабочим чужого поселения"
+                : "Выберите подходящих рабочих (универсальные рабочие могут выполнять эту задачу)");
+        String message = o.arg() == -1
                 ? "Видимость назначенных рабочих зон обновлена: " + (overlay == 0 ? "выкл." : overlay == 1 ? "слабая" : "яркая")
                     + " · рабочих: " + accepted
                 : "Участок назначен: " + labels[o.kind()] + " · рабочих: " + accepted
                     + " · радиус: " + o.arg() + " · отображение: " + (overlay == 0 ? "выкл." : overlay == 1 ? "слабое" : "яркое");
+        return ActionResult.ok(message);
     }
 
-    static String command(ServerPlayer p, OrderPacket o) {
+    static ActionResult command(ServerPlayer p, OrderPacket o) {
         ServerLevel lv = p.serverLevel();
         int done = 0;
         boolean denied = false;
@@ -113,8 +115,11 @@ final class WorkerControl {
             if (c == null || resident == null) continue;
             if (!mayControl(p, c)) { denied = true; continue; }
             if (o.action() == OrderPacket.RELEASE) {
-                c.workOrders.remove(w.workerId);
-                try { c.s.unassign(w.workerId); done++; } catch (RuntimeException ignored) {}
+                try {
+                    c.s.unassign(w.workerId);
+                    c.workOrders.remove(w.workerId);
+                    done++;
+                } catch (RuntimeException ignored) {}
                 continue;
             }
             if (o.action() == OrderPacket.WORK_FOLLOW) {
@@ -130,16 +135,15 @@ final class WorkerControl {
                 continue;
             }
             if (o.action() == OrderPacket.WORK_STOP || o.action() == OrderPacket.WORK_HOLD) {
-                c.workOrders.remove(w.workerId);
                 try {
                     double x = w.getX() - c.cx, z = w.getZ() - c.cz;
                     c.s.holdAt(w.workerId, x, z);
+                    c.workOrders.remove(w.workerId);
                     done++;
                     where = o.action() == OrderPacket.WORK_STOP ? "остановиться" : "удерживать позицию";
                 } catch (RuntimeException ex) { where = ex.getMessage(); }
                 continue;
             }
-            c.workOrders.remove(w.workerId);
             Building b = c.buildingAt((int) Math.floor(o.x()), (int) Math.floor(o.z()));
             try {
                 if (b == null) {
@@ -149,15 +153,18 @@ final class WorkerControl {
                     c.s.assign(w.workerId, b.uid);
                     where = b.def.name;
                 }
+                c.workOrders.remove(w.workerId);
                 done++;
             } catch (RuntimeException ex) {
                 where = ex.getMessage();
             }
         }
         if (done == 0) {
-            if (denied) return "Это поселение не ваше: приказы рабочим отдаёт его правитель";
-            return o.action() == OrderPacket.RELEASE ? "Рабочие не выбраны" : where.isEmpty() ? "Здесь нет здания своего поселения" : where;
+            if (denied) return ActionResult.fail("Это поселение не ваше: приказы рабочим отдаёт его правитель");
+            return ActionResult.fail(o.action() == OrderPacket.RELEASE ? "Рабочие не выбраны"
+                    : where.isEmpty() ? "Здесь нет здания своего поселения" : where);
         }
-        return o.action() == OrderPacket.RELEASE ? "Освобождено рабочих: " + done : "Отправлено в «" + where + "»: " + done;
+        String message = o.action() == OrderPacket.RELEASE ? "Освобождено рабочих: " + done : "Отправлено в «" + where + "»: " + done;
+        return ActionResult.ok(message);
     }
 }
