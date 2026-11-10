@@ -119,7 +119,7 @@ public final class Economy {
         if (level(barony) >= MAX_DEV) throw new TitleEditor.EditException("Развитие уже на пределе");
         double c = developCost(barony);
         if (e.gold(realm) < c) throw new TitleEditor.EditException("Не хватает золота: нужно " + Math.round(c));
-        e.gold.put(realm, e.gold(realm) - c);
+        e.postGoldDelta(realm, -c, "army-development", "army-development:" + barony + ":" + (level(barony) + 1));
         dev.put(barony, level(barony) + 1);
         e.log(e.realmName(realm) + " развивает " + e.title(barony) + " до уровня " + level(barony));
     }
