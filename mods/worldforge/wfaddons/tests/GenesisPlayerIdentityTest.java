@@ -43,6 +43,13 @@ public final class GenesisPlayerIdentityTest {
         check(authority.registryForGlobal(newPlayer.globalId) == players
                         && newPlayerUuid.equals(newPlayer.props.get("genesis.player_uuid")),
                 "new Genesis players are created in the dedicated world-wide player partition");
+        int beforeRejectedRestore = players.size();
+        check(rejects(() -> PlayerCharacterBinding.resolveOrCreate(
+                        "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+                        "ffffffff-ffff-4fff-8fff-ffffffffffff",
+                        authority, List.of(map), players, "Replacement", "human", "m", 90))
+                        && players.size() == beforeRejectedRestore,
+                "missing saved global Character UUID fails closed without creating a replacement player");
 
         CharacterRegistry restoredPlayers = new CharacterRegistry();
         Character persistedPlayer = players.create("PersistentPlayer", "", "human", "f", 81);
