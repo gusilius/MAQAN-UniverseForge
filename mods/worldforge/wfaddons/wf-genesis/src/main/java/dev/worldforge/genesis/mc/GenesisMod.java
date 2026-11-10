@@ -302,7 +302,6 @@ public class GenesisMod {
     private static int confirm(CommandSourceStack s) {
         ServerPlayer sp = s.getPlayer();
         if (sp == null) return 0;
-        if (GENESIS.isDone(owner(sp))) { s.sendFailure(Component.literal("Персонаж уже создан.")); return 0; }
         Draft d = GENESIS.draft(owner(sp));
         List<String> problems = GENESIS.problems(d);
         if (!problems.isEmpty()) {
@@ -315,6 +314,7 @@ public class GenesisMod {
             long worldMinute = WorldForgeApi.clock().worldMinute();
             String draftFingerprint = UUID.nameUUIDFromBytes((sp.getUUID() + "|" + GENESIS.viewJson(d)).getBytes(StandardCharsets.UTF_8)).toString();
             String actorId = "player:" + sp.getUUID();
+            int recoveryAttempt = 0;
             for (ActionExecutionService.Task previous : WorldForgeApi.actionExecution().tasks()) {
                 if (!"genesis.confirm".equals(previous.actionId()) || !actorId.equals(previous.actorId())
                         || previous.status() != ActionExecutionService.Status.FAILED || previous.args().isEmpty()) continue;
@@ -323,8 +323,17 @@ public class GenesisMod {
                     s.sendFailure(Component.literal("Предыдущее создание персонажа завершилось частично. Изменение черновика заблокировано до восстановления предыдущей операции."));
                     return 0;
                 }
+                recoveryAttempt++;
             }
-            String requestId = "genesis:" + sp.getUUID().toString().replace("-", "") + ":" + ACTION_SESSION_ID + ":" + draftFingerprint.replace("-", "");
+            if (GENESIS.isDone(owner(sp)) && recoveryAttempt == 0) {
+                s.sendFailure(Component.literal("Персонаж уже создан."));
+                return 0;
+            }
+            // Re-applying this exact draft is safe: Origins/Progress are rebuilt, starter grants
+            // carry stable grant IDs, and the settlement bridge resumes its durable phase cursor.
+            String requestId = "genesis:" + sp.getUUID().toString().replace("-", "") + ":" + ACTION_SESSION_ID
+                    + ":" + draftFingerprint.replace("-", "")
+                    + (recoveryAttempt == 0 ? "" : ":recover:" + recoveryAttempt);
             ActionExecutionService.Request request = new ActionExecutionService.Request(
                     requestId, "genesis.confirm", actorId, sp.getUUID().toString(),
                     List.of(d.race, d.start, d.cls, draftFingerprint), worldMinute);
