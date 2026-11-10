@@ -514,7 +514,8 @@ public class TroopsMod {
         }
         String actor = p.getUUID().toString();
         long minute = dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute();
-        String requestId = "troop:" + o.requestId();
+        String requestId = "troop:" + java.util.UUID.nameUUIDFromBytes(
+                (actor + ":" + o.requestId()).getBytes(java.nio.charset.StandardCharsets.UTF_8));
         var request = new dev.worldforge.mod.api.ActionExecutionService.Request(
                 requestId, "military.client_order", actor, "selection", List.of(payload), minute);
         try {
