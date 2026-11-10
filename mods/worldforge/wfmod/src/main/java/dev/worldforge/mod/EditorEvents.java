@@ -139,7 +139,7 @@ public final class EditorEvents {
                     int n = ed.smoothAtBlock(bx, bz, s.brush);
                     if (n > 0) {
                         EditorManager.touch(m);
-                        if (persist && !persistEditorChanges(player, ed)) return dev.worldforge.mod.api.ActionResult.fail(
+                        if (persist && !persistEditorChanges(player, m, ed)) return dev.worldforge.mod.api.ActionResult.fail(
                                 "Изменение границ не сохранено на диск; операция требует сверки");
                     }
                     return dev.worldforge.mod.api.ActionResult.ok(n == 0 ? "Границы здесь уже гладкие" : "Сглажено пикселей: " + n);
@@ -172,9 +172,11 @@ public final class EditorEvents {
         }
     }
 
-    private static boolean persistEditorChanges(ServerPlayer player, TitleEditor editor) {
+    private static boolean persistEditorChanges(ServerPlayer player, MapData map, TitleEditor editor) {
         EditorManager.saveDirty(player.server);
-        return !editor.isDirty();
+        if (!editor.isDirty()) return true;
+        EditorManager.blockMutations(map);
+        return false;
     }
 
     /** The wand is a direct player input path, so its world mutations must use the shared executor too. */
@@ -203,6 +205,8 @@ public final class EditorEvents {
                         if (currentMap != map || EditorManager.editorFor(currentMap) != editor
                                 || !dimension.equals(player.serverLevel().dimension().location().toString()))
                             return "Карта или измерение изменились до применения инструмента";
+                        if (EditorManager.mutationsBlocked(currentMap))
+                            return "Правки этой карты заблокированы после ошибки сохранения; требуется перезапуск и сверка";
                         return null;
                     },
                     (req, attempt) -> applyToolAction(player, session, map, editor, x, z, true),
