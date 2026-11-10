@@ -108,7 +108,11 @@ public class ArmyMod {
     }
 
     @SubscribeEvent
-    public void onStopping(ServerStoppingEvent e) { saveAll(e.getServer()); ARMIES.clear(); }
+    public void onStopping(ServerStoppingEvent e) {
+        saveAll(e.getServer()); // wf-army/1 balances are migrated while snapshots are written
+        WorldForgeMod.saveTreasuryNow(e.getServer()); // persist those migrations after the army addon has completed
+        ARMIES.clear();
+    }
 
     @SubscribeEvent
     public void onTick(TickEvent.ServerTickEvent e) {
