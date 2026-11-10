@@ -37,11 +37,17 @@ public class ClockTest {
         GameClock d = new GameClock();
         d.setSpeed(1);
         d.advance(GameClock.TICKS_PER_DAY * 45);
-        ok(d.month() == 1 && d.dayOfMonth() == 16 && d.dateText().equals("16 Февраля 300"), "45-й день: " + d.dateText());
+        ok(d.month() == 1 && d.dayOfMonth() == 16 && d.dateText().equals("15 Февраля 300"), "45-й день: " + d.dateText());
         d.advance(GameClock.TICKS_PER_DAY * 365);
         ok(d.year() == 301, "год сменился: " + d.dateText());
         d.advance(GameClock.TICKS_PER_DAY * 315);
         ok(d.month() == 11, "последние дни года остаются в декабре: " + d.dateText());
+        ok(d.worldMinute() == d.dayNumber() * 1440L, "canonical world minute is derived from the 365-day clock");
+        GameClock seasons = new GameClock();
+        seasons.advance(GameClock.TICKS_PER_DAY * 91);
+        ok(seasons.seasonIndex() == 1 && seasons.seasonProgress() == 0.0, "season boundary follows the shared world year");
+        seasons.advance(GameClock.TICKS_PER_DAY * 182);
+        ok(seasons.seasonIndex() == 3, "winter begins at day 273 and the final season spans 92 days");
         // сохранение
         GameClock r = new GameClock();
         r.load(d.toJson());
