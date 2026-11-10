@@ -126,6 +126,32 @@ public final class CharacterAuthority {
         return identity == null ? null : registries.get(identity.mapId());
     }
 
+    /**
+     * Binds a physical Minecraft body to its canonical person while enforcing entity UUID
+     * uniqueness across every map partition in this world, not just the owning map.
+     */
+    public synchronized boolean bindEntity(String globalCharacterId, String bodyKind, String entityUuid) {
+        if (globalCharacterId == null || globalCharacterId.isBlank())
+            throw new IllegalArgumentException("globalCharacterId is required");
+        if (bodyKind == null || bodyKind.isBlank()) throw new IllegalArgumentException("bodyKind is required");
+        if (entityUuid == null || entityUuid.isBlank()) throw new IllegalArgumentException("entityUuid is required");
+        refreshIndex();
+        CharacterIdentity identity = byGlobalId.get(globalCharacterId);
+        if (identity == null) return false;
+        Character person = byIdentity.get(identity);
+        CharacterRegistry owner = registries.get(identity.mapId());
+        if (person == null || owner == null || !person.alive) return false;
+
+        for (CharacterRegistry registry : registries.values()) {
+            for (Character candidate : registry.all()) {
+                if (globalCharacterId.equals(candidate.globalId)) continue;
+                Object raw = candidate.props.get("population.entity_bindings");
+                if (raw instanceof Map<?, ?> bindings && bindings.containsValue(entityUuid)) return false;
+            }
+        }
+        return owner.bindEntity(person.id, bodyKind, entityUuid);
+    }
+
     /** Returns null for an ambiguous legacy cN id; callers must provide map identity. */
     public synchronized Character getLegacy(String characterId) {
         refreshIndex();
