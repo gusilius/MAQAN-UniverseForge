@@ -59,10 +59,13 @@ public final class GameClock {
     public long dayNumber() { return (long) Math.floor(elapsed); }
     /** Canonical elapsed world minute, including the fractional day. */
     public long worldMinute() { return Math.max(0L, (long) Math.floor(elapsed * 1440.0)); }
-    public int seasonIndex() { return Math.min(3, dayOfYear() / (YEAR_DAYS / 4 + 1)); }
+    public int seasonIndex() { return Math.min(3, dayOfYear() / 91); }
     public double seasonProgress() {
-        int seasonDay = dayOfYear() % 91;
-        return Math.min(1.0, (seasonDay + (elapsed - Math.floor(elapsed))) / (dayOfYear() < 273 ? 91.0 : 92.0));
+        int index = seasonIndex();
+        int start = index * 91;
+        int duration = index == 3 ? 92 : 91;
+        double within = dayOfYear() - start + (elapsed - Math.floor(elapsed));
+        return Math.max(0, Math.min(1, within / duration));
     }
     public int year() { return startYear + (int) (dayNumber() / YEAR_DAYS); }
     public int dayOfYear() { return (int) (dayNumber() % YEAR_DAYS); }
