@@ -9,6 +9,9 @@ import com.mojang.logging.LogUtils;
 import dev.worldforge.genesis.Draft;
 import dev.worldforge.genesis.Genesis;
 import dev.worldforge.genesis.GenesisDefs;
+import dev.worldforge.people.Character;
+import dev.worldforge.people.CharacterRegistry;
+import dev.worldforge.people.mc.PeopleMod;
 import dev.worldforge.mod.WFNet;
 import dev.worldforge.mod.WFPerm;
 import dev.worldforge.origins.Origins;
@@ -113,7 +116,11 @@ public class GenesisMod {
     public void onLogin(PlayerEvent.PlayerLoggedInEvent e) {
         if (!(e.getEntity() instanceof ServerPlayer sp)) return;
         sendAllLooks(sp);
-        if (GENESIS.isDone(owner(sp))) { broadcastLook(sp); sp.refreshDimensions(); return; }
+        if (GENESIS.isDone(owner(sp))) {
+            Draft finished = GENESIS.finished(owner(sp));
+            if (finished != null) ensurePlayerCharacter(sp, finished);
+            broadcastLook(sp); sp.refreshDimensions(); return;
+        }
         // игроки с уже выбранной расой (из старых миров) мастер не видят: они уже играют
         Origins.Build b = OriginsMod.ORIGINS.peek(owner(sp));
         if (b != null && !b.race.isEmpty()) return;
@@ -251,6 +258,7 @@ public class GenesisMod {
     }
 
     private static void apply(ServerPlayer sp, Draft d) {
+        Character person = ensurePlayerCharacter(sp, d);
         String o = owner(sp);
         GenesisDefs.Start st = DEFS.starts.get(d.start);
         Origins og = OriginsMod.ORIGINS;
@@ -282,6 +290,15 @@ public class GenesisMod {
             else if (st != null && st.profXp() > 0) og.work(o, p, st.profXp());
         }
         if (!d.cls.isEmpty() && !og.chooseClass(o, d.cls)) LOGGER.warn("wf_genesis: класс {} не выбран: {}", d.cls, og.lastError);
+        person.props.put("genesis.race", d.race);
+        person.props.put("genesis.start", d.start);
+        person.props.put("genesis.class", d.cls);
+        person.props.put("genesis.professions", new ArrayList<>(d.profs));
+        person.props.put("genesis.attributes", new LinkedHashMap<>(d.attrs));
+        person.props.put("genesis.skills", new LinkedHashMap<>(d.skills));
+        person.props.put("genesis.features", new ArrayList<>(d.features));
+        person.props.put("genesis.appearance", new LinkedHashMap<>(d.look));
+        person.props.put("genesis.profile_owner", o);
         ProgressMod.apply(sp);
         sp.setHealth(sp.getMaxHealth());
         // вещи
@@ -296,6 +313,41 @@ public class GenesisMod {
         place(sp, d, st);
         sp.refreshDimensions();
         broadcastLook(sp);
+    }
+
+    /**
+     * Genesis creates the player's one canonical Character. Player UUID and progression owner
+     * remain external account/profile keys; they point to this same world-wide person record.
+     */
+    private static Character ensurePlayerCharacter(ServerPlayer sp, Draft draft) {
+        if (!ModList.get().isLoaded("wf_people"))
+            throw new IllegalStateException("Genesis requires wf_people to create the canonical player Character");
+        String playerUuid = sp.getUUID().toString();
+        String savedGlobalId = sp.getPersistentData().getString("worldforge_character_global_id");
+        Character person = savedGlobalId.isBlank() ? null : PeopleMod.authority().getGlobal(savedGlobalId);
+        if (person == null) {
+            for (CharacterRegistry registry : PeopleMod.registries().values()) {
+                for (Character candidate : registry.all()) {
+                    if (playerUuid.equals(String.valueOf(candidate.props.get("genesis.player_uuid")))) {
+                        person = candidate;
+                        break;
+                    }
+                }
+                if (person != null) break;
+            }
+        }
+        if (person == null) {
+            CharacterRegistry registry = PeopleMod.registryFor(sp.serverLevel());
+            if (registry == null)
+                throw new IllegalStateException("No WorldForge people registry exists at the player's current location");
+            String name = sp.getGameProfile().getName();
+            person = registry.create(name, "", draft.race, "m", PeopleMod.YEAR - 20);
+        }
+        person.props.put("genesis.player_uuid", playerUuid);
+        person.props.put("genesis.profile_owner", owner(sp));
+        person.props.put("genesis.race", draft.race);
+        sp.getPersistentData().putString("worldforge_character_global_id", person.globalId);
+        return person;
     }
 
     private static void give(ServerPlayer sp, Item it, int n) {
