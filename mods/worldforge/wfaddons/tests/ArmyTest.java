@@ -166,6 +166,18 @@ public class ArmyTest {
         back.fromJson(js);
         ok(back.armies.size() == ai.armies.size() && back.toJson().equals(js), "сохранение и загрузка совпадают");
         ok(!js.contains("\"gold\"") && js.contains("wf-army/2"), "new army snapshots no longer persist a duplicate local gold balance");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> legacyRoot = (Map<String, Object>) Json.parse(js);
+        legacyRoot.put("format", "wf-army/1");
+        legacyRoot.put("gold", Map.of("legacy-army-realm", 17.0));
+        ArmyEngine legacyReload = new ArmyEngine(ai.war);
+        legacyReload.fromJson(Json.write(legacyRoot));
+        ok(Math.abs(legacyReload.gold("legacy-army-realm") - 17.0) < 1e-8,
+                "wf-army/1 legacy gold migrates into the shared treasury on first access");
+        String upgradedLegacySave = legacyReload.toJson();
+        ok(upgradedLegacySave.contains("wf-army/2") && !upgradedLegacySave.contains("\"gold\"")
+                        && Math.abs(legacyReload.gold("legacy-army-realm") - 17.0) < 1e-8,
+                "legacy army save upgrades without persisting or importing its gold balance twice");
 
         System.out.println(fails == 0 ? "ALL OK" : fails + " FAILED");
         if (fails > 0) System.exit(1);
