@@ -184,11 +184,14 @@ public final class CharacterRegistry {
         else c.props.put("population.entity_bindings", bindings);
     }
 
-    @SuppressWarnings("unchecked")
     private static void addGlobalChild(Character parent, String childGlobalId) {
         Object raw = parent.props.get("family.children_global_ids");
-        List<String> children = raw instanceof List<?> list
-                ? new ArrayList<>((List<String>) list) : new ArrayList<>();
+        List<String> children = new ArrayList<>();
+        if (raw instanceof List<?> list)
+            for (Object value : list) if (value instanceof String id) {
+                try { children.add(java.util.UUID.fromString(id).toString()); }
+                catch (IllegalArgumentException ignored) { /* discard malformed legacy extension entry */ }
+            }
         if (!children.contains(childGlobalId)) children.add(childGlobalId);
         parent.props.put("family.children_global_ids", children);
     }
