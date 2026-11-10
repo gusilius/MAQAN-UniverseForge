@@ -420,7 +420,7 @@ public class TroopsMod {
             boolean settled = false;
             if (ModList.get().isLoaded("wf_settle") && troop.level() instanceof ServerLevel level) {
                 dev.worldforge.settle.mc.Colony nearest = dev.worldforge.settle.mc.SettleMod.nearest(level, troop.getX(), troop.getZ());
-                if (nearest != null) settled = dev.worldforge.settle.mc.SettleMod.attachExistingCharacter(nearest.s.id, person.id);
+                if (nearest != null) settled = dev.worldforge.settle.mc.SettleMod.attachExistingCharacter(nearest.s.id, person.globalId);
             }
             if (!settled) {
                 binding.registry().setDuty(person.id, Duty.SOLDIER, false, PeopleMod.YEAR);
