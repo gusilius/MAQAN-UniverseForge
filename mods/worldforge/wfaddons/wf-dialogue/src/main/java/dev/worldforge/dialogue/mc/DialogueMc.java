@@ -7,6 +7,7 @@ import dev.worldforge.dialogue.DialogueMemory;
 import dev.worldforge.dialogue.Session;
 import dev.worldforge.mod.Json;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.storage.LevelResource;
 import net.minecraft.world.phys.Vec3;
@@ -42,10 +43,11 @@ public final class DialogueMc {
     private static final class Active {
         final long id;
         final Session session;
+        final ServerLevel level;
         final Vec3 pos;
         final double maxDist;
 
-        Active(long id, Session session, Vec3 pos, double maxDist) { this.id = id; this.session = session; this.pos = pos; this.maxDist = maxDist; }
+        Active(long id, Session session, ServerLevel level, Vec3 pos, double maxDist) { this.id = id; this.session = session; this.level = level; this.pos = pos; this.maxDist = maxDist; }
     }
 
     /** Другие аддоны добавляют сюда сервисы и переменные в контекст каждого разговора (например, репутация кладёт ReputationStore). */
@@ -111,7 +113,7 @@ public final class DialogueMc {
                 LOGGER.warn("wf_dialogue: start rejected for '{}': {}", dialogueId, task.message());
                 return false;
             }
-            Active a = new Active(sessionId, s, speakerPos, maxDistance);
+            Active a = new Active(sessionId, s, player.serverLevel(), speakerPos, maxDistance);
             ACTIVE.put(uid, a);
             sendView(player, a);
             return true;
@@ -164,6 +166,10 @@ public final class DialogueMc {
                             return "Игрок отключился до выбора ответа";
                         if (ACTIVE.get(sp.getUUID()) != a || a.id != sessionId)
                             return "Диалог уже закрыт или заменён";
+                        if (sp.serverLevel() != a.level)
+                            return "Вы перешли в другое измерение";
+                        if (a.pos != null && sp.position().distanceToSqr(a.pos) > a.maxDist * a.maxDist)
+                            return "Вы отошли от собеседника";
                         if (a.session.revision() != revision)
                             return "Ответ устарел: откройте актуальный вариант диалога";
                         Session.View view = a.session.view();
@@ -218,7 +224,8 @@ public final class DialogueMc {
             Active a = e.getValue();
             ServerPlayer p = server.getPlayerList().getPlayer(e.getKey());
             if (p == null) { ACTIVE.remove(e.getKey(), a); continue; }
-            if (a.pos != null && p.position().distanceToSqr(a.pos) > a.maxDist * a.maxDist) {
+            if (p.serverLevel() != a.level
+                    || (a.pos != null && p.position().distanceToSqr(a.pos) > a.maxDist * a.maxDist)) {
                 ACTIVE.remove(e.getKey(), a);
                 DialogueNet.sendTo(p, new DialogueNet.Close(a.id));
             }
