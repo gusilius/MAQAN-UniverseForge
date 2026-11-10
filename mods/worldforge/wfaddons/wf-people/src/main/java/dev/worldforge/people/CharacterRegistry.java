@@ -184,6 +184,15 @@ public final class CharacterRegistry {
         else c.props.put("population.entity_bindings", bindings);
     }
 
+    @SuppressWarnings("unchecked")
+    private static void addGlobalChild(Character parent, String childGlobalId) {
+        Object raw = parent.props.get("family.children_global_ids");
+        List<String> children = raw instanceof List<?> list
+                ? new ArrayList<>((List<String>) list) : new ArrayList<>();
+        if (!children.contains(childGlobalId)) children.add(childGlobalId);
+        parent.props.put("family.children_global_ids", children);
+    }
+
     private void emit(Character c, LifecycleKind kind, String from, String to, int year) {
         publish(c, new LifecycleEvent(kind, c.id, from == null ? "" : from, to == null ? "" : to, year));
     }
@@ -280,6 +289,8 @@ public final class CharacterRegistry {
         if (!y.spouse.isEmpty()) throw new IllegalStateException(y.name + " уже состоит в браке");
         x.spouse = y.id;
         y.spouse = x.id;
+        x.props.put("family.spouse_global_id", y.globalId);
+        y.props.put("family.spouse_global_id", x.globalId);
         emit(x, LifecycleKind.MARRIED, "", y.id, year);
         emit(y, LifecycleKind.MARRIED, "", x.id, year);
     }
@@ -289,8 +300,12 @@ public final class CharacterRegistry {
         if (character.spouse.isEmpty()) return;
         Character spouse = byId.get(character.spouse);
         if (spouse != null && spouse.alive) return;
-        if (spouse != null && character.id.equals(spouse.spouse)) spouse.spouse = "";
+        if (spouse != null && character.id.equals(spouse.spouse)) {
+            spouse.spouse = "";
+            spouse.props.remove("family.spouse_global_id");
+        }
         character.spouse = "";
+        character.props.remove("family.spouse_global_id");
     }
 
     public Character addChild(Character father, Character mother, String name, String gender, int year) {
@@ -299,6 +314,10 @@ public final class CharacterRegistry {
         c.mother = mother.id;
         father.children.add(c.id);
         mother.children.add(c.id);
+        c.props.put("family.father_global_id", father.globalId);
+        c.props.put("family.mother_global_id", mother.globalId);
+        addGlobalChild(father, c.globalId);
+        addGlobalChild(mother, c.globalId);
         emit(c, LifecycleKind.CHILD_BORN, father.id, mother.id, year);
         return c;
     }
@@ -440,6 +459,21 @@ public final class CharacterRegistry {
         }
         if (maxNumericId == Integer.MAX_VALUE) throw new IllegalArgumentException("Исчерпаны ID персонажей");
         int safeNext = (int) Math.max(requestedNext, (long) maxNumericId + 1L);
+        // Upgrade legacy map-local family references to stable global UUID references.
+        for (Character character : loaded.values()) {
+            Character father = loaded.get(character.father);
+            Character mother = loaded.get(character.mother);
+            Character spouse = loaded.get(character.spouse);
+            if (father != null) {
+                character.props.putIfAbsent("family.father_global_id", father.globalId);
+                addGlobalChild(father, character.globalId);
+            }
+            if (mother != null) {
+                character.props.putIfAbsent("family.mother_global_id", mother.globalId);
+                addGlobalChild(mother, character.globalId);
+            }
+            if (spouse != null) character.props.putIfAbsent("family.spouse_global_id", spouse.globalId);
+        }
         byId.clear();
         byId.putAll(loaded);
         next = safeNext;
