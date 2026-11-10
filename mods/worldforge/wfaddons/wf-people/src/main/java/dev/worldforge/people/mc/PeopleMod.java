@@ -285,6 +285,7 @@ public class PeopleMod {
             YEAR = WorldForgeApi.clock().year();
             if (elapsedDays > 0) {
                 for (CharacterRegistry registry : REGS.values()) PopulationSimulation.advance(registry, elapsedDays, YEAR);
+                PopulationSimulation.advance(PLAYER_REGISTRY, elapsedDays, YEAR);
             }
             if (ticks % SPAWN_EVERY == 0) NpcSpawner.pass(e.getServer());
             if (ticks % 20 == 0) socialInitiatives(e.getServer());
