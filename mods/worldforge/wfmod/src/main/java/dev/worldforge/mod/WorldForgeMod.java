@@ -206,7 +206,7 @@ public class WorldForgeMod {
             LOGGER.info("WorldForge: world identity {}", worldId);
         } catch (IOException ex) {
             worldId = null;
-            LOGGER.error("WorldForge: cannot load stable WorldId; identity-dependent integrations must remain disabled: {}", ex.toString());
+            throw new IllegalStateException("WorldForge cannot start without a valid stable WorldId; refusing to fork this save's identity", ex);
         }
     }
 
