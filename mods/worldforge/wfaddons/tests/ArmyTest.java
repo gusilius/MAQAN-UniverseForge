@@ -165,7 +165,7 @@ public class ArmyTest {
         ArmyEngine back = new ArmyEngine(ai.war);
         back.fromJson(js);
         ok(back.armies.size() == ai.armies.size() && back.toJson().equals(js), "сохранение и загрузка совпадают");
-        ok(!js.contains("\\\"gold\\\"") && js.contains("wf-army/2"), "new army snapshots no longer persist a duplicate local gold balance");
+        ok(!js.contains("\"gold\"") && js.contains("wf-army/2"), "new army snapshots no longer persist a duplicate local gold balance");
 
         System.out.println(fails == 0 ? "ALL OK" : fails + " FAILED");
         if (fails > 0) System.exit(1);
