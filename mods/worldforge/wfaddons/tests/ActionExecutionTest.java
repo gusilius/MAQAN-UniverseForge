@@ -101,6 +101,21 @@ public final class ActionExecutionTest {
                         && cancelService.receipts().size() == 1,
                 "owner can cancel queued task and receives a terminal receipt");
 
+        ActionExecutionService interrupted = new ActionExecutionService();
+        interrupted.enqueue(new ActionExecutionService.Request(
+                "request-interrupted", "settlement.build", "player-1", "settlement-4", List.of("house"), 110), 110, null);
+        ActionExecutionService afterRestart = new ActionExecutionService();
+        afterRestart.loadJson(interrupted.toJson());
+        int[] replayed = {0};
+        ActionExecutionService.Task recovered = afterRestart.execute(new ActionExecutionService.Request(
+                "request-interrupted", "settlement.build", "player-1", "settlement-4", List.of("house"), 110),
+                r -> null, (r, attempt) -> { replayed[0]++; return ActionResult.ok("duplicate"); },
+                null, 111, null);
+        check(recovered.status() == ActionExecutionService.Status.FAILED
+                        && recovered.message().contains("server restart")
+                        && afterRestart.receipts().size() == 1 && replayed[0] == 0,
+                "interrupted queued task is reconciled to FAILED with receipt and is never replayed automatically");
+
         if (failures > 0) throw new AssertionError(failures + " action execution tests failed");
         System.out.println("ActionExecution: ALL OK");
     }
