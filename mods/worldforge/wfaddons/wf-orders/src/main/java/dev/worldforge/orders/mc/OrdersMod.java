@@ -249,8 +249,7 @@ public class OrdersMod {
         String actor = sp.getUUID().toString();
         String payload = what + "|" + org + "|" + arg + "|" + n;
         long minute = WorldForgeApi.clock().worldMinute();
-        String requestId = "orders-command:" + UUID.nameUUIDFromBytes(
-                (actor + ":" + s.getServer().getTickCount() + ":" + payload).getBytes(StandardCharsets.UTF_8));
+        String requestId = "orders-command:" + java.util.UUID.randomUUID();
         try {
             var task = WorldForgeApi.actionExecution().execute(
                     new dev.worldforge.mod.api.ActionExecutionService.Request(
