@@ -472,15 +472,27 @@ public class GenesisMod {
 
     private static void give(ServerPlayer sp, Item it, int n, String grantId) {
         if (it == Items.AIR || n <= 0) return;
-        int alreadyGranted = 0;
+        net.minecraft.nbt.CompoundTag playerData = sp.getPersistentData();
+        net.minecraft.nbt.CompoundTag grantLedger = playerData.getCompound("wf_genesis_grants");
+        int ledgerGranted = Math.max(0, grantLedger.getInt(grantId));
+        int inventoryGranted = 0;
         for (int slot = 0; slot < sp.getInventory().getContainerSize(); slot++) {
             ItemStack stack = sp.getInventory().getItem(slot);
             if (stack.is(it) && stack.hasTag() && grantId.equals(stack.getTag().getString("wf_genesis_grant"))) {
-                alreadyGranted += stack.getCount();
+                inventoryGranted += stack.getCount();
             }
         }
+        // The player NBT ledger follows the inventory into chests, containers and later sessions.
+        // Marked inventory stacks recover the narrow crash window before that ledger is saved.
+        int alreadyGranted = Math.max(ledgerGranted, inventoryGranted);
         int remaining = Math.max(0, n - alreadyGranted);
-        if (remaining == 0) return;
+        if (remaining == 0) {
+            if (ledgerGranted < n) {
+                grantLedger.putInt(grantId, n);
+                playerData.put("wf_genesis_grants", grantLedger);
+            }
+            return;
+        }
         int freeCapacity = 0;
         for (int slot = 0; slot < sp.getInventory().getContainerSize(); slot++) {
             ItemStack stack = sp.getInventory().getItem(slot);
@@ -503,6 +515,8 @@ public class GenesisMod {
             }
             remaining -= count;
         }
+        grantLedger.putInt(grantId, Math.max(ledgerGranted, n));
+        playerData.put("wf_genesis_grants", grantLedger);
     }
 
     // ------------------------------------------------------------------ место старта
