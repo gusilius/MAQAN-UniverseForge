@@ -5,8 +5,8 @@ Status: implementation contract for WorldForge population integrations.
 ## Identity ownership
 
 - `wf-people.CharacterRegistry` is the only authoritative registry of people.
-- A person's stable identity is `Character.id` (currently generated as `c<number>` within a world).
-- NPC progression uses the canonical owner key `n:<population-scope-id>:<Character.id>`; the scope is stable for the owning population/map and prevents local IDs such as `c1` from colliding across worlds. Player progression remains `p:<uuid>`.
+- A person's canonical stable identity is the immutable world-level `Character.globalId` UUID. The map-local `Character.id` (`c<number>`) remains a compatibility/storage-partition key only.
+- NPC progression uses the canonical owner key `n:<Character.globalId>` so moving a person between maps or settlements cannot create a second RPG profile. Old scoped keys `n:<population-scope-id>:<Character.id>` and unambiguous legacy `n:<Character.id>` keys are migrated; ambiguous legacy IDs fail closed. Player progression remains `p:<uuid>`.
 - Minecraft NPC entities, settlement workers, physical troop members, army commanders, heroes, quest givers and dialogue participants must reference the same Character ID. They must not create parallel person IDs.
 - Settlement `Worker.person` and physical `TroopEntity.characterId` are durable references to `Character.id`; soldier combat XP/rank is mirrored into the Character combat skill record.
 - A Minecraft entity is a body/projection. It may despawn, unload or be recreated without changing the Character.
