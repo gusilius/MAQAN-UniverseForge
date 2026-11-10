@@ -13,7 +13,9 @@ public final class CharacterIdentityMigrationTest {
 
     private static String legacyV2(CharacterRegistry registry) {
         return registry.toJson().replace("\"format\":\"wf-people/3\"", "\"format\":\"wf-people/2\"")
-                .replaceAll(",\"global_id\":\"[^\"]+\"", "");
+                .replaceAll(",\"global_id\":\"[^\"]+\"", "")
+                .replaceAll(",\"family\\.(father|mother|spouse)_global_id\":\"[^\"]+\"", "")
+                .replaceAll(",\"family\\.children_global_ids\":\\[[^\\]]*\\]", "");
     }
 
     public static void main(String[] args) {
