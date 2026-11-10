@@ -39,6 +39,21 @@ public final class CharacterLifecycleIntegrationTest {
 
         migrated.acknowledgeDeparture(migrated.pendingDepartures().get(0));
         ok(migrated.pendingDepartures().isEmpty(), "lifecycle event is removed only after registry acknowledgement");
+
+        Settlement oldColony = new Settlement("old-forge", "Old Forge", new Defs());
+        Worker transferred = oldColony.addWorker("Aldric");
+        transferred.person = "51515151-5151-4151-8151-515151515151";
+        ok(oldColony.removeWorkerByPerson(transferred.person, "transfer:military"),
+                "military enlistment records a durable pending departure");
+        Settlement returnColony = new Settlement("return-forge", "Return Forge", new Defs());
+        Worker returned = returnColony.addWorker("Aldric");
+        returned.person = transferred.person;
+        int cleared = oldColony.acknowledgeDepartureForPerson(returned.person, "transfer:military");
+        ok(cleared == 1 && oldColony.pendingDepartures().isEmpty()
+                        && returned.person.equals(transferred.person),
+                "reattaching the same Character cancels the stale military departure event");
+        ok(oldColony.acknowledgeDepartureForPerson(returned.person, "transfer:military") == 0,
+                "stale military departure acknowledgement is idempotent");
         System.out.println(failures == 0 ? "ALL OK" : failures + " FAILED");
         if (failures > 0) System.exit(1);
     }
