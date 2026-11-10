@@ -73,8 +73,14 @@ public final class TreasuryApi {
         if (realm == null || realm.isBlank() || !Double.isFinite(openingGold) || openingGold < 0)
             throw new IllegalArgumentException("valid realm and nonnegative opening gold are required");
         String id = accountId(realm);
-        if (!ledger().hasAccount(id)) ledger().open(id, realm, "silver", openingGold * SILVER_PER_GOLD);
-        ledger().setCreditLimit(id, 250.0);
+        TreasuryLedger.Account account = ledger().account(id);
+        if (account == null) account = ledger().open(id, realm, "silver", openingGold * SILVER_PER_GOLD);
+        else if (openingGold > 0 && account.balance <= 1e-9 && account.debt <= 1e-9
+                && ledger().journal().stream().noneMatch(entry -> id.equals(entry.accountId()))) {
+            ledger().depositOnce(id, openingGold * SILVER_PER_GOLD, TreasuryLedger.Kind.OPENING,
+                    "realm-opening", "realm-opening:" + realm, worldMinute(), "initial realm treasury");
+        }
+        ledger().setCreditLimit(id, 250.0 * SILVER_PER_GOLD);
     }
 
     /** Net gold balance includes any carried deficit as debt, preserving the legacy army economy contract. */
