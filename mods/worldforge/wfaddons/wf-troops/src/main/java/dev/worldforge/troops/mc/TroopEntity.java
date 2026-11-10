@@ -266,7 +266,12 @@ public class TroopEntity extends PathfinderMob {
 
     @Override
     public void die(DamageSource src) {
-        if (!level().isClientSide) TroopsMod.onDeath(this);
+        if (!level().isClientSide && !TroopsMod.onDeath(this, src)) {
+            // Keep the physical body until the canonical Character death and estate are durable.
+            setHealth(1.0F);
+            setInvulnerable(true);
+            return;
+        }
         super.die(src);
     }
 
