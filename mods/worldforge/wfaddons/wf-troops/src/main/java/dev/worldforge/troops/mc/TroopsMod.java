@@ -83,6 +83,8 @@ public class TroopsMod {
     public static final ArmyHierarchy HIERARCHY = new ArmyHierarchy();
     public static final Forts FORTS = new Forts();
     public static final Map<String, TroopEntity> LIVE = new ConcurrentHashMap<>();
+    /** Fail-closed guard after a player action cannot durably commit its military snapshot. */
+    private static volatile boolean actionPersistenceBlocked;
     private static MinecraftServer server;
     private static int ticks;
 
@@ -170,6 +172,7 @@ public class TroopsMod {
 
     @SubscribeEvent
     public void started(ServerStartedEvent e) {
+        actionPersistenceBlocked = false;
         server = e.getServer();
         DEFS = load(dir(server).resolve("wf_troops_units.json"));
         try {
@@ -554,6 +557,10 @@ public class TroopsMod {
             handleOrderDirect(p, o);
             return;
         }
+        if (actionPersistenceBlocked) {
+            p.displayClientMessage(Component.literal("Военные приказы заблокированы после ошибки сохранения; требуется перезапуск и сверка"), true);
+            return;
+        }
         if (ModList.get().isLoaded("wf_settle") && WorkerControl.anyWorker(p, o)
                 && dev.worldforge.settle.mc.SettleMod.actionsBlocked()) {
             p.displayClientMessage(Component.literal("Изменения поселений заблокированы после ошибки сохранения; требуется перезапуск и сверка"), true);
@@ -570,20 +577,31 @@ public class TroopsMod {
                     req -> {
                         if (p.server.getPlayerList().getPlayer(p.getUUID()) == null)
                             return "Игрок отключился до исполнения приказа";
+                        if (actionPersistenceBlocked)
+                            return "Военные приказы заблокированы после ошибки сохранения; требуется перезапуск и сверка";
                         if (ModList.get().isLoaded("wf_settle") && WorkerControl.anyWorker(p, o)
                                 && dev.worldforge.settle.mc.SettleMod.actionsBlocked())
                             return "Изменения поселений заблокированы после ошибки сохранения; требуется перезапуск и сверка";
                         return null;
                     },
                     (req, attempt) -> {
-                        ActionResult result = handleOrderDirect(p, o);
+                        ActionResult result;
+                        try { result = handleOrderDirect(p, o); }
+                        catch (RuntimeException ex) {
+                            actionPersistenceBlocked = true;
+                            return ActionResult.fail("Военный приказ завершился исключением; дальнейшие приказы заблокированы до сверки: " + ex.getMessage());
+                        }
                         if (!result.ok) return result;
-                        if (!saveDurably())
-                            return ActionResult.fail("Приказ применён в памяти, но военные снимки не сохранены; требуется сверка");
+                        if (!saveDurably()) {
+                            actionPersistenceBlocked = true;
+                            return ActionResult.fail("Приказ применён в памяти, но военные снимки не сохранены; дальнейшие приказы заблокированы до сверки");
+                        }
                         if (ModList.get().isLoaded("wf_settle")
                                 && (o.action() == OrderPacket.BUILD || WorkerControl.anyWorker(p, o))
-                                && !dev.worldforge.settle.mc.SettleMod.persistActionMutation(p.server))
-                            return ActionResult.fail("Приказ изменил состояние поселения в памяти, но снимок не сохранён; изменения заблокированы до сверки");
+                                && !dev.worldforge.settle.mc.SettleMod.persistActionMutation(p.server)) {
+                            actionPersistenceBlocked = true;
+                            return ActionResult.fail("Приказ изменил состояние поселения в памяти, но снимок не сохранён; военные и поселения заблокированы до сверки");
+                        }
                         return result;
                     }, null, minute,
                     dev.worldforge.mod.WorldForgeMod.actionExecutionFile(p.server));
@@ -879,6 +897,8 @@ public class TroopsMod {
                         if (source.getEntity() instanceof ServerPlayer player
                                 && source.getServer().getPlayerList().getPlayer(player.getUUID()) == null)
                             return "Игрок отключился до исполнения приказа";
+                        if (actionPersistenceBlocked)
+                            return "Военные приказы заблокированы после ошибки сохранения; требуется перезапуск и сверка";
                         boolean operatorRequired = actionId.equals("military.muster")
                                 || actionId.equals("military.return_to_army") || actionId.startsWith("military.fort_");
                         if (operatorRequired && !source.hasPermission(2))
@@ -886,11 +906,20 @@ public class TroopsMod {
                         return null;
                     },
                     (req, attempt) -> {
-                        if (action.getAsInt() <= 0)
-                            return dev.worldforge.mod.api.ActionResult.fail("Военный приказ отклонён");
-                        if (!saveDurably())
+                        int outcome;
+                        try { outcome = action.getAsInt(); }
+                        catch (RuntimeException ex) {
+                            actionPersistenceBlocked = true;
                             return dev.worldforge.mod.api.ActionResult.fail(
-                                    "Военный приказ применён в памяти, но военные снимки не сохранены; требуется сверка");
+                                    "Военный приказ завершился исключением; дальнейшие приказы заблокированы до сверки: " + ex.getMessage());
+                        }
+                        if (outcome <= 0)
+                            return dev.worldforge.mod.api.ActionResult.fail("Военный приказ отклонён");
+                        if (!saveDurably()) {
+                            actionPersistenceBlocked = true;
+                            return dev.worldforge.mod.api.ActionResult.fail(
+                                    "Военный приказ применён в памяти, но военные снимки не сохранены; дальнейшие приказы заблокированы до сверки");
+                        }
                         return dev.worldforge.mod.api.ActionResult.ok("Военный приказ выполнен");
                     },
                     null, minute, WorldForgeMod.actionExecutionFile(source.getServer()));
