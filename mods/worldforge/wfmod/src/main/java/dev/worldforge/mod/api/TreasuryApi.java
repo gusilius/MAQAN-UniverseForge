@@ -45,6 +45,7 @@ public final class TreasuryApi {
         String id = accountId(realm);
         TreasuryLedger.Account account = ledger().account(id);
         if (account == null) account = ledger().open(id, realm, "silver", 0);
+        ledger().setCreditLimit(id, 250.0 * SILVER_PER_GOLD);
         return account;
     }
 
