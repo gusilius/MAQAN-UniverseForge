@@ -11,7 +11,7 @@ public final class CharacterAuthority {
     private final Map<String, CharacterIdentity> byGlobalId = new ConcurrentHashMap<>();
     private final Map<String, Set<CharacterIdentity>> byLegacyId = new ConcurrentHashMap<>();
     private final Map<String, CharacterRegistry> registries = new ConcurrentHashMap<>();
-    private final Map<String, Integer> indexedSizes = new HashMap<>();
+    private final Map<String, Long> indexedRevisions = new HashMap<>();
     private volatile WorldId worldId;
 
     public synchronized void beginWorld(WorldId id) {
@@ -24,7 +24,7 @@ public final class CharacterAuthority {
         byGlobalId.clear();
         byLegacyId.clear();
         registries.clear();
-        indexedSizes.clear();
+        indexedRevisions.clear();
         worldId = null;
     }
 
@@ -45,9 +45,9 @@ public final class CharacterAuthority {
     private void refreshIndex() {
         WorldId currentWorld = worldId;
         if (currentWorld == null) return;
-        boolean changed = indexedSizes.size() != registries.size();
+        boolean changed = indexedRevisions.size() != registries.size();
         if (!changed) for (Map.Entry<String, CharacterRegistry> entry : registries.entrySet()) {
-            if (!Objects.equals(indexedSizes.get(entry.getKey()), entry.getValue().size())) { changed = true; break; }
+            if (!Objects.equals(indexedRevisions.get(entry.getKey()), entry.getValue().revision())) { changed = true; break; }
         }
         if (!changed) return;
         byIdentity.clear();
@@ -55,7 +55,7 @@ public final class CharacterAuthority {
         byLegacyId.clear();
         indexedSizes.clear();
         for (Map.Entry<String, CharacterRegistry> entry : registries.entrySet()) {
-            indexedSizes.put(entry.getKey(), entry.getValue().size());
+            indexedRevisions.put(entry.getKey(), entry.getValue().revision());
             String mapId = entry.getKey();
             for (Character character : entry.getValue().all()) {
                 CharacterIdentity identity = new CharacterIdentity(currentWorld, mapId, character.id, character.globalId);
