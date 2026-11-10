@@ -23,6 +23,8 @@ import dev.worldforge.troops.MixedOrders;
 import dev.worldforge.troops.Wars;
 import dev.worldforge.troops.Squads;
 import dev.worldforge.troops.ArmyHierarchy;
+import dev.worldforge.troops.MilitaryDeathLedger;
+import dev.worldforge.troops.OperationalSupply;
 import dev.worldforge.troops.TroopDefs;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -83,6 +85,11 @@ public class TroopsMod {
     public static final ArmyHierarchy HIERARCHY = new ArmyHierarchy();
     public static final Forts FORTS = new Forts();
     public static final Map<String, TroopEntity> LIVE = new ConcurrentHashMap<>();
+    /** Durable death outbox; a soldier body is retained until the canonical Character estate is committed. */
+    private static final MilitaryDeathLedger DEATHS = new MilitaryDeathLedger();
+    /** Durable field rations/readiness; ration quantities themselves live in the shared TreasuryLedger. */
+    private static final OperationalSupply.Store SUPPLY = new OperationalSupply.Store();
+    private static volatile boolean militaryLoadFailed;
     /** Fail-closed guard after a player action cannot durably commit its military snapshot. */
     private static volatile boolean actionPersistenceBlocked;
     private static MinecraftServer server;
@@ -173,18 +180,29 @@ public class TroopsMod {
     @SubscribeEvent
     public void started(ServerStartedEvent e) {
         actionPersistenceBlocked = false;
+        militaryLoadFailed = false;
         server = e.getServer();
         DEFS = load(dir(server).resolve("wf_troops_units.json"));
         try {
+            DEATHS.clear();
+            SUPPLY.clear();
             Path f = dir(server).resolve("wf_squads.json");
             if (Files.exists(f)) SQUADS.fromJson(Files.readString(f));
             Path hf = dir(server).resolve("wf_army_hierarchy.json");
             if (Files.exists(hf)) HIERARCHY.fromJson(Files.readString(hf));
             Path ff = dir(server).resolve("wf_forts.json");
             if (Files.exists(ff)) FORTS.fromJson(Files.readString(ff));
+            Path df = dir(server).resolve("wf_military_deaths.json");
+            if (Files.exists(df)) DEATHS.fromJson(Files.readString(df));
+            Path sf = dir(server).resolve("wf_operational_supply.json");
+            if (Files.exists(sf)) SUPPLY.fromJson(Files.readString(sf));
             syncArmyHierarchy();
+            processPendingDeaths();
         } catch (Exception ex) {
-            LOGGER.error("wf_squads.json: {}", ex.toString());
+            militaryLoadFailed = true;
+            actionPersistenceBlocked = true;
+            LOGGER.error("wf_troops: military snapshots, death outbox or supply state are corrupt; preserving originals and blocking mutations: {}",
+                    ex.toString(), ex);
         }
     }
 
@@ -197,12 +215,14 @@ public class TroopsMod {
 
     /** Writes all three military snapshots as one staged transaction and restores prior files on failure. */
     static boolean saveDurably() {
-        if (server == null) return false;
+        if (server == null || militaryLoadFailed) return false;
         Map<Path, String> snapshots = new LinkedHashMap<>();
         Path root = dir(server);
         snapshots.put(root.resolve("wf_squads.json"), SQUADS.toJson());
         snapshots.put(root.resolve("wf_army_hierarchy.json"), HIERARCHY.toJson());
         snapshots.put(root.resolve("wf_forts.json"), FORTS.toJson());
+        snapshots.put(root.resolve("wf_military_deaths.json"), DEATHS.toJson());
+        snapshots.put(root.resolve("wf_operational_supply.json"), SUPPLY.toJson());
         Map<Path, Path> staged = new LinkedHashMap<>(), backups = new LinkedHashMap<>();
         Set<Path> replaced = new LinkedHashSet<>();
         try {
@@ -288,13 +308,31 @@ public class TroopsMod {
     @SubscribeEvent
     public void join(EntityJoinLevelEvent e) {
         if (e.getLevel().isClientSide || !(e.getEntity() instanceof TroopEntity t)) return;
-        LIVE.put(t.getUUID().toString(), t);
+        String entityId = t.getUUID().toString();
+        if (ModList.get().isLoaded("wf_people") && t.characterId != null && !t.characterId.isBlank()) {
+            Character existingCharacter = PeopleMod.authority().getGlobal(t.characterId);
+            if (existingCharacter != null && !existingCharacter.alive) {
+                LIVE.remove(entityId);
+                SQUADS.remove(entityId);
+                t.discard();
+                return; // A previously committed death must never be resurrected by a late chunk load.
+            }
+        }
+        MilitaryDeathLedger.Pending pending = t.characterId == null || t.characterId.isBlank()
+                ? null : DEATHS.get(t.characterId);
+        if (pending != null && pending.troopEntityId().equals(entityId)) {
+            t.setInvulnerable(true);
+            completePendingDeath(pending, true);
+            return;
+        }
+        LIVE.put(entityId, t);
         if (!t.deferCharacterBinding) syncPerson(t); // legacy saved entities migrate once; new recruits bind after payment commits
-        if (SQUADS.squadOf(t.getUUID().toString()) == null) {                       // солдат без отряда (отряд потерян): свой отряд
-            Squads.Squad s = SQUADS.create(t.ownerId(), null, List.of(t.getUUID().toString()));
-            s.realm = t.realm; s.cx = t.getX(); s.cz = t.getZ();
-            t.setSquadId(s.id);
-        } else t.setSquadId(SQUADS.squadOf(t.getUUID().toString()).id);
+        if (SQUADS.squadOf(entityId) == null) {
+            Squads.Squad squad = SQUADS.create(t.ownerId(), null, List.of(entityId));
+            squad.realm = t.realm; squad.cx = t.getX(); squad.cz = t.getZ();
+            t.setSquadId(squad.id);
+        } else t.setSquadId(SQUADS.squadOf(entityId).id);
+        applySupplyReadiness(t);
     }
 
     private record PersonBinding(CharacterRegistry registry, Character character) {}
@@ -451,16 +489,124 @@ public class TroopsMod {
         LIVE.remove(t.getUUID().toString());
     }
 
-    static void onDeath(TroopEntity t) {
-        PersonBinding binding = bindPerson(t, false);
-        if (binding != null && binding.character().alive) {
-            binding.registry().unbindEntity(binding.character().id, "troop", t.getUUID().toString());
-            try { PopulationSimulation.die(binding.registry(), binding.character().id, PeopleMod.YEAR, "combat"); }
-            catch (RuntimeException ex) { LOGGER.error("wf_troops: failed to record soldier death {}: {}", t.characterId, ex.toString()); }
+    /**
+     * Write the death intent before mutating Character state. On any storage/identity error
+     * the physical body remains present and invulnerable; it cannot silently disappear.
+     */
+    static boolean onDeath(TroopEntity troop, net.minecraft.world.damagesource.DamageSource source) {
+        if (troop == null) return false;
+        String entityId = troop.getUUID().toString();
+        if (!ModList.get().isLoaded("wf_people")) {
+            LIVE.remove(entityId);
+            SQUADS.remove(entityId);
+            return true;
         }
-        String id = t.getUUID().toString();
-        LIVE.remove(id);
-        SQUADS.remove(id);
+
+        String characterId = troop.characterId == null ? "" : troop.characterId.trim();
+        if (characterId.isBlank()) {
+            PersonBinding binding = bindPerson(troop, false);
+            if (binding == null || binding.character() == null) {
+                actionPersistenceBlocked = true;
+                LOGGER.error("wf_troops: refusing to remove soldier {} because its canonical Character cannot be resolved",
+                        entityId);
+                return false;
+            }
+            characterId = binding.character().globalId;
+        }
+
+        String cause = source == null ? "combat" : source.getMsgId();
+        if (cause == null || cause.isBlank()) cause = "combat";
+        MilitaryDeathLedger.Pending pending;
+        try {
+            pending = new MilitaryDeathLedger.Pending(characterId, entityId,
+                    Math.max(1, PeopleMod.YEAR), cause);
+            DEATHS.stage(pending);
+        } catch (RuntimeException error) {
+            actionPersistenceBlocked = true;
+            LOGGER.error("wf_troops: death outbox rejected Character {}: {}", characterId, error.toString());
+            return false;
+        }
+
+        if (!saveDurably()) {
+            actionPersistenceBlocked = true;
+            LOGGER.error("wf_troops: death intent for Character {} could not be committed; preserving soldier body",
+                    characterId);
+            return false;
+        }
+        boolean completed = completePendingDeath(pending, false);
+        if (!completed) actionPersistenceBlocked = true;
+        return completed;
+    }
+
+    /** Resolves and commits a pending Character death/estate, then acknowledges the outbox. */
+    private static boolean completePendingDeath(MilitaryDeathLedger.Pending pending, boolean discardPhysicalBody) {
+        if (pending == null || server == null || militaryLoadFailed || !ModList.get().isLoaded("wf_people")) return false;
+        try {
+            Character person = PeopleMod.authority().getGlobal(pending.characterGlobalId());
+            CharacterRegistry owner = PeopleMod.authority().registryForGlobal(pending.characterGlobalId());
+            if (person == null || owner == null || !pending.characterGlobalId().equals(person.globalId)) {
+                LOGGER.debug("wf_troops: pending death {} waits for the owning Character partition",
+                        pending.characterGlobalId());
+                return false;
+            }
+
+            owner.unbindEntity(person.id, "troop", pending.troopEntityId());
+            if (person.alive) {
+                PopulationSimulation.die(owner, person.id, pending.year(), pending.cause());
+            } else {
+                // CharacterRegistry.kill also finishes an interrupted estate transfer and lifecycle receipt.
+                person.props.putIfAbsent("population.death_year", pending.year());
+                person.props.putIfAbsent("population.death_cause", pending.cause());
+                owner.kill(person.id);
+            }
+
+            if (!PeopleMod.persistCharacter(person, server)) {
+                LOGGER.error("wf_troops: Character death/estate {} is not durable; outbox remains pending",
+                        pending.characterGlobalId());
+                return false;
+            }
+
+            DEATHS.complete(pending.characterGlobalId());
+            if (!saveDurably()) {
+                DEATHS.stage(pending);
+                LOGGER.error("wf_troops: cannot acknowledge persisted death {}; retry remains staged",
+                        pending.characterGlobalId());
+                return false;
+            }
+
+            LIVE.remove(pending.troopEntityId());
+            SQUADS.remove(pending.troopEntityId());
+            if (discardPhysicalBody) discardPendingPhysicalBody(pending.troopEntityId());
+            return true;
+        } catch (RuntimeException error) {
+            LOGGER.error("wf_troops: pending Character death {} failed and will retry: {}",
+                    pending.characterGlobalId(), error.toString(), error);
+            return false;
+        }
+    }
+
+    private static void discardPendingPhysicalBody(String entityId) {
+        if (server == null) return;
+        try {
+            java.util.UUID id = java.util.UUID.fromString(entityId);
+            for (ServerLevel level : server.getAllLevels()) {
+                Entity body = level.getEntity(id);
+                if (body instanceof TroopEntity troop) {
+                    troop.discard();
+                    return;
+                }
+            }
+        } catch (IllegalArgumentException error) {
+            LOGGER.error("wf_troops: invalid pending troop entity UUID {}", entityId);
+        }
+    }
+
+    private static void processPendingDeaths() {
+        if (server == null || militaryLoadFailed || DEATHS.size() == 0 || !ModList.get().isLoaded("wf_people")) return;
+        for (MapData map : WorldForgeMod.loadedMaps().values())
+            if (map != null && map.titles != null) PeopleMod.registry(map);
+        for (MilitaryDeathLedger.Pending pending : DEATHS.pending())
+            completePendingDeath(pending, true);
     }
 
     /** Unpaid soldiers desert; preserve the living Character and demobilize into a nearby settlement when possible. */
@@ -497,11 +643,135 @@ public class TroopsMod {
         if (e.phase != TickEvent.Phase.END || server == null) return;
         ticks++;
         if (ticks % 10 == 0) TroopController.step(server);
-        if (ticks % 100 == 0) syncArmyHierarchy();
+        if (ticks % 100 == 0) {
+            syncArmyHierarchy();
+            processPendingDeaths();
+        }
         if (ticks % 1200 == 0) for (TroopEntity troop : LIVE.values()) syncPerson(troop);
         if (ticks % 100 == 0) payroll();
         if (ticks % 20 == 0) FortService.step(server, ticks);
         if (ticks % 6000 == 0) save();
+    }
+
+    private record SupplyKey(String realm, int armyId, String dimension) {
+        String id() { return realm + ":" + armyId + ":" + dimension; }
+        String accountId() { return "army-supply:" + realm + ":" + armyId + ":" + dimension; }
+        String ownerId() { return "army-supply:" + realm + ":" + armyId; }
+    }
+
+    /** Uses the saved field-supply state to apply combat/mobility effects when a soldier loads. */
+    private static void applySupplyReadiness(TroopEntity troop) {
+        if (troop == null || troop.realm == null || troop.realm.isBlank()) return;
+        String dimension = troop.level().dimension().location().toString();
+        OperationalSupply.State state = SUPPLY.state(new SupplyKey(troop.realm, troop.armyId, dimension).id());
+        troop.setSupplyReadiness(OperationalSupply.combatMultiplier(state),
+                OperationalSupply.movementMultiplier(state));
+    }
+
+    /**
+     * Settles daily rations against the actual settlement food store and persistent army account.
+     * The TreasuryLedger debit is committed before the readiness checkpoint. If the server stops
+     * between these two writes, the journal reference lets the next boot reconstruct the exact ration
+     * amount and finish the readiness checkpoint without charging the army twice.
+     */
+    private static void fieldSupply(Map<PayrollKey, List<TroopEntity>> payrollGroups, int days, long day, long worldMinute) {
+        if (days <= 0 || day < 0) return;
+        TreasuryLedger ledger = WorldForgeMod.treasury();
+        for (Map.Entry<PayrollKey, List<TroopEntity>> armyEntry : payrollGroups.entrySet()) {
+            Map<String, List<TroopEntity>> dimensions = new LinkedHashMap<>();
+            for (TroopEntity troop : armyEntry.getValue()) {
+                String dimension = troop.level().dimension().location().toString();
+                dimensions.computeIfAbsent(dimension, ignored -> new ArrayList<>()).add(troop);
+            }
+            for (Map.Entry<String, List<TroopEntity>> dimensionEntry : dimensions.entrySet()) {
+                PayrollKey army = armyEntry.getKey();
+                String dimension = dimensionEntry.getKey();
+                List<TroopEntity> soldiers = dimensionEntry.getValue();
+                SupplyKey key = new SupplyKey(army.realm(), army.armyId(), dimension);
+                OperationalSupply.State supplyState = SUPPLY.state(key.id());
+                if (day <= supplyState.lastProcessedWorldDay) {
+                    for (TroopEntity soldier : soldiers) applySupplyReadiness(soldier);
+                    continue;
+                }
+
+                String accountId = key.accountId();
+                ledger.open(accountId, key.ownerId(), "food", 0);
+                String consumptionReference = "army-rations:" + key.id() + ":" + day;
+
+                // Recovery after a ledger commit but before the supply snapshot commit.
+                TreasuryLedger.Entry committedConsumption = ledger.journal().stream()
+                        .filter(entry -> entry.accountId().equals(accountId) && !entry.credit()
+                                && entry.kind() == TreasuryLedger.Kind.CONSUMPTION
+                                && entry.reference().equals(consumptionReference))
+                        .reduce((first, second) -> {
+                            if (Math.abs(first.amount() - second.amount()) > 1e-8)
+                                throw new IllegalStateException("Conflicting committed army ration postings");
+                            return first;
+                        }).orElse(null);
+
+                double consumed;
+                double availableBeforeConsumption;
+                if (committedConsumption != null) {
+                    consumed = committedConsumption.amount();
+                    availableBeforeConsumption = ledger.balance(accountId) + consumed;
+                } else {
+                    int headcount = soldiers.size();
+                    double demand = OperationalSupply.demand(headcount, days);
+                    double available = ledger.balance(accountId);
+                    double shortfall = Math.max(0, demand - available);
+
+                    if (shortfall > 1e-9 && ModList.get().isLoaded("wf_settle")
+                            && !dev.worldforge.settle.mc.SettleMod.actionsBlocked()) {
+                        double centerX = soldiers.stream().mapToDouble(TroopEntity::getX).average().orElse(0);
+                        double centerZ = soldiers.stream().mapToDouble(TroopEntity::getZ).average().orElse(0);
+                        ServerLevel level = soldiers.get(0).level() instanceof ServerLevel serverLevel
+                                ? serverLevel : null;
+                        String deliveryReference = "army-resupply:" + key.id() + ":" + day;
+                        if (level != null) {
+                            dev.worldforge.settle.mc.SettleMod.transferFoodToArmy(level, army.realm(),
+                                    accountId, key.ownerId(), shortfall, centerX, centerZ, deliveryReference);
+                        }
+                        available = ledger.balance(accountId);
+                    }
+
+                    consumed = Math.min(available, demand);
+                    if (consumed > 1e-9 && !ledger.withdrawOnce(accountId, consumed,
+                            TreasuryLedger.Kind.CONSUMPTION, "field-rations", consumptionReference,
+                            worldMinute, "daily army food consumption")) {
+                        actionPersistenceBlocked = true;
+                        LOGGER.error("wf_troops: ration consumption failed for {}; readiness was not advanced: {}",
+                                key.id(), ledger.lastError());
+                        continue;
+                    }
+                    availableBeforeConsumption = available;
+                }
+
+                // First persist the economic posting. The readiness checkpoint is a recoverable second phase.
+                if (!WorldForgeMod.saveTreasuryNow(server)) {
+                    actionPersistenceBlocked = true;
+                    LOGGER.error("wf_troops: ration ledger for {} could not be saved; blocking military mutations",
+                            key.id());
+                    continue;
+                }
+                OperationalSupply.Report report;
+                try {
+                    report = SUPPLY.advance(key.id(), soldiers.size(), days,
+                            availableBeforeConsumption, consumed, day);
+                } catch (RuntimeException error) {
+                    actionPersistenceBlocked = true;
+                    LOGGER.error("wf_troops: cannot advance supply checkpoint {}: {}", key.id(), error.toString());
+                    continue;
+                }
+                if (report != null && report.shortage() > 1e-9)
+                    LOGGER.warn("wf_troops: army {} lacks {} food; readiness {}",
+                            key.id(), report.shortage(), report.readiness());
+                for (TroopEntity soldier : soldiers) applySupplyReadiness(soldier);
+                if (!saveDurably()) {
+                    actionPersistenceBlocked = true;
+                    LOGGER.error("wf_troops: field supply checkpoint {} could not be saved", key.id());
+                }
+            }
+        }
     }
 
     // ---- жалованье ----
@@ -521,6 +791,8 @@ public class TroopsMod {
             if (!troop.isAlive() || troop.realm == null || troop.realm.isBlank()) continue;
             groups.computeIfAbsent(new PayrollKey(troop.realm, troop.armyId), ignored -> new ArrayList<>()).add(troop);
         }
+        fieldSupply(groups, days, day, worldMinute);
+        if (actionPersistenceBlocked) return;
         for (Map.Entry<PayrollKey, List<TroopEntity>> entry : groups.entrySet()) {
             PayrollKey key = entry.getKey();
             Map<String, Integer> counts = new HashMap<>();

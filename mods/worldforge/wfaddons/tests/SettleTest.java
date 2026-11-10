@@ -394,8 +394,57 @@ public class SettleTest {
         ok(roundTrip, "сохранение и загрузка без потерь, включая ссылку на личность");
         ok(!r.workers.isEmpty() && r.workers.get(0).person.equals("c-person-roundtrip"),
                 "ссылка рабочего на CharacterRegistry сохраняется как стабильный foreign key");
-        x.tick(100); r.tick(100);
-        ok(x.toJson().equals(r.toJson()), "после загрузки симуляция идёт так же");
+        // Compare the same post-save simulation step from two independent copies of the world ledger.
+        String ledgerBeforeReloadStep = dev.worldforge.mod.economy.TreasuryService.current().toJson();
+        x.tick(100);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> stateAfterTickX = (Map<String, Object>) Json.parse(x.toJson());
+        dev.worldforge.mod.economy.TreasuryService.replace(
+                dev.worldforge.mod.economy.TreasuryLedger.fromJson(ledgerBeforeReloadStep));
+        r.tick(100);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> stateAfterTickR = (Map<String, Object>) Json.parse(r.toJson());
+        ok(stateAfterTickX.equals(stateAfterTickR), "после загрузки симуляция идёт так же");
+
+        // Field ration transfer is a cross-file economic mutation: the ledger is the source of truth.
+        dev.worldforge.mod.economy.TreasuryService.replace(new dev.worldforge.mod.economy.TreasuryLedger());
+        dev.worldforge.settle.Settlement resupplySource =
+                new dev.worldforge.settle.Settlement("resupply_source", "Resupply Source", d);
+        resupplySource.setLedgerScope("minecraft:overworld");
+        resupplySource.add("food", 50);
+        String armyFoodAccount = "army-supply:test:1:minecraft:overworld";
+        ok(resupplySource.transferResourceToAccount("food", armyFoodAccount,
+                        "army-supply:test:1", 20,
+                        dev.worldforge.mod.economy.TreasuryLedger.Kind.LOGISTICS,
+                        "army-field-rations", "resupply:test:source:0")
+                        && Math.abs(resupplySource.amount("food") - 30) < 1e-8
+                        && Math.abs(dev.worldforge.mod.economy.TreasuryService.current().balance(armyFoodAccount) - 20) < 1e-8,
+                "field rations move from the real settlement food store into a persistent army ledger account");
+        ok(resupplySource.transferResourceToAccount("food", armyFoodAccount,
+                        "army-supply:test:1", 20,
+                        dev.worldforge.mod.economy.TreasuryLedger.Kind.LOGISTICS,
+                        "army-field-rations", "resupply:test:source:0")
+                        && Math.abs(resupplySource.amount("food") - 30) < 1e-8,
+                "a retry of the exact settlement-to-army ration transfer cannot duplicate food");
+        ok(!resupplySource.transferResourceToAccount("food", armyFoodAccount,
+                        "army-supply:test:1", 21,
+                        dev.worldforge.mod.economy.TreasuryLedger.Kind.LOGISTICS,
+                        "army-field-rations", "resupply:test:source:0")
+                        && Math.abs(resupplySource.amount("food") - 30) < 1e-8,
+                "changing the amount under a committed settlement-to-army reference fails closed");
+        resupplySource.stock.put("food", 50.0);
+        ok(Math.abs(resupplySource.amount("food") - 30) < 1e-8,
+                "an old settlement stock mirror cannot recreate food already transferred to an army");
+        String sourceSnapshot = resupplySource.toJson();
+        dev.worldforge.mod.economy.TreasuryLedger savedFoodLedger =
+                dev.worldforge.mod.economy.TreasuryService.current();
+        dev.worldforge.mod.economy.TreasuryService.replace(
+                dev.worldforge.mod.economy.TreasuryLedger.fromJson(savedFoodLedger.toJson()));
+        dev.worldforge.settle.Settlement sourceRestored =
+                dev.worldforge.settle.Settlement.fromJson(sourceSnapshot, d);
+        ok(Math.abs(sourceRestored.amount("food") - 30) < 1e-8
+                        && Math.abs(dev.worldforge.mod.economy.TreasuryService.current().balance(armyFoodAccount) - 20) < 1e-8,
+                "settlement food and army field rations reconcile after independent snapshot reloads");
 
         System.out.println(fails == 0 ? "ALL OK" : fails + " FAILED");
         if (fails > 0) System.exit(1);

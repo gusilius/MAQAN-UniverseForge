@@ -11,7 +11,9 @@ import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.PopulationSimulation;
 import dev.worldforge.people.LifeSimulation;
 import dev.worldforge.mod.WorldForgeMod;
+import dev.worldforge.mod.MapChunkGenerator;
 import dev.worldforge.mod.economy.TreasuryLedger;
+import dev.worldforge.mod.economy.TreasuryService;
 import dev.worldforge.people.PopulationSimulation.Duty;
 import dev.worldforge.people.mc.PeopleMod;
 import net.minecraft.core.BlockPos;
@@ -92,6 +94,8 @@ public class SettleMod {
     public static final Map<String, Colony> COLONIES = new ConcurrentHashMap<>();
     public static dev.worldforge.settle.TradeNetwork NETWORK = new dev.worldforge.settle.TradeNetwork();
     private static long ticks;
+    /** Fail-closed gate when an army logistics transfer cannot persist its ledger/settlement checkpoint. */
+    private static volatile boolean logisticsPersistenceBlocked;
 
     public SettleMod() {
         dev.worldforge.mod.WorldForgeSnapshotExporter.registerContributor(SettleMod::appendAtlasFeatures);
@@ -301,6 +305,18 @@ public class SettleMod {
     // ------------------------------------------------------------------ доступ
 
     /** Государство, на чьей земле стоит поселение (по провинции под центром), или "". */
+    /** Resolve a settlement's realm only against the map generator in its actual dimension. */
+    private static String realmOf(Colony colony, ServerLevel level) {
+        if (colony == null || level == null
+                || !colony.dim.equals(level.dimension().location().toString())) return "";
+        if (!(level.getChunkSource().getGenerator() instanceof MapChunkGenerator generator)) return "";
+        dev.worldforge.mod.MapData map = generator.data();
+        if (map == null || map.titles == null) return "";
+        dev.worldforge.mod.TitleData.Title province = map.provinceAt(colony.cx, colony.cz);
+        dev.worldforge.mod.TitleData.Realm realm = province == null ? null : map.titles.realmOf(province);
+        return realm == null || realm.id == null ? "" : realm.id;
+    }
+
     public static String realmOf(Colony c) {
         try {
             for (dev.worldforge.mod.MapData m : dev.worldforge.mod.WorldForgeMod.loadedMaps().values()) {
@@ -348,6 +364,70 @@ public class SettleMod {
     public static boolean ownsAny(String uuid) {
         for (Colony c : COLONIES.values()) if (uuid.equals(c.owner)) return true;
         return false;
+    }
+
+    /**
+     * Pulls real food from the nearest settlements belonging to this realm and dimension into the
+     * army's food account. Each source settlement has its own durable idempotency reference.
+     */
+    public static double transferFoodToArmy(ServerLevel level, String realmId,
+            String targetAccountId, String targetOwnerId, double requested,
+            double armyX, double armyZ, String referencePrefix) {
+        if (level == null || realmId == null || realmId.isBlank()
+                || targetAccountId == null || targetAccountId.isBlank()
+                || targetOwnerId == null || targetOwnerId.isBlank()
+                || !Double.isFinite(requested) || requested <= 0
+                || !Double.isFinite(armyX) || !Double.isFinite(armyZ)
+                || referencePrefix == null || referencePrefix.isBlank()
+                || actionsBlocked()) return 0;
+        MinecraftServer server = level.getServer();
+        if (server == null) return 0;
+
+        String dimension = level.dimension().location().toString();
+        List<Colony> sources = COLONIES.values().stream()
+                .filter(colony -> colony != null && dimension.equals(colony.dim)
+                        && realmId.equals(realmOf(colony, level)))
+                .sorted(java.util.Comparator.comparingDouble(colony ->
+                        (colony.cx - armyX) * (colony.cx - armyX) + (colony.cz - armyZ) * (colony.cz - armyZ)))
+                .toList();
+        double remaining = requested;
+        double delivered = 0;
+        boolean changed = false;
+        for (Colony colony : sources) {
+            if (remaining <= 1e-9) break;
+            double available = colony.s.amount("food");
+            double amount = Math.min(available, remaining);
+            if (amount <= 1e-9) continue;
+            String referenceStem = referencePrefix + ":" + colony.s.id;
+            String sourceAccount = colony.s.ledgerAccountId("food");
+            long previousLegs = TreasuryService.current().journal().stream()
+                    .filter(entry -> entry.accountId().equals(sourceAccount) && !entry.credit()
+                            && entry.kind() == TreasuryLedger.Kind.LOGISTICS
+                            && entry.category().equals("army-field-rations")
+                            && entry.reference().startsWith(referenceStem + ":"))
+                    .map(TreasuryLedger.Entry::reference).distinct().count();
+            String reference = referenceStem + ":" + previousLegs;
+            boolean moved = colony.s.transferResourceToAccount("food", targetAccountId, targetOwnerId,
+                    amount, TreasuryLedger.Kind.LOGISTICS, "army-field-rations", reference);
+            if (!moved) continue;
+            delivered += amount;
+            remaining -= amount;
+            changed = true;
+        }
+        if (!changed) return 0;
+
+        // Persist the canonical treasury first. A stale settlement stock mirror can never overwrite it:
+        // Settlement.amount now always reads the shared ledger, then the settlement projection is flushed.
+        if (!WorldForgeMod.saveTreasuryNow(server)) {
+            logisticsPersistenceBlocked = true;
+            LOGGER.error("wf_settle: army food transfer reached memory but canonical treasury save failed; logistics paused");
+            return 0;
+        }
+        if (!saveDurably(server)) {
+            logisticsPersistenceBlocked = true;
+            LOGGER.error("wf_settle: army food transfer committed in treasury but settlement projection save failed; logistics paused");
+        }
+        return delivered;
     }
 
     /** Ближайшее к точке поселение в этом измерении (без ограничения расстояния) или null. */
@@ -546,7 +626,7 @@ public class SettleMod {
 
     /** True while any settlement has an uncommitted mutation; all settlement writers must then fail closed. */
     public static boolean actionsBlocked() {
-        return COLONIES.values().stream().anyMatch(colony -> colony != null
+        return logisticsPersistenceBlocked || COLONIES.values().stream().anyMatch(colony -> colony != null
                 && (colony.actionPersistenceBlocked || colony.genesisProvisioningRuntimeBlocked));
     }
 
