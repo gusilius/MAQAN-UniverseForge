@@ -77,7 +77,9 @@ public class PeopleMod {
     public static volatile NameBank NAMES = new NameBank();
     private static final Map<MapData, CharacterRegistry> REGS = new ConcurrentHashMap<>();
     private static final CharacterAuthority AUTHORITY = new CharacterAuthority();
+    private static final CharacterRegistry PLAYER_REGISTRY = new CharacterRegistry();
     public static CharacterAuthority authority() { return AUTHORITY; }
+    public static CharacterRegistry playerRegistry() { return PLAYER_REGISTRY; }
     /** Corrupt saves fail closed: never regenerate courts over unreadable identity data. */
     private static final Set<MapData> INVALID_REGS = ConcurrentHashMap.newKeySet();
     public static final int TICKS_PER_DAY = 1200;
@@ -154,6 +156,19 @@ public class PeopleMod {
     public void onStarted(ServerStartedEvent e) {
         YEAR = WorldForgeApi.clock().year();
         if (WorldForgeMod.worldId() != null) AUTHORITY.beginWorld(WorldForgeMod.worldId());
+        MinecraftServer server = e.getServer();
+        try {
+            Path playerFile = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
+                    .resolve("worldforge").resolve("wf_players.json");
+            if (Files.exists(playerFile)) {
+                WorldId world = WorldForgeMod.worldId();
+                if (world == null) throw new IllegalStateException("WorldId is unavailable for player identity migration");
+                PLAYER_REGISTRY.fromJson(Files.readString(playerFile), world + "|__players__");
+            }
+            AUTHORITY.registerMap("__players__", PLAYER_REGISTRY);
+        } catch (Exception ex) {
+            LOGGER.error("wf_people: player Character registry failed to load; player identity creation is disabled: {}", ex.toString());
+        }
         for (MapData m : WorldForgeMod.loadedMaps().values()) registry(m);
     }
 
@@ -212,6 +227,14 @@ public class PeopleMod {
     }
 
     static void saveAll(MinecraftServer server) {
+        try {
+            Path playerFile = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
+                    .resolve("worldforge").resolve("wf_players.json");
+            Files.createDirectories(playerFile.getParent());
+            Files.writeString(playerFile, PLAYER_REGISTRY.toJson());
+        } catch (Exception ex) {
+            LOGGER.error("wf_people: failed to save player Character registry: {}", ex.toString());
+        }
         for (Map.Entry<MapData, CharacterRegistry> en : REGS.entrySet()) {
             try {
                 Path dir = EditorManager.overlayDir(server, en.getKey());
@@ -227,6 +250,7 @@ public class PeopleMod {
     public void onStopping(ServerStoppingEvent e) {
         saveAll(e.getServer());
         REGS.clear();
+        PLAYER_REGISTRY.fromJson("{\"format\":\"wf-people/3\",\"schema_version\":3,\"next\":1,\"characters\":[]}");
         AUTHORITY.clear();
         FLAGS.clear();
     }
