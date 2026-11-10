@@ -294,9 +294,19 @@ public class GenesisMod {
             // Genesis uses the one shared durable action journal; it does not own a second executor.
             long worldMinute = WorldForgeApi.clock().worldMinute();
             String draftFingerprint = UUID.nameUUIDFromBytes((sp.getUUID() + "|" + GENESIS.viewJson(d)).getBytes(StandardCharsets.UTF_8)).toString();
+            String actorId = "player:" + sp.getUUID();
+            for (ActionExecutionService.Task previous : WorldForgeApi.actionExecution().tasks()) {
+                if (!"genesis.confirm".equals(previous.actionId()) || !actorId.equals(previous.actorId())
+                        || previous.status() != ActionExecutionService.Status.FAILED || previous.args().isEmpty()) continue;
+                String previousFingerprint = previous.args().get(previous.args().size() - 1);
+                if (!draftFingerprint.equals(previousFingerprint)) {
+                    s.sendFailure(Component.literal("Предыдущее создание персонажа завершилось частично. Изменение черновика заблокировано до восстановления предыдущей операции."));
+                    return 0;
+                }
+            }
             String requestId = "genesis:" + sp.getUUID().toString().replace("-", "") + ":" + ACTION_SESSION_ID + ":" + draftFingerprint.replace("-", "");
             ActionExecutionService.Request request = new ActionExecutionService.Request(
-                    requestId, "genesis.confirm", "player:" + sp.getUUID(), sp.getUUID().toString(),
+                    requestId, "genesis.confirm", actorId, sp.getUUID().toString(),
                     List.of(d.race, d.start, d.cls, draftFingerprint), worldMinute);
             ActionExecutionService.Task task = WorldForgeApi.actionExecution().execute(
                     request,
