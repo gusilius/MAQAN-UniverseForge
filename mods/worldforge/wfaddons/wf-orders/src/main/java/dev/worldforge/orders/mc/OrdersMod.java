@@ -123,10 +123,26 @@ public class OrdersMod {
             ServerPlayer p = player(pl);
             MapData m = p == null ? null : EditorManager.dataFor(p.serverLevel());
             if (m == null) { ORDERS.lastError = "Карта недоступна."; return null; }
-            ActionResult r = WorldForgeApi.run(action, new ActionContext(EditorManager.editorFor(m), p.getGameProfile().getName(), WFPerm.trusted(p.createCommandSourceStack()), realm, 0, args));
-            if (!r.ok) { ORDERS.lastError = r.message; return null; }
-            EditorManager.touch(m);
-            return r.message;
+            ActionContext context = new ActionContext(EditorManager.editorFor(m),
+                    p.getGameProfile().getName(), WFPerm.trusted(p.createCommandSourceStack()), realm, 0, args);
+            String actor = p.getUUID().toString();
+            String payload = action + "|" + realm + "|" + String.join("|", args);
+            String requestId = "orders:" + UUID.nameUUIDFromBytes(
+                    (actor + ":" + WorldForgeApi.clock().worldMinute() + ":" + payload)
+                            .getBytes(StandardCharsets.UTF_8));
+            try {
+                var task = WorldForgeApi.submitAction(requestId, action, context,
+                        WorldForgeMod.actionExecutionFile(p.server), WorldForgeApi.clock().worldMinute());
+                if (task.status() != dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED) {
+                    ORDERS.lastError = task.message();
+                    return null;
+                }
+                EditorManager.touch(m);
+                return task.message();
+            } catch (RuntimeException ex) {
+                ORDERS.lastError = "Не удалось выполнить действие организации: " + ex.getMessage();
+                return null;
+            }
         }
     };
 
