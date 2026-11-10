@@ -25,6 +25,10 @@ public final class CharacterRegistry {
     private final Map<String, Character> byId = new LinkedHashMap<>();
     private final List<Listener> listeners = new ArrayList<>();
     private int next = 1;
+    private long revision;
+
+    /** Changes only when registry membership or identity records are replaced. */
+    public long revision() { return revision; }
 
     public void addListener(Listener l) { listeners.add(l); }
 
@@ -47,6 +51,7 @@ public final class CharacterRegistry {
         c.gender = gender;
         c.birthYear = birthYear;
         byId.put(c.id, c);
+        revision++;
         for (Listener l : listeners) l.born(c);
         publish(c, new LifecycleEvent(LifecycleKind.BORN, c.id, "", "", birthYear));
         return c;
@@ -480,6 +485,7 @@ public final class CharacterRegistry {
         byId.clear();
         byId.putAll(loaded);
         next = safeNext;
+        revision++;
         for (Character character : byId.values()) {
             LifecycleEvent restored = new LifecycleEvent(LifecycleKind.RESTORED, character.id, "", "", 0);
             for (Listener listener : listeners) listener.lifecycle(character, restored);
