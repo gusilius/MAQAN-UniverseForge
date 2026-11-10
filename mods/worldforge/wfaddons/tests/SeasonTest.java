@@ -22,6 +22,14 @@ public class SeasonTest {
 
     public static void main(String[] a) throws Exception {
         Settlement s = make(false);
+        Settlement globallyTimed = make(false);
+        globallyTimed.setWorldCalendar(91L * 1440L, 301);
+        ok(globallyTimed.seasonName().equals("Лето") && globallyTimed.year() == 301
+                        && globallyTimed.seasonProgress() == 0.0,
+                "settlement season and year follow the shared world calendar, not local creation time");
+        globallyTimed.setWorldCalendar(273L * 1440L, 301);
+        ok(globallyTimed.seasonName().equals("Зима"),
+                "all settlements enter winter on the same global calendar day");
         ok(s.seasonName().equals("Весна") && s.year() == 1, "старт: весна, год 1");
         s.tick(Settlement.SEASON_LEN * 2 + 1);
         ok(s.seasonName().equals("Осень"), "через две смены - осень: " + s.seasonName());
