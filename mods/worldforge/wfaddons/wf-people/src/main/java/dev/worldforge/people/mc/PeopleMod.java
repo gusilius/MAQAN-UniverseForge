@@ -208,8 +208,17 @@ public class PeopleMod {
         CharacterRegistry prev = REGS.putIfAbsent(m, reg);
         CharacterRegistry selected = prev != null ? prev : reg;
         if (WorldForgeMod.worldId() != null) {
-            try { AUTHORITY.registerMap(m.name, selected); }
-            catch (RuntimeException ex) { LOGGER.error("wf_people: global Character authority rejected map '{}': {}", m.name, ex.toString()); }
+            try {
+                AUTHORITY.registerMap(m.name, selected);
+            } catch (RuntimeException ex) {
+                // Keep a rejected map out of the local cache as well as the global index.
+                // Callers must not resolve Characters through a partition that failed identity validation.
+                REGS.remove(m, selected);
+                INVALID_REGS.add(m);
+                LOGGER.error("wf_people: global Character authority rejected map '{}'; map registry is disabled: {}",
+                        m.name, ex.toString());
+                return null;
+            }
         }
         return selected;
     }
