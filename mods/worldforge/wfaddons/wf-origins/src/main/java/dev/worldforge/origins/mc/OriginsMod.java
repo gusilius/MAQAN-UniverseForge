@@ -173,15 +173,55 @@ public class OriginsMod {
     private static int act(CommandSourceStack s, String what, String id) {
         ServerPlayer sp = s.getPlayer();
         if (sp == null) return 0;
+        String actor = sp.getUUID().toString();
         String o = owner(sp);
-        boolean ok = switch (what) {
-            case "race" -> ORIGINS.setRace(o, id);
-            case "class" -> ORIGINS.chooseClass(o, id);
-            case "learn" -> ORIGINS.learn(o, id);
-            case "retrain" -> { ORIGINS.today = (int) dev.worldforge.mod.api.WorldForgeApi.clock().dayNumber(); String g = ORIGINS.retrain(o, ORIGINS.today); if (g != null) s.sendSuccess(() -> Component.literal("Класс снят: " + g), false); yield g != null; }
-            default -> { ORIGINS.drop(o, id); yield true; }
-        };
-        if (!ok) { s.sendFailure(Component.literal(ORIGINS.lastError)); }
-        return open(s);
+        long minute = dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute();
+        String requestId = "origins:" + UUID.nameUUIDFromBytes(
+                (actor + ":" + s.getServer().getTickCount() + ":" + what + ":" + id)
+                        .getBytes(StandardCharsets.UTF_8));
+        try {
+            var task = dev.worldforge.mod.api.WorldForgeApi.actionExecution().execute(
+                    new dev.worldforge.mod.api.ActionExecutionService.Request(
+                            requestId, "origins." + what, actor, o, List.of(id), minute),
+                    req -> s.getServer().getPlayerList().getPlayer(sp.getUUID()) == null
+                            ? "Игрок отключился до изменения происхождения" : null,
+                    (req, attempt) -> {
+                        boolean ok;
+                        String message;
+                        switch (what) {
+                            case "race" -> { ok = ORIGINS.setRace(o, id); message = "Раса выбрана."; }
+                            case "class" -> { ok = ORIGINS.chooseClass(o, id); message = "Класс выбран."; }
+                            case "learn" -> { ok = ORIGINS.learn(o, id); message = "Профессия изучена."; }
+                            case "retrain" -> {
+                                ORIGINS.today = (int) dev.worldforge.mod.api.WorldForgeApi.clock().dayNumber();
+                                String removed = ORIGINS.retrain(o, ORIGINS.today);
+                                ok = removed != null;
+                                message = ok ? "Класс снят: " + removed : ORIGINS.lastError;
+                            }
+                            case "drop" -> {
+                                if (!ORIGINS.build(o).prof.containsKey(id)) {
+                                    ok = false;
+                                    message = "Эта профессия не изучена.";
+                                } else {
+                                    ORIGINS.drop(o, id);
+                                    ok = true;
+                                    message = "Профессия и её зависимые специализации сброшены.";
+                                }
+                            }
+                            default -> { return dev.worldforge.mod.api.ActionResult.fail("Неизвестная операция происхождения: " + what); }
+                        }
+                        return ok ? dev.worldforge.mod.api.ActionResult.ok(message)
+                                : dev.worldforge.mod.api.ActionResult.fail(message == null || message.isBlank() ? ORIGINS.lastError : message);
+                    }, null, minute, dev.worldforge.mod.WorldForgeMod.actionExecutionFile(s.getServer()));
+            boolean ok = task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED;
+            if (ok) s.sendSuccess(() -> Component.literal(task.message()), false);
+            else s.sendFailure(Component.literal(task.message()));
+            open(s);
+            return ok ? 1 : 0;
+        } catch (RuntimeException ex) {
+            s.sendFailure(Component.literal("Не удалось изменить происхождение: " + ex.getMessage()));
+            open(s);
+            return 0;
+        }
     }
 }
