@@ -209,10 +209,10 @@ public final class Settlement {
             TreasuryLedger ledger = TreasuryService.current();
             if (delta > 0) ledger.deposit(accountId(resource), delta, TreasuryLedger.Kind.IMPORT,
                     "legacy-stock-mirror", "settlement:" + id + ":legacy-sync",
-                    Math.max(0, (long) Math.floor(time / 60.0)), "compatibility stock mirror reconciliation");
+                    worldMinute(), "compatibility stock mirror reconciliation");
             else ledger.withdraw(accountId(resource), -delta, TreasuryLedger.Kind.WRITE_OFF,
                     "legacy-stock-mirror", "settlement:" + id + ":legacy-sync",
-                    Math.max(0, (long) Math.floor(time / 60.0)), "compatibility stock mirror reconciliation");
+                    worldMinute(), "compatibility stock mirror reconciliation");
             account = resourceAccount(resource);
         }
         stock.put(resource, account.balance);
@@ -225,7 +225,7 @@ public final class Settlement {
         amount(resource);
         resourceAccount(resource);
         boolean ok = TreasuryService.current().withdraw(accountId(resource), value, kind, category, reference,
-                Math.max(0, (long) Math.floor(time / 60.0)), category);
+                worldMinute(), category);
         syncResourceMirror(resource);
         return ok;
     }
@@ -237,7 +237,7 @@ public final class Settlement {
         TreasuryLedger ledger = TreasuryService.current();
         double before = ledger.balance(accountId(resource));
         if (!ledger.deposit(accountId(resource), value, kind, category, reference,
-                Math.max(0, (long) Math.floor(time / 60.0)), category)) return 0;
+                worldMinute(), category)) return 0;
         syncResourceMirror(resource);
         return Math.max(0, ledger.balance(accountId(resource)) - before);
     }
@@ -300,7 +300,7 @@ public final class Settlement {
         resourceAccount(resource);
         recipient.resourceAccount(resource);
         boolean ok = TreasuryService.current().transfer(accountId(resource), recipient.accountId(resource), quantity,
-                TreasuryLedger.Kind.TRADE, category, reference, Math.max(0, (long) Math.floor(time / 60.0)),
+                TreasuryLedger.Kind.TRADE, category, reference, worldMinute(),
                 "settlement-to-settlement commodity transfer");
         syncResourceMirror(resource);
         recipient.syncResourceMirror(resource);
@@ -321,7 +321,7 @@ public final class Settlement {
         if (targetAccountId == null || targetAccountId.isBlank() || !Double.isFinite(quantity) || quantity < 0) return false;
         amount(Defs.SILVER);
         boolean ok = TreasuryService.current().transfer(accountId(Defs.SILVER), targetAccountId, quantity,
-                kind, category, reference, Math.max(0, (long) Math.floor(time / 60.0)),
+                kind, category, reference, worldMinute(),
                 "settlement treasury transfer");
         syncResourceMirror(Defs.SILVER);
         if (ok && quantity > 0) flow.record(time, Defs.SILVER, quantity, false);
