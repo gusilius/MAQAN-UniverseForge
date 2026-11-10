@@ -138,7 +138,7 @@ public final class EditorEvents {
                 case "smooth" -> {
                     int n = ed.smoothAtBlock(bx, bz, s.brush);
                     if (n > 0) {
-                        EditorManager.touch(m);
+                        if (persist) EditorManager.touch(m);
                         if (persist && !persistEditorChanges(player, m, ed)) return dev.worldforge.mod.api.ActionResult.fail(
                                 "Изменение границ не сохранено на диск; операция требует сверки");
                     }
@@ -149,7 +149,7 @@ public final class EditorEvents {
                     if (target == null) return dev.worldforge.mod.api.ActionResult.fail(
                             "Титул для назначения не выбран: /worldforge editor tool assign <уровень>");
                     TitleData.Title moved = ed.assignAtBlock(bx, bz, target.id);
-                    EditorManager.touch(m);
+                    if (persist) EditorManager.touch(m);
                     if (persist && !persistEditorChanges(player, m, ed)) return dev.worldforge.mod.api.ActionResult.fail(
                             "Перенос титула не сохранён на диск; операция требует сверки");
                     return dev.worldforge.mod.api.ActionResult.ok(moved.name + " → " + target.name);
@@ -159,7 +159,7 @@ public final class EditorEvents {
                             "Сначала выберите провинцию: Shift+ПКМ или ЛКМ по блоку");
                     int n = ed.paintAtBlock(bx, bz, s.brush, s.province);
                     if (n > 0) {
-                        EditorManager.touch(m);
+                        if (persist) EditorManager.touch(m);
                         if (persist && !persistEditorChanges(player, m, ed)) return dev.worldforge.mod.api.ActionResult.fail(
                                 "Закраска не сохранена на диск; операция требует сверки");
                     }
