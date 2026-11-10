@@ -125,6 +125,54 @@ public final class ResidentInteraction {
 
 
     private static int execute(ServerPlayer player, String action, String entityId) {
+        long minute = dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute();
+        String actor = player.getUUID().toString();
+        String payload = action + ":" + entityId;
+        String requestId = "resident:" + UUID.nameUUIDFromBytes(
+                (actor + ":" + player.server.getTickCount() + ":" + payload)
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        var request = new dev.worldforge.mod.api.ActionExecutionService.Request(
+                requestId, "settlement.resident_interaction", actor, entityId, List.of(action), minute);
+        try {
+            var task = dev.worldforge.mod.api.WorldForgeApi.actionExecution().execute(request,
+                    req -> {
+                        if (player.server.getPlayerList().getPlayer(player.getUUID()) == null)
+                            return "Игрок отключился до исполнения действия";
+                        UUID target;
+                        try { target = UUID.fromString(req.targetId()); }
+                        catch (IllegalArgumentException ex) { return "Некорректный ID жителя"; }
+                        Entity entity = player.serverLevel().getEntity(target);
+                        if (!(entity instanceof WFWorker current) || !validApproach(player, current,
+                                SettleMod.colony(current.colonyId)))
+                            return "Житель больше не находится рядом";
+                        if (requiresRuler(req.args().get(0))
+                                && !WorkerControlAccess.mayControl(player, SettleMod.colony(current.colonyId)))
+                            return "Недостаточно полномочий для этого приказа";
+                        return null;
+                    },
+                    (req, attempt) -> executeDirect(player, req.args().get(0), req.targetId()) == 1
+                            ? dev.worldforge.mod.api.ActionResult.ok("Действие жителя выполнено")
+                            : dev.worldforge.mod.api.ActionResult.fail("Действие жителя отклонено без изменения состояния"),
+                    null, minute, dev.worldforge.mod.WorldForgeMod.actionExecutionFile(player.server));
+            if (task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.FAILED)
+                player.sendSystemMessage(Component.literal("Действие не выполнено: " + task.message()));
+            return task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED ? 1 : 0;
+        } catch (RuntimeException ex) {
+            player.sendSystemMessage(Component.literal("Не удалось выполнить действие: " + ex.getMessage()));
+            return 0;
+        }
+    }
+
+    private static boolean requiresRuler(String action) {
+        return switch (action) {
+            case "repair", "tool", "equip", "follow", "stop", "work",
+                    "work_builder", "work_lumberjack", "work_miner", "work_farmer", "work_hauler",
+                    "work_area_resume", "work_area_cancel" -> true;
+            default -> false;
+        };
+    }
+
+    private static int executeDirect(ServerPlayer player, String action, String entityId) {
         UUID id;
         try { id = UUID.fromString(entityId); }
         catch (IllegalArgumentException ex) {
