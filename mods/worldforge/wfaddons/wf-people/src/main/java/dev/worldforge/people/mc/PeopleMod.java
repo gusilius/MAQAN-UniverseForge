@@ -256,6 +256,33 @@ public class PeopleMod {
         }
     }
 
+    /** Persist the exact Character partition that owns this player before Genesis reports success. */
+    public static boolean persistCharacter(Character character, MinecraftServer server) {
+        if (character == null || server == null) return false;
+        CharacterRegistry owner = AUTHORITY.registryForGlobal(character.globalId);
+        if (owner == null) return false;
+        try {
+            if (owner == PLAYER_REGISTRY) {
+                if (!playerRegistryAvailable) return false;
+                Path playerFile = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
+                        .resolve("worldforge").resolve("wf_players.json");
+                writeAtomic(playerFile, PLAYER_REGISTRY.toJson());
+                return true;
+            }
+            for (Map.Entry<MapData, CharacterRegistry> entry : REGS.entrySet()) {
+                if (entry.getValue() != owner) continue;
+                Path file = EditorManager.overlayDir(server, entry.getKey()).resolve("wf_people.json");
+                writeAtomic(file, owner.toJson());
+                return true;
+            }
+            return false;
+        } catch (Exception ex) {
+            if (owner == PLAYER_REGISTRY) playerRegistryAvailable = false;
+            LOGGER.error("wf_people: failed to persist canonical Character {}: {}", character.globalId, ex.toString());
+            return false;
+        }
+    }
+
     static void saveAll(MinecraftServer server) {
         if (playerRegistryAvailable) try {
             Path playerFile = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
