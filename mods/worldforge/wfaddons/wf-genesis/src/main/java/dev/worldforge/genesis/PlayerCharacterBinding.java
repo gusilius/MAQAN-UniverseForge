@@ -42,6 +42,21 @@ public final class PlayerCharacterBinding {
         return saved != null ? saved : match;
     }
 
+    /** New Genesis identities always live in the dedicated world-wide player partition. */
+    public static Character resolveOrCreate(String playerUuid, String savedGlobalId,
+                                             CharacterAuthority authority,
+                                             Collection<CharacterRegistry> mapRegistries,
+                                             CharacterRegistry playerRegistry,
+                                             String name, String culture, String gender, int birthYear) {
+        Character existing = resolveExisting(playerUuid, savedGlobalId, authority, mapRegistries, playerRegistry);
+        if (existing != null) return existing;
+        if (authority.registry("__players__") != playerRegistry)
+            throw new IllegalStateException("Dedicated world-wide player Character partition is not registered");
+        Character created = playerRegistry.create(name, "", culture, gender, birthYear);
+        created.props.put("genesis.player_uuid", playerUuid);
+        return created;
+    }
+
     private static Character matchPlayer(Character current, CharacterRegistry registry, String playerUuid) {
         for (Character candidate : registry.all()) {
             if (!playerUuid.equals(String.valueOf(candidate.props.get("genesis.player_uuid")))) continue;
