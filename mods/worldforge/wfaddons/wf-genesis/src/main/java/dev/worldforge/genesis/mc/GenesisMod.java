@@ -252,12 +252,28 @@ public class GenesisMod {
         if (sp == null) return 0;
         if (GENESIS.isDone(owner(sp))) { s.sendFailure(Component.literal("Персонаж уже создан.")); return 0; }
         Draft d = GENESIS.draft(owner(sp));
-        String err = GENESIS.confirm(d);
-        if (!err.isEmpty()) { push(sp, d); s.sendFailure(Component.literal(err)); return 0; }
-        try { apply(sp, d); }
-        catch (RuntimeException ex) { LOGGER.error("wf_genesis: ошибка применения персонажа {}: {}", sp.getName().getString(), ex.toString(), ex); s.sendFailure(Component.literal("Ошибка применения: " + ex.getMessage())); }
+        List<String> problems = GENESIS.problems(d);
+        if (!problems.isEmpty()) {
+            push(sp, d);
+            s.sendFailure(Component.literal(problems.get(0)));
+            return 0;
+        }
+        try {
+            // Do not publish the draft as completed until every application step succeeds.
+            apply(sp, d);
+            String err = GENESIS.confirm(d);
+            if (!err.isEmpty()) {
+                s.sendFailure(Component.literal(err));
+                return 0;
+            }
+            save(sp.getServer());
+        } catch (RuntimeException ex) {
+            LOGGER.error("wf_genesis: ошибка применения персонажа {}: {}", sp.getName().getString(), ex.toString(), ex);
+            s.sendFailure(Component.literal("Ошибка применения. Мастер создания оставлен открытым: " + ex.getMessage()));
+            return 0;
+        }
         sp.getPersistentData().remove(WAIT);
-        save(sp.getServer());
+        broadcastLook(sp);
         sp.sendSystemMessage(Component.literal("§6Персонаж создан. §7Окно происхождения - K, прокачка - P."));
         WFNet.sendView(sp, VIEW + "_close", "");
         return 1;
@@ -318,7 +334,6 @@ public class GenesisMod {
         // место старта
         place(sp, d, st);
         sp.refreshDimensions();
-        broadcastLook(sp);
     }
 
     /**
