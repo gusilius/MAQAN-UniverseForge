@@ -39,6 +39,10 @@ public final class CharacterAuthority {
         if (mapId == null || mapId.isBlank()) throw new IllegalArgumentException("mapId is required");
         Objects.requireNonNull(registry, "registry");
         String key = mapId.trim();
+        for (Map.Entry<String, CharacterRegistry> entry : registries.entrySet()) {
+            if (entry.getValue() == registry && !entry.getKey().equals(key))
+                throw new IllegalStateException("CharacterRegistry is already registered as map " + entry.getKey());
+        }
         CharacterRegistry previous = registries.putIfAbsent(key, registry);
         if (previous != null && previous != registry)
             throw new IllegalStateException("A different CharacterRegistry is already registered for map " + key);
