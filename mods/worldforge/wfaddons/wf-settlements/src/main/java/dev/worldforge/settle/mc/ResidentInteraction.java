@@ -148,8 +148,8 @@ public final class ResidentInteraction {
                         if (!(entity instanceof WFWorker current)) return "Житель больше не находится рядом";
                         Colony currentColony = SettleMod.colony(current.colonyId);
                         if (!validApproach(player, current, currentColony)) return "Житель больше не находится рядом";
-                        if (currentColony.actionPersistenceBlocked || currentColony.genesisProvisioningRuntimeBlocked)
-                            return "Изменения поселения заблокированы после ошибки сохранения; требуется сверка";
+                        if (SettleMod.actionsBlocked())
+                            return "Все изменения поселений заблокированы после ошибки сохранения; требуется перезапуск и сверка";
                         if (requiresRuler(req.args().get(0))
                                 && !WorkerControlAccess.mayControl(player, currentColony))
                             return "Недостаточно полномочий для этого приказа";
