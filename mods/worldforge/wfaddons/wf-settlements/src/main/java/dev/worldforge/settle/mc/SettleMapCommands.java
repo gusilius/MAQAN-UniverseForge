@@ -120,6 +120,7 @@ public final class SettleMapCommands {
                     req -> {
                         Colony current = SettleMod.colony(req.targetId());
                         if (current == null) return "Settlement no longer exists";
+                        if (SettleMod.actionsBlocked()) return "Settlement changes are frozen after a persistence failure; restart and reconcile";
                         if (!operator && !actor.equals(current.owner)) return "Settlement ownership changed";
                         return null;
                     },
