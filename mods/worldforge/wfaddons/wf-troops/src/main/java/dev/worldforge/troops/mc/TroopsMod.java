@@ -851,9 +851,13 @@ public class TroopsMod {
                         SQUADS.remove(id);
                     }
                 }
+                if (n == 0) {
+                    source.sendFailure(Component.literal("У вас нет солдат для расформирования."));
+                    return 0;
+                }
                 int count = n;
                 source.sendSuccess(() -> Component.literal("Распущено солдат: " + count), false);
-                return 1;
+                return count;
             } catch (Exception ex) {
                 source.sendFailure(Component.literal("Только для игрока"));
                 return 0;
