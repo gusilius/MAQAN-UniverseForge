@@ -141,13 +141,16 @@ public final class ActionExecutionTest {
                         && !enqueueTombstone.receiptId().isEmpty() && forbiddenReplay[0] == 0,
                 "failed durable enqueue creates a terminal tombstone and cannot execute on same-process retry");
 
-        Path runningBlockedFile = dir.resolve("running-blocked.json");
+        Path runningBlockedParent = dir.resolve("running-blocked-parent");
+        Files.createDirectories(runningBlockedParent);
+        Path runningBlockedFile = runningBlockedParent.resolve("actions.json");
         ActionExecutionService runningBlocked = new ActionExecutionService();
         ActionExecutionService.Request runningBlockedRequest = new ActionExecutionService.Request(
                 "request-running-no-journal", "settlement.build", "player-3", "settlement-5", List.of("hall"), 112);
         runningBlocked.enqueue(runningBlockedRequest, 112, runningBlockedFile);
         Files.delete(runningBlockedFile);
-        Files.createDirectory(runningBlockedFile);
+        Files.delete(runningBlockedParent);
+        Files.writeString(runningBlockedParent, "parent is no longer a directory");
         int[] unstartedEffects = {0};
         ActionExecutionService.Task runningTombstone = runningBlocked.process(
                 "request-running-no-journal", r -> null,
