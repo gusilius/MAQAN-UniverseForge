@@ -91,10 +91,9 @@ public final class ArmyEngine {
         return TreasuryApi.netBalance(realm);
     }
 
-    void postGoldDelta(String realm, double delta, String category, String reference) {
+    boolean postGoldDelta(String realm, double delta, String category, String reference) {
         long minute = Math.max(0L, war.day) * 1440L;
-        if (!TreasuryApi.postDeltaOnce(realm, delta, category, reference, minute))
-            throw new TitleEditor.EditException("Не удалось провести операцию через казну: " + realm);
+        return TreasuryApi.postDeltaOnce(realm, delta, category, reference, minute);
     }
 
     public int capital(String realm) {
@@ -143,7 +142,8 @@ public final class ArmyEngine {
         if (gold(realm) < c) throw new TitleEditor.EditException("Не хватает золота: " + (int) gold(realm) + " из " + Math.ceil(c));
         int cap = capital(realm);
         if (cap == 0) throw new TitleEditor.EditException("У государства нет земель");
-        if (c > 0) postGoldDelta(realm, -c, "army-recruitment", "army-recruit:" + nextArmy + ":" + type + ":" + n);
+        if (c > 0 && !postGoldDelta(realm, -c, "army-recruitment", "army-recruit:" + nextArmy + ":" + type + ":" + n))
+            throw new TitleEditor.EditException("Казна отклонила оплату набора армии");
         pool.put(realm, pool(realm) - n);
         Army a = armyAt(realm, cap, false);
         a.add(type, n);
@@ -160,7 +160,8 @@ public final class ArmyEngine {
         if (cap == 0) throw new TitleEditor.EditException("У государства нет земель для размещения наёмников");
         double c = Math.max(1, cost(type, n, true));
         if (gold(realm) < c) throw new TitleEditor.EditException("Не хватает золота: " + (int) gold(realm) + " из " + Math.ceil(c));
-        postGoldDelta(realm, -c, "army-mercenary-hiring", "army-mercenary:" + nextArmy + ":" + type + ":" + n);
+        if (!postGoldDelta(realm, -c, "army-mercenary-hiring", "army-mercenary:" + nextArmy + ":" + type + ":" + n))
+            throw new TitleEditor.EditException("Казна отклонила оплату наёмников");
         Army a = armyAt(realm, cap, true);
         a.add(type, n);
         say(realmName(realm) + " нанимает " + n + " " + u.name.toLowerCase() + " (наёмники)");
@@ -333,7 +334,8 @@ public final class ArmyEngine {
                 if (u != null) cost += e.getValue() * u.upkeep * (a.mercenary ? 2 : 1) / 10.0;
             }
             double g = inc - cost;
-            postGoldDelta(r, g, "army-daily-net", "army-day:" + (war.day + 1));
+            boolean treasuryPosted = postGoldDelta(r, g, "army-daily-net", "army-day:" + (war.day + 1));
+            if (!treasuryPosted) say("Казна " + realmName(r) + " достигла кредитного лимита; армейские расходы не оплачены");
             double cap = levyCap(r);
             pool.put(r, Math.min(cap, pool(r) + cap * POOL_REGEN));
             if (g < 0) for (Army a : armiesOf(r)) {
@@ -657,6 +659,7 @@ public final class ArmyEngine {
     // ------------------------------------------------------------------ сохранение
 
     public String toJson() {
+        for (String realm : new ArrayList<>(gold.keySet())) gold(realm); // migrate every wf-army/1 balance before dropping the legacy field
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("format", "wf-army/2");
         root.put("next", nextArmy);
