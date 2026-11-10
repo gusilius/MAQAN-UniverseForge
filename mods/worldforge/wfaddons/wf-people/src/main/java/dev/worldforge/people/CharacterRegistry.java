@@ -24,7 +24,20 @@ public final class CharacterRegistry {
 
     private final Map<String, Character> byId = new LinkedHashMap<>();
     private final List<Listener> listeners = new ArrayList<>();
+    private CharacterAuthority authority;
     private int next = 1;
+
+    /** The global authority is attached by CharacterAuthority when this registry joins a world. */
+    void bindAuthority(CharacterAuthority value) {
+        Objects.requireNonNull(value);
+        if (authority != null && authority != value)
+            throw new IllegalStateException("CharacterRegistry is already attached to another world authority");
+        authority = value;
+    }
+
+    void unbindAuthority(CharacterAuthority value) {
+        if (authority == value) authority = null;
+    }
     private long revision;
 
     /** Changes only when registry membership or identity records are replaced. */
@@ -252,16 +265,23 @@ public final class CharacterRegistry {
     /** Смерть освобождает все должности. Возвращает их список (чтобы назначить преемников). */
     public List<Character.Post> kill(String id) {
         Character c = require(id);
-        if (!c.alive) return List.of();
+        if (c.alive) c.alive = false;
+        // A pending cross-registry transfer marker must be reconciled even when the estate
+        // was previously marked settled: the recipient partition may have reached disk first.
+        if (!Boolean.TRUE.equals(c.props.get("estate.settled"))
+                || c.props.containsKey("estate.transfer_pending")) {
+            CharacterInventory.settleEstate(authority, this, c);
+        }
+        if (Boolean.TRUE.equals(c.props.get("death.lifecycle.completed"))) return List.of();
+
         List<Character.Post> vacated = new ArrayList<>(c.posts);
-        c.alive = false;
-        CharacterInventory.settleEstate(this,c);
         c.posts.clear();
         for (Character.Post p : vacated) for (Listener l : listeners) l.dismissed(c, p.role, p.place);
         c.props.remove("population.entity_bindings");
         int deathYear = c.props.get("population.death_year") instanceof Number n ? n.intValue() : 0;
         for (Listener l : listeners) l.died(c);
         publish(c, new LifecycleEvent(LifecycleKind.DIED, c.id, "", "", deathYear));
+        c.props.put("death.lifecycle.completed", true);
         return vacated;
     }
 

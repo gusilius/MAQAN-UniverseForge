@@ -2,7 +2,9 @@ package dev.worldforge.people.mc;
 
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
+import dev.worldforge.people.CharacterInventory;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.TagParser;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
@@ -12,6 +14,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.PathfinderMob;
 import net.minecraft.world.entity.ai.attributes.AttributeSupplier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
@@ -21,6 +24,11 @@ import net.minecraft.world.entity.ai.goal.RandomLookAroundGoal;
 import net.minecraft.world.entity.ai.goal.RandomStrollGoal;
 import net.minecraft.world.entity.ai.util.DefaultRandomPos;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.resources.ResourceLocation;
+
+import java.util.Map;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 
@@ -67,6 +75,41 @@ public class WFNpc extends PathfinderMob {
         this.entityData.set(VARIANT, "f".equals(c.gender) ? 1 : 0);
         setCustomName(Component.literal(PeopleMod.label(c)));
         setCustomNameVisible(true);
+        syncEquipment(c);
+    }
+
+    /** The Character owns equipment; this entity only renders the saved slots. */
+    private void syncEquipment(Character character) {
+        Map<String, EquipmentSlot> slots = Map.of(
+                "head", EquipmentSlot.HEAD, "chest", EquipmentSlot.CHEST,
+                "legs", EquipmentSlot.LEGS, "feet", EquipmentSlot.FEET,
+                "mainhand", EquipmentSlot.MAINHAND, "offhand", EquipmentSlot.OFFHAND);
+        Map<String, CharacterInventory.Item> saved = CharacterInventory.equipment(character);
+        for (Map.Entry<String, EquipmentSlot> entry : slots.entrySet()) {
+            CharacterInventory.Item item = saved.get(entry.getKey());
+            ItemStack stack = ItemStack.EMPTY;
+            if (item != null) {
+                try {
+                    if (!item.data().isBlank()) {
+                        CompoundTag tag = TagParser.parseTag(item.data());
+                        stack = tag.contains("id") ? ItemStack.of(tag) : ItemStack.EMPTY;
+                    }
+                } catch (Exception ignored) { stack = ItemStack.EMPTY; }
+                if (stack.isEmpty()) {
+                    ResourceLocation id = ResourceLocation.tryParse(item.id());
+                    if (id != null) {
+                        net.minecraft.world.item.Item registered = BuiltInRegistries.ITEM.get(id);
+                        if (registered != net.minecraft.world.item.Items.AIR)
+                            stack = new ItemStack(registered, item.count());
+                    }
+                    if (!stack.isEmpty() && !item.data().isBlank()) try {
+                        CompoundTag tag = TagParser.parseTag(item.data());
+                        if (!tag.contains("id")) stack.setTag(tag);
+                    } catch (Exception ignored) { /* malformed optional NBT does not erase the item */ }
+                }
+            }
+            setItemSlot(entry.getValue(), stack);
+        }
     }
 
     @Override
