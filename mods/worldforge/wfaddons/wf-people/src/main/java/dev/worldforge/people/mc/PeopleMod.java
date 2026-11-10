@@ -231,20 +231,35 @@ public class PeopleMod {
         return m == null ? null : REGS.get(m);
     }
 
+    private static void writeAtomic(Path file, String content) throws java.io.IOException {
+        Files.createDirectories(file.getParent());
+        Path temp = file.resolveSibling(file.getFileName() + ".tmp");
+        try {
+            Files.writeString(temp, content);
+            try {
+                Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                        java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+            } catch (java.nio.file.AtomicMoveNotSupportedException ex) {
+                Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            Files.deleteIfExists(temp);
+        }
+    }
+
     static void saveAll(MinecraftServer server) {
         if (playerRegistryAvailable) try {
             Path playerFile = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
                     .resolve("worldforge").resolve("wf_players.json");
-            Files.createDirectories(playerFile.getParent());
-            Files.writeString(playerFile, PLAYER_REGISTRY.toJson());
+            writeAtomic(playerFile, PLAYER_REGISTRY.toJson());
         } catch (Exception ex) {
-            LOGGER.error("wf_people: failed to save player Character registry: {}", ex.toString());
+            playerRegistryAvailable = false;
+            LOGGER.error("wf_people: failed to save player Character registry; further Genesis identity writes are disabled: {}", ex.toString());
         }
         for (Map.Entry<MapData, CharacterRegistry> en : REGS.entrySet()) {
             try {
                 Path dir = EditorManager.overlayDir(server, en.getKey());
-                Files.createDirectories(dir);
-                Files.writeString(dir.resolve("wf_people.json"), en.getValue().toJson());
+                writeAtomic(dir.resolve("wf_people.json"), en.getValue().toJson());
             } catch (Exception ex) {
                 LOGGER.error("wf_people: не удалось сохранить людей карты '{}': {}", en.getKey().name, ex.toString());
             }
