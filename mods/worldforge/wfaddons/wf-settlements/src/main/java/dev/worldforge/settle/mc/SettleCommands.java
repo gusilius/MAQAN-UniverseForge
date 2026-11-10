@@ -306,23 +306,6 @@ public final class SettleCommands {
                             + ": 4 рабочих, дерево 60, еда 40, камень 10");
         });
     }
-        if (SettleMod.DEFS == null) {
-            s.sendFailure(Component.literal("Сервер ещё не готов"));
-            return 0;
-        }
-        ServerLevel level = s.getLevel();
-        BlockPos pos = BlockPos.containing(s.getPosition());
-        String payload = level.dimension().location() + "|" + pos + "|" + name.trim();
-        return executeAdminMutation(s, "settlement.found", level.dimension().location().toString(), payload, () -> {
-            Colony colony = SettleMod.found(level, name.trim(), pos);
-            if (s.getEntity() instanceof net.minecraft.server.level.ServerPlayer player)
-                colony.owner = player.getUUID().toString();
-            return dev.worldforge.mod.api.ActionResult.ok(
-                    "Основано поселение " + colony.s.name + " (" + colony.s.id + ") в " + colony.cx + ", " + colony.cz
-                            + ": 4 рабочих, дерево 60, еда 40, камень 10");
-        });
-    }
-
     private static int list(CommandSourceStack s) {
         String dim = s.getLevel().dimension().location().toString();
         int n = 0;
