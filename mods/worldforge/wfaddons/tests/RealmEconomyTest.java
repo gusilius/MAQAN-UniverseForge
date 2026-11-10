@@ -2,11 +2,15 @@ package dev.worldforge.tests;
 
 import dev.worldforge.war.*;
 import dev.worldforge.army.*;
+import dev.worldforge.mod.api.TreasuryApi;
 
 public class RealmEconomyTest {
     static int fails;
     static void ok(boolean c, String what) { System.out.println((c ? "ok   " : "FAIL ") + what); if (!c) fails++; }
     static boolean fails(Runnable r) { try { r.run(); return false; } catch (dev.worldforge.mod.TitleEditor.EditException e) { return true; } }
+    static void setGold(ArmyEngine engine, String realm, double amount) {
+        TreasuryApi.add(realm, amount - engine.gold(realm), "realm-economy-test");
+    }
 
     public static void main(String[] a) throws Exception {
         String[] ids = new String[2];
@@ -31,22 +35,22 @@ public class RealmEconomyTest {
         // развитие
         int b = e.baroniesOf(A).get(0);
         double c1 = eco.developCost(b);
-        e.gold.put(A, c1 - 1);
+        setGold(e, A, c1 - 1);
         ok(fails(() -> eco.develop(A, b)), "без золота развитие недоступно");
-        e.gold.put(A, 1000.0);
+        setGold(e, A, 1000.0);
         double before = eco.net(A);
         eco.develop(A, b);
         ok(eco.level(b) == 1 && e.gold(A) == 1000 - c1, "уровень 1, золото списано");
         ok(eco.net(A) > before, "развитие повышает доход: " + before + " -> " + eco.net(A));
         ok(eco.developCost(b) > c1, "следующий уровень дороже");
-        for (int i = 0; i < 10 && eco.level(b) < Economy.MAX_DEV; i++) { e.gold.put(A, 1000.0); eco.develop(A, b); }
+        for (int i = 0; i < 10 && eco.level(b) < Economy.MAX_DEV; i++) { setGold(e, A, 1000.0); eco.develop(A, b); }
         e.gold.put(A, 1000.0);
         ok(eco.level(b) == Economy.MAX_DEV && fails(() -> eco.develop(A, b)), "предел развития " + Economy.MAX_DEV);
         int foreign = e.baroniesOf(B).get(0);
         ok(fails(() -> eco.develop(A, foreign)), "чужое баронство развивать нельзя");
 
         // доход реально капает в казну
-        e.gold.put(A, 100.0); e.pool.clear();
+        setGold(e, A, 100.0); e.pool.clear();
         double inc = eco.net(A);
         e.tick(10);
         ok(Math.abs(e.gold(A) - (100 + inc * 10)) < 1e-6, "казна растёт на чистый доход: " + e.gold(A));
