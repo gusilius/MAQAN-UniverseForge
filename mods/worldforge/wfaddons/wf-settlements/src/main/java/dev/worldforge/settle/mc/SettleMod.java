@@ -669,7 +669,7 @@ public class SettleMod {
         CharacterRegistry registry = registryForColony(colony);
         if (registry == null) return;
         Settlement settlement = colony.s;
-        long worldMinute = Math.max(0L, (long) Math.floor(settlement.time / 60.0));
+        long worldMinute = settlement.worldMinute();
         for (dev.worldforge.settle.Worker worker : new ArrayList<>(settlement.workers)) {
             if (worker.person == null || worker.person.isBlank()) continue;
             Character person = resolvePerson(registry, worker.person);
@@ -866,7 +866,7 @@ public class SettleMod {
         if (payment <= 1e-9) return;
         boolean transferred = ledger.transfer(source, target, payment, TreasuryLedger.Kind.TAX,
                 "crown-remittance", settlement.id + ":" + Double.toHexString(settlement.remittedSilver),
-                Math.max(0, (long) Math.floor(settlement.time / 60.0)), "settlement tax remitted to realm treasury");
+                settlement.worldMinute(), "settlement tax remitted to realm treasury");
         if (transferred) {
             settlement.remittedSilver = ledger.totalDebits(source, TreasuryLedger.Kind.TAX, "crown-remittance");
             settlement.stock.put(Defs.SILVER, ledger.balance(source));
@@ -884,7 +884,9 @@ public class SettleMod {
             for (Colony c : COLONIES.values()) {
                 if (speed <= 0) break;
                 try {
-                    c.s.tick(speed);                                   // 1 секунда симуляции = 20 тиков
+                    c.s.setWorldCalendar(dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute(),
+                            dev.worldforge.mod.api.WorldForgeApi.clock().year());
+                    c.s.tick(speed);                                   // 1 симуляционная секунда = 20 тиков, 24 мировые минуты
                     remitCrownTaxes(c);
                     syncPeople(c);
                     runLifeAI(server, c);
