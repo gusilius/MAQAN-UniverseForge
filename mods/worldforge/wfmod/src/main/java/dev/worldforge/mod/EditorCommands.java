@@ -1,6 +1,7 @@
 package dev.worldforge.mod;
 
 import com.mojang.brigadier.arguments.DoubleArgumentType;
+import dev.worldforge.mod.api.WorldForgeApi;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.builder.RequiredArgumentBuilder;
