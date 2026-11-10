@@ -1,6 +1,6 @@
 package dev.worldforge.settle;
 
-/** Рабочий поселения. person - связь с персонажем мода людей (может быть пустой). */
+/** Рабочая проекция поселения. person stores the canonical global Character UUID (blank only for legacy/unbound workers). */
 public final class Worker {
     public record ManualOrder(double x,double z) {}
     public static final int MAX_MANUAL_ORDERS=16;
