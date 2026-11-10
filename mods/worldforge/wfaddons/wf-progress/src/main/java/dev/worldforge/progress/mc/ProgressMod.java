@@ -279,9 +279,7 @@ public class ProgressMod {
         String actor = source.getEntity() instanceof ServerPlayer player
                 ? player.getUUID().toString() : source.getTextName();
         long minute = dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute();
-        String requestId = "progress:" + java.util.UUID.nameUUIDFromBytes(
-                (actor + ":" + source.getServer().getTickCount() + ":" + actionId + ":" + payload)
-                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        String requestId = "progress:" + java.util.UUID.randomUUID();
         try {
             var task = dev.worldforge.mod.api.WorldForgeApi.actionExecution().execute(
                     new dev.worldforge.mod.api.ActionExecutionService.Request(
