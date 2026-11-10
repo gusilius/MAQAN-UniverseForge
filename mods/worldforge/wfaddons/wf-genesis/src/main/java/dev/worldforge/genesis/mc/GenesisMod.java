@@ -109,9 +109,21 @@ public class GenesisMod {
 
     @SubscribeEvent public void onStopping(ServerStoppingEvent e) { save(e.getServer()); }
 
-    private static void save(MinecraftServer s) {
-        try { Path f = file(s); Files.createDirectories(f.getParent()); Files.writeString(f, GENESIS.toJson()); }
-        catch (Exception ex) { LOGGER.error("wf_genesis: не удалось сохранить персонажей: {}", ex.toString()); }
+    private static boolean save(MinecraftServer s) {
+        try {
+            Path f = file(s);
+            Files.createDirectories(f.getParent());
+            Path tmp = f.resolveSibling(f.getFileName() + ".tmp");
+            Files.writeString(tmp, GENESIS.toJson(), StandardCharsets.UTF_8);
+            try { Files.move(tmp, f, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE); }
+            catch (java.nio.file.AtomicMoveNotSupportedException unsupported) {
+                Files.move(tmp, f, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
+            return true;
+        } catch (Exception ex) {
+            LOGGER.error("wf_genesis: не удалось сохранить персонажей: {}", ex.toString(), ex);
+            return false;
+        }
     }
 
     // ------------------------------------------------------------------ вход игрока
@@ -276,7 +288,7 @@ public class GenesisMod {
         try {
             // Genesis uses the one shared durable action journal; it does not own a second executor.
             long worldMinute = WorldForgeApi.clock().worldMinute();
-            String requestId = "genesis:" + sp.getUUID() + ":" + UUID.randomUUID();
+            String requestId = "genesis:" + UUID.nameUUIDFromBytes((sp.getUUID() + "|" + GENESIS.viewJson(d)).getBytes(StandardCharsets.UTF_8));
             ActionExecutionService.Request request = new ActionExecutionService.Request(
                     requestId, "genesis.confirm", "player:" + sp.getUUID(), sp.getUUID().toString(),
                     List.of(d.race, d.start, d.cls), worldMinute);
@@ -290,7 +302,10 @@ public class GenesisMod {
                         apply(sp, d);
                         String err = GENESIS.confirm(d);
                         if (!err.isEmpty()) return ActionResult.fail(err);
-                        save(sp.getServer());
+                        if (!save(sp.getServer())) {
+                            GENESIS.forget(owner(sp));
+                            return ActionResult.fail("Genesis state could not be saved; confirmation remains blocked for reconciliation");
+                        }
                         return ActionResult.ok("Genesis character created");
                     },
                     null, worldMinute, WorldForgeMod.actionExecutionFile(sp.getServer()));
