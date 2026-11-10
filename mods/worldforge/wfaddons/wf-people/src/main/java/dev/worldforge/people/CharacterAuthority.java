@@ -41,48 +41,65 @@ public final class CharacterAuthority {
         try {
             refreshIndex();
         } catch (RuntimeException ex) {
-            // A rejected new partition must not poison the authority with a half-indexed registry.
-            if (previous == null) {
-                registries.remove(key, registry);
-                byIdentity.clear();
-                byGlobalId.clear();
-                byLegacyId.clear();
-                indexedRevisions.clear();
-                refreshIndex();
-            }
+            // A rejected partition must not poison the live authority or discard its last valid index.
+            if (previous == null) registries.remove(key, registry);
             throw ex;
         }
     }
 
-    /** Rebuilds indexes so Characters created after map registration become immediately authoritative. */
+    /**
+     * Rebuild into temporary indexes and publish them only after every partition validates.
+     * This is deliberately transactional: a late collision must never leave a half-empty
+     * authority that appears current because its revision snapshot was already advanced.
+     */
     private void refreshIndex() {
         WorldId currentWorld = worldId;
         if (currentWorld == null) return;
         boolean changed = indexedRevisions.size() != registries.size();
         if (!changed) for (Map.Entry<String, CharacterRegistry> entry : registries.entrySet()) {
-            if (!Objects.equals(indexedRevisions.get(entry.getKey()), entry.getValue().revision())) { changed = true; break; }
+            if (!Objects.equals(indexedRevisions.get(entry.getKey()), entry.getValue().revision())) {
+                changed = true;
+                break;
+            }
         }
         if (!changed) return;
-        byIdentity.clear();
-        byGlobalId.clear();
-        byLegacyId.clear();
-        indexedRevisions.clear();
+
+        Map<CharacterIdentity, Character> nextByIdentity = new HashMap<>();
+        Map<String, CharacterIdentity> nextByGlobalId = new HashMap<>();
+        Map<String, Set<CharacterIdentity>> nextByLegacyId = new HashMap<>();
+        Map<String, Long> nextRevisions = new HashMap<>();
+
         for (Map.Entry<String, CharacterRegistry> entry : registries.entrySet()) {
-            indexedRevisions.put(entry.getKey(), entry.getValue().revision());
             String mapId = entry.getKey();
-            for (Character character : entry.getValue().all()) {
-                CharacterIdentity identity = new CharacterIdentity(currentWorld, mapId, character.id, character.globalId);
-                CharacterIdentity globalOwner = byGlobalId.putIfAbsent(character.globalId, identity);
+            CharacterRegistry registry = entry.getValue();
+            nextRevisions.put(mapId, registry.revision());
+            for (Character character : registry.all()) {
+                CharacterIdentity identity = new CharacterIdentity(
+                        currentWorld, mapId, character.id, character.globalId);
+                CharacterIdentity globalOwner = nextByGlobalId.putIfAbsent(character.globalId, identity);
                 if (globalOwner != null && !globalOwner.equals(identity))
                     throw new IllegalStateException("Global Character UUID collision " + character.globalId
                             + " between " + globalOwner.mapId() + "/" + globalOwner.characterId()
                             + " and " + mapId + "/" + character.id);
-                Character existing = byIdentity.putIfAbsent(identity, character);
+                Character existing = nextByIdentity.putIfAbsent(identity, character);
                 if (existing != null && existing != character)
                     throw new IllegalStateException("Duplicate Character identity " + identity);
-                byLegacyId.computeIfAbsent(character.id, ignored -> ConcurrentHashMap.newKeySet()).add(identity);
+                nextByLegacyId.computeIfAbsent(character.id, ignored -> new HashSet<>()).add(identity);
             }
         }
+
+        // Publish only a completely validated snapshot.
+        byIdentity.clear();
+        byIdentity.putAll(nextByIdentity);
+        byGlobalId.clear();
+        byGlobalId.putAll(nextByGlobalId);
+        byLegacyId.clear();
+        for (Map.Entry<String, Set<CharacterIdentity>> entry : nextByLegacyId.entrySet())
+            byLegacyId.put(entry.getKey(), ConcurrentHashMap.newKeySet());
+        for (Map.Entry<String, Set<CharacterIdentity>> entry : nextByLegacyId.entrySet())
+            byLegacyId.get(entry.getKey()).addAll(entry.getValue());
+        indexedRevisions.clear();
+        indexedRevisions.putAll(nextRevisions);
     }
 
     public synchronized Character get(CharacterIdentity identity) {
