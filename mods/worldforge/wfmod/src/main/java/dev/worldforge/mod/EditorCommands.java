@@ -234,8 +234,8 @@ public final class EditorCommands {
                                     return 1;
                                 })))
                                 .then(Commands.literal("apply").executes(c -> exec(c, true, (p, m, ed, s) -> {
-                                    EditorEvents.applyTool(p, s, m, ed, DoubleArgumentType.getDouble(c, "x"), DoubleArgumentType.getDouble(c, "z"));
-                                    return 1;
+                                    return EditorEvents.applyTool(p, s, m, ed,
+                                            DoubleArgumentType.getDouble(c, "x"), DoubleArgumentType.getDouble(c, "z")) ? 1 : 0;
                                 }))))))
                 .then(Commands.literal("info").executes(c -> exec(c, false, (p, m, ed, s) -> {
                     TitleData.Title t = province(p, m, s);
