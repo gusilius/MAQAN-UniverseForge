@@ -65,6 +65,26 @@ public final class ActionExecutionTest {
                         && replanned.targetId().equals("alternate-settlement"),
                 "retryable failure triggers one alternate plan and completes");
 
+        int beforeDuplicateReplan = executions[0];
+        ActionExecutionService.Task replanDuplicate = service.execute(new ActionExecutionService.Request(
+                "request-replan", "settlement.build", "player-1", "settlement-4", List.of("bridge"), 103),
+                r -> null, (r, attempt) -> { executions[0]++; return ActionResult.ok("must not run"); },
+                null, 105, file);
+        check(replanDuplicate.status() == ActionExecutionService.Status.SUCCEEDED
+                        && executions[0] == beforeDuplicateReplan,
+                "duplicate original request remains idempotent after execution was replanned");
+
+        int[] protectedExecutions = {0};
+        ActionExecutionService.Task replannedDenied = service.execute(new ActionExecutionService.Request(
+                "request-replan-denied", "settlement.build", "player-1", "settlement-4", List.of("bridge"), 106),
+                r -> r.targetId().equals("forbidden-alternative") ? "alternative is not authorized" : null,
+                (r, attempt) -> { protectedExecutions[0]++; return ActionResult.retry("blocked"); },
+                (r, failure, attempt) -> new ActionExecutionService.Plan(
+                        "settlement.build", "forbidden-alternative", List.of("bridge"), "fallback"),
+                107, file);
+        check(replannedDenied.status() == ActionExecutionService.Status.FAILED && protectedExecutions[0] == 1,
+                "authorization is rechecked after replanning before any alternate side effect");
+
         ActionExecutionService restored = new ActionExecutionService();
         restored.load(file);
         check(restored.task("request-1") != null && restored.task("request-1").status() == ActionExecutionService.Status.SUCCEEDED
