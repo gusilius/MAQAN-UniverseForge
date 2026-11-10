@@ -9,6 +9,7 @@ import dev.worldforge.mod.api.WorldForgeApi;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.CharacterAuthority;
+import dev.worldforge.mod.identity.WorldId;
 import dev.worldforge.people.Courts;
 import dev.worldforge.people.NameBank;
 import dev.worldforge.people.PopulationSimulation;
@@ -169,7 +170,11 @@ public class PeopleMod {
         if (server != null) {
             Path f = EditorManager.overlayDir(server, m).resolve("wf_people.json");
             try {
-                if (Files.exists(f)) reg.fromJson(Files.readString(f));
+                if (Files.exists(f)) {
+                    WorldId world = WorldForgeMod.worldId();
+                    if (world == null) throw new IllegalStateException("WorldId is unavailable; refusing to migrate Character identities");
+                    reg.fromJson(Files.readString(f), world + "|" + m.name);
+                }
             } catch (Exception ex) {
                 LOGGER.error("wf_people: сохранение {} повреждено; генерация персонажей заблокирована во избежание потери данных: {}", f, ex.toString());
                 INVALID_REGS.add(m);
