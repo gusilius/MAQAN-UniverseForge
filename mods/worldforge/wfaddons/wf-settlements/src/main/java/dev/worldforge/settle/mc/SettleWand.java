@@ -122,8 +122,8 @@ public class SettleWand extends Item {
                     Colony current = SettleMod.colony(req.targetId());
                     if (current != colony || !dimension.equals(current.dim))
                         return "Поселение или измерение изменились до исполнения приказа";
-                    if (current.actionPersistenceBlocked || current.genesisProvisioningRuntimeBlocked)
-                        return "Изменения поселения заблокированы после ошибки сохранения; требуется сверка";
+                    if (SettleMod.actionsBlocked())
+                        return "Все изменения поселений заблокированы после ошибки сохранения; требуется перезапуск и сверка";
                     return null;
                 }, executor, null, minute, dev.worldforge.mod.WorldForgeMod.actionExecutionFile(player.server));
     }
