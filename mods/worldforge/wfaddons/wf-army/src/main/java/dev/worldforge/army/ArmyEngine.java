@@ -7,6 +7,7 @@ import dev.worldforge.war.Attitude;
 import dev.worldforge.mod.Json;
 import dev.worldforge.mod.TitleData;
 import dev.worldforge.mod.TitleEditor;
+import dev.worldforge.mod.api.TreasuryApi;
 
 import java.util.*;
 
@@ -78,7 +79,23 @@ public final class ArmyEngine {
 
     public double pool(String realm) { return pool.computeIfAbsent(realm, r -> levyCap(r)); }
 
-    public double gold(String realm) { return gold.computeIfAbsent(realm, r -> START_GOLD); }
+    /**
+     * Canonical realm wealth is held by TreasuryLedger in silver; this adapter preserves
+     * ArmyEngine's historic gold-facing API and migrates a wf_army/1 balance exactly once.
+     */
+    public double gold(String realm) {
+        if (realm == null || realm.isBlank()) return 0;
+        Double legacy = gold.remove(realm);
+        if (legacy != null) TreasuryApi.migrateLegacyRealmBalance(realm, legacy);
+        else TreasuryApi.ensureRealmAccount(realm, START_GOLD);
+        return TreasuryApi.netBalance(realm);
+    }
+
+    private void postGoldDelta(String realm, double delta, String category, String reference) {
+        long minute = Math.max(0L, war.day) * 1440L;
+        if (!TreasuryApi.postDeltaOnce(realm, delta, category, reference, minute))
+            throw new TitleEditor.EditException("Не удалось провести операцию через казну: " + realm);
+    }
 
     public int capital(String realm) {
         TitleData.Realm re = d().realms.get(realm);
@@ -126,8 +143,8 @@ public final class ArmyEngine {
         if (gold(realm) < c) throw new TitleEditor.EditException("Не хватает золота: " + (int) gold(realm) + " из " + Math.ceil(c));
         int cap = capital(realm);
         if (cap == 0) throw new TitleEditor.EditException("У государства нет земель");
+        if (c > 0) postGoldDelta(realm, -c, "army-recruitment", "army-recruit:" + nextArmy + ":" + type + ":" + n);
         pool.put(realm, pool(realm) - n);
-        gold.put(realm, gold(realm) - c);
         Army a = armyAt(realm, cap, false);
         a.add(type, n);
         say(realmName(realm) + " набирает " + n + " " + u.name.toLowerCase());
@@ -143,7 +160,7 @@ public final class ArmyEngine {
         if (cap == 0) throw new TitleEditor.EditException("У государства нет земель для размещения наёмников");
         double c = Math.max(1, cost(type, n, true));
         if (gold(realm) < c) throw new TitleEditor.EditException("Не хватает золота: " + (int) gold(realm) + " из " + Math.ceil(c));
-        gold.put(realm, gold(realm) - c);
+        postGoldDelta(realm, -c, "army-mercenary-hiring", "army-mercenary:" + nextArmy + ":" + type + ":" + n);
         Army a = armyAt(realm, cap, true);
         a.add(type, n);
         say(realmName(realm) + " нанимает " + n + " " + u.name.toLowerCase() + " (наёмники)");
@@ -315,8 +332,8 @@ public final class ArmyEngine {
                 UnitType u = types.get(e.getKey());
                 if (u != null) cost += e.getValue() * u.upkeep * (a.mercenary ? 2 : 1) / 10.0;
             }
-            double g = gold(r) + inc - cost;
-            gold.put(r, Math.max(-50, g));
+            double g = inc - cost;
+            postGoldDelta(r, g, "army-daily-net", "army-day:" + (war.day + 1));
             double cap = levyCap(r);
             pool.put(r, Math.min(cap, pool(r) + cap * POOL_REGEN));
             if (g < 0) for (Army a : armiesOf(r)) {
@@ -644,7 +661,11 @@ public final class ArmyEngine {
         root.put("format", "wf-army/1");
         root.put("next", nextArmy);
         root.put("dayAccumulator", dayAccumulator);
-        root.put("gold", new LinkedHashMap<String, Object>(gold));
+        Map<String, Object> treasuryBalances = new LinkedHashMap<>();
+        for (TitleData.Realm realm : d().realmList())
+            if (!realm.titleKeys.isEmpty()) treasuryBalances.put(realm.id, gold(realm.id));
+        for (String realm : gold.keySet()) treasuryBalances.putIfAbsent(realm, gold(realm));
+        root.put("gold", treasuryBalances); // compatibility snapshot; TreasuryLedger is authoritative
         root.put("pool", new LinkedHashMap<String, Object>(pool));
         root.put("humans", new ArrayList<Object>(humans)); root.put("pacts", new ArrayList<Object>(pacts)); root.put("eco", eco.save());
         List<Object> al = new ArrayList<>();
