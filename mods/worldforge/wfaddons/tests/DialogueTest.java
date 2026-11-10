@@ -33,8 +33,17 @@ public class DialogueTest {
         Session.View v = s.view();
         ok(v.text.equals("Приветствую, Стив! Вы в землях Север."), "подстановка переменных");
         ok(v.choices.equals(List.of("Служить вам", "Расскажите о землях", "Прощайте")), "условия скрывают ответ про клятву: " + v.choices);
-        s.choose(0);
+        int firstRevision = v.revision;
+        s.choose(0, firstRevision);
+        boolean staleChoiceRejected = false;
+        try { s.choose(0, firstRevision); } catch (IllegalStateException e) { staleChoiceRejected = true; }
+        ok(staleChoiceRejected && s.view().revision > firstRevision,
+                "повторный выбор по устаревшей ревизии отклонён без повторного эффекта");
         ok(ctx.flags.contains("sworn"), "эффект set_flag сработал при входе в реплику");
+        Session deferred = new Session(d, new Ctx(new HashSet<>()), true);
+        ok(deferred.view() == null, "deferred dialogue does not run entry effects before its journaled start");
+        deferred.start();
+        ok(deferred.view() != null, "journaled dialogue start exposes the first view");
         v = s.view();
         ok(v.cont && v.choices.isEmpty() && v.text.startsWith("Добро"), "реплика без ответов, с next: кнопка «Далее»");
         s.choose(0);
