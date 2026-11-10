@@ -118,10 +118,12 @@ public final class ActionExecutionService {
         if (denied != null) return finish(original, task, Status.FAILED, 0, denied, nowMinute, durableFile);
 
         Request current = original;
+        List<String> replanHistory = new ArrayList<>();
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             String attemptDenied = authorizer.denyReason(current);
             if (attemptDenied != null)
-                return finish(current, task, Status.FAILED, attempt - 1, attemptDenied, nowMinute, durableFile);
+                return finish(current, task, Status.FAILED, attempt - 1,
+                        withReplanHistory(attemptDenied, replanHistory), nowMinute, durableFile);
 
             // Task identity always describes the submitted request; the final Receipt records any replanned target.
             task = new Task(original.requestId(), original.actionId(), original.actorId(), original.targetId(),
@@ -148,15 +150,19 @@ public final class ActionExecutionService {
             ActionResult result;
             try { result = Objects.requireNonNull(executor.execute(current, attempt), "Action executor returned null"); }
             catch (RuntimeException ex) { result = ActionResult.fail("Action executor error: " + ex.getMessage()); }
-            if (result.ok) return finish(current, task, Status.SUCCEEDED, attempt, result.message, nowMinute, durableFile);
+            if (result.ok) return finish(current, task, Status.SUCCEEDED, attempt,
+                    withReplanHistory(result.message, replanHistory), nowMinute, durableFile);
             if (!result.retryable || replanner == null || attempt == MAX_ATTEMPTS)
-                return finish(current, task, Status.FAILED, attempt, result.message, nowMinute, durableFile);
+                return finish(current, task, Status.FAILED, attempt,
+                        withReplanHistory(result.message, replanHistory), nowMinute, durableFile);
 
             Plan next;
             try { next = replanner.replan(current, result, attempt); }
             catch (RuntimeException ex) { next = null; }
             if (next == null)
-                return finish(current, task, Status.FAILED, attempt, result.message, nowMinute, durableFile);
+                return finish(current, task, Status.FAILED, attempt,
+                        withReplanHistory(result.message, replanHistory), nowMinute, durableFile);
+            if (!next.reason().isBlank()) replanHistory.add(next.reason());
             current = new Request(original.requestId(), next.actionId(), original.actorId(), next.targetId(),
                     next.args(), original.requestedMinute());
         }
@@ -184,6 +190,12 @@ public final class ActionExecutionService {
         tasks.put(requestId, cancelled);
         persistOrRollback(durableFile, requestId);
         return true;
+    }
+
+    private static String withReplanHistory(String message, List<String> history) {
+        if (history == null || history.isEmpty()) return message == null ? "" : message;
+        String prefix = "Replanned: " + String.join(" -> ", history);
+        return message == null || message.isBlank() ? prefix : prefix + " | " + message;
     }
 
     private Task finish(Request request, Task prior, Status status, int attempts, String message,
