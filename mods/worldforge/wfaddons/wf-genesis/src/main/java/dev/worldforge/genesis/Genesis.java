@@ -337,6 +337,14 @@ public final class Genesis {
         return "";
     }
 
+    /** Reopens a draft when its durable completion receipt could not be saved. */
+    public void reopen(Draft d) {
+        if (d == null) return;
+        d.done = false;
+        finished.remove(d.owner, d);
+        drafts.put(d.owner, d);
+    }
+
     /** Случайный допустимый персонаж: раса, внешность, старт, профессии, очки и класс. */
     public void randomize(Draft d, Random rng) {
         List<OriginDefs.Race> top = new ArrayList<>(origins.races.values());
