@@ -133,7 +133,6 @@ public class GenesisMod {
             try { Files.deleteIfExists(tmp); } catch (Exception ignored) { }
         }
     }
-    }
 
     // ------------------------------------------------------------------ вход игрока
 
