@@ -787,7 +787,39 @@ public class TroopsMod {
                 })));
     }
 
+    static int executeMilitaryCommand(CommandSourceStack source, String actionId, String target, String payload,
+                                       java.util.function.IntSupplier action) {
+        String actor = source.getEntity() instanceof ServerPlayer player
+                ? player.getUUID().toString() : source.getTextName();
+        long minute = WorldForgeApi.clock().worldMinute();
+        String requestId = "military:" + java.util.UUID.nameUUIDFromBytes(
+                (actor + ":" + source.getServer().getTickCount() + ":" + actionId + ":" + target + ":" + payload)
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        var request = new dev.worldforge.mod.api.ActionExecutionService.Request(
+                requestId, actionId, actor, target, List.of(payload == null ? "" : payload), minute);
+        try {
+            var task = WorldForgeApi.actionExecution().execute(request,
+                    req -> source.getEntity() instanceof ServerPlayer player
+                            && source.getServer().getPlayerList().getPlayer(player.getUUID()) == null
+                            ? "Игрок отключился до исполнения приказа" : null,
+                    (req, attempt) -> action.getAsInt() > 0
+                            ? dev.worldforge.mod.api.ActionResult.ok("Военный приказ выполнен")
+                            : dev.worldforge.mod.api.ActionResult.fail("Военный приказ отклонён"),
+                    null, minute, WorldForgeMod.actionExecutionFile(source.getServer()));
+            if (task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.FAILED)
+                source.sendFailure(Component.literal(task.message()));
+            return task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED ? 1 : 0;
+        } catch (RuntimeException ex) {
+            source.sendFailure(Component.literal("Не удалось выполнить военный приказ: " + ex.getMessage()));
+            return 0;
+        }
+    }
+
     private static int createCorps(CommandSourceStack src, int armyId, String name) {
+        return executeMilitaryCommand(src, "military.create_corps", Integer.toString(armyId), name, () -> createCorpsDirect(src, armyId, name));
+    }
+
+    private static int createCorpsDirect(CommandSourceStack src, int armyId, String name) {
         ServerPlayer player;
         try { player = src.getPlayerOrException(); }
         catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
@@ -804,6 +836,10 @@ public class TroopsMod {
     }
 
     private static int assignSquadToCorps(CommandSourceStack src, String corpsId, String squadId) {
+        return executeMilitaryCommand(src, "military.assign_squad_to_corps", corpsId, squadId, () -> assignSquadToCorpsDirect(src, corpsId, squadId));
+    }
+
+    private static int assignSquadToCorpsDirect(CommandSourceStack src, String corpsId, String squadId) {
         ServerPlayer player;
         try { player = src.getPlayerOrException(); }
         catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
@@ -835,6 +871,10 @@ public class TroopsMod {
     }
 
     private static int orderArmy(CommandSourceStack src, int armyId, String kind, double x, double z, boolean queue) {
+        return executeMilitaryCommand(src, "military.order_army", Integer.toString(armyId), kind + "|" + x + "|" + z + "|" + queue, () -> orderArmyDirect(src, armyId, kind, x, z, queue));
+    }
+
+    private static int orderArmyDirect(CommandSourceStack src, int armyId, String kind, double x, double z, boolean queue) {
         syncArmyHierarchy();
         ServerPlayer player;
         try { player = src.getPlayerOrException(); }
@@ -855,6 +895,10 @@ public class TroopsMod {
     }
 
     private static int orderCorps(CommandSourceStack src, String corpsId, String kind, double x, double z, boolean queue) {
+        return executeMilitaryCommand(src, "military.order_corps", corpsId, kind + "|" + x + "|" + z + "|" + queue, () -> orderCorpsDirect(src, corpsId, kind, x, z, queue));
+    }
+
+    private static int orderCorpsDirect(CommandSourceStack src, String corpsId, String kind, double x, double z, boolean queue) {
         syncArmyHierarchy();
         ServerPlayer player;
         try { player = src.getPlayerOrException(); }
@@ -900,6 +944,10 @@ public class TroopsMod {
     }
 
     private static int appointArmyCommander(CommandSourceStack src, int armyId, String characterId) {
+        return executeMilitaryCommand(src, "military.appoint_army_commander", Integer.toString(armyId), characterId, () -> appointArmyCommanderDirect(src, armyId, characterId));
+    }
+
+    private static int appointArmyCommanderDirect(CommandSourceStack src, int armyId, String characterId) {
         ServerPlayer player;
         try { player = src.getPlayerOrException(); }
         catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
@@ -918,6 +966,10 @@ public class TroopsMod {
     }
 
     private static int appointCorpsCommander(CommandSourceStack src, String corpsId, String characterId) {
+        return executeMilitaryCommand(src, "military.appoint_corps_commander", corpsId, characterId, () -> appointCorpsCommanderDirect(src, corpsId, characterId));
+    }
+
+    private static int appointCorpsCommanderDirect(CommandSourceStack src, String corpsId, String characterId) {
         ServerPlayer player;
         try { player = src.getPlayerOrException(); }
         catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
@@ -936,6 +988,10 @@ public class TroopsMod {
 
     /** Appoints a living canonical wf-people Character who is physically present in the squad. */
     private static int appointCommander(CommandSourceStack src, String squadId, String characterId, boolean hero, int rank) {
+        return executeMilitaryCommand(src, "military.appoint_squad_commander", squadId, characterId + "|" + hero + "|" + rank, () -> appointCommanderDirect(src, squadId, characterId, hero, rank));
+    }
+
+    private static int appointCommanderDirect(CommandSourceStack src, String squadId, String characterId, boolean hero, int rank) {
         ServerPlayer player;
         try { player = src.getPlayerOrException(); }
         catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
@@ -991,6 +1047,10 @@ public class TroopsMod {
 
     /** Наём только из завершённого и укомплектованного профильного здания; списывает снабжение поселения и золото игрока/казны. */
     private static int raise(CommandSourceStack src, String type, int n, String realm) {
+        return executeMilitaryCommand(src, "military.raise", type, n + "|" + realm, () -> raiseDirect(src, type, n, realm));
+    }
+
+    private static int raiseDirect(CommandSourceStack src, String type, int n, String realm) {
         ServerPlayer p;
         try { p = src.getPlayerOrException(); }
         catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
@@ -1095,6 +1155,10 @@ public class TroopsMod {
 
     /** Призыв из армии wf-army: люди снимаются с армии, 1 солдат = Muster.SCALE человек; государство армии платит жалованье. */
     private static int muster(CommandSourceStack src, int armyId, int n) {
+        return executeMilitaryCommand(src, "military.muster", Integer.toString(armyId), Integer.toString(n), () -> musterDirect(src, armyId, n));
+    }
+
+    private static int musterDirect(CommandSourceStack src, int armyId, int n) {
         if (!ModList.get().isLoaded("wf_army") || !ModList.get().isLoaded("wf_settle")) {
             src.sendFailure(Component.literal("Для призыва нужны wf_army и wf_settle."));
             return 0;
@@ -1223,6 +1287,10 @@ public class TroopsMod {
 
     /** Выжившие призванные солдаты игрока возвращаются в свои армии; павшие потеряны. */
     private static int returnToArmy(CommandSourceStack src) {
+        return executeMilitaryCommand(src, "military.return_to_army", src.getEntity() instanceof ServerPlayer player ? player.getUUID().toString() : "console", "return", () -> returnToArmyDirect(src));
+    }
+
+    private static int returnToArmyDirect(CommandSourceStack src) {
         ServerPlayer p;
         try {
             p = src.getPlayerOrException();
