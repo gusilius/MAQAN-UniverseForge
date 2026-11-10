@@ -44,7 +44,11 @@ public final class ActionExecutionService {
             if (targetId == null || targetId.length() > 256)
                 throw new IllegalArgumentException("Invalid replanned target");
             args = List.copyOf(args == null ? List.of() : args);
+            if (args.size() > 64 || args.stream().anyMatch(a -> a == null || a.length() > 1024))
+                throw new IllegalArgumentException("Invalid replanned action arguments");
             reason = reason == null ? "" : reason;
+            if (reason.length() > 1024)
+                throw new IllegalArgumentException("Invalid replanning reason");
         }
     }
 
@@ -78,7 +82,23 @@ public final class ActionExecutionService {
         Task queued = new Task(request.requestId(), request.actionId(), request.actorId(), request.targetId(),
                 request.args(), Status.QUEUED, 0, "Queued", request.requestedMinute(), nowMinute, "");
         tasks.put(request.requestId(), queued);
-        persistOrRollback(durableFile, request.requestId());
+        if (durableFile != null) {
+            try {
+                save(durableFile);
+            } catch (IOException ex) {
+                // The domain executor has not run yet. Keep an in-memory terminal tombstone so
+                // a same-process retry cannot bypass the failed durable QUEUED write.
+                String receiptId = "receipt:" + request.requestId();
+                String message = "Could not durably persist queued action; execution is blocked until reconciliation";
+                Task blocked = new Task(queued.requestId(), queued.actionId(), queued.actorId(), queued.targetId(),
+                        queued.args(), Status.FAILED, 0, message, queued.createdMinute(), nowMinute, receiptId);
+                Receipt receipt = new Receipt(receiptId, queued.requestId(), queued.actionId(), queued.actorId(),
+                        queued.targetId(), Status.FAILED, 0, message, nowMinute);
+                tasks.put(request.requestId(), blocked);
+                receipts.put(receiptId, receipt);
+                throw new IllegalStateException(message + ": " + request.requestId(), ex);
+            }
+        }
         return queued;
     }
 
@@ -98,29 +118,51 @@ public final class ActionExecutionService {
         if (denied != null) return finish(original, task, Status.FAILED, 0, denied, nowMinute, durableFile);
 
         Request current = original;
+        List<String> replanHistory = new ArrayList<>();
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             String attemptDenied = authorizer.denyReason(current);
             if (attemptDenied != null)
-                return finish(current, task, Status.FAILED, attempt - 1, attemptDenied, nowMinute, durableFile);
+                return finish(current, task, Status.FAILED, attempt - 1,
+                        withReplanHistory(attemptDenied, replanHistory), nowMinute, durableFile);
 
             // Task identity always describes the submitted request; the final Receipt records any replanned target.
             task = new Task(original.requestId(), original.actionId(), original.actorId(), original.targetId(),
                     original.args(), Status.RUNNING, attempt, "Running", original.requestedMinute(), nowMinute, "");
             tasks.put(requestId, task);
-            persistOrRollback(durableFile, requestId);
+            try {
+                persistOrRollback(durableFile, requestId);
+            } catch (IllegalStateException ex) {
+                // The executor has not run. Convert the in-memory RUNNING transition into a
+                // terminal receipt so callers never observe an unreceipted task or retry it.
+                String message = "Action execution blocked before domain mutation because RUNNING state could not be persisted";
+                String receiptId = "receipt:" + requestId;
+                Task failed = new Task(original.requestId(), original.actionId(), original.actorId(),
+                        original.targetId(), original.args(), Status.FAILED, attempt - 1,
+                        message, original.requestedMinute(), nowMinute, receiptId);
+                Receipt receipt = new Receipt(receiptId, original.requestId(), original.actionId(),
+                        original.actorId(), original.targetId(), Status.FAILED, attempt - 1,
+                        message, nowMinute);
+                tasks.put(requestId, failed);
+                receipts.put(receiptId, receipt);
+                return failed;
+            }
 
             ActionResult result;
             try { result = Objects.requireNonNull(executor.execute(current, attempt), "Action executor returned null"); }
             catch (RuntimeException ex) { result = ActionResult.fail("Action executor error: " + ex.getMessage()); }
-            if (result.ok) return finish(current, task, Status.SUCCEEDED, attempt, result.message, nowMinute, durableFile);
+            if (result.ok) return finish(current, task, Status.SUCCEEDED, attempt,
+                    withReplanHistory(result.message, replanHistory), nowMinute, durableFile);
             if (!result.retryable || replanner == null || attempt == MAX_ATTEMPTS)
-                return finish(current, task, Status.FAILED, attempt, result.message, nowMinute, durableFile);
+                return finish(current, task, Status.FAILED, attempt,
+                        withReplanHistory(result.message, replanHistory), nowMinute, durableFile);
 
             Plan next;
             try { next = replanner.replan(current, result, attempt); }
             catch (RuntimeException ex) { next = null; }
             if (next == null)
-                return finish(current, task, Status.FAILED, attempt, result.message, nowMinute, durableFile);
+                return finish(current, task, Status.FAILED, attempt,
+                        withReplanHistory(result.message, replanHistory), nowMinute, durableFile);
+            if (!next.reason().isBlank()) replanHistory.add(next.reason());
             current = new Request(original.requestId(), next.actionId(), original.actorId(), next.targetId(),
                     next.args(), original.requestedMinute());
         }
@@ -148,6 +190,12 @@ public final class ActionExecutionService {
         tasks.put(requestId, cancelled);
         persistOrRollback(durableFile, requestId);
         return true;
+    }
+
+    private static String withReplanHistory(String message, List<String> history) {
+        if (history == null || history.isEmpty()) return message == null ? "" : message;
+        String prefix = "Replanned: " + String.join(" -> ", history);
+        return message == null || message.isBlank() ? prefix : prefix + " | " + message;
     }
 
     private Task finish(Request request, Task prior, Status status, int attempts, String message,

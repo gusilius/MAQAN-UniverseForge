@@ -9,17 +9,29 @@ public final class Session {
         public final String speaker,text;
         public final List<String> choices;
         public final boolean cont,end;
-        View(String speaker,String text,List<String> choices,boolean cont,boolean end){
-            this.speaker=speaker;this.text=text;this.choices=choices;this.cont=cont;this.end=end;
+        public final int revision;
+        View(String speaker,String text,List<String> choices,boolean cont,boolean end,int revision){
+            this.speaker=speaker;this.text=text;this.choices=choices;this.cont=cont;this.end=end;this.revision=revision;
         }
     }
     private final Dialogue dialogue;
     private final Ctx ctx;
     private Dialogue.Node node;
     private List<Dialogue.Choice> visible=List.of();
-    private boolean ended;
-    private int steps;
-    public Session(Dialogue dialogue,Ctx ctx){this.dialogue=dialogue;this.ctx=ctx;enter(dialogue.start);}
+    private boolean ended,started;
+    private int steps,revision;
+    public Session(Dialogue dialogue,Ctx ctx){this(dialogue,ctx,false);}
+    /** Deferred sessions let the server journal initial node effects before exposing a conversation. */
+    public Session(Dialogue dialogue,Ctx ctx,boolean deferStart){
+        this.dialogue=dialogue;this.ctx=ctx;
+        if(!deferStart)start();
+    }
+    public void start(){
+        if(started)throw new IllegalStateException("Диалог уже запущен");
+        started=true;
+        revision++;
+        enter(dialogue.start);
+    }
     private void enter(String id){
         Dialogue.Node n=dialogue.nodes.get(id);
         if(n==null||++steps>200){ended=true;node=null;return;}
@@ -35,16 +47,22 @@ public final class Session {
         return l;
     }
     public boolean ended(){return ended;}
+    public int revision(){return revision;}
     public View view(){
-        if(ended||node==null)return null;
+        if(!started||ended||node==null)return null;
         List<String> texts=new ArrayList<>();for(Dialogue.Choice c:visible)texts.add(template(c.text));
         boolean noChoices=node.choices.isEmpty();
-        return new View(template(node.speaker),template(node.text),texts,noChoices&&node.next!=null,noChoices&&node.next==null);
+        return new View(template(node.speaker),template(node.text),texts,noChoices&&node.next!=null,noChoices&&node.next==null,revision);
     }
-    public void choose(int i){
-        if(ended||node==null)return;
+    public void choose(int i){choose(i,revision);}
+    /** A choice is accepted once for the exact view revision that the client saw. */
+    public void choose(int i,int expectedRevision){
+        if(!started||ended||node==null)return;
+        if(expectedRevision!=revision)throw new IllegalStateException("Ответ устарел: обновите диалог");
+        if(!node.choices.isEmpty()&&(i<0||i>=visible.size()))
+            throw new IllegalArgumentException("Нет ответа с номером "+i);
+        revision++;
         if(node.choices.isEmpty()){if(node.next==null){ended=true;return;}enter(node.next);return;}
-        if(i<0||i>=visible.size())throw new IllegalArgumentException("Нет ответа с номером "+i);
         Dialogue.Choice c=visible.get(i);
         ctx.memory().recordEvent("choice",template(c.text));
         for(Call e:c.effects)DialogueApi.run(e,ctx);

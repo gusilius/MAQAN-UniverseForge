@@ -294,20 +294,51 @@ public class TradeMod {
     }
 
     /** Караван от рынка игрока (его государства) в соседнее. */
+    private static boolean executeTradeMutation(ServerPlayer player, String actionId, String target,
+                                                 String payload, java.util.function.Supplier<ActionResult> operation) {
+        String actor = player.getUUID().toString();
+        long minute = WorldForgeApi.clock().worldMinute();
+        String requestId = "trade:" + java.util.UUID.randomUUID();
+        try {
+            var task = WorldForgeApi.actionExecution().execute(
+                    new dev.worldforge.mod.api.ActionExecutionService.Request(
+                            requestId, actionId, actor, target, List.of(payload), minute),
+                    req -> player.server.getPlayerList().getPlayer(player.getUUID()) == null
+                            ? "Игрок отключился до исполнения торговой операции" : null,
+                    (req, attempt) -> operation.get(), null, minute,
+                    WorldForgeMod.actionExecutionFile(player.server));
+            if (task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED) return true;
+            player.sendSystemMessage(Component.literal(task.message()));
+            return false;
+        } catch (RuntimeException ex) {
+            player.sendSystemMessage(Component.literal("Не удалось выполнить торговую операцию: " + ex.getMessage()));
+            return false;
+        }
+    }
+
     private static int caravan(CommandSourceStack s, String to, String good, int qty, int guards) {
         ServerPlayer sp = s.getPlayer();
         if (sp == null) return 0;
         String from = marketOf(sp);
-        if (TRADE.dispatch("p:" + sp.getUUID(), from, to, good, qty, guards, day()) == null) { s.sendFailure(Component.literal(TRADE.lastError)); return 0; }
-        return open(s, from);
+        String owner = "p:" + sp.getUUID();
+        String payload = from + "|" + to + "|" + good + "|" + qty + "|" + guards;
+        boolean ok = executeTradeMutation(sp, "trade.dispatch_caravan", to, payload, () ->
+                TRADE.dispatch(owner, from, to, good, qty, guards, day()) != null
+                        ? ActionResult.ok("Караван отправлен")
+                        : ActionResult.fail(TRADE.lastError));
+        return ok ? open(s, from) : 0;
     }
 
     private static int direct(CommandSourceStack s, boolean sell, String good, int qty) {
         ServerPlayer sp = s.getPlayer();
         if (sp == null) return 0;
-        String r = marketOf(sp), o = "p:" + sp.getUUID();
-        boolean ok = sell ? TRADE.playerSell(o, r, good, qty) : TRADE.playerBuy(o, r, good, qty);
-        if (!ok) { s.sendFailure(Component.literal(TRADE.lastError)); return 0; }
-        return open(s, r);
+        String realm = marketOf(sp), owner = "p:" + sp.getUUID();
+        String actionId = sell ? "trade.player_sell" : "trade.player_buy";
+        String payload = owner + "|" + realm + "|" + good + "|" + qty;
+        boolean ok = executeTradeMutation(sp, actionId, realm, payload, () ->
+                (sell ? TRADE.playerSell(owner, realm, good, qty) : TRADE.playerBuy(owner, realm, good, qty))
+                        ? ActionResult.ok(sell ? "Товар продан" : "Товар куплен")
+                        : ActionResult.fail(TRADE.lastError));
+        return ok ? open(s, realm) : 0;
     }
 }

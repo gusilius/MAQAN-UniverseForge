@@ -1,5 +1,6 @@
 package dev.worldforge.settle.mc;
 
+import dev.worldforge.mod.api.ActionResult;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.PopulationSimulation;
 import dev.worldforge.settle.Worker;
@@ -199,13 +200,15 @@ public final class ResidentEquipment {
     }
 
     /** Craft a better profession tool only when the resident has the skill, level and settlement materials. */
-    public static String craft(WFWorker body) {
+    public static String craft(WFWorker body) { return craftAction(body).message; }
+
+    public static ActionResult craftAction(WFWorker body) {
         Colony colony = body.colony();
         Worker worker = body.worker();
         Character person = SettleMod.residentCharacter(body);
-        if (colony == null || worker == null || person == null) return "Не удалось проверить данные жителя.";
+        if (colony == null || worker == null || person == null) return ActionResult.fail("Не удалось проверить данные жителя.");
         Tool tool = tool(requiredRole(worker, colony));
-        if (tool == null) return "Для текущей профессии специальный инструмент не предусмотрен.";
+        if (tool == null) return ActionResult.fail("Для текущей профессии специальный инструмент не предусмотрен.");
         int allowed = maxTier(person, colony, worker, tool);
         ItemStack current = load(person);
         int currentTier = person.props.get(TIER_KEY) instanceof Number n ? n.intValue() : -1;
@@ -216,39 +219,41 @@ public final class ResidentEquipment {
             int cost = tool.cost[tier];
             if (colony.s.amount(resource) >= cost) { chosen = tier; break; }
         }
-        if (chosen < 0) return current.isEmpty()
+        if (chosen < 0) return ActionResult.fail(current.isEmpty()
                 ? "Нет подходящих материалов для инструмента. Нужны ресурсы и навык " + tool.skill + "."
-                : "Текущий инструмент уже соответствует доступному уровню; для улучшения нужны уровень, навык и материалы.";
+                : "Текущий инструмент уже соответствует доступному уровню; для улучшения нужны уровень, навык и материалы.");
         String resource = materialForTier(chosen);
         int cost = tool.cost[chosen];
-        if (!colony.s.consumeResource(resource, cost)) return "Материалы уже использованы другим заказом; изготовление отменено.";
+        if (!colony.s.consumeResource(resource, cost)) return ActionResult.fail("Материалы уже использованы другим заказом; изготовление отменено.");
         ItemStack crafted = tool.tiers[chosen].copy();
         save(person, crafted, chosen, requiredRole(worker, colony));
         body.setItemSlot(EquipmentSlot.MAINHAND, crafted.copy());
         person.props.put("equipment.last_craft", colony.s.year());
-        return "Изготовил " + crafted.getHoverName().getString() + " (уровень " + (chosen + 1) + "), потратил " + cost + " " + resource + ".";
+        return ActionResult.ok("Изготовил " + crafted.getHoverName().getString() + " (уровень " + (chosen + 1) + "), потратил " + cost + " " + resource + ".");
     }
 
 
     /** Repair a damaged profession tool using real settlement stock; no free durability restoration. */
-    public static String repair(WFWorker body) {
+    public static String repair(WFWorker body) { return repairAction(body).message; }
+
+    public static ActionResult repairAction(WFWorker body) {
         Colony colony = body.colony();
         Character person = SettleMod.residentCharacter(body);
-        if (colony == null || person == null) return "Не удалось проверить поселение или персонажа.";
+        if (colony == null || person == null) return ActionResult.fail("Не удалось проверить поселение или персонажа.");
         ItemStack stack = load(person);
-        if (stack.isEmpty()) return "Нечего ремонтировать: инструмент отсутствует.";
-        if (stack.getMaxDamage() <= 0 || stack.getDamageValue() <= 0) return "Инструмент не повреждён.";
+        if (stack.isEmpty()) return ActionResult.fail("Нечего ремонтировать: инструмент отсутствует.");
+        if (stack.getMaxDamage() <= 0 || stack.getDamageValue() <= 0) return ActionResult.fail("Инструмент не повреждён.");
         int tier = person.props.get(TIER_KEY) instanceof Number n ? Math.max(0, Math.min(4, n.intValue())) : 0;
         String material = materialForTier(tier);
         int cost = tier >= 3 ? 2 : 1;
         if (!colony.s.consumeResource(material, cost))
-            return "Не хватает " + material + " для ремонта (нужно " + cost + ").";
+            return ActionResult.fail("Не хватает " + material + " для ремонта (нужно " + cost + ").");
         int oldDamage = stack.getDamageValue();
         stack.setDamageValue(0);
         save(person, stack, tier, String.valueOf(person.props.getOrDefault(ROLE_KEY, "worker")));
         body.setItemSlot(EquipmentSlot.MAINHAND, stack.copy());
         person.props.put("equipment.last_repair", colony.s.year());
-        return "Отремонтировал " + stack.getHoverName().getString() + ": восстановлено " + oldDamage + " единиц прочности за " + cost + " " + material + ".";
+        return ActionResult.ok("Отремонтировал " + stack.getHoverName().getString() + ": восстановлено " + oldDamage + " единиц прочности за " + cost + " " + material + ".");
     }
 
     /** Refuse physical extraction when the required tool is missing or of the wrong type. */
@@ -276,12 +281,12 @@ public final class ResidentEquipment {
         person.props.put("equipment.craft_attempt", now);
         ItemStack before = load(person);
         if (!before.isEmpty() && before.getMaxDamage() > 0 && before.getDamageValue() > 0) {
-            String repaired = repair(body);
-            if (repaired.startsWith("Отремонтировал")) { worker.status = repaired.toLowerCase(Locale.ROOT); return; }
+            ActionResult repaired = repairAction(body);
+            if (repaired.ok) { worker.status = repaired.message.toLowerCase(Locale.ROOT); return; }
         }
-        String result = craft(body);
-        if (result.startsWith("Изготовил")) worker.status = "самостоятельно " + result.toLowerCase(Locale.ROOT);
-        else if (before.isEmpty()) worker.status = "нужен инструмент: " + result;
+        ActionResult result = craftAction(body);
+        if (result.ok) worker.status = "самостоятельно " + result.message.toLowerCase(Locale.ROOT);
+        else if (before.isEmpty()) worker.status = "нужен инструмент: " + result.message;
     }
 
     /** Wear is applied only after the owning work-order confirms a successful world action. */
@@ -316,26 +321,32 @@ public final class ResidentEquipment {
     }
 
     /** Accept a real player-supplied tool. It must match the resident's current work role. */
-    public static String receive(WFWorker body, net.minecraft.server.level.ServerPlayer player) {
+    public static String receive(WFWorker body, net.minecraft.server.level.ServerPlayer player) { return receiveAction(body, player).message; }
+
+    public static ActionResult receiveAction(WFWorker body, net.minecraft.server.level.ServerPlayer player) {
         Worker worker = body.worker();
+        Colony colony = body.colony();
         Character person = SettleMod.residentCharacter(body);
-        if (worker == null || person == null) return "Данные жителя недоступны.";
-        Tool expected = tool(requiredRole(worker, body.colony()));
-        if (expected == null) return "Эта профессия не использует переносимый инструмент.";
+        if (worker == null || colony == null || person == null)
+            return ActionResult.fail("Данные жителя или поселения недоступны.");
+        String role = requiredRole(worker, colony);
+        Tool expected = tool(role);
+        if (expected == null) return ActionResult.fail("Эта профессия не использует переносимый инструмент.");
         ItemStack offered = player.getMainHandItem();
-        if (!matches(offered, expected.kind)) return "Нужен инструмент подходящего типа для профессии " + requiredRole(worker, body.colony()) + ".";
+        if (!matches(offered, expected.kind))
+            return ActionResult.fail("Нужен инструмент подходящего типа для профессии " + role + ".");
         ItemStack copy = offered.copy();
         copy.setCount(1);
         int tier = copy.getItem() instanceof TieredItem tiered ? Math.max(0, Math.min(4, tiered.getTier().getLevel())) : 0;
-        if (tier > maxTier(person, body.colony(), worker, expected))
-            return "Этот инструмент пока слишком высокого уровня. Нужны уровень персонажа и навык " + expected.skill + " выше.";
+        if (tier > maxTier(person, colony, worker, expected))
+            return ActionResult.fail("Этот инструмент пока слишком высокого уровня. Нужны уровень персонажа и навык " + expected.skill + " выше.");
         ItemStack previous = load(person);
         if (!previous.isEmpty() && !player.getInventory().add(previous.copy()))
-            return "Освободите место в инвентаре: старый инструмент нужно вернуть вам перед заменой.";
-        save(person, copy, tier, requiredRole(worker, body.colony()));
+            return ActionResult.fail("Освободите место в инвентаре: старый инструмент нужно вернуть вам перед заменой.");
+        save(person, copy, tier, role);
         body.setItemSlot(EquipmentSlot.MAINHAND, copy.copy());
         offered.shrink(1);
-        return "Принял инструмент от игрока: " + copy.getHoverName().getString()
-                + (previous.isEmpty() ? "." : "; прежний инструмент возвращён в ваш инвентарь.");
+        return ActionResult.ok("Принял инструмент от игрока: " + copy.getHoverName().getString()
+                + (previous.isEmpty() ? "." : "; прежний инструмент возвращён в ваш инвентарь."));
     }
 }

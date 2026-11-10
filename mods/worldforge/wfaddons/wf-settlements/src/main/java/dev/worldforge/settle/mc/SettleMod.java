@@ -410,21 +410,67 @@ public class SettleMod {
 
     /** Закладывает поселение: 4 рабочих, склад дерево 60 / еда 40 / камень 10. */
     public static Colony found(ServerLevel lv, String name, BlockPos p) {
+        return found(lv, name, p, "");
+    }
+
+    /** Idempotent Genesis-aware variant. The same operation always resolves to the same colony. */
+    public static Colony found(ServerLevel lv, String name, BlockPos p, String genesisOperationId) {
+        String dimension = lv.dimension().location().toString();
+        if (genesisOperationId != null && !genesisOperationId.isBlank()) {
+            for (Colony existing : COLONIES.values()) {
+                if (!genesisOperationId.equals(existing.genesisOperationId)) continue;
+                if (dimension.equals(existing.dim)) return existing;
+                throw new IllegalStateException("Genesis operation " + genesisOperationId
+                        + " is already bound to dimension " + existing.dim + " and cannot create a second colony in " + dimension);
+            }
+        }
         String base = name.toLowerCase(Locale.ROOT).replaceAll("[^\\p{L}\\p{N}]+", "_").replaceAll("^_+|_+$", "");
         if (base.isEmpty()) base = "settlement";
         String id = base;
         for (int i = 2; COLONIES.containsKey(id); i++) id = base + "_" + i;
         Settlement s = new Settlement(id, name, DEFS);
-        s.setLedgerScope(lv.dimension().location().toString());
+        s.setLedgerScope(dimension);
         s.types = TYPES;
         for (int i = 0; i < 4; i++) s.addWorker(null);
         s.add("wood", 60);
         s.add("food", 40);
         s.add("stone", 10);
-        Colony c = new Colony(s, lv.dimension().location().toString(), p.getX(), p.getZ());
+        Colony c = new Colony(s, dimension, p.getX(), p.getZ());
+        c.genesisOperationId = genesisOperationId == null ? "" : genesisOperationId;
         c.captureTerrain(lv);
         COLONIES.put(id, c);
         return c;
+    }
+
+    /** Atomic settlement snapshot used when a domain action must persist before returning success. */
+    public static boolean saveDurably(MinecraftServer server) {
+        if (COLONIES.values().stream().anyMatch(colony -> colony != null && (colony.genesisProvisioningRuntimeBlocked || colony.actionPersistenceBlocked))) {
+            LOGGER.error("wf_settle: durable save blocked because a settlement operation has uncommitted in-memory mutations");
+            return false;
+        }
+        Path target = file(server);
+        Path temporary = target.resolveSibling(target.getFileName() + ".tmp");
+        try {
+            Files.createDirectories(target.getParent());
+            List<Object> colonies = new ArrayList<>();
+            for (Colony colony : COLONIES.values()) colonies.add(colony.toMap());
+            Map<String, Object> root = new java.util.LinkedHashMap<>();
+            root.put("format", "wf-settle-world/1");
+            root.put("colonies", colonies);
+            root.put("trade", NETWORK.toJson());
+            Files.writeString(temporary, Json.write(root), StandardCharsets.UTF_8);
+            try {
+                Files.move(temporary, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                        java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+            } catch (java.nio.file.AtomicMoveNotSupportedException unsupported) {
+                Files.move(temporary, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
+            return true;
+        } catch (Exception ex) {
+            LOGGER.error("wf_settle: не удалось атомарно сохранить поселения: {}", ex.toString(), ex);
+            try { Files.deleteIfExists(temporary); } catch (Exception ignored) { }
+            return false;
+        }
     }
 
     // ------------------------------------------------------------------ загрузка и сохранение
@@ -481,6 +527,10 @@ public class SettleMod {
     }
 
     public static void save(MinecraftServer server) {
+        if (COLONIES.values().stream().anyMatch(colony -> colony != null && (colony.genesisProvisioningRuntimeBlocked || colony.actionPersistenceBlocked))) {
+            LOGGER.error("wf_settle: periodic/shutdown save skipped to preserve the last durable settlement checkpoint");
+            return;
+        }
         try {
             List<Object> l = new ArrayList<>();
             for (Colony c : COLONIES.values()) l.add(c.toMap());
@@ -492,6 +542,30 @@ public class SettleMod {
         } catch (Exception ex) {
             LOGGER.error("wf_settle: не удалось сохранить поселения: {}", ex.toString());
         }
+    }
+
+    /** True while any settlement has an uncommitted mutation; all settlement writers must then fail closed. */
+    public static boolean actionsBlocked() {
+        return COLONIES.values().stream().anyMatch(colony -> colony != null
+                && (colony.actionPersistenceBlocked || colony.genesisProvisioningRuntimeBlocked));
+    }
+
+    /** Persist a player-issued domain mutation before its ActionExecution receipt can succeed. */
+    public static boolean persistActionMutation(MinecraftServer server, Colony colony) {
+        if (colony == null || colony.actionPersistenceBlocked || colony.genesisProvisioningRuntimeBlocked) return false;
+        if (saveDurably(server)) return true;
+        colony.actionPersistenceBlocked = true;
+        return false;
+    }
+
+    /** Persist one mixed RTS action that may have changed workers in several settlements. */
+    public static boolean persistActionMutation(MinecraftServer server) {
+        if (actionsBlocked()) return false;
+        if (saveDurably(server)) return true;
+        for (Colony colony : COLONIES.values()) {
+            if (colony != null) colony.actionPersistenceBlocked = true;
+        }
+        return false;
     }
 
     // ------------------------------------------------------------------ события сервера
@@ -890,6 +964,7 @@ public class SettleMod {
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server == null) return;
         ticks++;
+        if (actionsBlocked()) return;
         if (ticks % STEP_TICKS == 0) {
             double speed = dev.worldforge.mod.api.WorldForgeApi.clock().multiplier();
             for (Colony c : COLONIES.values()) {

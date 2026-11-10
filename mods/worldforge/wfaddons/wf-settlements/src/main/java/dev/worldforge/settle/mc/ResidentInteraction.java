@@ -1,5 +1,7 @@
 package dev.worldforge.settle.mc;
 
+import dev.worldforge.mod.api.ActionResult;
+
 import com.mojang.brigadier.arguments.StringArgumentType;
 import dev.worldforge.settle.ResidentSocial;
 import dev.worldforge.people.Character;
@@ -143,19 +145,35 @@ public final class ResidentInteraction {
                         try { target = UUID.fromString(req.targetId()); }
                         catch (IllegalArgumentException ex) { return "Некорректный ID жителя"; }
                         Entity entity = player.serverLevel().getEntity(target);
-                        if (!(entity instanceof WFWorker current) || !validApproach(player, current,
-                                SettleMod.colony(current.colonyId)))
-                            return "Житель больше не находится рядом";
+                        if (!(entity instanceof WFWorker current)) return "Житель больше не находится рядом";
+                        Colony currentColony = SettleMod.colony(current.colonyId);
+                        if (!validApproach(player, current, currentColony)) return "Житель больше не находится рядом";
+                        if (SettleMod.actionsBlocked())
+                            return "Все изменения поселений заблокированы после ошибки сохранения; требуется перезапуск и сверка";
                         if (requiresRuler(req.args().get(0))
-                                && !WorkerControlAccess.mayControl(player, SettleMod.colony(current.colonyId)))
+                                && !WorkerControlAccess.mayControl(player, currentColony))
                             return "Недостаточно полномочий для этого приказа";
                         return null;
                     },
                     (req, attempt) -> {
-                        int result = executeDirect(player, req.args().get(0), req.targetId());
-                        if (result == 1) return dev.worldforge.mod.api.ActionResult.ok("Действие жителя выполнено");
-                        if (result == 2) return dev.worldforge.mod.api.ActionResult.retry("Нет свободного места для выбранной роли");
-                        return dev.worldforge.mod.api.ActionResult.fail("Действие жителя отклонено без изменения состояния");
+                        String[] outcome = {""};
+                        String requestedAction = req.args().get(0);
+                        int result = executeDirect(player, requestedAction, req.targetId(), outcome);
+                        String message = outcome[0].isBlank() ? "Действие жителя выполнено" : outcome[0];
+                        if (result == 1) {
+                            if (mutatesSettlement(requestedAction)) {
+                                Entity currentEntity = player.serverLevel().getEntity(UUID.fromString(req.targetId()));
+                                Colony currentColony = currentEntity instanceof WFWorker currentWorker
+                                        ? SettleMod.colony(currentWorker.colonyId) : null;
+                                if (!SettleMod.persistActionMutation(player.server, currentColony))
+                                    return dev.worldforge.mod.api.ActionResult.fail(
+                                            "Действие жителя применено в памяти, но снимок поселения не сохранён; изменения заблокированы до сверки");
+                            }
+                            return dev.worldforge.mod.api.ActionResult.ok(message);
+                        }
+                        if (result == 2) return dev.worldforge.mod.api.ActionResult.retry(message);
+                        return dev.worldforge.mod.api.ActionResult.fail(outcome[0].isBlank()
+                                ? "Действие жителя отклонено без изменения состояния" : outcome[0]);
                     },
                     (req, failure, attempt) -> {
                         String requested = req.args().isEmpty() ? "" : req.args().get(0);
@@ -174,6 +192,15 @@ public final class ResidentInteraction {
         }
     }
 
+    private static boolean mutatesSettlement(String action) {
+        return switch (action) {
+            case "repair", "tool", "equip", "gift", "follow", "stop", "work",
+                    "work_builder", "work_lumberjack", "work_miner", "work_farmer", "work_hauler",
+                    "work_area_resume", "work_area_cancel", "quest", "abandon", "accept", "deliver" -> true;
+            default -> false;
+        };
+    }
+
     private static boolean requiresRuler(String action) {
         return switch (action) {
             case "repair", "tool", "equip", "follow", "stop", "work",
@@ -183,7 +210,7 @@ public final class ResidentInteraction {
         };
     }
 
-    private static int executeDirect(ServerPlayer player, String action, String entityId) {
+    private static int executeDirect(ServerPlayer player, String action, String entityId, String[] outcome) {
         UUID id;
         try { id = UUID.fromString(entityId); }
         catch (IllegalArgumentException ex) {
@@ -233,18 +260,21 @@ public final class ResidentInteraction {
             }
             case "repair" -> {
                 if (!ruler) { deny(player); return 0; }
-                String result = ResidentEquipment.repair(worker);
-                player.sendSystemMessage(Component.literal((result.startsWith("Отремонтировал") ? "§a" : "§e") + person.name + ": " + result));
+                ActionResult result = ResidentEquipment.repairAction(worker);
+                player.sendSystemMessage(Component.literal((result.ok ? "§a" : "§e") + person.name + ": " + result.message));
+                if (!result.ok) { outcome[0] = result.message; return 0; }
             }
             case "tool" -> {
                 if (!ruler) { deny(player); return 0; }
-                String result = ResidentEquipment.craft(worker);
-                player.sendSystemMessage(Component.literal((result.startsWith("Изготовил") ? "§a" : "§e") + person.name + ": " + result));
+                ActionResult result = ResidentEquipment.craftAction(worker);
+                player.sendSystemMessage(Component.literal((result.ok ? "§a" : "§e") + person.name + ": " + result.message));
+                if (!result.ok) { outcome[0] = result.message; return 0; }
             }
             case "equip" -> {
                 if (!ruler) { deny(player); return 0; }
-                String result = ResidentEquipment.receive(worker, player);
-                player.sendSystemMessage(Component.literal((result.startsWith("Принял") ? "§a" : "§e") + person.name + ": " + result));
+                ActionResult result = ResidentEquipment.receiveAction(worker, player);
+                player.sendSystemMessage(Component.literal((result.ok ? "§a" : "§e") + person.name + ": " + result.message));
+                if (!result.ok) { outcome[0] = result.message; return 0; }
             }
             case "gift" -> {
                 if (player.getInventory().countItem(Items.EMERALD) < 1) {
@@ -278,12 +308,13 @@ public final class ResidentInteraction {
             }
             case "work" -> {
                 if (!ruler) { deny(player); return 0; }
-                data.manualFollow = false;
                 int assigned = assignCompatibleBuilding(colony, data, null);
                 if (assigned <= 0) {
-                    player.sendSystemMessage(Component.literal("§eПодходящего свободного рабочего места для профессии " + data.profession + " нет."));
+                    outcome[0] = "Подходящего свободного рабочего места для профессии " + data.profession + " нет.";
+                    player.sendSystemMessage(Component.literal("§e" + outcome[0]));
                     return 2;
                 }
+                data.manualFollow = false;
                 colony.workOrders.remove(data.id);
                 player.sendSystemMessage(Component.literal("§a" + person.name + " назначен на подходящую работу в здании #" + assigned));
             }
@@ -295,12 +326,13 @@ public final class ResidentInteraction {
                             + ". Нужен соответствующий специалист или универсальный рабочий."));
                     return 0;
                 }
-                data.manualFollow = false;
                 int assigned = assignCompatibleBuilding(colony, data, role);
                 if (assigned <= 0) {
-                    player.sendSystemMessage(Component.literal("§eНет готового здания или свободного места для роли «" + role + "». Ищу совместимую альтернативу."));
+                    outcome[0] = "Нет готового здания или свободного места для роли «" + role + "». Ищу совместимую альтернативу.";
+                    player.sendSystemMessage(Component.literal("§e" + outcome[0]));
                     return 2;
                 }
+                data.manualFollow = false;
                 colony.workOrders.remove(data.id);
                 player.sendSystemMessage(Component.literal("§aПоручение принято: " + person.name + " назначен на роль «" + role
                         + "» в здании #" + assigned + "."));
@@ -323,9 +355,12 @@ public final class ResidentInteraction {
             case "work_area_cancel" -> {
                 if (!ruler) { deny(player); return 0; }
                 Colony.WorkOrder removed = colony.workOrders.remove(data.id);
-                player.sendSystemMessage(Component.literal(removed == null
-                        ? "§eУ этого жителя нет активного поручения по участку."
-                        : "§aПоручение по участку отменено. " + person.name + " снова свободен для других задач."));
+                if (removed == null) {
+                    outcome[0] = "У этого жителя нет активного поручения по участку.";
+                    player.sendSystemMessage(Component.literal("§e" + outcome[0]));
+                    return 0;
+                }
+                player.sendSystemMessage(Component.literal("§aПоручение по участку отменено. " + person.name + " снова свободен для других задач."));
             }
             case "quest" -> {
                 if (person.props.containsKey(QUEST_KEY) && quest(person) == null) {
@@ -370,7 +405,9 @@ public final class ResidentInteraction {
                 saveQuest(person, q);
                 player.sendSystemMessage(Component.literal("§aПоручение принято: " + q.objective() + ". Вернитесь ко мне с грузом."));
             }
-            case "deliver" -> deliver(player, colony, person);
+            case "deliver" -> {
+                if (deliver(player, colony, person, outcome) == 0) return 0;
+            }
             default -> {
                 player.sendSystemMessage(Component.literal("Неизвестная команда жителя."));
                 return 0;
@@ -402,37 +439,42 @@ public final class ResidentInteraction {
         return 0;
     }
 
-    private static void deliver(ServerPlayer player, Colony colony, Character person) {
+    private static int deliver(ServerPlayer player, Colony colony, Character person, String[] outcome) {
         ResidentQuest q = quest(person);
         if (q == null || q.status() != ResidentQuest.Status.ACCEPTED) {
-            player.sendSystemMessage(Component.literal("§eСначала примите поручение жителя."));
-            return;
+            outcome[0] = "Сначала примите поручение жителя.";
+            player.sendSystemMessage(Component.literal("§e" + outcome[0]));
+            return 0;
         }
         if (!colony.s.defs.resourceNames.containsKey(q.resourceId())) {
-            player.sendSystemMessage(Component.literal("§cРесурс этого поручения отсутствует в экономике поселения; запись сохранена."));
-            return;
+            outcome[0] = "Ресурс этого поручения отсутствует в экономике поселения; запись сохранена.";
+            player.sendSystemMessage(Component.literal("§c" + outcome[0]));
+            return 0;
         }
         net.minecraft.world.item.Item item = questItem(q.resourceId());
         int available = player.getInventory().countItem(item);
         int needed = q.required() - q.progress();
         int offered = Math.min(available, needed);
         if (offered <= 0) {
-            player.sendSystemMessage(Component.literal("§eУ вас нет ресурса «" + colony.s.defs.resourceNames.getOrDefault(q.resourceId(), q.resourceId()) + "» для передачи."));
-            return;
+            outcome[0] = "У вас нет ресурса «" + colony.s.defs.resourceNames.getOrDefault(q.resourceId(), q.resourceId()) + "» для передачи.";
+            player.sendSystemMessage(Component.literal("§e" + outcome[0]));
+            return 0;
         }
         double accepted = colony.s.receiveResource(q.resourceId(), offered);
         int delivered = Math.min(offered, (int) Math.floor(accepted + 1e-9));
         if (accepted > delivered) colony.s.consumeResource(q.resourceId(), accepted - delivered);
         if (delivered <= 0) {
-            player.sendSystemMessage(Component.literal("§cСклад поселения не может принять этот ресурс."));
-            return;
+            outcome[0] = "Склад поселения не может принять этот ресурс.";
+            player.sendSystemMessage(Component.literal("§c" + outcome[0]));
+            return 0;
         }
         int acceptedWhole = delivered;
         delivered = removeMatching(player, item, acceptedWhole);
         if (delivered < acceptedWhole) colony.s.consumeResource(q.resourceId(), acceptedWhole - delivered);
         if (delivered <= 0) {
-            player.sendSystemMessage(Component.literal("§cНе удалось передать ресурс."));
-            return;
+            outcome[0] = "Не удалось передать ресурс.";
+            player.sendSystemMessage(Component.literal("§c" + outcome[0]));
+            return 0;
         }
         boolean completed = q.addProgress(delivered, colony.s.year());
         saveQuest(person, q);
@@ -440,9 +482,11 @@ public final class ResidentInteraction {
             colony.s.add("silver", 2.0);
             player.sendSystemMessage(Component.literal("§aПоручение выполнено! Ресурс доставлен, в казну поселения зачислено 2 серебра."));
         } else {
-            player.sendSystemMessage(Component.literal("§aПередано хлеба: " + delivered + ". Осталось: "
+            player.sendSystemMessage(Component.literal("§aПередано ресурсов: " + delivered + ". Осталось: "
                     + (q.required() - q.progress()) + "."));
         }
+        outcome[0] = completed ? "Поручение жителя выполнено" : "Ресурсы доставлены: " + delivered;
+        return 1;
     }
 
     /** Remove an exact item count by scanning inventory slots; Minecraft Inventory has no removeItem(Item, count) overload. */

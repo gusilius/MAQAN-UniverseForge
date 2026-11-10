@@ -121,40 +121,99 @@ public final class EditorEvents {
             select(sp, s, m, t.x, t.z);
             return;
         }
-        applyTool(sp, s, m, ed, t.x, t.z);
+        executeWandMutation(sp, s, m, ed, t.x, t.z);
     }
 
-    /** Применяет текущий инструмент (кисть, сглаживание, назначение) в точке карты; используется жезлом и командой editor at ... apply. */
-    static void applyTool(ServerPlayer sp, EditorManager.Session s, MapData m, TitleEditor ed, double bx, double bz) {
+    /** Command path is already inside ActionExecutionService; returns false for a rejected edit. */
+    static boolean applyTool(ServerPlayer sp, EditorManager.Session s, MapData m, TitleEditor ed, double bx, double bz) {
+        dev.worldforge.mod.api.ActionResult result = applyToolAction(sp, s, m, ed, bx, bz, false);
+        sp.displayClientMessage(Component.literal(result.message), true);
+        return result.ok;
+    }
+
+    private static dev.worldforge.mod.api.ActionResult applyToolAction(
+            ServerPlayer player, EditorManager.Session s, MapData m, TitleEditor ed, double bx, double bz, boolean persist) {
         try {
             switch (s.tool) {
                 case "smooth" -> {
                     int n = ed.smoothAtBlock(bx, bz, s.brush);
-                    if (n > 0) EditorManager.touch(m);
-                    sp.displayClientMessage(Component.literal(n == 0 ? "Границы здесь уже гладкие" : "Сглажено пикселей: " + n), true);
+                    if (n > 0) {
+                        if (persist) EditorManager.touch(m);
+                        if (persist && !persistEditorChanges(player, m, ed)) return dev.worldforge.mod.api.ActionResult.fail(
+                                "Изменение границ не сохранено на диск; операция требует сверки");
+                    }
+                    return dev.worldforge.mod.api.ActionResult.ok(n == 0 ? "Границы здесь уже гладкие" : "Сглажено пикселей: " + n);
                 }
                 case "assign" -> {
                     TitleData.Title target = m.titles.get(s.assignTitle);
-                    if (target == null) {
-                        sp.displayClientMessage(Component.literal("Титул для назначения не выбран: /worldforge editor tool assign <уровень>"), true);
-                        return;
-                    }
+                    if (target == null) return dev.worldforge.mod.api.ActionResult.fail(
+                            "Титул для назначения не выбран: /worldforge editor tool assign <уровень>");
                     TitleData.Title moved = ed.assignAtBlock(bx, bz, target.id);
-                    EditorManager.touch(m);
-                    sp.displayClientMessage(Component.literal(moved.name + " → " + target.name), true);
+                    if (persist) EditorManager.touch(m);
+                    if (persist && !persistEditorChanges(player, m, ed)) return dev.worldforge.mod.api.ActionResult.fail(
+                            "Перенос титула не сохранён на диск; операция требует сверки");
+                    return dev.worldforge.mod.api.ActionResult.ok(moved.name + " → " + target.name);
                 }
                 default -> {
-                    if (m.titles.get(s.province) == null) {
-                        sp.displayClientMessage(Component.literal("Сначала выберите провинцию: Shift+ПКМ или ЛКМ по блоку"), true);
-                        return;
-                    }
+                    if (m.titles.get(s.province) == null) return dev.worldforge.mod.api.ActionResult.fail(
+                            "Сначала выберите провинцию: Shift+ПКМ или ЛКМ по блоку");
                     int n = ed.paintAtBlock(bx, bz, s.brush, s.province);
-                    if (n > 0) EditorManager.touch(m);
-                    sp.displayClientMessage(Component.literal(n == 0 ? "Здесь нечего менять" : "Закрашено: " + n + " px → " + m.titles.get(s.province).name), true);
+                    if (n > 0) {
+                        if (persist) EditorManager.touch(m);
+                        if (persist && !persistEditorChanges(player, m, ed)) return dev.worldforge.mod.api.ActionResult.fail(
+                                "Закраска не сохранена на диск; операция требует сверки");
+                    }
+                    return dev.worldforge.mod.api.ActionResult.ok(n == 0 ? "Здесь нечего менять"
+                            : "Закрашено: " + n + " px → " + m.titles.get(s.province).name);
                 }
             }
         } catch (TitleEditor.EditException ex) {
-            sp.displayClientMessage(Component.literal(ex.getMessage()), true);
+            return dev.worldforge.mod.api.ActionResult.fail(ex.getMessage());
+        }
+    }
+
+    private static boolean persistEditorChanges(ServerPlayer player, MapData map, TitleEditor editor) {
+        EditorManager.saveDirty(player.server);
+        if (!editor.isDirty()) return true;
+        EditorManager.blockMutations(map);
+        return false;
+    }
+
+    /** The wand is a direct player input path, so its world mutations must use the shared executor too. */
+    private static void executeWandMutation(ServerPlayer player, EditorManager.Session session,
+                                            MapData map, TitleEditor editor, double x, double z) {
+        long minute = dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute();
+        String actor = player.getUUID().toString();
+        String dimension = player.serverLevel().dimension().location().toString();
+        String payload = dimension + "|" + session.tool + "|" + session.province + "|" + session.assignTitle
+                + "|" + Double.toHexString(x) + "|" + Double.toHexString(z) + "|" + Double.toHexString(session.brush);
+        String requestId = "editor-wand:" + java.util.UUID.nameUUIDFromBytes(
+                (actor + ":" + player.server.getTickCount() + ":" + payload)
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        var request = new dev.worldforge.mod.api.ActionExecutionService.Request(
+                requestId, "worldforge.editor_wand", actor, dimension,
+                java.util.List.of(session.tool, Integer.toString(session.province), Integer.toString(session.assignTitle), payload), minute);
+        try {
+            var task = dev.worldforge.mod.api.WorldForgeApi.actionExecution().execute(request,
+                    req -> {
+                        if (player.server.getPlayerList().getPlayer(player.getUUID()) == null)
+                            return "Игрок отключился до применения инструмента";
+                        if (!EditorManager.canEdit(player)) return "Полномочия редактора отозваны";
+                        EditorManager.Session current = EditorManager.session(player);
+                        if (current != session || !current.on) return "Сеанс редактора изменился или выключен";
+                        MapData currentMap = EditorManager.dataFor(player.serverLevel());
+                        if (currentMap != map || EditorManager.editorFor(currentMap) != editor
+                                || !dimension.equals(player.serverLevel().dimension().location().toString()))
+                            return "Карта или измерение изменились до применения инструмента";
+                        if (EditorManager.mutationsBlocked(currentMap))
+                            return "Правки этой карты заблокированы после ошибки сохранения; требуется перезапуск и сверка";
+                        return null;
+                    },
+                    (req, attempt) -> applyToolAction(player, session, map, editor, x, z, true),
+                    null, minute, WorldForgeMod.actionExecutionFile(player.server));
+            player.displayClientMessage(Component.literal(task.message()), true);
+        } catch (RuntimeException ex) {
+            player.displayClientMessage(Component.literal("Не удалось применить инструмент: " + ex.getMessage()), true);
         }
     }
 

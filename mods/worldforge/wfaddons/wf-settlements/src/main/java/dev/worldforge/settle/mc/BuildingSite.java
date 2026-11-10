@@ -224,12 +224,14 @@ public final class BuildingSite {
         }
     }
 
-    /** Player placement that matches a blueprint block contributes directly to construction progress. */
+    /** Player placement that matches a blueprint block contributes through the shared action journal. */
     public static boolean assist(ServerPlayer player, ServerLevel level, BlockPos pos, BlockState placedState) {
+        String dimension = level.dimension().location().toString();
+        String actor = player.getUUID().toString();
         for (Colony colony : SettleMod.COLONIES.values()) {
-            if (colony == null || !level.dimension().location().toString().equals(colony.dim)) continue;
+            if (colony == null || !dimension.equals(colony.dim)) continue;
             if (!player.hasPermissions(2) && !player.server.isSingleplayerOwner(player.getGameProfile())
-                    && !player.getUUID().toString().equals(colony.owner)) continue;
+                    && !actor.equals(colony.owner)) continue;
             for (Building building : colony.s.buildings) {
                 Colony.Site site = colony.sites.get(building.uid);
                 if (building.state != Building.State.BUILDING && (site == null || !site.physicalPending)) continue;
@@ -237,15 +239,63 @@ public final class BuildingSite {
                         || pos.getY() < site.y || pos.getY() >= site.y + site.sy
                         || pos.getZ() < site.z || pos.getZ() >= site.z + site.sz) continue;
                 Blueprints.Plan plan = Blueprints.get(level, building.def);
-                for (int i = Math.max(0, site.placed); i < plan.blocks().size(); i++) {
-                    Blueprints.Entry entry = plan.blocks().get(i);
+                for (int index = Math.max(0, site.placed); index < plan.blocks().size(); index++) {
+                    Blueprints.Entry entry = plan.blocks().get(index);
                     if (site.x + entry.x() != pos.getX() || site.y + entry.y() != pos.getY()
                             || site.z + entry.z() != pos.getZ() || !entry.state().equals(placedState)) continue;
-                    site.assisted.add(i);
-                    int contributed = Math.min(plan.blocks().size(), Math.max(site.placed, i + 1));
-                    building.progress = Math.max(building.progress, building.def.work * contributed / plan.blocks().size());
-                    building.status = "строится: помощь игрока";
-                    return true;
+                    final int blockIndex = index;
+                    final int buildingUid = building.uid;
+                    String payload = buildingUid + "|" + blockIndex + "|" + pos.getX() + "|" + pos.getY() + "|" + pos.getZ();
+                    String requestId = "settlement-assist:" + java.util.UUID.nameUUIDFromBytes(
+                            (actor + ":" + player.server.getTickCount() + ":" + colony.s.id + ":" + payload)
+                                    .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    long minute = dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute();
+                    var request = new dev.worldforge.mod.api.ActionExecutionService.Request(
+                            requestId, "settlement.build_assist", actor, colony.s.id,
+                            java.util.List.of(payload), minute);
+                    try {
+                        var task = dev.worldforge.mod.api.WorldForgeApi.actionExecution().execute(request,
+                                req -> {
+                                    if (player.server.getPlayerList().getPlayer(player.getUUID()) == null)
+                                        return "Игрок отключился до зачёта строительного вклада";
+                                    if (SettleMod.actionsBlocked()) return "Изменения поселений заблокированы после ошибки сохранения";
+                                    Colony current = SettleMod.colony(req.targetId());
+                                    if (current != colony || !dimension.equals(current.dim))
+                                        return "Поселение или измерение изменились";
+                                    if (!player.hasPermissions(2) && !player.server.isSingleplayerOwner(player.getGameProfile())
+                                            && !actor.equals(current.owner)) return "Недостаточно полномочий";
+                                    Building currentBuilding = current.s.building(buildingUid);
+                                    Colony.Site currentSite = current.sites.get(buildingUid);
+                                    if (currentBuilding != building || currentSite != site
+                                            || (currentBuilding.state != Building.State.BUILDING && !currentSite.physicalPending)
+                                            || blockIndex < currentSite.placed || blockIndex >= plan.blocks().size())
+                                        return "Строительная площадка уже изменилась";
+                                    Blueprints.Entry currentEntry = plan.blocks().get(blockIndex);
+                                    return currentSite.x + currentEntry.x() == pos.getX()
+                                            && currentSite.y + currentEntry.y() == pos.getY()
+                                            && currentSite.z + currentEntry.z() == pos.getZ()
+                                            && currentEntry.state().equals(placedState) ? null : "Блок не соответствует чертежу";
+                                },
+                                (req, attempt) -> {
+                                    if (!site.assisted.add(blockIndex))
+                                        return dev.worldforge.mod.api.ActionResult.ok("Строительный вклад уже учтён");
+                                    int contributed = Math.min(plan.blocks().size(), Math.max(site.placed, blockIndex + 1));
+                                    building.progress = Math.max(building.progress,
+                                            building.def.work * contributed / plan.blocks().size());
+                                    building.status = "строится: помощь игрока";
+                                    if (!SettleMod.persistActionMutation(player.server, colony))
+                                        return dev.worldforge.mod.api.ActionResult.fail(
+                                                "Строительный вклад применён в памяти, но не сохранён; поселения заблокированы до сверки");
+                                    return dev.worldforge.mod.api.ActionResult.ok("Строительный вклад учтён");
+                                }, null, minute, dev.worldforge.mod.WorldForgeMod.actionExecutionFile(player.server));
+                        if (task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.FAILED)
+                            player.displayClientMessage(net.minecraft.network.chat.Component.literal(
+                                    "Строительный вклад не учтён: " + task.message()), true);
+                        return task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED;
+                    } catch (RuntimeException ex) {
+                        SettleMod.LOGGER.error("wf_settle: не удалось учесть строительный вклад {}: {}", payload, ex.toString());
+                        return false;
+                    }
                 }
             }
         }

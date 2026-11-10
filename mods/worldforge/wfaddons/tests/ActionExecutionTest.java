@@ -49,6 +49,15 @@ public final class ActionExecutionTest {
                 "authorization denial is terminal and executor is never invoked");
 
         int[] plans = {0};
+        ActionExecutionService.Task rejected = service.execute(new ActionExecutionService.Request(
+                "request-rejected", "military.client_order", "player-1", "selection", List.of("invalid-order"), 102),
+                r -> null, (r, attempt) -> ActionResult.fail("order rejected"), null, 103, file);
+        check(rejected.status() == ActionExecutionService.Status.FAILED
+                        && rejected.receiptId().equals("receipt:request-rejected")
+                        && service.receipts().stream().anyMatch(receipt -> receipt.requestId().equals("request-rejected")
+                        && receipt.outcome() == ActionExecutionService.Status.FAILED),
+                "rejected domain action is recorded as FAILED with a failure receipt");
+
         ActionExecutionService.Task replanned = service.execute(new ActionExecutionService.Request(
                 "request-replan", "settlement.build", "player-1", "settlement-4", List.of("bridge"), 103),
                 r -> r.targetId().equals("blocked") ? "target unavailable" : null,
@@ -63,8 +72,9 @@ public final class ActionExecutionTest {
                 }, 104, file);
         check(replanned.status() == ActionExecutionService.Status.SUCCEEDED && plans[0] == 1
                         && service.receipts().stream().anyMatch(r -> r.requestId().equals("request-replan")
-                        && r.targetId().equals("alternate-settlement")),
-                "retryable failure triggers one alternate plan and receipt records the actual target");
+                        && r.targetId().equals("alternate-settlement")
+                        && r.message().contains("alternate reachable settlement")),
+                "retryable failure triggers one alternate plan and receipt records the actual target and reason");
 
         int beforeDuplicateReplan = executions[0];
         ActionExecutionService.Task replanDuplicate = service.execute(new ActionExecutionService.Request(
@@ -76,6 +86,17 @@ public final class ActionExecutionTest {
                 "duplicate original request remains idempotent after execution was replanned");
 
         int[] protectedExecutions = {0};
+        boolean invalidPlanRejected = false;
+        try {
+            new ActionExecutionService.Plan("settlement.build", "alternate", java.util.Collections.nCopies(65, "x"), "too many arguments");
+        } catch (IllegalArgumentException expected) { invalidPlanRejected = true; }
+        check(invalidPlanRejected, "replanner cannot create a plan exceeding the request argument limit");
+        boolean invalidReasonRejected = false;
+        try {
+            new ActionExecutionService.Plan("settlement.build", "alternate", List.of("bridge"), "x".repeat(1025));
+        } catch (IllegalArgumentException expected) { invalidReasonRejected = true; }
+        check(invalidReasonRejected, "replanner reason is bounded before it can enter task execution");
+
         ActionExecutionService.Task replannedDenied = service.execute(new ActionExecutionService.Request(
                 "request-replan-denied", "settlement.build", "player-1", "settlement-4", List.of("bridge"), 106),
                 r -> r.targetId().equals("forbidden-alternative") ? "alternative is not authorized" : null,
@@ -85,6 +106,63 @@ public final class ActionExecutionTest {
                 107, file);
         check(replannedDenied.status() == ActionExecutionService.Status.FAILED && protectedExecutions[0] == 1,
                 "authorization is rechecked after replanning before any alternate side effect");
+
+        int[] partialEffects = {0};
+        ActionExecutionService.Task partial = service.execute(new ActionExecutionService.Request(
+                "request-partial", "genesis.confirm", "player-1", "player-1", List.of("human", "village"), 108),
+                r -> null, (r, attempt) -> {
+                    partialEffects[0]++;
+                    throw new IllegalStateException("simulated failure after a partial domain mutation");
+                }, null, 109, file);
+        check(partial.status() == ActionExecutionService.Status.FAILED && partialEffects[0] == 1
+                        && service.receipts().stream().anyMatch(r -> r.requestId().equals("request-partial")
+                        && r.outcome() == ActionExecutionService.Status.FAILED),
+                "exception during a domain mutation is recorded as FAILED with a receipt");
+        ActionExecutionService.Task partialDuplicate = service.execute(new ActionExecutionService.Request(
+                "request-partial", "genesis.confirm", "player-1", "player-1", List.of("human", "village"), 108),
+                r -> null, (r, attempt) -> { partialEffects[0]++; return ActionResult.ok("must not replay"); },
+                null, 110, file);
+        check(partialDuplicate.status() == ActionExecutionService.Status.FAILED && partialEffects[0] == 1,
+                "retrying the same Genesis operation ID never replays uncertain partial side effects");
+
+        Path blockedParent = dir.resolve("blocked-parent");
+        Files.writeString(blockedParent, "not a directory");
+        Path blockedJournal = blockedParent.resolve("actions.json");
+        ActionExecutionService blockedEnqueue = new ActionExecutionService();
+        ActionExecutionService.Request blockedRequest = new ActionExecutionService.Request(
+                "request-no-journal", "genesis.confirm", "player-2", "player-2", List.of("draft"), 111);
+        boolean enqueueFailed = false;
+        try { blockedEnqueue.enqueue(blockedRequest, 111, blockedJournal); }
+        catch (IllegalStateException expected) { enqueueFailed = true; }
+        int[] forbiddenReplay = {0};
+        ActionExecutionService.Task enqueueTombstone = blockedEnqueue.execute(blockedRequest,
+                r -> null, (r, attempt) -> { forbiddenReplay[0]++; return ActionResult.ok("must not execute"); },
+                null, 112, blockedJournal);
+        check(enqueueFailed && enqueueTombstone.status() == ActionExecutionService.Status.FAILED
+                        && !enqueueTombstone.receiptId().isEmpty() && forbiddenReplay[0] == 0,
+                "failed durable enqueue creates a terminal tombstone and cannot execute on same-process retry");
+
+        Path runningBlockedParent = dir.resolve("running-blocked-parent");
+        Files.createDirectories(runningBlockedParent);
+        Path runningBlockedFile = runningBlockedParent.resolve("actions.json");
+        ActionExecutionService runningBlocked = new ActionExecutionService();
+        ActionExecutionService.Request runningBlockedRequest = new ActionExecutionService.Request(
+                "request-running-no-journal", "settlement.build", "player-3", "settlement-5", List.of("hall"), 112);
+        runningBlocked.enqueue(runningBlockedRequest, 112, runningBlockedFile);
+        Files.delete(runningBlockedFile);
+        Files.delete(runningBlockedParent);
+        Files.writeString(runningBlockedParent, "parent is no longer a directory");
+        int[] unstartedEffects = {0};
+        ActionExecutionService.Task runningTombstone = runningBlocked.process(
+                "request-running-no-journal", r -> null,
+                (r, attempt) -> { unstartedEffects[0]++; return ActionResult.ok("must not run"); },
+                null, 113, runningBlockedFile);
+        check(runningTombstone.status() == ActionExecutionService.Status.FAILED
+                        && !runningTombstone.receiptId().isEmpty()
+                        && runningBlocked.receipts().stream().anyMatch(r -> r.requestId().equals("request-running-no-journal")
+                        && r.outcome() == ActionExecutionService.Status.FAILED)
+                        && unstartedEffects[0] == 0,
+                "failed RUNNING checkpoint produces an in-memory FAILED receipt and never enters the executor");
 
         ActionExecutionService restored = new ActionExecutionService();
         restored.load(file);

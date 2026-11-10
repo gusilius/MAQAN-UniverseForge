@@ -123,10 +123,24 @@ public class OrdersMod {
             ServerPlayer p = player(pl);
             MapData m = p == null ? null : EditorManager.dataFor(p.serverLevel());
             if (m == null) { ORDERS.lastError = "Карта недоступна."; return null; }
-            ActionResult r = WorldForgeApi.run(action, new ActionContext(EditorManager.editorFor(m), p.getGameProfile().getName(), WFPerm.trusted(p.createCommandSourceStack()), realm, 0, args));
-            if (!r.ok) { ORDERS.lastError = r.message; return null; }
-            EditorManager.touch(m);
-            return r.message;
+            ActionContext context = new ActionContext(EditorManager.editorFor(m),
+                    p.getGameProfile().getName(), WFPerm.trusted(p.createCommandSourceStack()), realm, 0, args);
+            String actor = p.getUUID().toString();
+            String payload = action + "|" + realm + "|" + String.join("|", args);
+            String requestId = "orders:" + java.util.UUID.randomUUID();
+            try {
+                var task = WorldForgeApi.submitAction(requestId, action, context,
+                        WorldForgeMod.actionExecutionFile(p.server), WorldForgeApi.clock().worldMinute());
+                if (task.status() != dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED) {
+                    ORDERS.lastError = task.message();
+                    return null;
+                }
+                EditorManager.touch(m);
+                return task.message();
+            } catch (RuntimeException ex) {
+                ORDERS.lastError = "Не удалось выполнить действие организации: " + ex.getMessage();
+                return null;
+            }
         }
     };
 
@@ -206,28 +220,90 @@ public class OrdersMod {
         ServerPlayer sp = s.getPlayer();
         if (sp == null) { s.sendFailure(Component.literal("Только для игрока")); return 0; }
         String id = sp.getUUID().toString();
-        for (String o : ORDERS.orgsOf(id)) ORDERS.offers(id, o, day(), RNG);
-        WFNet.sendView(sp, "wf_orders:orders", ORDERS.viewJson(id, day(), HOOKS.realmOf(id)));
+        int today = day();
+        for (String org : ORDERS.orgsOf(id)) {
+            String requestId = "orders-offers:" + UUID.nameUUIDFromBytes(
+                    (id + ":" + org + ":" + today).getBytes(StandardCharsets.UTF_8));
+            long minute = WorldForgeApi.clock().worldMinute();
+            try {
+                WorldForgeApi.actionExecution().execute(
+                        new dev.worldforge.mod.api.ActionExecutionService.Request(
+                                requestId, "orders.generate_offers", id, org, List.of(Integer.toString(today)), minute),
+                        req -> s.getServer().getPlayerList().getPlayer(sp.getUUID()) == null
+                                ? "Игрок отключился до обновления предложений" : null,
+                        (req, attempt) -> {
+                            ORDERS.offers(id, org, today, RNG);
+                            return ActionResult.ok("Предложения обновлены");
+                        }, null, minute, WorldForgeMod.actionExecutionFile(s.getServer()));
+            } catch (RuntimeException ex) {
+                LOGGER.error("wf_orders: не удалось обновить предложения для {}: {}", id, ex.toString());
+            }
+        }
+        WFNet.sendView(sp, "wf_orders:orders", ORDERS.viewJson(id, today, HOOKS.realmOf(id)));
         return 1;
     }
 
     private static int act(CommandSourceStack s, String what, String org, String arg, int n) {
         ServerPlayer sp = s.getPlayer();
         if (sp == null) return 0;
-        String id = sp.getUUID().toString();
-        boolean ok = true;
-        String msg = "";
-        switch (what) {
-            case "join" -> { ok = ORDERS.join(id, org, day()); msg = ok ? "Вы приняты." : ORDERS.lastError; }
-            case "leave" -> ORDERS.leave(id, org, day());
-            case "donate" -> { ok = ORDERS.donate(id, org, n); if (!ok) msg = ORDERS.lastError; }
-            case "offers" -> ORDERS.offers(id, org, day(), RNG);
-            case "accept" -> { ok = ORDERS.accept(id, n); if (!ok) msg = ORDERS.lastError; }
-            case "complete" -> { ok = ORDERS.complete(id, n, day()); msg = ok ? "Задание выполнено." : ORDERS.lastError; }
-            case "petition" -> { String r = ORDERS.petition(id, org, arg, day()); ok = r != null; msg = ok ? r : ORDERS.lastError; }
-            default -> { }
+        String actor = sp.getUUID().toString();
+        String payload = what + "|" + org + "|" + arg + "|" + n;
+        long minute = WorldForgeApi.clock().worldMinute();
+        String requestId = "orders-command:" + java.util.UUID.randomUUID();
+        try {
+            var task = WorldForgeApi.actionExecution().execute(
+                    new dev.worldforge.mod.api.ActionExecutionService.Request(
+                            requestId, "orders." + what, actor, org.isBlank() ? arg : org,
+                            List.of(payload), minute),
+                    req -> s.getServer().getPlayerList().getPlayer(sp.getUUID()) == null
+                            ? "Игрок отключился до исполнения команды" : null,
+                    (req, attempt) -> {
+                        String message;
+                        switch (what) {
+                            case "join" -> {
+                                if (!ORDERS.join(actor, org, day())) return ActionResult.fail(ORDERS.lastError);
+                                message = "Вы приняты.";
+                            }
+                            case "leave" -> {
+                                if (!ORDERS.orgsOf(actor).contains(org)) return ActionResult.fail("Вы не состоите в этой организации.");
+                                ORDERS.leave(actor, org, day());
+                                message = "Вы покинули организацию.";
+                            }
+                            case "donate" -> {
+                                if (!ORDERS.donate(actor, org, n)) return ActionResult.fail(ORDERS.lastError);
+                                message = "Пожертвование внесено.";
+                            }
+                            case "offers" -> {
+                                if (!ORDERS.orgsOf(actor).contains(org)) return ActionResult.fail("Вы не состоите в этой организации.");
+                                ORDERS.offers(actor, org, day(), RNG);
+                                message = "Предложения обновлены.";
+                            }
+                            case "accept" -> {
+                                if (!ORDERS.accept(actor, n)) return ActionResult.fail(ORDERS.lastError);
+                                message = "Задание принято.";
+                            }
+                            case "complete" -> {
+                                if (!ORDERS.complete(actor, n, day())) return ActionResult.fail(ORDERS.lastError);
+                                message = "Задание выполнено.";
+                            }
+                            case "petition" -> {
+                                String result = ORDERS.petition(actor, org, arg, day());
+                                if (result == null) return ActionResult.fail(ORDERS.lastError);
+                                message = result;
+                            }
+                            default -> { return ActionResult.fail("Неизвестная команда организации: " + what); }
+                        }
+                        return ActionResult.ok(message);
+                    }, null, minute, WorldForgeMod.actionExecutionFile(s.getServer()));
+            boolean ok = task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED;
+            if (ok && !task.message().isBlank()) s.sendSuccess(() -> Component.literal(task.message()), false);
+            else if (!ok) s.sendFailure(Component.literal(task.message()));
+            open(s);
+            return ok ? 1 : 0;
+        } catch (RuntimeException ex) {
+            s.sendFailure(Component.literal("Не удалось выполнить команду организации: " + ex.getMessage()));
+            open(s);
+            return 0;
         }
-        if (!msg.isEmpty()) { String m = msg; if (ok) s.sendSuccess(() -> Component.literal(m), false); else s.sendFailure(Component.literal(m)); }
-        return open(s);
     }
 }
