@@ -80,7 +80,7 @@ public final class Settlement {
     public int raidsRepelled, raidsLost;
     public boolean raids = true;
     public int seasonIndex() {
-        if (externalWorldMinute >= 0) return (int) ((externalWorldMinute / 1440L / 91L) % 4L);
+        if (externalWorldMinute >= 0) return (int) Math.min(3L, (externalWorldMinute / 1440L % 365L) / 91L);
         return (int) (time / SEASON_LEN) % 4;
     }
     public int year() {
@@ -89,8 +89,11 @@ public final class Settlement {
     }
     public double seasonProgress() {
         if (externalWorldMinute >= 0) {
-            long day = externalWorldMinute / 1440L;
-            return (day % 91L + (externalWorldMinute % 1440L) / 1440.0) / 91.0;
+            long day = externalWorldMinute / 1440L % 365L;
+            int season = seasonIndex();
+            int start = season * 91;
+            int duration = season == 3 ? 92 : 91;
+            return Math.max(0, Math.min(1, (day - start + (externalWorldMinute % 1440L) / 1440.0) / duration));
         }
         return (time % SEASON_LEN) / SEASON_LEN;
     }
