@@ -51,6 +51,21 @@ public final class CharacterProgressIdentityTest {
         check(PeopleProgressBridge.owner(person, "North").equals(PeopleProgressBridge.owner(person, "South")),
                 "the same Character keeps one progression owner after moving to another map scope");
 
+        CharacterRegistry destination = new CharacterRegistry();
+        destination.fromJson(north.toJson());
+        Character moved = destination.get(person.id);
+        Progress movedProgress = new Progress(new ProgressDefs());
+        Profile previousMapProfile = movedProgress.profile(
+                PopulationSimulation.legacyProgressOwner(moved, "North"));
+        previousMapProfile.level = 6;
+        previousMapProfile.totalXp = 620;
+        Profile movedProfile = PeopleProgressBridge.profile(
+                movedProgress, moved, "South", java.util.List.of(destination));
+        check(movedProfile.owner.equals("n:" + moved.globalId)
+                        && movedProfile.level == 6 && movedProfile.totalXp == 620
+                        && movedProgress.peek(PopulationSimulation.legacyProgressOwner(moved, "North")) == null,
+                "legacy profile from the previous map scope follows the same Character after transfer");
+
         CharacterRegistry south = new CharacterRegistry();
         Character sameLocalId = south.create("Beatrice", "", "", "f", 280);
         check(person.id.equals(sameLocalId.id) && !person.globalId.equals(sameLocalId.globalId)
