@@ -234,8 +234,8 @@ public final class SettleCommands {
                     req -> {
                         Colony current = SettleMod.colony(req.targetId());
                         if (current == null) return "Поселение больше не существует";
-                        if (current.actionPersistenceBlocked || current.genesisProvisioningRuntimeBlocked)
-                            return "Изменения поселения заблокированы после ошибки сохранения; требуется сверка";
+                        if (SettleMod.actionsBlocked())
+                            return "Все изменения поселений заблокированы после ошибки сохранения; требуется перезапуск и сверка";
                         if (!operator && !req.actorId().equals(current.owner))
                             return "Полномочия на это поселение изменились";
                         return null;
@@ -274,8 +274,8 @@ public final class SettleCommands {
                                 && source.getServer().getPlayerList().getPlayer(player.getUUID()) == null)
                             return "Игрок отключился до исполнения команды";
                         Colony targetColony = SettleMod.colony(req.targetId());
-                        if (targetColony != null && (targetColony.actionPersistenceBlocked || targetColony.genesisProvisioningRuntimeBlocked))
-                            return "Изменения поселения заблокированы после ошибки сохранения; требуется сверка";
+                        if (SettleMod.actionsBlocked())
+                            return "Все изменения поселений заблокированы после ошибки сохранения; требуется перезапуск и сверка";
                         return op(source) ? null : "Для этой операции нужны права владельца поселения или оператора";
                     },
                     (req, attempt) -> operation.get(), null, minute,
