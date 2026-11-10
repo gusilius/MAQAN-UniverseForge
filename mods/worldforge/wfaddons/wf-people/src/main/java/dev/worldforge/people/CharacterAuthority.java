@@ -95,7 +95,7 @@ public final class CharacterAuthority {
         byGlobalId.putAll(nextByGlobalId);
         byLegacyId.clear();
         for (Map.Entry<String, Set<CharacterIdentity>> entry : nextByLegacyId.entrySet())
-            byLegacyId.put(entry.getKey(), ConcurrentHashMap.newKeySet(entry.getValue()));
+            byLegacyId.put(entry.getKey(), new HashSet<>(entry.getValue()));
         indexedRevisions.clear();
         indexedRevisions.putAll(nextRevisions);
     }
