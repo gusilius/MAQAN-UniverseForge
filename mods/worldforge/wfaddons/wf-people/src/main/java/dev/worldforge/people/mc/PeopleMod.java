@@ -102,12 +102,9 @@ public class PeopleMod {
 
     /** Персонаж по id в любой загруженной карте (аддоны поверх людей ищут собеседников по нему). */
     public static Character findNpc(String id) {
-        for (MapData m : WorldForgeMod.loadedMaps().values()) {
-            CharacterRegistry reg = registry(m);
-            Character c = reg == null ? null : reg.get(id);
-            if (c != null) return c;
-        }
-        return null;
+        if (id == null || id.isBlank()) return null;
+        Character global = AUTHORITY.getGlobal(id);
+        return global != null ? global : AUTHORITY.getLegacy(id);
     }
 
     public static boolean dialogueLoaded() {
