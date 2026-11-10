@@ -316,15 +316,24 @@ public class SettleMod {
 
     public static Colony colony(String id) { return COLONIES.get(id); }
 
-    /** Resolve the one Character identity represented by this resident body. */
-    private static Character resolvePerson(CharacterRegistry registry, String id) {
-        if (registry == null || id == null || id.isBlank()) return null;
+    private record PersonBinding(CharacterRegistry registry, Character character) {}
+
+    /** Resolve a resident body to the Character and the persistence partition that actually owns that person. */
+    private static PersonBinding resolvePersonBinding(CharacterRegistry fallbackRegistry, String id) {
+        if (id == null || id.isBlank()) return null;
         Character global = PeopleMod.authority().getGlobal(id);
         if (global != null) {
             CharacterRegistry owner = PeopleMod.authority().registryForGlobal(id);
-            return owner == registry ? global : null;
+            return owner == null ? null : new PersonBinding(owner, global);
         }
-        return registry.get(id); // one-time compatibility for old map-local worker saves
+        // Pre-global UUID worker saves can only be resolved in their original local map partition.
+        Character legacy = fallbackRegistry == null ? null : fallbackRegistry.get(id);
+        return legacy == null ? null : new PersonBinding(fallbackRegistry, legacy);
+    }
+
+    private static Character resolvePerson(CharacterRegistry fallbackRegistry, String id) {
+        PersonBinding binding = resolvePersonBinding(fallbackRegistry, id);
+        return binding == null ? null : binding.character();
     }
 
     public static Character residentCharacter(WFWorker body) {
@@ -537,18 +546,20 @@ public class SettleMod {
                 colony.s.acknowledgeDeparture(departure); // legacy worker had no Character identity
                 continue;
             }
-            Character departed = resolvePerson(registry, departure.personId());
-            if (departed == null) {
+            PersonBinding departedBinding = resolvePersonBinding(registry, departure.personId());
+            Character departed = departedBinding == null ? null : departedBinding.character();
+            if (departedBinding == null) {
                 LOGGER.warn("wf_settle: departure references missing Character {}; retaining event for repair", departure.personId());
                 continue;
             }
             if (departed.alive) {
+                CharacterRegistry departedRegistry = departedBinding.registry();
                 try {
                     if (departure.reason().startsWith("death:"))
-                        PopulationSimulation.die(registry, departed.id, PeopleMod.YEAR, departure.reason().substring("death:".length()));
+                        PopulationSimulation.die(departedRegistry, departed.id, PeopleMod.YEAR, departure.reason().substring("death:".length()));
                     else if (departure.reason().startsWith("transfer:"))
-                        registry.fire(departed.id, place, PeopleMod.YEAR);
-                    else registry.migrate(departed.id, "outside:" + colony.s.id, PeopleMod.YEAR);
+                        departedRegistry.fire(departed.id, place, PeopleMod.YEAR);
+                    else departedRegistry.migrate(departed.id, "outside:" + colony.s.id, PeopleMod.YEAR);
                 } catch (RuntimeException ex) {
                     LOGGER.error("wf_settle: lifecycle transition failed for {}: {}", departed.id, ex.toString());
                     continue;
@@ -559,7 +570,9 @@ public class SettleMod {
 
         for (dev.worldforge.settle.Worker worker : new ArrayList<>(colony.s.workers)) {
             boolean hasPersonId = worker.person != null && !worker.person.isBlank();
-            Character person = hasPersonId ? resolvePerson(registry, worker.person) : null;
+            PersonBinding personBinding = hasPersonId ? resolvePersonBinding(registry, worker.person) : null;
+            Character person = personBinding == null ? null : personBinding.character();
+            CharacterRegistry personRegistry = personBinding == null ? registry : personBinding.registry();
             if (hasPersonId && person == null) {
                 LOGGER.warn("wf_settle: worker {} references missing Character {}; not creating a replacement", worker.id, worker.person);
                 continue;
@@ -570,31 +583,32 @@ public class SettleMod {
             }
             if (person == null) {
                 person = registry.create(worker.name, "", culture, "m", PeopleMod.YEAR - 20);
+                personRegistry = registry;
                 worker.person = person.globalId;
             }
             worker.person = person.globalId; // migrate legacy local cN reference to canonical global UUID
-            if (!person.has("settlement_worker", place)) registry.appoint(person.id, "settlement_worker", place, PeopleMod.YEAR);
+            if (!person.has("settlement_worker", place)) personRegistry.appoint(person.id, "settlement_worker", place, PeopleMod.YEAR);
             person.props.put("population.employer", place);
             person.props.put("population.location", colony.s.id);
             if (person.culture == null || person.culture.isBlank()) person.culture = culture;
             if (person.culture == null || person.culture.isBlank()) person.culture = culture;
             String profession = worker.profession == null || worker.profession.isBlank() ? "laborer" : worker.profession;
-            if (!profession.equals(PopulationSimulation.profession(person))) registry.changeProfession(person.id, profession, PeopleMod.YEAR);
-            registry.setDuty(person.id, Duty.WORKER, true, PeopleMod.YEAR);
+            if (!profession.equals(PopulationSimulation.profession(person))) personRegistry.changeProfession(person.id, profession, PeopleMod.YEAR);
+            personRegistry.setDuty(person.id, Duty.WORKER, true, PeopleMod.YEAR);
             boolean settlementSoldier = java.util.Set.of("guard", "soldier", "archer", "knight").contains(profession);
             if (settlementSoldier && !PopulationSimulation.hasDuty(person, Duty.SOLDIER)) {
-                registry.setDuty(person.id, Duty.SOLDIER, true, PeopleMod.YEAR);
+                personRegistry.setDuty(person.id, Duty.SOLDIER, true, PeopleMod.YEAR);
                 person.props.put("population.settlement_soldier_duty", true);
             } else if (!settlementSoldier && Boolean.TRUE.equals(person.props.remove("population.settlement_soldier_duty"))) {
-                registry.setDuty(person.id, Duty.SOLDIER, false, PeopleMod.YEAR);
+                personRegistry.setDuty(person.id, Duty.SOLDIER, false, PeopleMod.YEAR);
             }
             boolean settlementSpecialist = java.util.Set.of("lumberjack", "sawyer", "farmer", "miner", "smith",
                     "builder", "blacksmith", "armorer", "trainer", "healer", "merchant", "scholar", "porter").contains(profession);
             if (settlementSpecialist && !PopulationSimulation.hasDuty(person, Duty.SPECIALIST)) {
-                registry.setDuty(person.id, Duty.SPECIALIST, true, PeopleMod.YEAR);
+                personRegistry.setDuty(person.id, Duty.SPECIALIST, true, PeopleMod.YEAR);
                 person.props.put("population.settlement_specialist_duty", true);
             } else if (!settlementSpecialist && Boolean.TRUE.equals(person.props.remove("population.settlement_specialist_duty"))) {
-                registry.setDuty(person.id, Duty.SPECIALIST, false, PeopleMod.YEAR);
+                personRegistry.setDuty(person.id, Duty.SPECIALIST, false, PeopleMod.YEAR);
             }
             PopulationSimulation.updateIntent(person, PeopleMod.YEAR);
             person.props.put("wf_unit_kind", "worker");
@@ -807,16 +821,13 @@ public class SettleMod {
                 if (characterId.equals(worker.person)) return false;
         }
         CharacterRegistry registry = null;
-        Character person = null;
-        for (dev.worldforge.mod.MapData map : dev.worldforge.mod.WorldForgeMod.loadedMaps().values()) {
-            if (map.titles == null || map.provinceAt(colony.cx, colony.cz) == null) continue;
-            CharacterRegistry candidate = PeopleMod.registry(map);
-            Character found = candidate == null ? null : candidate.get(characterId);
-            if (found == null) {
-                Character global = PeopleMod.authority().getGlobal(characterId);
-                if (global != null && PeopleMod.authority().registryForGlobal(characterId) == candidate) found = global;
-            }
-            if (found != null) { registry = candidate; person = found; break; }
+        Character person = PeopleMod.authority().getGlobal(characterId);
+        if (person != null) {
+            registry = PeopleMod.authority().registryForGlobal(characterId);
+        } else {
+            // Legacy local cN references are only meaningful inside the destination colony's map.
+            registry = registryForColony(colony);
+            person = registry == null ? null : registry.get(characterId);
         }
         if (person == null || !person.alive) return false;
         String profession = person.props.get("population.pre_military_profession") instanceof String p && !p.isBlank()
