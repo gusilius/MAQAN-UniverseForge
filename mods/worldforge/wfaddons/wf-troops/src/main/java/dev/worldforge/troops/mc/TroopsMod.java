@@ -786,9 +786,16 @@ public class TroopsMod {
                 requestId, actionId, actor, target, List.of(payload == null ? "" : payload), minute);
         try {
             var task = WorldForgeApi.actionExecution().execute(request,
-                    req -> source.getEntity() instanceof ServerPlayer player
-                            && source.getServer().getPlayerList().getPlayer(player.getUUID()) == null
-                            ? "Игрок отключился до исполнения приказа" : null,
+                    req -> {
+                        if (source.getEntity() instanceof ServerPlayer player
+                                && source.getServer().getPlayerList().getPlayer(player.getUUID()) == null)
+                            return "Игрок отключился до исполнения приказа";
+                        boolean operatorRequired = actionId.equals("military.muster")
+                                || actionId.equals("military.return_to_army") || actionId.startsWith("military.fort_");
+                        if (operatorRequired && !source.hasPermission(2))
+                            return "Для этого военного приказа нужны права оператора";
+                        return null;
+                    },
                     (req, attempt) -> action.getAsInt() > 0
                             ? dev.worldforge.mod.api.ActionResult.ok("Военный приказ выполнен")
                             : dev.worldforge.mod.api.ActionResult.fail("Военный приказ отклонён"),
