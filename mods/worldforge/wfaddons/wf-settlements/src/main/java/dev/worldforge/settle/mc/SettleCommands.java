@@ -142,17 +142,32 @@ public final class SettleCommands {
                                         .then(Commands.argument("to", StringArgumentType.word())
                                                 .then(Commands.argument("res", StringArgumentType.word())
                                                         .then(Commands.argument("rate", IntegerArgumentType.integer(1, 30)).executes(c -> {
-                                                            try {
-                                                                java.util.Map<String, dev.worldforge.settle.Settlement> all = new java.util.LinkedHashMap<>();
-                                                                for (Colony x : SettleMod.COLONIES.values()) all.put(x.s.id, x.s);
-                                                                var r = SettleMod.NETWORK.add(all, StringArgumentType.getString(c, "from"), StringArgumentType.getString(c, "to"), StringArgumentType.getString(c, "res"), IntegerArgumentType.getInteger(c, "rate"));
-                                                                c.getSource().sendSuccess(() -> Component.literal("Маршрут #" + r.id + " открыт"), false);
-                                                                return 1;
-                                                            } catch (dev.worldforge.settle.TradeNetwork.TradeException ex) { c.getSource().sendFailure(Component.literal(ex.getMessage())); return 0; }
+                                                            String from = StringArgumentType.getString(c, "from");
+                                                            String to = StringArgumentType.getString(c, "to");
+                                                            String resource = StringArgumentType.getString(c, "res");
+                                                            int rate = IntegerArgumentType.getInteger(c, "rate");
+                                                            String payload = from + "|" + to + "|" + resource + "|" + rate;
+                                                            return executeAdminMutation(c.getSource(), "settlement.route_add", from, payload, () -> {
+                                                                try {
+                                                                    java.util.Map<String, dev.worldforge.settle.Settlement> all = new java.util.LinkedHashMap<>();
+                                                                    for (Colony x : SettleMod.COLONIES.values()) all.put(x.s.id, x.s);
+                                                                    var route = SettleMod.NETWORK.add(all, from, to, resource, rate);
+                                                                    return dev.worldforge.mod.api.ActionResult.ok("Маршрут #" + route.id + " открыт");
+                                                                } catch (dev.worldforge.settle.TradeNetwork.TradeException ex) {
+                                                                    return dev.worldforge.mod.api.ActionResult.fail(ex.getMessage());
+                                                                }
+                                                            });
                                                         }))))))
                         .then(Commands.literal("remove").then(Commands.argument("id", IntegerArgumentType.integer(1)).executes(c -> {
-                            try { SettleMod.NETWORK.remove(IntegerArgumentType.getInteger(c, "id")); c.getSource().sendSuccess(() -> Component.literal("Маршрут закрыт"), false); return 1; }
-                            catch (dev.worldforge.settle.TradeNetwork.TradeException ex) { c.getSource().sendFailure(Component.literal(ex.getMessage())); return 0; }
+                            int id = IntegerArgumentType.getInteger(c, "id");
+                            return executeAdminMutation(c.getSource(), "settlement.route_remove", Integer.toString(id), Integer.toString(id), () -> {
+                                try {
+                                    SettleMod.NETWORK.remove(id);
+                                    return dev.worldforge.mod.api.ActionResult.ok("Маршрут закрыт");
+                                } catch (dev.worldforge.settle.TradeNetwork.TradeException ex) {
+                                    return dev.worldforge.mod.api.ActionResult.fail(ex.getMessage());
+                                }
+                            });
                         }))))
                 .then(Commands.literal("priority-work").requires(SettleCommands::op)
                         .then(Commands.argument("worker", IntegerArgumentType.integer(1))
@@ -243,17 +258,69 @@ public final class SettleCommands {
         }
     }
 
+    private static int executeAdminMutation(CommandSourceStack source, String actionId, String target,
+                                              String payload, java.util.function.Supplier<dev.worldforge.mod.api.ActionResult> operation) {
+        String actor = source.getEntity() instanceof net.minecraft.server.level.ServerPlayer player
+                ? player.getUUID().toString() : "console";
+        long minute = dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute();
+        String requestId = "settlement-admin:" + actor + ":" + source.getServer().getTickCount() + ":"
+                + Integer.toUnsignedString(java.util.Objects.hash(actionId, target, payload), 16);
+        try {
+            var task = dev.worldforge.mod.api.WorldForgeApi.actionExecution().execute(
+                    new dev.worldforge.mod.api.ActionExecutionService.Request(
+                            requestId, actionId, actor, target, java.util.List.of(payload), minute),
+                    req -> {
+                        if (source.getEntity() instanceof net.minecraft.server.level.ServerPlayer player
+                                && source.getServer().getPlayerList().getPlayer(player.getUUID()) == null)
+                            return "Игрок отключился до исполнения команды";
+                        return op(source) ? null : "Для этой операции нужны права владельца поселения или оператора";
+                    },
+                    (req, attempt) -> operation.get(), null, minute,
+                    dev.worldforge.mod.WorldForgeMod.actionExecutionFile(source.getServer()));
+            if (task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED) {
+                source.sendSuccess(() -> Component.literal(task.message()), true);
+                return 1;
+            }
+            source.sendFailure(Component.literal(task.message()));
+            return 0;
+        } catch (RuntimeException ex) {
+            source.sendFailure(Component.literal("Не удалось выполнить команду поселения: " + ex.getMessage()));
+            return 0;
+        }
+    }
+
     private static int found(CommandSourceStack s, String name) {
         if (SettleMod.DEFS == null) {
             s.sendFailure(Component.literal("Сервер ещё не готов"));
             return 0;
         }
-        ServerLevel lv = s.getLevel();
-        BlockPos p = BlockPos.containing(s.getPosition());
-        Colony c = SettleMod.found(lv, name.trim(), p);
-        if (s.getEntity() instanceof net.minecraft.server.level.ServerPlayer player) c.owner = player.getUUID().toString();
-        s.sendSuccess(() -> Component.literal("Основано поселение " + c.s.name + " (" + c.s.id + ") в " + c.cx + ", " + c.cz + ": 4 рабочих, дерево 60, еда 40, камень 10"), true);
-        return 1;
+        ServerLevel level = s.getLevel();
+        BlockPos pos = BlockPos.containing(s.getPosition());
+        String payload = level.dimension().location() + "|" + pos + "|" + name.trim();
+        return executeAdminMutation(s, "settlement.found", level.dimension().location().toString(), payload, () -> {
+            Colony colony = SettleMod.found(level, name.trim(), pos);
+            if (s.getEntity() instanceof net.minecraft.server.level.ServerPlayer player)
+                colony.owner = player.getUUID().toString();
+            return dev.worldforge.mod.api.ActionResult.ok(
+                    "Основано поселение " + colony.s.name + " (" + colony.s.id + ") в " + colony.cx + ", " + colony.cz
+                            + ": 4 рабочих, дерево 60, еда 40, камень 10");
+        });
+    }
+        if (SettleMod.DEFS == null) {
+            s.sendFailure(Component.literal("Сервер ещё не готов"));
+            return 0;
+        }
+        ServerLevel level = s.getLevel();
+        BlockPos pos = BlockPos.containing(s.getPosition());
+        String payload = level.dimension().location() + "|" + pos + "|" + name.trim();
+        return executeAdminMutation(s, "settlement.found", level.dimension().location().toString(), payload, () -> {
+            Colony colony = SettleMod.found(level, name.trim(), pos);
+            if (s.getEntity() instanceof net.minecraft.server.level.ServerPlayer player)
+                colony.owner = player.getUUID().toString();
+            return dev.worldforge.mod.api.ActionResult.ok(
+                    "Основано поселение " + colony.s.name + " (" + colony.s.id + ") в " + colony.cx + ", " + colony.cz
+                            + ": 4 рабочих, дерево 60, еда 40, камень 10");
+        });
     }
 
     private static int list(CommandSourceStack s) {
