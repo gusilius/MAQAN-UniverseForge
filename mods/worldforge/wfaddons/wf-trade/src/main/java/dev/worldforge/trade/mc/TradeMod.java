@@ -298,9 +298,7 @@ public class TradeMod {
                                                  String payload, java.util.function.Supplier<ActionResult> operation) {
         String actor = player.getUUID().toString();
         long minute = WorldForgeApi.clock().worldMinute();
-        String requestId = "trade:" + UUID.nameUUIDFromBytes(
-                (actor + ":" + player.server.getTickCount() + ":" + actionId + ":" + target + ":" + payload)
-                        .getBytes(StandardCharsets.UTF_8));
+        String requestId = "trade:" + java.util.UUID.randomUUID();
         try {
             var task = WorldForgeApi.actionExecution().execute(
                     new dev.worldforge.mod.api.ActionExecutionService.Request(
