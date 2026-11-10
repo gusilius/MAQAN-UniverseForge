@@ -364,6 +364,8 @@ public class RealmsMod {
         String actor = player.getUUID().toString();
         String payload = what + "|" + realm + "|" + a + "|" + b;
         int result = executePoliticalMutation(source, "realm_" + what, realm, payload, () -> {
+            if (!rules(player, realm))
+                return dev.worldforge.mod.api.ActionResult.fail("Это решение правителя.");
             boolean ok = switch (what) {
                 case "gov" -> REALMS.setGov(realm, a, false);
                 case "unlock" -> REALMS.unlock(realm, a);
