@@ -145,11 +145,13 @@ public final class ResidentInteraction {
                         try { target = UUID.fromString(req.targetId()); }
                         catch (IllegalArgumentException ex) { return "Некорректный ID жителя"; }
                         Entity entity = player.serverLevel().getEntity(target);
-                        if (!(entity instanceof WFWorker current) || !validApproach(player, current,
-                                SettleMod.colony(current.colonyId)))
-                            return "Житель больше не находится рядом";
+                        if (!(entity instanceof WFWorker current)) return "Житель больше не находится рядом";
+                        Colony currentColony = SettleMod.colony(current.colonyId);
+                        if (!validApproach(player, current, currentColony)) return "Житель больше не находится рядом";
+                        if (currentColony.actionPersistenceBlocked || currentColony.genesisProvisioningRuntimeBlocked)
+                            return "Изменения поселения заблокированы после ошибки сохранения; требуется сверка";
                         if (requiresRuler(req.args().get(0))
-                                && !WorkerControlAccess.mayControl(player, SettleMod.colony(current.colonyId)))
+                                && !WorkerControlAccess.mayControl(player, currentColony))
                             return "Недостаточно полномочий для этого приказа";
                         return null;
                     },
