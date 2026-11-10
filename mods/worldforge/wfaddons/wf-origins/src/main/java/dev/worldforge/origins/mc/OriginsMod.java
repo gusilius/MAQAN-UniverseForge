@@ -176,9 +176,7 @@ public class OriginsMod {
         String actor = sp.getUUID().toString();
         String o = owner(sp);
         long minute = dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute();
-        String requestId = "origins:" + UUID.nameUUIDFromBytes(
-                (actor + ":" + s.getServer().getTickCount() + ":" + what + ":" + id)
-                        .getBytes(StandardCharsets.UTF_8));
+        String requestId = "origins:" + java.util.UUID.randomUUID();
         try {
             var task = dev.worldforge.mod.api.WorldForgeApi.actionExecution().execute(
                     new dev.worldforge.mod.api.ActionExecutionService.Request(
