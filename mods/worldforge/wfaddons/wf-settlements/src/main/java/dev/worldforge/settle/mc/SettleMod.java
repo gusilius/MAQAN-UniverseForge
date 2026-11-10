@@ -549,6 +549,16 @@ public class SettleMod {
         return false;
     }
 
+    /** Persist one mixed RTS action that may have changed workers in several settlements. */
+    public static boolean persistActionMutation(MinecraftServer server) {
+        if (actionsBlocked()) return false;
+        if (saveDurably(server)) return true;
+        for (Colony colony : COLONIES.values()) {
+            if (colony != null) colony.actionPersistenceBlocked = true;
+        }
+        return false;
+    }
+
     // ------------------------------------------------------------------ события сервера
 
     @SubscribeEvent
