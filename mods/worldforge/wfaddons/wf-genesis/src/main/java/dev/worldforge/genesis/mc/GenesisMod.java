@@ -237,6 +237,17 @@ public class GenesisMod {
     }
 
     private static int reset(CommandSourceStack s, ServerPlayer t) {
+        // A completed or partially applied Genesis character must never be reset by
+        // deleting only the wizard flag: that would leave Origins, Progress, inventory,
+        // settlements and world changes behind and allow a second starter grant.
+        boolean hasCanonicalCharacter = !t.getPersistentData()
+                .getString("worldforge_character_global_id").isBlank();
+        if (GENESIS.isDone(owner(t)) || hasCanonicalCharacter) {
+            s.sendFailure(Component.literal(
+                    "Сброс завершённого или частично применённого персонажа заблокирован: "
+                    + "сначала требуется согласованный сброс Character, Origins, Progress, имущества и поселения."));
+            return 0;
+        }
         GENESIS.forget(owner(t));
         t.refreshDimensions();
         broadcastLook(t);
