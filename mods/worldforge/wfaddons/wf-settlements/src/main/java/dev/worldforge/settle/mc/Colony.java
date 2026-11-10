@@ -52,6 +52,8 @@ public final class Colony {
     public SettlementMap map = new SettlementMap();
     /** UUID игрока-правителя (пусто - поселение без правителя-игрока). Правитель управляет своим поселением без прав оператора. */
     public String owner = "";
+    /** Stable origin operation that created this colony; empty for ordinary settlements. */
+    public String genesisOperationId = "";
 
     public Colony(Settlement s, String dim, int cx, int cz) {
         this.s = s;
@@ -129,6 +131,7 @@ public final class Colony {
         m.put("cx", cx);
         m.put("cz", cz);
         m.put("owner", owner);
+        m.put("genesisOperationId", genesisOperationId);
         m.put("settlement", Json.parse(s.toJson()));
         List<Object> l = new ArrayList<>();
         for (Map.Entry<Integer, Site> e : sites.entrySet()) {
@@ -167,6 +170,7 @@ public final class Colony {
         Colony c = new Colony(s, (String) m.get("dim"), ((Number) m.get("cx")).intValue(), ((Number) m.get("cz")).intValue());
         if (m.get("map") instanceof Map<?, ?> mapData) c.map = SettlementMap.fromJson(Json.write(mapData));
         if (m.get("owner") instanceof String ow) c.owner = ow;
+        if (m.get("genesisOperationId") instanceof String operationId) c.genesisOperationId = operationId;
         if (m.get("workOrders") instanceof List<?> orders) {
             for (Object raw : orders) {
                 if (!(raw instanceof Map<?, ?> row)) continue;
