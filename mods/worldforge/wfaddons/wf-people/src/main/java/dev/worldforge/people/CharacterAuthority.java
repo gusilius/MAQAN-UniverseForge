@@ -24,10 +24,13 @@ public final class CharacterAuthority {
     }
 
     public synchronized void clear() {
+        // Detach every persistence partition before dropping the authority's references.
+        // A registry may be reused by a newly created authority after server/world shutdown.
+        for (CharacterRegistry registry : registries.values()) registry.unbindAuthority(this);
+        registries.clear();
         byIdentity.clear();
         byGlobalId.clear();
         byLegacyId.clear();
-        registries.clear();
         indexedRevisions.clear();
         worldId = null;
     }
@@ -43,14 +46,24 @@ public final class CharacterAuthority {
             if (entry.getValue() == registry && !entry.getKey().equals(key))
                 throw new IllegalStateException("CharacterRegistry is already registered as map " + entry.getKey());
         }
-        CharacterRegistry previous = registries.putIfAbsent(key, registry);
-        if (previous != null && previous != registry)
-            throw new IllegalStateException("A different CharacterRegistry is already registered for map " + key);
+        CharacterRegistry previous = registries.get(key);
+        if (previous != null) {
+            if (previous != registry)
+                throw new IllegalStateException("A different CharacterRegistry is already registered for map " + key);
+            refreshIndex();
+            return;
+        }
+
+        // Bind first, then publish. If the registry belongs to another world authority,
+        // bindAuthority fails without leaving a rejected partition in this authority.
+        registry.bindAuthority(this);
+        registries.put(key, registry);
         try {
             refreshIndex();
         } catch (RuntimeException ex) {
             // A rejected partition must not poison the live authority or discard its last valid index.
-            if (previous == null) registries.remove(key, registry);
+            registries.remove(key, registry);
+            registry.unbindAuthority(this);
             throw ex;
         }
     }

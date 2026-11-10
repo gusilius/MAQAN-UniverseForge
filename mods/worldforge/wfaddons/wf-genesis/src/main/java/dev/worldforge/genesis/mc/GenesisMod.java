@@ -459,6 +459,9 @@ public class GenesisMod {
         // место старта
         place(sp, d, st);
         sp.refreshDimensions();
+        // Import the just-created player's real vanilla inventory, including tagged Genesis starter grants,
+        // into the canonical Character ledger before Genesis confirmation is persisted.
+        dev.worldforge.people.mc.PlayerInventoryBridge.initialize(sp, person);
     }
 
     /**
@@ -501,6 +504,7 @@ public class GenesisMod {
         sp.getPersistentData().putString("worldforge_character_global_id", person.globalId);
         if (!PeopleMod.persistCharacter(person, sp.getServer()))
             throw new IllegalStateException("Canonical player Character could not be durably saved");
+        PeopleMod.bindPlayerCharacter(sp.getUUID(), person);
         return person;
     }
 

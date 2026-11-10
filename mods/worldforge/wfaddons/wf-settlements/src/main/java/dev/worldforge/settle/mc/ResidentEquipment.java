@@ -2,6 +2,7 @@ package dev.worldforge.settle.mc;
 
 import dev.worldforge.mod.api.ActionResult;
 import dev.worldforge.people.Character;
+import dev.worldforge.people.CharacterInventory;
 import dev.worldforge.people.PopulationSimulation;
 import dev.worldforge.settle.Worker;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -18,6 +19,7 @@ import net.minecraft.world.item.SwordItem;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.List;
 import java.util.Locale;
 
 /**
@@ -164,16 +166,44 @@ public final class ResidentEquipment {
     }
 
     private static void save(Character person, ItemStack stack, int tier, String role) {
-        person.props.put(ITEM_KEY, stack.save(new CompoundTag()).toString());
+        if (stack == null || stack.isEmpty()) {
+            CharacterInventory.discardEquipment(person, "mainhand");
+            person.props.remove(ITEM_KEY);
+            person.props.remove(TIER_KEY);
+            person.props.remove(ROLE_KEY);
+            return;
+        }
+        String itemId = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+        CharacterInventory.setEquipment(person, "mainhand",
+                new CharacterInventory.Item(itemId, 1, stack.save(new CompoundTag()).toString()), false);
+        // Remove the old parallel field after its data has been migrated to the shared ledger.
+        person.props.remove(ITEM_KEY);
         person.props.put(TIER_KEY, tier);
         person.props.put(ROLE_KEY, role);
     }
 
     private static ItemStack load(Character person) {
+        CharacterInventory.Item equipped = CharacterInventory.equipment(person).get("mainhand");
+        if (equipped != null) {
+            try {
+                if (!equipped.data().isBlank()) return ItemStack.of(TagParser.parseTag(equipped.data()));
+                Item item = BuiltInRegistries.ITEM.get(new ResourceLocation(equipped.id()));
+                return item == Items.AIR ? ItemStack.EMPTY : new ItemStack(item, equipped.count());
+            } catch (Exception ignored) { return ItemStack.EMPTY; }
+        }
+        // One-time migration from the previous ResidentEquipment-only storage key.
         Object raw = person.props.get(ITEM_KEY);
         if (!(raw instanceof String nbt) || nbt.isBlank()) return ItemStack.EMPTY;
-        try { return ItemStack.of(TagParser.parseTag(nbt)); }
-        catch (Exception ignored) { person.props.remove(ITEM_KEY); return ItemStack.EMPTY; }
+        try {
+            ItemStack legacy = ItemStack.of(TagParser.parseTag(nbt));
+            if (!legacy.isEmpty()) {
+                String itemId = BuiltInRegistries.ITEM.getKey(legacy.getItem()).toString();
+                CharacterInventory.setEquipment(person, "mainhand",
+                        new CharacterInventory.Item(itemId, 1, legacy.save(new CompoundTag()).toString()), false);
+            }
+            person.props.remove(ITEM_KEY);
+            return legacy;
+        } catch (Exception ignored) { person.props.remove(ITEM_KEY); return ItemStack.EMPTY; }
     }
 
     public static void sync(WFWorker body) {
@@ -203,6 +233,10 @@ public final class ResidentEquipment {
     public static String craft(WFWorker body) { return craftAction(body).message; }
 
     public static ActionResult craftAction(WFWorker body) {
+        return executeToolAction(body, "craft", () -> craftActionDirect(body));
+    }
+
+    private static ActionResult craftActionDirect(WFWorker body) {
         Colony colony = body.colony();
         Worker worker = body.worker();
         Character person = SettleMod.residentCharacter(body);
@@ -226,6 +260,7 @@ public final class ResidentEquipment {
         int cost = tool.cost[chosen];
         if (!colony.s.consumeResource(resource, cost)) return ActionResult.fail("Материалы уже использованы другим заказом; изготовление отменено.");
         ItemStack crafted = tool.tiers[chosen].copy();
+        if (!current.isEmpty()) CharacterInventory.unequip(person, "mainhand");
         save(person, crafted, chosen, requiredRole(worker, colony));
         body.setItemSlot(EquipmentSlot.MAINHAND, crafted.copy());
         person.props.put("equipment.last_craft", colony.s.year());
@@ -237,6 +272,10 @@ public final class ResidentEquipment {
     public static String repair(WFWorker body) { return repairAction(body).message; }
 
     public static ActionResult repairAction(WFWorker body) {
+        return executeToolAction(body, "repair", () -> repairActionDirect(body));
+    }
+
+    private static ActionResult repairActionDirect(WFWorker body) {
         Colony colony = body.colony();
         Character person = SettleMod.residentCharacter(body);
         if (colony == null || person == null) return ActionResult.fail("Не удалось проверить поселение или персонажа.");
@@ -254,6 +293,38 @@ public final class ResidentEquipment {
         body.setItemSlot(EquipmentSlot.MAINHAND, stack.copy());
         person.props.put("equipment.last_repair", colony.s.year());
         return ActionResult.ok("Отремонтировал " + stack.getHoverName().getString() + ": восстановлено " + oldDamage + " единиц прочности за " + cost + " " + material + ".");
+    }
+
+    /** All resident tool mutations share the world action journal and its receipts/idempotency. */
+    private static ActionResult executeToolAction(WFWorker body, String operation,
+                                                   java.util.function.Supplier<ActionResult> mutation) {
+        if (body == null || body.level().getServer() == null)
+            return ActionResult.fail("Инструмент можно изменить только на сервере.");
+        Colony colony = body.colony();
+        Worker worker = body.worker();
+        Character person = SettleMod.residentCharacter(body);
+        if (colony == null || worker == null || person == null || !person.alive)
+            return ActionResult.fail("Не удалось подтвердить владельца инструмента или рабочего.");
+        long minute = dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute();
+        String requestId = "resident-tool:" + body.getUUID().toString().replace("-", "")
+                + ":" + operation + ":" + minute;
+        dev.worldforge.mod.api.ActionExecutionService.Request request =
+                new dev.worldforge.mod.api.ActionExecutionService.Request(
+                        requestId, "settlement.resident_tool_" + operation,
+                        "character:" + person.globalId, Integer.toString(worker.id),
+                        List.of(person.globalId, requiredRole(worker, colony), Long.toString(minute)), minute);
+        dev.worldforge.mod.api.ActionExecutionService.Task task =
+                dev.worldforge.mod.api.WorldForgeApi.actionExecution().execute(
+                        request,
+                        req -> {
+                            Character current = SettleMod.residentCharacter(body);
+                            return current == person && person.alive && body.isAlive()
+                                    ? null : "Resident Character ownership or body is no longer valid";
+                        },
+                        (req, attempt) -> mutation.get(),
+                        null, minute, dev.worldforge.mod.WorldForgeMod.actionExecutionFile(body.level().getServer()));
+        return task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED
+                ? ActionResult.ok(task.message()) : ActionResult.fail(task.message());
     }
 
     /** Refuse physical extraction when the required tool is missing or of the wrong type. */
@@ -310,6 +381,7 @@ public final class ResidentEquipment {
         if (!stack.isEmpty() && stack.getMaxDamage() > 0) {
             stack.hurtAndBreak(1, body, entity -> entity.broadcastBreakEvent(EquipmentSlot.MAINHAND));
             if (stack.isEmpty()) {
+                CharacterInventory.discardEquipment(person, "mainhand");
                 person.props.remove(ITEM_KEY);
                 person.props.remove(TIER_KEY);
                 person.props.remove(ROLE_KEY);
@@ -324,6 +396,32 @@ public final class ResidentEquipment {
     public static String receive(WFWorker body, net.minecraft.server.level.ServerPlayer player) { return receiveAction(body, player).message; }
 
     public static ActionResult receiveAction(WFWorker body, net.minecraft.server.level.ServerPlayer player) {
+        if (body == null || player == null || body.level().getServer() == null)
+            return ActionResult.fail("Передача инструмента доступна только на сервере.");
+        Character person = SettleMod.residentCharacter(body);
+        if (person == null || !person.alive) return ActionResult.fail("Персонаж рабочего недоступен.");
+        long minute = dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute();
+        String requestId = "toolrecv:" + java.util.UUID.nameUUIDFromBytes(
+                (player.getUUID() + "|" + body.getUUID() + "|" + minute).getBytes(java.nio.charset.StandardCharsets.UTF_8))
+                .toString().replace("-", "");
+        dev.worldforge.mod.api.ActionExecutionService.Request request =
+                new dev.worldforge.mod.api.ActionExecutionService.Request(
+                        requestId, "settlement.resident_tool_receive",
+                        "player:" + player.getUUID(), person.globalId,
+                        List.of(person.globalId, Long.toString(minute)), minute);
+        dev.worldforge.mod.api.ActionExecutionService.Task task =
+                dev.worldforge.mod.api.WorldForgeApi.actionExecution().execute(
+                        request,
+                        req -> SettleMod.residentCharacter(body) == person && person.alive
+                                && player.isAlive() && player.getServer() == body.level().getServer()
+                                ? null : "Player or resident Character is no longer authorized",
+                        (req, attempt) -> receiveActionDirect(body, player),
+                        null, minute, dev.worldforge.mod.WorldForgeMod.actionExecutionFile(body.level().getServer()));
+        return task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED
+                ? ActionResult.ok(task.message()) : ActionResult.fail(task.message());
+    }
+
+    private static ActionResult receiveActionDirect(WFWorker body, net.minecraft.server.level.ServerPlayer player) {
         Worker worker = body.worker();
         Colony colony = body.colony();
         Character person = SettleMod.residentCharacter(body);

@@ -101,6 +101,24 @@ public final class CharacterAuthorityTest {
 
         authority.clear();
         check(authority.size() == 0 && authority.worldId() == null, "world shutdown clears authority index");
+        CharacterAuthority nextWorld = new CharacterAuthority();
+        nextWorld.beginWorld(new WorldId(UUID.fromString("44444444-4444-4444-8444-444444444444")));
+        nextWorld.registerMap("north", north);
+        check(nextWorld.getGlobal(a.globalId) == a && nextWorld.registry("north") == north,
+                "cleared registry can be rebound to a new world authority without stale ownership");
+        CharacterAuthority wrongWorld = new CharacterAuthority();
+        wrongWorld.beginWorld(new WorldId(UUID.fromString("55555555-5555-4555-8555-555555555555")));
+        boolean alreadyAttachedRejected = false;
+        try {
+            wrongWorld.registerMap("north", north);
+        } catch (IllegalStateException expected) {
+            alreadyAttachedRejected = expected.getMessage().contains("already attached");
+        }
+        check(alreadyAttachedRejected && wrongWorld.mapCount() == 0
+                        && nextWorld.getGlobal(a.globalId) == a,
+                "failed cross-world registration leaves no stale partition in the rejected authority");
+        wrongWorld.clear();
+        nextWorld.clear();
         if (failures > 0) throw new AssertionError(failures + " CharacterAuthority tests failed");
         System.out.println("CharacterAuthority: ALL OK");
     }

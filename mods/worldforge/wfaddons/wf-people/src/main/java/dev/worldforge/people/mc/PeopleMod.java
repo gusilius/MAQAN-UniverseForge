@@ -7,6 +7,8 @@ import dev.worldforge.mod.TitleData;
 import dev.worldforge.mod.WorldForgeMod;
 import dev.worldforge.mod.api.WorldForgeApi;
 import dev.worldforge.people.Character;
+import dev.worldforge.people.CharacterInventory;
+import dev.worldforge.people.CharacterInventoryTransactions;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.CharacterAuthority;
 import dev.worldforge.mod.identity.WorldId;
@@ -52,6 +54,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
@@ -78,7 +81,11 @@ public class PeopleMod {
     private static final Map<MapData, CharacterRegistry> REGS = new ConcurrentHashMap<>();
     private static final CharacterAuthority AUTHORITY = new CharacterAuthority();
     private static final CharacterRegistry PLAYER_REGISTRY = new CharacterRegistry();
+    private static final Map<String, Character> PLAYER_CHARACTERS = new ConcurrentHashMap<>();
     private static volatile boolean playerRegistryAvailable = true;
+    /** True only after all world Character partitions are indexed and pending transfers recover cleanly. */
+    private static volatile boolean identityPartitionsReady;
+    public static boolean identityPartitionsReady() { return identityPartitionsReady; }
     public static CharacterAuthority authority() { return AUTHORITY; }
     public static CharacterRegistry playerRegistry() { return PLAYER_REGISTRY; }
     public static boolean playerRegistryAvailable() { return playerRegistryAvailable; }
@@ -94,6 +101,8 @@ public class PeopleMod {
         bus.addListener(PeopleMod::onAttributes);
         bus.addListener(PeopleMod::onCommonSetup);
         MinecraftForge.EVENT_BUS.register(this);
+        MinecraftForge.EVENT_BUS.register(new PlayerInventoryBridge());
+        MinecraftForge.EVENT_BUS.register(new CharacterInventoryEvents());
     }
 
     private static void onAttributes(EntityAttributeCreationEvent e) {
@@ -120,7 +129,9 @@ public class PeopleMod {
 
     @SubscribeEvent
     public void onAboutToStart(ServerAboutToStartEvent e) {
+        identityPartitionsReady = false;
         REGS.clear();
+        PLAYER_CHARACTERS.clear();
         INVALID_REGS.clear();
         if (WorldForgeMod.worldId() != null) AUTHORITY.beginWorld(WorldForgeMod.worldId());
         else AUTHORITY.clear();
@@ -170,11 +181,48 @@ public class PeopleMod {
                 PLAYER_REGISTRY.fromJson(Files.readString(playerFile), world + "|__players__");
             }
             AUTHORITY.registerMap("__players__", PLAYER_REGISTRY);
+            indexPlayerCharacters(PLAYER_REGISTRY);
         } catch (Exception ex) {
             playerRegistryAvailable = false;
             LOGGER.error("wf_people: player Character registry failed to load; player identity creation and overwrite are disabled: {}", ex.toString());
         }
         for (MapData m : WorldForgeMod.loadedMaps().values()) registry(m);
+        reconcileIdentityPartitions(server);
+    }
+
+    private static boolean allIdentityPartitionsLoaded() {
+        if (!playerRegistryAvailable || AUTHORITY.registry("__players__") != PLAYER_REGISTRY) return false;
+        int expected = 1; // Dedicated player Character partition.
+        for (MapData map : WorldForgeMod.loadedMaps().values())
+            if (map != null && map.titles != null) expected++;
+        try {
+            return AUTHORITY.mapCount() == expected;
+        } catch (RuntimeException ex) {
+            LOGGER.error("wf_people: could not validate Character partition set: {}", ex.toString());
+            return false;
+        }
+    }
+
+    /** Recover pending transactions only when every known Character partition is indexed. */
+    private static boolean reconcileIdentityPartitions(MinecraftServer server) {
+        identityPartitionsReady = false;
+        if (server == null || !allIdentityPartitionsLoaded()) {
+            LOGGER.error("wf_people: shared inventory is locked because not all Character partitions are available");
+            return false;
+        }
+        try {
+            if (!CharacterInventoryTransactions.reconcile(AUTHORITY,
+                    person -> persistCharacter(person, server))) {
+                LOGGER.error("wf_people: pending inventory transfer recovery is blocked; source ownership was not guessed");
+                return false;
+            }
+            CharacterInventory.reconcileEstates(AUTHORITY);
+            identityPartitionsReady = true;
+            return true;
+        } catch (RuntimeException ex) {
+            LOGGER.error("wf_people: Character recovery failed; shared inventory remains locked: {}", ex.toString(), ex);
+            return false;
+        }
     }
 
     /** Реестр людей карты: читается из папки мира, при первом обращении достраивается дворами (Courts.ensure). Null, если у карты нет титулов. */
@@ -193,6 +241,7 @@ public class PeopleMod {
                     reg.fromJson(Files.readString(f), world + "|" + m.name);
                 }
             } catch (Exception ex) {
+                identityPartitionsReady = false;
                 LOGGER.error("wf_people: сохранение {} повреждено; генерация персонажей заблокирована во избежание потери данных: {}", f, ex.toString());
                 INVALID_REGS.add(m);
                 return null;
@@ -210,9 +259,15 @@ public class PeopleMod {
         if (WorldForgeMod.worldId() != null) {
             try {
                 AUTHORITY.registerMap(m.name, selected);
+                indexPlayerCharacters(selected);
+                // During ServerStarted, map registries arrive one by one. Do not reconcile
+                // markers until the expected complete set (including __players__) is indexed.
+                if (allIdentityPartitionsLoaded()) reconcileIdentityPartitions(server);
+                else identityPartitionsReady = false;
             } catch (RuntimeException ex) {
-                // Keep a rejected map out of the local cache as well as the global index.
-                // Callers must not resolve Characters through a partition that failed identity validation.
+                identityPartitionsReady = false;
+                // A map rejected by global identity validation must be removed from the local cache too.
+                // It must never be used as a fallback source for ambiguous or foreign Characters.
                 REGS.remove(m, selected);
                 INVALID_REGS.add(m);
                 LOGGER.error("wf_people: global Character authority rejected map '{}'; map registry is disabled: {}",
@@ -229,6 +284,37 @@ public class PeopleMod {
 
     /** Read-only snapshot for optional population/progression bridges. */
     public static Map<MapData, CharacterRegistry> registries() { return java.util.Collections.unmodifiableMap(new HashMap<>(REGS)); }
+
+    /** Resolve the canonical player Character by the stable Minecraft account UUID. */
+    public static Character playerCharacter(UUID playerUuid) {
+        return playerUuid == null ? null : PLAYER_CHARACTERS.get(playerUuid.toString());
+    }
+
+    /** Genesis binds the account only after its global Character identity has been validated. */
+    public static void bindPlayerCharacter(UUID playerUuid, Character character) {
+        Objects.requireNonNull(playerUuid); Objects.requireNonNull(character);
+        String account = playerUuid.toString();
+        Object saved = character.props.get("genesis.player_uuid");
+        if (!account.equals(saved)) throw new IllegalStateException("Player account and Character binding disagree");
+        Character previous = PLAYER_CHARACTERS.putIfAbsent(account, character);
+        if (previous != null && previous != character)
+            throw new IllegalStateException("Minecraft player UUID is already bound to another Character");
+    }
+
+    private static void indexPlayerCharacters(CharacterRegistry registry) {
+        for (Character character : registry.all()) {
+            Object raw = character.props.get("genesis.player_uuid");
+            if (!(raw instanceof String account) || account.isBlank()) continue;
+            try {
+                String canonical = UUID.fromString(account).toString();
+                Character previous = PLAYER_CHARACTERS.putIfAbsent(canonical, character);
+                if (previous != null && previous != character)
+                    throw new IllegalStateException("Minecraft player UUID is bound to multiple Characters: " + canonical);
+            } catch (IllegalArgumentException ex) {
+                LOGGER.error("wf_people: invalid player UUID on Character {}: {}", character.globalId, account);
+            }
+        }
+    }
 
     public static CharacterRegistry registryFor(ServerLevel level) {
         return registry(EditorManager.dataFor(level));
@@ -256,56 +342,155 @@ public class PeopleMod {
         }
     }
 
-    /** Persist the exact Character partition that owns this player before Genesis reports success. */
+    static void saveAll(MinecraftServer server) {
+        PlayerInventoryBridge.syncOnline(server);
+        persistAllRegistries(server);
+    }
+
+    /** Persist only the registry that owns this Character; unrelated map failures must not block a safe death snapshot. */
     public static boolean persistCharacter(Character character, MinecraftServer server) {
         if (character == null || server == null) return false;
         CharacterRegistry owner = AUTHORITY.registryForGlobal(character.globalId);
         if (owner == null) return false;
-        try {
-            if (owner == PLAYER_REGISTRY) {
-                if (!playerRegistryAvailable) return false;
+        // A source-side write must never get ahead of a recipient commit marker in another file.
+        for (Character candidate : owner.all()) {
+            if (candidate.props.containsKey("estate.transfer_pending")
+                    || CharacterInventory.hasPendingTransfer(candidate))
+                return persistAllRegistries(server);
+        }
+        if (owner == PLAYER_REGISTRY) {
+            if (!playerRegistryAvailable) return false;
+            try {
                 Path playerFile = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
                         .resolve("worldforge").resolve("wf_players.json");
                 writeAtomic(playerFile, PLAYER_REGISTRY.toJson());
                 return true;
+            } catch (Exception ex) {
+                playerRegistryAvailable = false;
+                LOGGER.error("wf_people: failed to persist player Character {}: {}", character.globalId, ex.toString());
+                return false;
             }
-            for (Map.Entry<MapData, CharacterRegistry> entry : REGS.entrySet()) {
-                if (entry.getValue() != owner) continue;
+        }
+        for (Map.Entry<MapData, CharacterRegistry> entry : REGS.entrySet()) if (entry.getValue() == owner) {
+            try {
                 Path file = EditorManager.overlayDir(server, entry.getKey()).resolve("wf_people.json");
                 writeAtomic(file, owner.toJson());
                 return true;
+            } catch (Exception ex) {
+                LOGGER.error("wf_people: failed to persist Character {} in map {}: {}",
+                        character.globalId, entry.getKey().name, ex.toString());
+                return false;
             }
-            return false;
-        } catch (Exception ex) {
-            if (owner == PLAYER_REGISTRY) playerRegistryAvailable = false;
-            LOGGER.error("wf_people: failed to persist canonical Character {}: {}", character.globalId, ex.toString());
-            return false;
         }
+        return false;
     }
 
-    static void saveAll(MinecraftServer server) {
-        if (playerRegistryAvailable) try {
-            Path playerFile = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
-                    .resolve("worldforge").resolve("wf_players.json");
-            writeAtomic(playerFile, PLAYER_REGISTRY.toJson());
-        } catch (Exception ex) {
-            playerRegistryAvailable = false;
-            LOGGER.error("wf_people: failed to save player Character registry; further Genesis identity writes are disabled: {}", ex.toString());
+    /** Persist canonical Character ledgers after a changed player inventory snapshot. */
+    static boolean persistAllRegistries(MinecraftServer server) {
+        if (server == null || !playerRegistryAvailable) return false;
+
+        List<CharacterRegistry> registries = new ArrayList<>();
+        registries.add(PLAYER_REGISTRY);
+        java.util.IdentityHashMap<CharacterRegistry, MapData> mapOwners = new java.util.IdentityHashMap<>();
+        for (Map.Entry<MapData, CharacterRegistry> entry : REGS.entrySet()) {
+            registries.add(entry.getValue());
+            mapOwners.put(entry.getValue(), entry.getKey());
         }
-        for (Map.Entry<MapData, CharacterRegistry> en : REGS.entrySet()) {
-            try {
-                Path dir = EditorManager.overlayDir(server, en.getKey());
-                writeAtomic(dir.resolve("wf_people.json"), en.getValue().toJson());
-            } catch (Exception ex) {
-                LOGGER.error("wf_people: не удалось сохранить людей карты '{}': {}", en.getKey().name, ex.toString());
+
+        // Recipient partitions must reach disk before source partitions. If a crash occurs
+        // between two atomic file replacements, the incoming marker is then enough to finish
+        // clearing the deceased source on the next startup.
+        java.util.IdentityHashMap<CharacterRegistry, Set<CharacterRegistry>> outgoing = new java.util.IdentityHashMap<>();
+        java.util.IdentityHashMap<CharacterRegistry, Integer> indegree = new java.util.IdentityHashMap<>();
+        for (CharacterRegistry registry : registries) {
+            outgoing.put(registry, new HashSet<>());
+            indegree.put(registry, 0);
+        }
+        for (CharacterRegistry recipientRegistry : registries) {
+            for (Character character : recipientRegistry.all()) {
+                for (Map.Entry<String, Object> property : character.props.entrySet()) {
+                    if (!property.getKey().startsWith("estate.incoming.") || !(property.getValue() instanceof String sourceGlobalId))
+                        continue;
+                    CharacterRegistry sourceRegistry = AUTHORITY.registryForGlobal(sourceGlobalId);
+                    if (sourceRegistry != null && sourceRegistry != recipientRegistry
+                            && outgoing.get(recipientRegistry).add(sourceRegistry))
+                        indegree.put(sourceRegistry, indegree.getOrDefault(sourceRegistry, 0) + 1);
+                }
             }
         }
+
+        // Inventory transactions require destination-first writes just like estate succession.
+        // Their write-ahead markers are stored on both endpoint Characters and carry global IDs.
+        for (CharacterRegistry registry : registries) {
+            for (Character character : registry.all()) {
+                for (Map.Entry<String, Object> property : character.props.entrySet()) {
+                    if (!property.getKey().startsWith(CharacterInventory.TRANSFER_MARKER_PREFIX)
+                            || !(property.getValue() instanceof Map<?, ?> marker)) continue;
+                    Object sourceRaw = marker.get("source_global_id");
+                    Object destinationRaw = marker.get("destination_global_id");
+                    if (!(sourceRaw instanceof String sourceId)
+                            || !(destinationRaw instanceof String destinationId)) continue;
+                    CharacterRegistry sourceRegistry = AUTHORITY.registryForGlobal(sourceId);
+                    CharacterRegistry destinationRegistry = AUTHORITY.registryForGlobal(destinationId);
+                    if (sourceRegistry != null && destinationRegistry != null
+                            && sourceRegistry != destinationRegistry
+                            && outgoing.get(destinationRegistry).add(sourceRegistry))
+                        indegree.put(sourceRegistry, indegree.getOrDefault(sourceRegistry, 0) + 1);
+                }
+            }
+        }
+
+        java.util.ArrayDeque<CharacterRegistry> ready = new java.util.ArrayDeque<>();
+        for (CharacterRegistry registry : registries)
+            if (indegree.getOrDefault(registry, 0) == 0) ready.addLast(registry);
+        List<CharacterRegistry> ordered = new ArrayList<>();
+        while (!ready.isEmpty()) {
+            CharacterRegistry registry = ready.removeFirst();
+            ordered.add(registry);
+            for (CharacterRegistry source : outgoing.getOrDefault(registry, Set.of())) {
+                int nextDegree = indegree.get(source) - 1;
+                indegree.put(source, nextDegree);
+                if (nextDegree == 0) ready.addLast(source);
+            }
+        }
+        if (ordered.size() != registries.size()) {
+            LOGGER.error("wf_people: estate persistence dependency cycle detected; refusing a potentially partial cross-registry save");
+            return false;
+        }
+
+        for (CharacterRegistry registry : ordered) {
+            try {
+                if (registry == PLAYER_REGISTRY) {
+                    Path playerFile = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
+                            .resolve("worldforge").resolve("wf_players.json");
+                    writeAtomic(playerFile, PLAYER_REGISTRY.toJson());
+                } else {
+                    MapData map = mapOwners.get(registry);
+                    if (map == null) return false;
+                    Path dir = EditorManager.overlayDir(server, map);
+                    writeAtomic(dir.resolve("wf_people.json"), registry.toJson());
+                }
+            } catch (Exception ex) {
+                if (registry == PLAYER_REGISTRY) {
+                    playerRegistryAvailable = false;
+                    LOGGER.error("wf_people: failed to save player Character registry; further Genesis identity writes are disabled: {}", ex.toString());
+                } else {
+                    MapData map = mapOwners.get(registry);
+                    LOGGER.error("wf_people: не удалось сохранить людей карты '{}': {}",
+                            map == null ? "unknown" : map.name, ex.toString());
+                }
+                return false;
+            }
+        }
+        return true;
     }
 
     @SubscribeEvent
     public void onStopping(ServerStoppingEvent e) {
+        identityPartitionsReady = false;
         saveAll(e.getServer());
         REGS.clear();
+        PLAYER_CHARACTERS.clear();
         PLAYER_REGISTRY.fromJson("{\"format\":\"wf-people/3\",\"schema_version\":3,\"next\":1,\"characters\":[]}");
         playerRegistryAvailable = true;
         AUTHORITY.clear();
