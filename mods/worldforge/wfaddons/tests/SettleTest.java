@@ -394,14 +394,16 @@ public class SettleTest {
         ok(roundTrip, "сохранение и загрузка без потерь, включая ссылку на личность");
         ok(!r.workers.isEmpty() && r.workers.get(0).person.equals("c-person-roundtrip"),
                 "ссылка рабочего на CharacterRegistry сохраняется как стабильный foreign key");
-        x.tick(100); r.tick(100);
+        // Compare the same post-save simulation step from two independent copies of the world ledger.
+        String ledgerBeforeReloadStep = dev.worldforge.mod.economy.TreasuryService.current().toJson();
+        x.tick(100);
         @SuppressWarnings("unchecked")
         Map<String, Object> stateAfterTickX = (Map<String, Object>) Json.parse(x.toJson());
+        dev.worldforge.mod.economy.TreasuryService.replace(
+                dev.worldforge.mod.economy.TreasuryLedger.fromJson(ledgerBeforeReloadStep));
+        r.tick(100);
         @SuppressWarnings("unchecked")
         Map<String, Object> stateAfterTickR = (Map<String, Object>) Json.parse(r.toJson());
-        // The world-wide journal sequence is a persistence checkpoint, not settlement simulation state.
-        stateAfterTickX.remove("stock_ledger_entries");
-        stateAfterTickR.remove("stock_ledger_entries");
         ok(stateAfterTickX.equals(stateAfterTickR), "после загрузки симуляция идёт так же");
 
         // Field ration transfer is a cross-file economic mutation: the ledger is the source of truth.
