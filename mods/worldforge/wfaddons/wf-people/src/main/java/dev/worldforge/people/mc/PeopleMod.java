@@ -78,8 +78,10 @@ public class PeopleMod {
     private static final Map<MapData, CharacterRegistry> REGS = new ConcurrentHashMap<>();
     private static final CharacterAuthority AUTHORITY = new CharacterAuthority();
     private static final CharacterRegistry PLAYER_REGISTRY = new CharacterRegistry();
+    private static volatile boolean playerRegistryAvailable = true;
     public static CharacterAuthority authority() { return AUTHORITY; }
     public static CharacterRegistry playerRegistry() { return PLAYER_REGISTRY; }
+    public static boolean playerRegistryAvailable() { return playerRegistryAvailable; }
     /** Corrupt saves fail closed: never regenerate courts over unreadable identity data. */
     private static final Set<MapData> INVALID_REGS = ConcurrentHashMap.newKeySet();
     public static final int TICKS_PER_DAY = 1200;
@@ -157,6 +159,7 @@ public class PeopleMod {
         YEAR = WorldForgeApi.clock().year();
         if (WorldForgeMod.worldId() != null) AUTHORITY.beginWorld(WorldForgeMod.worldId());
         MinecraftServer server = e.getServer();
+        playerRegistryAvailable = true;
         try {
             Path playerFile = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
                     .resolve("worldforge").resolve("wf_players.json");
@@ -167,7 +170,8 @@ public class PeopleMod {
             }
             AUTHORITY.registerMap("__players__", PLAYER_REGISTRY);
         } catch (Exception ex) {
-            LOGGER.error("wf_people: player Character registry failed to load; player identity creation is disabled: {}", ex.toString());
+            playerRegistryAvailable = false;
+            LOGGER.error("wf_people: player Character registry failed to load; player identity creation and overwrite are disabled: {}", ex.toString());
         }
         for (MapData m : WorldForgeMod.loadedMaps().values()) registry(m);
     }
@@ -227,7 +231,7 @@ public class PeopleMod {
     }
 
     static void saveAll(MinecraftServer server) {
-        try {
+        if (playerRegistryAvailable) try {
             Path playerFile = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
                     .resolve("worldforge").resolve("wf_players.json");
             Files.createDirectories(playerFile.getParent());
@@ -251,6 +255,7 @@ public class PeopleMod {
         saveAll(e.getServer());
         REGS.clear();
         PLAYER_REGISTRY.fromJson("{\"format\":\"wf-people/3\",\"schema_version\":3,\"next\":1,\"characters\":[]}");
+        playerRegistryAvailable = true;
         AUTHORITY.clear();
         FLAGS.clear();
     }
