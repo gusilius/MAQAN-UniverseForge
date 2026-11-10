@@ -74,6 +74,26 @@ public final class PlayerCharacterBinding {
         return null;
     }
 
+    /** Creates a new Genesis identity only in the dedicated world-wide player partition. */
+    public static Character resolveOrCreate(
+            String playerUuid,
+            String savedGlobalId,
+            CharacterAuthority authority,
+            Collection<CharacterRegistry> mapRegistries,
+            CharacterRegistry playerRegistry,
+            String name,
+            String culture,
+            String gender,
+            int birthYear) {
+        Character existing = resolveExisting(playerUuid, savedGlobalId, authority, mapRegistries, playerRegistry);
+        if (existing != null) return existing;
+        if (authority.registry("__players__") != playerRegistry)
+            throw new IllegalStateException("Dedicated world-wide player Character partition is not registered");
+        Character created = playerRegistry.create(name, "", culture, gender, birthYear);
+        created.props.put(PLAYER_UUID, canonicalUuid(playerUuid, "player UUID"));
+        return created;
+    }
+
     private static void collect(
             CharacterRegistry registry,
             String accountId,
