@@ -157,9 +157,20 @@ public final class ResidentInteraction {
                     },
                     (req, attempt) -> {
                         String[] outcome = {""};
-                        int result = executeDirect(player, req.args().get(0), req.targetId(), outcome);
+                        String requestedAction = req.args().get(0);
+                        int result = executeDirect(player, requestedAction, req.targetId(), outcome);
                         String message = outcome[0].isBlank() ? "Действие жителя выполнено" : outcome[0];
-                        if (result == 1) return dev.worldforge.mod.api.ActionResult.ok(message);
+                        if (result == 1) {
+                            if (mutatesSettlement(requestedAction)) {
+                                Entity currentEntity = player.serverLevel().getEntity(UUID.fromString(req.targetId()));
+                                Colony currentColony = currentEntity instanceof WFWorker currentWorker
+                                        ? SettleMod.colony(currentWorker.colonyId) : null;
+                                if (!SettleMod.persistActionMutation(player.server, currentColony))
+                                    return dev.worldforge.mod.api.ActionResult.fail(
+                                            "Действие жителя применено в памяти, но снимок поселения не сохранён; изменения заблокированы до сверки");
+                            }
+                            return dev.worldforge.mod.api.ActionResult.ok(message);
+                        }
                         if (result == 2) return dev.worldforge.mod.api.ActionResult.retry(message);
                         return dev.worldforge.mod.api.ActionResult.fail(outcome[0].isBlank()
                                 ? "Действие жителя отклонено без изменения состояния" : outcome[0]);
@@ -179,6 +190,15 @@ public final class ResidentInteraction {
             player.sendSystemMessage(Component.literal("Не удалось выполнить действие: " + ex.getMessage()));
             return 0;
         }
+    }
+
+    private static boolean mutatesSettlement(String action) {
+        return switch (action) {
+            case "repair", "tool", "equip", "gift", "follow", "stop", "work",
+                    "work_builder", "work_lumberjack", "work_miner", "work_farmer", "work_hauler",
+                    "work_area_resume", "work_area_cancel", "quest", "abandon", "accept", "deliver" -> true;
+            default -> false;
+        };
     }
 
     private static boolean requiresRuler(String action) {
