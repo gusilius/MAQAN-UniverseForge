@@ -32,6 +32,7 @@ public final class WorldForgeApi {
     private static final Map<String, MapAction> ACTIONS = new LinkedHashMap<>();
     private static final List<Guard> GUARDS = new CopyOnWriteArrayList<>();
     private static final List<Consumer<MapChange>> LISTENERS = new CopyOnWriteArrayList<>();
+    private static final Map<String, ActionExecutionService.Replanner> REPLANNERS = new LinkedHashMap<>();
     private static final EventLog EVENTS = new EventLog();
     private static ActionExecutionService ACTION_EXECUTION = new ActionExecutionService();
     private static boolean builtinsDone;
@@ -77,6 +78,9 @@ public final class WorldForgeApi {
         ActionExecutionService.Request request = new ActionExecutionService.Request(requestId, id,
                 base.actor, target, base.args, worldMinute);
         ActionExecutionService service = ACTION_EXECUTION;
+        if (replanner == null) {
+            synchronized (WorldForgeApi.class) { replanner = REPLANNERS.get(id); }
+        }
         ActionExecutionService.Task queued = service.enqueue(request, worldMinute, journalFile);
         if (queued.status() != ActionExecutionService.Status.QUEUED) return queued;
         return service.process(requestId, req -> {
@@ -123,6 +127,14 @@ public final class WorldForgeApi {
 
     public static void addGuard(Guard g) { GUARDS.add(g); }
 
+    /** Domain addon registers a bounded alternative-plan strategy for its action family. */
+    public static synchronized void registerReplanner(String actionId, ActionExecutionService.Replanner replanner) {
+        if (actionId == null || !actionId.matches("[a-z0-9_.:-]{1,48}"))
+            throw new IllegalArgumentException("Invalid replanner action id");
+        if (REPLANNERS.putIfAbsent(actionId, java.util.Objects.requireNonNull(replanner)) != null)
+            throw new IllegalStateException("Replanner already registered: " + actionId);
+    }
+
     public static void addChangeListener(Consumer<MapChange> l) { LISTENERS.add(l); }
 
     /** Для тестов: убрать всё, что добавлено. */
@@ -130,6 +142,7 @@ public final class WorldForgeApi {
         ACTIONS.clear();
         GUARDS.clear();
         LISTENERS.clear();
+        REPLANNERS.clear();
         EVENTS.clear();
         builtinsDone = false;
     }
