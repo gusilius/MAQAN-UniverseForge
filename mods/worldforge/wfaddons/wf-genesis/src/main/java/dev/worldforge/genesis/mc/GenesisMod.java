@@ -79,7 +79,7 @@ public class GenesisMod {
     public static volatile java.util.function.BiFunction<Player, String, Double> CLIENT_SCALE = (p, k) -> 1.0;
     private static final String WAIT = "wf_genesis_wait";
     /** Changes once per server process so a restart can resume an interrupted, idempotent Genesis operation. */
-    private static final String ACTION_SESSION_ID = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+    private static volatile String ACTION_SESSION_ID = "";
 
     public GenesisMod() { MinecraftForge.EVENT_BUS.register(this); }
 
@@ -101,7 +101,10 @@ public class GenesisMod {
         LOGGER.info("wf_genesis: стартов {}, ползунков {}, особенностей {}", DEFS.starts.size(), DEFS.sliders.size(), DEFS.features.size());
     }
 
-    @SubscribeEvent public void onStarting(ServerStartingEvent e) { loadDefs(e.getServer().getResourceManager()); }
+    @SubscribeEvent public void onStarting(ServerStartingEvent e) {
+        ACTION_SESSION_ID = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+        loadDefs(e.getServer().getResourceManager());
+    }
     @SubscribeEvent public void onReload(AddReloadListenerEvent e) { e.addListener((ResourceManagerReloadListener) GenesisMod::loadDefs); }
 
     @SubscribeEvent
