@@ -43,6 +43,8 @@ import net.minecraftforge.server.ServerLifecycleHooks;
 import org.slf4j.Logger;
 import dev.worldforge.mod.economy.TreasuryLedger;
 import dev.worldforge.mod.economy.TreasuryService;
+import dev.worldforge.mod.identity.WorldId;
+import dev.worldforge.mod.identity.WorldIdentityStore;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -71,6 +73,7 @@ public class WorldForgeMod {
     private static final Map<String, MapData> MAPS = new ConcurrentHashMap<>();
     private static volatile Registry<Biome> biomes;
     private static volatile boolean treasuryLoadFailed;
+    private static volatile WorldId worldId;
     private static long treasuryTicks;
 
     public WorldForgeMod() {
@@ -100,6 +103,9 @@ public class WorldForgeMod {
 
     /** Canonical world-wide money ledger shared by settlements, realms, trade and military addons. */
     public static TreasuryLedger treasury() { return TreasuryService.current(); }
+
+    /** Stable identity for the currently loaded save; null until the save identity is validated. */
+    public static WorldId worldId() { return worldId; }
 
     private static Path treasuryFile(MinecraftServer server) {
         return server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT).resolve("worldforge").resolve("wf_treasury.json");
@@ -193,6 +199,15 @@ public class WorldForgeMod {
     public void onServerAboutToStart(ServerAboutToStartEvent e) {
         biomes = e.getServer().registryAccess().registryOrThrow(Registries.BIOME);
         MAPS.clear();
+        try {
+            Path identityFile = e.getServer().getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
+                    .resolve("worldforge").resolve("world_id.txt");
+            worldId = WorldIdentityStore.loadOrCreate(identityFile);
+            LOGGER.info("WorldForge: world identity {}", worldId);
+        } catch (IOException ex) {
+            worldId = null;
+            LOGGER.error("WorldForge: cannot load stable WorldId; identity-dependent integrations must remain disabled: {}", ex.toString());
+        }
     }
 
     @SubscribeEvent
@@ -210,6 +225,7 @@ public class WorldForgeMod {
     @SubscribeEvent
     public void onServerStopped(ServerStoppedEvent e) {
         EditorManager.forget();
+        worldId = null;
         biomes = null;
         MAPS.clear();
     }
