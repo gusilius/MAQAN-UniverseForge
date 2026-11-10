@@ -1,35 +1,33 @@
-# Статус сборки MAQAN UniverseForge
+# Статус основной линии MAQAN UniverseForge
 
-## Исходный архив
+**Дата:** 11 ноября 2026 года  
+**Основная ветка:** main  
+**Назначение:** актуальный краткий статус. Подробная матрица систем — в [аудите единой игровой основы](docs/MAQAN_MAINLINE_UNIFIED_GAME_AUDIT_RU.md).
 
-- Использован предоставленный `MAQAN-UniverseForge.zip` (723 записи, ZIP integrity check без ошибок).
-- Распакованы Atlas, WorldForge Core, 18 WorldForge addons, Rust crates, ресурсы, тесты и документация.
-- Atlas и WorldForge сохранены отдельными проектами и с исходными mod IDs / Forge версиями.
+## Что уже находится в main
 
-## Выполнено в первом инженерном проходе
+- Интеграционная основа из PR #16.
+- WorldId, CharacterAuthority и глобальные Character UUID; Genesis связывает игрока с каноническим Character.
+- Character inventory/ownership, перенос и доступ к реальным контейнерам.
+- ActionExecution с проверкой полномочий, задачами, результатами и восстановлением.
+- Общий double-entry TreasuryLedger для денежных операций и миграция legacy-балансов.
+- Settlement simulation, здания, рабочие, производство, дороги, склады и торговые связи.
+- RTS для поселений и физической армии; государственная стратегия, двор, войны, дипломатия, RPG, квесты и диалоги.
+- Live WorldForge → Atlas snapshot transport и Platform selection bridge.
 
-- Atlas: общий Java UI theme переведён на минималистичную футуристичную систему — спокойный тёмный фон, плоские поверхности, тонкие разделители, ограниченный cyan accent.
-- Atlas Rust UI: согласованы токены цвета, панели, кнопки, вкладки, строки каталога, карточки dossier и context menu; убраны декоративные свечения и анимированные фоновые звёзды/туманности. Сцена планет и орбит не затрагивалась.
-- Обновлены Rust unit tests под новую семантику минималистичного chrome.
-- WorldForge `ProgressTest`: исправлено устаревшее условие `attrs == 10`; фактический набор содержит 28 атрибутов и должен оставаться расширяемым.
-- WorldForge `tools/test-all.sh`: теперь корректно пропускает только тесты, которым нужен отсутствующий datapack fixture, и запускает остальные.
-- CI переведён на Windows x64; Atlas native DLL собирается под `x86_64-pc-windows-msvc` и включается в Forge resources.
+## Подтверждённые CI
 
-## Проверки, выполненные локально
+- Main run 42921858268: 7/7 jobs успешно, включая сборку addons и combined Forge server boot.
+- PR #20, run 42918542582: 7/7 успешно.
+- PR #21, run 42918825392: 7/7 успешно.
+- PR #22 принят в main (commit 3dda2bef0dfd801f5f44d757c74576476c966d43): военная смерть Character/estate и полевое снабжение от поселений. Полный CI run 42924989677: 7/7 jobs success, включая combined Forge server boot.
 
-- ZIP integrity: PASS.
-- WorldForge pure Java addon sources + tests compile (`javac`): PASS (98 addon source files + tests).
-- WorldForge logic tests: 24 PASS, 8 SKIP, 0 FAIL.
-- Пропуски относятся к map/court/army/war integration tests, которым нужен `testdata/game_of_thrones_datapack.zip`; этого файла в переданном архиве нет.
+## Границы приёмки
 
-## Что ещё не подтверждено
+- CI и синтетический server boot не заменяют in-game проверку на реальном сохранении.
+- Полная автономная жизнь всех Characters, рождение/воспитание/три поколения, полный campaign logistics, единая культура/религия, ручной turn-manager и атомарная сквозная world simulation ещё не приняты.
+- Не объединять Atlas и WorldForge в один mod ID: Forge 47.4.28 и 47.3.0 сохранены намеренно, сборки независимы.
 
-- Gradle/Forge build: не запускался — Gradle отсутствует в текущей среде.
-- Rust tests/build: не запускались — Cargo/Rust отсутствуют.
-- Windows MSVC native DLL и итоговые JAR не созданы в этой среде.
-- Forge launch и in-game проверки Cosmic Horizons не выполнялись.
-- Rust/Java изменения Atlas пока требуют Windows CI и визуальной проверки в игре.
+## Историческая информация
 
-## Следующий этап
-
-Разделить большой `NavigatorScreen` на переиспользуемые визуальные области без изменения поведения: top navigation, каталог, map canvas, object inspector, route/timeline controls. Затем проверить вкладки Overview / Orbit / Environment / Source / Politics и связанные действия на реальных данных.
+Сведения о первом распакованном архиве, ранних локальных тестах и старых непроверенных сборках больше не являются текущим статусом. Они удалены из оперативного отчёта, потому что после них появились интеграция, Windows CI и полный combined build workflow.

@@ -2,6 +2,10 @@
 
 **A modular Minecraft ecosystem repository.** Atlas and WorldForge are separate Forge mods that can be built, installed, updated, and tested independently.
 
+## Current engineering status
+
+See [the unified mainline gameplay audit](docs/MAQAN_MAINLINE_UNIFIED_GAME_AUDIT_RU.md) for the verified system matrix, historical branch consolidation, integration gaps, CI evidence and remaining Alpha acceptance work. Target UI architecture: [MAQAN Platform](docs/architecture/MAQAN_PLATFORM.md) and [Atlas Workspace](docs/architecture/ATLAS_WORKSPACE.md).
+
 ## Repository map
 
 - `mods/atlas` — Atlas: cosmic catalogue, system/galaxy visualization, orbital simulation, route planning, surface-map workspace, Cosmic Horizons integration.

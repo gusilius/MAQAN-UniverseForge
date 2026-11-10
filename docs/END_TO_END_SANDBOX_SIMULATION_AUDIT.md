@@ -1,3 +1,7 @@
+> **Исторический снимок:** этот аудит описывает состояние ветки integration/maqan-unified на 9 ноября 2026 года. После него в main вошли WorldId/CharacterAuthority, канонический Character игрока через Genesis, Character inventory/ownership и live WorldForge→Atlas transport. Поэтому отдельные утверждения ниже о том, что игрок не имеет Character, реестры не имеют глобальных UUID или Atlas использует только ручной file export, больше не описывают текущий main. Используйте [аудит актуальной основной линии](MAQAN_MAINLINE_UNIFIED_GAME_AUDIT_RU.md) как источник текущего статуса; оставшийся сценарий трёх поколений и универсальная NPC life simulation всё ещё не приняты.
+
+---
+
 # MAQAN UniverseForge — End-to-End Open Sandbox Simulation Audit
 
 Audit date: 2026-11-09  

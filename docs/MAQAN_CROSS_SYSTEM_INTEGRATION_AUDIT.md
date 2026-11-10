@@ -1,3 +1,7 @@
+> **Исторический снимок:** этот аудит составлен для feature/aaa-workspace-2-0-stage-xii и отражает более ранний срез до объединения PR #19–#21. Некоторые выводы о per-map ID, отдельной ArmyEngine gold-копии и ручном Atlas export были исправлены последующими интеграциями. Текущую проверенную картину и оставшиеся разрывы см. в [аудите mainline](MAQAN_MAINLINE_UNIFIED_GAME_AUDIT_RU.md).
+
+---
+
 # MAQAN Cross-System Integration Audit
 
 Audit target: `feature/aaa-workspace-2-0-stage-xii` at the Stage XII PR branch head.
