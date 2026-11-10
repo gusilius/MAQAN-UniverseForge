@@ -172,8 +172,7 @@ public class QuestsMod {
             String actor = p.getUUID().toString();
             String payload = action + "|" + realm + "|" + String.join("|", args);
             long minute = WorldForgeApi.clock().worldMinute();
-            String requestId = "quests-action:" + UUID.nameUUIDFromBytes(
-                    (actor + ":" + minute + ":" + payload).getBytes(StandardCharsets.UTF_8));
+            String requestId = "quests-action:" + java.util.UUID.randomUUID();
             try {
                 var task = WorldForgeApi.submitAction(requestId, action, context,
                         WorldForgeMod.actionExecutionFile(p.server), minute);
