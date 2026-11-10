@@ -37,7 +37,7 @@ public class ClockTest {
         GameClock d = new GameClock();
         d.setSpeed(1);
         d.advance(GameClock.TICKS_PER_DAY * 45);
-        ok(d.month() == 1 && d.dayOfMonth() == 16 && d.dateText().equals("15 Февраля 300"), "45-й день: " + d.dateText());
+        ok(d.month() == 1 && d.dayOfMonth() == 15 && d.dateText().equals("15 Февраля 300"), "45-й день: " + d.dateText());
         d.advance(GameClock.TICKS_PER_DAY * 365);
         ok(d.year() == 301, "год сменился: " + d.dateText());
         d.advance(GameClock.TICKS_PER_DAY * 315);
