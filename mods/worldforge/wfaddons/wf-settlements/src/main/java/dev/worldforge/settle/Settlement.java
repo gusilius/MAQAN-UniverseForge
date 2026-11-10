@@ -473,6 +473,17 @@ public final class Settlement {
     public List<WorkerDeparture> pendingDepartures() { return Collections.unmodifiableList(departures); }
     public void acknowledgeDeparture(WorkerDeparture departure) { departures.remove(departure); }
 
+    /**
+     * Cancels a stale departure after the same canonical person has been reattached.
+     * A military transfer is a temporary projection change, not a death or migration.
+     */
+    public int acknowledgeDepartureForPerson(String personId, String reason) {
+        if (personId == null || personId.isBlank() || reason == null || reason.isBlank()) return 0;
+        int before = departures.size();
+        departures.removeIf(event -> personId.equals(event.personId()) && reason.equals(event.reason()));
+        return before - departures.size();
+    }
+
     // ------------------------------------------------------------------ приказы
 
     /** Почему здание нельзя заложить здесь (те же правила, что у {@link #place}); null - можно. Для призрака в окне RTS. */
