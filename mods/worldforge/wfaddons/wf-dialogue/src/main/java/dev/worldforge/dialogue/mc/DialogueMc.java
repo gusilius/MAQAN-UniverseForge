@@ -36,17 +36,16 @@ public final class DialogueMc {
     private static final Map<UUID, Active> ACTIVE = new ConcurrentHashMap<>();
     private static final Map<UUID, Set<String>> FLAGS = new ConcurrentHashMap<>();
     private static final List<BiConsumer<ServerPlayer, Ctx>> PROVIDERS = new CopyOnWriteArrayList<>();
-    private static int nextId = 1;
 
     private DialogueMc() {}
 
     private static final class Active {
-        final int id;
+        final long id;
         final Session session;
         final Vec3 pos;
         final double maxDist;
 
-        Active(int id, Session session, Vec3 pos, double maxDist) { this.id = id; this.session = session; this.pos = pos; this.maxDist = maxDist; }
+        Active(long id, Session session, Vec3 pos, double maxDist) { this.id = id; this.session = session; this.pos = pos; this.maxDist = maxDist; }
     }
 
     /** Другие аддоны добавляют сюда сервисы и переменные в контекст каждого разговора (например, репутация кладёт ReputationStore). */
@@ -91,9 +90,28 @@ public final class DialogueMc {
             if (vars != null) for (Map.Entry<String, String> e : vars.entrySet()) ctx.var(e.getKey(), e.getValue());
             ctx.var("player_id", uid.toString());
             for (BiConsumer<ServerPlayer, Ctx> p : PROVIDERS) p.accept(player, ctx);
-            Session s = new Session(d, ctx);
-            if (s.view() == null) return false;
-            Active a = new Active(nextId++, s, speakerPos, maxDistance);
+            Session s = new Session(d, ctx, true);
+            long sessionId = UUID.randomUUID().getMostSignificantBits();
+            String actor = uid.toString();
+            long minute = dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute();
+            String requestId = "dialogue:start:" + UUID.nameUUIDFromBytes(
+                    (actor + ":" + sessionId).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            var request = new dev.worldforge.mod.api.ActionExecutionService.Request(
+                    requestId, "dialogue.start", actor, dialogueId, List.of(dialogueId), minute);
+            var task = dev.worldforge.mod.api.WorldForgeApi.actionExecution().execute(request,
+                    req -> player.server.getPlayerList().getPlayer(uid) == null
+                            ? "Игрок отключился до начала диалога" : null,
+                    (req, attempt) -> {
+                        s.start();
+                        return s.view() == null
+                                ? dev.worldforge.mod.api.ActionResult.fail("Диалог не содержит доступной стартовой реплики")
+                                : dev.worldforge.mod.api.ActionResult.ok("Диалог начат: " + dialogueId);
+                    }, null, minute, dev.worldforge.mod.WorldForgeMod.actionExecutionFile(player.server));
+            if (task.status() != dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED) {
+                LOGGER.warn("wf_dialogue: start rejected for '{}': {}", dialogueId, task.message());
+                return false;
+            }
+            Active a = new Active(sessionId, s, speakerPos, maxDistance);
             ACTIVE.put(uid, a);
             sendView(player, a);
             return true;
@@ -123,22 +141,56 @@ public final class DialogueMc {
             return;
         }
         byte mode = v.cont ? DialogueNet.MODE_CONTINUE : v.end ? DialogueNet.MODE_END : DialogueNet.MODE_CHOICES;
-        DialogueNet.sendTo(player, new DialogueNet.OpenView(a.id, v.speaker, v.text, mode, new ArrayList<>(v.choices)));
+        DialogueNet.sendTo(player, new DialogueNet.OpenView(a.id, v.revision, v.speaker, v.text, mode, new ArrayList<>(v.choices)));
     }
 
     // ---- вызывается из пакетов (главный поток сервера)
 
-    static void onChoose(ServerPlayer sp, int sessionId, int index) {
+    static void onChoose(ServerPlayer sp, long sessionId, int revision, int index) {
         Active a = ACTIVE.get(sp.getUUID());
-        if (a == null || a.id != sessionId) return;                      // чужая или устаревшая сессия
+        if (a == null || a.id != sessionId) return;
+        String actor = sp.getUUID().toString();
+        long minute = dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute();
+        String requestId = "dialogue:choose:" + UUID.nameUUIDFromBytes(
+                (actor + ":" + sessionId + ":" + revision + ":" + index)
+                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        var request = new dev.worldforge.mod.api.ActionExecutionService.Request(
+                requestId, "dialogue.choose", actor, Long.toString(sessionId),
+                List.of(Integer.toString(revision), Integer.toString(index)), minute);
         try {
-            Session.View v = a.session.view();
-            if (v == null) { ACTIVE.remove(sp.getUUID(), a); DialogueNet.sendTo(sp, new DialogueNet.Close(a.id)); return; }
-            if (v.choices.isEmpty()) index = 0;                           // «Далее» / «Закрыть»
-            else if (index < 0 || index >= v.choices.size()) return;      // неверный номер: игнорируем
-            a.session.choose(index);
-        } catch (Exception ex) {
-            LOGGER.error("wf_dialogue: ошибка в разговоре: {}", ex.toString());
+            var task = dev.worldforge.mod.api.WorldForgeApi.actionExecution().execute(request,
+                    req -> {
+                        if (sp.server.getPlayerList().getPlayer(sp.getUUID()) == null)
+                            return "Игрок отключился до выбора ответа";
+                        if (ACTIVE.get(sp.getUUID()) != a || a.id != sessionId)
+                            return "Диалог уже закрыт или заменён";
+                        if (a.session.revision() != revision)
+                            return "Ответ устарел: откройте актуальный вариант диалога";
+                        Session.View view = a.session.view();
+                        if (view == null) return "Диалог уже завершён";
+                        if (view.choices.isEmpty()) {
+                            if (index != 0) return "Недопустимый индекс продолжения диалога";
+                        } else if (index < 0 || index >= view.choices.size()) {
+                            return "Недопустимый номер ответа";
+                        }
+                        return null;
+                    },
+                    (req, attempt) -> {
+                        a.session.choose(index, revision);
+                        return dev.worldforge.mod.api.ActionResult.ok("Выбор диалога обработан");
+                    }, null, minute, dev.worldforge.mod.WorldForgeMod.actionExecutionFile(sp.server));
+            if (task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.FAILED) {
+                sp.sendSystemMessage(net.minecraft.network.chat.Component.literal("Выбор не выполнен: " + task.message()));
+                if (ACTIVE.get(sp.getUUID()) == a) {
+                    if (a.session.ended()) {
+                        ACTIVE.remove(sp.getUUID(), a);
+                        DialogueNet.sendTo(sp, new DialogueNet.Close(a.id));
+                    } else sendView(sp, a);
+                }
+                return;
+            }
+        } catch (RuntimeException ex) {
+            LOGGER.error("wf_dialogue: ошибка выбора ответа: {}", ex.toString());
             ACTIVE.remove(sp.getUUID(), a);
             DialogueNet.sendTo(sp, new DialogueNet.Close(a.id));
             return;
@@ -149,7 +201,7 @@ public final class DialogueMc {
         } else sendView(sp, a);
     }
 
-    static void onCloseRequest(ServerPlayer sp, int sessionId) {
+    static void onCloseRequest(ServerPlayer sp, long sessionId) {
         Active a = ACTIVE.get(sp.getUUID());
         if (a != null && a.id == sessionId) ACTIVE.remove(sp.getUUID(), a);   // клиент уже закрыл экран, Close не нужен
     }
