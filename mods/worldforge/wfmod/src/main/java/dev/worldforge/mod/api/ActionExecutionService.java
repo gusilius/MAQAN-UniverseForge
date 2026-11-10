@@ -170,10 +170,13 @@ public final class ActionExecutionService {
 
     public synchronized String toJson() {
         List<Object> taskRows = new ArrayList<>();
-        for (Task t : tasks.values()) taskRows.add(Map.of(
-                "request", t.requestId(), "action", t.actionId(), "actor", t.actorId(), "target", t.targetId(),
-                "args", t.args(), "status", t.status().name(), "attempts", t.attempts(), "message", t.message(),
-                "created", t.createdMinute(), "updated", t.updatedMinute(), "receipt", t.receiptId()));
+        for (Task t : tasks.values()) taskRows.add(Map.ofEntries(
+                Map.entry("request", t.requestId()), Map.entry("action", t.actionId()),
+                Map.entry("actor", t.actorId()), Map.entry("target", t.targetId()),
+                Map.entry("args", t.args()), Map.entry("status", t.status().name()),
+                Map.entry("attempts", t.attempts()), Map.entry("message", t.message()),
+                Map.entry("created", t.createdMinute()), Map.entry("updated", t.updatedMinute()),
+                Map.entry("receipt", t.receiptId())));
         List<Object> receiptRows = new ArrayList<>();
         for (Receipt r : receipts.values()) receiptRows.add(Map.of(
                 "id", r.receiptId(), "request", r.requestId(), "action", r.actionId(), "actor", r.actorId(),
