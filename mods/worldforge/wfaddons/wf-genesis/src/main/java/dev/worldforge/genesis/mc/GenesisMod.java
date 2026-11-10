@@ -333,25 +333,29 @@ public class GenesisMod {
         String playerUuid = sp.getUUID().toString();
         String savedGlobalId = sp.getPersistentData().getString("worldforge_character_global_id");
         Character person = savedGlobalId.isBlank() ? null : PeopleMod.authority().getGlobal(savedGlobalId);
-        if (person == null) {
-            for (CharacterRegistry registry : PeopleMod.registries().values()) {
-                for (Character candidate : registry.all()) {
-                    if (playerUuid.equals(String.valueOf(candidate.props.get("genesis.player_uuid")))) {
-                        person = candidate;
-                        break;
-                    }
-                }
-                if (person != null) break;
+        Character playerMatch = null;
+        for (CharacterRegistry registry : PeopleMod.registries().values()) {
+            for (Character candidate : registry.all()) {
+                if (!playerUuid.equals(String.valueOf(candidate.props.get("genesis.player_uuid")))) continue;
+                if (playerMatch != null && !playerMatch.globalId.equals(candidate.globalId))
+                    throw new IllegalStateException("Player UUID is bound to multiple WorldForge Characters: " + playerUuid);
+                playerMatch = candidate;
             }
         }
-        if (person == null) {
-            for (Character candidate : PeopleMod.playerRegistry().all()) {
-                if (playerUuid.equals(String.valueOf(candidate.props.get("genesis.player_uuid")))) {
-                    person = candidate;
-                    break;
-                }
-            }
+        for (Character candidate : PeopleMod.playerRegistry().all()) {
+            if (!playerUuid.equals(String.valueOf(candidate.props.get("genesis.player_uuid")))) continue;
+            if (playerMatch != null && !playerMatch.globalId.equals(candidate.globalId))
+                throw new IllegalStateException("Player UUID is bound to multiple WorldForge Characters: " + playerUuid);
+            playerMatch = candidate;
         }
+        if (person != null) {
+            String boundPlayer = String.valueOf(person.props.getOrDefault("genesis.player_uuid", ""));
+            if (!boundPlayer.isBlank() && !playerUuid.equals(boundPlayer))
+                throw new IllegalStateException("Saved Character UUID belongs to another player: " + savedGlobalId);
+        }
+        if (person != null && playerMatch != null && !person.globalId.equals(playerMatch.globalId))
+            throw new IllegalStateException("Player UUID and saved Character UUID resolve to different people");
+        if (person == null) person = playerMatch;
         if (person == null) {
             CharacterRegistry registry = PeopleMod.registryFor(sp.serverLevel());
             if (registry == null) registry = PeopleMod.playerRegistry();
