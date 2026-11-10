@@ -45,7 +45,7 @@ public final class TreasuryApi {
         String id = accountId(realm);
         TreasuryLedger.Account account = ledger().account(id);
         if (account == null) account = ledger().open(id, realm, "silver", 0);
-        ledger().setCreditLimit(id, 250.0 * SILVER_PER_GOLD);
+        ledger().setCreditLimit(id, 250.0);
         return account;
     }
 
@@ -57,7 +57,7 @@ public final class TreasuryApi {
         if (realm == null || realm.isBlank() || !Double.isFinite(legacyGold)) return false;
         String id = accountId(realm);
         if (!ledger().hasAccount(id)) ledger().open(id, realm, "silver", 0);
-        ledger().setCreditLimit(id, 250.0 * SILVER_PER_GOLD);
+        ledger().setCreditLimit(id, 250.0);
         double silver = Math.abs(legacyGold) * SILVER_PER_GOLD;
         if (silver <= 1e-9) return true;
         String reference = "legacy-army-balance:" + realm;
@@ -81,7 +81,7 @@ public final class TreasuryApi {
             ledger().depositOnce(id, openingGold * SILVER_PER_GOLD, TreasuryLedger.Kind.OPENING,
                     "realm-opening", "realm-opening:" + realm, worldMinute(), "initial realm treasury");
         }
-        ledger().setCreditLimit(id, 250.0 * SILVER_PER_GOLD);
+        ledger().setCreditLimit(id, 250.0);
     }
 
     /** Net gold balance includes any carried deficit as debt, preserving the legacy army economy contract. */
