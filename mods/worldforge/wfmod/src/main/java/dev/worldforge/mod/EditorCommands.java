@@ -82,13 +82,20 @@ public final class EditorCommands {
             src.sendFailure(Component.literal("В этом измерении нет карты с титулами (нужны provinces.png и titles.json)"));
             return 0;
         }
+        if (needsOn && EditorManager.mutationsBlocked(m)) {
+            src.sendFailure(Component.literal("Правки этой карты заблокированы после ошибки сохранения; требуется перезапуск и сверка"));
+            return 0;
+        }
         try {
             int before = ed.modCount();
             int r = a.run(p, m, ed, s);
             if (ed.modCount() != before) {
                 EditorManager.touch(m);
                 EditorManager.saveDirty(p.server);
-                if (ed.isDirty()) throw new Failure("Изменение карты не удалось надёжно сохранить; операция отмечена как неуспешная");
+                if (ed.isDirty()) {
+                    EditorManager.blockMutations(m);
+                    throw new Failure("Изменение карты не удалось надёжно сохранить; операция отмечена как неуспешная");
+                }
             }
             return r;
         } catch (TitleEditor.EditException | Failure e) {
