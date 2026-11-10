@@ -105,9 +105,25 @@ public class GenesisMod {
 
     @SubscribeEvent public void onStopping(ServerStoppingEvent e) { save(e.getServer()); }
 
-    private static void save(MinecraftServer s) {
-        try { Path f = file(s); Files.createDirectories(f.getParent()); Files.writeString(f, GENESIS.toJson()); }
-        catch (Exception ex) { LOGGER.error("wf_genesis: не удалось сохранить персонажей: {}", ex.toString()); }
+    private static boolean save(MinecraftServer s) {
+        Path f = file(s);
+        Path temp = f.resolveSibling(f.getFileName() + ".tmp");
+        try {
+            Files.createDirectories(f.getParent());
+            Files.writeString(temp, GENESIS.toJson());
+            try {
+                Files.move(temp, f, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                        java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+            } catch (java.nio.file.AtomicMoveNotSupportedException ex) {
+                Files.move(temp, f, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
+            return true;
+        } catch (Exception ex) {
+            LOGGER.error("wf_genesis: не удалось сохранить персонажей: {}", ex.toString(), ex);
+            return false;
+        } finally {
+            try { Files.deleteIfExists(temp); } catch (Exception ignored) { }
+        }
     }
 
     // ------------------------------------------------------------------ вход игрока
@@ -252,12 +268,32 @@ public class GenesisMod {
         if (sp == null) return 0;
         if (GENESIS.isDone(owner(sp))) { s.sendFailure(Component.literal("Персонаж уже создан.")); return 0; }
         Draft d = GENESIS.draft(owner(sp));
-        String err = GENESIS.confirm(d);
-        if (!err.isEmpty()) { push(sp, d); s.sendFailure(Component.literal(err)); return 0; }
-        try { apply(sp, d); }
-        catch (RuntimeException ex) { LOGGER.error("wf_genesis: ошибка применения персонажа {}: {}", sp.getName().getString(), ex.toString(), ex); s.sendFailure(Component.literal("Ошибка применения: " + ex.getMessage())); }
+        List<String> problems = GENESIS.problems(d);
+        if (!problems.isEmpty()) { push(sp, d); s.sendFailure(Component.literal(problems.get(0))); return 0; }
+        try {
+            // Do not publish completion before the canonical Character and its save are valid.
+            apply(sp, d);
+            String validation = GENESIS.confirm(d);
+            if (!validation.isEmpty()) {
+                GENESIS.reopen(d);
+                push(sp, d);
+                s.sendFailure(Component.literal(validation));
+                return 0;
+            }
+            if (!save(sp.getServer())) {
+                GENESIS.reopen(d);
+                push(sp, d);
+                s.sendFailure(Component.literal("Не удалось сохранить создание персонажа. Черновик оставлен открытым; попробуйте снова."));
+                return 0;
+            }
+        } catch (RuntimeException ex) {
+            GENESIS.reopen(d);
+            LOGGER.error("wf_genesis: ошибка применения персонажа {}: {}", sp.getName().getString(), ex.toString(), ex);
+            push(sp, d);
+            s.sendFailure(Component.literal("Ошибка применения. Мастер создания оставлен открытым: " + ex.getMessage()));
+            return 0;
+        }
         sp.getPersistentData().remove(WAIT);
-        save(sp.getServer());
         sp.sendSystemMessage(Component.literal("§6Персонаж создан. §7Окно происхождения - K, прокачка - P."));
         WFNet.sendView(sp, VIEW + "_close", "");
         return 1;
@@ -332,16 +368,13 @@ public class GenesisMod {
             throw new IllegalStateException("Player Character registry is corrupt; refusing to create a duplicate or overwrite its save");
         String playerUuid = sp.getUUID().toString();
         String savedGlobalId = sp.getPersistentData().getString("worldforge_character_global_id");
-        Character person = PlayerCharacterBinding.resolveExisting(playerUuid, savedGlobalId,
-                PeopleMod.authority(), PeopleMod.registries().values(), PeopleMod.playerRegistry());
-        if (person == null) {
-            CharacterRegistry registry = PeopleMod.registryFor(sp.serverLevel());
-            if (registry == null) registry = PeopleMod.playerRegistry();
-            if (registry == null)
-                throw new IllegalStateException("No WorldForge people registry exists for the player");
-            String name = sp.getGameProfile().getName();
-            person = registry.create(name, "", draft.race, "m", PeopleMod.YEAR - 20);
-        }
+        String name = sp.getGameProfile().getName();
+        CharacterRegistry playerRegistry = PeopleMod.playerRegistry();
+        if (playerRegistry == null || !PeopleMod.playerRegistryAvailable())
+            throw new IllegalStateException("Dedicated player Character partition is unavailable");
+        Character person = PlayerCharacterBinding.resolveOrCreate(playerUuid, savedGlobalId,
+                PeopleMod.authority(), PeopleMod.registries().values(), playerRegistry,
+                name, draft.race, "m", PeopleMod.YEAR - 20);
         boolean firstGenesisSync = !Boolean.TRUE.equals(person.props.get("genesis.initialized"));
         person.props.put("genesis.player_uuid", playerUuid);
         person.props.put("genesis.profile_owner", owner(sp));
@@ -361,6 +394,8 @@ public class GenesisMod {
         }
         person.props.put("genesis.initialized", true);
         sp.getPersistentData().putString("worldforge_character_global_id", person.globalId);
+        if (!PeopleMod.persistCharacter(person, sp.getServer()))
+            throw new IllegalStateException("Canonical player Character could not be durably saved");
         return person;
     }
 
