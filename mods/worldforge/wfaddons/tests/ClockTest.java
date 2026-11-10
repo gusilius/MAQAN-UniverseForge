@@ -52,6 +52,22 @@ public class ClockTest {
         GameClock r = new GameClock();
         r.load(d.toJson());
         ok(r.dateText().equals(d.dateText()) && r.speedIndex() == d.speedIndex() && r.pull("x") == 0, "часы сохраняются, потребители начинают заново");
+        GameClock strict = new GameClock();
+        strict.advance(GameClock.TICKS_PER_DAY * 12);
+        String validBeforeBadLoad = strict.toJson();
+        boolean invalidClockRejected = false;
+        try { strict.load("{\\"format\\":\\"wf-clock/1\\",\\"elapsed\\":-1,\\"speed\\":1,\\"last\\":1,\\"start\\":300}"); }
+        catch (IllegalArgumentException expected) { invalidClockRejected = true; }
+        ok(invalidClockRejected && strict.toJson().equals(validBeforeBadLoad),
+                "invalid clock save is rejected without partially mutating the running calendar");
+        boolean nonFiniteRejected = false;
+        try { strict.load("{\\"format\\":\\"wf-clock/1\\",\\"elapsed\\":1e999,\\"speed\\":1,\\"last\\":1,\\"start\\":300}"); }
+        catch (IllegalArgumentException expected) { nonFiniteRejected = true; }
+        ok(nonFiniteRejected && strict.toJson().equals(validBeforeBadLoad),
+                "non-finite clock elapsed time is rejected without resetting world time");
+        strict.reset();
+        ok(strict.dayNumber() == 0 && strict.year() == 300 && strict.speedIndex() == 1,
+                "clock singleton can be safely reset before loading a different save");
         System.out.println(fails == 0 ? "ALL OK" : fails + " FAILED");
         if (fails > 0) System.exit(1);
     }
