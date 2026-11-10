@@ -15,8 +15,12 @@ public final class CharacterAuthority {
     private volatile WorldId worldId;
 
     public synchronized void beginWorld(WorldId id) {
+        WorldId requested = Objects.requireNonNull(id, "worldId");
+        // Forge may announce the same save at more than one lifecycle phase.
+        // Re-entering the same world must not detach or discard already registered partitions.
+        if (requested.equals(worldId)) return;
         clear();
-        worldId = Objects.requireNonNull(id, "worldId");
+        worldId = requested;
     }
 
     public synchronized void clear() {
