@@ -66,7 +66,7 @@ public final class CharacterAuthority {
         byIdentity.clear();
         byGlobalId.clear();
         byLegacyId.clear();
-        indexedSizes.clear();
+        indexedRevisions.clear();
         for (Map.Entry<String, CharacterRegistry> entry : registries.entrySet()) {
             indexedRevisions.put(entry.getKey(), entry.getValue().revision());
             String mapId = entry.getKey();
