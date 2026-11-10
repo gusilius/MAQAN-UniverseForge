@@ -98,39 +98,11 @@ public final class ActionCommands {
     }
 
     private static int run(CommandSourceStack s, String id, String target, String rawArgs) {
-        MapData m = EditorManager.dataFor(s.getLevel());
-        if (m == null || m.titles == null) {
-            s.sendFailure(Component.literal("В этом измерении нет политической карты"));
-            return 0;
-        }
-        MapAction a = WorldForgeApi.action(id);
-        if (a == null) {
-            s.sendFailure(Component.literal("Нет такого действия: " + id));
-            return 0;
-        }
-        String realmId = null;
-        int titleId = 0;
-        if (a.scope == MapAction.Scope.REALM) {
-            realmId = target;
-        } else if (a.scope == MapAction.Scope.TITLE) {
-            try {
-                titleId = Integer.parseInt(target);
-            } catch (NumberFormatException e) {
-                s.sendFailure(Component.literal("Для этого действия цель - номер титула"));
-                return 0;
-            }
-        }
-        List<String> args = new ArrayList<>();
-        if (!rawArgs.isBlank()) for (String part : rawArgs.split("\\|", -1)) args.add(part.trim());
-        String who = s.getTextName();
-        ActionContext ctx = new ActionContext(EditorManager.editorFor(m), who, WFPerm.trusted(s), realmId, titleId, args);
-        ActionResult r = WorldForgeApi.run(id, ctx);
-        if (!r.ok) {
-            s.sendFailure(Component.literal(r.message));
-            return 0;
-        }
-        EditorManager.touch(m);
-        s.sendSuccess(() -> Component.literal(r.message.isEmpty() ? a.label + ": готово" : r.message), false);
-        return 1;
-    }
-}
+        String actorKey = s.getEntity() instanceof ServerPlayer player ? player.getUUID().toString() : "console";
+        int payloadHash = java.util.Objects.hash(id, target, rawArgs == null ? "" : rawArgs);
+        String requestId = "legacy:" + actorKey + ":" + s.getServer().getTickCount() + ":"
+                + Integer.toUnsignedString(payloadHash, 16);
+        // Legacy UI buttons use the same durable execution pipeline. The explicit submit
+        // command remains available to clients that can retain a request ID across retries.
+        return submit(s, requestId, id, target, rawArgs);
+    }}
