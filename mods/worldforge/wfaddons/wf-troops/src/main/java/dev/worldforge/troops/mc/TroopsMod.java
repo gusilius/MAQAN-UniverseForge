@@ -253,6 +253,13 @@ public class TroopsMod {
 
     private record PersonBinding(CharacterRegistry registry, Character character) {}
 
+    private static Character resolvePerson(CharacterRegistry registry, String id) {
+        if (registry == null || id == null || id.isBlank()) return null;
+        Character global = PeopleMod.authority().getGlobal(id);
+        if (global != null) return PeopleMod.authority().registryForGlobal(id) == registry ? global : null;
+        return registry.get(id); // compatibility with pre-global-UUID troop NBT
+    }
+
     /** Resolves a physical soldier to the one authoritative Character in the map owning its realm. */
     private static PersonBinding bindPerson(TroopEntity troop, boolean create) {
         if (troop == null || troop.level().isClientSide || !ModList.get().isLoaded("wf_people")) return null;
@@ -268,7 +275,7 @@ public class TroopsMod {
             CharacterRegistry registry = PeopleMod.registry(map);
             if (registry == null) continue;
             boolean hasIdentity = troop.characterId != null && !troop.characterId.isBlank();
-            Character person = hasIdentity ? registry.get(troop.characterId) : null;
+            Character person = hasIdentity ? resolvePerson(registry, troop.characterId) : null;
             if (hasIdentity && (person == null || !person.alive)) {
                 // A missing/dead foreign key is a data-integrity fault, not permission to invent a replacement person.
                 return null;
@@ -278,8 +285,9 @@ public class TroopsMod {
                 String culture = realm.props == null || realm.props.get("culture") == null ? "" : String.valueOf(realm.props.get("culture"));
                 String name = troop.def() == null ? troop.unitId() : troop.def().name();
                 person = registry.create(name + " " + troop.getUUID().toString().substring(0, 4), "", culture, "m", PeopleMod.YEAR - 20);
-                troop.setCharacterId(person.id);
+                troop.setCharacterId(person.globalId);
             }
+            troop.setCharacterId(person.globalId); // canonicalize legacy local ID before saving the entity
             registry.bindEntity(person.id, "troop", troop.getUUID().toString());
             return new PersonBinding(registry, person);
         }
@@ -306,7 +314,7 @@ public class TroopsMod {
                 PopulationSimulation.profession(person));
         if (workerDuty) {
             if (!ModList.get().isLoaded("wf_settle")
-                    || !dev.worldforge.settle.mc.SettleMod.detachWorkerForMilitary(person.id)) {
+                    || !dev.worldforge.settle.mc.SettleMod.detachWorkerForMilitary(person.globalId)) {
                 binding.registry().unbindEntity(person.id, "troop", troop.getUUID().toString());
                 troop.characterId = previousId;
                 if (!hadSavedProfession) person.props.remove("population.pre_military_profession");
@@ -853,7 +861,7 @@ public class TroopsMod {
         for (MapData map : WorldForgeMod.loadedMaps().values()) {
             if (map.titles == null || !army.realm.isBlank() && !map.titles.realms.containsKey(army.realm)) continue;
             CharacterRegistry registry = PeopleMod.registry(map);
-            Character candidate = registry == null ? null : registry.get(characterId);
+            Character candidate = resolvePerson(registry, characterId);
             if (candidate != null && candidate.alive) return candidate;
         }
         return null;
@@ -927,7 +935,7 @@ public class TroopsMod {
             if (!squad.realm.isEmpty() && !map.titles.realms.containsKey(squad.realm)) continue;
             CharacterRegistry registry = PeopleMod.registry(map);
             if (registry == null) continue;
-            Character candidate = registry.get(characterId);
+            Character candidate = resolvePerson(registry, characterId);
             if (candidate != null) { person = candidate; break; }
         }
         if (person == null || !person.alive) {
