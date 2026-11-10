@@ -512,6 +512,11 @@ public class TroopsMod {
             handleOrderDirect(p, o);
             return;
         }
+        if (ModList.get().isLoaded("wf_settle") && WorkerControl.anyWorker(p, o)
+                && dev.worldforge.settle.mc.SettleMod.actionsBlocked()) {
+            p.displayClientMessage(Component.literal("Изменения поселений заблокированы после ошибки сохранения; требуется перезапуск и сверка"), true);
+            return;
+        }
         String actor = p.getUUID().toString();
         long minute = dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute();
         String requestId = "troop:" + java.util.UUID.nameUUIDFromBytes(
