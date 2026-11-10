@@ -198,27 +198,82 @@ public class FormsMod {
         return 1;
     }
 
-    private static int act(CommandSourceStack s, String what, String id, String arg) {
-        ServerPlayer sp = s.getPlayer();
-        if (sp == null) return 0;
-        String o = owner(sp);
-        boolean ok = true;
-        switch (what) {
-            case "shift" -> ok = FORMS.shift(o, id, !arg.equals("off"), day());
-            case "feed" -> {
-                // кормление: золотые самородки не нужны - тратим сырое мясо (кровь/плоть/сытость)
-                if (HOOKS.count(o, "rotten_flesh") > 0 || HOOKS.count(o, "beef") > 0) {
-                    HOOKS.take(o, HOOKS.count(o, "rotten_flesh") > 0 ? "rotten_flesh" : "beef", 1);
-                    ok = FORMS.feed(o, id, 25) >= 0;
-                } else { FORMS.lastError = "Нужна пища: гнилая плоть или говядина."; ok = false; }
-            }
-            case "options" -> { s.sendSuccess(() -> Component.literal(FORMS.cureOptions(o, id)), false); return 1; }
-            case "cure" -> ok = FORMS.cure(o, id, arg, day());
-            case "infect" -> ok = FORMS.infect(o, id, day(), "по воле администратора");
-            case "remove" -> { ok = FORMS.of(o).remove(id) != null; if (!ok) FORMS.lastError = "Такой формы нет."; }
-            default -> { }
+    private static int act(CommandSourceStack source, String what, String id, String arg) {
+        ServerPlayer player = source.getPlayer();
+        if (player == null) return 0;
+        if ("options".equals(what)) {
+            source.sendSuccess(() -> Component.literal(FORMS.cureOptions(owner(player), id)), false);
+            return 1;
         }
-        if (!ok) { s.sendFailure(Component.literal(FORMS.lastError)); return 0; }
-        return info(s);
+        String actor = player.getUUID().toString();
+        String owner = owner(player);
+        String payload = what + "|" + id + "|" + arg;
+        long minute = WorldForgeApi.clock().worldMinute();
+        String requestId = "forms:" + UUID.nameUUIDFromBytes(
+                (actor + ":" + source.getServer().getTickCount() + ":" + payload).getBytes(StandardCharsets.UTF_8));
+        try {
+            var task = WorldForgeApi.actionExecution().execute(
+                    new dev.worldforge.mod.api.ActionExecutionService.Request(
+                            requestId, "forms." + what, actor, owner, List.of(payload), minute),
+                    req -> {
+                        if (source.getServer().getPlayerList().getPlayer(player.getUUID()) == null)
+                            return "Игрок отключился до изменения состояния";
+                        if (("infect".equals(what) || "remove".equals(what)) && !source.hasPermission(2))
+                            return "Для этой операции нужны права оператора";
+                        return null;
+                    },
+                    (req, attempt) -> {
+                        boolean ok;
+                        String message;
+                        switch (what) {
+                            case "shift" -> {
+                                ok = FORMS.shift(owner, id, !arg.equals("off"), day());
+                                message = ok ? "Облик изменён." : FORMS.lastError;
+                            }
+                            case "feed" -> {
+                                String food = HOOKS.count(owner, "rotten_flesh") > 0 ? "rotten_flesh"
+                                        : HOOKS.count(owner, "beef") > 0 ? "beef" : "";
+                                if (food.isEmpty()) {
+                                    ok = false;
+                                    message = "Нужна пища: гнилая плоть или говядина.";
+                                } else {
+                                    double fed = FORMS.feed(owner, id, 25);
+                                    if (fed < 0) {
+                                        ok = false;
+                                        message = FORMS.lastError;
+                                    } else {
+                                        HOOKS.take(owner, food, 1);
+                                        ok = true;
+                                        message = "Потребность насыщена.";
+                                    }
+                                }
+                            }
+                            case "cure" -> {
+                                ok = FORMS.cure(owner, id, arg, day());
+                                message = ok ? "Состояние вылечено." : FORMS.lastError;
+                            }
+                            case "infect" -> {
+                                ok = FORMS.infect(owner, id, day(), "по воле администратора");
+                                message = ok ? "Состояние добавлено." : FORMS.lastError;
+                            }
+                            case "remove" -> {
+                                ok = FORMS.of(owner).remove(id) != null;
+                                message = ok ? "Состояние удалено." : "Такой формы нет.";
+                                if (!ok) FORMS.lastError = message;
+                            }
+                            default -> { return dev.worldforge.mod.api.ActionResult.fail("Неизвестная операция формы: " + what); }
+                        }
+                        return ok ? dev.worldforge.mod.api.ActionResult.ok(message)
+                                : dev.worldforge.mod.api.ActionResult.fail(message);
+                    }, null, minute, dev.worldforge.mod.WorldForgeMod.actionExecutionFile(source.getServer()));
+            boolean ok = task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED;
+            if (ok) source.sendSuccess(() -> Component.literal(task.message()), false);
+            else source.sendFailure(Component.literal(task.message()));
+            if (ok) info(source);
+            return ok ? 1 : 0;
+        } catch (RuntimeException ex) {
+            source.sendFailure(Component.literal("Не удалось выполнить операцию формы: " + ex.getMessage()));
+            return 0;
+        }
     }
 }
