@@ -372,8 +372,9 @@ public class GenesisMod {
         CharacterRegistry playerRegistry = PeopleMod.playerRegistry();
         if (playerRegistry == null || !PeopleMod.playerRegistryAvailable())
             throw new IllegalStateException("Dedicated player Character partition is unavailable");
-        Character person = PlayerCharacterBinding.resolveOrCreate(playerUuid, savedGlobalId,
-                PeopleMod.authority(), PeopleMod.registries().values(), playerRegistry,
+        Character person = dev.worldforge.genesis.PlayerCharacterBinding.resolveOrCreate(
+                playerUuid, savedGlobalId, PeopleMod.authority(),
+                PeopleMod.registries().values(), playerRegistry,
                 name, draft.race, "m", PeopleMod.YEAR - 20);
         boolean firstGenesisSync = !Boolean.TRUE.equals(person.props.get("genesis.initialized"));
         person.props.put("genesis.player_uuid", playerUuid);
