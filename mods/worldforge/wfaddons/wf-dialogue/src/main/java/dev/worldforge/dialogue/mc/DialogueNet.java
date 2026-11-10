@@ -25,7 +25,7 @@ public final class DialogueNet {
 
     public static void init() {
         CHANNEL = NetworkRegistry.newSimpleChannel(new ResourceLocation("wf_dialogue", "main"), () -> PROTO,
-                NetworkRegistry.acceptMissingOr(PROTO), NetworkRegistry.acceptMissingOr(PROTO));
+                NetworkRegistry.acceptVersion(PROTO), NetworkRegistry.acceptVersion(PROTO));
         CHANNEL.registerMessage(0, OpenView.class, OpenView::encode, OpenView::decode, OpenView::handle);
         CHANNEL.registerMessage(1, Close.class, Close::encode, Close::decode, Close::handle);
         CHANNEL.registerMessage(2, Choose.class, Choose::encode, Choose::decode, Choose::handle);
