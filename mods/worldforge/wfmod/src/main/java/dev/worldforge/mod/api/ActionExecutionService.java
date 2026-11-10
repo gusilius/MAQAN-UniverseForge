@@ -71,7 +71,14 @@ public final class ActionExecutionService {
         Objects.requireNonNull(executor, "executor");
         if (nowMinute < request.requestedMinute()) throw new IllegalArgumentException("Action time moved backwards");
         Task prior = tasks.get(request.requestId());
-        if (prior != null) return prior;
+        if (prior != null) {
+            if (!prior.actorId().equals(request.actorId())
+                    || !prior.actionId().equals(request.actionId())
+                    || !prior.targetId().equals(request.targetId())
+                    || !prior.args().equals(request.args()))
+                throw new IllegalStateException("Action request id was reused with a different payload: " + request.requestId());
+            return prior;
+        }
         if (tasks.size() >= MAX_RECORDS) throw new IllegalStateException("Action task journal is full");
 
         Task task = new Task(request.requestId(), request.actionId(), request.actorId(), request.targetId(),
@@ -88,6 +95,10 @@ public final class ActionExecutionService {
                     current.args(), Status.RUNNING, attempt, "Running", request.requestedMinute(), nowMinute, "");
             tasks.put(request.requestId(), task);
             persistOrRollback(durableFile, request.requestId());
+
+            String attemptDenied = authorizer.denyReason(current);
+            if (attemptDenied != null)
+                return finish(current, task, Status.FAILED, attempt - 1, attemptDenied, nowMinute, durableFile);
 
             ActionResult result;
             try {
@@ -115,8 +126,12 @@ public final class ActionExecutionService {
         Task task = tasks.get(requestId);
         if (task == null || (task.status() != Status.QUEUED && task.status() != Status.RUNNING)) return false;
         if (!operator && !task.actorId().equals(actorId)) return false;
+        String receiptId = "receipt:" + requestId;
+        Receipt receipt = new Receipt(receiptId, requestId, task.actionId(), task.actorId(), task.targetId(),
+                Status.CANCELLED, task.attempts(), "Cancelled", nowMinute);
+        receipts.put(receiptId, receipt);
         Task cancelled = new Task(task.requestId(), task.actionId(), task.actorId(), task.targetId(), task.args(),
-                Status.CANCELLED, task.attempts(), "Cancelled", task.createdMinute(), nowMinute, "");
+                Status.CANCELLED, task.attempts(), "Cancelled", task.createdMinute(), nowMinute, receiptId);
         tasks.put(requestId, cancelled);
         persistOrRollback(durableFile, requestId);
         return true;
@@ -229,9 +244,10 @@ public final class ActionExecutionService {
         if (file == null) return;
         try { save(file); }
         catch (IOException ex) {
-            tasks.remove(requestId);
-            receipts.remove("receipt:" + requestId);
-            throw new IllegalStateException("Could not durably persist action task before/after execution", ex);
+            // Keep the request in memory as a tombstone. Retrying the same ID must never
+            // re-run a domain mutation whose durable outcome could not be confirmed.
+            throw new IllegalStateException("Could not durably persist action request " + requestId
+                    + "; execution is blocked for this ID until reconciliation", ex);
         }
     }
 
