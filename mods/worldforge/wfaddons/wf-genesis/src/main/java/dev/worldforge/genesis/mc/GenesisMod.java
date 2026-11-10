@@ -78,6 +78,8 @@ public class GenesisMod {
     /** Клиент подставляет сюда чтение облика по игроку (рост и ширина в долях от 1). */
     public static volatile java.util.function.BiFunction<Player, String, Double> CLIENT_SCALE = (p, k) -> 1.0;
     private static final String WAIT = "wf_genesis_wait";
+    /** Changes once per server process so a restart can resume an interrupted, idempotent Genesis operation. */
+    private static final String ACTION_SESSION_ID = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
 
     public GenesisMod() { MinecraftForge.EVENT_BUS.register(this); }
 
@@ -290,7 +292,7 @@ public class GenesisMod {
             // Genesis uses the one shared durable action journal; it does not own a second executor.
             long worldMinute = WorldForgeApi.clock().worldMinute();
             String draftFingerprint = UUID.nameUUIDFromBytes((sp.getUUID() + "|" + GENESIS.viewJson(d)).getBytes(StandardCharsets.UTF_8)).toString();
-            String requestId = "genesis:" + sp.getUUID() + ":" + draftFingerprint;
+            String requestId = "genesis:" + sp.getUUID().toString().replace("-", "") + ":" + ACTION_SESSION_ID + ":" + draftFingerprint.replace("-", "");
             ActionExecutionService.Request request = new ActionExecutionService.Request(
                     requestId, "genesis.confirm", "player:" + sp.getUUID(), sp.getUUID().toString(),
                     List.of(d.race, d.start, d.cls, draftFingerprint), worldMinute);
