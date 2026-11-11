@@ -876,7 +876,7 @@ public class TroopsMod {
 
     /** Idempotently resumes one deployment from its last durable phase. */
     private static boolean processMusterOperation(String operationId) {
-        if (server == null || militaryLoadFailed || !ModList.get().isLoaded("wf_army")
+        if (server == null || militaryLoadFailed || actionPersistenceBlocked || !ModList.get().isLoaded("wf_army")
                 || !ModList.get().isLoaded("wf_settle")) return false;
         MilitaryMusterLedger.Operation operation = MUSTERS.get(operationId);
         if (operation == null) return false;
@@ -940,6 +940,14 @@ public class TroopsMod {
                 for (ServerLevel candidate : server.getAllLevels()) {
                     Entity entity = candidate.getEntity(entityUuid);
                     if (entity != null) {
+                        MapData entityMap = EditorManager.dataFor(candidate);
+                        if (entityMap == null || !entityMap.name.equals(operation.mapId())
+                                || !candidate.dimension().location().toString().equals(spawn.dimension())) {
+                            actionPersistenceBlocked = true;
+                            LOGGER.error("wf_troops: muster entity UUID {} exists in a different map or dimension",
+                                    spawn.entityId());
+                            return false;
+                        }
                         if (!(entity instanceof TroopEntity physical)) {
                             actionPersistenceBlocked = true;
                             LOGGER.error("wf_troops: muster entity UUID {} is occupied by {}",
@@ -953,11 +961,14 @@ public class TroopsMod {
                 }
 
                 if (targetLevel == null) {
-                    for (ServerLevel candidate : server.getAllLevels())
-                        if (candidate.dimension().location().toString().equals(spawn.dimension())) {
+                    for (ServerLevel candidate : server.getAllLevels()) {
+                        MapData candidateMap = EditorManager.dataFor(candidate);
+                        if (candidateMap != null && candidateMap.name.equals(operation.mapId())
+                                && candidate.dimension().location().toString().equals(spawn.dimension())) {
                             targetLevel = candidate;
                             break;
                         }
+                    }
                     if (targetLevel == null) {
                         waitingForChunks = true;
                         continue;
@@ -1082,11 +1093,12 @@ public class TroopsMod {
         if (ticks % 100 == 0) {
             syncArmyHierarchy();
             processPendingDeaths();
+            processPendingTransitions();
             processPendingMusters();
             processReturnedBodies();
+            payroll();
         }
         if (ticks % 1200 == 0) for (TroopEntity troop : LIVE.values()) syncPerson(troop);
-        if (ticks % 100 == 0) { processPendingTransitions(); processPendingMusters(); processReturnedBodies(); payroll(); }
         if (ticks % 20 == 0) FortService.step(server, ticks);
         if (ticks % 6000 == 0) save();
     }
@@ -2274,7 +2286,10 @@ public class TroopsMod {
     private static boolean releaseBodyDurably(TroopEntity troop) {
         if (troop == null) return false;
         if (ModList.get().isLoaded("wf_people")) {
+            String entityUuid = troop.getUUID().toString();
             PersonBinding binding = bindPerson(troop, false);
+            if (binding == null && (troop.characterId == null || troop.characterId.isBlank()))
+                binding = findCharacterForTroopEntity(entityUuid);
             if (binding == null) return false;
             Character person = binding.character();
             binding.registry().unbindEntity(person.id, "troop", troop.getUUID().toString());
