@@ -78,7 +78,7 @@ public final class ResidentLifeEvents {
             for (int j = i + 1; j < people.size(); j++) {
                 Character second = people.get(j);
                 if (!second.alive || second.spouse != null && !second.spouse.isBlank()
-                        || PopulationSimulation.age(second, year) < 18 || closeFamily(first, second)) continue;
+                        || PopulationSimulation.age(second, year) < 18 || closeFamily(registry, first, second)) continue;
                 int affinity = Math.min(ResidentSocial.score(first, second.id), ResidentSocial.score(second, first.id));
                 String firstDating = string(first.props.get("family.dating"));
                 String secondDating = string(second.props.get("family.dating"));
@@ -126,9 +126,16 @@ public final class ResidentLifeEvents {
 
     private static void advanceChildhood(CharacterRegistry registry, List<Character> people, int year) {
         for (Character child : people) {
-            if (!child.alive || PopulationSimulation.age(child, year) >= 18
+            if (!child.alive || PopulationSimulation.age(child, year) > 18
                     || year <= number(child.props.get("family.development_year"), 0)) continue;
             int age = PopulationSimulation.age(child, year);
+            if (age == 18) {
+                child.props.put("family.development_year", year);
+                child.props.put("family.adulthood_year", year);
+                child.props.put("family.care_status", "independent_adult");
+                child.props.remove("family.guardian_id");
+                continue;
+            }
             Character father = child.father.isBlank() ? null : registry.get(child.father);
             Character mother = child.mother.isBlank() ? null : registry.get(child.mother);
             boolean fatherAlive = father != null && father.alive;
@@ -197,15 +204,15 @@ public final class ResidentLifeEvents {
                 || !a.mother.isBlank() && (a.mother.equals(b.father) || a.mother.equals(b.mother));
     }
 
-    private static boolean closeFamily(Character a, Character b) {
+    private static boolean closeFamily(CharacterRegistry registryForKinship, Character a, Character b) {
         if (a.id.equals(b.id)) return true;
-        Set<String> aAncestors = ancestors(a, 2);
-        Set<String> bAncestors = ancestors(b, 2);
+        Set<String> aAncestors = ancestors(registryForKinship, a, 2);
+        Set<String> bAncestors = ancestors(registryForKinship, b, 2);
         return aAncestors.contains(b.id) || bAncestors.contains(a.id)
                 || aAncestors.stream().anyMatch(bAncestors::contains);
     }
 
-    private static Set<String> ancestors(Character person, int depth) {
+    private static Set<String> ancestors(CharacterRegistry registry, Character person, int depth) {
         Set<String> result = new HashSet<>();
         Set<String> frontier = new HashSet<>();
         frontier.add(person.father);
@@ -214,8 +221,11 @@ public final class ResidentLifeEvents {
             Set<String> next = new HashSet<>();
             for (String id : frontier) {
                 if (id == null || id.isBlank() || !result.add(id)) continue;
-                // The registry is not needed for direct ancestry at the first level; callers
-                // populate grandparent links through the canonical Character references below.
+                Character ancestor = registry.get(id);
+                if (ancestor != null) {
+                    next.add(ancestor.father);
+                    next.add(ancestor.mother);
+                }
             }
             frontier = next;
         }
