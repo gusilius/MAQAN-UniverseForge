@@ -38,5 +38,13 @@ public final class NativeWorldSimulation {
         return result;
     }
 
+    public static byte[] generate(byte[] request) {
+        if (!load()) throw new IllegalStateException("WorldForge native decision core is unavailable");
+        byte[] result = nativeGenerate(request);
+        if (result == null || result.length == 0) throw new IllegalStateException("WorldForge native generator returned an empty result");
+        return result;
+    }
+
     private static native byte[] nativeDecide(byte[] snapshot);
+    private static native byte[] nativeGenerate(byte[] request);
 }
