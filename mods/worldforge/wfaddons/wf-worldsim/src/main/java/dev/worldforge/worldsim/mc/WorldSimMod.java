@@ -158,7 +158,9 @@ public final class WorldSimMod {
             item.addProperty("housing", s.housing());
             item.addProperty("housing_used", s.workers.size());
             item.addProperty("farms", s.count("farm", false));
-            item.addProperty("workshops", s.count("workshop", false));
+            item.addProperty("foresters", s.count("lumber_camp", false));
+            item.addProperty("quarries", s.count("quarry", false));
+            item.addProperty("workshops", s.count("market", false) + s.count("sawmill", false) + s.count("smithy", false));
             item.addProperty("barracks", s.count("barracks", false));
             item.addProperty("roads", s.count("road", false));
             item.addProperty("local_pressure", Math.max(0, s.workers.size() - s.housing()));
@@ -201,8 +203,9 @@ public final class WorldSimMod {
                     if (Math.max(Math.abs(x), Math.abs(z)) != radius) continue;
                     if (colony.s.placeError(building, x + (hash & 7), z + ((hash >>> 3) & 7)) == null) {
                         colony.s.place(building, x + (hash & 7), z + ((hash >>> 3) & 7));
+                        if (!SettleMod.saveDurably(server)) return false;
                         lastProjectDay.put(settlementId, day);
-                        return SettleMod.saveDurably(server);
+                        return true;
                     }
                 }
             }
