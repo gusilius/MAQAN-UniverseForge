@@ -76,11 +76,11 @@ public final class ResidentLifeEventsTest {
         CharacterRegistry familyRegistry = new CharacterRegistry();
         Character grandpa = familyRegistry.create("Орин", "Дом", "north", "m", 1940);
         Character grandma = familyRegistry.create("Эйра", "Дом", "north", "f", 1942);
-        Character father = familyRegistry.addChild(grandpa, grandma, "Дорен", "m", 1970);
-        Character mother = familyRegistry.create("Лина", "Дом Лины", "north", "f", 1972);
-        Character child = familyRegistry.addChild(father, mother, "Кай", "m", 2000);
-        father.alive = false;
-        mother.alive = false;
+        Character orphanFather = familyRegistry.addChild(grandpa, grandma, "Дорен", "m", 1970);
+        Character orphanMother = familyRegistry.create("Лина", "Дом Лины", "north", "f", 1972);
+        Character child = familyRegistry.addChild(orphanFather, orphanMother, "Кай", "m", 2000);
+        orphanFather.alive = false;
+        orphanMother.alive = false;
         ResidentLifeEvents.yearly(familyRegistry, 2010);
         check((grandpa.id.equals(child.props.get("family.guardian_id"))
                         || grandma.id.equals(child.props.get("family.guardian_id")))
