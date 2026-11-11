@@ -146,8 +146,10 @@ public final class StatecraftTest {
         check(restored.inheritanceLaw("north") == Statecraft.InheritanceLaw.COGNATIC
                 && restored.title("crown").holderCharacterId.equals("c3")
                 && restored.war(war.id).status == Statecraft.WarStatus.ATTACKER_VICTORY
-                && restored.plot(plot.id).status == Statecraft.PlotStatus.EXPOSED,
-                "succession, title, war and intrigue state are restored");
+                && restored.plot(plot.id).status == Statecraft.PlotStatus.EXPOSED
+                && restored.lastVassalReviewDay() == 1060
+                && restored.vassalage("north_duchy_realm").loyalty == 51,
+                "succession, title, war, intrigue and monthly vassal politics survive save/load");
         boolean badRateRejected = false;
         try { restored.setTaxRate("north", 2); } catch (IllegalArgumentException expected) { badRateRejected = true; }
         check(badRateRejected, "invalid tax rates are rejected");
