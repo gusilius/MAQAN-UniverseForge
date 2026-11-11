@@ -142,7 +142,16 @@ public class RealmsMod {
         try {
             if (ticks % 200 == 0) {
                 int days = WorldForgeApi.clock().pull("wf_realms");
-                for (TitleData.Realm r : realms()) {
+                List<TitleData.Realm> currentRealms = realms();
+                if (days > 0) {
+                    Map<String, Integer> rulerOpinions = new LinkedHashMap<>();
+                    for (TitleData.Realm r : currentRealms) {
+                        Object rawOpinion = r.props.get("politics.liege_opinion");
+                        rulerOpinions.put(r.id, rawOpinion instanceof Number n ? n.intValue() : 0);
+                    }
+                    POLITICS.advanceVassalPolitics((int) WorldForgeApi.clock().dayNumber(), rulerOpinions);
+                }
+                for (TitleData.Realm r : currentRealms) {
                     Object taxableBase = r.props.get("taxable_base");
                     if (days > 0 && taxableBase instanceof Number base && base.doubleValue() > 0) {
                         POLITICS.collectTaxes(REALMS, r.id, base.doubleValue(), days);
