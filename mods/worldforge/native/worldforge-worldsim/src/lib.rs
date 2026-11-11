@@ -50,6 +50,8 @@ pub struct Settlement {
     pub quarries: u32,
     pub workshops: u32,
     pub barracks: u32,
+    pub watch_posts: u32,
+    pub threatened: bool,
     pub roads: u32,
     pub local_pressure: i32,
     pub last_project_day: Day,
@@ -223,7 +225,11 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
         let desired_farms = (s.population / 50).max(1) as u32;
         let desired_foresters = (s.population / 80).max(1) as u32;
         let desired_quarries = (s.population / 100).max(1) as u32;
-        let (building, priority, reason) = if s.food < (s.population as i64 * 2) && s.farms < desired_farms {
+        let (building, priority, reason) = if s.threatened && s.watch_posts == 0 {
+            ("watch_post", 88, "frontier threat requires a completed watch post")
+        } else if s.threatened && s.watch_posts > 0 && s.barracks == 0 {
+            ("barracks", 84, "frontier threat requires a trained garrison")
+        } else if s.food < (s.population as i64 * 2) && s.farms < desired_farms {
             ("farm", 95, "food reserve below two days of population demand")
         } else if s.housing > 0 && s.housing_used.saturating_mul(100) >= s.housing.saturating_mul(85) {
             ("house", 82, "housing capacity approaching saturation")
@@ -339,7 +345,7 @@ mod tests {
             realms:vec![realm("north",200),realm("south",100)],
             borders:vec![Border{a:"north".into(),b:"south".into(),contested_claim:true,strategic_value:100,distance_cost:0}],
             settlements:vec![Settlement{id:"village".into(),realm_id:"north".into(),population:40,food:10,food_capacity:100,
-                wood:30,stone:30,housing:100,housing_used:90,farms:0,foresters:0,quarries:0,workshops:0,barracks:1,roads:0,local_pressure:20,last_project_day:0}],
+                wood:30,stone:30,housing:100,housing_used:90,farms:0,foresters:0,quarries:0,workshops:0,barracks:1,watch_posts:0,threatened:false,roads:0,local_pressure:20,last_project_day:0}],
             characters:vec![],workforce:vec![] }
     }
     #[test] fn decisions_are_deterministic_and_idempotently_identified() {
