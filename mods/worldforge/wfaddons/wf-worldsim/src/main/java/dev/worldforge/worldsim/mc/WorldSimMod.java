@@ -68,8 +68,11 @@ public final class WorldSimMod {
     public void onStarted(ServerStartedEvent event) {
         lastDecisionDay = Long.MIN_VALUE;
         lodTicks = 0;
+        publishObservers(event.getServer());
         loadState(event.getServer());
-        LOGGER.info("wf_worldsim: autonomous coordinator started; native Rust core={}", NativeWorldSimulation.load() ? "available" : "unavailable");
+        LOGGER.info("wf_worldsim: autonomous coordinator started; native Rust core={}, initial LOD observers={}",
+                NativeWorldSimulation.load() ? "available" : "unavailable",
+                serverObserverCount(event.getServer()));
     }
 
     @SubscribeEvent
@@ -174,6 +177,13 @@ public final class WorldSimMod {
                             }
                             return recent.size();
                         }))));
+    }
+
+    private static int serverObserverCount(MinecraftServer server) {
+        int count = 0;
+        for (var level : server.getAllLevels())
+            for (var player : level.players()) if (!player.isSpectator()) count++;
+        return count;
     }
 
     /** One shared observer snapshot drives NPC, worker, settlement and future ambient LOD. */
