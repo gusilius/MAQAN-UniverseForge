@@ -1,3 +1,4 @@
+pub mod worldgen;
 //! Autonomous WorldForge decision engine.
 //!
 //! Pure deterministic Rust domain layer. It receives immutable snapshots from
