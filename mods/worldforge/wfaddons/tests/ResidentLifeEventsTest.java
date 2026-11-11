@@ -106,7 +106,12 @@ public final class ResidentLifeEventsTest {
                 conflictEvents.add(event);
             }
         });
-        for (int year = 2001; year <= 2003; year++) ResidentLifeEvents.yearly(conflictRegistry, year);
+        ResidentLifeEvents.yearly(conflictRegistry, 2001);
+        ResidentLifeEvents.yearly(conflictRegistry, 2001);
+        ResidentLifeEvents.yearly(conflictRegistry, 2001);
+        check(((Number) partnerA.props.get("family.marital_conflict_years")).intValue() == 1,
+                "repeated settlement ticks cannot advance the same annual marital conflict more than once");
+        for (int year = 2002; year <= 2003; year++) ResidentLifeEvents.yearly(conflictRegistry, year);
         check(partnerA.spouse.isBlank() && partnerB.spouse.isBlank()
                         && conflictEvents.stream().anyMatch(e -> e.kind() == CharacterRegistry.LifecycleKind.MARRIAGE_DISSOLVED),
                 "sustained severe marital conflict produces one reciprocal divorce lifecycle event");
