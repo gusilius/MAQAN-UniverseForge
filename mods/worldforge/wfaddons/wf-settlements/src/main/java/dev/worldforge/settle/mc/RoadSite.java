@@ -1,6 +1,7 @@
 package dev.worldforge.settle.mc;
 
 import dev.worldforge.settle.SettlementMap;
+import dev.worldforge.mod.api.SimulationLod;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.Blocks;
@@ -22,7 +23,7 @@ public final class RoadSite {
                 int az = colony.cz + a.gz() * SettlementMap.CELL_SIZE + SettlementMap.CELL_SIZE / 2;
                 int bx = colony.cx + b.gx() * SettlementMap.CELL_SIZE + SettlementMap.CELL_SIZE / 2;
                 int bz = colony.cz + b.gz() * SettlementMap.CELL_SIZE + SettlementMap.CELL_SIZE / 2;
-                if (!BuildingSite.playerNear(level, (ax + bx) / 2.0, (az + bz) / 2.0, BuildingSite.NEAR)) break;
+                if (!SimulationLod.shouldMaterializeSettlement(level.dimension().location().toString(), (ax + bx) / 2.0, (az + bz) / 2.0)) break;
                 if (!level.hasChunkAt(new BlockPos(ax, level.getMinBuildHeight(), az))
                         || !level.hasChunkAt(new BlockPos(bx, level.getMinBuildHeight(), bz))) break;
                 if (!buildSegment(level, road.surface, ax, az, bx, bz, budget)) break;
