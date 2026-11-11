@@ -304,7 +304,8 @@ public final class WorldSimMod {
             int changed = 0;
             for (Worker worker : colony.s.workers) {
                 if (changed >= wanted) break;
-                if (!from.equals(worker.permanentProfession()) || worker.building != 0 || !worker.lifeAction.isBlank()) continue;
+                boolean sourceMatches = "unemployed".equals(from) ? worker.generalist() : from.equals(worker.permanentProfession());
+                if (!sourceMatches || worker.building != 0 || !worker.lifeAction.isBlank()) continue;
                 colony.s.setProfession(worker.id, to);
                 changed++;
             }
@@ -362,8 +363,7 @@ public final class WorldSimMod {
             }
             return false;
         }
-        // Recruitment and profession changes remain proposals until their dedicated
-        // transactional executors are exposed by wf_army and wf_people.
+        // Unknown proposal kinds are rejected rather than silently mutating the world.
         return false;
     }
 
