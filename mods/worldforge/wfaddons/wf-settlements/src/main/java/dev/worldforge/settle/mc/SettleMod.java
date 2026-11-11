@@ -912,15 +912,19 @@ public class SettleMod {
                 if (!worker.lifeAction.isBlank()) {
                     if (!"performing".equals(worker.lifeActionStage)) return LifeSimulation.Outcome.IN_PROGRESS;
                     if (settlement.time < worker.lifeActionUntil) return LifeSimulation.Outcome.IN_PROGRESS;
-                    if (action == LifeSimulation.Action.EAT && !settlement.consumeResource("food", 1.0))
+                    if (action == LifeSimulation.Action.EAT && !settlement.consumeResource("food", 1.0)) {
+                        clearLifeAction(worker);
                         return LifeSimulation.Outcome.BLOCKED;
+                    }
                     if (action == LifeSimulation.Action.SOCIALIZE) {
                         dev.worldforge.settle.Worker companion = settlement.workers.stream()
                                 .filter(other -> other.person != null && other.person.equals(worker.lifeSocialTarget))
                                 .findFirst().orElse(null);
                         Character companionPerson = companion == null ? null : resolvePerson(registry, companion.person);
-                        if (companion == null || companionPerson == null || !companionPerson.alive)
+                        if (companion == null || companionPerson == null || !companionPerson.alive) {
+                            clearLifeAction(worker);
                             return LifeSimulation.Outcome.BLOCKED;
+                        }
                         int opinion = dev.worldforge.settle.ResidentSocial.interactionDelta(character, companionPerson);
                         dev.worldforge.settle.ResidentSocial.socialize(character, companionPerson, opinion);
                         companion.status = "общался: " + character.name;
@@ -935,13 +939,13 @@ public class SettleMod {
                     case EAT -> {
                         if (settlement.amount("food") < 1.0) return LifeSimulation.Outcome.BLOCKED;
                         double[] meal = residentMealPlace(settlement, worker);
-                        beginLifeAction(worker, "eating", meal[0], meal[1], 30, context.lod());
+                        beginLifeAction(worker, "eating", meal[0], meal[1], 30, settlement.time, context.lod());
                         worker.status = "идёт принимать пищу";
                         return LifeSimulation.Outcome.IN_PROGRESS;
                     }
                     case SLEEP -> {
                         double[] home = residentShelter(settlement, worker);
-                        beginLifeAction(worker, "sleeping", home[0], home[1], 8 * 60, context.lod());
+                        beginLifeAction(worker, "sleeping", home[0], home[1], 8 * 60, settlement.time, context.lod());
                         worker.status = "идёт отдыхать";
                         return LifeSimulation.Outcome.IN_PROGRESS;
                     }
@@ -967,7 +971,7 @@ public class SettleMod {
                         }
                         if (companion == null) return LifeSimulation.Outcome.BLOCKED;
                         worker.lifeSocialTarget = companion.person;
-                        beginLifeAction(worker, "socializing", companion.x, companion.z, 3 * 60, context.lod());
+                        beginLifeAction(worker, "socializing", companion.x, companion.z, 3 * 60, settlement.time, context.lod());
                         worker.status = "идёт на встречу";
                         return LifeSimulation.Outcome.IN_PROGRESS;
                     }
@@ -994,14 +998,14 @@ public class SettleMod {
     }
 
     private static void beginLifeAction(dev.worldforge.settle.Worker worker, String action,
-                                        double targetX, double targetZ, double duration,
+                                        double targetX, double targetZ, double duration, double now,
                                         LifeSimulation.LOD lod) {
         worker.lifeAction = action;
         worker.lifeTargetX = targetX;
         worker.lifeTargetZ = targetZ;
         worker.lifeActionDuration = duration;
         worker.lifeActionStage = lod == LifeSimulation.LOD.ACTIVE ? "travelling" : "performing";
-        worker.lifeActionUntil = lod == LifeSimulation.LOD.ACTIVE ? 0 : duration + 1;
+        worker.lifeActionUntil = lod == LifeSimulation.LOD.ACTIVE ? 0 : now + duration;
     }
 
     private static void clearLifeAction(dev.worldforge.settle.Worker worker) {
