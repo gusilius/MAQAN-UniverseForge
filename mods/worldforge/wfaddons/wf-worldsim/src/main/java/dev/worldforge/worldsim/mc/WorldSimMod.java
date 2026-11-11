@@ -99,13 +99,33 @@ public final class WorldSimMod {
                 JsonObject kind = proposal.has("kind") && proposal.get("kind").isJsonObject()
                         ? proposal.getAsJsonObject("kind") : null;
                 if (kind == null) continue;
+                String proposalId = proposal.get("id").getAsString();
                 try {
-                    boolean applied = apply(server, proposal.get("id").getAsString(), kind, day);
+                    // Reuse the project's canonical durable ActionExecutionService. Its RUNNING
+                    // checkpoint prevents replay after a crash between a domain save and receipt.
+                    String requestId = "worldsim:" + proposalId;
+                    String payload = GSON.toJson(kind);
+                    long worldMinute = Math.max(0L, day * 1440L);
+                    var task = WorldForgeApi.actionExecution().execute(
+                            new dev.worldforge.mod.api.ActionExecutionService.Request(
+                                    requestId, "worldsim.apply", "worldsim", "world",
+                                    List.of(payload), worldMinute),
+                            request -> null,
+                            (request, attempt) -> {
+                                JsonObject decoded = GSON.fromJson(request.args().get(0), JsonObject.class);
+                                boolean applied = decoded != null && apply(server, request.requestId(), decoded, day);
+                                return applied
+                                        ? dev.worldforge.mod.api.ActionResult.ok("Autonomous proposal applied")
+                                        : dev.worldforge.mod.api.ActionResult.fail("Proposal rejected by authoritative domain API");
+                            },
+                            null, worldMinute, WorldForgeMod.actionExecutionFile(server));
+                    boolean applied = task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED;
                     if (applied) accepted++; else rejected++;
-                    recordEvent(day, proposal.get("id").getAsString(), kind, applied);
+                    recordEvent(day, proposalId, kind, applied);
                 } catch (RuntimeException error) {
                     rejected++;
-                    LOGGER.warn("wf_worldsim: proposal {} rejected: {}", proposal.get("id"), error.toString());
+                    LOGGER.warn("wf_worldsim: proposal {} rejected: {}", proposalId, error.toString());
+                    recordEvent(day, proposalId, kind, false);
                 }
             }
             saveState(server);
