@@ -6,7 +6,11 @@ import dev.worldforge.army.mc.ArmyMod;
 import dev.worldforge.mod.MapData;
 import dev.worldforge.mod.WorldForgeMod;
 
-import java.util.Map;
+import dev.worldforge.troops.Muster;
+import net.minecraft.server.MinecraftServer;
+
+import java.util.*;
+
 
 /** Мягкая связь с wf_army: призыв солдат из абстрактной армии и возврат выживших. Загружается только если есть wf_army. */
 final class ArmyLink {
@@ -37,5 +41,37 @@ final class ArmyLink {
         if (f == null) return false;
         for (var e : men.entrySet()) f.army().add(e.getKey(), e.getValue());
         return true;
+    }
+
+    /**
+     * Stages one idempotent manpower credit per physical soldier, then synchronously writes
+     * the strategic army snapshot. The troop entities must not be released before this returns true.
+     */
+    static boolean returnToArmy(Found found, Collection<TroopEntity> troops,
+                                Map<String, String> armyTypes, MinecraftServer server) {
+        if (found == null || found.army() == null || troops == null || troops.isEmpty()
+                || armyTypes == null || server == null) return false;
+
+        List<TroopEntity> ordered = new ArrayList<>(troops);
+        ordered.sort(Comparator.comparing(t -> t.getUUID().toString()));
+        Map<String, Map<String, Integer>> deltas = new LinkedHashMap<>();
+        Set<String> seen = new HashSet<>();
+        for (TroopEntity troop : ordered) {
+            if (troop == null || troop.armyId != found.army().id || troop.unitId() == null
+                    || troop.unitId().isBlank())
+                throw new IllegalArgumentException("Invalid physical troop in army return");
+            String entityId = troop.getUUID().toString();
+            if (!seen.add(entityId)) throw new IllegalArgumentException("Duplicate physical troop in army return");
+            Map<String, Integer> delta = Muster.back(Map.of(troop.unitId(), 1), armyTypes);
+            if (delta.isEmpty() || delta.values().stream().anyMatch(value -> value == null || value <= 0))
+                throw new IllegalStateException("No strategic roster mapping for physical troop " + troop.unitId());
+            deltas.put(entityId, delta);
+        }
+
+        for (Map.Entry<String, Map<String, Integer>> entry : deltas.entrySet())
+            found.engine().applyRosterDeltaOnce("troop-return:" + entry.getKey(), found.army().id, entry.getValue());
+
+        // Atomic per-map snapshot: a failure leaves every physical body in the world.
+        return ArmyMod.persistNow(server);
     }
 }
