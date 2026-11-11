@@ -912,7 +912,9 @@ public class SettleMod {
                 if (!worker.lifeAction.isBlank()) {
                     if (!"performing".equals(worker.lifeActionStage)) return LifeSimulation.Outcome.IN_PROGRESS;
                     if (worldMinute < worker.lifeActionUntil) return LifeSimulation.Outcome.IN_PROGRESS;
-                    if (action == LifeSimulation.Action.EAT && !settlement.consumeResource("food", 1.0)) {
+                    // Settlement.eat(dt) is the authoritative ration ledger for every resident.
+                    // Do not debit a second meal here; only ensure the stock has not collapsed to zero.
+                    if (action == LifeSimulation.Action.EAT && settlement.amount("food") <= 0) {
                         clearLifeAction(worker);
                         return LifeSimulation.Outcome.BLOCKED;
                     }
@@ -924,6 +926,13 @@ public class SettleMod {
                         if (companion == null || companionPerson == null || !companionPerson.alive) {
                             clearLifeAction(worker);
                             return LifeSimulation.Outcome.BLOCKED;
+                        }
+                        if (ignored.lod() == LifeSimulation.LOD.ACTIVE) {
+                            double dx = worker.x - companion.x, dz = worker.z - companion.z;
+                            if (dx * dx + dz * dz > 16.0) {
+                                clearLifeAction(worker);
+                                return LifeSimulation.Outcome.BLOCKED;
+                            }
                         }
                         int opinion = dev.worldforge.settle.ResidentSocial.interactionDelta(character, companionPerson);
                         dev.worldforge.settle.ResidentSocial.socialize(character, companionPerson, opinion);
