@@ -145,60 +145,186 @@ public final class WorldSimulationAcceptanceTest {
         Defs settlementDefs = loadSettlementDefs();
         Settlement north = createSettlement("acceptance_north", settlementDefs);
         Settlement south = createSettlement("acceptance_south", settlementDefs);
-        check(north.buildings.size() == 3 && south.buildings.size() == 3,
-                "two settlements start with housing, food and wood production plans");
+        check(north.buildings.size() == 4 && south.buildings.size() == 4,
+                "two settlements start housing, food, wood production and market plans");
 
         WarEngine wars = new WarEngine(new TitleEditor(map.titles));
         wars.loadCasusBelli(Files.readString(Path.of("wf-war/src/main/resources/data/wf_war/wf_war/base.json")));
-        List<String> realms = new ArrayList<>();
-        for (var realm : map.titles.realmList()) if (realm.overlordId == null && !realm.titleKeys.isEmpty()) realms.add(realm.id);
-        check(realms.size() >= 2, "independent political actors are available for campaign simulation");
-        War activeWar = null;
-        if (realms.size() >= 2) activeWar = wars.declare(realms.get(0), realms.get(1), "humiliation", List.of());
+        List<String> realmIds = new ArrayList<>();
+        for (var realm : map.titles.realmList())
+            if (realm.overlordId == null && !realm.titleKeys.isEmpty()) realmIds.add(realm.id);
+        check(realmIds.size() >= 2, "independent political actors are available for campaign simulation");
+        String attackerRealm = realmIds.get(0), defenderRealm = realmIds.get(1);
+        War activeWar = wars.declare(attackerRealm, defenderRealm, "humiliation", List.of());
+        WarEngine[] warRef = {wars};
 
-        CampaignOperation operation = new CampaignOperation("acceptance-operation", "acceptance",
+        RealmDefs realmDefs = loadRealmDefs();
+        StatApi.resetForTests();
+        Realms realmDevelopment = new Realms(realmDefs);
+        realmDevelopment.hooks = new Realms.Hooks() {
+            @Override public int provinces(String id) {
+                var realm = map.titles.realms.get(id);
+                return realm == null ? 1 : Math.max(1, realm.titleKeys.size());
+            }
+            @Override public int prestige(String id) { return 0; }
+            @Override public Map<String, Double> races(String id) { return Map.of("human", 1.0); }
+            @Override public Map<String, Double> terrain(String id) { return Map.of("plains", 1.0); }
+            @Override public int today() { return (int) clock.dayNumber(); }
+        };
+        realmDevelopment.publish();
+
+        TradeDefs tradeDefs = loadTradeDefs();
+        DemoApi.resetForTests();
+        DemoApi.registerTerrain("acceptance", id -> Map.of("plains", 1.0));
+        DemoApi.registerRaces("acceptance", id -> Map.of("human", 1.0));
+        Trade trade = new Trade(tradeDefs);
+        Trade.Hooks tradeHooks = new Trade.Hooks() {
+            @Override public List<String> neighbors(String id) {
+                if (id.equals(attackerRealm)) return List.of(defenderRealm);
+                if (id.equals(defenderRealm)) return List.of(attackerRealm);
+                return List.of();
+            }
+            @Override public double distance(String from, String to) { return 3; }
+            @Override public boolean atWar(String from, String to) { return warRef[0].warBetween(from, to) != null; }
+            @Override public double danger(String from, String to) { return 0; }
+            @Override public int season() { return clock.seasonIndex(); }
+        };
+        trade.hooks = tradeHooks;
+        trade.rng = new Random(20261111L);
+        for (String id : realmIds) trade.market(id).autoTrade = false;
+        trade.market(attackerRealm).stock.put("grain", 1000.0);
+        trade.market(defenderRealm).stock.put("grain", 1000.0);
+
+        Squads squads = new Squads();
+        OperationalSupply.Store supply = new OperationalSupply.Store();
+        List<String> squadIds = new ArrayList<>();
+        String attackerArmyOwner = "army:" + attackerRealm;
+        String defenderArmyOwner = "army:" + defenderRealm;
+        for (String realm : List.of(attackerRealm, defenderRealm)) {
+            String owner = "army:" + realm;
+            for (int group = 0; group < 25; group++) {
+                List<String> members = new ArrayList<>();
+                for (int unit = 0; unit < 40; unit++) members.add(realm + "-troop-" + group + "-" + unit);
+                String squadId = "army-" + realm + "-" + group;
+                Squads.Squad squad = squads.createWithId(squadId, owner, "Сотня " + (group + 1), realm,
+                        group * 3.0, realm.equals(attackerRealm) ? 0 : 120, members);
+                squad.formation = group % 2 == 0 ? Formations.Type.LINE : Formations.Type.BLOCK;
+                if (group == 0) squads.appointLeader(squadId, father.id, true, 4);
+                squads.command(squadId, Squads.Order.move(group * 3.0, realm.equals(attackerRealm) ? 80 : 40), false);
+                squadIds.add(squadId);
+            }
+        }
+        check(squads.of(attackerArmyOwner).size() == 25 && squads.of(defenderArmyOwner).size() == 25
+                        && soldiers(squads, attackerArmyOwner) == 1000 && soldiers(squads, defenderArmyOwner) == 1000,
+                "two canonical 1000-soldier armies are deployed as 50 commanded squads");
+
+        CampaignOperation operation = new CampaignOperation("acceptance-operation", attackerArmyOwner,
                 CampaignOperation.Objective.DEFEND, 128, 64);
-        check(operation.assign("acceptance-squad", "acceptance") && operation.start()
+        check(operation.assign(squadIds.get(0), attackerArmyOwner) && operation.start()
                 && operation.advance(0.9) && operation.engage() && operation.complete("domain-scenario"),
-                "campaign operation executes its complete domain lifecycle");
+                "campaign operation executes against a real persisted squad identity");
 
         int armySlotsA = Formations.slots(Formations.Type.LINE, 1000, 1.5).size();
         int armySlotsB = Formations.slots(Formations.Type.BLOCK, 1000, 1.5).size();
         check(armySlotsA == 1000 && armySlotsB == 1000,
                 "formation geometry scales to 1000 slots on each side");
         report.put("formation_slots_per_side", 1000);
+        report.put("military_squads_initial", squads.all().size());
+        report.put("military_initial_strength_per_side", 1000);
         report.put("physical_1000v1000_battle", "NOT_EXECUTED_MINECRAFT_RUNTIME_REQUIRED");
 
+        boolean blockedTradeDuringWar = false;
+        int caravanId = -1;
         int snapshots = 0;
+        Map<String, Settlement> cities = new LinkedHashMap<>();
+        cities.put(north.id, north);
+        cities.put(south.id, south);
         for (int day = 1; day <= 1000; day++) {
             clock.advance(GameClock.TICKS_PER_DAY);
             int year = clock.year();
             PopulationSimulation.advance(people, 1, year);
             if (day % 365 == 0) ResidentLifeEvents.yearly(people, year);
+            for (String realm : realmIds) realmDevelopment.autoDevelop(realm, day);
+
             long worldMinute = (long) day * 1440L;
             north.setWorldCalendar(worldMinute, year);
             south.setWorldCalendar(worldMinute, year);
             north.tick(60);
             south.tick(60);
-            wars.tick(1);
 
+            for (String squadId : squadIds) {
+                Squads.Squad squad = squads.get(squadId);
+                if (squad == null) continue;
+                if (day == 2) {
+                    int losses = squad.owner.equals(attackerArmyOwner) ? 2 : 1;
+                    for (int i = 0; i < losses && !squad.members.isEmpty(); i++)
+                        squads.remove(squad.members.get(squad.members.size() - 1));
+                    squad = squads.get(squadId);
+                }
+                int alive = squad.members.size();
+                boolean enemiesNear = day == 2;
+                double lostNow = day == 2 ? (squad.owner.equals(attackerArmyOwner) ? 2.0 : 1.0) / 40.0 : 0;
+                squad.morale = Morale.step(squad.morale, alive / 40.0, lostNow,
+                        enemiesNear ? 1.1 : 0, !squad.leaderCharacterId.isBlank(), enemiesNear, 1);
+                squad.routed = Morale.routed(squad.routed, squad.morale, enemiesNear);
+                double rationUse = day >= 50 && day < 60 ? alive * 0.5 : alive;
+                supply.advance(squadId, alive, 1, alive, rationUse, day);
+            }
+
+            wars.tick(1);
+            if (day == 1) {
+                trade.tick(day, realmIds);
+                blockedTradeDuringWar = trade.dispatch("m:" + attackerRealm, attackerRealm,
+                        defenderRealm, "grain", 5, 2, day) == null;
+            } else {
+                trade.tick(day, realmIds);
+            }
             if (activeWar != null && day == 2 && activeWar.active) {
                 wars.battle(activeWar.id, War.Side.ATTACKER, 20, "acceptance-domain-battle");
                 wars.offerPeace(activeWar.id, activeWar.attacker, true);
                 wars.acceptPeace(activeWar.id, activeWar.defender);
+            }
+            if (day == 3) {
+                Trade.Caravan caravan = trade.dispatch("m:" + attackerRealm, attackerRealm,
+                        defenderRealm, "grain", 5, 2, day);
+                if (caravan != null) caravanId = caravan.id;
             }
 
             if (day % 250 == 0) {
                 people = restorePeople(people);
                 north = Settlement.fromJson(north.toJson(), settlementDefs);
                 south = Settlement.fromJson(south.toJson(), settlementDefs);
+                cities.clear();
+                cities.put(north.id, north);
+                cities.put(south.id, south);
                 clock.load(clock.toJson());
-                WarEngine restored = new WarEngine(new TitleEditor(map.titles));
-                restored.loadCasusBelli(Files.readString(Path.of("wf-war/src/main/resources/data/wf_war/wf_war/base.json")));
-                restored.fromJson(wars.toJson());
-                wars = restored;
+
+                WarEngine restoredWar = new WarEngine(new TitleEditor(map.titles));
+                restoredWar.loadCasusBelli(Files.readString(Path.of("wf-war/src/main/resources/data/wf_war/wf_war/base.json")));
+                restoredWar.fromJson(wars.toJson());
+                wars = restoredWar;
+                warRef[0] = wars;
+
+                Realms restoredRealms = new Realms(realmDefs);
+                restoredRealms.hooks = realmDevelopment.hooks;
+                restoredRealms.publish();
+                restoredRealms.fromJson(realmDevelopment.toJson());
+                realmDevelopment = restoredRealms;
+
+                Trade restoredTrade = new Trade(tradeDefs);
+                restoredTrade.hooks = tradeHooks;
+                restoredTrade.rng = new Random(20261111L);
+                restoredTrade.fromJson(trade.toJson());
+                trade = restoredTrade;
+
+                Squads restoredSquads = new Squads();
+                restoredSquads.fromJson(squads.toJson());
+                squads = restoredSquads;
+                OperationalSupply.Store restoredSupply = new OperationalSupply.Store();
+                restoredSupply.fromJson(supply.toJson());
+                supply = restoredSupply;
                 snapshots++;
-                check(clock.dayNumber() == day, "day " + day + " checkpoint round-trips shared clock and domain saves");
+                check(clock.dayNumber() == day, "day " + day + " checkpoint round-trips all campaign domains");
             }
         }
 
@@ -209,6 +335,17 @@ public final class WorldSimulationAcceptanceTest {
         check(people.size() > 0 && people.all().stream().allMatch(c -> c.id != null && !c.id.isBlank()),
                 "canonical population remains addressable after long simulation and restores");
         check(snapshots == 4, "four cross-domain save/restore checkpoints completed");
+        check(blockedTradeDuringWar, "diplomatic war state blocks cross-realm caravan dispatch");
+        Trade.Caravan caravan = caravanId < 0 ? null : trade.caravans.get(caravanId);
+        check(caravan != null && !caravan.status.equals("в пути"),
+                "trade caravan resumes after peace and completes its route");
+        long developedRealms = realmIds.stream().filter(id -> !realmDevelopment.state(id).gov.isBlank()).count();
+        check(developedRealms > 0, "realm AI develops government state through the shared campaign calendar");
+        check(squads.all().size() == 50, "50 military squads survive campaign save/restore");
+        check(soldiers(squads, attackerArmyOwner) == 950 && soldiers(squads, defenderArmyOwner) == 975,
+                "abstract 1000v1000 campaign battle applies deterministic casualties to both armies");
+        check(squadIds.stream().allMatch(id -> supply.state(id).readiness > 0.9),
+                "field supply recovers readiness after a deterministic shortage window");
 
         report.put("simulation_days", clock.dayNumber());
         report.put("simulation_year", clock.year());
@@ -216,6 +353,13 @@ public final class WorldSimulationAcceptanceTest {
         report.put("north_completed_buildings", countCompleted(north));
         report.put("south_completed_buildings", countCompleted(south));
         report.put("war_records", wars.wars.size());
+        report.put("trade_markets", trade.markets.size());
+        report.put("trade_caravan_id", caravanId);
+        report.put("trade_caravan_status", caravan == null ? "NOT_CREATED" : caravan.status);
+        report.put("realm_governments_developed", developedRealms);
+        report.put("military_squads", squads.all().size());
+        report.put("military_survivors_attacker", soldiers(squads, attackerArmyOwner));
+        report.put("military_survivors_defender", soldiers(squads, defenderArmyOwner));
         report.put("save_restore_checkpoints", snapshots);
         report.put("failures", failures);
         report.put("elapsed_ms", (System.nanoTime() - started) / 1_000_000L);
