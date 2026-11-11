@@ -145,8 +145,10 @@ public class WarTest {
         ok(!r1.ok && r1.message.contains("полномочий"), "чужак не может действовать от государства: " + r1.message);
         ActionResult r2 = WorldForgeApi.run("war_declare", new ActionContext(ed, "Лорд Тест", false, B, 0, List.of(A, "humiliation")));
         ok(r2.ok, "правитель объявляет войну: " + r2.message);
+        int warCountBeforeReplay = e.wars.size();
         ActionResult r3 = WorldForgeApi.run("war_declare", new ActionContext(ed, "Лорд Тест", false, B, 0, List.of(A, "humiliation")));
-        ok(!r3.ok, "повтор отклонён сообщением, а не исключением: " + r3.message);
+        ok(r3.ok && e.wars.size() == warCountBeforeReplay,
+                "повтор одного политического requestId возвращает прежний результат без второй войны: " + r3.message);
         ok(WorldForgeApi.actionsJson().contains("war_peace_white"), "действия видны клиентам");
 
         // --- предпросмотр, мнение, статусы, договоры, история (чистый движок на тех же данных)

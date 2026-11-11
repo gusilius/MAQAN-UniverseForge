@@ -106,7 +106,16 @@ public final class WarActions {
             WarEngine e = ENGINE == null ? null : ENGINE.apply(ctx.editor);
             if (e == null) return ActionResult.fail("Движок войн не запущен");
             try {
-                ActionResult result = body.run(e, ctx);
+                dev.worldforge.mod.api.ActionContext effective = ctx;
+                if (ctx.requestId == null || ctx.requestId.isBlank()) {
+                    String legacyPayload = dev.worldforge.mod.Json.write(java.util.Arrays.asList(
+                            id, ctx.actor, ctx.realmId, e.day, ctx.args));
+                    String legacyRequestId = "legacy-war:" + java.util.UUID.nameUUIDFromBytes(
+                            legacyPayload.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    effective = new dev.worldforge.mod.api.ActionContext(ctx.editor, ctx.actor, ctx.operator,
+                            ctx.realmId, ctx.titleId, ctx.args, legacyRequestId);
+                }
+                ActionResult result = body.run(e, effective);
                 if (!result.ok) return result;
                 PersistenceBridge bridge = persistenceBridge;
                 if (bridge != null && !bridge.persist())
