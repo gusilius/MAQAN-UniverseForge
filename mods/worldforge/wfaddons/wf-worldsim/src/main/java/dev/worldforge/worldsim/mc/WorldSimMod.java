@@ -492,6 +492,14 @@ public final class WorldSimMod {
             int wanted = Math.max(1, action.get("count").getAsInt());
             for (MapData map : WorldForgeMod.loadedMaps().values()) {
                 if (map.titles == null || !map.titles.realms.containsKey(realm)) continue;
+                ArmyEngine army = ArmyMod.armies(map);
+                // A prepared or completed army-domain operation is authoritative. Resume it
+                // before checking current barracks staffing or levy availability: those may
+                // have changed after the original action but must not block crash recovery.
+                if (army.hasPendingRecruitment(requestId) || army.hasArmyActionReceipt(requestId)) {
+                    army.resumeRecruitmentWithPersistence(requestId);
+                    return true;
+                }
                 Colony trainingColony = SettleMod.COLONIES.values().stream()
                         .filter(c -> c != null && c.s != null && realm.equals(SettleMod.realmOf(c)))
                         .filter(c -> c.s.buildings.stream().anyMatch(b -> "barracks".equals(b.def.id)
@@ -499,14 +507,11 @@ public final class WorldSimMod {
                                 && c.s.assigned(b.uid).stream().anyMatch(worker -> worker.lifeAction.isBlank() && "trainer".equals(worker.workRole()))))
                         .findFirst().orElse(null);
                 if (trainingColony == null) return false;
-                ArmyEngine army = ArmyMod.armies(map);
                 UnitType levy = army.types.values().stream().filter(unit -> unit.levy)
                         .sorted(Comparator.comparing(unit -> unit.id)).findFirst().orElse(null);
                 int count = (int) Math.min(wanted, Math.floor(army.pool(realm)));
                 if (levy == null || count <= 0) return false;
-                if (army.hasPendingRecruitment(requestId) || army.hasArmyActionReceipt(requestId))
-                    army.resumeRecruitmentWithPersistence(requestId);
-                else army.recruitWithPersistence(requestId, "raise", realm, levy.id, count);
+                army.recruitWithPersistence(requestId, "raise", realm, levy.id, count);
                 return true;
             }
             return false;
