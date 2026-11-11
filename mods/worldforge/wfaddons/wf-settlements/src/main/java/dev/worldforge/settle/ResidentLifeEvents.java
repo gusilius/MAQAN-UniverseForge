@@ -46,10 +46,10 @@ public final class ResidentLifeEvents {
             child.traits.add("curious");
             child.props.put("family.father_name", father.name);
             child.props.put("family.mother_name", mother.name);
-            ResidentSocial.adjust(father, child.id, 35);
-            ResidentSocial.adjust(mother, child.id, 35);
-            ResidentSocial.adjust(child, father.id, 35);
-            ResidentSocial.adjust(child, mother.id, 35);
+            ResidentSocial.adjust(father, child.globalId, 35);
+            ResidentSocial.adjust(mother, child.globalId, 35);
+            ResidentSocial.adjust(child, father.globalId, 35);
+            ResidentSocial.adjust(child, mother.globalId, 35);
             mother.props.put("family.last_birth_year", year);
             father.props.put("family.last_birth_year", year);
             mother.props.put("family.last_event", "child-born:" + child.id);
@@ -63,7 +63,7 @@ public final class ResidentLifeEvents {
                     || person.id.compareTo(person.spouse) >= 0) continue;
             Character spouse = registry.get(person.spouse);
             if (spouse == null || !spouse.alive || !person.id.equals(spouse.spouse)) continue;
-            int affinity = Math.min(ResidentSocial.score(person, spouse.id), ResidentSocial.score(spouse, person.id));
+            int affinity = Math.min(ResidentSocial.score(person, spouse.globalId), ResidentSocial.score(spouse, person.globalId));
             if (year <= number(person.props.get("family.marital_review_year"), 0)) continue;
             person.props.put("family.marital_review_year", year);
             spouse.props.put("family.marital_review_year", year);
@@ -91,7 +91,7 @@ public final class ResidentLifeEvents {
                 Character second = people.get(j);
                 if (!second.alive || second.spouse != null && !second.spouse.isBlank()
                         || PopulationSimulation.age(second, year) < 18 || closeFamily(registry, first, second)) continue;
-                int affinity = Math.min(ResidentSocial.score(first, second.id), ResidentSocial.score(second, first.id));
+                int affinity = Math.min(ResidentSocial.score(first, second.globalId), ResidentSocial.score(second, first.globalId));
                 String firstDating = string(first.props.get("family.dating"));
                 String secondDating = string(second.props.get("family.dating"));
                 boolean mutualDating = second.id.equals(firstDating) && first.id.equals(secondDating);
@@ -155,7 +155,7 @@ public final class ResidentLifeEvents {
             boolean motherAlive = mother != null && mother.alive;
             Character guardian = null;
             if (fatherAlive && motherAlive) {
-                guardian = ResidentSocial.score(child, father.id) >= ResidentSocial.score(child, mother.id) ? father : mother;
+                guardian = ResidentSocial.score(child, father.globalId) >= ResidentSocial.score(child, mother.globalId) ? father : mother;
             } else if (fatherAlive) guardian = father;
             else if (motherAlive) guardian = mother;
             else guardian = findKinGuardian(registry, child, year);
@@ -172,8 +172,8 @@ public final class ResidentLifeEvents {
                 child.props.put("family.education_level", Math.min(100, education + progress));
                 child.props.put("family.education_last_year", year);
                 if (guardian != null) {
-                    ResidentSocial.adjust(child, guardian.id, 1);
-                    ResidentSocial.adjust(guardian, child.id, 1);
+                    ResidentSocial.adjust(child, guardian.globalId, 1);
+                    ResidentSocial.adjust(guardian, child.globalId, 1);
                     // Learning is attached to the child's canonical Character skill ledger.
                     // Guardians can mentor only skills they actually possess; progress is slow
                     // and age-scaled so education influences adult capability without cloning ranks.
