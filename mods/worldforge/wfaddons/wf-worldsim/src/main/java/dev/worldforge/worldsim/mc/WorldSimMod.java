@@ -152,23 +152,21 @@ public final class WorldSimMod {
                                     + ", realms=" + WorldForgeMod.loadedMaps().values().stream().filter(m -> m.titles != null)
                                     .mapToInt(m -> m.titles.realmList().size()).sum()
                                     + ", settlements=" + SettleMod.COLONIES.size()
-                                    + ", recorded_events=" + journal.size()
+                                    + ", proposal_records=" + journal.size()
+                                    + ", world_events=" + WorldForgeApi.events().size()
                                     + ", day=" + WorldForgeApi.clock().dayNumber()), false);
                     return 1;
                 }))
                 .then(Commands.literal("history")
                         .then(Commands.argument("count", IntegerArgumentType.integer(1, 20)).executes(context -> {
-                            int count = Math.min(IntegerArgumentType.getInteger(context, "count"), journal.size());
-                            int start = journal.size() - count;
-                            for (int i = start; i < journal.size(); i++) {
-                                JsonObject item = GSON.fromJson(journal.get(i), JsonObject.class);
-                                String result = item.get("applied").getAsBoolean() ? "применено" : "отклонено";
-                                String line = "День " + item.get("day").getAsLong() + ": "
-                                        + item.get("type").getAsString() + " — " + result
-                                        + (item.has("reason") ? "; " + item.get("reason").getAsString() : "");
+                                int count = Math.min(IntegerArgumentType.getInteger(context, "count"), WorldForgeApi.events().size());
+                            var recent = WorldForgeApi.events().recent(count);
+                            for (var item : recent) {
+                                String line = "День " + Math.max(0L, item.time / 1440L) + ": "
+                                        + item.category.label + " — " + item.text;
                                 context.getSource().sendSuccess(() -> Component.literal(line), false);
                             }
-                            return count;
+                            return recent.size();
                         }))));
     }
 
@@ -405,6 +403,30 @@ public final class WorldSimMod {
         if (action.has("second")) event.add("second", action.get("second"));
         journal.add(GSON.toJson(event));
         while (journal.size() > 10000) journal.remove(0);
+
+        String type = action.has("type") ? action.get("type").getAsString() : "unknown";
+        String outcome = applied ? "Исполнено" : "Отклонено исполнительной системой";
+        String subject = switch (type) {
+            case "declare_war" -> "Объявление войны " + action.get("attacker").getAsString()
+                    + " против " + action.get("defender").getAsString();
+            case "dynastic_marriage" -> "Династический брак " + action.get("first").getAsString()
+                    + " и " + action.get("second").getAsString();
+            case "build" -> "Строительный план " + action.get("building").getAsString()
+                    + " в поселении " + action.get("settlement").getAsString();
+            case "recruit" -> "Набор войск в государстве " + action.get("realm").getAsString();
+            case "reassign_profession" -> "Изменение профессии в поселении " + action.get("settlement").getAsString();
+            default -> "Решение автономного мира: " + type;
+        };
+        List<String> affectedRealms = new ArrayList<>();
+        for (String key : List.of("attacker", "defender", "realm")) {
+            if (action.has(key) && !action.get(key).isJsonNull()) affectedRealms.add(action.get(key).getAsString());
+        }
+        String reason = action.has("reason") ? action.get("reason").getAsString() : "";
+        WorldForgeApi.postEvent(type.equals("declare_war") ? "war"
+                        : (type.equals("dynastic_marriage") ? "people"
+                        : (type.equals("build") || type.equals("reassign_profession") ? "settlement" : "diplomacy")),
+                outcome + ": " + subject + (reason.isBlank() ? "" : ". Причина: " + reason),
+                affectedRealms, Math.max(0L, day * 1440L));
     }
 
     private static Path stateFile(MinecraftServer server) {
@@ -421,6 +443,7 @@ public final class WorldSimMod {
             JsonArray events = new JsonArray();
             for (String line : journal) events.add(GSON.fromJson(line, JsonObject.class));
             state.add("events", events);
+            state.add("shared_event_log", com.google.gson.JsonParser.parseString(WorldForgeApi.events().toJson()));
             Path target = stateFile(server);
             Files.createDirectories(target.getParent());
             Path temp = target.resolveSibling(target.getFileName() + ".tmp");
@@ -431,8 +454,10 @@ public final class WorldSimMod {
             } catch (java.nio.file.AtomicMoveNotSupportedException unsupported) {
                 Files.move(temp, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             }
+            return true;
         } catch (Exception error) {
             LOGGER.error("wf_worldsim: unable to persist simulation journal; proposals remain idempotent", error);
+            return false;
         }
     }
 
@@ -452,7 +477,10 @@ public final class WorldSimMod {
             journal.clear();
             if (state.has("events") && state.get("events").isJsonArray())
                 for (var event : state.getAsJsonArray("events")) if (event.isJsonObject()) journal.add(GSON.toJson(event));
-            LOGGER.info("wf_worldsim: restored {} event records and {} settlement cooldowns", journal.size(), lastProjectDay.size());
+            if (state.has("shared_event_log") && state.get("shared_event_log").isJsonObject())
+                WorldForgeApi.events().fromJson(GSON.toJson(state.get("shared_event_log")));
+            LOGGER.info("wf_worldsim: restored {} proposal records, {} shared world events and {} settlement cooldowns",
+                    journal.size(), WorldForgeApi.events().size(), lastProjectDay.size());
         } catch (Exception error) {
             LOGGER.error("wf_worldsim: simulation journal is unreadable; no old data will be overwritten until inspected", error);
         }
