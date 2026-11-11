@@ -112,9 +112,8 @@ public final class ArmyActions {
         if (!persistence.persist())
             throw new TitleEditor.EditException("Не удалось сохранить намерение набора армии; ресурсы не изменены");
         Army result = engine.completePendingRecruitment(operationId);
-        // persistActionMutation saves TreasuryLedger first, then the army receipt and resulting roster.
-        if (!ArmyMod.persistActionMutation())
-            throw new TitleEditor.EditException("Набор выполнен в памяти, но не подтверждён сохранением; восстановление будет выполнено после перезапуска");
+        // The enclosing action wrapper checkpoints treasury and army state once.
+        // If that checkpoint fails, the persisted intent and treasury reference make restart replay safe.
         return result;
     }
 
@@ -127,7 +126,7 @@ public final class ArmyActions {
             try {
                 ActionResult result = body.run(e, ctx);
                 if (!result.ok) return result;
-                if (!ArmyMod.persistActionMutation())
+                if (!persistActionMutation())
                     return ActionResult.fail("Стратегический приказ применён в памяти, но его сохранение не подтверждено; дальнейшие приказы заблокированы до восстановления");
                 return result;
             } catch (TitleEditor.EditException ex) {
