@@ -185,6 +185,36 @@ public class ArmyTest {
                         && Math.abs(legacyReload.gold("legacy-army-realm") - 17.0) < 1e-8,
                 "legacy army save upgrades without persisting or importing its gold balance twice");
 
+        // Physical troop return -> strategic roster uses one durable operation receipt per entity UUID.
+        ArmyEngine rosterTx = fresh(a[0], ids);
+        rosterTx.ai = false;
+        Army rosterArmy = rosterTx.raise(ids[0], "levy", 20);
+        int rosterBefore = rosterArmy.count("levy");
+        String returnOperation = "troop-return:11111111-1111-4111-8111-111111111111";
+        ok(rosterTx.applyRosterDeltaOnce(returnOperation, rosterArmy.id, Map.of("levy", 10))
+                        && rosterArmy.count("levy") == rosterBefore + 10,
+                "first physical-troop return applies its manpower delta");
+        ok(!rosterTx.applyRosterDeltaOnce(returnOperation, rosterArmy.id, Map.of("levy", 10))
+                        && rosterArmy.count("levy") == rosterBefore + 10,
+                "replaying the same troop return does not duplicate manpower");
+        boolean rosterCollision = false;
+        try { rosterTx.applyRosterDeltaOnce(returnOperation, rosterArmy.id, Map.of("levy", 20)); }
+        catch (IllegalStateException expected) { rosterCollision = true; }
+        ok(rosterCollision && rosterArmy.count("levy") == rosterBefore + 10,
+                "reusing a troop return id with a different payload fails closed");
+        boolean rosterUnderflow = false;
+        try { rosterTx.applyRosterDeltaOnce("troop-return:22222222-2222-4222-8222-222222222222",
+                rosterArmy.id, Map.of("levy", -1000)); }
+        catch (IllegalArgumentException expected) { rosterUnderflow = true; }
+        ok(rosterUnderflow && rosterArmy.count("levy") == rosterBefore + 10,
+                "invalid roster deltas are rejected before any partial manpower mutation");
+        String rosterSnapshot = rosterTx.toJson();
+        ArmyEngine rosterReload = new ArmyEngine(rosterTx.war);
+        rosterReload.fromJson(rosterSnapshot);
+        ok(!rosterReload.applyRosterDeltaOnce(returnOperation, rosterArmy.id, Map.of("levy", 10))
+                        && rosterReload.army(rosterArmy.id).count("levy") == rosterBefore + 10,
+                "troop return idempotency receipts survive army save/reload");
+
         System.out.println(fails == 0 ? "ALL OK" : fails + " FAILED");
         if (fails > 0) System.exit(1);
     }
