@@ -230,7 +230,10 @@ public final class CourtSim {
         if (!c.alive) return;
         String realm = realmOf(c);
         boolean wasRuler = !realm.isEmpty() && ruler(realm) == c;
-        String law = realm.isEmpty() ? "primogeniture" : String.valueOf(d.realms.get(realm) == null ? "primogeniture" : d.realms.get(realm).props.getOrDefault("succession", "primogeniture"));
+        TitleData.Realm politicalRealm = realm.isEmpty() ? null : d.realms.get(realm);
+        String law = politicalRealm == null ? "primogeniture" : String.valueOf(
+                politicalRealm.props.getOrDefault("politics.succession_law",
+                        politicalRealm.props.getOrDefault("succession", "primogeniture")));
         if (wasRuler) {
             List<Succession.Result> res = Succession.onDeath(reg, defs, d, ed, names, seed + day, c.id, year(), law);
             for (Succession.Result s : res) say(c.name + " (" + realmName(realm) + ") " + cause + ". Наследует " + s.heir.name + (s.usurper ? " (узурпатор)" : ""));
