@@ -181,6 +181,35 @@ public final class PopulationSimulationTest {
                         && PopulationSimulation.need(blocked, Need.HUNGER) == 90,
                 "unavailable resources and blocked actions do not grant free need relief");
 
+        Character delayed = registry.create("Delayed", "", "north", "m", 280);
+        PopulationSimulation.setNeed(delayed, Need.HUNGER, 90);
+        LifeSimulation.Decision travelling = LifeSimulation.tick(delayed, activeMorning,
+                (person, action, context) -> LifeSimulation.Outcome.IN_PROGRESS);
+        ok(travelling.outcome() == LifeSimulation.Outcome.IN_PROGRESS
+                        && PopulationSimulation.need(delayed, Need.HUNGER) == 90
+                        && "EAT".equals(delayed.props.get("population.ai.pending_action")),
+                "a planned daily-life action remains pending and grants no need relief before completion");
+        LifeSimulation.Decision completed = LifeSimulation.tick(delayed,
+                new LifeSimulation.Context(421, true, true, true, true, true, true, true, false, LifeSimulation.LOD.ACTIVE),
+                (person, action, context) -> LifeSimulation.Outcome.SUCCESS);
+        ok(completed.outcome() == LifeSimulation.Outcome.SUCCESS
+                        && PopulationSimulation.need(delayed, Need.HUNGER) == 20
+                        && !delayed.props.containsKey("population.ai.pending_action")
+                        && !LifeSimulation.completePending(delayed),
+                "authoritative completion applies pending effects exactly once and is idempotent");
+
+        Character interrupted = registry.create("Interrupted", "", "north", "m", 280);
+        PopulationSimulation.setNeed(interrupted, Need.HUNGER, 90);
+        LifeSimulation.tick(interrupted, activeMorning,
+                (person, action, context) -> LifeSimulation.Outcome.IN_PROGRESS);
+        LifeSimulation.Decision interruptedDecision = LifeSimulation.tick(interrupted,
+                new LifeSimulation.Context(421, true, true, true, true, true, true, true, false, LifeSimulation.LOD.ACTIVE),
+                (person, action, context) -> LifeSimulation.Outcome.BLOCKED);
+        ok(interruptedDecision.outcome() == LifeSimulation.Outcome.BLOCKED
+                        && PopulationSimulation.need(interrupted, Need.HUNGER) == 90
+                        && !interrupted.props.containsKey("population.ai.pending_action"),
+                "interrupted daily-life actions are cancelled without granting effects");
+
         Character fallbackNpc = registry.create("Tarin", "", "north", "m", 280);
         PopulationSimulation.setNeed(fallbackNpc, Need.HUNGER, 90);
         PopulationSimulation.setNeed(fallbackNpc, Need.REST, 65);
