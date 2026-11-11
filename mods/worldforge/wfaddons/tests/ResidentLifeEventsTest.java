@@ -97,9 +97,8 @@ public final class ResidentLifeEventsTest {
 
         CharacterRegistry mentorshipRegistry = new CharacterRegistry();
         Character mentor = mentorshipRegistry.create("Мастер", "", "north", "m", 1970);
-        Character pupil = mentorshipRegistry.create("Ученик", "", "north", "f", 2000);
-        mentorshipRegistry.addChild(mentor, mentorshipRegistry.create("Родитель", "", "north", "f", 1971),
-                "Неиспользуемый ребёнок", "m", 2010);
+        Character otherParent = mentorshipRegistry.create("Родитель", "", "north", "f", 1971);
+        Character pupil = mentorshipRegistry.addChild(mentor, otherParent, "Ученик", "f", 2000);
         PopulationSimulation.setSkillRank(mentor, "farming", 4);
         ResidentLifeEvents.yearly(mentorshipRegistry, 2010);
         long firstMentorshipXp = PopulationSimulation.trainingXp(pupil, "farming");
