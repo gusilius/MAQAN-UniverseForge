@@ -2,7 +2,7 @@ name: MAQAN UniverseForge — Windows x64
 
 on:
   push:
-    branches: [main, integration/maqan-unified, codex/blocker3-action-execution-audit, codex/blocker4-ownership-inventory]
+    branches: [main, integration/maqan-unified, codex/blocker3-action-execution-audit, codex/blocker4-ownership-inventory, feature/autonomous-world-simulation-engine]
     paths:
       - "mods/**"
       - "shared/**"
@@ -100,10 +100,15 @@ jobs:
   worldforge-addons:
     name: WorldForge addons (Windows x64)
     runs-on: windows-latest
-    needs: worldforge-core
+    needs: [worldforge-core, worldforge-native]
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+      - name: Download native WorldForge simulation core
+        uses: actions/download-artifact@v4
+        with:
+          name: worldforge-worldsim-windows-x64
+          path: mods/worldforge/wfaddons/wf-worldsim/src/main/resources/maqan-native-windows-x86_64
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -184,6 +189,18 @@ jobs:
       - name: Build WorldForge native core
         working-directory: mods/worldforge/native/worldforge-sim
         run: cargo build --release --target x86_64-pc-windows-msvc
+      - name: Test autonomous WorldForge decision engine
+        working-directory: mods/worldforge/native/worldforge-worldsim
+        run: cargo test --target x86_64-pc-windows-msvc
+      - name: Build autonomous WorldForge decision engine
+        working-directory: mods/worldforge/native/worldforge-worldsim
+        run: cargo build --release --target x86_64-pc-windows-msvc
+      - uses: actions/upload-artifact@v4
+        with:
+          name: worldforge-worldsim-windows-x64
+          path: mods/worldforge/native/worldforge-worldsim/target/x86_64-pc-windows-msvc/release/worldforge_worldsim.dll
+          if-no-files-found: error
+          retention-days: 30
 
   platform:
     name: MAQAN Platform shell (Windows x64)
