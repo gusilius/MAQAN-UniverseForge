@@ -84,7 +84,10 @@ public final class WorldSimMod {
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server == null) return;
         long day = WorldForgeApi.clock().dayNumber();
-        if (day <= 0 || day % DECISION_INTERVAL_DAYS != 0 || day == lastDecisionDay) return;
+        if (day <= 0 || (lastDecisionDay != Long.MIN_VALUE
+                && day - lastDecisionDay < DECISION_INTERVAL_DAYS)) return;
+        // Compare elapsed game days instead of day % interval: at accelerated speeds
+        // the clock may jump over exact multiples and otherwise starve the coordinator.
         lastDecisionDay = day;
         if (!NativeWorldSimulation.load()) return;
         try {
@@ -414,6 +417,7 @@ public final class WorldSimMod {
             JsonObject cooldowns = new JsonObject();
             lastProjectDay.forEach(cooldowns::addProperty);
             state.add("last_project_day", cooldowns);
+            if (lastDecisionDay != Long.MIN_VALUE) state.addProperty("last_decision_day", lastDecisionDay);
             JsonArray events = new JsonArray();
             for (String line : journal) events.add(GSON.fromJson(line, JsonObject.class));
             state.add("events", events);
@@ -439,6 +443,8 @@ public final class WorldSimMod {
             JsonObject state = GSON.fromJson(Files.readString(file, StandardCharsets.UTF_8), JsonObject.class);
             if (state == null) return;
             lastProjectDay.clear();
+            lastDecisionDay = state.has("last_decision_day")
+                    ? state.get("last_decision_day").getAsLong() : Long.MIN_VALUE;
             if (state.has("last_project_day") && state.get("last_project_day").isJsonObject()) {
                 for (var entry : state.getAsJsonObject("last_project_day").entrySet())
                     lastProjectDay.put(entry.getKey(), entry.getValue().getAsLong());
