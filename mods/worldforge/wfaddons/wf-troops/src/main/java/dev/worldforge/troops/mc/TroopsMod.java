@@ -690,17 +690,19 @@ public class TroopsMod {
         if (ticks % 6000 == 0) save();
     }
 
-    private record SupplyKey(String realm, int armyId, String dimension) {
-        String id() { return realm + ":" + armyId + ":" + dimension; }
-        String accountId() { return "army-supply:" + realm + ":" + armyId + ":" + dimension; }
-        String ownerId() { return "army-supply:" + realm + ":" + armyId; }
+    private record SupplyKey(String realm, int armyId, String worldId, String mapId, String dimension) {
+        String id() { return worldId + ":" + mapId + ":" + realm + ":" + armyId + ":" + dimension; }
+        String accountId() { return "army-supply:" + id(); }
+        String ownerId() { return "army-supply:" + worldId + ":" + mapId + ":" + realm + ":" + armyId; }
     }
 
     /** Uses the saved field-supply state to apply combat/mobility effects when a soldier loads. */
     private static void applySupplyReadiness(TroopEntity troop) {
         if (troop == null || troop.realm == null || troop.realm.isBlank()) return;
         String dimension = troop.level().dimension().location().toString();
-        OperationalSupply.State state = SUPPLY.state(new SupplyKey(troop.realm, troop.armyId, dimension).id());
+        OperationalSupply.State state = SUPPLY.state(new SupplyKey(troop.realm, troop.armyId, WorldForgeMod.worldId().toString(),
+                troop.level() instanceof ServerLevel level && EditorManager.dataFor(level) != null
+                        ? EditorManager.dataFor(level).name : "unmapped:" + dimension, dimension).id());
         troop.setSupplyReadiness(OperationalSupply.combatMultiplier(state),
                 OperationalSupply.movementMultiplier(state));
     }
@@ -724,7 +726,7 @@ public class TroopsMod {
                 PayrollKey army = armyEntry.getKey();
                 String dimension = dimensionEntry.getKey();
                 List<TroopEntity> soldiers = dimensionEntry.getValue();
-                SupplyKey key = new SupplyKey(army.realm(), army.armyId(), dimension);
+                SupplyKey key = new SupplyKey(army.realm(), army.armyId(), army.worldId(), army.mapId(), dimension);
                 OperationalSupply.State supplyState = SUPPLY.state(key.id());
                 if (day <= supplyState.lastProcessedWorldDay) {
                     for (TroopEntity soldier : soldiers) applySupplyReadiness(soldier);
@@ -814,7 +816,7 @@ public class TroopsMod {
     // ---- жалованье ----
     private static final Random RNG = new Random();
 
-    private record PayrollKey(String realm, int armyId) {}
+    private record PayrollKey(String realm, int armyId, String worldId, String mapId) {}
 
     /** Daily payroll is funded through the same realm and army accounts used by Statecraft. */
     private static void payroll() {
@@ -825,8 +827,13 @@ public class TroopsMod {
         TreasuryLedger ledger = WorldForgeMod.treasury();
         Map<PayrollKey, List<TroopEntity>> groups = new LinkedHashMap<>();
         for (TroopEntity troop : LIVE.values()) {
-            if (!troop.isAlive() || troop.realm == null || troop.realm.isBlank()) continue;
-            groups.computeIfAbsent(new PayrollKey(troop.realm, troop.armyId), ignored -> new ArrayList<>()).add(troop);
+            if (!troop.isAlive() || troop.realm == null || troop.realm.isBlank()
+                    || !(troop.level() instanceof ServerLevel troopLevel)) continue;
+            MapData map = EditorManager.dataFor(troopLevel);
+            String worldId = WorldForgeMod.worldId().toString();
+            String mapId = map == null ? "unmapped:" + troopLevel.dimension().location() : map.name;
+            groups.computeIfAbsent(new PayrollKey(troop.realm, troop.armyId, worldId, mapId),
+                    ignored -> new ArrayList<>()).add(troop);
         }
         fieldSupply(groups, days, day, worldMinute);
         if (actionPersistenceBlocked) return;
@@ -840,16 +847,16 @@ public class TroopsMod {
 
             String realmAccount = "realm:" + key.realm();
             ledger.open(realmAccount, key.realm(), "silver", 0);
-            String armyAccount = key.armyId() > 0 ? "army:" + key.armyId() : "army:garrison:" + key.realm();
-            String armyOwner = key.armyId() > 0 ? Integer.toString(key.armyId()) : "garrison:" + key.realm();
+            String armyAccount = key.armyId() > 0 ? "army:" + key.worldId() + ":" + key.mapId() + ":" + key.armyId() : "army:garrison:" + key.worldId() + ":" + key.mapId() + ":" + key.realm();
+            String armyOwner = key.armyId() > 0 ? key.worldId() + ":" + key.mapId() + ":" + key.armyId() : "garrison:" + key.worldId() + ":" + key.mapId() + ":" + key.realm();
             ledger.open(armyAccount, armyOwner, "silver", 0);
 
-            String wageReference = "payroll:" + key.realm() + ":" + key.armyId() + ":" + day;
+            String wageReference = "payroll:" + key.worldId() + ":" + key.mapId() + ":" + key.realm() + ":" + key.armyId() + ":" + day;
             if (ledger.hasDebit(armyAccount, TreasuryLedger.Kind.WAGE, wageReference)) continue;
             double topUp = Math.max(0, costSilver - ledger.balance(armyAccount));
             boolean funded = topUp <= 1e-9 || ledger.transferOnce(
                     realmAccount, armyAccount, topUp, TreasuryLedger.Kind.ARMY_UPKEEP,
-                    "payroll-funding", "payroll-fund:" + key.realm() + ":" + key.armyId() + ":" + day,
+                    "payroll-funding", "payroll-fund:" + key.worldId() + ":" + key.mapId() + ":" + key.realm() + ":" + key.armyId() + ":" + day,
                     worldMinute, "daily military payroll appropriation");
             boolean paid = funded && ledger.withdrawOnce(
                     armyAccount, costSilver, TreasuryLedger.Kind.WAGE,

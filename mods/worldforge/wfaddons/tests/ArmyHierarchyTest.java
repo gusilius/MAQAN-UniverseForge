@@ -26,11 +26,10 @@ public final class ArmyHierarchyTest {
         ArmyHierarchy hierarchy = new ArmyHierarchy();
         hierarchy.ensureArmy(northRef, "Первая армия", "player", "realm-north");
         hierarchy.ensureArmy(southRef, "Вторая армия", "player", "realm-south");
-        hierarchy.ensureArmy(otherWorldRef, "Армия другого мира", "player", "realm-north");
         ArmyHierarchy.Corps vanguard = hierarchy.defaultCorps(northRef);
         ArmyHierarchy.Corps reserve = hierarchy.createCorps(southRef, "Резервный корпус");
         check(hierarchy.army(northRef) != hierarchy.army(southRef)
-                        && hierarchy.army(otherWorldRef) != null && hierarchy.armies().size() == 3,
+                        && hierarchy.armies().size() == 2,
                 "same map-local army ID remains independent across maps and WorldIds");
         check(hierarchy.assignSquad(vanguard.id, first.id, squads)
                         && hierarchy.assignSquad(reserve.id, second.id, squads),
@@ -51,13 +50,18 @@ public final class ArmyHierarchyTest {
         ArmyHierarchy restored = new ArmyHierarchy();
         restored.fromJson(hierarchy.toJson(), world, ignored -> null);
         check(restored.army(northRef) != null && restored.army(southRef) != null
-                        && restored.army(otherWorldRef) != null
                         && restored.corps(vanguard.id) != null
                         && restored.corps(reserve.id).squadIds.contains(second.id)
                         && restored.corpsForSquad(second.id).id.equals(reserve.id),
                 "world/map-scoped army hierarchy and custom squad membership survive save/reload");
         check(restored.army(42) == null,
                 "legacy numeric army lookup fails closed when map-local IDs are ambiguous");
+        ArmyHierarchy foreignWorld = new ArmyHierarchy();
+        foreignWorld.ensureArmy(otherWorldRef, "Армия другого мира", "player", "realm-north");
+        boolean rejectedForeignWorld = false;
+        try { new ArmyHierarchy().fromJson(foreignWorld.toJson(), world, ignored -> null); }
+        catch (IllegalStateException expected) { rejectedForeignWorld = true; }
+        check(rejectedForeignWorld, "loading hierarchy from a different WorldId is rejected");
 
         String legacy = "{\"format\":\"wf-army-hierarchy/1\",\"nextCorps\":2,"
                 + "\"armies\":[{\"id\":7,\"name\":\"Legacy\",\"owner\":\"player\",\"realm\":\"realm-old\",\"commander\":\"\",\"corps\":[]}],"
