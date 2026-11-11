@@ -284,6 +284,15 @@ public class SettleTest {
         ok(graphRestored.nextId() == durableGraph.nextId()
                         && graphRestored.receipts().size() < 10,
                 "долгий цикл добычи/переноса/потребления компактизирует завершённую историю, сохраняя монотонный ID");
+        ResidentTaskGraph stockConsumptionGraph = new ResidentTaskGraph();
+        for (int i = 0; i < 6000; i++) {
+            stockConsumptionGraph.extract(1, 1, "food", 1, i);
+            okGraphDelivery(stockConsumptionGraph.deliver(1, 2, "food", 1, i), 1);
+            okGraphDelivery(stockConsumptionGraph.consumeStock("food", 1), 1);
+        }
+        ok(stockConsumptionGraph.receipts().size() < 10,
+                "long-running stock debits retire consumed provenance without exhausting the active-lot journal");
+
         ResidentTaskGraph activeGraph = new ResidentTaskGraph();
         activeGraph.extract(7, 4, "stone", 3, 1);
         ResidentTaskGraph activeRestored = new ResidentTaskGraph();
