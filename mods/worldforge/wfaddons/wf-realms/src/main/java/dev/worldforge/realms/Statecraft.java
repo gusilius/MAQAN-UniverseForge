@@ -110,6 +110,7 @@ public final class Statecraft {
     private final Map<String, War> wars = new LinkedHashMap<>();
     private final Map<String, InheritanceLaw> inheritanceLaws = new LinkedHashMap<>();
     private long sequence = 1;
+    private int lastVassalReviewDay = -1;
     public String lastError = "";
 
     private boolean fail(String message) { lastError = message; return false; }
@@ -257,6 +258,40 @@ public final class Statecraft {
         v.loyalty = Math.max(0, Math.min(100, v.loyalty + delta));
         return v.loyalty;
     }
+
+    /**
+     * Monthly autonomous vassal politics. CourtSim supplies the current ruler-to-ruler
+     * opinion snapshot; this layer owns contractual loyalty and its persistence.
+     * Repeated ticks and save/reload cannot apply the same review twice.
+     */
+    public int advanceVassalPolitics(int day, Map<String, Integer> rulerOpinions) {
+        if (day < 0) return 0;
+        if (lastVassalReviewDay < 0) {
+            lastVassalReviewDay = day;
+            return 0;
+        }
+        int reviews = 0;
+        while (day - lastVassalReviewDay >= 30) {
+            lastVassalReviewDay += 30;
+            reviews++;
+            for (VassalContract contract : vassals.values()) {
+                int opinion = Math.max(-100, Math.min(100,
+                        rulerOpinions == null ? 0 : rulerOpinions.getOrDefault(contract.vassalRealm, 0)));
+                int delta = opinion >= 50 ? 2 : opinion >= 20 ? 1
+                        : opinion <= -60 ? -3 : opinion <= -30 ? -2 : 0;
+                if (contract.taxShare >= 0.35) delta--;
+                if (contract.levyShare >= 0.50) delta--;
+                if (contract.protectedByLiege) delta++;
+                Relation diplomatic = relations.get(pair(contract.vassalRealm, contract.liegeRealm));
+                if (diplomatic != null && (diplomatic.treaties.contains(Treaty.ALLIANCE)
+                        || diplomatic.treaties.contains(Treaty.DEFENSIVE_PACT))) delta++;
+                contract.loyalty = Math.max(0, Math.min(100, contract.loyalty + delta));
+            }
+        }
+        return reviews;
+    }
+
+    public int lastVassalReviewDay() { return lastVassalReviewDay; }
 
     /** Inheritance policy is stored per realm and translated by the wf-people succession adapter. */
     public void setInheritanceLaw(String realmId, InheritanceLaw law) {
@@ -523,6 +558,7 @@ public final class Statecraft {
         }
         Map<String,Object> root=new LinkedHashMap<>();
         root.put("version",1); root.put("sequence",sequence);
+        root.put("lastVassalReviewDay", lastVassalReviewDay);
         List<Object> ts=new ArrayList<>();
         for (Title t:titles.values()) { Map<String,Object> m=new LinkedHashMap<>(); m.put("id",t.id);m.put("realm",t.realmId);m.put("rank",t.rank.name());m.put("name",t.name);m.put("holder",t.holderCharacterId);m.put("liege",t.liegeTitleId);m.put("claims",new ArrayList<>(t.claims));ts.add(m); }
         root.put("titles",ts);
@@ -556,6 +592,7 @@ public final class Statecraft {
         if (!(parsed instanceof Map<?,?> root)) throw new IllegalArgumentException("statecraft save must be an object");
         Statecraft next=new Statecraft();
         next.sequence=root.get("sequence") instanceof Number n?Math.max(1,n.longValue()):1;
+        next.lastVassalReviewDay=root.get("lastVassalReviewDay") instanceof Number n?n.intValue():-1;
         if(root.get("titles") instanceof List<?> list) for(Object x:list) {
             Map<?,?> m=(Map<?,?>)x;
             Title t=next.createTitle(String.valueOf(m.get("id")),String.valueOf(m.get("realm")),Rank.valueOf(String.valueOf(m.get("rank"))),String.valueOf(m.get("name")));
@@ -593,6 +630,6 @@ public final class Statecraft {
             w.warScore=((Number)value(m,"score",0)).intValue();w.status=WarStatus.valueOf(String.valueOf(value(m,"status","ACTIVE")));w.outcome=String.valueOf(value(m,"outcome",""));next.wars.put(w.id,w);
         }
         titles.clear();titles.putAll(next.titles);vassals.clear();vassals.putAll(next.vassals);dynasties.clear();dynasties.putAll(next.dynasties);
-        treasuries.clear();treasuries.putAll(next.treasuries);relations.clear();relations.putAll(next.relations);plots.clear();plots.putAll(next.plots);wars.clear();wars.putAll(next.wars);inheritanceLaws.clear();inheritanceLaws.putAll(next.inheritanceLaws);sequence=next.sequence;
+        treasuries.clear();treasuries.putAll(next.treasuries);relations.clear();relations.putAll(next.relations);plots.clear();plots.putAll(next.plots);wars.clear();wars.putAll(next.wars);inheritanceLaws.clear();inheritanceLaws.putAll(next.inheritanceLaws);sequence=next.sequence;lastVassalReviewDay=next.lastVassalReviewDay;
     }
 }
