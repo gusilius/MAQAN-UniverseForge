@@ -129,6 +129,23 @@ public final class EditorManager {
         if (STALE.remove(m)) PoliticalMapRenderer.regenerateAll(m);
     }
 
+    /**
+     * Checked checkpoint variant for cross-domain political transactions. A blocked or still-dirty
+     * title/marker partition means the political outcome is not committed.
+     */
+    public static boolean saveDirtyChecked(MinecraftServer server) {
+        if (server == null) return false;
+        saveDirty(server);
+        synchronized (MARKERS) {
+            for (Markers markers : MARKERS.values()) if (markers.isDirty()) return false;
+        }
+        synchronized (EDITORS) {
+            if (!BLOCKED.isEmpty()) return false;
+            for (TitleEditor titleEditor : EDITORS.values()) if (titleEditor.isDirty()) return false;
+        }
+        return true;
+    }
+
     /** Сохраняет все изменённые карты. Возвращает число сохранённых. */
     public static int saveDirty(MinecraftServer server) {
         int saved = 0;
