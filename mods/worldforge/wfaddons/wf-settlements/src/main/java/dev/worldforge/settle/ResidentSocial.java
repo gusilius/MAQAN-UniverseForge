@@ -78,8 +78,6 @@ public final class ResidentSocial {
         if (first == null || second == null || first == second || !first.alive || !second.alive) return 0;
         if (operationId == null || !operationId.matches("[A-Za-z0-9_.:-]{1,128}"))
             throw new IllegalArgumentException("A stable social interaction operation ID is required");
-        migrateLegacyCounterpart(first, second);
-        migrateLegacyCounterpart(second, first);
         applyInteractionOnce(first, second, delta, operationId);
         applyInteractionOnce(second, first, delta, operationId);
         return Math.min(score(first, globalId(second)), score(second, globalId(first)));
