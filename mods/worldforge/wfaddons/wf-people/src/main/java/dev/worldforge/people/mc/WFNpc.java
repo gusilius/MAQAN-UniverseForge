@@ -1,6 +1,7 @@
 package dev.worldforge.people.mc;
 
 import dev.worldforge.people.Character;
+import dev.worldforge.mod.api.SimulationLod;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.CharacterInventory;
 import net.minecraft.nbt.CompoundTag;
@@ -156,7 +157,7 @@ public class WFNpc extends PathfinderMob {
     protected void customServerAiStep() {
         super.customServerAiStep();
         if (this.tickCount % 100 != 7 || !(this.level() instanceof ServerLevel sl)) return;
-        if (sl.getNearestPlayer(this, 160.0) == null) {
+        if (!SimulationLod.shouldRetainPeople(sl.dimension().location().toString(), getX(), getZ())) {
             discard();
             return;
         }
