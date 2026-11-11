@@ -17,6 +17,7 @@ import dev.worldforge.war.mc.WarMod;
 import dev.worldforge.settle.mc.Colony;
 import dev.worldforge.settle.mc.SettleMod;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.world.level.storage.LevelResource;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.server.ServerStartedEvent;
@@ -27,6 +28,8 @@ import net.minecraftforge.server.ServerLifecycleHooks;
 import org.slf4j.Logger;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.*;
 
 /**
@@ -51,11 +54,14 @@ public final class WorldSimMod {
     @SubscribeEvent
     public void onStarted(ServerStartedEvent event) {
         lastDecisionDay = Long.MIN_VALUE;
+        loadState(event.getServer());
         LOGGER.info("wf_worldsim: autonomous coordinator started; native Rust core={}", NativeWorldSimulation.load() ? "available" : "unavailable");
     }
 
     @SubscribeEvent
     public void onStopping(ServerStoppingEvent event) {
+        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+        if (server != null) saveState(server);
         lastDecisionDay = Long.MIN_VALUE;
         lastProjectDay.clear();
         journal.clear();
@@ -83,13 +89,15 @@ public final class WorldSimMod {
                         ? proposal.getAsJsonObject("kind") : null;
                 if (kind == null) continue;
                 try {
-                    if (apply(server, proposal.get("id").getAsString(), kind, day)) accepted++;
-                    else rejected++;
+                    boolean applied = apply(server, proposal.get("id").getAsString(), kind, day);
+                    if (applied) accepted++; else rejected++;
+                    recordEvent(day, proposal.get("id").getAsString(), kind, applied);
                 } catch (RuntimeException error) {
                     rejected++;
                     LOGGER.warn("wf_worldsim: proposal {} rejected: {}", proposal.get("id"), error.toString());
                 }
             }
+            saveState(server);
             LOGGER.info("wf_worldsim: day={} realms={} settlements={} proposals={} applied={} rejected={}",
                     day, snapshot.getAsJsonArray("realms").size(), snapshot.getAsJsonArray("settlements").size(),
                     frame.getAsJsonArray("proposals").size(), accepted, rejected);
@@ -101,7 +109,7 @@ public final class WorldSimMod {
     private static JsonObject snapshot(MinecraftServer server, long day) {
         JsonObject root = new JsonObject();
         root.addProperty("world_id", server.getWorldData().getLevelName());
-        root.addProperty("seed", server.getWorldData().worldGenOptions().seed());
+        root.addProperty("seed", server.getWorldData().worldGenOptions().seed() & Long.MAX_VALUE);
         root.addProperty("day", day);
         JsonArray realms = new JsonArray(), borders = new JsonArray(), settlements = new JsonArray(), characters = new JsonArray(), workforce = new JsonArray();
         for (MapData map : WorldForgeMod.loadedMaps().values()) {
@@ -137,9 +145,11 @@ public final class WorldSimMod {
         for (Colony colony : SettleMod.COLONIES.values()) {
             if (colony == null || colony.s == null) continue;
             var s = colony.s;
+            String settlementRealm = SettleMod.realmOf(colony);
+            if (settlementRealm == null || settlementRealm.isBlank()) continue;
             JsonObject item = new JsonObject();
             item.addProperty("id", s.id);
-            item.addProperty("realm_id", SettleMod.realmOf(colony));
+            item.addProperty("realm_id", settlementRealm);
             item.addProperty("population", s.workers.size());
             item.addProperty("food", fixed(s.amount("food")));
             item.addProperty("food_capacity", fixed(s.capacity("food")));
@@ -227,6 +237,72 @@ public final class WorldSimMod {
         // Recruitment and profession changes remain proposals until their dedicated
         // transactional executors are exposed by wf_army and wf_people.
         return false;
+    }
+
+
+    private static void recordEvent(long day, String id, JsonObject action, boolean applied) {
+        JsonObject event = new JsonObject();
+        event.addProperty("day", day);
+        event.addProperty("request_id", id);
+        event.addProperty("type", action.has("type") ? action.get("type").getAsString() : "unknown");
+        event.addProperty("applied", applied);
+        if (action.has("reason")) event.add("reason", action.get("reason"));
+        if (action.has("attacker")) event.add("attacker", action.get("attacker"));
+        if (action.has("defender")) event.add("defender", action.get("defender"));
+        if (action.has("settlement")) event.add("settlement", action.get("settlement"));
+        if (action.has("building")) event.add("building", action.get("building"));
+        if (action.has("first")) event.add("first", action.get("first"));
+        if (action.has("second")) event.add("second", action.get("second"));
+        journal.add(GSON.toJson(event));
+        while (journal.size() > 10000) journal.remove(0);
+    }
+
+    private static Path stateFile(MinecraftServer server) {
+        return server.getWorldPath(LevelResource.ROOT).resolve("worldforge").resolve("wf_worldsim.json");
+    }
+
+    private static synchronized void saveState(MinecraftServer server) {
+        try {
+            JsonObject state = new JsonObject();
+            JsonObject cooldowns = new JsonObject();
+            lastProjectDay.forEach(cooldowns::addProperty);
+            state.add("last_project_day", cooldowns);
+            JsonArray events = new JsonArray();
+            for (String line : journal) events.add(GSON.fromJson(line, JsonObject.class));
+            state.add("events", events);
+            Path target = stateFile(server);
+            Files.createDirectories(target.getParent());
+            Path temp = target.resolveSibling(target.getFileName() + ".tmp");
+            Files.writeString(temp, GSON.toJson(state), StandardCharsets.UTF_8);
+            try {
+                Files.move(temp, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                        java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+            } catch (java.nio.file.AtomicMoveNotSupportedException unsupported) {
+                Files.move(temp, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
+        } catch (Exception error) {
+            LOGGER.error("wf_worldsim: unable to persist simulation journal; proposals remain idempotent", error);
+        }
+    }
+
+    private static synchronized void loadState(MinecraftServer server) {
+        Path file = stateFile(server);
+        if (!Files.exists(file)) return;
+        try {
+            JsonObject state = GSON.fromJson(Files.readString(file, StandardCharsets.UTF_8), JsonObject.class);
+            if (state == null) return;
+            lastProjectDay.clear();
+            if (state.has("last_project_day") && state.get("last_project_day").isJsonObject()) {
+                for (var entry : state.getAsJsonObject("last_project_day").entrySet())
+                    lastProjectDay.put(entry.getKey(), entry.getValue().getAsLong());
+            }
+            journal.clear();
+            if (state.has("events") && state.get("events").isJsonArray())
+                for (var event : state.getAsJsonArray("events")) if (event.isJsonObject()) journal.add(GSON.toJson(event));
+            LOGGER.info("wf_worldsim: restored {} event records and {} settlement cooldowns", journal.size(), lastProjectDay.size());
+        } catch (Exception error) {
+            LOGGER.error("wf_worldsim: simulation journal is unreadable; no old data will be overwritten until inspected", error);
+        }
     }
 
     private static double number(Object value, double fallback) {
