@@ -214,6 +214,8 @@ public class ArmyTest {
         ok(!rosterReload.applyRosterDeltaOnce(returnOperation, rosterArmy.id, Map.of("levy", 10))
                         && rosterReload.army(rosterArmy.id).count("levy") == rosterBefore + 10,
                 "troop return idempotency receipts survive army save/reload");
+        ok(rosterReload.hasRosterOperation(returnOperation),
+                "physical return receipt can tombstone a late-loaded troop entity after restart");
 
         System.out.println(fails == 0 ? "ALL OK" : fails + " FAILED");
         if (fails > 0) System.exit(1);

@@ -482,6 +482,29 @@ public class SettleMod {
         return site != null && site.colony().s.spend(cost);
     }
 
+    /** Crash-replay-safe recruitment debit. Treasury journal is committed before the settlement projection. */
+    public static boolean payRecruitmentOnce(String colonyId, java.util.Map<String, Integer> cost,
+                                             String operationId, MinecraftServer server) {
+        if (server == null || colonyId == null || colonyId.isBlank()
+                || operationId == null || operationId.isBlank() || actionsBlocked()) return false;
+        Colony colony = COLONIES.get(colonyId);
+        if (colony == null || colony.s == null) return false;
+        if (!colony.s.spendOnce(cost, operationId)) return false;
+        if (!WorldForgeMod.saveTreasuryNow(server)) {
+            colony.actionPersistenceBlocked = true;
+            LOGGER.error("wf_settle: recruitment debit {} is in memory but treasury persistence failed; settlement actions paused",
+                    operationId);
+            return false;
+        }
+        if (!saveDurably(server)) {
+            colony.actionPersistenceBlocked = true;
+            LOGGER.error("wf_settle: recruitment debit {} is in treasury but settlement snapshot failed; settlement actions paused",
+                    operationId);
+            return false;
+        }
+        return true;
+    }
+
     /** Rolls back a just-paid recruitment batch if its second payment leg fails. */
     public static void refundRecruitment(RecruitmentSite site, java.util.Map<String, Integer> cost) {
         if (site == null || cost == null) return;

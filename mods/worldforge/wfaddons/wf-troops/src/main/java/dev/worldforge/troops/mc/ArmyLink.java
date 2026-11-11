@@ -71,6 +71,15 @@ final class ArmyLink {
         return found != null && Objects.equals(found.army().realm, realm) ? found : null;
     }
 
+    /** Applies the strategic side of a deployment exactly once and persists its receipt with the army snapshot. */
+    static boolean debitMuster(Found found, String operationId, Map<String, Integer> manpowerDelta,
+                               MinecraftServer server) {
+        if (found == null || found.engine() == null || found.army() == null
+                || operationId == null || operationId.isBlank() || manpowerDelta == null || server == null) return false;
+        found.engine().applyRosterDeltaOnce("muster:" + operationId, found.army().id, manpowerDelta);
+        return ArmyMod.persistNow(server);
+    }
+
     /** Снимает людей с армии. Вызывать только после успешного плана. */
     static void take(Army a, Map<String, Integer> men) {
         for (var e : men.entrySet()) {
