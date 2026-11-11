@@ -13,6 +13,9 @@ import dev.worldforge.mod.api.SimulationLod;
 import dev.worldforge.court.CourtSim;
 import dev.worldforge.court.mc.CourtMod;
 import dev.worldforge.court.Marriages;
+import dev.worldforge.people.CharacterRegistry;
+import dev.worldforge.people.PopulationSimulation;
+import dev.worldforge.people.mc.PeopleMod;
 import dev.worldforge.war.WarEngine;
 import dev.worldforge.army.ArmyEngine;
 import dev.worldforge.army.UnitType;
@@ -377,12 +380,40 @@ public final class WorldSimMod {
             int wanted = action.get("workers").getAsInt();
             Colony colony = SettleMod.colony(settlementId);
             if (colony == null || colony.s == null || wanted <= 0) return false;
+            if (!colony.s.defs.professions.containsKey(to)) return false;
             int changed = 0;
-            for (Worker worker : colony.s.workers) {
+            List<Worker> candidates = new ArrayList<>(colony.s.workers);
+            candidates.sort(Comparator.comparingInt(worker -> worker.id));
+            for (Worker worker : candidates) {
                 if (changed >= wanted) break;
-                boolean sourceMatches = "unemployed".equals(from) ? worker.generalist() : from.equals(worker.permanentProfession());
-                if (!sourceMatches || worker.building != 0 || !worker.lifeAction.isBlank()) continue;
-                colony.s.setProfession(worker.id, to);
+                if (worker.building != 0 || !worker.lifeAction.isBlank()) continue;
+                boolean workerSource = "unemployed".equals(from)
+                        ? worker.generalist() : from.equals(worker.permanentProfession());
+                boolean workerTarget = to.equals(worker.permanentProfession());
+                if (!workerSource && !workerTarget) continue;
+                if (worker.person == null || worker.person.isBlank()) continue;
+
+                // A settlement Worker is only a projection of its canonical Character.
+                // Reconcile either side of an interrupted legacy transition, but never
+                // change a worker whose authoritative Character is missing or unrelated.
+                var person = PeopleMod.authority().getGlobal(worker.person);
+                CharacterRegistry owner = PeopleMod.authority().registryForGlobal(worker.person);
+                if (person == null || owner == null || !person.alive) continue;
+                String canonicalProfession = PopulationSimulation.profession(person);
+                boolean characterSource = "unemployed".equals(from)
+                        ? canonicalProfession.isBlank() || "laborer".equals(canonicalProfession)
+                                || "general_worker".equals(canonicalProfession)
+                        : from.equals(canonicalProfession);
+                boolean characterTarget = to.equals(canonicalProfession);
+                if (!characterSource && !characterTarget) continue;
+                if (characterSource) {
+                    if (!PopulationSimulation.canWork(person, PeopleMod.YEAR)) continue;
+                    owner.changeProfession(person.id, to, PeopleMod.YEAR);
+                }
+                // Persist the Character partition first. If the settlement write then
+                // fails, the next proposal can finish the Worker projection idempotently.
+                if (!PeopleMod.persistCharacter(person, server)) return false;
+                if (workerSource) colony.s.setProfession(worker.id, to);
                 changed++;
             }
             return changed > 0 && SettleMod.saveDurably(server);
