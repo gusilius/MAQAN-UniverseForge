@@ -9,7 +9,7 @@ import java.util.*;
  * и спрашивают, что разрешает должность ({@link #unlocked}), не зная ничего о ролях друг друга.
  */
 public final class CharacterRegistry {
-    public enum LifecycleKind { BORN, CHILD_BORN, MARRIED, LIFE_STAGE_CHANGED, POST_APPOINTED, POST_DISMISSED, PROFESSION_CHANGED,
+    public enum LifecycleKind { BORN, CHILD_BORN, MARRIED, MARRIAGE_DISSOLVED, LIFE_STAGE_CHANGED, POST_APPOINTED, POST_DISMISSED, PROFESSION_CHANGED,
         HIRED, FIRED, MIGRATED, DUTY_ASSIGNED, DUTY_REMOVED, DIED, RESTORED }
 
     public record LifecycleEvent(LifecycleKind kind, String characterId, String from, String to, int year) { }
@@ -334,6 +334,21 @@ public final class CharacterRegistry {
         }
         character.spouse = "";
         character.props.remove("family.spouse_global_id");
+    }
+
+    /** Ends a reciprocal marriage while preserving both Character identities and family links. */
+    public boolean divorce(String firstId, String secondId, int year) {
+        Character first = require(firstId), second = require(secondId);
+        if (first == second || !first.id.equals(second.spouse) || !second.id.equals(first.spouse)) return false;
+        first.spouse = "";
+        second.spouse = "";
+        first.props.remove("family.spouse_global_id");
+        second.props.remove("family.spouse_global_id");
+        first.props.remove("family.spouse_name");
+        second.props.remove("family.spouse_name");
+        emit(first, LifecycleKind.MARRIAGE_DISSOLVED, second.id, "", year);
+        emit(second, LifecycleKind.MARRIAGE_DISSOLVED, first.id, "", year);
+        return true;
     }
 
     public Character addChild(Character father, Character mother, String name, String gender, int year) {
