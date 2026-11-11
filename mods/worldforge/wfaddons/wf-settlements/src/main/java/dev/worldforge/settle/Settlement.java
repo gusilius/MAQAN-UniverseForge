@@ -573,7 +573,7 @@ public final class Settlement {
     }
 
     private static void clearLifeAction(Worker worker) {
-        worker.lifeAction = "";
+        clearLifeAction(worker);
         worker.lifeActionStage = "";
         worker.lifeSocialTarget = "";
         worker.lifeActionDuration = 0;
@@ -1113,7 +1113,7 @@ public final class Settlement {
             }
             if (pick != null) {
                 pick.assignedProfession = "builder";
-                pick.lifeAction = "";
+                clearLifeAction(pick);
                 pick.building = site.uid;
                 pick.status = "";
             }
