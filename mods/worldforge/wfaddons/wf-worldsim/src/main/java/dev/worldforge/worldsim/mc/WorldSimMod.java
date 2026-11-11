@@ -433,7 +433,7 @@ public final class WorldSimMod {
         return server.getWorldPath(LevelResource.ROOT).resolve("worldforge").resolve("wf_worldsim.json");
     }
 
-    private static synchronized void saveState(MinecraftServer server) {
+    private static synchronized boolean saveState(MinecraftServer server) {
         try {
             JsonObject state = new JsonObject();
             JsonObject cooldowns = new JsonObject();
