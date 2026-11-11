@@ -111,6 +111,15 @@ public final class ResidentLifeEventsTest {
                         && PopulationSimulation.skillRank(pupil, "farming") == 0,
                 "children inherit learning opportunities gradually without copying guardian skill ranks");
 
+        CharacterRegistry sameYearRegistry = new CharacterRegistry();
+        sameYearRegistry.create("Первый", "", "north", "m", 1990);
+        ResidentLifeEvents.yearly(sameYearRegistry, 2020);
+        Character lateArrival = sameYearRegistry.create("Прибывший", "", "north", "f", 2005);
+        ResidentLifeEvents.yearly(sameYearRegistry, 2020);
+        check("child".equals(lateArrival.props.get("population.life_stage"))
+                        && ((Number) lateArrival.props.get("population.age_years")).intValue() == 15,
+                "characters registered mid-year receive calendar-derived life stages without waiting a full year");
+
         CharacterRegistry missedYearsRegistry = new CharacterRegistry();
         Character grown = missedYearsRegistry.create("Повзрослевший", "", "north", "m", 2000);
         ResidentLifeEvents.yearly(missedYearsRegistry, 2025);
