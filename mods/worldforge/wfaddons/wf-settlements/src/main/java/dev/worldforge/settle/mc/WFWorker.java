@@ -205,7 +205,8 @@ public class WFWorker extends PathfinderMob {
             Building b = wk.building == 0 ? null : c.s.building(wk.building);
             BlockPos target;
             boolean working = false;
-            Colony.WorkOrder area = c.workOrders.get(wk.id);
+            Colony.WorkOrder area = ("travelling".equals(wk.lifeActionStage) || "performing".equals(wk.lifeActionStage))
+                    ? null : c.workOrders.get(wk.id);
             BlockPos resourceTarget = null;
             if (area != null) {
                 if (--workScan <= 0 || cachedWorkTarget == null
