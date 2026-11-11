@@ -697,6 +697,8 @@ public final class WarEngine {
             for (Object o : (List<Object>) e.getValue()) s.add((String) o);
             managedEnemies.put(e.getKey(), s);
         }
+        if (!legacy && !(root.get("actionOperations") instanceof List<?>))
+            throw new IllegalArgumentException("В wf-war/2 отсутствует раздел квитанций политических действий");
         if (!legacy && root.get("actionOperations") instanceof List<?> receipts) {
             if (receipts.size() > MAX_ACTION_OPERATIONS)
                 throw new IllegalArgumentException("Слишком много квитанций политических действий");

@@ -109,8 +109,8 @@ public class ArmyMod {
      */
     public static boolean persistNow(MinecraftServer server) {
         if (server == null) return false;
-        if (actionPersistenceBlocked) {
-            LOGGER.error("wf_army: save skipped because the strategic ledger is blocked; existing world files are preserved");
+        if (actionsBlocked()) {
+            LOGGER.error("wf_army: save skipped because the army or political ledger is blocked; existing world files are preserved");
             return false;
         }
         boolean allSaved = true;
@@ -173,7 +173,7 @@ public class ArmyMod {
     }
 
     private static void recoverPendingRecruitments(MinecraftServer server) {
-        if (server == null || actionPersistenceBlocked) return;
+        if (server == null || actionsBlocked()) return;
         boolean changed = false;
         for (Map.Entry<MapData, ArmyEngine> entry : ARMIES.entrySet()) {
             for (String operationId : entry.getValue().pendingRecruitmentIds()) {
