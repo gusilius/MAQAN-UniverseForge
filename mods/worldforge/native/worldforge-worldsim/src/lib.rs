@@ -197,7 +197,7 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
                 + attacker.prestige as i64 / 5
                 - defender.stability as i64 / 4
                 - border.distance_cost as i64
-                - 35
+                - 10
             );
             let roll = (stable_hash(snapshot.seed, "war", &attacker.id, &defender.id, snapshot.day) % 100) as i32;
             if score >= 45 && roll < (score - 35).clamp(0, 65) {
