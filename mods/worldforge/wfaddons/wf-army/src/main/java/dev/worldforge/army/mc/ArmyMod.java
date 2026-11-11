@@ -86,8 +86,13 @@ public class ArmyMod {
                 }
                 RAW = raw;
                 Path f = EditorManager.overlayDir(server, k).resolve("wf_army.json");
-                try { if (Files.exists(f)) a.fromJson(Files.readString(f)); }
-                catch (Exception ex) { LOGGER.error("wf_army: не удалось прочитать {}: {}", f, ex.toString()); }
+                try {
+                    if (Files.exists(f)) a.fromJson(Files.readString(f));
+                } catch (Exception ex) {
+                    actionPersistenceBlocked = true;
+                    LOGGER.error("wf_army: стратегический файл '{}' повреждён или недоступен; исходник сохранён без перезаписи, все приказы заблокированы: {}",
+                            f, ex.toString(), ex);
+                }
             }
             return a;
         });
@@ -100,6 +105,10 @@ public class ArmyMod {
      */
     public static boolean persistNow(MinecraftServer server) {
         if (server == null) return false;
+        if (actionPersistenceBlocked) {
+            LOGGER.error("wf_army: save skipped because the strategic ledger is blocked; existing world files are preserved");
+            return false;
+        }
         boolean allSaved = true;
         for (Map.Entry<MapData, ArmyEngine> en : ARMIES.entrySet()) {
             Path temp = null;
@@ -153,6 +162,7 @@ public class ArmyMod {
     }
 
     private static void recoverPendingRecruitments(MinecraftServer server) {
+        if (server == null || actionPersistenceBlocked) return;
         boolean changed = false;
         for (Map.Entry<MapData, ArmyEngine> entry : ARMIES.entrySet()) {
             for (String operationId : entry.getValue().pendingRecruitmentIds()) {
@@ -222,6 +232,10 @@ public class ArmyMod {
     }
 
     private static int screen(CommandSourceStack s, String realm) {
+        if (actionPersistenceBlocked) {
+            s.sendFailure(Component.literal("Стратегические сохранения не прошли проверку. Файлы сохранены без перезаписи; приказы и экран армий заблокированы до сверки."));
+            return 0;
+        }
         net.minecraft.server.level.ServerPlayer sp = s.getPlayer();
         MapData m = EditorManager.dataFor(s.getLevel());
         if (sp == null) { s.sendFailure(Component.literal("Только для игрока")); return 0; }

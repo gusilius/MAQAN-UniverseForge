@@ -21,8 +21,8 @@ public final class ArmyActions {
         boolean persist();
     }
     private static volatile PersistenceBridge persistence = new PersistenceBridge() {
-        @Override public boolean actionsBlocked() { return false; }
-        @Override public boolean persist() { return true; }
+        @Override public boolean actionsBlocked() { return true; }
+        @Override public boolean persist() { return false; }
     };
     public static void installPersistenceBridge(PersistenceBridge bridge) {
         if (bridge == null) throw new IllegalArgumentException("army persistence bridge is required");
