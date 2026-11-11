@@ -129,6 +129,8 @@ pub struct DecisionFrame {
 pub enum SimError {
     EmptyWorldId,
     DuplicateRealm(String),
+    DuplicateSettlement(String),
+    DuplicateCharacter(String),
     UnknownRealm(String),
     InvalidSnapshot(String),
 }
