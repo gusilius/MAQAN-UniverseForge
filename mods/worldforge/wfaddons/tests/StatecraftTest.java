@@ -46,17 +46,18 @@ public final class StatecraftTest {
                 "vassal loyalty is clamped and mutable");
         check(state.vassalsOf("north").size() == 1, "liege can enumerate direct vassals");
 
+        state.vassalage("north_duchy_realm").loyalty = 50;
         check(state.advanceVassalPolitics(1000, Map.of("north_duchy_realm", 60)) == 0
-                        && state.vassalage("north_duchy_realm").loyalty == 75,
+                        && state.vassalage("north_duchy_realm").loyalty == 50,
                 "monthly vassal politics establishes its first review baseline without retroactive drift");
         check(state.advanceVassalPolitics(1030, Map.of("north_duchy_realm", 60)) == 1
-                        && state.vassalage("north_duchy_realm").loyalty == 78,
+                        && state.vassalage("north_duchy_realm").loyalty == 53,
                 "vassal loyalty rises from ruler relations and protection, with contract burden applied");
         check(state.advanceVassalPolitics(1030, Map.of("north_duchy_realm", 60)) == 0
-                        && state.vassalage("north_duchy_realm").loyalty == 78,
+                        && state.vassalage("north_duchy_realm").loyalty == 53,
                 "repeated realm ticks on the same day cannot duplicate a monthly political review");
         check(state.advanceVassalPolitics(1060, Map.of("north_duchy_realm", -80)) == 1
-                        && state.vassalage("north_duchy_realm").loyalty == 74,
+                        && state.vassalage("north_duchy_realm").loyalty == 51,
                 "high tax and levy obligations combined with hostile ruler relations reduce vassal loyalty");
 
         // Dynasty and canonical identity references
