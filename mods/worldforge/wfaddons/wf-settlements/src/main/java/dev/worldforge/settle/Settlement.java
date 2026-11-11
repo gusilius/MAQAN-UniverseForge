@@ -1584,7 +1584,9 @@ public final class Settlement {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", w.id); m.put("name", w.name); m.put("profession", w.profession); m.put("assigned_profession", w.assignedProfession); m.put("person", w.person); m.put("building", w.building); m.put("status", w.status); m.put("x", w.x); m.put("z", w.z);
             m.put("life_action", w.lifeAction); m.put("life_target_x", w.lifeTargetX); m.put("life_target_z", w.lifeTargetZ);
-            m.put("life_action_until", w.lifeActionUntil); m.put("haul_progress", w.haulProgress);
+            m.put("life_action_until", w.lifeActionUntil); m.put("life_action_stage", w.lifeActionStage);
+            m.put("life_social_target", w.lifeSocialTarget); m.put("life_action_duration", w.lifeActionDuration);
+            m.put("haul_progress", w.haulProgress);
             m.put("manual_hauler", w.manualHauler);
             m.put("manual_order", w.manualOrder); m.put("manual_follow", w.manualFollow); m.put("manual_follow_owner", w.manualFollowOwner); m.put("order_x", w.orderX); m.put("order_z", w.orderZ);
             List<Object> queuedOrders=new ArrayList<>();
@@ -1673,6 +1675,10 @@ public final class Settlement {
             if (m.get("life_target_x") instanceof Number lx) w.lifeTargetX = lx.doubleValue();
             if (m.get("life_target_z") instanceof Number lz) w.lifeTargetZ = lz.doubleValue();
             if (m.get("life_action_until") instanceof Number lu && Double.isFinite(lu.doubleValue())) w.lifeActionUntil = lu.doubleValue();
+            w.lifeActionStage = m.get("life_action_stage") instanceof String stage ? stage : "";
+            w.lifeSocialTarget = m.get("life_social_target") instanceof String target ? target : "";
+            if (m.get("life_action_duration") instanceof Number duration && Double.isFinite(duration.doubleValue()))
+                w.lifeActionDuration = Math.max(0, Math.min(1440, duration.doubleValue()));
             if (m.get("haul_progress") instanceof Number hp && Double.isFinite(hp.doubleValue())) w.haulProgress = Math.max(0, Math.min(100, hp.doubleValue()));
             w.manualHauler = Boolean.TRUE.equals(m.get("manual_hauler"));
             if (!Set.of("", "sleeping", "eating", "fleeing", "defending", "socializing").contains(w.lifeAction)) w.lifeAction = "";
