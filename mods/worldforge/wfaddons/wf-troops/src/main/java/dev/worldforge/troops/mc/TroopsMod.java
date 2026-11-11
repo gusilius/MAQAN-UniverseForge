@@ -1622,7 +1622,7 @@ public class TroopsMod {
         try { player = src.getPlayerOrException(); }
         catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
         MapData currentMap = EditorManager.dataFor(player.serverLevel());
-        ArmyLink.Found found = currentMap == null ? null : ArmyLink.find(armyId, currentMap.name);
+        ArmyLink.Found found = currentMap == null ? null : ArmyLink.findOnMap(armyId, currentMap.name);
         if (found == null) { src.sendFailure(Component.literal("Нет армии " + armyId)); return 0; }
 
         Muster.Plan plan = Muster.plan(found.army().units, n, DEFS.armyTypes());

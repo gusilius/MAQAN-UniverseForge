@@ -55,7 +55,7 @@ final class ArmyLink {
     }
 
     /** Exact map-scoped lookup used by RTS command hierarchy and physical troop transitions. */
-    static Found find(int armyId, String mapId) {
+    static Found findOnMap(int armyId, String mapId) {
         if (armyId <= 0 || mapId == null || mapId.isBlank()) return null;
         for (MapData map : WorldForgeMod.loadedMaps().values()) {
             if (!map.name.equals(mapId) || map.titles == null) continue;
@@ -67,7 +67,7 @@ final class ArmyLink {
     }
 
     static Found find(int armyId, String realm, String mapId) {
-        Found found = find(armyId, mapId);
+        Found found = findOnMap(armyId, mapId);
         return found != null && Objects.equals(found.army().realm, realm) ? found : null;
     }
 
