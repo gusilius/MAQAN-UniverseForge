@@ -216,6 +216,9 @@ public class ArmyTest {
                 "troop return idempotency receipts survive army save/reload");
         ok(rosterReload.hasRosterOperation(returnOperation),
                 "physical return receipt can tombstone a late-loaded troop entity after restart");
+        rosterReload.disband(rosterArmy.id, A);
+        ok(!rosterReload.armies.containsKey(rosterArmy.id) && rosterReload.hasRosterOperation(returnOperation),
+                "physical return tombstone survives disbanding its source army");
 
         System.out.println(fails == 0 ? "ALL OK" : fails + " FAILED");
         if (fails > 0) System.exit(1);

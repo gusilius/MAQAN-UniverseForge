@@ -807,9 +807,55 @@ public class TroopsMod {
         }
     }
 
+    /**
+     * Completes an abstract-army return without demobilizing the Character. The terminal outbox receipt
+     * survives later army merge/disband and prevents an old physical chunk from resurrecting the soldier.
+     */
+    private static boolean completeStrategicReturnTransition(
+            dev.worldforge.troops.MilitaryTransitionLedger.Pending pending, TroopEntity body) {
+        if (pending == null || server == null || militaryLoadFailed || !ModList.get().isLoaded("wf_people"))
+            return false;
+        try {
+            if (body == null) {
+                UUID entityId = UUID.fromString(pending.troopEntityId());
+                for (ServerLevel level : server.getAllLevels()) {
+                    Entity entity = level.getEntity(entityId);
+                    if (entity instanceof TroopEntity found) { body = found; break; }
+                }
+            }
+            if (body == null || !pending.troopEntityId().equals(body.getUUID().toString())) return false;
+            PersonBinding binding = bindPerson(body, false);
+            if (binding == null && (body.characterId == null || body.characterId.isBlank()))
+                binding = findCharacterForTroopEntity(pending.troopEntityId());
+            if (binding == null || !pending.characterGlobalId().equals(binding.character().globalId)
+                    || !binding.character().alive) return false;
+            body.setInvulnerable(true);
+            if (!releaseBodyDurably(body)) return false;
+            if (!TRANSITIONS.complete(pending.characterGlobalId())) {
+                if (TRANSITIONS.isCompleted(pending.characterGlobalId(), pending.troopEntityId()))
+                    return true;
+                actionPersistenceBlocked = true;
+                return false;
+            }
+            if (!saveDurably()) {
+                TRANSITIONS.reopen(pending.characterGlobalId(), pending.troopEntityId());
+                actionPersistenceBlocked = true;
+                return false;
+            }
+            body.discard();
+            return true;
+        } catch (RuntimeException error) {
+            LOGGER.error("wf_troops: strategic return transition for {} will retry: {}",
+                    pending.characterGlobalId(), error.toString(), error);
+            return false;
+        }
+    }
+
     /** Applies a staged non-lethal transition; retries are safe after any intermediate crash. */
     private static boolean completePendingTransition(
             dev.worldforge.troops.MilitaryTransitionLedger.Pending pending, TroopEntity body) {
+        if (pending != null && pending.kind() == dev.worldforge.troops.MilitaryTransitionLedger.Kind.STRATEGIC_RETURN)
+            return completeStrategicReturnTransition(pending, body);
         if (pending == null || server == null || militaryLoadFailed || !ModList.get().isLoaded("wf_people")) return false;
         try {
             Character person = PeopleMod.authority().getGlobal(pending.characterGlobalId());
@@ -882,12 +928,8 @@ public class TroopsMod {
     }
 
     private static boolean hasStrategicReturnReceipt(TroopEntity troop) {
-        if (troop == null || troop.armyId <= 0 || !ModList.get().isLoaded("wf_army")
-                || !(troop.level() instanceof ServerLevel level)) return false;
-        MapData map = EditorManager.dataFor(level);
-        if (map == null) return false;
-        ArmyLink.Found found = ArmyLink.findOnMap(troop.armyId, map.name);
-        return found != null && found.engine().hasRosterOperation("troop-return:" + troop.getUUID());
+        return troop != null && troop.armyId > 0 && ModList.get().isLoaded("wf_army")
+                && ArmyLink.hasReturnReceipt(troop.getUUID().toString());
     }
 
     private static void processReturnedBodies() {
@@ -2303,12 +2345,44 @@ public class TroopsMod {
         int returnedBodies = 0;
         int returnedMen = 0;
         for (TroopEntity troop : stagedReturns) {
-            if (!releaseBodyDurably(troop)) {
+            boolean released;
+            if (ModList.get().isLoaded("wf_people")) {
+                PersonBinding binding = bindPerson(troop, false);
+                if (binding == null && (troop.characterId == null || troop.characterId.isBlank()))
+                    binding = findCharacterForTroopEntity(troop.getUUID().toString());
+                if (binding == null) {
+                    actionPersistenceBlocked = true;
+                    src.sendFailure(Component.literal("Не удалось разрешить Character перед возвратом; физический солдат сохранён"));
+                    continue;
+                }
+                var pending = new dev.worldforge.troops.MilitaryTransitionLedger.Pending(
+                        binding.character().globalId, troop.getUUID().toString(),
+                        dev.worldforge.troops.MilitaryTransitionLedger.Kind.STRATEGIC_RETURN,
+                        Math.max(1, PeopleMod.YEAR), "");
+                try {
+                    troop.setInvulnerable(true);
+                    TRANSITIONS.stage(pending);
+                    if (!saveDurably()) {
+                        actionPersistenceBlocked = true;
+                        src.sendFailure(Component.literal("Не удалось сохранить терминальную квитанцию возврата; солдат оставлен в мире"));
+                        continue;
+                    }
+                    released = completeStrategicReturnTransition(pending, troop);
+                } catch (RuntimeException error) {
+                    actionPersistenceBlocked = true;
+                    LOGGER.error("wf_troops: could not stage strategic return for {}: {}",
+                            binding.character().globalId, error.toString(), error);
+                    released = false;
+                }
+            } else {
+                released = releaseBodyDurably(troop);
+                if (released) troop.discard();
+            }
+            if (!released) {
                 actionPersistenceBlocked = true;
-                src.sendFailure(Component.literal("Не удалось сохранить жизненный статус персонажа; его физическое тело оставлено в мире"));
+                src.sendFailure(Component.literal("Не удалось надёжно завершить возврат; физический солдат сохранён для восстановления"));
                 continue;
             }
-            troop.discard();
             returnedBodies++;
             Map<String, Integer> one = Muster.back(troop.unitId(), troop.strategicUnitId, DEFS.armyTypes());
             returnedMen += one.values().stream().mapToInt(Integer::intValue).sum();

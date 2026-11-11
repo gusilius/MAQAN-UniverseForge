@@ -100,6 +100,20 @@ final class ArmyLink {
     }
 
     /**
+     * Finds a terminal physical-return receipt independently of whether its source army still exists.
+     * Army merges and disbanding must never erase the tombstone for a late-loaded troop chunk.
+     */
+    static boolean hasReturnReceipt(String troopEntityId) {
+        if (troopEntityId == null || troopEntityId.isBlank()) return false;
+        String operationId = "troop-return:" + troopEntityId;
+        for (MapData map : WorldForgeMod.loadedMaps().values()) {
+            if (map == null || map.titles == null) continue;
+            if (ArmyMod.armies(map).hasRosterOperation(operationId)) return true;
+        }
+        return false;
+    }
+
+    /**
      * Stages one idempotent manpower credit per physical soldier, then synchronously writes
      * the strategic army snapshot. The troop entities must not be released before this returns true.
      */
