@@ -18,14 +18,22 @@ final class ArmyLink {
 
     record Found(ArmyEngine engine, Army army) {}
 
+    /**
+     * Resolves a legacy numeric army reference only when it identifies exactly one loaded map.
+     * Army IDs are map-local; returning the first match could silently mutate another world's army.
+     */
     static Found find(int armyId) {
-        for (MapData m : WorldForgeMod.loadedMaps().values()) {
-            if (m.titles == null) continue;
-            ArmyEngine e = ArmyMod.armies(m);
-            Army a = e.armies.get(armyId);
-            if (a != null) return new Found(e, a);
+        if (armyId <= 0) return null;
+        Found match = null;
+        for (MapData map : WorldForgeMod.loadedMaps().values()) {
+            if (map.titles == null) continue;
+            ArmyEngine engine = ArmyMod.armies(map);
+            Army army = engine.armies.get(armyId);
+            if (army == null) continue;
+            if (match != null && match.engine() != engine) return null;
+            match = new Found(engine, army);
         }
-        return null;
+        return match;
     }
 
     /**
