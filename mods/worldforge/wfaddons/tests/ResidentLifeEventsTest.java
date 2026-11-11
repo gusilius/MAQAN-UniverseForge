@@ -2,6 +2,7 @@ package dev.worldforge.tests;
 
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
+import dev.worldforge.people.PopulationSimulation;
 import dev.worldforge.settle.ResidentLifeEvents;
 import dev.worldforge.settle.ResidentSocial;
 
@@ -93,6 +94,30 @@ public final class ResidentLifeEventsTest {
         check("independent_adult".equals(child.props.get("family.care_status"))
                         && ((Number) child.props.get("family.adulthood_year")).intValue() == 2018,
                 "the family-care lifecycle releases a resident into adulthood at eighteen");
+
+        CharacterRegistry mentorshipRegistry = new CharacterRegistry();
+        Character mentor = mentorshipRegistry.create("Мастер", "", "north", "m", 1970);
+        Character pupil = mentorshipRegistry.create("Ученик", "", "north", "f", 2000);
+        mentorshipRegistry.addChild(mentor, mentorshipRegistry.create("Родитель", "", "north", "f", 1971),
+                "Неиспользуемый ребёнок", "m", 2010);
+        PopulationSimulation.setSkillRank(mentor, "farming", 4);
+        ResidentLifeEvents.yearly(mentorshipRegistry, 2010);
+        long firstMentorshipXp = PopulationSimulation.trainingXp(pupil, "farming");
+        ResidentLifeEvents.yearly(mentorshipRegistry, 2010);
+        check(firstMentorshipXp == 5 && PopulationSimulation.trainingXp(pupil, "farming") == firstMentorshipXp,
+                "guardian mentorship grants age-scaled skill experience only once per world year");
+        ResidentLifeEvents.yearly(mentorshipRegistry, 2011);
+        ResidentLifeEvents.yearly(mentorshipRegistry, 2012);
+        check(PopulationSimulation.trainingXp(pupil, "farming") == 15
+                        && PopulationSimulation.skillRank(pupil, "farming") == 0,
+                "children inherit learning opportunities gradually without copying guardian skill ranks");
+
+        CharacterRegistry missedYearsRegistry = new CharacterRegistry();
+        Character grown = missedYearsRegistry.create("Повзрослевший", "", "north", "m", 2000);
+        ResidentLifeEvents.yearly(missedYearsRegistry, 2025);
+        check("independent_adult".equals(grown.props.get("family.care_status"))
+                        && ((Number) grown.props.get("family.adulthood_year")).intValue() == 2025,
+                "a resident loaded after several missed years still transitions to adulthood");
 
         CharacterRegistry conflictRegistry = new CharacterRegistry();
         Character partnerA = conflictRegistry.create("Алан", "", "north", "m", 1970);
