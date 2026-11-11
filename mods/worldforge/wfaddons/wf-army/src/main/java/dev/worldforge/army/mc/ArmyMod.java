@@ -145,11 +145,13 @@ public class ArmyMod {
         return allSaved;
     }
 
-    public static boolean actionsBlocked() { return actionPersistenceBlocked; }
+    public static boolean actionsBlocked() {
+        return actionPersistenceBlocked || dev.worldforge.war.mc.WarMod.actionsBlocked();
+    }
 
     /** Domain mutations are acknowledged only after treasury and all loaded army snapshots are durable. */
     public static synchronized boolean persistActionMutation() {
-        if (actionPersistenceBlocked) return false;
+        if (actionsBlocked()) return false;
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server == null) return false;
         if (!WorldForgeMod.saveTreasuryNow(server)) {
@@ -160,6 +162,11 @@ public class ArmyMod {
         if (!persistNow(server)) {
             actionPersistenceBlocked = true;
             LOGGER.error("wf_army: army save failed after a strategic command; further army actions are blocked");
+            return false;
+        }
+        if (!dev.worldforge.war.mc.WarMod.persistNow(server)) {
+            actionPersistenceBlocked = true;
+            LOGGER.error("wf_army: political campaign/title checkpoint failed after a strategic command; further army actions are blocked");
             return false;
         }
         return true;

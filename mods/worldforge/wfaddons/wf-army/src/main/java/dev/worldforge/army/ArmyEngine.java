@@ -954,10 +954,30 @@ public final class ArmyEngine {
         if (!leader) return;
         double mineScore = w.scoreFor(me);
         try {
+            boolean politicalMutation = false;
             if (w.offerFrom != null && w.offerFrom != me) {
-                if (mineScore < 10 || (w.offerWhite && war.day - w.startDay > 360)) war.acceptPeace(w.id, r);
-            } else if (mineScore >= war.goalCost(w) && !w.goals.isEmpty()) war.enforce(w.id, r);
-            else if (mineScore <= -45 && w.offerFrom == null) war.offerPeace(w.id, r, true);
+                if (mineScore < 10 || (w.offerWhite && war.day - w.startDay > 360)) {
+                    if (persistenceBridge == null) war.acceptPeace(w.id, r);
+                    else {
+                        war.acceptPeaceOnce(WarEngine.autonomousActionRequestId(war.day, r, "accept-peace", w.id), w.id, r);
+                        politicalMutation = true;
+                    }
+                }
+            } else if (mineScore >= war.goalCost(w) && !w.goals.isEmpty()) {
+                if (persistenceBridge == null) war.enforce(w.id, r);
+                else {
+                    war.enforceOnce(WarEngine.autonomousActionRequestId(war.day, r, "enforce-peace", w.id), w.id, r);
+                    politicalMutation = true;
+                }
+            } else if (mineScore <= -45 && w.offerFrom == null) {
+                if (persistenceBridge == null) war.offerPeace(w.id, r, true);
+                else {
+                    war.offerPeaceOnce(WarEngine.autonomousActionRequestId(war.day, r, "offer-white-peace", w.id), w.id, r, true);
+                    politicalMutation = true;
+                }
+            }
+            if (politicalMutation && persistenceBridge != null
+                    && (!persistenceBridge.persist() || persistenceBridge.actionsBlocked())) return;
         } catch (TitleEditor.EditException ignored) { }
     }
 
