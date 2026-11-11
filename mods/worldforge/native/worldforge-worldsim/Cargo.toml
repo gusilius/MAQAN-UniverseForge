@@ -1,0 +1,11 @@
+[package]
+name = "worldforge-worldsim"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "worldforge_worldsim"
+path = "src/lib.rs"
+
+[dependencies]
