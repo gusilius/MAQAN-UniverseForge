@@ -9,7 +9,7 @@ import java.util.*;
  */
 public final class LifeSimulation {
     public enum Action { EAT, SLEEP, SEEK_SAFETY, SOCIALIZE, WORK, TRAIN, RECREATE, IDLE }
-    public enum Outcome { SUCCESS, BLOCKED, RETRY }
+    public enum Outcome { SUCCESS, IN_PROGRESS, BLOCKED, RETRY }
     public enum LOD { ACTIVE, SETTLEMENT, REGIONAL, REMOTE }
 
     public record Context(long worldMinute, boolean foodAvailable, boolean shelterAvailable,
@@ -49,6 +49,19 @@ public final class LifeSimulation {
             return new Decision(Action.IDLE, Outcome.BLOCKED, 0, "dead-or-missing", List.of(), context.worldMinute());
 
         long now = context.worldMinute();
+        Object pendingRaw = character.props.get("population.ai.pending_action");
+        if (pendingRaw instanceof String pendingName && !pendingName.isBlank()) {
+            try {
+                Action pending = Action.valueOf(pendingName);
+                long pendingMinute = number(character.props.get("population.ai.pending_minute"), now);
+                return new Decision(pending, Outcome.IN_PROGRESS, utility(character, context, pending),
+                        "action-in-progress", List.of(pending), pendingMinute + 1);
+            } catch (IllegalArgumentException invalidPending) {
+                character.props.remove("population.ai.pending_action");
+                character.props.remove("population.ai.pending_minute");
+                character.props.remove("population.ai.pending_token");
+            }
+        }
         long next = number(character.props.get("population.ai.next_think_minute"), Long.MIN_VALUE);
         if (now < next) return new Decision(Action.IDLE, Outcome.RETRY, 0, "thinking-cooldown", List.of(), next);
 
@@ -88,6 +101,17 @@ public final class LifeSimulation {
             lastAction = candidate;
             lastOutcome = executor.execute(character, candidate, context);
             if (lastOutcome == null) lastOutcome = Outcome.BLOCKED;
+            if (lastOutcome == Outcome.IN_PROGRESS) {
+                String token = candidate.name() + ":" + now;
+                character.props.put("population.ai.pending_action", candidate.name());
+                character.props.put("population.ai.pending_minute", now);
+                character.props.put("population.ai.pending_token", token);
+                character.props.put("population.ai.last_action", candidate.name().toLowerCase(Locale.ROOT));
+                character.props.put("population.ai.last_outcome", "in_progress");
+                character.props.put("population.ai.last_reason", "awaiting-authoritative-completion");
+                return new Decision(candidate, Outcome.IN_PROGRESS, utility(character, context, candidate),
+                        "awaiting-authoritative-completion", plan, now + interval);
+            }
             if (lastOutcome == Outcome.SUCCESS) {
                 applyEffects(character, candidate);
                 character.props.put("population.ai.last_action", candidate.name().toLowerCase(Locale.ROOT));
@@ -216,6 +240,47 @@ public final class LifeSimulation {
         if (x.urgentWorldEvent() && action == Action.SEEK_SAFETY) value += 45;
         if (action == Action.SEEK_SAFETY && !x.safe()) value += 20;
         return value;
+    }
+
+    /**
+     * Completes the pending action only after its authoritative adapter confirms completion.
+     * The token makes replay after save/load idempotent for the same in-flight action.
+     */
+    public static boolean completePending(Character character) {
+        if (character == null || !character.alive) return false;
+        Object rawAction = character.props.get("population.ai.pending_action");
+        Object rawToken = character.props.get("population.ai.pending_token");
+        if (!(rawAction instanceof String actionName) || !(rawToken instanceof String token)
+                || actionName.isBlank() || token.isBlank()) return false;
+        if (token.equals(character.props.get("population.ai.last_completed_token"))) {
+            clearPending(character);
+            return false;
+        }
+        final Action action;
+        try { action = Action.valueOf(actionName); }
+        catch (IllegalArgumentException invalid) { clearPending(character); return false; }
+        applyEffects(character, action);
+        character.props.put("population.ai.last_completed_token", token);
+        character.props.put("population.ai.last_action", action.name().toLowerCase(Locale.ROOT));
+        character.props.put("population.ai.last_outcome", "success");
+        character.props.put("population.ai.last_reason", "authoritative-action-completed");
+        clearPending(character);
+        return true;
+    }
+
+    /** Cancels an interrupted action without granting its need, skill or relationship effects. */
+    public static boolean cancelPending(Character character, String reason) {
+        if (character == null || !(character.props.get("population.ai.pending_action") instanceof String)) return false;
+        character.props.put("population.ai.last_outcome", "blocked");
+        character.props.put("population.ai.last_reason", safeReason(reason));
+        clearPending(character);
+        return true;
+    }
+
+    private static void clearPending(Character character) {
+        character.props.remove("population.ai.pending_action");
+        character.props.remove("population.ai.pending_minute");
+        character.props.remove("population.ai.pending_token");
     }
 
     private static void applyEffects(Character c, Action action) {
