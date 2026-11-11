@@ -364,7 +364,7 @@ mod tests {
         assert!(decide(&s).unwrap().proposals.iter().any(|p| matches!(&p.kind,ProposalKind::ReassignProfession{to,..} if to=="farmer")));
     }
     #[test] fn marriage_requires_two_distinct_realms() {
-        let mut s=base(); s.characters=vec![
+        let mut s=base(); s.seed=0; s.characters=vec![
             Character{id:"a".into(),realm_id:"north".into(),age:22,alive:true,married:false,gender:0,fertility:10,prestige:50,opinion:50,house_id:"A".into()},
             Character{id:"b".into(),realm_id:"south".into(),age:23,alive:true,married:false,gender:1,fertility:10,prestige:50,opinion:50,house_id:"B".into()}
         ];
