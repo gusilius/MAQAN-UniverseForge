@@ -3,6 +3,7 @@ package dev.worldforge.settle.mc;
 import dev.worldforge.settle.Building;
 import dev.worldforge.settle.Worker;
 import dev.worldforge.settle.Defs;
+import dev.worldforge.mod.api.SimulationLod;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -51,7 +52,7 @@ public final class BuildingSite {
             if (b.state == Building.State.PLANNED) continue;
             boolean done = b.state == Building.State.DONE;
             int wx = c.worldX(b), wz = c.worldZ(b);
-            if (!done && !playerNear(lv, wx, wz, NEAR)) continue;
+            if (!SimulationLod.shouldMaterializeSettlement(lv.dimension().location().toString(), wx, wz)) continue;
             Colony.Site site = c.sites.get(b.uid);
             Blueprints.Plan plan = Blueprints.get(lv, b.def);
             if (site == null) {
