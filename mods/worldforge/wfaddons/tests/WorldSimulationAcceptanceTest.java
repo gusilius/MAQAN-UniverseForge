@@ -238,6 +238,8 @@ public final class WorldSimulationAcceptanceTest {
         int caravanId = -1;
         String tradeBlockAfterPeace = "NOT_CHECKED";
         String tradeDispatchError = "";
+        boolean caravanCompleted = false;
+        String caravanFinalStatus = "NOT_CREATED";
         int snapshots = 0;
         Map<String, Settlement> cities = new LinkedHashMap<>();
         cities.put(north.id, north);
@@ -295,8 +297,17 @@ public final class WorldSimulationAcceptanceTest {
                 trade.capital.put(attackerRealm, 1000.0);
                 Trade.Caravan caravan = trade.dispatch("m:" + attackerRealm, attackerRealm,
                         defenderRealm, "grain", 5, 2, day);
-                if (caravan != null) caravanId = caravan.id;
+                if (caravan != null) { caravanId = caravan.id; caravanFinalStatus = caravan.status; }
                 else tradeDispatchError = trade.lastError;
+            }
+            // The trade subsystem prunes completed caravans after their retention window.
+            // Capture delivery when it occurs instead of expecting the record to survive 1000 days.
+            if (caravanId >= 0) {
+                Trade.Caravan currentCaravan = trade.caravans.get(caravanId);
+                if (currentCaravan != null && !currentCaravan.status.equals("в пути")) {
+                    caravanCompleted = true;
+                    caravanFinalStatus = currentCaravan.status;
+                }
             }
 
             if (day % 250 == 0) {
@@ -345,10 +356,8 @@ public final class WorldSimulationAcceptanceTest {
                 "canonical population remains addressable after long simulation and restores");
         check(snapshots == 4, "four cross-domain save/restore checkpoints completed");
         check(blockedTradeDuringWar, "diplomatic war state blocks cross-realm caravan dispatch");
-        Trade.Caravan caravan = caravanId < 0 ? null : trade.caravans.get(caravanId);
-        check(caravan != null && !caravan.status.equals("в пути"),
-                "trade caravan resumes after peace and completes its route");
-        if (caravan == null) System.out.println("TRADE_DIAGNOSTIC block=" + tradeBlockAfterPeace
+        check(caravanCompleted, "trade caravan resumes after peace and completes its route");
+        if (!caravanCompleted) System.out.println("TRADE_DIAGNOSTIC block=" + tradeBlockAfterPeace
                 + " dispatchError=" + tradeDispatchError + " warActive="
                 + (warRef[0].warBetween(attackerRealm, defenderRealm) != null));
 
@@ -370,7 +379,8 @@ public final class WorldSimulationAcceptanceTest {
         report.put("war_records", wars.wars.size());
         report.put("trade_markets", trade.markets.size());
         report.put("trade_caravan_id", caravanId);
-        report.put("trade_caravan_status", caravan == null ? "NOT_CREATED" : caravan.status);
+        report.put("trade_caravan_status", caravanFinalStatus);
+        report.put("trade_caravan_completed", caravanCompleted);
         report.put("trade_block_after_peace", tradeBlockAfterPeace);
         report.put("trade_dispatch_error", tradeDispatchError);
         report.put("realm_governments_developed", developedRealms);
