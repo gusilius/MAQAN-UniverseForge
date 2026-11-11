@@ -119,6 +119,11 @@ public class ArmyMod {
                 if (temp != null) try { Files.deleteIfExists(temp); } catch (Exception ignored) { }
             }
         }
+        // Army snapshot serialization can migrate legacy balances into the shared treasury.
+        if (allSaved && !WorldForgeMod.saveTreasuryNow(server)) {
+            LOGGER.error("wf_army: strategic roster snapshots were written but the shared treasury snapshot failed");
+            allSaved = false;
+        }
         return allSaved;
     }
 
