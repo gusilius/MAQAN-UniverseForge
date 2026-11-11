@@ -348,7 +348,7 @@ public class WFWorker extends PathfinderMob {
                 lastNavigationTarget = null;
                 if ("travelling".equals(wk.lifeActionStage)) {
                     wk.lifeActionStage = "performing";
-                    wk.lifeActionUntil = c.s.time + Math.max(1.0, wk.lifeActionDuration);
+                    wk.lifeActionUntil = c.s.worldMinute() + Math.max(1.0, wk.lifeActionDuration);
                     wk.status = switch (wk.lifeAction) {
                         case "eating" -> "принимает пищу";
                         case "sleeping" -> "отдыхает";
