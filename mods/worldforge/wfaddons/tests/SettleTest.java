@@ -292,8 +292,10 @@ public class SettleTest {
                 "активный складской лот сохраняет свою квитанцию происхождения при компактизации и перезапуске");
         boolean missingProvenanceRejected = false;
         try {
-            activeRestored.fromJson("{\\"format\\":\\"wf-resident-task-graph/1\\",\\"next\\":2,\\"receipts\\":[],"
-                    + "\\"local\\":{\\"7|stone\\":[{\\"receipt\\":1,\\"quantity\\":3}]},\\"stored\\":{}}");
+            activeRestored.fromJson(Json.write(Map.of(
+                    "format", "wf-resident-task-graph/1", "next", 2, "receipts", List.of(),
+                    "local", Map.of("7|stone", List.of(Map.of("receipt", 1, "quantity", 3))),
+                    "stored", Map.of())));
         } catch (IllegalArgumentException expected) { missingProvenanceRejected = true; }
         ok(missingProvenanceRejected,
                 "загрузка отклоняет активный складской лот со ссылкой на отсутствующую квитанцию");
