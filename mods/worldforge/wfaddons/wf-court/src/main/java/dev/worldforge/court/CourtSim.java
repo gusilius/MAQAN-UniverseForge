@@ -210,6 +210,12 @@ public final class CourtSim {
             Character f = reg.get(c.spouse);
             int age = y - c.birthYear;
             if (f == null || !f.alive || age < 18 || age > 40 || c.children.size() >= 6) continue;
+            // ResidentLifeEvents also advances local families on the shared CharacterRegistry.
+            // Both owners consult the same persisted marker so one calendar year cannot create
+            // two births for the same mother when settlement and court ticks run in either order.
+            Object lastBirthValue = c.props.get("family.last_birth_year");
+            int lastBirthYear = lastBirthValue instanceof Number n ? n.intValue() : 0;
+            if (lastBirthYear > 0 && y - lastBirthYear < 2) continue;
             if (rnd("birth", c.id.hashCode() + day).nextDouble() < 0.24) bear(f, c);
         }
     }
@@ -221,6 +227,12 @@ public final class CourtSim {
         List<String> l = m ? pool.male : pool.female;
         if (l.isEmpty()) return;
         Character kid = reg.addChild(father, mother, l.get(r.nextInt(l.size())), m ? "m" : "f", year());
+        // Shared with wf-settlements' ResidentLifeEvents pass: birth is one canonical
+        // Character lifecycle event, regardless of which domain clock reaches the year first.
+        mother.props.put("family.last_birth_year", year());
+        father.props.put("family.last_birth_year", year());
+        mother.props.put("family.last_event", "child-born:" + kid.id);
+        father.props.put("family.last_event", "child-born:" + kid.id);
         String realm = realmOf(father);
         if (!realm.isEmpty() && ruler(realm) == father) say("В доме " + realmName(realm) + " родился " + (m ? "наследник " : "ребёнок ") + kid.name);
     }

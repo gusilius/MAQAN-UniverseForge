@@ -4,6 +4,7 @@ import dev.worldforge.mod.*;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.*;
 import dev.worldforge.court.*;
+import dev.worldforge.settle.ResidentLifeEvents;
 
 import java.nio.file.*;
 import java.util.*;
@@ -34,6 +35,28 @@ public class CourtTest {
     public static void main(String[] a) throws Exception {
         CourtSim s = build(a[0], 7);
         ok(s.events.size() >= 10, "события загружены из файлов: " + s.events.size());
+
+        // Court and settlement clocks share one CharacterRegistry. A birth resolved by either
+        // subsystem must be visible to the other so the same mother cannot give birth twice.
+        boolean sharedBirthGuard = false;
+        for (long seed = 1; seed <= 100 && !sharedBirthGuard; seed++) {
+            CharacterRegistry family = new CharacterRegistry();
+            Character mother = family.create("Мать", "Дом", "north", "f", 270);
+            Character father = family.create("Отец", "Дом", "north", "m", 270);
+            family.marry(mother.id, father.id, 300);
+            CourtSim familyCourt = new CourtSim(s.d, null, family, s.defs, s.names, seed, 300);
+            familyCourt.day = 364;
+            familyCourt.tick(1);
+            if (mother.children.isEmpty()) continue; // choose a deterministic seed that produces the annual birth
+            int childrenAfterCourt = mother.children.size();
+            ok(((Number) mother.props.get("family.last_birth_year")).intValue() == 301,
+                    "court birth publishes the shared family-year marker");
+            ResidentLifeEvents.yearly(family, 301);
+            ok(mother.children.size() == childrenAfterCourt,
+                    "settlement family pass does not duplicate a birth already resolved by court simulation");
+            sharedBirthGuard = true;
+        }
+        ok(sharedBirthGuard, "shared court/settlement family lifecycle produces a reproducible annual birth for integration testing");
 
         // совет
         String realm = null;
