@@ -136,10 +136,11 @@ public final class ResidentLifeEvents {
 
     private static void advanceChildhood(CharacterRegistry registry, List<Character> people, int year) {
         for (Character child : people) {
-            if (!child.alive || PopulationSimulation.age(child, year) > 18
-                    || year <= number(child.props.get("family.development_year"), 0)) continue;
+            if (!child.alive || year <= number(child.props.get("family.development_year"), 0)) continue;
             int age = PopulationSimulation.age(child, year);
-            if (age == 18) {
+            // Catch up missed calendar years safely: an unloaded/archived child must still
+            // transition to adulthood when the next annual pass occurs after their 18th birthday.
+            if (age >= 18) {
                 child.props.put("family.development_year", year);
                 child.props.put("family.adulthood_year", year);
                 child.props.put("family.care_status", "independent_adult");
@@ -171,6 +172,21 @@ public final class ResidentLifeEvents {
                 if (guardian != null) {
                     ResidentSocial.adjust(child, guardian.id, 1);
                     ResidentSocial.adjust(guardian, child.id, 1);
+                    // Learning is attached to the child's canonical Character skill ledger.
+                    // Guardians can mentor only skills they actually possess; progress is slow
+                    // and age-scaled so education influences adult capability without cloning ranks.
+                    if (age >= 10) {
+                        int annualXp = age >= 13 ? 10 : 5;
+                        PopulationSimulation.skillRanksSnapshot(guardian).entrySet().stream()
+                                .filter(entry -> entry.getValue() > 0)
+                                .sorted(Map.Entry.comparingByKey())
+                                .limit(5)
+                                .forEach(entry -> {
+                                    int childRank = PopulationSimulation.skillRank(child, entry.getKey());
+                                    if (childRank < Math.min(3, entry.getValue()))
+                                        PopulationSimulation.train(child, entry.getKey(), annualXp);
+                                });
+                    }
                 }
             }
             if (age == 6) child.props.put("family.school_started_year", year);
