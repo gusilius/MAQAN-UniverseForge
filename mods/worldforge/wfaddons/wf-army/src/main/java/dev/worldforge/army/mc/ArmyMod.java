@@ -46,6 +46,7 @@ public class ArmyMod {
     /** Исходные JSON типов отрядов: уходят клиенту вместе с состоянием. */
     static volatile List<String> RAW = List.of();
     private static long ticks;
+    private static volatile boolean actionPersistenceBlocked;
 
     public ArmyMod() {
         MinecraftForge.EVENT_BUS.register(this);
@@ -127,17 +128,65 @@ public class ArmyMod {
         return allSaved;
     }
 
+    public static boolean actionsBlocked() { return actionPersistenceBlocked; }
+
+    /** Domain mutations are acknowledged only after treasury and all loaded army snapshots are durable. */
+    public static synchronized boolean persistActionMutation() {
+        if (actionPersistenceBlocked) return false;
+        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+        if (server == null) return false;
+        if (!WorldForgeMod.saveTreasuryNow(server)) {
+            actionPersistenceBlocked = true;
+            LOGGER.error("wf_army: treasury save failed after a strategic command; further army actions are blocked");
+            return false;
+        }
+        if (!persistNow(server)) {
+            actionPersistenceBlocked = true;
+            LOGGER.error("wf_army: army save failed after a strategic command; further army actions are blocked");
+            return false;
+        }
+        return true;
+    }
+
+    private static void recoverPendingRecruitments(MinecraftServer server) {
+        boolean changed = false;
+        for (Map.Entry<MapData, ArmyEngine> entry : ARMIES.entrySet()) {
+            for (String operationId : entry.getValue().pendingRecruitmentIds()) {
+                try {
+                    entry.getValue().completePendingRecruitment(operationId);
+                    changed = true;
+                    LOGGER.info("wf_army: recovered pending recruitment {} on map {}",
+                            operationId, entry.getKey().name);
+                } catch (RuntimeException error) {
+                    actionPersistenceBlocked = true;
+                    LOGGER.error("wf_army: pending recruitment {} on map {} is blocked for safe reconciliation: {}",
+                            operationId, entry.getKey().name, error.toString(), error);
+                    return;
+                }
+            }
+        }
+        if (changed && !persistActionMutation()) {
+            actionPersistenceBlocked = true;
+            LOGGER.error("wf_army: recovered recruitment state could not be durably checkpointed");
+        }
+    }
+
     private static void saveAll(MinecraftServer server) {
         if (!persistNow(server)) LOGGER.error("wf_army: at least one strategic army snapshot was not persisted");
     }
 
     @SubscribeEvent
-    public void onAboutToStart(ServerAboutToStartEvent e) { ARMIES.clear(); ticks = 0; }
+    public void onAboutToStart(ServerAboutToStartEvent e) {
+        ARMIES.clear();
+        ticks = 0;
+        actionPersistenceBlocked = false;
+    }
 
     /** Армии создаются при старте, чтобы водитель времени был подключён до первого дня. */
     @SubscribeEvent
     public void onStarted(ServerStartedEvent e) {
         for (MapData m : WorldForgeMod.loadedMaps().values()) if (m.titles != null) armies(m);
+        recoverPendingRecruitments(e.getServer());
     }
 
     @SubscribeEvent
