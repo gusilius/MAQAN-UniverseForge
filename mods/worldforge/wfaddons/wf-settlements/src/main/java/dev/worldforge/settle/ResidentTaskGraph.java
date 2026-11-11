@@ -171,6 +171,8 @@ public final class ResidentTaskGraph {
         }
         keep.addAll(latestProcessed.values());
         keep.addAll(latestConstruction.values());
+        pending.addAll(latestProcessed.values());
+        pending.addAll(latestConstruction.values());
         while (!pending.isEmpty()) {
             long id = pending.removeFirst();
             if (!keep.add(id)) continue;
