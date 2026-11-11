@@ -20,6 +20,12 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.level.storage.LevelResource;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
+import net.minecraftforge.event.RegisterCommandsEvent;
+import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.commands.Commands;
+import net.minecraft.network.chat.Component;
 import net.minecraftforge.event.server.ServerStartedEvent;
 import net.minecraftforge.event.server.ServerStoppingEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -106,6 +112,38 @@ public final class WorldSimMod {
         }
     }
 
+
+    @SubscribeEvent
+    public void onCommands(RegisterCommandsEvent event) {
+        CommandDispatcher<CommandSourceStack> dispatcher = event.getDispatcher();
+        dispatcher.register(Commands.literal("wfworldsim")
+                .then(Commands.literal("status").executes(context -> {
+                    MinecraftServer server = context.getSource().getServer();
+                    context.getSource().sendSuccess(() -> Component.literal(
+                            "WorldSim: native=" + NativeWorldSimulation.load()
+                                    + ", realms=" + WorldForgeMod.loadedMaps().values().stream().filter(m -> m.titles != null)
+                                    .mapToInt(m -> m.titles.realmList().size()).sum()
+                                    + ", settlements=" + SettleMod.COLONIES.size()
+                                    + ", recorded_events=" + journal.size()
+                                    + ", day=" + WorldForgeApi.clock().dayNumber()), false);
+                    return 1;
+                }))
+                .then(Commands.literal("history")
+                        .then(Commands.argument("count", IntegerArgumentType.integer(1, 20)).executes(context -> {
+                            int count = Math.min(IntegerArgumentType.getInteger(context, "count"), journal.size());
+                            int start = journal.size() - count;
+                            for (int i = start; i < journal.size(); i++) {
+                                JsonObject item = GSON.fromJson(journal.get(i), JsonObject.class);
+                                String result = item.get("applied").getAsBoolean() ? "применено" : "отклонено";
+                                String line = "День " + item.get("day").getAsLong() + ": "
+                                        + item.get("type").getAsString() + " — " + result
+                                        + (item.has("reason") ? "; " + item.get("reason").getAsString() : "");
+                                context.getSource().sendSuccess(() -> Component.literal(line), false);
+                            }
+                            return count;
+                        }))));
+    }
+
     private static JsonObject snapshot(MinecraftServer server, long day) {
         JsonObject root = new JsonObject();
         root.addProperty("world_id", server.getWorldData().getLevelName());
@@ -122,7 +160,7 @@ public final class WorldSimMod {
                 r.addProperty("army_strength", (long) number(realm.props.get("army_strength"), 0));
                 r.addProperty("stability", (int) number(realm.props.get("stability"), 50));
                 r.addProperty("prestige", (int) number(realm.props.get("prestige"), 0));
-                r.addProperty("expansion_pressure", (int) number(realm.props.get("expansion_pressure"), 10));
+                r.addProperty("expansion_pressure", (int) number(realm.props.get("expansion_pressure"), 35));
                 String war = String.valueOf(realm.props.getOrDefault("war.state", "peace"));
                 r.addProperty("at_war", !war.isBlank() && !"peace".equalsIgnoreCase(war));
                 r.addProperty("last_war_day", (long) number(realm.props.get("war.last_day"), 0));
@@ -136,8 +174,12 @@ public final class WorldSimMod {
                 if (!emitted.add(a + "|" + b)) continue;
                 JsonObject border = new JsonObject();
                 border.addProperty("a", a); border.addProperty("b", b);
-                border.addProperty("contested_claim", false);
-                border.addProperty("strategic_value", 30);
+                var realmA = map.titles.realms.get(a);
+                var realmB = map.titles.realms.get(b);
+                boolean contested = realmA != null && dev.worldforge.mod.api.Diplomacy.ids(realmA, "claims").contains(b)
+                        || realmB != null && dev.worldforge.mod.api.Diplomacy.ids(realmB, "claims").contains(a);
+                border.addProperty("contested_claim", contested);
+                border.addProperty("strategic_value", 80);
                 border.addProperty("distance_cost", 0);
                 borders.add(border);
             }
