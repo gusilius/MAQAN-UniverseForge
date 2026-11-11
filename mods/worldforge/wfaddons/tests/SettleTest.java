@@ -99,6 +99,36 @@ public class SettleTest {
         ok(supply.spend(Map.of("wood", 10, "stone", 5))
                 && supply.amount("wood") == supplyWood - 10 && supply.amount("stone") == supplyStone - 5,
                 "снабжение военного найма списывается одной атомарной операцией");
+        double invalidWood = supply.amount("wood"), invalidStone = supply.amount("stone");
+        ok(!supply.spend(Map.of("wood", 1, "stone", -1))
+                        && supply.amount("wood") == invalidWood && supply.amount("stone") == invalidStone,
+                "отрицательная стоимость отклоняется до списания любого ресурса");
+
+        Settlement replaySupply = fresh(d, 0);
+        Map<String, Integer> replayCost = Map.of("wood", 12, "stone", 4);
+        double replayWood = replaySupply.amount("wood"), replayStone = replaySupply.amount("stone");
+        ok(replaySupply.spendOnce(replayCost, "army-muster-test-1")
+                        && replaySupply.amount("wood") == replayWood - 12
+                        && replaySupply.amount("stone") == replayStone - 4,
+                "именованная операция списывает все ресурсы с durable ledger receipts");
+        int replayJournalSize = dev.worldforge.mod.economy.TreasuryService.current().journal().size();
+        ok(replaySupply.spendOnce(replayCost, "army-muster-test-1")
+                        && replaySupply.amount("wood") == replayWood - 12
+                        && replaySupply.amount("stone") == replayStone - 4
+                        && dev.worldforge.mod.economy.TreasuryService.current().journal().size() == replayJournalSize,
+                "повтор после частичного/неподтверждённого ответа не списывает ресурсы повторно");
+        ok(!replaySupply.spendOnce(Map.of("wood", 13, "stone", 4), "army-muster-test-1")
+                        && replaySupply.amount("wood") == replayWood - 12
+                        && replaySupply.amount("stone") == replayStone - 4,
+                "повтор operation ID с изменённой стоимостью блокируется");
+        var treasurySnapshot = dev.worldforge.mod.economy.TreasuryLedger.fromJson(
+                dev.worldforge.mod.economy.TreasuryService.current().toJson());
+        dev.worldforge.mod.economy.TreasuryService.replace(treasurySnapshot);
+        int restoredJournalSize = treasurySnapshot.journal().size();
+        ok(replaySupply.spendOnce(replayCost, "army-muster-test-1")
+                        && treasurySnapshot.journal().size() == restoredJournalSize
+                        && replaySupply.amount("wood") == replayWood - 12,
+                "receipt ресурсов восстанавливается из treasury JSON и переживает reload");
 
         Flow flow = new Flow();
         flow.record(1, "wood", 5, true);

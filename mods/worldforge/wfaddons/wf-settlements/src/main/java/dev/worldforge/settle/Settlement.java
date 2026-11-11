@@ -409,7 +409,14 @@ public final class Settlement {
     }
 
     public boolean canPay(Map<String, Integer> cost) {
-        for (Map.Entry<String, Integer> e : cost.entrySet()) if (amount(e.getKey()) + 1e-9 < e.getValue()) return false;
+        if (cost == null || cost.size() > 64) return false;
+        for (Map.Entry<String, Integer> e : cost.entrySet()) {
+            if (e.getKey() == null || e.getKey().isBlank() || e.getKey().length() > 64
+                    || e.getValue() == null || e.getValue() < 0 || e.getValue() > 1_000_000_000)
+                return false;
+        }
+        for (Map.Entry<String, Integer> e : cost.entrySet())
+            if (amount(e.getKey()) + 1e-9 < e.getValue()) return false;
         return true;
     }
 
@@ -417,6 +424,60 @@ public final class Settlement {
     public boolean spend(Map<String, Integer> cost) {
         if (cost == null || !canPay(cost)) return false;
         return pay(cost);
+    }
+
+    /**
+     * Crash-replay-safe resource debit for a named domain operation.
+     * Each resource has its own immutable TreasuryLedger receipt, allowing a retry to
+     * finish a partially persisted multi-resource debit without charging completed legs twice.
+     * The operation owner must keep its own durable intent until every leg and dependent
+     * domain snapshot has been committed.
+     */
+    public synchronized boolean spendOnce(Map<String, Integer> cost, String operationId) {
+        if (operationId == null || !operationId.matches("[A-Za-z0-9_.:-]{1,96}")
+                || cost == null || cost.size() > 64) return false;
+
+        TreeMap<String, Integer> normalized = new TreeMap<>();
+        for (Map.Entry<String, Integer> entry : cost.entrySet()) {
+            String resource = entry.getKey();
+            Integer quantity = entry.getValue();
+            if (resource == null || !resource.matches("[a-z0-9_.:-]{1,64}")
+                    || quantity == null || quantity < 0 || quantity > 1_000_000_000)
+                return false;
+            normalized.put(resource, quantity);
+        }
+
+        TreasuryLedger ledger = TreasuryService.current();
+        Map<String, String> references = new LinkedHashMap<>();
+        for (Map.Entry<String, Integer> entry : normalized.entrySet()) {
+            if (entry.getValue() == 0) continue;
+            String resource = entry.getKey();
+            TreasuryLedger.Kind kind = Defs.SILVER.equals(resource)
+                    ? TreasuryLedger.Kind.WITHDRAWAL : TreasuryLedger.Kind.CONSUMPTION;
+            String reference = "settlement-spend:" + operationId + ":" + resource;
+            String account = accountId(resource);
+            amount(resource);
+            resourceAccount(resource);
+            references.put(resource, reference);
+            if (!ledger.hasTransaction(account, kind, reference)
+                    && ledger.balance(account) + 1e-9 < entry.getValue()) return false;
+        }
+
+        for (Map.Entry<String, Integer> entry : normalized.entrySet()) {
+            int quantity = entry.getValue();
+            if (quantity == 0) continue;
+            String resource = entry.getKey();
+            TreasuryLedger.Kind kind = Defs.SILVER.equals(resource)
+                    ? TreasuryLedger.Kind.WITHDRAWAL : TreasuryLedger.Kind.CONSUMPTION;
+            String account = accountId(resource);
+            String reference = references.get(resource);
+            boolean alreadyPosted = ledger.hasTransaction(account, kind, reference);
+            if (!ledger.withdrawOnce(account, quantity, kind, "settlement-spend", reference,
+                    worldMinute(), "idempotent settlement resource debit")) return false;
+            syncResourceMirror(resource);
+            if (!alreadyPosted) flow.record(time, resource, quantity, false);
+        }
+        return true;
     }
 
     private boolean pay(Map<String, Integer> cost) { return pay(cost, "settlement-spend", "resource-cost"); }
