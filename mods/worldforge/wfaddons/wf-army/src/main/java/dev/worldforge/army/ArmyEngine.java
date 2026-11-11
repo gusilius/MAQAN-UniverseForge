@@ -50,6 +50,18 @@ public final class ArmyEngine {
         }
     }
     private final LinkedHashMap<String, PendingRecruitment> pendingRecruitments = new LinkedHashMap<>();
+
+    /** Runtime adapter for durable checkpoints; the army domain remains independent of Forge. */
+    public interface PersistenceBridge {
+        boolean actionsBlocked();
+        boolean persist();
+    }
+    private transient volatile PersistenceBridge persistenceBridge;
+
+    public void installPersistenceBridge(PersistenceBridge bridge) {
+        if (bridge == null) throw new IllegalArgumentException("army persistence bridge is required");
+        persistenceBridge = bridge;
+    }
     /** Дробная часть суток между вызовами tick; сохраняется, чтобы частые малые шаги не терялись. */
     private double dayAccumulator;
     private Map<String, List<Integer>> baronyCache = new HashMap<>();
@@ -264,6 +276,29 @@ public final class ArmyEngine {
     public synchronized List<String> pendingRecruitmentIds() {
         return List.copyOf(pendingRecruitments.keySet());
     }
+
+    /**
+     * Executes autonomous or scripted recruitment through the same durable intent/debit/roster
+     * protocol as player commands. The persistence bridge checkpoints the prepared intent before
+     * TreasuryLedger is touched and checkpoints the completed army receipt afterwards.
+     */
+    public synchronized Army recruitWithPersistence(String requestId, String kind, String realm,
+                                                     String type, int count) {
+        PersistenceBridge bridge = persistenceBridge;
+        if (bridge == null)
+            throw new TitleEditor.EditException("Для автономного набора не установлен durable persistence bridge");
+        if (bridge.actionsBlocked())
+            throw new TitleEditor.EditException("Набор армии заблокирован до восстановления стратегического сохранения");
+        String operationId = stageRecruitment(requestId, kind, realm, type, count);
+        if (!bridge.persist() || bridge.actionsBlocked())
+            throw new TitleEditor.EditException("Не удалось сохранить intent набора армии; оплата не выполнялась");
+        Army result = completePendingRecruitment(operationId);
+        if (!bridge.persist() || bridge.actionsBlocked())
+            throw new TitleEditor.EditException("Набор применён в памяти, но финальный checkpoint не подтверждён; операция будет восстановлена из intent");
+        return result;
+    }
+
+
 
     /** Набрать n человек типа type в столице. Ополченцы тратят запас людей, остальные - золото (n/10 * цена). */
     public Army raise(String realm, String type, int n) {
@@ -851,6 +886,8 @@ public final class ArmyEngine {
     // ------------------------------------------------------------------ ИИ
 
     private void aiTurn() {
+        PersistenceBridge bridge = persistenceBridge;
+        if (bridge != null && bridge.actionsBlocked()) return;
         for (War w : new ArrayList<>(war.wars.values())) {
             if (!w.active) continue;
             for (String r : new ArrayList<>(w.sides.keySet())) {
@@ -865,16 +902,39 @@ public final class ArmyEngine {
         War.Side me = w.sides.get(r);
         // 1. набор
         if (armiesOf(r).stream().mapToInt(Army::men).sum() < 0.3 * levyCap(r)) {
-            double p = pool(r);
-            int n = (int) Math.min(p, levyCap(r) * 0.6);
+            double availablePool = pool(r);
+            int n = (int) Math.min(availablePool, levyCap(r) * 0.6);
             if (n >= 20) {
                 try {
-                    raise(r, "levy", (int) (n * 0.5));
-                    if (n * 0.25 >= 5) raise(r, "spear", (int) (n * 0.25));
-                    if (gold(r) > 40 && n * 0.15 >= 3) raise(r, "archer", (int) (n * 0.15));
-                    if (gold(r) > 120 && n * 0.1 >= 2) raise(r, "cavalry", (int) (n * 0.1));
-                    if (gold(r) > 120) hire(r, "siege", 2);
+                    if (persistenceBridge == null) {
+                        // Pure-domain compatibility for deterministic tests and standalone simulations.
+                        raise(r, "levy", (int) (n * 0.5));
+                        if (n * 0.25 >= 5) raise(r, "spear", (int) (n * 0.25));
+                        if (gold(r) > 40 && n * 0.15 >= 3) raise(r, "archer", (int) (n * 0.15));
+                        if (gold(r) > 120 && n * 0.1 >= 2) raise(r, "cavalry", (int) (n * 0.1));
+                        if (gold(r) > 120) hire(r, "siege", 2);
+                    } else {
+                        recruitWithPersistence(aiRecruitmentRequestId(w, r, "raise", "levy"),
+                                "raise", r, "levy", (int) (n * 0.5));
+                        if (persistenceBridge.actionsBlocked()) return;
+                        if (n * 0.25 >= 5)
+                            recruitWithPersistence(aiRecruitmentRequestId(w, r, "raise", "spear"),
+                                    "raise", r, "spear", (int) (n * 0.25));
+                        if (persistenceBridge.actionsBlocked()) return;
+                        if (gold(r) > 40 && n * 0.15 >= 3)
+                            recruitWithPersistence(aiRecruitmentRequestId(w, r, "raise", "archer"),
+                                    "raise", r, "archer", (int) (n * 0.15));
+                        if (persistenceBridge.actionsBlocked()) return;
+                        if (gold(r) > 120 && n * 0.1 >= 2)
+                            recruitWithPersistence(aiRecruitmentRequestId(w, r, "raise", "cavalry"),
+                                    "raise", r, "cavalry", (int) (n * 0.1));
+                        if (persistenceBridge.actionsBlocked()) return;
+                        if (gold(r) > 120)
+                            recruitWithPersistence(aiRecruitmentRequestId(w, r, "hire", "siege"),
+                                    "hire", r, "siege", 2);
+                    }
                 } catch (TitleEditor.EditException ignored) { }
+                if (persistenceBridge != null && persistenceBridge.actionsBlocked()) return;
             }
         }
         // 2. слить армии в одной точке
@@ -899,6 +959,12 @@ public final class ArmyEngine {
             } else if (mineScore >= war.goalCost(w) && !w.goals.isEmpty()) war.enforce(w.id, r);
             else if (mineScore <= -45 && w.offerFrom == null) war.offerPeace(w.id, r, true);
         } catch (TitleEditor.EditException ignored) { }
+    }
+
+    /** Stable identity per war day and unit type; a restarted AI reuses the same receipt. */
+    private String aiRecruitmentRequestId(War campaign, String realm, String kind, String type) {
+        String canonical = campaign.id + "|" + war.day + "|" + realm + "|" + kind + "|" + type;
+        return "ai:" + UUID.nameUUIDFromBytes(canonical.getBytes(StandardCharsets.UTF_8));
     }
 
     private void tryMove(Army a, int target) { try { move(a.id, target, a.realm); } catch (TitleEditor.EditException ignored) { } }

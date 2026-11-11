@@ -252,6 +252,52 @@ public class ArmyTest {
         ok(treasuryAfterHire < treasuryBefore,
                 "hiring commits the canonical TreasuryLedger debit");
 
+        // Autonomous AI recruitment uses the same intent/debit/receipt protocol as player orders.
+        ArmyEngine autonomous = fresh(a[0], ids);
+        autonomous.ai = false;
+        String autonomousRequest = "ai-crash-recovery-request-001";
+        String[] durableArmySnapshot = {""};
+        String[] durableTreasurySnapshot = {""};
+        int[] autonomousCheckpoints = {0};
+        boolean[] autonomousBlocked = {false};
+        autonomous.installPersistenceBridge(new ArmyEngine.PersistenceBridge() {
+            @Override public boolean actionsBlocked() { return autonomousBlocked[0]; }
+            @Override public boolean persist() {
+                autonomousCheckpoints[0]++;
+                if (autonomousCheckpoints[0] == 1) {
+                    durableArmySnapshot[0] = autonomous.toJson(); // PREPARED intent reaches disk first
+                    durableTreasurySnapshot[0] = TreasuryService.current().toJson();
+                    return true;
+                }
+                if (autonomousCheckpoints[0] == 2) {
+                    durableTreasurySnapshot[0] = TreasuryService.current().toJson(); // debit saved; army snapshot deliberately fails
+                    autonomousBlocked[0] = true;
+                    return false;
+                }
+                return false;
+            }
+        });
+        boolean autonomousCheckpointFailed = false;
+        try { autonomous.recruitWithPersistence(autonomousRequest, "hire", ids[0], "archer", 10); }
+        catch (TitleEditor.EditException expected) { autonomousCheckpointFailed = true; }
+        ok(autonomousCheckpointFailed && autonomousBlocked[0] && autonomousCheckpoints[0] == 2
+                        && durableArmySnapshot[0].contains("pendingRecruitments"),
+                "autonomous recruitment persists its intent before the treasury debit and fails closed on the final army checkpoint");
+        double debitCommittedBeforeRestart = autonomous.gold(ids[0]);
+        TreasuryService.replace(dev.worldforge.mod.economy.TreasuryLedger.fromJson(durableTreasurySnapshot[0]));
+        ArmyEngine autonomousRestart = new ArmyEngine(autonomous.war);
+        autonomousRestart.fromJson(durableArmySnapshot[0]);
+        String autonomousPendingId = autonomousRestart.pendingRecruitmentIds().get(0);
+        Army autonomousRecovered = autonomousRestart.completePendingRecruitment(autonomousPendingId);
+        ok(autonomousRecovered.count("archer") == 10
+                        && Math.abs(autonomousRestart.gold(ids[0]) - debitCommittedBeforeRestart) < 1e-8
+                        && autonomousRestart.pendingRecruitmentIds().isEmpty(),
+                "restart replays an autonomous recruitment after a committed Treasury debit without charging twice");
+        ArmyEngine autonomousSecondRestart = new ArmyEngine(autonomousRestart.war);
+        autonomousSecondRestart.fromJson(autonomousRestart.toJson());
+        ok(autonomousSecondRestart.completePendingRecruitment(autonomousPendingId).id == autonomousRecovered.id,
+                "autonomous recruitment receipt remains idempotent after its recovered army is saved and reloaded");
+
         // Split, merge and disband are request-idempotent composition operations.
         Army splitSource = hiredReload.raise(ids[0], "levy", 30);
         String splitRequest = "test-army-split-request-001";

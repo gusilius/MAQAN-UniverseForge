@@ -73,6 +73,10 @@ public class ArmyMod {
     public static ArmyEngine armies(MapData m) {
         return ARMIES.computeIfAbsent(m, k -> {
             ArmyEngine a = new ArmyEngine(WarMod.engine(k));
+            a.installPersistenceBridge(new ArmyEngine.PersistenceBridge() {
+                @Override public boolean actionsBlocked() { return ArmyMod.actionsBlocked(); }
+                @Override public boolean persist() { return ArmyMod.persistActionMutation(); }
+            });
             MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
             if (server != null) {
                 List<String> raw = new ArrayList<>();
