@@ -59,6 +59,44 @@ public final class ResidentSocial {
         return Math.min(a, b);
     }
 
+    /**
+     * Replay-safe conversation effect. Each Character stores its own receipt beside its
+     * relationship mutation, so a crash between the two Character saves can be resumed
+     * without applying the first participant's opinion delta twice.
+     */
+    public static int socializeOnce(Character first, Character second, int delta, String operationId) {
+        if (first == null || second == null || first == second || !first.alive || !second.alive) return 0;
+        if (operationId == null || !operationId.matches("[A-Za-z0-9_.:-]{1,128}"))
+            throw new IllegalArgumentException("A stable social interaction operation ID is required");
+        applyInteractionOnce(first, second, delta, operationId);
+        applyInteractionOnce(second, first, delta, operationId);
+        return Math.min(score(first, second.id), score(second, first.id));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void applyInteractionOnce(Character person, Character other, int delta, String operationId) {
+        final String receiptKey = "social.interaction_receipts";
+        Map<String, Object> receipts = new LinkedHashMap<>();
+        Object raw = person.props.get(receiptKey);
+        if (raw instanceof Map<?, ?> map) {
+            for (Map.Entry<?, ?> entry : map.entrySet())
+                if (entry.getKey() instanceof String key && entry.getValue() instanceof String value)
+                    receipts.put(key, value);
+        }
+        String target = other.globalId;
+        Object prior = receipts.get(operationId);
+        if (prior != null) {
+            if (!target.equals(prior))
+                throw new IllegalStateException("Social interaction ID collision: " + operationId);
+            return;
+        }
+        adjust(person, other.id, delta);
+        updateBond(person, other.id, score(person, other.id));
+        receipts.put(operationId, target);
+        while (receipts.size() > 4096) receipts.remove(receipts.keySet().iterator().next());
+        person.props.put(receiptKey, receipts);
+    }
+
     /** Stable social labels are derived from the durable score, not stored as a second source of truth. */
     public static String bond(Character person, String otherId) {
         int value = score(person, otherId);

@@ -965,8 +965,13 @@ public class SettleMod {
                                 return LifeSimulation.Outcome.BLOCKED;
                             }
                         }
+                        Object tokenRaw = character.props.get("population.ai.pending_token");
+                        if (!(tokenRaw instanceof String operationId) || operationId.isBlank()) {
+                            clearLifeAction(worker);
+                            return LifeSimulation.Outcome.BLOCKED;
+                        }
                         int opinion = dev.worldforge.settle.ResidentSocial.interactionDelta(character, companionPerson);
-                        dev.worldforge.settle.ResidentSocial.socialize(character, companionPerson, opinion);
+                        dev.worldforge.settle.ResidentSocial.socializeOnce(character, companionPerson, opinion, operationId);
                         companion.status = "общался: " + character.name;
                     }
                     clearLifeAction(worker);

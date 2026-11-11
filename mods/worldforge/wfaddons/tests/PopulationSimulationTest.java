@@ -14,6 +14,7 @@ import dev.worldforge.people.PopulationSimulation.Duty;
 import dev.worldforge.people.PopulationSimulation.Intent;
 import dev.worldforge.people.PopulationSimulation.LifeStage;
 import dev.worldforge.people.PopulationSimulation.Need;
+import dev.worldforge.settle.ResidentSocial;
 
 public final class PopulationSimulationTest {
     private static int failures;
@@ -191,6 +192,21 @@ public final class PopulationSimulationTest {
                         && !LifeSimulation.matchesPhysicalAction(LifeSimulation.Action.WORK, "socializing")
                         && !LifeSimulation.matchesPhysicalAction(LifeSimulation.Action.EAT, ""),
                 "mismatched or missing physical action cannot satisfy a Character need");
+
+        Character conversationalist = registry.create("Conversationalist", "", "north", "m", 280);
+        Character companion = registry.create("Companion", "", "north", "f", 280);
+        int firstBefore = ResidentSocial.score(conversationalist, companion.id);
+        int secondBefore = ResidentSocial.score(companion, conversationalist.id);
+        ResidentSocial.socializeOnce(conversationalist, companion, 3, "life:conversation:one");
+        ResidentSocial.socializeOnce(conversationalist, companion, 3, "life:conversation:one");
+        ok(ResidentSocial.score(conversationalist, companion.id) == firstBefore + 3
+                        && ResidentSocial.score(companion, conversationalist.id) == secondBefore + 3,
+                "replayed conversation applies each participant relationship delta exactly once");
+        boolean collisionRejected = false;
+        try { ResidentSocial.socializeOnce(conversationalist, smith, 3, "life:conversation:one"); }
+        catch (IllegalStateException expected) { collisionRejected = true; }
+        ok(collisionRejected && ResidentSocial.score(conversationalist, companion.id) == firstBefore + 3,
+                "conversation receipt rejects reuse of one operation ID for another participant");
 
         Character delayed = registry.create("Delayed", "", "north", "m", 280);
         PopulationSimulation.setNeed(delayed, Need.HUNGER, 90);
