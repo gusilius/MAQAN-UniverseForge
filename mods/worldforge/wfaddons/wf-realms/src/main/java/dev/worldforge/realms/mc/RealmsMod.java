@@ -150,6 +150,10 @@ public class RealmsMod {
                         rulerOpinions.put(r.id, rawOpinion instanceof Number n ? n.intValue() : 0);
                     }
                     POLITICS.advanceVassalPolitics((int) WorldForgeApi.clock().dayNumber(), rulerOpinions);
+                    for (TitleData.Realm realm : currentRealms) {
+                        Statecraft.VassalContract contract = POLITICS.vassalage(realm.id);
+                        if (contract != null) realm.props.put("politics.vassal_loyalty", contract.loyalty);
+                    }
                 }
                 for (TitleData.Realm r : currentRealms) {
                     Object taxableBase = r.props.get("taxable_base");
