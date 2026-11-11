@@ -451,6 +451,7 @@ public final class WorldSimMod {
             if (colony == null || colony.s == null || wanted <= 0) return false;
             if (!colony.s.defs.professions.containsKey(to)) return false;
             int changed = 0;
+            List<dev.worldforge.people.Character> pendingProfessionTransitions = new ArrayList<>();
             List<Worker> candidates = new ArrayList<>(colony.s.workers);
             candidates.sort(Comparator.comparingInt(worker -> worker.id));
             for (Worker worker : candidates) {
@@ -477,15 +478,33 @@ public final class WorldSimMod {
                 if (!characterSource && !characterTarget) continue;
                 if (characterSource) {
                     if (!PopulationSimulation.canWork(person, PeopleMod.YEAR)) continue;
+                    Map<String, Object> transition = new LinkedHashMap<>();
+                    transition.put("request_id", requestId);
+                    transition.put("settlement", settlementId);
+                    transition.put("worker_id", worker.id);
+                    transition.put("character_id", person.globalId);
+                    transition.put("from", from);
+                    transition.put("profession", to);
+                    person.props.put("population.pending_settlement_profession", transition);
                     owner.changeProfession(person.id, to, PeopleMod.YEAR);
                 }
-                // Persist the Character partition first. If the settlement write then
-                // fails, the next proposal can finish the Worker projection idempotently.
+                // Persist the Character and its projection-recovery marker first. The
+                // settlement synchronizer will honor this marker after restart instead of
+                // overwriting the canonical profession with a stale Worker snapshot.
                 if (!PeopleMod.persistCharacter(person, server)) return false;
                 if (workerSource) colony.s.setProfession(worker.id, to);
+                if (characterSource) pendingProfessionTransitions.add(person);
                 changed++;
             }
-            return changed > 0 && SettleMod.saveDurably(server);
+            if (changed == 0 || !SettleMod.saveDurably(server)) return false;
+            for (dev.worldforge.people.Character person : pendingProfessionTransitions) {
+                Object marker = person.props.remove("population.pending_settlement_profession");
+                if (!PeopleMod.persistCharacter(person, server)) {
+                    if (marker != null) person.props.put("population.pending_settlement_profession", marker);
+                    return false;
+                }
+            }
+            return true;
         }
         if ("recruit".equals(type)) {
             String realm = action.get("realm").getAsString();

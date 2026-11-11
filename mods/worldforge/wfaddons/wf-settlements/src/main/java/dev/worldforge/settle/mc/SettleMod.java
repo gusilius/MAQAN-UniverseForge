@@ -700,7 +700,7 @@ public class SettleMod {
      * Worker.person is the durable foreign key; profession/building remain settlement-owned state.
      * The optional wf_people addon remains optional and no duplicate character registry is created here.
      */
-    private static void syncPeople(Colony colony) {
+    private static void syncPeople(Colony colony, MinecraftServer server) {
         if (!net.minecraftforge.fml.ModList.get().isLoaded("wf_people") || colony == null || colony.s == null) return;
         dev.worldforge.mod.MapData ownerMap = null;
         dev.worldforge.mod.TitleData.Title province = null;
@@ -716,6 +716,7 @@ public class SettleMod {
         String race = realm == null ? "" : propertyString(realm.props, "race");
         String culture = realm == null ? "" : propertyString(realm.props, "culture");
         String place = "settlement:" + colony.s.id;
+        List<Character> pendingProfessionTransitions = new ArrayList<>();
 
         // Consume persisted departures before reconciling current workers. A crash/reload cannot erase a death or migration.
         for (Settlement.WorkerDeparture departure : new ArrayList<>(colony.s.pendingDepartures())) {
@@ -770,6 +771,20 @@ public class SettleMod {
             if (person.culture == null || person.culture.isBlank()) person.culture = culture;
             if (person.culture == null || person.culture.isBlank()) person.culture = culture;
             String profession = worker.profession == null || worker.profession.isBlank() ? "laborer" : worker.profession;
+            // A cross-domain profession change writes the canonical Character first. If the
+            // server stopped before the settlement projection was durable, this marker makes
+            // the Character's committed target win over the stale Worker snapshot on reload.
+            Object pendingRaw = person.props.get("population.pending_settlement_profession");
+            if (pendingRaw instanceof Map<?, ?> pending
+                    && colony.s.id.equals(pending.get("settlement"))
+                    && worker.id == (pending.get("worker_id") instanceof Number n ? n.intValue() : -1)
+                    && person.globalId.equals(pending.get("character_id"))
+                    && pending.get("profession") instanceof String target
+                    && colony.s.defs.professions.containsKey(target)) {
+                if (!target.equals(worker.profession)) colony.s.setProfession(worker.id, target);
+                profession = target;
+                if (!pendingProfessionTransitions.contains(person)) pendingProfessionTransitions.add(person);
+            }
             if (!profession.equals(PopulationSimulation.profession(person))) personRegistry.changeProfession(person.id, profession, PeopleMod.YEAR);
             personRegistry.setDuty(person.id, Duty.WORKER, true, PeopleMod.YEAR);
             boolean settlementSoldier = java.util.Set.of("guard", "soldier", "archer", "knight").contains(profession);
@@ -796,6 +811,13 @@ public class SettleMod {
             person.props.put("wf_building_uid", worker.building);
             person.props.put("wf_race_id", race);
             person.props.put("wf_culture_id", culture);
+        }
+        if (!pendingProfessionTransitions.isEmpty() && saveDurably(server)) {
+            for (Character person : pendingProfessionTransitions) {
+                Object marker = person.props.remove("population.pending_settlement_profession");
+                if (!PeopleMod.persistCharacter(person, server) && marker != null)
+                    person.props.put("population.pending_settlement_profession", marker);
+            }
         }
     }
 
@@ -1129,7 +1151,7 @@ public class SettleMod {
                             dev.worldforge.mod.api.WorldForgeApi.clock().year());
                     c.s.tick(speed);                                   // 1 симуляционная секунда = 20 тиков, 24 мировые минуты
                     remitCrownTaxes(c);
-                    syncPeople(c);
+                    syncPeople(c, server);
                     runLifeAI(server, c);
                     c.map.tick(c.s, speed);                             // глобальная логистика не зависит от загруженности чанков
                     if (ticks % (STEP_TICKS * 10) == 0) { c.s.types = TYPES; String rid = realmOf(c); c.s.refreshType(c.s.workers.size(), rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.terrain(rid), rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.races(rid)); }
