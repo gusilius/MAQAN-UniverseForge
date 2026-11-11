@@ -19,7 +19,9 @@ public final class ResidentLifeEvents {
         people.sort(Comparator.comparing(c -> c.id));
         // A settlement may call this pass every simulation step. Refresh the full registry only
         // once per world year, not once per colony tick.
-        if (people.isEmpty() || number(people.get(0).props.get("population.life_stage_refresh_year"), 0) < year) {
+        boolean refreshStages = people.stream().anyMatch(person ->
+                number(person.props.get("population.life_stage_refresh_year"), 0) < year);
+        if (refreshStages) {
             registry.refreshLifeStages(year);
             for (Character person : people) person.props.put("population.life_stage_refresh_year", year);
         }
