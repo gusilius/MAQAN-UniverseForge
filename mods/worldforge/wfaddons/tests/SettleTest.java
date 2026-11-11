@@ -9,6 +9,10 @@ import java.util.*;
 public class SettleTest {
     static int fails;
 
+    private static void okGraphDelivery(double actual, double expected) {
+        if (Math.abs(actual - expected) > 1e-9) throw new AssertionError("Unexpected task graph quantity: " + actual);
+    }
+
     static void ok(boolean c, String what) { System.out.println((c ? "ok   " : "FAIL ") + what); if (!c) fails++; }
     static String firstDiff(Object a, Object b, String path) {
         if (Objects.equals(a, b)) return "";
@@ -266,6 +270,33 @@ public class SettleTest {
         ok(manualHaulerBack.worker(newHauler.id).manualHauler
                         && manualHaulerBack.worker(newHauler.id).workRole().equals("hauler"),
                 "ручное назначение носильщика сохраняется после перезапуска поселения");
+
+        // долгоживущий граф задач: компактизация сохраняет активную цепочку происхождения,
+        // но не даёт завершённой истории бесконечно заполнять журнал.
+        ResidentTaskGraph durableGraph = new ResidentTaskGraph();
+        for (int i = 0; i < 6000; i++) {
+            durableGraph.extract(1, 1, "wood", 1, i);
+            okGraphDelivery(durableGraph.deliver(1, 2, "wood", 1, i), 1);
+            okGraphDelivery(durableGraph.consume(ResidentTaskGraph.Stage.PROCESSED, 2, 3, "wood", 1, i), 1);
+        }
+        ResidentTaskGraph graphRestored = new ResidentTaskGraph();
+        graphRestored.fromJson(durableGraph.toJson());
+        ok(graphRestored.nextId() == durableGraph.nextId()
+                        && graphRestored.receipts().size() < 10,
+                "долгий цикл добычи/переноса/потребления компактизирует завершённую историю, сохраняя монотонный ID");
+        ResidentTaskGraph activeGraph = new ResidentTaskGraph();
+        activeGraph.extract(7, 4, "stone", 3, 1);
+        ResidentTaskGraph activeRestored = new ResidentTaskGraph();
+        activeRestored.fromJson(activeGraph.toJson());
+        ok(activeRestored.count(ResidentTaskGraph.Stage.EXTRACTED) == 1,
+                "активный складской лот сохраняет свою квитанцию происхождения при компактизации и перезапуске");
+        boolean missingProvenanceRejected = false;
+        try {
+            activeRestored.fromJson("{\\"format\\":\\"wf-resident-task-graph/1\\",\\"next\\":2,\\"receipts\\":[],"
+                    + "\\"local\\":{\\"7|stone\\":[{\\"receipt\\":1,\\"quantity\\":3}]},\\"stored\\":{}}");
+        } catch (IllegalArgumentException expected) { missingProvenanceRejected = true; }
+        ok(missingProvenanceRejected,
+                "загрузка отклоняет активный складской лот со ссылкой на отсутствующую квитанцию");
 
         // зависимости и лимиты
         ok(throwsOrder(() -> s.place("granary", 30, 30)), "амбар требует лесопилку");
