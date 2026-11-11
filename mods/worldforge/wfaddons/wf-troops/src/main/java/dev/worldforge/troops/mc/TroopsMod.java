@@ -89,6 +89,9 @@ public class TroopsMod {
     public static final Map<String, TroopEntity> LIVE = new ConcurrentHashMap<>();
     /** Durable death outbox; a soldier body is retained until the canonical Character estate is committed. */
     private static final MilitaryDeathLedger DEATHS = new MilitaryDeathLedger();
+    /** Durable outbox for demobilization/desertion; never discard a living Character before acknowledgement. */
+    private static final dev.worldforge.troops.MilitaryTransitionLedger TRANSITIONS =
+            new dev.worldforge.troops.MilitaryTransitionLedger();
     /** Durable field rations/readiness; ration quantities themselves live in the shared TreasuryLedger. */
     private static final OperationalSupply.Store SUPPLY = new OperationalSupply.Store();
     private static volatile boolean militaryLoadFailed;
@@ -187,6 +190,7 @@ public class TroopsMod {
         DEFS = load(dir(server).resolve("wf_troops_units.json"));
         try {
             DEATHS.clear();
+            TRANSITIONS.clear();
             SUPPLY.clear();
             Path f = dir(server).resolve("wf_squads.json");
             if (Files.exists(f)) SQUADS.fromJson(Files.readString(f));
@@ -196,10 +200,13 @@ public class TroopsMod {
             if (Files.exists(ff)) FORTS.fromJson(Files.readString(ff));
             Path df = dir(server).resolve("wf_military_deaths.json");
             if (Files.exists(df)) DEATHS.fromJson(Files.readString(df));
+            Path tf = dir(server).resolve("wf_military_transitions.json");
+            if (Files.exists(tf)) TRANSITIONS.fromJson(Files.readString(tf));
             Path sf = dir(server).resolve("wf_operational_supply.json");
             if (Files.exists(sf)) SUPPLY.fromJson(Files.readString(sf));
             syncArmyHierarchy();
             processPendingDeaths();
+            processPendingTransitions();
         } catch (Exception ex) {
             militaryLoadFailed = true;
             actionPersistenceBlocked = true;
@@ -224,6 +231,7 @@ public class TroopsMod {
         snapshots.put(root.resolve("wf_army_hierarchy.json"), HIERARCHY.toJson());
         snapshots.put(root.resolve("wf_forts.json"), FORTS.toJson());
         snapshots.put(root.resolve("wf_military_deaths.json"), DEATHS.toJson());
+        snapshots.put(root.resolve("wf_military_transitions.json"), TRANSITIONS.toJson());
         snapshots.put(root.resolve("wf_operational_supply.json"), SUPPLY.toJson());
         Map<Path, Path> staged = new LinkedHashMap<>(), backups = new LinkedHashMap<>();
         Set<Path> replaced = new LinkedHashSet<>();
@@ -454,27 +462,26 @@ public class TroopsMod {
         return true;
     }
 
-    /** Demobilizes a physical soldier into a settlement worker using the same Character ID. */
+    /** Demobilizes a soldier through a durable, replayable Character transition. */
     public static boolean demobilizeToSettlement(TroopEntity troop, String colonyId) {
-        if (troop == null || troop.level().isClientSide || !ModList.get().isLoaded("wf_settle")) return false;
+        if (troop == null || troop.level().isClientSide || server == null
+                || !ModList.get().isLoaded("wf_settle") || colonyId == null || colonyId.isBlank()) return false;
         PersonBinding binding = bindPerson(troop, false);
-        if (binding == null) return false;
-        Character person = binding.character();
-        if (!dev.worldforge.settle.mc.SettleMod.attachExistingCharacter(colonyId, person.globalId)) return false;
-        binding.registry().unbindEntity(person.id, "troop", troop.getUUID().toString());
-        person.props.remove("wf_troop_uuid");
-        person.props.remove("wf_troop_unit");
-        person.props.remove("wf_army_id");
-        person.props.remove("wf_combat_xp");
-        person.props.remove("wf_veteran_rank");
-        person.props.remove("wf_unit_kind");
-        Object lastMorale = person.props.remove("military.morale");
-        if (lastMorale instanceof Number n)
-            person.props.put("military.last_service_morale", Math.max(0, Math.min(100, n.intValue())));
-        LIVE.remove(troop.getUUID().toString());
-        SQUADS.remove(troop.getUUID().toString());
-        troop.discard();
-        return true;
+        if (binding == null || !binding.character().alive) return false;
+        var pending = new dev.worldforge.troops.MilitaryTransitionLedger.Pending(
+                binding.character().globalId, troop.getUUID().toString(),
+                dev.worldforge.troops.MilitaryTransitionLedger.Kind.DEMOBILIZATION,
+                Math.max(1, PeopleMod.YEAR), colonyId);
+        try {
+            TRANSITIONS.stage(pending);
+            if (!saveDurably()) { actionPersistenceBlocked = true; return false; }
+            return completePendingTransition(pending, troop);
+        } catch (RuntimeException error) {
+            actionPersistenceBlocked = true;
+            LOGGER.error("wf_troops: demobilization transition could not be staged for {}: {}",
+                    binding.character().globalId, error.toString(), error);
+            return false;
+        }
     }
 
     /** Records wounds on the canonical Character before a lethal hit can close the entity binding. */
@@ -646,33 +653,111 @@ public class TroopsMod {
             completePendingDeath(pending, true);
     }
 
-    /** Unpaid soldiers desert; preserve the living Character and demobilize into a nearby settlement when possible. */
+    /** Unpaid soldiers desert through a durable transition outbox. */
     private static void onDesertion(TroopEntity troop) {
+        if (troop == null || server == null || !ModList.get().isLoaded("wf_people")) return;
         PersonBinding binding = bindPerson(troop, false);
-        if (binding != null) {
-            Character person = binding.character();
-            binding.registry().unbindEntity(person.id, "troop", troop.getUUID().toString());
+        if (binding == null || !binding.character().alive) {
+            actionPersistenceBlocked = true;
+            LOGGER.error("wf_troops: cannot desert troop {} without its living canonical Character", troop.getUUID());
+            return;
+        }
+        String destination = "";
+        if (ModList.get().isLoaded("wf_settle") && troop.level() instanceof ServerLevel level) {
+            var nearest = dev.worldforge.settle.mc.SettleMod.nearest(level, troop.getX(), troop.getZ());
+            if (nearest != null) destination = nearest.s.id;
+        }
+        var pending = new dev.worldforge.troops.MilitaryTransitionLedger.Pending(
+                binding.character().globalId, troop.getUUID().toString(),
+                dev.worldforge.troops.MilitaryTransitionLedger.Kind.DESERTION,
+                Math.max(1, PeopleMod.YEAR), destination);
+        try {
+            TRANSITIONS.stage(pending);
+            troop.setInvulnerable(true);
+            if (!saveDurably()) {
+                actionPersistenceBlocked = true;
+                LOGGER.error("wf_troops: desertion intent for {} is not durable; retaining physical soldier",
+                        binding.character().globalId);
+                return;
+            }
+            completePendingTransition(pending, troop);
+        } catch (RuntimeException error) {
+            actionPersistenceBlocked = true;
+            LOGGER.error("wf_troops: desertion transition failed for {}: {}",
+                    binding.character().globalId, error.toString(), error);
+        }
+    }
+
+    /** Applies a staged non-lethal transition; retries are safe after any intermediate crash. */
+    private static boolean completePendingTransition(
+            dev.worldforge.troops.MilitaryTransitionLedger.Pending pending, TroopEntity body) {
+        if (pending == null || server == null || militaryLoadFailed || !ModList.get().isLoaded("wf_people")) return false;
+        try {
+            Character person = PeopleMod.authority().getGlobal(pending.characterGlobalId());
+            CharacterRegistry owner = PeopleMod.authority().registryForGlobal(pending.characterGlobalId());
+            if (person == null || owner == null || !person.alive) return false;
+            if (body == null) {
+                try {
+                    UUID entityId = UUID.fromString(pending.troopEntityId());
+                    for (ServerLevel level : server.getAllLevels()) {
+                        Entity entity = level.getEntity(entityId);
+                        if (entity instanceof TroopEntity found) { body = found; break; }
+                    }
+                } catch (IllegalArgumentException invalid) { return false; }
+            }
+            if (body == null) return false; // entity chunk is not loaded yet; retain outbox for the next retry
+            body.setInvulnerable(true);
             boolean settled = false;
-            if (ModList.get().isLoaded("wf_settle") && troop.level() instanceof ServerLevel level) {
-                dev.worldforge.settle.mc.Colony nearest = dev.worldforge.settle.mc.SettleMod.nearest(level, troop.getX(), troop.getZ());
-                if (nearest != null) settled = dev.worldforge.settle.mc.SettleMod.attachExistingCharacter(nearest.s.id, person.globalId);
+            if (!pending.destinationColonyId().isBlank() && ModList.get().isLoaded("wf_settle")) {
+                settled = dev.worldforge.settle.mc.SettleMod.attachExistingCharacter(
+                        pending.destinationColonyId(), person.globalId);
             }
             if (!settled) {
-                binding.registry().setDuty(person.id, Duty.SOLDIER, false, PeopleMod.YEAR);
-                person.props.put("population.status", "deserted");
+                owner.setDuty(person.id, Duty.SOLDIER, false, pending.year());
+                person.props.put("population.status",
+                        pending.kind() == dev.worldforge.troops.MilitaryTransitionLedger.Kind.DESERTION
+                                ? "deserted" : "demobilized");
                 person.props.put("population.employer", "");
+                if (pending.kind() == dev.worldforge.troops.MilitaryTransitionLedger.Kind.DESERTION)
+                    person.props.put("population.location", "unassigned");
             }
+            owner.unbindEntity(person.id, "troop", pending.troopEntityId());
             person.props.remove("wf_unit_kind");
             person.props.remove("wf_troop_uuid");
             person.props.remove("wf_troop_unit");
             person.props.remove("wf_army_id");
             person.props.remove("wf_combat_xp");
             person.props.remove("wf_veteran_rank");
+            Object lastMorale = person.props.remove("military.morale");
+            if (lastMorale instanceof Number n)
+                person.props.put("military.last_service_morale", Math.max(0, Math.min(100, n.intValue())));
+            if (!PeopleMod.persistCharacter(person, server)) return false;
+            if (ModList.get().isLoaded("wf_settle")
+                    && !dev.worldforge.settle.mc.SettleMod.persistActionMutation(server)) return false;
+            TRANSITIONS.complete(pending.characterGlobalId());
+            if (!saveDurably()) {
+                TRANSITIONS.stage(pending);
+                actionPersistenceBlocked = true;
+                return false;
+            }
+            String id = pending.troopEntityId();
+            LIVE.remove(id);
+            SQUADS.remove(id);
+            body.discard();
+            return true;
+        } catch (RuntimeException error) {
+            LOGGER.error("wf_troops: pending {} transition for Character {} will retry: {}",
+                    pending.kind(), pending.characterGlobalId(), error.toString(), error);
+            return false;
         }
-        String id = troop.getUUID().toString();
-        LIVE.remove(id);
-        SQUADS.remove(id);
-        troop.discard();
+    }
+
+    private static void processPendingTransitions() {
+        if (server == null || militaryLoadFailed || TRANSITIONS.size() == 0
+                || !ModList.get().isLoaded("wf_people")) return;
+        for (MapData map : WorldForgeMod.loadedMaps().values())
+            if (map != null && map.titles != null) PeopleMod.registry(map);
+        for (var pending : TRANSITIONS.pending()) completePendingTransition(pending, null);
     }
 
     @SubscribeEvent
@@ -685,7 +770,7 @@ public class TroopsMod {
             processPendingDeaths();
         }
         if (ticks % 1200 == 0) for (TroopEntity troop : LIVE.values()) syncPerson(troop);
-        if (ticks % 100 == 0) payroll();
+        if (ticks % 100 == 0) { processPendingTransitions(); payroll(); }
         if (ticks % 20 == 0) FortService.step(server, ticks);
         if (ticks % 6000 == 0) save();
     }
