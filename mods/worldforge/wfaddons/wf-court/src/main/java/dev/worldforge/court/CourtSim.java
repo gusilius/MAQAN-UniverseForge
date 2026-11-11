@@ -268,7 +268,12 @@ public final class CourtSim {
             for (String s : subs) {
                 Character sr = ruler(s);
                 if (sr == null) continue;
-                double op = opinion(sr.id, lr.id) + bonus;
+                TitleData.Realm vassalRealm = d.realms.get(s);
+                Object rawLoyalty = vassalRealm == null ? null : vassalRealm.props.get("politics.vassal_loyalty");
+                int contractualLoyalty = rawLoyalty instanceof Number n ? Math.max(0, Math.min(100, n.intValue())) : 50;
+                // Contract compliance and ruler-to-ruler opinion both shape faction recruitment.
+                // A neglected or overtaxed vassal can organize even before personal relations collapse.
+                double op = opinion(sr.id, lr.id) + bonus + (contractualLoyalty - 50) * 0.5;
                 Faction cur = factionOf(L.id, s);
                 if (cur == null && op < -25 && cooldown.getOrDefault("faction|" + L.id + "|" + s, 0) <= year()) {
                     if (f == null) { f = new Faction(nextId++, "independence", L.id, (int) day); f.leader = s; factions.put(f.id, f); say(realmName(s) + " затевает заговор против " + realmName(L.id)); }
