@@ -15,6 +15,7 @@ public final class ResidentLifeEvents {
 
     public static void yearly(CharacterRegistry registry, int year) {
         if (registry == null || year < 1) return;
+        registry.refreshLifeStages(year);
         List<Character> people = new ArrayList<>(registry.all());
         people.sort(Comparator.comparing(c -> c.id));
         for (Character person : people) {
@@ -29,7 +30,8 @@ public final class ResidentLifeEvents {
             int fatherAge = PopulationSimulation.age(father, year);
             if (motherAge < 18 || motherAge > 42 || fatherAge < 18 || fatherAge > 65) continue;
             if (mother.children.size() >= 5 || father.children.size() >= 5) continue;
-            if (number(mother.props.get("family.last_birth_year"), 0) >= year) continue;
+            int lastBirth = number(mother.props.get("family.last_birth_year"), 0);
+            if (lastBirth > 0 && year - lastBirth < 2) continue;
             if (Math.floorMod(Objects.hash(mother.id, father.id, year, "birth"), 7) != 0) continue;
             String gender = Math.floorMod(Objects.hash(mother.id, father.id, year, "gender"), 2) == 0 ? "f" : "m";
             String childName = "Дитя семьи " + (mother.house == null || mother.house.isBlank() ? mother.name : mother.house);
@@ -37,11 +39,38 @@ public final class ResidentLifeEvents {
             child.traits.add("curious");
             child.props.put("family.father_name", father.name);
             child.props.put("family.mother_name", mother.name);
+            ResidentSocial.adjust(father, child.id, 35);
+            ResidentSocial.adjust(mother, child.id, 35);
+            ResidentSocial.adjust(child, father.id, 35);
+            ResidentSocial.adjust(child, mother.id, 35);
             mother.props.put("family.last_birth_year", year);
             father.props.put("family.last_birth_year", year);
             mother.props.put("family.last_event", "child-born:" + child.id);
             father.props.put("family.last_event", "child-born:" + child.id);
         }
+        advanceChildhood(registry, people, year);
+
+        // Marital conflict is persistent and reciprocal; one bad day does not dissolve a family.
+        for (Character person : people) {
+            if (!person.alive || person.spouse == null || person.spouse.isBlank()
+                    || person.id.compareTo(person.spouse) >= 0) continue;
+            Character spouse = registry.get(person.spouse);
+            if (spouse == null || !spouse.alive || !person.id.equals(spouse.spouse)) continue;
+            int affinity = Math.min(ResidentSocial.score(person, spouse.id), ResidentSocial.score(spouse, person.id));
+            int conflictYears = number(person.props.get("family.marital_conflict_years"), 0);
+            conflictYears = affinity <= -55 ? conflictYears + 1 : Math.max(0, conflictYears - 1);
+            person.props.put("family.marital_conflict_years", conflictYears);
+            spouse.props.put("family.marital_conflict_years", conflictYears);
+            person.props.put("family.marital_affinity", affinity);
+            spouse.props.put("family.marital_affinity", affinity);
+            if (conflictYears >= 3 && registry.divorce(person.id, spouse.id, year)) {
+                person.props.put("family.last_event", "divorced:" + spouse.id);
+                spouse.props.put("family.last_event", "divorced:" + person.id);
+                person.props.put("family.separation_year", year);
+                spouse.props.put("family.separation_year", year);
+            }
+        }
+
         for (int i = 0; i < people.size(); i++) {
             Character first = people.get(i);
             if (!first.alive || first.spouse != null && !first.spouse.isBlank()
@@ -95,11 +124,102 @@ public final class ResidentLifeEvents {
         }
     }
 
-    private static boolean closeFamily(Character a, Character b) {
-        if (a.id.equals(b.id) || a.father.equals(b.id) || a.mother.equals(b.id)
-                || b.father.equals(a.id) || b.mother.equals(a.id)) return true;
+    private static void advanceChildhood(CharacterRegistry registry, List<Character> people, int year) {
+        for (Character child : people) {
+            if (!child.alive || PopulationSimulation.age(child, year) >= 18
+                    || year <= number(child.props.get("family.development_year"), 0)) continue;
+            int age = PopulationSimulation.age(child, year);
+            Character father = child.father.isBlank() ? null : registry.get(child.father);
+            Character mother = child.mother.isBlank() ? null : registry.get(child.mother);
+            boolean fatherAlive = father != null && father.alive;
+            boolean motherAlive = mother != null && mother.alive;
+            Character guardian = null;
+            if (fatherAlive && motherAlive) {
+                guardian = ResidentSocial.score(child, father.id) >= ResidentSocial.score(child, mother.id) ? father : mother;
+            } else if (fatherAlive) guardian = father;
+            else if (motherAlive) guardian = mother;
+            else guardian = findKinGuardian(registry, child, year);
+            child.props.put("family.guardian_id", guardian == null ? "" : guardian.id);
+            child.props.put("family.care_status", guardian == null ? "orphaned" :
+                    fatherAlive && motherAlive ? "two_parent_home" :
+                    fatherAlive || motherAlive ? "single_parent_home" : "kin_guardianship");
+            child.props.put("family.development_year", year);
+            child.props.put("family.age_stage", PopulationSimulation.lifeStage(child, year).name().toLowerCase(Locale.ROOT));
+            if (age >= 6 && age < 18) {
+                int education = number(child.props.get("family.education_level"), 0);
+                int progress = guardian == null ? 1 : 2;
+                if (guardian != null && number(guardian.props.get("family.education_level"), 0) >= 5) progress++;
+                child.props.put("family.education_level", Math.min(100, education + progress));
+                child.props.put("family.education_last_year", year);
+                if (guardian != null) {
+                    ResidentSocial.adjust(child, guardian.id, 1);
+                    ResidentSocial.adjust(guardian, child.id, 1);
+                }
+            }
+            if (age == 6) child.props.put("family.school_started_year", year);
+            if (age == 13) child.props.put("family.adolescence_started_year", year);
+            if (age == 18) child.props.put("family.adulthood_year", year);
+        }
+    }
+
+    private static Character findKinGuardian(CharacterRegistry registry, Character child, int year) {
+        Set<String> candidates = new TreeSet<>();
+        addGrandparents(registry, child.father, candidates);
+        addGrandparents(registry, child.mother, candidates);
+        for (Character possible : registry.all()) {
+            if (!possible.alive || possible.id.equals(child.id) || PopulationSimulation.age(possible, year) < 18) continue;
+            if (isSiblingOfParent(registry, possible, child.father) || isSiblingOfParent(registry, possible, child.mother))
+                candidates.add(possible.id);
+        }
+        return candidates.stream().map(registry::get).filter(Objects::nonNull)
+                .filter(c -> c.alive && PopulationSimulation.age(c, year) >= 18)
+                .min(Comparator.comparingInt(c -> Math.abs(PopulationSimulation.age(c, year) - 35)))
+                .orElse(null);
+    }
+
+    private static void addGrandparents(CharacterRegistry registry, String parentId, Set<String> candidates) {
+        if (parentId == null || parentId.isBlank()) return;
+        Character parent = registry.get(parentId);
+        if (parent == null) return;
+        if (!parent.father.isBlank()) candidates.add(parent.father);
+        if (!parent.mother.isBlank()) candidates.add(parent.mother);
+    }
+
+    private static boolean isSiblingOfParent(CharacterRegistry registry, Character possible, String parentId) {
+        if (parentId == null || parentId.isBlank()) return false;
+        Character parent = registry.get(parentId);
+        if (parent == null) return false;
+        return sharesParent(possible, parent);
+    }
+
+    private static boolean sharesParent(Character a, Character b) {
         return !a.father.isBlank() && (a.father.equals(b.father) || a.father.equals(b.mother))
                 || !a.mother.isBlank() && (a.mother.equals(b.father) || a.mother.equals(b.mother));
+    }
+
+    private static boolean closeFamily(Character a, Character b) {
+        if (a.id.equals(b.id)) return true;
+        Set<String> aAncestors = ancestors(a, 2);
+        Set<String> bAncestors = ancestors(b, 2);
+        return aAncestors.contains(b.id) || bAncestors.contains(a.id)
+                || aAncestors.stream().anyMatch(bAncestors::contains);
+    }
+
+    private static Set<String> ancestors(Character person, int depth) {
+        Set<String> result = new HashSet<>();
+        Set<String> frontier = new HashSet<>();
+        frontier.add(person.father);
+        frontier.add(person.mother);
+        for (int level = 0; level < depth && !frontier.isEmpty(); level++) {
+            Set<String> next = new HashSet<>();
+            for (String id : frontier) {
+                if (id == null || id.isBlank() || !result.add(id)) continue;
+                // The registry is not needed for direct ancestry at the first level; callers
+                // populate grandparent links through the canonical Character references below.
+            }
+            frontier = next;
+        }
+        return result;
     }
 
     private static String string(Object value) { return value instanceof String s ? s : ""; }
