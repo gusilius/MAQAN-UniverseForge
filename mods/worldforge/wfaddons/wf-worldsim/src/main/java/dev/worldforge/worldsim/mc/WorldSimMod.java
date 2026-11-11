@@ -5,16 +5,21 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.mojang.logging.LogUtils;
 import dev.worldforge.mod.MapData;
+import dev.worldforge.mod.EditorManager;
 import dev.worldforge.mod.WorldForgeMod;
 import dev.worldforge.mod.api.Diplomacy;
 import dev.worldforge.mod.api.WorldForgeApi;
-import dev.worldforge.people.CharacterRegistry;
-import dev.worldforge.people.mc.PeopleMod;
+import dev.worldforge.court.CourtSim;
 import dev.worldforge.court.mc.CourtMod;
 import dev.worldforge.court.Marriages;
 import dev.worldforge.war.WarEngine;
+import dev.worldforge.army.ArmyEngine;
+import dev.worldforge.army.UnitType;
+import dev.worldforge.army.mc.ArmyMod;
 import dev.worldforge.war.mc.WarMod;
 import dev.worldforge.settle.mc.Colony;
+import dev.worldforge.settle.Worker;
+import dev.worldforge.settle.Building;
 import dev.worldforge.settle.mc.SettleMod;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.level.storage.LevelResource;
@@ -150,14 +155,17 @@ public final class WorldSimMod {
         root.addProperty("seed", server.getWorldData().worldGenOptions().seed() & Long.MAX_VALUE);
         root.addProperty("day", day);
         JsonArray realms = new JsonArray(), borders = new JsonArray(), settlements = new JsonArray(), characters = new JsonArray(), workforce = new JsonArray();
+        Set<String> threatenedRealms = new HashSet<>();
         for (MapData map : WorldForgeMod.loadedMaps().values()) {
             if (map.titles == null) continue;
             for (var realm : map.titles.realmList()) {
                 JsonObject r = new JsonObject();
                 r.addProperty("id", realm.id);
                 r.addProperty("population", number(realm.props.get("population"), 100));
-                r.addProperty("treasury", (long) (number(realm.props.get("treasury"), 500) * 100));
-                r.addProperty("army_strength", (long) number(realm.props.get("army_strength"), 0));
+                ArmyEngine armyEngine = ArmyMod.armies(map);
+                double armyPower = armyEngine.armiesOf(realm.id).stream().mapToDouble(a -> a.power(armyEngine.types)).sum();
+                r.addProperty("treasury", fixed(armyEngine.gold(realm.id)));
+                r.addProperty("army_strength", Math.max(0L, Math.round(armyPower)));
                 r.addProperty("stability", (int) number(realm.props.get("stability"), 50));
                 r.addProperty("prestige", (int) number(realm.props.get("prestige"), 0));
                 r.addProperty("expansion_pressure", (int) number(realm.props.get("expansion_pressure"), 35));
@@ -180,6 +188,7 @@ public final class WorldSimMod {
                         || realmB != null && dev.worldforge.mod.api.Diplomacy.ids(realmB, "claims").contains(a);
                 border.addProperty("contested_claim", contested);
                 border.addProperty("strategic_value", 80);
+                if (contested) { threatenedRealms.add(a); threatenedRealms.add(b); }
                 border.addProperty("distance_cost", 0);
                 borders.add(border);
             }
@@ -203,21 +212,54 @@ public final class WorldSimMod {
             item.addProperty("foresters", s.count("lumber_camp", false));
             item.addProperty("quarries", s.count("quarry", false));
             item.addProperty("workshops", s.count("market", false) + s.count("sawmill", false) + s.count("smithy", false));
-            item.addProperty("barracks", s.count("barracks", false));
-            item.addProperty("roads", s.count("road", false));
+            boolean staffedBarracks = false;
+            for (Building building : s.buildings) if ("barracks".equals(building.def.id)
+                    && building.state == Building.State.DONE && !building.paused
+                    && s.assigned(building.uid).stream().anyMatch(worker -> worker.lifeAction.isBlank() && "trainer".equals(worker.workRole()))) {
+                staffedBarracks = true; break;
+            }
+            item.addProperty("barracks", staffedBarracks ? 1 : 0);
+            item.addProperty("watch_posts", s.count("watch_post", true));
+            item.addProperty("threatened", threatenedRealms.contains(settlementRealm));
+            item.addProperty("roads", 0);
             item.addProperty("local_pressure", Math.max(0, s.workers.size() - s.housing()));
             item.addProperty("last_project_day", lastProjectDay.getOrDefault(s.id, Math.max(0, day - 365)));
             settlements.add(item);
+            int farmers = 0, lumberjacks = 0, miners = 0, builders = 0, soldiers = 0, unemployed = 0;
+            for (Worker worker : s.workers) {
+                switch (worker.permanentProfession()) {
+                    case "farmer" -> farmers++;
+                    case "lumberjack" -> lumberjacks++;
+                    case "miner" -> miners++;
+                    case "builder" -> builders++;
+                    case "guard", "trainer" -> soldiers++;
+                    case "laborer", "general_worker" -> { if (worker.building == 0 && worker.lifeAction.isBlank()) unemployed++; }
+                }
+            }
+            JsonObject w = new JsonObject();
+            w.addProperty("settlement_id", s.id);
+            w.addProperty("farmers", farmers); w.addProperty("lumberjacks", lumberjacks);
+            w.addProperty("miners", miners); w.addProperty("builders", builders);
+            w.addProperty("soldiers", soldiers); w.addProperty("unemployed", unemployed);
+            w.addProperty("food_need", fixed(s.flow.perMinute(s.time, "food", false)));
+            w.addProperty("food_output", fixed(s.flow.perMinute(s.time, "food", true)));
+            w.addProperty("wood_need", fixed(s.flow.perMinute(s.time, "wood", false)));
+            w.addProperty("wood_output", fixed(s.flow.perMinute(s.time, "wood", true)));
+            w.addProperty("stone_need", fixed(s.flow.perMinute(s.time, "stone", false)));
+            w.addProperty("stone_output", fixed(s.flow.perMinute(s.time, "stone", true)));
+            workforce.add(w);
         }
-        for (CharacterRegistry registry : PeopleMod.registries().values()) {
-            for (dev.worldforge.people.Character person : registry.all()) {
+        for (MapData map : WorldForgeMod.loadedMaps().values()) {
+            if (map.titles == null) continue;
+            CourtSim court = CourtMod.court(map);
+            if (court == null) continue;
+            for (dev.worldforge.people.Character person : court.reg.all()) {
                 if (!person.alive) continue;
-                String realm = "";
-                for (var post : person.posts) if (post.place.startsWith("realm:")) { realm = post.place.substring(6); break; }
+                String realm = Marriages.family(court, person);
                 if (realm.isBlank()) continue;
                 JsonObject c = new JsonObject();
                 c.addProperty("id", person.id); c.addProperty("realm_id", realm);
-                c.addProperty("age", Math.max(0, WorldForgeApi.clock().year() - person.birthYear));
+                c.addProperty("age", Math.max(0, court.year() - person.birthYear));
                 c.addProperty("alive", person.alive); c.addProperty("married", !person.spouse.isBlank());
                 c.addProperty("gender", "m".equals(person.gender) ? 0 : 1);
                 c.addProperty("fertility", (int) number(person.props.get("fertility"), 50));
@@ -253,6 +295,43 @@ public final class WorldSimMod {
             }
             return false;
         }
+        if ("reassign_profession".equals(type)) {
+            String settlementId = action.get("settlement").getAsString();
+            String from = action.get("from").getAsString(), to = action.get("to").getAsString();
+            int wanted = action.get("workers").getAsInt();
+            Colony colony = SettleMod.colony(settlementId);
+            if (colony == null || colony.s == null || wanted <= 0) return false;
+            int changed = 0;
+            for (Worker worker : colony.s.workers) {
+                if (changed >= wanted) break;
+                if (!from.equals(worker.permanentProfession()) || worker.building != 0 || !worker.lifeAction.isBlank()) continue;
+                colony.s.setProfession(worker.id, to);
+                changed++;
+            }
+            return changed > 0 && SettleMod.saveDurably(server);
+        }
+        if ("recruit".equals(type)) {
+            String realm = action.get("realm").getAsString();
+            int wanted = Math.max(1, action.get("count").getAsInt());
+            for (MapData map : WorldForgeMod.loadedMaps().values()) {
+                if (map.titles == null || !map.titles.realms.containsKey(realm)) continue;
+                Colony trainingColony = SettleMod.COLONIES.values().stream()
+                        .filter(c -> c != null && c.s != null && realm.equals(SettleMod.realmOf(c)))
+                        .filter(c -> c.s.buildings.stream().anyMatch(b -> "barracks".equals(b.def.id)
+                                && b.state == Building.State.DONE && !b.paused
+                                && c.s.assigned(b.uid).stream().anyMatch(worker -> worker.lifeAction.isBlank() && "trainer".equals(worker.workRole()))))
+                        .findFirst().orElse(null);
+                if (trainingColony == null) return false;
+                ArmyEngine army = ArmyMod.armies(map);
+                UnitType levy = army.types.values().stream().filter(unit -> unit.levy)
+                        .sorted(Comparator.comparing(unit -> unit.id)).findFirst().orElse(null);
+                int count = (int) Math.min(wanted, Math.floor(army.pool(realm)));
+                if (levy == null || count <= 0) return false;
+                army.recruitWithPersistence(requestId, "raise", realm, levy.id, count);
+                return true;
+            }
+            return false;
+        }
         if ("dynastic_marriage".equals(type)) {
             String first = action.get("first").getAsString(), second = action.get("second").getAsString();
             for (MapData map : WorldForgeMod.loadedMaps().values()) {
@@ -262,7 +341,11 @@ public final class WorldSimMod {
                 var a = court.reg.get(first); var b = court.reg.get(second);
                 if (a != null && b != null) {
                     var result = Marriages.propose(court, first, second);
-                    return result.ok;
+                    if (!result.ok) return false;
+                    Path directory = EditorManager.overlayDir(server, map);
+                    Files.createDirectories(directory);
+                    Files.writeString(directory.resolve("wf_court.json"), court.toJson(), StandardCharsets.UTF_8);
+                    return true;
                 }
             }
             return false;
