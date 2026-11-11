@@ -911,7 +911,7 @@ public class SettleMod {
                 // An existing pending action is polled here until its physical/abstract execution finishes.
                 if (!worker.lifeAction.isBlank()) {
                     if (!"performing".equals(worker.lifeActionStage)) return LifeSimulation.Outcome.IN_PROGRESS;
-                    if (settlement.time < worker.lifeActionUntil) return LifeSimulation.Outcome.IN_PROGRESS;
+                    if (worldMinute < worker.lifeActionUntil) return LifeSimulation.Outcome.IN_PROGRESS;
                     if (action == LifeSimulation.Action.EAT && !settlement.consumeResource("food", 1.0)) {
                         clearLifeAction(worker);
                         return LifeSimulation.Outcome.BLOCKED;
@@ -939,13 +939,13 @@ public class SettleMod {
                     case EAT -> {
                         if (settlement.amount("food") < 1.0) return LifeSimulation.Outcome.BLOCKED;
                         double[] meal = residentMealPlace(settlement, worker);
-                        beginLifeAction(worker, "eating", meal[0], meal[1], 30, settlement.time, context.lod());
+                        beginLifeAction(worker, "eating", meal[0], meal[1], 30, worldMinute, context.lod());
                         worker.status = "идёт принимать пищу";
                         return LifeSimulation.Outcome.IN_PROGRESS;
                     }
                     case SLEEP -> {
                         double[] home = residentShelter(settlement, worker);
-                        beginLifeAction(worker, "sleeping", home[0], home[1], 8 * 60, settlement.time, context.lod());
+                        beginLifeAction(worker, "sleeping", home[0], home[1], 8 * 60, worldMinute, context.lod());
                         worker.status = "идёт отдыхать";
                         return LifeSimulation.Outcome.IN_PROGRESS;
                     }
@@ -971,7 +971,7 @@ public class SettleMod {
                         }
                         if (companion == null) return LifeSimulation.Outcome.BLOCKED;
                         worker.lifeSocialTarget = companion.person;
-                        beginLifeAction(worker, "socializing", companion.x, companion.z, 3 * 60, settlement.time, context.lod());
+                        beginLifeAction(worker, "socializing", companion.x, companion.z, 3 * 60, worldMinute, context.lod());
                         worker.status = "идёт на встречу";
                         return LifeSimulation.Outcome.IN_PROGRESS;
                     }
@@ -998,14 +998,14 @@ public class SettleMod {
     }
 
     private static void beginLifeAction(dev.worldforge.settle.Worker worker, String action,
-                                        double targetX, double targetZ, double duration, double now,
+                                        double targetX, double targetZ, double durationMinutes, double worldMinute,
                                         LifeSimulation.LOD lod) {
         worker.lifeAction = action;
         worker.lifeTargetX = targetX;
         worker.lifeTargetZ = targetZ;
-        worker.lifeActionDuration = duration;
+        worker.lifeActionDuration = Math.max(1, Math.min(1440, durationMinutes));
         worker.lifeActionStage = lod == LifeSimulation.LOD.ACTIVE ? "travelling" : "performing";
-        worker.lifeActionUntil = lod == LifeSimulation.LOD.ACTIVE ? 0 : now + duration;
+        worker.lifeActionUntil = lod == LifeSimulation.LOD.ACTIVE ? 0 : worldMinute + worker.lifeActionDuration;
     }
 
     private static void clearLifeAction(dev.worldforge.settle.Worker worker) {
