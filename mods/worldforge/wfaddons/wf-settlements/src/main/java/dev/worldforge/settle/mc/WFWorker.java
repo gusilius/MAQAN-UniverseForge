@@ -269,6 +269,17 @@ public class WFWorker extends PathfinderMob {
                         ? w.level().getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, tx, tz)
                         : w.getBlockY();
                 target = new BlockPos(tx, ty, tz);
+            } else if ("travelling".equals(wk.lifeActionStage)) {
+                int tx = c.cx + (int) Math.floor(wk.lifeTargetX);
+                int tz = c.cz + (int) Math.floor(wk.lifeTargetZ);
+                BlockPos probe = new BlockPos(tx, w.getBlockY(), tz);
+                int ty = w.level().hasChunkAt(probe)
+                        ? w.level().getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, tx, tz)
+                        : w.getBlockY();
+                target = new BlockPos(tx, ty, tz);
+                working = false;
+            } else if ("performing".equals(wk.lifeActionStage)) {
+                target = w.blockPosition();
             } else if (b != null) {
                 target = b.state == Building.State.BUILDING || b.status.startsWith("строится: укладка")
                         ? BuildingSite.builderWorkPoint((net.minecraft.server.level.ServerLevel) w.level(), c, b, w)
@@ -334,6 +345,16 @@ public class WFWorker extends PathfinderMob {
             if (arrived) {
                 w.getNavigation().stop();
                 lastNavigationTarget = null;
+                if ("travelling".equals(wk.lifeActionStage)) {
+                    wk.lifeActionStage = "performing";
+                    wk.lifeActionUntil = c.s.time + Math.max(1.0, wk.lifeActionDuration);
+                    wk.status = switch (wk.lifeAction) {
+                        case "eating" -> "принимает пищу";
+                        case "sleeping" -> "отдыхает";
+                        case "socializing" -> "общается";
+                        default -> "выполняет личное дело";
+                    };
+                }
                 if (area != null && !area.complete && resourceTarget == null && workScan > 0) {
                     BlockPos waypoint = workWaypoint(w, area);
                     if (waypoint == null || w.distanceToSqr(waypoint.getX() + 0.5, w.getY(), waypoint.getZ() + 0.5) < 6.25) {
