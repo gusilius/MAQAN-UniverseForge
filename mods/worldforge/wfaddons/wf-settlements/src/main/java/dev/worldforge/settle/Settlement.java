@@ -253,6 +253,10 @@ public final class Settlement {
         boolean ok = TreasuryService.current().withdraw(accountId(resource), value, kind, category, reference,
                 worldMinute(), category);
         syncResourceMirror(resource);
+        // Retire task-graph provenance only after the canonical stock debit commits.
+        // Construction and recipe inputs keep their richer stage-specific receipts below.
+        if (ok && !"construction".equals(category) && !"production-input".equals(category))
+            taskGraph.consumeStock(resource, value);
         return ok;
     }
 
