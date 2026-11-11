@@ -195,22 +195,22 @@ public final class PopulationSimulationTest {
 
         Character conversationalist = registry.create("Conversationalist", "", "north", "m", 280);
         Character companion = registry.create("Companion", "", "north", "f", 280);
-        int firstBefore = ResidentSocial.score(conversationalist, companion.id);
-        int secondBefore = ResidentSocial.score(companion, conversationalist.id);
+        int firstBefore = ResidentSocial.score(conversationalist, companion.globalId);
+        int secondBefore = ResidentSocial.score(companion, conversationalist.globalId);
         ResidentSocial.socializeOnce(conversationalist, companion, 3, "life:conversation:one");
         ResidentSocial.socializeOnce(conversationalist, companion, 3, "life:conversation:one");
-        ok(ResidentSocial.score(conversationalist, companion.id) == firstBefore + 3
-                        && ResidentSocial.score(companion, conversationalist.id) == secondBefore + 3,
+        ok(ResidentSocial.score(conversationalist, companion.globalId) == firstBefore + 3
+                        && ResidentSocial.score(companion, conversationalist.globalId) == secondBefore + 3,
                 "replayed conversation applies each participant relationship delta exactly once");
         boolean collisionRejected = false;
         try { ResidentSocial.socializeOnce(conversationalist, smith, 3, "life:conversation:one"); }
         catch (IllegalStateException expected) { collisionRejected = true; }
-        ok(collisionRejected && ResidentSocial.score(conversationalist, companion.id) == firstBefore + 3,
+        ok(collisionRejected && ResidentSocial.score(conversationalist, companion.globalId) == firstBefore + 3,
                 "conversation receipt rejects reuse of one operation ID for another participant");
         boolean changedPayloadRejected = false;
         try { ResidentSocial.socializeOnce(conversationalist, companion, 4, "life:conversation:one"); }
         catch (IllegalStateException expected) { changedPayloadRejected = true; }
-        ok(changedPayloadRejected && ResidentSocial.score(conversationalist, companion.id) == firstBefore + 3,
+        ok(changedPayloadRejected && ResidentSocial.score(conversationalist, companion.globalId) == firstBefore + 3,
                 "conversation receipt rejects changed relationship delta on replay");
 
         Character delayed = registry.create("Delayed", "", "north", "m", 280);

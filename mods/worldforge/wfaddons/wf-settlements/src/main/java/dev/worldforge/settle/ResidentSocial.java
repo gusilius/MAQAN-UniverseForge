@@ -35,6 +35,45 @@ public final class ResidentSocial {
         return next;
     }
 
+    /** Canonical world-level identity is the only key for Character-to-Character relationships. */
+    private static String globalId(Character person) {
+        if (person == null || person.globalId == null || person.globalId.isBlank())
+            throw new IllegalStateException("Social relationships require a canonical Character global UUID");
+        return person.globalId;
+    }
+
+    /**
+     * One-time migration for relationships written by older versions under map-local cN IDs.
+     * If two partitions reused the same local ID, each new relationship is still isolated by UUID.
+     */
+    private static void migrateLegacyCounterpart(Character person, Character other) {
+        String canonical = globalId(other);
+        String legacy = other.id;
+        if (legacy == null || legacy.isBlank() || legacy.equals(canonical)) return;
+
+        Object rawRelationships = person.props.get(KEY);
+        if (rawRelationships instanceof Map<?, ?> map && map.containsKey(legacy)) {
+            Map<String, Object> relationships = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : map.entrySet())
+                if (entry.getKey() instanceof String key && entry.getValue() instanceof Number n)
+                    relationships.put(key, clamp(n.intValue()));
+            relationships.putIfAbsent(canonical, relationships.get(legacy));
+            relationships.remove(legacy);
+            person.props.put(KEY, relationships);
+        }
+
+        Object rawBonds = person.props.get("social.bonds");
+        if (rawBonds instanceof Map<?, ?> map && map.containsKey(legacy)) {
+            Map<String, Object> bonds = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : map.entrySet())
+                if (entry.getKey() instanceof String key && entry.getValue() instanceof String value)
+                    bonds.put(key, value);
+            bonds.putIfAbsent(canonical, bonds.get(legacy));
+            bonds.remove(legacy);
+            person.props.put("social.bonds", bonds);
+        }
+    }
+
     /** Trait/culture compatibility shapes the result of an actual conversation. */
     public static int interactionDelta(Character first, Character second) {
         if (first == null || second == null) return 0;
@@ -52,10 +91,14 @@ public final class ResidentSocial {
     /** A real resident-to-resident interaction updates both sides of the relationship. */
     public static int socialize(Character first, Character second, int delta) {
         if (first == null || second == null || first == second || !first.alive || !second.alive) return 0;
-        int a = adjust(first, second.id, delta);
-        int b = adjust(second, first.id, delta);
-        updateBond(first, second.id, a);
-        updateBond(second, first.id, b);
+        migrateLegacyCounterpart(first, second);
+        migrateLegacyCounterpart(second, first);
+        String firstKey = globalId(first);
+        String secondKey = globalId(second);
+        int a = adjust(first, secondKey, delta);
+        int b = adjust(second, firstKey, delta);
+        updateBond(first, secondKey, a);
+        updateBond(second, firstKey, b);
         return Math.min(a, b);
     }
 
@@ -68,9 +111,11 @@ public final class ResidentSocial {
         if (first == null || second == null || first == second || !first.alive || !second.alive) return 0;
         if (operationId == null || !operationId.matches("[A-Za-z0-9_.:-]{1,128}"))
             throw new IllegalArgumentException("A stable social interaction operation ID is required");
+        migrateLegacyCounterpart(first, second);
+        migrateLegacyCounterpart(second, first);
         applyInteractionOnce(first, second, delta, operationId);
         applyInteractionOnce(second, first, delta, operationId);
-        return Math.min(score(first, second.id), score(second, first.id));
+        return Math.min(score(first, globalId(second)), score(second, globalId(first)));
     }
 
     @SuppressWarnings("unchecked")
@@ -83,7 +128,8 @@ public final class ResidentSocial {
                 if (entry.getKey() instanceof String key && entry.getValue() instanceof String value)
                     receipts.put(key, value);
         }
-        String payload = other.globalId + "|" + delta;
+        String counterpartId = globalId(other);
+        String payload = counterpartId + "|" + delta;
         Object prior = receipts.get(operationId);
         if (prior != null) {
             if (!payload.equals(prior))
@@ -92,8 +138,8 @@ public final class ResidentSocial {
         }
         if (receipts.size() >= 10000)
             throw new IllegalStateException("Social interaction receipt limit reached; refusing unsafe replay");
-        adjust(person, other.id, delta);
-        updateBond(person, other.id, score(person, other.id));
+        adjust(person, counterpartId, delta);
+        updateBond(person, counterpartId, score(person, counterpartId));
         receipts.put(operationId, payload);
         person.props.put(receiptKey, receipts);
     }

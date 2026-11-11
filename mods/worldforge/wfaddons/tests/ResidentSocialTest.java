@@ -46,8 +46,23 @@ public final class ResidentSocialTest {
                 "aggressive personalities and cultural difference can create rivalry");
         check(ResidentSocial.socialize(aggressive, resident,
                         ResidentSocial.interactionDelta(aggressive, resident)) < 0
-                        && ResidentSocial.score(resident, aggressive.id) < 0,
+                        && ResidentSocial.score(resident, aggressive.globalId) < 0,
                 "negative resident encounters create reciprocal rivalry/enmity");
+
+
+        CharacterRegistry migratedPartition = new CharacterRegistry();
+        Character partitionPeer = migratedPartition.create("Partition Peer", "", "north", "f", 1);
+        CharacterRegistry collidingPartition = new CharacterRegistry();
+        Character collidingPeer = collidingPartition.create("Colliding Peer", "", "south", "m", 1);
+        Map<String, Object> legacyRelationships = new java.util.LinkedHashMap<>();
+        legacyRelationships.put(partitionPeer.id, 12);
+        aggressive.props.put("social.relationships", legacyRelationships);
+        ResidentSocial.socializeOnce(aggressive, partitionPeer, 3, "life:cross-partition:one");
+        ResidentSocial.socializeOnce(aggressive, collidingPeer, 7, "life:cross-partition:two");
+        check(ResidentSocial.score(aggressive, partitionPeer.globalId) == 15
+                        && ResidentSocial.score(aggressive, collidingPeer.globalId) == 7
+                        && !((Map<?, ?>) aggressive.props.get("social.relationships")).containsKey(partitionPeer.id),
+                "legacy local relationship keys migrate to global UUIDs and colliding partition IDs stay distinct");
 
         System.out.println("ResidentSocialTest: " + (failures == 0 ? "OK" : failures + " failure(s)"));
         if (failures > 0) throw new AssertionError("ResidentSocialTest failed: " + failures);
