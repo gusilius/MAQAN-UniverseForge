@@ -402,6 +402,19 @@ public class TroopsMod {
             return; // A committed non-lethal transition owns this exact physical body forever.
         }
 
+        String transitionCharacterId = troop.characterId == null ? "" : troop.characterId;
+        if (transitionCharacterId.isBlank() && ModList.get().isLoaded("wf_people")) {
+            PersonBinding existingBinding = findCharacterForTroopEntity(entityId);
+            if (existingBinding != null) transitionCharacterId = existingBinding.character().globalId;
+        }
+        var pendingTransition = transitionCharacterId.isBlank() ? null : TRANSITIONS.get(transitionCharacterId);
+        if (pendingTransition != null && pendingTransition.troopEntityId().equals(entityId)) {
+            troop.setInvulnerable(true);
+            if (pendingTransition.kind() == dev.worldforge.troops.MilitaryTransitionLedger.Kind.STRATEGIC_RETURN)
+                completeStrategicReturnTransition(pendingTransition, troop);
+            return; // Resolve the durable outbox before any roster-return shortcut can discard this body.
+        }
+
         if (hasStrategicReturnReceipt(troop)) {
             troop.setInvulnerable(true);
             if (releaseBodyDurably(troop)) troop.discard();
@@ -457,13 +470,6 @@ public class TroopsMod {
                     return;
                 }
             }
-        }
-
-        var transition = troop.characterId == null || troop.characterId.isBlank()
-                ? null : TRANSITIONS.get(troop.characterId);
-        if (transition != null && transition.troopEntityId().equals(entityId)) {
-            troop.setInvulnerable(true);
-            return; // A staged non-lethal transition owns this body until its outbox is acknowledged.
         }
 
         MilitaryDeathLedger.Pending pending = troop.characterId == null || troop.characterId.isBlank()
@@ -832,8 +838,12 @@ public class TroopsMod {
             body.setInvulnerable(true);
             if (!releaseBodyDurably(body)) return false;
             if (!TRANSITIONS.complete(pending.characterGlobalId())) {
-                if (TRANSITIONS.isCompleted(pending.characterGlobalId(), pending.troopEntityId()))
+                if (TRANSITIONS.isCompleted(pending.characterGlobalId(), pending.troopEntityId())) {
+                    LIVE.remove(pending.troopEntityId());
+                    SQUADS.remove(pending.troopEntityId());
+                    body.discard();
                     return true;
+                }
                 actionPersistenceBlocked = true;
                 return false;
             }
