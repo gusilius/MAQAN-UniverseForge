@@ -572,6 +572,14 @@ public final class Settlement {
         return null;
     }
 
+    private static void clearLifeAction(Worker worker) {
+        worker.lifeAction = "";
+        worker.lifeActionStage = "";
+        worker.lifeSocialTarget = "";
+        worker.lifeActionDuration = 0;
+        worker.lifeActionUntil = 0;
+    }
+
     public int count(String defId, boolean doneOnly) {
         int n = 0;
         for (Building b : buildings) if (b.def.id.equals(defId) && (!doneOnly || b.state == Building.State.DONE)) n++;
@@ -746,7 +754,7 @@ public final class Settlement {
                 + " или нет свободных мест в " + b.def.name);
         w.assignedProfession = role;
         w.manualHauler = false;
-        w.lifeAction = "";
+        clearLifeAction(w);
         w.building = uid;
         w.manualFollow = false;
         w.manualFollowOwner = "";
@@ -761,7 +769,7 @@ public final class Settlement {
         w.building = 0;
         w.assignedProfession = "";
         w.manualHauler = false;
-        w.lifeAction = "";
+        clearLifeAction(w);
         w.manualFollow = false;
         w.manualFollowOwner = "";
         w.manualOrder = false;
@@ -785,7 +793,7 @@ public final class Settlement {
         }
         w.orderQueue.clear();
         w.manualHauler = false;
-        w.lifeAction = "";
+        clearLifeAction(w);
         w.manualFollow=false;
         w.manualFollowOwner="";
         w.building=0;w.manualOrder=true;w.orderX=x;w.orderZ=z;w.status="приказ: движение";
@@ -815,7 +823,7 @@ public final class Settlement {
         w.profession = profession;
         w.assignedProfession = "";
         w.manualHauler = false;
-        w.lifeAction = "";
+        clearLifeAction(w);
         w.building = 0;
         w.manualFollow = false;
         w.manualFollowOwner = "";
@@ -1125,7 +1133,7 @@ public final class Settlement {
                 b.progress = b.def.work;
                 b.status = b.def.produces() ? "работает" : "готово";
                 taskGraph.built(b.uid, workerForRole(b.uid, Set.of("builder")), time);
-                for (Worker w : assigned(b.uid)) { w.building = 0; w.assignedProfession = ""; w.lifeAction = ""; w.status = "свободен"; }
+                for (Worker w : assigned(b.uid)) { w.building = 0; w.assignedProfession = ""; clearLifeAction(w); w.status = "свободен"; }
                 say("Построено: " + b.def.name);
             }
         }
@@ -1675,13 +1683,14 @@ public final class Settlement {
             if (m.get("life_target_x") instanceof Number lx) w.lifeTargetX = lx.doubleValue();
             if (m.get("life_target_z") instanceof Number lz) w.lifeTargetZ = lz.doubleValue();
             if (m.get("life_action_until") instanceof Number lu && Double.isFinite(lu.doubleValue())) w.lifeActionUntil = lu.doubleValue();
-            w.lifeActionStage = m.get("life_action_stage") instanceof String stage ? stage : "";
+            w.lifeActionStage = m.get("life_action_stage") instanceof String stage
+                    && Set.of("", "travelling", "performing").contains(stage) ? stage : "";
             w.lifeSocialTarget = m.get("life_social_target") instanceof String target ? target : "";
             if (m.get("life_action_duration") instanceof Number duration && Double.isFinite(duration.doubleValue()))
                 w.lifeActionDuration = Math.max(0, Math.min(1440, duration.doubleValue()));
             if (m.get("haul_progress") instanceof Number hp && Double.isFinite(hp.doubleValue())) w.haulProgress = Math.max(0, Math.min(100, hp.doubleValue()));
             w.manualHauler = Boolean.TRUE.equals(m.get("manual_hauler"));
-            if (!Set.of("", "sleeping", "eating", "fleeing", "defending", "socializing").contains(w.lifeAction)) w.lifeAction = "";
+            if (!Set.of("", "sleeping", "eating", "fleeing", "defending", "socializing").contains(w.lifeAction)) clearLifeAction(w);
             w.manualOrder = Boolean.TRUE.equals(m.get("manual_order")); w.manualFollow = Boolean.TRUE.equals(m.get("manual_follow")); w.manualFollowOwner = m.get("manual_follow_owner") instanceof String fo ? fo : "";
             if (m.get("order_x") instanceof Number ox) w.orderX = ox.doubleValue();
             if (m.get("order_z") instanceof Number oz) w.orderZ = oz.doubleValue();
