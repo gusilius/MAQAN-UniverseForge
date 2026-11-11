@@ -79,8 +79,9 @@ public final class WorldSimulationAcceptanceTest {
         Character father = registry.create("Founder", "House Acceptance", "acceptance", "m", 300);
         int generations = 1;
         for (int generation = 2; generation <= 10; generation++) {
-            Character mother = registry.create("Founder spouse " + generation, father.house, father.culture, "f", 280 + generation * 20);
-            Character child = registry.addChild(father, mother, "Generation " + generation, "m", 280 + generation * 20);
+             int birthYear = father.birthYear + 20;
+            Character mother = registry.create("Founder spouse " + generation, father.house, father.culture, "f", birthYear - 20);
+            Character child = registry.addChild(father, mother, "Generation " + generation, "m", birthYear);
             if (!father.id.equals(child.father) || !mother.id.equals(child.mother)
                     || !father.children.contains(child.id) || !mother.children.contains(child.id)) break;
             father = child;
