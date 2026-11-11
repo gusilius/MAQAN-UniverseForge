@@ -193,16 +193,9 @@ public final class ArmyEngine {
         if (!"raise".equals(kind) && !"hire".equals(kind))
             throw new TitleEditor.EditException("Неизвестный тип набора армии: " + kind);
         if (realm == null || realm.isBlank()) throw new TitleEditor.EditException("Не выбрано государство");
-        UnitType unit = types.get(type);
-        if (unit == null) throw new TitleEditor.EditException("Нет типа отряда " + type);
+        if (type == null || !type.matches("[a-z0-9_.:-]{1,64}"))
+            throw new TitleEditor.EditException("Некорректный тип отряда");
         if (n <= 0 || n > 1_000_000) throw new TitleEditor.EditException("Нужно положительное число в допустимом диапазоне");
-        int capital = capital(realm);
-        if (capital == 0) throw new TitleEditor.EditException("У государства нет земель");
-        double amount = cost(type, n, "hire".equals(kind));
-        if ("raise".equals(kind) && pool(realm) + 1e-9 < n)
-            throw new TitleEditor.EditException("Не хватает людей в ополчении: " + (int) pool(realm) + " из " + n);
-        if (gold(realm) + 1e-9 < amount)
-            throw new TitleEditor.EditException("Не хватает золота: " + (int) gold(realm) + " из " + Math.ceil(amount));
 
         String operationId = armyActionKey(requestId);
         String fingerprint = armyActionFingerprint(kind, realm, type, Integer.toString(n));
@@ -212,8 +205,18 @@ public final class ArmyEngine {
         if (existing != null) {
             if (!existing.fingerprint().equals(fingerprint))
                 throw new IllegalStateException("Army recruitment request ID collision: " + operationId);
-            return operationId;
+            return operationId; // A prepared transaction may already have posted its debit; do not re-check balance.
         }
+
+        UnitType unit = types.get(type);
+        if (unit == null) throw new TitleEditor.EditException("Нет типа отряда " + type);
+        int capital = capital(realm);
+        if (capital == 0) throw new TitleEditor.EditException("У государства нет земель");
+        double amount = cost(type, n, "hire".equals(kind));
+        if ("raise".equals(kind) && pool(realm) + 1e-9 < n)
+            throw new TitleEditor.EditException("Не хватает людей в ополчении: " + (int) pool(realm) + " из " + n);
+        if (gold(realm) + 1e-9 < amount)
+            throw new TitleEditor.EditException("Не хватает золота: " + (int) gold(realm) + " из " + Math.ceil(amount));
         requireReceiptCapacity();
         pendingRecruitments.put(operationId, new PendingRecruitment(operationId, fingerprint, kind, realm, type, n));
         return operationId;
