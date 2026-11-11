@@ -65,10 +65,9 @@ final class ArmyLink {
      * Stages one idempotent manpower credit per physical soldier, then synchronously writes
      * the strategic army snapshot. The troop entities must not be released before this returns true.
      */
-    static boolean returnToArmy(Found found, Collection<TroopEntity> troops,
-                                Map<String, String> armyTypes, MinecraftServer server) {
-        if (found == null || found.army() == null || troops == null || troops.isEmpty()
-                || armyTypes == null || server == null) return false;
+    static void stageReturn(Found found, Collection<TroopEntity> troops, Map<String, String> armyTypes) {
+        if (found == null || found.army() == null || troops == null || troops.isEmpty() || armyTypes == null)
+            throw new IllegalArgumentException("Invalid strategic army return request");
 
         List<TroopEntity> ordered = new ArrayList<>(troops);
         ordered.sort(Comparator.comparing(t -> t.getUUID().toString()));
@@ -89,8 +88,10 @@ final class ArmyLink {
 
         for (Map.Entry<String, Map<String, Integer>> entry : deltas.entrySet())
             found.engine().applyRosterDeltaOnce("troop-return:" + entry.getKey(), found.army().id, entry.getValue());
+    }
 
-        // Atomic per-map snapshot: a failure leaves every physical body in the world.
+    /** Flushes all staged returns before any physical troop body is removed. */
+    static boolean persistStagedReturns(MinecraftServer server) {
         return ArmyMod.persistNow(server);
     }
 }
