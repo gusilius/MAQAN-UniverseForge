@@ -86,12 +86,17 @@ public final class ResidentTaskGraph {
         validate(resource, quantity, time);
         Deque<Lot> available = storedLots.get(resource);
         if (available == null || available.isEmpty()) return 0;
-        ensureCapacity(chunksNeeded(available, quantity));
+        compactReceipts();
+        int requiredReceipts = chunksNeeded(available, quantity);
+        // A consumed lot is no longer active inventory. At the journal limit we
+        // still retire it safely; the treasury journal remains the durable debit
+        // record, while the task graph keeps provenance only for stock still held.
+        boolean canRecord = requiredReceipts <= MAX_RECEIPTS - receipts.size();
         double remaining = quantity, consumed = 0;
         while (remaining > 1e-9 && !available.isEmpty()) {
             Lot lot = available.removeFirst();
             double part = Math.min(remaining, lot.quantity());
-            record(stage, buildingId, workerId, resource, part, lot.receiptId(), time);
+            if (canRecord) record(stage, buildingId, workerId, resource, part, lot.receiptId(), time);
             remaining -= part;
             consumed += part;
             double tail = lot.quantity() - part;
@@ -119,6 +124,32 @@ public final class ResidentTaskGraph {
         Receipt receipt = record(Stage.BUILT, buildingId, workerId, "building:" + buildingId, 1, parent, time);
         compactReceipts();
         return receipt;
+    }
+
+    /**
+     * Retires provenance for stock debited by systems that do not create a
+     * production/construction stage receipt (population upkeep, trade, raids).
+     * The canonical treasury journal records the debit; this graph tracks only
+     * provenance for quantities that remain in active inventory.
+     */
+    public double consumeStock(String resource, double quantity) {
+        if (resource == null || resource.isBlank() || !Double.isFinite(quantity) || quantity <= 0) return 0;
+        Deque<Lot> available = storedLots.get(resource);
+        if (available == null || available.isEmpty()) return 0;
+        double remaining = quantity, consumed = 0;
+        while (remaining > 1e-9 && !available.isEmpty()) {
+            Lot lot = available.removeFirst();
+            double part = Math.min(remaining, lot.quantity());
+            remaining -= part;
+            consumed += part;
+            double tail = lot.quantity() - part;
+            if (tail > 1e-9) {
+                available.addFirst(new Lot(lot.receiptId(), tail));
+                break;
+            }
+        }
+        compactReceipts();
+        return consumed;
     }
 
     private Receipt record(Stage stage, int buildingId, int workerId, String resource,
