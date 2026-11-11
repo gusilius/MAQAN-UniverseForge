@@ -75,6 +75,7 @@ public final class WorldSimulationAcceptanceTest {
         settlement.place("house", 0, 0);
         settlement.place("farm", 12, 0);
         settlement.place("lumber_camp", 24, 0);
+        settlement.place("market", 36, 0);
         return settlement;
     }
 
@@ -339,13 +340,15 @@ public final class WorldSimulationAcceptanceTest {
         Trade.Caravan caravan = caravanId < 0 ? null : trade.caravans.get(caravanId);
         check(caravan != null && !caravan.status.equals("в пути"),
                 "trade caravan resumes after peace and completes its route");
-        long developedRealms = realmIds.stream().filter(id -> !realmDevelopment.state(id).gov.isBlank()).count();
+        long developedRealms = 0;
+        for (String id : realmIds) if (!realmDevelopment.state(id).gov.isBlank()) developedRealms++;
         check(developedRealms > 0, "realm AI develops government state through the shared campaign calendar");
         check(squads.all().size() == 50, "50 military squads survive campaign save/restore");
         check(soldiers(squads, attackerArmyOwner) == 950 && soldiers(squads, defenderArmyOwner) == 975,
                 "abstract 1000v1000 campaign battle applies deterministic casualties to both armies");
-        check(squadIds.stream().allMatch(id -> supply.state(id).readiness > 0.9),
-                "field supply recovers readiness after a deterministic shortage window");
+        boolean supplyRecovered = true;
+        for (String id : squadIds) if (supply.state(id).readiness <= 0.9) supplyRecovered = false;
+        check(supplyRecovered, "field supply recovers readiness after a deterministic shortage window");
 
         report.put("simulation_days", clock.dayNumber());
         report.put("simulation_year", clock.year());
