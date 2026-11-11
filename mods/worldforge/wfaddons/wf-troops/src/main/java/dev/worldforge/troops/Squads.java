@@ -38,6 +38,44 @@ public final class Squads {
     private final Map<String, Squad> squads = new LinkedHashMap<>();
     private int counter = 1;
 
+    /**
+     * Idempotent squad creation for durable RTS deployment plans. Existing members are
+     * reconciled into the requested stable squad ID instead of allocating duplicate groups.
+     */
+    public Squad createWithId(String stableId, String owner, String name, String realm,
+                              double centerX, double centerZ, Collection<String> members) {
+        if (stableId == null || !stableId.matches("[A-Za-z0-9_.:-]{1,128}"))
+            throw new IllegalArgumentException("stable squad ID is invalid");
+        if (owner == null || owner.isBlank() || members == null || members.isEmpty() || members.size() > MAX_SIZE)
+            throw new IllegalArgumentException("stable squad owner and 1..40 members are required");
+        if (!Double.isFinite(centerX) || !Double.isFinite(centerZ))
+            throw new IllegalArgumentException("stable squad center must be finite");
+        Squad squad = squads.get(stableId);
+        if (squad != null && !squad.owner.equals(owner))
+            throw new IllegalStateException("stable squad ID belongs to another owner");
+        if (squad == null) {
+            squad = new Squad(stableId, name == null || name.isBlank() ? "Отряд" : name, owner);
+            squads.put(stableId, squad);
+        }
+        squad.name = name == null || name.isBlank() ? squad.name : name;
+        squad.realm = realm == null ? "" : realm;
+        squad.cx = centerX;
+        squad.cz = centerZ;
+        LinkedHashSet<String> unique = new LinkedHashSet<>();
+        for (String member : members) {
+            if (member == null || member.isBlank()) continue;
+            unique.add(member);
+        }
+        if (unique.size() > MAX_SIZE) throw new IllegalArgumentException("stable squad exceeds maximum size");
+        for (String member : unique) {
+            Squad current = squadOf(member);
+            if (current != null && current != squad) remove(member);
+            if (!squad.members.contains(member)) squad.members.add(member);
+        }
+        squad.initial = Math.max(squad.initial, squad.members.size());
+        return squad;
+    }
+
     public Squad create(String owner, String name, Collection<String> members) {
         if (owner == null || owner.isBlank()) throw new IllegalArgumentException("owner is required");
         if (members == null) throw new IllegalArgumentException("members are required");

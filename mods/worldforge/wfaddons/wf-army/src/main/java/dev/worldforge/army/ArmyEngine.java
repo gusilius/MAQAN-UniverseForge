@@ -230,6 +230,11 @@ public final class ArmyEngine {
         return true;
     }
 
+    /** Read-only durable receipt lookup used to reconcile late-loaded physical troop chunks. */
+    public synchronized boolean hasRosterOperation(String operationId) {
+        return operationId != null && rosterOperations.containsKey(operationId);
+    }
+
     private Army own(int id, String realm) {
         Army a = army(id);
         if (realm != null && !a.realm.equals(realm)) throw new TitleEditor.EditException("Это армия другого государства");

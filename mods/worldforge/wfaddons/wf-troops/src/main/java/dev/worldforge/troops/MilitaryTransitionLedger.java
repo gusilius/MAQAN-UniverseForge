@@ -12,7 +12,7 @@ import java.util.*;
  * resurrecting the old physical soldier after a restart.
  */
 public final class MilitaryTransitionLedger {
-    public enum Kind { DESERTION, DEMOBILIZATION }
+    public enum Kind { DESERTION, DEMOBILIZATION, STRATEGIC_RETURN }
 
     private enum State { PENDING, COMPLETED }
     private record Entry(Pending value, State state) { }

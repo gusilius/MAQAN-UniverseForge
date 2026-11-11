@@ -94,6 +94,15 @@ public final class MilitaryTransitionLedgerTest {
         } catch (IllegalArgumentException expected) { malformed = true; }
         check(malformed, "corrupt identity fails closed during transition recovery");
 
+        MilitaryTransitionLedger.Pending returned = new MilitaryTransitionLedger.Pending(
+                "66666666-6666-4666-8666-666666666666",
+                "77777777-7777-4777-8777-777777777777",
+                MilitaryTransitionLedger.Kind.STRATEGIC_RETURN, 420,
+                "army:22222222-2222-4222-8222-222222222222:north-map:7");
+        check(legacy.stage(returned) && legacy.complete(returned.characterGlobalId())
+                        && legacy.isCompleted(returned.characterGlobalId(), returned.troopEntityId()),
+                "strategic return keeps a terminal tombstone for a late-loaded troop chunk");
+
         if (failures > 0) throw new AssertionError(failures + " MilitaryTransitionLedger tests failed");
         System.out.println("MilitaryTransitionLedger: ALL OK");
     }
