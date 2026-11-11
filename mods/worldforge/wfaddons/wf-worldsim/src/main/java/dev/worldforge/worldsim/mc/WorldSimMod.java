@@ -88,7 +88,6 @@ public final class WorldSimMod {
                 && day - lastDecisionDay < DECISION_INTERVAL_DAYS)) return;
         // Compare elapsed game days instead of day % interval: at accelerated speeds
         // the clock may jump over exact multiples and otherwise starve the coordinator.
-        lastDecisionDay = day;
         if (!NativeWorldSimulation.load()) return;
         try {
             JsonObject snapshot = snapshot(server, day);
@@ -131,6 +130,7 @@ public final class WorldSimMod {
                     recordEvent(day, proposalId, kind, false);
                 }
             }
+            lastDecisionDay = day;
             saveState(server);
             LOGGER.info("wf_worldsim: day={} realms={} settlements={} proposals={} applied={} rejected={}",
                     day, snapshot.getAsJsonArray("realms").size(), snapshot.getAsJsonArray("settlements").size(),
