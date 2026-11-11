@@ -363,6 +363,12 @@ public class TroopsMod {
                 return; // A previously committed death must never be resurrected by a late chunk load.
             }
         }
+        var transition = t.characterId == null || t.characterId.isBlank()
+                ? null : TRANSITIONS.get(t.characterId);
+        if (transition != null && transition.troopEntityId().equals(entityId)) {
+            t.setInvulnerable(true);
+            return; // A staged non-lethal transition owns this body until its outbox is acknowledged.
+        }
         MilitaryDeathLedger.Pending pending = t.characterId == null || t.characterId.isBlank()
                 ? null : DEATHS.get(t.characterId);
         if (pending != null && pending.troopEntityId().equals(entityId)) {
@@ -473,6 +479,7 @@ public class TroopsMod {
                 dev.worldforge.troops.MilitaryTransitionLedger.Kind.DEMOBILIZATION,
                 Math.max(1, PeopleMod.YEAR), colonyId);
         try {
+            troop.setInvulnerable(true);
             TRANSITIONS.stage(pending);
             if (!saveDurably()) { actionPersistenceBlocked = true; return false; }
             return completePendingTransition(pending, troop);
@@ -547,6 +554,12 @@ public class TroopsMod {
         }
 
         String characterId = troop.characterId == null ? "" : troop.characterId.trim();
+        if (!characterId.isBlank() && TRANSITIONS.get(characterId) != null) {
+            troop.setInvulnerable(true);
+            LOGGER.error("wf_troops: death is deferred because Character {} already has a staged non-lethal transition",
+                    characterId);
+            return false;
+        }
         if (characterId.isBlank()) {
             PersonBinding binding = bindPerson(troop, false);
             if (binding == null || binding.character() == null) {
