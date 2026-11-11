@@ -155,7 +155,6 @@ public final class ResidentTaskGraph {
      * CONSTRUCTION receipt per building remain as stable links for subsequent output/build receipts.
      */
     private void compactReceipts() {
-        if (receipts.size() <= MAX_RECEIPTS) return;
         Map<Long, Receipt> byId = new HashMap<>();
         for (Receipt receipt : receipts) byId.put(receipt.id(), receipt);
         Set<Long> keep = new HashSet<>();
