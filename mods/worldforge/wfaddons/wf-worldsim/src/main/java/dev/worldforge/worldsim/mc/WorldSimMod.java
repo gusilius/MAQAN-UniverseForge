@@ -346,7 +346,7 @@ public final class WorldSimMod {
             ordered.add(element.getAsJsonObject());
         }
         ordered.sort(comparator);
-        array.removeAll();
+        while (array.size() > 0) array.remove(array.size() - 1);
         ordered.forEach(array::add);
     }
 
