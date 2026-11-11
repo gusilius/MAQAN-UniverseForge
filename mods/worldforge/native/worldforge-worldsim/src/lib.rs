@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 pub type Day = u64;
 pub type Fixed = i64;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Realm {
     pub id: String,
     pub population: u64,
@@ -24,7 +24,7 @@ pub struct Realm {
     pub last_war_day: Day,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Border {
     pub a: String,
     pub b: String,
@@ -33,7 +33,7 @@ pub struct Border {
     pub distance_cost: i32,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Settlement {
     pub id: String,
     pub realm_id: String,
@@ -52,7 +52,7 @@ pub struct Settlement {
     pub last_project_day: Day,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Character {
     pub id: String,
     pub realm_id: String,
@@ -66,7 +66,7 @@ pub struct Character {
     pub house_id: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Workforce {
     pub settlement_id: String,
     pub farmers: u32,
@@ -83,7 +83,7 @@ pub struct Workforce {
     pub stone_output: Fixed,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct WorldSnapshot {
     pub world_id: String,
     pub seed: u64,
@@ -105,14 +105,14 @@ pub enum ProposalKind {
     DynasticMarriage { first: String, second: String, score: i32, reason: String },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Proposal {
     pub id: String,
     pub day: Day,
     pub kind: ProposalKind,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DecisionFrame {
     pub world_id: String,
     pub day: Day,
