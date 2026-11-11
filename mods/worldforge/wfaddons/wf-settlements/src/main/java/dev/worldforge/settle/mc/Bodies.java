@@ -1,6 +1,7 @@
 package dev.worldforge.settle.mc;
 
 import dev.worldforge.settle.Worker;
+import dev.worldforge.mod.api.SimulationLod;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -16,7 +17,7 @@ import java.util.UUID;
 public final class Bodies {
     private Bodies() {}
 
-    public static final double SPAWN = 64, DESPAWN = 80;
+    public static final double SPAWN = SimulationLod.WORKER_SPAWN_RADIUS, DESPAWN = SimulationLod.WORKER_RETAIN_RADIUS;
     /** "поселение#рабочий" -> UUID живого тела. Тело, которого здесь нет, само исчезает (см. WFWorker.tick). */
     public static final Map<String, UUID> LIVE = new HashMap<>();
 
@@ -28,8 +29,9 @@ public final class Bodies {
             ServerLevel lv = c.level(server);
             if (lv == null) continue;
             String prefix = c.s.id + "#";
-            boolean keep = BuildingSite.playerNear(lv, c.cx, c.cz, DESPAWN);
-            boolean spawn = BuildingSite.playerNear(lv, c.cx, c.cz, SPAWN);
+            String dimension = lv.dimension().location().toString();
+            boolean keep = SimulationLod.shouldRetainWorkers(dimension, c.cx, c.cz);
+            boolean spawn = SimulationLod.shouldSpawnWorkers(dimension, c.cx, c.cz);
             Iterator<Map.Entry<String, UUID>> it = LIVE.entrySet().iterator();
             while (it.hasNext()) {                                                 // убрать лишние тела: игроков нет рядом или рабочего больше нет
                 Map.Entry<String, UUID> e = it.next();
