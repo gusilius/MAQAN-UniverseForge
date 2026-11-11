@@ -126,7 +126,7 @@ public final class ArmyActions {
             try {
                 ActionResult result = body.run(e, ctx);
                 if (!result.ok) return result;
-                if (!persistActionMutation())
+                if (!persistence.persist())
                     return ActionResult.fail("Стратегический приказ применён в памяти, но его сохранение не подтверждено; дальнейшие приказы заблокированы до восстановления");
                 return result;
             } catch (TitleEditor.EditException ex) {
