@@ -482,6 +482,29 @@ public class SettleMod {
         return site != null && site.colony().s.spend(cost);
     }
 
+    /** Crash-replay-safe recruitment debit. Treasury journal is committed before the settlement projection. */
+    public static boolean payRecruitmentOnce(String colonyId, java.util.Map<String, Integer> cost,
+                                             String operationId, MinecraftServer server) {
+        if (server == null || colonyId == null || colonyId.isBlank()
+                || operationId == null || operationId.isBlank() || actionsBlocked()) return false;
+        Colony colony = COLONIES.get(colonyId);
+        if (colony == null || colony.s == null) return false;
+        if (!colony.s.spendOnce(cost, operationId)) return false;
+        if (!WorldForgeMod.saveTreasuryNow(server)) {
+            colony.actionPersistenceBlocked = true;
+            LOGGER.error("wf_settle: recruitment debit {} is in memory but treasury persistence failed; settlement actions paused",
+                    operationId);
+            return false;
+        }
+        if (!saveDurably(server)) {
+            colony.actionPersistenceBlocked = true;
+            LOGGER.error("wf_settle: recruitment debit {} is in treasury but settlement snapshot failed; settlement actions paused",
+                    operationId);
+            return false;
+        }
+        return true;
+    }
+
     /** Rolls back a just-paid recruitment batch if its second payment leg fails. */
     public static void refundRecruitment(RecruitmentSite site, java.util.Map<String, Integer> cost) {
         if (site == null || cost == null) return;
@@ -969,10 +992,14 @@ public class SettleMod {
         Colony colony = COLONIES.get(colonyId);
         if (colony == null || colony.s == null || characterId == null || characterId.isBlank()
                 || !net.minecraftforge.fml.ModList.get().isLoaded("wf_people")) return false;
+        // Recovery may replay a transition after the destination settlement was already saved.
+        // Treat the exact existing assignment as success; never create a duplicate worker.
         for (Colony other : COLONIES.values()) {
             if (other == null || other.s == null) continue;
-            for (dev.worldforge.settle.Worker worker : other.s.workers)
-                if (characterId.equals(worker.person)) return false;
+            for (dev.worldforge.settle.Worker worker : other.s.workers) {
+                if (!characterId.equals(worker.person)) continue;
+                return other == colony;
+            }
         }
         CharacterRegistry registry = null;
         Character person = PeopleMod.authority().getGlobal(characterId);

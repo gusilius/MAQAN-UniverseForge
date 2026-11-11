@@ -9,6 +9,10 @@ import java.util.*;
 public class SettleTest {
     static int fails;
 
+    private static void okGraphDelivery(double actual, double expected) {
+        if (Math.abs(actual - expected) > 1e-9) throw new AssertionError("Unexpected task graph quantity: " + actual);
+    }
+
     static void ok(boolean c, String what) { System.out.println((c ? "ok   " : "FAIL ") + what); if (!c) fails++; }
     static String firstDiff(Object a, Object b, String path) {
         if (Objects.equals(a, b)) return "";
@@ -99,6 +103,36 @@ public class SettleTest {
         ok(supply.spend(Map.of("wood", 10, "stone", 5))
                 && supply.amount("wood") == supplyWood - 10 && supply.amount("stone") == supplyStone - 5,
                 "снабжение военного найма списывается одной атомарной операцией");
+        double invalidWood = supply.amount("wood"), invalidStone = supply.amount("stone");
+        ok(!supply.spend(Map.of("wood", 1, "stone", -1))
+                        && supply.amount("wood") == invalidWood && supply.amount("stone") == invalidStone,
+                "отрицательная стоимость отклоняется до списания любого ресурса");
+
+        Settlement replaySupply = fresh(d, 0);
+        Map<String, Integer> replayCost = Map.of("wood", 12, "stone", 4);
+        double replayWood = replaySupply.amount("wood"), replayStone = replaySupply.amount("stone");
+        ok(replaySupply.spendOnce(replayCost, "army-muster-test-1")
+                        && replaySupply.amount("wood") == replayWood - 12
+                        && replaySupply.amount("stone") == replayStone - 4,
+                "именованная операция списывает все ресурсы с durable ledger receipts");
+        int replayJournalSize = dev.worldforge.mod.economy.TreasuryService.current().journal().size();
+        ok(replaySupply.spendOnce(replayCost, "army-muster-test-1")
+                        && replaySupply.amount("wood") == replayWood - 12
+                        && replaySupply.amount("stone") == replayStone - 4
+                        && dev.worldforge.mod.economy.TreasuryService.current().journal().size() == replayJournalSize,
+                "повтор после частичного/неподтверждённого ответа не списывает ресурсы повторно");
+        ok(!replaySupply.spendOnce(Map.of("wood", 13, "stone", 4), "army-muster-test-1")
+                        && replaySupply.amount("wood") == replayWood - 12
+                        && replaySupply.amount("stone") == replayStone - 4,
+                "повтор operation ID с изменённой стоимостью блокируется");
+        var treasurySnapshot = dev.worldforge.mod.economy.TreasuryLedger.fromJson(
+                dev.worldforge.mod.economy.TreasuryService.current().toJson());
+        dev.worldforge.mod.economy.TreasuryService.replace(treasurySnapshot);
+        int restoredJournalSize = treasurySnapshot.journal().size();
+        ok(replaySupply.spendOnce(replayCost, "army-muster-test-1")
+                        && treasurySnapshot.journal().size() == restoredJournalSize
+                        && replaySupply.amount("wood") == replayWood - 12,
+                "receipt ресурсов восстанавливается из treasury JSON и переживает reload");
 
         Flow flow = new Flow();
         flow.record(1, "wood", 5, true);
@@ -236,6 +270,44 @@ public class SettleTest {
         ok(manualHaulerBack.worker(newHauler.id).manualHauler
                         && manualHaulerBack.worker(newHauler.id).workRole().equals("hauler"),
                 "ручное назначение носильщика сохраняется после перезапуска поселения");
+
+        // долгоживущий граф задач: компактизация сохраняет активную цепочку происхождения,
+        // но не даёт завершённой истории бесконечно заполнять журнал.
+        ResidentTaskGraph durableGraph = new ResidentTaskGraph();
+        for (int i = 0; i < 6000; i++) {
+            durableGraph.extract(1, 1, "wood", 1, i);
+            okGraphDelivery(durableGraph.deliver(1, 2, "wood", 1, i), 1);
+            okGraphDelivery(durableGraph.consume(ResidentTaskGraph.Stage.PROCESSED, 2, 3, "wood", 1, i), 1);
+        }
+        ResidentTaskGraph graphRestored = new ResidentTaskGraph();
+        graphRestored.fromJson(durableGraph.toJson());
+        ok(graphRestored.nextId() == durableGraph.nextId()
+                        && graphRestored.receipts().size() < 10,
+                "долгий цикл добычи/переноса/потребления компактизирует завершённую историю, сохраняя монотонный ID");
+        ResidentTaskGraph stockConsumptionGraph = new ResidentTaskGraph();
+        for (int i = 0; i < 6000; i++) {
+            stockConsumptionGraph.extract(1, 1, "food", 1, i);
+            okGraphDelivery(stockConsumptionGraph.deliver(1, 2, "food", 1, i), 1);
+            okGraphDelivery(stockConsumptionGraph.consumeStock("food", 1), 1);
+        }
+        ok(stockConsumptionGraph.receipts().size() < 10,
+                "long-running stock debits retire consumed provenance without exhausting the active-lot journal");
+
+        ResidentTaskGraph activeGraph = new ResidentTaskGraph();
+        activeGraph.extract(7, 4, "stone", 3, 1);
+        ResidentTaskGraph activeRestored = new ResidentTaskGraph();
+        activeRestored.fromJson(activeGraph.toJson());
+        ok(activeRestored.count(ResidentTaskGraph.Stage.EXTRACTED) == 1,
+                "активный складской лот сохраняет свою квитанцию происхождения при компактизации и перезапуске");
+        boolean missingProvenanceRejected = false;
+        try {
+            activeRestored.fromJson(Json.write(Map.of(
+                    "format", "wf-resident-task-graph/1", "next", 2, "receipts", List.of(),
+                    "local", Map.of("7|stone", List.of(Map.of("receipt", 1, "quantity", 3))),
+                    "stored", Map.of())));
+        } catch (IllegalArgumentException expected) { missingProvenanceRejected = true; }
+        ok(missingProvenanceRejected,
+                "загрузка отклоняет активный складской лот со ссылкой на отсутствующую квитанцию");
 
         // зависимости и лимиты
         ok(throwsOrder(() -> s.place("granary", 30, 30)), "амбар требует лесопилку");
@@ -445,6 +517,35 @@ public class SettleTest {
         ok(Math.abs(sourceRestored.amount("food") - 30) < 1e-8
                         && Math.abs(dev.worldforge.mod.economy.TreasuryService.current().balance(armyFoodAccount) - 20) < 1e-8,
                 "settlement food and army field rations reconcile after independent snapshot reloads");
+
+        // A settlement spend receipt is bound to the entire resource basket, not only individual legs.
+        dev.worldforge.mod.economy.TreasuryService.replace(new dev.worldforge.mod.economy.TreasuryLedger());
+        dev.worldforge.settle.Settlement spendOnce = new dev.worldforge.settle.Settlement("spend_once", "Spend Once", d);
+        spendOnce.setLedgerScope("minecraft:overworld");
+        spendOnce.add("wood", 20);
+        spendOnce.add("stone", 20);
+        Map<String, Integer> recruitmentCost = Map.of("wood", 3, "stone", 4);
+        ok(spendOnce.spendOnce(recruitmentCost, "recruitment:test:one")
+                        && Math.abs(spendOnce.amount("wood") - 17) < 1e-8
+                        && Math.abs(spendOnce.amount("stone") - 16) < 1e-8,
+                "named settlement spend debits every recruitment resource exactly once");
+        ok(spendOnce.spendOnce(recruitmentCost, "recruitment:test:one")
+                        && Math.abs(spendOnce.amount("wood") - 17) < 1e-8
+                        && Math.abs(spendOnce.amount("stone") - 16) < 1e-8,
+                "replaying the same complete settlement spend does not debit resources twice");
+        ok(!spendOnce.spendOnce(Map.of("wood", 3, "stone", 4, "food", 1), "recruitment:test:one")
+                        && Math.abs(spendOnce.amount("food")) < 1e-8,
+                "reusing a spend ID with an added resource fails before any new debit");
+        ok(!spendOnce.spendOnce(Map.of("wood", 3), "recruitment:test:one")
+                        && Math.abs(spendOnce.amount("wood") - 17) < 1e-8,
+                "reusing a spend ID with an omitted resource fails closed");
+        String spendLedger = dev.worldforge.mod.economy.TreasuryService.current().toJson();
+        dev.worldforge.mod.economy.TreasuryService.replace(
+                dev.worldforge.mod.economy.TreasuryLedger.fromJson(spendLedger));
+        ok(spendOnce.spendOnce(recruitmentCost, "recruitment:test:one")
+                        && Math.abs(spendOnce.amount("wood") - 17) < 1e-8
+                        && Math.abs(spendOnce.amount("stone") - 16) < 1e-8,
+                "complete settlement spend receipts survive treasury reload");
 
         System.out.println(fails == 0 ? "ALL OK" : fails + " FAILED");
         if (fails > 0) System.exit(1);

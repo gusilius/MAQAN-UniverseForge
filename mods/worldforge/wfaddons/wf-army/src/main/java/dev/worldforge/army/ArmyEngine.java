@@ -11,6 +11,7 @@ import dev.worldforge.mod.api.TreasuryApi;
 import dev.worldforge.mod.api.WorldForgeApi;
 
 import java.util.*;
+import java.nio.charset.StandardCharsets;
 
 /**
  * Армии, сражения и осады поверх {@link WarEngine}. Армии стоят и ходят по баронствам (граф соседства карты). Столкнувшиеся армии
@@ -31,6 +32,36 @@ public final class ArmyEngine {
     public final List<String> events = new ArrayList<>();
     public boolean ai = true;
     private int nextArmy = 1;
+    /** Durable idempotency receipts for roster transitions to/from physical troop entities. */
+    public static final int MAX_ROSTER_OPERATIONS = 100_000;
+    private final LinkedHashMap<String, String> rosterOperations = new LinkedHashMap<>();
+    /** Prepared recruitment transactions; persisted before any TreasuryLedger or roster mutation. */
+    public record PendingRecruitment(String operationId, String fingerprint, String kind,
+                                     String realm, String type, int count) {
+        public PendingRecruitment {
+            if (operationId == null || !operationId.matches("[A-Za-z0-9_.:-]{1,128}"))
+                throw new IllegalArgumentException("invalid army recruitment operation ID");
+            if (fingerprint == null || !fingerprint.matches("[A-Za-z0-9_-]{1,1024}"))
+                throw new IllegalArgumentException("invalid army recruitment fingerprint");
+            if (!"raise".equals(kind) && !"hire".equals(kind))
+                throw new IllegalArgumentException("invalid army recruitment kind");
+            if (realm == null || realm.isBlank() || type == null || !type.matches("[a-z0-9_.:-]{1,64}") || count <= 0)
+                throw new IllegalArgumentException("invalid army recruitment payload");
+        }
+    }
+    private final LinkedHashMap<String, PendingRecruitment> pendingRecruitments = new LinkedHashMap<>();
+
+    /** Runtime adapter for durable checkpoints; the army domain remains independent of Forge. */
+    public interface PersistenceBridge {
+        boolean actionsBlocked();
+        boolean persist();
+    }
+    private transient volatile PersistenceBridge persistenceBridge;
+
+    public void installPersistenceBridge(PersistenceBridge bridge) {
+        if (bridge == null) throw new IllegalArgumentException("army persistence bridge is required");
+        persistenceBridge = bridge;
+    }
     /** Дробная часть суток между вызовами tick; сохраняется, чтобы частые малые шаги не терялись. */
     private double dayAccumulator;
     private Map<String, List<Integer>> baronyCache = new HashMap<>();
@@ -38,6 +69,74 @@ public final class ArmyEngine {
     public ArmyEngine(WarEngine war) { this.war = war; war.driver = this::tick; }
 
     private TitleData d() { return war.editor.data(); }
+
+    private static String armyActionKey(String requestId) {
+        if (requestId == null || requestId.isBlank())
+            throw new TitleEditor.EditException("У стратегического приказа отсутствует стабильный requestId");
+        return "army-action:" + UUID.nameUUIDFromBytes(
+                requestId.trim().getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static String armyActionFingerprint(String... values) {
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(
+                Json.write(Arrays.asList(values)).getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** Read-only lookup shared by AI planning and replay-safe player/domain adapters. */
+    public synchronized boolean hasArmyActionReceipt(String requestId) {
+        return rosterOperations.containsKey(armyActionKey(requestId));
+    }
+
+    /**
+     * Stable identity for an autonomous composition or movement order. Merge pair IDs are
+     * normalized so iteration order cannot allocate two receipts for the same pair.
+     * Movement identity includes origin, target and prior army state so a later replanning
+     * after a battle/stop is distinct from replaying the earlier route.
+     */
+    public static String autonomousArmyActionRequestId(long worldDay, String realm, String operation,
+                                                       int armyId, int otherArmyId, int origin,
+                                                       int target, String priorState) {
+        if (worldDay < 0 || realm == null || realm.isBlank() || operation == null
+                || armyId <= 0 || otherArmyId < 0 || origin < 0 || target < 0)
+            throw new IllegalArgumentException("Invalid autonomous army order identity");
+        String state = priorState == null ? "" : priorState;
+        if (state.length() > 256) throw new IllegalArgumentException("Autonomous army order state is too long");
+        String canonical;
+        if ("merge".equals(operation)) {
+            if (otherArmyId <= 0 || otherArmyId == armyId || origin != 0 || target != 0 || !state.isEmpty())
+                throw new IllegalArgumentException("Invalid autonomous merge identity");
+            int first = Math.min(armyId, otherArmyId), second = Math.max(armyId, otherArmyId);
+            canonical = worldDay + "|" + realm + "|merge|" + first + "|" + second;
+        } else if ("move".equals(operation)) {
+            if (otherArmyId != 0 || target <= 0)
+                throw new IllegalArgumentException("Invalid autonomous movement identity");
+            canonical = worldDay + "|" + realm + "|move|" + armyId + "|" + origin + "|" + target + "|" + state;
+        } else {
+            throw new IllegalArgumentException("Unsupported autonomous army order: " + operation);
+        }
+        return "ai-order:" + UUID.nameUUIDFromBytes(canonical.getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** Returns the prior result, or null for a new operation; payload collisions fail closed. */
+    private String priorArmyActionResult(String operationId, String fingerprint) {
+        String prior = rosterOperations.get(operationId);
+        if (prior == null) return null;
+        String prefix = "army-action/v1|" + fingerprint + "|";
+        if (!prior.startsWith(prefix))
+            throw new IllegalStateException("Army action request ID was reused with a different payload: " + operationId);
+        return prior.substring(prefix.length());
+    }
+
+    private void rememberArmyAction(String operationId, String fingerprint, String result) {
+        if (rosterOperations.size() >= MAX_ROSTER_OPERATIONS)
+            throw new IllegalStateException("Army action receipt limit reached; reconcile/compact before another command");
+        rosterOperations.put(operationId, "army-action/v1|" + fingerprint + "|" + result);
+    }
+
+    private void requireReceiptCapacity() {
+        if (rosterOperations.size() + pendingRecruitments.size() >= MAX_ROSTER_OPERATIONS)
+            throw new IllegalStateException("Army operation journal is full; reconcile/compact before another command");
+    }
 
     public void loadUnits(String json) { Map<String, UnitType> m = UnitType.parse(json); if (!m.isEmpty()) { types.clear(); types.putAll(m); } }
 
@@ -133,6 +232,109 @@ public final class ArmyEngine {
         return a;
     }
 
+    /**
+     * Stages a player-requested recruitment intent. Caller must durably persist this snapshot
+     * before completePendingRecruitment is allowed to debit the treasury or mutate the roster.
+     */
+    public synchronized String stageRecruitment(String requestId, String kind, String realm, String type, int n) {
+        if (!"raise".equals(kind) && !"hire".equals(kind))
+            throw new TitleEditor.EditException("Неизвестный тип набора армии: " + kind);
+        if (realm == null || realm.isBlank()) throw new TitleEditor.EditException("Не выбрано государство");
+        if (type == null || !type.matches("[a-z0-9_.:-]{1,64}"))
+            throw new TitleEditor.EditException("Некорректный тип отряда");
+        if (n <= 0 || n > 1_000_000) throw new TitleEditor.EditException("Нужно положительное число в допустимом диапазоне");
+
+        String operationId = armyActionKey(requestId);
+        String fingerprint = armyActionFingerprint(kind, realm, type, Integer.toString(n));
+        String prior = priorArmyActionResult(operationId, fingerprint);
+        if (prior != null) return operationId;
+        PendingRecruitment existing = pendingRecruitments.get(operationId);
+        if (existing != null) {
+            if (!existing.fingerprint().equals(fingerprint))
+                throw new IllegalStateException("Army recruitment request ID collision: " + operationId);
+            return operationId; // A prepared transaction may already have posted its debit; do not re-check balance.
+        }
+
+        UnitType unit = types.get(type);
+        if (unit == null) throw new TitleEditor.EditException("Нет типа отряда " + type);
+        int capital = capital(realm);
+        if (capital == 0) throw new TitleEditor.EditException("У государства нет земель");
+        double amount = cost(type, n, "hire".equals(kind));
+        if ("raise".equals(kind) && pool(realm) + 1e-9 < n)
+            throw new TitleEditor.EditException("Не хватает людей в ополчении: " + (int) pool(realm) + " из " + n);
+        if (gold(realm) + 1e-9 < amount)
+            throw new TitleEditor.EditException("Не хватает золота: " + (int) gold(realm) + " из " + Math.ceil(amount));
+        requireReceiptCapacity();
+        pendingRecruitments.put(operationId, new PendingRecruitment(operationId, fingerprint, kind, realm, type, n));
+        return operationId;
+    }
+
+    /** Completes one persisted recruitment intent. Treasury references make payment replay-safe after restart. */
+    public synchronized Army completePendingRecruitment(String operationId) {
+        PendingRecruitment pending = pendingRecruitments.get(operationId);
+        if (pending == null) {
+            String receipt = rosterOperations.get(operationId);
+            if (receipt == null || !receipt.startsWith("army-action/v1|"))
+                throw new TitleEditor.EditException("Незавершённый приказ набора не найден");
+            int separator = receipt.lastIndexOf('|');
+            int armyId;
+            try { armyId = Integer.parseInt(receipt.substring(separator + 1)); }
+            catch (RuntimeException ex) { throw new IllegalStateException("Повреждена квитанция набора армии", ex); }
+            return army(armyId);
+        }
+
+        UnitType unit = types.get(pending.type());
+        if (unit == null) throw new TitleEditor.EditException("Тип армии больше не существует: " + pending.type());
+        boolean mercenary = "hire".equals(pending.kind());
+        double amount = cost(pending.type(), pending.count(), mercenary);
+        if (!mercenary && pool(pending.realm()) + 1e-9 < pending.count())
+            throw new TitleEditor.EditException("После подготовки приказа изменился запас ополчения");
+        int capital = capital(pending.realm());
+        if (capital == 0) throw new TitleEditor.EditException("У государства больше нет земель для размещения армии");
+        // Do not pre-check the balance here: after a crash the exact TreasuryLedger receipt may
+        // already exist and must replay successfully even though the debit reduced the balance.
+        if (amount > 1e-9 && !postGoldDelta(pending.realm(), -amount,
+                mercenary ? "army-mercenary-hiring" : "army-recruitment",
+                "army-action-treasury:" + pending.operationId()))
+            throw new TitleEditor.EditException("Казна отклонила оплату набора армии");
+
+        if (!mercenary) pool.put(pending.realm(), pool(pending.realm()) - pending.count());
+        Army army = armyAt(pending.realm(), capital, mercenary);
+        army.add(pending.type(), pending.count());
+        rememberArmyAction(pending.operationId(), pending.fingerprint(), Integer.toString(army.id));
+        pendingRecruitments.remove(pending.operationId());
+        say(realmName(pending.realm()) + (mercenary ? " нанимает " : " набирает ")
+                + pending.count() + " " + unit.name.toLowerCase());
+        return army;
+    }
+
+    public synchronized List<String> pendingRecruitmentIds() {
+        return List.copyOf(pendingRecruitments.keySet());
+    }
+
+    /**
+     * Executes autonomous or scripted recruitment through the same durable intent/debit/roster
+     * protocol as player commands. The persistence bridge checkpoints the prepared intent before
+     * TreasuryLedger is touched and checkpoints the completed army receipt afterwards.
+     */
+    public synchronized Army recruitWithPersistence(String requestId, String kind, String realm,
+                                                     String type, int count) {
+        PersistenceBridge bridge = persistenceBridge;
+        if (bridge == null)
+            throw new TitleEditor.EditException("Для автономного набора не установлен durable persistence bridge");
+        if (bridge.actionsBlocked())
+            throw new TitleEditor.EditException("Набор армии заблокирован до восстановления стратегического сохранения");
+        String operationId = stageRecruitment(requestId, kind, realm, type, count);
+        if (!bridge.persist() || bridge.actionsBlocked())
+            throw new TitleEditor.EditException("Не удалось сохранить intent набора армии; оплата не выполнялась");
+        Army result = completePendingRecruitment(operationId);
+        if (!bridge.persist() || bridge.actionsBlocked())
+            throw new TitleEditor.EditException("Набор применён в памяти, но финальный checkpoint не подтверждён; операция будет восстановлена из intent");
+        return result;
+    }
+
+
+
     /** Набрать n человек типа type в столице. Ополченцы тратят запас людей, остальные - золото (n/10 * цена). */
     public Army raise(String realm, String type, int n) {
         UnitType u = types.get(type);
@@ -171,41 +373,195 @@ public final class ArmyEngine {
 
     public Army army(int id) { Army a = armies.get(id); if (a == null) throw new TitleEditor.EditException("Нет армии " + id); return a; }
 
+    /**
+     * Applies a strategic roster delta exactly once. The operation receipt is part of
+     * wf_army.json, so a physical soldier that survives a crash during demobilization
+     * cannot be credited to the abstract army twice.
+     *
+     * @return true when the roster changed; false when the same operation was already committed
+     */
+    public synchronized boolean applyRosterDeltaOnce(String operationId, int armyId, Map<String, Integer> delta) {
+        if (operationId == null || !operationId.matches("[A-Za-z0-9_.:-]{1,128}"))
+            throw new IllegalArgumentException("Invalid army roster operation id");
+        if (armyId <= 0 || delta == null || delta.isEmpty() || delta.size() > 64)
+            throw new IllegalArgumentException("Invalid army roster delta");
+
+        TreeMap<String, Integer> normalized = new TreeMap<>();
+        for (Map.Entry<String, Integer> entry : delta.entrySet()) {
+            String type = entry.getKey();
+            Integer amount = entry.getValue();
+            if (type == null || !type.matches("[a-z0-9_.:-]{1,64}") || amount == null
+                    || amount == 0 || Math.abs((long) amount) > 1_000_000_000L)
+                throw new IllegalArgumentException("Invalid army roster delta entry");
+            normalized.put(type, amount);
+        }
+
+        StringBuilder canonical = new StringBuilder().append(armyId);
+        for (Map.Entry<String, Integer> entry : normalized.entrySet())
+            canonical.append('|').append(entry.getKey()).append(':').append(entry.getValue());
+        String payload = canonical.toString();
+
+        String prior = rosterOperations.get(operationId);
+        if (prior != null) {
+            if (!prior.equals(payload))
+                throw new IllegalStateException("Army roster operation id was reused with a different payload: " + operationId);
+            return false;
+        }
+        if (rosterOperations.size() >= MAX_ROSTER_OPERATIONS)
+            throw new IllegalStateException("Army roster receipt limit reached; reconcile/compact receipts before another transition");
+
+        Army target = armies.get(armyId);
+        if (target == null) throw new IllegalArgumentException("Нет армии " + armyId);
+
+        Map<String, Integer> next = new TreeMap<>();
+        for (Map.Entry<String, Integer> entry : normalized.entrySet()) {
+            long value = (long) target.units.getOrDefault(entry.getKey(), 0) + entry.getValue();
+            if (value < 0 || value > Integer.MAX_VALUE)
+                throw new IllegalArgumentException("Army roster delta would create an invalid count for " + entry.getKey());
+            next.put(entry.getKey(), (int) value);
+        }
+
+        for (Map.Entry<String, Integer> entry : next.entrySet()) {
+            if (entry.getValue() == 0) target.units.remove(entry.getKey());
+            else target.units.put(entry.getKey(), entry.getValue());
+        }
+        rosterOperations.put(operationId, payload);
+        return true;
+    }
+
+    /** Read-only durable receipt lookup used to reconcile late-loaded physical troop chunks. */
+    public synchronized boolean hasRosterOperation(String operationId) {
+        return operationId != null && rosterOperations.containsKey(operationId);
+    }
+
     private Army own(int id, String realm) {
         Army a = army(id);
         if (realm != null && !a.realm.equals(realm)) throw new TitleEditor.EditException("Это армия другого государства");
         return a;
     }
 
-    public void disband(int id, String realm) {
-        Army a = own(id, realm);
-        if (!a.mercenary) pool.put(a.realm, Math.min(levyCap(a.realm), pool(a.realm) + a.units.entrySet().stream().filter(e -> types.get(e.getKey()) != null && types.get(e.getKey()).levy).mapToInt(Map.Entry::getValue).sum()));
+    private boolean hasActiveSiege(Army army) {
+        if (army.siegeTitle != 0) return true;
+        for (double[] siege : sieges.values())
+            if (siege != null && siege.length > 0 && (int) siege[0] == army.id) return true;
+        return false;
+    }
+
+    private void disbandInternal(int id, String realm) {
+        Army army = own(id, realm);
+        if (army.moving() || hasActiveSiege(army))
+            throw new TitleEditor.EditException("Сначала остановите армию и завершите осаду");
+        if (!army.mercenary) {
+            long levy = army.units.entrySet().stream()
+                    .filter(entry -> types.get(entry.getKey()) != null && types.get(entry.getKey()).levy)
+                    .mapToLong(Map.Entry::getValue).sum();
+            pool.put(army.realm, Math.min(levyCap(army.realm), pool(army.realm) + levy));
+        }
         armies.remove(id);
-        sieges.values().removeIf(s -> (int) s[0] == id);
+        sieges.values().removeIf(siege -> (int) siege[0] == id);
     }
 
-    public void merge(int into, int from, String realm) {
-        Army a = own(into, realm), b = own(from, realm);
-        if (a == b) throw new TitleEditor.EditException("Нельзя слить армию с самой собой");
-        if (a.location != b.location) throw new TitleEditor.EditException("Армии должны стоять в одном месте");
-        if (a.mercenary != b.mercenary) throw new TitleEditor.EditException("Наёмников нельзя сливать с войском");
-        for (Map.Entry<String, Integer> e : b.units.entrySet()) a.add(e.getKey(), e.getValue());
+    public void disband(int id, String realm) { disbandInternal(id, realm); }
+
+    public synchronized boolean disbandOnce(String requestId, int id, String realm) {
+        String operationId = armyActionKey(requestId);
+        String fingerprint = armyActionFingerprint("disband", realm, Integer.toString(id));
+        String prior = priorArmyActionResult(operationId, fingerprint);
+        if (prior != null) return false;
+        requireReceiptCapacity();
+        disbandInternal(id, realm);
+        rememberArmyAction(operationId, fingerprint, "done");
+        return true;
+    }
+
+    private void mergeInternal(int into, int from, String realm) {
+        Army target = own(into, realm), source = own(from, realm);
+        if (target == source) throw new TitleEditor.EditException("Нельзя слить армию с самой собой");
+        if (target.moving() || source.moving() || hasActiveSiege(target) || hasActiveSiege(source))
+            throw new TitleEditor.EditException("Для слияния обе армии должны стоять вне осады");
+        if (target.location != source.location) throw new TitleEditor.EditException("Армии должны стоять в одном месте");
+        if (target.mercenary != source.mercenary) throw new TitleEditor.EditException("Наёмников нельзя сливать с войском");
+        long targetMen = target.men(), sourceMen = source.men(), totalMen = targetMen + sourceMen;
+        if (totalMen <= 0 || totalMen > Integer.MAX_VALUE * 64L)
+            throw new TitleEditor.EditException("Недопустимая общая численность армии");
+        for (Map.Entry<String, Integer> entry : source.units.entrySet()) {
+            long next = (long) target.units.getOrDefault(entry.getKey(), 0) + entry.getValue();
+            if (next > Integer.MAX_VALUE) throw new TitleEditor.EditException("Переполнение численности типа " + entry.getKey());
+        }
+        double targetWeight = targetMen / (double) totalMen;
+        double sourceWeight = sourceMen / (double) totalMen;
+        target.morale = Math.max(0, Math.min(1, target.morale * targetWeight + source.morale * sourceWeight));
+        target.supply = Math.max(0, Math.min(1, target.supply * targetWeight + source.supply * sourceWeight));
+        if (target.commander == null || target.commander.isBlank()) target.commander = source.commander == null ? "" : source.commander;
+        target.martial = Math.max(target.martial, source.martial);
+        for (Map.Entry<String, Integer> entry : source.units.entrySet()) target.add(entry.getKey(), entry.getValue());
         armies.remove(from);
-        sieges.values().removeIf(s -> (int) s[0] == from);
+        sieges.values().removeIf(siege -> (int) siege[0] == from);
     }
 
-    /** Отделить отряд заданного типа и размера в новую армию на том же месте. */
-    public Army split(int id, String type, int n, String realm) {
-        Army a = own(id, realm);
-        if (n <= 0 || a.count(type) < n) throw new TitleEditor.EditException("В армии нет столько: " + type);
-        if (a.count(type) == a.men() && n == a.men()) throw new TitleEditor.EditException("Нельзя отделить всё: используйте приказ движения");
-        a.units.merge(type, -n, Integer::sum);
-        if (a.units.get(type) == 0) a.units.remove(type);
-        Army b = new Army(nextArmy++, a.realm, (armiesOf(a.realm).size() + 1) + "-я армия", a.location);
-        b.mercenary = a.mercenary; b.martial = 0;
-        b.add(type, n);
-        armies.put(b.id, b);
-        return b;
+    public void merge(int into, int from, String realm) { mergeInternal(into, from, realm); }
+
+    public synchronized Army mergeOnce(String requestId, int into, int from, String realm) {
+        String operationId = armyActionKey(requestId);
+        String fingerprint = armyActionFingerprint("merge", realm, Integer.toString(into), Integer.toString(from));
+        String prior = priorArmyActionResult(operationId, fingerprint);
+        if (prior != null) return army(Integer.parseInt(prior));
+        requireReceiptCapacity();
+        mergeInternal(into, from, realm);
+        rememberArmyAction(operationId, fingerprint, Integer.toString(into));
+        return army(into);
+    }
+
+    private Army splitInternal(int id, String type, int n, String realm) {
+        Army source = own(id, realm);
+        if (source.moving() || hasActiveSiege(source))
+            throw new TitleEditor.EditException("Для разделения армия должна стоять вне осады");
+        if (n <= 0 || source.count(type) < n) throw new TitleEditor.EditException("В армии нет столько: " + type);
+        if (n >= source.men()) throw new TitleEditor.EditException("Нельзя оставить исходную армию без войск");
+        if (nextArmy <= 0 || nextArmy == Integer.MAX_VALUE) throw new TitleEditor.EditException("Достигнут предел ID стратегических армий");
+        source.units.merge(type, -n, Integer::sum);
+        if (source.units.get(type) == 0) source.units.remove(type);
+        Army split = new Army(nextArmy++, source.realm, (armiesOf(source.realm).size() + 1) + "-я армия", source.location);
+        split.mercenary = source.mercenary;
+        split.martial = source.martial;
+        split.morale = source.morale;
+        split.supply = source.supply;
+        split.add(type, n);
+        armies.put(split.id, split);
+        return split;
+    }
+
+    /** Отделить часть армии; оба соединения сохраняют боеспособность, снабжение и принадлежность. */
+    public Army split(int id, String type, int n, String realm) { return splitInternal(id, type, n, realm); }
+
+    public synchronized Army splitOnce(String requestId, int id, String type, int n, String realm) {
+        String operationId = armyActionKey(requestId);
+        String fingerprint = armyActionFingerprint("split", realm, Integer.toString(id), type, Integer.toString(n));
+        String prior = priorArmyActionResult(operationId, fingerprint);
+        if (prior != null) return army(Integer.parseInt(prior));
+        requireReceiptCapacity();
+        Army split = splitInternal(id, type, n, realm);
+        rememberArmyAction(operationId, fingerprint, Integer.toString(split.id));
+        return split;
+    }
+
+    public synchronized boolean moveOnce(String requestId, int id, int target, String realm) {
+        String operationId = armyActionKey(requestId);
+        String fingerprint = armyActionFingerprint("move", realm, Integer.toString(id), Integer.toString(target));
+        if (priorArmyActionResult(operationId, fingerprint) != null) return false;
+        requireReceiptCapacity();
+        move(id, target, realm);
+        rememberArmyAction(operationId, fingerprint, Integer.toString(id));
+        return true;
+    }
+
+    public synchronized void stopOnce(String requestId, int id, String realm) {
+        String operationId = armyActionKey(requestId);
+        String fingerprint = armyActionFingerprint("stop", realm, Integer.toString(id));
+        if (priorArmyActionResult(operationId, fingerprint) != null) return;
+        requireReceiptCapacity();
+        stop(id, realm);
+        rememberArmyAction(operationId, fingerprint, Integer.toString(id));
     }
 
     // ------------------------------------------------------------------ движение
@@ -566,6 +922,8 @@ public final class ArmyEngine {
     // ------------------------------------------------------------------ ИИ
 
     private void aiTurn() {
+        PersistenceBridge bridge = persistenceBridge;
+        if (bridge != null && bridge.actionsBlocked()) return;
         for (War w : new ArrayList<>(war.wars.values())) {
             if (!w.active) continue;
             for (String r : new ArrayList<>(w.sides.keySet())) {
@@ -580,43 +938,144 @@ public final class ArmyEngine {
         War.Side me = w.sides.get(r);
         // 1. набор
         if (armiesOf(r).stream().mapToInt(Army::men).sum() < 0.3 * levyCap(r)) {
-            double p = pool(r);
-            int n = (int) Math.min(p, levyCap(r) * 0.6);
+            double availablePool = pool(r);
+            int n = (int) Math.min(availablePool, levyCap(r) * 0.6);
             if (n >= 20) {
                 try {
-                    raise(r, "levy", (int) (n * 0.5));
-                    if (n * 0.25 >= 5) raise(r, "spear", (int) (n * 0.25));
-                    if (gold(r) > 40 && n * 0.15 >= 3) raise(r, "archer", (int) (n * 0.15));
-                    if (gold(r) > 120 && n * 0.1 >= 2) raise(r, "cavalry", (int) (n * 0.1));
-                    if (gold(r) > 120) hire(r, "siege", 2);
+                    if (persistenceBridge == null) {
+                        // Pure-domain compatibility for deterministic tests and standalone simulations.
+                        raise(r, "levy", (int) (n * 0.5));
+                        if (n * 0.25 >= 5) raise(r, "spear", (int) (n * 0.25));
+                        if (gold(r) > 40 && n * 0.15 >= 3) raise(r, "archer", (int) (n * 0.15));
+                        if (gold(r) > 120 && n * 0.1 >= 2) raise(r, "cavalry", (int) (n * 0.1));
+                        if (gold(r) > 120) hire(r, "siege", 2);
+                    } else {
+                        recruitWithPersistence(autonomousRecruitmentRequestId(war.day, r, "raise", "levy"),
+                                "raise", r, "levy", (int) (n * 0.5));
+                        if (persistenceBridge.actionsBlocked()) return;
+                        if (n * 0.25 >= 5)
+                            recruitWithPersistence(autonomousRecruitmentRequestId(war.day, r, "raise", "spear"),
+                                    "raise", r, "spear", (int) (n * 0.25));
+                        if (persistenceBridge.actionsBlocked()) return;
+                        if (gold(r) > 40 && n * 0.15 >= 3)
+                            recruitWithPersistence(autonomousRecruitmentRequestId(war.day, r, "raise", "archer"),
+                                    "raise", r, "archer", (int) (n * 0.15));
+                        if (persistenceBridge.actionsBlocked()) return;
+                        if (gold(r) > 120 && n * 0.1 >= 2)
+                            recruitWithPersistence(autonomousRecruitmentRequestId(war.day, r, "raise", "cavalry"),
+                                    "raise", r, "cavalry", (int) (n * 0.1));
+                        if (persistenceBridge.actionsBlocked()) return;
+                        if (gold(r) > 120)
+                            recruitWithPersistence(autonomousRecruitmentRequestId(war.day, r, "hire", "siege"),
+                                    "hire", r, "siege", 2);
+                    }
                 } catch (TitleEditor.EditException ignored) { }
+                if (persistenceBridge != null && persistenceBridge.actionsBlocked()) return;
             }
         }
-        // 2. слить армии в одной точке
-        List<Army> mine = armiesOf(r);
-        for (Army a : mine) for (Army b : mine) if (a.id < b.id && armies.containsKey(a.id) && armies.containsKey(b.id) && a.location == b.location && !a.moving() && !b.moving() && a.mercenary == b.mercenary) merge(a.id, b.id, r);
-        // 3. приказы простаивающим
-        for (Army a : armiesOf(r)) {
+        // 2. Слияние и перемещение используют те же durable receipts, что и приказы игрока.
+        boolean armyOrdersChanged = false;
+        List<Army> mine = new ArrayList<>(armiesOf(r));
+        mine.sort(Comparator.comparingInt(army -> army.id));
+        for (int i = 0; i < mine.size(); i++) {
+            Army a = mine.get(i);
+            for (int j = i + 1; j < mine.size(); j++) {
+                Army b = mine.get(j);
+                if (!armies.containsKey(a.id) || !armies.containsKey(b.id)
+                        || a.location != b.location || a.moving() || b.moving()
+                        || a.mercenary != b.mercenary) continue;
+                if (persistenceBridge == null) {
+                    // Standalone deterministic simulations keep the pure-domain path.
+                    merge(a.id, b.id, r);
+                    armyOrdersChanged = true;
+                } else {
+                    String requestId = autonomousArmyActionRequestId(
+                            war.day, r, "merge", a.id, b.id, 0, 0, "");
+                    boolean replay = hasArmyActionReceipt(requestId);
+                    mergeOnce(requestId, a.id, b.id, r);
+                    armyOrdersChanged |= !replay;
+                    if (persistenceBridge.actionsBlocked()) return;
+                }
+            }
+        }
+
+        // 3. Приказы простаивающим соединениям. Новый target/state образует новый приказ;
+        // повтор того же маршрута после рестарта возвращает ранее сохранённый receipt.
+        for (Army a : new ArrayList<>(armiesOf(r))) {
             if (a.moving() || a.siegeTitle != 0 || a.men() < 10) continue;
             Army foe = nearestEnemyArmy(a);
-            if (foe != null && foe.power(types) < 0.85 * a.power(types) * 1.2) { tryMove(a, foe.location); continue; }
-            int tgt = nearestEnemyBarony(w, a, me);
-            if (tgt != 0) tryMove(a, tgt);
-            else if (a.location != capital(r)) tryMove(a, capital(r));
+            if (foe != null && foe.power(types) < 0.85 * a.power(types) * 1.2) {
+                armyOrdersChanged |= tryMove(war.day, a, foe.location);
+                continue;
+            }
+            int target = nearestEnemyBarony(w, a, me);
+            if (target != 0) armyOrdersChanged |= tryMove(war.day, a, target);
+            else if (a.location != capital(r)) armyOrdersChanged |= tryMove(war.day, a, capital(r));
+            if (persistenceBridge != null && persistenceBridge.actionsBlocked()) return;
         }
+
+        // Сохраняем весь пакет приказов государства одним checkpoint, а не отдельным save на юнит.
+        if (armyOrdersChanged && persistenceBridge != null
+                && (!persistenceBridge.persist() || persistenceBridge.actionsBlocked())) return;
+
         // 4. мир
         boolean leader = r.equals(w.attacker) || r.equals(w.defender);
         if (!leader) return;
         double mineScore = w.scoreFor(me);
         try {
+            boolean politicalMutation = false;
             if (w.offerFrom != null && w.offerFrom != me) {
-                if (mineScore < 10 || (w.offerWhite && war.day - w.startDay > 360)) war.acceptPeace(w.id, r);
-            } else if (mineScore >= war.goalCost(w) && !w.goals.isEmpty()) war.enforce(w.id, r);
-            else if (mineScore <= -45 && w.offerFrom == null) war.offerPeace(w.id, r, true);
+                if (mineScore < 10 || (w.offerWhite && war.day - w.startDay > 360)) {
+                    if (persistenceBridge == null) war.acceptPeace(w.id, r);
+                    else {
+                        war.acceptPeaceOnce(WarEngine.autonomousActionRequestId(war.day, r, "accept-peace", w.id), w.id, r);
+                        politicalMutation = true;
+                    }
+                }
+            } else if (mineScore >= war.goalCost(w) && !w.goals.isEmpty()) {
+                if (persistenceBridge == null) war.enforce(w.id, r);
+                else {
+                    war.enforceOnce(WarEngine.autonomousActionRequestId(war.day, r, "enforce-peace", w.id), w.id, r);
+                    politicalMutation = true;
+                }
+            } else if (mineScore <= -45 && w.offerFrom == null) {
+                if (persistenceBridge == null) war.offerPeace(w.id, r, true);
+                else {
+                    war.offerPeaceOnce(WarEngine.autonomousActionRequestId(war.day, r, "offer-white-peace", w.id), w.id, r, true);
+                    politicalMutation = true;
+                }
+            }
+            if (politicalMutation && persistenceBridge != null
+                    && (!persistenceBridge.persist() || persistenceBridge.actionsBlocked())) return;
         } catch (TitleEditor.EditException ignored) { }
     }
 
-    private void tryMove(Army a, int target) { try { move(a.id, target, a.realm); } catch (TitleEditor.EditException ignored) { } }
+    /**
+     * Stable identity per world day, realm and unit category. A realm participating in two wars
+     * on the same day must not recruit twice merely because aiRealm was reached from two campaigns.
+     */
+    public static String autonomousRecruitmentRequestId(long worldDay, String realm, String kind, String type) {
+        if (worldDay < 0 || realm == null || realm.isBlank()
+                || kind == null || (!"raise".equals(kind) && !"hire".equals(kind))
+                || type == null || !type.matches("[a-z0-9_.:-]{1,64}"))
+            throw new IllegalArgumentException("Invalid autonomous recruitment identity");
+        String canonical = worldDay + "|" + realm + "|" + kind + "|" + type;
+        return "ai:" + UUID.nameUUIDFromBytes(canonical.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private boolean tryMove(long worldDay, Army army, int target) {
+        try {
+            if (persistenceBridge == null) {
+                move(army.id, target, army.realm);
+                return true;
+            }
+            String requestId = autonomousArmyActionRequestId(
+                    worldDay, army.realm, "move", army.id, 0, army.location, target, army.lastEvent);
+            return moveOnce(requestId, army.id, target, army.realm);
+        } catch (TitleEditor.EditException ignored) {
+            return false;
+        }
+    }
 
     private Army nearestEnemyArmy(Army a) {
         Army best = null; int bd = 1 << 30;
@@ -663,7 +1122,7 @@ public final class ArmyEngine {
     public String toJson() {
         for (String realm : new ArrayList<>(gold.keySet())) gold(realm); // migrate every wf-army/1 balance before dropping the legacy field
         Map<String, Object> root = new LinkedHashMap<>();
-        root.put("format", "wf-army/2");
+        root.put("format", "wf-army/3");
         root.put("next", nextArmy);
         root.put("dayAccumulator", dayAccumulator);
         root.put("pool", new LinkedHashMap<String, Object>(pool));
@@ -678,6 +1137,15 @@ public final class ArmyEngine {
             al.add(m);
         }
         root.put("armies", al);
+        List<Object> rosterReceipts = new ArrayList<>();
+        for (Map.Entry<String, String> entry : rosterOperations.entrySet())
+            rosterReceipts.add(Map.of("id", entry.getKey(), "payload", entry.getValue()));
+        root.put("rosterOperations", rosterReceipts);
+        List<Object> pendingRows = new ArrayList<>();
+        for (PendingRecruitment pending : pendingRecruitments.values())
+            pendingRows.add(Map.of("id", pending.operationId(), "fingerprint", pending.fingerprint(),
+                    "kind", pending.kind(), "realm", pending.realm(), "type", pending.type(), "count", pending.count()));
+        root.put("pendingRecruitments", pendingRows);
         Map<String, Object> sg = new LinkedHashMap<>();
         for (Map.Entry<Integer, double[]> e : sieges.entrySet()) sg.put(String.valueOf(e.getKey()), List.of(e.getValue()[0], e.getValue()[1], e.getValue()[2]));
         root.put("sieges", sg);
@@ -688,8 +1156,9 @@ public final class ArmyEngine {
     public void fromJson(String json) {
         Map<String, Object> root = (Map<String, Object>) Json.parse(json);
         String format = String.valueOf(root.get("format"));
-        if (!"wf-army/1".equals(format) && !"wf-army/2".equals(format)) throw new IllegalArgumentException("Неверный формат армий");
-        armies.clear(); sieges.clear(); pacts.clear(); gold.clear(); pool.clear(); humans.clear();
+        if (!"wf-army/1".equals(format) && !"wf-army/2".equals(format) && !"wf-army/3".equals(format))
+            throw new IllegalArgumentException("Неверный формат армий");
+        armies.clear(); sieges.clear(); pacts.clear(); gold.clear(); pool.clear(); humans.clear(); rosterOperations.clear(); pendingRecruitments.clear();
         nextArmy = ((Number) root.get("next")).intValue();
         Object savedAccumulator = root.get("dayAccumulator");
         dayAccumulator = savedAccumulator instanceof Number n && Double.isFinite(n.doubleValue()) && n.doubleValue() >= 0 && n.doubleValue() < 1 ? n.doubleValue() : 0;
@@ -710,6 +1179,37 @@ public final class ArmyEngine {
             for (Map.Entry<String, Object> e : ((Map<String, Object>) m.get("units")).entrySet()) a.units.put(e.getKey(), ((Number) e.getValue()).intValue());
             for (Object p : (List<Object>) m.get("path")) a.path.add(((Number) p).intValue());
             armies.put(a.id, a);
+        }
+        if (root.get("rosterOperations") instanceof List<?> savedReceipts) {
+            if (savedReceipts.size() > MAX_ROSTER_OPERATIONS)
+                throw new IllegalArgumentException("Слишком много квитанций состава армии");
+            for (Object raw : savedReceipts) {
+                if (!(raw instanceof Map<?, ?> receipt)
+                        || !(receipt.get("id") instanceof String operationId)
+                        || !(receipt.get("payload") instanceof String payload)
+                        || !operationId.matches("[A-Za-z0-9_.:-]{1,128}")
+                        || payload.isBlank() || payload.length() > 4096
+                        || rosterOperations.putIfAbsent(operationId, payload) != null)
+                    throw new IllegalArgumentException("Повреждена квитанция состава армии");
+            }
+        }
+        if (root.get("pendingRecruitments") instanceof List<?> pendingRows) {
+            if (pendingRows.size() > MAX_ROSTER_OPERATIONS)
+                throw new IllegalArgumentException("Слишком много незавершённых операций набора армии");
+            for (Object raw : pendingRows) {
+                if (!(raw instanceof Map<?, ?> pending)
+                        || !(pending.get("id") instanceof String operationId)
+                        || !(pending.get("fingerprint") instanceof String fingerprint)
+                        || !(pending.get("kind") instanceof String kind)
+                        || !(pending.get("realm") instanceof String realm)
+                        || !(pending.get("type") instanceof String type)
+                        || !(pending.get("count") instanceof Number count))
+                    throw new IllegalArgumentException("Повреждена ожидающая операция набора армии");
+                PendingRecruitment value = new PendingRecruitment(operationId, fingerprint, kind, realm, type, count.intValue());
+                if (rosterOperations.containsKey(operationId)
+                        || pendingRecruitments.putIfAbsent(operationId, value) != null)
+                    throw new IllegalArgumentException("Повторный ID операции набора армии: " + operationId);
+            }
         }
         for (Map.Entry<String, Object> e : ((Map<String, Object>) root.get("sieges")).entrySet()) {
             List<Object> v = (List<Object>) e.getValue();

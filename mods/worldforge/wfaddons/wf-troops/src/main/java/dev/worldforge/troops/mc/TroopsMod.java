@@ -8,6 +8,7 @@ import dev.worldforge.mod.api.TreasuryApi;
 import dev.worldforge.mod.api.WorldForgeApi;
 import dev.worldforge.mod.economy.TreasuryLedger;
 import dev.worldforge.mod.MapData;
+import dev.worldforge.mod.EditorManager;
 import dev.worldforge.mod.TitleData;
 import dev.worldforge.mod.WorldForgeMod;
 import dev.worldforge.people.Character;
@@ -23,12 +24,15 @@ import dev.worldforge.troops.MixedOrders;
 import dev.worldforge.troops.Wars;
 import dev.worldforge.troops.Squads;
 import dev.worldforge.troops.ArmyHierarchy;
+import dev.worldforge.troops.ArmyRef;
 import dev.worldforge.troops.MilitaryDeathLedger;
+import dev.worldforge.troops.MilitaryMusterLedger;
 import dev.worldforge.troops.OperationalSupply;
 import dev.worldforge.troops.TroopDefs;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.commands.SharedSuggestionProvider;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
@@ -87,6 +91,13 @@ public class TroopsMod {
     public static final Map<String, TroopEntity> LIVE = new ConcurrentHashMap<>();
     /** Durable death outbox; a soldier body is retained until the canonical Character estate is committed. */
     private static final MilitaryDeathLedger DEATHS = new MilitaryDeathLedger();
+    /** Durable strategic roster -> physical troop deployment journal. */
+    private static final MilitaryMusterLedger MUSTERS = new MilitaryMusterLedger();
+    /** Loaded stale troop bodies whose strategic return is already durably credited. */
+    private static final Map<String, TroopEntity> RETURNED_BODIES_PENDING = new ConcurrentHashMap<>();
+    /** Durable outbox for demobilization/desertion; never discard a living Character before acknowledgement. */
+    private static final dev.worldforge.troops.MilitaryTransitionLedger TRANSITIONS =
+            new dev.worldforge.troops.MilitaryTransitionLedger();
     /** Durable field rations/readiness; ration quantities themselves live in the shared TreasuryLedger. */
     private static final OperationalSupply.Store SUPPLY = new OperationalSupply.Store();
     private static volatile boolean militaryLoadFailed;
@@ -185,19 +196,27 @@ public class TroopsMod {
         DEFS = load(dir(server).resolve("wf_troops_units.json"));
         try {
             DEATHS.clear();
+            TRANSITIONS.clear();
+            MUSTERS.clear();
+            RETURNED_BODIES_PENDING.clear();
             SUPPLY.clear();
             Path f = dir(server).resolve("wf_squads.json");
             if (Files.exists(f)) SQUADS.fromJson(Files.readString(f));
             Path hf = dir(server).resolve("wf_army_hierarchy.json");
-            if (Files.exists(hf)) HIERARCHY.fromJson(Files.readString(hf));
+            if (Files.exists(hf)) HIERARCHY.fromJson(Files.readString(hf), WorldForgeMod.worldId(), TroopsMod::resolveLegacyArmyMap);
             Path ff = dir(server).resolve("wf_forts.json");
             if (Files.exists(ff)) FORTS.fromJson(Files.readString(ff));
             Path df = dir(server).resolve("wf_military_deaths.json");
             if (Files.exists(df)) DEATHS.fromJson(Files.readString(df));
+            Path tf = dir(server).resolve("wf_military_transitions.json");
+            if (Files.exists(tf)) TRANSITIONS.fromJson(Files.readString(tf));
+            Path mf = dir(server).resolve("wf_military_musters.json");
+            if (Files.exists(mf)) MUSTERS.fromJson(Files.readString(mf));
             Path sf = dir(server).resolve("wf_operational_supply.json");
             if (Files.exists(sf)) SUPPLY.fromJson(Files.readString(sf));
             syncArmyHierarchy();
             processPendingDeaths();
+            processPendingTransitions();
         } catch (Exception ex) {
             militaryLoadFailed = true;
             actionPersistenceBlocked = true;
@@ -222,6 +241,8 @@ public class TroopsMod {
         snapshots.put(root.resolve("wf_army_hierarchy.json"), HIERARCHY.toJson());
         snapshots.put(root.resolve("wf_forts.json"), FORTS.toJson());
         snapshots.put(root.resolve("wf_military_deaths.json"), DEATHS.toJson());
+        snapshots.put(root.resolve("wf_military_transitions.json"), TRANSITIONS.toJson());
+        snapshots.put(root.resolve("wf_military_musters.json"), MUSTERS.toJson());
         snapshots.put(root.resolve("wf_operational_supply.json"), SUPPLY.toJson());
         Map<Path, Path> staged = new LinkedHashMap<>(), backups = new LinkedHashMap<>();
         Set<Path> replaced = new LinkedHashSet<>();
@@ -265,41 +286,92 @@ public class TroopsMod {
         }
     }
 
+    private static String resolveLegacyArmyMap(ArmyHierarchy.LegacyArmy legacy) {
+        if (legacy == null) return null;
+        List<MapData> matches = new ArrayList<>();
+        for (MapData map : WorldForgeMod.loadedMaps().values()) {
+            if (map == null || map.titles == null) continue;
+            if (legacy.realm() != null && !legacy.realm().isBlank()
+                    && !map.titles.realms.containsKey(legacy.realm())) continue;
+            if (ModList.get().isLoaded("wf_army")) {
+                ArmyLink.Found candidate = ArmyLink.findOnMap(legacy.armyId(), map.name);
+                if (candidate == null || legacy.realm() != null && !legacy.realm().isBlank()
+                        && !legacy.realm().equals(candidate.army().realm)) continue;
+            } else if (legacy.realm() == null || legacy.realm().isBlank()) {
+                continue; // no strategic roster to disambiguate a legacy map-local ID
+            }
+            matches.add(map);
+        }
+        return matches.size() == 1 ? matches.get(0).name : null;
+    }
+
+    /** Finds a Character already bound to this exact physical troop UUID after an entity/registry split crash. */
+    private static PersonBinding findCharacterForTroopEntity(String entityId) {
+        if (entityId == null || entityId.isBlank() || !ModList.get().isLoaded("wf_people")) return null;
+        for (var identity : PeopleMod.authority().identities()) {
+            Character person = PeopleMod.authority().get(identity);
+            if (person == null || !person.alive) continue;
+            boolean matches = entityId.equals(person.props.get("wf_troop_uuid"));
+            Object raw = person.props.get("population.entity_bindings");
+            if (!matches && raw instanceof Map<?, ?> bindings) matches = bindings.containsValue(entityId);
+            if (!matches) continue;
+            CharacterRegistry owner = PeopleMod.authority().registryForGlobal(person.globalId);
+            return owner == null ? null : new PersonBinding(owner, person);
+        }
+        return null;
+    }
+
+    private static ArmyRef armyRef(MapData map, int armyId) {
+        if (map == null || WorldForgeMod.worldId() == null || armyId <= 0) return null;
+        return new ArmyRef(WorldForgeMod.worldId(), map.name, armyId);
+    }
+
+    private static ArmyRef armyRef(ServerLevel level, int armyId) {
+        return level == null ? null : armyRef(EditorManager.dataFor(level), armyId);
+    }
+
     /** Reconciles the physical squad projection with the strategic wf-army roster. */
     private static void syncArmyHierarchy() {
         if (server == null) return;
         Set<String> reconciledSquads = new HashSet<>();
         for (TroopEntity troop : LIVE.values()) {
-            if (troop == null || !troop.isAlive() || troop.armyId <= 0) continue;
+            if (troop == null || !troop.isAlive() || troop.armyId <= 0 || !(troop.level() instanceof ServerLevel troopLevel)) continue;
+            MapData map = EditorManager.dataFor(troopLevel);
+            ArmyRef ref = armyRef(map, troop.armyId);
+            if (ref == null) continue;
             Squads.Squad squad = SQUADS.squadOf(troop.getUUID().toString());
             if (squad == null || !reconciledSquads.add(squad.id)) continue;
             boolean oneStrategicArmy = true;
             for (String memberId : squad.members) {
                 TroopEntity member = LIVE.get(memberId);
-                if (member != null && member.isAlive() && member.armyId != troop.armyId) {
+                if (member == null || !member.isAlive()) continue;
+                MapData memberMap = member.level() instanceof ServerLevel memberLevel
+                        ? EditorManager.dataFor(memberLevel) : null;
+                if (member.armyId != troop.armyId || memberMap == null || !map.name.equals(memberMap.name)) {
                     oneStrategicArmy = false;
                     break;
                 }
             }
             if (!oneStrategicArmy) {
                 HIERARCHY.unassignSquad(squad.id);
-                LOGGER.warn("wf-troops: squad {} contains units from multiple strategic armies; hierarchy link withheld", squad.id);
+                LOGGER.warn("wf-troops: squad {} contains units from multiple map-scoped strategic armies; hierarchy link withheld", squad.id);
                 continue;
             }
-            ArmyLink.Found strategic = ArmyLink.find(troop.armyId);
+            ArmyLink.Found strategic = ArmyLink.find(troop.armyId, troop.realm, map.name);
             String name = strategic == null ? "Армия " + troop.armyId : strategic.army().name;
             String realm = strategic == null ? troop.realm : strategic.army().realm;
             try {
-                HIERARCHY.ensureArmy(troop.armyId, name, troop.ownerId(), realm);
+                HIERARCHY.ensureArmy(ref, name, troop.ownerId(), realm);
                 if (strategic != null && !strategic.army().commander.isBlank())
-                    HIERARCHY.appointArmyCommander(troop.armyId, strategic.army().commander);
+                    HIERARCHY.appointArmyCommander(ref, strategic.army().commander);
                 ArmyHierarchy.Corps assigned = HIERARCHY.corpsForSquad(squad.id);
-                if (assigned == null || assigned.armyId != troop.armyId) {
-                    ArmyHierarchy.Corps corps = HIERARCHY.defaultCorps(troop.armyId);
+                if (assigned == null || !assigned.armyRef.equals(ref)) {
+                    ArmyHierarchy.Corps corps = HIERARCHY.defaultCorps(ref);
                     HIERARCHY.assignSquad(corps.id, squad.id, SQUADS);
                 }
             } catch (RuntimeException ex) {
-                LOGGER.warn("wf-troops: hierarchy reconcile failed for army {}: {}", troop.armyId, ex.toString());
+                LOGGER.warn("wf-troops: hierarchy reconcile failed for army {} on map {}: {}",
+                        troop.armyId, map.name, ex.toString());
             }
         }
         HIERARCHY.pruneSquads(SQUADS);
@@ -307,32 +379,127 @@ public class TroopsMod {
 
     @SubscribeEvent
     public void join(EntityJoinLevelEvent e) {
-        if (e.getLevel().isClientSide || !(e.getEntity() instanceof TroopEntity t)) return;
-        String entityId = t.getUUID().toString();
-        if (ModList.get().isLoaded("wf_people") && t.characterId != null && !t.characterId.isBlank()) {
-            Character existingCharacter = PeopleMod.authority().getGlobal(t.characterId);
+        if (e.getLevel().isClientSide || !(e.getEntity() instanceof TroopEntity troop)) return;
+        String entityId = troop.getUUID().toString();
+
+        if (TRANSITIONS.hasCompletedEntity(entityId)) {
+            LIVE.remove(entityId);
+            SQUADS.remove(entityId);
+            RETURNED_BODIES_PENDING.remove(entityId);
+            troop.discard();
+            return; // Terminal physical-body receipt is authoritative even when NBT lost CharacterId.
+        }
+
+        // Death is terminal even when a later army-roster receipt also exists.
+        if (ModList.get().isLoaded("wf_people")
+                && troop.characterId != null && !troop.characterId.isBlank()) {
+            Character existingCharacter = PeopleMod.authority().getGlobal(troop.characterId);
             if (existingCharacter != null && !existingCharacter.alive) {
                 LIVE.remove(entityId);
                 SQUADS.remove(entityId);
-                t.discard();
-                return; // A previously committed death must never be resurrected by a late chunk load.
+                troop.discard();
+                return;
             }
         }
-        MilitaryDeathLedger.Pending pending = t.characterId == null || t.characterId.isBlank()
-                ? null : DEATHS.get(t.characterId);
+
+        if (troop.characterId != null && !troop.characterId.isBlank()
+                && TRANSITIONS.isCompleted(troop.characterId, entityId)) {
+            LIVE.remove(entityId);
+            SQUADS.remove(entityId);
+            troop.discard();
+            return; // A committed non-lethal transition owns this exact physical body forever.
+        }
+
+        String transitionCharacterId = troop.characterId == null ? "" : troop.characterId;
+        if (transitionCharacterId.isBlank() && ModList.get().isLoaded("wf_people")) {
+            PersonBinding existingBinding = findCharacterForTroopEntity(entityId);
+            if (existingBinding != null) transitionCharacterId = existingBinding.character().globalId;
+        }
+        var pendingTransition = transitionCharacterId.isBlank() ? null : TRANSITIONS.get(transitionCharacterId);
+        if (pendingTransition != null && pendingTransition.troopEntityId().equals(entityId)) {
+            troop.setInvulnerable(true);
+            if (pendingTransition.kind() == dev.worldforge.troops.MilitaryTransitionLedger.Kind.STRATEGIC_RETURN)
+                completeStrategicReturnTransition(pendingTransition, troop);
+            return; // Resolve the durable outbox before any roster-return shortcut can discard this body.
+        }
+
+        if (hasStrategicReturnReceipt(troop)) {
+            troop.setInvulnerable(true);
+            if (releaseBodyDurably(troop)) troop.discard();
+            else RETURNED_BODIES_PENDING.put(entityId, troop);
+            return; // The strategic roster receipt is authoritative after a return operation.
+        }
+
+        MilitaryMusterLedger.Match musterMatch = MUSTERS.findSpawn(entityId);
+        if (musterMatch != null) {
+            MilitaryMusterLedger.Operation operation = musterMatch.operation();
+            MilitaryMusterLedger.Spawn spawn = musterMatch.spawn();
+            MapData physicalMap = e.getLevel() instanceof ServerLevel serverLevel
+                    ? EditorManager.dataFor(serverLevel) : null;
+            boolean exactPhysicalPlan = physicalMap != null && physicalMap.name.equals(operation.mapId())
+                    && e.getLevel().dimension().location().toString().equals(spawn.dimension())
+                    && troop.armyId == operation.armyId()
+                    && operation.realm().equals(troop.realm)
+                    && spawn.unitId().equals(troop.unitId());
+            if (troop.deploymentOperationId == null || troop.deploymentOperationId.isBlank()) {
+                if (!exactPhysicalPlan) {
+                    troop.setInvulnerable(true);
+                    actionPersistenceBlocked = true;
+                    LOGGER.error("wf_troops: entity {} cannot be adopted by muster operation {}: physical identity differs",
+                            entityId, operation.id());
+                    return;
+                }
+                troop.deploymentOperationId = operation.id();
+            }
+            if (!operation.id().equals(troop.deploymentOperationId)) {
+                troop.setInvulnerable(true);
+                actionPersistenceBlocked = true;
+                LOGGER.error("wf_troops: entity {} conflicts with durable muster operation {}",
+                        entityId, musterMatch.operation().id());
+                return;
+            }
+            if (troop.strategicUnitId == null || troop.strategicUnitId.isBlank()) {
+                if (!musterMatch.spawn().strategicUnitId().isBlank())
+                    troop.strategicUnitId = musterMatch.spawn().strategicUnitId();
+            } else if (!musterMatch.spawn().strategicUnitId().equals(troop.strategicUnitId)) {
+                troop.setInvulnerable(true);
+                actionPersistenceBlocked = true;
+                LOGGER.error("wf_troops: entity {} strategic source differs from its muster receipt", entityId);
+                return;
+            }
+            String expectedCharacter = musterMatch.spawn().characterGlobalId();
+            if (!expectedCharacter.isBlank()) {
+                if (troop.characterId == null || troop.characterId.isBlank())
+                    troop.setCharacterId(expectedCharacter);
+                else if (!expectedCharacter.equals(troop.characterId)) {
+                    troop.setInvulnerable(true);
+                    actionPersistenceBlocked = true;
+                    LOGGER.error("wf_troops: entity {} Character identity differs from its muster receipt", entityId);
+                    return;
+                }
+            }
+        }
+
+        MilitaryDeathLedger.Pending pending = troop.characterId == null || troop.characterId.isBlank()
+                ? null : DEATHS.get(troop.characterId);
         if (pending != null && pending.troopEntityId().equals(entityId)) {
-            t.setInvulnerable(true);
+            troop.setInvulnerable(true);
             completePendingDeath(pending, true);
             return;
         }
-        LIVE.put(entityId, t);
-        if (!t.deferCharacterBinding) syncPerson(t); // legacy saved entities migrate once; new recruits bind after payment commits
+
+        LIVE.put(entityId, troop);
+        if (!troop.deferCharacterBinding) syncPerson(troop);
         if (SQUADS.squadOf(entityId) == null) {
-            Squads.Squad squad = SQUADS.create(t.ownerId(), null, List.of(entityId));
-            squad.realm = t.realm; squad.cx = t.getX(); squad.cz = t.getZ();
-            t.setSquadId(squad.id);
-        } else t.setSquadId(SQUADS.squadOf(entityId).id);
-        applySupplyReadiness(t);
+            Squads.Squad squad = SQUADS.create(troop.ownerId(), null, List.of(entityId));
+            squad.realm = troop.realm;
+            squad.cx = troop.getX();
+            squad.cz = troop.getZ();
+            troop.setSquadId(squad.id);
+        } else {
+            troop.setSquadId(SQUADS.squadOf(entityId).id);
+        }
+        applySupplyReadiness(troop);
     }
 
     private record PersonBinding(CharacterRegistry registry, Character character) {}
@@ -347,6 +514,10 @@ public class TroopsMod {
     /** Resolves a physical soldier to the one authoritative Character in the map owning its realm. */
     private static PersonBinding bindPerson(TroopEntity troop, boolean create) {
         if (troop == null || troop.level().isClientSide || !ModList.get().isLoaded("wf_people")) return null;
+        if ((troop.characterId == null || troop.characterId.isBlank()) && create) {
+            PersonBinding previouslyBound = findCharacterForTroopEntity(troop.getUUID().toString());
+            if (previouslyBound != null) troop.setCharacterId(previouslyBound.character().globalId);
+        }
         for (MapData map : WorldForgeMod.loadedMaps().values()) {
             if (map.titles == null) continue;
             TitleData.Realm realm = troop.realm == null || troop.realm.isBlank() ? null : map.titles.realms.get(troop.realm);
@@ -417,27 +588,27 @@ public class TroopsMod {
         return true;
     }
 
-    /** Demobilizes a physical soldier into a settlement worker using the same Character ID. */
+    /** Demobilizes a soldier through a durable, replayable Character transition. */
     public static boolean demobilizeToSettlement(TroopEntity troop, String colonyId) {
-        if (troop == null || troop.level().isClientSide || !ModList.get().isLoaded("wf_settle")) return false;
+        if (troop == null || troop.level().isClientSide || server == null
+                || !ModList.get().isLoaded("wf_settle") || colonyId == null || colonyId.isBlank()) return false;
         PersonBinding binding = bindPerson(troop, false);
-        if (binding == null) return false;
-        Character person = binding.character();
-        if (!dev.worldforge.settle.mc.SettleMod.attachExistingCharacter(colonyId, person.globalId)) return false;
-        binding.registry().unbindEntity(person.id, "troop", troop.getUUID().toString());
-        person.props.remove("wf_troop_uuid");
-        person.props.remove("wf_troop_unit");
-        person.props.remove("wf_army_id");
-        person.props.remove("wf_combat_xp");
-        person.props.remove("wf_veteran_rank");
-        person.props.remove("wf_unit_kind");
-        Object lastMorale = person.props.remove("military.morale");
-        if (lastMorale instanceof Number n)
-            person.props.put("military.last_service_morale", Math.max(0, Math.min(100, n.intValue())));
-        LIVE.remove(troop.getUUID().toString());
-        SQUADS.remove(troop.getUUID().toString());
-        troop.discard();
-        return true;
+        if (binding == null || !binding.character().alive) return false;
+        var pending = new dev.worldforge.troops.MilitaryTransitionLedger.Pending(
+                binding.character().globalId, troop.getUUID().toString(),
+                dev.worldforge.troops.MilitaryTransitionLedger.Kind.DEMOBILIZATION,
+                Math.max(1, PeopleMod.YEAR), colonyId);
+        try {
+            troop.setInvulnerable(true);
+            TRANSITIONS.stage(pending);
+            if (!saveDurably()) { actionPersistenceBlocked = true; return false; }
+            return completePendingTransition(pending, troop);
+        } catch (RuntimeException error) {
+            actionPersistenceBlocked = true;
+            LOGGER.error("wf_troops: demobilization transition could not be staged for {}: {}",
+                    binding.character().globalId, error.toString(), error);
+            return false;
+        }
     }
 
     /** Records wounds on the canonical Character before a lethal hit can close the entity binding. */
@@ -503,6 +674,12 @@ public class TroopsMod {
         }
 
         String characterId = troop.characterId == null ? "" : troop.characterId.trim();
+        if (!characterId.isBlank() && TRANSITIONS.get(characterId) != null) {
+            troop.setInvulnerable(true);
+            LOGGER.error("wf_troops: death is deferred because Character {} already has a staged non-lethal transition",
+                    characterId);
+            return false;
+        }
         if (characterId.isBlank()) {
             PersonBinding binding = bindPerson(troop, false);
             if (binding == null || binding.character() == null) {
@@ -609,33 +786,440 @@ public class TroopsMod {
             completePendingDeath(pending, true);
     }
 
-    /** Unpaid soldiers desert; preserve the living Character and demobilize into a nearby settlement when possible. */
+    /** Unpaid soldiers desert through a durable transition outbox. */
     private static void onDesertion(TroopEntity troop) {
+        if (troop == null || server == null || !ModList.get().isLoaded("wf_people")) return;
         PersonBinding binding = bindPerson(troop, false);
-        if (binding != null) {
-            Character person = binding.character();
-            binding.registry().unbindEntity(person.id, "troop", troop.getUUID().toString());
-            boolean settled = false;
-            if (ModList.get().isLoaded("wf_settle") && troop.level() instanceof ServerLevel level) {
-                dev.worldforge.settle.mc.Colony nearest = dev.worldforge.settle.mc.SettleMod.nearest(level, troop.getX(), troop.getZ());
-                if (nearest != null) settled = dev.worldforge.settle.mc.SettleMod.attachExistingCharacter(nearest.s.id, person.globalId);
+        if (binding == null || !binding.character().alive) {
+            actionPersistenceBlocked = true;
+            LOGGER.error("wf_troops: cannot desert troop {} without its living canonical Character", troop.getUUID());
+            return;
+        }
+        String destination = "";
+        if (ModList.get().isLoaded("wf_settle") && troop.level() instanceof ServerLevel level) {
+            var nearest = dev.worldforge.settle.mc.SettleMod.nearest(level, troop.getX(), troop.getZ());
+            if (nearest != null) destination = nearest.s.id;
+        }
+        var pending = new dev.worldforge.troops.MilitaryTransitionLedger.Pending(
+                binding.character().globalId, troop.getUUID().toString(),
+                dev.worldforge.troops.MilitaryTransitionLedger.Kind.DESERTION,
+                Math.max(1, PeopleMod.YEAR), destination);
+        try {
+            TRANSITIONS.stage(pending);
+            troop.setInvulnerable(true);
+            if (!saveDurably()) {
+                actionPersistenceBlocked = true;
+                LOGGER.error("wf_troops: desertion intent for {} is not durable; retaining physical soldier",
+                        binding.character().globalId);
+                return;
             }
-            if (!settled) {
-                binding.registry().setDuty(person.id, Duty.SOLDIER, false, PeopleMod.YEAR);
-                person.props.put("population.status", "deserted");
-                person.props.put("population.employer", "");
+            completePendingTransition(pending, troop);
+        } catch (RuntimeException error) {
+            actionPersistenceBlocked = true;
+            LOGGER.error("wf_troops: desertion transition failed for {}: {}",
+                    binding.character().globalId, error.toString(), error);
+        }
+    }
+
+    /**
+     * Completes an abstract-army return without demobilizing the Character. The terminal outbox receipt
+     * survives later army merge/disband and prevents an old physical chunk from resurrecting the soldier.
+     */
+    private static boolean completeStrategicReturnTransition(
+            dev.worldforge.troops.MilitaryTransitionLedger.Pending pending, TroopEntity body) {
+        if (pending == null || server == null || militaryLoadFailed || !ModList.get().isLoaded("wf_people"))
+            return false;
+        try {
+            Character person = PeopleMod.authority().getGlobal(pending.characterGlobalId());
+            CharacterRegistry owner = PeopleMod.authority().registryForGlobal(pending.characterGlobalId());
+            if (person == null || owner == null || !person.alive) return false;
+            if (body == null) {
+                UUID entityId = UUID.fromString(pending.troopEntityId());
+                for (ServerLevel level : server.getAllLevels()) {
+                    Entity entity = level.getEntity(entityId);
+                    if (entity instanceof TroopEntity found) { body = found; break; }
+                }
             }
+            if (body == null || !pending.troopEntityId().equals(body.getUUID().toString())) return false;
+            if (body.characterId != null && !body.characterId.isBlank()
+                    && !pending.characterGlobalId().equals(body.characterId)) {
+                body.setInvulnerable(true);
+                actionPersistenceBlocked = true;
+                LOGGER.error("wf_troops: strategic return {} conflicts with body Character {}",
+                        pending.troopEntityId(), body.characterId);
+                return false;
+            }
+            Object boundEntity = person.props.get("wf_troop_uuid");
+            if (boundEntity instanceof String current && !current.isBlank()
+                    && !pending.troopEntityId().equals(current)) {
+                body.setInvulnerable(true);
+                actionPersistenceBlocked = true;
+                LOGGER.error("wf_troops: Character {} is already bound to a different physical troop {}",
+                        person.globalId, current);
+                return false;
+            }
+
+            // Idempotently complete the Character half by global ID. This still works if a crash
+            // happened after the previous attempt had already removed the old entity binding.
+            body.setInvulnerable(true);
+            owner.unbindEntity(person.id, "troop", pending.troopEntityId());
             person.props.remove("wf_unit_kind");
             person.props.remove("wf_troop_uuid");
             person.props.remove("wf_troop_unit");
             person.props.remove("wf_army_id");
             person.props.remove("wf_combat_xp");
             person.props.remove("wf_veteran_rank");
+            if (!PeopleMod.persistCharacter(person, server)) return false;
+
+            if (!TRANSITIONS.complete(pending.characterGlobalId())
+                    && !TRANSITIONS.isCompleted(pending.characterGlobalId(), pending.troopEntityId())) {
+                actionPersistenceBlocked = true;
+                return false;
+            }
+            if (!saveDurably()) {
+                TRANSITIONS.reopen(pending.characterGlobalId(), pending.troopEntityId());
+                actionPersistenceBlocked = true;
+                return false;
+            }
+            LIVE.remove(pending.troopEntityId());
+            SQUADS.remove(pending.troopEntityId());
+            body.discard();
+            return true;
+        } catch (RuntimeException error) {
+            LOGGER.error("wf_troops: strategic return transition for {} will retry: {}",
+                    pending.characterGlobalId(), error.toString(), error);
+            return false;
         }
-        String id = troop.getUUID().toString();
-        LIVE.remove(id);
-        SQUADS.remove(id);
-        troop.discard();
+    }
+
+    /** Applies a staged non-lethal transition; retries are safe after any intermediate crash. */
+    private static boolean completePendingTransition(
+            dev.worldforge.troops.MilitaryTransitionLedger.Pending pending, TroopEntity body) {
+        if (pending != null && pending.kind() == dev.worldforge.troops.MilitaryTransitionLedger.Kind.STRATEGIC_RETURN)
+            return completeStrategicReturnTransition(pending, body);
+        if (pending == null || server == null || militaryLoadFailed || !ModList.get().isLoaded("wf_people")) return false;
+        try {
+            Character person = PeopleMod.authority().getGlobal(pending.characterGlobalId());
+            CharacterRegistry owner = PeopleMod.authority().registryForGlobal(pending.characterGlobalId());
+            if (person == null || owner == null || !person.alive) return false;
+            if (body == null) {
+                try {
+                    UUID entityId = UUID.fromString(pending.troopEntityId());
+                    for (ServerLevel level : server.getAllLevels()) {
+                        Entity entity = level.getEntity(entityId);
+                        if (entity instanceof TroopEntity found) { body = found; break; }
+                    }
+                } catch (IllegalArgumentException invalid) { return false; }
+            }
+            if (body == null) return false; // entity chunk is not loaded yet; retain outbox for the next retry
+            body.setInvulnerable(true);
+            boolean settled = false;
+            if (!pending.destinationColonyId().isBlank() && ModList.get().isLoaded("wf_settle")) {
+                settled = dev.worldforge.settle.mc.SettleMod.attachExistingCharacter(
+                        pending.destinationColonyId(), person.globalId);
+            }
+            if (!settled) {
+                owner.setDuty(person.id, Duty.SOLDIER, false, pending.year());
+                person.props.put("population.status",
+                        pending.kind() == dev.worldforge.troops.MilitaryTransitionLedger.Kind.DESERTION
+                                ? "deserted" : "demobilized");
+                person.props.put("population.employer", "");
+                person.props.put("population.location", "unassigned");
+            }
+            owner.unbindEntity(person.id, "troop", pending.troopEntityId());
+            person.props.remove("wf_unit_kind");
+            person.props.remove("wf_troop_uuid");
+            person.props.remove("wf_troop_unit");
+            person.props.remove("wf_army_id");
+            person.props.remove("wf_combat_xp");
+            person.props.remove("wf_veteran_rank");
+            Object lastMorale = person.props.remove("military.morale");
+            if (lastMorale instanceof Number n)
+                person.props.put("military.last_service_morale", Math.max(0, Math.min(100, n.intValue())));
+            if (!PeopleMod.persistCharacter(person, server)) return false;
+            if (ModList.get().isLoaded("wf_settle")
+                    && !dev.worldforge.settle.mc.SettleMod.persistActionMutation(server)) return false;
+            if (!TRANSITIONS.complete(pending.characterGlobalId())) {
+                actionPersistenceBlocked = true;
+                return false;
+            }
+            if (!saveDurably()) {
+                TRANSITIONS.reopen(pending.characterGlobalId(), pending.troopEntityId());
+                actionPersistenceBlocked = true;
+                return false;
+            }
+            String id = pending.troopEntityId();
+            LIVE.remove(id);
+            SQUADS.remove(id);
+            body.discard();
+            return true;
+        } catch (RuntimeException error) {
+            LOGGER.error("wf_troops: pending {} transition for Character {} will retry: {}",
+                    pending.kind(), pending.characterGlobalId(), error.toString(), error);
+            return false;
+        }
+    }
+
+    private static void processPendingTransitions() {
+        if (server == null || militaryLoadFailed || TRANSITIONS.size() == 0
+                || !ModList.get().isLoaded("wf_people")) return;
+        for (MapData map : WorldForgeMod.loadedMaps().values())
+            if (map != null && map.titles != null) PeopleMod.registry(map);
+        for (var pending : TRANSITIONS.pending()) completePendingTransition(pending, null);
+    }
+
+    private static boolean hasStrategicReturnReceipt(TroopEntity troop) {
+        return troop != null && troop.armyId > 0 && ModList.get().isLoaded("wf_army")
+                && ArmyLink.hasReturnReceipt(troop.getUUID().toString());
+    }
+
+    private static void processReturnedBodies() {
+        if (RETURNED_BODIES_PENDING.isEmpty()) return;
+        for (Map.Entry<String, TroopEntity> entry : new ArrayList<>(RETURNED_BODIES_PENDING.entrySet())) {
+            TroopEntity troop = entry.getValue();
+            if (troop == null || !troop.isAlive()) {
+                RETURNED_BODIES_PENDING.remove(entry.getKey());
+                continue;
+            }
+            if (TRANSITIONS.hasCompletedEntity(entry.getKey())) {
+                troop.discard();
+                RETURNED_BODIES_PENDING.remove(entry.getKey());
+                continue;
+            }
+            if (!hasStrategicReturnReceipt(troop)) {
+                RETURNED_BODIES_PENDING.remove(entry.getKey());
+                continue;
+            }
+            if (releaseBodyDurably(troop)) {
+                troop.discard();
+                RETURNED_BODIES_PENDING.remove(entry.getKey());
+            }
+        }
+    }
+
+    private static boolean advanceMuster(String operationId, MilitaryMusterLedger.Phase expected,
+                                         MilitaryMusterLedger.Phase next) {
+        if (!MUSTERS.advance(operationId, expected, next)) return false;
+        if (saveDurably()) return true;
+        actionPersistenceBlocked = true;
+        return false;
+    }
+
+    /** Idempotently resumes one deployment from its last durable phase. */
+    private static boolean processMusterOperation(String operationId) {
+        if (server == null || militaryLoadFailed || actionPersistenceBlocked || !ModList.get().isLoaded("wf_army")
+                || !ModList.get().isLoaded("wf_settle")) return false;
+        MilitaryMusterLedger.Operation operation = MUSTERS.get(operationId);
+        if (operation == null) return false;
+        if (operation.phase() == MilitaryMusterLedger.Phase.COMMITTED) return true;
+
+        ArmyLink.Found found = ArmyLink.find(operation.armyId(), operation.realm(), operation.mapId());
+        if (found == null) return false;
+
+        if (operation.phase() == MilitaryMusterLedger.Phase.PREPARED) {
+            try {
+                if (!ArmyLink.debitMuster(found, operation.id(), operation.manpowerDelta(), server)) {
+                    actionPersistenceBlocked = true;
+                    LOGGER.error("wf_troops: strategic manpower debit could not be persisted for muster {}", operation.id());
+                    return false;
+                }
+            } catch (RuntimeException ex) {
+                actionPersistenceBlocked = true;
+                LOGGER.error("wf_troops: strategic manpower debit failed for muster {}: {}",
+                        operation.id(), ex.toString(), ex);
+                return false;
+            }
+            if (!advanceMuster(operation.id(), MilitaryMusterLedger.Phase.PREPARED,
+                    MilitaryMusterLedger.Phase.ROSTER_DEBITED)) return false;
+            operation = MUSTERS.get(operationId);
+        }
+
+        if (operation.phase() == MilitaryMusterLedger.Phase.ROSTER_DEBITED) {
+            for (MilitaryMusterLedger.StockDebit debit : operation.stockDebits()) {
+                if (!dev.worldforge.settle.mc.SettleMod.payRecruitmentOnce(
+                        debit.colonyId(), debit.resources(), debit.receiptId(), server)) {
+                    LOGGER.warn("wf_troops: muster {} is waiting for settlement stock debit {}",
+                            operation.id(), debit.receiptId());
+                    return false;
+                }
+            }
+            if (!advanceMuster(operation.id(), MilitaryMusterLedger.Phase.ROSTER_DEBITED,
+                    MilitaryMusterLedger.Phase.STOCK_DEBITED)) return false;
+            operation = MUSTERS.get(operationId);
+        }
+
+        if (operation.phase() == MilitaryMusterLedger.Phase.STOCK_DEBITED) {
+            for (MilitaryMusterLedger.SquadPlan squad : operation.squads())
+                SQUADS.createWithId(squad.id(), squad.owner(), squad.name(), squad.realm(),
+                        squad.centerX(), squad.centerZ(), squad.members());
+            if (!saveDurably()) {
+                actionPersistenceBlocked = true;
+                return false;
+            }
+            if (!advanceMuster(operation.id(), MilitaryMusterLedger.Phase.STOCK_DEBITED,
+                    MilitaryMusterLedger.Phase.SQUADS_SAVED)) return false;
+            operation = MUSTERS.get(operationId);
+        }
+
+        if (operation.phase() == MilitaryMusterLedger.Phase.SQUADS_SAVED
+                || operation.phase() == MilitaryMusterLedger.Phase.ENTITIES_SPAWNED) {
+            boolean waitingForChunks = false;
+            for (MilitaryMusterLedger.Spawn spawn : operation.spawns()) {
+                TroopEntity troop = null;
+                ServerLevel targetLevel = null;
+                UUID entityUuid = UUID.fromString(spawn.entityId());
+                for (ServerLevel candidate : server.getAllLevels()) {
+                    Entity entity = candidate.getEntity(entityUuid);
+                    if (entity != null) {
+                        MapData entityMap = EditorManager.dataFor(candidate);
+                        if (entityMap == null || !entityMap.name.equals(operation.mapId())
+                                || !candidate.dimension().location().toString().equals(spawn.dimension())) {
+                            actionPersistenceBlocked = true;
+                            LOGGER.error("wf_troops: muster entity UUID {} exists in a different map or dimension",
+                                    spawn.entityId());
+                            return false;
+                        }
+                        if (!(entity instanceof TroopEntity physical)) {
+                            actionPersistenceBlocked = true;
+                            LOGGER.error("wf_troops: muster entity UUID {} is occupied by {}",
+                                    spawn.entityId(), entity.getType());
+                            return false;
+                        }
+                        troop = physical;
+                        targetLevel = candidate;
+                        break;
+                    }
+                }
+
+                if (targetLevel == null) {
+                    for (ServerLevel candidate : server.getAllLevels()) {
+                        MapData candidateMap = EditorManager.dataFor(candidate);
+                        if (candidateMap != null && candidateMap.name.equals(operation.mapId())
+                                && candidate.dimension().location().toString().equals(spawn.dimension())) {
+                            targetLevel = candidate;
+                            break;
+                        }
+                    }
+                    if (targetLevel == null) {
+                        waitingForChunks = true;
+                        continue;
+                    }
+                    BlockPos position = BlockPos.containing(spawn.x(), spawn.y(), spawn.z());
+                    if (!targetLevel.hasChunkAt(position)) {
+                        waitingForChunks = true;
+                        continue;
+                    }
+                    TroopDefs.Unit unit = DEFS.units.get(spawn.unitId());
+                    if (unit == null) {
+                        actionPersistenceBlocked = true;
+                        LOGGER.error("wf_troops: muster {} references missing troop type {}",
+                                operation.id(), spawn.unitId());
+                        return false;
+                    }
+                    troop = TROOP.get().create(targetLevel);
+                    if (troop == null) {
+                        waitingForChunks = true;
+                        continue;
+                    }
+                    troop.setUUID(entityUuid);
+                    troop.setup(unit, operation.owner());
+                    troop.realm = operation.realm();
+                    troop.armyId = operation.armyId();
+                    troop.deploymentOperationId = operation.id();
+                    troop.strategicUnitId = spawn.strategicUnitId();
+                    troop.deferCharacterBinding = true;
+                    troop.setSquadId(spawn.squadId());
+                    troop.moveTo(spawn.x(), spawn.y(), spawn.z(), (float) spawn.yaw(), 0);
+                    if (!targetLevel.addFreshEntity(troop)) {
+                        waitingForChunks = true;
+                        continue;
+                    }
+                } else {
+                    if (troop.deploymentOperationId == null || troop.deploymentOperationId.isBlank())
+                        troop.deploymentOperationId = operation.id();
+                    if (troop.strategicUnitId == null || troop.strategicUnitId.isBlank())
+                        troop.strategicUnitId = spawn.strategicUnitId();
+                    if (!operation.id().equals(troop.deploymentOperationId)
+                            || troop.armyId != operation.armyId()
+                            || !operation.realm().equals(troop.realm)
+                            || !spawn.unitId().equals(troop.unitId())
+                            || !spawn.strategicUnitId().equals(troop.strategicUnitId)) {
+                        actionPersistenceBlocked = true;
+                        troop.setInvulnerable(true);
+                        LOGGER.error("wf_troops: existing entity {} does not match muster operation {}",
+                                spawn.entityId(), operation.id());
+                        return false;
+                    }
+                }
+
+                troop.setSquadId(spawn.squadId());
+                if (ModList.get().isLoaded("wf_people")) {
+                    String expectedCharacter = MUSTERS.get(operation.id()).spawns().stream()
+                            .filter(value -> value.entityId().equals(spawn.entityId()))
+                            .map(MilitaryMusterLedger.Spawn::characterGlobalId).findFirst().orElse("");
+                    if (!expectedCharacter.isBlank()) {
+                        if (troop.characterId == null || troop.characterId.isBlank())
+                            troop.setCharacterId(expectedCharacter);
+                        else if (!expectedCharacter.equals(troop.characterId)) {
+                            actionPersistenceBlocked = true;
+                            troop.setInvulnerable(true);
+                            LOGGER.error("wf_troops: Character UUID mismatch for muster entity {}", spawn.entityId());
+                            return false;
+                        }
+                    }
+                    troop.deferCharacterBinding = false;
+                    syncPerson(troop);
+                    PersonBinding binding = bindPerson(troop, false);
+                    if (binding == null || !PeopleMod.persistCharacter(binding.character(), server)) {
+                        troop.deferCharacterBinding = true;
+                        waitingForChunks = true;
+                        continue;
+                    }
+                    if (!MUSTERS.recordCharacter(operation.id(), spawn.entityId(), binding.character().globalId)
+                            || !saveDurably()) {
+                        actionPersistenceBlocked = true;
+                        return false;
+                    }
+                } else {
+                    troop.deferCharacterBinding = false;
+                }
+                LIVE.put(troop.getUUID().toString(), troop);
+            }
+
+            if (waitingForChunks) return false;
+            if (!saveDurably()) {
+                actionPersistenceBlocked = true;
+                return false;
+            }
+            if (!server.saveEverything(true, true, true)) {
+                actionPersistenceBlocked = true;
+                LOGGER.error("wf_troops: world/entity save failed before muster {} could commit", operation.id());
+                return false;
+            }
+            operation = MUSTERS.get(operationId);
+            if (operation.phase() == MilitaryMusterLedger.Phase.SQUADS_SAVED
+                    && !advanceMuster(operation.id(), MilitaryMusterLedger.Phase.SQUADS_SAVED,
+                    MilitaryMusterLedger.Phase.ENTITIES_SPAWNED)) return false;
+            operation = MUSTERS.get(operationId);
+            if (operation.phase() == MilitaryMusterLedger.Phase.ENTITIES_SPAWNED
+                    && !advanceMuster(operation.id(), MilitaryMusterLedger.Phase.ENTITIES_SPAWNED,
+                    MilitaryMusterLedger.Phase.COMMITTED)) return false;
+        }
+        return MUSTERS.get(operationId) != null
+                && MUSTERS.get(operationId).phase() == MilitaryMusterLedger.Phase.COMMITTED;
+    }
+
+    private static void processPendingMusters() {
+        if (server == null || militaryLoadFailed || MUSTERS.pending().isEmpty()) return;
+        for (MilitaryMusterLedger.Operation operation : MUSTERS.pending()) {
+            try {
+                processMusterOperation(operation.id());
+            } catch (RuntimeException ex) {
+                actionPersistenceBlocked = true;
+                LOGGER.error("wf_troops: muster recovery failed for {}: {}",
+                        operation.id(), ex.toString(), ex);
+            }
+        }
     }
 
     @SubscribeEvent
@@ -646,24 +1230,29 @@ public class TroopsMod {
         if (ticks % 100 == 0) {
             syncArmyHierarchy();
             processPendingDeaths();
+            processPendingTransitions();
+            processPendingMusters();
+            processReturnedBodies();
+            payroll();
         }
         if (ticks % 1200 == 0) for (TroopEntity troop : LIVE.values()) syncPerson(troop);
-        if (ticks % 100 == 0) payroll();
         if (ticks % 20 == 0) FortService.step(server, ticks);
         if (ticks % 6000 == 0) save();
     }
 
-    private record SupplyKey(String realm, int armyId, String dimension) {
-        String id() { return realm + ":" + armyId + ":" + dimension; }
-        String accountId() { return "army-supply:" + realm + ":" + armyId + ":" + dimension; }
-        String ownerId() { return "army-supply:" + realm + ":" + armyId; }
+    private record SupplyKey(String realm, int armyId, String worldId, String mapId, String dimension) {
+        String id() { return worldId + ":" + mapId + ":" + realm + ":" + armyId + ":" + dimension; }
+        String accountId() { return "army-supply:" + id(); }
+        String ownerId() { return "army-supply:" + worldId + ":" + mapId + ":" + realm + ":" + armyId; }
     }
 
     /** Uses the saved field-supply state to apply combat/mobility effects when a soldier loads. */
     private static void applySupplyReadiness(TroopEntity troop) {
         if (troop == null || troop.realm == null || troop.realm.isBlank()) return;
         String dimension = troop.level().dimension().location().toString();
-        OperationalSupply.State state = SUPPLY.state(new SupplyKey(troop.realm, troop.armyId, dimension).id());
+        OperationalSupply.State state = SUPPLY.state(new SupplyKey(troop.realm, troop.armyId, WorldForgeMod.worldId().toString(),
+                troop.level() instanceof ServerLevel level && EditorManager.dataFor(level) != null
+                        ? EditorManager.dataFor(level).name : "unmapped:" + dimension, dimension).id());
         troop.setSupplyReadiness(OperationalSupply.combatMultiplier(state),
                 OperationalSupply.movementMultiplier(state));
     }
@@ -687,7 +1276,7 @@ public class TroopsMod {
                 PayrollKey army = armyEntry.getKey();
                 String dimension = dimensionEntry.getKey();
                 List<TroopEntity> soldiers = dimensionEntry.getValue();
-                SupplyKey key = new SupplyKey(army.realm(), army.armyId(), dimension);
+                SupplyKey key = new SupplyKey(army.realm(), army.armyId(), army.worldId(), army.mapId(), dimension);
                 OperationalSupply.State supplyState = SUPPLY.state(key.id());
                 if (day <= supplyState.lastProcessedWorldDay) {
                     for (TroopEntity soldier : soldiers) applySupplyReadiness(soldier);
@@ -777,7 +1366,7 @@ public class TroopsMod {
     // ---- жалованье ----
     private static final Random RNG = new Random();
 
-    private record PayrollKey(String realm, int armyId) {}
+    private record PayrollKey(String realm, int armyId, String worldId, String mapId) {}
 
     /** Daily payroll is funded through the same realm and army accounts used by Statecraft. */
     private static void payroll() {
@@ -788,8 +1377,13 @@ public class TroopsMod {
         TreasuryLedger ledger = WorldForgeMod.treasury();
         Map<PayrollKey, List<TroopEntity>> groups = new LinkedHashMap<>();
         for (TroopEntity troop : LIVE.values()) {
-            if (!troop.isAlive() || troop.realm == null || troop.realm.isBlank()) continue;
-            groups.computeIfAbsent(new PayrollKey(troop.realm, troop.armyId), ignored -> new ArrayList<>()).add(troop);
+            if (!troop.isAlive() || troop.realm == null || troop.realm.isBlank()
+                    || !(troop.level() instanceof ServerLevel troopLevel)) continue;
+            MapData map = EditorManager.dataFor(troopLevel);
+            String worldId = WorldForgeMod.worldId().toString();
+            String mapId = map == null ? "unmapped:" + troopLevel.dimension().location() : map.name;
+            groups.computeIfAbsent(new PayrollKey(troop.realm, troop.armyId, worldId, mapId),
+                    ignored -> new ArrayList<>()).add(troop);
         }
         fieldSupply(groups, days, day, worldMinute);
         if (actionPersistenceBlocked) return;
@@ -803,16 +1397,16 @@ public class TroopsMod {
 
             String realmAccount = "realm:" + key.realm();
             ledger.open(realmAccount, key.realm(), "silver", 0);
-            String armyAccount = key.armyId() > 0 ? "army:" + key.armyId() : "army:garrison:" + key.realm();
-            String armyOwner = key.armyId() > 0 ? Integer.toString(key.armyId()) : "garrison:" + key.realm();
+            String armyAccount = key.armyId() > 0 ? "army:" + key.worldId() + ":" + key.mapId() + ":" + key.armyId() : "army:garrison:" + key.worldId() + ":" + key.mapId() + ":" + key.realm();
+            String armyOwner = key.armyId() > 0 ? key.worldId() + ":" + key.mapId() + ":" + key.armyId() : "garrison:" + key.worldId() + ":" + key.mapId() + ":" + key.realm();
             ledger.open(armyAccount, armyOwner, "silver", 0);
 
-            String wageReference = "payroll:" + key.realm() + ":" + key.armyId() + ":" + day;
+            String wageReference = "payroll:" + key.worldId() + ":" + key.mapId() + ":" + key.realm() + ":" + key.armyId() + ":" + day;
             if (ledger.hasDebit(armyAccount, TreasuryLedger.Kind.WAGE, wageReference)) continue;
             double topUp = Math.max(0, costSilver - ledger.balance(armyAccount));
             boolean funded = topUp <= 1e-9 || ledger.transferOnce(
                     realmAccount, armyAccount, topUp, TreasuryLedger.Kind.ARMY_UPKEEP,
-                    "payroll-funding", "payroll-fund:" + key.realm() + ":" + key.armyId() + ":" + day,
+                    "payroll-funding", "payroll-fund:" + key.worldId() + ":" + key.mapId() + ":" + key.realm() + ":" + key.armyId() + ":" + day,
                     worldMinute, "daily military payroll appropriation");
             boolean paid = funded && ledger.withdrawOnce(
                     armyAccount, costSilver, TreasuryLedger.Kind.WAGE,
@@ -1246,12 +1840,13 @@ public class TroopsMod {
         try { player = src.getPlayerOrException(); }
         catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
         syncArmyHierarchy();
-        ArmyHierarchy.ArmyNode army = HIERARCHY.army(armyId);
+        ArmyRef ref = armyRef(player.serverLevel(), armyId);
+        ArmyHierarchy.ArmyNode army = ref == null ? null : HIERARCHY.army(ref);
         if (army == null || !army.owner.equals(player.getUUID().toString())) {
             src.sendFailure(Component.literal("Армия не найдена или принадлежит другому игроку"));
             return 0;
         }
-        ArmyHierarchy.Corps corps = HIERARCHY.createCorps(armyId, name);
+        ArmyHierarchy.Corps corps = HIERARCHY.createCorps(ref, name);
         save();
         src.sendSuccess(() -> Component.literal("Создан корпус «" + corps.name + "» в составе " + army.name), false);
         return 1;
@@ -1267,7 +1862,7 @@ public class TroopsMod {
         catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
         ArmyHierarchy.Corps corps = HIERARCHY.corps(corpsId);
         Squads.Squad squad = SQUADS.get(squadId);
-        ArmyHierarchy.ArmyNode army = corps == null ? null : HIERARCHY.army(corps.armyId);
+        ArmyHierarchy.ArmyNode army = corps == null ? null : HIERARCHY.army(corps.armyRef);
         if (corps == null || squad == null || army == null
                 || !army.owner.equals(player.getUUID().toString()) || !squad.owner.equals(army.owner)
                 || !HIERARCHY.assignSquad(corpsId, squadId, SQUADS)) {
@@ -1301,12 +1896,13 @@ public class TroopsMod {
         ServerPlayer player;
         try { player = src.getPlayerOrException(); }
         catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
-        ArmyHierarchy.ArmyNode army = HIERARCHY.army(armyId);
+        ArmyRef ref = armyRef(player.serverLevel(), armyId);
+        ArmyHierarchy.ArmyNode army = ref == null ? null : HIERARCHY.army(ref);
         if (army == null || !army.owner.equals(player.getUUID().toString())) {
             src.sendFailure(Component.literal("Армия не найдена или принадлежит другому игроку")); return 0;
         }
         try {
-            int count = HIERARCHY.commandArmy(armyId, SQUADS, parseArmyOrder(kind, x, z), queue);
+            int count = HIERARCHY.commandArmy(ref, SQUADS, parseArmyOrder(kind, x, z), queue);
             save();
             int issued = count;
             src.sendSuccess(() -> Component.literal("Приказ передан корпусам и отрядам: " + issued), false);
@@ -1326,7 +1922,7 @@ public class TroopsMod {
         try { player = src.getPlayerOrException(); }
         catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
         ArmyHierarchy.Corps corps = HIERARCHY.corps(corpsId);
-        ArmyHierarchy.ArmyNode army = corps == null ? null : HIERARCHY.army(corps.armyId);
+        ArmyHierarchy.ArmyNode army = corps == null ? null : HIERARCHY.army(corps.armyRef);
         if (corps == null || army == null || !army.owner.equals(player.getUUID().toString())) {
             src.sendFailure(Component.literal("Корпус не найден или принадлежит другому игроку")); return 0;
         }
@@ -1346,18 +1942,20 @@ public class TroopsMod {
         ServerPlayer player;
         try { player = src.getPlayerOrException(); }
         catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
-        ArmyHierarchy.ArmyNode army = HIERARCHY.army(armyId);
+        ArmyRef ref = armyRef(player.serverLevel(), armyId);
+        ArmyHierarchy.ArmyNode army = ref == null ? null : HIERARCHY.army(ref);
         if (army == null || !army.owner.equals(player.getUUID().toString())) {
             src.sendFailure(Component.literal("Армия не найдена или принадлежит другому игроку")); return 0;
         }
-        src.sendSuccess(() -> Component.literal(HIERARCHY.viewJson(armyId)), false);
+        src.sendSuccess(() -> Component.literal(HIERARCHY.viewJson(ref)), false);
         return 1;
     }
 
     private static Character findArmyCharacter(ArmyHierarchy.ArmyNode army, String characterId) {
         if (!ModList.get().isLoaded("wf_people") || army == null) return null;
         for (MapData map : WorldForgeMod.loadedMaps().values()) {
-            if (map.titles == null || !army.realm.isBlank() && !map.titles.realms.containsKey(army.realm)) continue;
+            if (!map.name.equals(army.ref.mapId()) || map.titles == null
+                    || !army.realm.isBlank() && !map.titles.realms.containsKey(army.realm)) continue;
             CharacterRegistry registry = PeopleMod.registry(map);
             Character candidate = resolvePerson(registry, characterId);
             if (candidate != null && candidate.alive) return candidate;
@@ -1374,13 +1972,14 @@ public class TroopsMod {
         try { player = src.getPlayerOrException(); }
         catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
         syncArmyHierarchy();
-        ArmyHierarchy.ArmyNode army = HIERARCHY.army(armyId);
+        ArmyRef ref = armyRef(player.serverLevel(), armyId);
+        ArmyHierarchy.ArmyNode army = ref == null ? null : HIERARCHY.army(ref);
         Character character = findArmyCharacter(army, characterId);
         if (army == null || !army.owner.equals(player.getUUID().toString()) || character == null
-                || !HIERARCHY.appointArmyCommander(armyId, characterId)) {
+                || !HIERARCHY.appointArmyCommander(ref, characterId)) {
             src.sendFailure(Component.literal("Живой Character из государства армии не найден или нет прав")); return 0;
         }
-        ArmyLink.Found strategic = ArmyLink.find(armyId);
+        ArmyLink.Found strategic = ArmyLink.find(armyId, army.realm, army.ref.mapId());
         if (strategic != null) strategic.army().commander = characterId;
         save();
         src.sendSuccess(() -> Component.literal("Командующий армией «" + army.name + "»: " + character.name), false);
@@ -1397,7 +1996,7 @@ public class TroopsMod {
         catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
         syncArmyHierarchy();
         ArmyHierarchy.Corps corps = HIERARCHY.corps(corpsId);
-        ArmyHierarchy.ArmyNode army = corps == null ? null : HIERARCHY.army(corps.armyId);
+        ArmyHierarchy.ArmyNode army = corps == null ? null : HIERARCHY.army(corps.armyRef);
         Character character = findArmyCharacter(army, characterId);
         if (corps == null || army == null || !army.owner.equals(player.getUUID().toString())
                 || character == null || !HIERARCHY.appointCorpsCommander(corpsId, characterId)) {
@@ -1575,12 +2174,18 @@ public class TroopsMod {
         return recruits.size();
     }
 
-    /** Призыв из армии wf-army: люди снимаются с армии, 1 солдат = Muster.SCALE человек; государство армии платит жалованье. */
+    /** Durable strategic deployment. Roster, settlement stock, squads, physical UUIDs and Characters share one replayable operation. */
     private static int muster(CommandSourceStack src, int armyId, int n) {
-        return executeMilitaryCommand(src, "military.muster", Integer.toString(armyId), Integer.toString(n), () -> musterDirect(src, armyId, n));
+        String actor = src.getEntity() instanceof ServerPlayer player
+                ? player.getUUID().toString() : src.getTextName();
+        String stableRequest = actor + ":" + src.getServer().getTickCount()
+                + ":military.muster:" + armyId + ":" + n;
+        String operationId = UUID.nameUUIDFromBytes(stableRequest.getBytes(StandardCharsets.UTF_8)).toString();
+        return executeMilitaryCommand(src, "military.muster", Integer.toString(armyId), Integer.toString(n),
+                () -> musterDirect(src, armyId, n, operationId));
     }
 
-    private static int musterDirect(CommandSourceStack src, int armyId, int n) {
+    private static int musterDirect(CommandSourceStack src, int armyId, int n, String operationId) {
         if (!ModList.get().isLoaded("wf_army") || !ModList.get().isLoaded("wf_settle")) {
             src.sendFailure(Component.literal("Для призыва нужны wf_army и wf_settle."));
             return 0;
@@ -1588,8 +2193,32 @@ public class TroopsMod {
         ServerPlayer player;
         try { player = src.getPlayerOrException(); }
         catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
-        ArmyLink.Found found = ArmyLink.find(armyId);
-        if (found == null) { src.sendFailure(Component.literal("Нет армии " + armyId)); return 0; }
+
+        MilitaryMusterLedger.Operation existing = MUSTERS.get(operationId);
+        if (existing != null) {
+            boolean complete = processMusterOperation(operationId);
+            if (complete) src.sendSuccess(() -> Component.literal(
+                    "Операция призыва " + operationId.substring(0, 8) + " восстановлена и завершена."), false);
+            else src.sendFailure(Component.literal(
+                    "Операция призыва сохранена и будет продолжена автоматически после загрузки нужных областей мира."));
+            return 1; // the durable operation, not the command connection, owns subsequent recovery
+        }
+
+        MapData currentMap = EditorManager.dataFor(player.serverLevel());
+        if (currentMap == null || WorldForgeMod.worldId() == null) {
+            src.sendFailure(Component.literal("Не удалось определить WorldId и карту стратегической армии."));
+            return 0;
+        }
+        ArmyLink.Found found = ArmyLink.findOnMap(armyId, currentMap.name);
+        if (found == null || found.army().realm == null || found.army().realm.isBlank()) {
+            src.sendFailure(Component.literal("Армия не найдена на текущей карте или у неё не определено государство."));
+            return 0;
+        }
+        String worldId = WorldForgeMod.worldId().toString();
+        if (MUSTERS.hasPendingArmy(worldId, currentMap.name, armyId)) {
+            src.sendFailure(Component.literal("У этой армии уже есть незавершённая операция мобилизации."));
+            return 0;
+        }
 
         Muster.Plan plan = Muster.plan(found.army().units, n, DEFS.armyTypes());
         if (plan.total() == 0) {
@@ -1601,10 +2230,13 @@ public class TroopsMod {
         String owner = player.getUUID().toString();
         ServerLevel level = player.serverLevel();
         Map<String, dev.worldforge.settle.mc.SettleMod.RecruitmentSite> sites = new LinkedHashMap<>();
-        Map<String, Map<String, Integer>> supplies = new LinkedHashMap<>();
-        Map<String, List<TroopEntity>> batches = new LinkedHashMap<>();
+        Map<String, Map<String, Integer>> stockByColony = new TreeMap<>();
+        List<MilitaryMusterLedger.SquadPlan> squadPlans = new ArrayList<>();
+        List<MilitaryMusterLedger.Spawn> spawnPlans = new ArrayList<>();
+        int squadIndex = 0;
+        int entityIndex = 0;
 
-        for (var entry : plan.soldiers().entrySet()) {
+        for (Map.Entry<String, Integer> entry : plan.soldiers().entrySet()) {
             TroopDefs.Unit unit = DEFS.units.get(entry.getKey());
             if (unit == null) {
                 src.sendFailure(Component.literal("В army_map указан неизвестный тип войска: " + entry.getKey()));
@@ -1618,93 +2250,90 @@ public class TroopsMod {
                         + buildingId + "» с инструктором в радиусе 128 блоков."));
                 return 0;
             }
-            Map<String, Integer> required = supplies.computeIfAbsent(buildingId, id -> new LinkedHashMap<>());
-            for (var resource : DEFS.recruitmentCost(unit).entrySet()) {
+
+            Map<String, Integer> colonyCost = stockByColony.computeIfAbsent(
+                    site.colony().s.id, ignored -> new TreeMap<>());
+            for (Map.Entry<String, Integer> resource : DEFS.recruitmentCost(unit).entrySet()) {
                 long amount = (long) resource.getValue() * entry.getValue();
-                if (amount > Integer.MAX_VALUE) { src.sendFailure(Component.literal("Слишком большой заказ")); return 0; }
-                required.merge(resource.getKey(), (int) amount, Integer::sum);
-            }
-            List<TroopEntity> batch = batches.computeIfAbsent(buildingId, id -> new ArrayList<>());
-            for (int i = 0; i < entry.getValue(); i++) {
-                TroopEntity troop = TROOP.get().create(level);
-                if (troop == null) {
-                    src.sendFailure(Component.literal("Не удалось подготовить весь призыв; армия и склады не изменены."));
+                if (amount <= 0 || amount > Integer.MAX_VALUE) {
+                    src.sendFailure(Component.literal("Некорректная стоимость снабжения для " + unit.name()));
                     return 0;
                 }
-                troop.setup(unit, owner);
-                troop.realm = found.army().realm;
-                troop.armyId = armyId;
-                troop.deferCharacterBinding = true;
-                batch.add(troop);
+                colonyCost.merge(resource.getKey(), (int) amount, (left, right) -> {
+                    long total = (long) left + right;
+                    if (total > Integer.MAX_VALUE) throw new IllegalArgumentException("Recruitment stock total overflow");
+                    return (int) total;
+                });
             }
-        }
 
-        for (var entry : supplies.entrySet()) {
-            var site = sites.get(entry.getKey());
-            if (!site.colony().s.canPay(entry.getValue())) {
-                src.sendFailure(Component.literal("В поселении «" + site.colony().s.name
-                        + "» не хватает снабжения для " + entry.getKey() + ": " + entry.getValue()));
+            String squadId = "muster-" + operationId.replace("-", "") + "-" + squadIndex++;
+            List<Muster.Soldier> sourceAllocations = plan.allocations().stream()
+                    .filter(allocation -> allocation.troopUnitId().equals(unit.id())).toList();
+            if (sourceAllocations.size() != entry.getValue()) {
+                src.sendFailure(Component.literal("План призыва потерял соответствие стратегического типа для " + unit.id()));
                 return 0;
             }
-        }
-
-        // Prepare all physical soldiers before touching army manpower or settlement stock.
-        List<TroopEntity> allPrepared = new ArrayList<>();
-        for (List<TroopEntity> batch : batches.values()) allPrepared.addAll(batch);
-        for (var entry : batches.entrySet()) {
-            var site = sites.get(entry.getKey());
-            List<TroopEntity> batch = entry.getValue();
-            List<Formations.Slot> slots = Formations.slots(Formations.Type.BLOCK, batch.size(), 1.6);
+            List<String> memberIds = new ArrayList<>();
+            List<Formations.Slot> slots = Formations.slots(Formations.Type.BLOCK, entry.getValue(), 1.6);
             List<double[]> positions = Formations.place(slots, site.spawn().getX() + 0.5,
                     site.spawn().getZ() + 0.5, player.getYRot() + 180);
-            for (int i = 0; i < batch.size(); i++) {
-                TroopEntity troop = batch.get(i);
-                int x = (int) Math.floor(positions.get(i)[0]), z = (int) Math.floor(positions.get(i)[1]);
-                int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
-                troop.moveTo(positions.get(i)[0], y, positions.get(i)[1], player.getYRot(), 0);
+            for (int i = 0; i < sourceAllocations.size(); i++) {
+                Muster.Soldier allocation = sourceAllocations.get(i);
+                UUID entityUuid = UUID.nameUUIDFromBytes((operationId + ":troop:" + entityIndex++)
+                        .getBytes(StandardCharsets.UTF_8));
+                String entityId = entityUuid.toString();
+                memberIds.add(entityId);
+                double x = positions.get(i)[0], z = positions.get(i)[1];
+                int blockX = (int) Math.floor(x), blockZ = (int) Math.floor(z);
+                int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, blockX, blockZ);
+                spawnPlans.add(new MilitaryMusterLedger.Spawn(entityId, unit.id(), allocation.armyUnitId(), squadId,
+                        level.dimension().location().toString(), x, y, z,
+                        player.getYRot(), ""));
             }
+            squadPlans.add(new MilitaryMusterLedger.SquadPlan(squadId, unit.name(), owner,
+                    found.army().realm, site.spawn().getX(), site.spawn().getZ(), memberIds));
         }
 
-        int total = 0;
-        for (var entry : batches.entrySet()) {
-            var site = sites.get(entry.getKey());
-            List<TroopEntity> batch = entry.getValue();
-            List<String> ids = new ArrayList<>();
-            for (TroopEntity troop : batch) ids.add(troop.getUUID().toString());
-            Squads.Squad squad = SQUADS.create(owner, found.army().name, ids);
-            squad.realm = found.army().realm;
-            squad.cx = site.spawn().getX();
-            squad.cz = site.spawn().getZ();
-            for (TroopEntity troop : batch) {
-                troop.setSquadId(squad.id);
-                if (!level.addFreshEntity(troop)) {
-                    discardPrepared(allPrepared);
-                    src.sendFailure(Component.literal("Мир отклонил создание призванных солдат; армия и склады не изменены."));
-                    return 0;
-                }
-            }
-            total += batch.size();
-        }
-
-        ArmyLink.take(found.army(), plan.menTaken());
-        List<String> paidBuildings = new ArrayList<>();
-        for (var entry : supplies.entrySet()) {
-            if (!dev.worldforge.settle.mc.SettleMod.payRecruitment(sites.get(entry.getKey()), entry.getValue())) {
-                for (String paid : paidBuildings)
-                    dev.worldforge.settle.mc.SettleMod.refundRecruitment(sites.get(paid), supplies.get(paid));
-                ArmyLink.give(armyId, plan.menTaken());
-                discardPrepared(allPrepared);
-                src.sendFailure(Component.literal("Склад изменился во время призыва; люди возвращены в армию, отряд удалён."));
+        List<MilitaryMusterLedger.StockDebit> stockDebits = new ArrayList<>();
+        int stockIndex = 0;
+        for (Map.Entry<String, Map<String, Integer>> entry : stockByColony.entrySet()) {
+            var colony = dev.worldforge.settle.mc.SettleMod.COLONIES.get(entry.getKey());
+            if (colony == null || colony.s == null || !colony.s.canPay(entry.getValue())) {
+                src.sendFailure(Component.literal("В поселении «" + entry.getKey()
+                        + "» не хватает материалов и припасов для мобилизации: " + entry.getValue()));
                 return 0;
             }
-            paidBuildings.add(entry.getKey());
+            String receipt = "muster-stock-" + operationId.replace("-", "") + "-" + stockIndex++;
+            stockDebits.add(new MilitaryMusterLedger.StockDebit(entry.getKey(), receipt, entry.getValue()));
         }
 
-        for (TroopEntity troop : allPrepared) { troop.deferCharacterBinding = false; syncPerson(troop); }
-        int recruited = total;
-        src.sendSuccess(() -> Component.literal("Из военных зданий поселения призвано " + recruited
-                + " солдат армии " + armyId + " (оставшиеся люди: " + found.army().men() + ")"), false);
-        return recruited;
+        Map<String, Integer> manpowerDelta = new TreeMap<>();
+        for (Map.Entry<String, Integer> entry : plan.menTaken().entrySet())
+            manpowerDelta.put(entry.getKey(), -entry.getValue());
+        MilitaryMusterLedger.Operation operation = new MilitaryMusterLedger.Operation(
+                operationId, worldId, currentMap.name, armyId, found.army().realm, owner,
+                manpowerDelta, stockDebits, squadPlans, spawnPlans, MilitaryMusterLedger.Phase.PREPARED);
+        try {
+            MUSTERS.stage(operation);
+        } catch (RuntimeException ex) {
+            src.sendFailure(Component.literal("План мобилизации отклонён: " + ex.getMessage()));
+            return 0;
+        }
+        if (!saveDurably()) {
+            actionPersistenceBlocked = true;
+            src.sendFailure(Component.literal("Не удалось сохранить намерение мобилизации; ресурсы и армия не изменены."));
+            return 0;
+        }
+
+        boolean complete = processMusterOperation(operationId);
+        int recruited = plan.total();
+        if (complete) {
+            src.sendSuccess(() -> Component.literal("Мобилизация завершена: " + recruited
+                    + " физических солдат; стратегическая численность и склады списаны один раз."), false);
+        } else {
+            src.sendFailure(Component.literal("Операция мобилизации надёжно зарегистрирована. Развёртывание будет продолжено автоматически; повторно ресурсы и численность не списываются."));
+        }
+        return 1;
     }
 
     /** Выжившие призванные солдаты игрока возвращаются в свои армии; павшие потеряны. */
@@ -1721,22 +2350,95 @@ public class TroopsMod {
             return 0;
         }
         if (!ModList.get().isLoaded("wf_army")) { src.sendFailure(Component.literal("Нужен мод wf_army")); return 0; }
-        Map<Integer, Map<String, Integer>> byArmy = new HashMap<>();
-        List<TroopEntity> gone = new ArrayList<>();
-        for (TroopEntity t : LIVE.values()) if (t.isAlive() && t.armyId > 0 && t.ownerId().equals(p.getUUID().toString())) {
-            byArmy.computeIfAbsent(t.armyId, k -> new HashMap<>()).merge(t.unitId(), 1, Integer::sum);
-            gone.add(t);
+
+        record ArmyReturnKey(int armyId, String realm, String mapId) {}
+        Map<ArmyReturnKey, List<TroopEntity>> byArmy = new TreeMap<>(
+                Comparator.comparing(ArmyReturnKey::mapId).thenComparing(ArmyReturnKey::realm)
+                        .thenComparingInt(ArmyReturnKey::armyId));
+        for (TroopEntity troop : LIVE.values()) {
+            if (!troop.isAlive() || troop.armyId <= 0 || !troop.ownerId().equals(p.getUUID().toString())
+                    || !(troop.level() instanceof ServerLevel troopLevel)) continue;
+            MapData map = EditorManager.dataFor(troopLevel);
+            if (map == null) continue;
+            String realm = troop.realm == null ? "" : troop.realm;
+            byArmy.computeIfAbsent(new ArmyReturnKey(troop.armyId, realm, map.name), ignored -> new ArrayList<>()).add(troop);
         }
-        int back = 0;
-        for (var e : byArmy.entrySet()) {
-            Map<String, Integer> men = Muster.back(e.getValue(), DEFS.armyTypes());
-            if (ArmyLink.give(e.getKey(), men)) back += men.values().stream().mapToInt(Integer::intValue).sum();
-            else gone.removeIf(t -> t.armyId == e.getKey());                                    // армии больше нет: солдаты остаются
+
+        // Commit every strategic roster credit before releasing any physical soldier.
+        List<TroopEntity> stagedReturns = new ArrayList<>();
+        for (Map.Entry<ArmyReturnKey, List<TroopEntity>> entry : byArmy.entrySet()) {
+            ArmyReturnKey key = entry.getKey();
+            ArmyLink.Found found = ArmyLink.find(key.armyId(), key.realm(), key.mapId());
+            if (found == null) continue; // missing/ambiguous map-local army: soldiers remain physical and playable
+            try {
+                ArmyLink.stageReturn(found, entry.getValue(), DEFS.armyTypes());
+                stagedReturns.addAll(entry.getValue());
+            } catch (RuntimeException ex) {
+                actionPersistenceBlocked = true;
+                LOGGER.error("wf_troops: strategic return staging failed for army {} in realm {} on map {}: {}",
+                        key.armyId(), key.realm(), key.mapId(), ex.toString(), ex);
+                src.sendFailure(Component.literal("Возврат в армию остановлен; физические солдаты сохранены для сверки"));
+                return 0;
+            }
         }
-        for (TroopEntity t : gone) { releaseBody(t); t.discard(); }
-        int men = back;
-        src.sendSuccess(() -> Component.literal("Вернулось в армии людей: " + men), false);
-        return gone.size();
+
+        if (!stagedReturns.isEmpty() && !ArmyLink.persistStagedReturns(p.server)) {
+            actionPersistenceBlocked = true;
+            src.sendFailure(Component.literal("Не удалось надёжно сохранить численность армий; физические солдаты оставлены в мире"));
+            return 0;
+        }
+
+        int returnedBodies = 0;
+        int returnedMen = 0;
+        for (TroopEntity troop : stagedReturns) {
+            boolean released;
+            if (ModList.get().isLoaded("wf_people")) {
+                PersonBinding binding = bindPerson(troop, false);
+                if (binding == null && (troop.characterId == null || troop.characterId.isBlank()))
+                    binding = findCharacterForTroopEntity(troop.getUUID().toString());
+                if (binding == null) {
+                    actionPersistenceBlocked = true;
+                    src.sendFailure(Component.literal("Не удалось разрешить Character перед возвратом; физический солдат сохранён"));
+                    continue;
+                }
+                var pending = new dev.worldforge.troops.MilitaryTransitionLedger.Pending(
+                        binding.character().globalId, troop.getUUID().toString(),
+                        dev.worldforge.troops.MilitaryTransitionLedger.Kind.STRATEGIC_RETURN,
+                        Math.max(1, PeopleMod.YEAR), "");
+                try {
+                    troop.setInvulnerable(true);
+                    TRANSITIONS.stage(pending);
+                    if (!saveDurably()) {
+                        actionPersistenceBlocked = true;
+                        src.sendFailure(Component.literal("Не удалось сохранить терминальную квитанцию возврата; солдат оставлен в мире"));
+                        continue;
+                    }
+                    released = completeStrategicReturnTransition(pending, troop);
+                } catch (RuntimeException error) {
+                    actionPersistenceBlocked = true;
+                    LOGGER.error("wf_troops: could not stage strategic return for {}: {}",
+                            binding.character().globalId, error.toString(), error);
+                    released = false;
+                }
+            } else {
+                released = releaseBodyDurably(troop);
+                if (released) troop.discard();
+            }
+            if (!released) {
+                actionPersistenceBlocked = true;
+                src.sendFailure(Component.literal("Не удалось надёжно завершить возврат; физический солдат сохранён для восстановления"));
+                continue;
+            }
+            returnedBodies++;
+            Map<String, Integer> one = Muster.back(troop.unitId(), troop.strategicUnitId, DEFS.armyTypes());
+            returnedMen += one.values().stream().mapToInt(Integer::intValue).sum();
+        }
+
+        int men = returnedMen;
+        int bodies = returnedBodies;
+        src.sendSuccess(() -> Component.literal("Возвращено в стратегические армии: " + men
+                + " человек · физических солдат: " + bodies), false);
+        return returnedBodies;
     }
 
     /** Removes a physical troop body without killing the underlying person (return, rollback or disband). */
@@ -1754,6 +2456,30 @@ public class TroopsMod {
         String id = troop.getUUID().toString();
         LIVE.remove(id);
         SQUADS.remove(id);
+    }
+
+    /** Unbinds and persists the canonical Character before its physical troop body is discarded. */
+    private static boolean releaseBodyDurably(TroopEntity troop) {
+        if (troop == null) return false;
+        if (ModList.get().isLoaded("wf_people")) {
+            String entityUuid = troop.getUUID().toString();
+            PersonBinding binding = bindPerson(troop, false);
+            if (binding == null && (troop.characterId == null || troop.characterId.isBlank()))
+                binding = findCharacterForTroopEntity(entityUuid);
+            if (binding == null) return false;
+            Character person = binding.character();
+            binding.registry().unbindEntity(person.id, "troop", troop.getUUID().toString());
+            person.props.remove("wf_troop_uuid");
+            person.props.remove("wf_troop_unit");
+            person.props.remove("wf_army_id");
+            person.props.remove("wf_combat_xp");
+            person.props.remove("wf_veteran_rank");
+            if (server == null || !PeopleMod.persistCharacter(person, server)) return false;
+        }
+        String id = troop.getUUID().toString();
+        LIVE.remove(id);
+        SQUADS.remove(id);
+        return true;
     }
 
     private static void discardPrepared(List<TroopEntity> troops) {

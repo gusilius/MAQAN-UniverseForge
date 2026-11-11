@@ -46,8 +46,13 @@ public class ArmyMod {
     /** Исходные JSON типов отрядов: уходят клиенту вместе с состоянием. */
     static volatile List<String> RAW = List.of();
     private static long ticks;
+    private static volatile boolean actionPersistenceBlocked;
 
     public ArmyMod() {
+        ArmyActions.installPersistenceBridge(new ArmyActions.PersistenceBridge() {
+            @Override public boolean actionsBlocked() { return ArmyMod.actionsBlocked(); }
+            @Override public boolean persist() { return ArmyMod.persistActionMutation(); }
+        });
         MinecraftForge.EVENT_BUS.register(this);
         dev.worldforge.mod.api.TreasuryApi.register("army", new dev.worldforge.mod.api.TreasuryApi.Provider() {
             private ArmyEngine of(String realm) {
@@ -68,6 +73,10 @@ public class ArmyMod {
     public static ArmyEngine armies(MapData m) {
         return ARMIES.computeIfAbsent(m, k -> {
             ArmyEngine a = new ArmyEngine(WarMod.engine(k));
+            a.installPersistenceBridge(new ArmyEngine.PersistenceBridge() {
+                @Override public boolean actionsBlocked() { return ArmyMod.actionsBlocked(); }
+                @Override public boolean persist() { return ArmyMod.persistActionMutation(); }
+            });
             MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
             if (server != null) {
                 List<String> raw = new ArrayList<>();
@@ -81,30 +90,128 @@ public class ArmyMod {
                 }
                 RAW = raw;
                 Path f = EditorManager.overlayDir(server, k).resolve("wf_army.json");
-                try { if (Files.exists(f)) a.fromJson(Files.readString(f)); }
-                catch (Exception ex) { LOGGER.error("wf_army: не удалось прочитать {}: {}", f, ex.toString()); }
+                try {
+                    if (Files.exists(f)) a.fromJson(Files.readString(f));
+                } catch (Exception ex) {
+                    actionPersistenceBlocked = true;
+                    LOGGER.error("wf_army: стратегический файл '{}' повреждён или недоступен; исходник сохранён без перезаписи, все приказы заблокированы: {}",
+                            f, ex.toString(), ex);
+                }
             }
             return a;
         });
     }
 
-    private static void saveAll(MinecraftServer server) {
+    /**
+     * Synchronously persists every loaded strategic roster. Each map snapshot is atomically
+     * replaced; callers that are about to remove physical troops must require true before
+     * acknowledging that removal.
+     */
+    public static boolean persistNow(MinecraftServer server) {
+        if (server == null) return false;
+        if (actionsBlocked()) {
+            LOGGER.error("wf_army: save skipped because the army or political ledger is blocked; existing world files are preserved");
+            return false;
+        }
+        boolean allSaved = true;
         for (Map.Entry<MapData, ArmyEngine> en : ARMIES.entrySet()) {
+            Path temp = null;
             try {
                 Path dir = EditorManager.overlayDir(server, en.getKey());
                 Files.createDirectories(dir);
-                Files.writeString(dir.resolve("wf_army.json"), en.getValue().toJson());
-            } catch (Exception ex) { LOGGER.error("wf_army: не удалось сохранить армии карты '{}': {}", en.getKey().name, ex.toString()); }
+                Path target = dir.resolve("wf_army.json");
+                temp = target.resolveSibling(target.getFileName() + ".action.tmp");
+                Files.deleteIfExists(temp);
+                Files.writeString(temp, en.getValue().toJson(), StandardCharsets.UTF_8);
+                try {
+                    Files.move(temp, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                            java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+                } catch (java.nio.file.AtomicMoveNotSupportedException unsupported) {
+                    Files.move(temp, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                }
+            } catch (Exception ex) {
+                allSaved = false;
+                LOGGER.error("wf_army: не удалось атомарно сохранить армии карты '{}': {}",
+                        en.getKey().name, ex.toString());
+            } finally {
+                if (temp != null) try { Files.deleteIfExists(temp); } catch (Exception ignored) { }
+            }
+        }
+        // Army snapshot serialization can migrate legacy balances into the shared treasury.
+        if (allSaved && !WorldForgeMod.saveTreasuryNow(server)) {
+            LOGGER.error("wf_army: strategic roster snapshots were written but the shared treasury snapshot failed");
+            allSaved = false;
+        }
+        return allSaved;
+    }
+
+    public static boolean actionsBlocked() {
+        return actionPersistenceBlocked || dev.worldforge.war.mc.WarMod.actionsBlocked();
+    }
+
+    /** Domain mutations are acknowledged only after treasury and all loaded army snapshots are durable. */
+    public static synchronized boolean persistActionMutation() {
+        if (actionsBlocked()) return false;
+        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+        if (server == null) return false;
+        if (!WorldForgeMod.saveTreasuryNow(server)) {
+            actionPersistenceBlocked = true;
+            LOGGER.error("wf_army: treasury save failed after a strategic command; further army actions are blocked");
+            return false;
+        }
+        if (!persistNow(server)) {
+            actionPersistenceBlocked = true;
+            LOGGER.error("wf_army: army save failed after a strategic command; further army actions are blocked");
+            return false;
+        }
+        if (!dev.worldforge.war.mc.WarMod.persistNow(server)) {
+            actionPersistenceBlocked = true;
+            LOGGER.error("wf_army: political campaign/title checkpoint failed after a strategic command; further army actions are blocked");
+            return false;
+        }
+        return true;
+    }
+
+    private static void recoverPendingRecruitments(MinecraftServer server) {
+        if (server == null || actionsBlocked()) return;
+        boolean changed = false;
+        for (Map.Entry<MapData, ArmyEngine> entry : ARMIES.entrySet()) {
+            for (String operationId : entry.getValue().pendingRecruitmentIds()) {
+                try {
+                    entry.getValue().completePendingRecruitment(operationId);
+                    changed = true;
+                    LOGGER.info("wf_army: recovered pending recruitment {} on map {}",
+                            operationId, entry.getKey().name);
+                } catch (RuntimeException error) {
+                    actionPersistenceBlocked = true;
+                    LOGGER.error("wf_army: pending recruitment {} on map {} is blocked for safe reconciliation: {}",
+                            operationId, entry.getKey().name, error.toString(), error);
+                    return;
+                }
+            }
+        }
+        if (changed && !persistActionMutation()) {
+            actionPersistenceBlocked = true;
+            LOGGER.error("wf_army: recovered recruitment state could not be durably checkpointed");
         }
     }
 
+    private static void saveAll(MinecraftServer server) {
+        if (!persistNow(server)) LOGGER.error("wf_army: at least one strategic army snapshot was not persisted");
+    }
+
     @SubscribeEvent
-    public void onAboutToStart(ServerAboutToStartEvent e) { ARMIES.clear(); ticks = 0; }
+    public void onAboutToStart(ServerAboutToStartEvent e) {
+        ARMIES.clear();
+        ticks = 0;
+        actionPersistenceBlocked = false;
+    }
 
     /** Армии создаются при старте, чтобы водитель времени был подключён до первого дня. */
     @SubscribeEvent
     public void onStarted(ServerStartedEvent e) {
         for (MapData m : WorldForgeMod.loadedMaps().values()) if (m.titles != null) armies(m);
+        recoverPendingRecruitments(e.getServer());
     }
 
     @SubscribeEvent
@@ -131,10 +238,15 @@ public class ArmyMod {
                 .then(Commands.literal("screen")
                         .executes(c -> screen(c.getSource(), ""))
                         .then(Commands.argument("realm", StringArgumentType.word()).executes(c -> screen(c.getSource(), StringArgumentType.getString(c, "realm")))))
-                .then(Commands.literal("save").requires(s -> s.hasPermission(2)).executes(c -> { saveAll(c.getSource().getServer()); return 1; })));
+                .then(Commands.literal("save").requires(s -> s.hasPermission(2)).executes(c ->
+                        persistNow(c.getSource().getServer()) ? 1 : 0)));
     }
 
     private static int screen(CommandSourceStack s, String realm) {
+        if (actionPersistenceBlocked) {
+            s.sendFailure(Component.literal("Стратегические сохранения не прошли проверку. Файлы сохранены без перезаписи; приказы и экран армий заблокированы до сверки."));
+            return 0;
+        }
         net.minecraft.server.level.ServerPlayer sp = s.getPlayer();
         MapData m = EditorManager.dataFor(s.getLevel());
         if (sp == null) { s.sendFailure(Component.literal("Только для игрока")); return 0; }
