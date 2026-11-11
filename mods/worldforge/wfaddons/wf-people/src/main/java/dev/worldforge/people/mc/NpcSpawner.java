@@ -3,6 +3,7 @@ package dev.worldforge.people.mc;
 import dev.worldforge.mod.EditorManager;
 import dev.worldforge.mod.MapData;
 import dev.worldforge.mod.TitleData;
+import dev.worldforge.mod.api.SimulationLod;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.Courts;
@@ -20,7 +21,7 @@ import java.util.*;
 
 /** Появление тел: раз в SPAWN_EVERY тиков рядом с игроком в карте. Реестр - истина, тела - лишь картинка. */
 final class NpcSpawner {
-    static final double NEAR = 96, FAR = 160;
+    static final double NEAR = SimulationLod.PEOPLE_SPAWN_RADIUS, FAR = SimulationLod.PEOPLE_RETAIN_RADIUS;
     static final int PER_PLAYER = 24;
 
     private NpcSpawner() {}
@@ -68,7 +69,7 @@ final class NpcSpawner {
             TitleData.Title cap = realmCapital(d, realm);
             if (cap == null) continue;
             double d2 = sq(cap.capX - px, cap.capZ - pz);
-            if (d2 > NEAR * NEAR) continue;
+            if (!SimulationLod.shouldSpawnPeople(level.dimension().location().toString(), cap.capX, cap.capZ)) continue;
             for (Role r : roles) for (Character c : reg.holders(r.id, Courts.realmPlace(realm.id))) targets.putIfAbsent(c.id, new Target(c, r, cap.capX, cap.capZ, d2));
         }
         for (TitleData.Title t : d.allTitles()) {                              // носители должностей титулов (барон, жители...)
@@ -77,7 +78,7 @@ final class NpcSpawner {
             List<Role> roles = key == null ? null : perRoles.get(key);
             if (roles == null) continue;
             double d2 = sq(t.capX - px, t.capZ - pz);
-            if (d2 > NEAR * NEAR) continue;
+            if (!SimulationLod.shouldSpawnPeople(level.dimension().location().toString(), t.capX, t.capZ)) continue;
             for (Role r : roles) for (Character c : reg.holders(r.id, Courts.titlePlace(t.id))) targets.putIfAbsent(c.id, new Target(c, r, t.capX, t.capZ, d2));
         }
 
