@@ -15,9 +15,14 @@ public final class ResidentLifeEvents {
 
     public static void yearly(CharacterRegistry registry, int year) {
         if (registry == null || year < 1) return;
-        registry.refreshLifeStages(year);
         List<Character> people = new ArrayList<>(registry.all());
         people.sort(Comparator.comparing(c -> c.id));
+        // A settlement may call this pass every simulation step. Refresh the full registry only
+        // once per world year, not once per colony tick.
+        if (people.isEmpty() || number(people.get(0).props.get("population.life_stage_refresh_year"), 0) < year) {
+            registry.refreshLifeStages(year);
+            for (Character person : people) person.props.put("population.life_stage_refresh_year", year);
+        }
         for (Character person : people) {
             if (!person.alive || year <= number(person.props.get("social.last_family_year"), 0)) continue;
             person.props.put("social.last_family_year", year);
@@ -57,6 +62,9 @@ public final class ResidentLifeEvents {
             Character spouse = registry.get(person.spouse);
             if (spouse == null || !spouse.alive || !person.id.equals(spouse.spouse)) continue;
             int affinity = Math.min(ResidentSocial.score(person, spouse.id), ResidentSocial.score(spouse, person.id));
+            if (year <= number(person.props.get("family.marital_review_year"), 0)) continue;
+            person.props.put("family.marital_review_year", year);
+            spouse.props.put("family.marital_review_year", year);
             int conflictYears = number(person.props.get("family.marital_conflict_years"), 0);
             conflictYears = affinity <= -55 ? conflictYears + 1 : Math.max(0, conflictYears - 1);
             person.props.put("family.marital_conflict_years", conflictYears);
@@ -74,7 +82,9 @@ public final class ResidentLifeEvents {
         for (int i = 0; i < people.size(); i++) {
             Character first = people.get(i);
             if (!first.alive || first.spouse != null && !first.spouse.isBlank()
-                    || PopulationSimulation.age(first, year) < 18) continue;
+                    || PopulationSimulation.age(first, year) < 18
+                    || year <= number(first.props.get("family.relationship_review_year"), 0)) continue;
+            first.props.put("family.relationship_review_year", year);
             for (int j = i + 1; j < people.size(); j++) {
                 Character second = people.get(j);
                 if (!second.alive || second.spouse != null && !second.spouse.isBlank()
