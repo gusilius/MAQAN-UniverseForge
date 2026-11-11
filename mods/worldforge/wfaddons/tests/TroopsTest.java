@@ -372,7 +372,10 @@ public class TroopsTest {
         Map<String, String> collidingMap = new LinkedHashMap<>();
         collidingMap.put("levy", "pikeman");
         collidingMap.put("spear", "pikeman");
-        Muster.Plan sourcePlan = Muster.plan(Map.of("levy", 20, "spear", 10), 3, collidingMap);
+        Map<String, Integer> collidingArmy = new LinkedHashMap<>();
+        collidingArmy.put("levy", 20);
+        collidingArmy.put("spear", 10);
+        Muster.Plan sourcePlan = Muster.plan(collidingArmy, 3, collidingMap);
         check(sourcePlan.soldiers().get("pikeman") == 3
                         && sourcePlan.allocations().get(0).armyUnitId().equals("levy")
                         && sourcePlan.allocations().get(2).armyUnitId().equals("spear"),
