@@ -154,17 +154,40 @@ impl WorldSnapshot {
         if self.world_id.trim().is_empty() { return Err(SimError::EmptyWorldId); }
         let mut realms = BTreeSet::new();
         for r in &self.realms {
+            if r.id.trim().is_empty() { return Err(SimError::InvalidSnapshot("empty-realm-id".into())); }
             if !realms.insert(r.id.as_str()) { return Err(SimError::DuplicateRealm(r.id.clone())); }
         }
+        let mut border_pairs = BTreeSet::new();
         for b in &self.borders {
             if !realms.contains(b.a.as_str()) { return Err(SimError::UnknownRealm(b.a.clone())); }
             if !realms.contains(b.b.as_str()) { return Err(SimError::UnknownRealm(b.b.clone())); }
             if b.a == b.b { return Err(SimError::InvalidSnapshot("self-border".into())); }
+            let pair = if b.a < b.b { (b.a.as_str(), b.b.as_str()) } else { (b.b.as_str(), b.a.as_str()) };
+            if !border_pairs.insert(pair) { return Err(SimError::InvalidSnapshot(format!("duplicate-border:{}:{}", pair.0, pair.1))); }
         }
+        let mut settlements = BTreeSet::new();
         for s in &self.settlements {
+            if s.id.trim().is_empty() { return Err(SimError::InvalidSnapshot("empty-settlement-id".into())); }
+            if !settlements.insert(s.id.as_str()) { return Err(SimError::DuplicateSettlement(s.id.clone())); }
             if !realms.contains(s.realm_id.as_str()) { return Err(SimError::UnknownRealm(s.realm_id.clone())); }
             if s.food < 0 || s.wood < 0 || s.stone < 0 || s.food_capacity < 0 {
                 return Err(SimError::InvalidSnapshot(format!("negative stock in {}", s.id)));
+            }
+        }
+        let mut characters = BTreeSet::new();
+        for c in &self.characters {
+            if c.id.trim().is_empty() { return Err(SimError::InvalidSnapshot("empty-character-id".into())); }
+            if !characters.insert(c.id.as_str()) { return Err(SimError::DuplicateCharacter(c.id.clone())); }
+            if !realms.contains(c.realm_id.as_str()) { return Err(SimError::UnknownRealm(c.realm_id.clone())); }
+            if c.age > 120 { return Err(SimError::InvalidSnapshot(format!("implausible-character-age:{}:{}", c.id, c.age))); }
+        }
+        let mut workforce = BTreeSet::new();
+        for w in &self.workforce {
+            if !settlements.contains(w.settlement_id.as_str()) {
+                return Err(SimError::InvalidSnapshot(format!("workforce-without-settlement:{}", w.settlement_id)));
+            }
+            if !workforce.insert(w.settlement_id.as_str()) {
+                return Err(SimError::InvalidSnapshot(format!("duplicate-workforce:{}", w.settlement_id)));
             }
         }
         Ok(())
@@ -373,5 +396,28 @@ mod tests {
     #[test] fn duplicate_realms_are_rejected() {
         let mut s=base(); s.realms.push(s.realms[0].clone());
         assert_eq!(s.validate(),Err(SimError::DuplicateRealm("north".into())));
+    }
+    #[test] fn duplicate_settlement_ids_are_rejected() {
+        let mut s=base(); s.settlements.push(s.settlements[0].clone());
+        assert_eq!(s.validate(),Err(SimError::DuplicateSettlement("village".into())));
+    }
+    #[test] fn duplicate_global_character_ids_are_rejected() {
+        let mut s=base();
+        let person=Character{id:"global-person-1".into(),realm_id:"north".into(),age:24,alive:true,married:false,
+            gender:0,fertility:50,prestige:0,opinion:0,house_id:"North".into()};
+        s.characters=vec![person.clone(),person];
+        assert_eq!(s.validate(),Err(SimError::DuplicateCharacter("global-person-1".into())));
+    }
+    #[test] fn character_cannot_reference_an_unknown_realm() {
+        let mut s=base();
+        s.characters.push(Character{id:"global-person-2".into(),realm_id:"missing".into(),age:24,alive:true,married:false,
+            gender:0,fertility:50,prestige:0,opinion:0,house_id:"North".into()});
+        assert_eq!(s.validate(),Err(SimError::UnknownRealm("missing".into())));
+    }
+    #[test] fn workforce_requires_one_known_settlement_partition() {
+        let mut s=base();
+        s.workforce.push(Workforce{settlement_id:"missing".into(),farmers:0,lumberjacks:0,miners:0,builders:0,soldiers:0,
+            unemployed:0,food_need:0,food_output:0,wood_need:0,wood_output:0,stone_need:0,stone_output:0});
+        assert!(matches!(s.validate(),Err(SimError::InvalidSnapshot(reason)) if reason.starts_with("workforce-without-settlement")));
     }
 }

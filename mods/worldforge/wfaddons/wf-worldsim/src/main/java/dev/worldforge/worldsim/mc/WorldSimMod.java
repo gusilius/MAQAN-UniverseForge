@@ -201,7 +201,10 @@ public final class WorldSimMod {
 
     private static JsonObject snapshot(MinecraftServer server, long day) {
         JsonObject root = new JsonObject();
-        root.addProperty("world_id", server.getWorldData().getLevelName());
+        var canonicalWorldId = WorldForgeMod.worldId();
+        if (canonicalWorldId == null)
+            throw new IllegalStateException("Canonical WorldId is unavailable; refusing autonomous simulation without stable world identity");
+        root.addProperty("world_id", canonicalWorldId.toString());
         root.addProperty("seed", server.getWorldData().worldGenOptions().seed() & Long.MAX_VALUE);
         root.addProperty("day", day);
         JsonArray realms = new JsonArray(), borders = new JsonArray(), settlements = new JsonArray(), characters = new JsonArray(), workforce = new JsonArray();
@@ -308,7 +311,11 @@ public final class WorldSimMod {
                 String realm = Marriages.family(court, person);
                 if (realm.isBlank()) continue;
                 JsonObject c = new JsonObject();
-                c.addProperty("id", person.id); c.addProperty("realm_id", realm);
+                if (person.globalId == null || person.globalId.isBlank()) {
+                    LOGGER.warn("wf_worldsim: skipping Character {} without canonical global UUID", person.id);
+                    continue;
+                }
+                c.addProperty("id", person.globalId); c.addProperty("realm_id", realm);
                 c.addProperty("age", Math.max(0, court.year() - person.birthYear));
                 c.addProperty("alive", person.alive); c.addProperty("married", !person.spouse.isBlank());
                 c.addProperty("gender", "m".equals(person.gender) ? 0 : 1);
