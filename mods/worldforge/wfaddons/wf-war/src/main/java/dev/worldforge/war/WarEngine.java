@@ -63,6 +63,11 @@ public final class WarEngine {
                 Json.write(Arrays.asList(values)).getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 
+    /** Read-only durable receipt lookup for crash reconciliation. */
+    public synchronized boolean hasActionReceipt(String requestId) {
+        return actionOperations.containsKey(actionOperationId(requestId));
+    }
+
     private String priorActionResult(String requestId, String fingerprint) {
         String operationId = actionOperationId(requestId);
         String prior = actionOperations.get(operationId);

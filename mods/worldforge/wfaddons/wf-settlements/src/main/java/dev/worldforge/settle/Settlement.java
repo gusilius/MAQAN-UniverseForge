@@ -15,6 +15,8 @@ public final class Settlement {
     /** Persisted departures bridge settlement population changes to the canonical Character registry. */
     public record WorkerDeparture(String personId, String name, String reason) { }
     public final List<WorkerDeparture> departures = new ArrayList<>();
+    /** Durable idempotency receipts for autonomous placement requests. */
+    private final Map<String, String> placementReceipts = new TreeMap<>();
 
     public static final double BASE_CAP = 100, EAT = 0.02, GROW_EVERY = 45, STARVE_EVERY = 30, MAX_STEP = 2, MAX_TICK = 86400;
     public static final int BASE_HOUSING = 4, LOG_MAX = 60;
@@ -722,6 +724,32 @@ public final class Settlement {
         say("Заложено: " + d.name);
         return b;
     }
+
+    /** Replay-safe placement; receipt and building are written in the same settlement snapshot. */
+    public Building placeOnce(String requestId, String defId, int x, int z) {
+        if (requestId == null || !requestId.matches("[A-Za-z0-9_.:-]{1,128}"))
+            throw new OrderException("Некорректный идентификатор строительного приказа");
+        String fingerprint = defId + "|" + x + "|" + z;
+        String prior = placementReceipts.get(requestId);
+        if (prior != null) {
+            int separator = prior.lastIndexOf('|');
+            if (separator < 0 || !prior.substring(0, separator).equals(fingerprint))
+                throw new IllegalStateException("Settlement placement request ID collision: " + requestId);
+            int uid;
+            try { uid = Integer.parseInt(prior.substring(separator + 1)); }
+            catch (NumberFormatException error) { throw new IllegalStateException("Corrupt settlement placement receipt", error); }
+            Building existing = building(uid);
+            if (existing == null) throw new IllegalStateException("Placement receipt references missing building " + uid);
+            return existing;
+        }
+        if (placementReceipts.size() >= 10000)
+            throw new IllegalStateException("Settlement placement receipt limit reached");
+        Building created = place(defId, x, z);
+        placementReceipts.put(requestId, fingerprint + "|" + created.uid);
+        return created;
+    }
+
+    public boolean hasPlacementReceipt(String requestId) { return placementReceipts.containsKey(requestId); }
 
     /** Отмена стройки или снос. Возврат: не начатое 100%, строящееся 50%, готовое 25%. */
     public void cancel(int uid) {
@@ -1611,6 +1639,7 @@ public final class Settlement {
             ds.add(m);
         }
         root.put("departures", ds);
+        root.put("placement_receipts", new TreeMap<>(placementReceipts));
         root.put("log", new ArrayList<Object>(log));
         return Json.write(root);
     }
@@ -1706,6 +1735,16 @@ public final class Settlement {
             if (m.get("prio") instanceof Map<?, ?> pm) { w.jobPrio = new TreeMap<>(); for (var e : pm.entrySet()) w.jobPrio.put(String.valueOf(e.getKey()), ((Number) e.getValue()).intValue()); }
             if (w.building != 0 && s.building(w.building) == null) w.building = 0;
             s.workers.add(w);
+        }
+        if (root.get("placement_receipts") instanceof Map<?, ?> receipts) {
+            for (Map.Entry<?, ?> entry : receipts.entrySet()) {
+                if (!(entry.getKey() instanceof String request) || !request.matches("[A-Za-z0-9_.:-]{1,128}")
+                        || !(entry.getValue() instanceof String receipt) || receipt.length() > 256)
+                    throw new IllegalArgumentException("Malformed settlement placement receipt");
+                s.placementReceipts.put(request, receipt);
+            }
+            if (s.placementReceipts.size() > 10000)
+                throw new IllegalArgumentException("Settlement placement receipt limit exceeded");
         }
         if (root.get("departures") instanceof List<?> ds) for (Object o : ds) {
             if (!(o instanceof Map<?, ?> m)) continue;

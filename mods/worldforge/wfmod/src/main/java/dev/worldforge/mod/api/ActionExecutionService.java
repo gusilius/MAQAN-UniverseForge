@@ -16,6 +16,8 @@ import java.util.*;
  */
 public final class ActionExecutionService {
     public enum Status { QUEUED, RUNNING, SUCCEEDED, FAILED, CANCELLED }
+    /** Domain adapter's verified outcome for an interrupted request. */
+    public enum Reconciliation { APPLIED, NOT_APPLIED, UNKNOWN }
     public static final int MAX_RECORDS = 10000;
     public static final int MAX_ATTEMPTS = 3;
 
@@ -175,6 +177,51 @@ public final class ActionExecutionService {
         Task task = enqueue(request, nowMinute, durableFile);
         if (task.status() != Status.QUEUED) return task;
         return process(request.requestId(), authorizer, executor, replanner, nowMinute, durableFile);
+    }
+
+    /**
+     * Resolves a request interrupted by process restart after its owning domain has inspected
+     * authoritative persisted state. UNKNOWN leaves the fail-closed tombstone untouched.
+     * NOT_APPLIED re-queues only after the adapter has verified that retry is safe.
+     */
+    public synchronized Task reconcileInterrupted(String requestId, Reconciliation outcome,
+                                                   String message, long nowMinute, Path durableFile) {
+        Objects.requireNonNull(outcome, "outcome");
+        Task prior = tasks.get(requestId);
+        if (prior == null || prior.status() != Status.FAILED
+                || !prior.message().startsWith("Interrupted by server restart")) return prior;
+        if (outcome == Reconciliation.UNKNOWN) return prior;
+        if (nowMinute < prior.createdMinute()) throw new IllegalArgumentException("Action time moved backwards");
+
+        String receiptId = prior.receiptId().isEmpty() ? "receipt:" + requestId : prior.receiptId();
+        Receipt previousReceipt = receipts.get(receiptId);
+        Task resolved;
+        if (outcome == Reconciliation.APPLIED) {
+            String detail = message == null || message.isBlank()
+                    ? "Domain state confirms the interrupted action was applied" : message;
+            resolved = new Task(prior.requestId(), prior.actionId(), prior.actorId(), prior.targetId(),
+                    prior.args(), Status.SUCCEEDED, prior.attempts(), detail,
+                    prior.createdMinute(), nowMinute, receiptId);
+            receipts.put(receiptId, new Receipt(receiptId, requestId, prior.actionId(), prior.actorId(),
+                    prior.targetId(), Status.SUCCEEDED, prior.attempts(), detail, nowMinute));
+        } else {
+            receipts.remove(receiptId);
+            String detail = message == null || message.isBlank()
+                    ? "Domain state confirms no effect; safe retry authorized by adapter" : message;
+            resolved = new Task(prior.requestId(), prior.actionId(), prior.actorId(), prior.targetId(),
+                    prior.args(), Status.QUEUED, prior.attempts(), detail,
+                    prior.createdMinute(), nowMinute, "");
+        }
+        tasks.put(requestId, resolved);
+        try {
+            save(durableFile);
+        } catch (IOException ex) {
+            tasks.put(requestId, prior);
+            if (previousReceipt != null) receipts.put(receiptId, previousReceipt);
+            else receipts.remove(receiptId);
+            throw new IllegalStateException("Could not persist interrupted action reconciliation: " + requestId, ex);
+        }
+        return resolved;
     }
 
     public synchronized boolean cancel(String requestId, String actorId, boolean operator, long nowMinute, Path durableFile) {

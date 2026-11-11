@@ -115,12 +115,23 @@ public final class WorldSimMod {
                 if (kind == null) continue;
                 String proposalId = proposal.get("id").getAsString();
                 try {
-                    // Reuse the project's canonical durable ActionExecutionService. Its RUNNING
-                    // checkpoint prevents replay after a crash between a domain save and receipt.
+                    // Reconcile interrupted tasks against authoritative domain receipts before
+                    // allowing the action service to retry anything after a restart.
                     String requestId = "worldsim:" + proposalId;
                     String payload = GSON.toJson(kind);
                     long worldMinute = Math.max(0L, day * 1440L);
-                    var task = WorldForgeApi.actionExecution().execute(
+                    var actionService = WorldForgeApi.actionExecution();
+                    var priorTask = actionService.task(requestId);
+                    if (priorTask != null && priorTask.status() == dev.worldforge.mod.api.ActionExecutionService.Status.FAILED
+                            && priorTask.message().startsWith("Interrupted by server restart")) {
+                        var reconciliation = reconcileInterrupted(server, requestId, kind);
+                        priorTask = actionService.reconcileInterrupted(requestId, reconciliation,
+                                reconciliation == dev.worldforge.mod.api.ActionExecutionService.Reconciliation.APPLIED
+                                        ? "Authoritative domain receipt confirms the effect"
+                                        : "Authoritative domain state confirms safe retry",
+                                worldMinute, WorldForgeMod.actionExecutionFile(server));
+                    }
+                    var task = actionService.execute(
                             new dev.worldforge.mod.api.ActionExecutionService.Request(
                                     requestId, "worldsim.apply", "worldsim", "world",
                                     List.of(payload), worldMinute),
@@ -353,6 +364,64 @@ public final class WorldSimMod {
         ordered.forEach(array::add);
     }
 
+    private static dev.worldforge.mod.api.ActionExecutionService.Reconciliation reconcileInterrupted(
+            MinecraftServer server, String requestId, JsonObject action) {
+        String type = action.has("type") ? action.get("type").getAsString() : "";
+        try {
+            return switch (type) {
+                case "build" -> {
+                    Colony colony = SettleMod.colony(action.get("settlement").getAsString());
+                    yield colony == null || colony.s == null
+                            ? dev.worldforge.mod.api.ActionExecutionService.Reconciliation.UNKNOWN
+                            : (colony.s.hasPlacementReceipt(requestId)
+                                ? dev.worldforge.mod.api.ActionExecutionService.Reconciliation.APPLIED
+                                : dev.worldforge.mod.api.ActionExecutionService.Reconciliation.NOT_APPLIED);
+                }
+                case "reassign_profession" -> SettleMod.colony(action.get("settlement").getAsString()) == null
+                        ? dev.worldforge.mod.api.ActionExecutionService.Reconciliation.UNKNOWN
+                        // apply() is projection-aware and idempotently completes a partial Character/Worker transition.
+                        : dev.worldforge.mod.api.ActionExecutionService.Reconciliation.NOT_APPLIED;
+                case "recruit" -> {
+                    String realm = action.get("realm").getAsString();
+                    ArmyEngine found = null;
+                    for (MapData map : WorldForgeMod.loadedMaps().values())
+                        if (map.titles != null && map.titles.realms.containsKey(realm)) { found = ArmyMod.armies(map); break; }
+                    yield found == null ? dev.worldforge.mod.api.ActionExecutionService.Reconciliation.UNKNOWN
+                            : (found.hasArmyActionReceipt(requestId)
+                                ? dev.worldforge.mod.api.ActionExecutionService.Reconciliation.APPLIED
+                                : dev.worldforge.mod.api.ActionExecutionService.Reconciliation.NOT_APPLIED);
+                }
+                case "dynastic_marriage" -> {
+                    String first = action.get("first").getAsString(), second = action.get("second").getAsString();
+                    dev.worldforge.people.Character a = PeopleMod.authority().getGlobal(first);
+                    dev.worldforge.people.Character b = PeopleMod.authority().getGlobal(second);
+                    if (a == null || b == null) yield dev.worldforge.mod.api.ActionExecutionService.Reconciliation.UNKNOWN;
+                    if (second.equals(a.spouse) && first.equals(b.spouse))
+                        yield dev.worldforge.mod.api.ActionExecutionService.Reconciliation.APPLIED;
+                    if (a.alive && b.alive && a.spouse.isEmpty() && b.spouse.isEmpty())
+                        yield dev.worldforge.mod.api.ActionExecutionService.Reconciliation.NOT_APPLIED;
+                    yield dev.worldforge.mod.api.ActionExecutionService.Reconciliation.UNKNOWN;
+                }
+                case "declare_war" -> {
+                    String attacker = action.get("attacker").getAsString();
+                    String defender = action.get("defender").getAsString();
+                    WarEngine found = null;
+                    for (MapData map : WorldForgeMod.loadedMaps().values())
+                        if (map.titles != null && map.titles.realms.containsKey(attacker)
+                                && map.titles.realms.containsKey(defender)) { found = WarMod.engine(map); break; }
+                    yield found == null ? dev.worldforge.mod.api.ActionExecutionService.Reconciliation.UNKNOWN
+                            : (found.hasActionReceipt(requestId)
+                                ? dev.worldforge.mod.api.ActionExecutionService.Reconciliation.APPLIED
+                                : dev.worldforge.mod.api.ActionExecutionService.Reconciliation.NOT_APPLIED);
+                }
+                default -> dev.worldforge.mod.api.ActionExecutionService.Reconciliation.UNKNOWN;
+            };
+        } catch (RuntimeException error) {
+            LOGGER.warn("wf_worldsim: could not reconcile interrupted action {}: {}", requestId, error.toString());
+            return dev.worldforge.mod.api.ActionExecutionService.Reconciliation.UNKNOWN;
+        }
+    }
+
     private static boolean apply(MinecraftServer server, String requestId, JsonObject action, long day) {
         String type = action.has("type") ? action.get("type").getAsString() : "";
         if ("build".equals(type)) {
@@ -365,7 +434,7 @@ public final class WorldSimMod {
                 for (int x = -radius; x <= radius; x += 4) for (int z = -radius; z <= radius; z += 4) {
                     if (Math.max(Math.abs(x), Math.abs(z)) != radius) continue;
                     if (colony.s.placeError(building, x + (hash & 7), z + ((hash >>> 3) & 7)) == null) {
-                        colony.s.place(building, x + (hash & 7), z + ((hash >>> 3) & 7));
+                        colony.s.placeOnce(requestId, building, x + (hash & 7), z + ((hash >>> 3) & 7));
                         if (!SettleMod.saveDurably(server)) return false;
                         lastProjectDay.put(settlementId, day);
                         return true;
@@ -435,7 +504,9 @@ public final class WorldSimMod {
                         .sorted(Comparator.comparing(unit -> unit.id)).findFirst().orElse(null);
                 int count = (int) Math.min(wanted, Math.floor(army.pool(realm)));
                 if (levy == null || count <= 0) return false;
-                army.recruitWithPersistence(requestId, "raise", realm, levy.id, count);
+                if (army.hasPendingRecruitment(requestId) || army.hasArmyActionReceipt(requestId))
+                    army.resumeRecruitmentWithPersistence(requestId);
+                else army.recruitWithPersistence(requestId, "raise", realm, levy.id, count);
                 return true;
             }
             return false;

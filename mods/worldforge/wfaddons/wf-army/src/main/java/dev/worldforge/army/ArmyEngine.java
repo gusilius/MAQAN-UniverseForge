@@ -87,6 +87,26 @@ public final class ArmyEngine {
         return rosterOperations.containsKey(armyActionKey(requestId));
     }
 
+    public synchronized boolean hasPendingRecruitment(String requestId) {
+        return pendingRecruitments.containsKey(armyActionKey(requestId));
+    }
+
+    /** Resume a prepared recruitment after the action journal was interrupted by a restart. */
+    public synchronized Army resumeRecruitmentWithPersistence(String requestId) {
+        PersistenceBridge bridge = persistenceBridge;
+        if (bridge == null || bridge.actionsBlocked())
+            throw new TitleEditor.EditException("Восстановление набора армии заблокировано до восстановления сохранения");
+        String operationId = armyActionKey(requestId);
+        if (!pendingRecruitments.containsKey(operationId) && !rosterOperations.containsKey(operationId))
+            throw new TitleEditor.EditException("Нет подготовленного или завершённого набора для восстановления");
+        if (pendingRecruitments.containsKey(operationId) && (!bridge.persist() || bridge.actionsBlocked()))
+            throw new TitleEditor.EditException("Не удалось подтвердить подготовленный набор армии");
+        Army result = completePendingRecruitment(operationId);
+        if (!bridge.persist() || bridge.actionsBlocked())
+            throw new TitleEditor.EditException("Восстановленный набор не прошёл финальную проверку сохранения");
+        return result;
+    }
+
     /**
      * Stable identity for an autonomous composition or movement order. Merge pair IDs are
      * normalized so iteration order cannot allocate two receipts for the same pair.
