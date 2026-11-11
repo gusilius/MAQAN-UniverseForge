@@ -518,6 +518,14 @@ public final class CourtSim {
                 ed.setDerivedProp(r.id, "council." + e.getKey(), v);
             }
             ed.setDerivedProp(r.id, "people.ties", String.join(",", Marriages.ties(this, r.id)));
+            // Publish the canonical ruler-to-ruler opinion to wf-realms through the shared
+            // realm property bus; wf-realms consumes it for its monthly vassal contract review.
+            Character vassalRuler = ruler(r.id);
+            String liegeId = r.overlord == null ? "" : r.overlord.id;
+            Character liegeRuler = liegeId.isEmpty() ? null : ruler(liegeId);
+            int liegeOpinion = vassalRuler == null || liegeRuler == null ? 0
+                    : opinion(vassalRuler.id, liegeRuler.id);
+            ed.setDerivedProp(r.id, "politics.liege_opinion", liegeOpinion);
         }
     }
 
