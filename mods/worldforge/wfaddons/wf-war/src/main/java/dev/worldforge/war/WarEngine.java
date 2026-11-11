@@ -58,7 +58,7 @@ public final class WarEngine {
         return "war-action:" + UUID.nameUUIDFromBytes(requestId.trim().getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 
-    private static String actionFingerprint(String... values) {
+    private static String actionFingerprint(Object... values) {
         return Base64.getUrlEncoder().withoutPadding().encodeToString(
                 Json.write(Arrays.asList(values)).getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
