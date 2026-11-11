@@ -88,14 +88,42 @@ public class ArmyMod {
         });
     }
 
-    private static void saveAll(MinecraftServer server) {
+    /**
+     * Synchronously persists every loaded strategic roster. Each map snapshot is atomically
+     * replaced; callers that are about to remove physical troops must require true before
+     * acknowledging that removal.
+     */
+    public static boolean persistNow(MinecraftServer server) {
+        if (server == null) return false;
+        boolean allSaved = true;
         for (Map.Entry<MapData, ArmyEngine> en : ARMIES.entrySet()) {
+            Path temp = null;
             try {
                 Path dir = EditorManager.overlayDir(server, en.getKey());
                 Files.createDirectories(dir);
-                Files.writeString(dir.resolve("wf_army.json"), en.getValue().toJson());
-            } catch (Exception ex) { LOGGER.error("wf_army: не удалось сохранить армии карты '{}': {}", en.getKey().name, ex.toString()); }
+                Path target = dir.resolve("wf_army.json");
+                temp = target.resolveSibling(target.getFileName() + ".action.tmp");
+                Files.deleteIfExists(temp);
+                Files.writeString(temp, en.getValue().toJson(), StandardCharsets.UTF_8);
+                try {
+                    Files.move(temp, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                            java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+                } catch (java.nio.file.AtomicMoveNotSupportedException unsupported) {
+                    Files.move(temp, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                }
+            } catch (Exception ex) {
+                allSaved = false;
+                LOGGER.error("wf_army: не удалось атомарно сохранить армии карты '{}': {}",
+                        en.getKey().name, ex.toString());
+            } finally {
+                if (temp != null) try { Files.deleteIfExists(temp); } catch (Exception ignored) { }
+            }
         }
+        return allSaved;
+    }
+
+    private static void saveAll(MinecraftServer server) {
+        if (!persistNow(server)) LOGGER.error("wf_army: at least one strategic army snapshot was not persisted");
     }
 
     @SubscribeEvent
@@ -131,7 +159,8 @@ public class ArmyMod {
                 .then(Commands.literal("screen")
                         .executes(c -> screen(c.getSource(), ""))
                         .then(Commands.argument("realm", StringArgumentType.word()).executes(c -> screen(c.getSource(), StringArgumentType.getString(c, "realm")))))
-                .then(Commands.literal("save").requires(s -> s.hasPermission(2)).executes(c -> { saveAll(c.getSource().getServer()); return 1; })));
+                .then(Commands.literal("save").requires(s -> s.hasPermission(2)).executes(c ->
+                        persistNow(c.getSource().getServer()) ? 1 : 0)));
     }
 
     private static int screen(CommandSourceStack s, String realm) {
