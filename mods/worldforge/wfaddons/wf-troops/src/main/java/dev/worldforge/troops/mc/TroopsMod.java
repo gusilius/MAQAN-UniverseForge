@@ -354,6 +354,13 @@ public class TroopsMod {
     public void join(EntityJoinLevelEvent e) {
         if (e.getLevel().isClientSide || !(e.getEntity() instanceof TroopEntity t)) return;
         String entityId = t.getUUID().toString();
+        if (t.characterId != null && !t.characterId.isBlank()
+                && TRANSITIONS.isCompleted(t.characterId, entityId)) {
+            LIVE.remove(entityId);
+            SQUADS.remove(entityId);
+            t.discard();
+            return; // A committed non-lethal transition must not resurrect from a stale chunk.
+        }
         if (ModList.get().isLoaded("wf_people") && t.characterId != null && !t.characterId.isBlank()) {
             Character existingCharacter = PeopleMod.authority().getGlobal(t.characterId);
             if (existingCharacter != null && !existingCharacter.alive) {
@@ -746,9 +753,12 @@ public class TroopsMod {
             if (!PeopleMod.persistCharacter(person, server)) return false;
             if (ModList.get().isLoaded("wf_settle")
                     && !dev.worldforge.settle.mc.SettleMod.persistActionMutation(server)) return false;
-            TRANSITIONS.complete(pending.characterGlobalId());
+            if (!TRANSITIONS.complete(pending.characterGlobalId())) {
+                actionPersistenceBlocked = true;
+                return false;
+            }
             if (!saveDurably()) {
-                TRANSITIONS.stage(pending);
+                TRANSITIONS.reopen(pending.characterGlobalId(), pending.troopEntityId());
                 actionPersistenceBlocked = true;
                 return false;
             }
