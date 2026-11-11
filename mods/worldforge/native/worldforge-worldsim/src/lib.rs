@@ -205,9 +205,21 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
 
     // Political AI: border wars emerge from pressure, claims, power balance,
     // stability and treasury. A war is never forced by the scenario.
-    let mut borders = snapshot.borders.iter().collect::<Vec<_>>();
+    // Border direction is not semantically meaningful. Normalize endpoints before
+    // evaluating either direction so input ordering cannot change proposal order.
+    let mut borders = snapshot.borders.iter().map(|border| {
+        if border.a <= border.b {
+            border.clone()
+        } else {
+            Border {
+                a: border.b.clone(), b: border.a.clone(),
+                contested_claim: border.contested_claim,
+                strategic_value: border.strategic_value, distance_cost: border.distance_cost,
+            }
+        }
+    }).collect::<Vec<_>>();
     borders.sort_by(|x, y| (&x.a, &x.b).cmp(&(&y.a, &y.b)));
-    for border in borders {
+    for border in &borders {
         let a = realms[border.a.as_str()];
         let b = realms[border.b.as_str()];
         for (attacker, defender) in [(a, b), (b, a)] {
@@ -306,9 +318,11 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
 
     // Recruitment AI: only proposes recruitment when a settlement has barracks,
     // realm is threatened and treasury/food stocks can support the force.
-    for s in &snapshot.settlements {
+    let mut recruitment_settlements = snapshot.settlements.iter().collect::<Vec<_>>();
+    recruitment_settlements.sort_by(|a, b| a.id.cmp(&b.id));
+    for s in recruitment_settlements {
         let Some(r) = realms.get(s.realm_id.as_str()) else { continue; };
-        let threatened = snapshot.borders.iter().any(|b| {
+        let threatened = borders.iter().any(|b| {
             (b.a == r.id || b.b == r.id) && b.contested_claim
         });
         if threatened && s.barracks > 0 && r.treasury >= 250 && s.food > (s.population as i64) {
@@ -352,6 +366,7 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
     }
 
     proposals.sort_by(|a, b| a.id.cmp(&b.id));
+    diagnostics.sort();
     let mut unique = BTreeSet::new();
     proposals.retain(|p| unique.insert(p.id.clone()));
     Ok(DecisionFrame { world_id: snapshot.world_id.clone(), day: snapshot.day, proposals, diagnostics })
@@ -373,6 +388,38 @@ mod tests {
                 wood:30,stone:30,housing:100,housing_used:90,farms:0,foresters:0,quarries:0,workshops:0,barracks:1,watch_posts:0,threatened:false,roads:0,local_pressure:20,last_project_day:0}],
             characters:vec![],workforce:vec![] }
     }
+    #[test] fn decisions_are_invariant_to_snapshot_collection_and_border_order() {
+        let mut original = base();
+        let mut south = original.settlements[0].clone();
+        south.id = "south-town".into();
+        south.realm_id = "south".into();
+        south.last_project_day = 0;
+        original.settlements.push(south);
+        original.workforce = vec![
+            Workforce{settlement_id:"village".into(),farmers:0,lumberjacks:0,miners:0,builders:0,soldiers:0,
+                unemployed:2,food_need:100,food_output:0,wood_need:10,wood_output:0,stone_need:0,stone_output:0},
+            Workforce{settlement_id:"south-town".into(),farmers:0,lumberjacks:0,miners:0,builders:0,soldiers:0,
+                unemployed:1,food_need:0,food_output:0,wood_need:0,wood_output:0,stone_need:10,stone_output:0},
+        ];
+        original.characters = vec![
+            Character{id:"person-a".into(),realm_id:"north".into(),age:22,alive:true,married:false,
+                gender:0,fertility:50,prestige:50,opinion:50,house_id:"A".into()},
+            Character{id:"person-b".into(),realm_id:"south".into(),age:23,alive:true,married:false,
+                gender:1,fertility:50,prestige:50,opinion:50,house_id:"B".into()},
+        ];
+
+        let expected = decide(&original).unwrap();
+        let mut permuted = original.clone();
+        permuted.realms.reverse();
+        permuted.borders.reverse();
+        for border in &mut permuted.borders { std::mem::swap(&mut border.a, &mut border.b); }
+        permuted.settlements.reverse();
+        permuted.characters.reverse();
+        permuted.workforce.reverse();
+
+        assert_eq!(expected, decide(&permuted).unwrap());
+    }
+
     #[test] fn decisions_are_deterministic_and_idempotently_identified() {
         let s=base(); assert_eq!(decide(&s).unwrap(),decide(&s).unwrap());
     }

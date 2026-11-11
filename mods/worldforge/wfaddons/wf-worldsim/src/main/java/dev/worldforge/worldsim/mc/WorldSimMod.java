@@ -326,9 +326,28 @@ public final class WorldSimMod {
                 characters.add(c);
             }
         }
+        // Canonical JSON ordering is part of the native simulation contract:
+        // identical authoritative state must yield identical Rust input bytes.
+        sortObjects(realms, Comparator.comparing(item -> item.get("id").getAsString()));
+        sortObjects(borders, Comparator.comparing((JsonObject item) -> item.get("a").getAsString())
+                .thenComparing(item -> item.get("b").getAsString()));
+        sortObjects(settlements, Comparator.comparing(item -> item.get("id").getAsString()));
+        sortObjects(characters, Comparator.comparing(item -> item.get("id").getAsString()));
+        sortObjects(workforce, Comparator.comparing(item -> item.get("settlement_id").getAsString()));
         root.add("realms", realms); root.add("borders", borders); root.add("settlements", settlements);
         root.add("characters", characters); root.add("workforce", workforce);
         return root;
+    }
+
+    private static void sortObjects(JsonArray array, Comparator<JsonObject> comparator) {
+        List<JsonObject> ordered = new ArrayList<>();
+        for (var element : array) {
+            if (!element.isJsonObject()) throw new IllegalStateException("WorldSim snapshot contains a non-object row");
+            ordered.add(element.getAsJsonObject());
+        }
+        ordered.sort(comparator);
+        array.removeAll();
+        ordered.forEach(array::add);
     }
 
     private static boolean apply(MinecraftServer server, String requestId, JsonObject action, long day) {
