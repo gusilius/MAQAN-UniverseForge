@@ -1739,19 +1739,21 @@ public class TroopsMod {
             ArmyLink.Found found = ArmyLink.find(key.armyId(), key.realm());
             if (found == null) continue; // missing/ambiguous map-local army: soldiers remain physical and playable
             try {
-                if (!ArmyLink.returnToArmy(found, entry.getValue(), DEFS.armyTypes(), p.server)) {
-                    actionPersistenceBlocked = true;
-                    src.sendFailure(Component.literal("Не удалось надёжно сохранить численность армии; физические солдаты оставлены в мире"));
-                    return 0;
-                }
+                ArmyLink.stageReturn(found, entry.getValue(), DEFS.armyTypes());
                 stagedReturns.addAll(entry.getValue());
             } catch (RuntimeException ex) {
                 actionPersistenceBlocked = true;
-                LOGGER.error("wf_troops: strategic return failed for army {} in realm {}: {}",
+                LOGGER.error("wf_troops: strategic return staging failed for army {} in realm {}: {}",
                         key.armyId(), key.realm(), ex.toString(), ex);
                 src.sendFailure(Component.literal("Возврат в армию остановлен; физические солдаты сохранены для сверки"));
                 return 0;
             }
+        }
+
+        if (!stagedReturns.isEmpty() && !ArmyLink.persistStagedReturns(p.server)) {
+            actionPersistenceBlocked = true;
+            src.sendFailure(Component.literal("Не удалось надёжно сохранить численность армий; физические солдаты оставлены в мире"));
+            return 0;
         }
 
         int returnedBodies = 0;
