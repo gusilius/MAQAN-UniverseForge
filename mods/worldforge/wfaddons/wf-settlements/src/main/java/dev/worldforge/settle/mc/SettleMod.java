@@ -865,18 +865,26 @@ public class SettleMod {
             if (worker.person == null || worker.person.isBlank()) continue;
             Character person = resolvePerson(registry, worker.person);
             if (person == null || !person.alive) continue;
-            if (("sleeping".equals(worker.lifeAction) || "eating".equals(worker.lifeAction)
-                    || "socializing".equals(worker.lifeAction)) && settlement.time >= worker.lifeActionUntil
-                    || ("fleeing".equals(worker.lifeAction) || "defending".equals(worker.lifeAction)) && !settlement.raidIncoming) {
-                worker.lifeAction = "";
-                worker.lifeActionUntil = 0;
-                worker.status = worker.building == 0 ? "свободен" : "работает";
+
+            // Explicit player/RTS orders always preempt autonomous life goals without granting their effects.
+            if (worker.manualOrder || worker.manualFollow) {
+                LifeSimulation.cancelPending(person, "preempted-by-player-order");
+                clearLifeAction(worker);
+                continue;
             }
-            if (!worker.lifeAction.isBlank()) continue;
+            if ("fleeing".equals(worker.lifeAction) || "defending".equals(worker.lifeAction)) {
+                if (settlement.raidIncoming) continue;
+                clearLifeAction(worker);
+            }
+            if (!worker.lifeAction.isBlank()
+                    && !("travelling".equals(worker.lifeActionStage) || "performing".equals(worker.lifeActionStage))) {
+                continue;
+            }
+
             boolean brave = PopulationSimulation.hasDuty(person, Duty.SOLDIER)
                     || person.traits.contains("brave") || person.traits.contains("courageous")
                     || person.traits.contains("protective");
-            if (settlement.raidIncoming && brave) {
+            if (worker.lifeAction.isBlank() && settlement.raidIncoming && brave) {
                 worker.lifeAction = "defending";
                 worker.lifeTargetX = 0; worker.lifeTargetZ = 0;
                 worker.lifeActionUntil = 1.0e12;
@@ -900,23 +908,42 @@ public class SettleMod {
                     settlement.raidIncoming,
                     lifeLod(server, colony, worker));
             LifeSimulation.tick(person, context, (character, action, ignored) -> {
+                // An existing pending action is polled here until its physical/abstract execution finishes.
+                if (!worker.lifeAction.isBlank()) {
+                    if (!"performing".equals(worker.lifeActionStage)) return LifeSimulation.Outcome.IN_PROGRESS;
+                    if (settlement.time < worker.lifeActionUntil) return LifeSimulation.Outcome.IN_PROGRESS;
+                    if (action == LifeSimulation.Action.EAT && !settlement.consumeResource("food", 1.0))
+                        return LifeSimulation.Outcome.BLOCKED;
+                    if (action == LifeSimulation.Action.SOCIALIZE) {
+                        dev.worldforge.settle.Worker companion = settlement.workers.stream()
+                                .filter(other -> other.person != null && other.person.equals(worker.lifeSocialTarget))
+                                .findFirst().orElse(null);
+                        Character companionPerson = companion == null ? null : resolvePerson(registry, companion.person);
+                        if (companion == null || companionPerson == null || !companionPerson.alive)
+                            return LifeSimulation.Outcome.BLOCKED;
+                        int opinion = dev.worldforge.settle.ResidentSocial.interactionDelta(character, companionPerson);
+                        dev.worldforge.settle.ResidentSocial.socialize(character, companionPerson, opinion);
+                        companion.status = "общался: " + character.name;
+                    }
+                    clearLifeAction(worker);
+                    worker.status = worker.building == 0 ? "свободен" : "работает";
+                    return LifeSimulation.Outcome.SUCCESS;
+                }
+
+                // Start a local action. Its needs, food stock and social relations are not changed yet.
                 switch (action) {
                     case EAT -> {
-                        if (!settlement.consumeResource("food", 1.0)) return LifeSimulation.Outcome.BLOCKED;
+                        if (settlement.amount("food") < 1.0) return LifeSimulation.Outcome.BLOCKED;
                         double[] meal = residentMealPlace(settlement, worker);
-                        worker.lifeAction = "eating";
-                        worker.lifeTargetX = meal[0]; worker.lifeTargetZ = meal[1];
-                        worker.lifeActionUntil = settlement.time + 30;
-                        worker.status = "ест";
-                        return LifeSimulation.Outcome.SUCCESS;
+                        beginLifeAction(worker, "eating", meal[0], meal[1], 30, context.lod());
+                        worker.status = "идёт принимать пищу";
+                        return LifeSimulation.Outcome.IN_PROGRESS;
                     }
                     case SLEEP -> {
                         double[] home = residentShelter(settlement, worker);
-                        worker.lifeAction = "sleeping";
-                        worker.lifeTargetX = home[0]; worker.lifeTargetZ = home[1];
-                        worker.lifeActionUntil = settlement.time + 8 * 60;
-                        worker.status = "спит";
-                        return LifeSimulation.Outcome.SUCCESS;
+                        beginLifeAction(worker, "sleeping", home[0], home[1], 8 * 60, context.lod());
+                        worker.status = "идёт отдыхать";
+                        return LifeSimulation.Outcome.IN_PROGRESS;
                     }
                     case SEEK_SAFETY -> {
                         if (!settlement.raidIncoming) return LifeSimulation.Outcome.BLOCKED;
@@ -929,40 +956,29 @@ public class SettleMod {
                     }
                     case SOCIALIZE -> {
                         dev.worldforge.settle.Worker companion = null;
-                        Character companionPerson = null;
                         double nearest = 32 * 32;
                         for (dev.worldforge.settle.Worker other : settlement.workers) {
-                            if (other == worker) continue;
+                            if (other == worker || other.person == null || other.person.isBlank()) continue;
                             double dx = worker.x - other.x, dz = worker.z - other.z;
                             double distance = dx * dx + dz * dz;
-                            if (distance < nearest && other.person != null && !other.person.isBlank()) {
-                                Character candidate = resolvePerson(registry, other.person);
-                                if (candidate != null && candidate.alive) {
-                                    nearest = distance; companion = other; companionPerson = candidate;
-                                }
+                            if (distance < nearest && resolvePerson(registry, other.person) != null) {
+                                nearest = distance; companion = other;
                             }
                         }
-                        if (companion == null || companionPerson == null) return LifeSimulation.Outcome.BLOCKED;
-                        int opinion = dev.worldforge.settle.ResidentSocial.interactionDelta(person, companionPerson);
-                        dev.worldforge.settle.ResidentSocial.socialize(person, companionPerson, opinion);
-                        worker.lifeAction = "socializing";
-                        worker.lifeTargetX = companion.x; worker.lifeTargetZ = companion.z;
-                        worker.lifeActionUntil = settlement.time + 3 * 60;
-                        worker.status = "общается: " + companionPerson.name;
-                        companion.status = "общается: " + person.name;
-                        return LifeSimulation.Outcome.SUCCESS;
+                        if (companion == null) return LifeSimulation.Outcome.BLOCKED;
+                        worker.lifeSocialTarget = companion.person;
+                        beginLifeAction(worker, "socializing", companion.x, companion.z, 3 * 60, context.lod());
+                        worker.status = "идёт на встречу";
+                        return LifeSimulation.Outcome.IN_PROGRESS;
                     }
                     case WORK -> {
-                        return worker.building != 0
-                                ? LifeSimulation.Outcome.SUCCESS : LifeSimulation.Outcome.RETRY;
+                        return worker.building != 0 ? LifeSimulation.Outcome.SUCCESS : LifeSimulation.Outcome.RETRY;
                     }
                     case TRAIN -> {
-                        if (worker.generalist()) return LifeSimulation.Outcome.BLOCKED;
-                        String skill = PopulationSimulation.trainingTarget(character);
-                        if (skill.isBlank()) return LifeSimulation.Outcome.BLOCKED;
-                        PopulationSimulation.train(character, skill, 5);
+                        if (worker.generalist() || PopulationSimulation.trainingTarget(character).isBlank())
+                            return LifeSimulation.Outcome.BLOCKED;
                         worker.status = "обучается";
-                        return LifeSimulation.Outcome.SUCCESS;
+                        return LifeSimulation.Outcome.SUCCESS; // skill XP is granted once by LifeSimulation.applyEffects
                     }
                     case RECREATE -> {
                         if (!hasLeisure) return LifeSimulation.Outcome.BLOCKED;
@@ -975,6 +991,25 @@ public class SettleMod {
             });
         }
         dev.worldforge.settle.ResidentLifeEvents.yearly(registry, settlement.year());
+    }
+
+    private static void beginLifeAction(dev.worldforge.settle.Worker worker, String action,
+                                        double targetX, double targetZ, double duration,
+                                        LifeSimulation.LOD lod) {
+        worker.lifeAction = action;
+        worker.lifeTargetX = targetX;
+        worker.lifeTargetZ = targetZ;
+        worker.lifeActionDuration = duration;
+        worker.lifeActionStage = lod == LifeSimulation.LOD.ACTIVE ? "travelling" : "performing";
+        worker.lifeActionUntil = lod == LifeSimulation.LOD.ACTIVE ? 0 : duration + 1;
+    }
+
+    private static void clearLifeAction(dev.worldforge.settle.Worker worker) {
+        worker.lifeAction = "";
+        worker.lifeActionStage = "";
+        worker.lifeSocialTarget = "";
+        worker.lifeActionDuration = 0;
+        worker.lifeActionUntil = 0;
     }
 
     /** Removes the existing worker projection for a person entering military service; the departure is persisted. */
