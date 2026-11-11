@@ -219,6 +219,78 @@ public class WarTest {
             ok(nc.values.contains(Attitude.PAST_WAR_CAP), "мнение: штраф за прошлые войны ограничен " + Attitude.PAST_WAR_CAP + " после " + (capCount + 1) + " войн");
         }
 
+        // --- durable political action receipts and replay after restart
+        {
+            WarEngine receiptEngine = new WarEngine(ed);
+            receiptEngine.loadCasusBelli(Files.readString(Path.of("wf-war/src/main/resources/data/wf_war/wf_war/base.json")));
+            receiptEngine.day = 10_000;
+            String attacker = null, defender = null;
+            outer:
+            for (TitleData.Realm candidateA : d.realmList()) {
+                for (TitleData.Realm candidateB : d.realmList()) {
+                    if (candidateA.id.equals(candidateB.id)) continue;
+                    if (receiptEngine.preview(candidateA.id, candidateB.id, "humiliation", List.of()).ok) {
+                        attacker = candidateA.id;
+                        defender = candidateB.id;
+                        break outer;
+                    }
+                }
+            }
+            ok(attacker != null && defender != null, "есть пара для теста durable политических приказов");
+            if (attacker != null && defender != null) {
+                String declareRequest = "war-receipt-declare-001";
+                War declared = receiptEngine.declareOnce(declareRequest, attacker, defender, "humiliation", List.of());
+                int warCount = receiptEngine.wars.size();
+                War replayed = receiptEngine.declareOnce(declareRequest, attacker, defender, "humiliation", List.of());
+                ok(replayed.id == declared.id && receiptEngine.wars.size() == warCount,
+                        "повтор объявления возвращает ту же войну и не создаёт вторую кампанию");
+                boolean declarationCollision = false;
+                try {
+                    receiptEngine.declareOnce(declareRequest, defender, attacker, "humiliation", List.of());
+                } catch (IllegalStateException expected) { declarationCollision = true; }
+                ok(declarationCollision, "requestId объявления нельзя повторно использовать с другой целью");
+
+                String offerRequest = "war-receipt-offer-001";
+                receiptEngine.offerPeaceOnce(offerRequest, declared.id, attacker, true);
+                receiptEngine.offerPeaceOnce(offerRequest, declared.id, attacker, true);
+                boolean offerCollision = false;
+                try { receiptEngine.offerPeaceOnce(offerRequest, declared.id, attacker, false); }
+                catch (IllegalStateException expected) { offerCollision = true; }
+                ok(offerCollision, "receipt предложения мира проверяет неизменность параметров");
+
+                String acceptRequest = "war-receipt-accept-001";
+                receiptEngine.acceptPeaceOnce(acceptRequest, declared.id, defender);
+                receiptEngine.acceptPeaceOnce(acceptRequest, declared.id, defender);
+                ok(!declared.active, "принятие мира завершается один раз и остаётся терминальным");
+
+                String persisted = receiptEngine.toJson();
+                ok(persisted.contains("wf-war/2") && persisted.contains("actionOperations"),
+                        "снимок wf-war/2 включает receipts политических действий");
+                WarEngine restored = new WarEngine(ed);
+                restored.loadCasusBelli(Files.readString(Path.of("wf-war/src/main/resources/data/wf_war/wf_war/base.json")));
+                restored.fromJson(persisted);
+                int restoredCount = restored.wars.size();
+                War restoredDeclaration = restored.declareOnce(
+                        declareRequest, attacker, defender, "humiliation", List.of());
+                restored.acceptPeaceOnce(acceptRequest, declared.id, defender);
+                ok(restoredDeclaration.id == declared.id && restored.wars.size() == restoredCount
+                                && !restored.wars.get(declared.id).active,
+                        "declaration and peace receipts survive save/reload without reapplying political consequences");
+
+                WarEngine legacy = new WarEngine(ed);
+                legacy.loadCasusBelli(Files.readString(Path.of("wf-war/src/main/resources/data/wf_war/wf_war/base.json")));
+                legacy.fromJson(persisted.replace("wf-war/2", "wf-war/1"));
+                ok(legacy.wars.containsKey(declared.id) && !legacy.wars.get(declared.id).active,
+                        "legacy wf-war/1 data migrates without requiring action receipt rows");
+
+                String aiId = WarEngine.autonomousActionRequestId(412, attacker, "enforce-peace", 7);
+                ok(aiId.equals(WarEngine.autonomousActionRequestId(412, attacker, "enforce-peace", 7))
+                                && !aiId.equals(WarEngine.autonomousActionRequestId(413, attacker, "enforce-peace", 7))
+                                && !aiId.equals(WarEngine.autonomousActionRequestId(412, defender, "enforce-peace", 7)),
+                        "AI political receipts are stable by day, realm, operation and campaign");
+            }
+        }
+
         System.out.println(fails == 0 ? "ALL OK" : fails + " FAILED");
         if (fails > 0) System.exit(1);
     }
