@@ -4,7 +4,7 @@
 //! the Minecraft host and emits proposals; it never mutates Minecraft state.
 //! Stable ordering and seeded hashing make identical snapshots reproducible.
 
-#![forbid(unsafe_code)]
+pub mod jni;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -95,7 +95,8 @@ pub struct WorldSnapshot {
     pub workforce: Vec<Workforce>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum ProposalKind {
     DeclareWar { attacker: String, defender: String, score: i32, reason: String },
     Build { settlement: String, building: String, priority: i32, reason: String },
