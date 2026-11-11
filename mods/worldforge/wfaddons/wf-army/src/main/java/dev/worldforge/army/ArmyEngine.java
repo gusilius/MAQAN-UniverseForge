@@ -31,6 +31,9 @@ public final class ArmyEngine {
     public final List<String> events = new ArrayList<>();
     public boolean ai = true;
     private int nextArmy = 1;
+    /** Durable idempotency receipts for roster transitions to/from physical troop entities. */
+    public static final int MAX_ROSTER_OPERATIONS = 100_000;
+    private final LinkedHashMap<String, String> rosterOperations = new LinkedHashMap<>();
     /** Дробная часть суток между вызовами tick; сохраняется, чтобы частые малые шаги не терялись. */
     private double dayAccumulator;
     private Map<String, List<Integer>> baronyCache = new HashMap<>();
@@ -170,6 +173,62 @@ public final class ArmyEngine {
     }
 
     public Army army(int id) { Army a = armies.get(id); if (a == null) throw new TitleEditor.EditException("Нет армии " + id); return a; }
+
+    /**
+     * Applies a strategic roster delta exactly once. The operation receipt is part of
+     * wf_army.json, so a physical soldier that survives a crash during demobilization
+     * cannot be credited to the abstract army twice.
+     *
+     * @return true when the roster changed; false when the same operation was already committed
+     */
+    public synchronized boolean applyRosterDeltaOnce(String operationId, int armyId, Map<String, Integer> delta) {
+        if (operationId == null || !operationId.matches("[A-Za-z0-9_.:-]{1,128}"))
+            throw new IllegalArgumentException("Invalid army roster operation id");
+        if (armyId <= 0 || delta == null || delta.isEmpty() || delta.size() > 64)
+            throw new IllegalArgumentException("Invalid army roster delta");
+
+        TreeMap<String, Integer> normalized = new TreeMap<>();
+        for (Map.Entry<String, Integer> entry : delta.entrySet()) {
+            String type = entry.getKey();
+            Integer amount = entry.getValue();
+            if (type == null || !type.matches("[a-z0-9_.:-]{1,64}") || amount == null
+                    || amount == 0 || Math.abs((long) amount) > 1_000_000_000L)
+                throw new IllegalArgumentException("Invalid army roster delta entry");
+            normalized.put(type, amount);
+        }
+
+        StringBuilder canonical = new StringBuilder().append(armyId);
+        for (Map.Entry<String, Integer> entry : normalized.entrySet())
+            canonical.append('|').append(entry.getKey()).append(':').append(entry.getValue());
+        String payload = canonical.toString();
+
+        String prior = rosterOperations.get(operationId);
+        if (prior != null) {
+            if (!prior.equals(payload))
+                throw new IllegalStateException("Army roster operation id was reused with a different payload: " + operationId);
+            return false;
+        }
+        if (rosterOperations.size() >= MAX_ROSTER_OPERATIONS)
+            throw new IllegalStateException("Army roster receipt limit reached; reconcile/compact receipts before another transition");
+
+        Army target = armies.get(armyId);
+        if (target == null) throw new IllegalArgumentException("Нет армии " + armyId);
+
+        Map<String, Integer> next = new TreeMap<>();
+        for (Map.Entry<String, Integer> entry : normalized.entrySet()) {
+            long value = (long) target.units.getOrDefault(entry.getKey(), 0) + entry.getValue();
+            if (value < 0 || value > Integer.MAX_VALUE)
+                throw new IllegalArgumentException("Army roster delta would create an invalid count for " + entry.getKey());
+            next.put(entry.getKey(), (int) value);
+        }
+
+        for (Map.Entry<String, Integer> entry : next.entrySet()) {
+            if (entry.getValue() == 0) target.units.remove(entry.getKey());
+            else target.units.put(entry.getKey(), entry.getValue());
+        }
+        rosterOperations.put(operationId, payload);
+        return true;
+    }
 
     private Army own(int id, String realm) {
         Army a = army(id);
@@ -678,6 +737,10 @@ public final class ArmyEngine {
             al.add(m);
         }
         root.put("armies", al);
+        List<Object> rosterReceipts = new ArrayList<>();
+        for (Map.Entry<String, String> entry : rosterOperations.entrySet())
+            rosterReceipts.add(Map.of("id", entry.getKey(), "payload", entry.getValue()));
+        root.put("rosterOperations", rosterReceipts);
         Map<String, Object> sg = new LinkedHashMap<>();
         for (Map.Entry<Integer, double[]> e : sieges.entrySet()) sg.put(String.valueOf(e.getKey()), List.of(e.getValue()[0], e.getValue()[1], e.getValue()[2]));
         root.put("sieges", sg);
@@ -689,7 +752,7 @@ public final class ArmyEngine {
         Map<String, Object> root = (Map<String, Object>) Json.parse(json);
         String format = String.valueOf(root.get("format"));
         if (!"wf-army/1".equals(format) && !"wf-army/2".equals(format)) throw new IllegalArgumentException("Неверный формат армий");
-        armies.clear(); sieges.clear(); pacts.clear(); gold.clear(); pool.clear(); humans.clear();
+        armies.clear(); sieges.clear(); pacts.clear(); gold.clear(); pool.clear(); humans.clear(); rosterOperations.clear();
         nextArmy = ((Number) root.get("next")).intValue();
         Object savedAccumulator = root.get("dayAccumulator");
         dayAccumulator = savedAccumulator instanceof Number n && Double.isFinite(n.doubleValue()) && n.doubleValue() >= 0 && n.doubleValue() < 1 ? n.doubleValue() : 0;
@@ -710,6 +773,19 @@ public final class ArmyEngine {
             for (Map.Entry<String, Object> e : ((Map<String, Object>) m.get("units")).entrySet()) a.units.put(e.getKey(), ((Number) e.getValue()).intValue());
             for (Object p : (List<Object>) m.get("path")) a.path.add(((Number) p).intValue());
             armies.put(a.id, a);
+        }
+        if (root.get("rosterOperations") instanceof List<?> savedReceipts) {
+            if (savedReceipts.size() > MAX_ROSTER_OPERATIONS)
+                throw new IllegalArgumentException("Слишком много квитанций состава армии");
+            for (Object raw : savedReceipts) {
+                if (!(raw instanceof Map<?, ?> receipt)
+                        || !(receipt.get("id") instanceof String operationId)
+                        || !(receipt.get("payload") instanceof String payload)
+                        || !operationId.matches("[A-Za-z0-9_.:-]{1,128}")
+                        || payload.isBlank() || payload.length() > 4096
+                        || rosterOperations.putIfAbsent(operationId, payload) != null)
+                    throw new IllegalArgumentException("Повреждена квитанция состава армии");
+            }
         }
         for (Map.Entry<String, Object> e : ((Map<String, Object>) root.get("sieges")).entrySet()) {
             List<Object> v = (List<Object>) e.getValue();
