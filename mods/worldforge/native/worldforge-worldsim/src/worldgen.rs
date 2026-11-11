@@ -89,6 +89,10 @@ pub fn generate_world(request: &WorldGenRequest) -> Result<GeneratedWorld, World
             let dz = i64::from(r.z) - i64::from(z);
             dx * dx + dz * dz
         }).expect("realm count is validated");
+        // The first province in each realm's group is its guaranteed capital province.
+        let owner = if index % request.provinces_per_realm == 0 {
+            &realms[(index / request.provinces_per_realm) as usize]
+        } else { nearest };
         let elevation = (roll(request.seed, "elevation", index as u64, 201) as i16) - 80;
         let moisture = roll(request.seed, "moisture", index as u64, 101) as u8;
         let temperature = (roll(request.seed, "temperature", index as u64, 101) as i8) - 50;
@@ -99,7 +103,7 @@ pub fn generate_world(request: &WorldGenRequest) -> Result<GeneratedWorld, World
             else if moisture > 75 { "forest" }
             else { "plains" };
         provinces.push(ProvinceSeed {
-            id: format!("province_{:04}", index + 1), realm_id: nearest.id.clone(), x, z,
+            id: format!("province_{:04}", index + 1), realm_id: owner.id.clone(), x, z,
             elevation, moisture, temperature, biome: biome.into(),
             food: (moisture / 2).saturating_add(if biome == "plains" { 35 } else { 0 }),
             wood: if biome == "forest" { 90 } else { moisture / 3 },
