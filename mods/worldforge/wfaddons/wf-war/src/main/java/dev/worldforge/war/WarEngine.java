@@ -24,6 +24,9 @@ public final class WarEngine {
     public final Map<Integer, War> wars = new LinkedHashMap<>();
     public final Map<String, Long> truces = new LinkedHashMap<>();
     private final Map<String, Set<String>> managedEnemies = new HashMap<>();
+    /** Durable idempotency receipts for declarations, peace, alliances and political outcomes. */
+    public static final int MAX_ACTION_OPERATIONS = 50_000;
+    private final LinkedHashMap<String, String> actionOperations = new LinkedHashMap<>();
     public long day;
     private int nextWar = 1;
     public Authority authority;
@@ -48,6 +51,48 @@ public final class WarEngine {
         if (r == null) throw new TitleEditor.EditException("Нет государства " + id);
         return r;
     }
+
+    private static String actionOperationId(String requestId) {
+        if (requestId == null || requestId.isBlank() || requestId.length() > 128)
+            throw new TitleEditor.EditException("У политического приказа отсутствует корректный requestId");
+        return "war-action:" + UUID.nameUUIDFromBytes(requestId.trim().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    private static String actionFingerprint(String... values) {
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(
+                Json.write(Arrays.asList(values)).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    private String priorActionResult(String requestId, String fingerprint) {
+        String operationId = actionOperationId(requestId);
+        String prior = actionOperations.get(operationId);
+        if (prior == null) return null;
+        String prefix = "war-action/v1|" + fingerprint + "|";
+        if (!prior.startsWith(prefix))
+            throw new IllegalStateException("War action request ID was reused with a different payload: " + requestId);
+        return prior.substring(prefix.length());
+    }
+
+    private void rememberActionResult(String requestId, String fingerprint, String result) {
+        String operationId = actionOperationId(requestId);
+        if (actionOperations.size() >= MAX_ACTION_OPERATIONS)
+            throw new IllegalStateException("War action receipt limit reached; reconcile/compact before another political command");
+        actionOperations.put(operationId, "war-action/v1|" + fingerprint + "|" + result);
+    }
+
+    private void requireActionReceiptCapacity() {
+        if (actionOperations.size() >= MAX_ACTION_OPERATIONS)
+            throw new IllegalStateException("War action receipt limit reached; reconcile/compact before another political command");
+    }
+
+    /** Stable AI request identity: replay within one world day reuses the same political receipt. */
+    public static String autonomousActionRequestId(long worldDay, String realmId, String operation, int warId) {
+        if (worldDay < 0 || realmId == null || realmId.isBlank() || operation == null || operation.isBlank()
+                || warId <= 0) throw new IllegalArgumentException("Invalid autonomous war action identity");
+        String canonical = worldDay + "|" + realmId + "|" + operation + "|" + warId;
+        return "ai-war:" + UUID.nameUUIDFromBytes(canonical.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
 
     private static String key(String a, String b) { return a.compareTo(b) < 0 ? a + "|" + b : b + "|" + a; }
 
@@ -206,6 +251,27 @@ public final class WarEngine {
         return w;
     }
 
+    /** Replay-safe declaration; the original War object remains addressable after conclusion. */
+    public synchronized War declareOnce(String requestId, String attackerId, String defenderId,
+                                        String cbId, List<Integer> goals) {
+        List<Integer> safeGoals = List.copyOf(goals == null ? List.of() : goals);
+        String fingerprint = actionFingerprint("declare", attackerId, defenderId, cbId, Json.write(safeGoals));
+        String prior = priorActionResult(requestId, fingerprint);
+        if (prior != null) {
+            if (!prior.startsWith("war:")) throw new IllegalStateException("Invalid prior war declaration receipt");
+            int id;
+            try { id = Integer.parseInt(prior.substring(4)); }
+            catch (NumberFormatException error) { throw new IllegalStateException("Corrupt prior war declaration receipt", error); }
+            War existing = wars.get(id);
+            if (existing == null) throw new IllegalStateException("War declaration receipt references a missing campaign " + id);
+            return existing;
+        }
+        requireActionReceiptCapacity();
+        War created = declare(attackerId, defenderId, cbId, safeGoals);
+        rememberActionResult(requestId, fingerprint, "war:" + created.id);
+        return created;
+    }
+
     private void gather(Map<String, War.Side> sides, Map<String, String> why, String leader, War.Side side) {
         Deque<String> q = new ArrayDeque<>();
         q.add(leader);
@@ -236,6 +302,14 @@ public final class WarEngine {
         return null;
     }
 
+    public synchronized void allyOnce(String requestId, String a, String b) {
+        String fingerprint = actionFingerprint("ally", a, b);
+        if (priorActionResult(requestId, fingerprint) != null) return;
+        requireActionReceiptCapacity();
+        ally(a, b);
+        rememberActionResult(requestId, fingerprint, "done");
+    }
+
     public void ally(String a, String b) {
         TitleData.Realm ra = realm(a);
         realm(b);
@@ -245,6 +319,14 @@ public final class WarEngine {
         s.add(b);
         editor.setRealmProp(a, "allies", String.join(",", s));
         syncProps();
+    }
+
+    public synchronized void breakAllianceOnce(String requestId, String a, String b) {
+        String fingerprint = actionFingerprint("breakAlliance", a, b);
+        if (priorActionResult(requestId, fingerprint) != null) return;
+        requireActionReceiptCapacity();
+        breakAlliance(a, b);
+        rememberActionResult(requestId, fingerprint, "done");
     }
 
     public void breakAlliance(String a, String b) {
@@ -316,6 +398,14 @@ public final class WarEngine {
     // ------------------------------------------------------------------ мир
 
     /** Предложение мира от государства-лидера. Белый мир - без итогов; иначе победитель требует цели (нужно хватающее очко). */
+    public synchronized void offerPeaceOnce(String requestId, int warId, String fromRealm, boolean white) {
+        String fingerprint = actionFingerprint("offerPeace", warId, fromRealm, white);
+        if (priorActionResult(requestId, fingerprint) != null) return;
+        requireActionReceiptCapacity();
+        offerPeace(warId, fromRealm, white);
+        rememberActionResult(requestId, fingerprint, "done");
+    }
+
     public void offerPeace(int warId, String fromRealm, boolean white) {
         War w = active(warId);
         War.Side s = leaderSide(w, fromRealm);
@@ -323,6 +413,14 @@ public final class WarEngine {
         w.offerFrom = s;
         w.offerWhite = white;
         w.say(day, realm(fromRealm).name + (white ? " предлагает белый мир" : " предъявляет условия мира"));
+    }
+
+    public synchronized void acceptPeaceOnce(String requestId, int warId, String byRealm) {
+        String fingerprint = actionFingerprint("acceptPeace", warId, byRealm);
+        if (priorActionResult(requestId, fingerprint) != null) return;
+        requireActionReceiptCapacity();
+        acceptPeace(warId, byRealm);
+        rememberActionResult(requestId, fingerprint, "done");
     }
 
     public void acceptPeace(int warId, String byRealm) {
@@ -333,12 +431,28 @@ public final class WarEngine {
     }
 
     /** Победитель с достаточным счётом навязывает мир сразу (противник держится, но ему некуда деваться). */
+    public synchronized void enforceOnce(String requestId, int warId, String byRealm) {
+        String fingerprint = actionFingerprint("enforce", warId, byRealm);
+        if (priorActionResult(requestId, fingerprint) != null) return;
+        requireActionReceiptCapacity();
+        enforce(warId, byRealm);
+        rememberActionResult(requestId, fingerprint, "done");
+    }
+
     public void enforce(int warId, String byRealm) {
         War w = active(warId);
         War.Side s = leaderSide(w, byRealm);
         double need = goalCost(w);
         if (w.scoreFor(s) < need) throw new TitleEditor.EditException("Не хватает очков войны: " + Math.round(w.scoreFor(s)) + " из " + Math.round(need));
         finish(w, s, "Мир навязан победителем");
+    }
+
+    public synchronized void surrenderOnce(String requestId, int warId, String byRealm) {
+        String fingerprint = actionFingerprint("surrender", warId, byRealm);
+        if (priorActionResult(requestId, fingerprint) != null) return;
+        requireActionReceiptCapacity();
+        surrender(warId, byRealm);
+        rememberActionResult(requestId, fingerprint, "done");
     }
 
     public void surrender(int warId, String byRealm) {
@@ -537,12 +651,16 @@ public final class WarEngine {
 
     public String toJson() {
         Map<String, Object> root = new LinkedHashMap<>();
-        root.put("format", "wf-war/1");
+        root.put("format", "wf-war/2");
         root.put("day", day); root.put("next_war", nextWar);
         root.put("truces", new LinkedHashMap<String, Object>(truces));
         Map<String, Object> mg = new LinkedHashMap<>();
         for (Map.Entry<String, Set<String>> e : managedEnemies.entrySet()) mg.put(e.getKey(), new ArrayList<Object>(e.getValue()));
         root.put("managed", mg);
+        List<Object> operationReceipts = new ArrayList<>();
+        for (Map.Entry<String, String> entry : actionOperations.entrySet())
+            operationReceipts.add(Map.of("id", entry.getKey(), "payload", entry.getValue()));
+        root.put("actionOperations", operationReceipts);
         List<Object> ws = new ArrayList<>();
         for (War w : wars.values()) {
             Map<String, Object> m = new LinkedHashMap<>();
@@ -567,15 +685,30 @@ public final class WarEngine {
     @SuppressWarnings("unchecked")
     public void fromJson(String json) {
         Map<String, Object> root = (Map<String, Object>) Json.parse(json);
-        if (!"wf-war/1".equals(root.get("format"))) throw new IllegalArgumentException("Неверный формат войн");
+        String format = String.valueOf(root.get("format"));
+        boolean legacy = "wf-war/1".equals(format);
+        if (!legacy && !"wf-war/2".equals(format)) throw new IllegalArgumentException("Неверный формат войн");
         day = ((Number) root.get("day")).longValue();
         nextWar = ((Number) root.get("next_war")).intValue();
-        truces.clear(); wars.clear(); managedEnemies.clear();
+        truces.clear(); wars.clear(); managedEnemies.clear(); actionOperations.clear();
         for (Map.Entry<String, Object> e : ((Map<String, Object>) root.get("truces")).entrySet()) truces.put(e.getKey(), ((Number) e.getValue()).longValue());
         for (Map.Entry<String, Object> e : ((Map<String, Object>) root.get("managed")).entrySet()) {
             Set<String> s = new LinkedHashSet<>();
             for (Object o : (List<Object>) e.getValue()) s.add((String) o);
             managedEnemies.put(e.getKey(), s);
+        }
+        if (!legacy && root.get("actionOperations") instanceof List<?> receipts) {
+            if (receipts.size() > MAX_ACTION_OPERATIONS)
+                throw new IllegalArgumentException("Слишком много квитанций политических действий");
+            for (Object raw : receipts) {
+                if (!(raw instanceof Map<?, ?> receipt)
+                        || !(receipt.get("id") instanceof String operationId)
+                        || !(receipt.get("payload") instanceof String payload)
+                        || !operationId.matches("[A-Za-z0-9_.:-]{1,128}")
+                        || payload.isBlank() || payload.length() > 4096
+                        || actionOperations.putIfAbsent(operationId, payload) != null)
+                    throw new IllegalArgumentException("Повреждена квитанция политического действия");
+            }
         }
         for (Object o : (List<Object>) root.get("wars")) {
             Map<String, Object> m = (Map<String, Object>) o;
