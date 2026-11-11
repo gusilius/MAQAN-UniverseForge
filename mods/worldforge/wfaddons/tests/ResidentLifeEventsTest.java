@@ -5,6 +5,9 @@ import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.settle.ResidentLifeEvents;
 import dev.worldforge.settle.ResidentSocial;
 
+import java.util.ArrayList;
+import java.util.List;
+
 public final class ResidentLifeEventsTest {
     private static int failures;
     private static void check(boolean value, String message) {
@@ -70,6 +73,61 @@ public final class ResidentLifeEventsTest {
         ResidentLifeEvents.yearly(registry, 2004);
         check(!datingA.props.containsKey("family.dating") && !datingB.props.containsKey("family.dating"),
                 "severe relationship damage ends the dating relationship with a separation event");
+        CharacterRegistry familyRegistry = new CharacterRegistry();
+        Character grandpa = familyRegistry.create("Орин", "Дом", "north", "m", 1940);
+        Character grandma = familyRegistry.create("Эйра", "Дом", "north", "f", 1942);
+        Character father = familyRegistry.addChild(grandpa, grandma, "Дорен", "m", 1970);
+        Character mother = familyRegistry.create("Лина", "Дом Лины", "north", "f", 1972);
+        Character child = familyRegistry.addChild(father, mother, "Кай", "m", 2000);
+        father.alive = false;
+        mother.alive = false;
+        ResidentLifeEvents.yearly(familyRegistry, 2010);
+        check((grandpa.id.equals(child.props.get("family.guardian_id"))
+                        || grandma.id.equals(child.props.get("family.guardian_id")))
+                        && "kin_guardianship".equals(child.props.get("family.care_status")),
+                "an orphan is assigned a living grandparent as canonical kin guardian");
+        check(((Number) child.props.get("family.education_level")).intValue() >= 2
+                        && ((Number) child.props.get("family.development_year")).intValue() == 2010,
+                "childhood advances age-appropriate education exactly once per world year");
+        ResidentLifeEvents.yearly(familyRegistry, 2018);
+        check("independent_adult".equals(child.props.get("family.care_status"))
+                        && ((Number) child.props.get("family.adulthood_year")).intValue() == 2018,
+                "the family-care lifecycle releases a resident into adulthood at eighteen");
+
+        CharacterRegistry conflictRegistry = new CharacterRegistry();
+        Character partnerA = conflictRegistry.create("Алан", "", "north", "m", 1970);
+        Character partnerB = conflictRegistry.create("Селия", "", "north", "f", 1971);
+        conflictRegistry.marry(partnerA.id, partnerB.id, 2000);
+        ResidentSocial.adjust(partnerA, partnerB.id, -80);
+        ResidentSocial.adjust(partnerB, partnerA.id, -80);
+        List<CharacterRegistry.LifecycleEvent> conflictEvents = new ArrayList<>();
+        conflictRegistry.addListener(new CharacterRegistry.Listener() {
+            @Override public void lifecycle(Character character, CharacterRegistry.LifecycleEvent event) {
+                conflictEvents.add(event);
+            }
+        });
+        for (int year = 2001; year <= 2003; year++) ResidentLifeEvents.yearly(conflictRegistry, year);
+        check(partnerA.spouse.isBlank() && partnerB.spouse.isBlank()
+                        && conflictEvents.stream().anyMatch(e -> e.kind() == CharacterRegistry.LifecycleKind.MARRIAGE_DISSOLVED),
+                "sustained severe marital conflict produces one reciprocal divorce lifecycle event");
+
+        CharacterRegistry cousinRegistry = new CharacterRegistry();
+        Character rootA = cousinRegistry.create("RootA", "", "north", "m", 1940);
+        Character rootB = cousinRegistry.create("RootB", "", "north", "f", 1942);
+        Character siblingOne = cousinRegistry.addChild(rootA, rootB, "SiblingOne", "m", 1970);
+        Character siblingTwo = cousinRegistry.addChild(rootA, rootB, "SiblingTwo", "f", 1972);
+        Character cousinOne = cousinRegistry.create("CousinOne", "", "north", "m", 1995);
+        Character cousinTwo = cousinRegistry.create("CousinTwo", "", "north", "f", 1996);
+        cousinOne.father = siblingOne.id;
+        cousinOne.mother = cousinRegistry.create("OtherMotherA", "", "north", "f", 1971).id;
+        cousinTwo.father = siblingTwo.id;
+        cousinTwo.mother = cousinRegistry.create("OtherMotherB", "", "north", "f", 1973).id;
+        ResidentSocial.adjust(cousinOne, cousinTwo.id, 100);
+        ResidentSocial.adjust(cousinTwo, cousinOne.id, 100);
+        for (int year = 2000; year <= 2008; year++) ResidentLifeEvents.yearly(cousinRegistry, year);
+        check(!cousinOne.props.containsKey("family.dating") && !cousinTwo.props.containsKey("family.dating"),
+                "close cousins sharing grandparents are excluded from autonomous dating");
+
         if (failures > 0) throw new AssertionError(failures + " resident life event tests failed");
     }
 }
