@@ -343,10 +343,9 @@ public final class WorldSimMod {
                 if (a != null && b != null) {
                     var result = Marriages.propose(court, first, second);
                     if (!result.ok) return false;
-                    Path directory = EditorManager.overlayDir(server, map);
-                    Files.createDirectories(directory);
-                    Files.writeString(directory.resolve("wf_court.json"), court.toJson(), StandardCharsets.UTF_8);
-                    return true;
+                    // Use the court addon's canonical crash-recoverable persistence path.
+                    // The in-memory marriage is not reported as committed unless its state is durable.
+                    return CourtMod.persistNow(server, map);
                 }
             }
             return false;
