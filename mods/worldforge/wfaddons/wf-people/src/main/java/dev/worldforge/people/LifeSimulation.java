@@ -53,6 +53,18 @@ public final class LifeSimulation {
         if (pendingRaw instanceof String pendingName && !pendingName.isBlank()) {
             try {
                 Action pending = Action.valueOf(pendingName);
+                Outcome pendingOutcome = executor.execute(character, pending, context);
+                if (pendingOutcome == Outcome.SUCCESS) {
+                    completePending(character);
+                    character.props.put("population.ai.next_think_minute", now + 1);
+                    return new Decision(pending, Outcome.SUCCESS, utility(character, context, pending),
+                            "authoritative-action-completed", List.of(pending), now + 1);
+                }
+                if (pendingOutcome == Outcome.BLOCKED || pendingOutcome == Outcome.RETRY) {
+                    cancelPending(character, executor.failureReason(character, pending, context, pendingOutcome));
+                    return new Decision(pending, pendingOutcome, utility(character, context, pending),
+                            "pending-action-interrupted", List.of(pending), now + 1);
+                }
                 long pendingMinute = number(character.props.get("population.ai.pending_minute"), now);
                 return new Decision(pending, Outcome.IN_PROGRESS, utility(character, context, pending),
                         "action-in-progress", List.of(pending), pendingMinute + 1);
