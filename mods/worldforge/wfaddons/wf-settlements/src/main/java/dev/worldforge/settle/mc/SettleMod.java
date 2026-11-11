@@ -932,6 +932,15 @@ public class SettleMod {
             LifeSimulation.tick(person, context, (character, action, ignored) -> {
                 // An existing pending action is polled here until its physical/abstract execution finishes.
                 if (!worker.lifeAction.isBlank()) {
+                    // Character and settlement snapshots are persisted independently. After a
+                    // crash they can disagree; do not let an old sleep/eat/social animation
+                    // complete a different pending Character action and grant the wrong effects.
+                    if (!LifeSimulation.matchesPhysicalAction(action, worker.lifeAction)) {
+                        LOGGER.warn("wf_settle: cancelling mismatched life action for Character {} (AI={}, worker={})",
+                                character.globalId, action, worker.lifeAction);
+                        clearLifeAction(worker);
+                        return LifeSimulation.Outcome.BLOCKED;
+                    }
                     if (!"performing".equals(worker.lifeActionStage)) return LifeSimulation.Outcome.IN_PROGRESS;
                     if (worldMinute < worker.lifeActionUntil) return LifeSimulation.Outcome.IN_PROGRESS;
                     // Settlement.eat(dt) is the authoritative ration ledger for every resident.

@@ -181,6 +181,17 @@ public final class PopulationSimulationTest {
                         && PopulationSimulation.need(blocked, Need.HUNGER) == 90,
                 "unavailable resources and blocked actions do not grant free need relief");
 
+        ok(LifeSimulation.matchesPhysicalAction(LifeSimulation.Action.EAT, "eating")
+                        && LifeSimulation.matchesPhysicalAction(LifeSimulation.Action.SLEEP, "sleeping")
+                        && LifeSimulation.matchesPhysicalAction(LifeSimulation.Action.SOCIALIZE, "socializing")
+                        && LifeSimulation.matchesPhysicalAction(LifeSimulation.Action.SEEK_SAFETY, "fleeing"),
+                "physical settlement actions map only to their matching Character AI actions");
+        ok(!LifeSimulation.matchesPhysicalAction(LifeSimulation.Action.EAT, "sleeping")
+                        && !LifeSimulation.matchesPhysicalAction(LifeSimulation.Action.SLEEP, "eating")
+                        && !LifeSimulation.matchesPhysicalAction(LifeSimulation.Action.WORK, "socializing")
+                        && !LifeSimulation.matchesPhysicalAction(LifeSimulation.Action.EAT, ""),
+                "mismatched or missing physical action cannot satisfy a Character need");
+
         Character delayed = registry.create("Delayed", "", "north", "m", 280);
         PopulationSimulation.setNeed(delayed, Need.HUNGER, 90);
         LifeSimulation.Decision travelling = LifeSimulation.tick(delayed, activeMorning,

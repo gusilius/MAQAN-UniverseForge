@@ -12,6 +12,22 @@ public final class LifeSimulation {
     public enum Outcome { SUCCESS, IN_PROGRESS, BLOCKED, RETRY }
     public enum LOD { ACTIVE, SETTLEMENT, REGIONAL, REMOTE }
 
+    /**
+     * Confirms that a persisted settlement-side physical action represents the Character AI action
+     * currently being completed. A mismatch must fail closed: never grant sleep/food/social effects
+     * for a different action merely because some worker animation is still in progress.
+     */
+    public static boolean matchesPhysicalAction(Action action, String workerAction) {
+        if (action == null || workerAction == null) return false;
+        return switch (action) {
+            case EAT -> "eating".equals(workerAction);
+            case SLEEP -> "sleeping".equals(workerAction);
+            case SOCIALIZE -> "socializing".equals(workerAction);
+            case SEEK_SAFETY -> "fleeing".equals(workerAction);
+            case WORK, TRAIN, RECREATE, IDLE -> false;
+        };
+    }
+
     public record Context(long worldMinute, boolean foodAvailable, boolean shelterAvailable,
                           boolean safe, boolean socialAvailable, boolean workAvailable,
                           boolean trainingAvailable, boolean recreationAvailable,
