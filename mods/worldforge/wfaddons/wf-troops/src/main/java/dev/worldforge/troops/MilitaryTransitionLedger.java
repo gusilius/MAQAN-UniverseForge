@@ -78,6 +78,12 @@ public final class MilitaryTransitionLedger {
                 && entry.value().characterGlobalId().equals(characterGlobalId);
     }
 
+    /** Terminal tombstone lookup by physical entity UUID, even when its NBT no longer has CharacterId. */
+    public synchronized boolean hasCompletedEntity(String troopEntityId) {
+        Entry entry = byEntity.get(troopEntityId);
+        return entry != null && entry.state() == State.COMPLETED;
+    }
+
     /** Changes the pending intent into a durable terminal receipt; it does not erase history. */
     public synchronized boolean complete(String characterGlobalId) {
         String entityId = activeByCharacter.remove(characterGlobalId);

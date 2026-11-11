@@ -382,6 +382,14 @@ public class TroopsMod {
         if (e.getLevel().isClientSide || !(e.getEntity() instanceof TroopEntity troop)) return;
         String entityId = troop.getUUID().toString();
 
+        if (TRANSITIONS.hasCompletedEntity(entityId)) {
+            LIVE.remove(entityId);
+            SQUADS.remove(entityId);
+            RETURNED_BODIES_PENDING.remove(entityId);
+            troop.discard();
+            return; // Terminal physical-body receipt is authoritative even when NBT lost CharacterId.
+        }
+
         // Death is terminal even when a later army-roster receipt also exists.
         if (ModList.get().isLoaded("wf_people")
                 && troop.characterId != null && !troop.characterId.isBlank()) {
@@ -822,6 +830,9 @@ public class TroopsMod {
         if (pending == null || server == null || militaryLoadFailed || !ModList.get().isLoaded("wf_people"))
             return false;
         try {
+            Character person = PeopleMod.authority().getGlobal(pending.characterGlobalId());
+            CharacterRegistry owner = PeopleMod.authority().registryForGlobal(pending.characterGlobalId());
+            if (person == null || owner == null || !person.alive) return false;
             if (body == null) {
                 UUID entityId = UUID.fromString(pending.troopEntityId());
                 for (ServerLevel level : server.getAllLevels()) {
@@ -830,20 +841,38 @@ public class TroopsMod {
                 }
             }
             if (body == null || !pending.troopEntityId().equals(body.getUUID().toString())) return false;
-            PersonBinding binding = bindPerson(body, false);
-            if (binding == null && (body.characterId == null || body.characterId.isBlank()))
-                binding = findCharacterForTroopEntity(pending.troopEntityId());
-            if (binding == null || !pending.characterGlobalId().equals(binding.character().globalId)
-                    || !binding.character().alive) return false;
+            if (body.characterId != null && !body.characterId.isBlank()
+                    && !pending.characterGlobalId().equals(body.characterId)) {
+                body.setInvulnerable(true);
+                actionPersistenceBlocked = true;
+                LOGGER.error("wf_troops: strategic return {} conflicts with body Character {}",
+                        pending.troopEntityId(), body.characterId);
+                return false;
+            }
+            Object boundEntity = person.props.get("wf_troop_uuid");
+            if (boundEntity instanceof String current && !current.isBlank()
+                    && !pending.troopEntityId().equals(current)) {
+                body.setInvulnerable(true);
+                actionPersistenceBlocked = true;
+                LOGGER.error("wf_troops: Character {} is already bound to a different physical troop {}",
+                        person.globalId, current);
+                return false;
+            }
+
+            // Idempotently complete the Character half by global ID. This still works if a crash
+            // happened after the previous attempt had already removed the old entity binding.
             body.setInvulnerable(true);
-            if (!releaseBodyDurably(body)) return false;
-            if (!TRANSITIONS.complete(pending.characterGlobalId())) {
-                if (TRANSITIONS.isCompleted(pending.characterGlobalId(), pending.troopEntityId())) {
-                    LIVE.remove(pending.troopEntityId());
-                    SQUADS.remove(pending.troopEntityId());
-                    body.discard();
-                    return true;
-                }
+            owner.unbindEntity(person.id, "troop", pending.troopEntityId());
+            person.props.remove("wf_unit_kind");
+            person.props.remove("wf_troop_uuid");
+            person.props.remove("wf_troop_unit");
+            person.props.remove("wf_army_id");
+            person.props.remove("wf_combat_xp");
+            person.props.remove("wf_veteran_rank");
+            if (!PeopleMod.persistCharacter(person, server)) return false;
+
+            if (!TRANSITIONS.complete(pending.characterGlobalId())
+                    && !TRANSITIONS.isCompleted(pending.characterGlobalId(), pending.troopEntityId())) {
                 actionPersistenceBlocked = true;
                 return false;
             }
@@ -852,6 +881,8 @@ public class TroopsMod {
                 actionPersistenceBlocked = true;
                 return false;
             }
+            LIVE.remove(pending.troopEntityId());
+            SQUADS.remove(pending.troopEntityId());
             body.discard();
             return true;
         } catch (RuntimeException error) {
@@ -947,6 +978,11 @@ public class TroopsMod {
         for (Map.Entry<String, TroopEntity> entry : new ArrayList<>(RETURNED_BODIES_PENDING.entrySet())) {
             TroopEntity troop = entry.getValue();
             if (troop == null || !troop.isAlive()) {
+                RETURNED_BODIES_PENDING.remove(entry.getKey());
+                continue;
+            }
+            if (TRANSITIONS.hasCompletedEntity(entry.getKey())) {
+                troop.discard();
                 RETURNED_BODIES_PENDING.remove(entry.getKey());
                 continue;
             }

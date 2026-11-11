@@ -38,6 +38,8 @@ public final class MilitaryTransitionLedgerTest {
                 "completion moves the transition to a terminal receipt");
         check(restored.get(character) == null && restored.isCompleted(character, entity),
                 "completed transition is no longer pending but still blocks its exact stale body");
+        check(restored.hasCompletedEntity(entity),
+                "terminal receipt blocks stale entity NBT even when its CharacterId field is missing");
         check(!restored.isCompleted(otherCharacter, entity),
                 "a terminal receipt cannot remove a different Character's entity");
 
