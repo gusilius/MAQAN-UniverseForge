@@ -3,6 +3,7 @@ package dev.worldforge.war.mc;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.logging.LogUtils;
+import dev.worldforge.mod.AtomicFileBatch;
 import dev.worldforge.mod.EditorManager;
 import dev.worldforge.mod.MapData;
 import dev.worldforge.mod.TitleData;
@@ -100,67 +101,32 @@ public class WarMod {
      * Checked atomic checkpoint for all loaded political campaigns and title/realm map overlays.
      * Existing snapshots are backed up and restored if any map replacement fails.
      */
+    /**
+     * Commits political title/marker overlays and every loaded war snapshot in one recoverable
+     * multi-file batch. A crash before the batch manifest is removed restores the previous set.
+     */
     public static synchronized boolean persistNow(MinecraftServer server) {
         if (server == null || actionPersistenceBlocked) return false;
-        if (!EditorManager.saveDirtyChecked(server)) {
-            actionPersistenceBlocked = true;
-            LOGGER.error("wf_war: dirty political map state could not be committed; blocking further war actions");
-            return false;
-        }
-        Map<Path, String> snapshots = new java.util.LinkedHashMap<>();
-        for (Map.Entry<MapData, WarEngine> entry : ENGINES.entrySet()) {
-            snapshots.put(EditorManager.overlayDir(server, entry.getKey()).resolve("wf_war.json"),
-                    entry.getValue().toJson());
-        }
-        Map<Path, Path> staged = new java.util.LinkedHashMap<>();
-        Map<Path, Path> backups = new java.util.LinkedHashMap<>();
-        java.util.Set<Path> replaced = new java.util.LinkedHashSet<>();
+        EditorManager.DirtySnapshot dirty = null;
         try {
-            for (Map.Entry<Path, String> entry : snapshots.entrySet()) {
-                Path target = entry.getKey();
-                Files.createDirectories(target.getParent());
-                Path temp = target.resolveSibling(target.getFileName() + ".action.tmp");
-                Path backup = target.resolveSibling(target.getFileName() + ".action.bak");
-                Files.deleteIfExists(temp);
-                Files.deleteIfExists(backup);
-                Files.writeString(temp, entry.getValue(), StandardCharsets.UTF_8);
-                staged.put(target, temp);
-                if (Files.isRegularFile(target)) {
-                    Files.copy(target, backup, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                    backups.put(target, backup);
-                }
+            Path transactionRoot = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
+                    .resolve("worldforge");
+            AtomicFileBatch.recover(transactionRoot);
+            dirty = EditorManager.snapshotDirty(server);
+            Map<Path, byte[]> writes = new java.util.LinkedHashMap<>(dirty.files());
+            for (Map.Entry<MapData, WarEngine> entry : ENGINES.entrySet()) {
+                Path target = EditorManager.overlayDir(server, entry.getKey()).resolve("wf_war.json");
+                writes.put(target, entry.getValue().toJson().getBytes(StandardCharsets.UTF_8));
             }
-            for (Map.Entry<Path, Path> entry : staged.entrySet()) {
-                try {
-                    Files.move(entry.getValue(), entry.getKey(),
-                            java.nio.file.StandardCopyOption.REPLACE_EXISTING,
-                            java.nio.file.StandardCopyOption.ATOMIC_MOVE);
-                } catch (java.nio.file.AtomicMoveNotSupportedException unsupported) {
-                    Files.move(entry.getValue(), entry.getKey(),
-                            java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                }
-                replaced.add(entry.getKey());
-            }
-            for (Path backup : backups.values()) Files.deleteIfExists(backup);
+            AtomicFileBatch.commit(transactionRoot, writes);
+            EditorManager.acknowledgeDirtySnapshot(dirty);
             return true;
         } catch (Exception error) {
-            for (Path target : replaced) {
-                Path backup = backups.get(target);
-                try {
-                    if (backup != null && Files.exists(backup))
-                        Files.move(backup, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                    else Files.deleteIfExists(target);
-                } catch (Exception rollbackError) {
-                    LOGGER.error("wf_war: rollback failed for {}: {}", target, rollbackError.toString());
-                }
-            }
+            EditorManager.blockDirtySnapshot(dirty);
             actionPersistenceBlocked = true;
-            LOGGER.error("wf_war: atomic political checkpoint failed; further war actions are blocked: {}",
+            LOGGER.error("wf_war: политический пакет (титулы, метки, войны) не удалось зафиксировать или восстановить; действия заблокированы: {}",
                     error.toString(), error);
             return false;
-        } finally {
-            for (Path temp : staged.values()) try { Files.deleteIfExists(temp); } catch (Exception ignored) { }
-            for (Path backup : backups.values()) try { Files.deleteIfExists(backup); } catch (Exception ignored) { }
         }
     }
 
@@ -175,6 +141,14 @@ public class WarMod {
         ENGINES.clear();
         actionPersistenceBlocked = false;
         acc = 0;
+        try {
+            AtomicFileBatch.recover(e.getServer().getWorldPath(
+                    net.minecraft.world.level.storage.LevelResource.ROOT).resolve("worldforge"));
+        } catch (Exception error) {
+            actionPersistenceBlocked = true;
+            LOGGER.error("wf_war: аварийный политический file batch не удалось восстановить; войны и стратегические приказы заблокированы: {}",
+                    error.toString(), error);
+        }
     }
 
     @SubscribeEvent

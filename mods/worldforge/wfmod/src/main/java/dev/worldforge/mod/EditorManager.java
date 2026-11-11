@@ -26,6 +26,27 @@ import java.util.concurrent.ConcurrentHashMap;
  * Правки хранятся в <мир>/worldforge/<карта>/ (titles.json, realms.json, provinces.png) и накладываются поверх пакета при загрузке.
  */
 public final class EditorManager {
+    /** Immutable in-memory snapshot of dirty title/marker overlays awaiting a durable batch commit. */
+    public static final class DirtySnapshot {
+        private final Map<Path, byte[]> files;
+        private final Set<MapData> maps;
+
+        private DirtySnapshot(Map<Path, byte[]> files, Set<MapData> maps) {
+            Map<Path, byte[]> copy = new java.util.LinkedHashMap<>();
+            files.forEach((path, bytes) -> copy.put(path, bytes.clone()));
+            this.files = Collections.unmodifiableMap(copy);
+            Set<MapData> mapCopy = Collections.newSetFromMap(new IdentityHashMap<>());
+            mapCopy.addAll(maps);
+            this.maps = Collections.unmodifiableSet(mapCopy);
+        }
+
+        public Map<Path, byte[]> files() {
+            Map<Path, byte[]> copy = new java.util.LinkedHashMap<>();
+            files.forEach((path, bytes) -> copy.put(path, bytes.clone()));
+            return copy;
+        }
+    }
+
     public static final class Session {
         public boolean on;
         public int province;            // выбранная провинция (0 = нет)
@@ -133,17 +154,72 @@ public final class EditorManager {
      * Checked checkpoint variant for cross-domain political transactions. A blocked or still-dirty
      * title/marker partition means the political outcome is not committed.
      */
-    public static boolean saveDirtyChecked(MinecraftServer server) {
-        if (server == null) return false;
-        saveDirty(server);
+    /** Collects every dirty political overlay without changing dirty flags or disk state. */
+    public static DirtySnapshot snapshotDirty(MinecraftServer server) throws IOException {
+        if (server == null) throw new IOException("Нет сервера для политического checkpoint");
+        Map<Path, byte[]> files = new java.util.LinkedHashMap<>();
+        Set<MapData> maps = Collections.newSetFromMap(new IdentityHashMap<>());
         synchronized (MARKERS) {
-            for (Markers markers : MARKERS.values()) if (markers.isDirty()) return false;
+            for (Map.Entry<MapData, Markers> entry : MARKERS.entrySet()) {
+                if (!entry.getValue().isDirty()) continue;
+                if (BLOCKED.contains(entry.getKey()))
+                    throw new IOException("Политические метки карты заблокированы: " + entry.getKey().name);
+                Path target = overlayDir(server, entry.getKey()).resolve("markers.json");
+                files.put(target, entry.getValue().toJson().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                maps.add(entry.getKey());
+            }
         }
         synchronized (EDITORS) {
-            if (!BLOCKED.isEmpty()) return false;
-            for (TitleEditor titleEditor : EDITORS.values()) if (titleEditor.isDirty()) return false;
+            for (Map.Entry<MapData, TitleEditor> entry : EDITORS.entrySet()) {
+                if (!entry.getValue().isDirty()) continue;
+                if (BLOCKED.contains(entry.getKey()))
+                    throw new IOException("Политическая карта заблокирована: " + entry.getKey().name);
+                files.putAll(TitleStore.snapshotFiles(entry.getKey(), overlayDir(server, entry.getKey())));
+                maps.add(entry.getKey());
+            }
         }
-        return true;
+        return new DirtySnapshot(files, maps);
+    }
+
+    /** Acknowledges dirty flags only after the complete multi-file batch has committed. */
+    public static void acknowledgeDirtySnapshot(DirtySnapshot snapshot) {
+        if (snapshot == null) return;
+        synchronized (MARKERS) {
+            for (MapData map : snapshot.maps) {
+                Markers markers = MARKERS.get(map);
+                if (markers != null) markers.clearDirty();
+            }
+        }
+        synchronized (EDITORS) {
+            for (MapData map : snapshot.maps) {
+                TitleEditor titleEditor = EDITORS.get(map);
+                if (titleEditor != null && titleEditor.isDirty()) {
+                    titleEditor.clearDirty();
+                    refreshMaps(map);
+                }
+            }
+        }
+    }
+
+    /** Freezes all affected maps if a batch cannot be committed or recovered. */
+    public static void blockDirtySnapshot(DirtySnapshot snapshot) {
+        if (snapshot == null) return;
+        BLOCKED.addAll(snapshot.maps);
+    }
+
+    public static boolean saveDirtyChecked(MinecraftServer server) {
+        DirtySnapshot snapshot = null;
+        try {
+            snapshot = snapshotDirty(server);
+            AtomicFileBatch.commit(server.getWorldPath(LevelResource.ROOT).resolve("worldforge"), snapshot.files());
+            acknowledgeDirtySnapshot(snapshot);
+            return true;
+        } catch (Exception error) {
+            blockDirtySnapshot(snapshot);
+            WorldForgeMod.LOGGER.error("WorldForge: политический пакет титулов/меток не сохранён; карты заморожены: {}",
+                    error.toString(), error);
+            return false;
+        }
     }
 
     /** Сохраняет все изменённые карты. Возвращает число сохранённых. */
@@ -151,7 +227,7 @@ public final class EditorManager {
         int saved = 0;
         synchronized (MARKERS) {
             for (Map.Entry<MapData, Markers> e : MARKERS.entrySet()) {
-                if (!e.getValue().isDirty()) continue;
+                if (BLOCKED.contains(e.getKey()) || !e.getValue().isDirty()) continue;
                 try {
                     e.getValue().save(overlayDir(server, e.getKey()).resolve("markers.json"));
                     saved++;
@@ -188,12 +264,15 @@ public final class EditorManager {
     public static void applySaved(MinecraftServer server, MapData m) {
         if (server == null || m.titles == null) return;
         try {
+            AtomicFileBatch.recover(server.getWorldPath(LevelResource.ROOT).resolve("worldforge"));
             if (TitleStore.applyOverlay(m, overlayDir(server, m))) {
                 PoliticalMapRenderer.regenerateAll(m);
                 WorldForgeMod.LOGGER.info("WorldForge: к карте '{}' применены сохранённые правки границ", m.name);
             }
         } catch (IOException | RuntimeException e) {
-            WorldForgeMod.LOGGER.error("WorldForge: не удалось применить правки карты '{}': {}", m.name, e.toString());
+            BLOCKED.add(m);
+            WorldForgeMod.LOGGER.error("WorldForge: не удалось восстановить/применить политический пакет карты '{}'; карту заморожено: {}",
+                    m.name, e.toString(), e);
         }
     }
 
