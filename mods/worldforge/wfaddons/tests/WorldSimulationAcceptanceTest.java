@@ -3,6 +3,15 @@ package dev.worldforge.tests;
 import dev.worldforge.mod.MapData;
 import dev.worldforge.mod.Json;
 import dev.worldforge.mod.api.GameClock;
+import dev.worldforge.mod.api.DemoApi;
+import dev.worldforge.mod.api.StatApi;
+import dev.worldforge.realms.RealmDefs;
+import dev.worldforge.realms.Realms;
+import dev.worldforge.trade.Trade;
+import dev.worldforge.trade.TradeDefs;
+import dev.worldforge.troops.Squads;
+import dev.worldforge.troops.Morale;
+import dev.worldforge.troops.OperationalSupply;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.PopulationSimulation;
@@ -67,6 +76,26 @@ public final class WorldSimulationAcceptanceTest {
         settlement.place("farm", 12, 0);
         settlement.place("lumber_camp", 24, 0);
         return settlement;
+    }
+
+    private static RealmDefs loadRealmDefs() throws Exception {
+        RealmDefs defs = new RealmDefs();
+        Path directory = Path.of("wf-realms/src/main/resources/data/wf_realms/wf_realms");
+        try (var files = Files.list(directory)) {
+            for (Path file : (Iterable<Path>) files.sorted()::iterator) defs.load(Files.readString(file));
+        }
+        return defs;
+    }
+
+    private static TradeDefs loadTradeDefs() throws Exception {
+        TradeDefs defs = new TradeDefs();
+        defs.load(Files.readString(Path.of("wf-trade/src/main/resources/data/wf_trade/wf_trade/goods.json")));
+        if (!defs.validate().isEmpty()) throw new IllegalStateException("Invalid trade definitions: " + defs.validate());
+        return defs;
+    }
+
+    private static int soldiers(Squads squads, String owner) {
+        return squads.of(owner).stream().mapToInt(squad -> squad.members.size()).sum();
     }
 
     private static int countCompleted(Settlement settlement) {
