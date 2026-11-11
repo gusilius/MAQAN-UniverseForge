@@ -124,7 +124,7 @@ public final class ResidentLifeEventsTest {
         cousinTwo.mother = cousinRegistry.create("OtherMotherB", "", "north", "f", 1973).id;
         ResidentSocial.adjust(cousinOne, cousinTwo.id, 100);
         ResidentSocial.adjust(cousinTwo, cousinOne.id, 100);
-        for (int year = 2000; year <= 2008; year++) ResidentLifeEvents.yearly(cousinRegistry, year);
+        for (int year = 2015; year <= 2023; year++) ResidentLifeEvents.yearly(cousinRegistry, year);
         check(!cousinOne.props.containsKey("family.dating") && !cousinTwo.props.containsKey("family.dating"),
                 "close cousins sharing grandparents are excluded from autonomous dating");
 
