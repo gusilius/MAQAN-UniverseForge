@@ -288,22 +288,6 @@ public class TroopsMod {
     private static String resolveLegacyArmyMap(ArmyHierarchy.LegacyArmy legacy) {
         if (legacy == null) return null;
         List<MapData> matches = new ArrayList<>();
-    /** Finds a Character already bound to this exact physical troop UUID after an entity/registry split crash. */
-    private static PersonBinding findCharacterForTroopEntity(String entityId) {
-        if (entityId == null || entityId.isBlank() || !ModList.get().isLoaded("wf_people")) return null;
-        for (var identity : PeopleMod.authority().identities()) {
-            Character person = PeopleMod.authority().get(identity);
-            if (person == null || !person.alive) continue;
-            boolean matches = entityId.equals(person.props.get("wf_troop_uuid"));
-            Object raw = person.props.get("population.entity_bindings");
-            if (!matches && raw instanceof Map<?, ?> bindings) matches = bindings.containsValue(entityId);
-            if (!matches) continue;
-            CharacterRegistry owner = PeopleMod.authority().registryForGlobal(person.globalId);
-            return owner == null ? null : new PersonBinding(owner, person);
-        }
-        return null;
-    }
-
         for (MapData map : WorldForgeMod.loadedMaps().values()) {
             if (map == null || map.titles == null) continue;
             if (legacy.realm() != null && !legacy.realm().isBlank()
@@ -318,6 +302,22 @@ public class TroopsMod {
             matches.add(map);
         }
         return matches.size() == 1 ? matches.get(0).name : null;
+    }
+
+    /** Finds a Character already bound to this exact physical troop UUID after an entity/registry split crash. */
+    private static PersonBinding findCharacterForTroopEntity(String entityId) {
+        if (entityId == null || entityId.isBlank() || !ModList.get().isLoaded("wf_people")) return null;
+        for (var identity : PeopleMod.authority().identities()) {
+            Character person = PeopleMod.authority().get(identity);
+            if (person == null || !person.alive) continue;
+            boolean matches = entityId.equals(person.props.get("wf_troop_uuid"));
+            Object raw = person.props.get("population.entity_bindings");
+            if (!matches && raw instanceof Map<?, ?> bindings) matches = bindings.containsValue(entityId);
+            if (!matches) continue;
+            CharacterRegistry owner = PeopleMod.authority().registryForGlobal(person.globalId);
+            return owner == null ? null : new PersonBinding(owner, person);
+        }
+        return null;
     }
 
     private static ArmyRef armyRef(MapData map, int armyId) {
@@ -2309,7 +2309,7 @@ public class TroopsMod {
             }
             troop.discard();
             returnedBodies++;
-            Map<String, Integer> one = Muster.back(Map.of(troop.unitId(), 1), DEFS.armyTypes());
+            Map<String, Integer> one = Muster.back(troop.unitId(), troop.strategicUnitId, DEFS.armyTypes());
             returnedMen += one.values().stream().mapToInt(Integer::intValue).sum();
         }
 
