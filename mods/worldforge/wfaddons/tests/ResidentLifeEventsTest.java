@@ -116,7 +116,7 @@ public final class ResidentLifeEventsTest {
         ResidentLifeEvents.yearly(sameYearRegistry, 2020);
         Character lateArrival = sameYearRegistry.create("Прибывший", "", "north", "f", 2005);
         ResidentLifeEvents.yearly(sameYearRegistry, 2020);
-        check("child".equals(lateArrival.props.get("population.life_stage"))
+        check("adolescent".equals(lateArrival.props.get("population.life_stage"))
                         && ((Number) lateArrival.props.get("population.age_years")).intValue() == 15,
                 "characters registered mid-year receive calendar-derived life stages without waiting a full year");
 
