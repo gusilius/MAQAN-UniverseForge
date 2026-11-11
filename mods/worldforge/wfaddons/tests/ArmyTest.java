@@ -298,6 +298,14 @@ public class ArmyTest {
         ok(autonomousSecondRestart.completePendingRecruitment(autonomousPendingId).id == autonomousRecovered.id,
                 "autonomous recruitment receipt remains idempotent after its recovered army is saved and reloaded");
 
+        String aiRequestA = ArmyEngine.autonomousRecruitmentRequestId(412, "realm:north", "raise", "levy");
+        String aiRequestSameDaySecondWar = ArmyEngine.autonomousRecruitmentRequestId(412, "realm:north", "raise", "levy");
+        String aiRequestNextDay = ArmyEngine.autonomousRecruitmentRequestId(413, "realm:north", "raise", "levy");
+        String aiRequestOtherRealm = ArmyEngine.autonomousRecruitmentRequestId(412, "realm:south", "raise", "levy");
+        ok(aiRequestA.equals(aiRequestSameDaySecondWar)
+                        && !aiRequestA.equals(aiRequestNextDay)
+                        && !aiRequestA.equals(aiRequestOtherRealm),
+                "autonomous recruitment identity is stable across campaigns on one realm/day but isolated by day and realm");
         // Split, merge and disband are request-idempotent composition operations.
         Army splitSource = hiredReload.raise(ids[0], "levy", 30);
         String splitRequest = "test-army-split-request-001";

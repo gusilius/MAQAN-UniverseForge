@@ -914,23 +914,23 @@ public final class ArmyEngine {
                         if (gold(r) > 120 && n * 0.1 >= 2) raise(r, "cavalry", (int) (n * 0.1));
                         if (gold(r) > 120) hire(r, "siege", 2);
                     } else {
-                        recruitWithPersistence(aiRecruitmentRequestId(w, r, "raise", "levy"),
+                        recruitWithPersistence(autonomousRecruitmentRequestId(war.day, r, "raise", "levy"),
                                 "raise", r, "levy", (int) (n * 0.5));
                         if (persistenceBridge.actionsBlocked()) return;
                         if (n * 0.25 >= 5)
-                            recruitWithPersistence(aiRecruitmentRequestId(w, r, "raise", "spear"),
+                            recruitWithPersistence(autonomousRecruitmentRequestId(war.day, r, "raise", "spear"),
                                     "raise", r, "spear", (int) (n * 0.25));
                         if (persistenceBridge.actionsBlocked()) return;
                         if (gold(r) > 40 && n * 0.15 >= 3)
-                            recruitWithPersistence(aiRecruitmentRequestId(w, r, "raise", "archer"),
+                            recruitWithPersistence(autonomousRecruitmentRequestId(war.day, r, "raise", "archer"),
                                     "raise", r, "archer", (int) (n * 0.15));
                         if (persistenceBridge.actionsBlocked()) return;
                         if (gold(r) > 120 && n * 0.1 >= 2)
-                            recruitWithPersistence(aiRecruitmentRequestId(w, r, "raise", "cavalry"),
+                            recruitWithPersistence(autonomousRecruitmentRequestId(war.day, r, "raise", "cavalry"),
                                     "raise", r, "cavalry", (int) (n * 0.1));
                         if (persistenceBridge.actionsBlocked()) return;
                         if (gold(r) > 120)
-                            recruitWithPersistence(aiRecruitmentRequestId(w, r, "hire", "siege"),
+                            recruitWithPersistence(autonomousRecruitmentRequestId(war.day, r, "hire", "siege"),
                                     "hire", r, "siege", 2);
                     }
                 } catch (TitleEditor.EditException ignored) { }
@@ -961,9 +961,16 @@ public final class ArmyEngine {
         } catch (TitleEditor.EditException ignored) { }
     }
 
-    /** Stable identity per war day and unit type; a restarted AI reuses the same receipt. */
-    private String aiRecruitmentRequestId(War campaign, String realm, String kind, String type) {
-        String canonical = campaign.id + "|" + war.day + "|" + realm + "|" + kind + "|" + type;
+    /**
+     * Stable identity per world day, realm and unit category. A realm participating in two wars
+     * on the same day must not recruit twice merely because aiRealm was reached from two campaigns.
+     */
+    public static String autonomousRecruitmentRequestId(long worldDay, String realm, String kind, String type) {
+        if (worldDay < 0 || realm == null || realm.isBlank()
+                || kind == null || (!"raise".equals(kind) && !"hire".equals(kind))
+                || type == null || !type.matches("[a-z0-9_.:-]{1,64}"))
+            throw new IllegalArgumentException("Invalid autonomous recruitment identity");
+        String canonical = worldDay + "|" + realm + "|" + kind + "|" + type;
         return "ai:" + UUID.nameUUIDFromBytes(canonical.getBytes(StandardCharsets.UTF_8));
     }
 
