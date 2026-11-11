@@ -61,8 +61,8 @@ public final class ResidentSocialTest {
         ResidentSocial.socializeOnce(aggressive, collidingPeer, 7, "life:cross-partition:two");
         check(ResidentSocial.score(aggressive, partitionPeer.globalId) == 15
                         && ResidentSocial.score(aggressive, collidingPeer.globalId) == 7
-                        && !((Map<?, ?>) aggressive.props.get("social.relationships")).containsKey(partitionPeer.id),
-                "legacy local relationship keys migrate to global UUIDs and colliding partition IDs stay distinct");
+                        && ((Number) ((Map<?, ?>) aggressive.props.get("social.relationships")).get(partitionPeer.id)).intValue() == 12,
+                "legacy local relationship data is preserved as unresolved while new links use distinct global UUIDs");
 
         System.out.println("ResidentSocialTest: " + (failures == 0 ? "OK" : failures + " failure(s)"));
         if (failures > 0) throw new AssertionError("ResidentSocialTest failed: " + failures);

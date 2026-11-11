@@ -42,37 +42,6 @@ public final class ResidentSocial {
         return person.globalId;
     }
 
-    /**
-     * One-time migration for relationships written by older versions under map-local cN IDs.
-     * If two partitions reused the same local ID, each new relationship is still isolated by UUID.
-     */
-    private static void migrateLegacyCounterpart(Character person, Character other) {
-        String canonical = globalId(other);
-        String legacy = other.id;
-        if (legacy == null || legacy.isBlank() || legacy.equals(canonical)) return;
-
-        Object rawRelationships = person.props.get(KEY);
-        if (rawRelationships instanceof Map<?, ?> map && map.containsKey(legacy)) {
-            Map<String, Object> relationships = new LinkedHashMap<>();
-            for (Map.Entry<?, ?> entry : map.entrySet())
-                if (entry.getKey() instanceof String key && entry.getValue() instanceof Number n)
-                    relationships.put(key, clamp(n.intValue()));
-            relationships.putIfAbsent(canonical, relationships.get(legacy));
-            relationships.remove(legacy);
-            person.props.put(KEY, relationships);
-        }
-
-        Object rawBonds = person.props.get("social.bonds");
-        if (rawBonds instanceof Map<?, ?> map && map.containsKey(legacy)) {
-            Map<String, Object> bonds = new LinkedHashMap<>();
-            for (Map.Entry<?, ?> entry : map.entrySet())
-                if (entry.getKey() instanceof String key && entry.getValue() instanceof String value)
-                    bonds.put(key, value);
-            bonds.putIfAbsent(canonical, bonds.get(legacy));
-            bonds.remove(legacy);
-            person.props.put("social.bonds", bonds);
-        }
-    }
 
     /** Trait/culture compatibility shapes the result of an actual conversation. */
     public static int interactionDelta(Character first, Character second) {
@@ -91,8 +60,6 @@ public final class ResidentSocial {
     /** A real resident-to-resident interaction updates both sides of the relationship. */
     public static int socialize(Character first, Character second, int delta) {
         if (first == null || second == null || first == second || !first.alive || !second.alive) return 0;
-        migrateLegacyCounterpart(first, second);
-        migrateLegacyCounterpart(second, first);
         String firstKey = globalId(first);
         String secondKey = globalId(second);
         int a = adjust(first, secondKey, delta);
