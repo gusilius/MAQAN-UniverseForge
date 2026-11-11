@@ -1721,22 +1721,53 @@ public class TroopsMod {
             return 0;
         }
         if (!ModList.get().isLoaded("wf_army")) { src.sendFailure(Component.literal("Нужен мод wf_army")); return 0; }
-        Map<Integer, Map<String, Integer>> byArmy = new HashMap<>();
-        List<TroopEntity> gone = new ArrayList<>();
-        for (TroopEntity t : LIVE.values()) if (t.isAlive() && t.armyId > 0 && t.ownerId().equals(p.getUUID().toString())) {
-            byArmy.computeIfAbsent(t.armyId, k -> new HashMap<>()).merge(t.unitId(), 1, Integer::sum);
-            gone.add(t);
+
+        Map<Integer, List<TroopEntity>> byArmy = new TreeMap<>();
+        for (TroopEntity troop : LIVE.values()) {
+            if (troop.isAlive() && troop.armyId > 0 && troop.ownerId().equals(p.getUUID().toString()))
+                byArmy.computeIfAbsent(troop.armyId, ignored -> new ArrayList<>()).add(troop);
         }
-        int back = 0;
-        for (var e : byArmy.entrySet()) {
-            Map<String, Integer> men = Muster.back(e.getValue(), DEFS.armyTypes());
-            if (ArmyLink.give(e.getKey(), men)) back += men.values().stream().mapToInt(Integer::intValue).sum();
-            else gone.removeIf(t -> t.armyId == e.getKey());                                    // армии больше нет: солдаты остаются
+
+        // Commit every strategic roster credit before releasing any physical soldier.
+        List<TroopEntity> stagedReturns = new ArrayList<>();
+        for (Map.Entry<Integer, List<TroopEntity>> entry : byArmy.entrySet()) {
+            ArmyLink.Found found = ArmyLink.find(entry.getKey());
+            if (found == null) continue; // no abstract army: these soldiers remain physical and playable
+            try {
+                if (!ArmyLink.returnToArmy(found, entry.getValue(), DEFS.armyTypes(), p.server)) {
+                    actionPersistenceBlocked = true;
+                    src.sendFailure(Component.literal("Не удалось надёжно сохранить численность армии; физические солдаты оставлены в мире"));
+                    return 0;
+                }
+                stagedReturns.addAll(entry.getValue());
+            } catch (RuntimeException ex) {
+                actionPersistenceBlocked = true;
+                LOGGER.error("wf_troops: strategic return failed for army {}: {}",
+                        entry.getKey(), ex.toString(), ex);
+                src.sendFailure(Component.literal("Возврат в армию остановлен; физические солдаты сохранены для сверки"));
+                return 0;
+            }
         }
-        for (TroopEntity t : gone) { releaseBody(t); t.discard(); }
-        int men = back;
-        src.sendSuccess(() -> Component.literal("Вернулось в армии людей: " + men), false);
-        return gone.size();
+
+        int returnedBodies = 0;
+        int returnedMen = 0;
+        for (TroopEntity troop : stagedReturns) {
+            if (!releaseBodyDurably(troop)) {
+                actionPersistenceBlocked = true;
+                src.sendFailure(Component.literal("Не удалось сохранить жизненный статус персонажа; его физическое тело оставлено в мире"));
+                continue;
+            }
+            troop.discard();
+            returnedBodies++;
+            Map<String, Integer> one = Muster.back(Map.of(troop.unitId(), 1), DEFS.armyTypes());
+            returnedMen += one.values().stream().mapToInt(Integer::intValue).sum();
+        }
+
+        int men = returnedMen;
+        int bodies = returnedBodies;
+        src.sendSuccess(() -> Component.literal("Возвращено в стратегические армии: " + men
+                + " человек · физических солдат: " + bodies), false);
+        return returnedBodies;
     }
 
     /** Removes a physical troop body without killing the underlying person (return, rollback or disband). */
@@ -1754,6 +1785,27 @@ public class TroopsMod {
         String id = troop.getUUID().toString();
         LIVE.remove(id);
         SQUADS.remove(id);
+    }
+
+    /** Unbinds and persists the canonical Character before its physical troop body is discarded. */
+    private static boolean releaseBodyDurably(TroopEntity troop) {
+        if (troop == null) return false;
+        if (ModList.get().isLoaded("wf_people")) {
+            PersonBinding binding = bindPerson(troop, false);
+            if (binding == null) return false;
+            Character person = binding.character();
+            binding.registry().unbindEntity(person.id, "troop", troop.getUUID().toString());
+            person.props.remove("wf_troop_uuid");
+            person.props.remove("wf_troop_unit");
+            person.props.remove("wf_army_id");
+            person.props.remove("wf_combat_xp");
+            person.props.remove("wf_veteran_rank");
+            if (server == null || !PeopleMod.persistCharacter(person, server)) return false;
+        }
+        String id = troop.getUUID().toString();
+        LIVE.remove(id);
+        SQUADS.remove(id);
+        return true;
     }
 
     private static void discardPrepared(List<TroopEntity> troops) {
