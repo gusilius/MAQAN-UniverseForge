@@ -1,7 +1,7 @@
-//! JNI boundary for the pure Rust decision engine. Java sends UTF-8 JSON and
-//! receives UTF-8 JSON. All authoritative state remains on the Java side.
+//! JNI boundary for the pure Rust decision and generation engines.
 use std::{ffi::c_void, mem};
 use crate::{decide, WorldSnapshot};
+use crate::worldgen::{generate_world, WorldGenRequest};
 
 type JNIEnvPtr = *mut *const *const c_void;
 type JObject = *mut c_void;
@@ -20,7 +20,6 @@ unsafe fn read_bytes(env: JNIEnvPtr, array: JObject, max_len: i32) -> Option<Vec
     if exception(env) != 0 { return None; }
     Some(std::slice::from_raw_parts(bytes.as_ptr().cast::<u8>(), bytes.len()).to_vec())
 }
-
 unsafe fn make_bytes(env: JNIEnvPtr, bytes: &[u8]) -> JObject {
     if env.is_null() || bytes.is_empty() || bytes.len() > 16 * 1024 * 1024 { return std::ptr::null_mut(); }
     let table = *env;
@@ -34,21 +33,40 @@ unsafe fn make_bytes(env: JNIEnvPtr, bytes: &[u8]) -> JObject {
     if exception(env) != 0 { return std::ptr::null_mut(); }
     array
 }
+fn error_json(status: &str, error: &str) -> Vec<u8> {
+    serde_json::to_vec(&serde_json::json!({"status":status,"error":error}))
+        .unwrap_or_else(|_| br#"{"status":"serialization_error"}"#.to_vec())
+}
 
 #[no_mangle]
 pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulation_nativeDecide(
     env: JNIEnvPtr, _class: JObject, input: JObject,
 ) -> JObject {
     let response = match read_bytes(env, input, 16 * 1024 * 1024) {
-        None => br#"{"status":"invalid_input","diagnostics":["JNI input unavailable or too large"]}"#.to_vec(),
+        None => error_json("invalid_input", "JNI input unavailable or too large"),
         Some(bytes) => match serde_json::from_slice::<WorldSnapshot>(&bytes) {
             Ok(snapshot) => match decide(&snapshot) {
-                Ok(frame) => serde_json::to_vec(&frame).unwrap_or_else(|_| br#"{"status":"serialization_error"}"#.to_vec()),
-                Err(error) => serde_json::to_vec(&serde_json::json!({"status":"rejected","error":format!("{error:?}")}))
-                    .unwrap_or_else(|_| br#"{"status":"serialization_error"}"#.to_vec()),
+                Ok(frame) => serde_json::to_vec(&frame).unwrap_or_else(|_| error_json("serialization_error", "decision frame")),
+                Err(error) => error_json("rejected", &format!("{error:?}")),
             },
-            Err(error) => serde_json::to_vec(&serde_json::json!({"status":"invalid_snapshot","error":error.to_string()}))
-                .unwrap_or_else(|_| br#"{"status":"serialization_error"}"#.to_vec()),
+            Err(error) => error_json("invalid_snapshot", &error.to_string()),
+        },
+    };
+    make_bytes(env, &response)
+}
+
+#[no_mangle]
+pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulation_nativeGenerate(
+    env: JNIEnvPtr, _class: JObject, input: JObject,
+) -> JObject {
+    let response = match read_bytes(env, input, 1024 * 1024) {
+        None => error_json("invalid_input", "JNI input unavailable or too large"),
+        Some(bytes) => match serde_json::from_slice::<WorldGenRequest>(&bytes) {
+            Ok(request) => match generate_world(&request) {
+                Ok(world) => serde_json::to_vec(&world).unwrap_or_else(|_| error_json("serialization_error", "generated world")),
+                Err(error) => error_json("generation_rejected", &format!("{error:?}")),
+            },
+            Err(error) => error_json("invalid_request", &error.to_string()),
         },
     };
     make_bytes(env, &response)
