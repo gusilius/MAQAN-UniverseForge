@@ -8,6 +8,7 @@ import dev.worldforge.mod.api.TreasuryApi;
 import dev.worldforge.mod.api.WorldForgeApi;
 import dev.worldforge.mod.economy.TreasuryLedger;
 import dev.worldforge.mod.MapData;
+import dev.worldforge.mod.EditorManager;
 import dev.worldforge.mod.TitleData;
 import dev.worldforge.mod.WorldForgeMod;
 import dev.worldforge.people.Character;
@@ -23,6 +24,7 @@ import dev.worldforge.troops.MixedOrders;
 import dev.worldforge.troops.Wars;
 import dev.worldforge.troops.Squads;
 import dev.worldforge.troops.ArmyHierarchy;
+import dev.worldforge.troops.ArmyRef;
 import dev.worldforge.troops.MilitaryDeathLedger;
 import dev.worldforge.troops.OperationalSupply;
 import dev.worldforge.troops.TroopDefs;
@@ -189,7 +191,7 @@ public class TroopsMod {
             Path f = dir(server).resolve("wf_squads.json");
             if (Files.exists(f)) SQUADS.fromJson(Files.readString(f));
             Path hf = dir(server).resolve("wf_army_hierarchy.json");
-            if (Files.exists(hf)) HIERARCHY.fromJson(Files.readString(hf));
+            if (Files.exists(hf)) HIERARCHY.fromJson(Files.readString(hf), WorldForgeMod.worldId(), TroopsMod::resolveLegacyArmyMap);
             Path ff = dir(server).resolve("wf_forts.json");
             if (Files.exists(ff)) FORTS.fromJson(Files.readString(ff));
             Path df = dir(server).resolve("wf_military_deaths.json");
@@ -265,41 +267,67 @@ public class TroopsMod {
         }
     }
 
+    private static String resolveLegacyArmyMap(ArmyHierarchy.LegacyArmy legacy) {
+        if (legacy == null || legacy.realm() == null || legacy.realm().isBlank()) return null;
+        List<MapData> matches = new ArrayList<>();
+        for (MapData map : WorldForgeMod.loadedMaps().values()) {
+            if (map != null && map.titles != null && map.titles.realms.containsKey(legacy.realm()))
+                matches.add(map);
+        }
+        return matches.size() == 1 ? matches.get(0).name : null;
+    }
+
+    private static ArmyRef armyRef(MapData map, int armyId) {
+        if (map == null || WorldForgeMod.worldId() == null || armyId <= 0) return null;
+        return new ArmyRef(WorldForgeMod.worldId(), map.name, armyId);
+    }
+
+    private static ArmyRef armyRef(ServerLevel level, int armyId) {
+        return level == null ? null : armyRef(EditorManager.dataFor(level), armyId);
+    }
+
     /** Reconciles the physical squad projection with the strategic wf-army roster. */
     private static void syncArmyHierarchy() {
         if (server == null) return;
         Set<String> reconciledSquads = new HashSet<>();
         for (TroopEntity troop : LIVE.values()) {
-            if (troop == null || !troop.isAlive() || troop.armyId <= 0) continue;
+            if (troop == null || !troop.isAlive() || troop.armyId <= 0 || !(troop.level() instanceof ServerLevel troopLevel)) continue;
+            MapData map = EditorManager.dataFor(troopLevel);
+            ArmyRef ref = armyRef(map, troop.armyId);
+            if (ref == null) continue;
             Squads.Squad squad = SQUADS.squadOf(troop.getUUID().toString());
             if (squad == null || !reconciledSquads.add(squad.id)) continue;
             boolean oneStrategicArmy = true;
             for (String memberId : squad.members) {
                 TroopEntity member = LIVE.get(memberId);
-                if (member != null && member.isAlive() && member.armyId != troop.armyId) {
+                if (member == null || !member.isAlive()) continue;
+                MapData memberMap = member.level() instanceof ServerLevel memberLevel
+                        ? EditorManager.dataFor(memberLevel) : null;
+                if (member.armyId != troop.armyId || memberMap == null || !map.name.equals(memberMap.name)) {
                     oneStrategicArmy = false;
                     break;
                 }
             }
             if (!oneStrategicArmy) {
                 HIERARCHY.unassignSquad(squad.id);
-                LOGGER.warn("wf-troops: squad {} contains units from multiple strategic armies; hierarchy link withheld", squad.id);
+                LOGGER.warn("wf-troops: squad {} contains units from multiple map-scoped strategic armies; hierarchy link withheld", squad.id);
                 continue;
             }
-            ArmyLink.Found strategic = ArmyLink.find(troop.armyId, troop.realm);
+            ArmyLink.Found strategic = ArmyLink.find(troop.armyId, troop.realm, map.name);
             String name = strategic == null ? "Армия " + troop.armyId : strategic.army().name;
             String realm = strategic == null ? troop.realm : strategic.army().realm;
             try {
-                HIERARCHY.ensureArmy(troop.armyId, name, troop.ownerId(), realm);
+                HIERARCHY.ensureArmy(ref, name, troop.ownerId(), realm);
                 if (strategic != null && !strategic.army().commander.isBlank())
-                    HIERARCHY.appointArmyCommander(troop.armyId, strategic.army().commander);
+                    HIERARCHY.appointArmyCommander(ref, strategic.army().commander);
                 ArmyHierarchy.Corps assigned = HIERARCHY.corpsForSquad(squad.id);
-                if (assigned == null || assigned.armyId != troop.armyId) {
-                    ArmyHierarchy.Corps corps = HIERARCHY.defaultCorps(troop.armyId);
+                if (assigned == null || !assigned.armyRef.equals(ref)) {
+                    ArmyHierarchy.Corps corps = HIERARCHY.defaultCorps(ref);
                     HIERARCHY.assignSquad(corps.id, squad.id, SQUADS);
                 }
             } catch (RuntimeException ex) {
-                LOGGER.warn("wf-troops: hierarchy reconcile failed for army {}: {}", troop.armyId, ex.toString());
+                LOGGER.warn("wf-troops: hierarchy reconcile failed for army {} on map {}: {}",
+                        troop.armyId, map.name, ex.toString());
             }
         }
         HIERARCHY.pruneSquads(SQUADS);
@@ -1246,12 +1274,13 @@ public class TroopsMod {
         try { player = src.getPlayerOrException(); }
         catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
         syncArmyHierarchy();
-        ArmyHierarchy.ArmyNode army = HIERARCHY.army(armyId);
+        ArmyRef ref = armyRef(player.serverLevel(), armyId);
+        ArmyHierarchy.ArmyNode army = ref == null ? null : HIERARCHY.army(ref);
         if (army == null || !army.owner.equals(player.getUUID().toString())) {
             src.sendFailure(Component.literal("Армия не найдена или принадлежит другому игроку"));
             return 0;
         }
-        ArmyHierarchy.Corps corps = HIERARCHY.createCorps(armyId, name);
+        ArmyHierarchy.Corps corps = HIERARCHY.createCorps(ref, name);
         save();
         src.sendSuccess(() -> Component.literal("Создан корпус «" + corps.name + "» в составе " + army.name), false);
         return 1;
@@ -1267,7 +1296,7 @@ public class TroopsMod {
         catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
         ArmyHierarchy.Corps corps = HIERARCHY.corps(corpsId);
         Squads.Squad squad = SQUADS.get(squadId);
-        ArmyHierarchy.ArmyNode army = corps == null ? null : HIERARCHY.army(corps.armyId);
+        ArmyHierarchy.ArmyNode army = corps == null ? null : HIERARCHY.army(corps.armyRef);
         if (corps == null || squad == null || army == null
                 || !army.owner.equals(player.getUUID().toString()) || !squad.owner.equals(army.owner)
                 || !HIERARCHY.assignSquad(corpsId, squadId, SQUADS)) {
@@ -1301,12 +1330,13 @@ public class TroopsMod {
         ServerPlayer player;
         try { player = src.getPlayerOrException(); }
         catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
-        ArmyHierarchy.ArmyNode army = HIERARCHY.army(armyId);
+        ArmyRef ref = armyRef(player.serverLevel(), armyId);
+        ArmyHierarchy.ArmyNode army = ref == null ? null : HIERARCHY.army(ref);
         if (army == null || !army.owner.equals(player.getUUID().toString())) {
             src.sendFailure(Component.literal("Армия не найдена или принадлежит другому игроку")); return 0;
         }
         try {
-            int count = HIERARCHY.commandArmy(armyId, SQUADS, parseArmyOrder(kind, x, z), queue);
+            int count = HIERARCHY.commandArmy(ref, SQUADS, parseArmyOrder(kind, x, z), queue);
             save();
             int issued = count;
             src.sendSuccess(() -> Component.literal("Приказ передан корпусам и отрядам: " + issued), false);
@@ -1326,7 +1356,7 @@ public class TroopsMod {
         try { player = src.getPlayerOrException(); }
         catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
         ArmyHierarchy.Corps corps = HIERARCHY.corps(corpsId);
-        ArmyHierarchy.ArmyNode army = corps == null ? null : HIERARCHY.army(corps.armyId);
+        ArmyHierarchy.ArmyNode army = corps == null ? null : HIERARCHY.army(corps.armyRef);
         if (corps == null || army == null || !army.owner.equals(player.getUUID().toString())) {
             src.sendFailure(Component.literal("Корпус не найден или принадлежит другому игроку")); return 0;
         }
@@ -1346,18 +1376,20 @@ public class TroopsMod {
         ServerPlayer player;
         try { player = src.getPlayerOrException(); }
         catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
-        ArmyHierarchy.ArmyNode army = HIERARCHY.army(armyId);
+        ArmyRef ref = armyRef(player.serverLevel(), armyId);
+        ArmyHierarchy.ArmyNode army = ref == null ? null : HIERARCHY.army(ref);
         if (army == null || !army.owner.equals(player.getUUID().toString())) {
             src.sendFailure(Component.literal("Армия не найдена или принадлежит другому игроку")); return 0;
         }
-        src.sendSuccess(() -> Component.literal(HIERARCHY.viewJson(armyId)), false);
+        src.sendSuccess(() -> Component.literal(HIERARCHY.viewJson(ref)), false);
         return 1;
     }
 
     private static Character findArmyCharacter(ArmyHierarchy.ArmyNode army, String characterId) {
         if (!ModList.get().isLoaded("wf_people") || army == null) return null;
         for (MapData map : WorldForgeMod.loadedMaps().values()) {
-            if (map.titles == null || !army.realm.isBlank() && !map.titles.realms.containsKey(army.realm)) continue;
+            if (!map.name.equals(army.ref.mapId()) || map.titles == null
+                    || !army.realm.isBlank() && !map.titles.realms.containsKey(army.realm)) continue;
             CharacterRegistry registry = PeopleMod.registry(map);
             Character candidate = resolvePerson(registry, characterId);
             if (candidate != null && candidate.alive) return candidate;
@@ -1374,13 +1406,14 @@ public class TroopsMod {
         try { player = src.getPlayerOrException(); }
         catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
         syncArmyHierarchy();
-        ArmyHierarchy.ArmyNode army = HIERARCHY.army(armyId);
+        ArmyRef ref = armyRef(player.serverLevel(), armyId);
+        ArmyHierarchy.ArmyNode army = ref == null ? null : HIERARCHY.army(ref);
         Character character = findArmyCharacter(army, characterId);
         if (army == null || !army.owner.equals(player.getUUID().toString()) || character == null
-                || !HIERARCHY.appointArmyCommander(armyId, characterId)) {
+                || !HIERARCHY.appointArmyCommander(ref, characterId)) {
             src.sendFailure(Component.literal("Живой Character из государства армии не найден или нет прав")); return 0;
         }
-        ArmyLink.Found strategic = ArmyLink.find(armyId);
+        ArmyLink.Found strategic = ArmyLink.find(armyId, army.realm, army.ref.mapId());
         if (strategic != null) strategic.army().commander = characterId;
         save();
         src.sendSuccess(() -> Component.literal("Командующий армией «" + army.name + "»: " + character.name), false);
@@ -1397,7 +1430,7 @@ public class TroopsMod {
         catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
         syncArmyHierarchy();
         ArmyHierarchy.Corps corps = HIERARCHY.corps(corpsId);
-        ArmyHierarchy.ArmyNode army = corps == null ? null : HIERARCHY.army(corps.armyId);
+        ArmyHierarchy.ArmyNode army = corps == null ? null : HIERARCHY.army(corps.armyRef);
         Character character = findArmyCharacter(army, characterId);
         if (corps == null || army == null || !army.owner.equals(player.getUUID().toString())
                 || character == null || !HIERARCHY.appointCorpsCommander(corpsId, characterId)) {
@@ -1588,7 +1621,8 @@ public class TroopsMod {
         ServerPlayer player;
         try { player = src.getPlayerOrException(); }
         catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
-        ArmyLink.Found found = ArmyLink.find(armyId);
+        MapData currentMap = EditorManager.dataFor(player.serverLevel());
+        ArmyLink.Found found = currentMap == null ? null : ArmyLink.find(armyId, currentMap.name);
         if (found == null) { src.sendFailure(Component.literal("Нет армии " + armyId)); return 0; }
 
         Muster.Plan plan = Muster.plan(found.army().units, n, DEFS.armyTypes());
@@ -1692,7 +1726,7 @@ public class TroopsMod {
             if (!dev.worldforge.settle.mc.SettleMod.payRecruitment(sites.get(entry.getKey()), entry.getValue())) {
                 for (String paid : paidBuildings)
                     dev.worldforge.settle.mc.SettleMod.refundRecruitment(sites.get(paid), supplies.get(paid));
-                ArmyLink.give(armyId, plan.menTaken());
+                ArmyLink.give(found, plan.menTaken());
                 discardPrepared(allPrepared);
                 src.sendFailure(Component.literal("Склад изменился во время призыва; люди возвращены в армию, отряд удалён."));
                 return 0;
@@ -1722,29 +1756,32 @@ public class TroopsMod {
         }
         if (!ModList.get().isLoaded("wf_army")) { src.sendFailure(Component.literal("Нужен мод wf_army")); return 0; }
 
-        record ArmyReturnKey(int armyId, String realm) {}
+        record ArmyReturnKey(int armyId, String realm, String mapId) {}
         Map<ArmyReturnKey, List<TroopEntity>> byArmy = new TreeMap<>(
-                Comparator.comparing(ArmyReturnKey::realm).thenComparingInt(ArmyReturnKey::armyId));
+                Comparator.comparing(ArmyReturnKey::mapId).thenComparing(ArmyReturnKey::realm)
+                        .thenComparingInt(ArmyReturnKey::armyId));
         for (TroopEntity troop : LIVE.values()) {
-            if (troop.isAlive() && troop.armyId > 0 && troop.ownerId().equals(p.getUUID().toString())) {
-                String realm = troop.realm == null ? "" : troop.realm;
-                byArmy.computeIfAbsent(new ArmyReturnKey(troop.armyId, realm), ignored -> new ArrayList<>()).add(troop);
-            }
+            if (!troop.isAlive() || troop.armyId <= 0 || !troop.ownerId().equals(p.getUUID().toString())
+                    || !(troop.level() instanceof ServerLevel troopLevel)) continue;
+            MapData map = EditorManager.dataFor(troopLevel);
+            if (map == null) continue;
+            String realm = troop.realm == null ? "" : troop.realm;
+            byArmy.computeIfAbsent(new ArmyReturnKey(troop.armyId, realm, map.name), ignored -> new ArrayList<>()).add(troop);
         }
 
         // Commit every strategic roster credit before releasing any physical soldier.
         List<TroopEntity> stagedReturns = new ArrayList<>();
         for (Map.Entry<ArmyReturnKey, List<TroopEntity>> entry : byArmy.entrySet()) {
             ArmyReturnKey key = entry.getKey();
-            ArmyLink.Found found = ArmyLink.find(key.armyId(), key.realm());
+            ArmyLink.Found found = ArmyLink.find(key.armyId(), key.realm(), key.mapId());
             if (found == null) continue; // missing/ambiguous map-local army: soldiers remain physical and playable
             try {
                 ArmyLink.stageReturn(found, entry.getValue(), DEFS.armyTypes());
                 stagedReturns.addAll(entry.getValue());
             } catch (RuntimeException ex) {
                 actionPersistenceBlocked = true;
-                LOGGER.error("wf_troops: strategic return staging failed for army {} in realm {}: {}",
-                        key.armyId(), key.realm(), ex.toString(), ex);
+                LOGGER.error("wf_troops: strategic return staging failed for army {} in realm {} on map {}: {}",
+                        key.armyId(), key.realm(), key.mapId(), ex.toString(), ex);
                 src.sendFailure(Component.literal("Возврат в армию остановлен; физические солдаты сохранены для сверки"));
                 return 0;
             }

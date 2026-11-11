@@ -54,6 +54,23 @@ final class ArmyLink {
         return match;
     }
 
+    /** Exact map-scoped lookup used by RTS command hierarchy and physical troop transitions. */
+    static Found find(int armyId, String mapId) {
+        if (armyId <= 0 || mapId == null || mapId.isBlank()) return null;
+        for (MapData map : WorldForgeMod.loadedMaps().values()) {
+            if (!map.name.equals(mapId) || map.titles == null) continue;
+            ArmyEngine engine = ArmyMod.armies(map);
+            Army army = engine.armies.get(armyId);
+            return army == null ? null : new Found(engine, army);
+        }
+        return null;
+    }
+
+    static Found find(int armyId, String realm, String mapId) {
+        Found found = find(armyId, mapId);
+        return found != null && Objects.equals(found.army().realm, realm) ? found : null;
+    }
+
     /** Снимает людей с армии. Вызывать только после успешного плана. */
     static void take(Army a, Map<String, Integer> men) {
         for (var e : men.entrySet()) {
@@ -64,8 +81,12 @@ final class ArmyLink {
 
     static boolean give(int armyId, Map<String, Integer> men) {
         Found f = find(armyId);
-        if (f == null) return false;
-        for (var e : men.entrySet()) f.army().add(e.getKey(), e.getValue());
+        return give(f, men);
+    }
+
+    static boolean give(Found found, Map<String, Integer> men) {
+        if (found == null || found.army() == null || men == null) return false;
+        for (var e : men.entrySet()) found.army().add(e.getKey(), e.getValue());
         return true;
     }
 
