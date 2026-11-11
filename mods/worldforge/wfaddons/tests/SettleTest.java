@@ -155,6 +155,22 @@ public class SettleTest {
         ok(restoredFlow.resources().equals(Set.of("food")) && restoredFlow.perMinute(4, "food", true) > 0, "загрузка статистики пропускает повреждённые записи");
 
         Settlement s = fresh(d, 4);
+        Worker lifeResident = s.workers.get(0);
+        lifeResident.lifeAction = "sleeping";
+        lifeResident.lifeActionStage = "travelling";
+        lifeResident.lifeTargetX = 14.5;
+        lifeResident.lifeTargetZ = -8.25;
+        lifeResident.lifeActionDuration = 480;
+        lifeResident.lifeSocialTarget = "character:family-member";
+        Settlement lifeRestored = Settlement.fromJson(s.toJson(), d);
+        Worker restoredLifeResident = lifeRestored.worker(lifeResident.id);
+        ok(restoredLifeResident.lifeAction.equals("sleeping")
+                        && restoredLifeResident.lifeActionStage.equals("travelling")
+                        && restoredLifeResident.lifeTargetX == 14.5
+                        && restoredLifeResident.lifeTargetZ == -8.25
+                        && restoredLifeResident.lifeActionDuration == 480
+                        && restoredLifeResident.lifeSocialTarget.equals("character:family-member"),
+                "resident life action target, phase, duration and social counterpart survive settlement reload");
         String unchanged = s.toJson();
         s.tick(Double.NaN);
         s.tick(Double.POSITIVE_INFINITY);
