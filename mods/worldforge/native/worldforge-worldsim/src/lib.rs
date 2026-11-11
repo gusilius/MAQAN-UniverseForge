@@ -1,4 +1,3 @@
-pub mod worldgen;
 //! Autonomous WorldForge decision engine.
 //!
 //! Pure deterministic Rust domain layer. It receives immutable snapshots from
@@ -6,6 +5,7 @@ pub mod worldgen;
 //! Stable ordering and seeded hashing make identical snapshots reproducible.
 
 pub mod jni;
+pub mod worldgen;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -301,10 +301,10 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
         let mut best: Option<(&Character, i32)> = None;
         for b in &eligible {
             if a.id == b.id || a.realm_id == b.realm_id || a.gender == b.gender || used.contains(b.id.as_str()) { continue; }
-            let score = clamp_score(25 + (a.opinion + b.opinion) / 4
-                + (a.prestige + b.prestige) / 8
+            let score = clamp_score(25_i64 + ((a.opinion + b.opinion) / 4) as i64
+                + ((a.prestige + b.prestige) / 8) as i64
                 + if a.house_id != b.house_id { 10 } else { 0 }
-                - (a.age as i32 - b.age as i32).abs());
+                - (a.age as i32 - b.age as i32).abs() as i64);
             if score >= 35 && best.map(|(_, current)| score > current).unwrap_or(true) { best = Some((b, score)); }
         }
         if let Some((b, score)) = best {
