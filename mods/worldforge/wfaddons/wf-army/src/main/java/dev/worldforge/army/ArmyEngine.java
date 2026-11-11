@@ -82,6 +82,41 @@ public final class ArmyEngine {
                 Json.write(Arrays.asList(values)).getBytes(StandardCharsets.UTF_8));
     }
 
+    /** Read-only lookup shared by AI planning and replay-safe player/domain adapters. */
+    public synchronized boolean hasArmyActionReceipt(String requestId) {
+        return rosterOperations.containsKey(armyActionKey(requestId));
+    }
+
+    /**
+     * Stable identity for an autonomous composition or movement order. Merge pair IDs are
+     * normalized so iteration order cannot allocate two receipts for the same pair.
+     * Movement identity includes origin, target and prior army state so a later replanning
+     * after a battle/stop is distinct from replaying the earlier route.
+     */
+    public static String autonomousArmyActionRequestId(long worldDay, String realm, String operation,
+                                                       int armyId, int otherArmyId, int origin,
+                                                       int target, String priorState) {
+        if (worldDay < 0 || realm == null || realm.isBlank() || operation == null
+                || armyId <= 0 || otherArmyId < 0 || origin < 0 || target < 0)
+            throw new IllegalArgumentException("Invalid autonomous army order identity");
+        String state = priorState == null ? "" : priorState;
+        if (state.length() > 256) throw new IllegalArgumentException("Autonomous army order state is too long");
+        String canonical;
+        if ("merge".equals(operation)) {
+            if (otherArmyId <= 0 || otherArmyId == armyId || origin != 0 || target != 0 || !state.isEmpty())
+                throw new IllegalArgumentException("Invalid autonomous merge identity");
+            int first = Math.min(armyId, otherArmyId), second = Math.max(armyId, otherArmyId);
+            canonical = worldDay + "|" + realm + "|merge|" + first + "|" + second;
+        } else if ("move".equals(operation)) {
+            if (otherArmyId != 0 || target <= 0)
+                throw new IllegalArgumentException("Invalid autonomous movement identity");
+            canonical = worldDay + "|" + realm + "|move|" + armyId + "|" + origin + "|" + target + "|" + state;
+        } else {
+            throw new IllegalArgumentException("Unsupported autonomous army order: " + operation);
+        }
+        return "ai-order:" + UUID.nameUUIDFromBytes(canonical.getBytes(StandardCharsets.UTF_8));
+    }
+
     /** Returns the prior result, or null for a new operation; payload collisions fail closed. */
     private String priorArmyActionResult(String operationId, String fingerprint) {
         String prior = rosterOperations.get(operationId);
@@ -510,13 +545,14 @@ public final class ArmyEngine {
         return split;
     }
 
-    public synchronized void moveOnce(String requestId, int id, int target, String realm) {
+    public synchronized boolean moveOnce(String requestId, int id, int target, String realm) {
         String operationId = armyActionKey(requestId);
         String fingerprint = armyActionFingerprint("move", realm, Integer.toString(id), Integer.toString(target));
-        if (priorArmyActionResult(operationId, fingerprint) != null) return;
+        if (priorArmyActionResult(operationId, fingerprint) != null) return false;
         requireReceiptCapacity();
         move(id, target, realm);
         rememberArmyAction(operationId, fingerprint, Integer.toString(id));
+        return true;
     }
 
     public synchronized void stopOnce(String requestId, int id, String realm) {
@@ -937,18 +973,51 @@ public final class ArmyEngine {
                 if (persistenceBridge != null && persistenceBridge.actionsBlocked()) return;
             }
         }
-        // 2. слить армии в одной точке
-        List<Army> mine = armiesOf(r);
-        for (Army a : mine) for (Army b : mine) if (a.id < b.id && armies.containsKey(a.id) && armies.containsKey(b.id) && a.location == b.location && !a.moving() && !b.moving() && a.mercenary == b.mercenary) merge(a.id, b.id, r);
-        // 3. приказы простаивающим
-        for (Army a : armiesOf(r)) {
+        // 2. Слияние и перемещение используют те же durable receipts, что и приказы игрока.
+        boolean armyOrdersChanged = false;
+        List<Army> mine = new ArrayList<>(armiesOf(r));
+        mine.sort(Comparator.comparingInt(army -> army.id));
+        for (int i = 0; i < mine.size(); i++) {
+            Army a = mine.get(i);
+            for (int j = i + 1; j < mine.size(); j++) {
+                Army b = mine.get(j);
+                if (!armies.containsKey(a.id) || !armies.containsKey(b.id)
+                        || a.location != b.location || a.moving() || b.moving()
+                        || a.mercenary != b.mercenary) continue;
+                if (persistenceBridge == null) {
+                    // Standalone deterministic simulations keep the pure-domain path.
+                    merge(a.id, b.id, r);
+                    armyOrdersChanged = true;
+                } else {
+                    String requestId = autonomousArmyActionRequestId(
+                            war.day, r, "merge", a.id, b.id, 0, 0, "");
+                    boolean replay = hasArmyActionReceipt(requestId);
+                    mergeOnce(requestId, a.id, b.id, r);
+                    armyOrdersChanged |= !replay;
+                    if (persistenceBridge.actionsBlocked()) return;
+                }
+            }
+        }
+
+        // 3. Приказы простаивающим соединениям. Новый target/state образует новый приказ;
+        // повтор того же маршрута после рестарта возвращает ранее сохранённый receipt.
+        for (Army a : new ArrayList<>(armiesOf(r))) {
             if (a.moving() || a.siegeTitle != 0 || a.men() < 10) continue;
             Army foe = nearestEnemyArmy(a);
-            if (foe != null && foe.power(types) < 0.85 * a.power(types) * 1.2) { tryMove(a, foe.location); continue; }
-            int tgt = nearestEnemyBarony(w, a, me);
-            if (tgt != 0) tryMove(a, tgt);
-            else if (a.location != capital(r)) tryMove(a, capital(r));
+            if (foe != null && foe.power(types) < 0.85 * a.power(types) * 1.2) {
+                armyOrdersChanged |= tryMove(war.day, a, foe.location);
+                continue;
+            }
+            int target = nearestEnemyBarony(w, a, me);
+            if (target != 0) armyOrdersChanged |= tryMove(war.day, a, target);
+            else if (a.location != capital(r)) armyOrdersChanged |= tryMove(war.day, a, capital(r));
+            if (persistenceBridge != null && persistenceBridge.actionsBlocked()) return;
         }
+
+        // Сохраняем весь пакет приказов государства одним checkpoint, а не отдельным save на юнит.
+        if (armyOrdersChanged && persistenceBridge != null
+                && (!persistenceBridge.persist() || persistenceBridge.actionsBlocked())) return;
+
         // 4. мир
         boolean leader = r.equals(w.attacker) || r.equals(w.defender);
         if (!leader) return;
@@ -994,7 +1063,19 @@ public final class ArmyEngine {
         return "ai:" + UUID.nameUUIDFromBytes(canonical.getBytes(StandardCharsets.UTF_8));
     }
 
-    private void tryMove(Army a, int target) { try { move(a.id, target, a.realm); } catch (TitleEditor.EditException ignored) { } }
+    private boolean tryMove(long worldDay, Army army, int target) {
+        try {
+            if (persistenceBridge == null) {
+                move(army.id, target, army.realm);
+                return true;
+            }
+            String requestId = autonomousArmyActionRequestId(
+                    worldDay, army.realm, "move", army.id, 0, army.location, target, army.lastEvent);
+            return moveOnce(requestId, army.id, target, army.realm);
+        } catch (TitleEditor.EditException ignored) {
+            return false;
+        }
+    }
 
     private Army nearestEnemyArmy(Army a) {
         Army best = null; int bd = 1 << 30;

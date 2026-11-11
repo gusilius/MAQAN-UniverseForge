@@ -306,6 +306,47 @@ public class ArmyTest {
                         && !aiRequestA.equals(aiRequestNextDay)
                         && !aiRequestA.equals(aiRequestOtherRealm),
                 "autonomous recruitment identity is stable across campaigns on one realm/day but isolated by day and realm");
+        String mergeOrderId = ArmyEngine.autonomousArmyActionRequestId(
+                412, "realm:north", "merge", 7, 9, 0, 0, "");
+        String reverseMergeOrderId = ArmyEngine.autonomousArmyActionRequestId(
+                412, "realm:north", "merge", 9, 7, 0, 0, "");
+        String otherMergeOrderId = ArmyEngine.autonomousArmyActionRequestId(
+                412, "realm:north", "merge", 7, 10, 0, 0, "");
+        String moveOrderId = ArmyEngine.autonomousArmyActionRequestId(
+                412, "realm:north", "move", 7, 0, 100, 200, "стоит");
+        String replayMoveOrderId = ArmyEngine.autonomousArmyActionRequestId(
+                412, "realm:north", "move", 7, 0, 100, 200, "стоит");
+        String replannedMoveOrderId = ArmyEngine.autonomousArmyActionRequestId(
+                412, "realm:north", "move", 7, 0, 100, 201, "стоит");
+        String afterBattleMoveOrderId = ArmyEngine.autonomousArmyActionRequestId(
+                412, "realm:north", "move", 7, 0, 100, 200, "победила в битве");
+        ok(mergeOrderId.equals(reverseMergeOrderId) && !mergeOrderId.equals(otherMergeOrderId),
+                "AI merge identity is symmetric for the same army pair and isolated for another pair");
+        ok(moveOrderId.equals(replayMoveOrderId) && !moveOrderId.equals(replannedMoveOrderId)
+                        && !moveOrderId.equals(afterBattleMoveOrderId),
+                "AI movement identity replays the same route but changes when target or post-battle state changes");
+
+        ArmyEngine autonomousOrders = fresh(a[0], ids);
+        autonomousOrders.ai = false;
+        Army autonomousArmy = autonomousOrders.raise(ids[0], "levy", 20);
+        int autonomousTarget = autonomousOrders.baroniesOf(ids[1]).get(0);
+        String autonomousMoveRequest = ArmyEngine.autonomousArmyActionRequestId(
+                412, ids[0], "move", autonomousArmy.id, 0,
+                autonomousArmy.location, autonomousTarget, autonomousArmy.lastEvent);
+        boolean firstAutonomousMove = autonomousOrders.moveOnce(
+                autonomousMoveRequest, autonomousArmy.id, autonomousTarget, ids[0]);
+        List<Integer> autonomousPath = new ArrayList<>(autonomousArmy.path);
+        boolean replayAutonomousMove = autonomousOrders.moveOnce(
+                autonomousMoveRequest, autonomousArmy.id, autonomousTarget, ids[0]);
+        ArmyEngine autonomousOrdersReload = new ArmyEngine(autonomousOrders.war);
+        autonomousOrdersReload.fromJson(autonomousOrders.toJson());
+        boolean reloadAutonomousMove = autonomousOrdersReload.moveOnce(
+                autonomousMoveRequest, autonomousArmy.id, autonomousTarget, ids[0]);
+        ok(firstAutonomousMove && !replayAutonomousMove && !reloadAutonomousMove
+                        && autonomousOrdersReload.army(autonomousArmy.id).path.equals(autonomousPath)
+                        && autonomousOrdersReload.hasArmyActionReceipt(autonomousMoveRequest),
+                "AI movement receipt survives save/reload and a repeated route never rewrites the path");
+
         // Split, merge and disband are request-idempotent composition operations.
         Army splitSource = hiredReload.raise(ids[0], "levy", 30);
         String splitRequest = "test-army-split-request-001";
