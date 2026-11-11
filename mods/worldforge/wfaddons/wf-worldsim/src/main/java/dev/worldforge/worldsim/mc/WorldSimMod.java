@@ -396,9 +396,10 @@ public final class WorldSimMod {
                 if (map.titles == null) continue;
                 var court = CourtMod.court(map);
                 if (court == null) continue;
-                var a = court.reg.get(first); var b = court.reg.get(second);
+                var a = court.reg.all().stream().filter(person -> first.equals(person.globalId)).findFirst().orElse(null);
+                var b = court.reg.all().stream().filter(person -> second.equals(person.globalId)).findFirst().orElse(null);
                 if (a != null && b != null) {
-                    var result = Marriages.propose(court, first, second);
+                    var result = Marriages.propose(court, a.id, b.id);
                     if (!result.ok) return false;
                     // Use the court addon's canonical crash-recoverable persistence path.
                     // The in-memory marriage is not reported as committed unless its state is durable.
