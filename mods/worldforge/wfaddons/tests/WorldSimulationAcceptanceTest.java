@@ -236,6 +236,8 @@ public final class WorldSimulationAcceptanceTest {
 
         boolean blockedTradeDuringWar = false;
         int caravanId = -1;
+        String tradeBlockAfterPeace = "NOT_CHECKED";
+        String tradeDispatchError = "";
         int snapshots = 0;
         Map<String, Settlement> cities = new LinkedHashMap<>();
         cities.put(north.id, north);
@@ -286,9 +288,15 @@ public final class WorldSimulationAcceptanceTest {
                 wars.acceptPeace(activeWar.id, activeWar.defender);
             }
             if (day == 3) {
+                tradeBlockAfterPeace = trade.blocked(attackerRealm, defenderRealm);
+                // Make the acceptance scenario independent of market-price drift:
+                // the route itself must be accepted once the war restriction is gone.
+                trade.market(attackerRealm).stock.put("grain", 1000.0);
+                trade.capital.put(attackerRealm, 1000.0);
                 Trade.Caravan caravan = trade.dispatch("m:" + attackerRealm, attackerRealm,
                         defenderRealm, "grain", 5, 2, day);
                 if (caravan != null) caravanId = caravan.id;
+                else tradeDispatchError = trade.lastError;
             }
 
             if (day % 250 == 0) {
@@ -340,6 +348,10 @@ public final class WorldSimulationAcceptanceTest {
         Trade.Caravan caravan = caravanId < 0 ? null : trade.caravans.get(caravanId);
         check(caravan != null && !caravan.status.equals("в пути"),
                 "trade caravan resumes after peace and completes its route");
+        if (caravan == null) System.out.println("TRADE_DIAGNOSTIC block=" + tradeBlockAfterPeace
+                + " dispatchError=" + tradeDispatchError + " warActive="
+                + (warRef[0].warBetween(attackerRealm, defenderRealm) != null));
+
         long developedRealms = 0;
         for (String id : realmIds) if (!realmDevelopment.state(id).gov.isBlank()) developedRealms++;
         check(developedRealms > 0, "realm AI develops government state through the shared campaign calendar");
@@ -359,6 +371,8 @@ public final class WorldSimulationAcceptanceTest {
         report.put("trade_markets", trade.markets.size());
         report.put("trade_caravan_id", caravanId);
         report.put("trade_caravan_status", caravan == null ? "NOT_CREATED" : caravan.status);
+        report.put("trade_block_after_peace", tradeBlockAfterPeace);
+        report.put("trade_dispatch_error", tradeDispatchError);
         report.put("realm_governments_developed", developedRealms);
         report.put("military_squads", squads.all().size());
         report.put("military_survivors_attacker", soldiers(squads, attackerArmyOwner));
