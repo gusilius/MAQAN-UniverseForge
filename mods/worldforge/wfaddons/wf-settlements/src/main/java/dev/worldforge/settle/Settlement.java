@@ -573,7 +573,7 @@ public final class Settlement {
     }
 
     private static void clearLifeAction(Worker worker) {
-        clearLifeAction(worker);
+        worker.lifeAction = "";
         worker.lifeActionStage = "";
         worker.lifeSocialTarget = "";
         worker.lifeActionDuration = 0;
