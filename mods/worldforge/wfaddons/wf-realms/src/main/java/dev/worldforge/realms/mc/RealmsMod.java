@@ -153,6 +153,7 @@ public class RealmsMod {
                     for (TitleData.Realm realm : currentRealms) {
                         Statecraft.VassalContract contract = POLITICS.vassalage(realm.id);
                         if (contract != null) realm.props.put("politics.vassal_loyalty", contract.loyalty);
+                        realm.props.put("politics.succession_law", POLITICS.successionLawForPeople(realm.id));
                     }
                 }
                 for (TitleData.Realm r : currentRealms) {
