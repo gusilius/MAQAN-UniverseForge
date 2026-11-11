@@ -83,17 +83,18 @@ public final class ResidentSocial {
                 if (entry.getKey() instanceof String key && entry.getValue() instanceof String value)
                     receipts.put(key, value);
         }
-        String target = other.globalId;
+        String payload = other.globalId + "|" + delta;
         Object prior = receipts.get(operationId);
         if (prior != null) {
-            if (!target.equals(prior))
+            if (!payload.equals(prior))
                 throw new IllegalStateException("Social interaction ID collision: " + operationId);
             return;
         }
+        if (receipts.size() >= 10000)
+            throw new IllegalStateException("Social interaction receipt limit reached; refusing unsafe replay");
         adjust(person, other.id, delta);
         updateBond(person, other.id, score(person, other.id));
-        receipts.put(operationId, target);
-        while (receipts.size() > 4096) receipts.remove(receipts.keySet().iterator().next());
+        receipts.put(operationId, payload);
         person.props.put(receiptKey, receipts);
     }
 

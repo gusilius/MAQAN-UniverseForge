@@ -972,6 +972,12 @@ public class SettleMod {
                         }
                         int opinion = dev.worldforge.settle.ResidentSocial.interactionDelta(character, companionPerson);
                         dev.worldforge.settle.ResidentSocial.socializeOnce(character, companionPerson, opinion, operationId);
+                        // Persist both canonical Character partitions before completing the
+                        // physical action. If the second write fails, keep the same pending
+                        // token: the first participant's receipt makes the retry idempotent.
+                        if (!PeopleMod.persistCharacter(character, server)
+                                || !PeopleMod.persistCharacter(companionPerson, server))
+                            return LifeSimulation.Outcome.IN_PROGRESS;
                         companion.status = "общался: " + character.name;
                     }
                     clearLifeAction(worker);

@@ -207,6 +207,11 @@ public final class PopulationSimulationTest {
         catch (IllegalStateException expected) { collisionRejected = true; }
         ok(collisionRejected && ResidentSocial.score(conversationalist, companion.id) == firstBefore + 3,
                 "conversation receipt rejects reuse of one operation ID for another participant");
+        boolean changedPayloadRejected = false;
+        try { ResidentSocial.socializeOnce(conversationalist, companion, 4, "life:conversation:one"); }
+        catch (IllegalStateException expected) { changedPayloadRejected = true; }
+        ok(changedPayloadRejected && ResidentSocial.score(conversationalist, companion.id) == firstBefore + 3,
+                "conversation receipt rejects changed relationship delta on replay");
 
         Character delayed = registry.create("Delayed", "", "north", "m", 280);
         PopulationSimulation.setNeed(delayed, Need.HUNGER, 90);
