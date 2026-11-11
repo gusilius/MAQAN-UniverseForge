@@ -969,10 +969,14 @@ public class SettleMod {
         Colony colony = COLONIES.get(colonyId);
         if (colony == null || colony.s == null || characterId == null || characterId.isBlank()
                 || !net.minecraftforge.fml.ModList.get().isLoaded("wf_people")) return false;
+        // Recovery may replay a transition after the destination settlement was already saved.
+        // Treat the exact existing assignment as success; never create a duplicate worker.
         for (Colony other : COLONIES.values()) {
             if (other == null || other.s == null) continue;
-            for (dev.worldforge.settle.Worker worker : other.s.workers)
-                if (characterId.equals(worker.person)) return false;
+            for (dev.worldforge.settle.Worker worker : other.s.workers) {
+                if (!characterId.equals(worker.person)) continue;
+                return other == colony;
+            }
         }
         CharacterRegistry registry = null;
         Character person = PeopleMod.authority().getGlobal(characterId);

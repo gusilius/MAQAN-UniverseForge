@@ -731,8 +731,7 @@ public class TroopsMod {
                         pending.kind() == dev.worldforge.troops.MilitaryTransitionLedger.Kind.DESERTION
                                 ? "deserted" : "demobilized");
                 person.props.put("population.employer", "");
-                if (pending.kind() == dev.worldforge.troops.MilitaryTransitionLedger.Kind.DESERTION)
-                    person.props.put("population.location", "unassigned");
+                person.props.put("population.location", "unassigned");
             }
             owner.unbindEntity(person.id, "troop", pending.troopEntityId());
             person.props.remove("wf_unit_kind");
