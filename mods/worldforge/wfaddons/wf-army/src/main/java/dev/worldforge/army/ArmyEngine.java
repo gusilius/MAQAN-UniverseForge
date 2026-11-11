@@ -239,16 +239,16 @@ public final class ArmyEngine {
         double amount = cost(pending.type(), pending.count(), mercenary);
         if (!mercenary && pool(pending.realm()) + 1e-9 < pending.count())
             throw new TitleEditor.EditException("После подготовки приказа изменился запас ополчения");
-        if (gold(pending.realm()) + 1e-9 < amount)
-            throw new TitleEditor.EditException("После подготовки приказа изменилось состояние казны");
+        int capital = capital(pending.realm());
+        if (capital == 0) throw new TitleEditor.EditException("У государства больше нет земель для размещения армии");
+        // Do not pre-check the balance here: after a crash the exact TreasuryLedger receipt may
+        // already exist and must replay successfully even though the debit reduced the balance.
         if (amount > 1e-9 && !postGoldDelta(pending.realm(), -amount,
                 mercenary ? "army-mercenary-hiring" : "army-recruitment",
                 "army-action-treasury:" + pending.operationId()))
             throw new TitleEditor.EditException("Казна отклонила оплату набора армии");
 
         if (!mercenary) pool.put(pending.realm(), pool(pending.realm()) - pending.count());
-        int capital = capital(pending.realm());
-        if (capital == 0) throw new TitleEditor.EditException("У государства больше нет земель для размещения армии");
         Army army = armyAt(pending.realm(), capital, mercenary);
         army.add(pending.type(), pending.count());
         rememberArmyAction(pending.operationId(), pending.fingerprint(), Integer.toString(army.id));
