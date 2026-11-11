@@ -286,7 +286,7 @@ public class TroopsMod {
                 LOGGER.warn("wf-troops: squad {} contains units from multiple strategic armies; hierarchy link withheld", squad.id);
                 continue;
             }
-            ArmyLink.Found strategic = ArmyLink.find(troop.armyId);
+            ArmyLink.Found strategic = ArmyLink.find(troop.armyId, troop.realm);
             String name = strategic == null ? "Армия " + troop.armyId : strategic.army().name;
             String realm = strategic == null ? troop.realm : strategic.army().realm;
             try {
@@ -1722,17 +1722,22 @@ public class TroopsMod {
         }
         if (!ModList.get().isLoaded("wf_army")) { src.sendFailure(Component.literal("Нужен мод wf_army")); return 0; }
 
-        Map<Integer, List<TroopEntity>> byArmy = new TreeMap<>();
+        record ArmyReturnKey(int armyId, String realm) {}
+        Map<ArmyReturnKey, List<TroopEntity>> byArmy = new TreeMap<>(
+                Comparator.comparing(ArmyReturnKey::realm).thenComparingInt(ArmyReturnKey::armyId));
         for (TroopEntity troop : LIVE.values()) {
-            if (troop.isAlive() && troop.armyId > 0 && troop.ownerId().equals(p.getUUID().toString()))
-                byArmy.computeIfAbsent(troop.armyId, ignored -> new ArrayList<>()).add(troop);
+            if (troop.isAlive() && troop.armyId > 0 && troop.ownerId().equals(p.getUUID().toString())) {
+                String realm = troop.realm == null ? "" : troop.realm;
+                byArmy.computeIfAbsent(new ArmyReturnKey(troop.armyId, realm), ignored -> new ArrayList<>()).add(troop);
+            }
         }
 
         // Commit every strategic roster credit before releasing any physical soldier.
         List<TroopEntity> stagedReturns = new ArrayList<>();
-        for (Map.Entry<Integer, List<TroopEntity>> entry : byArmy.entrySet()) {
-            ArmyLink.Found found = ArmyLink.find(entry.getKey());
-            if (found == null) continue; // no abstract army: these soldiers remain physical and playable
+        for (Map.Entry<ArmyReturnKey, List<TroopEntity>> entry : byArmy.entrySet()) {
+            ArmyReturnKey key = entry.getKey();
+            ArmyLink.Found found = ArmyLink.find(key.armyId(), key.realm());
+            if (found == null) continue; // missing/ambiguous map-local army: soldiers remain physical and playable
             try {
                 if (!ArmyLink.returnToArmy(found, entry.getValue(), DEFS.armyTypes(), p.server)) {
                     actionPersistenceBlocked = true;
@@ -1742,8 +1747,8 @@ public class TroopsMod {
                 stagedReturns.addAll(entry.getValue());
             } catch (RuntimeException ex) {
                 actionPersistenceBlocked = true;
-                LOGGER.error("wf_troops: strategic return failed for army {}: {}",
-                        entry.getKey(), ex.toString(), ex);
+                LOGGER.error("wf_troops: strategic return failed for army {} in realm {}: {}",
+                        key.armyId(), key.realm(), ex.toString(), ex);
                 src.sendFailure(Component.literal("Возврат в армию остановлен; физические солдаты сохранены для сверки"));
                 return 0;
             }
