@@ -103,6 +103,22 @@ public class CourtTest {
         ok(fz.factions.size() == 1 && fz.factions.values().iterator().next().members.size() == 2, "недовольные вассалы собрались во фракцию");
         double pw = fz.factions.values().iterator().next().power;
         ok(pw > 0 && pw < 1, "мощь фракции " + Math.round(pw * 100) + "%");
+
+        CourtSim contractLow = build(a[0], 51);
+        contractLow.ed.setOverlord(v1, liege, "vassal");
+        contractLow.opinions.add(contractLow.ruler(v1).id, contractLow.ruler(liege).id, "Обида", -30, 0);
+        contractLow.d.realms.get(v1).props.put("politics.vassal_loyalty", 0);
+        contractLow.tick(30);
+        ok(contractLow.factions.size() == 1,
+                "low feudal contract loyalty can organize a faction before ruler opinion becomes deeply hostile");
+
+        CourtSim contractHigh = build(a[0], 52);
+        contractHigh.ed.setOverlord(v1, liege, "vassal");
+        contractHigh.opinions.add(contractHigh.ruler(v1).id, contractHigh.ruler(liege).id, "Обида", -30, 0);
+        contractHigh.d.realms.get(v1).props.put("politics.vassal_loyalty", 100);
+        contractHigh.tick(30);
+        ok(contractHigh.factions.isEmpty(),
+                "high contractual loyalty moderates faction recruitment under the same ruler opinion");
         int fid = fz.factions.values().iterator().next().id;
         for (int i = 0; i < 200 && rebels.isEmpty(); i++) fz.tick(30);
         ok(rebels.size() == 2, "фракция предъявила ультиматум: " + rebels.size() + " мятежников");
