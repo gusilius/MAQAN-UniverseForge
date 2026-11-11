@@ -66,6 +66,8 @@ public class TroopEntity extends PathfinderMob {
     public boolean deferCharacterBinding;
     /** Stable transaction owner for a troop created by a recoverable strategic muster. */
     public String deploymentOperationId = "";
+    /** Exact strategic roster type this physical body was converted from. */
+    public String strategicUnitId = "";
     private int cooldown, seek;
     private int combatXp;
     private TroopDefs.Unit def;
@@ -227,6 +229,7 @@ public class TroopEntity extends PathfinderMob {
         t.putInt("wf_combat_xp", combatXp);
         t.putString("wf_character", characterId == null ? "" : characterId);
         t.putString("wf_deployment_operation", deploymentOperationId == null ? "" : deploymentOperationId);
+        t.putString("wf_strategic_unit", strategicUnitId == null ? "" : strategicUnitId);
     }
 
     @Override
@@ -238,6 +241,7 @@ public class TroopEntity extends PathfinderMob {
         combatXp = Math.max(0, Math.min(TroopProgression.MAX_XP, t.getInt("wf_combat_xp")));
         setCharacterId(t.getString("wf_character"));
         deploymentOperationId = t.getString("wf_deployment_operation");
+        strategicUnitId = t.getString("wf_strategic_unit");
         syncCombatXp();
         TroopDefs.Unit u = TroopsMod.DEFS.units.get(t.getString("wf_unit"));
         if (u != null) {

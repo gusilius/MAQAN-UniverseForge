@@ -118,7 +118,7 @@ final class ArmyLink {
                 throw new IllegalArgumentException("Invalid physical troop in army return");
             String entityId = troop.getUUID().toString();
             if (!seen.add(entityId)) throw new IllegalArgumentException("Duplicate physical troop in army return");
-            Map<String, Integer> delta = Muster.back(Map.of(troop.unitId(), 1), armyTypes);
+            Map<String, Integer> delta = Muster.back(troop.unitId(), troop.strategicUnitId, armyTypes);
             if (delta.isEmpty() || delta.values().stream().anyMatch(value -> value == null || value <= 0))
                 throw new IllegalStateException("No strategic roster mapping for physical troop " + troop.unitId());
             deltas.put(entityId, delta);

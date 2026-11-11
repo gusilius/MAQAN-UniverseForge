@@ -38,11 +38,13 @@ public final class MilitaryMusterLedger {
         }
     }
 
-    public record Spawn(String entityId, String unitId, String squadId, String dimension,
+    public record Spawn(String entityId, String unitId, String strategicUnitId, String squadId, String dimension,
                         double x, double y, double z, double yaw, String characterGlobalId) {
         public Spawn {
             entityId = uuid(entityId, "troop entity UUID");
             unitId = token(unitId, "unit ID");
+            strategicUnitId = strategicUnitId == null || strategicUnitId.isBlank()
+                    ? "" : token(strategicUnitId, "strategic army unit ID");
             squadId = token(squadId, "squad ID");
             dimension = required(dimension, "dimension", 256);
             finite(x, "spawn X"); finite(y, "spawn Y"); finite(z, "spawn Z"); finite(yaw, "spawn yaw");
@@ -50,7 +52,7 @@ public final class MilitaryMusterLedger {
                     ? "" : uuid(characterGlobalId, "Character UUID");
         }
         Spawn withCharacter(String characterId) {
-            return new Spawn(entityId, unitId, squadId, dimension, x, y, z, yaw, characterId);
+            return new Spawn(entityId, unitId, strategicUnitId, squadId, dimension, x, y, z, yaw, characterId);
         }
     }
 
@@ -91,6 +93,8 @@ public final class MilitaryMusterLedger {
                 if (!spawnIds.add(spawn.entityId())) throw new IllegalArgumentException("duplicate muster entity UUID");
                 if (!squadIds.contains(spawn.squadId()) || !memberIds.contains(spawn.entityId()))
                     throw new IllegalArgumentException("muster spawn is not assigned to its saved squad plan");
+                if (!spawn.strategicUnitId().isBlank() && !manpowerDelta.containsKey(spawn.strategicUnitId()))
+                    throw new IllegalArgumentException("muster physical soldier references an un-debited strategic unit");
             }
             if (!memberIds.equals(spawnIds)) throw new IllegalArgumentException("squad membership and spawn plan differ");
             Set<String> stockRefs = new HashSet<>();
@@ -215,7 +219,8 @@ public final class MilitaryMusterLedger {
 
             List<Object> spawns = new ArrayList<>();
             for (Spawn spawn : operation.spawns())
-                spawns.add(Map.of("entity", spawn.entityId(), "unit", spawn.unitId(), "squad", spawn.squadId(),
+                spawns.add(Map.of("entity", spawn.entityId(), "unit", spawn.unitId(),
+                        "strategicUnit", spawn.strategicUnitId(), "squad", spawn.squadId(),
                         "dimension", spawn.dimension(), "x", spawn.x(), "y", spawn.y(), "z", spawn.z(),
                         "yaw", spawn.yaw(), "character", spawn.characterGlobalId()));
             row.put("spawns", spawns);
@@ -268,7 +273,9 @@ public final class MilitaryMusterLedger {
             for (Object value : list(row.get("spawns"), "spawns")) {
                 if (!(value instanceof Map<?, ?> spawn)) throw new IllegalArgumentException("Invalid muster spawn");
                 spawns.add(new Spawn(requiredValue(spawn.get("entity"), "entity UUID"),
-                        requiredValue(spawn.get("unit"), "unit ID"), requiredValue(spawn.get("squad"), "squad ID"),
+                        requiredValue(spawn.get("unit"), "unit ID"),
+                        spawn.get("strategicUnit") instanceof String strategic ? strategic : "",
+                        requiredValue(spawn.get("squad"), "squad ID"),
                         requiredValue(spawn.get("dimension"), "dimension"),
                         number(spawn.get("x"), "spawn X"), number(spawn.get("y"), "spawn Y"),
                         number(spawn.get("z"), "spawn Z"), number(spawn.get("yaw"), "spawn yaw"),

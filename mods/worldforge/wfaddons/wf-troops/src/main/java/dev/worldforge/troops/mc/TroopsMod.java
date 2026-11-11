@@ -410,11 +410,39 @@ public class TroopsMod {
 
         MilitaryMusterLedger.Match musterMatch = MUSTERS.findSpawn(entityId);
         if (musterMatch != null) {
-            if (!musterMatch.operation().id().equals(troop.deploymentOperationId)) {
+            MilitaryMusterLedger.Operation operation = musterMatch.operation();
+            MilitaryMusterLedger.Spawn spawn = musterMatch.spawn();
+            MapData physicalMap = e.getLevel() instanceof ServerLevel serverLevel
+                    ? EditorManager.dataFor(serverLevel) : null;
+            boolean exactPhysicalPlan = physicalMap != null && physicalMap.name.equals(operation.mapId())
+                    && e.getLevel().dimension().location().toString().equals(spawn.dimension())
+                    && troop.armyId == operation.armyId()
+                    && operation.realm().equals(troop.realm)
+                    && spawn.unitId().equals(troop.unitId());
+            if (troop.deploymentOperationId == null || troop.deploymentOperationId.isBlank()) {
+                if (!exactPhysicalPlan) {
+                    troop.setInvulnerable(true);
+                    actionPersistenceBlocked = true;
+                    LOGGER.error("wf_troops: entity {} cannot be adopted by muster operation {}: physical identity differs",
+                            entityId, operation.id());
+                    return;
+                }
+                troop.deploymentOperationId = operation.id();
+            }
+            if (!operation.id().equals(troop.deploymentOperationId)) {
                 troop.setInvulnerable(true);
                 actionPersistenceBlocked = true;
                 LOGGER.error("wf_troops: entity {} conflicts with durable muster operation {}",
                         entityId, musterMatch.operation().id());
+                return;
+            }
+            if (troop.strategicUnitId == null || troop.strategicUnitId.isBlank()) {
+                if (!musterMatch.spawn().strategicUnitId().isBlank())
+                    troop.strategicUnitId = musterMatch.spawn().strategicUnitId();
+            } else if (!musterMatch.spawn().strategicUnitId().equals(troop.strategicUnitId)) {
+                troop.setInvulnerable(true);
+                actionPersistenceBlocked = true;
+                LOGGER.error("wf_troops: entity {} strategic source differs from its muster receipt", entityId);
                 return;
             }
             String expectedCharacter = musterMatch.spawn().characterGlobalId();
@@ -1009,6 +1037,7 @@ public class TroopsMod {
                     troop.realm = operation.realm();
                     troop.armyId = operation.armyId();
                     troop.deploymentOperationId = operation.id();
+                    troop.strategicUnitId = spawn.strategicUnitId();
                     troop.deferCharacterBinding = true;
                     troop.setSquadId(spawn.squadId());
                     troop.moveTo(spawn.x(), spawn.y(), spawn.z(), (float) spawn.yaw(), 0);
@@ -1017,10 +1046,15 @@ public class TroopsMod {
                         continue;
                     }
                 } else {
+                    if (troop.deploymentOperationId == null || troop.deploymentOperationId.isBlank())
+                        troop.deploymentOperationId = operation.id();
+                    if (troop.strategicUnitId == null || troop.strategicUnitId.isBlank())
+                        troop.strategicUnitId = spawn.strategicUnitId();
                     if (!operation.id().equals(troop.deploymentOperationId)
                             || troop.armyId != operation.armyId()
                             || !operation.realm().equals(troop.realm)
-                            || !spawn.unitId().equals(troop.unitId())) {
+                            || !spawn.unitId().equals(troop.unitId())
+                            || !spawn.strategicUnitId().equals(troop.strategicUnitId)) {
                         actionPersistenceBlocked = true;
                         troop.setInvulnerable(true);
                         LOGGER.error("wf_troops: existing entity {} does not match muster operation {}",
@@ -2144,11 +2178,18 @@ public class TroopsMod {
             }
 
             String squadId = "muster-" + operationId.replace("-", "") + "-" + squadIndex++;
+            List<Muster.Soldier> sourceAllocations = plan.allocations().stream()
+                    .filter(allocation -> allocation.troopUnitId().equals(unit.id())).toList();
+            if (sourceAllocations.size() != entry.getValue()) {
+                src.sendFailure(Component.literal("План призыва потерял соответствие стратегического типа для " + unit.id()));
+                return 0;
+            }
             List<String> memberIds = new ArrayList<>();
             List<Formations.Slot> slots = Formations.slots(Formations.Type.BLOCK, entry.getValue(), 1.6);
             List<double[]> positions = Formations.place(slots, site.spawn().getX() + 0.5,
                     site.spawn().getZ() + 0.5, player.getYRot() + 180);
-            for (int i = 0; i < entry.getValue(); i++) {
+            for (int i = 0; i < sourceAllocations.size(); i++) {
+                Muster.Soldier allocation = sourceAllocations.get(i);
                 UUID entityUuid = UUID.nameUUIDFromBytes((operationId + ":troop:" + entityIndex++)
                         .getBytes(StandardCharsets.UTF_8));
                 String entityId = entityUuid.toString();
@@ -2156,7 +2197,7 @@ public class TroopsMod {
                 double x = positions.get(i)[0], z = positions.get(i)[1];
                 int blockX = (int) Math.floor(x), blockZ = (int) Math.floor(z);
                 int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, blockX, blockZ);
-                spawnPlans.add(new MilitaryMusterLedger.Spawn(entityId, unit.id(), squadId,
+                spawnPlans.add(new MilitaryMusterLedger.Spawn(entityId, unit.id(), allocation.armyUnitId(), squadId,
                         level.dimension().location().toString(), x, y, z,
                         player.getYRot(), ""));
             }

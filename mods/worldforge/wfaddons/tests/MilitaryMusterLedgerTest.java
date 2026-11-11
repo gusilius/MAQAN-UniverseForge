@@ -18,7 +18,7 @@ public final class MilitaryMusterLedgerTest {
         String entity = "33333333-3333-4333-8333-333333333333";
         String character = "44444444-4444-4444-8444-444444444444";
         MilitaryMusterLedger.Spawn spawn = new MilitaryMusterLedger.Spawn(
-                entity, "footman", "muster-squad-1", "minecraft:overworld",
+                entity, "footman", "levy", "muster-squad-1", "minecraft:overworld",
                 12.5, 64, -3.5, 90, "");
         MilitaryMusterLedger.SquadPlan squad = new MilitaryMusterLedger.SquadPlan(
                 "muster-squad-1", "1-й корпус", "owner", "north",
@@ -80,6 +80,8 @@ public final class MilitaryMusterLedgerTest {
                 "committed muster and Character link survive another restart");
         check(afterRestart.findSpawn(entity).operation().armyId() == 7,
                 "physical UUID resolves back to its exact map-scoped strategic army");
+        check(afterRestart.findSpawn(entity).spawn().strategicUnitId().equals("levy"),
+                "physical soldier keeps the strategic roster type through save/reload");
 
         boolean malformedRejected = false;
         try {
