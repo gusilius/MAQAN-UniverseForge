@@ -476,6 +476,35 @@ public class SettleTest {
                         && Math.abs(dev.worldforge.mod.economy.TreasuryService.current().balance(armyFoodAccount) - 20) < 1e-8,
                 "settlement food and army field rations reconcile after independent snapshot reloads");
 
+        // A settlement spend receipt is bound to the entire resource basket, not only individual legs.
+        dev.worldforge.mod.economy.TreasuryService.replace(new dev.worldforge.mod.economy.TreasuryLedger());
+        dev.worldforge.settle.Settlement spendOnce = new dev.worldforge.settle.Settlement("spend_once", "Spend Once", d);
+        spendOnce.setLedgerScope("minecraft:overworld");
+        spendOnce.add("wood", 20);
+        spendOnce.add("stone", 20);
+        Map<String, Integer> recruitmentCost = Map.of("wood", 3, "stone", 4);
+        ok(spendOnce.spendOnce(recruitmentCost, "recruitment:test:one")
+                        && Math.abs(spendOnce.amount("wood") - 17) < 1e-8
+                        && Math.abs(spendOnce.amount("stone") - 16) < 1e-8,
+                "named settlement spend debits every recruitment resource exactly once");
+        ok(spendOnce.spendOnce(recruitmentCost, "recruitment:test:one")
+                        && Math.abs(spendOnce.amount("wood") - 17) < 1e-8
+                        && Math.abs(spendOnce.amount("stone") - 16) < 1e-8,
+                "replaying the same complete settlement spend does not debit resources twice");
+        ok(!spendOnce.spendOnce(Map.of("wood", 3, "stone", 4, "food", 1), "recruitment:test:one")
+                        && Math.abs(spendOnce.amount("food")) < 1e-8,
+                "reusing a spend ID with an added resource fails before any new debit");
+        ok(!spendOnce.spendOnce(Map.of("wood", 3), "recruitment:test:one")
+                        && Math.abs(spendOnce.amount("wood") - 17) < 1e-8,
+                "reusing a spend ID with an omitted resource fails closed");
+        String spendLedger = dev.worldforge.mod.economy.TreasuryService.current().toJson();
+        dev.worldforge.mod.economy.TreasuryService.replace(
+                dev.worldforge.mod.economy.TreasuryLedger.fromJson(spendLedger));
+        ok(spendOnce.spendOnce(recruitmentCost, "recruitment:test:one")
+                        && Math.abs(spendOnce.amount("wood") - 17) < 1e-8
+                        && Math.abs(spendOnce.amount("stone") - 16) < 1e-8,
+                "complete settlement spend receipts survive treasury reload");
+
         System.out.println(fails == 0 ? "ALL OK" : fails + " FAILED");
         if (fails > 0) System.exit(1);
     }

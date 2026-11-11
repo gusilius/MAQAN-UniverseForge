@@ -447,14 +447,39 @@ public final class Settlement {
             normalized.put(resource, quantity);
         }
 
+        // Bind every resource leg to the complete operation payload. Without this manifest,
+        // replaying an operation ID with an added/removed resource could silently debit a
+        // different basket while each individual resource receipt still looked valid.
+        StringBuilder payload = new StringBuilder("settlement-spend-v1:");
+        for (Map.Entry<String, Integer> entry : normalized.entrySet())
+            payload.append(entry.getKey()).append('=').append(entry.getValue()).append(';');
+        String payloadFingerprint = payload.toString();
+
         TreasuryLedger ledger = TreasuryService.current();
+        String operationPrefix = "settlement-spend:" + operationId + ":";
         Map<String, String> references = new LinkedHashMap<>();
+        Map<String, Integer> existingLegs = new HashMap<>();
+        for (TreasuryLedger.Entry receipt : ledger.journal()) {
+            if (!receipt.reference().startsWith(operationPrefix)) continue;
+            String resource = receipt.reference().substring(operationPrefix.length());
+            Integer expected = normalized.get(resource);
+            TreasuryLedger.Kind expectedKind = Defs.SILVER.equals(resource)
+                    ? TreasuryLedger.Kind.WITHDRAWAL : TreasuryLedger.Kind.CONSUMPTION;
+            if (expected == null || expected <= 0 || receipt.credit()
+                    || !receipt.accountId().equals(accountId(resource))
+                    || !receipt.counterpartyId().equals("external")
+                    || !receipt.currency().equals(resource) || receipt.kind() != expectedKind
+                    || !receipt.category().equals(payloadFingerprint)
+                    || Math.abs(receipt.amount() - expected) > 1e-8
+                    || existingLegs.putIfAbsent(resource, 1) != null) return false;
+        }
+
         for (Map.Entry<String, Integer> entry : normalized.entrySet()) {
             if (entry.getValue() == 0) continue;
             String resource = entry.getKey();
             TreasuryLedger.Kind kind = Defs.SILVER.equals(resource)
                     ? TreasuryLedger.Kind.WITHDRAWAL : TreasuryLedger.Kind.CONSUMPTION;
-            String reference = "settlement-spend:" + operationId + ":" + resource;
+            String reference = operationPrefix + resource;
             String account = accountId(resource);
             amount(resource);
             resourceAccount(resource);
@@ -472,7 +497,7 @@ public final class Settlement {
             String account = accountId(resource);
             String reference = references.get(resource);
             boolean alreadyPosted = ledger.hasTransaction(account, kind, reference);
-            if (!ledger.withdrawOnce(account, quantity, kind, "settlement-spend", reference,
+            if (!ledger.withdrawOnce(account, quantity, kind, payloadFingerprint, reference,
                     worldMinute(), "idempotent settlement resource debit")) return false;
             syncResourceMirror(resource);
             if (!alreadyPosted) flow.record(time, resource, quantity, false);
