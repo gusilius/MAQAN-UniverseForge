@@ -113,16 +113,25 @@ public class CourtMod {
         });
     }
 
-    static void saveAll(MinecraftServer server) {
-        for (Map.Entry<MapData, CourtSim> en : COURTS.entrySet()) {
-            try {
-                Path dir = EditorManager.overlayDir(server, en.getKey());
-                Files.createDirectories(dir);
-                Files.writeString(dir.resolve("wf_court.json"), en.getValue().toJson());
-            } catch (Exception ex) {
-                LOGGER.error("wf_court: не удалось сохранить двор карты '{}': {}", en.getKey().name, ex.toString());
-            }
+    /** Persist one court through the shared crash-recoverable worldforge file transaction. */
+    public static boolean persistNow(MinecraftServer server, MapData map) {
+        if (server == null || map == null) return false;
+        CourtSim court = COURTS.get(map);
+        if (court == null) return false;
+        try {
+            Path root = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT).resolve("worldforge");
+            Path target = EditorManager.overlayDir(server, map).resolve("wf_court.json");
+            dev.worldforge.mod.AtomicFileBatch.commit(root, Map.of(
+                    target, court.toJson().getBytes(StandardCharsets.UTF_8)));
+            return true;
+        } catch (Exception ex) {
+            LOGGER.error("wf_court: не удалось атомарно сохранить двор карты '{}': {}", map.name, ex.toString(), ex);
+            return false;
         }
+    }
+
+    static void saveAll(MinecraftServer server) {
+        for (MapData map : COURTS.keySet()) persistNow(server, map);
     }
 
     @SubscribeEvent
