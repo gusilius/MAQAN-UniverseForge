@@ -226,30 +226,30 @@ public class ArmyTest {
         double treasuryBefore = transactions.gold(ids[0]);
         String recruitmentRequest = "test-army-recruitment-request-001";
         String pendingId = transactions.stageRecruitment(recruitmentRequest, "hire", ids[0], "archer", 10);
-        check(transactions.pendingRecruitmentIds().contains(pendingId),
+        ok(transactions.pendingRecruitmentIds().contains(pendingId),
                 "army recruitment intent exists before money or units are changed");
         String pendingSnapshot = transactions.toJson();
         ArmyEngine pendingReload = new ArmyEngine(transactions.war);
         pendingReload.fromJson(pendingSnapshot);
-        check(pendingReload.pendingRecruitmentIds().contains(pendingId),
+        ok(pendingReload.pendingRecruitmentIds().contains(pendingId),
                 "pending recruitment intent survives army save/reload");
         Army hired = pendingReload.completePendingRecruitment(pendingId);
         double treasuryAfterHire = pendingReload.gold(ids[0]);
         int hiredCount = hired.count("archer");
         Army replayedHire = pendingReload.completePendingRecruitment(pendingId);
-        check(replayedHire.id == hired.id && replayedHire.count("archer") == hiredCount
+        ok(replayedHire.id == hired.id && replayedHire.count("archer") == hiredCount
                         && Math.abs(pendingReload.gold(ids[0]) - treasuryAfterHire) < 1e-8,
                 "replaying a completed recruitment reuses its receipt and never charges twice");
         ArmyEngine hiredReload = new ArmyEngine(pendingReload.war);
         hiredReload.fromJson(pendingReload.toJson());
-        check(hiredReload.pendingRecruitmentIds().isEmpty()
+        ok(hiredReload.pendingRecruitmentIds().isEmpty()
                         && hiredReload.completePendingRecruitment(pendingId).id == hired.id,
                 "completed recruitment receipt survives a second restart");
         boolean recruitmentCollision = false;
         try { hiredReload.stageRecruitment(recruitmentRequest, "hire", ids[0], "knight", 10); }
         catch (IllegalStateException expected) { recruitmentCollision = true; }
-        check(recruitmentCollision, "reusing a recruitment request ID with a different payload fails closed");
-        check(treasuryAfterHire < treasuryBefore,
+        ok(recruitmentCollision, "reusing a recruitment request ID with a different payload fails closed");
+        ok(treasuryAfterHire < treasuryBefore,
                 "hiring commits the canonical TreasuryLedger debit");
 
         // Split, merge and disband are request-idempotent composition operations.
@@ -258,27 +258,27 @@ public class ArmyTest {
         Army detached = hiredReload.splitOnce(splitRequest, splitSource.id, "levy", 10, ids[0]);
         int parentAfterSplit = splitSource.count("levy");
         Army splitReplay = hiredReload.splitOnce(splitRequest, splitSource.id, "levy", 10, ids[0]);
-        check(splitReplay.id == detached.id && splitSource.count("levy") == parentAfterSplit
+        ok(splitReplay.id == detached.id && splitSource.count("levy") == parentAfterSplit
                         && detached.count("levy") == 10,
                 "split replay returns the same new army without detaching units twice");
         ArmyEngine splitReload = new ArmyEngine(hiredReload.war);
         splitReload.fromJson(hiredReload.toJson());
-        check(splitReload.splitOnce(splitRequest, splitSource.id, "levy", 10, ids[0]).id == detached.id,
+        ok(splitReload.splitOnce(splitRequest, splitSource.id, "levy", 10, ids[0]).id == detached.id,
                 "split result identity survives save/reload");
         int combinedBefore = splitReload.army(splitSource.id).men();
         Army merged = splitReload.mergeOnce("test-army-merge-request-001",
                 splitSource.id, detached.id, ids[0]);
         Army mergedReplay = splitReload.mergeOnce("test-army-merge-request-001",
                 splitSource.id, detached.id, ids[0]);
-        check(mergedReplay.id == merged.id && merged.men() == combinedBefore + detached.men()
+        ok(mergedReplay.id == merged.id && merged.men() == combinedBefore + detached.men()
                         && !splitReload.armies.containsKey(detached.id),
                 "merge replay is idempotent and preserves the combined roster");
         Army toDisband = splitReload.splitOnce("test-army-disband-split-001",
                 merged.id, "levy", 5, ids[0]);
         double poolBeforeDisband = splitReload.pool(ids[0]);
-        check(splitReload.disbandOnce("test-army-disband-request-001", toDisband.id, ids[0]),
+        ok(splitReload.disbandOnce("test-army-disband-request-001", toDisband.id, ids[0]),
                 "first disband applies the operation");
-        check(!splitReload.disbandOnce("test-army-disband-request-001", toDisband.id, ids[0])
+        ok(!splitReload.disbandOnce("test-army-disband-request-001", toDisband.id, ids[0])
                         && !splitReload.armies.containsKey(toDisband.id)
                         && splitReload.pool(ids[0]) >= poolBeforeDisband,
                 "disband replay does not restore levy manpower twice");

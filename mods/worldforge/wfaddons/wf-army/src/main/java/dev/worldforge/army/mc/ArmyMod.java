@@ -49,6 +49,10 @@ public class ArmyMod {
     private static volatile boolean actionPersistenceBlocked;
 
     public ArmyMod() {
+        ArmyActions.installPersistenceBridge(new ArmyActions.PersistenceBridge() {
+            @Override public boolean actionsBlocked() { return ArmyMod.actionsBlocked(); }
+            @Override public boolean persist() { return ArmyMod.persistActionMutation(); }
+        });
         MinecraftForge.EVENT_BUS.register(this);
         dev.worldforge.mod.api.TreasuryApi.register("army", new dev.worldforge.mod.api.TreasuryApi.Provider() {
             private ArmyEngine of(String realm) {

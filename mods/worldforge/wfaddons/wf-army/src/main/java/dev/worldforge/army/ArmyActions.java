@@ -5,7 +5,6 @@ import dev.worldforge.mod.TitleEditor;
 import dev.worldforge.mod.api.ActionResult;
 import dev.worldforge.mod.api.MapAction;
 import dev.worldforge.mod.api.WorldForgeApi;
-import dev.worldforge.army.mc.ArmyMod;
 
 import java.util.List;
 import java.util.function.Function;
@@ -15,6 +14,20 @@ public final class ArmyActions {
     private ArmyActions() {}
 
     private static final java.util.Map<String, String> CAPS = new java.util.HashMap<>();
+
+    /** Runtime persistence is injected by the Forge adapter; pure logic tests stay Forge-independent. */
+    public interface PersistenceBridge {
+        boolean actionsBlocked();
+        boolean persist();
+    }
+    private static volatile PersistenceBridge persistence = new PersistenceBridge() {
+        @Override public boolean actionsBlocked() { return false; }
+        @Override public boolean persist() { return true; }
+    };
+    public static void installPersistenceBridge(PersistenceBridge bridge) {
+        if (bridge == null) throw new IllegalArgumentException("army persistence bridge is required");
+        persistence = bridge;
+    }
 
     private static Function<TitleEditor, ArmyEngine> ARMIES;
 
@@ -36,7 +49,7 @@ public final class ArmyActions {
         WorldForgeApi.addGuard((action, ctx) -> {
             String cap = CAPS.get(action.id);
             if (cap == null) return null;
-            if (ArmyMod.actionsBlocked()) return "Стратегические приказы заблокированы после ошибки сохранения; требуется перезапуск и сверка";
+            if (persistence.actionsBlocked()) return "Стратегические приказы заблокированы после ошибки сохранения; требуется перезапуск и сверка";
             ArmyEngine e = armies.apply(ctx.editor);
             if (e == null) return "Движок армий не запущен";
             if (ctx.realmId == null) return "Не выбрано государство";
@@ -96,7 +109,7 @@ public final class ArmyActions {
         String operationId = engine.stageRecruitment(context.requestId, kind, context.realmId,
                 context.arg(0, "тип"), num(context.arg(1, "число")));
         // The intent is written before the operation can debit TreasuryLedger or change the roster.
-        if (!ArmyMod.persistActionMutation())
+        if (!persistence.persist())
             throw new TitleEditor.EditException("Не удалось сохранить намерение набора армии; ресурсы не изменены");
         Army result = engine.completePendingRecruitment(operationId);
         // persistActionMutation saves TreasuryLedger first, then the army receipt and resulting roster.
