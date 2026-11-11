@@ -378,18 +378,40 @@ public class TroopsMod {
 
     @SubscribeEvent
     public void join(EntityJoinLevelEvent e) {
-        if (e.getLevel().isClientSide || !(e.getEntity() instanceof TroopEntity t)) return;
-        String entityId = t.getUUID().toString();
-        if (hasStrategicReturnReceipt(t)) {
-            t.setInvulnerable(true);
-            if (releaseBodyDurably(t)) t.discard();
-            else RETURNED_BODIES_PENDING.put(entityId, t);
-            return; // The strategic roster receipt is authoritative; a late chunk cannot restore this body.
+        if (e.getLevel().isClientSide || !(e.getEntity() instanceof TroopEntity troop)) return;
+        String entityId = troop.getUUID().toString();
+
+        // Death is terminal even when a later army-roster receipt also exists.
+        if (ModList.get().isLoaded("wf_people")
+                && troop.characterId != null && !troop.characterId.isBlank()) {
+            Character existingCharacter = PeopleMod.authority().getGlobal(troop.characterId);
+            if (existingCharacter != null && !existingCharacter.alive) {
+                LIVE.remove(entityId);
+                SQUADS.remove(entityId);
+                troop.discard();
+                return;
+            }
         }
+
+        if (troop.characterId != null && !troop.characterId.isBlank()
+                && TRANSITIONS.isCompleted(troop.characterId, entityId)) {
+            LIVE.remove(entityId);
+            SQUADS.remove(entityId);
+            troop.discard();
+            return; // A committed non-lethal transition owns this exact physical body forever.
+        }
+
+        if (hasStrategicReturnReceipt(troop)) {
+            troop.setInvulnerable(true);
+            if (releaseBodyDurably(troop)) troop.discard();
+            else RETURNED_BODIES_PENDING.put(entityId, troop);
+            return; // The strategic roster receipt is authoritative after a return operation.
+        }
+
         MilitaryMusterLedger.Match musterMatch = MUSTERS.findSpawn(entityId);
         if (musterMatch != null) {
-            if (!musterMatch.operation().id().equals(t.deploymentOperationId)) {
-                t.setInvulnerable(true);
+            if (!musterMatch.operation().id().equals(troop.deploymentOperationId)) {
+                troop.setInvulnerable(true);
                 actionPersistenceBlocked = true;
                 LOGGER.error("wf_troops: entity {} conflicts with durable muster operation {}",
                         entityId, musterMatch.operation().id());
@@ -397,52 +419,44 @@ public class TroopsMod {
             }
             String expectedCharacter = musterMatch.spawn().characterGlobalId();
             if (!expectedCharacter.isBlank()) {
-                if (t.characterId == null || t.characterId.isBlank()) t.setCharacterId(expectedCharacter);
-                else if (!expectedCharacter.equals(t.characterId)) {
-                    t.setInvulnerable(true);
+                if (troop.characterId == null || troop.characterId.isBlank())
+                    troop.setCharacterId(expectedCharacter);
+                else if (!expectedCharacter.equals(troop.characterId)) {
+                    troop.setInvulnerable(true);
                     actionPersistenceBlocked = true;
                     LOGGER.error("wf_troops: entity {} Character identity differs from its muster receipt", entityId);
                     return;
                 }
             }
         }
-        if (t.characterId != null && !t.characterId.isBlank()
-                && TRANSITIONS.isCompleted(t.characterId, entityId)) {
-            LIVE.remove(entityId);
-            SQUADS.remove(entityId);
-            t.discard();
-            return; // A committed non-lethal transition must not resurrect from a stale chunk.
-        }
-        if (ModList.get().isLoaded("wf_people") && t.characterId != null && !t.characterId.isBlank()) {
-            Character existingCharacter = PeopleMod.authority().getGlobal(t.characterId);
-            if (existingCharacter != null && !existingCharacter.alive) {
-                LIVE.remove(entityId);
-                SQUADS.remove(entityId);
-                t.discard();
-                return; // A previously committed death must never be resurrected by a late chunk load.
-            }
-        }
-        var transition = t.characterId == null || t.characterId.isBlank()
-                ? null : TRANSITIONS.get(t.characterId);
+
+        var transition = troop.characterId == null || troop.characterId.isBlank()
+                ? null : TRANSITIONS.get(troop.characterId);
         if (transition != null && transition.troopEntityId().equals(entityId)) {
-            t.setInvulnerable(true);
+            troop.setInvulnerable(true);
             return; // A staged non-lethal transition owns this body until its outbox is acknowledged.
         }
-        MilitaryDeathLedger.Pending pending = t.characterId == null || t.characterId.isBlank()
-                ? null : DEATHS.get(t.characterId);
+
+        MilitaryDeathLedger.Pending pending = troop.characterId == null || troop.characterId.isBlank()
+                ? null : DEATHS.get(troop.characterId);
         if (pending != null && pending.troopEntityId().equals(entityId)) {
-            t.setInvulnerable(true);
+            troop.setInvulnerable(true);
             completePendingDeath(pending, true);
             return;
         }
-        LIVE.put(entityId, t);
-        if (!t.deferCharacterBinding) syncPerson(t); // legacy saved entities migrate once; new recruits bind after payment commits
+
+        LIVE.put(entityId, troop);
+        if (!troop.deferCharacterBinding) syncPerson(troop);
         if (SQUADS.squadOf(entityId) == null) {
-            Squads.Squad squad = SQUADS.create(t.ownerId(), null, List.of(entityId));
-            squad.realm = t.realm; squad.cx = t.getX(); squad.cz = t.getZ();
-            t.setSquadId(squad.id);
-        } else t.setSquadId(SQUADS.squadOf(entityId).id);
-        applySupplyReadiness(t);
+            Squads.Squad squad = SQUADS.create(troop.ownerId(), null, List.of(entityId));
+            squad.realm = troop.realm;
+            squad.cx = troop.getX();
+            squad.cz = troop.getZ();
+            troop.setSquadId(squad.id);
+        } else {
+            troop.setSquadId(SQUADS.squadOf(entityId).id);
+        }
+        applySupplyReadiness(troop);
     }
 
     private record PersonBinding(CharacterRegistry registry, Character character) {}
