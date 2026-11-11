@@ -9,6 +9,7 @@ import dev.worldforge.mod.EditorManager;
 import dev.worldforge.mod.WorldForgeMod;
 import dev.worldforge.mod.api.Diplomacy;
 import dev.worldforge.mod.api.WorldForgeApi;
+import dev.worldforge.mod.api.SimulationLod;
 import dev.worldforge.court.CourtSim;
 import dev.worldforge.court.mc.CourtMod;
 import dev.worldforge.court.Marriages;
@@ -55,6 +56,7 @@ public final class WorldSimMod {
     private static final Gson GSON = new Gson();
     private static final int DECISION_INTERVAL_DAYS = 30;
     private static long lastDecisionDay = Long.MIN_VALUE;
+    private static long lodTicks;
     private static final Map<String, Long> lastProjectDay = new HashMap<>();
     private static final List<String> journal = new ArrayList<>();
 
@@ -65,6 +67,7 @@ public final class WorldSimMod {
     @SubscribeEvent
     public void onStarted(ServerStartedEvent event) {
         lastDecisionDay = Long.MIN_VALUE;
+        lodTicks = 0;
         loadState(event.getServer());
         LOGGER.info("wf_worldsim: autonomous coordinator started; native Rust core={}", NativeWorldSimulation.load() ? "available" : "unavailable");
     }
@@ -74,6 +77,8 @@ public final class WorldSimMod {
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server != null) saveState(server);
         lastDecisionDay = Long.MIN_VALUE;
+        lodTicks = 0;
+        SimulationLod.clear();
         lastProjectDay.clear();
         journal.clear();
     }
@@ -83,6 +88,7 @@ public final class WorldSimMod {
         if (event.phase != TickEvent.Phase.END) return;
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server == null) return;
+        if (++lodTicks % 20 == 0) publishObservers(server);
         long day = WorldForgeApi.clock().dayNumber();
         if (day <= 0 || (lastDecisionDay != Long.MIN_VALUE
                 && day - lastDecisionDay < DECISION_INTERVAL_DAYS)) return;
@@ -168,6 +174,19 @@ public final class WorldSimMod {
                             }
                             return recent.size();
                         }))));
+    }
+
+    /** One shared observer snapshot drives NPC, worker, settlement and future ambient LOD. */
+    private static void publishObservers(MinecraftServer server) {
+        List<SimulationLod.Observer> observers = new ArrayList<>();
+        for (var level : server.getAllLevels()) {
+            String dimension = level.dimension().location().toString();
+            for (var player : level.players()) {
+                if (player.isSpectator()) continue;
+                observers.add(new SimulationLod.Observer(dimension, player.getX(), player.getZ()));
+            }
+        }
+        SimulationLod.publish(observers);
     }
 
     private static JsonObject snapshot(MinecraftServer server, long day) {
