@@ -268,11 +268,20 @@ public class TroopsMod {
     }
 
     private static String resolveLegacyArmyMap(ArmyHierarchy.LegacyArmy legacy) {
-        if (legacy == null || legacy.realm() == null || legacy.realm().isBlank()) return null;
+        if (legacy == null) return null;
         List<MapData> matches = new ArrayList<>();
         for (MapData map : WorldForgeMod.loadedMaps().values()) {
-            if (map != null && map.titles != null && map.titles.realms.containsKey(legacy.realm()))
-                matches.add(map);
+            if (map == null || map.titles == null) continue;
+            if (legacy.realm() != null && !legacy.realm().isBlank()
+                    && !map.titles.realms.containsKey(legacy.realm())) continue;
+            if (ModList.get().isLoaded("wf_army")) {
+                ArmyLink.Found candidate = ArmyLink.findOnMap(legacy.armyId(), map.name);
+                if (candidate == null || legacy.realm() != null && !legacy.realm().isBlank()
+                        && !legacy.realm().equals(candidate.army().realm)) continue;
+            } else if (legacy.realm() == null || legacy.realm().isBlank()) {
+                continue; // no strategic roster to disambiguate a legacy map-local ID
+            }
+            matches.add(map);
         }
         return matches.size() == 1 ? matches.get(0).name : null;
     }

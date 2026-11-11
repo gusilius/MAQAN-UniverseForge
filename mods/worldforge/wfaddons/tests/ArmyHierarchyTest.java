@@ -18,17 +18,20 @@ public final class ArmyHierarchyTest {
         WorldId world = WorldId.parse("11111111-1111-1111-1111-111111111111");
         ArmyRef northRef = new ArmyRef(world, "north-map", 42);
         ArmyRef southRef = new ArmyRef(world, "south-map", 42);
+        WorldId otherWorld = WorldId.parse("22222222-2222-2222-2222-222222222222");
+        ArmyRef otherWorldRef = new ArmyRef(otherWorld, "north-map", 42);
         Squads squads = new Squads();
         Squads.Squad first = squads.create("player", "Авангард", List.of("unit-1", "unit-2"));
         Squads.Squad second = squads.create("player", "Резерв", List.of("unit-3"));
         ArmyHierarchy hierarchy = new ArmyHierarchy();
         hierarchy.ensureArmy(northRef, "Первая армия", "player", "realm-north");
         hierarchy.ensureArmy(southRef, "Вторая армия", "player", "realm-south");
+        hierarchy.ensureArmy(otherWorldRef, "Армия другого мира", "player", "realm-north");
         ArmyHierarchy.Corps vanguard = hierarchy.defaultCorps(northRef);
         ArmyHierarchy.Corps reserve = hierarchy.createCorps(southRef, "Резервный корпус");
         check(hierarchy.army(northRef) != hierarchy.army(southRef)
-                        && hierarchy.armies().size() == 2,
-                "same map-local army ID in two maps remains two independent strategic armies");
+                        && hierarchy.army(otherWorldRef) != null && hierarchy.armies().size() == 3,
+                "same map-local army ID remains independent across maps and WorldIds");
         check(hierarchy.assignSquad(vanguard.id, first.id, squads)
                         && hierarchy.assignSquad(reserve.id, second.id, squads),
                 "army contains corps and corps contain canonical RTS squads");
@@ -37,8 +40,8 @@ public final class ArmyHierarchyTest {
                 "army and corps commanders use canonical Character IDs");
         int issued = hierarchy.commandArmy(northRef, squads,
                 new Squads.Order(Squads.Kind.MOVE, 120, -40, ""), false);
-        check(issued == 1 && first.current().kind() == Squads.Kind.MOVE
-                        && second.current().kind() != Squads.Kind.MOVE,
+        check(issued == 1 && first.current() != null && first.current().kind() == Squads.Kind.MOVE
+                        && second.current() == null,
                 "army-level orders never leak into another map with the same numeric army ID");
         hierarchy.commandCorps(reserve.id, squads,
                 new Squads.Order(Squads.Kind.HOLD, 0, 0, ""), false);
@@ -48,6 +51,7 @@ public final class ArmyHierarchyTest {
         ArmyHierarchy restored = new ArmyHierarchy();
         restored.fromJson(hierarchy.toJson(), world, ignored -> null);
         check(restored.army(northRef) != null && restored.army(southRef) != null
+                        && restored.army(otherWorldRef) != null
                         && restored.corps(vanguard.id) != null
                         && restored.corps(reserve.id).squadIds.contains(second.id)
                         && restored.corpsForSquad(second.id).id.equals(reserve.id),
