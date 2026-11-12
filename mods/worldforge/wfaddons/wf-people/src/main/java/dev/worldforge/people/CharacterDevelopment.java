@@ -15,6 +15,18 @@ public final class CharacterDevelopment {
     }
     public enum Mood { NEUTRAL, HAPPY, SAD, ANGRY, AFRAID, STRESSED, INSPIRED, EXHAUSTED }
 
+    /** Conducts which can either reinforce or violate a person's internal principles. */
+    public enum Conduct {
+        KEEP_PROMISE, BREAK_PROMISE, TELL_TRUTH, LIE, SHOW_MERCY, CRUELTY, DEFEND_WEAK,
+        ABANDON_ALLY, HONOR_DUTY, BETRAYAL, SEEK_REVENGE, FORGIVE, SHARE_WEALTH,
+        EXPLOIT, FLEE, STAND_FIRM, CARE_FOR_CHILD, NEGLECT_CHILD
+    }
+    public enum Experience {
+        BATTLE_VICTORY, BATTLE_DEFEAT, SURVIVED_DANGER, BETRAYED, BETRAYED_SOMEONE,
+        BEREAVEMENT, PUBLIC_SUCCESS, PUBLIC_HUMILIATION, POVERTY, WEALTH_GAIN,
+        EDUCATION, PARENTAL_CARE, NEGLECT
+    }
+
     /** Stable psychological dimensions; unlike mood, these change slowly and belong to the person. */
     public enum Temperament { RISK, DISCIPLINE, SOCIABILITY, EMPATHY, AMBITION, ADAPTABILITY, STABILITY, CURIOSITY }
     /** Long-term motives can coexist; a character may want both family security and political power. */
@@ -156,6 +168,186 @@ public final class CharacterDevelopment {
         int next = clamp(stress(c) + delta, 0, 100);
         c.props.put("psychology.stress", next);
         return next;
+    }
+
+    private static void adjustTemperament(Character c, Temperament facet, int delta) {
+        setTemperament(c, facet, clamp(temperament(c, facet) + delta, 0, 100));
+    }
+    private static void adjustDrive(Character c, Drive drive, int delta) {
+        setDrive(c, drive, clamp(drive(c, drive) + delta, 0, 100));
+    }
+
+    /** Compact idempotent personal memory stored on the observer's canonical Character. */
+    public static boolean remember(Character observer, String eventId, String kind, String subjectGlobalId,
+                                   String detail, int emotionalWeight, long worldMinute) {
+        Objects.requireNonNull(observer);
+        if (eventId == null || !eventId.matches("[A-Za-z0-9_.:-]{1,160}"))
+            throw new IllegalArgumentException("invalid memory event ID");
+        if (kind == null || kind.isBlank() || kind.length() > 64 || worldMinute < 0)
+            throw new IllegalArgumentException("invalid memory");
+        List<Object> history = new ArrayList<>();
+        Object raw = observer.props.get("character.memory.events");
+        if (raw instanceof List<?> list) for (Object item : list) if (item instanceof Map<?,?> map) {
+            if (eventId.equals(map.get("id"))) return false;
+            Map<String,Object> copy = new LinkedHashMap<>();
+            map.forEach((k,v) -> { if (k instanceof String key) copy.put(key,v); });
+            history.add(copy);
+        }
+        Map<String,Object> event = new LinkedHashMap<>();
+        event.put("id", eventId); event.put("kind", kind);
+        event.put("subject", subjectGlobalId == null ? "" : subjectGlobalId);
+        event.put("detail", detail == null ? "" : detail.substring(0, Math.min(240, detail.length())));
+        event.put("weight", clamp(emotionalWeight, -100, 100)); event.put("minute", worldMinute);
+        history.add(event);
+        while (history.size() > 96) history.remove(0);
+        observer.props.put("character.memory.events", history);
+        observer.props.put("character.memory.last_minute", worldMinute);
+        return true;
+    }
+
+    public static List<Map<String,Object>> memories(Character observer, int limit) {
+        Object raw = observer.props.get("character.memory.events");
+        if (!(raw instanceof List<?> list) || limit <= 0) return List.of();
+        List<Map<String,Object>> result = new ArrayList<>();
+        int start = Math.max(0, list.size() - Math.min(96, limit));
+        for (int i = start; i < list.size(); i++) if (list.get(i) instanceof Map<?,?> map) {
+            Map<String,Object> copy = new LinkedHashMap<>();
+            map.forEach((k,v) -> { if (k instanceof String key) copy.put(key,v); });
+            result.add(Collections.unmodifiableMap(copy));
+        }
+        return Collections.unmodifiableList(result);
+    }
+
+    /** Returns stress caused by acting against the character's own principles. */
+    public static int recordConduct(Character actor, Conduct conduct, Character affected,
+                                    String operationId, long worldMinute) {
+        Objects.requireNonNull(actor); Objects.requireNonNull(conduct);
+        if (operationId == null || operationId.isBlank()) throw new IllegalArgumentException("conduct operation ID required");
+        int conflict = switch (conduct) {
+            case BREAK_PROMISE -> trait(actor,"honest",14)+trait(actor,"honorable",18)+trait(actor,"loyal",12)+trait(actor,"dutiful",8);
+            case TELL_TRUTH -> trait(actor,"deceitful",-4)+trait(actor,"opportunistic",-3);
+            case LIE -> trait(actor,"honest",12)+trait(actor,"honorable",15);
+            case SHOW_MERCY -> trait(actor,"cruel",12)+trait(actor,"sadistic",18);
+            case CRUELTY -> trait(actor,"just",16)+trait(actor,"compassionate",18)+trait(actor,"protective",14)+trait(actor,"honorable",8);
+            case DEFEND_WEAK -> trait(actor,"callous",-3)+trait(actor,"sadistic",-4);
+            case ABANDON_ALLY -> trait(actor,"loyal",18)+trait(actor,"dutiful",10)+trait(actor,"honorable",12)+trait(actor,"compassionate",7);
+            case HONOR_DUTY -> trait(actor,"opportunistic",-4)+trait(actor,"fickle",-4);
+            case BETRAYAL -> trait(actor,"honest",12)+trait(actor,"honorable",18)+trait(actor,"loyal",18)+trait(actor,"dutiful",10);
+            case SEEK_REVENGE -> trait(actor,"forgiving",15)+trait(actor,"just",4);
+            case FORGIVE -> trait(actor,"vengeful",8)+trait(actor,"wroth",5);
+            case SHARE_WEALTH -> trait(actor,"greedy",12)+trait(actor,"opportunistic",5);
+            case EXPLOIT -> trait(actor,"generous",10)+trait(actor,"compassionate",10)+trait(actor,"just",8)+trait(actor,"protective",6);
+            case FLEE -> trait(actor,"brave",12)+trait(actor,"dutiful",5)+trait(actor,"loyal",5);
+            case STAND_FIRM -> trait(actor,"craven",-3);
+            case CARE_FOR_CHILD -> trait(actor,"callous",-3);
+            case NEGLECT_CHILD -> trait(actor,"protective",18)+trait(actor,"compassionate",14)+trait(actor,"dutiful",12)+trait(actor,"honorable",5);
+            case KEEP_PROMISE -> trait(actor,"honest",-3)+trait(actor,"honorable",-4)+trait(actor,"loyal",-3);
+        };
+        int stressDelta = conflict > 0 ? Math.min(24, conflict) : conflict;
+        changeStress(actor, stressDelta);
+        String subject = affected == null ? "" : affected.globalId;
+        remember(actor, "conduct:" + operationId, "conduct_" + conduct.name().toLowerCase(Locale.ROOT),
+                subject, conduct.name().toLowerCase(Locale.ROOT), stressDelta, worldMinute);
+        if (affected != null && affected != actor)
+            remember(affected, "witness:" + operationId + ":" + actor.globalId,
+                    "witnessed_" + conduct.name().toLowerCase(Locale.ROOT), actor.globalId,
+                    actor.name + ":" + conduct.name().toLowerCase(Locale.ROOT), -stressDelta, worldMinute);
+        actor.props.put("psychology.last_conduct", conduct.name());
+        if (stress(actor) >= 70) setMood(actor, Mood.STRESSED, worldMinute, 1440, "inner_conflict:" + conduct.name());
+        return stressDelta;
+    }
+
+    /** Experiences slowly alter motivation and temperament; repeated experiences may unlock a compatible trait. */
+    public static void recordExperience(Character c, Experience experience, String eventId,
+                                         String detail, long worldMinute, int intensity) {
+        Objects.requireNonNull(c); Objects.requireNonNull(experience);
+        if (eventId == null || eventId.isBlank() || intensity < 1 || intensity > 5)
+            throw new IllegalArgumentException("invalid experience");
+        if (!remember(c, "experience:" + eventId, "experience_" + experience.name().toLowerCase(Locale.ROOT),
+                "", detail, intensity * 8, worldMinute)) return;
+        String countKey = "personality.experience." + experience.name().toLowerCase(Locale.ROOT);
+        int count = c.props.get(countKey) instanceof Number n ? Math.max(0,n.intValue()) : 0;
+        c.props.put(countKey, count + 1);
+        int step = Math.max(1, intensity / 2);
+        String[] growth = switch (experience) {
+            case BATTLE_VICTORY -> { adjustDrive(c,Drive.PRESTIGE,step); adjustTemperament(c,Temperament.RISK,1); yield new String[]{"brave","confident"}; }
+            case BATTLE_DEFEAT -> { adjustTemperament(c,Temperament.RISK,-step); adjustTemperament(c,Temperament.DISCIPLINE,1); yield new String[]{"cautious","resilient"}; }
+            case SURVIVED_DANGER -> { adjustTemperament(c,Temperament.STABILITY,step); yield new String[]{"resilient","brave"}; }
+            case BETRAYED -> { adjustTemperament(c,Temperament.STABILITY,-step); adjustDrive(c,Drive.SECURITY,step*2); yield new String[]{"paranoid","cynical"}; }
+            case BETRAYED_SOMEONE -> { adjustDrive(c,Drive.POWER,step); adjustTemperament(c,Temperament.EMPATHY,-step); yield new String[]{"deceitful","opportunistic"}; }
+            case BEREAVEMENT -> { adjustTemperament(c,Temperament.STABILITY,-step); adjustTemperament(c,Temperament.EMPATHY,1); adjustDrive(c,Drive.FAMILY,step); yield new String[]{"melancholic","compassionate"}; }
+            case PUBLIC_SUCCESS -> { adjustDrive(c,Drive.PRESTIGE,step*2); adjustTemperament(c,Temperament.AMBITION,1); yield new String[]{"ambitious","confident"}; }
+            case PUBLIC_HUMILIATION -> { adjustTemperament(c,Temperament.STABILITY,-step); adjustDrive(c,Drive.SECURITY,step); yield new String[]{"humble","paranoid"}; }
+            case POVERTY -> { adjustDrive(c,Drive.SECURITY,step*2); yield new String[]{"resourceful","cautious"}; }
+            case WEALTH_GAIN -> { adjustDrive(c,Drive.WEALTH,step*2); yield new String[]{"generous","greedy"}; }
+            case EDUCATION -> { adjustTemperament(c,Temperament.CURIOSITY,step*2); adjustDrive(c,Drive.KNOWLEDGE,step*2); yield new String[]{"scholar","curious"}; }
+            case PARENTAL_CARE -> { adjustTemperament(c,Temperament.EMPATHY,step); adjustDrive(c,Drive.FAMILY,step*2); yield new String[]{"compassionate","dutiful"}; }
+            case NEGLECT -> { adjustTemperament(c,Temperament.SOCIABILITY,-step); adjustDrive(c,Drive.INDEPENDENCE,step*2); yield new String[]{"independent","paranoid"}; }
+        };
+        String growthKey = "personality.growth." + growth[0];
+        int progress = c.props.get(growthKey) instanceof Number n ? Math.max(0,n.intValue()) : 0;
+        progress = Math.min(5, progress + intensity);
+        c.props.put(growthKey, progress);
+        if (progress >= 3 && c.traits.size() < 6) {
+            if (CharacterStats.addTrait(c,growth[0])) c.props.put(growthKey + ".unlocked",true);
+            else if (CharacterStats.addTrait(c,growth[1])) c.props.put("personality.growth."+growth[1]+".unlocked",true);
+        }
+        c.props.put("personality.last_experience",experience.name());
+    }
+
+    /** Blended inherited psychology and a small, compatible sample of family traits. */
+    public static void inheritPsychology(Character child, Character father, Character mother, long worldMinute) {
+        Objects.requireNonNull(child); Objects.requireNonNull(father); Objects.requireNonNull(mother);
+        List<String> initial = new ArrayList<>(CharacterStats.traits(child));
+        child.traits.clear(); child.traits.addAll(initial);
+        for (Character parent : List.of(father,mother)) for (String traitId : CharacterStats.traits(parent)) {
+            long roll = Math.floorMod(psychologyHash(child.globalId+"|inherit|"+parent.globalId+"|"+traitId),100L);
+            if (roll < 12 && child.traits.size() < 6) CharacterStats.addTrait(child,traitId);
+        }
+        for (Temperament facet : Temperament.values()) {
+            int base = temperament(child,facet);
+            setTemperament(child,facet,(int)Math.round(base*.55+temperament(father,facet)*.225+temperament(mother,facet)*.225));
+        }
+        for (Drive drive : Drive.values()) {
+            int base = drive(child,drive);
+            setDrive(child,drive,(int)Math.round(base*.55+drive(father,drive)*.225+drive(mother,drive)*.225));
+        }
+        ensurePsychology(child);
+        remember(child,"family:birth:"+child.globalId,"birth",father.globalId,"born into "+child.house,worldMinute,10);
+        remember(father,"family:child-born:"+child.globalId,"child_born",child.globalId,child.name,worldMinute,18);
+        remember(mother,"family:child-born:"+child.globalId,"child_born",child.globalId,child.name,worldMinute,18);
+    }
+
+    /** Annual upbringing is deterministic and replay-safe; parents influence children gradually. */
+    public static void upbringingTick(Character child, Character father, Character mother, int year) {
+        if (child == null || !child.alive || year < child.birthYear || year-child.birthYear > 16) return;
+        Object previous = child.props.get("family.upbringing.last_year");
+        if (previous instanceof Number n && n.intValue() >= year) return;
+        int warmth=0, discipline=0, curiosity=0, count=0;
+        for (Character parent : new Character[]{father,mother}) {
+            if (parent == null || !parent.alive) continue;
+            warmth += temperament(parent,Temperament.EMPATHY);
+            discipline += temperament(parent,Temperament.DISCIPLINE);
+            curiosity += temperament(parent,Temperament.CURIOSITY);
+            count++;
+        }
+        if (count == 0) return;
+        warmth/=count; discipline/=count; curiosity/=count;
+        if (warmth >= 62) {
+            adjustTemperament(child,Temperament.EMPATHY,1); adjustDrive(child,Drive.FAMILY,1);
+            recordExperience(child,Experience.PARENTAL_CARE,"upbringing:care:"+child.globalId+":"+year,
+                    "parental warmth",Math.max(0L,year*525600L),1);
+        } else if (warmth <= 28) {
+            adjustTemperament(child,Temperament.SOCIABILITY,-1); adjustDrive(child,Drive.INDEPENDENCE,1);
+            if (year%3==0) recordExperience(child,Experience.NEGLECT,"upbringing:neglect:"+child.globalId+":"+year,
+                    "lack of parental care",Math.max(0L,year*525600L),1);
+        }
+        if (discipline >= 68) adjustTemperament(child,Temperament.DISCIPLINE,1);
+        if (curiosity >= 68) { adjustTemperament(child,Temperament.CURIOSITY,1); adjustDrive(child,Drive.KNOWLEDGE,1); }
+        child.props.put("family.upbringing.last_year",year);
+        remember(child,"upbringing:year:"+child.globalId+":"+year,"upbringing",
+                father==null?"":father.globalId,"warmth="+warmth+",discipline="+discipline+",curiosity="+curiosity,
+                warmth-50,Math.max(0L,year*525600L));
     }
 
     private static int trait(Character c, String id, int amount) {

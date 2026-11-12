@@ -3,6 +3,7 @@ package dev.worldforge.tests;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.settle.ResidentSocial;
+import dev.worldforge.people.CharacterDevelopment;
 import java.util.Map;
 
 public final class ResidentSocialTest {
@@ -64,6 +65,9 @@ public final class ResidentSocialTest {
                         && ((Number) ((Map<?, ?>) aggressive.props.get("social.relationships")).get(partitionPeer.id)).intValue() == 12,
                 "ambiguous legacy local relationship data stays untouched while new links use distinct global UUIDs");
 
+        check(CharacterDevelopment.memories(aggressive, 10).stream().anyMatch(m -> "social_conflict".equals(m.get("kind")))
+                        && CharacterDevelopment.memories(resident, 10).stream().anyMatch(m -> "social_conflict".equals(m.get("kind"))),
+                "both participants remember the concrete negative social encounter");
         System.out.println("ResidentSocialTest: " + (failures == 0 ? "OK" : failures + " failure(s)"));
         if (failures > 0) throw new AssertionError("ResidentSocialTest failed: " + failures);
     }

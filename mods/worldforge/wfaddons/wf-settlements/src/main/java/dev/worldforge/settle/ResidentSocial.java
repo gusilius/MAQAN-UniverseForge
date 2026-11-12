@@ -1,6 +1,7 @@
 package dev.worldforge.settle;
 
 import dev.worldforge.people.Character;
+import dev.worldforge.people.CharacterDevelopment;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -49,6 +50,13 @@ public final class ResidentSocial {
         int delta = 1;
         if (first.traits.contains("kind") || first.traits.contains("generous")) delta++;
         if (second.traits.contains("kind") || second.traits.contains("generous")) delta++;
+        int empathy = (CharacterDevelopment.temperament(first, CharacterDevelopment.Temperament.EMPATHY)
+                + CharacterDevelopment.temperament(second, CharacterDevelopment.Temperament.EMPATHY)) / 2;
+        int sociability = (CharacterDevelopment.temperament(first, CharacterDevelopment.Temperament.SOCIABILITY)
+                + CharacterDevelopment.temperament(second, CharacterDevelopment.Temperament.SOCIABILITY)) / 2;
+        if (empathy >= 70) delta++;
+        if (empathy <= 25) delta--;
+        if (sociability >= 75) delta++;
         if (first.traits.contains("aggressive") || first.traits.contains("cruel")
                 || first.traits.contains("arrogant") || second.traits.contains("aggressive")
                 || second.traits.contains("cruel") || second.traits.contains("arrogant")) delta -= 3;
@@ -105,6 +113,12 @@ public final class ResidentSocial {
             throw new IllegalStateException("Social interaction receipt limit reached; refusing unsafe replay");
         adjust(person, counterpartId, delta);
         updateBond(person, counterpartId, score(person, counterpartId));
+        CharacterDevelopment.remember(person, "social:" + operationId,
+                delta >= 0 ? "social_positive" : "social_conflict", counterpartId,
+                "relationship_delta=" + delta, delta * 5, 0);
+        CharacterDevelopment.remember(other, "social:" + operationId,
+                delta >= 0 ? "social_positive" : "social_conflict", globalId(person),
+                "relationship_delta=" + delta, delta * 5, 0);
         receipts.put(operationId, payload);
         person.props.put(receiptKey, receipts);
     }

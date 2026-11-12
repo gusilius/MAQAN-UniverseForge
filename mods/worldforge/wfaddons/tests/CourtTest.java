@@ -110,6 +110,9 @@ public class CourtTest {
                 "CourtSim publishes ruler attributes from the canonical Character Registry for realm policy decisions");
         ok(s.d.realms.get(realm).props.get("politics.ruler_trait_greedy") instanceof Number,
                 "ruler personality traits are projected onto the shared realm property bus");
+        ok(s.d.realms.get(realm).props.get("politics.ruler_drive_power") instanceof Number
+                        && s.d.realms.get(realm).props.get("politics.ruler_temperament_ambition") instanceof Number,
+                "ruler motivations and temperament are projected for strategic policy systems");
 
         // мнения
         Character a1 = s.ruler(realm), b1 = steward;

@@ -91,6 +91,20 @@ public final class CharacterStats {
         t(new Trait("observant", "Наблюдательный", "Замечает детали поведения и слабости окружающих.", GOOD, "intrigue", 1, "learning", 1));
         t(new Trait("traditionalist", "Приверженец традиций", "Считает проверенные обычаи опорой общества.", NEUT, "stewardship", 1));
         t(new Trait("innovative", "Новатор", "Охотно испытывает новые методы и порядки.", GOOD, "learning", 2));
+        t(new Trait("honorable", "Благородный", "Считает честь и данное слово основой отношений.", GOOD, "diplomacy", 1, "martial", 1));
+        t(new Trait("opportunistic", "Оппортунист", "Использует возможности, даже если это задевает других.", BAD, "intrigue", 2, "stewardship", 1));
+        t(new Trait("loyal", "Верный", "Хранит преданность семье, друзьям и покровителям.", GOOD, "diplomacy", 1, "martial", 1));
+        t(new Trait("fickle", "Непостоянный", "Легко меняет сторону при изменении обстоятельств.", BAD, "intrigue", 1, "diplomacy", -1));
+        t(new Trait("protective", "Заботливый защитник", "Ставит безопасность близких и слабых выше выгоды.", GOOD, "martial", 1, "diplomacy", 1));
+        t(new Trait("callous", "Черствый", "С трудом сопереживает чужим потерям и нуждам.", BAD, "stewardship", 1, "diplomacy", -1));
+        t(new Trait("disciplined", "Дисциплинированный", "Следует распорядку и удерживает себя от импульсивности.", GOOD, "martial", 1, "stewardship", 1));
+        t(new Trait("impulsive", "Импульсивный", "Действует прежде, чем взвесит последствия.", BAD, "martial", 1, "intrigue", -1));
+        t(new Trait("pragmatic", "Прагматичный", "Предпочитает работающие решения красивым обещаниям.", NEUT, "stewardship", 1, "learning", 1));
+        t(new Trait("idealistic", "Идеалист", "Жертвует выгодой ради представлений о должном.", NEUT, "diplomacy", 1, "learning", 1));
+        t(new Trait("charismatic", "Харизматичный", "Притягивает внимание и вдохновляет окружающих.", GOOD, "diplomacy", 2));
+        t(new Trait("awkward", "Неловкий", "Трудно чувствует себя в обществе и понимает намёки.", BAD, "diplomacy", -1, "learning", 1));
+        t(new Trait("artistic", "Творческий", "Ищет новые формы выражения и необычные связи.", GOOD, "learning", 2));
+        t(new Trait("confident", "Уверенный", "Доверяет собственным силам и не теряется под давлением.", GOOD, "martial", 1, "diplomacy", 1));
     }
 
     private static String traitGroup(String id) {
@@ -110,6 +124,12 @@ public final class CharacterStats {
             case "compassionate", "sadistic" -> "empathy";
             case "trusting", "paranoid" -> "trust";
             case "optimistic", "pessimistic" -> "outlook";
+            case "honorable", "opportunistic" -> "honor";
+            case "loyal", "fickle" -> "loyalty";
+            case "protective", "callous" -> "care";
+            case "disciplined", "impulsive" -> "self_control";
+            case "pragmatic", "idealistic" -> "worldview";
+            case "charismatic", "awkward" -> "social_skill";
             case "reckless", "cautious" -> "risk";
             default -> id;
         };
@@ -186,7 +206,9 @@ public final class CharacterStats {
             Set.of("sociable", "reclusive"), Set.of("ambitious", "content"), Set.of("wroth", "patient"),
             Set.of("honest", "deceitful"), Set.of("temperate", "gluttonous"), Set.of("chaste", "lustful"),
             Set.of("humble", "arrogant"), Set.of("forgiving", "vengeful"), Set.of("compassionate", "sadistic"),
-            Set.of("trusting", "paranoid"), Set.of("optimistic", "pessimistic"), Set.of("reckless", "cautious")
+            Set.of("trusting", "paranoid"), Set.of("optimistic", "pessimistic"), Set.of("reckless", "cautious"),
+            Set.of("honorable", "opportunistic"), Set.of("loyal", "fickle"), Set.of("protective", "callous"),
+            Set.of("disciplined", "impulsive"), Set.of("pragmatic", "idealistic"), Set.of("charismatic", "awkward")
     );
 
     public static boolean compatibleTraits(Collection<String> values) {

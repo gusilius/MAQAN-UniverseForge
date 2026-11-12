@@ -385,6 +385,47 @@ public final class PopulationSimulationTest {
                         && CharacterDevelopment.stress(restoredPsychological) == 40,
                 "temperament, motivations and stress survive CharacterRegistry save/load");
 
+        Character evolving = registry.create("Mara", "", "north", "f", 260);
+        evolving.traits.add("honest");
+        CharacterDevelopment.recordConduct(evolving, CharacterDevelopment.Conduct.BETRAYAL, psychological,
+                "test:betrayal:one", 10);
+        int stressAfter = CharacterDevelopment.stress(evolving);
+        CharacterDevelopment.recordConduct(evolving, CharacterDevelopment.Conduct.BETRAYAL, psychological,
+                "test:betrayal:one", 10);
+        ok(stressAfter > 0 && CharacterDevelopment.stress(evolving) == stressAfter,
+                "acting against honesty creates stress and duplicate conduct receipts are ignored");
+        CharacterDevelopment.recordExperience(evolving, CharacterDevelopment.Experience.BETRAYED,
+                "test:betrayed:one", "trusted ally betrayed Mara", 20, 2);
+        CharacterDevelopment.recordExperience(evolving, CharacterDevelopment.Experience.BETRAYED,
+                "test:betrayed:two", "second betrayal", 30, 2);
+        ok(CharacterDevelopment.memories(evolving, 10).size() >= 3
+                        && CharacterDevelopment.drive(evolving, CharacterDevelopment.Drive.SECURITY) > 50,
+                "personal memory and repeated betrayal alter long-term security motivation");
+        CharacterDevelopment.recordExperience(evolving, CharacterDevelopment.Experience.BETRAYED,
+                "test:betrayed:three", "third betrayal", 40, 2);
+        ok(evolving.traits.contains("paranoid") || evolving.traits.contains("cynical"),
+                "repeated experiences can unlock a compatible personality trait");
+
+        Character parentA = registry.create("Parent A", "House", "north", "m", 240);
+        Character parentB = registry.create("Parent B", "House", "north", "f", 241);
+        CharacterStats.addTrait(parentA, "compassionate");
+        CharacterStats.addTrait(parentB, "diligent");
+        CharacterDevelopment.setTemperament(parentA, CharacterDevelopment.Temperament.EMPATHY, 95);
+        CharacterDevelopment.setTemperament(parentB, CharacterDevelopment.Temperament.DISCIPLINE, 90);
+        Character child = registry.addChild(parentA, parentB, "Child", "f", 280);
+        ok(child.props.containsKey("personality.temperament.empathy")
+                        && child.props.containsKey("personality.drive.family")
+                        && CharacterDevelopment.memories(child, 5).stream().anyMatch(m -> "birth".equals(m.get("kind"))),
+                "children inherit blended psychology and begin with a personal birth memory");
+        int empathyBefore = CharacterDevelopment.temperament(child, CharacterDevelopment.Temperament.EMPATHY);
+        CharacterDevelopment.upbringingTick(child, parentA, parentB, 281);
+        ok(CharacterDevelopment.temperament(child, CharacterDevelopment.Temperament.EMPATHY) >= empathyBefore
+                        && ((Number) child.props.get("family.upbringing.last_year")).intValue() == 281,
+                "annual upbringing applies parental influence once per year");
+        CharacterDevelopment.upbringingTick(child, parentA, parentB, 281);
+        ok(((Number) child.props.get("family.upbringing.last_year")).intValue() == 281,
+                "replayed upbringing year is idempotent");
+
         System.out.println(failures == 0 ? "ALL OK" : failures + " FAILED");
         if (failures > 0) System.exit(1);
     }

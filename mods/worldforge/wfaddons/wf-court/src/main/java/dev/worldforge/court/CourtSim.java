@@ -3,6 +3,7 @@ package dev.worldforge.court;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.CharacterStats;
+import dev.worldforge.people.CharacterDevelopment;
 import dev.worldforge.people.Courts;
 import dev.worldforge.people.NameBank;
 import dev.worldforge.people.Role;
@@ -204,6 +205,9 @@ public final class CourtSim {
         for (Character c : all) {
             if (!c.alive) continue;
             int age = y - c.birthYear;
+            if (age <= 16) CharacterDevelopment.upbringingTick(c,
+                    c.father.isEmpty() ? null : reg.get(c.father),
+                    c.mother.isEmpty() ? null : reg.get(c.mother), y);
             double p = age < 50 ? 0.003 : Math.min(0.55, 0.01 + Math.pow(age - 50, 2) * 0.0007);
             if (c.traits.contains("craven") || CharacterStats.traits(c).contains("lazy")) p *= 1.05;
             if (rnd("death", c.id.hashCode() + day).nextDouble() < p) die(c, "умер от старости или болезни");
@@ -309,7 +313,10 @@ public final class CourtSim {
 
                 // Personal opinion, the canonical Statecraft contract and its visible map projection
                 // all contribute to grievance. High obligations can trigger demands before secession.
-                double adjustedOpinion = opinion(vassalRuler.id, liegeRuler.id) + councilBonus
+                double personalityPressure = (CharacterDevelopment.drive(vassalRuler, CharacterDevelopment.Drive.INDEPENDENCE) - 50) * 0.03
+                        + (CharacterDevelopment.temperament(vassalRuler, CharacterDevelopment.Temperament.AMBITION) - 50) * 0.02
+                        - (CharacterDevelopment.drive(vassalRuler, CharacterDevelopment.Drive.SECURITY) - 50) * 0.01;
+                double adjustedOpinion = opinion(vassalRuler.id, liegeRuler.id) + councilBonus + personalityPressure
                         + (loyalty - 50) * 0.5
                         - Math.max(0, taxShare - 0.20) * 70.0
                         - Math.max(0, levyShare - 0.30) * 50.0;
@@ -438,16 +445,27 @@ public final class CourtSim {
         Character o = reg.get(s.owner), t = reg.get(s.target);
         if (o == null || t == null) return 0;
         double def = council(realmOf(t)).getOrDefault("plot_defense", 0.0) / 100.0;
-        return Math.max(0.05, Math.min(0.95, s.kind.base + 0.04 * (CharacterStats.value(o, "intrigue") - CharacterStats.value(t, "intrigue")) - def));
+        double daring = (CharacterDevelopment.temperament(o, CharacterDevelopment.Temperament.RISK) - 50) * 0.0015;
+        double ambition = (CharacterDevelopment.temperament(o, CharacterDevelopment.Temperament.AMBITION) - 50) * 0.001;
+        double guile = o.traits.contains("deceitful") || o.traits.contains("shrewd") || o.traits.contains("ambitious_schemer") ? 0.035 : 0.0;
+        double vigilance = (CharacterDevelopment.drive(t, CharacterDevelopment.Drive.SECURITY) - 50) * 0.001
+                + (t.traits.contains("paranoid") || t.traits.contains("observant") ? 0.035 : 0.0);
+        return Math.max(0.05, Math.min(0.95, s.kind.base
+                + 0.04 * (CharacterStats.value(o, "intrigue") - CharacterStats.value(t, "intrigue"))
+                + daring + ambition + guile - vigilance - def));
     }
 
     private void stepSchemes() {
         for (Scheme s : new ArrayList<>(schemes.values())) {
             Character o = reg.get(s.owner);
             if (o == null || !o.alive) { schemes.remove(s.id); continue; }
-            double speed = 1 + 0.05 * (CharacterStats.value(o, "intrigue") - 10) + council(s.ownerRealm).getOrDefault("scheme_power", 0.0) * 0.05;
+            double speed = 1 + 0.05 * (CharacterStats.value(o, "intrigue") - 10)
+                    + (CharacterDevelopment.temperament(o, CharacterDevelopment.Temperament.AMBITION) - 50) * 0.004
+                    + (CharacterDevelopment.temperament(o, CharacterDevelopment.Temperament.DISCIPLINE) - 50) * 0.002
+                    + council(s.ownerRealm).getOrDefault("scheme_power", 0.0) * 0.05;
             s.progress += Math.max(0.3, speed);
-            s.secrecy = Math.max(0.05, s.secrecy - 0.003);
+            double concealment = o.traits.contains("deceitful") || o.traits.contains("ambitious_schemer") ? 0.001 : 0.0;
+            s.secrecy = Math.max(0.05, Math.min(1.0, s.secrecy - 0.003 + concealment));
             if (s.progress >= s.kind.days) { schemes.remove(s.id); finishScheme(s); }
         }
     }
@@ -461,7 +479,14 @@ public final class CourtSim {
         Character tr = ruler(s.ownerRealm);
         switch (s.kind) {
             case BEFRIEND -> {
-                if (ok) { opinions.add(t.id, o.id, "Дружба", 25, 0); opinions.add(o.id, t.id, "Дружба", 25, 0); s.result = "успех: теперь они друзья"; }
+                if (ok) {
+                    opinions.add(t.id, o.id, "Дружба", 25, 0); opinions.add(o.id, t.id, "Дружба", 25, 0);
+                    CharacterDevelopment.remember(o, "court:befriend:" + s.id, "court_friendship", t.globalId,
+                            "успешное сближение", 35, day * 1440L);
+                    CharacterDevelopment.remember(t, "court:befriend:" + s.id, "court_friendship", o.globalId,
+                            "успешное сближение", 35, day * 1440L);
+                    s.result = "успех: теперь они друзья";
+                }
                 else s.result = "неудача: цель осталась равнодушной";
             }
             case SWAY -> {
@@ -469,12 +494,25 @@ public final class CourtSim {
                 else s.result = "неудача";
             }
             case MURDER -> {
-                if (ok) { die(t, exposed ? "убит" : "погиб при странных обстоятельствах"); s.result = "успех: цель мертва"; }
+                if (ok) {
+                    CharacterDevelopment.recordConduct(o, CharacterDevelopment.Conduct.CRUELTY, t,
+                            "court:assassination:" + s.id, day * 1440L);
+                    CharacterDevelopment.remember(t, "court:assassination:" + s.id, "assassination_attempt",
+                            o.globalId, "покушение на жизнь", -100, day * 1440L);
+                    die(t, exposed ? "убит" : "погиб при странных обстоятельствах");
+                    s.result = "успех: цель мертва";
+                }
                 else s.result = "неудача: цель жива";
             }
         }
         if (exposed) {
             s.exposed = true;
+            CharacterDevelopment.recordConduct(o, CharacterDevelopment.Conduct.BETRAYAL, t,
+                    "court:scheme-exposed:" + s.id, day * 1440L);
+            CharacterDevelopment.recordExperience(t, CharacterDevelopment.Experience.BETRAYED,
+                    "court:betrayal:" + s.id, "раскрытые козни " + o.name, day * 1440L, 2);
+            CharacterDevelopment.remember(t, "court:scheme:" + s.id, "court_betrayal", o.globalId,
+                    s.kind.title, -70, day * 1440L);
             opinions.add(t.id, o.id, "Раскрытые козни: " + s.kind.title.toLowerCase(), -50, year() + 20);
             Character trr = ruler(realmOf(t));
             if (trr != null && trr != t) opinions.add(trr.id, o.id, "Раскрытые козни против двора", -40, year() + 20);
@@ -630,8 +668,16 @@ public final class CourtSim {
                             CharacterStats.value(sovereign, attribute) / 20.0);
                 Set<String> rulerTraits = new HashSet<>(CharacterStats.traits(sovereign));
                 for (String trait : List.of("greedy", "generous", "just", "cruel", "ambitious",
-                        "content", "brave", "craven", "patient", "wroth", "scholar", "shrewd"))
+                        "content", "brave", "craven", "patient", "wroth", "scholar", "shrewd",
+                        "honorable", "opportunistic", "loyal", "fickle", "protective", "callous",
+                        "disciplined", "impulsive", "pragmatic", "idealistic", "charismatic", "awkward"))
                     ed.setDerivedProp(r.id, "politics.ruler_trait_" + trait, rulerTraits.contains(trait) ? 1.0 : 0.0);
+                for (CharacterDevelopment.Drive drive : CharacterDevelopment.Drive.values())
+                    ed.setDerivedProp(r.id, "politics.ruler_drive_" + drive.name().toLowerCase(Locale.ROOT),
+                            CharacterDevelopment.drive(sovereign, drive) / 100.0);
+                for (CharacterDevelopment.Temperament facet : CharacterDevelopment.Temperament.values())
+                    ed.setDerivedProp(r.id, "politics.ruler_temperament_" + facet.name().toLowerCase(Locale.ROOT),
+                            CharacterDevelopment.temperament(sovereign, facet) / 100.0);
                 TitleData.Title highest = null;
                 for (String key : r.titleKeys) {
                     TitleData.Title candidate = d.findTitle(key);
