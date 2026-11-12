@@ -136,7 +136,7 @@ public final class CharacterDevelopment {
             case FAITH -> trait(c,"zealous",24) + trait(c,"traditionalist",10) + trait(c,"cynical",-12);
             case REVENGE -> trait(c,"vengeful",28) + trait(c,"wroth",10) + trait(c,"forgiving",-18);
             case INDEPENDENCE -> trait(c,"independent",24) + trait(c,"stubborn",12) + trait(c,"dutiful",-8);
-            case DUTY -> trait(c,"dutiful",22) + trait(c,"just",10) + trait(c,"diligent",12) + trait(c,"lazy",-16);
+            case DUTY -> trait(c,"dutiful",22) + trait(c,"just",10) + trait(c,"diligent",28) + trait(c,"lazy",-16);
             case COMMUNITY -> trait(c,"gregarious",16) + trait(c,"sociable",18) + trait(c,"generous",12) + trait(c,"reclusive",-18);
         };
         return clamp(value, 0, 100);
