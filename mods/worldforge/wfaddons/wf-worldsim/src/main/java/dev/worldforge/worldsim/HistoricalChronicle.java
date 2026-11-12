@@ -89,7 +89,7 @@ public final class HistoricalChronicle {
      */
     public synchronized List<String> book(int requestedEntries) {
         int from = requestedEntries <= 0 ? 0 : Math.max(0, entries.size() - requestedEntries);
-        List<String> selected = entries.subList(from, entries.size());
+        List<Entry> selected = entries.subList(from, entries.size());
         List<String> pages = new ArrayList<>();
         pages.add("ЛЕТОПИСЬ ЖИВОГО МИРА");
         pages.add("История, записанная не заранее, а прожитая самим миром.");
