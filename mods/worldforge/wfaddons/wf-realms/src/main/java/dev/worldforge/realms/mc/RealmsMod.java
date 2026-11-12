@@ -141,6 +141,15 @@ public class RealmsMod {
                 Object councilAccept = current.props.get("council.ai_accept");
                 double accept = councilAccept instanceof Number n ? (n.doubleValue() + 20.0) / 40.0 : 0.5;
                 signals.put("council_ai_accept", Math.max(0, Math.min(1, accept)));
+
+                // Ruler profile is published by CourtSim from the canonical Character Registry.
+                // Missing values from legacy saves remain neutral instead of inventing traits.
+                for (String attribute : List.of("diplomacy", "martial", "intrigue", "stewardship", "learning"))
+                    signals.put("ruler_" + attribute, normalizedProp(current, "politics.ruler_" + attribute));
+                for (String trait : List.of("greedy", "generous", "just", "cruel", "ambitious",
+                        "content", "brave", "craven", "patient", "wroth", "scholar", "shrewd"))
+                    signals.put("ruler_trait_" + trait,
+                            normalizedProp(current, "politics.ruler_trait_" + trait));
                 return signals;
             }
             @Override public int today() { return (int) WorldForgeApi.clock().dayNumber(); }

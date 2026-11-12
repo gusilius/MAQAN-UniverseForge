@@ -623,6 +623,15 @@ public final class CourtSim {
 
             Character sovereign = ruler(r.id);
             if (sovereign != null) {
+                // The ruler's actual Character Registry attributes and traits shape the realm's
+                // strategic preferences. These are derived projections, never a second ruler profile.
+                for (String attribute : CharacterStats.ATTRS)
+                    ed.setDerivedProp(r.id, "politics.ruler_" + attribute,
+                            CharacterStats.value(sovereign, attribute) / 20.0);
+                Set<String> rulerTraits = new HashSet<>(CharacterStats.traits(sovereign));
+                for (String trait : List.of("greedy", "generous", "just", "cruel", "ambitious",
+                        "content", "brave", "craven", "patient", "wroth", "scholar", "shrewd"))
+                    ed.setDerivedProp(r.id, "politics.ruler_trait_" + trait, rulerTraits.contains(trait) ? 1.0 : 0.0);
                 TitleData.Title highest = null;
                 for (String key : r.titleKeys) {
                     TitleData.Title candidate = d.findTitle(key);

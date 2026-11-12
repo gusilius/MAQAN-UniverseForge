@@ -102,6 +102,14 @@ public class CourtTest {
         ok(s.council(realm).get("income_pct") > before, "лучший управляющий даёт больший доход");
         s.syncProps();
         ok(s.d.realms.get(realm).props.get("council.income_pct") instanceof Number, "эффекты записаны в свойства государства");
+        Character rulerForPolicy = s.ruler(realm);
+        ok(rulerForPolicy != null
+                        && s.d.realms.get(realm).props.get("politics.ruler_martial") instanceof Number
+                        && ((Number) s.d.realms.get(realm).props.get("politics.ruler_martial")).doubleValue()
+                        == CharacterStats.value(rulerForPolicy, "martial") / 20.0,
+                "CourtSim publishes ruler attributes from the canonical Character Registry for realm policy decisions");
+        ok(s.d.realms.get(realm).props.get("politics.ruler_trait_greedy") instanceof Number,
+                "ruler personality traits are projected onto the shared realm property bus");
 
         // мнения
         Character a1 = s.ruler(realm), b1 = steward;

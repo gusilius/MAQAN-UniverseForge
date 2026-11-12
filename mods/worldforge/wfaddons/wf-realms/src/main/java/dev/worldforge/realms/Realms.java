@@ -254,26 +254,50 @@ public final class Realms {
         double intrigue = signal(signals, "court_intrigue");
         double dynastic = signal(signals, "dynastic_ties");
         double councilAccept = signal(signals, "council_ai_accept");
+        double diplomacy = signal(signals, "ruler_diplomacy");
+        double martial = signal(signals, "ruler_martial");
+        double intrigueSkill = signal(signals, "ruler_intrigue");
+        double stewardship = signal(signals, "ruler_stewardship");
+        double learning = signal(signals, "ruler_learning");
+        double greedy = signal(signals, "ruler_trait_greedy");
+        double generous = signal(signals, "ruler_trait_generous");
+        double just = signal(signals, "ruler_trait_just");
+        double cruel = signal(signals, "ruler_trait_cruel");
+        double ambitious = signal(signals, "ruler_trait_ambitious");
+        double content = signal(signals, "ruler_trait_content");
+        double brave = signal(signals, "ruler_trait_brave");
+        double craven = signal(signals, "ruler_trait_craven");
+        double scholar = signal(signals, "ruler_trait_scholar");
+        double shrewd = signal(signals, "ruler_trait_shrewd");
         double score = 0;
-        score += effects.getOrDefault("levy_pct", 0.0) * (0.01 + war * 1.50);
+        // Policies are evaluated through the current ruler, not only through a generic realm template.
+        score += effects.getOrDefault("levy_pct", 0.0) * (0.01 + war * (0.75 + martial * 1.05 + brave * 0.25 - craven * 0.20));
         score += effects.getOrDefault("melee_dmg_pct", 0.0) * war * 1.20;
         score += effects.getOrDefault("ranged_dmg_pct", 0.0) * war * 0.80;
         score += effects.getOrDefault("siege_pct", 0.0) * war * 1.35;
         score += effects.getOrDefault("defense_pct", 0.0) * war * 0.70;
         score -= effects.getOrDefault("upkeep_pct", 0.0) * (war * 0.50 + fiscal * 0.35);
-        score += effects.getOrDefault("tax_pct", 0.0) * (0.10 + fiscal * 1.20 - vassal * 0.25 - unrest * 0.20 - faction * 0.65);
-        score += effects.getOrDefault("trade_pct", 0.0) * (0.15 + trade * 1.40);
+        score += effects.getOrDefault("tax_pct", 0.0) * (0.10 + fiscal * (0.80 + stewardship * 0.65 + greedy * 0.35)
+                - vassal * (0.25 + diplomacy * 0.30 + just * 0.20)
+                - unrest * (0.20 + diplomacy * 0.35 + generous * 0.15) - faction * (0.65 + diplomacy * 0.35));
+        score += effects.getOrDefault("trade_pct", 0.0) * (0.15 + trade * (0.90 + diplomacy * 0.45 + stewardship * 0.25));
         score += effects.getOrDefault("discount_pct", 0.0) * trade * 0.70;
-        score += effects.getOrDefault("opinion", 0.0) * (0.20 + vassal * 1.40 + unrest * 1.30 + faction * 1.20);
-        score += effects.getOrDefault("vassal_opinion", 0.0) * (vassal * 1.60 + faction * 1.80);
-        score -= effects.getOrDefault("unrest_pct", 0.0) * (vassal + unrest);
+        score += effects.getOrDefault("opinion", 0.0) * (0.20 + vassal * (1.10 + diplomacy * 0.55 + generous * 0.25)
+                + unrest * (1.00 + just * 0.35) + faction * (0.90 + diplomacy * 0.45));
+        score += effects.getOrDefault("vassal_opinion", 0.0) * (vassal * (1.20 + diplomacy * 0.55 + generous * 0.20)
+                + faction * (1.35 + diplomacy * 0.45));
+        score -= effects.getOrDefault("unrest_pct", 0.0) * (vassal + unrest * (0.75 + diplomacy * 0.25));
         score += effects.getOrDefault("xp_gain_pct", 0.0) * diversity * 1.50;
         score += effects.getOrDefault("heal_pct", 0.0) * diversity * 0.20;
         score += effects.getOrDefault("cultural_tolerance_pct", 0.0) * diversity * 2.0;
-        score += effects.getOrDefault("plot_defense", 0.0) * intrigue * 1.10;
-        score += effects.getOrDefault("ai_accept", 0.0) * (0.15 + dynastic * 0.80 + councilAccept * 0.60);
+        score += effects.getOrDefault("plot_defense", 0.0) * intrigue * (0.65 + intrigueSkill * 0.75 + shrewd * 0.25 + cruel * 0.10);
+        score += effects.getOrDefault("ai_accept", 0.0) * (0.15 + dynastic * (0.55 + diplomacy * 0.35)
+                + councilAccept * (0.45 + just * 0.25 + content * 0.15));
         score += effects.getOrDefault("trade_pct", 0.0) * dynastic * 0.25;
-        score += effects.getOrDefault("doctrine_pct", 0.0) * (0.20 + fiscal * 0.20);
+        score += effects.getOrDefault("doctrine_pct", 0.0) * (0.15 + fiscal * 0.15 + learning * 0.45 + scholar * 0.30);
+        // Ambitious rulers tolerate disruptive reforms; content rulers prefer preserving a stable order.
+        score += effects.getOrDefault("reform_pct", 0.0) * (ambitious * 0.8 - content * 0.45);
+        score += effects.getOrDefault("cultural_tolerance_pct", 0.0) * (diplomacy * 0.25 + just * 0.30 + cruel * -0.20);
         return score;
     }
 

@@ -88,6 +88,9 @@ public class RealmsTest {
         policySignals.clear();
         policySignals.put("war", 1.0); policySignals.put("fiscal_stress", 1.0);
         policySignals.put("trade_access", 1.0); policySignals.put("cultural_diversity", 1.0);
+        policySignals.put("ruler_martial", 1.0); policySignals.put("ruler_stewardship", 1.0);
+        policySignals.put("ruler_diplomacy", 0.8); policySignals.put("ruler_learning", 0.9);
+        policySignals.put("ruler_trait_brave", 1.0); policySignals.put("ruler_trait_scholar", 1.0);
         r.state("policy-war").gov = "holdfast";
         r.state("policy-war").points = 1000;
         r.autoDevelop("policy-war", 24);
