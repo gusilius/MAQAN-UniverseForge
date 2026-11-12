@@ -67,6 +67,16 @@ public final class Settlement {
     public final Flow flow = new Flow();
     public final ResidentTaskGraph taskGraph = new ResidentTaskGraph();
     private double growTimer, starveTimer, leaveTimer;
+    /** -1 keeps legacy worker-count semantics; >=0 is the authoritative canonical resident count. */
+    private int canonicalPopulation = -1;
+
+    public int population() { return canonicalPopulation >= 0 ? canonicalPopulation : workers.size(); }
+    public boolean hasCanonicalPopulation() { return canonicalPopulation >= 0; }
+    public void setCanonicalPopulation(int residents) {
+        if (residents < 0 || residents > 100_000) throw new IllegalArgumentException("canonical population out of range");
+        canonicalPopulation = residents;
+        growTimer = 0;
+    }
 
     // ---- времена года и набеги
     public static final double SEASON_LEN = 5475;                   // 91.25 world days at 60 simulation seconds/day
@@ -952,8 +962,9 @@ public final class Settlement {
     }
 
     private void eat(double dt) {
-        double need = workers.size() * EAT * dt, have = amount("food");
-        if (workers.isEmpty()) { starveTimer = 0; return; }
+        int residents = population();
+        double need = residents * EAT * dt, have = amount("food");
+        if (residents == 0) { starveTimer = 0; return; }
         if (have >= need) {
             debitResource("food", need, TreasuryLedger.Kind.CONSUMPTION, "population-food", "daily-rations");
             flow.record(time, "food", need, false);
@@ -976,6 +987,7 @@ public final class Settlement {
     }
 
     private void grow(double dt) {
+        if (hasCanonicalPopulation()) { growTimer = 0; leaveTimer = 0; return; }
         if (approval() < APPROVAL_LEAVE_BELOW && !workers.isEmpty()) {
             leaveTimer += dt;
             if (leaveTimer >= LEAVE_EVERY) {
@@ -1306,9 +1318,15 @@ public final class Settlement {
 
     /** Налоги в минуту при текущем уровне (для окна бюджета). */
     public double taxPerMin() {
-        double t = 0;
-        for (Worker w : workers) t += TAX_PER_MIN * (w.building == 0 ? 0.5 : 1);
-        return t * TAX_MULT[taxLevel];
+        double t;
+        if (hasCanonicalPopulation()) {
+            t = population() * 0.5;
+            for (Worker worker : workers) if (worker.building != 0) t += 0.5;
+        } else {
+            t = 0;
+            for (Worker worker : workers) t += worker.building == 0 ? 0.5 : 1.0;
+        }
+        return t * TAX_PER_MIN * TAX_MULT[taxLevel];
     }
 
     /** Содержание зданий в минуту. */
@@ -1335,7 +1353,7 @@ public final class Settlement {
             int lack = (int) Math.min(e.getValue() - amount(e.getKey()), tradeLeft);
             if (lack >= 1 && price(e.getKey()) > 0 && tradePerMin() > 0) { try { buy(e.getKey(), Math.min(lack, 5)); } catch (OrderException ignored) { } }
         }
-        int n = workers.size();
+        int n = population();
         for (var e : defs.comfort.entrySet()) {
             double c = Math.min(amount(e.getKey()), e.getValue().rate * n * dt);
             if (c > 0) {
@@ -1454,7 +1472,7 @@ public final class Settlement {
     /** Текущие тревоги поселения, самые важные первыми. */
     public List<Alert> alerts() {
         List<Alert> l = new ArrayList<>();
-        int n = workers.size();
+        int n = population();
         if (n > 0 && amount("food") < 1) l.add(new Alert(2, "starving", "Голод: еда закончилась, жители умирают", 0));
         else {
             double sec = suppliesSeconds();
@@ -1564,7 +1582,7 @@ public final class Settlement {
      */
     public List<Factor> approvalBreakdown() {
         List<Factor> l = new ArrayList<>();
-        int n = workers.size();
+        int n = population();
         l.add(new Factor("Базовое настроение", APPROVAL_BASE));
         int food = 0;
         if (n > 0) food = amount("food") < 1 ? -30 : clamp((int) Math.round((amount("food") / n - 5) * 2), -30, 15);
@@ -1572,7 +1590,7 @@ public final class Settlement {
         int over = n - housing(), spare = housing() - n;
         l.add(over > 0 ? new Factor("Теснота в домах", -Math.min(20, over * 5)) : new Factor("Жильё", spare >= 2 ? 5 : 0));
         int emp = 0;
-        if (n > 0) emp = (int) Math.round(10 - 20.0 * idleWorkers().size() / n);
+        if (!workers.isEmpty()) emp = (int) Math.round(10 - 20.0 * idleWorkers().size() / workers.size());
         l.add(new Factor(emp < 0 ? "Безработица" : "Занятость", emp));
         int guards = 0;
         for (Worker w : workers) if (w.profession.equals("guard")) guards++;
@@ -1601,6 +1619,7 @@ public final class Settlement {
         root.put("format", "wf-settlement/2");
         root.put("schema_version", 2);
         root.put("id", id); root.put("name", name); root.put("ledger_scope", ledgerScope); root.put("time", time); root.put("auto", auto);
+        root.put("canonical_population", canonicalPopulation);
         root.put("next_building", nextBuilding); root.put("next_worker", nextWorker); root.put("grow", growTimer); root.put("starve", starveTimer); root.put("leave", leaveTimer);
         root.put("flow", flow.save());
         root.put("resident_task_graph", taskGraph.toJson());
@@ -1661,6 +1680,8 @@ public final class Settlement {
         s.setLedgerScope(scope != null && !scope.isBlank() ? scope : savedScope instanceof String v ? v : "");
         s.time = ((Number) root.get("time")).doubleValue();
         s.auto = Boolean.TRUE.equals(root.get("auto"));
+        if (root.get("canonical_population") instanceof Number population)
+            s.canonicalPopulation = Math.max(0, Math.min(100_000, population.intValue()));
         s.nextBuilding = ((Number) root.get("next_building")).intValue();
         s.nextWorker = ((Number) root.get("next_worker")).intValue();
         s.growTimer = ((Number) root.get("grow")).doubleValue();
