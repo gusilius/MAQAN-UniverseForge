@@ -112,7 +112,8 @@
      "name": "Терпимость",
      "mods": {
       "opinion": 1,
-      "xp_gain_pct": 2
+      "xp_gain_pct": 2,
+      "cultural_tolerance_pct": 5
      }
     }
    ]

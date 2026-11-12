@@ -68,6 +68,39 @@ public class RealmsMod {
             @Override public int provinces(String realm) { TitleData.Realm r = realm(realm); return r == null ? 1 : Math.max(1, r.titleKeys.size()); }
             @Override public int prestige(String realm) { TitleData.Realm r = realm(realm); return r != null && r.props.get("prestige") instanceof Number n ? n.intValue() : 0; }
             @Override public boolean flag(String realm, String flag) { TitleData.Realm r = realm(realm); return r != null && Boolean.parseBoolean(String.valueOf(r.props.get("flag." + flag))); }
+            @Override public Map<String, Double> policySignals(String realmId) {
+                TitleData.Realm current = realm(realmId);
+                if (current == null) return Map.of();
+                Map<String, Double> signals = new LinkedHashMap<>();
+
+                Object warState = current.props.get("war.state");
+                String war = warState == null ? "" : String.valueOf(warState);
+                signals.put("war", !war.isBlank() && !war.equalsIgnoreCase("peace") ? 1.0 : 0.0);
+
+                Statecraft.Treasury treasury = POLITICS.treasury(realmId);
+                double debt = POLITICS.realmDebt(realmId);
+                double balance = Math.max(0, treasury.balance);
+                double fiscalStress = debt <= 0 ? 0 : debt / (debt + balance + 1.0);
+                if (POLITICS.realmBankrupt(realmId)) fiscalStress = 1.0;
+                signals.put("fiscal_stress", Math.max(0, Math.min(1, fiscalStress)));
+
+                List<Statecraft.VassalContract> vassals = new ArrayList<>(POLITICS.vassalsOf(realmId));
+                double averageLoyalty = vassals.stream().mapToInt(v -> v.loyalty).average().orElse(100.0);
+                signals.put("vassal_discontent", Math.max(0, Math.min(1, 1.0 - averageLoyalty / 100.0)));
+
+                Map<String, Double> terrain = REALMS.hooks.terrain(realmId);
+                signals.put("trade_access", Math.max(0, Math.min(1, terrain.getOrDefault("coast", 0.0))));
+
+                Map<String, Double> races = REALMS.hooks.races(realmId);
+                double dominantRace = races.values().stream().filter(v -> v != null && Double.isFinite(v))
+                        .mapToDouble(v -> Math.max(0, v)).max().orElse(0);
+                signals.put("cultural_diversity", Math.max(0, Math.min(1, 1.0 - dominantRace)));
+
+                Object unrestValue = current.props.get("politics.unrest");
+                double unrest = unrestValue instanceof Number n ? n.doubleValue() / 100.0 : 0.0;
+                signals.put("unrest", Math.max(0, Math.min(1, unrest)));
+                return signals;
+            }
             @Override public int today() { return (int) WorldForgeApi.clock().dayNumber(); }
         };
     }

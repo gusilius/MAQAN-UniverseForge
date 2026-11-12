@@ -19,6 +19,8 @@ public final class Realms {
         /** Доли рас среди жителей. */
         default Map<String, Double> races(String realm) { return dev.worldforge.mod.api.DemoApi.races(realm); }
         default boolean flag(String realm, String flag) { return false; }
+        /** Normalized, live political pressures supplied by the owning game systems (0..1). */
+        default Map<String, Double> policySignals(String realm) { return Map.of(); }
         default int today() { return 0; }
     }
 
@@ -116,11 +118,12 @@ public final class Realms {
     /** Лучший доступный строй для ИИ-государства: по подгонке, с детерминированной случайностью. */
     public String suggest(String realm, long seed) {
         Random rng = new Random(seed);
+        Map<String, Double> signals = hooks.policySignals(realm);
         String best = "";
         double bs = -1e9;
         for (RealmDefs.Gov g : defs.govs.values()) {
             if (!why(realm, g).isEmpty()) continue;
-            double sc = fit(realm, g) + rng.nextDouble() * 15;
+            double sc = fit(realm, g) + policyUtility(g.mods(), signals) * 0.35 + rng.nextDouble() * 5;
             if (sc > bs) { bs = sc; best = g.id(); }
         }
         return best;
@@ -221,16 +224,100 @@ public final class Realms {
 
     // ---------- ИИ ----------
 
-    /** Простое развитие для государств без игрока: строй по подгонке, доктрины и законы по дешёвизне. */
+    private static double signal(Map<String, Double> signals, String key) {
+        if (signals == null) return 0;
+        double value = signals.getOrDefault(key, 0.0);
+        return Double.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
+    }
+
+    /**
+     * Scores a policy by its actual effects against the realm's live pressures.
+     * Signals are supplied by wf-war, wf-court, Statecraft and the shared map/demography APIs;
+     * this class does not create a parallel war, treasury, population or unrest model.
+     */
+    private static double policyUtility(Map<String, Double> effects, Map<String, Double> signals) {
+        double war = signal(signals, "war");
+        double fiscal = signal(signals, "fiscal_stress");
+        double vassal = signal(signals, "vassal_discontent");
+        double trade = signal(signals, "trade_access");
+        double diversity = signal(signals, "cultural_diversity");
+        double unrest = signal(signals, "unrest");
+        double score = 0;
+        score += effects.getOrDefault("levy_pct", 0.0) * (0.01 + war * 1.50);
+        score += effects.getOrDefault("melee_dmg_pct", 0.0) * war * 1.20;
+        score += effects.getOrDefault("ranged_dmg_pct", 0.0) * war * 0.80;
+        score += effects.getOrDefault("siege_pct", 0.0) * war * 1.35;
+        score += effects.getOrDefault("defense_pct", 0.0) * war * 0.70;
+        score -= effects.getOrDefault("upkeep_pct", 0.0) * (war * 0.50 + fiscal * 0.35);
+        score += effects.getOrDefault("tax_pct", 0.0) * (0.10 + fiscal * 1.20 - vassal * 0.25 - unrest * 0.20);
+        score += effects.getOrDefault("trade_pct", 0.0) * (0.15 + trade * 1.40);
+        score += effects.getOrDefault("discount_pct", 0.0) * trade * 0.70;
+        score += effects.getOrDefault("opinion", 0.0) * (0.20 + vassal * 1.40 + unrest * 1.30);
+        score += effects.getOrDefault("vassal_opinion", 0.0) * vassal * 1.60;
+        score -= effects.getOrDefault("unrest_pct", 0.0) * (vassal + unrest);
+        score += effects.getOrDefault("xp_gain_pct", 0.0) * diversity * 1.50;
+        score += effects.getOrDefault("heal_pct", 0.0) * diversity * 0.20;
+        score += effects.getOrDefault("cultural_tolerance_pct", 0.0) * diversity * 2.0;
+        score += effects.getOrDefault("doctrine_pct", 0.0) * (0.20 + fiscal * 0.20);
+        return score;
+    }
+
+    private RealmDefs.Node bestAvailableDoctrine(String realm, Map<String, Double> signals) {
+        State state = state(realm);
+        if (state.nodes.size() >= doctrineSlots(realm)) return null;
+        List<RealmDefs.Node> candidates = new ArrayList<>();
+        for (RealmDefs.Branch branch : defs.branches.values())
+            for (RealmDefs.Node node : branch.nodes())
+                if (canUnlock(realm, node.key())) candidates.add(node);
+        candidates.sort(Comparator
+                .comparingDouble((RealmDefs.Node node) -> policyUtility(node.mods(), signals) - node.cost() * 0.10)
+                .reversed()
+                .thenComparing(RealmDefs.Node::key));
+        return candidates.isEmpty() ? null : candidates.get(0);
+    }
+
+    private RealmDefs.LawOption bestLawOption(String realm, RealmDefs.Law law, Map<String, Double> signals) {
+        RealmDefs.LawOption best = null;
+        double bestScore = -Double.MAX_VALUE;
+        for (RealmDefs.LawOption option : law.options()) {
+            if (level(realm) < option.minLevel()) continue;
+            double score = policyUtility(option.mods(), signals);
+            if (best == null || score > bestScore || score == bestScore && option.id().compareTo(best.id()) < 0) {
+                best = option;
+                bestScore = score;
+            }
+        }
+        return best;
+    }
+
+    /**
+     * Autonomous government development is strategic rather than cheapest-first/random:
+     * choose a regime compatible with population/terrain, invest in the most useful available
+     * doctrine, and select laws that answer current war, fiscal, trade and vassal pressures.
+     * All effects still flow through the existing Realms modifiers and Statecraft/Treasury APIs.
+     */
     public void autoDevelop(String realm, long seed) {
-        State s = state(realm);
-        if (s.gov.isEmpty()) { String g = suggest(realm, seed); if (!g.isEmpty()) setGov(realm, g, true); }
+        State state = state(realm);
+        Map<String, Double> signals = hooks.policySignals(realm);
+        if (state.gov.isEmpty()) {
+            String government = suggest(realm, seed);
+            if (!government.isEmpty()) setGov(realm, government, true);
+        }
         tick(realm);
-        List<String> keys = new ArrayList<>();
-        for (RealmDefs.Branch b : defs.branches.values()) for (RealmDefs.Node n : b.nodes()) keys.add(n.key());
-        keys.sort(Comparator.comparingInt(k -> defs.node(k).cost()));
-        for (String k : keys) if (canUnlock(realm, k)) unlock(realm, k);
-        for (RealmDefs.Law l : defs.laws.values()) if (!s.laws.containsKey(l.id())) setLaw(realm, l.id(), l.options().get((int) Math.floorMod(seed + l.id().hashCode(), l.options().size())).id());
+
+        while (state.nodes.size() < doctrineSlots(realm)) {
+            RealmDefs.Node next = bestAvailableDoctrine(realm, signals);
+            if (next == null || !unlock(realm, next.key())) break;
+        }
+
+        for (RealmDefs.Law law : defs.laws.values()) {
+            boolean alreadyActive = state.laws.containsKey(law.id());
+            if (!alreadyActive && state.laws.size() >= lawSlots(realm)) continue;
+            RealmDefs.LawOption option = bestLawOption(realm, law, signals);
+            if (option == null || option.id().equals(state.laws.get(law.id()))) continue;
+            // setLaw enforces the law's own cooldown; changing pressure cannot bypass it.
+            setLaw(realm, law.id(), option.id());
+        }
     }
 
     // ---------- вид и сохранение ----------
