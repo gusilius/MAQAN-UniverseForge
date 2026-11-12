@@ -341,9 +341,9 @@ public final class PopulationSimulationTest {
 
         // Stable CK-style psychology is generated from the canonical identity, persisted, and used by daily AI.
         Character psychological = registry.create("Aster", "", "north", "m", 280);
-        CharacterStats.addTrait(psychological, "gregarious");
-        CharacterStats.addTrait(psychological, "diligent");
-        CharacterStats.addTrait(psychological, "curious");
+        psychological.traits.add("gregarious");
+        psychological.traits.add("diligent");
+        psychological.traits.add("curious");
         CharacterDevelopment.ensurePsychology(psychological);
         int sociability = CharacterDevelopment.temperament(psychological, CharacterDevelopment.Temperament.SOCIABILITY);
         int dutyDrive = CharacterDevelopment.drive(psychological, CharacterDevelopment.Drive.DUTY);
@@ -359,7 +359,7 @@ public final class PopulationSimulationTest {
                 1200, true, true, true, true, true, true, true, false, LifeSimulation.LOD.ACTIVE);
         double socialUtility = LifeSimulation.utility(psychological, personalityContext, LifeSimulation.Action.SOCIALIZE);
         Character loner = registry.create("Bram", "", "north", "m", 280);
-        CharacterStats.addTrait(loner, "reclusive");
+        loner.traits.add("reclusive");
         CharacterDevelopment.setTemperament(loner, CharacterDevelopment.Temperament.SOCIABILITY, 0);
         CharacterDevelopment.setDrive(loner, CharacterDevelopment.Drive.COMMUNITY, 0);
         PopulationSimulation.setNeed(loner, Need.SOCIAL, 60);
