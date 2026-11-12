@@ -45,8 +45,8 @@ public final class ResidentSocialTest {
                 "kind personalities improve the outcome of social encounters");
         check(ResidentSocial.interactionDelta(aggressive, resident) < 0,
                 "aggressive personalities and cultural difference can create rivalry");
-        check(ResidentSocial.socialize(aggressive, resident,
-                        ResidentSocial.interactionDelta(aggressive, resident)) < 0
+        check(ResidentSocial.socializeOnce(aggressive, resident,
+                        ResidentSocial.interactionDelta(aggressive, resident), "life:aggressive:resident:initial") < 0
                         && ResidentSocial.score(resident, aggressive.globalId) < 0,
                 "negative resident encounters create reciprocal rivalry/enmity");
 

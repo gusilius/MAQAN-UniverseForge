@@ -412,18 +412,18 @@ public final class PopulationSimulationTest {
         CharacterStats.addTrait(parentB, "diligent");
         CharacterDevelopment.setTemperament(parentA, CharacterDevelopment.Temperament.EMPATHY, 95);
         CharacterDevelopment.setTemperament(parentB, CharacterDevelopment.Temperament.DISCIPLINE, 90);
-        Character child = registry.addChild(parentA, parentB, "Child", "f", 280);
-        ok(child.props.containsKey("personality.temperament.empathy")
-                        && child.props.containsKey("personality.drive.family")
-                        && CharacterDevelopment.memories(child, 5).stream().anyMatch(m -> "birth".equals(m.get("kind"))),
+        Character inheritedChild = registry.addChild(parentA, parentB, "Child", "f", 280);
+        ok(inheritedChild.props.containsKey("personality.temperament.empathy")
+                        && inheritedChild.props.containsKey("personality.drive.family")
+                        && CharacterDevelopment.memories(inheritedChild, 5).stream().anyMatch(m -> "birth".equals(m.get("kind"))),
                 "children inherit blended psychology and begin with a personal birth memory");
-        int empathyBefore = CharacterDevelopment.temperament(child, CharacterDevelopment.Temperament.EMPATHY);
-        CharacterDevelopment.upbringingTick(child, parentA, parentB, 281);
-        ok(CharacterDevelopment.temperament(child, CharacterDevelopment.Temperament.EMPATHY) >= empathyBefore
-                        && ((Number) child.props.get("family.upbringing.last_year")).intValue() == 281,
+        int empathyBefore = CharacterDevelopment.temperament(inheritedChild, CharacterDevelopment.Temperament.EMPATHY);
+        CharacterDevelopment.upbringingTick(inheritedChild, parentA, parentB, 281);
+        ok(CharacterDevelopment.temperament(inheritedChild, CharacterDevelopment.Temperament.EMPATHY) >= empathyBefore
+                        && ((Number) inheritedChild.props.get("family.upbringing.last_year")).intValue() == 281,
                 "annual upbringing applies parental influence once per year");
-        CharacterDevelopment.upbringingTick(child, parentA, parentB, 281);
-        ok(((Number) child.props.get("family.upbringing.last_year")).intValue() == 281,
+        CharacterDevelopment.upbringingTick(inheritedChild, parentA, parentB, 281);
+        ok(((Number) inheritedChild.props.get("family.upbringing.last_year")).intValue() == 281,
                 "replayed upbringing year is idempotent");
 
         System.out.println(failures == 0 ? "ALL OK" : failures + " FAILED");

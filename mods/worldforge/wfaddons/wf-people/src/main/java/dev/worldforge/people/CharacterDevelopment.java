@@ -313,9 +313,9 @@ public final class CharacterDevelopment {
             setDrive(child,drive,(int)Math.round(base*.55+drive(father,drive)*.225+drive(mother,drive)*.225));
         }
         ensurePsychology(child);
-        remember(child,"family:birth:"+child.globalId,"birth",father.globalId,"born into "+child.house,worldMinute,10);
-        remember(father,"family:child-born:"+child.globalId,"child_born",child.globalId,child.name,worldMinute,18);
-        remember(mother,"family:child-born:"+child.globalId,"child_born",child.globalId,child.name,worldMinute,18);
+        remember(child,"family:birth:"+child.globalId,"birth",father.globalId,"born into "+child.house,10,worldMinute);
+        remember(father,"family:child-born:"+child.globalId,"child_born",child.globalId,child.name,18,worldMinute);
+        remember(mother,"family:child-born:"+child.globalId,"child_born",child.globalId,child.name,18,worldMinute);
     }
 
     /** Annual upbringing is deterministic and replay-safe; parents influence children gradually. */
