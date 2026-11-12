@@ -105,6 +105,16 @@ public class MapScreen extends Screen {
         TitleData.Realm r = MapTextures.titles.realmOf(MapTextures.titles.get(prov));
         if (MapImages.isDip(ClientState.mode) && r != null && !ClientState.mode.equals(MapImages.DIP + r.id)) setMode(MapImages.DIP + r.id, true);
         panel.onSelected(prov);
+        TitleData.Title selectedTitle = MapTextures.titles == null ? null : MapTextures.titles.get(prov);
+        TitleData.Realm selectedRealm = selectedTitle == null ? null : MapTextures.titles.realmOf(selectedTitle);
+        if (selectedRealm != null) {
+            PlatformWorkspaceBridge.publish("wf_realms", selectedRealm.id, "realm",
+                    selectedRealm.name, "Selected on political map · province " + prov);
+        } else {
+            PlatformWorkspaceBridge.publish("worldforge", "province:" + prov, "province",
+                    selectedTitle == null ? "Province " + prov : selectedTitle.name,
+                    "Selected on political map");
+        }
         centerOnProvince(prov);
     }
 

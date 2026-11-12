@@ -71,10 +71,36 @@ public final class WorldSimMod {
     private static boolean emergentRealmsRehydrated;
     private static final HistoricalChronicle HISTORICAL_CHRONICLE = new HistoricalChronicle();
 
+
+    /**
+     * Mirrors confirmed domain facts into MAQAN's presentation timeline.
+     * The EventLog and HistoricalChronicle remain canonical; the Platform journal
+     * is only a bounded UI projection and is optional on dedicated servers.
+     */
+    private static void publishPlatformTimelineEvent(dev.worldforge.mod.api.EventLog.Event event) {
+        if (event == null || event.text == null || event.text.isBlank()) return;
+        try {
+            Class<?> runtime = Class.forName("dev.maqan.platform.client.WorkspaceRuntime");
+            Class<?> severity = Class.forName("dev.maqan.platform.client.WorkspaceRuntime$Severity");
+            Object info = java.lang.Enum.valueOf((Class) severity, "INFO");
+            String entityId = event.realms == null || event.realms.isEmpty() ? "" : event.realms.get(0);
+            MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+            String worldId = server == null ? "" : server.overworld().dimension().location().toString();
+            runtime.getMethod("publish", severity, String.class, String.class,
+                    String.class, String.class, String.class)
+                    .invoke(null, info, "worldforge", event.category == null ? "world" : event.category.id(),
+                            event.text, entityId, worldId);
+        } catch (ReflectiveOperationException | LinkageError ignored) {
+            // MAQAN Platform is optional; the authoritative event and book are unaffected.
+        }
+    }
+
     public WorldSimMod() {
         MinecraftForge.EVENT_BUS.register(this);
-        WorldForgeApi.events().addListener(item -> HISTORICAL_CHRONICLE.record(
-                item, WorldForgeApi.clock().dayNumber(), WorldForgeApi.clock().year()));
+        WorldForgeApi.events().addListener(item -> {
+            HISTORICAL_CHRONICLE.record(item, WorldForgeApi.clock().dayNumber(), WorldForgeApi.clock().year());
+            publishPlatformTimelineEvent(item);
+        });
     }
 
     @SubscribeEvent
