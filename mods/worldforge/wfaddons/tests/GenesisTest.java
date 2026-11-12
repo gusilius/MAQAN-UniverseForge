@@ -4,6 +4,7 @@ import dev.worldforge.genesis.*;
 import dev.worldforge.mod.Json;
 import dev.worldforge.origins.OriginDefs;
 import dev.worldforge.progress.ProgressDefs;
+import dev.worldforge.people.NameBank;
 
 import java.nio.file.*;
 import java.util.*;
@@ -55,6 +56,22 @@ public class GenesisTest {
         ok(inheritedPlaceNames.stream().anyMatch(g.namePool.get("mountain_dwarf")::contains)
                         && inheritedPlaceNames.stream().anyMatch(g.namePool.get("dwarf")::contains),
                 "subrace settlement naming combines its own pool with inherited parent-culture names");
+
+        NameBank sharedNames = new NameBank();
+        sharedNames.add("""
+                {"default":"dwarf",
+                 "cultures":{"dwarf":{"male":["Торин"],"female":["Диса"],"houses":["Каменный Молот"]}},
+                 "races":{"dwarf":{"settlements":["Кхазад-Рун"]},
+                          "mountain_dwarf":{"settlements":["Гримнир"]}},
+                 "race_parents":{"mountain_dwarf":"dwarf"}}
+                """);
+        ge.sharedNameBank(() -> sharedNames);
+        Set<String> canonicalPlaceNames = new HashSet<>();
+        for (int seed = 0; seed < 100; seed++) canonicalPlaceNames.add(ge.randomName(d, new Random(seed)));
+        ok(canonicalPlaceNames.containsAll(List.of("Кхазад-Рун", "Гримнир")),
+                "Genesis settlement names use the shared race-inherited NameBank instead of a parallel pool");
+        ok(sharedNames.generate("mountain_dwarf", "dwarf", "houses", new Random(1)).equals("Каменный Молот"),
+                "the same canonical bank remains the source for house/dynasty naming");
         Draft el = ge.draft("p:2"); ge.setRace(el, "wood_elf");
         ok(ge.settleNoun(el, "town").equals("Лесной город"), "подраса эльфа берёт стиль родителя");
         ok(!ge.setSettle(d, "").isEmpty() && !ge.setSettle(d, "A".repeat(40)).isEmpty() && !ge.setSettle(d, "Bad<>").isEmpty() && ge.setSettle(d, "Новый-Чертог").isEmpty(), "название поселения проверяется");

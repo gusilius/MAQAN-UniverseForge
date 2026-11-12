@@ -31,6 +31,8 @@ public final class Realms {
         public final Set<String> nodes = new LinkedHashSet<>();
         public final Map<String, String> laws = new LinkedHashMap<>();
         public final Map<String, Integer> lawChanged = new HashMap<>();
+        /** Signal snapshot at the time each law was adopted; used to evaluate observed outcomes. */
+        public final Map<String, Map<String, Double>> lawSignalBaselines = new LinkedHashMap<>();
         public int lastTick = -1;
     }
 
@@ -111,6 +113,7 @@ public final class Realms {
         s.gov = id;
         s.govChanged = hooks.today();
         s.laws.clear();
+        s.lawSignalBaselines.clear();
         s.nodes.removeIf(k -> { RealmDefs.Node n = defs.node(k); return n != null && !nodeGovOk(n, id); });
         return true;
     }
@@ -197,6 +200,11 @@ public final class Realms {
         if (left > 0) return fail("менять закон можно через " + left + " дн.");
         s.laws.put(law, option);
         s.lawChanged.put(law, hooks.today());
+        Map<String, Double> baseline = new LinkedHashMap<>();
+        Map<String, Double> currentSignals = hooks.policySignals(realm);
+        for (String key : List.of("unrest", "fiscal_stress", "vassal_discontent", "faction_pressure", "court_intrigue"))
+            baseline.put(key, signal(currentSignals, key));
+        s.lawSignalBaselines.put(law, baseline);
         return true;
     }
 
@@ -242,6 +250,10 @@ public final class Realms {
         double trade = signal(signals, "trade_access");
         double diversity = signal(signals, "cultural_diversity");
         double unrest = signal(signals, "unrest");
+        double faction = signal(signals, "faction_pressure");
+        double intrigue = signal(signals, "court_intrigue");
+        double dynastic = signal(signals, "dynastic_ties");
+        double councilAccept = signal(signals, "council_ai_accept");
         double score = 0;
         score += effects.getOrDefault("levy_pct", 0.0) * (0.01 + war * 1.50);
         score += effects.getOrDefault("melee_dmg_pct", 0.0) * war * 1.20;
@@ -249,15 +261,18 @@ public final class Realms {
         score += effects.getOrDefault("siege_pct", 0.0) * war * 1.35;
         score += effects.getOrDefault("defense_pct", 0.0) * war * 0.70;
         score -= effects.getOrDefault("upkeep_pct", 0.0) * (war * 0.50 + fiscal * 0.35);
-        score += effects.getOrDefault("tax_pct", 0.0) * (0.10 + fiscal * 1.20 - vassal * 0.25 - unrest * 0.20);
+        score += effects.getOrDefault("tax_pct", 0.0) * (0.10 + fiscal * 1.20 - vassal * 0.25 - unrest * 0.20 - faction * 0.65);
         score += effects.getOrDefault("trade_pct", 0.0) * (0.15 + trade * 1.40);
         score += effects.getOrDefault("discount_pct", 0.0) * trade * 0.70;
-        score += effects.getOrDefault("opinion", 0.0) * (0.20 + vassal * 1.40 + unrest * 1.30);
-        score += effects.getOrDefault("vassal_opinion", 0.0) * vassal * 1.60;
+        score += effects.getOrDefault("opinion", 0.0) * (0.20 + vassal * 1.40 + unrest * 1.30 + faction * 1.20);
+        score += effects.getOrDefault("vassal_opinion", 0.0) * (vassal * 1.60 + faction * 1.80);
         score -= effects.getOrDefault("unrest_pct", 0.0) * (vassal + unrest);
         score += effects.getOrDefault("xp_gain_pct", 0.0) * diversity * 1.50;
         score += effects.getOrDefault("heal_pct", 0.0) * diversity * 0.20;
         score += effects.getOrDefault("cultural_tolerance_pct", 0.0) * diversity * 2.0;
+        score += effects.getOrDefault("plot_defense", 0.0) * intrigue * 1.10;
+        score += effects.getOrDefault("ai_accept", 0.0) * (0.15 + dynastic * 0.80 + councilAccept * 0.60);
+        score += effects.getOrDefault("trade_pct", 0.0) * dynastic * 0.25;
         score += effects.getOrDefault("doctrine_pct", 0.0) * (0.20 + fiscal * 0.20);
         return score;
     }
@@ -276,12 +291,29 @@ public final class Realms {
         return candidates.isEmpty() ? null : candidates.get(0);
     }
 
+    /** A policy is not judged only by its intended modifier: the AI also remembers what happened after adoption. */
+    private static double observedOutcomeAdjustment(State state, String lawId, RealmDefs.LawOption option,
+                                                    Map<String, Double> signals) {
+        if (!option.id().equals(state.laws.get(lawId))) return 0;
+        Map<String, Double> baseline = state.lawSignalBaselines.get(lawId);
+        if (baseline == null || baseline.isEmpty()) return 0;
+        double change = 0;
+        change += (signal(signals, "unrest") - baseline.getOrDefault("unrest", 0.0)) * 22.0;
+        change += (signal(signals, "fiscal_stress") - baseline.getOrDefault("fiscal_stress", 0.0)) * 18.0;
+        change += (signal(signals, "vassal_discontent") - baseline.getOrDefault("vassal_discontent", 0.0)) * 24.0;
+        change += (signal(signals, "faction_pressure") - baseline.getOrDefault("faction_pressure", 0.0)) * 28.0;
+        change += (signal(signals, "court_intrigue") - baseline.getOrDefault("court_intrigue", 0.0)) * 12.0;
+        return Math.max(-35.0, Math.min(35.0, -change));
+    }
+
     private RealmDefs.LawOption bestLawOption(String realm, RealmDefs.Law law, Map<String, Double> signals) {
+        State state = state(realm);
         RealmDefs.LawOption best = null;
         double bestScore = -Double.MAX_VALUE;
         for (RealmDefs.LawOption option : law.options()) {
             if (level(realm) < option.minLevel()) continue;
-            double score = policyUtility(option.mods(), signals);
+            double score = policyUtility(option.mods(), signals)
+                    + observedOutcomeAdjustment(state, law.id(), option, signals);
             if (best == null || score > bestScore || score == bestScore && option.id().compareTo(best.id()) < 0) {
                 best = option;
                 bestScore = score;
@@ -342,6 +374,7 @@ public final class Realms {
         root.put("govs", gl);
         root.put("nodes", new ArrayList<>(s.nodes));
         root.put("laws", new LinkedHashMap<>(s.laws));
+        root.put("policyMemory", new LinkedHashMap<>(s.lawSignalBaselines));
         root.put("mods", mods(realm));
         return Json.write(root);
     }
@@ -353,6 +386,7 @@ public final class Realms {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("gov", s.gov); m.put("points", s.points); m.put("govChanged", s.govChanged); m.put("lastTick", s.lastTick);
             m.put("nodes", new ArrayList<>(s.nodes)); m.put("laws", new LinkedHashMap<>(s.laws)); m.put("lawChanged", new LinkedHashMap<>(s.lawChanged));
+            m.put("lawSignalBaselines", new LinkedHashMap<>(s.lawSignalBaselines));
             root.put(e.getKey(), m);
         }
         return Json.write(root);
@@ -371,6 +405,13 @@ public final class Realms {
             if (m.get("nodes") instanceof List<?> l) for (Object o : l) s.nodes.add(String.valueOf(o));
             if (m.get("laws") instanceof Map<?, ?> lm) for (var x : lm.entrySet()) s.laws.put(String.valueOf(x.getKey()), String.valueOf(x.getValue()));
             if (m.get("lawChanged") instanceof Map<?, ?> lm) for (var x : lm.entrySet()) s.lawChanged.put(String.valueOf(x.getKey()), ((Number) x.getValue()).intValue());
+            if (m.get("lawSignalBaselines") instanceof Map<?, ?> baselines) for (var lawEntry : baselines.entrySet()) {
+                if (!(lawEntry.getValue() instanceof Map<?, ?> values)) continue;
+                Map<String, Double> snapshot = new LinkedHashMap<>();
+                for (var value : values.entrySet()) if (value.getValue() instanceof Number n)
+                    snapshot.put(String.valueOf(value.getKey()), Math.max(0, Math.min(1, n.doubleValue())));
+                s.lawSignalBaselines.put(String.valueOf(lawEntry.getKey()), snapshot);
+            }
         }
     }
 }

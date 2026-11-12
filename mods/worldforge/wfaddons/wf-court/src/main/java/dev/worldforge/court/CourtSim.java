@@ -261,6 +261,7 @@ public final class CourtSim {
             if (heir == null) heir = heirOf(c);
             handOver(pl, c, heir);
         }
+        if (wasRuler && ed != null) syncProps();
     }
 
     // ------------------------------------------------------------------ фракции
@@ -537,7 +538,35 @@ public final class CourtSim {
                 double v = Math.round(e.getValue() * 10) / 10.0;
                 ed.setDerivedProp(r.id, "council." + e.getKey(), v);
             }
-            ed.setDerivedProp(r.id, "people.ties", String.join(",", Marriages.ties(this, r.id)));
+            Set<String> dynasticTies = Marriages.ties(this, r.id);
+            ed.setDerivedProp(r.id, "people.ties", String.join(",", dynasticTies));
+            ed.setDerivedProp(r.id, "politics.dynastic_ties", dynasticTies.size());
+
+            List<Faction> realmFactions = factions.values().stream().filter(f -> f.liege.equals(r.id)).toList();
+            double factionPressure = Math.min(1.0, realmFactions.stream().mapToDouble(f -> Math.max(0, f.power)).sum());
+            ed.setDerivedProp(r.id, "politics.faction_pressure", Math.round(factionPressure * 1000) / 1000.0);
+            ed.setDerivedProp(r.id, "politics.faction_count", realmFactions.size());
+
+            long activeSchemes = schemes.values().stream().filter(sc -> {
+                Character target = reg.get(sc.target);
+                return sc.ownerRealm.equals(r.id) || (target != null && realmOf(target).equals(r.id));
+            }).count();
+            double intriguePressure = Math.min(1.0, activeSchemes / 3.0);
+            ed.setDerivedProp(r.id, "politics.intrigue_pressure", Math.round(intriguePressure * 1000) / 1000.0);
+
+            Character sovereign = ruler(r.id);
+            if (sovereign != null) {
+                TitleData.Title highest = null;
+                for (String key : r.titleKeys) {
+                    TitleData.Title candidate = d.findTitle(key);
+                    if (candidate != null && (highest == null || candidate.tier > highest.tier
+                            || candidate.tier == highest.tier && candidate.key.compareTo(highest.key) < 0))
+                        highest = candidate;
+                }
+                if (highest != null && !sovereign.globalId.equals(highest.props.get("holderCharacterId")))
+                    ed.setProp(highest.id, "holderCharacterId", sovereign.globalId);
+            }
+
             // Publish the canonical ruler-to-ruler opinion to wf-realms through the shared
             // realm property bus; wf-realms consumes it for its monthly vassal contract review.
             Character vassalRuler = ruler(r.id);

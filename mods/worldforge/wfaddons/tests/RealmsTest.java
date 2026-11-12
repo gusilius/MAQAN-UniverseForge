@@ -114,6 +114,24 @@ public class RealmsTest {
         r.autoDevelop("policy-war", 26);
         ok("volunteers".equals(r.state("policy-war").laws.get("conscription")),
                 "the AI abandons emergency conscription after wartime pressure ends and the law cooldown expires");
+
+        // The policy engine learns from the observed result after a law was adopted.
+        policySignals.clear();
+        r.state("policy-memory").gov = "holdfast";
+        r.state("policy-memory").points = 1000;
+        ok(r.setLaw("policy-memory", "taxation", "heavy"),
+                "policy-memory realm adopts the initial heavy-tax law");
+        ok(r.state("policy-memory").lawSignalBaselines.containsKey("taxation"),
+                "law adoption stores the actual pressure baseline");
+        policySignals.put("unrest", 1.0); policySignals.put("faction_pressure", 1.0);
+        day += 100;
+        r.autoDevelop("policy-memory", 27);
+        ok("low".equals(r.state("policy-memory").laws.get("taxation")),
+                "worsening unrest and faction pressure make the AI reconsider a previously adopted heavy-tax policy");
+        Realms memoryReload = new Realms(d); memoryReload.hooks = r.hooks;
+        memoryReload.fromJson(r.toJson());
+        ok(memoryReload.state("policy-memory").lawSignalBaselines.equals(r.state("policy-memory").lawSignalBaselines),
+                "policy outcome baselines survive save/load");
         races.clear(); races.put("orc", 1.0); r.state("c").gov = "";
         ok(d.govs.get(r.suggest("c", 3)).reqRaces().isEmpty() || d.govs.get(r.suggest("c", 3)).reqRaces().contains("orc"), "ИИ не берёт чужую расу");
 

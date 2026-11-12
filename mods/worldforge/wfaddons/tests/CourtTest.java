@@ -5,6 +5,7 @@ import dev.worldforge.people.Character;
 import dev.worldforge.people.*;
 import dev.worldforge.court.*;
 import dev.worldforge.settle.ResidentLifeEvents;
+import dev.worldforge.realms.Statecraft;
 
 import java.nio.file.*;
 import java.util.*;
@@ -35,6 +36,23 @@ public class CourtTest {
     public static void main(String[] a) throws Exception {
         CourtSim s = build(a[0], 7);
         ok(s.events.size() >= 10, "события загружены из файлов: " + s.events.size());
+
+        // Statecraft mirrors the map's feudal hierarchy, and must release contracts when
+        // the authoritative visible map relationship is removed.
+        Statecraft political = new Statecraft();
+        political.syncMapTitles("court-test", s.d);
+        TitleData.Realm mapVassal = s.d.realmList().stream()
+                .filter(r -> r.overlordId != null && !r.overlordId.isBlank()).findFirst().orElse(null);
+        boolean vassalContractImported = mapVassal != null
+                && political.vassalage(mapVassal.id) != null
+                && political.vassalage(mapVassal.id).liegeRealm.equals(mapVassal.overlordId);
+        ok(vassalContractImported, "map vassal hierarchy imports into the canonical Statecraft contract");
+        if (mapVassal != null) {
+            s.ed.setOverlord(mapVassal.id, null, null);
+            political.syncMapTitles("court-test", s.d);
+            ok(political.vassalage(mapVassal.id) == null,
+                    "removing a map overlord also releases its stale Statecraft tribute contract");
+        }
 
         // Court and settlement clocks share one CharacterRegistry. A birth resolved by either
         // subsystem must be visible to the other so the same mother cannot give birth twice.
@@ -100,6 +118,15 @@ public class CourtTest {
         t.die(old, "умер");
         Character neu = t.ruler(r2);
         ok(neu != null && neu != old && neu.alive, "у государства новый правитель после смерти");
+        TitleData.Title highestRealmTitle = null;
+        for (String key : t.d.realms.get(r2).titleKeys) {
+            TitleData.Title candidate = t.d.findTitle(key);
+            if (candidate != null && (highestRealmTitle == null || candidate.tier > highestRealmTitle.tier))
+                highestRealmTitle = candidate;
+        }
+        Object holderId = highestRealmTitle == null ? null : highestRealmTitle.props.get("holderCharacterId");
+        ok(highestRealmTitle != null && neu.globalId.equals(holderId),
+                "succession publishes the heir's canonical Character UUID to the realm's highest political title");
         ok(t.news.stream().anyMatch(x -> x.contains("Наследует")), "сообщение о наследовании");
 
         // события для игрока
@@ -124,6 +151,12 @@ public class CourtTest {
         for (String vv : List.of(v1, v2)) fz.opinions.add(fz.ruler(vv).id, fz.ruler(liege).id, "Обида", -60, 0);
         fz.tick(30);
         ok(fz.factions.size() == 1 && fz.factions.values().iterator().next().members.size() == 2, "недовольные вассалы собрались во фракцию");
+        fz.syncProps();
+        Object publishedFactionPressure = fz.d.realms.get(liege).props.get("politics.faction_pressure");
+        Object publishedFactionCount = fz.d.realms.get(liege).props.get("politics.faction_count");
+        ok(publishedFactionPressure instanceof Number pressure && pressure.doubleValue() > 0
+                        && publishedFactionCount instanceof Number count && count.intValue() == 1,
+                "CourtSim publishes its actual faction pressure to the shared realm property bus");
         double pw = fz.factions.values().iterator().next().power;
         ok(pw > 0 && pw < 1, "мощь фракции " + Math.round(pw * 100) + "%");
 
