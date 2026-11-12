@@ -268,6 +268,12 @@ public final class MapData {
         return pz * w + px;
     }
 
+    /** True only when the source package actually supplied rivers.png. */
+    public boolean hasRiverLayer() { return river != null; }
+
+    /** Political/administrative overlays are metadata, never geographic input to a map-first campaign. */
+    public boolean hasPoliticalLayers() { return titles != null || regions != null; }
+
     /** Индекс биома в точке мира; границы слегка «дрожат», чтобы не было квадратов по пикселям. */
     public int biomeIndexAt(double bx, double bz) {
         int i = biome[pixelIndex(bx, bz)] & 0xFF;

@@ -89,6 +89,28 @@ pub struct Workforce {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct GeographicCell {
+    pub x: u32,
+    pub z: u32,
+    pub biome: String,
+    pub elevation: i32,
+    pub river: u8,
+    pub land: bool,
+    pub suitability: u8,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct GeographicMap {
+    pub map_id: String,
+    pub width_px: u32,
+    pub height_px: u32,
+    pub blocks_per_pixel_milli: u64,
+    pub political_layers_present: bool,
+    pub sample_stride: u32,
+    pub cells: Vec<GeographicCell>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct WorldSnapshot {
     pub world_id: String,
     pub seed: u64,
@@ -98,6 +120,9 @@ pub struct WorldSnapshot {
     pub settlements: Vec<Settlement>,
     pub characters: Vec<Character>,
     pub workforce: Vec<Workforce>,
+    /// Optional, political-overlay-free geography. Missing in legacy snapshots.
+    #[serde(default)]
+    pub geography: Vec<GeographicMap>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -154,6 +179,23 @@ fn clamp_score(v: i64) -> i32 { v.clamp(-100, 100) as i32 }
 impl WorldSnapshot {
     pub fn validate(&self) -> Result<(), SimError> {
         if self.world_id.trim().is_empty() { return Err(SimError::EmptyWorldId); }
+        let mut map_ids = BTreeSet::new();
+        for map in &self.geography {
+            if map.map_id.trim().is_empty() || map.width_px == 0 || map.height_px == 0 || map.sample_stride == 0
+                || map.blocks_per_pixel_milli == 0 {
+                return Err(SimError::InvalidSnapshot("invalid-geographic-map-metadata".into()));
+            }
+            if !map_ids.insert(map.map_id.as_str()) {
+                return Err(SimError::InvalidSnapshot(format!("duplicate-geographic-map:{}", map.map_id)));
+            }
+            let mut cells = BTreeSet::new();
+            for cell in &map.cells {
+                if cell.x >= map.width_px || cell.z >= map.height_px || cell.biome.trim().is_empty()
+                    || cell.suitability > 100 || !cells.insert((cell.x, cell.z)) {
+                    return Err(SimError::InvalidSnapshot(format!("invalid-geographic-cell:{}", map.map_id)));
+                }
+            }
+        }
         let mut realms = BTreeSet::new();
         for r in &self.realms {
             if r.id.trim().is_empty() { return Err(SimError::InvalidSnapshot("empty-realm-id".into())); }
@@ -202,6 +244,15 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
     let settlements: BTreeMap<&str, &Settlement> = snapshot.settlements.iter().map(|s| (s.id.as_str(), s)).collect();
     let mut proposals = Vec::new();
     let mut diagnostics = Vec::new();
+    // Geography is observational input only in this integration pass: it is never
+    // converted into pre-seeded realms, rulers, settlements or population counts.
+    for map in &snapshot.geography {
+        let land_cells = map.cells.iter().filter(|cell| cell.land).count();
+        let viable_cells = map.cells.iter().filter(|cell| cell.land && cell.suitability >= 55).count();
+        let river_cells = map.cells.iter().filter(|cell| cell.river > 0).count();
+        diagnostics.push(format!("geography:{}:land_samples={}:viable_samples={}:river_samples={}:political_layers_ignored={}",
+            map.map_id, land_cells, viable_cells, river_cells, map.political_layers_present));
+    }
 
     // Political AI: border wars emerge from pressure, claims, power balance,
     // stability and treasury. A war is never forced by the scenario.
@@ -386,7 +437,7 @@ mod tests {
             borders:vec![Border{a:"north".into(),b:"south".into(),contested_claim:true,strategic_value:100,distance_cost:0}],
             settlements:vec![Settlement{id:"village".into(),realm_id:"north".into(),population:40,food:10,food_capacity:100,
                 wood:30,stone:30,housing:100,housing_used:90,farms:0,foresters:0,quarries:0,workshops:0,barracks:1,watch_posts:0,threatened:false,roads:0,local_pressure:20,last_project_day:0}],
-            characters:vec![],workforce:vec![] }
+            characters:vec![],workforce:vec![],geography:vec![] }
     }
     #[test] fn decisions_are_invariant_to_snapshot_collection_and_border_order() {
         let mut original = base();
@@ -442,6 +493,32 @@ mod tests {
         ];
         assert!(decide(&s).unwrap().proposals.iter().any(|p| matches!(p.kind,ProposalKind::DynasticMarriage{..})));
     }
+    #[test]
+    fn map_first_geography_is_valid_without_preseeded_polities_or_settlements() {
+        let mut snapshot = WorldSnapshot {
+            world_id: "map-first".into(), seed: 9, day: 0,
+            realms: vec![], borders: vec![], settlements: vec![], characters: vec![], workforce: vec![],
+            geography: vec![GeographicMap {
+                map_id: "planetos".into(), width_px: 128, height_px: 96,
+                blocks_per_pixel_milli: 16000, political_layers_present: true, sample_stride: 4,
+                cells: vec![
+                    GeographicCell { x: 4, z: 8, biome: "plains".into(), elevation: 70,
+                        river: 0, land: true, suitability: 82 },
+                    GeographicCell { x: 8, z: 8, biome: "forest".into(), elevation: 72,
+                        river: 255, land: true, suitability: 90 },
+                ],
+            }],
+        };
+        assert_eq!(snapshot.validate(), Ok(()));
+        let frame = decide(&snapshot).unwrap();
+        assert!(frame.proposals.is_empty());
+        assert!(frame.diagnostics.iter().any(|line| line.contains("geography:planetos:land_samples=2")));
+        assert!(snapshot.realms.is_empty() && snapshot.settlements.is_empty(),
+            "geography alone must not synthesize political or population entities");
+        snapshot.geography[0].cells[0].suitability = 101;
+        assert!(snapshot.validate().is_err());
+    }
+
     #[test] fn duplicate_realms_are_rejected() {
         let mut s=base(); s.realms.push(s.realms[0].clone());
         assert_eq!(s.validate(),Err(SimError::DuplicateRealm("north".into())));

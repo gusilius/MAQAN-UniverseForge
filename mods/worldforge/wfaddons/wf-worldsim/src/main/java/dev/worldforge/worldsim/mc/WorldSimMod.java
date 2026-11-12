@@ -11,6 +11,7 @@ import dev.worldforge.mod.api.Diplomacy;
 import dev.worldforge.mod.api.WorldForgeApi;
 import dev.worldforge.mod.api.SimulationLod;
 import dev.worldforge.worldsim.HistoricalChronicle;
+import dev.worldforge.worldsim.MapGeography;
 import dev.worldforge.court.CourtSim;
 import dev.worldforge.court.mc.CourtMod;
 import dev.worldforge.court.Marriages;
@@ -241,6 +242,11 @@ public final class WorldSimMod {
         root.addProperty("seed", server.getWorldData().worldGenOptions().seed() & Long.MAX_VALUE);
         root.addProperty("day", day);
         JsonArray realms = new JsonArray(), borders = new JsonArray(), settlements = new JsonArray(), characters = new JsonArray(), workforce = new JsonArray();
+        JsonArray geography = new JsonArray();
+        // Geography is sampled independently of political overlays. A map with no titles/realms
+        // is still a valid source of terrain, biome and river evidence for a future map-first world.
+        for (MapData map : WorldForgeMod.loadedMaps().values())
+            geography.add(GSON.toJsonTree(MapGeography.describe(map)));
         Set<String> threatenedRealms = new HashSet<>();
         for (MapData map : WorldForgeMod.loadedMaps().values()) {
             if (map.titles == null) continue;
@@ -367,6 +373,7 @@ public final class WorldSimMod {
         sortObjects(settlements, Comparator.comparing(item -> item.get("id").getAsString()));
         sortObjects(characters, Comparator.comparing(item -> item.get("id").getAsString()));
         sortObjects(workforce, Comparator.comparing(item -> item.get("settlement_id").getAsString()));
+        root.add("geography", geography);
         root.add("realms", realms); root.add("borders", borders); root.add("settlements", settlements);
         root.add("characters", characters); root.add("workforce", workforce);
         return root;
