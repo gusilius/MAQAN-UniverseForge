@@ -596,6 +596,8 @@ public class PeopleMod {
     public static String label(Character c) {
         StringBuilder sb = new StringBuilder(c.name);
         if (!c.house.isEmpty()) sb.append(' ').append(c.house);
+        else if (c.props.get("identity.surname") instanceof String surname && !surname.isBlank())
+            sb.append(' ').append(surname);
         String role = roleName(c);
         if (!role.isEmpty()) sb.append(", ").append(role);
         return sb.toString();

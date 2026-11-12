@@ -21,10 +21,10 @@ public final class ResidentLifeEventsTest {
         Character father = registry.create("Арен", "Дом Арен", "north", "m", 1980);
         Character mother = registry.create("Мира", "Дом Мира", "north", "f", 1980);
         ResidentSocial.socialize(father, mother, 80);
-        check(ResidentSocial.score(father, mother.id) == 80
-                        && ResidentSocial.score(mother, father.id) == 80,
+        check(ResidentSocial.score(father, mother.globalId) == 80
+                        && ResidentSocial.score(mother, father.globalId) == 80,
                 "social interaction updates both canonical Characters");
-        check("друг".equals(ResidentSocial.bond(father, mother.id)),
+        check("друг".equals(ResidentSocial.bond(father, mother.globalId)),
                 "relationship score resolves to a stable friendship bond");
 
         boolean married = false;
@@ -54,6 +54,10 @@ public final class ResidentLifeEventsTest {
             check(child != null && father.name.equals(child.props.get("family.father_name"))
                             && mother.name.equals(child.props.get("family.mother_name")),
                     "child stores readable canonical parent names");
+            father.props.put("identity.surname", "Речной");
+            Character surnameChild = registry.addChild(father, mother, "Новый", "m", 2020);
+            check("Речной".equals(surnameChild.props.get("identity.surname")),
+                    "new children inherit the canonical family surname from their father");
         }
         CharacterRegistry restored = new CharacterRegistry();
         restored.fromJson(registry.toJson());
@@ -69,8 +73,8 @@ public final class ResidentLifeEventsTest {
         check(datingB.id.equals(datingA.props.get("family.dating"))
                         && datingA.id.equals(datingB.props.get("family.dating")),
                 "mutual affinity can start a reciprocal dating relationship");
-        ResidentSocial.adjust(datingA, datingB.id, -100);
-        ResidentSocial.adjust(datingB, datingA.id, -100);
+        ResidentSocial.adjust(datingA, datingB.globalId, -100);
+        ResidentSocial.adjust(datingB, datingA.globalId, -100);
         ResidentLifeEvents.yearly(registry, 2004);
         check(!datingA.props.containsKey("family.dating") && !datingB.props.containsKey("family.dating"),
                 "severe relationship damage ends the dating relationship with a separation event");
@@ -131,8 +135,8 @@ public final class ResidentLifeEventsTest {
         Character partnerA = conflictRegistry.create("Алан", "", "north", "m", 1970);
         Character partnerB = conflictRegistry.create("Селия", "", "north", "f", 1971);
         conflictRegistry.marry(partnerA.id, partnerB.id, 2000);
-        ResidentSocial.adjust(partnerA, partnerB.id, -80);
-        ResidentSocial.adjust(partnerB, partnerA.id, -80);
+        ResidentSocial.adjust(partnerA, partnerB.globalId, -80);
+        ResidentSocial.adjust(partnerB, partnerA.globalId, -80);
         List<CharacterRegistry.LifecycleEvent> conflictEvents = new ArrayList<>();
         conflictRegistry.addListener(new CharacterRegistry.Listener() {
             @Override public void lifecycle(Character character, CharacterRegistry.LifecycleEvent event) {
@@ -160,8 +164,8 @@ public final class ResidentLifeEventsTest {
         cousinOne.mother = cousinRegistry.create("OtherMotherA", "", "north", "f", 1971).id;
         cousinTwo.father = siblingTwo.id;
         cousinTwo.mother = cousinRegistry.create("OtherMotherB", "", "north", "f", 1973).id;
-        ResidentSocial.adjust(cousinOne, cousinTwo.id, 100);
-        ResidentSocial.adjust(cousinTwo, cousinOne.id, 100);
+        ResidentSocial.adjust(cousinOne, cousinTwo.globalId, 100);
+        ResidentSocial.adjust(cousinTwo, cousinOne.globalId, 100);
         for (int year = 2015; year <= 2023; year++) ResidentLifeEvents.yearly(cousinRegistry, year);
         check(!cousinOne.props.containsKey("family.dating") && !cousinTwo.props.containsKey("family.dating"),
                 "close cousins sharing grandparents are excluded from autonomous dating");

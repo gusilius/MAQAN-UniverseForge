@@ -353,6 +353,11 @@ public final class CharacterRegistry {
 
     public Character addChild(Character father, Character mother, String name, String gender, int year) {
         Character c = create(name, father.house, father.culture, gender, year);
+        if (c.house.isEmpty()) {
+            Object inheritedSurname = father.props.get("identity.surname");
+            if (inheritedSurname instanceof String surname && !surname.isBlank())
+                c.props.put("identity.surname", surname);
+        }
         c.father = father.id;
         c.mother = mother.id;
         father.children.add(c.id);

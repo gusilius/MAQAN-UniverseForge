@@ -27,19 +27,19 @@ public final class Courts {
     public static int ensure(TitleData d, TitleEditor ed, CharacterRegistry reg, RoleDefs defs, NameBank names, long seed, int year) {
         int created = 0;
         for (Role role : defs.all()) {
-            List<String[]> places = new ArrayList<>();             // {place, culture, label}
+            List<String[]> places = new ArrayList<>();             // {place, culture, label, race}
             if (role.per.equals("realm")) {
-                for (TitleData.Realm r : d.realmList()) places.add(new String[]{realmPlace(r.id), String.valueOf(r.props.getOrDefault("culture", "")), r.id});
+                for (TitleData.Realm r : d.realmList()) places.add(new String[]{realmPlace(r.id), String.valueOf(r.props.getOrDefault("culture", "")), r.id, String.valueOf(r.props.getOrDefault("race", ""))});
             } else {
                 int tier = -1;
                 for (TitleData.Tier t : d.tiers) if (t.key.equals(role.per)) tier = t.index;
                 if (tier < 0) throw new IllegalArgumentException("Роль " + role.id + ": нет уровня титулов '" + role.per + "'");
-                for (TitleData.Title t : d.allTitles()) if (t.tier == tier) places.add(new String[]{titlePlace(t.id), cultureOf(d, t), String.valueOf(t.id)});
+                for (TitleData.Title t : d.allTitles()) if (t.tier == tier) places.add(new String[]{titlePlace(t.id), cultureOf(d, t), String.valueOf(t.id), raceOf(d, t)});
             }
             for (String[] pl : places) {
                 int have = reg.holders(role.id, pl[0]).size();
                 for (int i = have; i < role.count; i++) {
-                    create(d, ed, reg, defs, names, role, pl[0], pl[1], pl[2], new Random(mix(seed, pl[0], role.id, i)), year);
+                    create(d, ed, reg, defs, names, role, pl[0], pl[1], pl[2], pl[3], new Random(mix(seed, pl[0], role.id, i)), year);
                     created++;
                 }
             }
@@ -51,6 +51,14 @@ public final class Courts {
         for (TitleData.Title c = t; c != null; c = c.parent > 0 ? d.get(c.parent) : null) {
             Object v = c.props.get("culture");
             if (v != null) return String.valueOf(v);
+        }
+        return "";
+    }
+
+    private static String raceOf(TitleData d, TitleData.Title t) {
+        for (TitleData.Title current = t; current != null; current = current.parent > 0 ? d.get(current.parent) : null) {
+            Object value = current.props.get("race");
+            if (value != null && !String.valueOf(value).isBlank()) return String.valueOf(value);
         }
         return "";
     }
@@ -70,9 +78,9 @@ public final class Courts {
         }
     }
 
-    private static void create(TitleData d, TitleEditor ed, CharacterRegistry reg, RoleDefs defs, NameBank names, Role role, String place, String wantedCulture, String label, Random r, int year) {
+    private static void create(TitleData d, TitleEditor ed, CharacterRegistry reg, RoleDefs defs, NameBank names, Role role, String place, String wantedCulture, String label, String race, Random r, int year) {
         String culture = names.culture(wantedCulture);
-        NameBank.Pool pool = names.pool(culture);
+        NameBank.Pool pool = names.poolForRace(race, culture);
         boolean male = r.nextInt(100) < (role.ruler ? 75 : 50);
         String first = pick(male ? pool.male : pool.female, r);
         String house = role.ruler ? unusedHouse(reg, pool, r) : role.noble ? pick(pool.houses, r) : "";
@@ -80,17 +88,17 @@ public final class Courts {
         TitleData.Realm realm = place.startsWith("realm:") ? d.realms.get(place.substring(6)) : null;
         String preset = realm != null && role.ruler && realm.ruler != null && !realm.ruler.isBlank() ? realm.ruler : null;   // правитель, заданный вручную, остаётся
         Character c = reg.create(preset != null ? preset : first, house, culture, male ? "m" : "f", year - age);
-        reg.appoint(c.id, role.id, place);
+        if (!race.isBlank()) c.props.put("origin.race", race);\n        if (house.isEmpty() && !pool.surnames.isEmpty()) c.props.put("identity.surname", pick(pool.surnames, r));\n        reg.appoint(c.id, role.id, place);
         if (role.ruler && realm != null && preset == null && ed != null) ed.setRuler(realm.id, c.name + (house.isEmpty() ? "" : " " + house));
-        if (role.family) makeFamily(reg, pool, c, year, r);
+        if (role.family) makeFamily(reg, pool, c, year, r, race);
     }
 
-    private static void makeFamily(CharacterRegistry reg, NameBank.Pool pool, Character head, int year, Random r) {
+    private static void makeFamily(CharacterRegistry reg, NameBank.Pool pool, Character head, int year, Random r, String race) {
         boolean headMale = head.gender.equals("m");
         String spouseHouse;
         do { spouseHouse = pick(pool.houses, r); } while (spouseHouse.equals(head.house) && pool.houses.size() > 1);
         Character sp = reg.create(pick(headMale ? pool.female : pool.male, r), spouseHouse, head.culture, headMale ? "f" : "m", head.birthYear + r.nextInt(9) - 4);
-        reg.marry(head.id, sp.id);
+        if (!race.isBlank()) sp.props.put("origin.race", race);\n        if (spouseHouse.isEmpty() && !pool.surnames.isEmpty()) sp.props.put("identity.surname", pick(pool.surnames, r));\n        reg.marry(head.id, sp.id);
         int age = year - head.birthYear;
         int kids = age < 20 ? 0 : r.nextInt(4);
         Character father = headMale ? head : sp, mother = headMale ? sp : head;
@@ -98,7 +106,7 @@ public final class Courts {
             int lo = Math.max(father.birthYear, mother.birthYear) + 18, born = lo + r.nextInt(Math.max(1, year - lo + 1));
             if (born > year) break;
             boolean m = r.nextBoolean();
-            reg.addChild(father, mother, pick(m ? pool.male : pool.female, r), m ? "m" : "f", born);
+            Character child = reg.addChild(father, mother, pick(m ? pool.male : pool.female, r), m ? "m" : "f", born);\n            if (!race.isBlank()) child.props.put("origin.race", race);\n            if (child.house.isEmpty() && !pool.surnames.isEmpty()) child.props.put("identity.surname", father.props.getOrDefault("identity.surname", pick(pool.surnames, r)));
         }
     }
 }
