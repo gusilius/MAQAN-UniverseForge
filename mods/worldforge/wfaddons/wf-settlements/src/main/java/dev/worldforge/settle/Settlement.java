@@ -310,6 +310,30 @@ public final class Settlement {
                 ? TreasuryLedger.Kind.DEPOSIT : TreasuryLedger.Kind.IMPORT, "settlement-stock-in", "settlement:" + id);
     }
 
+    /**
+     * Crash-safe one-time endowment for autonomous settlement founding.
+     * The TreasuryLedger receipt is authoritative, so retries cannot mint the
+     * same founding stock twice even when the settlement snapshot is replayed.
+     */
+    public boolean addOnce(String resource, double quantity, String operationId) {
+        if (resource == null || resource.isBlank() || operationId == null
+                || !operationId.matches("[A-Za-z0-9_.:-]{1,128}")
+                || !Double.isFinite(quantity) || quantity <= 0) return false;
+        amount(resource);
+        String reference = "worldgen:" + id + ":" + operationId + ":" + resource;
+        TreasuryLedger ledger = TreasuryService.current();
+        boolean alreadyPosted = ledger.hasTransaction(accountId(resource), Defs.SILVER.equals(resource)
+                ? TreasuryLedger.Kind.DEPOSIT : TreasuryLedger.Kind.IMPORT, reference);
+        boolean accepted = ledger.depositOnce(accountId(resource), quantity,
+                Defs.SILVER.equals(resource) ? TreasuryLedger.Kind.DEPOSIT : TreasuryLedger.Kind.IMPORT,
+                "autonomous-settlement-founding", reference, worldMinute(),
+                "one-time founding endowment for " + id);
+        if (!accepted) return false;
+        syncResourceMirror(resource);
+        if (!alreadyPosted) flow.record(time, resource, quantity, true);
+        return true;
+    }
+
     private double addResourceWithKind(String resource, double quantity, TreasuryLedger.Kind kind, String category, String reference) {
         if (!Double.isFinite(quantity) || quantity <= 0) return 0;
         double current = amount(resource);

@@ -12,6 +12,7 @@ import dev.worldforge.people.PopulationSimulation;
 import dev.worldforge.people.LifeSimulation;
 import dev.worldforge.mod.WorldForgeMod;
 import dev.worldforge.mod.MapChunkGenerator;
+import dev.worldforge.mod.api.SimulationLod;
 import dev.worldforge.mod.economy.TreasuryLedger;
 import dev.worldforge.mod.economy.TreasuryService;
 import dev.worldforge.people.PopulationSimulation.Duty;
@@ -578,6 +579,95 @@ public class SettleMod {
         LOGGER.info("wf_settle: map-first settlement staged id={} dim={} x={} z={} (no synthetic workers or stock)",
                 id, dim, x, z);
         return colony;
+    }
+
+
+    /**
+     * Turns a map-first emergent settlement into a real, economically-backed village
+     * when it enters the local physical LOD. The normal Settlement, BuildingSite and
+     * WFWorker systems perform construction; this method only submits idempotent
+     * founding stock and building orders. It never creates a parallel population.
+     */
+    public static boolean ensureAutonomousInfrastructure(MinecraftServer server, String settlementId) {
+        Colony colony = COLONIES.get(settlementId);
+        if (server == null || colony == null || colony.s == null
+                || colony.genesisOperationId == null
+                || !colony.genesisOperationId.startsWith("worldsim:settlement:")) return false;
+        String dimension = colony.dim;
+        if (!SimulationLod.shouldMaterializeSettlement(dimension, colony.cx, colony.cz)) return false;
+        ServerLevel level = colony.level(server);
+        if (level == null) return false;
+        BlockPos probe = new BlockPos(colony.cx, level.getMinBuildHeight(), colony.cz);
+        if (!level.hasChunkAt(probe)) return false;
+
+        Settlement settlement = colony.s;
+        int population = Math.max(1, settlement.population());
+        int households = Math.max(1, Math.min(12, (population + 3) / 4));
+        boolean ledgerChanged = false;
+        try {
+            // Capture only already-loaded terrain; placement validates slope, water and overlap.
+            colony.captureTerrain(level, -48, -48, 48, 48);
+            boolean seeded = settlement.addOnce("wood", 35, "founding-core")
+                    & settlement.addOnce("food", Math.max(80, Math.min(500, population * 4.0)), "founding-food")
+                    & settlement.addOnce("stone", 20, "founding-stone");
+            if (!seeded) return false;
+            for (int i = 0; i < households; i++) {
+                if (settlement.defs.buildings.containsKey("house")) {
+                    if (!settlement.addOnce("wood", 20, "house-stock-" + i)) return false;
+                }
+            }
+            if (!WorldForgeMod.saveTreasuryNow(server)) {
+                colony.actionPersistenceBlocked = true;
+                LOGGER.error("wf_settle: autonomous founding stock for {} could not be persisted; settlement frozen for recovery",
+                        settlementId);
+                return false;
+            }
+
+            boolean changed = false;
+            int[][] houseSites = {
+                    {-12, -8}, {-4, -12}, {4, -12}, {12, -8},
+                    {-12, 4}, {-4, 12}, {4, 12}, {12, 4},
+                    {-20, -8}, {20, -8}, {-20, 8}, {20, 8}
+            };
+            if (settlement.defs.buildings.containsKey("house")) {
+                for (int i = 0; i < households; i++) {
+                    int[] site = houseSites[i];
+                    int before = settlement.count("house", false);
+                    settlement.placeOnce("wfworldgen.house." + i, "house", site[0], site[1]);
+                    changed |= settlement.count("house", false) > before;
+                }
+            }
+            if (settlement.defs.buildings.containsKey("farm")) {
+                int before = settlement.count("farm", false);
+                settlement.placeOnce("wfworldgen.farm", "farm", 20, 0);
+                changed |= settlement.count("farm", false) > before;
+            }
+            if (settlement.defs.buildings.containsKey("lumber_camp")) {
+                int before = settlement.count("lumber_camp", false);
+                settlement.placeOnce("wfworldgen.lumber", "lumber_camp", -20, 0);
+                changed |= settlement.count("lumber_camp", false) > before;
+            }
+            if (changed) {
+                if (!saveDurably(server)) {
+                    colony.actionPersistenceBlocked = true;
+                    LOGGER.error("wf_settle: autonomous building plan for {} could not be persisted; settlement frozen for recovery",
+                            settlementId);
+                    return false;
+                }
+                List<String> realms = colony.realmId == null || colony.realmId.isBlank()
+                        ? List.of() : List.of(colony.realmId);
+                dev.worldforge.mod.api.WorldForgeApi.postEvent("settlement",
+                        settlement.name + " begins physical founding: housing, food production and timber work",
+                        realms, dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute());
+                LOGGER.info("wf_settle: autonomous physical founding orders committed id={} population={} houses={}",
+                        settlementId, population, households);
+            }
+            return changed;
+        } catch (Settlement.OrderException | IllegalStateException failure) {
+            LOGGER.debug("wf_settle: autonomous site {} is not ready for physical founding yet: {}",
+                    settlementId, failure.getMessage());
+            return false;
+        }
     }
 
     /** In-memory owner binding used by WorldSim's per-map batch commit. */
@@ -1257,6 +1347,8 @@ public class SettleMod {
                     c.s.tick(speed);                                   // 1 симуляционная секунда = 20 тиков, 24 мировые минуты
                     remitCrownTaxes(c);
                     syncPeople(c, server);
+                    if (c.genesisOperationId != null && c.genesisOperationId.startsWith("worldsim:settlement:"))
+                        ensureAutonomousInfrastructure(server, c.s.id);
                     runLifeAI(server, c);
                     c.map.tick(c.s, speed);                             // глобальная логистика не зависит от загруженности чанков
                     if (ticks % (STEP_TICKS * 10) == 0) { c.s.types = TYPES; String rid = realmOf(c); c.s.refreshType(c.s.population(), rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.terrain(rid), rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.races(rid)); }
