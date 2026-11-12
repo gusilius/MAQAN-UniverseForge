@@ -485,13 +485,16 @@ public final class WorldSimMod {
                     if (created == null) break;
                     residents.add(created);
                 }
-                while (residents.size() > target && !residents.isEmpty()) {
-                    dev.worldforge.people.Character deceased = residents.remove(0);
-                    deceased.props.put("population.death_year", year);
-                    registry.kill(deceased.id);
-                    Colony deceasedSettlement = SettleMod.colony("emg_" + bandId);
-                    if (deceasedSettlement != null && deceasedSettlement.s != null)
-                        deceasedSettlement.s.removeWorkerByPerson(deceased.globalId, "death:emergence");
+                // The native cohort count is a demographic target, not an order to kill
+                // canonical people. A lower target can result from migration, scarcity or
+                // modelled decline; only the individual life/death simulation may end a life.
+                // Keep every living Character and expose the materialized count separately.
+                if (residents.size() != target) {
+                    band.addProperty("materialized_population", residents.size());
+                    band.addProperty("population_target_gap", target - residents.size());
+                } else {
+                    band.addProperty("materialized_population", residents.size());
+                    band.addProperty("population_target_gap", 0);
                 }
                 if (!band.get("settled").getAsBoolean()) continue;
                 hasSettledBands = true;
