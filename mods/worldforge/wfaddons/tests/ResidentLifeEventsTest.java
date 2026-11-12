@@ -4,6 +4,7 @@ import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.PopulationSimulation;
 import dev.worldforge.people.NameBank;
+import dev.worldforge.people.CharacterDevelopment;
 import dev.worldforge.settle.ResidentLifeEvents;
 import dev.worldforge.settle.ResidentSocial;
 
@@ -37,6 +38,9 @@ public final class ResidentLifeEventsTest {
         check(father.name.equals(mother.props.get("family.spouse_name"))
                         && mother.name.equals(father.props.get("family.spouse_name")),
                 "marriage stores reciprocal partner display names");
+        check(CharacterDevelopment.memories(father, 96).stream().anyMatch(m -> "marriage".equals(m.get("kind")))
+                        && CharacterDevelopment.memories(mother, 96).stream().anyMatch(m -> "marriage".equals(m.get("kind"))),
+                "marriage becomes a remembered emotional milestone for both spouses");
         check(registry.get(father.id) == father && registry.get(mother.id) == mother,
                 "family events retain the original Character identities");
 
@@ -104,12 +108,19 @@ public final class ResidentLifeEventsTest {
         orphanFather.alive = false;
         orphanMother.alive = false;
         ResidentLifeEvents.yearly(familyRegistry, 2010);
+        CharacterDevelopment.setTemperament(grandpa, CharacterDevelopment.Temperament.EMPATHY, 95);
+        CharacterDevelopment.setTemperament(grandma, CharacterDevelopment.Temperament.DISCIPLINE, 95);
+        ResidentLifeEvents.yearly(familyRegistry, 2011);
         check((grandpa.id.equals(child.props.get("family.guardian_id"))
                         || grandma.id.equals(child.props.get("family.guardian_id")))
                         && "kin_guardianship".equals(child.props.get("family.care_status")),
                 "an orphan is assigned a living grandparent as canonical kin guardian");
+        check(((Number) child.props.get("family.upbringing.last_year")).intValue() == 2011
+                        && CharacterDevelopment.memories(child, 96).stream().anyMatch(m -> "experience_orphaned".equals(m.get("kind")))
+                        && CharacterDevelopment.memories(child, 96).stream().anyMatch(m -> "experience_mentorship".equals(m.get("kind"))),
+                "orphanhood and kin mentorship become distinct remembered life experiences");
         check(((Number) child.props.get("family.education_level")).intValue() >= 2
-                        && ((Number) child.props.get("family.development_year")).intValue() == 2010,
+                        && ((Number) child.props.get("family.development_year")).intValue() == 2011,
                 "childhood advances age-appropriate education exactly once per world year");
         ResidentLifeEvents.yearly(familyRegistry, 2018);
         check("independent_adult".equals(child.props.get("family.care_status"))
@@ -169,6 +180,9 @@ public final class ResidentLifeEventsTest {
         check(partnerA.spouse.isBlank() && partnerB.spouse.isBlank()
                         && conflictEvents.stream().anyMatch(e -> e.kind() == CharacterRegistry.LifecycleKind.MARRIAGE_DISSOLVED),
                 "sustained severe marital conflict produces one reciprocal divorce lifecycle event");
+        check(CharacterDevelopment.memories(partnerA, 96).stream().anyMatch(m -> "divorce".equals(m.get("kind")))
+                        && CharacterDevelopment.memories(partnerB, 96).stream().anyMatch(m -> "divorce".equals(m.get("kind"))),
+                "divorce is remembered by both former spouses and changes their psychology once");
 
         CharacterRegistry cousinRegistry = new CharacterRegistry();
         Character rootA = cousinRegistry.create("RootA", "", "north", "m", 1940);

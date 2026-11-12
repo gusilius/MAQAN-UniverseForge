@@ -24,7 +24,8 @@ public final class CharacterDevelopment {
     public enum Experience {
         BATTLE_VICTORY, BATTLE_DEFEAT, SURVIVED_DANGER, BETRAYED, BETRAYED_SOMEONE,
         BEREAVEMENT, PUBLIC_SUCCESS, PUBLIC_HUMILIATION, POVERTY, WEALTH_GAIN,
-        EDUCATION, PARENTAL_CARE, NEGLECT
+        EDUCATION, PARENTAL_CARE, NEGLECT, MARRIAGE, DIVORCE, ORPHANED,
+        MENTORSHIP, SOCIAL_REJECTION, RECONCILIATION
     }
 
     /** Stable psychological dimensions; unlike mood, these change slowly and belong to the person. */
@@ -303,6 +304,12 @@ public final class CharacterDevelopment {
             case EDUCATION -> { adjustTemperament(c,Temperament.CURIOSITY,step*2); adjustDrive(c,Drive.KNOWLEDGE,step*2); yield new String[]{"scholar","curious"}; }
             case PARENTAL_CARE -> { adjustTemperament(c,Temperament.EMPATHY,step); adjustDrive(c,Drive.FAMILY,step*2); yield new String[]{"compassionate","dutiful"}; }
             case NEGLECT -> { adjustTemperament(c,Temperament.SOCIABILITY,-step); adjustDrive(c,Drive.INDEPENDENCE,step*2); yield new String[]{"independent","paranoid"}; }
+            case MARRIAGE -> { adjustDrive(c,Drive.FAMILY,step*2); adjustTemperament(c,Temperament.SOCIABILITY,1); yield new String[]{"loyal","compassionate"}; }
+            case DIVORCE -> { adjustTemperament(c,Temperament.STABILITY,-step); adjustDrive(c,Drive.SECURITY,step*2); adjustDrive(c,Drive.INDEPENDENCE,step); yield new String[]{"independent","resilient"}; }
+            case ORPHANED -> { adjustTemperament(c,Temperament.STABILITY,-step); adjustDrive(c,Drive.SECURITY,step*2); adjustDrive(c,Drive.FAMILY,step); yield new String[]{"independent","paranoid"}; }
+            case MENTORSHIP -> { adjustTemperament(c,Temperament.CURIOSITY,step); adjustDrive(c,Drive.KNOWLEDGE,step*2); yield new String[]{"scholar","diligent"}; }
+            case SOCIAL_REJECTION -> { adjustTemperament(c,Temperament.SOCIABILITY,-step); adjustDrive(c,Drive.SECURITY,step); yield new String[]{"shy","cynical"}; }
+            case RECONCILIATION -> { adjustTemperament(c,Temperament.STABILITY,step); adjustTemperament(c,Temperament.EMPATHY,1); yield new String[]{"forgiving","compassionate"}; }
         };
         String growthKey = "personality.growth." + growth[0];
         int progress = c.props.get(growthKey) instanceof Number n ? Math.max(0,n.intValue()) : 0;
@@ -338,36 +345,66 @@ public final class CharacterDevelopment {
         remember(mother,"family:child-born:"+child.globalId,"child_born",child.globalId,child.name,18,worldMinute);
     }
 
-    /** Annual upbringing is deterministic and replay-safe; parents influence children gradually. */
+    /** Annual upbringing is deterministic and replay-safe; the legacy overload uses only parents. */
     public static void upbringingTick(Character child, Character father, Character mother, int year) {
+        upbringingTick(child, father, mother, null, year);
+    }
+
+    /** Parents shape early temperament; a kin guardian can provide a real substitute caregiver. */
+    public static void upbringingTick(Character child, Character father, Character mother,
+                                      Character guardian, int year) {
         if (child == null || !child.alive || year < child.birthYear || year-child.birthYear > 16) return;
         Object previous = child.props.get("family.upbringing.last_year");
         if (previous instanceof Number n && n.intValue() >= year) return;
+        Map<String,Character> caregivers = new LinkedHashMap<>();
+        for (Character caregiver : new Character[]{father,mother,guardian})
+            if (caregiver != null && caregiver.alive && !caregiver.id.equals(child.id))
+                caregivers.put(caregiver.id, caregiver);
+        long minute = Math.max(0L, year * 525600L);
+        boolean orphaned = (father == null || !father.alive) && (mother == null || !mother.alive);
+        if (orphaned) recordExperience(child, Experience.ORPHANED,
+                "family:orphaned:" + child.globalId, "loss of both parents", minute, 3);
+        if (guardian != null && guardian.alive
+                && (father == null || !guardian.id.equals(father.id))
+                && (mother == null || !guardian.id.equals(mother.id)))
+            recordExperience(child, Experience.MENTORSHIP,
+                    "family:kin-mentor:" + child.globalId + ":" + guardian.globalId,
+                    "raised by kin guardian " + guardian.name, minute, 1);
+        if (caregivers.isEmpty()) {
+            child.props.put("family.upbringing.last_year", year);
+            adjustTemperament(child, Temperament.SOCIABILITY, -1);
+            adjustDrive(child, Drive.INDEPENDENCE, 1);
+            if (year % 3 == 0) recordExperience(child, Experience.NEGLECT,
+                    "upbringing:neglect:" + child.globalId + ":" + year,
+                    "grew up without a living caregiver", minute, 1);
+            remember(child, "upbringing:year:" + child.globalId + ":" + year, "upbringing",
+                    "", "no living caregiver", -35, minute);
+            return;
+        }
         int warmth=0, discipline=0, curiosity=0, count=0;
-        for (Character parent : new Character[]{father,mother}) {
-            if (parent == null || !parent.alive) continue;
-            warmth += temperament(parent,Temperament.EMPATHY);
-            discipline += temperament(parent,Temperament.DISCIPLINE);
-            curiosity += temperament(parent,Temperament.CURIOSITY);
+        for (Character caregiver : caregivers.values()) {
+            warmth += temperament(caregiver,Temperament.EMPATHY);
+            discipline += temperament(caregiver,Temperament.DISCIPLINE);
+            curiosity += temperament(caregiver,Temperament.CURIOSITY);
             count++;
         }
-        if (count == 0) return;
         warmth/=count; discipline/=count; curiosity/=count;
         if (warmth >= 62) {
             adjustTemperament(child,Temperament.EMPATHY,1); adjustDrive(child,Drive.FAMILY,1);
             recordExperience(child,Experience.PARENTAL_CARE,"upbringing:care:"+child.globalId+":"+year,
-                    "parental warmth",Math.max(0L,year*525600L),1);
+                    "caregiver warmth",minute,1);
         } else if (warmth <= 28) {
             adjustTemperament(child,Temperament.SOCIABILITY,-1); adjustDrive(child,Drive.INDEPENDENCE,1);
             if (year%3==0) recordExperience(child,Experience.NEGLECT,"upbringing:neglect:"+child.globalId+":"+year,
-                    "lack of parental care",Math.max(0L,year*525600L),1);
+                    "lack of emotional care",minute,1);
         }
         if (discipline >= 68) adjustTemperament(child,Temperament.DISCIPLINE,1);
         if (curiosity >= 68) { adjustTemperament(child,Temperament.CURIOSITY,1); adjustDrive(child,Drive.KNOWLEDGE,1); }
         child.props.put("family.upbringing.last_year",year);
         remember(child,"upbringing:year:"+child.globalId+":"+year,"upbringing",
-                father==null?"":father.globalId,"warmth="+warmth+",discipline="+discipline+",curiosity="+curiosity,
-                warmth-50,Math.max(0L,year*525600L));
+                guardian != null ? guardian.globalId : father != null ? father.globalId : mother.globalId,
+                "warmth="+warmth+",discipline="+discipline+",curiosity="+curiosity,
+                warmth-50,minute);
     }
 
     private static int trait(Character c, String id, int amount) {

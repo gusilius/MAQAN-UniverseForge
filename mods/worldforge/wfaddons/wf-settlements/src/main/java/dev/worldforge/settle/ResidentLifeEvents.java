@@ -95,6 +95,15 @@ public final class ResidentLifeEvents {
                 spouse.props.put("family.last_event", "divorced:" + person.id);
                 person.props.put("family.separation_year", year);
                 spouse.props.put("family.separation_year", year);
+                long minute = Math.max(0L, year * 525600L);
+                CharacterDevelopment.recordExperience(person, CharacterDevelopment.Experience.DIVORCE,
+                        "family:divorce:" + person.globalId + ":" + spouse.globalId, "marriage ended with " + spouse.name, minute, 2);
+                CharacterDevelopment.recordExperience(spouse, CharacterDevelopment.Experience.DIVORCE,
+                        "family:divorce:" + spouse.globalId + ":" + person.globalId, "marriage ended with " + person.name, minute, 2);
+                CharacterDevelopment.remember(person, "family:divorce-memory:" + person.globalId + ":" + spouse.globalId,
+                        "divorce", spouse.globalId, "marriage ended after prolonged conflict", -65, minute);
+                CharacterDevelopment.remember(spouse, "family:divorce-memory:" + spouse.globalId + ":" + person.globalId,
+                        "divorce", person.globalId, "marriage ended after prolonged conflict", -65, minute);
             }
         }
 
@@ -119,6 +128,15 @@ public final class ResidentLifeEvents {
                     second.props.remove("family.dating_name");
                     first.props.put("family.last_event", "separated:" + second.id);
                     second.props.put("family.last_event", "separated:" + first.id);
+                    long minute = Math.max(0L, year * 525600L);
+                    CharacterDevelopment.recordExperience(first, CharacterDevelopment.Experience.SOCIAL_REJECTION,
+                            "family:dating-separation:" + first.globalId + ":" + second.globalId, "relationship ended with " + second.name, minute, 1);
+                    CharacterDevelopment.recordExperience(second, CharacterDevelopment.Experience.SOCIAL_REJECTION,
+                            "family:dating-separation:" + second.globalId + ":" + first.globalId, "relationship ended with " + first.name, minute, 1);
+                    CharacterDevelopment.remember(first, "family:dating-separation-memory:" + first.globalId + ":" + second.globalId,
+                            "relationship_separation", second.globalId, "mutual relationship ended", -35, minute);
+                    CharacterDevelopment.remember(second, "family:dating-separation-memory:" + second.globalId + ":" + first.globalId,
+                            "relationship_separation", first.globalId, "mutual relationship ended", -35, minute);
                     continue;
                 }
                 if (!firstDating.isBlank() && !firstDating.equals(second.id)
@@ -145,6 +163,15 @@ public final class ResidentLifeEvents {
                     second.props.put("family.spouse_name", first.name);
                     first.props.put("family.last_event", "married:" + second.id);
                     second.props.put("family.last_event", "married:" + first.id);
+                    long minute = Math.max(0L, year * 525600L);
+                    CharacterDevelopment.recordExperience(first, CharacterDevelopment.Experience.MARRIAGE,
+                            "family:marriage:" + first.globalId + ":" + second.globalId, "married " + second.name, minute, 1);
+                    CharacterDevelopment.recordExperience(second, CharacterDevelopment.Experience.MARRIAGE,
+                            "family:marriage:" + second.globalId + ":" + first.globalId, "married " + first.name, minute, 1);
+                    CharacterDevelopment.remember(first, "family:marriage-memory:" + first.globalId + ":" + second.globalId,
+                            "marriage", second.globalId, "married " + second.name, 70, minute);
+                    CharacterDevelopment.remember(second, "family:marriage-memory:" + second.globalId + ":" + first.globalId,
+                            "marriage", first.globalId, "married " + first.name, 70, minute);
                 } catch (RuntimeException ignored) {
                     // A concurrent title/lifecycle transition may have changed either partner this year.
                 }
@@ -180,14 +207,24 @@ public final class ResidentLifeEvents {
             child.props.put("family.care_status", guardian == null ? "orphaned" :
                     fatherAlive && motherAlive ? "two_parent_home" :
                     fatherAlive || motherAlive ? "single_parent_home" : "kin_guardianship");
+            CharacterDevelopment.upbringingTick(child, father, mother, guardian, year);
             child.props.put("family.development_year", year);
             child.props.put("family.age_stage", PopulationSimulation.lifeStage(child, year).name().toLowerCase(Locale.ROOT));
             if (age >= 6 && age < 18) {
                 int education = number(child.props.get("family.education_level"), 0);
                 int progress = guardian == null ? 1 : 2;
                 if (guardian != null && number(guardian.props.get("family.education_level"), 0) >= 5) progress++;
-                child.props.put("family.education_level", Math.min(100, education + progress));
+                int nextEducation = Math.min(100, education + progress);
+                child.props.put("family.education_level", nextEducation);
                 child.props.put("family.education_last_year", year);
+                int milestone = nextEducation / 25;
+                int priorMilestone = number(child.props.get("family.education.psychology_milestone"), 0);
+                if (milestone > priorMilestone) {
+                    child.props.put("family.education.psychology_milestone", milestone);
+                    CharacterDevelopment.recordExperience(child, CharacterDevelopment.Experience.EDUCATION,
+                            "family:education-milestone:" + child.globalId + ":" + milestone,
+                            "reached education milestone " + (milestone * 25), Math.max(0L, year * 525600L), 1);
+                }
                 if (guardian != null) {
                     ResidentSocial.adjust(child, guardian.globalId, 1);
                     ResidentSocial.adjust(guardian, child.globalId, 1);
