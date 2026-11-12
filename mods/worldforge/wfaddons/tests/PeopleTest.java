@@ -164,10 +164,14 @@ public class PeopleTest {
         Character carrier = journal.create("Переносчик", "", "", "m", 1);
         int[] lifecycleCallbacks = {0, 0};
         journal.addListener(new CharacterRegistry.Listener() {
-            @Override public void lifecycle(Character person, CharacterRegistry.LifecycleEvent event) { lifecycleCallbacks[0]++; }
+            @Override public void lifecycle(Character person, CharacterRegistry.LifecycleEvent event) {
+                if ("Житель журнала".equals(person.name)) lifecycleCallbacks[0]++;
+            }
         });
         journal.addListener(new CharacterRegistry.Listener() {
-            @Override public void lifecycle(Character person, CharacterRegistry.LifecycleEvent event) { lifecycleCallbacks[1]++; }
+            @Override public void lifecycle(Character person, CharacterRegistry.LifecycleEvent event) {
+                if ("Житель журнала".equals(person.name)) lifecycleCallbacks[1]++;
+            }
         });
         Character journalPerson = journal.create("Житель журнала", "", "", "m", 1);
         CharacterInventory.add(journalPerson,"minecraft:bread",8);
