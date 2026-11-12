@@ -244,10 +244,30 @@ public final class CharacterDevelopment {
             case KEEP_PROMISE -> trait(actor,"honest",-3)+trait(actor,"honorable",-4)+trait(actor,"loyal",-3);
         };
         int stressDelta = conflict > 0 ? Math.min(24, conflict) : conflict;
-        changeStress(actor, stressDelta);
+        if (!operationId.matches("[A-Za-z0-9_.:-]{1,160}"))
+            throw new IllegalArgumentException("invalid conduct operation ID");
         String subject = affected == null ? "" : affected.globalId;
-        remember(actor, "conduct:" + operationId, "conduct_" + conduct.name().toLowerCase(Locale.ROOT),
-                subject, conduct.name().toLowerCase(Locale.ROOT), stressDelta, worldMinute);
+        String receiptKey = "psychology.conduct.receipts";
+        Map<String,Object> receipts = new LinkedHashMap<>();
+        Object receiptRaw = actor.props.get(receiptKey);
+        if (receiptRaw instanceof Map<?,?> map) for (Map.Entry<?,?> entry : map.entrySet())
+            if (entry.getKey() instanceof String key) receipts.put(key, entry.getValue());
+        String payload = conduct.name() + "|" + subject + "|" + stressDelta;
+        Object prior = receipts.get(operationId);
+        if (prior != null) {
+            if (!payload.equals(prior)) throw new IllegalStateException("Conduct operation ID collision: " + operationId);
+            return 0;
+        }
+        if (receipts.size() >= 10000) throw new IllegalStateException("Conduct receipt limit reached");
+        if (!remember(actor, "conduct:" + operationId, "conduct_" + conduct.name().toLowerCase(Locale.ROOT),
+                subject, conduct.name().toLowerCase(Locale.ROOT), stressDelta, worldMinute)) {
+            receipts.put(operationId, payload);
+            actor.props.put(receiptKey, receipts);
+            return 0;
+        }
+        changeStress(actor, stressDelta);
+        receipts.put(operationId, payload);
+        actor.props.put(receiptKey, receipts);
         if (affected != null && affected != actor)
             remember(affected, "witness:" + operationId + ":" + actor.globalId,
                     "witnessed_" + conduct.name().toLowerCase(Locale.ROOT), actor.globalId,

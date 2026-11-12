@@ -390,9 +390,9 @@ public final class PopulationSimulationTest {
         CharacterDevelopment.recordConduct(evolving, CharacterDevelopment.Conduct.BETRAYAL, psychological,
                 "test:betrayal:one", 10);
         int stressAfter = CharacterDevelopment.stress(evolving);
-        CharacterDevelopment.recordConduct(evolving, CharacterDevelopment.Conduct.BETRAYAL, psychological,
-                "test:betrayal:one", 10);
-        ok(stressAfter > 0 && CharacterDevelopment.stress(evolving) == stressAfter,
+        int duplicateConductDelta = CharacterDevelopment.recordConduct(evolving, CharacterDevelopment.Conduct.BETRAYAL,
+                psychological, "test:betrayal:one", 10);
+        ok(stressAfter > 0 && duplicateConductDelta == 0 && CharacterDevelopment.stress(evolving) == stressAfter,
                 "acting against honesty creates stress and duplicate conduct receipts are ignored");
         CharacterDevelopment.recordExperience(evolving, CharacterDevelopment.Experience.BETRAYED,
                 "test:betrayed:one", "trusted ally betrayed Mara", 20, 2);
