@@ -366,6 +366,10 @@ public final class PopulationSimulationTest {
         double lonerUtility = LifeSimulation.utility(loner, personalityContext, LifeSimulation.Action.SOCIALIZE);
         ok(socialUtility > lonerUtility + 25,
                 "two people with the same social need prioritize social contact differently by personality");
+        CharacterDevelopment.setTemperament(psychological, CharacterDevelopment.Temperament.STABILITY, 50);
+        CharacterDevelopment.setTemperament(loner, CharacterDevelopment.Temperament.STABILITY, 50);
+        CharacterDevelopment.setDrive(psychological, CharacterDevelopment.Drive.ADVENTURE, 50);
+        CharacterDevelopment.setDrive(loner, CharacterDevelopment.Drive.ADVENTURE, 50);
         CharacterDevelopment.setMood(psychological, CharacterDevelopment.Mood.STRESSED, 1200, 300, "court pressure");
         ok(LifeSimulation.utility(psychological, personalityContext, LifeSimulation.Action.RECREATE)
                         > LifeSimulation.utility(loner, personalityContext, LifeSimulation.Action.RECREATE),
