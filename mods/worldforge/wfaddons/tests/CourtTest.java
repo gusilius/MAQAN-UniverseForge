@@ -160,7 +160,7 @@ public class CourtTest {
         fz.ed.setOverlord(v1, liege, "vassal"); fz.ed.setOverlord(v2, liege, "vassal");
         List<String> rebels = new ArrayList<>();
         fz.hooks = new CourtSim.Hooks() { @Override public void independence(String r, String l) { rebels.add(r); } };
-        for (String vv : List.of(v1, v2)) fz.opinions.add(fz.ruler(vv).id, fz.ruler(liege).id, "Обида", -60, 0);
+        for (String vv : List.of(v1, v2)) fz.opinions.add(fz.ruler(vv).id, fz.ruler(liege).id, "Обида", -100, 0);
         fz.tick(30);
         ok(fz.factions.size() == 1 && fz.factions.values().iterator().next().members.size() == 2, "недовольные вассалы собрались во фракцию");
         fz.syncProps();
@@ -214,7 +214,7 @@ public class CourtTest {
         // умиротворение и подавление
         CourtSim fy = build(a[0], 5);
         fy.ed.setOverlord(v1, liege, "vassal"); fy.ed.setOverlord(v2, liege, "vassal");
-        fy.opinions.add(fy.ruler(v1).id, fy.ruler(liege).id, "Обида", -60, 0);
+        fy.opinions.add(fy.ruler(v1).id, fy.ruler(liege).id, "Обида", -100, 0);
         fy.tick(30);
         ok(fy.factions.size() == 1, "одна фракция у одного вассала");
         int before1 = fy.opinion(fy.ruler(v1).id, fy.ruler(liege).id);
