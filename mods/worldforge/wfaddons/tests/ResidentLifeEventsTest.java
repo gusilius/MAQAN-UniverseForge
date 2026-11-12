@@ -55,10 +55,12 @@ public final class ResidentLifeEventsTest {
             check(child != null && father.name.equals(child.props.get("family.father_name"))
                             && mother.name.equals(child.props.get("family.mother_name")),
                     "child stores readable canonical parent names");
-            father.props.put("identity.surname", "Речной");
-            Character surnameChild = registry.addChild(father, mother, "Новый", "m", 2020);
+            Character surnameFather = registry.create("Отец без дома", "", "north", "m", 1970);
+            Character surnameMother = registry.create("Мать без дома", "", "north", "f", 1972);
+            surnameFather.props.put("identity.surname", "Речной");
+            Character surnameChild = registry.addChild(surnameFather, surnameMother, "Новый", "m", 2020);
             check("Речной".equals(surnameChild.props.get("identity.surname")),
-                    "new children inherit the canonical family surname from their father");
+                    "children without a house inherit the canonical family surname from their father");
         }
         NameBank birthNames = new NameBank();
         birthNames.add("{\"default\":\"dwarf\",\"cultures\":{\"dwarf\":{\"male\":[\"Торин\"],\"female\":[\"Диса\"],\"houses\":[\"Каменный Молот\"]}},\"races\":{\"deep_dwarf\":{\"male\":[\"Двалин\"],\"female\":[\"Груна\"],\"houses\":[\"Чёрный Кремень\"]}},\"race_parents\":{\"deep_dwarf\":\"dwarf\"}}");
