@@ -1680,8 +1680,10 @@ public final class Settlement {
         s.setLedgerScope(scope != null && !scope.isBlank() ? scope : savedScope instanceof String v ? v : "");
         s.time = ((Number) root.get("time")).doubleValue();
         s.auto = Boolean.TRUE.equals(root.get("auto"));
-        if (root.get("canonical_population") instanceof Number population)
-            s.canonicalPopulation = Math.max(0, Math.min(100_000, population.intValue()));
+        if (root.get("canonical_population") instanceof Number population) {
+            int savedPopulation = population.intValue();
+            s.canonicalPopulation = savedPopulation < 0 ? -1 : Math.min(100_000, savedPopulation);
+        }
         s.nextBuilding = ((Number) root.get("next_building")).intValue();
         s.nextWorker = ((Number) root.get("next_worker")).intValue();
         s.growTimer = ((Number) root.get("grow")).doubleValue();
