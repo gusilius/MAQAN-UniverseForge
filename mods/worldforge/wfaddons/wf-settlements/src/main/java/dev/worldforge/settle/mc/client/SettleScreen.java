@@ -6,6 +6,7 @@ import dev.worldforge.settle.Building;
 import dev.worldforge.settle.Defs;
 import dev.worldforge.settle.Settlement;
 import dev.worldforge.settle.SettlementMap;
+import dev.worldforge.settle.ResidentRow;
 import dev.worldforge.settle.Worker;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
@@ -17,16 +18,18 @@ import java.util.function.Consumer;
 
 /**
  * Окно поселения (WFUi), вкладки: «Обзор» (настроение с разбором, тревоги, склад с приростом), «Здания» (таблица: штат, КПД, узкое
- * место, приоритет, пауза, снос), «Люди» (профессии и назначение) и «Строить» (карточки с ценой и причиной отказа).
+ * место, приоритет, пауза, снос), «Работники» (профессии и назначение), «Население» (канонический реестр жителей) и «Строить».
  * Все приказы уходят командами /wfsettle через {@code cmd}.
  */
 public class SettleScreen extends Screen {
     private static final int W = 640, H = 400;
-    private static final String[] TABS = {"Обзор", "Здания", "Люди", "Строить", "Торговля", "Бюджет", "Города", "Журнал", "Карта"};
+    private static final String[] TABS = {"Обзор", "Здания", "Работники", "Строить", "Торговля", "Бюджет", "Города", "Журнал", "Карта", "Население"};
     private Settlement s;
     private SettlementMap map = new SettlementMap();
     private final Consumer<String> cmd;
     private int tab, selWorker, selBuilding, scroll, cat;
+    private List<ResidentRow> residents = new ArrayList<>();
+    private String selectedResidentId = "";
     private final List<Object[]> hits = new ArrayList<>();   // {x,y,w,h,Runnable,title,tipLines}
 
     public SettleScreen(Settlement s, Consumer<String> cmd) {
@@ -46,6 +49,10 @@ public class SettleScreen extends Screen {
     private dev.worldforge.settle.TradeNetwork net = new dev.worldforge.settle.TradeNetwork();
     public void setCities(java.util.List<dev.worldforge.settle.CityRow> c, dev.worldforge.settle.TradeNetwork n) { this.cities = c; this.net = n; }
     public void setCities(java.util.List<dev.worldforge.settle.CityRow> c) { this.cities = c; }
+    public void setResidents(List<ResidentRow> rows) {
+        this.residents = rows == null ? new ArrayList<>() : new ArrayList<>(rows);
+        if (residents.stream().noneMatch(r -> r.id.equals(selectedResidentId))) selectedResidentId = "";
+    }
 
     private int refresh;
     private double mapZoom = 1.0, mapPanX, mapPanY;
@@ -69,6 +76,15 @@ public class SettleScreen extends Screen {
     public void setEmbeddedInMaqan(boolean embedded) { this.embeddedInMaqan = embedded; }
 
     private void publishWorkspaceSelection() {
+        if (selectedResidentId != null && !selectedResidentId.isBlank()) {
+            ResidentRow resident = residents.stream().filter(r -> selectedResidentId.equals(r.id)).findFirst().orElse(null);
+            if (resident != null) {
+                dev.worldforge.mod.client.PlatformWorkspaceBridge.publish("wf_people", resident.id,
+                        "character", resident.name, "Age " + resident.age + " · " + resident.stage
+                                + " · " + (resident.working ? "working" : "not assigned"));
+                return;
+            }
+        }
         if (selBuilding != 0) {
             Building b = s.building(selBuilding);
             if (b != null) {
@@ -95,6 +111,7 @@ public class SettleScreen extends Screen {
     @Override
     public void removed() {
         dev.worldforge.mod.client.PlatformWorkspaceBridge.clear("wf_settlements");
+        dev.worldforge.mod.client.PlatformWorkspaceBridge.clear("wf_people");
         super.removed();
     }
 
@@ -110,7 +127,8 @@ public class SettleScreen extends Screen {
         hits.clear();
         int x = (width - W) / 2, y = (height - H) / 2;
         int ap = s.approval();
-        WFUi.panel(g, font, x, y, W, H, s.name + "  ·  жителей " + s.workers.size() + "/" + s.housing() + "  ·  настроение " + ap);
+        WFUi.panel(g, font, x, y, W, H, s.name + "  ·  жителей " + s.population()
+                + "  ·  работают " + s.workers.size() + "  ·  настроение " + ap);
         int tw = WFUi.tabs(g, font, x + 10, y + 24, 480, TABS, tab, mx, my);
         for (int i = 0; i < TABS.length; i++) { final int t = i; hit(x + 10 + i * (tw + 2), y + 24, tw, 15, () -> { tab = t; scroll = 0; }, null, null); }
         String au = s.auto ? "Автоназначение: вкл" : "Автоназначение: выкл";
@@ -128,6 +146,7 @@ public class SettleScreen extends Screen {
             case 6 -> cities(g, cx, top, cw, h, mx, my);
             case 7 -> journal(g, cx, top, cw, h);
             case 8 -> settlementMap(g, cx, top, cw, h, mx, my);
+            case 9 -> population(g, cx, top, cw, h, mx, my);
         }
         for (int i = hits.size() - 1; i >= 0; i--) {
             Object[] hh = hits.get(i);
@@ -144,7 +163,8 @@ public class SettleScreen extends Screen {
         int apc = apv < Settlement.APPROVAL_LEAVE_BELOW ? WFUi.BAD : apv < Settlement.APPROVAL_GROWTH_MIN ? WFUi.GOLD : WFUi.GOOD;
         double food = s.amount("food"), fnet = s.producedPerMin("food") - s.consumedPerMin("food");
         String fsub = fnet >= 0 ? "прирост +" + String.format("%.1f", fnet) + "/мин" : "хватит на " + (food <= 0 ? 0 : Math.round(food / -fnet)) + " мин";
-        WFArt.tile(g, font, x, top, tw, 46, "ЖИТЕЛИ", s.workers.size() + "/" + s.housing(), s.workers.size() < s.housing() ? "есть место" : "дома заполнены", WFUi.INFO);
+        WFArt.tile(g, font, x, top, tw, 46, "НАСЕЛЕНИЕ", s.population() + "/" + s.housing(),
+                s.workers.size() + " работают", s.population() < s.housing() ? WFUi.INFO : WFUi.GOLD);
         WFArt.tile(g, font, x + tw + 8, top, tw, 46, "НАСТРОЕНИЕ", String.valueOf(apv), apv >= Settlement.APPROVAL_GROWTH_MIN ? "рост идёт" : apv >= Settlement.APPROVAL_LEAVE_BELOW ? "рост стоит" : "уходят", apc);
         WFArt.tile(g, font, x + (tw + 8) * 2, top, tw, 46, "СЕРЕБРО", String.valueOf((int) s.amount("silver")), (s.silverPerMin() >= 0 ? "+" : "") + String.format("%.1f", s.silverPerMin()) + "/мин", WFUi.GOLD);
         WFArt.tile(g, font, x + (tw + 8) * 3, top, tw, 46, "ЕДА", String.valueOf((int) food), fsub, fnet >= 0 ? WFUi.GOOD : WFUi.BAD);
@@ -166,10 +186,14 @@ public class SettleScreen extends Screen {
             cy += 11;
         }
         cy += 6;
-        g.drawString(font, "РОСТ", x + 7, cy, WFUi.GOLD_DIM);
+        g.drawString(font, s.hasCanonicalPopulation() ? "ДЕМОГРАФИЯ · WORLD SIM" : "РОСТ ПОСЕЛЕНИЯ", x + 7, cy, WFUi.GOLD_DIM);
         cy += 12;
-        String gr = ap >= Settlement.APPROVAL_GROWTH_MIN ? (s.workers.size() < s.housing() ? "новые жители приходят" : "нет места в домах") : ap >= Settlement.APPROVAL_LEAVE_BELOW ? "рост остановлен" : "жители уходят";
-        g.drawString(font, gr, x + 7, cy, ap >= Settlement.APPROVAL_GROWTH_MIN && s.workers.size() < s.housing() ? WFUi.GOOD : WFUi.BAD);
+        String gr = s.hasCanonicalPopulation()
+                ? "Реестр wf-people управляет жизненным циклом"
+                : ap >= Settlement.APPROVAL_GROWTH_MIN ? (s.workers.size() < s.housing() ? "новые жители приходят" : "нет места в домах")
+                : ap >= Settlement.APPROVAL_LEAVE_BELOW ? "рост остановлен" : "жители уходят";
+        g.drawString(font, font.plainSubstrByWidth(gr, lw - 14), x + 7, cy,
+                s.hasCanonicalPopulation() ? WFUi.INFO : ap >= Settlement.APPROVAL_GROWTH_MIN && s.workers.size() < s.housing() ? WFUi.GOOD : WFUi.BAD);
         cy += 16;
         g.drawString(font, "ВРЕМЯ ГОДА", x + 7, cy, WFUi.GOLD_DIM);
         String sn = s.seasonName() + ", год " + s.year();
@@ -237,7 +261,7 @@ public class SettleScreen extends Screen {
             if (b.state == Building.State.DONE && b.def.produces()) g.drawString(font, Math.round(ch.efficiency * 100) + "%", col[3], ry + 2, ch.efficiency > 0.7 ? WFUi.GOOD : ch.efficiency > 0 ? WFUi.GOLD : WFUi.BAD);
             g.drawString(font, String.valueOf(b.priority), col[4], ry + 2, WFUi.TX);
             final int uid = b.uid;
-            hit(x + 3, ry - 1, lw - 6, 14, () -> { selBuilding = uid; selWorker = 0; }, null, null);
+            hit(x + 3, ry - 1, lw - 6, 14, () -> { selBuilding = uid; selWorker = 0; selectedResidentId = ""; }, null, null);
             ry += 14;
         }
         if (s.buildings.isEmpty()) g.drawString(font, "Пока ничего нет: вкладка «Строить».", x + 8, top + 22, WFUi.MUTED);
@@ -297,7 +321,7 @@ public class SettleScreen extends Screen {
             g.drawString(font, font.plainSubstrByWidth(wb == null ? "свободен" : wb.def.name, 106), col[2], ry + 2, wb == null ? WFUi.OFF : WFUi.TX);
             g.drawString(font, font.plainSubstrByWidth(w.status, 96), col[3], ry + 2, WFUi.MUTED);
             final int id = w.id;
-            hit(x + 3, ry - 1, lw - 6, 14, () -> { selWorker = id; selBuilding = 0; }, null, null);
+            hit(x + 3, ry - 1, lw - 6, 14, () -> { selWorker = id; selBuilding = 0; selectedResidentId = ""; }, null, null);
             ry += 14;
         }
         WFUi.scrollbar(g, x + lw - 5, top + 19, h - 22, s.workers.size() * 14, scroll * 14);
@@ -722,12 +746,86 @@ public class SettleScreen extends Screen {
 
         String heading = "ПЛАН ПОСЕЛЕНИЯ";
         g.drawString(font, heading, x + 8, top + 7, WFUi.GOLD);
-        String stats = s.buildings.size() + " зданий  ·  " + s.workers.size() + " жителей  ·  " + map.roads.size() + " дорог  ·  " + map.parcels.size() + " участков  ·  " + map.warehouses.size() + " складов";
+        String stats = s.buildings.size() + " зданий  ·  " + s.population() + " жителей  ·  "
+                + s.workers.size() + " работников  ·  " + map.roads.size() + " дорог  ·  "
+                + map.parcels.size() + " участков  ·  " + map.warehouses.size() + " складов";
         g.drawString(font, stats, x + cw - 8 - font.width(stats), top + 7, WFUi.MUTED);
         String hint = "Рельеф  ·  участки  ·  дороги  ·  ЛКМ + перетаскивание — перемещение  ·  выбор здания/жителя";
         g.drawString(font, font.plainSubstrByWidth(hint, cw - 16), x + 8, top + h - 12, WFUi.MUTED);
         String zoomLabel = Math.round(mapZoom * 100) + "%";
         g.drawString(font, zoomLabel, x + cw - 8 - font.width(zoomLabel), top + h - 12, WFUi.GOLD_DIM);
+    }
+
+    // ------------------------------------------------------------------ Каноническое население
+
+    private void population(GuiGraphics g, int x, int top, int cw, int h, int mx, int my) {
+        int lw = 400, rx = x + lw + 8, rw = cw - lw - 8;
+        WFUi.bevel(g, x, top, lw, h, true);
+        String[] heads = {"ИМЯ", "ВОЗРАСТ", "СТАДИЯ", "ПРОФЕССИЯ", "СТАТУС"};
+        int[] col = {x + 8, x + 112, x + 164, x + 244, x + 326};
+        for (int i = 0; i < heads.length; i++) g.drawString(font, heads[i], col[i], top + 6, WFUi.GOLD_DIM);
+        int rows = (h - 22) / 14, ry = top + 19;
+        residents.sort(java.util.Comparator.comparingInt((ResidentRow r) -> r.age).thenComparing(r -> r.name, String.CASE_INSENSITIVE_ORDER));
+        scroll = Math.max(0, Math.min(Math.max(0, residents.size() - rows), scroll));
+        for (int k = scroll; k < residents.size() && k < scroll + rows; k++) {
+            ResidentRow resident = residents.get(k);
+            boolean selected = resident.id.equals(selectedResidentId);
+            WFUi.rowBg(g, x + 3, ry - 1, lw - 6, 14, k, selected, WFUi.over(mx, my, x + 3, ry - 1, lw - 6, 14));
+            g.drawString(font, font.plainSubstrByWidth(resident.name, 100), col[0], ry + 2, selected ? WFUi.GOLD : WFUi.TX);
+            g.drawString(font, String.valueOf(resident.age), col[1], ry + 2, WFUi.MUTED);
+            String stage = switch (resident.stage) {
+                case "INFANT" -> "младенец";
+                case "CHILD" -> "ребёнок";
+                case "ADOLESCENT" -> "подросток";
+                case "ADULT" -> "взрослый";
+                case "ELDER" -> "пожилой";
+                default -> "—";
+            };
+            g.drawString(font, font.plainSubstrByWidth(stage, 76), col[2], ry + 2, resident.age < 18 ? WFUi.INFO : WFUi.TX);
+            g.drawString(font, font.plainSubstrByWidth(resident.profession.isBlank() ? "—" : resident.profession, 78), col[3], ry + 2, WFUi.MUTED);
+            String status = resident.working ? "работает" : "не занят";
+            g.drawString(font, status, col[4], ry + 2, resident.working ? WFUi.GOOD : WFUi.OFF);
+            hit(x + 3, ry - 1, lw - 6, 14, () -> {
+                selectedResidentId = resident.id;
+                selWorker = 0;
+                selBuilding = 0;
+            }, resident.name, List.of("Возраст: " + resident.age, "Стадия жизни: " + stage,
+                    "Профессия: " + (resident.profession.isBlank() ? "не назначена" : resident.profession),
+                    resident.working ? "Занят в рабочей силе поселения" : "Не является активным работником"));
+            ry += 14;
+        }
+        WFUi.scrollbar(g, x + lw - 5, top + 19, h - 22, residents.size() * 14, scroll * 14);
+        if (residents.isEmpty()) {
+            String message = s.hasCanonicalPopulation()
+                    ? "Канонический список жителей пока не передан клиенту."
+                    : "Для этого поселения ещё не создан канонический реестр жителей.";
+            g.drawString(font, font.plainSubstrByWidth(message, lw - 16), x + 8, top + 24, WFUi.MUTED);
+        }
+        long children = residents.stream().filter(r -> r.age < 18).count();
+        long adults = residents.stream().filter(r -> r.age >= 18 && r.age < 60).count();
+        long elders = residents.stream().filter(r -> r.age >= 60).count();
+        long employed = residents.stream().filter(r -> r.working).count();
+        WFUi.bevel(g, rx, top, rw, h, true);
+        int ix = rx + 8, cy = top + 8;
+        g.drawString(font, "СОСТАВ НАСЕЛЕНИЯ", ix, cy, WFUi.GOLD);
+        cy += 20;
+        WFUi.kv(g, font, ix, cy, rw - 16, 100, "Всего жителей", String.valueOf(s.population()), WFUi.INFO); cy += 15;
+        WFUi.kv(g, font, ix, cy, rw - 16, 100, "В реестре", String.valueOf(residents.size()), WFUi.TX); cy += 15;
+        WFUi.kv(g, font, ix, cy, rw - 16, 100, "Дети и подростки", String.valueOf(children), WFUi.INFO); cy += 15;
+        WFUi.kv(g, font, ix, cy, rw - 16, 100, "Взрослые", String.valueOf(adults), WFUi.TX); cy += 15;
+        WFUi.kv(g, font, ix, cy, rw - 16, 100, "Пожилые", String.valueOf(elders), WFUi.MUTED); cy += 15;
+        WFUi.kv(g, font, ix, cy, rw - 16, 100, "Работают", String.valueOf(s.workers.size()), WFUi.GOOD); cy += 15;
+        WFUi.kv(g, font, ix, cy, rw - 16, 100, "Не работают", String.valueOf(Math.max(0, s.population() - s.workers.size())), WFUi.OFF);
+        cy += 26;
+        g.drawString(font, "ЕДИНАЯ ИДЕНТИЧНОСТЬ", ix, cy, WFUi.GOLD_DIM);
+        cy += 13;
+        g.drawString(font, "Житель остаётся одним Character", ix, cy, WFUi.MUTED);
+        cy += 11;
+        g.drawString(font, "при смене профессии, службы и места.", ix, cy, WFUi.MUTED);
+        if (employed != s.workers.size()) {
+            cy += 18;
+            g.drawString(font, "Синхронизация списка работников ожидается.", ix, cy, WFUi.GOLD);
+        }
     }
 
     // ------------------------------------------------------------------ Журнал

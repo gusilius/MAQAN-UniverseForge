@@ -585,6 +585,22 @@ public class SettleTest {
                         && canonicalPopulationReloaded.population() == 20
                         && canonicalPopulationReloaded.workers.isEmpty(),
                 "canonical resident population projection survives settlement reload");
+        dev.worldforge.settle.CityRow canonicalCityRow = dev.worldforge.settle.CityRow.of(canonicalPopulation);
+        ok(canonicalCityRow.pop == 20 && canonicalCityRow.workforce == 0,
+                "city register reports total residents separately from the active workforce");
+        dev.worldforge.settle.CityRow cityRowReloaded = dev.worldforge.settle.CityRow
+                .fromJson(dev.worldforge.settle.CityRow.toJson(List.of(canonicalCityRow))).get(0);
+        ok(cityRowReloaded.pop == 20 && cityRowReloaded.workforce == 0,
+                "city population and workforce remain separate in the client data contract");
+        dev.worldforge.settle.ResidentRow residentRow = new dev.worldforge.settle.ResidentRow();
+        residentRow.id = "00000000-0000-0000-0000-000000000001";
+        residentRow.name = "Resident Test"; residentRow.age = 12; residentRow.stage = "CHILD";
+        residentRow.profession = ""; residentRow.working = false;
+        dev.worldforge.settle.ResidentRow residentRowReloaded = dev.worldforge.settle.ResidentRow
+                .fromJson(dev.worldforge.settle.ResidentRow.toJson(List.of(residentRow))).get(0);
+        ok(residentRowReloaded.id.equals(residentRow.id) && residentRowReloaded.age == 12
+                        && residentRowReloaded.stage.equals("CHILD") && !residentRowReloaded.working,
+                "canonical resident roster preserves identity, age stage and non-worker status across UI transport");
 
         System.out.println(fails == 0 ? "ALL OK" : fails + " FAILED");
         if (fails > 0) System.exit(1);

@@ -7,7 +7,7 @@ import java.util.*;
 /** Строка сводной таблицы городов (как «реестр» в Paradox): ключевые показатели поселения в одной строке. */
 public final class CityRow {
     public String id, name, season;
-    public int pop, housing, approval, buildings, tax, repelled, lost;
+    public int pop, workforce, housing, approval, buildings, tax, repelled, lost;
     public double silver, silverNet, food, foodNet, defense, wealth;
     public boolean raid;
     public final Map<String, Double> prices = new LinkedHashMap<>(), stock = new LinkedHashMap<>();
@@ -15,7 +15,7 @@ public final class CityRow {
     public static CityRow of(Settlement s) {
         CityRow r = new CityRow();
         r.id = s.id; r.name = s.name; r.season = s.seasonName();
-        r.pop = s.workers.size(); r.housing = s.housing(); r.approval = s.approval();
+        r.pop = s.population(); r.workforce = s.workers.size(); r.housing = s.housing(); r.approval = s.approval();
         for (Building b : s.buildings) if (b.state == Building.State.DONE) r.buildings++;
         r.tax = s.taxLevel; r.repelled = s.raidsRepelled; r.lost = s.raidsLost;
         r.silver = s.amount(Defs.SILVER); r.silverNet = s.silverPerMin();
@@ -27,7 +27,7 @@ public final class CityRow {
 
     private Map<String, Object> map() {
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("id", id); m.put("name", name); m.put("season", season); m.put("pop", pop); m.put("housing", housing); m.put("approval", approval);
+        m.put("id", id); m.put("name", name); m.put("season", season); m.put("pop", pop); m.put("workforce", workforce); m.put("housing", housing); m.put("approval", approval);
         m.put("buildings", buildings); m.put("tax", tax); m.put("ok", repelled); m.put("bad", lost);
         m.put("silver", silver); m.put("silverNet", silverNet); m.put("food", food); m.put("foodNet", foodNet); m.put("defense", defense); m.put("wealth", wealth); m.put("raid", raid); m.put("prices", new LinkedHashMap<String, Object>(prices)); m.put("stock", new LinkedHashMap<String, Object>(stock));
         return m;
@@ -46,7 +46,9 @@ public final class CityRow {
             Map<String, Object> m = (Map<String, Object>) o;
             CityRow r = new CityRow();
             r.id = (String) m.get("id"); r.name = (String) m.get("name"); r.season = (String) m.get("season");
-            r.pop = ((Number) m.get("pop")).intValue(); r.housing = ((Number) m.get("housing")).intValue(); r.approval = ((Number) m.get("approval")).intValue();
+            r.pop = ((Number) m.get("pop")).intValue();
+            r.workforce = m.get("workforce") instanceof Number workforce ? workforce.intValue() : r.pop;
+            r.housing = ((Number) m.get("housing")).intValue(); r.approval = ((Number) m.get("approval")).intValue();
             r.buildings = ((Number) m.get("buildings")).intValue(); r.tax = ((Number) m.get("tax")).intValue();
             r.repelled = ((Number) m.get("ok")).intValue(); r.lost = ((Number) m.get("bad")).intValue();
             r.silver = ((Number) m.get("silver")).doubleValue(); r.silverNet = ((Number) m.get("silverNet")).doubleValue();

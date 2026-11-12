@@ -28,8 +28,15 @@ public final class SettleClient {
             List<dev.worldforge.settle.CityRow> cities = m.get("cities") == null ? List.of() : dev.worldforge.settle.CityRow.fromJson((String) m.get("cities"));
             dev.worldforge.settle.TradeNetwork net = m.get("routes") == null ? new dev.worldforge.settle.TradeNetwork() : dev.worldforge.settle.TradeNetwork.fromJson((String) m.get("routes"));
             dev.worldforge.settle.SettlementMap map = m.get("map") instanceof String json ? dev.worldforge.settle.SettlementMap.fromJson(json) : new dev.worldforge.settle.SettlementMap();
+            List<dev.worldforge.settle.ResidentRow> residents = m.get("residents") instanceof String json
+                    ? dev.worldforge.settle.ResidentRow.fromJson(json) : List.of();
             Minecraft mc = Minecraft.getInstance();
-            if (mc.screen instanceof SettleScreen sc) { sc.setModel(s); sc.setCities(cities, net); sc.setMap(map); } else { SettleScreen sc = new SettleScreen(s, ClientViews::command); sc.setCities(cities, net); sc.setMap(map); mc.setScreen(sc); }
+            if (mc.screen instanceof SettleScreen sc) {
+                sc.setModel(s); sc.setCities(cities, net); sc.setMap(map); sc.setResidents(residents);
+            } else {
+                SettleScreen sc = new SettleScreen(s, ClientViews::command);
+                sc.setCities(cities, net); sc.setMap(map); sc.setResidents(residents); mc.setScreen(sc);
+            }
         } catch (RuntimeException e) {
             dev.worldforge.settle.mc.SettleMod.LOGGER.error("wf_settle: не удалось открыть окно: {}", e.toString());
         }

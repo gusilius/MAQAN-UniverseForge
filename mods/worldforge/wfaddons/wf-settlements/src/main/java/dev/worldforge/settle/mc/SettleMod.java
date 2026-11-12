@@ -149,6 +149,7 @@ public class SettleMod {
                     colony.cx, colony.cz);
             Map<String, String> attrs = new java.util.LinkedHashMap<>();
             attrs.put("population", Integer.toString(colony.s.population()));
+            attrs.put("workforce", Integer.toString(colony.s.workers.size()));
             attrs.put("housing", Integer.toString(colony.s.housing()));
             attrs.put("settlement_type", colony.s.typeId == null ? "" : colony.s.typeId);
             attrs.put("owner_assigned", Boolean.toString(colony.owner != null && !colony.owner.isBlank()));
@@ -1258,7 +1259,7 @@ public class SettleMod {
                     syncPeople(c, server);
                     runLifeAI(server, c);
                     c.map.tick(c.s, speed);                             // глобальная логистика не зависит от загруженности чанков
-                    if (ticks % (STEP_TICKS * 10) == 0) { c.s.types = TYPES; String rid = realmOf(c); c.s.refreshType(c.s.workers.size(), rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.terrain(rid), rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.races(rid)); }
+                    if (ticks % (STEP_TICKS * 10) == 0) { c.s.types = TYPES; String rid = realmOf(c); c.s.refreshType(c.s.population(), rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.terrain(rid), rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.races(rid)); }
                 } catch (RuntimeException ex) {
                     LOGGER.error("wf_settle: ошибка симуляции поселения {}: {}", c.s.id, ex.toString());
                 }
