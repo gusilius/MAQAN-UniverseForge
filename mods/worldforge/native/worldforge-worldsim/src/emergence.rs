@@ -29,6 +29,12 @@ pub struct EmergentPolity {
     pub stability: i32,
     pub dynasty_id: String,
     pub dynasty_generations: u32,
+    /// Canonical wf-people global UUID of the current ruler. Generation count advances
+    /// only when Java confirms a different living Character has actually succeeded.
+    #[serde(default)]
+    pub ruler_global_id: Option<String>,
+    #[serde(default)]
+    pub last_succession_year: u64,
     pub years_in_generation: u32,
     pub succession_pressure: i32,
     pub weak_years: u32,
@@ -195,7 +201,8 @@ fn maybe_form_polity(map: &GeographicMap, seed: u64, year: u64, bands: &[Emergen
         let name = format!("{} Confederation", anchor.id.chars().take(8).collect::<String>());
         polities.push(EmergentPolity { id: id.clone(), map_id: map.map_id.clone(), name: name.clone(),
             settlement_ids: ids, population, founded_year: year, stability: 55, dynasty_id,
-            dynasty_generations: 1, years_in_generation: 0, succession_pressure: 0, weak_years: 0 });
+            dynasty_generations: 1, ruler_global_id: None, last_succession_year: year,
+            years_in_generation: 0, succession_pressure: 0, weak_years: 0 });
         events.push(EmergenceEvent { year, kind: "state_founded".into(), subject_id: id,
             text: format!("{} forms through the association of neighbouring settlements (population {})", name, population) });
         break;
@@ -212,15 +219,10 @@ fn update_polities(seed: u64, year: u64, bands: &[EmergentBand], polities: &mut 
         else { polity.weak_years = polity.weak_years.saturating_sub(1); }
         polity.stability = (polity.stability + if population > 120 { 1 } else if population < 60 { -3 } else { 0 }).clamp(0,100);
         if population > 0 && polity.stability >= 15 {
-            polity.years_in_generation += 1;
-            // Generation turnover is gated by population and succession viability, not by a fixed dynasty script.
-            if polity.years_in_generation >= 24 && population >= 45 {
-                polity.years_in_generation = 0;
-                polity.dynasty_generations += 1;
-                polity.succession_pressure = (polity.succession_pressure + 12).min(100);
-                events.push(EmergenceEvent { year, kind: "dynasty_generation".into(), subject_id: polity.id.clone(),
-                    text: format!("{} enters dynasty generation {} through natural succession", polity.name, polity.dynasty_generations) });
-            }
+            // This is elapsed time since statehood/succession, not a generation counter.
+            // Only a new canonical wf-people ruler may advance dynasty_generations.
+            polity.years_in_generation = polity.years_in_generation.saturating_add(1);
+            polity.succession_pressure = (polity.succession_pressure + 1).min(100);
         } else if population > 0 {
             polity.succession_pressure = (polity.succession_pressure + 4).min(100);
         }
@@ -239,6 +241,39 @@ fn update_polities(seed: u64, year: u64, bands: &[EmergentBand], polities: &mut 
     polities.retain(|p| !dissolved.contains(&p.id));
 }
 
+
+/// Records a real succession from the canonical Character registry.
+/// Repeated reconciliation of the same ruler is idempotent and never inflates generations.
+pub fn record_ruler_succession(
+    state: &mut EmergentWorld,
+    polity_id: &str,
+    ruler_global_id: &str,
+    year: u64,
+) -> Result<Option<EmergenceEvent>, String> {
+    if ruler_global_id.trim().is_empty() {
+        return Err("empty-canonical-ruler-id".into());
+    }
+    let polity = state.polities.iter_mut().find(|polity| polity.id == polity_id)
+        .ok_or_else(|| format!("unknown-polity:{polity_id}"))?;
+    if polity.ruler_global_id.as_deref() == Some(ruler_global_id) {
+        return Ok(None);
+    }
+    let first = polity.ruler_global_id.is_none();
+    polity.ruler_global_id = Some(ruler_global_id.to_owned());
+    polity.dynasty_generations = if first { 1 } else { polity.dynasty_generations.saturating_add(1) };
+    polity.last_succession_year = year;
+    polity.years_in_generation = 0;
+    let kind = if first { "founding_ruler" } else { "dynastic_succession" };
+    let text = if first {
+        format!("{} receives its first canonical ruler", polity.name)
+    } else {
+        format!("{} enters canonical dynasty generation {}", polity.name, polity.dynasty_generations)
+    };
+    Ok(Some(EmergenceEvent {
+        year, kind: kind.into(), subject_id: polity.id.clone(), text,
+    }))
+}
+
 pub fn advance(request: EmergenceRequest) -> Result<EmergenceFrame, String> {
     request.snapshot.validate().map_err(|e| format!("snapshot:{e:?}"))?;
     let mut state = request.state.unwrap_or_else(|| EmergentWorld::new(request.snapshot.seed));
@@ -249,10 +284,14 @@ pub fn advance(request: EmergenceRequest) -> Result<EmergenceFrame, String> {
     let mut diagnostics = Vec::new();
     let maps = &request.snapshot.geography;
 
-    if state.bands.is_empty() {
-        for map in maps { bootstrap(map, state.seed, &mut state.bands, &mut events); }
-        state.bands.sort_by(|a,b| a.id.cmp(&b.id));
+    // A map may be loaded after the world has already developed. Bootstrap each map
+    // independently instead of treating the first non-empty map as the whole universe.
+    for map in maps {
+        if !state.bands.iter().any(|band| band.map_id == map.map_id) {
+            bootstrap(map, state.seed, &mut state.bands, &mut events);
+        }
     }
+    state.bands.sort_by(|a,b| a.id.cmp(&b.id));
     let mut years_advanced = 0u64;
     while state.last_year < target_year {
         let year = state.last_year + 1;
@@ -314,22 +353,42 @@ mod tests {
     }
 
     #[test]
-    fn four_generations_are_natural_and_follow_statehood() {
-        let mut state = None;
-        let mut founded = None;
-        let mut generations = 0;
-        for year in 1..=500 {
-            let frame = advance(request(year * 365, state)).unwrap();
-            state = Some(frame.state);
-            if let Some(polity) = state.as_ref().unwrap().polities.first() {
-                founded.get_or_insert(polity.founded_year);
-                generations = polity.dynasty_generations;
-                if generations >= 4 { break; }
-            }
+    fn four_generations_require_four_distinct_canonical_rulers_after_statehood() {
+        let frame = advance(request(365 * 220, None)).unwrap();
+        let mut state = frame.state;
+        let polity = state.polities.first().expect("statehood should emerge from map-only conditions");
+        let polity_id = polity.id.clone();
+        let founded = polity.founded_year;
+        assert!(founded > 0 && founded < state.last_year);
+        for generation in 1..=4 {
+            let ruler_id = format!("world-character-{generation}");
+            let event = record_ruler_succession(&mut state, &polity_id, &ruler_id, founded + generation as u64 * 28).unwrap();
+            assert!(event.is_some());
+            assert_eq!(state.polities[0].dynasty_generations, generation);
         }
-        assert!(founded.is_some(), "statehood should emerge from map-only conditions");
-        assert!(generations >= 4, "a surviving polity should experience four generations after statehood");
-        assert!(state.as_ref().unwrap().polities[0].founded_year < state.as_ref().unwrap().last_year);
+        let current_year = state.last_year;
+        let repeated = record_ruler_succession(&mut state, &polity_id, "world-character-4", current_year).unwrap();
+        assert!(repeated.is_none(), "reconciliation of the same canonical ruler is idempotent");
+        assert_eq!(state.polities[0].dynasty_generations, 4);
+    }
+
+    #[test]
+    fn dynasty_age_does_not_fake_a_succession() {
+        let frame = advance(request(365 * 500, None)).unwrap();
+        assert!(frame.state.polities.iter().all(|polity| polity.dynasty_generations == 1
+            && polity.ruler_global_id.is_none()),
+            "elapsed years alone must not invent canonical rulers or dynastic generations");
+    }
+
+    #[test]
+    fn maps_loaded_later_receive_their_own_population_bootstrap() {
+        let mut first = advance(request(365 * 120, None)).unwrap().state;
+        let second_map = GeographicMap { map_id:"late-map".into(), ..map() };
+        let snapshot = WorldSnapshot { world_id:"map-only".into(),seed:8128,day:365 * 121,
+            realms:vec![],borders:vec![],settlements:vec![],characters:vec![],workforce:vec![],
+            geography:vec![map(), second_map] };
+        let frame = advance(EmergenceRequest { snapshot, state:Some(first.clone()) }).unwrap();
+        assert!(frame.state.bands.iter().any(|band| band.map_id == "late-map"));
     }
 
     #[test]

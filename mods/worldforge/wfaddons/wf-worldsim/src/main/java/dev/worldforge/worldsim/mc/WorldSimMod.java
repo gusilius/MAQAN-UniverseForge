@@ -501,7 +501,9 @@ public final class WorldSimMod {
                 if (members.isEmpty()) continue;
                 JsonObject binding = emergenceBindings.has(polityId) && emergenceBindings.get(polityId).isJsonObject()
                         ? emergenceBindings.getAsJsonObject(polityId) : new JsonObject();
-                String previousRulerId = binding.has("ruler_global_id") ? binding.get("ruler_global_id").getAsString() : "";
+                String previousRulerId = polity.has("ruler_global_id")
+                        ? polity.get("ruler_global_id").getAsString()
+                        : (binding.has("ruler_global_id") ? binding.get("ruler_global_id").getAsString() : "");
                 dev.worldforge.people.Character ruler = members.stream()
                         .filter(person -> person.globalId.equals(previousRulerId)).findFirst().orElse(null);
                 if (ruler == null) {
@@ -521,14 +523,23 @@ public final class WorldSimMod {
                     ruler.props.put("emergence.polity_role", "ruler");
                     if (ruler.house == null || ruler.house.isBlank()) ruler.house = dynastyId;
                     registry.appoint(ruler.id, "emergent_ruler", polityId, year);
+                    // Political succession is committed only after the canonical Character is durable.
+                    if (!PeopleMod.persistCharacter(ruler, server)) {
+                        LOGGER.error("wf_worldsim: canonical ruler {} for polity {} could not be persisted; succession remains pending",
+                                ruler.globalId, polityId);
+                        continue;
+                    }
                     binding.addProperty("ruler_global_id", ruler.globalId);
+                    int generation = previousRulerId.isBlank() ? 1
+                            : (polity.has("dynasty_generations") ? polity.get("dynasty_generations").getAsInt()
+                                : (binding.has("generation") ? binding.get("generation").getAsInt() : 1)) + 1;
+                    binding.addProperty("generation", generation);
+                    polity.addProperty("ruler_global_id", ruler.globalId);
+                    polity.addProperty("dynasty_generations", generation);
                     if (previousRulerId.isBlank()) {
-                        binding.addProperty("generation", 1);
                         WorldForgeApi.postEvent("people", ruler.name + " becomes the first recorded ruler of " + polity.get("name").getAsString(),
                                 List.of(), Math.max(0L, (long) year * 525600L));
                     } else {
-                        int generation = binding.has("generation") ? binding.get("generation").getAsInt() + 1 : 2;
-                        binding.addProperty("generation", generation);
                         WorldForgeApi.postEvent("people", "Succession in " + polity.get("name").getAsString()
                                         + ": " + ruler.name + " succeeds the previous ruler (dynastic generation " + generation + ")",
                                 List.of(), Math.max(0L, (long) year * 525600L));
@@ -540,8 +551,11 @@ public final class WorldSimMod {
                     ruler.props.put("emergence.polity_role", "ruler");
                     if (!ruler.has("emergent_ruler", polityId)) registry.appoint(ruler.id, "emergent_ruler", polityId, year);
                 }
+                if (!polity.has("ruler_global_id")) polity.addProperty("ruler_global_id", ruler.globalId);
+                if (!polity.has("dynasty_generations"))
+                    polity.addProperty("dynasty_generations", binding.has("generation") ? binding.get("generation").getAsInt() : 1);
+                binding.addProperty("ruler_global_id", ruler.globalId);
                 binding.addProperty("dynasty_id", dynastyId);
-                binding.addProperty("last_validated_year", year);
                 emergenceBindings.add(polityId, binding);
                 changed = true;
             }
