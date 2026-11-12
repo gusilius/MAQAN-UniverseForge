@@ -123,9 +123,12 @@ public final class StatecraftTest {
                 "non-aggression treaty blocks a war in either realm ordering");
         state.setTreaty("north", "dorne", Statecraft.Treaty.NON_AGGRESSION, false);
         Statecraft.War war = state.declareWar("north", "dorne", "claim", "c1", 1001);
+        check(state.activeWarBetween("dorne", "north") == war,
+                "active war lookup is symmetric for trade and diplomacy consumers");
         check(state.changeWarScore(war.id, 65) && war.warScore == 65, "war records its casus belli and war score");
         check(state.concludeWar(war.id, Statecraft.WarStatus.ATTACKER_VICTORY, "crown claim recognized", 1100)
-                && war.status == Statecraft.WarStatus.ATTACKER_VICTORY,
+                && war.status == Statecraft.WarStatus.ATTACKER_VICTORY
+                && state.activeWarBetween("north", "dorne") == null,
                 "peace outcome and truce are recorded");
         boolean truceBlocksWar = false;
         try { state.declareWar("north", "dorne", "new_claim", "c1", 1050); }

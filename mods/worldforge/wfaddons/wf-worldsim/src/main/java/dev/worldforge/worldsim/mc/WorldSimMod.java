@@ -5,6 +5,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.mojang.logging.LogUtils;
 import dev.worldforge.mod.MapData;
+import dev.worldforge.mod.TitleData;
 import dev.worldforge.mod.EditorManager;
 import dev.worldforge.mod.WorldForgeMod;
 import dev.worldforge.mod.api.Diplomacy;
@@ -18,6 +19,7 @@ import dev.worldforge.court.Marriages;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.PopulationSimulation;
 import dev.worldforge.people.mc.PeopleMod;
+import dev.worldforge.realms.mc.RealmsMod;
 import dev.worldforge.war.WarEngine;
 import dev.worldforge.army.ArmyEngine;
 import dev.worldforge.army.UnitType;
@@ -66,6 +68,7 @@ public final class WorldSimMod {
     private static final List<String> journal = new ArrayList<>();
     private static JsonObject emergenceState;
     private static JsonObject emergenceBindings = new JsonObject();
+    private static boolean emergentRealmsRehydrated;
     private static final HistoricalChronicle HISTORICAL_CHRONICLE = new HistoricalChronicle();
 
     public WorldSimMod() {
@@ -80,6 +83,7 @@ public final class WorldSimMod {
         lodTicks = 0;
         emergenceState = null;
         emergenceBindings = new JsonObject();
+        emergentRealmsRehydrated = false;
         HISTORICAL_CHRONICLE.clear();
         HISTORICAL_CHRONICLE.setStartingYear(WorldForgeApi.clock().startYear);
         publishObservers(event.getServer());
@@ -95,6 +99,7 @@ public final class WorldSimMod {
         if (server != null) saveState(server);
         lastDecisionDay = Long.MIN_VALUE;
         lodTicks = 0;
+        emergentRealmsRehydrated = false;
         SimulationLod.clear();
         lastProjectDay.clear();
         journal.clear();
@@ -106,6 +111,12 @@ public final class WorldSimMod {
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server == null) return;
         if (++lodTicks % 20 == 0) publishObservers(server);
+        // Rebuild virtual realm/trade projections from the persisted emergence state only
+        // after all ServerStarted listeners (including wf-realms) have restored their files.
+        if (!emergentRealmsRehydrated && emergenceState != null) {
+            syncEmergentPolities(server, emergenceState, WorldForgeApi.clock().year());
+            emergentRealmsRehydrated = true;
+        }
         long day = WorldForgeApi.clock().dayNumber();
         if (day <= 0 || (lastDecisionDay != Long.MIN_VALUE
                 && day - lastDecisionDay < DECISION_INTERVAL_DAYS)) return;
@@ -310,6 +321,47 @@ public final class WorldSimMod {
                 borders.add(border);
             }
         }
+        for (TitleData.Realm realm : RealmsMod.emergentRealms()) {
+            JsonObject item = new JsonObject();
+            item.addProperty("id", realm.id);
+            long population = (long) number(realm.props.get("population"), 0);
+            item.addProperty("population", Math.max(0L, population));
+            item.addProperty("treasury", fixed(RealmsMod.POLITICS.treasury(realm.id).balance));
+            // Population-backed mobilization potential is strategic capacity, not a spawned army.
+            item.addProperty("army_strength", Math.max(0L, population / 12L));
+            item.addProperty("stability", (int) number(realm.props.get("stability"), 50));
+            item.addProperty("prestige", (int) number(realm.props.get("prestige"), 0));
+            item.addProperty("expansion_pressure", (int) Math.max(0, Math.min(100, 20 + population / 10)));
+            long lastWarDay = 0;
+            boolean atWar = false;
+            for (var war : RealmsMod.POLITICS.wars()) {
+                if (!war.attackerRealm.equals(realm.id) && !war.defenderRealm.equals(realm.id)) continue;
+                lastWarDay = Math.max(lastWarDay, war.startDay);
+                if (war.status == dev.worldforge.realms.Statecraft.WarStatus.ACTIVE) atWar = true;
+            }
+            item.addProperty("at_war", atWar);
+            item.addProperty("last_war_day", lastWarDay);
+            realms.add(item);
+        }
+        Set<String> emergentIds = RealmsMod.emergentRealms().stream()
+                .map(realm -> realm.id).collect(java.util.stream.Collectors.toSet());
+        Set<String> emittedEmergentBorders = new TreeSet<>();
+        for (TitleData.Realm realm : RealmsMod.emergentRealms()) {
+            Object raw = realm.props.get("emergence.neighbors");
+            if (raw == null) continue;
+            for (String neighbor : String.valueOf(raw).split(",")) {
+                if (neighbor.isBlank() || !emergentIds.contains(neighbor)) continue;
+                String a = realm.id.compareTo(neighbor) < 0 ? realm.id : neighbor;
+                String b = realm.id.compareTo(neighbor) < 0 ? neighbor : realm.id;
+                if (!emittedEmergentBorders.add(a + "|" + b)) continue;
+                JsonObject border = new JsonObject();
+                border.addProperty("a", a); border.addProperty("b", b);
+                border.addProperty("contested_claim", false);
+                border.addProperty("strategic_value", 60);
+                border.addProperty("distance_cost", 0);
+                borders.add(border);
+            }
+        }
         for (Colony colony : SettleMod.COLONIES.values()) {
             if (colony == null || colony.s == null) continue;
             var s = colony.s;
@@ -478,9 +530,60 @@ public final class WorldSimMod {
     }
 
 
+
+    private static Set<String> emergentNeighbors(JsonObject polity, JsonArray polities, JsonArray bands, MapData map) {
+        Set<String> own = new HashSet<>();
+        if (polity.has("settlement_ids") && polity.get("settlement_ids").isJsonArray())
+            for (var id : polity.getAsJsonArray("settlement_ids")) own.add(id.getAsString());
+        Map<String, JsonObject> samples = new HashMap<>();
+        for (var item : bands) if (item.isJsonObject()) {
+            JsonObject band = item.getAsJsonObject();
+            if (map.name.equals(band.get("map_id").getAsString())) samples.put(band.get("id").getAsString(), band);
+        }
+        double maxDistanceSq = Math.pow(Math.min(map.w, map.h) / 4.0, 2.0);
+        Set<String> neighbors = new TreeSet<>();
+        for (var item : polities) {
+            if (!item.isJsonObject()) continue;
+            JsonObject other = item.getAsJsonObject();
+            String otherId = other.get("id").getAsString();
+            if (otherId.equals(polity.get("id").getAsString()) || !map.name.equals(other.get("map_id").getAsString())) continue;
+            if (!other.has("settlement_ids") || !other.get("settlement_ids").isJsonArray()) continue;
+            boolean adjacent = false;
+            for (var a : polity.getAsJsonArray("settlement_ids")) {
+                JsonObject first = samples.get(a.getAsString());
+                if (first == null) continue;
+                for (var b : other.getAsJsonArray("settlement_ids")) {
+                    JsonObject second = samples.get(b.getAsString());
+                    if (second == null) continue;
+                    double dx = first.get("x").getAsDouble() - second.get("x").getAsDouble();
+                    double dz = first.get("z").getAsDouble() - second.get("z").getAsDouble();
+                    if (dx * dx + dz * dz <= maxDistanceSq) { adjacent = true; break; }
+                }
+                if (adjacent) break;
+            }
+            if (adjacent) neighbors.add("emergent-" + otherId);
+        }
+        return neighbors;
+    }
+
+    private static String emergentBiomeSummary(Set<String> bandIds, JsonArray bands, MapData map) {
+        Map<String, Integer> counts = new TreeMap<>();
+        for (var item : bands) if (item.isJsonObject()) {
+            JsonObject band = item.getAsJsonObject();
+            if (!map.name.equals(band.get("map_id").getAsString()) || !bandIds.contains(band.get("id").getAsString())) continue;
+            int x = Math.max(0, Math.min(map.w - 1, band.get("x").getAsInt()));
+            int z = Math.max(0, Math.min(map.h - 1, band.get("z").getAsInt()));
+            String biome = map.biomeKey(map.biomeAtPx(x, z));
+            counts.merge(biome == null || biome.isBlank() ? "unknown" : biome, 1, Integer::sum);
+        }
+        return counts.entrySet().stream().map(entry -> entry.getKey() + ":" + entry.getValue())
+                .collect(java.util.stream.Collectors.joining(","));
+    }
+
     /** Binds emergent polities to canonical rulers; succession follows actual Character identity. */
     private static void syncEmergentPolities(MinecraftServer server, JsonObject state, int year) {
         if (server == null || state == null || !state.has("polities") || !state.get("polities").isJsonArray()) return;
+        Set<String> activeRealmIds = new HashSet<>();
         for (MapData map : WorldForgeMod.loadedMaps().values()) {
             if (map == null) continue;
             var registry = PeopleMod.registry(map);
@@ -491,6 +594,8 @@ public final class WorldSimMod {
                 JsonObject polity = element.getAsJsonObject();
                 if (!map.name.equals(polity.get("map_id").getAsString())) continue;
                 String polityId = polity.get("id").getAsString();
+                String realmId = "emergent-" + polityId;
+                activeRealmIds.add(realmId);
                 String dynastyId = polity.get("dynasty_id").getAsString();
                 Set<String> bandIds = new LinkedHashSet<>();
                 if (polity.has("settlement_ids") && polity.get("settlement_ids").isJsonArray())
@@ -498,30 +603,58 @@ public final class WorldSimMod {
                 List<dev.worldforge.people.Character> members = registry.all().stream()
                         .filter(person -> person.alive && bandIds.contains(String.valueOf(person.props.get("emergence.band_id"))))
                         .toList();
+                Set<String> neighbors = emergentNeighbors(polity, state.getAsJsonArray("polities"),
+                        state.getAsJsonArray("bands"), map);
+                String biomes = emergentBiomeSummary(bandIds, state.getAsJsonArray("bands"), map);
+                String currentRuler = polity.has("ruler_global_id") && !polity.get("ruler_global_id").isJsonNull()
+                        ? polity.get("ruler_global_id").getAsString() : "";
+                RealmsMod.registerEmergentRealm(realmId,
+                        polity.get("name").getAsString(), map.name, currentRuler,
+                        polity.get("population").getAsLong(), polity.get("stability").getAsInt(),
+                        bandIds.size(), neighbors, biomes);
                 if (members.isEmpty()) continue;
                 JsonObject binding = emergenceBindings.has(polityId) && emergenceBindings.get(polityId).isJsonObject()
                         ? emergenceBindings.getAsJsonObject(polityId) : new JsonObject();
-                String previousRulerId = polity.has("ruler_global_id")
+                String previousRulerId = polity.has("ruler_global_id") && !polity.get("ruler_global_id").isJsonNull()
                         ? polity.get("ruler_global_id").getAsString()
-                        : (binding.has("ruler_global_id") ? binding.get("ruler_global_id").getAsString() : "");
+                        : (binding.has("ruler_global_id") && !binding.get("ruler_global_id").isJsonNull()
+                            ? binding.get("ruler_global_id").getAsString() : "");
                 dev.worldforge.people.Character ruler = members.stream()
                         .filter(person -> person.globalId.equals(previousRulerId)).findFirst().orElse(null);
+                boolean foundedNewDynasty = false;
                 if (ruler == null) {
                     dev.worldforge.people.Character previous = registry.all().stream()
                             .filter(person -> person.globalId.equals(previousRulerId)).findFirst().orElse(null);
                     ruler = members.stream()
                             .filter(person -> dev.worldforge.people.PopulationSimulation.age(person, year) >= 18)
                             .sorted(Comparator
-                                    .comparing((dev.worldforge.people.Character person) ->
-                                            previous != null && (person.father.equals(previous.id) || person.mother.equals(previous.id)) ? 0 : 1)
+                                    .comparingInt((dev.worldforge.people.Character person) -> {
+                                        if (previous == null) return 0;
+                                        if (person.father.equals(previous.id) || person.mother.equals(previous.id)) return 0;
+                                        if (previous.house != null && !previous.house.isBlank()
+                                                && previous.house.equals(person.house)) return 1;
+                                        return 2;
+                                    })
                                     .thenComparingInt(person -> person.birthYear)
                                     .thenComparing(person -> person.globalId))
                             .findFirst().orElse(null);
                     if (ruler == null) continue;
+                    boolean directHeir = previous != null
+                            && (ruler.father.equals(previous.id) || ruler.mother.equals(previous.id));
+                    boolean sameHouse = previous != null && previous.house != null
+                            && !previous.house.isBlank() && previous.house.equals(ruler.house);
+                    if (previous != null && !directHeir && !sameHouse) {
+                        dynastyId = "house_" + UUID.nameUUIDFromBytes(
+                                (polityId + "|" + year + "|" + ruler.globalId).getBytes(StandardCharsets.UTF_8))
+                                .toString().replace("-", "");
+                        polity.addProperty("dynasty_id", dynastyId);
+                        foundedNewDynasty = true;
+                    }
+                    // The Character's house is authoritative: descendants inherit it through addChild().
+                    ruler.house = dynastyId;
                     ruler.props.put("emergence.polity_id", polityId);
                     ruler.props.put("emergence.dynasty_id", dynastyId);
                     ruler.props.put("emergence.polity_role", "ruler");
-                    if (ruler.house == null || ruler.house.isBlank()) ruler.house = dynastyId;
                     registry.appoint(ruler.id, "emergent_ruler", polityId, year);
                     // Political succession is committed only after the canonical Character is durable.
                     if (!PeopleMod.persistCharacter(ruler, server)) {
@@ -530,7 +663,7 @@ public final class WorldSimMod {
                         continue;
                     }
                     binding.addProperty("ruler_global_id", ruler.globalId);
-                    int generation = previousRulerId.isBlank() ? 1
+                    int generation = previousRulerId.isBlank() || foundedNewDynasty ? 1
                             : (polity.has("dynasty_generations") ? polity.get("dynasty_generations").getAsInt()
                                 : (binding.has("generation") ? binding.get("generation").getAsInt() : 1)) + 1;
                     binding.addProperty("generation", generation);
@@ -538,6 +671,9 @@ public final class WorldSimMod {
                     polity.addProperty("dynasty_generations", generation);
                     if (previousRulerId.isBlank()) {
                         WorldForgeApi.postEvent("people", ruler.name + " becomes the first recorded ruler of " + polity.get("name").getAsString(),
+                                List.of(), Math.max(0L, (long) year * 525600L));
+                    } else if (foundedNewDynasty) {
+                        WorldForgeApi.postEvent("people", ruler.name + " founds a new ruling house in " + polity.get("name").getAsString(),
                                 List.of(), Math.max(0L, (long) year * 525600L));
                     } else {
                         WorldForgeApi.postEvent("people", "Succession in " + polity.get("name").getAsString()
@@ -549,9 +685,49 @@ public final class WorldSimMod {
                     ruler.props.put("emergence.polity_id", polityId);
                     ruler.props.put("emergence.dynasty_id", dynastyId);
                     ruler.props.put("emergence.polity_role", "ruler");
-                    if (!ruler.has("emergent_ruler", polityId)) registry.appoint(ruler.id, "emergent_ruler", polityId, year);
+                    if (!Objects.equals(ruler.house, dynastyId)) {
+                        ruler.house = dynastyId;
+                        if (!PeopleMod.persistCharacter(ruler, server)) {
+                            LOGGER.error("wf_worldsim: canonical house for ruler {} could not be persisted", ruler.globalId);
+                            continue;
+                        }
+                    }
+                    if (!ruler.has("emergent_ruler", polityId)) {
+                        registry.appoint(ruler.id, "emergent_ruler", polityId, year);
+                        if (!PeopleMod.persistCharacter(ruler, server)) {
+                            LOGGER.error("wf_worldsim: existing canonical ruler {} could not be persisted", ruler.globalId);
+                            continue;
+                        }
+                    }
                 }
-                if (!polity.has("ruler_global_id")) polity.addProperty("ruler_global_id", ruler.globalId);
+                // Reconcile Statecraft every pass, not only when a ruler changes. This also
+                // repairs a missing virtual title after a crash between Character and politics saves.
+                String titleId = "emergent-title-" + polityId;
+                var politicalTitle = RealmsMod.POLITICS.title(titleId);
+                if (politicalTitle == null) {
+                    RealmsMod.POLITICS.createTitle(titleId, realmId,
+                            dev.worldforge.realms.Statecraft.Rank.DUCHY, polity.get("name").getAsString());
+                    RealmsMod.POLITICS.grantTitle(titleId, ruler.globalId);
+                    RealmsMod.POLITICS.setInheritanceLaw(realmId,
+                            dev.worldforge.realms.Statecraft.InheritanceLaw.PRIMOGENITURE);
+                } else if (!politicalTitle.holderCharacterId.equals(ruler.globalId)) {
+                    if (!previousRulerId.isBlank() && politicalTitle.holderCharacterId.equals(previousRulerId)) {
+                        RealmsMod.POLITICS.addClaim(titleId, ruler.globalId);
+                        if (!RealmsMod.POLITICS.inheritTitle(titleId, previousRulerId, ruler.globalId))
+                            RealmsMod.POLITICS.grantTitle(titleId, ruler.globalId);
+                    } else {
+                        RealmsMod.POLITICS.grantTitle(titleId, ruler.globalId);
+                    }
+                }
+                if (RealmsMod.POLITICS.dynasty(dynastyId) == null)
+                    RealmsMod.POLITICS.registerDynasty(dynastyId, ruler.globalId);
+                else RealmsMod.POLITICS.addDynastyMember(dynastyId, ruler.globalId);
+                RealmsMod.registerEmergentRealm(realmId, polity.get("name").getAsString(), map.name,
+                        ruler.globalId, polity.get("population").getAsLong(), polity.get("stability").getAsInt(),
+                        bandIds.size(), neighbors, biomes);
+                polity.addProperty("dynasty_id", dynastyId);
+                if (!polity.has("ruler_global_id") || polity.get("ruler_global_id").isJsonNull())
+                    polity.addProperty("ruler_global_id", ruler.globalId);
                 if (!polity.has("dynasty_generations"))
                     polity.addProperty("dynasty_generations", binding.has("generation") ? binding.get("generation").getAsInt() : 1);
                 binding.addProperty("ruler_global_id", ruler.globalId);
@@ -678,6 +854,10 @@ public final class WorldSimMod {
                 case "declare_war" -> {
                     String attacker = action.get("attacker").getAsString();
                     String defender = action.get("defender").getAsString();
+                    if (attacker.startsWith("emergent-") && defender.startsWith("emergent-"))
+                        yield RealmsMod.POLITICS.activeWarBetween(attacker, defender) != null
+                                ? dev.worldforge.mod.api.ActionExecutionService.Reconciliation.APPLIED
+                                : dev.worldforge.mod.api.ActionExecutionService.Reconciliation.NOT_APPLIED;
                     WarEngine found = null;
                     for (MapData map : WorldForgeMod.loadedMaps().values())
                         if (map.titles != null && map.titles.realms.containsKey(attacker)
@@ -828,6 +1008,21 @@ public final class WorldSimMod {
         }
         if ("declare_war".equals(type)) {
             String attacker = action.get("attacker").getAsString(), defender = action.get("defender").getAsString();
+            if (attacker.startsWith("emergent-") && defender.startsWith("emergent-")) {
+                if (RealmsMod.POLITICS.activeWarBetween(attacker, defender) != null)
+                    return RealmsMod.persistNow(server);
+                TitleData.Realm attackingRealm = RealmsMod.realm(attacker);
+                if (attackingRealm == null || attackingRealm.ruler == null || attackingRealm.ruler.isBlank()) return false;
+                try {
+                    RealmsMod.POLITICS.declareWar(attacker, defender, "emergent_border_conflict",
+                            attackingRealm.ruler, (int) Math.min(Integer.MAX_VALUE, day));
+                    return RealmsMod.persistNow(server);
+                } catch (RuntimeException rejected) {
+                    LOGGER.info("wf_worldsim: emergent war {} -> {} rejected by Statecraft: {}",
+                            attacker, defender, rejected.getMessage());
+                    return false;
+                }
+            }
             for (MapData map : WorldForgeMod.loadedMaps().values()) {
                 if (map.titles == null || !map.titles.realms.containsKey(attacker) || !map.titles.realms.containsKey(defender)) continue;
                 WarEngine war = WarMod.engine(map);

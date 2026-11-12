@@ -14,6 +14,8 @@ import dev.worldforge.mod.api.MapAction;
 import dev.worldforge.mod.api.WorldForgeApi;
 import dev.worldforge.trade.Trade;
 import dev.worldforge.trade.TradeDefs;
+import dev.worldforge.realms.Statecraft;
+import dev.worldforge.realms.mc.RealmsMod;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -76,22 +78,21 @@ public class TradeMod {
 
     // ------------------------------------------------------------------ данные мира
 
-    static List<TitleData.Realm> realms() {
-        List<TitleData.Realm> l = new ArrayList<>();
-        for (MapData m : WorldForgeMod.loadedMaps().values()) if (m.titles != null) l.addAll(m.titles.realmList());
-        return l;
-    }
+    static List<TitleData.Realm> realms() { return RealmsMod.realms(); }
 
-    static TitleData.Realm realm(String id) {
-        for (TitleData.Realm r : realms()) if (r.id.equals(id)) return r;
-        return null;
-    }
+    static TitleData.Realm realm(String id) { return RealmsMod.realm(id); }
 
     private static Set<String> neighborsOf(String realm) {
         int today = day();
         if (today != adjacencyDay) {
             adjacency = new HashMap<>();
-            for (MapData m : WorldForgeMod.loadedMaps().values()) if (m.titles != null) Diplomacy.adjacency(m.titles).forEach((k, v) -> adjacency.computeIfAbsent(k, x -> new HashSet<>()).addAll(v));
+            for (MapData m : WorldForgeMod.loadedMaps().values()) if (m.titles != null)
+                Diplomacy.adjacency(m.titles).forEach((k, v) -> adjacency.computeIfAbsent(k, x -> new HashSet<>()).addAll(v));
+            for (TitleData.Realm emergent : RealmsMod.emergentRealms()) {
+                Set<String> linked = csv(emergent.props.get("emergence.neighbors"));
+                adjacency.computeIfAbsent(emergent.id, x -> new HashSet<>()).addAll(linked);
+                for (String other : linked) adjacency.computeIfAbsent(other, x -> new HashSet<>()).add(emergent.id);
+            }
             adjacencyDay = today;
         }
         return adjacency.getOrDefault(realm, Set.of());
@@ -141,10 +142,19 @@ public class TradeMod {
         @Override public double distance(String a, String b) { return neighborsOf(a).contains(b) ? 3 : 8; }
         @Override public boolean atWar(String a, String b) {
             TitleData.Realm x = realm(a), y = realm(b);
-            return x != null && y != null && (csv(x.props.get("enemies")).contains(b) || csv(y.props.get("enemies")).contains(a));
+            boolean mapWar = x != null && y != null
+                    && (csv(x.props.get("enemies")).contains(b) || csv(y.props.get("enemies")).contains(a));
+            boolean statecraftWar = RealmsMod.POLITICS.wars().stream().anyMatch(war ->
+                    war.status == Statecraft.WarStatus.ACTIVE
+                            && ((war.attackerRealm.equals(a) && war.defenderRealm.equals(b))
+                                || (war.attackerRealm.equals(b) && war.defenderRealm.equals(a))));
+            return mapWar || statecraftWar;
         }
         @Override public double danger(String a, String b) { return neighborsOf(a).contains(b) ? 0.04 : 0.07; }
-        @Override public double treaty(String a, String b) { return armyLoaded && ArmyLink.pact(a, b) ? 10 : 0; }
+        @Override public double treaty(String a, String b) {
+            if (armyLoaded && ArmyLink.pact(a, b)) return 10;
+            return RealmsMod.POLITICS.hasTreaty(a, b, Statecraft.Treaty.TRADE_PACT) ? 10 : 0;
+        }
         @Override public int count(String o, String it) {
             ServerPlayer p = player(o); Item i = itemOf(it);
             if (p == null || i == null) return 0;

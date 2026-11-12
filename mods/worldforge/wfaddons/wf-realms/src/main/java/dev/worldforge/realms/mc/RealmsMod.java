@@ -6,6 +6,7 @@ import com.mojang.logging.LogUtils;
 import dev.worldforge.mod.TitleData;
 import dev.worldforge.mod.TitleEditor;
 import dev.worldforge.mod.EditorManager;
+import dev.worldforge.mod.AtomicFileBatch;
 import dev.worldforge.mod.WorldForgeMod;
 import dev.worldforge.mod.api.DemoApi;
 import dev.worldforge.mod.api.ActionContext;
@@ -58,6 +59,8 @@ public class RealmsMod {
     public static final Realms REALMS = new Realms(DEFS);
     /** Persistent political state; Character IDs always resolve through wf-people. */
     public static final Statecraft POLITICS = new Statecraft();
+    /** Runtime realm projections reconstructed from the persisted map-first emergence state. */
+    private static final Map<String, TitleData.Realm> AUTONOMOUS_REALMS = new java.util.concurrent.ConcurrentHashMap<>();
     private static long ticks;
     private static final Random RNG = new Random();
 
@@ -92,7 +95,13 @@ public class RealmsMod {
                     }));
         }
         REALMS.hooks = new Realms.Hooks() {
-            @Override public int provinces(String realm) { TitleData.Realm r = realm(realm); return r == null ? 1 : Math.max(1, r.titleKeys.size()); }
+            @Override public int provinces(String realm) {
+                TitleData.Realm r = realm(realm);
+                if (r == null) return 1;
+                Object emergent = r.props.get("emergence.settlement_count");
+                int emergentSettlements = emergent instanceof Number n ? n.intValue() : 0;
+                return Math.max(1, Math.max(r.titleKeys.size(), emergentSettlements));
+            }
             @Override public int prestige(String realm) { TitleData.Realm r = realm(realm); return r != null && r.props.get("prestige") instanceof Number n ? n.intValue() : 0; }
             @Override public boolean flag(String realm, String flag) { TitleData.Realm r = realm(realm); return r != null && Boolean.parseBoolean(String.valueOf(r.props.get("flag." + flag))); }
             @Override public Map<String, Double> policySignals(String realmId) {
@@ -156,13 +165,57 @@ public class RealmsMod {
         };
     }
 
-    static List<TitleData.Realm> realms() {
+    /** All political actors, including polities that emerged without a pre-authored title overlay. */
+    public static List<TitleData.Realm> realms() {
         List<TitleData.Realm> l = new ArrayList<>();
-        for (var m : WorldForgeMod.loadedMaps().values()) if (m.titles != null) l.addAll(m.titles.realmList());
+        Set<String> seen = new HashSet<>();
+        for (var m : WorldForgeMod.loadedMaps().values()) if (m.titles != null)
+            for (TitleData.Realm realm : m.titles.realmList()) if (seen.add(realm.id)) l.add(realm);
+        for (TitleData.Realm realm : AUTONOMOUS_REALMS.values()) if (seen.add(realm.id)) l.add(realm);
         return l;
     }
 
-    static TitleData.Realm realm(String id) { for (TitleData.Realm r : realms()) if (r.id.equals(id)) return r; return null; }
+    public static TitleData.Realm realm(String id) {
+        for (TitleData.Realm r : realms()) if (r.id.equals(id)) return r;
+        return null;
+    }
+
+    public static List<TitleData.Realm> emergentRealms() {
+        return List.copyOf(AUTONOMOUS_REALMS.values());
+    }
+
+    /** Rebuilds a virtual realm projection without fabricating map provinces or title overlays. */
+    public static TitleData.Realm registerEmergentRealm(String id, String name, String mapId,
+            String rulerGlobalId, long population, int stability, int settlementCount,
+            Collection<String> neighbors, String biomeSummary) {
+        if (id == null || !id.matches("[A-Za-z0-9_.:-]{3,96}"))
+            throw new IllegalArgumentException("Invalid emergent realm id");
+        TitleData.Realm realm = AUTONOMOUS_REALMS.computeIfAbsent(id, key -> new TitleData.Realm());
+        realm.id = id;
+        realm.name = name == null || name.isBlank() ? id : name;
+        realm.ruler = rulerGlobalId == null ? "" : rulerGlobalId;
+        realm.overlordId = null;
+        realm.relation = "";
+        realm.titleKeys.clear();
+        realm.subjectIds.clear();
+        realm.props.put("emergence.map_id", mapId == null ? "" : mapId);
+        realm.props.put("emergence.settlement_count", Math.max(0, settlementCount));
+        realm.props.put("emergence.neighbors", neighbors == null ? "" : String.join(",", new TreeSet<>(neighbors)));
+        realm.props.put("emergence.biomes", biomeSummary == null ? "" : biomeSummary);
+        realm.props.put("population", Math.max(0L, population));
+        realm.props.put("stability", Math.max(0, Math.min(100, stability)));
+        realm.props.put("prestige", (int) Math.min(100_000L, Math.max(0L, population / 10L)));
+        realm.props.put("taxable_base", Math.max(0.0, population * 0.05));
+        REALMS.state(id);
+        POLITICS.treasury(id);
+        return realm;
+    }
+
+    /** Remove runtime market actors whose polities have genuinely dissolved. Their historical records remain in Statecraft. */
+    public static void reconcileEmergentRealms(Set<String> activeIds) {
+        Set<String> keep = activeIds == null ? Set.of() : new HashSet<>(activeIds);
+        AUTONOMOUS_REALMS.keySet().retainAll(keep);
+    }
 
     private static double normalizedProp(TitleData.Realm realm, String key) {
         Object value = realm.props.get(key);
@@ -245,6 +298,7 @@ public class RealmsMod {
 
     @SubscribeEvent
     public void onStarted(ServerStartedEvent e) {
+        AUTONOMOUS_REALMS.clear();
         try {
             Path f = file(e.getServer());
             if (Files.exists(f)) REALMS.fromJson(Files.readString(f));
@@ -264,11 +318,23 @@ public class RealmsMod {
         } catch (Exception ex) { LOGGER.error("wf_realms: не удалось прочитать состояние: {}", ex.toString()); }
     }
 
-    private static void save(MinecraftServer s) {
+    public static synchronized boolean persistNow(MinecraftServer server) {
+        if (server == null) return false;
         try {
-            Path f = file(s); Files.createDirectories(f.getParent()); Files.writeString(f, REALMS.toJson());
-            Files.writeString(politicsFile(s), POLITICS.toJson());
-        } catch (Exception ex) { LOGGER.error("wf_realms: не удалось сохранить: {}", ex.toString()); }
+            Path root = server.getWorldPath(LevelResource.ROOT).resolve("worldforge");
+            Map<Path, byte[]> writes = new LinkedHashMap<>();
+            writes.put(file(server), REALMS.toJson().getBytes(StandardCharsets.UTF_8));
+            writes.put(politicsFile(server), POLITICS.toJson().getBytes(StandardCharsets.UTF_8));
+            AtomicFileBatch.commit(root, writes);
+            return true;
+        } catch (Exception ex) {
+            LOGGER.error("wf_realms: atomic political checkpoint failed: {}", ex.toString(), ex);
+            return false;
+        }
+    }
+
+    private static void save(MinecraftServer s) {
+        if (!persistNow(s)) LOGGER.error("wf_realms: political checkpoint remains dirty");
     }
 
     @SubscribeEvent

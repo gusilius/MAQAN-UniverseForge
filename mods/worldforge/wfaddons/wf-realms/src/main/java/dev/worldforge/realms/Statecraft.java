@@ -573,6 +573,13 @@ public final class Statecraft {
         return true;
     }
     public War war(String id) { return wars.get(id); }
+    public Collection<War> wars() { return Collections.unmodifiableCollection(wars.values()); }
+    public War activeWarBetween(String first, String second) {
+        return wars.values().stream().filter(w -> w.status == WarStatus.ACTIVE
+                && ((w.attackerRealm.equals(first) && w.defenderRealm.equals(second))
+                    || (w.attackerRealm.equals(second) && w.defenderRealm.equals(first))))
+                .findFirst().orElse(null);
+    }
 
     // ---------------- Persistence ----------------
 

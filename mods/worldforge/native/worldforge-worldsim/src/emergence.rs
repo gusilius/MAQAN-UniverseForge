@@ -353,7 +353,7 @@ mod tests {
     }
 
     #[test]
-    fn four_generations_require_four_distinct_canonical_rulers_after_statehood() {
+    fn dynasty_generation_advances_only_for_distinct_ruler_ids_after_statehood() {
         let frame = advance(request(365 * 220, None)).unwrap();
         let mut state = frame.state;
         let polity = state.polities.first().expect("statehood should emerge from map-only conditions");
@@ -361,13 +361,13 @@ mod tests {
         let founded = polity.founded_year;
         assert!(founded > 0 && founded < state.last_year);
         for generation in 1..=4 {
-            let ruler_id = format!("world-character-{generation}");
+            let ruler_id = format!("00000000-0000-0000-0000-{generation:012}");
             let event = record_ruler_succession(&mut state, &polity_id, &ruler_id, founded + generation as u64 * 28).unwrap();
             assert!(event.is_some());
             assert_eq!(state.polities[0].dynasty_generations, generation);
         }
         let current_year = state.last_year;
-        let repeated = record_ruler_succession(&mut state, &polity_id, "world-character-4", current_year).unwrap();
+        let repeated = record_ruler_succession(&mut state, &polity_id, "00000000-0000-0000-0000-000000000004", current_year).unwrap();
         assert!(repeated.is_none(), "reconciliation of the same canonical ruler is idempotent");
         assert_eq!(state.polities[0].dynasty_generations, 4);
     }
