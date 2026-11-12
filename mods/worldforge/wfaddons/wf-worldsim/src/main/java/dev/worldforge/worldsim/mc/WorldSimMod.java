@@ -10,6 +10,7 @@ import dev.worldforge.mod.WorldForgeMod;
 import dev.worldforge.mod.api.Diplomacy;
 import dev.worldforge.mod.api.WorldForgeApi;
 import dev.worldforge.mod.api.SimulationLod;
+import dev.worldforge.worldsim.HistoricalChronicle;
 import dev.worldforge.court.CourtSim;
 import dev.worldforge.court.mc.CourtMod;
 import dev.worldforge.court.Marriages;
@@ -62,15 +63,20 @@ public final class WorldSimMod {
     private static long lodTicks;
     private static final Map<String, Long> lastProjectDay = new HashMap<>();
     private static final List<String> journal = new ArrayList<>();
+    private static final HistoricalChronicle HISTORICAL_CHRONICLE = new HistoricalChronicle();
 
     public WorldSimMod() {
         MinecraftForge.EVENT_BUS.register(this);
+        WorldForgeApi.events().addListener(item -> HISTORICAL_CHRONICLE.record(
+                item, WorldForgeApi.clock().dayNumber(), WorldForgeApi.clock().year()));
     }
 
     @SubscribeEvent
     public void onStarted(ServerStartedEvent event) {
         lastDecisionDay = Long.MIN_VALUE;
         lodTicks = 0;
+        HISTORICAL_CHRONICLE.clear();
+        HISTORICAL_CHRONICLE.setStartingYear(WorldForgeApi.clock().startYear);
         publishObservers(event.getServer());
         loadState(event.getServer());
         LOGGER.info("wf_worldsim: autonomous coordinator started; native Rust core={}, initial LOD observers={}",
@@ -177,6 +183,7 @@ public final class WorldSimMod {
                                     + ", settlements=" + SettleMod.COLONIES.size()
                                     + ", proposal_records=" + journal.size()
                                     + ", world_events=" + WorldForgeApi.events().size()
+                                    + ", chronicle_records=" + HISTORICAL_CHRONICLE.size()
                                     + ", day=" + WorldForgeApi.clock().dayNumber()), false);
                     return 1;
                 }))
@@ -190,6 +197,18 @@ public final class WorldSimMod {
                                 context.getSource().sendSuccess(() -> Component.literal(line), false);
                             }
                             return recent.size();
+                        })))
+                .then(Commands.literal("chronicle")
+                        .executes(context -> {
+                            List<String> pages = HISTORICAL_CHRONICLE.book(12);
+                            for (String page : pages) context.getSource().sendSuccess(() -> Component.literal(page), false);
+                            return HISTORICAL_CHRONICLE.size();
+                        })
+                        .then(Commands.argument("count", IntegerArgumentType.integer(1, 50)).executes(context -> {
+                            int count = IntegerArgumentType.getInteger(context, "count");
+                            List<String> pages = HISTORICAL_CHRONICLE.book(count);
+                            for (String page : pages) context.getSource().sendSuccess(() -> Component.literal(page), false);
+                            return Math.min(count, HISTORICAL_CHRONICLE.size());
                         }))));
     }
 
@@ -604,11 +623,14 @@ public final class WorldSimMod {
             if (action.has(key) && !action.get(key).isJsonNull()) affectedRealms.add(action.get(key).getAsString());
         }
         String reason = action.has("reason") ? action.get("reason").getAsString() : "";
-        WorldForgeApi.postEvent(type.equals("declare_war") ? "war"
-                        : (type.equals("dynastic_marriage") ? "people"
-                        : (type.equals("build") || type.equals("reassign_profession") ? "settlement" : "diplomacy")),
-                outcome + ": " + subject + (reason.isBlank() ? "" : ". Причина: " + reason),
-                affectedRealms, Math.max(0L, day * 1440L));
+        // A rejected proposal is an AI diagnostic, not a historical event.
+        if (applied) {
+            WorldForgeApi.postEvent(type.equals("declare_war") ? "war"
+                            : (type.equals("dynastic_marriage") ? "people"
+                            : (type.equals("build") || type.equals("reassign_profession") ? "settlement" : "diplomacy")),
+                    outcome + ": " + subject + (reason.isBlank() ? "" : ". Причина: " + reason),
+                    affectedRealms, Math.max(0L, day * 1440L));
+        }
     }
 
     private static Path stateFile(MinecraftServer server) {
@@ -626,6 +648,7 @@ public final class WorldSimMod {
             for (String line : journal) events.add(GSON.fromJson(line, JsonObject.class));
             state.add("events", events);
             state.add("shared_event_log", com.google.gson.JsonParser.parseString(WorldForgeApi.events().toJson()));
+            state.add("historical_chronicle", com.google.gson.JsonParser.parseString(HISTORICAL_CHRONICLE.toJson()));
             Path target = stateFile(server);
             Files.createDirectories(target.getParent());
             Path temp = target.resolveSibling(target.getFileName() + ".tmp");
@@ -661,8 +684,10 @@ public final class WorldSimMod {
                 for (var event : state.getAsJsonArray("events")) if (event.isJsonObject()) journal.add(GSON.toJson(event));
             if (state.has("shared_event_log") && state.get("shared_event_log").isJsonObject())
                 WorldForgeApi.events().fromJson(GSON.toJson(state.get("shared_event_log")));
-            LOGGER.info("wf_worldsim: restored {} proposal records, {} shared world events and {} settlement cooldowns",
-                    journal.size(), WorldForgeApi.events().size(), lastProjectDay.size());
+            if (state.has("historical_chronicle") && state.get("historical_chronicle").isJsonObject())
+                HISTORICAL_CHRONICLE.fromJson(GSON.toJson(state.get("historical_chronicle")));
+            LOGGER.info("wf_worldsim: restored {} proposal records, {} shared world events, {} chronicle entries and {} settlement cooldowns",
+                    journal.size(), WorldForgeApi.events().size(), HISTORICAL_CHRONICLE.size(), lastProjectDay.size());
         } catch (Exception error) {
             LOGGER.error("wf_worldsim: simulation journal is unreadable; no old data will be overwritten until inspected", error);
         }
