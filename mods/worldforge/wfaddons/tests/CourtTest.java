@@ -51,6 +51,8 @@ public class CourtTest {
                 mapVassal = freeForContract.get(1);
             }
         }
+        // Re-import after creating a synthetic test relationship above.
+        political.syncMapTitles("court-test", s.d);
         boolean vassalContractImported = mapVassal != null
                 && political.vassalage(mapVassal.id) != null
                 && political.vassalage(mapVassal.id).liegeRealm.equals(mapVassal.overlordId);
