@@ -370,13 +370,14 @@ public final class WorldSimMod {
             JsonObject item = new JsonObject();
             item.addProperty("id", s.id);
             item.addProperty("realm_id", settlementRealm);
-            item.addProperty("population", s.workers.size());
+            int residentPopulation = Math.max(s.workers.size(), colony.residentCharacterIds.size());
+            item.addProperty("population", residentPopulation);
             item.addProperty("food", fixed(s.amount("food")));
             item.addProperty("food_capacity", fixed(s.capacity("food")));
             item.addProperty("wood", fixed(s.amount("wood")));
             item.addProperty("stone", fixed(s.amount("stone")));
             item.addProperty("housing", s.housing());
-            item.addProperty("housing_used", s.workers.size());
+            item.addProperty("housing_used", residentPopulation);
             item.addProperty("farms", s.count("farm", false));
             item.addProperty("foresters", s.count("lumber_camp", false));
             item.addProperty("quarries", s.count("quarry", false));
@@ -391,7 +392,7 @@ public final class WorldSimMod {
             item.addProperty("watch_posts", s.count("watch_post", true));
             item.addProperty("threatened", threatenedRealms.contains(settlementRealm));
             item.addProperty("roads", 0);
-            item.addProperty("local_pressure", Math.max(0, s.workers.size() - s.housing()));
+            item.addProperty("local_pressure", Math.max(0, residentPopulation - s.housing()));
             item.addProperty("last_project_day", lastProjectDay.getOrDefault(s.id, Math.max(0, day - 365)));
             settlements.add(item);
             int farmers = 0, lumberjacks = 0, miners = 0, builders = 0, soldiers = 0, unemployed = 0;
@@ -468,7 +469,7 @@ public final class WorldSimMod {
                 LOGGER.warn("wf_worldsim: canonical Character registry unavailable for map {}; materialization deferred", map.name);
                 continue;
             }
-            boolean changed = false;
+            boolean hasSettledBands = false;
             for (var element : bands) {
                 if (!element.isJsonObject()) continue;
                 JsonObject band = element.getAsJsonObject();
@@ -483,31 +484,17 @@ public final class WorldSimMod {
                     dev.worldforge.people.Character created = createEmergentResident(registry, map, bandId, residents, year, residents.size());
                     if (created == null) break;
                     residents.add(created);
-                    changed = true;
                 }
                 while (residents.size() > target && !residents.isEmpty()) {
                     dev.worldforge.people.Character deceased = residents.remove(0);
                     deceased.props.put("population.death_year", year);
                     registry.kill(deceased.id);
-                    changed = true;
+                    Colony deceasedSettlement = SettleMod.colony("emg_" + bandId);
+                    if (deceasedSettlement != null && deceasedSettlement.s != null)
+                        deceasedSettlement.s.removeWorkerByPerson(deceased.globalId, "death:emergence");
                 }
-
-            }
-            if (changed) {
-                dev.worldforge.people.Character durable = registry.all().stream()
-                        .filter(person -> person.props.containsKey("emergence.band_id")).findFirst().orElse(null);
-                if (durable != null && !PeopleMod.persistCharacter(durable, server)) {
-                    LOGGER.error("wf_worldsim: emergent Character registry for map {} could not be persisted; settlement linking deferred", map.name);
-                    continue;
-                }
-                LOGGER.info("wf_worldsim: materialized canonical people for map {} (characters={})", map.name, registry.size());
-            }
-            // Persist canonical Character identities before any settlement stores their UUIDs.
-            for (var element : bands) {
-                if (!element.isJsonObject()) continue;
-                JsonObject band = element.getAsJsonObject();
-                if (!map.name.equals(band.get("map_id").getAsString()) || !band.get("settled").getAsBoolean()) continue;
-                String bandId = band.get("id").getAsString();
+                if (!band.get("settled").getAsBoolean()) continue;
+                hasSettledBands = true;
                 String settlementId = "emg_" + bandId;
                 try {
                     int x = (int) Math.max(-29_999_000L, Math.min(29_999_000L,
@@ -515,35 +502,51 @@ public final class WorldSimMod {
                     int z = (int) Math.max(-29_999_000L, Math.min(29_999_000L,
                             Math.round((band.get("z").getAsDouble() - map.h / 2.0) * Math.max(0.001, map.bpp))));
                     String display = "Settlement " + bandId.substring(0, Math.min(8, bandId.length()));
-                    var colony = SettleMod.foundEmergent(server, server.overworld().dimension().location().toString(),
-                            settlementId, display, x, z, "worldsim:settlement:" + bandId);
+                    Colony colony = SettleMod.foundEmergentInMemory(server,
+                            server.overworld().dimension().location().toString(), settlementId, display,
+                            x, z, "worldsim:settlement:" + bandId);
                     List<String> residentIds = registry.all().stream()
                             .filter(person -> person.alive && bandId.equals(person.props.get("emergence.band_id")))
                             .map(person -> person.globalId).toList();
-                    if (!SettleMod.linkCanonicalResidents(server, colony.s.id, residentIds))
-                        LOGGER.error("wf_worldsim: canonical residents for settlement {} could not be durably linked", settlementId);
-                    boolean attachedAll = true;
+                    if (!SettleMod.replaceCanonicalResidentsInMemory(colony.s.id, residentIds))
+                        LOGGER.error("wf_worldsim: canonical residents for settlement {} could not be staged", settlementId);
+                    for (Worker worker : new ArrayList<>(colony.s.workers)) {
+                        if (worker.person == null || worker.person.isBlank() || residentIds.contains(worker.person)) continue;
+                        dev.worldforge.people.Character former = PeopleMod.authority().getGlobal(worker.person);
+                        if (former == null) continue;
+                        String reason = !former.alive ? "death:emergence" : "transfer:emergence";
+                        colony.s.removeWorkerByPerson(worker.person, reason);
+                    }
                     for (String residentId : residentIds) {
-                        if (!SettleMod.attachExistingCharacter(colony.s.id, residentId)) {
-                            attachedAll = false;
+                        dev.worldforge.people.Character resident = registry.all().stream()
+                                .filter(person -> residentId.equals(person.globalId)).findFirst().orElse(null);
+                        if (resident == null) continue;
+                        boolean workingAge = dev.worldforge.people.PopulationSimulation.age(resident, year) >= 18
+                                && dev.worldforge.people.PopulationSimulation.canWork(resident, year);
+                        if (!workingAge) {
+                            colony.s.removeWorkerByPerson(residentId, "transfer:underage");
+                            continue;
+                        }
+                        if (!SettleMod.attachExistingCharacter(colony.s.id, residentId))
                             LOGGER.warn("wf_worldsim: canonical resident {} could not be attached to settlement {}",
                                     residentId, settlementId);
-                        }
                     }
-                    dev.worldforge.people.Character residentCheckpoint = registry.all().stream()
-                            .filter(person -> residentIds.contains(person.globalId)).findFirst().orElse(null);
-                    if (residentCheckpoint != null && !PeopleMod.persistCharacter(residentCheckpoint, server))
-                        attachedAll = false;
-                    if (attachedAll && !SettleMod.saveDurably(server))
-                        LOGGER.error("wf_worldsim: worker projections for settlement {} could not be durably saved", settlementId);
                 } catch (IllegalStateException deferred) {
                     LOGGER.warn("wf_worldsim: settlement materialization deferred for band {}: {}", bandId, deferred.getMessage());
                 }
             }
+            List<dev.worldforge.people.Character> emergentResidents = registry.all().stream()
+                    .filter(person -> person.props.containsKey("emergence.band_id")).toList();
+            boolean peopleDurable = emergentResidents.isEmpty()
+                    || PeopleMod.persistCharacter(emergentResidents.get(0), server);
+            if (!peopleDurable) {
+                LOGGER.error("wf_worldsim: canonical residents for map {} could not be durably saved; settlement batch deferred", map.name);
+                continue;
+            }
+            if (hasSettledBands && !SettleMod.saveDurably(server))
+                LOGGER.error("wf_worldsim: settlement/Worker batch for map {} could not be durably saved", map.name);
         }
     }
-
-
 
     private static Set<String> emergentNeighbors(JsonObject polity, JsonArray polities, JsonArray bands, MapData map) {
         Set<String> own = new HashSet<>();
@@ -598,6 +601,8 @@ public final class WorldSimMod {
     private static void syncEmergentPolities(MinecraftServer server, JsonObject state, int year) {
         if (server == null || state == null || !state.has("polities") || !state.get("polities").isJsonArray()) return;
         Set<String> activeRealmIds = new HashSet<>();
+        for (var element : state.getAsJsonArray("polities")) if (element.isJsonObject())
+            activeRealmIds.add("emergent-" + element.getAsJsonObject().get("id").getAsString());
         for (MapData map : WorldForgeMod.loadedMaps().values()) {
             if (map == null) continue;
             var registry = PeopleMod.registry(map);
@@ -683,6 +688,8 @@ public final class WorldSimMod {
                     binding.addProperty("generation", generation);
                     polity.addProperty("ruler_global_id", ruler.globalId);
                     polity.addProperty("dynasty_generations", generation);
+                    polity.addProperty("last_succession_year", year);
+                    polity.addProperty("years_in_generation", 0);
                     if (previousRulerId.isBlank()) {
                         WorldForgeApi.postEvent("people", ruler.name + " becomes the first recorded ruler of " + polity.get("name").getAsString(),
                                 List.of(), Math.max(0L, (long) year * 525600L));
@@ -742,7 +749,7 @@ public final class WorldSimMod {
                 for (String bandId : bandIds) {
                     String settlementId = "emg_" + bandId;
                     if (SettleMod.colony(settlementId) != null
-                            && !SettleMod.bindEmergentRealm(server, settlementId, realmId))
+                            && !SettleMod.bindEmergentRealmInMemory(settlementId, realmId))
                         LOGGER.error("wf_worldsim: could not bind settlement {} to emergent polity {}",
                                 settlementId, polityId);
                 }
@@ -764,6 +771,9 @@ public final class WorldSimMod {
                     LOGGER.error("wf_worldsim: ruler/dynasty bindings for map {} could not be persisted", map.name);
             }
         }
+        RealmsMod.reconcileEmergentRealms(activeRealmIds);
+        if (!activeRealmIds.isEmpty() && !SettleMod.saveDurably(server))
+            LOGGER.error("wf_worldsim: emergent settlement realm bindings could not be durably saved");
     }
 
     private static dev.worldforge.people.Character createEmergentResident(

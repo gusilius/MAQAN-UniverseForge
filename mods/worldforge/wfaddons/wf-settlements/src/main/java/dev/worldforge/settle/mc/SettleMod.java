@@ -546,6 +546,18 @@ public class SettleMod {
     /** Creates a map-first settlement without fabricated workers, stock or buildings. */
     public static Colony foundEmergent(MinecraftServer server, String dimension, String id, String name,
                                        int x, int z, String operationId) {
+        Colony existing = COLONIES.get(id);
+        Colony colony = foundEmergentInMemory(server, dimension, id, name, x, z, operationId);
+        if (existing == null && !saveDurably(server)) {
+            COLONIES.remove(id, colony);
+            throw new IllegalStateException("Could not durably persist emergent settlement " + id);
+        }
+        return colony;
+    }
+
+    /** Creates a deterministic settlement projection in memory; caller batches one durable snapshot per map. */
+    public static Colony foundEmergentInMemory(MinecraftServer server, String dimension, String id, String name,
+                                                int x, int z, String operationId) {
         if (server == null || DEFS == null) throw new IllegalStateException("Settlement definitions are not ready");
         if (id == null || !id.matches("[a-z0-9_:-]{3,96}")) throw new IllegalArgumentException("Invalid emergent settlement id");
         String dim = dimension == null || dimension.isBlank() ? server.overworld().dimension().location().toString() : dimension;
@@ -561,37 +573,55 @@ public class SettleMod {
         Colony colony = new Colony(settlement, dim, x, z);
         colony.genesisOperationId = operationId == null ? "" : operationId;
         COLONIES.put(id, colony);
-        if (!saveDurably(server)) {
-            COLONIES.remove(id, colony);
-            throw new IllegalStateException("Could not durably persist emergent settlement " + id);
-        }
-        LOGGER.info("wf_settle: map-first settlement registered id={} dim={} x={} z={} (no synthetic workers or stock)",
+        LOGGER.info("wf_settle: map-first settlement staged id={} dim={} x={} z={} (no synthetic workers or stock)",
                 id, dim, x, z);
         return colony;
     }
 
-    /** Persists the autonomous polity owner without inventing a title/province overlay. */
+    /** In-memory owner binding used by WorldSim's per-map batch commit. */
+    public static boolean bindEmergentRealmInMemory(String settlementId, String realmId) {
+        Colony colony = COLONIES.get(settlementId);
+        if (colony == null || realmId == null || realmId.isBlank()) return false;
+        colony.realmId = realmId;
+        return true;
+    }
+
     public static boolean bindEmergentRealm(MinecraftServer server, String settlementId, String realmId) {
         Colony colony = COLONIES.get(settlementId);
         if (server == null || colony == null || realmId == null || realmId.isBlank()) return false;
         String before = colony.realmId;
         if (realmId.equals(before)) return true;
-        colony.realmId = realmId;
+        if (!bindEmergentRealmInMemory(settlementId, realmId)) return false;
         if (saveDurably(server)) return true;
         colony.realmId = before;
         return false;
     }
 
-    /** Atomically links canonical people to an emergent settlement; no duplicate Worker identities are created. */
+    /** In-memory canonical resident binding; caller persists the complete settlement batch. */
+    public static boolean linkCanonicalResidentsInMemory(String settlementId, Collection<String> globalCharacterIds) {
+        Colony colony = COLONIES.get(settlementId);
+        if (colony == null || globalCharacterIds == null) return false;
+        for (String id : globalCharacterIds) if (id != null && !id.isBlank())
+            colony.residentCharacterIds.add(id);
+        return true;
+    }
+
+    /** Reconciles the complete living population projection, removing departed/deceased UUIDs. */
+    public static boolean replaceCanonicalResidentsInMemory(String settlementId, Collection<String> globalCharacterIds) {
+        Colony colony = COLONIES.get(settlementId);
+        if (colony == null || globalCharacterIds == null) return false;
+        colony.residentCharacterIds.clear();
+        for (String id : globalCharacterIds) if (id != null && !id.isBlank())
+            colony.residentCharacterIds.add(id);
+        return true;
+    }
+
     public static boolean linkCanonicalResidents(MinecraftServer server, String settlementId,
                                                    Collection<String> globalCharacterIds) {
         Colony colony = COLONIES.get(settlementId);
         if (server == null || colony == null || globalCharacterIds == null) return false;
         Set<String> before = new LinkedHashSet<>(colony.residentCharacterIds);
-        boolean changed = false;
-        for (String id : globalCharacterIds) if (id != null && !id.isBlank())
-            changed |= colony.residentCharacterIds.add(id);
-        if (!changed) return true;
+        if (!linkCanonicalResidentsInMemory(settlementId, globalCharacterIds)) return false;
         if (saveDurably(server)) return true;
         colony.residentCharacterIds.clear();
         colony.residentCharacterIds.addAll(before);
