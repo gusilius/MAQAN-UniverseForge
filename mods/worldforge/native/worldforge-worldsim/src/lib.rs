@@ -6,6 +6,7 @@
 
 pub mod jni;
 pub mod worldgen;
+pub mod emergence;
 
 use std::collections::{BTreeMap, BTreeSet};
 

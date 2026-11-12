@@ -2,6 +2,7 @@
 use std::{ffi::c_void, mem};
 use crate::{decide, WorldSnapshot};
 use crate::worldgen::{generate_world, WorldGenRequest};
+use crate::emergence::{advance, EmergenceRequest};
 
 type JNIEnvPtr = *mut *const *const c_void;
 type JObject = *mut c_void;
@@ -65,6 +66,23 @@ pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulat
             Ok(request) => match generate_world(&request) {
                 Ok(world) => serde_json::to_vec(&world).unwrap_or_else(|_| error_json("serialization_error", "generated world")),
                 Err(error) => error_json("generation_rejected", &format!("{error:?}")),
+            },
+            Err(error) => error_json("invalid_request", &error.to_string()),
+        },
+    };
+    make_bytes(env, &response)
+}
+
+#[no_mangle]
+pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulation_nativeAdvanceEmergence(
+    env: JNIEnvPtr, _class: JObject, input: JObject,
+) -> JObject {
+    let response = match read_bytes(env, input, 16 * 1024 * 1024) {
+        None => error_json("invalid_input", "emergence input unavailable or too large"),
+        Some(bytes) => match serde_json::from_slice::<EmergenceRequest>(&bytes) {
+            Ok(request) => match advance(request) {
+                Ok(frame) => serde_json::to_vec(&frame).unwrap_or_else(|_| error_json("serialization_error", "emergence frame")),
+                Err(error) => error_json("emergence_rejected", &error),
             },
             Err(error) => error_json("invalid_request", &error.to_string()),
         },

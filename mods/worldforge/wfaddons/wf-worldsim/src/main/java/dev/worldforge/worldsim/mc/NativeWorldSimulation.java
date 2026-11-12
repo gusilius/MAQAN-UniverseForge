@@ -45,6 +45,14 @@ public final class NativeWorldSimulation {
         return result;
     }
 
+    public static byte[] advanceEmergence(byte[] request) {
+        if (!load()) throw new IllegalStateException("WorldForge native emergence core is unavailable");
+        byte[] result = nativeAdvanceEmergence(request);
+        if (result == null || result.length == 0) throw new IllegalStateException("WorldForge native emergence core returned an empty frame");
+        return result;
+    }
+
     private static native byte[] nativeDecide(byte[] snapshot);
     private static native byte[] nativeGenerate(byte[] request);
+    private static native byte[] nativeAdvanceEmergence(byte[] request);
 }

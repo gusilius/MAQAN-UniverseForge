@@ -64,6 +64,7 @@ public final class WorldSimMod {
     private static long lodTicks;
     private static final Map<String, Long> lastProjectDay = new HashMap<>();
     private static final List<String> journal = new ArrayList<>();
+    private static JsonObject emergenceState;
     private static final HistoricalChronicle HISTORICAL_CHRONICLE = new HistoricalChronicle();
 
     public WorldSimMod() {
@@ -111,6 +112,25 @@ public final class WorldSimMod {
         try {
             JsonObject snapshot = snapshot(server, day);
             byte[] input = GSON.toJson(snapshot).getBytes(StandardCharsets.UTF_8);
+            JsonObject emergenceRequest = new JsonObject();
+            emergenceRequest.add("snapshot", snapshot);
+            if (emergenceState != null) emergenceRequest.add("state", emergenceState);
+            JsonObject emergenceFrame = GSON.fromJson(new String(
+                    NativeWorldSimulation.advanceEmergence(GSON.toJson(emergenceRequest).getBytes(StandardCharsets.UTF_8)),
+                    StandardCharsets.UTF_8), JsonObject.class);
+            if (emergenceFrame == null || !emergenceFrame.has("state") || !emergenceFrame.get("state").isJsonObject())
+                throw new IllegalStateException("Native emergence engine returned an invalid state frame");
+            emergenceState = emergenceFrame.getAsJsonObject("state").deepCopy();
+            if (emergenceFrame.has("events") && emergenceFrame.get("events").isJsonArray()) {
+                for (var eventElement : emergenceFrame.getAsJsonArray("events")) {
+                    if (!eventElement.isJsonObject()) continue;
+                    JsonObject event = eventElement.getAsJsonObject();
+                    String category = event.has("kind") ? event.get("kind").getAsString() : "world";
+                    String subject = event.has("text") ? event.get("text").getAsString() : "Emergent world event";
+                    long eventDay = Math.max(0L, event.has("year") ? event.get("year").getAsLong() * 365L : day);
+                    WorldForgeApi.postEvent("world", "[" + category + "] " + subject, List.of(), eventDay * 1440L);
+                }
+            }
             JsonObject frame = GSON.fromJson(new String(NativeWorldSimulation.decide(input), StandardCharsets.UTF_8), JsonObject.class);
             if (frame == null || !frame.has("proposals") || !frame.get("proposals").isJsonArray()) return;
             int accepted = 0, rejected = 0;
@@ -654,6 +674,7 @@ public final class WorldSimMod {
             JsonArray events = new JsonArray();
             for (String line : journal) events.add(GSON.fromJson(line, JsonObject.class));
             state.add("events", events);
+            if (emergenceState != null) state.add("emergence_state", emergenceState);
             state.add("shared_event_log", com.google.gson.JsonParser.parseString(WorldForgeApi.events().toJson()));
             state.add("historical_chronicle", com.google.gson.JsonParser.parseString(HISTORICAL_CHRONICLE.toJson()));
             Path target = stateFile(server);
@@ -687,6 +708,8 @@ public final class WorldSimMod {
                     lastProjectDay.put(entry.getKey(), entry.getValue().getAsLong());
             }
             journal.clear();
+            emergenceState = state.has("emergence_state") && state.get("emergence_state").isJsonObject()
+                    ? state.getAsJsonObject("emergence_state").deepCopy() : null;
             if (state.has("events") && state.get("events").isJsonArray())
                 for (var event : state.getAsJsonArray("events")) if (event.isJsonObject()) journal.add(GSON.toJson(event));
             if (state.has("shared_event_log") && state.get("shared_event_log").isJsonObject())
