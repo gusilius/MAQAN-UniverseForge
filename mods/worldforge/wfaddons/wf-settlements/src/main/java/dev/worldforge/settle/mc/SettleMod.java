@@ -108,6 +108,7 @@ public class SettleMod {
         MinecraftForge.EVENT_BUS.register(new BuildingSite.Events());
         MinecraftForge.EVENT_BUS.register(new ResidentInteraction());
         MinecraftForge.EVENT_BUS.register(new TaxService());
+        MinecraftForge.EVENT_BUS.register(new VanillaVillageAdapter());
     }
 
     @net.minecraftforge.fml.common.Mod.EventBusSubscriber(modid = MOD_ID,
@@ -1336,6 +1337,7 @@ public class SettleMod {
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server == null) return;
         ticks++;
+        if (ticks % (STEP_TICKS * 10) == 0) VanillaVillageAdapter.reconcile(server);
         if (actionsBlocked()) return;
         if (ticks % STEP_TICKS == 0) {
             double speed = dev.worldforge.mod.api.WorldForgeApi.clock().multiplier();

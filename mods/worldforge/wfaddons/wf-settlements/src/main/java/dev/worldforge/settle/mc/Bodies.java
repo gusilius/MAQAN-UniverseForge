@@ -2,6 +2,8 @@ package dev.worldforge.settle.mc;
 
 import dev.worldforge.settle.Worker;
 import dev.worldforge.mod.api.SimulationLod;
+import dev.worldforge.people.Character;
+import dev.worldforge.people.mc.PeopleMod;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -22,6 +24,20 @@ public final class Bodies {
     public static final Map<String, UUID> LIVE = new HashMap<>();
 
     public static String key(String colony, int worker) { return colony + "#" + worker; }
+
+    private static boolean hasLoadedVanillaVillagerBody(Worker worker, ServerLevel level) {
+        if (worker == null || worker.person == null || worker.person.isBlank()) return false;
+        Character person = PeopleMod.authority().getGlobal(worker.person);
+        if (person == null) return false;
+        Object raw = person.props.get("population.entity_bindings");
+        if (!(raw instanceof Map<?, ?> bindings) || !(bindings.get("villager") instanceof String uuid)) return false;
+        try {
+            Entity body = level.getEntity(UUID.fromString(uuid));
+            return body instanceof net.minecraft.world.entity.npc.Villager villager && villager.isAlive();
+        } catch (IllegalArgumentException invalid) {
+            return false;
+        }
+    }
 
     public static void tick(MinecraftServer server) {
         int spawned = 0;
@@ -53,6 +69,11 @@ public final class Bodies {
                 String k = key(c.s.id, w.id);
                 UUID u = LIVE.get(k);
                 Entity body = u == null ? null : lv.getEntity(u);
+                if (hasLoadedVanillaVillagerBody(w, lv)) {
+                    if (body != null) body.discard();
+                    LIVE.remove(k);
+                    continue;
+                }
                 if (body != null && body.isAlive()) continue;
                 int x = c.cx + lv.random.nextInt(9) - 4, z = c.cz + lv.random.nextInt(9) - 4;
                 if (!lv.hasChunkAt(new BlockPos(x, 64, z))) continue;
