@@ -185,6 +185,35 @@ public class PeopleTest {
         CharacterDevelopment.setMilitaryMorale(journalPerson, 15);
         journalPerson.props.put("wf_unit_kind", "soldier");
         int baseMartial = CharacterStats.value(journalPerson, "martial");
+        List<String> generatedTraits = CharacterStats.traits(journalPerson);
+        ok(generatedTraits.size() >= 3 && generatedTraits.size() <= 5
+                        && CharacterStats.compatibleTraits(generatedTraits)
+                        && generatedTraits.equals(CharacterStats.traits(journalPerson)),
+                "personality generation yields 3-5 deterministic, internally compatible traits");
+        Character personality = journal.create("Последовательный", "", "", "m", 1);
+        personality.traits.add("brave");
+        ok(!CharacterStats.addTrait(personality, "craven")
+                        && CharacterStats.traits(personality).equals(List.of("brave")),
+                "adding a contradictory personality trait is rejected without replacing established traits");
+        Character legacyPersonality = journal.create("Старый профиль", "", "", "m", 1);
+        legacyPersonality.traits.add("brave");
+        legacyPersonality.traits.add("craven");
+        CharacterStats.ensure(journal);
+        ok(legacyPersonality.traits.equals(Set.of("brave")),
+                "legacy contradictory trait combinations are normalized deterministically on ensure");
+        ok(CharacterStats.allTraits().size() >= 50
+                        && CharacterStats.trait("paranoid") != null
+                        && CharacterStats.trait("honest") != null
+                        && CharacterStats.trait("adaptable") != null,
+                "expanded personality catalog exposes broad social, ethical and emotional dimensions");
+        ok(CharacterStats.allSkills().size() >= 25
+                        && CharacterStats.skill("swordsmanship").governingAttribute().equals("martial")
+                        && CharacterStats.skill("persuasion").governingAttribute().equals("diplomacy"),
+                "skill catalog maps specialized abilities to the five core attributes");
+        int ranksBefore = PopulationSimulation.skillRank(journalPerson, "swordsmanship");
+        ok(CharacterStats.trainSkill(journalPerson, "swordsmanship", 250) == 2
+                        && PopulationSimulation.skillRank(journalPerson, "swordsmanship") == ranksBefore + 2,
+                "character skill growth uses the existing PopulationSimulation rank and XP store");
         ok(CharacterDevelopment.militaryMorale(journalPerson) == 15
                         && CharacterDevelopment.effectiveAttribute(journalPerson, "martial", 0) == Math.max(0, baseMartial - 3),
                 "soldier morale is persisted on canonical Character and affects effective martial ability");
