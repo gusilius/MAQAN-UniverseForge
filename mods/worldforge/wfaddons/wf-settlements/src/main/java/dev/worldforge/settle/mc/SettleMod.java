@@ -315,6 +315,7 @@ public class SettleMod {
     }
 
     public static String realmOf(Colony c) {
+        if (c != null && c.realmId != null && !c.realmId.isBlank()) return c.realmId;
         try {
             for (dev.worldforge.mod.MapData m : dev.worldforge.mod.WorldForgeMod.loadedMaps().values()) {
                 if (m.titles == null) continue;
@@ -567,6 +568,18 @@ public class SettleMod {
         LOGGER.info("wf_settle: map-first settlement registered id={} dim={} x={} z={} (no synthetic workers or stock)",
                 id, dim, x, z);
         return colony;
+    }
+
+    /** Persists the autonomous polity owner without inventing a title/province overlay. */
+    public static boolean bindEmergentRealm(MinecraftServer server, String settlementId, String realmId) {
+        Colony colony = COLONIES.get(settlementId);
+        if (server == null || colony == null || realmId == null || realmId.isBlank()) return false;
+        String before = colony.realmId;
+        if (realmId.equals(before)) return true;
+        colony.realmId = realmId;
+        if (saveDurably(server)) return true;
+        colony.realmId = before;
+        return false;
     }
 
     /** Atomically links canonical people to an emergent settlement; no duplicate Worker identities are created. */

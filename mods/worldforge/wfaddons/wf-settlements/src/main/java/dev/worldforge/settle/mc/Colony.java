@@ -54,6 +54,8 @@ public final class Colony {
     public SettlementMap map = new SettlementMap();
     /** UUID игрока-правителя (пусто - поселение без правителя-игрока). Правитель управляет своим поселением без прав оператора. */
     public String owner = "";
+    /** Autonomous polity ownership; empty for settlements still outside a realm. */
+    public String realmId = "";
     /** Stable origin operation that created this colony; empty for ordinary settlements. */
     public String genesisOperationId = "";
     /** Provisioning is guarded across retries; an interrupted phase requires reconciliation, never replay. */
@@ -142,6 +144,7 @@ public final class Colony {
         m.put("cx", cx);
         m.put("cz", cz);
         m.put("owner", owner);
+        m.put("realmId", realmId);
         m.put("genesisOperationId", genesisOperationId);
         m.put("residentCharacterIds", new ArrayList<>(residentCharacterIds));
         m.put("genesisProvisioningStarted", genesisProvisioningStarted);
@@ -186,6 +189,7 @@ public final class Colony {
         Colony c = new Colony(s, (String) m.get("dim"), ((Number) m.get("cx")).intValue(), ((Number) m.get("cz")).intValue());
         if (m.get("map") instanceof Map<?, ?> mapData) c.map = SettlementMap.fromJson(Json.write(mapData));
         if (m.get("owner") instanceof String ow) c.owner = ow;
+        if (m.get("realmId") instanceof String realm) c.realmId = realm;
         if (m.get("genesisOperationId") instanceof String operationId) c.genesisOperationId = operationId;
         if (m.get("residentCharacterIds") instanceof List<?> residents) for (Object id : residents)
             if (id instanceof String value && !value.isBlank()) c.residentCharacterIds.add(value);

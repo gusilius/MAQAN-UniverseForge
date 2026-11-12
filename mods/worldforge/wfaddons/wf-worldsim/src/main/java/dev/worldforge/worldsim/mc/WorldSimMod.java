@@ -522,6 +522,20 @@ public final class WorldSimMod {
                             .map(person -> person.globalId).toList();
                     if (!SettleMod.linkCanonicalResidents(server, colony.s.id, residentIds))
                         LOGGER.error("wf_worldsim: canonical residents for settlement {} could not be durably linked", settlementId);
+                    boolean attachedAll = true;
+                    for (String residentId : residentIds) {
+                        if (!SettleMod.attachExistingCharacter(colony.s.id, residentId)) {
+                            attachedAll = false;
+                            LOGGER.warn("wf_worldsim: canonical resident {} could not be attached to settlement {}",
+                                    residentId, settlementId);
+                        }
+                    }
+                    dev.worldforge.people.Character residentCheckpoint = registry.all().stream()
+                            .filter(person -> residentIds.contains(person.globalId)).findFirst().orElse(null);
+                    if (residentCheckpoint != null && !PeopleMod.persistCharacter(residentCheckpoint, server))
+                        attachedAll = false;
+                    if (attachedAll && !SettleMod.saveDurably(server))
+                        LOGGER.error("wf_worldsim: worker projections for settlement {} could not be durably saved", settlementId);
                 } catch (IllegalStateException deferred) {
                     LOGGER.warn("wf_worldsim: settlement materialization deferred for band {}: {}", bandId, deferred.getMessage());
                 }
@@ -725,6 +739,13 @@ public final class WorldSimMod {
                 RealmsMod.registerEmergentRealm(realmId, polity.get("name").getAsString(), map.name,
                         ruler.globalId, polity.get("population").getAsLong(), polity.get("stability").getAsInt(),
                         bandIds.size(), neighbors, biomes);
+                for (String bandId : bandIds) {
+                    String settlementId = "emg_" + bandId;
+                    if (SettleMod.colony(settlementId) != null
+                            && !SettleMod.bindEmergentRealm(server, settlementId, realmId))
+                        LOGGER.error("wf_worldsim: could not bind settlement {} to emergent polity {}",
+                                settlementId, polityId);
+                }
                 polity.addProperty("dynasty_id", dynastyId);
                 if (!polity.has("ruler_global_id") || polity.get("ruler_global_id").isJsonNull())
                     polity.addProperty("ruler_global_id", ruler.globalId);
