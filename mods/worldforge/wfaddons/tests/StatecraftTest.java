@@ -41,6 +41,14 @@ public final class StatecraftTest {
                 "nested vassal contracts are accepted");
         check(!state.setVassalage("north", "winter_county_realm", 0.1, 0.1),
                 "nested vassalage cycle is rejected");
+        check(!state.concedeVassalDemands("north", List.of("north_duchy_realm", "not-a-vassal"))
+                        && state.vassalage("north_duchy_realm").taxShare == 0.2,
+                "liberty demands validate every member before changing any feudal contract");
+        check(state.concedeVassalDemands("north", List.of("north_duchy_realm"))
+                        && Math.abs(state.vassalage("north_duchy_realm").taxShare - 0.15) < 1e-9
+                        && Math.abs(state.vassalage("north_duchy_realm").levyShare - 0.25) < 1e-9
+                        && state.vassalage("north_duchy_realm").loyalty == 65,
+                "accepted liberty demands reduce canonical tribute and levy obligations and restore loyalty");
         check(state.changeLoyalty("north_duchy_realm", -70) == 0
                 && state.changeLoyalty("north_duchy_realm", 25) == 25,
                 "vassal loyalty is clamped and mutable");

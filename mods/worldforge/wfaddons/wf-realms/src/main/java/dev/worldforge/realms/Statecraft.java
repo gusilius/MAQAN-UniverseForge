@@ -261,6 +261,30 @@ public final class Statecraft {
     }
 
     /**
+     * Atomically accepts a liberty faction's negotiated demands through the canonical feudal contracts.
+     * No map properties or duplicate loyalty records are mutated here; RealmsMod projects the result.
+     */
+    public boolean concedeVassalDemands(String liegeRealm, Collection<String> vassalRealms) {
+        String liege = clean(liegeRealm, "liege realm");
+        if (vassalRealms == null || vassalRealms.isEmpty()) return fail("no vassal demands supplied");
+        TreeSet<String> members = new TreeSet<>();
+        for (String raw : vassalRealms) members.add(clean(raw, "vassal realm"));
+        for (String member : members) {
+            VassalContract contract = vassals.get(member);
+            if (contract == null || !contract.liegeRealm.equals(liege))
+                return fail("vassal contract is missing or belongs to another liege: " + member);
+        }
+        for (String member : members) {
+            VassalContract contract = vassals.get(member);
+            contract.taxShare = Math.max(0, contract.taxShare - 0.05);
+            contract.levyShare = Math.max(0, contract.levyShare - 0.10);
+            contract.loyalty = Math.min(100, contract.loyalty + 15);
+        }
+        lastError = "";
+        return true;
+    }
+
+    /**
      * Monthly autonomous vassal politics. CourtSim supplies the current ruler-to-ruler
      * opinion snapshot; this layer owns contractual loyalty and its persistence.
      * Repeated ticks and save/reload cannot apply the same review twice.

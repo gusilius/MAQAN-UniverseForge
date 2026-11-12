@@ -30,6 +30,9 @@ public final class CourtSim {
         /** Фракция выдвинула ультиматум: члены хотят независимости. */
         default void independence(String realm, String liege) { }
 
+        /** Фракция требует пересмотра феодальных обязательств; true только после доменного подтверждения. */
+        default boolean vassalDemands(String liege, List<String> vassals) { return false; }
+
         default void news(String text) { }
 
         /** Заключён династический брак между государствами. */
@@ -269,53 +272,117 @@ public final class CourtSim {
     private double weight(String realm) { TitleData.Realm r = d.realms.get(realm); return r == null ? 0 : Math.max(1, r.areaBlocks); }
 
     private Faction factionOf(String liege, String member) {
-        for (Faction f : factions.values()) if (f.liege.equals(liege) && f.members.contains(member)) return f;
+        for (Faction faction : factions.values())
+            if (faction.liege.equals(liege) && faction.members.contains(member)) return faction;
         return null;
     }
 
-    private void updateFactions() {
-        for (TitleData.Realm L : d.realmList()) {
-            Character lr = ruler(L.id);
-            if (lr == null) continue;
-            double bonus = council(L.id).getOrDefault("vassal_opinion", 0.0);
-            List<String> subs = new ArrayList<>(L.subjectIds);
-            Faction f = null;
-            for (Faction x : factions.values()) if (x.liege.equals(L.id)) f = x;
-            for (String s : subs) {
-                Character sr = ruler(s);
-                if (sr == null) continue;
-                TitleData.Realm vassalRealm = d.realms.get(s);
-                Object rawLoyalty = vassalRealm == null ? null : vassalRealm.props.get("politics.vassal_loyalty");
-                int contractualLoyalty = rawLoyalty instanceof Number n ? Math.max(0, Math.min(100, n.intValue())) : 50;
-                // Contract compliance and ruler-to-ruler opinion both shape faction recruitment.
-                // A neglected or overtaxed vassal can organize even before personal relations collapse.
-                double op = opinion(sr.id, lr.id) + bonus + (contractualLoyalty - 50) * 0.5;
-                Faction cur = factionOf(L.id, s);
-                if (cur == null && op < -25 && cooldown.getOrDefault("faction|" + L.id + "|" + s, 0) <= year()) {
-                    if (f == null) { f = new Faction(nextId++, "independence", L.id, (int) day); f.leader = s; factions.put(f.id, f); say(realmName(s) + " затевает заговор против " + realmName(L.id)); }
-                    f.members.add(s);
-                } else if (cur != null && op > -10) {
-                    cur.members.remove(s);
-                    if (cur.leader.equals(s) && !cur.members.isEmpty()) cur.leader = cur.members.get(0);
-                }
-            }
-            if (f == null) continue;
-            f.members.removeIf(m -> !subs.contains(m));
-            if (f.members.isEmpty()) { factions.remove(f.id); continue; }
-            double mine = 0, total = weight(L.id);
-            for (String s : subs) { total += weight(s); if (f.members.contains(s)) mine += weight(s); }
-            f.power = total <= 0 ? 0 : mine / total;
-            f.progress = Math.min(100, f.progress + 2 + f.power * 25 + (f.members.size() >= 2 ? 2 : 0));
-            if (f.progress >= 100 && f.power >= 0.2) strike(f);
-        }
-        factions.values().removeIf(x -> x.members.isEmpty());
+    private Faction factionFor(String liege, String type) {
+        for (Faction faction : factions.values())
+            if (faction.liege.equals(liege) && faction.type.equals(type)) return faction;
+        return null;
     }
 
-    private void strike(Faction f) {
-        factions.remove(f.id);
-        for (String m : f.members) cooldown.put("faction|" + f.liege + "|" + m, year() + 10);
-        say("Вассалы " + realmName(f.liege) + " поднимают восстание: " + f.members.size() + " государств");
-        for (String m : f.members) hooks.independence(m, f.liege);
+    private static double realmShare(TitleData.Realm realm, String key) {
+        if (realm == null) return 0;
+        Object raw = realm.props.get(key);
+        if (!(raw instanceof Number number) || !Double.isFinite(number.doubleValue())) return 0;
+        return Math.max(0, Math.min(1, number.doubleValue()));
+    }
+
+    private void updateFactions() {
+        for (TitleData.Realm liege : d.realmList()) {
+            Character liegeRuler = ruler(liege.id);
+            if (liegeRuler == null) continue;
+            double councilBonus = council(liege.id).getOrDefault("vassal_opinion", 0.0);
+            List<String> subjects = new ArrayList<>(liege.subjectIds);
+            subjects.sort(String::compareTo);
+
+            for (String subjectId : subjects) {
+                Character vassalRuler = ruler(subjectId);
+                if (vassalRuler == null) continue;
+                TitleData.Realm vassal = d.realms.get(subjectId);
+                int loyalty = vassal != null && vassal.props.get("politics.vassal_loyalty") instanceof Number n
+                        ? Math.max(0, Math.min(100, n.intValue())) : 50;
+                double taxShare = realmShare(vassal, "tax_share");
+                double levyShare = realmShare(vassal, "levy_share");
+
+                // Personal opinion, the canonical Statecraft contract and its visible map projection
+                // all contribute to grievance. High obligations can trigger demands before secession.
+                double adjustedOpinion = opinion(vassalRuler.id, liegeRuler.id) + councilBonus
+                        + (loyalty - 50) * 0.5
+                        - Math.max(0, taxShare - 0.20) * 70.0
+                        - Math.max(0, levyShare - 0.30) * 50.0;
+                String desiredType = adjustedOpinion <= -55 || loyalty <= 15 ? "independence"
+                        : adjustedOpinion <= -25 || loyalty <= 35 ? "demands" : "";
+
+                Faction current = factionOf(liege.id, subjectId);
+                if (current != null && !current.type.equals(desiredType)) {
+                    current.members.remove(subjectId);
+                    if (current.leader.equals(subjectId))
+                        current.leader = current.members.isEmpty() ? "" : current.members.get(0);
+                    current = null;
+                }
+                if (desiredType.isEmpty()) continue;
+                if (current != null) continue;
+                if (cooldown.getOrDefault("faction|" + liege.id + "|" + subjectId, 0) > year()) continue;
+
+                Faction faction = factionFor(liege.id, desiredType);
+                if (faction == null) {
+                    faction = new Faction(nextId++, desiredType, liege.id, (int) day);
+                    factions.put(faction.id, faction);
+                    say(realmName(subjectId) + (desiredType.equals("independence")
+                            ? " требует независимости от " : " объединяет требования против ") + realmName(liege.id));
+                }
+                faction.members.add(subjectId);
+                if (faction.leader.isEmpty()) faction.leader = subjectId;
+            }
+
+            for (Faction faction : new ArrayList<>(factions.values())) {
+                if (!faction.liege.equals(liege.id)) continue;
+                faction.members.removeIf(member -> !subjects.contains(member) || ruler(member) == null);
+                if (faction.members.isEmpty()) {
+                    factions.remove(faction.id);
+                    continue;
+                }
+                double factionWeight = 0, totalWeight = weight(liege.id);
+                for (String subjectId : subjects) {
+                    double subjectWeight = weight(subjectId);
+                    totalWeight += subjectWeight;
+                    if (faction.members.contains(subjectId)) factionWeight += subjectWeight;
+                }
+                faction.power = totalWeight <= 0 ? 0 : factionWeight / totalWeight;
+                faction.progress = Math.min(100, faction.progress + 2 + faction.power * 25
+                        + (faction.members.size() >= 2 ? 2 : 0));
+                if (faction.progress >= 100 && faction.power >= 0.2) strike(faction);
+            }
+        }
+        factions.values().removeIf(faction -> faction.members.isEmpty());
+    }
+
+    private void strike(Faction faction) {
+        if ("demands".equals(faction.type)) {
+            List<String> members = List.copyOf(faction.members);
+            if (!hooks.vassalDemands(faction.liege, members)) {
+                faction.progress = 95;
+                say("Требования вассалов " + realmName(faction.liege)
+                        + " пока не получили подтверждения политической системы");
+                return;
+            }
+            factions.remove(faction.id);
+            for (String member : members)
+                cooldown.put("faction|" + faction.liege + "|" + member, year() + 3);
+            say("Сюзерен " + realmName(faction.liege)
+                    + " уступил требованиям вассалов: феодальные обязательства пересмотрены");
+            return;
+        }
+
+        factions.remove(faction.id);
+        for (String member : faction.members)
+            cooldown.put("faction|" + faction.liege + "|" + member, year() + 10);
+        say("Вассалы " + realmName(faction.liege) + " поднимают восстание: "
+                + faction.members.size() + " государств");
+        for (String member : faction.members) hooks.independence(member, faction.liege);
     }
 
     /** Одарить вассала: его мнение о правителе растёт на 5 лет. */

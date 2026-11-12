@@ -75,6 +75,22 @@ public class RealmsMod {
                     || POLITICS.hasTreaty(context.realmId, defender, Statecraft.Treaty.ALLIANCE)
                     ? "Дипломатический договор запрещает объявлять войну" : null;
         });
+        if (WorldForgeApi.action("vassal_demands") == null) {
+            WorldForgeApi.registerAction(new dev.worldforge.mod.api.MapAction(
+                    "vassal_demands", "Уступить требованиям вассалов",
+                    dev.worldforge.mod.api.MapAction.Scope.REALM, dev.worldforge.mod.api.MapAction.Perm.OP,
+                    List.of("vassal_realm_ids"), "Пересматривает феодальные обязательства всех участников фракции.",
+                    context -> {
+                        if (context.realmId == null || context.args.isEmpty())
+                            return dev.worldforge.mod.api.ActionResult.fail("Не указаны сюзерен или участники фракции");
+                        List<String> members = Arrays.stream(context.args.get(0).split(","))
+                                .map(String::trim).filter(value -> !value.isEmpty()).distinct().toList();
+                        if (!POLITICS.concedeVassalDemands(context.realmId, members))
+                            return dev.worldforge.mod.api.ActionResult.fail(POLITICS.lastError);
+                        syncPoliticalMapState();
+                        return dev.worldforge.mod.api.ActionResult.ok("Требования вассалов приняты");
+                    }));
+        }
         REALMS.hooks = new Realms.Hooks() {
             @Override public int provinces(String realm) { TitleData.Realm r = realm(realm); return r == null ? 1 : Math.max(1, r.titleKeys.size()); }
             @Override public int prestige(String realm) { TitleData.Realm r = realm(realm); return r != null && r.props.get("prestige") instanceof Number n ? n.intValue() : 0; }

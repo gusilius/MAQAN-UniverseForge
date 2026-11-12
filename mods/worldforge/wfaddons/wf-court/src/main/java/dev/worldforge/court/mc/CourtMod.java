@@ -86,6 +86,16 @@ public class CourtMod {
                     if (dev.worldforge.mod.api.WorldForgeApi.action("war_independence") != null) dev.worldforge.mod.api.WorldForgeApi.run("war_independence", ctx);
                 }
 
+                @Override public boolean vassalDemands(String liege, List<String> vassals) {
+                    if (dev.worldforge.mod.api.WorldForgeApi.action("vassal_demands") == null) return false;
+                    var ctx = new dev.worldforge.mod.api.ActionContext(ed, "court", true, liege, 0,
+                            List.of(String.join(",", vassals)));
+                    var result = dev.worldforge.mod.api.WorldForgeApi.run("vassal_demands", ctx);
+                    if (!result.ok) LOGGER.warn("wf_court: vassal demands for {} were not applied: {}",
+                            liege, result.message);
+                    return result.ok;
+                }
+
                 @Override public void news(String text) { dev.worldforge.mod.api.WorldForgeApi.postEvent("court", text, java.util.List.of()); }
 
                 private void tell(String player, String text) {

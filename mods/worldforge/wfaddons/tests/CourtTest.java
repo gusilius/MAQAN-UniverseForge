@@ -187,6 +187,26 @@ public class CourtTest {
         contractHigh.tick(30);
         ok(contractHigh.factions.isEmpty(),
                 "high contractual loyalty moderates faction recruitment under the same ruler opinion");
+
+        CourtSim liberty = build(a[0], 53);
+        liberty.ed.setOverlord(v1, liege, "vassal"); liberty.ed.setOverlord(v2, liege, "vassal");
+        liberty.opinions.add(liberty.ruler(v1).id, liberty.ruler(liege).id, "Налоговые злоупотребления", -35, 0);
+        liberty.opinions.add(liberty.ruler(v2).id, liberty.ruler(liege).id, "Налоговые злоупотребления", -35, 0);
+        List<String> conceded = new ArrayList<>();
+        liberty.hooks = new CourtSim.Hooks() {
+            @Override public boolean vassalDemands(String l, List<String> members) {
+                if (!l.equals(liege)) return false;
+                conceded.addAll(members);
+                return true;
+            }
+        };
+        liberty.tick(30);
+        ok(liberty.factions.size() == 1 && "demands".equals(liberty.factions.values().iterator().next().type),
+                "moderately dissatisfied vassals form a liberty faction before demanding independence");
+        for (int i = 0; i < 200 && conceded.isEmpty(); i++) liberty.tick(30);
+        ok(conceded.size() == 2 && liberty.factions.isEmpty(),
+                "successful liberty ultimatum is resolved by the political-domain adapter, not converted into secession");
+
         int fid = fz.factions.values().iterator().next().id;
         for (int i = 0; i < 200 && rebels.isEmpty(); i++) fz.tick(30);
         ok(rebels.size() == 2, "фракция предъявила ультиматум: " + rebels.size() + " мятежников");
