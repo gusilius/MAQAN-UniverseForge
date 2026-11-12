@@ -42,6 +42,8 @@ public final class Colony {
         public int overlay = 2;
     }
     public final Map<Integer, WorkOrder> workOrders = new LinkedHashMap<>();
+    /** Canonical wf-people global UUIDs residing in this settlement; Workers are only job projections. */
+    public final Set<String> residentCharacterIds = new LinkedHashSet<>();
     /** Temporary access scaffolds placed by workers; persisted so reloads cannot leave orphan blocks. */
     public final Map<BlockPos, String> temporaryScaffolds = new LinkedHashMap<>();
 
@@ -141,6 +143,7 @@ public final class Colony {
         m.put("cz", cz);
         m.put("owner", owner);
         m.put("genesisOperationId", genesisOperationId);
+        m.put("residentCharacterIds", new ArrayList<>(residentCharacterIds));
         m.put("genesisProvisioningStarted", genesisProvisioningStarted);
         m.put("genesisProvisioned", genesisProvisioned);
         m.put("genesisProvisioningStep", genesisProvisioningStep);
@@ -184,6 +187,8 @@ public final class Colony {
         if (m.get("map") instanceof Map<?, ?> mapData) c.map = SettlementMap.fromJson(Json.write(mapData));
         if (m.get("owner") instanceof String ow) c.owner = ow;
         if (m.get("genesisOperationId") instanceof String operationId) c.genesisOperationId = operationId;
+        if (m.get("residentCharacterIds") instanceof List<?> residents) for (Object id : residents)
+            if (id instanceof String value && !value.isBlank()) c.residentCharacterIds.add(value);
         c.genesisProvisioningStarted = Boolean.TRUE.equals(m.get("genesisProvisioningStarted"));
         c.genesisProvisioned = Boolean.TRUE.equals(m.get("genesisProvisioned"));
         if (m.get("genesisProvisioningStep") instanceof Number step) c.genesisProvisioningStep = Math.max(0, step.intValue());

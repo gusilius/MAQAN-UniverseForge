@@ -194,7 +194,7 @@ public class PeopleMod {
         if (!playerRegistryAvailable || AUTHORITY.registry("__players__") != PLAYER_REGISTRY) return false;
         int expected = 1; // Dedicated player Character partition.
         for (MapData map : WorldForgeMod.loadedMaps().values())
-            if (map != null && map.titles != null) expected++;
+            if (map != null) expected++;
         try {
             return AUTHORITY.mapCount() == expected;
         } catch (RuntimeException ex) {
@@ -227,7 +227,7 @@ public class PeopleMod {
 
     /** Реестр людей карты: читается из папки мира, при первом обращении достраивается дворами (Courts.ensure). Null, если у карты нет титулов. */
     public static CharacterRegistry registry(MapData m) {
-        if (m == null || m.titles == null || INVALID_REGS.contains(m)) return null;
+        if (m == null || INVALID_REGS.contains(m)) return null;
         CharacterRegistry have = REGS.get(m);
         if (have != null) return have;
         MinecraftServer server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
@@ -249,7 +249,7 @@ public class PeopleMod {
         }
         int before = reg.size();
         try {
-            int created = Courts.ensure(m.titles, EditorManager.editorFor(m), reg, ROLES, NAMES, seed(m), YEAR);
+            int created = m.titles == null ? 0 : Courts.ensure(m.titles, EditorManager.editorFor(m), reg, ROLES, NAMES, seed(m), YEAR);
             LOGGER.info("wf_people: карта '{}': было {} людей, создано {}, теперь {}", m.name, before, created, reg.size());
         } catch (Exception ex) {
             LOGGER.error("wf_people: Courts.ensure для карты '{}' не удался: {}", m.name, ex.toString());

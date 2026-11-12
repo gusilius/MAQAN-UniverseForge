@@ -545,6 +545,49 @@ public class SettleMod {
         return c;
     }
 
+    /** Creates a map-first settlement without fabricated workers, stock or buildings. */
+    public static Colony foundEmergent(MinecraftServer server, String dimension, String id, String name,
+                                       int x, int z, String operationId) {
+        if (server == null || DEFS == null) throw new IllegalStateException("Settlement definitions are not ready");
+        if (id == null || !id.matches("[a-z0-9_:-]{3,96}")) throw new IllegalArgumentException("Invalid emergent settlement id");
+        String dim = dimension == null || dimension.isBlank() ? server.overworld().dimension().location().toString() : dimension;
+        Colony existing = COLONIES.get(id);
+        if (existing != null) {
+            if (!Objects.equals(existing.genesisOperationId, operationId) || !Objects.equals(existing.dim, dim))
+                throw new IllegalStateException("Emergent settlement identity collision: " + id);
+            return existing;
+        }
+        Settlement settlement = new Settlement(id, name == null || name.isBlank() ? id : name, DEFS);
+        settlement.setLedgerScope(dim);
+        settlement.types = TYPES;
+        Colony colony = new Colony(settlement, dim, x, z);
+        colony.genesisOperationId = operationId == null ? "" : operationId;
+        COLONIES.put(id, colony);
+        if (!saveDurably(server)) {
+            COLONIES.remove(id, colony);
+            throw new IllegalStateException("Could not durably persist emergent settlement " + id);
+        }
+        LOGGER.info("wf_settle: map-first settlement registered id={} dim={} x={} z={} (no synthetic workers or stock)",
+                id, dim, x, z);
+        return colony;
+    }
+
+    /** Atomically links canonical people to an emergent settlement; no duplicate Worker identities are created. */
+    public static boolean linkCanonicalResidents(MinecraftServer server, String settlementId,
+                                                   Collection<String> globalCharacterIds) {
+        Colony colony = COLONIES.get(settlementId);
+        if (server == null || colony == null || globalCharacterIds == null) return false;
+        Set<String> before = new LinkedHashSet<>(colony.residentCharacterIds);
+        boolean changed = false;
+        for (String id : globalCharacterIds) if (id != null && !id.isBlank())
+            changed |= colony.residentCharacterIds.add(id);
+        if (!changed) return true;
+        if (saveDurably(server)) return true;
+        colony.residentCharacterIds.clear();
+        colony.residentCharacterIds.addAll(before);
+        return false;
+    }
+
     /** Atomic settlement snapshot used when a domain action must persist before returning success. */
     public static boolean saveDurably(MinecraftServer server) {
         if (COLONIES.values().stream().anyMatch(colony -> colony != null && (colony.genesisProvisioningRuntimeBlocked || colony.actionPersistenceBlocked))) {

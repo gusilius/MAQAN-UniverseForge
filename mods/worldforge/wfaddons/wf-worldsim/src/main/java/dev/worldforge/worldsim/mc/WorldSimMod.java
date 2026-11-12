@@ -121,13 +121,14 @@ public final class WorldSimMod {
             if (emergenceFrame == null || !emergenceFrame.has("state") || !emergenceFrame.get("state").isJsonObject())
                 throw new IllegalStateException("Native emergence engine returned an invalid state frame");
             emergenceState = emergenceFrame.getAsJsonObject("state").deepCopy();
+            syncEmergentPeople(server, emergenceState, WorldForgeApi.clock().year());
             if (emergenceFrame.has("events") && emergenceFrame.get("events").isJsonArray()) {
                 for (var eventElement : emergenceFrame.getAsJsonArray("events")) {
                     if (!eventElement.isJsonObject()) continue;
-                    JsonObject event = eventElement.getAsJsonObject();
-                    String category = event.has("kind") ? event.get("kind").getAsString() : "world";
-                    String subject = event.has("text") ? event.get("text").getAsString() : "Emergent world event";
-                    long eventDay = Math.max(0L, event.has("year") ? event.get("year").getAsLong() * 365L : day);
+                    JsonObject emergenceEvent = eventElement.getAsJsonObject();
+                    String category = emergenceEvent.has("kind") ? emergenceEvent.get("kind").getAsString() : "world";
+                    String subject = emergenceEvent.has("text") ? emergenceEvent.get("text").getAsString() : "Emergent world event";
+                    long eventDay = Math.max(0L, emergenceEvent.has("year") ? emergenceEvent.get("year").getAsLong() * 365L : day);
                     WorldForgeApi.postEvent("world", "[" + category + "] " + subject, List.of(), eventDay * 1440L);
                 }
             }
@@ -397,6 +398,127 @@ public final class WorldSimMod {
         root.add("realms", realms); root.add("borders", borders); root.add("settlements", settlements);
         root.add("characters", characters); root.add("workforce", workforce);
         return root;
+    }
+
+
+    /** Materializes map-first demographic cohorts into the canonical wf-people registry. */
+    private static void syncEmergentPeople(MinecraftServer server, JsonObject state, int year) {
+        if (server == null || state == null || !state.has("bands") || !state.get("bands").isJsonArray()) return;
+        JsonArray bands = state.getAsJsonArray("bands");
+        for (MapData map : WorldForgeMod.loadedMaps().values()) {
+            if (map == null) continue;
+            var registry = PeopleMod.registry(map);
+            if (registry == null) {
+                LOGGER.warn("wf_worldsim: canonical Character registry unavailable for map {}; materialization deferred", map.name);
+                continue;
+            }
+            boolean changed = false;
+            for (var element : bands) {
+                if (!element.isJsonObject()) continue;
+                JsonObject band = element.getAsJsonObject();
+                if (!band.has("map_id") || !map.name.equals(band.get("map_id").getAsString())) continue;
+                String bandId = band.get("id").getAsString();
+                int target = (int) Math.max(0L, Math.min(100_000L, band.get("population").getAsLong()));
+                List<dev.worldforge.people.Character> residents = registry.all().stream()
+                        .filter(person -> person.alive && bandId.equals(person.props.get("emergence.band_id")))
+                        .sorted(Comparator.comparingInt(person -> person.birthYear))
+                        .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+                while (residents.size() < target) {
+                    dev.worldforge.people.Character created = createEmergentResident(registry, map, bandId, residents, year, residents.size());
+                    if (created == null) break;
+                    residents.add(created);
+                    changed = true;
+                }
+                while (residents.size() > target && !residents.isEmpty()) {
+                    dev.worldforge.people.Character deceased = residents.remove(0);
+                    deceased.props.put("population.death_year", year);
+                    registry.kill(deceased.id);
+                    changed = true;
+                }
+                if (band.has("settled") && band.get("settled").getAsBoolean()) {
+                    String settlementId = "emg_" + bandId;
+                    try {
+                        int x = (int) Math.max(-29_999_000L, Math.min(29_999_000L,
+                                Math.round((band.get("x").getAsDouble() - map.w / 2.0) * Math.max(0.001, map.bpp))));
+                        int z = (int) Math.max(-29_999_000L, Math.min(29_999_000L,
+                                Math.round((band.get("z").getAsDouble() - map.h / 2.0) * Math.max(0.001, map.bpp))));
+                        String display = "Settlement " + bandId.substring(0, Math.min(8, bandId.length()));
+                        var colony = SettleMod.foundEmergent(server, server.overworld().dimension().location().toString(),
+                                settlementId, display, x, z, "worldsim:settlement:" + bandId);
+                        List<String> residentIds = residents.stream().filter(person -> person.alive)
+                                .map(person -> person.globalId).toList();
+                        if (!SettleMod.linkCanonicalResidents(server, colony.s.id, residentIds))
+                            LOGGER.error("wf_worldsim: canonical residents for settlement {} could not be durably linked", settlementId);
+                    } catch (IllegalStateException deferred) {
+                        LOGGER.warn("wf_worldsim: settlement materialization deferred for band {}: {}", bandId, deferred.getMessage());
+                    }
+                }
+            }
+            if (changed) {
+                dev.worldforge.people.Character durable = registry.all().stream()
+                        .filter(person -> person.props.containsKey("emergence.band_id")).findFirst().orElse(null);
+                if (durable != null && !PeopleMod.persistCharacter(durable, server))
+                    LOGGER.error("wf_worldsim: emergent Character registry for map {} could not be persisted; retrying reconciliation later", map.name);
+                else LOGGER.info("wf_worldsim: materialized canonical people for map {} (characters={})", map.name, registry.size());
+            }
+        }
+    }
+
+    private static dev.worldforge.people.Character createEmergentResident(
+            dev.worldforge.people.CharacterRegistry registry, MapData map, String bandId,
+            List<dev.worldforge.people.Character> residents, int year, int ordinal) {
+        dev.worldforge.people.Character father = null, mother = null;
+        for (dev.worldforge.people.Character candidate : residents) {
+            if (!candidate.alive || dev.worldforge.people.PopulationSimulation.age(candidate, year) < 18) continue;
+            if ("m".equals(candidate.gender) && father == null) father = candidate;
+            if ("f".equals(candidate.gender) && mother == null) mother = candidate;
+        }
+        if (father == null || mother == null || !father.spouse.equals(mother.id) || !mother.spouse.equals(father.id)) {
+            String gender = father == null ? "m" : (mother == null ? "f" : (ordinal % 2 == 0 ? "m" : "f"));
+            dev.worldforge.people.Character adult = createEmergentAdult(registry, map, bandId, gender, year, ordinal);
+            if (adult == null) return null;
+            if ("m".equals(gender)) father = adult; else mother = adult;
+            if (father != null && mother != null && father.spouse.isBlank() && mother.spouse.isBlank()) {
+                try { registry.marry(father.id, mother.id, year); } catch (RuntimeException ignored) { }
+            }
+            return adult;
+        }
+        String gender = ordinal % 2 == 0 ? "m" : "f";
+        String name = emergentName(map, bandId, father.culture, gender, ordinal, year);
+        dev.worldforge.people.Character child = registry.addChild(father, mother, name, gender, year);
+        tagEmergentResident(child, bandId);
+        return child;
+    }
+
+    private static dev.worldforge.people.Character createEmergentAdult(
+            dev.worldforge.people.CharacterRegistry registry, MapData map, String bandId,
+            String gender, int year, int ordinal) {
+        String culture = PeopleMod.NAMES.culture("");
+        String name = emergentName(map, bandId, culture, gender, ordinal, year);
+        String house;
+        try { house = PeopleMod.NAMES.pickHouse("", culture, new Random(PeopleMod.seed(map) ^ bandId.hashCode() ^ ordinal)); }
+        catch (RuntimeException ignored) { house = "House " + bandId.substring(0, Math.min(8, bandId.length())); }
+        dev.worldforge.people.Character person = registry.create(name, house, culture, gender,
+                year - (18 + Math.floorMod(bandId.hashCode() + ordinal * 13, 24)));
+        tagEmergentResident(person, bandId);
+        person.props.put("identity.source", "autonomous-emergence");
+        return person;
+    }
+
+    private static void tagEmergentResident(dev.worldforge.people.Character person, String bandId) {
+        person.props.put("emergence.band_id", bandId);
+        person.props.put("emergence.household_id", bandId);
+        person.props.put("population.location", bandId);
+        person.props.put("emergence.origin", "map-first");
+    }
+
+    private static String emergentName(MapData map, String bandId, String culture, String gender, int ordinal, int year) {
+        try {
+            return PeopleMod.NAMES.pickGivenName("", culture, gender,
+                    new Random(PeopleMod.seed(map) ^ ((long) bandId.hashCode() << 32) ^ ordinal ^ year));
+        } catch (RuntimeException ignored) {
+            return "Settler-" + Integer.toUnsignedString(Objects.hash(map.name, bandId, ordinal), 36);
+        }
     }
 
     private static void sortObjects(JsonArray array, Comparator<JsonObject> comparator) {

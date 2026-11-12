@@ -67,6 +67,7 @@ public class CourtMod {
 
     /** Двор карты: события из датапаков, состояние - wf_court.json; связи с войнами идут через действия карты и свойства государств. */
     public static CourtSim court(MapData m) {
+        if (m == null || m.titles == null) return null;
         CharacterRegistry reg = PeopleMod.registry(m);
         if (reg == null) return null;
         return COURTS.computeIfAbsent(m, k -> {
