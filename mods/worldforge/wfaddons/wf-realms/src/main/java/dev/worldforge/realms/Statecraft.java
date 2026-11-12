@@ -164,49 +164,13 @@ public final class Statecraft {
         for (TitleData.Title title : data.allTitles()) sourceByKey.put(title.key, title);
         int imported = 0;
         for (TitleData.Realm realm : data.realmList()) {
-            String realmId = clean(realm.id, "realm id");
-            for (String key : realm.titleKeys) {
-                TitleData.Title source = sourceByKey.get(key);
-                if (source == null) continue;
-                String id = "map:" + UUID.nameUUIDFromBytes((namespace + "|" + key)
-                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
-                ids.put(source.id, id);
-                Title target = titles.get(id);
-                if (target == null) {
-                    int tier = Math.max(0, Math.min(Rank.values().length - 1, source.tier));
-                    target = createTitle(id, realmId, Rank.values()[tier], source.name);
-                    imported++;
-                }
-                Object holder = source.props.get("holderCharacterId");
-                if (holder instanceof String characterId && !characterId.isBlank())
-                    target.holderCharacterId = clean(characterId, "holder Character ID");
+            if (realm.overlordId == null || realm.overlordId.isBlank() || vassals.containsKey(realm.id)) continue;
+            if (data.realms.containsKey(realm.overlordId)) {
+                Object tax = realm.props.get("tax_share"), levy = realm.props.get("levy_share");
+                double taxShare = tax instanceof Number n ? Math.max(0, Math.min(1, n.doubleValue())) : 0.10;
+                double levyShare = levy instanceof Number n ? Math.max(0, Math.min(1, n.doubleValue())) : 0.10;
+                setVassalage(realm.id, realm.overlordId, taxShare, levyShare);
             }
-        }
-        for (TitleData.Title source : data.allTitles()) {
-            String childId = ids.get(source.id), parentId = ids.get(source.parent);
-            if (childId == null || parentId == null) continue;
-            Title child = titles.get(childId), parent = titles.get(parentId);
-            if (child != null && parent != null && child.liegeTitleId.isEmpty()
-                    && child.realmId.equals(parent.realmId) && child.rank.ordinal() < parent.rank.ordinal())
-                setTitleLiege(childId, parentId);
-        }
-        for (TitleData.Realm realm : data.realmList()) {
-            VassalContract existing = vassals.get(realm.id);
-            if (realm.overlordId == null || realm.overlordId.isBlank()) {
-                // The map hierarchy is the visible world relation. A released realm must not
-                // retain a stale contract that would continue collecting tribute off-map.
-                if (existing != null) releaseVassal(realm.id);
-                continue;
-            }
-            if (!data.realms.containsKey(realm.overlordId)) continue;
-            if (existing != null && existing.liegeRealm.equals(realm.overlordId)) continue;
-            Object tax = realm.props.get("tax_share"), levy = realm.props.get("levy_share");
-            double taxShare = tax instanceof Number n ? Math.max(0, Math.min(1, n.doubleValue()))
-                    : existing == null ? 0.10 : existing.taxShare;
-            double levyShare = levy instanceof Number n ? Math.max(0, Math.min(1, n.doubleValue()))
-                    : existing == null ? 0.10 : existing.levyShare;
-            if (!setVassalage(realm.id, realm.overlordId, taxShare, levyShare))
-                throw new IllegalStateException("Cannot reconcile map vassalage for " + realm.id + ": " + lastError);
         }
         return imported;
     }

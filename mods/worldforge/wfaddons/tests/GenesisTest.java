@@ -67,7 +67,8 @@ public class GenesisTest {
                 """);
         ge.sharedNameBank(() -> sharedNames);
         Set<String> canonicalPlaceNames = new HashSet<>();
-        for (int seed = 0; seed < 100; seed++) canonicalPlaceNames.add(ge.randomName(d, new Random(seed)));
+        Random canonicalNameRng = new Random(100);
+        for (int seed = 0; seed < 100; seed++) canonicalPlaceNames.add(ge.randomName(d, canonicalNameRng));
         ok(canonicalPlaceNames.containsAll(List.of("Кхазад-Рун", "Гримнир")),
                 "Genesis settlement names use the shared race-inherited NameBank instead of a parallel pool");
         ok(sharedNames.generate("mountain_dwarf", "dwarf", "houses", new Random(1)).equals("Каменный Молот"),

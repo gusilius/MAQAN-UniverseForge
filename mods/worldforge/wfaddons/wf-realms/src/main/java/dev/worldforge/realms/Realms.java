@@ -297,12 +297,22 @@ public final class Realms {
         if (!option.id().equals(state.laws.get(lawId))) return 0;
         Map<String, Double> baseline = state.lawSignalBaselines.get(lawId);
         if (baseline == null || baseline.isEmpty()) return 0;
+        Map<String, Double> effects = option.mods();
         double change = 0;
-        change += (signal(signals, "unrest") - baseline.getOrDefault("unrest", 0.0)) * 22.0;
-        change += (signal(signals, "fiscal_stress") - baseline.getOrDefault("fiscal_stress", 0.0)) * 18.0;
-        change += (signal(signals, "vassal_discontent") - baseline.getOrDefault("vassal_discontent", 0.0)) * 24.0;
-        change += (signal(signals, "faction_pressure") - baseline.getOrDefault("faction_pressure", 0.0)) * 28.0;
-        change += (signal(signals, "court_intrigue") - baseline.getOrDefault("court_intrigue", 0.0)) * 12.0;
+        // Only attribute an observed outcome to a policy when that policy actually affects
+        // the corresponding domain. This prevents unrelated fiscal recovery from making
+        // emergency conscription look successful after a war has already ended.
+        boolean affectsStability = effects.containsKey("opinion") || effects.containsKey("vassal_opinion")
+                || effects.containsKey("unrest_pct");
+        if (affectsStability) {
+            change += (signal(signals, "unrest") - baseline.getOrDefault("unrest", 0.0)) * 22.0;
+            change += (signal(signals, "vassal_discontent") - baseline.getOrDefault("vassal_discontent", 0.0)) * 24.0;
+            change += (signal(signals, "faction_pressure") - baseline.getOrDefault("faction_pressure", 0.0)) * 28.0;
+        }
+        if (effects.containsKey("tax_pct") || effects.containsKey("upkeep_pct"))
+            change += (signal(signals, "fiscal_stress") - baseline.getOrDefault("fiscal_stress", 0.0)) * 18.0;
+        if (effects.containsKey("plot_defense"))
+            change += (signal(signals, "court_intrigue") - baseline.getOrDefault("court_intrigue", 0.0)) * 12.0;
         return Math.max(-35.0, Math.min(35.0, -change));
     }
 

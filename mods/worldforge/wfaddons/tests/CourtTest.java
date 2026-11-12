@@ -43,15 +43,25 @@ public class CourtTest {
         political.syncMapTitles("court-test", s.d);
         TitleData.Realm mapVassal = s.d.realmList().stream()
                 .filter(r -> r.overlordId != null && !r.overlordId.isBlank()).findFirst().orElse(null);
+        if (mapVassal == null) {
+            List<TitleData.Realm> freeForContract = s.d.realmList().stream()
+                    .filter(r -> r.overlordId == null && !r.titleKeys.isEmpty()).toList();
+            if (freeForContract.size() >= 2) {
+                s.ed.setOverlord(freeForContract.get(1).id, freeForContract.get(0).id, "vassal");
+                mapVassal = freeForContract.get(1);
+            }
+        }
         boolean vassalContractImported = mapVassal != null
                 && political.vassalage(mapVassal.id) != null
                 && political.vassalage(mapVassal.id).liegeRealm.equals(mapVassal.overlordId);
         ok(vassalContractImported, "map vassal hierarchy imports into the canonical Statecraft contract");
         if (mapVassal != null) {
+            ok(political.releaseVassal(mapVassal.id) && political.vassalage(mapVassal.id) == null,
+                    "releasing a canonical feudal contract removes its tribute obligation");
             s.ed.setOverlord(mapVassal.id, null, null);
             political.syncMapTitles("court-test", s.d);
             ok(political.vassalage(mapVassal.id) == null,
-                    "removing a map overlord also releases its stale Statecraft tribute contract");
+                    "a released map relationship does not recreate a stale tribute contract");
         }
 
         // Court and settlement clocks share one CharacterRegistry. A birth resolved by either

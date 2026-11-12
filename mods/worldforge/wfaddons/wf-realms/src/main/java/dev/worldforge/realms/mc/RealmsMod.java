@@ -149,19 +149,25 @@ public class RealmsMod {
     private static void syncPoliticalMapState() {
         for (var map : WorldForgeMod.loadedMaps().values()) {
             if (map.titles == null) continue;
-            POLITICS.syncMapTitles(map.name, map.titles);
+            // Statecraft is authoritative after startup import; this pass only projects it.
             TitleEditor editor = EditorManager.editorFor(map);
             if (editor == null) continue;
             for (TitleData.Realm realm : map.titles.realmList()) {
                 Statecraft.VassalContract contract = POLITICS.vassalage(realm.id);
-                if (contract == null) continue;
-                if (!Objects.equals(realm.overlordId, contract.liegeRealm)) {
-                    try { editor.setOverlord(realm.id, contract.liegeRealm, null); }
+                String desiredLiege = contract == null ? null : contract.liegeRealm;
+                if (!Objects.equals(realm.overlordId, desiredLiege)) {
+                    try { editor.setOverlord(realm.id, desiredLiege, null); }
                     catch (RuntimeException ex) {
                         LOGGER.warn("wf_realms: cannot project vassal contract {} -> {} onto map {}: {}",
-                                realm.id, contract.liegeRealm, map.name, ex.getMessage());
+                                realm.id, desiredLiege, map.name, ex.getMessage());
                         continue;
                     }
+                }
+                if (contract == null) {
+                    editor.setDerivedProp(realm.id, "tax_share", null);
+                    editor.setDerivedProp(realm.id, "levy_share", null);
+                    editor.setDerivedProp(realm.id, "politics.vassal_loyalty", null);
+                    continue;
                 }
                 editor.setDerivedProp(realm.id, "tax_share", contract.taxShare);
                 editor.setDerivedProp(realm.id, "levy_share", contract.levyShare);
