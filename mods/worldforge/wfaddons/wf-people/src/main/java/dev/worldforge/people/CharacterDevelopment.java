@@ -25,7 +25,7 @@ public final class CharacterDevelopment {
         BATTLE_VICTORY, BATTLE_DEFEAT, SURVIVED_DANGER, BETRAYED, BETRAYED_SOMEONE,
         BEREAVEMENT, PUBLIC_SUCCESS, PUBLIC_HUMILIATION, POVERTY, WEALTH_GAIN,
         EDUCATION, PARENTAL_CARE, NEGLECT, MARRIAGE, DIVORCE, ORPHANED,
-        MENTORSHIP, SOCIAL_REJECTION, RECONCILIATION
+        MENTORSHIP, SOCIAL_REJECTION, RECONCILIATION, COMRADE_FALLEN
     }
 
     /** Stable psychological dimensions; unlike mood, these change slowly and belong to the person. */
@@ -291,12 +291,27 @@ public final class CharacterDevelopment {
         c.props.put(countKey, count + 1);
         int step = Math.max(1, intensity / 2);
         String[] growth = switch (experience) {
-            case BATTLE_VICTORY -> { adjustDrive(c,Drive.PRESTIGE,step); adjustTemperament(c,Temperament.RISK,1); yield new String[]{"brave","confident"}; }
-            case BATTLE_DEFEAT -> { adjustTemperament(c,Temperament.RISK,-step); adjustTemperament(c,Temperament.DISCIPLINE,1); yield new String[]{"cautious","resilient"}; }
+            case BATTLE_VICTORY -> {
+                adjustDrive(c,Drive.PRESTIGE,step); adjustTemperament(c,Temperament.RISK,1);
+                changeStress(c,-intensity*2); setMilitaryMorale(c,militaryMorale(c)+intensity*5);
+                setMood(c,Mood.INSPIRED,worldMinute,3L*1440L,"battle victory");
+                yield new String[]{"brave","confident"};
+            }
+            case BATTLE_DEFEAT -> {
+                adjustTemperament(c,Temperament.RISK,-step); adjustTemperament(c,Temperament.DISCIPLINE,1);
+                changeStress(c,intensity*5); setMilitaryMorale(c,militaryMorale(c)-intensity*7);
+                setMood(c,Mood.STRESSED,worldMinute,7L*1440L,"battle defeat");
+                yield new String[]{"cautious","resilient"};
+            }
             case SURVIVED_DANGER -> { adjustTemperament(c,Temperament.STABILITY,step); yield new String[]{"resilient","brave"}; }
             case BETRAYED -> { adjustTemperament(c,Temperament.STABILITY,-step); adjustDrive(c,Drive.SECURITY,step*2); yield new String[]{"paranoid","cynical"}; }
             case BETRAYED_SOMEONE -> { adjustDrive(c,Drive.POWER,step); adjustTemperament(c,Temperament.EMPATHY,-step); yield new String[]{"deceitful","opportunistic"}; }
-            case BEREAVEMENT -> { adjustTemperament(c,Temperament.STABILITY,-step); adjustTemperament(c,Temperament.EMPATHY,1); adjustDrive(c,Drive.FAMILY,step); yield new String[]{"melancholic","compassionate"}; }
+            case BEREAVEMENT -> {
+                adjustTemperament(c,Temperament.STABILITY,-step); adjustTemperament(c,Temperament.EMPATHY,1);
+                adjustDrive(c,Drive.FAMILY,step); changeStress(c,intensity*8);
+                setMood(c,Mood.SAD,worldMinute,Math.max(3L,intensity*7L)*1440L,"bereavement");
+                yield new String[]{"melancholic","compassionate"};
+            }
             case PUBLIC_SUCCESS -> { adjustDrive(c,Drive.PRESTIGE,step*2); adjustTemperament(c,Temperament.AMBITION,1); yield new String[]{"ambitious","confident"}; }
             case PUBLIC_HUMILIATION -> { adjustTemperament(c,Temperament.STABILITY,-step); adjustDrive(c,Drive.SECURITY,step); yield new String[]{"humble","paranoid"}; }
             case POVERTY -> { adjustDrive(c,Drive.SECURITY,step*2); yield new String[]{"resourceful","cautious"}; }
@@ -310,6 +325,13 @@ public final class CharacterDevelopment {
             case MENTORSHIP -> { adjustTemperament(c,Temperament.CURIOSITY,step); adjustDrive(c,Drive.KNOWLEDGE,step*2); yield new String[]{"scholar","diligent"}; }
             case SOCIAL_REJECTION -> { adjustTemperament(c,Temperament.SOCIABILITY,-step); adjustDrive(c,Drive.SECURITY,step); yield new String[]{"shy","cynical"}; }
             case RECONCILIATION -> { adjustTemperament(c,Temperament.STABILITY,step); adjustTemperament(c,Temperament.EMPATHY,1); yield new String[]{"forgiving","compassionate"}; }
+            case COMRADE_FALLEN -> {
+                adjustTemperament(c,Temperament.STABILITY,-step); adjustTemperament(c,Temperament.EMPATHY,step);
+                adjustDrive(c,Drive.COMMUNITY,step*2); changeStress(c,intensity*6);
+                setMilitaryMorale(c,militaryMorale(c)-intensity*5);
+                setMood(c,Mood.SAD,worldMinute,Math.max(2L,intensity*4L)*1440L,"comrade fallen");
+                yield new String[]{"loyal","resilient"};
+            }
         };
         String growthKey = "personality.growth." + growth[0];
         int progress = c.props.get(growthKey) instanceof Number n ? Math.max(0,n.intValue()) : 0;
@@ -446,6 +468,21 @@ public final class CharacterDevelopment {
         while(history.size()>24)history.remove(0);
         c.props.put("military.injury.history",history);
         return next;
+    }
+
+    /** One physical hit produces one durable wound and one trauma response. */
+    public static boolean recordCombatInjury(Character c,int severity,String eventId,String cause,long worldMinute) {
+        Objects.requireNonNull(c);
+        if(severity<1||severity>3||eventId==null||eventId.isBlank()||worldMinute<0)
+            throw new IllegalArgumentException("invalid combat injury event");
+        if(!remember(c,"combat:injury:"+eventId,"combat_injury","",
+                cause==null?"combat":cause,-severity*12,worldMinute)) return false;
+        recordInjury(c,severity,cause,worldMinute);
+        changeStress(c,severity*5);
+        setMilitaryMorale(c,militaryMorale(c)-severity*7);
+        setMood(c,severity>=3?Mood.AFRAID:Mood.STRESSED,worldMinute,(long)(severity+1)*1440L,
+                cause==null?"combat injury":cause);
+        return true;
     }
 
     public static int injurySeverity(Character c) {

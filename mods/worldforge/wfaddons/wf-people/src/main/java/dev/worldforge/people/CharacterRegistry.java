@@ -279,10 +279,49 @@ public final class CharacterRegistry {
         for (Character.Post p : vacated) for (Listener l : listeners) l.dismissed(c, p.role, p.place);
         c.props.remove("population.entity_bindings");
         int deathYear = c.props.get("population.death_year") instanceof Number n ? n.intValue() : 0;
+        recordBereavement(c, deathYear);
         for (Listener l : listeners) l.died(c);
         publish(c, new LifecycleEvent(LifecycleKind.DIED, c.id, "", "", deathYear));
         c.props.put("death.lifecycle.completed", true);
         return vacated;
+    }
+
+    /** Family and trusted friends remember a death on their own canonical Character records. */
+    private void recordBereavement(Character deceased,int deathYear) {
+        if(Boolean.TRUE.equals(deceased.props.get("death.bereavement.completed"))) return;
+        long minute=Math.max(0L,(long)deathYear*525600L);
+        for(Character survivor:byId.values()) {
+            if(survivor==deceased||!survivor.alive) continue;
+            int intensity=0;
+            if(deceased.spouse.equals(survivor.id)||survivor.spouse.equals(deceased.id)
+                    ||deceased.father.equals(survivor.id)||deceased.mother.equals(survivor.id)
+                    ||survivor.father.equals(deceased.id)||survivor.mother.equals(deceased.id)
+                    ||deceased.children.contains(survivor.id)||survivor.children.contains(deceased.id)) intensity=4;
+            else {
+                boolean sibling=(!deceased.father.isBlank()&&deceased.father.equals(survivor.father))
+                        ||(!deceased.mother.isBlank()&&deceased.mother.equals(survivor.mother));
+                if(sibling) intensity=3;
+                else {
+                    int relationship=relationshipScore(survivor,deceased.globalId);
+                    if(relationship>=70) intensity=3;
+                    else if(relationship>=35) intensity=2;
+                }
+            }
+            if(intensity==0) continue;
+            String eventId="death:bereavement:"+deceased.globalId+":"+survivor.globalId;
+            CharacterDevelopment.recordExperience(survivor,CharacterDevelopment.Experience.BEREAVEMENT,
+                    eventId,"lost "+deceased.name,minute,intensity);
+            CharacterDevelopment.remember(survivor,eventId+":memory","bereavement",deceased.globalId,
+                    "death of "+deceased.name,-intensity*15,minute);
+        }
+        deceased.props.put("death.bereavement.completed",true);
+    }
+
+    private static int relationshipScore(Character observer,String subjectGlobalId) {
+        Object raw=observer.props.get("social.relationships");
+        if(!(raw instanceof Map<?,?> relationships)) return 0;
+        Object value=relationships.get(subjectGlobalId);
+        return value instanceof Number n?Math.max(-100,Math.min(100,n.intValue())):0;
     }
 
     public List<Character> holders(String role, String place) {

@@ -26,6 +26,7 @@ import dev.worldforge.troops.Squads;
 import dev.worldforge.troops.ArmyHierarchy;
 import dev.worldforge.troops.ArmyRef;
 import dev.worldforge.troops.MilitaryDeathLedger;
+import dev.worldforge.troops.MilitaryPsychology;
 import dev.worldforge.troops.MilitaryMusterLedger;
 import dev.worldforge.troops.OperationalSupply;
 import dev.worldforge.troops.TroopDefs;
@@ -615,8 +616,11 @@ public class TroopsMod {
     static void recordInjury(TroopEntity troop,int severity,String cause) {
         PersonBinding binding=bindPerson(troop,false);
         if(binding==null||!binding.character().alive)return;
-        CharacterDevelopment.recordInjury(binding.character(),severity,cause,
-                Math.max(0,troop.level().getDayTime()));
+        long minute=Math.max(0,troop.level().getDayTime()/20L);
+        int nextInjury=CharacterDevelopment.injuryCount(binding.character())+1;
+        String eventId="hit:"+troop.getUUID()+":"+troop.level().getGameTime()+":"+nextInjury;
+        if(MilitaryPsychology.recordInjury(binding.character(),severity,eventId,cause,minute))
+            troop.setMorale(CharacterDevelopment.militaryMorale(binding.character()));
     }
 
     static double injuryCombatMultiplier(TroopEntity troop) {
@@ -691,6 +695,22 @@ public class TroopsMod {
             characterId = binding.character().globalId;
         }
 
+        Character fallen = PeopleMod.authority().getGlobal(characterId);
+        long worldMinute = Math.max(0,troop.level().getDayTime()/20L);
+        if (fallen != null && fallen.alive) {
+            Entity attackerEntity = source == null ? null : source.getEntity();
+            if (attackerEntity != null)
+                MilitaryPsychology.recordBattleOutcome(fallen, false,
+                        "battle:death-defeat:" + fallen.globalId, worldMinute, 2);
+            recordComradeLosses(troop, fallen, worldMinute);
+            if (attackerEntity instanceof TroopEntity attacker && attacker != troop) {
+                PersonBinding killer = bindPerson(attacker, false);
+                if (killer != null && killer.character() != null && killer.character().alive)
+                    MilitaryPsychology.recordBattleOutcome(killer.character(), true,
+                            "battle:kill:" + fallen.globalId + ":" + killer.character().globalId,
+                            worldMinute, 2);
+            }
+        }
         String cause = source == null ? "combat" : source.getMsgId();
         if (cause == null || cause.isBlank()) cause = "combat";
         MilitaryDeathLedger.Pending pending;
@@ -713,6 +733,22 @@ public class TroopsMod {
         boolean completed = completePendingDeath(pending, false);
         if (!completed) actionPersistenceBlocked = true;
         return completed;
+    }
+
+    private static void recordComradeLosses(TroopEntity fallenBody, Character fallen, long worldMinute) {
+        String squadId=fallenBody.squadId();
+        Squads.Squad squad=squadId==null||squadId.isBlank()?null:SQUADS.get(squadId);
+        if(squad==null) return;
+        for(String memberId:new ArrayList<>(squad.members)) {
+            if(memberId.equals(fallenBody.getUUID().toString())) continue;
+            TroopEntity body=LIVE.get(memberId);
+            if(body==null||!body.isAlive()) continue;
+            PersonBinding witness=bindPerson(body,false);
+            if(witness==null||witness.character()==null||!witness.character().alive) continue;
+            MilitaryPsychology.recordComradeLoss(witness.character(),fallen,
+                    "battle:comrade-fallen:"+fallen.globalId+":"+witness.character().globalId,worldMinute);
+            body.setMorale(CharacterDevelopment.militaryMorale(witness.character()));
+        }
     }
 
     /** Resolves and commits a pending Character death/estate, then acknowledges the outbox. */

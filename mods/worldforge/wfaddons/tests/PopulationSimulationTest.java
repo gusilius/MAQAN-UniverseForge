@@ -6,6 +6,7 @@ import dev.worldforge.people.PopulationSimulation;
 import dev.worldforge.people.LifeSimulation;
 import dev.worldforge.people.CharacterDevelopment;
 import dev.worldforge.people.CharacterStats;
+import dev.worldforge.troops.MilitaryPsychology;
 import dev.worldforge.people.ProfessionDefs;
 import dev.worldforge.progress.Progress;
 import dev.worldforge.progress.ProgressDefs;
@@ -394,12 +395,13 @@ public final class PopulationSimulationTest {
                 psychological, "test:betrayal:one", 10);
         ok(stressAfter > 0 && duplicateConductDelta == 0 && CharacterDevelopment.stress(evolving) == stressAfter,
                 "acting against honesty creates stress and duplicate conduct receipts are ignored");
+        CharacterDevelopment.setDrive(evolving, CharacterDevelopment.Drive.SECURITY, 40);
         CharacterDevelopment.recordExperience(evolving, CharacterDevelopment.Experience.BETRAYED,
                 "test:betrayed:one", "trusted ally betrayed Mara", 20, 2);
         CharacterDevelopment.recordExperience(evolving, CharacterDevelopment.Experience.BETRAYED,
                 "test:betrayed:two", "second betrayal", 30, 2);
         ok(CharacterDevelopment.memories(evolving, 10).size() >= 3
-                        && CharacterDevelopment.drive(evolving, CharacterDevelopment.Drive.SECURITY) > 50,
+                        && CharacterDevelopment.drive(evolving, CharacterDevelopment.Drive.SECURITY) > 40,
                 "personal memory and repeated betrayal alter long-term security motivation");
         CharacterDevelopment.recordExperience(evolving, CharacterDevelopment.Experience.BETRAYED,
                 "test:betrayed:three", "third betrayal", 40, 2);
@@ -425,6 +427,52 @@ public final class PopulationSimulationTest {
         CharacterDevelopment.upbringingTick(inheritedChild, parentA, parentB, 281);
         ok(((Number) inheritedChild.props.get("family.upbringing.last_year")).intValue() == 281,
                 "replayed upbringing year is idempotent");
+
+        Character wounded = registry.create("Ser Edric", "House North", "north", "m", 270);
+        CharacterDevelopment.setMilitaryMorale(wounded, 90);
+        boolean injuryApplied = MilitaryPsychology.recordInjury(wounded, 2, "test:combat-hit", "arrow", 900);
+        int injuryStress = CharacterDevelopment.stress(wounded);
+        int injuryMorale = CharacterDevelopment.militaryMorale(wounded);
+        boolean duplicateInjury = MilitaryPsychology.recordInjury(wounded, 2, "test:combat-hit", "arrow", 900);
+        ok(injuryApplied && !duplicateInjury && CharacterDevelopment.injurySeverity(wounded) == 2
+                        && injuryStress > 0 && injuryMorale < 90,
+                "combat wounds create one persistent injury, trauma and morale loss per hit receipt");
+
+        Character fallenComrade = registry.create("Dain", "House North", "north", "m", 268);
+        Character witness = registry.create("Ronan", "House North", "north", "m", 269);
+        MilitaryPsychology.recordComradeLoss(witness, fallenComrade, "test:comrade-loss", 1200);
+        int comradeBond = ResidentSocial.score(witness, fallenComrade.globalId);
+        int comradeStress = CharacterDevelopment.stress(witness);
+        MilitaryPsychology.recordComradeLoss(witness, fallenComrade, "test:comrade-loss", 1200);
+        ok(comradeBond > 0 && comradeStress > 0
+                        && ResidentSocial.score(witness, fallenComrade.globalId) == comradeBond
+                        && CharacterDevelopment.stress(witness) == comradeStress,
+                "a fallen squadmate strengthens a canonical social bond and records grief exactly once");
+
+        Character victor = registry.create("Captain Arlen", "House North", "north", "m", 250);
+        CharacterDevelopment.setMilitaryMorale(victor, 50);
+        MilitaryPsychology.recordBattleOutcome(victor, true, "test:battle-victory", 1500, 2);
+        int victoryMorale = CharacterDevelopment.militaryMorale(victor);
+        MilitaryPsychology.recordBattleOutcome(victor, true, "test:battle-victory", 1500, 2);
+        ok(victoryMorale > 50 && CharacterDevelopment.militaryMorale(victor) == victoryMorale,
+                "battle victory raises canonical soldier morale and is replay-safe");
+
+        Character deceased = registry.create("Lord Alaric", "House North", "north", "m", 230);
+        Character widow = registry.create("Lady Elin", "House North", "north", "f", 232);
+        Character orphanedChild = registry.addChild(deceased, widow, "Tomas", "m", 260);
+        Character trustedFriend = registry.create("Old Friend", "House North", "north", "m", 231);
+        registry.marry(deceased.id, widow.id, 260);
+        ResidentSocial.socialize(deceased, trustedFriend, 75);
+        PopulationSimulation.die(registry, deceased.id, 304, "battle");
+        int widowGrief = CharacterDevelopment.stress(widow);
+        int childGrief = CharacterDevelopment.stress(orphanedChild);
+        int friendGrief = CharacterDevelopment.stress(trustedFriend);
+        registry.kill(deceased.id);
+        ok(widowGrief > 0 && childGrief > 0 && friendGrief > 0
+                        && CharacterDevelopment.stress(widow) == widowGrief
+                        && CharacterDevelopment.stress(orphanedChild) == childGrief
+                        && CharacterDevelopment.stress(trustedFriend) == friendGrief,
+                "death creates idempotent bereavement for spouse, child and trusted friend");
 
         System.out.println(failures == 0 ? "ALL OK" : failures + " FAILED");
         if (failures > 0) System.exit(1);
