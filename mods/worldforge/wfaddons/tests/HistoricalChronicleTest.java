@@ -26,6 +26,7 @@ public final class HistoricalChronicleTest {
                 List.of("realm_north"), 7L * 365L * 1440L);
 
         check(book.size() == 2, "only published world facts enter the chronicle; rejected proposals stay out");
+        check(source.size() == 3, "the book is a read-only projection and never changes the source event journal");
         check(!book.record(war, 12, 300), "duplicate event delivery is idempotent");
         List<String> pages = book.book(10);
         String rendered = String.join("\n", pages);

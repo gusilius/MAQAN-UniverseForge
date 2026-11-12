@@ -12,8 +12,9 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Durable, book-oriented rendering of events emitted by authoritative game domains.
- * It never creates events: it only turns confirmed EventLog facts into readable prose.
+ * Read-only, book-oriented presentation of events emitted by authoritative game domains.
+ * It has no decision engine, RNG, simulation clock, or domain-state mutation. It only
+ * turns confirmed EventLog facts into readable prose; disabling it cannot affect gameplay.
  */
 public final class HistoricalChronicle {
     public static final int DAYS_PER_YEAR = 365;
