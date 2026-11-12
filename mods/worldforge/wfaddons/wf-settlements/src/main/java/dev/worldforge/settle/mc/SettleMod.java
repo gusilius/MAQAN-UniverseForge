@@ -139,7 +139,8 @@ public class SettleMod {
             dev.worldforge.mod.TitleData.Title province = map.provinceAt(colony.cx, colony.cz);
             dev.worldforge.mod.TitleData.Realm realm = province == null || map.titles == null
                     ? null : map.titles.realmOf(province);
-            String realmId = realm == null ? "" : realm.id;
+            String realmId = colony.realmId != null && !colony.realmId.isBlank()
+                    ? colony.realmId : realm == null ? "" : realm.id;
             String raceId = realm == null ? "" : propertyString(realm.props, "race");
             String cultureId = realm == null ? "" : propertyString(realm.props, "culture");
             String provinceFeatureId = province == null ? "" :
@@ -147,7 +148,7 @@ public class SettleMod {
             int y = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
                     colony.cx, colony.cz);
             Map<String, String> attrs = new java.util.LinkedHashMap<>();
-            attrs.put("population", Integer.toString(colony.s.workers.size()));
+            attrs.put("population", Integer.toString(colony.s.population()));
             attrs.put("housing", Integer.toString(colony.s.housing()));
             attrs.put("settlement_type", colony.s.typeId == null ? "" : colony.s.typeId);
             attrs.put("owner_assigned", Boolean.toString(colony.owner != null && !colony.owner.isBlank()));

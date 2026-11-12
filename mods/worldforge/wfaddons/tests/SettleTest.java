@@ -563,6 +563,29 @@ public class SettleTest {
                         && Math.abs(spendOnce.amount("stone") - 16) < 1e-8,
                 "complete settlement spend receipts survive treasury reload");
 
+        // Emergent settlements hold a canonical resident count distinct from their adult workforce.
+        dev.worldforge.mod.economy.TreasuryService.replace(new dev.worldforge.mod.economy.TreasuryLedger());
+        Settlement canonicalPopulation = new Settlement("canonical_population", "Canonical Population", d);
+        canonicalPopulation.setLedgerScope("minecraft:overworld");
+        canonicalPopulation.add("food", 100);
+        canonicalPopulation.setCanonicalPopulation(20);
+        ok(canonicalPopulation.population() == 20 && canonicalPopulation.workers.isEmpty(),
+                "canonical residents are counted without fabricating adult Worker projections");
+        double canonicalFood = canonicalPopulation.amount("food");
+        canonicalPopulation.tick(10);
+        ok(Math.abs(canonicalPopulation.amount("food") - (canonicalFood - 4.0)) < 1e-8,
+                "food consumption is calculated from all canonical residents, not only employed adults");
+        ok(canonicalPopulation.workers.isEmpty(),
+                "settlement growth does not create duplicate residents when canonical population simulation owns demography");
+        ok(Math.abs(canonicalPopulation.taxPerMin() - 6.0) < 1e-8,
+                "basic settlement tax uses the full resident population while retaining a separate workforce");
+        String canonicalPopulationSnapshot = canonicalPopulation.toJson();
+        Settlement canonicalPopulationReloaded = Settlement.fromJson(canonicalPopulationSnapshot, d);
+        ok(canonicalPopulationReloaded.hasCanonicalPopulation()
+                        && canonicalPopulationReloaded.population() == 20
+                        && canonicalPopulationReloaded.workers.isEmpty(),
+                "canonical resident population projection survives settlement reload");
+
         System.out.println(fails == 0 ? "ALL OK" : fails + " FAILED");
         if (fails > 0) System.exit(1);
     }

@@ -965,9 +965,13 @@ public final class Settlement {
         starveTimer += dt;
         if (starveTimer >= STARVE_EVERY) {
             starveTimer = 0;
-            Worker w = workers.get(workers.size() - 1);
-            removeWorker(w, "death:starvation");
-            say(w.name + " умер от голода");
+            // Only an actual adult Worker can be removed here. Non-working canonical residents
+            // remain in the people registry and are reconciled by the world population engine.
+            if (!workers.isEmpty()) {
+                Worker w = workers.get(workers.size() - 1);
+                removeWorker(w, "death:starvation");
+                say(w.name + " умер от голода");
+            }
         }
     }
 

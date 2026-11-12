@@ -370,7 +370,7 @@ public final class WorldSimMod {
             JsonObject item = new JsonObject();
             item.addProperty("id", s.id);
             item.addProperty("realm_id", settlementRealm);
-            int residentPopulation = Math.max(s.workers.size(), colony.residentCharacterIds.size());
+            int residentPopulation = s.population();
             item.addProperty("population", residentPopulation);
             item.addProperty("food", fixed(s.amount("food")));
             item.addProperty("food_capacity", fixed(s.capacity("food")));
@@ -510,6 +510,7 @@ public final class WorldSimMod {
                             .map(person -> person.globalId).toList();
                     if (!SettleMod.replaceCanonicalResidentsInMemory(colony.s.id, residentIds))
                         LOGGER.error("wf_worldsim: canonical residents for settlement {} could not be staged", settlementId);
+                    colony.s.setCanonicalPopulation(residentIds.size());
                     for (Worker worker : new ArrayList<>(colony.s.workers)) {
                         if (worker.person == null || worker.person.isBlank() || residentIds.contains(worker.person)) continue;
                         dev.worldforge.people.Character former = PeopleMod.authority().getGlobal(worker.person);
