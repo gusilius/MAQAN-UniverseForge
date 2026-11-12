@@ -3,6 +3,7 @@ package dev.worldforge.tests;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.PopulationSimulation;
+import dev.worldforge.people.NameBank;
 import dev.worldforge.settle.ResidentLifeEvents;
 import dev.worldforge.settle.ResidentSocial;
 
@@ -59,6 +60,20 @@ public final class ResidentLifeEventsTest {
             check("Речной".equals(surnameChild.props.get("identity.surname")),
                     "new children inherit the canonical family surname from their father");
         }
+        NameBank birthNames = new NameBank();
+        birthNames.add("{\"default\":\"dwarf\",\"cultures\":{\"dwarf\":{\"male\":[\"Торин\"],\"female\":[\"Диса\"],\"houses\":[\"Каменный Молот\"]}},\"races\":{\"deep_dwarf\":{\"male\":[\"Двалин\"],\"female\":[\"Груна\"],\"houses\":[\"Чёрный Кремень\"]}},\"race_parents\":{\"deep_dwarf\":\"dwarf\"}}");
+        CharacterRegistry namedFamily = new CharacterRegistry();
+        Character namedFather = namedFamily.create("Отец", "", "dwarf", "m", 1980);
+        Character namedMother = namedFamily.create("Мать", "", "dwarf", "f", 1980);
+        namedFather.props.put("origin.race", "deep_dwarf");
+        namedMother.props.put("origin.race", "deep_dwarf");
+        namedFamily.marry(namedFather.id, namedMother.id, 2000);
+        for (int year = 2000; year <= 2022 && namedMother.children.isEmpty(); year++)
+            ResidentLifeEvents.yearly(namedFamily, year, birthNames);
+        Character namedChild = namedMother.children.isEmpty() ? null : namedFamily.get(namedMother.children.get(0));
+        check(namedChild != null && List.of("Торин", "Двалин", "Диса", "Груна").contains(namedChild.name),
+                "natural births use the shared race-aware NameBank instead of generic placeholder names");
+
         CharacterRegistry restored = new CharacterRegistry();
         restored.fromJson(registry.toJson());
         Character savedMother = restored.get(mother.id);

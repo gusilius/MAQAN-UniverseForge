@@ -88,7 +88,9 @@ public final class Courts {
         TitleData.Realm realm = place.startsWith("realm:") ? d.realms.get(place.substring(6)) : null;
         String preset = realm != null && role.ruler && realm.ruler != null && !realm.ruler.isBlank() ? realm.ruler : null;   // правитель, заданный вручную, остаётся
         Character c = reg.create(preset != null ? preset : first, house, culture, male ? "m" : "f", year - age);
-        if (!race.isBlank()) c.props.put("origin.race", race);\n        if (house.isEmpty() && !pool.surnames.isEmpty()) c.props.put("identity.surname", pick(pool.surnames, r));\n        reg.appoint(c.id, role.id, place);
+        if (!race.isBlank()) c.props.put("origin.race", race);
+        if (house.isEmpty() && !pool.surnames.isEmpty()) c.props.put("identity.surname", pick(pool.surnames, r));
+        reg.appoint(c.id, role.id, place);
         if (role.ruler && realm != null && preset == null && ed != null) ed.setRuler(realm.id, c.name + (house.isEmpty() ? "" : " " + house));
         if (role.family) makeFamily(reg, pool, c, year, r, race);
     }
@@ -98,7 +100,9 @@ public final class Courts {
         String spouseHouse;
         do { spouseHouse = pick(pool.houses, r); } while (spouseHouse.equals(head.house) && pool.houses.size() > 1);
         Character sp = reg.create(pick(headMale ? pool.female : pool.male, r), spouseHouse, head.culture, headMale ? "f" : "m", head.birthYear + r.nextInt(9) - 4);
-        if (!race.isBlank()) sp.props.put("origin.race", race);\n        if (spouseHouse.isEmpty() && !pool.surnames.isEmpty()) sp.props.put("identity.surname", pick(pool.surnames, r));\n        reg.marry(head.id, sp.id);
+        if (!race.isBlank()) sp.props.put("origin.race", race);
+        if (spouseHouse.isEmpty() && !pool.surnames.isEmpty()) sp.props.put("identity.surname", pick(pool.surnames, r));
+        reg.marry(head.id, sp.id);
         int age = year - head.birthYear;
         int kids = age < 20 ? 0 : r.nextInt(4);
         Character father = headMale ? head : sp, mother = headMale ? sp : head;
@@ -106,7 +110,9 @@ public final class Courts {
             int lo = Math.max(father.birthYear, mother.birthYear) + 18, born = lo + r.nextInt(Math.max(1, year - lo + 1));
             if (born > year) break;
             boolean m = r.nextBoolean();
-            Character child = reg.addChild(father, mother, pick(m ? pool.male : pool.female, r), m ? "m" : "f", born);\n            if (!race.isBlank()) child.props.put("origin.race", race);\n            if (child.house.isEmpty() && !pool.surnames.isEmpty()) child.props.put("identity.surname", father.props.getOrDefault("identity.surname", pick(pool.surnames, r)));
+            Character child = reg.addChild(father, mother, pick(m ? pool.male : pool.female, r), m ? "m" : "f", born);
+            if (!race.isBlank()) child.props.put("origin.race", race);
+            if (child.house.isEmpty() && !pool.surnames.isEmpty()) child.props.put("identity.surname", father.props.getOrDefault("identity.surname", pick(pool.surnames, r)));
         }
     }
 }

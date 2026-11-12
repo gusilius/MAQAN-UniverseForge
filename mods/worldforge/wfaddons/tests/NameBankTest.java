@@ -17,7 +17,7 @@ public final class NameBankTest {
                  "cultures":{"northern":{"male":["Эйрик"],"female":["Астрид"],"houses":["Воронья Кровь"]},
                              "dwarf":{"male":["Торин"],"female":["Диса"],"houses":["Каменный Молот"]}},
                  "races":{"dwarf":{"male":["Брунар"],"female":["Бринья"],"houses":["Глубокая Кузня"],
-                                    "settlements":["Кхазад-Рун"],"realms":["Подгорная Корона"]},
+                                    "settlements":["Кхазад-Рун"],"realms":["Подгорная Корона"],"guilds":["Гильдия Подгорная Корона"]},
                           "deep_dwarf":{"male":["Двалин"],"female":["Груна"],"houses":["Чёрный Кремень"]}},
                  "race_parents":{"deep_dwarf":"dwarf"}}
                 """);
@@ -31,6 +31,8 @@ public final class NameBankTest {
                 "realm naming uses the race-specific data pack pool");
         check("Кхазад-Рун".equals(bank.generate("deep_dwarf", "dwarf", "settlements", new Random(1))),
                 "settlement naming uses the race-specific data pack pool");
+        check("Гильдия Подгорная Корона".equals(bank.generate("deep_dwarf", "dwarf", "guilds", new Random(1))),
+                "guild names are generated from the same inherited race lineage");
         check("Воронья Кровь".equals(bank.generate("unknown", "unknown", "houses", new Random(1))),
                 "unknown cultures fall back to the configured default pool");
         check(bank.pickGivenName("deep_dwarf", "dwarf", "m", new Random(7)) != null,

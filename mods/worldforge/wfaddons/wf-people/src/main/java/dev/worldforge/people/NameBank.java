@@ -16,13 +16,23 @@ public final class NameBank {
                 clans = new ArrayList<>(), settlements = new ArrayList<>(), realms = new ArrayList<>(),
                 regions = new ArrayList<>(), provinces = new ArrayList<>(), rivers = new ArrayList<>(),
                 mountains = new ArrayList<>(), forests = new ArrayList<>(), taverns = new ArrayList<>(),
-                ships = new ArrayList<>(), orders = new ArrayList<>();
+                ships = new ArrayList<>(), orders = new ArrayList<>(), factions = new ArrayList<>(),
+                guilds = new ArrayList<>(), companies = new ArrayList<>(), armies = new ArrayList<>(),
+                regiments = new ArrayList<>(), castles = new ArrayList<>(), fortresses = new ArrayList<>(),
+                districts = new ArrayList<>(), landmarks = new ArrayList<>(), roads = new ArrayList<>(),
+                markets = new ArrayList<>(), temples = new ArrayList<>(), religions = new ArrayList<>(),
+                artifacts = new ArrayList<>(), monuments = new ArrayList<>();
         private void merge(Pool other) {
             mergeList(male, other.male); mergeList(female, other.female); mergeList(surnames, other.surnames);
             mergeList(houses, other.houses); mergeList(dynasties, other.dynasties); mergeList(clans, other.clans);
             mergeList(settlements, other.settlements); mergeList(realms, other.realms); mergeList(regions, other.regions);
             mergeList(provinces, other.provinces); mergeList(rivers, other.rivers); mergeList(mountains, other.mountains);
             mergeList(forests, other.forests); mergeList(taverns, other.taverns); mergeList(ships, other.ships); mergeList(orders, other.orders);
+            mergeList(factions, other.factions); mergeList(guilds, other.guilds); mergeList(companies, other.companies);
+            mergeList(armies, other.armies); mergeList(regiments, other.regiments); mergeList(castles, other.castles);
+            mergeList(fortresses, other.fortresses); mergeList(districts, other.districts); mergeList(landmarks, other.landmarks);
+            mergeList(roads, other.roads); mergeList(markets, other.markets); mergeList(temples, other.temples);
+            mergeList(religions, other.religions); mergeList(artifacts, other.artifacts); mergeList(monuments, other.monuments);
         }
         private static void mergeList(List<String> target, List<String> source) {
             for (String value : source) if (!target.contains(value)) target.add(value);
@@ -30,7 +40,9 @@ public final class NameBank {
     }
 
     private static final List<String> CATEGORIES = List.of("male","female","surnames","houses","dynasties","clans",
-            "settlements","realms","regions","provinces","rivers","mountains","forests","taverns","ships","orders");
+            "settlements","realms","regions","provinces","rivers","mountains","forests","taverns","ships","orders",
+            "factions","guilds","companies","armies","regiments","castles","fortresses","districts","landmarks",
+            "roads","markets","temples","religions","artifacts","monuments");
     private final Map<String, Pool> cultures = new LinkedHashMap<>(), races = new LinkedHashMap<>();
     private final Map<String, String> raceParents = new LinkedHashMap<>();
     private String def = "";
@@ -72,7 +84,12 @@ public final class NameBank {
             case "settlements" -> p.settlements; case "realms" -> p.realms; case "regions" -> p.regions;
             case "provinces" -> p.provinces; case "rivers" -> p.rivers; case "mountains" -> p.mountains;
             case "forests" -> p.forests; case "taverns" -> p.taverns; case "ships" -> p.ships;
-            case "orders" -> p.orders; default -> throw new IllegalArgumentException("Неизвестная категория имён: " + category);
+            case "orders" -> p.orders; case "factions" -> p.factions; case "guilds" -> p.guilds;
+            case "companies" -> p.companies; case "armies" -> p.armies; case "regiments" -> p.regiments;
+            case "castles" -> p.castles; case "fortresses" -> p.fortresses; case "districts" -> p.districts;
+            case "landmarks" -> p.landmarks; case "roads" -> p.roads; case "markets" -> p.markets;
+            case "temples" -> p.temples; case "religions" -> p.religions; case "artifacts" -> p.artifacts;
+            case "monuments" -> p.monuments; default -> throw new IllegalArgumentException("Неизвестная категория имён: " + category);
         };
     }
 

@@ -152,9 +152,18 @@ public final class Genesis {
     public String rulerTitle(Draft d, String tier) { return defs.style(chainLeafFirst(d.race), "ruler_" + tier, "Правитель"); }
 
     public String randomName(Draft d, Random rng) {
-        List<String> pool = null;
-        for (String r : chainLeafFirst(d.race)) if (defs.namePool.containsKey(r) && !defs.namePool.get(r).isEmpty()) { pool = defs.namePool.get(r); break; }
-        if (pool == null) pool = defs.namePool.getOrDefault("_default", List.of("Новый Дом"));
+        Objects.requireNonNull(rng, "rng");
+        LinkedHashSet<String> inherited = new LinkedHashSet<>();
+        for (String race : chainLeafFirst(d.race)) {
+            List<String> names = defs.namePool.get(race);
+            if (names != null) for (String name : names)
+                if (name != null && !name.isBlank()) inherited.add(name.trim());
+        }
+        if (inherited.isEmpty()) {
+            List<String> fallback = defs.namePool.getOrDefault("_default", List.of("Новый Дом"));
+            inherited.addAll(fallback);
+        }
+        List<String> pool = new ArrayList<>(inherited);
         return pool.get(rng.nextInt(pool.size()));
     }
 

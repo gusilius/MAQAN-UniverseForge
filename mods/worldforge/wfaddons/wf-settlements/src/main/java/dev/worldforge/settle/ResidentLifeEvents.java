@@ -3,6 +3,7 @@ package dev.worldforge.settle;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.PopulationSimulation;
+import dev.worldforge.people.NameBank;
 
 import java.util.*;
 
@@ -14,6 +15,11 @@ public final class ResidentLifeEvents {
     private ResidentLifeEvents() {}
 
     public static void yearly(CharacterRegistry registry, int year) {
+        yearly(registry, year, null);
+    }
+
+    /** Uses the shared data-pack name bank; the legacy overload remains for pure-domain callers. */
+    public static void yearly(CharacterRegistry registry, int year, NameBank names) {
         if (registry == null || year < 1) return;
         List<Character> people = new ArrayList<>(registry.all());
         people.sort(Comparator.comparing(c -> c.id));
@@ -42,6 +48,17 @@ public final class ResidentLifeEvents {
             if (Math.floorMod(Objects.hash(mother.id, father.id, year, "birth"), 7) != 0) continue;
             String gender = Math.floorMod(Objects.hash(mother.id, father.id, year, "gender"), 2) == 0 ? "f" : "m";
             String childName = "Дитя семьи " + (mother.house == null || mother.house.isBlank() ? mother.name : mother.house);
+            if (names != null) {
+                String race = mother.props.get("origin.race") instanceof String mr && !mr.isBlank() ? mr
+                        : father.props.get("origin.race") instanceof String fr ? fr : "";
+                String culture = mother.culture == null || mother.culture.isBlank() ? father.culture : mother.culture;
+                try {
+                    childName = names.pickGivenName(race, culture, gender,
+                            new Random(Objects.hash(mother.globalId, father.globalId, year, "birth-name")));
+                } catch (IllegalStateException unavailablePool) {
+                    // Keep the stable family fallback if a third-party data pack has no compatible pool.
+                }
+            }
             Character child = registry.addChild(father, mother, childName, gender, year);
             child.traits.add("curious");
             child.props.put("family.father_name", father.name);

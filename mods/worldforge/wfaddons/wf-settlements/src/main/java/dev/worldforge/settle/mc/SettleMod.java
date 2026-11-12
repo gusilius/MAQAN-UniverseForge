@@ -1045,7 +1045,7 @@ public class SettleMod {
                 return LifeSimulation.Outcome.BLOCKED;
             });
         }
-        dev.worldforge.settle.ResidentLifeEvents.yearly(registry, settlement.year());
+        dev.worldforge.settle.ResidentLifeEvents.yearly(registry, settlement.year(), PeopleMod.NAMES);
     }
 
     private static void beginLifeAction(dev.worldforge.settle.Worker worker, String action,

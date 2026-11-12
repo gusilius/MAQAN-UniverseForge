@@ -50,6 +50,11 @@ public class GenesisTest {
         ok(!ge.setStart(d, "bandit_x").isEmpty(), "нет такого старта");
         ok(ge.setStart(d, "leader_village").isEmpty() && !d.settleName.isEmpty() && !d.focus.isEmpty(), "лидер: имя и направление по умолчанию: " + d.settleName);
         ok(ge.settleNoun(d, "village").equals("Горный чертог") && ge.rulerTitle(d, "capital").equals("Король под горой"), "расовые названия гнома");
+        Set<String> inheritedPlaceNames = new HashSet<>();
+        for (int seed = 0; seed < 500; seed++) inheritedPlaceNames.add(ge.randomName(d, new Random(seed)));
+        ok(inheritedPlaceNames.stream().anyMatch(g.namePool.get("mountain_dwarf")::contains)
+                        && inheritedPlaceNames.stream().anyMatch(g.namePool.get("dwarf")::contains),
+                "subrace settlement naming combines its own pool with inherited parent-culture names");
         Draft el = ge.draft("p:2"); ge.setRace(el, "wood_elf");
         ok(ge.settleNoun(el, "town").equals("Лесной город"), "подраса эльфа берёт стиль родителя");
         ok(!ge.setSettle(d, "").isEmpty() && !ge.setSettle(d, "A".repeat(40)).isEmpty() && !ge.setSettle(d, "Bad<>").isEmpty() && ge.setSettle(d, "Новый-Чертог").isEmpty(), "название поселения проверяется");
