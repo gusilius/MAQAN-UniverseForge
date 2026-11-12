@@ -65,6 +65,7 @@ public final class WorldSimMod {
     private static final Map<String, Long> lastProjectDay = new HashMap<>();
     private static final List<String> journal = new ArrayList<>();
     private static JsonObject emergenceState;
+    private static JsonObject emergenceBindings = new JsonObject();
     private static final HistoricalChronicle HISTORICAL_CHRONICLE = new HistoricalChronicle();
 
     public WorldSimMod() {
@@ -77,6 +78,8 @@ public final class WorldSimMod {
     public void onStarted(ServerStartedEvent event) {
         lastDecisionDay = Long.MIN_VALUE;
         lodTicks = 0;
+        emergenceState = null;
+        emergenceBindings = new JsonObject();
         HISTORICAL_CHRONICLE.clear();
         HISTORICAL_CHRONICLE.setStartingYear(WorldForgeApi.clock().startYear);
         publishObservers(event.getServer());
@@ -122,6 +125,7 @@ public final class WorldSimMod {
                 throw new IllegalStateException("Native emergence engine returned an invalid state frame");
             emergenceState = emergenceFrame.getAsJsonObject("state").deepCopy();
             syncEmergentPeople(server, emergenceState, WorldForgeApi.clock().year());
+            syncEmergentPolities(server, emergenceState, WorldForgeApi.clock().year());
             if (emergenceFrame.has("events") && emergenceFrame.get("events").isJsonArray()) {
                 for (var eventElement : emergenceFrame.getAsJsonArray("events")) {
                     if (!eventElement.isJsonObject()) continue;
@@ -435,31 +439,118 @@ public final class WorldSimMod {
                     registry.kill(deceased.id);
                     changed = true;
                 }
-                if (band.has("settled") && band.get("settled").getAsBoolean()) {
-                    String settlementId = "emg_" + bandId;
-                    try {
-                        int x = (int) Math.max(-29_999_000L, Math.min(29_999_000L,
-                                Math.round((band.get("x").getAsDouble() - map.w / 2.0) * Math.max(0.001, map.bpp))));
-                        int z = (int) Math.max(-29_999_000L, Math.min(29_999_000L,
-                                Math.round((band.get("z").getAsDouble() - map.h / 2.0) * Math.max(0.001, map.bpp))));
-                        String display = "Settlement " + bandId.substring(0, Math.min(8, bandId.length()));
-                        var colony = SettleMod.foundEmergent(server, server.overworld().dimension().location().toString(),
-                                settlementId, display, x, z, "worldsim:settlement:" + bandId);
-                        List<String> residentIds = residents.stream().filter(person -> person.alive)
-                                .map(person -> person.globalId).toList();
-                        if (!SettleMod.linkCanonicalResidents(server, colony.s.id, residentIds))
-                            LOGGER.error("wf_worldsim: canonical residents for settlement {} could not be durably linked", settlementId);
-                    } catch (IllegalStateException deferred) {
-                        LOGGER.warn("wf_worldsim: settlement materialization deferred for band {}: {}", bandId, deferred.getMessage());
-                    }
-                }
+
             }
             if (changed) {
                 dev.worldforge.people.Character durable = registry.all().stream()
                         .filter(person -> person.props.containsKey("emergence.band_id")).findFirst().orElse(null);
+                if (durable != null && !PeopleMod.persistCharacter(durable, server)) {
+                    LOGGER.error("wf_worldsim: emergent Character registry for map {} could not be persisted; settlement linking deferred", map.name);
+                    continue;
+                }
+                LOGGER.info("wf_worldsim: materialized canonical people for map {} (characters={})", map.name, registry.size());
+            }
+            // Persist canonical Character identities before any settlement stores their UUIDs.
+            for (var element : bands) {
+                if (!element.isJsonObject()) continue;
+                JsonObject band = element.getAsJsonObject();
+                if (!map.name.equals(band.get("map_id").getAsString()) || !band.get("settled").getAsBoolean()) continue;
+                String bandId = band.get("id").getAsString();
+                String settlementId = "emg_" + bandId;
+                try {
+                    int x = (int) Math.max(-29_999_000L, Math.min(29_999_000L,
+                            Math.round((band.get("x").getAsDouble() - map.w / 2.0) * Math.max(0.001, map.bpp))));
+                    int z = (int) Math.max(-29_999_000L, Math.min(29_999_000L,
+                            Math.round((band.get("z").getAsDouble() - map.h / 2.0) * Math.max(0.001, map.bpp))));
+                    String display = "Settlement " + bandId.substring(0, Math.min(8, bandId.length()));
+                    var colony = SettleMod.foundEmergent(server, server.overworld().dimension().location().toString(),
+                            settlementId, display, x, z, "worldsim:settlement:" + bandId);
+                    List<String> residentIds = registry.all().stream()
+                            .filter(person -> person.alive && bandId.equals(person.props.get("emergence.band_id")))
+                            .map(person -> person.globalId).toList();
+                    if (!SettleMod.linkCanonicalResidents(server, colony.s.id, residentIds))
+                        LOGGER.error("wf_worldsim: canonical residents for settlement {} could not be durably linked", settlementId);
+                } catch (IllegalStateException deferred) {
+                    LOGGER.warn("wf_worldsim: settlement materialization deferred for band {}: {}", bandId, deferred.getMessage());
+                }
+            }
+        }
+    }
+
+
+    /** Binds emergent polities to canonical rulers; succession follows actual Character identity. */
+    private static void syncEmergentPolities(MinecraftServer server, JsonObject state, int year) {
+        if (server == null || state == null || !state.has("polities") || !state.get("polities").isJsonArray()) return;
+        for (MapData map : WorldForgeMod.loadedMaps().values()) {
+            if (map == null) continue;
+            var registry = PeopleMod.registry(map);
+            if (registry == null) continue;
+            boolean changed = false;
+            for (var element : state.getAsJsonArray("polities")) {
+                if (!element.isJsonObject()) continue;
+                JsonObject polity = element.getAsJsonObject();
+                if (!map.name.equals(polity.get("map_id").getAsString())) continue;
+                String polityId = polity.get("id").getAsString();
+                String dynastyId = polity.get("dynasty_id").getAsString();
+                Set<String> bandIds = new LinkedHashSet<>();
+                if (polity.has("settlement_ids") && polity.get("settlement_ids").isJsonArray())
+                    for (var band : polity.getAsJsonArray("settlement_ids")) bandIds.add(band.getAsString());
+                List<dev.worldforge.people.Character> members = registry.all().stream()
+                        .filter(person -> person.alive && bandIds.contains(String.valueOf(person.props.get("emergence.band_id"))))
+                        .toList();
+                if (members.isEmpty()) continue;
+                JsonObject binding = emergenceBindings.has(polityId) && emergenceBindings.get(polityId).isJsonObject()
+                        ? emergenceBindings.getAsJsonObject(polityId) : new JsonObject();
+                String previousRulerId = binding.has("ruler_global_id") ? binding.get("ruler_global_id").getAsString() : "";
+                dev.worldforge.people.Character ruler = members.stream()
+                        .filter(person -> person.globalId.equals(previousRulerId)).findFirst().orElse(null);
+                if (ruler == null) {
+                    dev.worldforge.people.Character previous = registry.all().stream()
+                            .filter(person -> person.globalId.equals(previousRulerId)).findFirst().orElse(null);
+                    ruler = members.stream()
+                            .filter(person -> dev.worldforge.people.PopulationSimulation.age(person, year) >= 18)
+                            .sorted(Comparator
+                                    .comparing((dev.worldforge.people.Character person) ->
+                                            previous != null && (person.father.equals(previous.id) || person.mother.equals(previous.id)) ? 0 : 1)
+                                    .thenComparingInt(person -> person.birthYear)
+                                    .thenComparing(person -> person.globalId))
+                            .findFirst().orElse(null);
+                    if (ruler == null) continue;
+                    ruler.props.put("emergence.polity_id", polityId);
+                    ruler.props.put("emergence.dynasty_id", dynastyId);
+                    ruler.props.put("emergence.polity_role", "ruler");
+                    if (ruler.house == null || ruler.house.isBlank()) ruler.house = dynastyId;
+                    registry.appoint(ruler.id, "emergent_ruler", polityId, year);
+                    binding.addProperty("ruler_global_id", ruler.globalId);
+                    if (previousRulerId.isBlank()) {
+                        binding.addProperty("generation", 1);
+                        WorldForgeApi.postEvent("people", ruler.name + " becomes the first recorded ruler of " + polity.get("name").getAsString(),
+                                List.of(), Math.max(0L, (long) year * 525600L));
+                    } else {
+                        int generation = binding.has("generation") ? binding.get("generation").getAsInt() + 1 : 2;
+                        binding.addProperty("generation", generation);
+                        WorldForgeApi.postEvent("people", "Succession in " + polity.get("name").getAsString()
+                                        + ": " + ruler.name + " succeeds the previous ruler (dynastic generation " + generation + ")",
+                                List.of(), Math.max(0L, (long) year * 525600L));
+                    }
+                    changed = true;
+                } else {
+                    ruler.props.put("emergence.polity_id", polityId);
+                    ruler.props.put("emergence.dynasty_id", dynastyId);
+                    ruler.props.put("emergence.polity_role", "ruler");
+                    if (!ruler.has("emergent_ruler", polityId)) registry.appoint(ruler.id, "emergent_ruler", polityId, year);
+                }
+                binding.addProperty("dynasty_id", dynastyId);
+                binding.addProperty("last_validated_year", year);
+                emergenceBindings.add(polityId, binding);
+                changed = true;
+            }
+            if (changed) {
+                dev.worldforge.people.Character durable = registry.all().stream()
+                        .filter(person -> person.alive && person.props.containsKey("emergence.polity_id"))
+                        .findFirst().orElse(null);
                 if (durable != null && !PeopleMod.persistCharacter(durable, server))
-                    LOGGER.error("wf_worldsim: emergent Character registry for map {} could not be persisted; retrying reconciliation later", map.name);
-                else LOGGER.info("wf_worldsim: materialized canonical people for map {} (characters={})", map.name, registry.size());
+                    LOGGER.error("wf_worldsim: ruler/dynasty bindings for map {} could not be persisted", map.name);
             }
         }
     }
@@ -797,6 +888,7 @@ public final class WorldSimMod {
             for (String line : journal) events.add(GSON.fromJson(line, JsonObject.class));
             state.add("events", events);
             if (emergenceState != null) state.add("emergence_state", emergenceState);
+            state.add("emergence_bindings", emergenceBindings);
             state.add("shared_event_log", com.google.gson.JsonParser.parseString(WorldForgeApi.events().toJson()));
             state.add("historical_chronicle", com.google.gson.JsonParser.parseString(HISTORICAL_CHRONICLE.toJson()));
             Path target = stateFile(server);
@@ -832,6 +924,8 @@ public final class WorldSimMod {
             journal.clear();
             emergenceState = state.has("emergence_state") && state.get("emergence_state").isJsonObject()
                     ? state.getAsJsonObject("emergence_state").deepCopy() : null;
+            emergenceBindings = state.has("emergence_bindings") && state.get("emergence_bindings").isJsonObject()
+                    ? state.getAsJsonObject("emergence_bindings").deepCopy() : new JsonObject();
             if (state.has("events") && state.get("events").isJsonArray())
                 for (var event : state.getAsJsonArray("events")) if (event.isJsonObject()) journal.add(GSON.toJson(event));
             if (state.has("shared_event_log") && state.get("shared_event_log").isJsonObject())
