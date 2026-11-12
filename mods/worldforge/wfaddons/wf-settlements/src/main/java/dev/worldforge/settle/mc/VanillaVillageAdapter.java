@@ -63,7 +63,10 @@ public final class VanillaVillageAdapter {
             if (colony == null || colony.genesisOperationId == null
                     || !colony.genesisOperationId.startsWith("minecraft:village:")) continue;
             ServerLevel level = colony.level(server);
-            if (level != null) reconcileResidents(level, colony);
+            if (level != null) {
+                reconcileResidents(level, colony);
+                reconcileLoadedInfrastructure(level, colony);
+            }
         }
     }
 
@@ -97,7 +100,8 @@ public final class VanillaVillageAdapter {
                     realm == null ? List.of() : List.of(realm.id), WorldForgeApi.clock().worldMinute());
         }
         reconcileResidents(level, colony);
-        // Physical infrastructure is adopted incrementally as nearby chunks load.
+        reconcileLoadedInfrastructure(level, colony);
+        // Future chunks are adopted incrementally by the chunk-load listener.
         if (created && !SettleMod.saveDurably(level.getServer()))
             SettleMod.LOGGER.error("wf_settle: discovered vanilla village {} could not be durably saved", id);
     }
@@ -166,6 +170,17 @@ public final class VanillaVillageAdapter {
 
 
     private record ExistingBuilding(String definition, int x, int z) { }
+
+    /** Visit only already loaded chunks around a village; never generate/load terrain from this adapter. */
+    private static void reconcileLoadedInfrastructure(ServerLevel level, Colony colony) {
+        int centerX = Math.floorDiv(colony.cx, 16), centerZ = Math.floorDiv(colony.cz, 16);
+        for (int x = centerX - 4; x <= centerX + 4; x++) {
+            for (int z = centerZ - 4; z <= centerZ + 4; z++) {
+                net.minecraft.world.level.chunk.LevelChunk loaded = level.getChunkSource().getChunkNow(x, z);
+                if (loaded != null) reconcileInfrastructureChunk(level, loaded.getPos());
+            }
+        }
+    }
 
     /** Each loaded chunk is reconciled once; this never forces an unloaded chunk to load. */
     private static void reconcileInfrastructureChunk(ServerLevel level, net.minecraft.world.level.ChunkPos chunkPos) {
