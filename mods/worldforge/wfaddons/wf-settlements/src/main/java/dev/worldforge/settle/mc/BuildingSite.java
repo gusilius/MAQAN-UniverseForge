@@ -49,7 +49,7 @@ public final class BuildingSite {
             }
         }
         for (Building b : new ArrayList<>(c.s.buildings)) {
-            if (b.state == Building.State.PLANNED) continue;
+            if (b.externallyMaterialized || b.state == Building.State.PLANNED) continue;
             boolean done = b.state == Building.State.DONE;
             int wx = c.worldX(b), wz = c.worldZ(b);
             if (!SimulationLod.shouldMaterializeSettlement(lv.dimension().location().toString(), wx, wz)) continue;

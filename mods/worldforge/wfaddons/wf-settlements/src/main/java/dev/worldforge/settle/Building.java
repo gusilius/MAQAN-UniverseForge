@@ -12,6 +12,8 @@ public final class Building {
     public int priority = 5;                 // 1..9, выше - раньше получает рабочих и материалы
     public boolean unpaid;                   // не хватило серебра на содержание (не сохраняется)
     public boolean paused;                   // производство остановлено вручную
+    /** Existing Minecraft structure adopted into the simulation; do not place a duplicate blueprint. */
+    public boolean externallyMaterialized;
     public String status = "";
     /** Produced goods waiting for a resident hauler to deliver them to the shared settlement store. */
     public final java.util.Map<String, Double> localStock = new java.util.TreeMap<>();

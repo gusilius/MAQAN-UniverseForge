@@ -785,6 +785,38 @@ public final class Settlement {
 
     public boolean hasPlacementReceipt(String requestId) { return placementReceipts.containsKey(requestId); }
 
+    /** Register an existing physical building without charging resources or placing a blueprint. */
+    public Building adoptExistingBuilding(String requestId, String defId, int x, int z) {
+        if (requestId == null || !requestId.matches("[A-Za-z0-9_.:-]{1,128}"))
+            throw new OrderException("Некорректный идентификатор существующего здания");
+        Defs.Building definition = defs.buildings.get(defId);
+        if (definition == null) throw new OrderException("Неизвестный тип здания: " + defId);
+        String fingerprint = "existing|" + defId + "|" + x + "|" + z;
+        String prior = placementReceipts.get(requestId);
+        if (prior != null) {
+            int separator = prior.lastIndexOf('|');
+            if (separator < 0 || !prior.substring(0, separator).equals(fingerprint))
+                throw new IllegalStateException("Settlement adoption request ID collision: " + requestId);
+            int uid;
+            try { uid = Integer.parseInt(prior.substring(separator + 1)); }
+            catch (NumberFormatException error) { throw new IllegalStateException("Corrupt settlement adoption receipt", error); }
+            Building existing = building(uid);
+            if (existing == null) throw new IllegalStateException("Adoption receipt references missing building " + uid);
+            return existing;
+        }
+        if (placementReceipts.size() >= 10000)
+            throw new IllegalStateException("Settlement placement receipt limit reached");
+        Building adopted = new Building(nextBuilding++, definition, x, z);
+        adopted.state = Building.State.DONE;
+        adopted.progress = definition.work;
+        adopted.externallyMaterialized = true;
+        adopted.status = "существующее сооружение Minecraft подключено к симуляции";
+        buildings.add(adopted);
+        placementReceipts.put(requestId, fingerprint + "|" + adopted.uid);
+        say("Подключено существующее здание: " + definition.name);
+        return adopted;
+    }
+
     /** Отмена стройки или снос. Возврат: не начатое 100%, строящееся 50%, готовое 25%. */
     public void cancel(int uid) {
         Building b = building(uid);
@@ -1657,7 +1689,7 @@ public final class Settlement {
         for (Building b : buildings) {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("uid", b.uid); m.put("def", b.def.id); m.put("x", b.x); m.put("z", b.z); m.put("state", b.state.name());
-            m.put("progress", b.progress); m.put("cycle", b.cycleTime); m.put("priority", b.priority); m.put("status", b.status); m.put("paused", b.paused);
+            m.put("progress", b.progress); m.put("cycle", b.cycleTime); m.put("priority", b.priority); m.put("status", b.status); m.put("paused", b.paused); m.put("external", b.externallyMaterialized);
             m.put("local_stock", new LinkedHashMap<>(b.localStock));
             bs.add(m);
         }
@@ -1742,7 +1774,7 @@ public final class Settlement {
             Building b = new Building(((Number) m.get("uid")).intValue(), d, ((Number) m.get("x")).intValue(), ((Number) m.get("z")).intValue());
             b.state = Building.State.valueOf((String) m.get("state"));
             b.progress = ((Number) m.get("progress")).doubleValue(); b.cycleTime = ((Number) m.get("cycle")).doubleValue();
-            b.priority = ((Number) m.get("priority")).intValue(); b.status = (String) m.get("status"); b.paused = Boolean.TRUE.equals(m.get("paused"));
+            b.priority = ((Number) m.get("priority")).intValue(); b.status = (String) m.get("status"); b.paused = Boolean.TRUE.equals(m.get("paused")); b.externallyMaterialized = Boolean.TRUE.equals(m.get("external"));
             if (m.get("local_stock") instanceof Map<?, ?> local)
                 for (Map.Entry<?, ?> entry : local.entrySet())
                     if (entry.getKey() instanceof String resource && entry.getValue() instanceof Number quantity

@@ -13,6 +13,8 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.npc.Villager;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.levelgen.structure.BoundingBox;
 import net.minecraft.world.level.levelgen.structure.StructureStart;
@@ -51,6 +53,7 @@ public final class VanillaVillageAdapter {
             int z = (bounds.minZ() + bounds.maxZ()) / 2;
             adopt(level, x, z, typeKey.toString());
         }
+        reconcileInfrastructureChunk(level, chunk.getPos());
     }
 
     /** New villagers may arrive after the structure-start chunk; periodically reconcile the loaded area. */
@@ -94,6 +97,7 @@ public final class VanillaVillageAdapter {
                     realm == null ? List.of() : List.of(realm.id), WorldForgeApi.clock().worldMinute());
         }
         reconcileResidents(level, colony);
+        // Physical infrastructure is adopted incrementally as nearby chunks load.
         if (created && !SettleMod.saveDurably(level.getServer()))
             SettleMod.LOGGER.error("wf_settle: discovered vanilla village {} could not be durably saved", id);
     }
@@ -157,6 +161,92 @@ public final class VanillaVillageAdapter {
         } else if (!colony.s.hasCanonicalPopulation()) {
             colony.s.setCanonicalPopulation(residentIds.size());
             SettleMod.saveDurably(level.getServer());
+        }
+    }
+
+
+    private record ExistingBuilding(String definition, int x, int z) { }
+
+    /** Each loaded chunk is reconciled once; this never forces an unloaded chunk to load. */
+    private static void reconcileInfrastructureChunk(ServerLevel level, net.minecraft.world.level.ChunkPos chunkPos) {
+        int minX = chunkPos.getMinBlockX(), minZ = chunkPos.getMinBlockZ();
+        String dimension = level.dimension().location().toString();
+        for (Colony colony : SettleMod.COLONIES.values()) {
+            if (colony == null || colony.s == null || !dimension.equals(colony.dim)
+                    || Math.abs(minX + 8 - colony.cx) > RECONCILE_RADIUS
+                    || Math.abs(minZ + 8 - colony.cz) > RECONCILE_RADIUS) continue;
+            String chunkKey = chunkPos.x + ":" + chunkPos.z;
+            if (colony.vanillaInfrastructureChunks.contains(chunkKey)) continue;
+            adoptInfrastructureChunk(level, colony, minX, minZ, chunkKey);
+        }
+    }
+
+    /** Existing blocks stay in place while completed economic buildings are registered. */
+    private static void adoptInfrastructureChunk(ServerLevel level, Colony colony, int minX, int minZ, String chunkKey) {
+        if (SettleMod.DEFS == null) return;
+        Map<String, ExistingBuilding> candidates = new LinkedHashMap<>();
+        Set<Long> bedDistricts = new LinkedHashSet<>();
+        int farmland = 0;
+        for (int x = minX; x < minX + 16; x++) for (int z = minZ; z < minZ + 16; z++) {
+            BlockPos probe = new BlockPos(x, level.getMinBuildHeight(), z);
+            if (!level.hasChunkAt(probe)) return;
+            int surface = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+            for (int y = Math.max(level.getMinBuildHeight(), surface - 4);
+                 y <= Math.min(level.getMaxBuildHeight() - 1, surface + 8); y++) {
+                BlockState state = level.getBlockState(new BlockPos(x, y, z));
+                if (state.is(Blocks.BED)) {
+                    long district = ((long) Math.floorDiv(x - colony.cx, 12) << 32)
+                            | (Math.floorDiv(z - colony.cz, 12) & 0xffffffffL);
+                    bedDistricts.add(district);
+                }
+                if (state.is(Blocks.FARMLAND) || state.is(Blocks.WHEAT) || state.is(Blocks.CARROTS)
+                        || state.is(Blocks.POTATOES) || state.is(Blocks.BEETROOTS)) farmland++;
+                String def = null;
+                if (state.is(Blocks.BELL)) def = "village_hall";
+                else if (state.is(Blocks.BARREL) || state.is(Blocks.CHEST) || state.is(Blocks.TRAPPED_CHEST)) def = "village_granary";
+                else if (state.is(Blocks.COMPOSTER)) def = "farm_district";
+                else if (state.is(Blocks.SMITHING_TABLE) || state.is(Blocks.ANVIL)
+                        || state.is(Blocks.CHIPPED_ANVIL) || state.is(Blocks.DAMAGED_ANVIL)) def = "smithy";
+                else if (state.is(Blocks.BLAST_FURNACE) || state.is(Blocks.FURNACE)) def = "mining_district";
+                else if (state.is(Blocks.SMOKER) || state.is(Blocks.BEEHIVE) || state.is(Blocks.BEE_NEST)) def = "livestock_district";
+                else if (state.is(Blocks.FLETCHING_TABLE) || state.is(Blocks.TARGET)) def = "hunting_lodge";
+                else if (state.is(Blocks.LOOM) || state.is(Blocks.CARTOGRAPHY_TABLE) || state.is(Blocks.LECTERN)) def = "village_hall";
+                if (def != null && SettleMod.DEFS.buildings.containsKey(def))
+                    candidates.putIfAbsent(def + "@" + x + ":" + z, new ExistingBuilding(def, x, z));
+            }
+        }
+        for (long district : bedDistricts) {
+            int gx = (int) (district >> 32), gz = (int) district;
+            int x = colony.cx + gx * 12 + 6, z = colony.cz + gz * 12 + 6;
+            if (SettleMod.DEFS.buildings.containsKey("village_house"))
+                candidates.putIfAbsent("village_house@" + x + ":" + z, new ExistingBuilding("village_house", x, z));
+        }
+        if (farmland >= 24 && SettleMod.DEFS.buildings.containsKey("farm_district"))
+            candidates.putIfAbsent("farm_district@" + minX + ":" + minZ,
+                    new ExistingBuilding("farm_district", minX + 8, minZ + 8));
+
+        boolean changed = false;
+        for (ExistingBuilding physical : candidates.values()) {
+            String request = "mc.village.building." + physical.definition() + "." + physical.x() + "." + physical.z();
+            int before = colony.s.buildings.size();
+            try {
+                colony.s.adoptExistingBuilding(request, physical.definition(),
+                        physical.x() - colony.cx, physical.z() - colony.cz);
+                changed |= colony.s.buildings.size() > before;
+            } catch (RuntimeException failure) {
+                SettleMod.LOGGER.debug("wf_settle: could not adopt existing {} in {}: {}",
+                        physical.definition(), colony.s.id, failure.getMessage());
+            }
+        }
+        colony.vanillaInfrastructureChunks.add(chunkKey);
+        if (changed) WorldForgeApi.postEvent("settlement",
+                "Existing Minecraft village facilities linked to shared housing, production and storage simulation",
+                colony.realmId == null || colony.realmId.isBlank() ? List.of() : List.of(colony.realmId),
+                WorldForgeApi.clock().worldMinute());
+        if (!SettleMod.saveDurably(level.getServer())) {
+            colony.actionPersistenceBlocked = true;
+            SettleMod.LOGGER.error("wf_settle: infrastructure adoption for {} could not be persisted; settlement frozen for recovery",
+                    colony.s.id);
         }
     }
 
