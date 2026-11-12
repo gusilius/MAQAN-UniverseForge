@@ -267,6 +267,45 @@ public final class LifeSimulation {
         if (action == Action.RECREATE && minute >= 1140 && minute < 1320) value += 24;
         if (x.urgentWorldEvent() && action == Action.SEEK_SAFETY) value += 45;
         if (action == Action.SEEK_SAFETY && !x.safe()) value += 20;
+
+        // Stable character psychology shapes priorities; it never overrides survival preconditions.
+        int discipline = CharacterDevelopment.temperament(c, CharacterDevelopment.Temperament.DISCIPLINE);
+        int sociability = CharacterDevelopment.temperament(c, CharacterDevelopment.Temperament.SOCIABILITY);
+        int curiosity = CharacterDevelopment.temperament(c, CharacterDevelopment.Temperament.CURIOSITY);
+        int risk = CharacterDevelopment.temperament(c, CharacterDevelopment.Temperament.RISK);
+        int stability = CharacterDevelopment.temperament(c, CharacterDevelopment.Temperament.STABILITY);
+        int stress = CharacterDevelopment.stress(c);
+        switch (action) {
+            case WORK -> value += discipline * 0.16
+                    + CharacterDevelopment.drive(c, CharacterDevelopment.Drive.DUTY) * 0.12
+                    - stress * 0.10;
+            case TRAIN -> value += curiosity * 0.18
+                    + CharacterDevelopment.drive(c, CharacterDevelopment.Drive.KNOWLEDGE) * 0.16
+                    + CharacterDevelopment.drive(c, CharacterDevelopment.Drive.PRESTIGE) * 0.05
+                    - stress * 0.06;
+            case SOCIALIZE -> value += sociability * 0.18
+                    + CharacterDevelopment.drive(c, CharacterDevelopment.Drive.COMMUNITY) * 0.14
+                    + CharacterDevelopment.drive(c, CharacterDevelopment.Drive.FAMILY) * 0.04;
+            case RECREATE -> value += (100 - stability) * 0.08 + stress * 0.18
+                    + CharacterDevelopment.drive(c, CharacterDevelopment.Drive.ADVENTURE) * 0.06;
+            case SLEEP -> value += stress * 0.10 + (100 - stability) * 0.04;
+            case SEEK_SAFETY -> value += (100 - risk) * 0.12
+                    + CharacterDevelopment.drive(c, CharacterDevelopment.Drive.SECURITY) * 0.10;
+            case EAT -> value += CharacterDevelopment.drive(c, CharacterDevelopment.Drive.SECURITY) * 0.02;
+            case IDLE -> { }
+        }
+
+        // Temporary moods modify decisions, but expire independently from permanent traits.
+        CharacterDevelopment.Mood mood = CharacterDevelopment.mood(c, x.worldMinute());
+        value += switch (mood) {
+            case ANGRY -> action == Action.SOCIALIZE ? -12 : action == Action.WORK ? 3 : 0;
+            case AFRAID -> action == Action.SEEK_SAFETY ? 18 : action == Action.WORK ? -8 : 0;
+            case STRESSED -> action == Action.SLEEP || action == Action.RECREATE ? 10 : action == Action.WORK ? -8 : 0;
+            case EXHAUSTED -> action == Action.SLEEP ? 18 : action == Action.WORK || action == Action.TRAIN ? -15 : 0;
+            case SAD -> action == Action.SOCIALIZE ? 5 : action == Action.RECREATE ? 4 : 0;
+            case INSPIRED -> action == Action.TRAIN ? 12 : action == Action.WORK ? 5 : 0;
+            case HAPPY, NEUTRAL -> 0;
+        };
         return value;
     }
 
@@ -313,24 +352,39 @@ public final class LifeSimulation {
 
     private static void applyEffects(Character c, Action action) {
         switch (action) {
-            case EAT -> PopulationSimulation.changeNeed(c, PopulationSimulation.Need.HUNGER, -70);
-            case SLEEP -> PopulationSimulation.changeNeed(c, PopulationSimulation.Need.REST, -75);
-            case SEEK_SAFETY -> PopulationSimulation.changeNeed(c, PopulationSimulation.Need.SAFETY, -60);
-            case SOCIALIZE -> PopulationSimulation.changeNeed(c, PopulationSimulation.Need.SOCIAL, -60);
+            case EAT -> {
+                PopulationSimulation.changeNeed(c, PopulationSimulation.Need.HUNGER, -70);
+                CharacterDevelopment.changeStress(c, -2);
+            }
+            case SLEEP -> {
+                PopulationSimulation.changeNeed(c, PopulationSimulation.Need.REST, -75);
+                CharacterDevelopment.changeStress(c, -14);
+            }
+            case SEEK_SAFETY -> {
+                PopulationSimulation.changeNeed(c, PopulationSimulation.Need.SAFETY, -60);
+                CharacterDevelopment.changeStress(c, -8);
+            }
+            case SOCIALIZE -> {
+                PopulationSimulation.changeNeed(c, PopulationSimulation.Need.SOCIAL, -60);
+                CharacterDevelopment.changeStress(c, -5);
+            }
             case WORK -> {
                 PopulationSimulation.changeNeed(c, PopulationSimulation.Need.PURPOSE, -20);
                 PopulationSimulation.changeNeed(c, PopulationSimulation.Need.REST, 8);
                 PopulationSimulation.changeNeed(c, PopulationSimulation.Need.HUNGER, 6);
+                CharacterDevelopment.changeStress(c, 3);
             }
             case TRAIN -> {
                 PopulationSimulation.changeNeed(c, PopulationSimulation.Need.PURPOSE, -16);
                 PopulationSimulation.changeNeed(c, PopulationSimulation.Need.REST, 5);
+                CharacterDevelopment.changeStress(c, 1);
                 String skill = PopulationSimulation.trainingTarget(c);
                 if (!skill.isBlank()) PopulationSimulation.train(c, skill, 5);
             }
             case RECREATE -> {
                 PopulationSimulation.changeNeed(c, PopulationSimulation.Need.LEISURE, -65);
                 PopulationSimulation.changeNeed(c, PopulationSimulation.Need.SOCIAL, -10);
+                CharacterDevelopment.changeStress(c, -12);
             }
             case IDLE -> { }
         }

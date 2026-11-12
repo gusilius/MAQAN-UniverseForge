@@ -339,6 +339,48 @@ public final class PopulationSimulationTest {
         catch (IllegalStateException expected) { rejectsDeadAssignment = true; }
         ok(rejectsDeadAssignment, "dead characters cannot receive new professions");
 
+        // Stable CK-style psychology is generated from the canonical identity, persisted, and used by daily AI.
+        Character psychological = registry.create("Aster", "", "north", "m", 280);
+        CharacterStats.addTrait(psychological, "gregarious");
+        CharacterStats.addTrait(psychological, "diligent");
+        CharacterStats.addTrait(psychological, "curious");
+        CharacterDevelopment.ensurePsychology(psychological);
+        int sociability = CharacterDevelopment.temperament(psychological, CharacterDevelopment.Temperament.SOCIABILITY);
+        int dutyDrive = CharacterDevelopment.drive(psychological, CharacterDevelopment.Drive.DUTY);
+        ok(sociability >= 50 && dutyDrive >= 50,
+                "stable temperament and motivations are shaped by permanent traits");
+        ok(CharacterDevelopment.temperament(psychological, CharacterDevelopment.Temperament.SOCIABILITY) == sociability
+                        && CharacterDevelopment.drive(psychological, CharacterDevelopment.Drive.DUTY) == dutyDrive,
+                "generated psychological profile remains deterministic for one Character identity");
+        CharacterDevelopment.setTemperament(psychological, CharacterDevelopment.Temperament.SOCIABILITY, 100);
+        CharacterDevelopment.setDrive(psychological, CharacterDevelopment.Drive.COMMUNITY, 100);
+        PopulationSimulation.setNeed(psychological, Need.SOCIAL, 60);
+        LifeSimulation.Context personalityContext = new LifeSimulation.Context(
+                1200, true, true, true, true, true, true, true, false, LifeSimulation.LOD.ACTIVE);
+        double socialUtility = LifeSimulation.utility(psychological, personalityContext, LifeSimulation.Action.SOCIALIZE);
+        Character loner = registry.create("Bram", "", "north", "m", 280);
+        CharacterStats.addTrait(loner, "reclusive");
+        CharacterDevelopment.setTemperament(loner, CharacterDevelopment.Temperament.SOCIABILITY, 0);
+        CharacterDevelopment.setDrive(loner, CharacterDevelopment.Drive.COMMUNITY, 0);
+        PopulationSimulation.setNeed(loner, Need.SOCIAL, 60);
+        double lonerUtility = LifeSimulation.utility(loner, personalityContext, LifeSimulation.Action.SOCIALIZE);
+        ok(socialUtility > lonerUtility + 25,
+                "two people with the same social need prioritize social contact differently by personality");
+        CharacterDevelopment.setMood(psychological, CharacterDevelopment.Mood.STRESSED, 1200, 300, "court pressure");
+        ok(LifeSimulation.utility(psychological, personalityContext, LifeSimulation.Action.RECREATE)
+                        > LifeSimulation.utility(loner, personalityContext, LifeSimulation.Action.RECREATE),
+                "temporary stress changes recreation priorities without replacing permanent personality");
+        CharacterDevelopment.changeStress(psychological, 40);
+        ok(CharacterDevelopment.stress(psychological) == 40, "psychological stress is bounded and character-owned");
+        String psychologySave = registry.toJson();
+        CharacterRegistry psychologyReload = new CharacterRegistry();
+        psychologyReload.fromJson(psychologySave);
+        Character restoredPsychological = psychologyReload.get(psychological.id);
+        ok(CharacterDevelopment.temperament(restoredPsychological, CharacterDevelopment.Temperament.SOCIABILITY) == 100
+                        && CharacterDevelopment.drive(restoredPsychological, CharacterDevelopment.Drive.COMMUNITY) == 100
+                        && CharacterDevelopment.stress(restoredPsychological) == 40,
+                "temperament, motivations and stress survive CharacterRegistry save/load");
+
         System.out.println(failures == 0 ? "ALL OK" : failures + " FAILED");
         if (failures > 0) System.exit(1);
     }
