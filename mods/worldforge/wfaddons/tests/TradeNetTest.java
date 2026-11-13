@@ -130,7 +130,9 @@ public class TradeNetTest {
         double spread1 = B.price("wood") / A.price("wood");
         ok(spread1 < spread0, "цены сближаются: x" + Math.round(spread0 * 100) / 100.0 + " -> x" + Math.round(spread1 * 100) / 100.0);
         for (int i = 0; i < 60; i++) { A.tradeLeft = 100; B.tradeLeft = 100; n.tick(cs, 30); }
-        ok(r.status.equals("нет разницы") || r.status.equals("нет товара") || r.status.equals("нет места"), "когда разница исчезла, караван встаёт: " + r.status);
+        ok(r.status.equals("нет разницы") || r.status.equals("нет товара") || r.status.equals("нет места")
+                        || r.status.equals("защита резерва"),
+                "когда торговля исчерпывает выгоду или защищённый запас, маршрут останавливается: " + r.status);
         // без рынка
         Settlement C = new Settlement("C", "C", d); C.add("wood", 100); cs.put("C", C);
         var r2 = n.add(cs, "C", "B", "wood", 5);
