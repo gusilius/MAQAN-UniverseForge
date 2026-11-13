@@ -29,6 +29,18 @@ public class TradeNetTest {
         ok(A.price("wood") < B.price("wood"), "в A дрова дешевле: " + A.price("wood") + " < " + B.price("wood"));
         TradeNetwork n = new TradeNetwork();
         var sug = TradeNetwork.suggestions(cs, 3);
+        TradeNetwork autonomous = new TradeNetwork();
+        int autonomousCreated = autonomous.ensureAutonomousRoutes(cs, 1, 2, 2.0);
+        ok(autonomousCreated == 1 && autonomous.routes.size() == 1,
+                "autonomous supply links are created only between staffed markets");
+        var autonomousRoute = autonomous.routes.values().iterator().next();
+        ok(autonomous.routes.values().stream().filter(route -> route.from.equals(autonomousRoute.from)
+                        || route.to.equals(autonomousRoute.from)).count() <= 1
+                        && autonomous.routes.values().stream().filter(route -> route.from.equals(autonomousRoute.to)
+                        || route.to.equals(autonomousRoute.to)).count() <= 1,
+                "autonomous trade participation respects per-settlement hub limits");
+        ok(autonomous.ensureAutonomousRoutes(cs, 1, 2, 2.0) == 0,
+                "autonomous route review is idempotent when supply capacity is already linked");
         ok(!sug.isEmpty() && sug.get(0)[0].equals("A") && sug.get(0)[1].equals("B") && sug.get(0)[2].equals("wood"), "подсказка: возить дрова из A в B");
         try { n.add(cs, "A", "A", "wood", 5); ok(false, "в себя нельзя"); } catch (TradeNetwork.TradeException e) { ok(true, "в себя нельзя"); }
         try { n.add(cs, "A", "B", "silver", 5); ok(false, "серебро не возят"); } catch (TradeNetwork.TradeException e) { ok(true, "серебро не возят"); }

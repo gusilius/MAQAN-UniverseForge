@@ -96,6 +96,42 @@ public final class TradeNetwork {
         }
     }
 
+    /**
+     * Creates a bounded set of autonomous supply links between staffed markets.
+     * Price spread and available stock decide direction; each settlement can participate
+     * in only a small number of routes, preventing every village from becoming a trade hub.
+     */
+    public int ensureAutonomousRoutes(Map<String, Settlement> cities, int perSettlementLimit,
+                                      int maxNewRoutes, double rate) {
+        if (cities == null || cities.size() < 2 || perSettlementLimit < 1 || maxNewRoutes < 1
+                || !Double.isFinite(rate) || rate <= 0 || rate > 30) return 0;
+        Map<String, Integer> participation = new HashMap<>();
+        for (Route route : routes.values()) {
+            participation.merge(route.from, 1, Integer::sum);
+            participation.merge(route.to, 1, Integer::sum);
+        }
+        int created = 0;
+        for (String[] suggestion : suggestions(cities, Math.max(8, cities.size() * 4))) {
+            if (created >= maxNewRoutes) break;
+            Settlement from = cities.get(suggestion[0]), to = cities.get(suggestion[1]);
+            if (from == null || to == null || from.tradePerMin() <= 0 || to.tradePerMin() <= 0) continue;
+            if (participation.getOrDefault(from.id, 0) >= perSettlementLimit
+                    || participation.getOrDefault(to.id, 0) >= perSettlementLimit) continue;
+            boolean duplicate = routes.values().stream().anyMatch(route ->
+                    route.from.equals(from.id) && route.to.equals(to.id) && route.res.equals(suggestion[2]));
+            if (duplicate) continue;
+            try {
+                add(cities, from.id, to.id, suggestion[2], rate);
+                participation.merge(from.id, 1, Integer::sum);
+                participation.merge(to.id, 1, Integer::sum);
+                created++;
+            } catch (TradeException ignored) {
+                // A stale price/stock suggestion is harmless; reconsider it on the next review.
+            }
+        }
+        return created;
+    }
+
     /** Лучшие пары для маршрутов: отношение цен, убывание. */
     public static List<String[]> suggestions(Map<String, Settlement> cities, int limit) {
         List<double[]> tmp = new ArrayList<>();

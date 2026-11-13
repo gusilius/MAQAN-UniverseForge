@@ -1593,7 +1593,24 @@ public class SettleMod {
             try {
                 Map<String, dev.worldforge.settle.Settlement> all = new java.util.LinkedHashMap<>();
                 for (Colony c : COLONIES.values()) all.put(c.s.id, c.s);
-                if (speed > 0) NETWORK.tick(all, speed);
+                if (speed > 0) {
+                    NETWORK.tick(all, speed);
+                    if (ticks % (STEP_TICKS * 10) == 0) {
+                        Set<Integer> routeIds = new LinkedHashSet<>(NETWORK.routes.keySet());
+                        int created = NETWORK.ensureAutonomousRoutes(all, 2, Math.max(1, all.size() / 3), 2.0);
+                        if (created > 0) {
+                            if (!saveDurably(server)) {
+                                NETWORK.routes.keySet().removeIf(id -> !routeIds.contains(id));
+                                LOGGER.error("wf_settle: autonomous trade links could not be persisted; review deferred");
+                            } else {
+                                dev.worldforge.mod.api.WorldForgeApi.postEvent("trade",
+                                        "Autonomous settlement supply network established " + created + " new route(s)",
+                                        List.of(), dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute());
+                                LOGGER.info("wf_settle: autonomous supply links created={} settlements={}", created, all.size());
+                            }
+                        }
+                    }
+                }
             } catch (RuntimeException ex) {
                 LOGGER.error("wf_settle: ошибка торговых маршрутов: {}", ex.toString());
             }
