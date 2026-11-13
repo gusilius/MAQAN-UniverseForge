@@ -299,7 +299,7 @@ public final class CourtSim {
                     || candidate.posts.stream().noneMatch(post -> post.place.equals(place))) continue;
             candidates.add(candidate);
         }
-        candidates.sort(Comparator.comparingInt((Character candidate) -> regentScore(candidate, sovereign)).reversed()
+        candidates.sort(Comparator.comparingInt((Character candidate) -> regentScore(realm, candidate, sovereign)).reversed()
                 .thenComparing(candidate -> candidate.id));
         return candidates;
     }
@@ -316,8 +316,8 @@ public final class CourtSim {
         return support;
     }
 
-    private int regentScore(Character candidate, Character heir) {
-        int councilSupport = regencyCouncilSupport(realmOf(candidate), candidate);
+    private int regentScore(String realm, Character candidate, Character heir) {
+        int councilSupport = regencyCouncilSupport(realm, candidate);
         int score = CharacterStats.value(candidate, "diplomacy") * 2
                 + CharacterStats.value(candidate, "stewardship") * 2
                 + CharacterStats.value(candidate, "intrigue")
