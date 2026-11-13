@@ -378,10 +378,11 @@ public final class WorldSimMod {
                     && polity.has("population") && polity.get("population").getAsLong() >= 120) completed++;
         }
         int total = polities.size();
+        int completedStates = completed;
         source.sendSuccess(() -> Component.literal("Campaign=" + (campaignRunning ? "RUNNING" : "STOPPED")
                 + ", map=" + (campaignMapId.isBlank() ? "-" : campaignMapId)
                 + ", elapsed_days=" + Math.max(0L, WorldForgeApi.clock().dayNumber() - campaignStartedDay)
-                + ", stable_four-generation_states=" + completed + "/" + total
+                + ", stable_four-generation_states=" + completedStates + "/" + total
                 + ", clock_multiplier=" + WorldForgeApi.clock().simulationTickMultiplier()
                 + ", materialized_settlements=" + materializedSettlementCount()
                 + ", completed_buildings=" + completedAutonomousBuildingCount()
