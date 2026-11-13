@@ -352,6 +352,38 @@ mod tests {
     }
 
     #[test]
+    fn statehood_requires_four_viable_settled_communities() {
+        let geography = map();
+        let make_band = |index: u32, population: u64, food_reserve: i64| EmergentBand {
+            id: format!("settlement-{index}"), map_id: "planetos".into(),
+            x: 10 + index * 4, z: 10, population, food_reserve,
+            settled: true, founded_year: 20, hardship_years: 0,
+        };
+        let mut events = Vec::new();
+        let mut polities = Vec::new();
+        let three = vec![
+            make_band(0, 30, 4), make_band(1, 30, 4), make_band(2, 30, 4),
+        ];
+        maybe_form_polity(&geography, 8128, 40, &three, &mut polities, &mut events);
+        assert!(polities.is_empty(), "three settlements must not become a sovereign state");
+
+        let four = vec![
+            make_band(0, 30, 4), make_band(1, 30, 4),
+            make_band(2, 30, 4), make_band(3, 30, 4),
+        ];
+        maybe_form_polity(&geography, 8128, 41, &four, &mut polities, &mut events);
+        assert_eq!(polities.len(), 1, "four viable communities with 120 people may form a polity");
+
+        let starving = vec![
+            make_band(0, 30, -20), make_band(1, 30, -20),
+            make_band(2, 30, -20), make_band(3, 30, -20),
+        ];
+        let mut starving_polities = Vec::new();
+        maybe_form_polity(&geography, 8128, 42, &starving, &mut starving_polities, &mut Vec::new());
+        assert!(starving_polities.is_empty(), "a starving regional cluster cannot found a viable state");
+    }
+
+    #[test]
     fn map_only_world_emerges_without_preseeded_entities() {
         let frame = advance(request(365 * 220, None)).unwrap();
         assert!(!frame.state.bands.is_empty());
