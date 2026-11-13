@@ -192,8 +192,17 @@ fn maybe_form_polity(map: &GeographicMap, seed: u64, year: u64, bands: &[Emergen
         cluster.sort_by(|a,b| a.id.cmp(&b.id));
         cluster.dedup_by(|a,b| a.id == b.id);
         let population = cluster.iter().map(|b| b.population).sum::<u64>();
-        // Statehood requires a real settlement network and surplus population; no realm count is supplied.
-        if cluster.len() < 2 || population < 90 { continue; }
+        // A village or a tiny cluster is not automatically a sovereign state.
+        // The first polity requires a durable regional base: at least four settled
+        // communities, a meaningful combined population, no single starving member,
+        // and a cluster whose aggregate food position is not in sustained collapse.
+        // These are founding gates, not permanent size caps: later growth is handled
+        // by the canonical realm/government systems.
+        let food_position = cluster.iter().map(|b| b.food_reserve).sum::<i64>();
+        let viable_communities = cluster.iter().filter(|b| b.population >= 20 && b.hardship_years <= 4).count();
+        if cluster.len() < 4 || population < 120 || viable_communities < 4 || food_position < -12 {
+            continue;
+        }
         let ids = cluster.iter().map(|b| b.id.clone()).collect::<Vec<_>>();
         let id = format!("polity_{:016x}", roll(seed, "polity-id", &map.map_id, &ids.join("|"), year));
         if polities.iter().any(|p| p.id == id || p.settlement_ids.iter().any(|s| ids.contains(s))) { continue; }
