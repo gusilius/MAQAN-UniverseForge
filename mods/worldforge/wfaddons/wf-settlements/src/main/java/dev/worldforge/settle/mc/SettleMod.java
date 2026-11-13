@@ -669,6 +669,54 @@ public class SettleMod {
         return settlement.count("house", false) > before;
     }
 
+    /**
+     * Adds at most one production building per reconciliation pass when the settlement's
+     * actual stock and consumption show a persistent bottleneck. Recipes, staffing, storage,
+     * prices and upkeep remain owned by the existing Defs/Settlement economy.
+     */
+    private static boolean ensureEconomicSpecialization(Colony colony) {
+        if (colony == null || colony.s == null || !colony.s.hasCanonicalPopulation()) return false;
+        Settlement settlement = colony.s;
+        int population = settlement.population();
+        if (population < 8 || settlement.approval() < Settlement.APPROVAL_GROWTH_MIN) return false;
+
+        String candidate = null;
+        int preferredX = 0, preferredZ = 0;
+        boolean preferForest = false;
+
+        // Stone is a common construction bottleneck; do not add extraction while reserves recover.
+        if (settlement.defs.buildings.containsKey("stone_quarry")
+                && settlement.count("stone_quarry", false) == 0
+                && settlement.amount("stone") < Math.max(24, population * 0.8)
+                && settlement.producedPerMin("stone") <= settlement.consumedPerMin("stone") + 0.05) {
+            candidate = "stone_quarry";
+            preferredX = 34;
+            preferredZ = -24;
+        }
+
+        // Convert surplus timber into planks only when raw wood remains safely above reserve.
+        if (candidate == null && settlement.defs.buildings.containsKey("sawmill")
+                && settlement.count("sawmill", false) == 0
+                && settlement.amount("planks") < Math.max(18, population * 0.45)
+                && settlement.amount("wood") >= Math.max(60, population * 2.0)
+                && settlement.producedPerMin("planks") <= settlement.consumedPerMin("planks") + 0.05) {
+            candidate = "sawmill";
+            preferredX = -36;
+            preferredZ = -24;
+            preferForest = true;
+        }
+
+        if (candidate == null) return false;
+        String requestId = "wfworldgen.specialization." + candidate;
+        if (settlement.placement(requestId) != null) return false;
+        int[] site = findAutonomousBuildSite(colony, candidate, preferredX, preferredZ,
+                64, false, preferForest);
+        if (site == null) return false;
+        int before = settlement.count(candidate, false);
+        settlement.placeOnce(requestId, candidate, site[0], site[1]);
+        return settlement.count(candidate, false) > before;
+    }
+
     /** Connects every autonomous building to the civic hub using the existing A* road graph. */
     private static boolean ensureAutonomousRoads(Colony colony) {
         if (colony == null || colony.s == null || colony.s.buildings.isEmpty()) return false;
@@ -818,6 +866,9 @@ public class SettleMod {
 
             // Demographic expansion uses canonical population and existing economy/housing definitions.
             changed |= ensureAutonomousHousingGrowth(colony);
+
+            // Economic specialization responds to real stock pressure, not a fixed town template.
+            changed |= ensureEconomicSpecialization(colony);
 
             // The A* road graph is authoritative; RoadSite materializes these routes only in local LOD.
             changed |= ensureAutonomousRoads(colony);
