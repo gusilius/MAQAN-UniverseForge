@@ -88,6 +88,10 @@ public final class StatecraftTest {
         check(state.addDynastyMember("house_stark", "c2") && state.addDynastyPrestige("house_stark", 40)
                 && dynasty.members.containsAll(List.of("c1", "c2")) && dynasty.prestige == 40,
                 "dynasty records members by canonical Character ID and prestige");
+        Statecraft.Dynasty cyrillicDynasty = state.registerDynasty("Сервин", "character_servin");
+        check(cyrillicDynasty.houseId.equals("Сервин")
+                        && state.addDynastyMember("Сервин", "character_heir"),
+                "Unicode dynasty names remain valid identifiers and preserve canonical Character references");
 
         // Treasury, tax laws and tribute
         RealmDefs defs = definitions();
