@@ -20,6 +20,7 @@ import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.levelgen.structure.BoundingBox;
 import net.minecraft.world.level.levelgen.structure.StructureStart;
 import net.minecraft.world.phys.AABB;
+import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.level.ChunkEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
@@ -80,11 +81,12 @@ public final class VanillaVillageAdapter {
             ArrayDeque<ChunkPos> queue = PENDING_INFRASTRUCTURE.get(dimension);
             if (queue == null) continue;
             while (processed < MAX_INFRASTRUCTURE_CHUNKS_PER_TICK && !queue.isEmpty()) {
-                ChunkPos position = queue.peekFirst();
-                if (level.getChunkSource().getChunkNow(position.x, position.z) == null) break;
-                queue.removeFirst();
+                ChunkPos position = queue.removeFirst();
                 PENDING_INFRASTRUCTURE_KEYS.remove(chunkKey(dimension, position));
-                reconcileInfrastructureChunk(level, position);
+                // A chunk may have unloaded between its load event and this tick. Drop
+                // that stale work item; a later load event will enqueue it again.
+                if (level.getChunkSource().getChunkNow(position.x, position.z) != null)
+                    reconcileInfrastructureChunk(level, position);
                 processed++;
             }
             if (queue.isEmpty()) PENDING_INFRASTRUCTURE.remove(dimension);
