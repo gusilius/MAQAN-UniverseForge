@@ -28,7 +28,7 @@ public final class Statecraft {
     public static final class Title {
         public final String id;
         public final String realmId;
-        public final Rank rank;
+        public Rank rank;
         public String name;
         public String holderCharacterId = "";
         public String liegeTitleId = "";
@@ -154,6 +154,26 @@ public final class Statecraft {
     }
 
     public Title title(String id) { return titles.get(id); }
+
+    /**
+     * Reconciles a realm's canonical title tier as its real development level changes.
+     * A rank change is rejected when it would invalidate an existing liege/subtitle link.
+     */
+    public boolean setTitleRank(String titleId, Rank rank) {
+        Title title = titles.get(titleId);
+        if (title == null || rank == null) return fail("unknown title or rank");
+        if (!title.liegeTitleId.isEmpty()) {
+            Title liege = titles.get(title.liegeTitleId);
+            if (liege != null && rank.ordinal() >= liege.rank.ordinal())
+                return fail("title rank must remain below its liege");
+        }
+        for (Title child : titles.values()) if (titleId.equals(child.liegeTitleId)
+                && child.rank.ordinal() >= rank.ordinal())
+            return fail("title rank must remain above its subordinate titles");
+        title.rank = rank;
+        return true;
+    }
+
     public Collection<Title> titles() { return Collections.unmodifiableCollection(titles.values()); }
     public static String mapTitleId(String mapName, String titleKey) {
         String namespace = (mapName == null ? "map" : mapName.trim()).replaceAll("[^A-Za-z0-9_.-]", "_");
