@@ -121,6 +121,12 @@ public final class SettlementCaravans {
             mob.setPersistenceRequired();
             mob.addTag(TAG);
             mob.getPersistentData().putLong("wf_shipment_id", shipment.id);
+            mob.getPersistentData().putString("wf_cargo_resource", shipment.res);
+            mob.getPersistentData().putDouble("wf_cargo_quantity", shipment.quantity);
+            if (mob instanceof net.minecraft.world.entity.animal.horse.Llama llama) {
+                llama.setChest(true);
+                llama.getPersistentData().putString("wf_cargo_role", "shipment_pack_animal");
+            }
             if (i == 0) {
                 mob.setCustomName(Component.literal("Караван #" + shipment.id + " · " + shipment.quantity + " " + shipment.res));
                 mob.setCustomNameVisible(true);
