@@ -151,6 +151,17 @@ public class TradeNetTest {
         ok(back.routes.size() == n.routes.size() && back.toJson().equals(n.toJson())
                         && back.routes.get(r.id).dutyRate == 0.05 && back.routes.get(r.id).dutyRealm.equals("north"),
                 "маршруты и параметры пошлин сохраняются");
+        Settlement unanchoredA = city("unanchored-A", d), unanchoredB = city("unanchored-B", d);
+        unanchoredA.stock.put("wood", 150.0); unanchoredB.stock.put("wood", 12.0);
+        TradeNetwork unanchored = new TradeNetwork();
+        unanchored.add(Map.of("unanchored-A", unanchoredA, "unanchored-B", unanchoredB),
+                "unanchored-A", "unanchored-B", "wood", 10);
+        unanchoredA.tradeLeft = 100; unanchoredB.tradeLeft = 100;
+        unanchored.tick(Map.of("unanchored-A", unanchoredA, "unanchored-B", unanchoredB), 30);
+        TradeNetwork unanchoredReload = TradeNetwork.fromJson(unanchored.toJson());
+        ok(unanchored.shipments.values().stream().allMatch(shipment -> shipment.path().length == 0)
+                        && unanchoredReload.toJson().equals(unanchored.toJson()),
+                "strategic-only shipments without world anchors remain pathless after save/reload");
         n.remove(r.id);
         ok(n.routes.size() == 1, "маршрут можно убрать");
         System.out.println(fails == 0 ? "ALL OK" : fails + " FAILED");

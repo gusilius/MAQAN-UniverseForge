@@ -408,7 +408,8 @@ public final class TradeNetwork {
             double[][] path=points.toArray(double[][]::new);
             if(validPath(path)) return path;
         }
-        return from!=null&&to!=null&&from.dimension().equals(to.dimension())
+        return from!=null&&to!=null&&!from.dimension().isBlank()
+                && from.dimension().equals(to.dimension())
                 ? new double[][]{{from.x(),from.z()},{to.x(),to.z()}} : new double[0][];
     }
 }
