@@ -124,6 +124,29 @@ jobs:
         working-directory: mods/worldforge/wfaddons
         shell: bash
         run: bash tools/build-all.sh ../wfmod
+      - name: Stage complete addon distribution for server smoke test
+        working-directory: mods/worldforge/wfaddons
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          rm -f dist/*.jar
+          expected=$(find . -mindepth 1 -maxdepth 1 -type d -name 'wf-*' | wc -l)
+          mapfile -t addon_jars < <(find wf-* -type f -path '*/build/libs/wf_*.jar' ! -name '*-sources.jar' | sort)
+          if [ "${#addon_jars[@]}" -lt "$expected" ]; then
+            echo "ERROR: expected at least $expected addon jars, found ${#addon_jars[@]}"
+            printf '%s\n' "${addon_jars[@]}"
+            exit 1
+          fi
+          for jar in "${addon_jars[@]}"; do cp "$jar" dist/; done
+          mapfile -t core_jars < <(find ../wfmod/build/libs -maxdepth 1 -type f -name 'worldforge-*.jar' ! -name '*-sources.jar' | sort)
+          if [ "${#core_jars[@]}" -eq 0 ]; then
+            echo "ERROR: WorldForge core jar is missing"
+            exit 1
+          fi
+          for jar in "${core_jars[@]}"; do cp "$jar" dist/; done
+          echo "Staged $(find dist -maxdepth 1 -type f -name '*.jar' | wc -l) jars:"
+          ls -lh dist
       - uses: actions/upload-artifact@v4
         with:
           name: maqan-worldforge-addons-windows-x64

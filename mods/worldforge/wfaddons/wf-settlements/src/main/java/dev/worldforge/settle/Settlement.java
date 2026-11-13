@@ -785,6 +785,20 @@ public final class Settlement {
 
     public boolean hasPlacementReceipt(String requestId) { return placementReceipts.containsKey(requestId); }
 
+    /** Resolve a committed placement so later terrain scans cannot move its blueprint. */
+    public Building placement(String requestId) {
+        String prior = placementReceipts.get(requestId);
+        if (prior == null) return null;
+        int separator = prior.lastIndexOf('|');
+        if (separator < 0) throw new IllegalStateException("Corrupt settlement placement receipt: " + requestId);
+        int uid;
+        try { uid = Integer.parseInt(prior.substring(separator + 1)); }
+        catch (NumberFormatException error) { throw new IllegalStateException("Corrupt settlement placement receipt: " + requestId, error); }
+        Building existing = building(uid);
+        if (existing == null) throw new IllegalStateException("Placement receipt references missing building " + requestId);
+        return existing;
+    }
+
     /** Register an existing physical building without charging resources or placing a blueprint. */
     public Building adoptExistingBuilding(String requestId, String defId, int x, int z) {
         if (requestId == null || !requestId.matches("[A-Za-z0-9_.:-]{1,128}"))

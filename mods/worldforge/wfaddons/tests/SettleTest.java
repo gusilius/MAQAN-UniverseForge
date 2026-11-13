@@ -134,6 +134,18 @@ public class SettleTest {
                         && replaySupply.amount("wood") == replayWood - 12,
                 "receipt ресурсов восстанавливается из treasury JSON и переживает reload");
 
+        Settlement founding = new Settlement("settle_founding_receipt_test", "Founding receipt", d);
+        double foundingWood = founding.amount("wood");
+        int foundingJournal = dev.worldforge.mod.economy.TreasuryService.current().journal().size();
+        ok(founding.addOnce("wood", 35, "founding-core")
+                        && founding.addOnce("wood", 35, "founding-core")
+                        && founding.amount("wood") == foundingWood + 35
+                        && dev.worldforge.mod.economy.TreasuryService.current().journal().size() == foundingJournal + 1,
+                "автономное основание повторно подтверждает тот же стартовый запас без двойного начисления");
+        ok(!founding.addOnce("wood", 36, "founding-core")
+                        && founding.amount("wood") == foundingWood + 35,
+                "идемпотентный запас основания блокирует повтор ID с изменённым количеством");
+
         Flow flow = new Flow();
         flow.record(1, "wood", 5, true);
         double validFlow = flow.perMinute(2, "wood", true);

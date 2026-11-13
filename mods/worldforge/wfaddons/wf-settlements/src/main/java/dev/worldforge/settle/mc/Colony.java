@@ -63,6 +63,8 @@ public final class Colony {
     /** Durable cursor and immutable input fingerprint for resumable Genesis provisioning. */
     public int genesisProvisioningStep;
     public String genesisProvisioningSpec = "";
+    /** Population snapshot used to keep founding endowments stable across retries. */
+    public int autonomousFoundingPopulation;
     /** Loaded physical chunks already reconciled into this village. */
     public final Set<String> vanillaInfrastructureChunks = new LinkedHashSet<>();
     /** Runtime-only poison flag: do not retry unsaved mutations until the last durable snapshot is reloaded. */
@@ -153,6 +155,7 @@ public final class Colony {
         m.put("genesisProvisioned", genesisProvisioned);
         m.put("genesisProvisioningStep", genesisProvisioningStep);
         m.put("genesisProvisioningSpec", genesisProvisioningSpec);
+        m.put("autonomousFoundingPopulation", autonomousFoundingPopulation);
         m.put("vanillaInfrastructureChunks", new ArrayList<>(vanillaInfrastructureChunks));
         m.put("settlement", Json.parse(s.toJson()));
         List<Object> l = new ArrayList<>();
@@ -200,6 +203,8 @@ public final class Colony {
         c.genesisProvisioned = Boolean.TRUE.equals(m.get("genesisProvisioned"));
         if (m.get("genesisProvisioningStep") instanceof Number step) c.genesisProvisioningStep = Math.max(0, step.intValue());
         if (m.get("genesisProvisioningSpec") instanceof String spec) c.genesisProvisioningSpec = spec;
+        if (m.get("autonomousFoundingPopulation") instanceof Number population)
+            c.autonomousFoundingPopulation = Math.max(0, Math.min(1_000_000, population.intValue()));
         if (m.get("vanillaInfrastructureChunks") instanceof List<?> scanned)
             for (Object value : scanned) if (value instanceof String key && key.length() <= 64) c.vanillaInfrastructureChunks.add(key);
         if (m.get("workOrders") instanceof List<?> orders) {

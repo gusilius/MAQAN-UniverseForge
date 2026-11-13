@@ -589,64 +589,137 @@ public class SettleMod {
      * WFWorker systems perform construction; this method only submits idempotent
      * founding stock and building orders. It never creates a parallel population.
      */
+    private static boolean ensureFoundingStock(Colony colony, String resource, double amount, String operationId,
+                                                TreasuryLedger.Kind kind, Set<String> newlyPosted) {
+        String reference = "worldgen:" + colony.s.id + ":" + operationId + ":" + resource;
+        TreasuryLedger ledger = TreasuryService.current();
+        boolean alreadyPosted = ledger.hasTransaction(colony.s.ledgerAccountId(resource), kind, reference);
+        boolean accepted = colony.s.addOnce(resource, amount, operationId);
+        if (accepted && !alreadyPosted) newlyPosted.add(reference);
+        return accepted;
+    }
+
+    /** Select a deterministic sampled buildable site; the search never loads chunks. */
+    private static int[] findAutonomousBuildSite(Colony colony, String definitionId,
+                                                  int preferredX, int preferredZ, int radius,
+                                                  boolean preferFertile, boolean preferForest) {
+        Defs.Building definition = colony.s.defs.buildings.get(definitionId);
+        if (definition == null) return null;
+        int[] best = null;
+        double bestScore = Double.POSITIVE_INFINITY;
+        for (dev.worldforge.settle.SettlementMap.Cell cell : colony.map.cells()) {
+            int x = cell.x(), z = cell.z();
+            int dx = x - preferredX, dz = z - preferredZ;
+            int distance = dx * dx + dz * dz;
+            if (distance > radius * radius || cell.water) continue;
+            try {
+                colony.map.validatePlacement(definition.category, x, z, definition.sizeX, definition.sizeZ);
+            } catch (IllegalArgumentException unsuitable) {
+                continue;
+            }
+            if (colony.s.placeError(definitionId, x, z) != null) continue;
+            double score = distance + cell.slope * 96.0;
+            if (preferFertile) score -= cell.fertility * 180.0;
+            if (preferForest) {
+                String biome = cell.biome == null ? "" : cell.biome.toLowerCase(Locale.ROOT);
+                score += biome.contains("forest") || biome.contains("wood") ? -220.0 : 140.0;
+            }
+            if (score < bestScore || (score == bestScore && (best == null || x < best[0]
+                    || (x == best[0] && z < best[1])))) {
+                bestScore = score;
+                best = new int[]{x, z};
+            }
+        }
+        return best;
+    }
+
+    /**
+     * Turns a map-first emergent settlement into a physically grounded village when it enters
+     * local LOD. The layout is chosen from real sampled Minecraft terrain; canonical domain
+     * systems remain the only owners of stock, buildings and people.
+     */
     public static boolean ensureAutonomousInfrastructure(MinecraftServer server, String settlementId) {
         Colony colony = COLONIES.get(settlementId);
         if (server == null || colony == null || colony.s == null
                 || colony.genesisOperationId == null
                 || !colony.genesisOperationId.startsWith("worldsim:settlement:")) return false;
-        String dimension = colony.dim;
-        if (!SimulationLod.shouldMaterializeSettlement(dimension, colony.cx, colony.cz)) return false;
+        if (!SimulationLod.shouldMaterializeSettlement(colony.dim, colony.cx, colony.cz)) return false;
         ServerLevel level = colony.level(server);
         if (level == null) return false;
         BlockPos probe = new BlockPos(colony.cx, level.getMinBuildHeight(), colony.cz);
         if (!level.hasChunkAt(probe)) return false;
 
         Settlement settlement = colony.s;
-        int population = Math.max(1, settlement.population());
-        int households = Math.max(1, Math.min(12, (population + 3) / 4));
-        boolean ledgerChanged = false;
-        try {
-            // Capture only already-loaded terrain; placement validates slope, water and overlap.
-            colony.captureTerrain(level, -48, -48, 48, 48);
-            boolean seeded = settlement.addOnce("wood", 35, "founding-core")
-                    & settlement.addOnce("food", Math.max(80, Math.min(500, population * 4.0)), "founding-food")
-                    & settlement.addOnce("stone", 20, "founding-stone");
-            if (!seeded) return false;
-            for (int i = 0; i < households; i++) {
-                if (settlement.defs.buildings.containsKey("house")) {
-                    if (!settlement.addOnce("wood", 20, "house-stock-" + i)) return false;
-                }
-            }
-            if (!WorldForgeMod.saveTreasuryNow(server)) {
+        if (colony.autonomousFoundingPopulation <= 0) {
+            colony.autonomousFoundingPopulation = Math.max(1, settlement.population());
+            if (!saveDurably(server)) {
+                colony.autonomousFoundingPopulation = 0;
                 colony.actionPersistenceBlocked = true;
-                LOGGER.error("wf_settle: autonomous founding stock for {} could not be persisted; settlement frozen for recovery",
+                LOGGER.error("wf_settle: founding population snapshot for {} could not be persisted; settlement frozen for recovery",
                         settlementId);
                 return false;
             }
+        }
+        int foundingPopulation = colony.autonomousFoundingPopulation;
+        int households = Math.max(1, Math.min(12, (foundingPopulation + 3) / 4));
+        Set<String> newlyPostedStock = new LinkedHashSet<>();
+        try {
+            // Capture only loaded terrain. Missing cells are not guessed and are retried later.
+            colony.captureTerrain(level, -48, -48, 48, 48);
+            boolean validStock = true;
+            validStock &= ensureFoundingStock(colony, "wood", 35, "founding-core",
+                    TreasuryLedger.Kind.IMPORT, newlyPostedStock);
+            validStock &= ensureFoundingStock(colony, "food",
+                    Math.max(80, Math.min(500, foundingPopulation * 4.0)), "founding-food",
+                    TreasuryLedger.Kind.IMPORT, newlyPostedStock);
+            validStock &= ensureFoundingStock(colony, "stone", 20, "founding-stone",
+                    TreasuryLedger.Kind.IMPORT, newlyPostedStock);
+            if (!validStock) return false;
 
-            boolean changed = false;
-            int[][] houseSites = {
+            int[][] preferredHouses = {
                     {-12, -8}, {-4, -12}, {4, -12}, {12, -8},
                     {-12, 4}, {-4, 12}, {4, 12}, {12, 4},
                     {-20, -8}, {20, -8}, {-20, 8}, {20, 8}
             };
+            boolean changed = false;
             if (settlement.defs.buildings.containsKey("house")) {
                 for (int i = 0; i < households; i++) {
-                    int[] site = houseSites[i];
+                    String request = "wfworldgen.house." + i;
+                    if (settlement.placement(request) != null) continue;
+                    int[] site = findAutonomousBuildSite(colony, "house",
+                            preferredHouses[i][0], preferredHouses[i][1], 24, false, false);
+                    if (site == null) continue;
+                    if (!ensureFoundingStock(colony, "wood", 20, "house-stock-" + i,
+                            TreasuryLedger.Kind.IMPORT, newlyPostedStock)) continue;
                     int before = settlement.count("house", false);
-                    settlement.placeOnce("wfworldgen.house." + i, "house", site[0], site[1]);
+                    settlement.placeOnce(request, "house", site[0], site[1]);
                     changed |= settlement.count("house", false) > before;
                 }
             }
-            if (settlement.defs.buildings.containsKey("farm")) {
-                int before = settlement.count("farm", false);
-                settlement.placeOnce("wfworldgen.farm", "farm", 20, 0);
-                changed |= settlement.count("farm", false) > before;
+            if (settlement.defs.buildings.containsKey("farm")
+                    && settlement.placement("wfworldgen.farm") == null) {
+                int[] site = findAutonomousBuildSite(colony, "farm", 24, 0, 44, true, false);
+                if (site != null) {
+                    int before = settlement.count("farm", false);
+                    settlement.placeOnce("wfworldgen.farm", "farm", site[0], site[1]);
+                    changed |= settlement.count("farm", false) > before;
+                }
             }
-            if (settlement.defs.buildings.containsKey("lumber_camp")) {
-                int before = settlement.count("lumber_camp", false);
-                settlement.placeOnce("wfworldgen.lumber", "lumber_camp", -20, 0);
-                changed |= settlement.count("lumber_camp", false) > before;
+            if (settlement.defs.buildings.containsKey("lumber_camp")
+                    && settlement.placement("wfworldgen.lumber") == null) {
+                int[] site = findAutonomousBuildSite(colony, "lumber_camp", -24, 0, 44, false, true);
+                if (site != null) {
+                    int before = settlement.count("lumber_camp", false);
+                    settlement.placeOnce("wfworldgen.lumber", "lumber_camp", site[0], site[1]);
+                    changed |= settlement.count("lumber_camp", false) > before;
+                }
+            }
+
+            if (!newlyPostedStock.isEmpty() && !WorldForgeMod.saveTreasuryNow(server)) {
+                colony.actionPersistenceBlocked = true;
+                LOGGER.error("wf_settle: autonomous founding stock for {} could not be persisted; settlement frozen for recovery",
+                        settlementId);
+                return false;
             }
             if (changed) {
                 if (!saveDurably(server)) {
@@ -658,12 +731,13 @@ public class SettleMod {
                 List<String> realms = colony.realmId == null || colony.realmId.isBlank()
                         ? List.of() : List.of(colony.realmId);
                 dev.worldforge.mod.api.WorldForgeApi.postEvent("settlement",
-                        settlement.name + " begins physical founding: housing, food production and timber work",
+                        settlement.name + " begins terrain-adapted physical founding: housing, food production and timber work",
                         realms, dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute());
-                LOGGER.info("wf_settle: autonomous physical founding orders committed id={} population={} houses={}",
-                        settlementId, population, households);
+                LOGGER.info("wf_settle: terrain-adapted founding orders committed id={} population={} households={} houses={} farm={} timber={}",
+                        settlementId, foundingPopulation, households, settlement.count("house", false),
+                        settlement.count("farm", false), settlement.count("lumber_camp", false));
             }
-            return changed;
+            return changed || !newlyPostedStock.isEmpty();
         } catch (Settlement.OrderException | IllegalStateException failure) {
             LOGGER.debug("wf_settle: autonomous site {} is not ready for physical founding yet: {}",
                     settlementId, failure.getMessage());
