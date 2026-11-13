@@ -68,6 +68,30 @@ public class ClockTest {
         strict.reset();
         ok(strict.dayNumber() == 0 && strict.year() == 300 && strict.speedIndex() == 1,
                 "clock singleton can be safely reset before loading a different save");
+
+        // A campaign advances the one shared clock; every addon consumer receives the same elapsed days.
+        GameClock campaign = new GameClock();
+        campaign.setSimulationDaysPerTick(7);
+        ok(campaign.simulationDaysPerTick() == 7 && campaign.multiplier() == 7.0,
+                "campaign step is reflected in real-time domain multipliers");
+        campaign.advance(1);
+        ok(campaign.dayNumber() == 7 && campaign.pull("people") == 0 && campaign.pull("people") == 0,
+                "one campaign server tick advances exactly seven shared calendar days");
+        ok(campaign.pull("court") == 0, "each campaign consumer has an independent initial cursor");
+        campaign.advance(1);
+        ok(campaign.pull("people") == 7 && campaign.pull("court") == 7,
+                "all addon consumers observe the same seven-day elapsed interval");
+        campaign.pause();
+        double campaignDay = campaign.elapsedDays();
+        campaign.advance(10);
+        ok(campaign.elapsedDays() == campaignDay && campaign.multiplier() == 0.0,
+                "campaign acceleration respects the shared pause state");
+        boolean excessiveStepRejected = false;
+        try { campaign.setSimulationDaysPerTick(31); } catch (IllegalArgumentException expected) { excessiveStepRejected = true; }
+        ok(excessiveStepRejected, "campaign step is bounded to prevent unsafe calendar jumps");
+        campaign.reset();
+        ok(campaign.simulationDaysPerTick() == 1 && campaign.multiplier() == 1.0,
+                "campaign acceleration is cleared when a server world is reset");
         System.out.println(fails == 0 ? "ALL OK" : fails + " FAILED");
         if (fails > 0) System.exit(1);
     }

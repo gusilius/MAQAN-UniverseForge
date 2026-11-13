@@ -33,6 +33,11 @@ public final class ClockService {
             if (Files.exists(f)) WorldForgeApi.clock().load(Files.readString(f));
             Path t = ledgerFile(e.getServer());
             if (Files.exists(t)) loadLedger(Files.readString(t));
+            // CI campaign worlds opt into a bounded shared-clock step. Normal worlds keep 1 day/tick.
+            int campaignStep = Integer.getInteger("wf.campaign.days-per-tick", 1);
+            WorldForgeApi.clock().setSimulationDaysPerTick(campaignStep);
+            if (campaignStep > 1)
+                WorldForgeMod.LOGGER.warn("WorldForge campaign clock acceleration enabled: {} shared world days per server tick", campaignStep);
         } catch (Exception ex) {
             WorldForgeMod.LOGGER.error("WorldForge: отказ запуска — сохранённое время мира не удалось проверить: {}", ex.toString());
             throw new IllegalStateException("WorldForge cannot start with an unreadable or invalid world clock; refusing to reset world time", ex);

@@ -18,6 +18,8 @@ public final class GameClock {
     private double elapsed;                 // игровых дней с начала
     private int speed = 1;
     private int lastSpeed = 1;              // скорость до паузы
+    // Test/campaign acceleration is applied at the shared clock, so every consumer observes the same elapsed days.
+    private int simulationDaysPerTick = 1;
     public int startYear = 300;
     private final Map<String, Long> pulled = new HashMap<>();
 
@@ -28,6 +30,7 @@ public final class GameClock {
         elapsed = 0;
         speed = 1;
         lastSpeed = 1;
+        simulationDaysPerTick = 1;
         startYear = 300;
         pulled.clear();
     }
@@ -47,10 +50,21 @@ public final class GameClock {
     public void faster() { if (speed < SPEEDS.length - 1) setSpeed(speed + 1); }
     public void slower() { if (speed > 1) setSpeed(speed - 1); }
 
+    /**
+     * Sets a bounded shared-calendar step for isolated long-running simulation campaigns.
+     * It is deliberately not persisted: ordinary worlds always restart at one day per tick.
+     */
+    public void setSimulationDaysPerTick(int days) {
+        if (days < 1 || days > 30) throw new IllegalArgumentException("Simulation step must be between 1 and 30 days");
+        simulationDaysPerTick = days;
+    }
+
+    public int simulationDaysPerTick() { return simulationDaysPerTick; }
+
     /** Прошло столько серверных тиков (1 тик = 1/1200 дня при скорости x1). */
     public void advance(int ticks) {
         if (ticks < 0) throw new IllegalArgumentException("ticks cannot be negative");
-        elapsed += (double) SPEEDS[speed] * ticks / TICKS_PER_DAY;
+        elapsed += (double) SPEEDS[speed] * simulationDaysPerTick * ticks / TICKS_PER_DAY;
     }
 
     /** Сколько целых игровых дней прошло с прошлого вызова для этого потребителя; первый вызов возвращает 0. */
@@ -61,7 +75,7 @@ public final class GameClock {
     }
 
     /** Множитель для систем реального времени (поселения): 0 на паузе, иначе скорость. */
-    public double multiplier() { return SPEEDS[speed]; }
+    public double multiplier() { return (double) SPEEDS[speed] * simulationDaysPerTick; }
 
     // ------------------------------------------------------------------ календарь
 
