@@ -691,6 +691,35 @@ public class SettleMod {
                     {-20, -8}, {20, -8}, {-20, 8}, {20, 8}
             };
             boolean changed = false;
+            // Establish the civic/storage spine first: dependent village facilities can
+            // only be placed after the hall has a durable domain building record.
+            if (settlement.defs.buildings.containsKey("village_hall")
+                    && settlement.placement("wfworldgen.village-hall") == null) {
+                int[] site = findAutonomousBuildSite(colony, "village_hall", 0, 0, 20, false, false);
+                if (site != null) {
+                    int before = settlement.count("village_hall", false);
+                    settlement.placeOnce("wfworldgen.village-hall", "village_hall", site[0], site[1]);
+                    changed |= settlement.count("village_hall", false) > before;
+                }
+            }
+            if (settlement.defs.buildings.containsKey("village_granary")
+                    && settlement.placement("wfworldgen.village-granary") == null) {
+                int[] site = findAutonomousBuildSite(colony, "village_granary", 12, 8, 30, false, false);
+                if (site != null) {
+                    int before = settlement.count("village_granary", false);
+                    settlement.placeOnce("wfworldgen.village-granary", "village_granary", site[0], site[1]);
+                    changed |= settlement.count("village_granary", false) > before;
+                }
+            }
+            if (settlement.defs.buildings.containsKey("farm_district")
+                    && settlement.placement("wfworldgen.farm-district") == null) {
+                int[] site = findAutonomousBuildSite(colony, "farm_district", 30, 16, 44, true, false);
+                if (site != null) {
+                    int before = settlement.count("farm_district", false);
+                    settlement.placeOnce("wfworldgen.farm-district", "farm_district", site[0], site[1]);
+                    changed |= settlement.count("farm_district", false) > before;
+                }
+            }
             if (settlement.defs.buildings.containsKey("house")) {
                 for (int i = 0; i < households; i++) {
                     String request = "wfworldgen.house." + i;
