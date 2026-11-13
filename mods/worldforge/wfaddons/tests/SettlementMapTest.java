@@ -62,6 +62,20 @@ public final class SettlementMapTest {
         ok(road.path.size() > 5 && road.path.stream().noneMatch(n -> n.gx() == 2 && n.gz() == 0),
                 "A* road planning routes around water using passable terrain");
         ok(map.isRoad(0, 0) && map.isRoad(8, 0), "road path is represented as a connected network");
+        SettlementMap infrastructure = flatMap();
+        infrastructure.planBuilding(new Settlement("road_plan_a", "Road plan A", defs).place("house", -16, 0));
+        SettlementMap.ConstructionPlan blockedPlan = infrastructure.plans.values().iterator().next();
+        infrastructure.planBuilding(new Settlement("road_plan_b", "Road plan B", defs).place("house", 16, 0));
+        SettlementMap.Road accessRoad = infrastructure.addInfrastructureRoad(-16, 12, 16, 12);
+        ok(accessRoad.path.size() > 2 && accessRoad.path.stream().noneMatch(n ->
+                        n.gx() * SettlementMap.CELL_SIZE < blockedPlan.x + blockedPlan.width
+                                && (n.gx() + 1) * SettlementMap.CELL_SIZE > blockedPlan.x
+                                && n.gz() * SettlementMap.CELL_SIZE < blockedPlan.z + blockedPlan.depth
+                                && (n.gz() + 1) * SettlementMap.CELL_SIZE > blockedPlan.z),
+                "autonomous access roads route around existing building footprints");
+        ok(infrastructure.hasRoadBetween(-16, 12, 16, 12)
+                        && !infrastructure.hasRoadBetween(16, 12, -16, -12),
+                "road endpoint identity supports idempotent autonomous connections");
 
         SettlementMap.Warehouse east = map.addWarehouse("east", 32, 0, 100);
         SettlementMap.LogisticsJob job = map.addLogistics("central", "east", "wood", 60);

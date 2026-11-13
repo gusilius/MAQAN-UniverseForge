@@ -15,8 +15,8 @@ echo "Порядок: $ORDER"
 DEFAULT_IFS=$' \t\n'
 mapfile -t MODULES < <(printf '%s\n' "$ORDER" | tr ' ' '\n' | sed '/^$/d')
 EXPECTED_MODULES=$(find . -mindepth 1 -maxdepth 1 -type d -name 'wf-*' | wc -l | tr -d ' ')
-if [ "\${#MODULES[@]}" -ne "$EXPECTED_MODULES" ]; then
-  echo "ERROR: dependency order contains \${#MODULES[@]} modules, expected $EXPECTED_MODULES"
+if [ "${#MODULES[@]}" -ne "$EXPECTED_MODULES" ]; then
+  echo "ERROR: dependency order contains ${#MODULES[@]} modules, expected $EXPECTED_MODULES"
   exit 1
 fi
 

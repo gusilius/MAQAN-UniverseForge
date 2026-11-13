@@ -13,6 +13,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.npc.Villager;
+import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
@@ -209,7 +210,7 @@ public final class VanillaVillageAdapter {
             for (int y = Math.max(level.getMinBuildHeight(), surface - 4);
                  y <= Math.min(level.getMaxBuildHeight() - 1, surface + 8); y++) {
                 BlockState state = level.getBlockState(new BlockPos(x, y, z));
-                if (state.is(Blocks.BED)) {
+                if (state.getBlock() instanceof BedBlock) {
                     long district = ((long) Math.floorDiv(x - colony.cx, 12) << 32)
                             | (Math.floorDiv(z - colony.cz, 12) & 0xffffffffL);
                     bedDistricts.add(district);

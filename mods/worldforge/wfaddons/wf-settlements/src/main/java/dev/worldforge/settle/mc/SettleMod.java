@@ -633,6 +633,33 @@ public class SettleMod {
         return best;
     }
 
+    /** Connects every autonomous building to the civic hub using the existing A* road graph. */
+    private static boolean ensureAutonomousRoads(Colony colony) {
+        if (colony == null || colony.s == null || colony.s.buildings.isEmpty()) return false;
+        Building hub = colony.s.buildings.stream()
+                .filter(b -> b != null && b.def != null && b.def.id.equals("village_hall"))
+                .min(java.util.Comparator.comparingInt(b -> b.uid)).orElse(null);
+        if (hub == null) return false;
+        int hubX = hub.x;
+        int hubZ = hub.z + Math.max(4, hub.def.sizeZ / 2 + 4);
+        boolean changed = false;
+        List<Building> buildings = new ArrayList<>(colony.s.buildings);
+        buildings.sort(java.util.Comparator.comparingInt(b -> b.uid));
+        for (Building building : buildings) {
+            if (building == null || building.def == null || building.uid == hub.uid) continue;
+            int accessX = building.x;
+            int accessZ = building.z + Math.max(4, building.def.sizeZ / 2 + 4);
+            if (colony.map.hasRoadBetween(hubX, hubZ, accessX, accessZ)) continue;
+            try {
+                colony.map.addInfrastructureRoad(hubX, hubZ, accessX, accessZ);
+                changed = true;
+            } catch (IllegalArgumentException terrainNotReady) {
+                // Incomplete terrain samples are normal during streaming generation; retry next local tick.
+            }
+        }
+        return changed;
+    }
+
     /**
      * Turns a map-first emergent settlement into a physically grounded village when it enters
      * local LOD. The layout is chosen from real sampled Minecraft terrain; canonical domain
@@ -752,6 +779,9 @@ public class SettleMod {
                     changed |= settlement.count("lumber_camp", false) > before;
                 }
             }
+
+            // The A* road graph is authoritative; RoadSite materializes these routes only in local LOD.
+            changed |= ensureAutonomousRoads(colony);
 
             if (!newlyPostedStock.isEmpty() && !WorldForgeMod.saveTreasuryNow(server)) {
                 colony.actionPersistenceBlocked = true;
