@@ -283,7 +283,7 @@ public final class WorldSimMod {
                                         .executes(context -> startCampaign(context.getSource().getServer(),
                                                 StringArgumentType.getString(context, "map"), context.getSource()))))
                         .then(Commands.literal("status").executes(context -> campaignStatus(context.getSource())))
-                        .then(Commands.literal("stop").executes(context -> stopCampaign(context.getSource()))));
+                        .then(Commands.literal("stop").executes(context -> stopCampaign(context.getSource())))));
         dispatcher.register(Commands.literal("wfworldsim")
                 .then(Commands.literal("status").executes(context -> {
                     MinecraftServer server = context.getSource().getServer();
