@@ -788,7 +788,11 @@ public class CourtScreen extends Screen {
             Character regent = s.reg.get(current.regent);
             g.drawString(font, "Регент: " + (regent == null ? "не назначен" : regent.name), x + 12, top + 68,
                     regent == null ? WFUi.BAD : WFUi.GOOD);
-            g.drawString(font, "Срок: с " + (s.startYear + (int) (current.startedDay / 365)) + " года", x + 12, top + 82, WFUi.MUTED);
+            int support = regent == null ? 0 : s.regencyCouncilSupport(realm, regent);
+            g.drawString(font, "Поддержка совета: " + support + "/4"
+                            + (support >= 3 ? " · устойчивая" : support <= 1 ? " · оспаривается" : " · шаткая"),
+                    x + 12, top + 82, support >= 3 ? WFUi.GOOD : support <= 1 ? WFUi.BAD : WFUi.MUTED);
+            g.drawString(font, "Срок: с " + (s.startYear + (int) (current.startedDay / 365)) + " года", x + 12, top + 96, WFUi.MUTED);
         }
         g.drawString(font, "КАНДИДАТЫ ИЗ СУЩЕСТВУЮЩЕГО ДВОРА", x + 12, top + 108, WFUi.GOLD_DIM);
         List<Character> candidates = s.regencyCandidates(realm);
@@ -800,6 +804,9 @@ public class CourtScreen extends Screen {
             g.drawString(font, candidate.name + (candidate.house.isEmpty() ? "" : " · " + candidate.house),
                     x + 16, y + 3, selected ? WFUi.GOLD : WFUi.TX);
             g.drawString(font, (s.year() - candidate.birthYear) + " лет", x + cw - 145, y + 3, WFUi.MUTED);
+            int candidateSupport = s.regencyCouncilSupport(realm, candidate);
+            g.drawString(font, candidateSupport + "/4", x + cw - 112, y + 3,
+                    candidateSupport >= 3 ? WFUi.GOOD : candidateSupport <= 1 ? WFUi.BAD : WFUi.MUTED);
             final String id = candidate.id;
             btn(g, x + cw - 92, y, 78, selected ? "Назначен" : "Назначить",
                     !selected, mx, my, () -> cmd.accept("wfaction run regency_appoint " + realm + " " + id),

@@ -198,6 +198,10 @@ public class CourtTest {
         ok(regencyProjection instanceof Number active && active.intValue() == 1
                         && adultRegent.globalId.equals(regentProjection),
                 "active regency and its canonical regent UUID are published to the shared realm projection");
+        Object supportProjection = minorCourt.d.realms.get(minorRealm).props.get("politics.regency.council_support");
+        ok(supportProjection instanceof Number votes && votes.intValue() >= 0 && votes.intValue() <= 4
+                        && minorCourt.regencyCouncilSupport(minorRealm, adultRegent) == votes.intValue(),
+                "regent council backing is derived from the existing four canonical council seats");
         childHeir.birthYear = minorCourt.year() - 16;
         minorCourt.tick(30);
         ok(minorCourt.regency(minorRealm) == null

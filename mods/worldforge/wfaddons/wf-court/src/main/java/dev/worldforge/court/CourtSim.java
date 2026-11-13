@@ -304,10 +304,24 @@ public final class CourtSim {
         return candidates;
     }
 
+    /** Number of existing council seats that support a regency candidate (no parallel faction registry). */
+    public int regencyCouncilSupport(String realm, Character candidate) {
+        if (candidate == null) return 0;
+        int support = 0;
+        for (Council.Seat seat : Council.seats(reg, defs, realm)) {
+            Character councillor = seat.holder;
+            if (councillor != null && councillor != candidate && opinion(councillor.id, candidate.id) >= -10)
+                support++;
+        }
+        return support;
+    }
+
     private int regentScore(Character candidate, Character heir) {
+        int councilSupport = regencyCouncilSupport(realmOf(candidate), candidate);
         int score = CharacterStats.value(candidate, "diplomacy") * 2
                 + CharacterStats.value(candidate, "stewardship") * 2
-                + CharacterStats.value(candidate, "intrigue");
+                + CharacterStats.value(candidate, "intrigue")
+                + councilSupport * 12;
         if (heir != null) score += Math.max(-20, Math.min(20, opinion(candidate.id, heir.id) / 3));
         Set<String> traits = new HashSet<>(CharacterStats.traits(candidate));
         if (traits.contains("just")) score += 5;
@@ -409,7 +423,8 @@ public final class CourtSim {
                 Character regent = regency == null ? null : reg.get(regency.regent);
                 double regentInfluence = regent == null || !regent.alive ? 0
                         : (CharacterStats.value(regent, "diplomacy") - 10) * 0.6
-                        + (CharacterStats.value(regent, "stewardship") - 10) * 0.2;
+                        + (CharacterStats.value(regent, "stewardship") - 10) * 0.2
+                        + (regencyCouncilSupport(liege.id, regent) - 2) * 2.5;
                 double adjustedOpinion = opinion(vassalRuler.id, liegeRuler.id) + councilBonus + personalityPressure + regentInfluence
                         + (loyalty - 50) * 0.5
                         - Math.max(0, taxShare - 0.20) * 70.0
@@ -755,6 +770,8 @@ public final class CourtSim {
                     regent == null || !regent.alive ? "" : regent.globalId);
             ed.setDerivedProp(r.id, "politics.regency.started_year",
                     activeRegency == null ? 0 : startYear + (int) (activeRegency.startedDay / 365));
+            ed.setDerivedProp(r.id, "politics.regency.council_support",
+                    regent == null || !regent.alive ? 0 : regencyCouncilSupport(r.id, regent));
 
             long activeSchemes = schemes.values().stream().filter(sc -> {
                 Character target = reg.get(sc.target);
