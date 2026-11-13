@@ -249,7 +249,14 @@ public class PeopleMod {
         }
         int before = reg.size();
         try {
-            int created = m.titles == null ? 0 : Courts.ensure(m.titles, EditorManager.editorFor(m), reg, ROLES, NAMES, seed(m), YEAR);
+            // The autonomous campaign runs in a dedicated, disposable server process.
+            // It must begin from geography only; ordinary Minecraft launches retain the
+            // normal Courts.ensure bootstrap because this property is absent by default.
+            boolean emptyCampaignBootstrap = Boolean.getBoolean("worldforge.campaign.empty-bootstrap");
+            int created = m.titles == null || emptyCampaignBootstrap ? 0
+                    : Courts.ensure(m.titles, EditorManager.editorFor(m), reg, ROLES, NAMES, seed(m), YEAR);
+            if (emptyCampaignBootstrap && before == 0)
+                LOGGER.info("wf_people: campaign empty bootstrap enabled for map '{}'; authored court seeding skipped", m.name);
             LOGGER.info("wf_people: карта '{}': было {} людей, создано {}, теперь {}", m.name, before, created, reg.size());
         } catch (Exception ex) {
             LOGGER.error("wf_people: Courts.ensure для карты '{}' не удался: {}", m.name, ex.toString());
