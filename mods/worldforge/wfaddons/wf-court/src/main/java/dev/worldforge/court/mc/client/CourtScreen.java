@@ -480,7 +480,8 @@ public class CourtScreen extends Screen {
             if (y > top + h - 20) break;
             TitleData.Title title = d().byKey(key);
             if (title == null) continue;
-            String holderId = String.valueOf(title.props.getOrDefault("politics.holder_character", ""));
+            String holderId = String.valueOf(title.props.getOrDefault("holderCharacterId",
+                    title.props.getOrDefault("politics.holder_character", "")));
             Character holder = holderId.isBlank() ? null : s.reg.get(holderId);
             String holderName = holder == null ? (holderId.isBlank() ? "Не назначен" : holderId) : holder.name;
             String claims = String.valueOf(title.props.getOrDefault("politics.claimants", ""));
@@ -496,9 +497,21 @@ public class CourtScreen extends Screen {
             g.drawString(font, font.plainSubstrByWidth(holderName, 175), x + 205, y + 3, WFUi.TX);
             g.drawString(font, font.plainSubstrByWidth(claimantIds.isEmpty() ? "Нет" : claimantNames, cw - 410),
                     x + 390, y + 3, claimantIds.isEmpty() ? WFUi.MUTED : WFUi.BAD);
-            hit(x + 4, y - 2, cw - 8, 19, null, title.name,
-                    List.of("Держатель: " + holderName, "Претендентов: " + claimantIds.size(),
-                            claimantIds.isEmpty() ? "Спорных прав нет" : String.join(", ", claimantIds)));
+            List<String> titleDetails = new ArrayList<>();
+            titleDetails.add("Держатель: " + holderName);
+            titleDetails.add("Претендентов: " + claimantIds.size());
+            titleDetails.add(claimantIds.isEmpty() ? "Спорных прав нет" : String.join(", ", claimantIds));
+            Object lastDeceased = title.props.get("succession.last_deceased");
+            Object lastHeir = title.props.get("succession.last_heir");
+            Object lastYear = title.props.get("succession.last_year");
+            if (lastHeir != null) {
+                Character successor = s.reg.get(String.valueOf(lastHeir));
+                Character predecessor = lastDeceased == null ? null : s.reg.get(String.valueOf(lastDeceased));
+                titleDetails.add("Последнее наследование: " + (lastYear == null ? "год неизвестен" : lastYear));
+                titleDetails.add("Предшественник: " + (predecessor == null ? String.valueOf(lastDeceased) : predecessor.name));
+                titleDetails.add("Наследник: " + (successor == null ? String.valueOf(lastHeir) : successor.name));
+            }
+            hit(x + 4, y - 2, cw - 8, 19, null, title.name, titleDetails);
             y += 21;
         }
         g.drawString(font, "Наследование: " + realmData.props.getOrDefault("politics.succession_law", "primogeniture"),
