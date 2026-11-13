@@ -633,6 +633,42 @@ public class SettleMod {
         return best;
     }
 
+    /**
+     * Adds one residential building only when canonical demographic pressure, food security,
+     * public approval and the shared stock ledger all support expansion. Pending houses are
+     * counted so repeated local ticks cannot queue an unbounded housing backlog.
+     */
+    private static boolean ensureAutonomousHousingGrowth(Colony colony) {
+        if (colony == null || colony.s == null) return false;
+        Settlement settlement = colony.s;
+        if (!settlement.hasCanonicalPopulation() || !settlement.defs.buildings.containsKey("house")) return false;
+        int completed = settlement.count("house", true);
+        int planned = Math.max(0, settlement.count("house", false) - completed);
+        int projectedHousing = settlement.housing() + planned * settlement.defs.buildings.get("house").housing;
+        int population = settlement.population();
+        if (population < Math.max(1, projectedHousing - 2)) return false;
+        if (settlement.approval() < Settlement.APPROVAL_GROWTH_MIN) return false;
+        double food = settlement.amount("food");
+        double foodNet = settlement.producedPerMin("food") - settlement.consumedPerMin("food");
+        if (food < Math.max(40, population * 1.5) || foodNet < -1e-6) return false;
+        if (settlement.amount("wood") < settlement.defs.buildings.get("house").cost.getOrDefault("wood", 0.0)) return false;
+
+        int ordinal = settlement.count("house", false);
+        String request = "wfworldgen.expansion.house." + ordinal;
+        if (settlement.placement(request) != null) return false;
+        int ring = 28 + (ordinal / 8) * 16;
+        int[][] anchors = {{-ring, -ring / 2}, {-ring / 2, -ring}, {ring / 2, -ring},
+                {ring, -ring / 2}, {ring, ring / 2}, {ring / 2, ring},
+                {-ring / 2, ring}, {-ring, ring / 2}};
+        int[] anchor = anchors[ordinal % anchors.length];
+        int[] site = findAutonomousBuildSite(colony, "house", anchor[0], anchor[1],
+                Math.max(36, ring + 20), false, false);
+        if (site == null) return false;
+        int before = settlement.count("house", false);
+        settlement.placeOnce(request, "house", site[0], site[1]);
+        return settlement.count("house", false) > before;
+    }
+
     /** Connects every autonomous building to the civic hub using the existing A* road graph. */
     private static boolean ensureAutonomousRoads(Colony colony) {
         if (colony == null || colony.s == null || colony.s.buildings.isEmpty()) return false;
@@ -779,6 +815,9 @@ public class SettleMod {
                     changed |= settlement.count("lumber_camp", false) > before;
                 }
             }
+
+            // Demographic expansion uses canonical population and existing economy/housing definitions.
+            changed |= ensureAutonomousHousingGrowth(colony);
 
             // The A* road graph is authoritative; RoadSite materializes these routes only in local LOD.
             changed |= ensureAutonomousRoads(colony);

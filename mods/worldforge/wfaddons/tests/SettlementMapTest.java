@@ -76,6 +76,9 @@ public final class SettlementMapTest {
         ok(infrastructure.hasRoadBetween(-16, 12, 16, 12)
                         && !infrastructure.hasRoadBetween(16, 12, -16, -12),
                 "road endpoint identity supports idempotent autonomous connections");
+        ok(dev.worldforge.settle.Settlement.APPROVAL_GROWTH_MIN == 40
+                        && new Settlement("growth_policy", "Growth policy", defs).housing() == Settlement.BASE_HOUSING,
+                "autonomous housing growth retains existing settlement approval and base-housing rules");
 
         SettlementMap.Warehouse east = map.addWarehouse("east", 32, 0, 100);
         SettlementMap.LogisticsJob job = map.addLogistics("central", "east", "wood", 60);
