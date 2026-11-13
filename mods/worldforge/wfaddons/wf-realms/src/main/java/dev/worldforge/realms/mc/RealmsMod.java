@@ -424,6 +424,8 @@ public class RealmsMod {
                 changed |= editor.setDerivedProp(realm.id, "tax_share", contract == null ? null : contract.taxShare);
                 changed |= editor.setDerivedProp(realm.id, "levy_share", contract == null ? null : contract.levyShare);
                 changed |= editor.setDerivedProp(realm.id, "politics.vassal_loyalty", contract == null ? null : contract.loyalty);
+                changed |= editor.setDerivedProp(realm.id, "politics.subject_type", contract == null ? null : contract.subjectType.name().toLowerCase(Locale.ROOT));
+                changed |= editor.setDerivedProp(realm.id, "politics.autonomy", contract == null ? null : contract.autonomy);
                 int contested = 0;
                 for (String key : realm.titleKeys) {
                     TitleData.Title title = map.titles.byKey(key);

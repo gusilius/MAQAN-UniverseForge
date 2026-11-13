@@ -22,6 +22,8 @@ public final class Statecraft {
     public enum PlotStatus { GATHERING, ACTIVE, EXPOSED, SUCCEEDED, FAILED }
     public enum WarStatus { ACTIVE, WHITE_PEACE, ATTACKER_VICTORY, DEFENDER_VICTORY }
     public enum InheritanceLaw { PRIMOGENITURE, COGNATIC, ULTIMOGENITURE }
+    /** Political relationship between two sovereign realms; independent realms have no contract. */
+    public enum SubjectType { FEUDAL_VASSAL, TRIBUTARY, PROTECTORATE, OCCUPIED, PERSONAL_UNION, CONFEDERATION_MEMBER }
 
     public static final class Title {
         public final String id;
@@ -44,6 +46,9 @@ public final class Statecraft {
         public double levyShare;
         public int loyalty = 50;
         public boolean protectedByLiege = true;
+        public SubjectType subjectType = SubjectType.FEUDAL_VASSAL;
+        /** 0 = directly administered, 100 = nearly self-governing. */
+        public int autonomy = 35;
         private VassalContract(String vassalRealm, String liegeRealm, double taxShare, double levyShare) {
             this.vassalRealm = vassalRealm; this.liegeRealm = liegeRealm;
             this.taxShare = taxShare; this.levyShare = levyShare;
@@ -250,6 +255,34 @@ public final class Statecraft {
         VassalContract contract = vassals.get(vassal);
         if (contract == null) vassals.put(vassal, new VassalContract(vassal, liege, taxShare, levyShare));
         else { contract.liegeRealm=liege; contract.taxShare=taxShare; contract.levyShare=levyShare; }
+        return true;
+    }
+
+    /** Changes the constitutional relationship without replacing the realm or its identity. */
+    public boolean setSubjectType(String vassalRealm, SubjectType type) {
+        VassalContract contract = vassals.get(clean(vassalRealm, "vassal realm"));
+        if (contract == null) return fail("realm has no liege contract");
+        if (type == null) return fail("subject type is required");
+        contract.subjectType = type;
+        contract.autonomy = switch (type) {
+            case FEUDAL_VASSAL -> 35;
+            case TRIBUTARY -> 82;
+            case PROTECTORATE -> 68;
+            case OCCUPIED -> 5;
+            case PERSONAL_UNION -> 48;
+            case CONFEDERATION_MEMBER -> 92;
+        };
+        lastError = "";
+        return true;
+    }
+
+    /** Fine-tunes local self-government while preserving the selected constitutional type. */
+    public boolean setSubjectAutonomy(String vassalRealm, int autonomy) {
+        VassalContract contract = vassals.get(clean(vassalRealm, "vassal realm"));
+        if (contract == null) return fail("realm has no liege contract");
+        if (autonomy < 0 || autonomy > 100) return fail("autonomy must be between 0 and 100");
+        contract.autonomy = autonomy;
+        lastError = "";
         return true;
     }
 
@@ -601,7 +634,7 @@ public final class Statecraft {
         for (Title t:titles.values()) { Map<String,Object> m=new LinkedHashMap<>(); m.put("id",t.id);m.put("realm",t.realmId);m.put("rank",t.rank.name());m.put("name",t.name);m.put("holder",t.holderCharacterId);m.put("liege",t.liegeTitleId);m.put("claims",new ArrayList<>(t.claims));ts.add(m); }
         root.put("titles",ts);
         List<Object> vs=new ArrayList<>();
-        for (VassalContract v:vassals.values()) { Map<String,Object> m=new LinkedHashMap<>();m.put("vassal",v.vassalRealm);m.put("liege",v.liegeRealm);m.put("tax",v.taxShare);m.put("levy",v.levyShare);m.put("loyalty",v.loyalty);m.put("protected",v.protectedByLiege);vs.add(m); }
+        for (VassalContract v:vassals.values()) { Map<String,Object> m=new LinkedHashMap<>();m.put("vassal",v.vassalRealm);m.put("liege",v.liegeRealm);m.put("tax",v.taxShare);m.put("levy",v.levyShare);m.put("loyalty",v.loyalty);m.put("protected",v.protectedByLiege);m.put("subjectType",v.subjectType.name());m.put("autonomy",v.autonomy);vs.add(m); }
         root.put("vassals",vs);
         List<Object> ds=new ArrayList<>();
         for (Dynasty d:dynasties.values()) { Map<String,Object> m=new LinkedHashMap<>();m.put("house",d.houseId);m.put("founder",d.founderCharacterId);m.put("prestige",d.prestige);m.put("members",new ArrayList<>(d.members));ds.add(m); }
@@ -640,7 +673,7 @@ public final class Statecraft {
         }
         if(root.get("vassals") instanceof List<?> list) for(Object x:list) {
             Map<?,?> m=(Map<?,?>)x; next.setVassalage(String.valueOf(m.get("vassal")),String.valueOf(m.get("liege")),((Number)m.get("tax")).doubleValue(),((Number)m.get("levy")).doubleValue());
-            VassalContract v=next.vassals.get(String.valueOf(m.get("vassal")));v.loyalty=((Number)value(m,"loyalty",50)).intValue();v.protectedByLiege=!Boolean.FALSE.equals(m.get("protected"));
+            VassalContract v=next.vassals.get(String.valueOf(m.get("vassal")));v.loyalty=((Number)value(m,"loyalty",50)).intValue();v.protectedByLiege=!Boolean.FALSE.equals(m.get("protected"));v.subjectType=SubjectType.valueOf(String.valueOf(value(m,"subjectType","FEUDAL_VASSAL")));v.autonomy=Math.max(0,Math.min(100,((Number)value(m,"autonomy",35)).intValue()));
         }
         if(root.get("dynasties") instanceof List<?> list) for(Object x:list) {
             Map<?,?> m=(Map<?,?>)x; Dynasty d=next.registerDynasty(String.valueOf(m.get("house")),String.valueOf(m.get("founder")));

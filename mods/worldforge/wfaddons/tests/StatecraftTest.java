@@ -53,6 +53,14 @@ public final class StatecraftTest {
                 && state.changeLoyalty("north_duchy_realm", 25) == 25,
                 "vassal loyalty is clamped and mutable");
         check(state.vassalsOf("north").size() == 1, "liege can enumerate direct vassals");
+        check(state.setSubjectType("north_duchy_realm", Statecraft.SubjectType.TRIBUTARY)
+                        && state.vassalage("north_duchy_realm").autonomy == 82
+                        && state.setSubjectAutonomy("north_duchy_realm", 74)
+                        && !state.setSubjectAutonomy("north_duchy_realm", 101),
+                "tributary status grants broad autonomy and custom autonomy is range-checked");
+        check(state.setSubjectType("north_duchy_realm", Statecraft.SubjectType.PERSONAL_UNION)
+                        && state.vassalage("north_duchy_realm").autonomy == 48,
+                "a personal union is distinct from ordinary feudal vassalage");
 
         state.vassalage("north_duchy_realm").loyalty = 50;
         check(state.advanceVassalPolitics(1000, Map.of("north_duchy_realm", 60)) == 0
