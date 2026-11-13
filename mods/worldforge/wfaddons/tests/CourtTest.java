@@ -177,7 +177,7 @@ public class CourtTest {
         minorCourt.reg.appoint(childHeir.id, minorCourt.defs.ruler().id, Courts.realmPlace(minorRealm));
         minorCourt.d.realms.get(minorRealm).ruler = childHeir.name;
         minorCourt.regencies.clear();
-        minorCourt.updateRegencies();
+        minorCourt.tick(30);
         ok(minorCourt.regency(minorRealm) != null
                         && minorCourt.regency(minorRealm).heir.equals(childHeir.id)
                         && minorCourt.regency(minorRealm).regent.equals(adultRegent.id),

@@ -328,6 +328,7 @@ public final class CourtSim {
             if (regent != null && regent.alive && year() - regent.birthYear >= 16) return;
         }
         List<Character> candidates = regencyCandidates(realm);
+        if (current != null && current.heir.equals(heir.id) && current.regent.isEmpty() && candidates.isEmpty()) return;
         String regentId = candidates.isEmpty() ? "" : candidates.get(0).id;
         regencies.put(realm, new Regency(realm, heir.id, regentId, current == null ? day : current.startedDay));
         Character regent = regentId.isEmpty() ? null : reg.get(regentId);
