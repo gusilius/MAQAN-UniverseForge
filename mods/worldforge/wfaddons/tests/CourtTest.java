@@ -37,6 +37,29 @@ public class CourtTest {
         CourtSim s = build(a[0], 7);
         ok(s.events.size() >= 10, "события загружены из файлов: " + s.events.size());
 
+        // Autonomous polities must enter the same map realm registry and ordinary court office,
+        // not remain invisible to diplomacy/council consumers behind a parallel runtime list.
+        TitleData.Realm emergent = new TitleData.Realm();
+        emergent.id = "emergent-court-test";
+        emergent.name = "Тестовое автономное княжество";
+        emergent.props.put("emergence.virtual", true);
+        s.d.registerRealmProjection(emergent);
+        Character emergentRuler = s.reg.create("Автономный правитель", "Дом Теста", "north", "m", 270);
+        s.reg.appoint(emergentRuler.id, s.defs.ruler().id, Courts.realmPlace(emergent.id));
+        ok(s.d.realmList().contains(emergent) && s.d.realms.get(emergent.id) == emergent
+                        && s.ruler(emergent.id) == emergentRuler,
+                "emergent polity and canonical ruler are visible to the existing CourtSim realm office");
+        List<Object> clientRealmSnapshot = dev.worldforge.mod.RealmProjectionCodec.encode(s.d);
+        ok(s.d.removeRealmProjection(emergent.id) && !s.d.realms.containsKey(emergent.id)
+                        && !s.d.realmList().contains(emergent),
+                "runtime polity projection can be reconciled without leaving a stale realm in the map registry");
+        dev.worldforge.mod.RealmProjectionCodec.apply(s.d, clientRealmSnapshot);
+        TitleData.Realm restoredEmergent = s.d.realms.get(emergent.id);
+        ok(restoredEmergent != null && Boolean.TRUE.equals(restoredEmergent.props.get("emergence.virtual"))
+                        && s.d.realmList().contains(restoredEmergent),
+                "server realm projection payload restores autonomous countries into the client political map registry");
+        s.d.removeRealmProjection(emergent.id);
+
         // Statecraft mirrors the map's feudal hierarchy, and must release contracts when
         // the authoritative visible map relationship is removed.
         Statecraft political = new Statecraft();

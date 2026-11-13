@@ -6,6 +6,7 @@ import com.mojang.logging.LogUtils;
 import dev.worldforge.mod.AtomicFileBatch;
 import dev.worldforge.mod.EditorManager;
 import dev.worldforge.mod.MapData;
+import dev.worldforge.mod.RealmProjectionCodec;
 import dev.worldforge.mod.TitleData;
 import dev.worldforge.mod.WorldForgeMod;
 import dev.worldforge.war.War;
@@ -213,6 +214,7 @@ public class WarMod {
         }
         java.util.Map<String, Object> p = new java.util.LinkedHashMap<>();
         p.put("realm", realm);
+        p.put("realm_projections", dev.worldforge.mod.RealmProjectionCodec.encode(m.titles));
         p.put("raw", new java.util.ArrayList<Object>(RAW));
         p.put("war", en.toJson());
         dev.worldforge.mod.WFNet.sendView(sp, "wf_war:main", dev.worldforge.mod.Json.write(p));

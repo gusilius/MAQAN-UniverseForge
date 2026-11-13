@@ -443,6 +443,51 @@ public final class TitleData {
         rebuildRealmIndex();
     }
 
+    /**
+     * Adds a runtime-only realm projection to the same canonical map registry used by
+     * diplomacy, courts and political ledgers. The caller owns persistence of its source model.
+     */
+    public void registerRealmProjection(Realm realm) {
+        if (realm == null || realm.id == null || realm.id.isBlank())
+            throw new IllegalArgumentException("A projected realm needs a stable id");
+        Realm existing = realms.get(realm.id);
+        if (existing != null && existing != realm
+                && !Boolean.TRUE.equals(existing.props.get("emergence.virtual")))
+            throw new IllegalStateException("Projected realm collides with authored realm " + realm.id);
+        realms.put(realm.id, realm);
+        rebuildRealmIndex();
+        recompute();
+    }
+
+    /** Replaces the client-side set of runtime projections in one index rebuild. */
+    public void replaceRealmProjections(java.util.Collection<Realm> projections) {
+        Map<String, Realm> incoming = new LinkedHashMap<>();
+        if (projections != null) for (Realm realm : projections) {
+            if (realm == null || realm.id == null || realm.id.isBlank()
+                    || !Boolean.TRUE.equals(realm.props.get("emergence.virtual")))
+                throw new IllegalArgumentException("Invalid runtime realm projection");
+            Realm existing = realms.get(realm.id);
+            if (existing != null && !Boolean.TRUE.equals(existing.props.get("emergence.virtual")))
+                throw new IllegalStateException("Runtime projection collides with authored realm " + realm.id);
+            incoming.put(realm.id, realm);
+        }
+        realms.entrySet().removeIf(entry -> Boolean.TRUE.equals(entry.getValue().props.get("emergence.virtual"))
+                && !incoming.containsKey(entry.getKey()));
+        realms.putAll(incoming);
+        rebuildRealmIndex();
+        recompute();
+    }
+
+    /** Removes only an autonomous projection; authored map realms are never removed here. */
+    public boolean removeRealmProjection(String id) {
+        Realm existing = realms.get(id);
+        if (existing == null || !Boolean.TRUE.equals(existing.props.get("emergence.virtual"))) return false;
+        realms.remove(id);
+        rebuildRealmIndex();
+        recompute();
+        return true;
+    }
+
     void removeRealm(String id) {
         realms.remove(id);
         rebuildRealmIndex();

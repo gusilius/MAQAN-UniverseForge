@@ -24,6 +24,7 @@ public final class CourtClient {
         try {
             if (ClientState.state == null || ClientState.state.titles == null) return;
             Map<String, Object> m = (Map<String, Object>) Json.parse(payload);
+            dev.worldforge.mod.RealmProjectionCodec.apply(ClientState.state.titles, m.get("realm_projections"));
             RoleDefs defs = new RoleDefs();
             for (Object o : (List<Object>) m.get("roles")) defs.add((String) o);
             CharacterRegistry reg = new CharacterRegistry();

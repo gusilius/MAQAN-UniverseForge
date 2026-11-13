@@ -627,6 +627,38 @@ public final class WorldSimMod {
                 .collect(java.util.stream.Collectors.joining(","));
     }
 
+    /** Race composition is sampled from the polity's canonical living Characters, not copied into a second population registry. */
+    private static Map<String, Double> emergentRaceShares(
+            List<dev.worldforge.people.Character> members) {
+        Map<String, Double> counts = new TreeMap<>();
+        for (dev.worldforge.people.Character person : members) {
+            Object rawRace = person.props.get("origin.race");
+            String race = rawRace == null ? "" : String.valueOf(rawRace).trim();
+            if (!race.isEmpty()) counts.merge(race, 1.0, Double::sum);
+        }
+        double total = counts.values().stream().mapToDouble(Double::doubleValue).sum();
+        if (total <= 0) return Map.of();
+        counts.replaceAll((race, count) -> count / total);
+        return counts;
+    }
+
+    /**
+     * Bind an emergent sovereign to the ordinary realm-ruler office used by Courts,
+     * CourtSim, councils, succession and court events. The emergence-specific post
+     * remains a provenance marker; both offices point to the same Character UUID.
+     */
+    private static boolean ensureEmergentCourtOffice(CharacterRegistry registry,
+            dev.worldforge.people.Character ruler, String realmId, int year) {
+        var role = PeopleMod.ROLES.ruler();
+        if (role == null) {
+            LOGGER.error("wf_worldsim: no canonical ruler role is defined; court integration deferred for {}", realmId);
+            return false;
+        }
+        String place = dev.worldforge.people.Courts.realmPlace(realmId);
+        if (!ruler.has(role.id, place)) registry.appoint(ruler.id, role.id, place, year);
+        return ruler.has(role.id, place);
+    }
+
     /** Binds emergent polities to canonical rulers; succession follows actual Character identity. */
     private static void syncEmergentPolities(MinecraftServer server, JsonObject state, int year) {
         if (server == null || state == null || !state.has("polities") || !state.get("polities").isJsonArray()) return;
@@ -660,7 +692,7 @@ public final class WorldSimMod {
                 RealmsMod.registerEmergentRealm(realmId,
                         polity.get("name").getAsString(), map.name, currentRuler,
                         polity.get("population").getAsLong(), polity.get("stability").getAsInt(),
-                        bandIds.size(), neighbors, biomes);
+                        bandIds.size(), neighbors, biomes, emergentRaceShares(members));
                 if (members.isEmpty()) continue;
                 JsonObject binding = emergenceBindings.has(polityId) && emergenceBindings.get(polityId).isJsonObject()
                         ? emergenceBindings.getAsJsonObject(polityId) : new JsonObject();
@@ -705,6 +737,7 @@ public final class WorldSimMod {
                     ruler.props.put("emergence.dynasty_id", dynastyId);
                     ruler.props.put("emergence.polity_role", "ruler");
                     registry.appoint(ruler.id, "emergent_ruler", polityId, year);
+                    if (!ensureEmergentCourtOffice(registry, ruler, realmId, year)) continue;
                     // Political succession is committed only after the canonical Character is durable.
                     if (!PeopleMod.persistCharacter(ruler, server)) {
                         LOGGER.error("wf_worldsim: canonical ruler {} for polity {} could not be persisted; succession remains pending",
@@ -743,8 +776,14 @@ public final class WorldSimMod {
                             continue;
                         }
                     }
-                    if (!ruler.has("emergent_ruler", polityId)) {
-                        registry.appoint(ruler.id, "emergent_ruler", polityId, year);
+                    var canonicalRulerRole = PeopleMod.ROLES.ruler();
+                    if (canonicalRulerRole == null) continue;
+                    boolean missingEmergenceOffice = !ruler.has("emergent_ruler", polityId);
+                    boolean missingCourtOffice = !ruler.has(canonicalRulerRole.id,
+                            dev.worldforge.people.Courts.realmPlace(realmId));
+                    if (missingEmergenceOffice) registry.appoint(ruler.id, "emergent_ruler", polityId, year);
+                    if (!ensureEmergentCourtOffice(registry, ruler, realmId, year)) continue;
+                    if (missingEmergenceOffice || missingCourtOffice) {
                         if (!PeopleMod.persistCharacter(ruler, server)) {
                             LOGGER.error("wf_worldsim: existing canonical ruler {} could not be persisted", ruler.globalId);
                             continue;
@@ -773,9 +812,12 @@ public final class WorldSimMod {
                 if (RealmsMod.POLITICS.dynasty(dynastyId) == null)
                     RealmsMod.POLITICS.registerDynasty(dynastyId, ruler.globalId);
                 else RealmsMod.POLITICS.addDynastyMember(dynastyId, ruler.globalId);
-                RealmsMod.registerEmergentRealm(realmId, polity.get("name").getAsString(), map.name,
-                        ruler.globalId, polity.get("population").getAsLong(), polity.get("stability").getAsInt(),
-                        bandIds.size(), neighbors, biomes);
+                TitleData.Realm politicalActor = RealmsMod.registerEmergentRealm(realmId,
+                        polity.get("name").getAsString(), map.name, ruler.globalId,
+                        polity.get("population").getAsLong(), polity.get("stability").getAsInt(),
+                        bandIds.size(), neighbors, biomes, emergentRaceShares(members));
+                politicalActor.ruler = ruler.name + (ruler.house == null || ruler.house.isBlank() ? "" : " " + ruler.house);
+                politicalActor.props.put("emergence.ruler_global_id", ruler.globalId);
                 for (String bandId : bandIds) {
                     String settlementId = "emg_" + bandId;
                     if (SettleMod.colony(settlementId) != null
@@ -793,12 +835,19 @@ public final class WorldSimMod {
                 emergenceBindings.add(polityId, binding);
                 changed = true;
             }
+            // Fill the ordinary council, steward, marshal, chancellor and household offices
+            // for newly emerged realms through the existing deterministic Courts.ensure pipeline.
+            int newCourtPositions = dev.worldforge.people.Courts.ensure(map.titles,
+                    EditorManager.editorFor(map), registry, PeopleMod.ROLES, PeopleMod.NAMES,
+                    PeopleMod.seed(map), year);
+            if (newCourtPositions > 0) changed = true;
             if (changed) {
                 dev.worldforge.people.Character durable = registry.all().stream()
-                        .filter(person -> person.alive && person.props.containsKey("emergence.polity_id"))
+                        .filter(person -> person.alive && (person.props.containsKey("emergence.polity_id")
+                                || person.posts.stream().anyMatch(post -> post.place.startsWith("realm:"))))
                         .findFirst().orElse(null);
                 if (durable != null && !PeopleMod.persistCharacter(durable, server))
-                    LOGGER.error("wf_worldsim: ruler/dynasty bindings for map {} could not be persisted", map.name);
+                    LOGGER.error("wf_worldsim: ruler/dynasty/court bindings for map {} could not be persisted", map.name);
             }
         }
         RealmsMod.reconcileEmergentRealms(activeRealmIds);

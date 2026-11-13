@@ -4,6 +4,7 @@ import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.logging.LogUtils;
 import dev.worldforge.mod.TitleData;
+import dev.worldforge.mod.MapData;
 import dev.worldforge.mod.TitleEditor;
 import dev.worldforge.mod.EditorManager;
 import dev.worldforge.mod.AtomicFileBatch;
@@ -188,24 +189,72 @@ public class RealmsMod {
     public static TitleData.Realm registerEmergentRealm(String id, String name, String mapId,
             String rulerGlobalId, long population, int stability, int settlementCount,
             Collection<String> neighbors, String biomeSummary) {
+        return registerEmergentRealm(id, name, mapId, rulerGlobalId, population, stability,
+                settlementCount, neighbors, biomeSummary, Map.of());
+    }
+
+    public static TitleData.Realm registerEmergentRealm(String id, String name, String mapId,
+            String rulerGlobalId, long population, int stability, int settlementCount,
+            Collection<String> neighbors, String biomeSummary, Map<String, Double> raceShares) {
         if (id == null || !id.matches("[A-Za-z0-9_.:-]{3,96}"))
             throw new IllegalArgumentException("Invalid emergent realm id");
-        TitleData.Realm realm = AUTONOMOUS_REALMS.computeIfAbsent(id, key -> new TitleData.Realm());
+        MapData ownerMap = mapId == null ? null : WorldForgeMod.loadedMaps().get(mapId);
+        TitleData.Realm realm;
+        if (ownerMap != null && ownerMap.titles != null) {
+            TitleData.Realm existing = ownerMap.titles.realms.get(id);
+            if (existing != null && !Boolean.TRUE.equals(existing.props.get("emergence.virtual")))
+                throw new IllegalStateException("Emergent realm id collides with an authored map realm: " + id);
+            realm = existing == null ? new TitleData.Realm() : existing;
+        } else {
+            realm = AUTONOMOUS_REALMS.getOrDefault(id, new TitleData.Realm());
+        }
         realm.id = id;
         realm.name = name == null || name.isBlank() ? id : name;
         realm.ruler = rulerGlobalId == null ? "" : rulerGlobalId;
-        realm.overlordId = null;
-        realm.relation = "";
+        // Preserve Statecraft's current feudal relationship; TitleData.recompute rebuilds subjectIds.
         realm.titleKeys.clear();
-        realm.subjectIds.clear();
+        realm.props.put("emergence.virtual", true);
         realm.props.put("emergence.map_id", mapId == null ? "" : mapId);
         realm.props.put("emergence.settlement_count", Math.max(0, settlementCount));
         realm.props.put("emergence.neighbors", neighbors == null ? "" : String.join(",", new TreeSet<>(neighbors)));
         realm.props.put("emergence.biomes", biomeSummary == null ? "" : biomeSummary);
+        Map<String, Double> biomeCounts = new LinkedHashMap<>();
+        if (biomeSummary != null) for (String entry : biomeSummary.split(",")) {
+            String[] pair = entry.split(":", 2);
+            if (pair.length == 2) try { biomeCounts.put(pair[0], Math.max(0, Double.parseDouble(pair[1]))); }
+            catch (NumberFormatException ignored) { }
+        }
+        double totalBiomes = biomeCounts.values().stream().mapToDouble(Double::doubleValue).sum();
+        Map<String, Double> terrainShares = new LinkedHashMap<>();
+        if (totalBiomes > 0) for (RealmDefs.Terrain terrain : DEFS.terrains.values()) {
+            double count = terrain.biomes().stream().mapToDouble(biome ->
+                    biomeCounts.entrySet().stream()
+                            .filter(entry -> entry.getKey().equals(biome)
+                                    || entry.getKey().endsWith(":" + biome)
+                                    || biome.endsWith(":" + entry.getKey()))
+                            .mapToDouble(Map.Entry::getValue).sum()).sum();
+            if (count > 0) terrainShares.put(terrain.id(), count / totalBiomes);
+        }
+        realm.props.put("terrain", terrainShares.entrySet().stream()
+                .map(entry -> entry.getKey() + ":" + entry.getValue())
+                .collect(java.util.stream.Collectors.joining(",")));
+        Map<String, Double> normalizedRaces = new TreeMap<>();
+        if (raceShares != null) raceShares.forEach((race, share) -> {
+            if (race != null && !race.isBlank() && share != null && Double.isFinite(share) && share > 0)
+                normalizedRaces.put(race, share);
+        });
+        double totalRaces = normalizedRaces.values().stream().mapToDouble(Double::doubleValue).sum();
+        if (totalRaces > 0) normalizedRaces.replaceAll((race, share) -> share / totalRaces);
+        realm.props.put("races", normalizedRaces.entrySet().stream()
+                .map(entry -> entry.getKey() + ":" + entry.getValue())
+                .collect(java.util.stream.Collectors.joining(",")));
         realm.props.put("population", Math.max(0L, population));
         realm.props.put("stability", Math.max(0, Math.min(100, stability)));
         realm.props.put("prestige", (int) Math.min(100_000L, Math.max(0L, population / 10L)));
         realm.props.put("taxable_base", Math.max(0.0, population * 0.05));
+        if (ownerMap != null && ownerMap.titles != null)
+            ownerMap.titles.registerRealmProjection(realm);
+        AUTONOMOUS_REALMS.put(id, realm);
         REALMS.state(id);
         POLITICS.treasury(id);
         return realm;
@@ -215,6 +264,34 @@ public class RealmsMod {
     public static void reconcileEmergentRealms(Set<String> activeIds) {
         Set<String> keep = activeIds == null ? Set.of() : new HashSet<>(activeIds);
         AUTONOMOUS_REALMS.keySet().retainAll(keep);
+        for (var map : WorldForgeMod.loadedMaps().values()) {
+            if (map == null || map.titles == null) continue;
+            for (String id : new ArrayList<>(map.titles.realms.keySet()))
+                if (!keep.contains(id)) map.titles.removeRealmProjection(id);
+        }
+    }
+
+    /** Publishes the canonical Realms development state onto the shared realm projection for map/UI consumers. */
+    private static void syncDevelopmentProjection(TitleData.Realm realm) {
+        if (realm == null) return;
+        Realms.State state = REALMS.state(realm.id);
+        RealmDefs.Gov government = DEFS.govs.get(state.gov);
+        realm.props.put("politics.government_id", state.gov);
+        realm.props.put("politics.government", government == null ? "Не определён" : government.name());
+        realm.props.put("politics.government_category", government == null ? "" : government.category());
+        RealmDefs.Level level = DEFS.levels.isEmpty() ? null : REALMS.levelDef(realm.id);
+        int doctrineSlots = DEFS.levels.isEmpty() ? 0 : REALMS.doctrineSlots(realm.id);
+        int lawSlots = DEFS.levels.isEmpty() ? 0 : REALMS.lawSlots(realm.id);
+        realm.props.put("politics.realm_level", level == null ? "" : level.name());
+        realm.props.put("politics.doctrine_count", state.nodes.size());
+        realm.props.put("politics.doctrine_slots", doctrineSlots);
+        realm.props.put("politics.law_count", state.laws.size());
+        realm.props.put("politics.law_slots", lawSlots);
+        realm.props.put("politics.doctrines", String.join(", ", state.nodes));
+        realm.props.put("politics.laws", state.laws.entrySet().stream()
+                .map(entry -> entry.getKey() + ":" + entry.getValue()).sorted()
+                .collect(java.util.stream.Collectors.joining(", ")));
+        realm.props.put("politics.development_points", Math.round(state.points * 10.0) / 10.0);
     }
 
     private static double normalizedProp(TitleData.Realm realm, String key) {
@@ -366,6 +443,7 @@ public class RealmsMod {
                     }
                     if (days > 0 && !r.props.containsKey("player")) REALMS.autoDevelop(r.id, r.id.hashCode() + WorldForgeApi.clock().dayNumber());
                     else REALMS.tick(r.id);
+                    syncDevelopmentProjection(r);
                 }
             }
             if (ticks % 6000 == 0) save(e.getServer());

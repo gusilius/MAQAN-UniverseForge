@@ -261,6 +261,25 @@ public class WarScreen extends Screen {
         TitleData.Realm sr = data().realms.get(sel);
         if (sr != null && sr.ruler != null && !sr.ruler.isEmpty()) g.drawString(font, "Правитель: " + sr.ruler, ix + 32, cy + 15, WFUi.MUTED);
         cy += 34;
+        if (sr != null && Boolean.TRUE.equals(sr.props.get("emergence.virtual"))) {
+            String population = String.valueOf(sr.props.getOrDefault("population", 0));
+            String stability = String.valueOf(sr.props.getOrDefault("stability", 0));
+            String settlements = String.valueOf(sr.props.getOrDefault("emergence.settlement_count", 0));
+            String government = String.valueOf(sr.props.getOrDefault("politics.government", "Форма правления не определена"));
+            String level = String.valueOf(sr.props.getOrDefault("politics.realm_level", "—"));
+            int doctrines = sr.props.get("politics.doctrine_count") instanceof Number n ? n.intValue() : 0;
+            int doctrineSlots = sr.props.get("politics.doctrine_slots") instanceof Number n ? n.intValue() : 0;
+            int laws = sr.props.get("politics.law_count") instanceof Number n ? n.intValue() : 0;
+            int lawSlots = sr.props.get("politics.law_slots") instanceof Number n ? n.intValue() : 0;
+            g.drawString(font, "НАСЕЛЕНИЕ " + population + " · ПОСЕЛЕНИЯ " + settlements
+                    + " · СТАБИЛЬНОСТЬ " + stability + "%", ix, cy, WFUi.GOLD_DIM);
+            cy += 11;
+            g.drawString(font, font.plainSubstrByWidth("Строй: " + government + " · уровень: " + level, iw), ix, cy, WFUi.TX);
+            cy += 11;
+            g.drawString(font, "Доктрины " + doctrines + "/" + doctrineSlots + " · законы " + laws + "/" + lawSlots,
+                    ix, cy, WFUi.MUTED);
+            cy += 14;
+        }
         WarEngine.DipStatus st = e.diplomacyStatus(realm, sel);
         WFUi.badge(g, font, ix, cy, st.text, statusColor(st.kind));
         cy += 17;
