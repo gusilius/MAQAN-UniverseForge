@@ -28,7 +28,7 @@ import java.util.function.Consumer;
  */
 public class CourtScreen extends Screen {
     private static final int W = 780, H = 460;
-    private static final String[] TABS = {"Совет", "Вассалы", "Государство", "Козни", "События", "Браки", "Хроника"};
+    private static final String[] TABS = {"Совет", "Вассалы", "Государство", "Козни", "События", "Браки", "Титулы", "Дипломатия", "Хроника"};
     private CourtSim s;
     private final String realm;
     private final Consumer<String> cmd;
@@ -161,6 +161,8 @@ public class CourtScreen extends Screen {
             case 3 -> schemes(g, cx, top, cw, h, mx, my, ruler);
             case 4 -> events(g, cx, top, cw, h, mx, my);
             case 5 -> marriages(g, cx, top, cw, h, mx, my);
+            case 6 -> titles(g, cx, top, cw, h, mx, my);
+            case 7 -> diplomacy(g, cx, top, cw, h, mx, my);
             default -> chronicle(g, cx, top, cw, h);
         }
         publishWorkspaceSelection();
@@ -450,6 +452,109 @@ public class CourtScreen extends Screen {
             y += 10;
         }
         return y;
+    }
+
+    // ------------------------------------------------------------------ Титулы и династические права
+    private void titles(GuiGraphics g, int x, int top, int cw, int h, int mx, int my) {
+        TitleData.Realm realmData = d().realms.get(realm);
+        WFUi.bevel(g, x, top, cw, h, true);
+        g.drawString(font, "ТИТУЛЬНАЯ ИЕРАРХИЯ И ПРЕТЕНЗИИ", x + 8, top + 6, WFUi.GOLD_DIM);
+        Character ruler = s.ruler(realm);
+        int y = top + 22;
+        if (ruler != null) {
+            String house = ruler.house == null || ruler.house.isBlank() ? "Без династического дома" : ruler.house;
+            g.drawString(font, "Правящий дом: " + house, x + 8, y, WFUi.GOLD);
+            hit(x + 8, y - 2, cw - 16, 14, null, house,
+                    List.of("Правитель: " + ruler.name, "Персонажи и родственные связи берутся из общего CharacterRegistry"));
+            y += 18;
+        }
+        if (realmData == null || realmData.titleKeys.isEmpty()) {
+            g.drawString(font, "У государства пока нет титулов на карте.", x + 8, y, WFUi.MUTED);
+            return;
+        }
+        g.drawString(font, "ТИТУЛ", x + 8, y, WFUi.GOLD_DIM);
+        g.drawString(font, "ДЕРЖАТЕЛЬ", x + 205, y, WFUi.GOLD_DIM);
+        g.drawString(font, "ПРЕТЕНДЕНТЫ", x + 390, y, WFUi.GOLD_DIM);
+        y += 13;
+        for (String key : realmData.titleKeys) {
+            if (y > top + h - 20) break;
+            TitleData.Title title = d().byKey(key);
+            if (title == null) continue;
+            String holderId = String.valueOf(title.props.getOrDefault("politics.holder_character", ""));
+            Character holder = holderId.isBlank() ? null : s.reg.get(holderId);
+            String holderName = holder == null ? (holderId.isBlank() ? "Не назначен" : holderId) : holder.name;
+            String claims = String.valueOf(title.props.getOrDefault("politics.claimants", ""));
+            List<String> claimantIds = claims.isBlank() ? List.of() : Arrays.asList(claims.split(";"));
+            String claimantNames = claimantIds.stream().map(id -> {
+                Character c = s.reg.get(id);
+                return c == null ? id : c.name + (c.house.isBlank() ? "" : " " + c.house);
+            }).limit(3).collect(java.util.stream.Collectors.joining(", "));
+            WFUi.rowBg(g, x + 4, y - 2, cw - 8, 19, title.id, false,
+                    WFUi.over(mx, my, x + 4, y - 2, cw - 8, 19));
+            String rank = title.tier >= 0 && title.tier < d().tiers.size() ? d().tiers.get(title.tier).name : "Титул";
+            g.drawString(font, font.plainSubstrByWidth(title.name + " · " + rank, 188), x + 8, y + 3, WFUi.TX);
+            g.drawString(font, font.plainSubstrByWidth(holderName, 175), x + 205, y + 3, WFUi.TX);
+            g.drawString(font, font.plainSubstrByWidth(claimantIds.isEmpty() ? "Нет" : claimantNames, cw - 410),
+                    x + 390, y + 3, claimantIds.isEmpty() ? WFUi.MUTED : WFUi.BAD);
+            hit(x + 4, y - 2, cw - 8, 19, null, title.name,
+                    List.of("Держатель: " + holderName, "Претендентов: " + claimantIds.size(),
+                            claimantIds.isEmpty() ? "Спорных прав нет" : String.join(", ", claimantIds)));
+            y += 21;
+        }
+        g.drawString(font, "Наследование: " + realmData.props.getOrDefault("politics.succession_law", "primogeniture"),
+                x + 8, top + h - 13, WFUi.MUTED);
+    }
+
+    // ------------------------------------------------------------------ Дипломатия
+    private void diplomacy(GuiGraphics g, int x, int top, int cw, int h, int mx, int my) {
+        TitleData.Realm realmData = d().realms.get(realm);
+        WFUi.bevel(g, x, top, cw, h, true);
+        g.drawString(font, "ДИПЛОМАТИЧЕСКИЕ ОТНОШЕНИЯ", x + 8, top + 6, WFUi.GOLD_DIM);
+        int y = top + 22;
+        if (realmData == null) return;
+        String raw = String.valueOf(realmData.props.getOrDefault("politics.diplomacy_options", ""));
+        String firstOther = "";
+        if (raw.isBlank()) {
+            g.drawString(font, "Нет дипломатических контактов. Контакты возникают между соседними государствами.", x + 8, y, WFUi.MUTED);
+        } else {
+            g.drawString(font, "ГОСУДАРСТВО", x + 8, y, WFUi.GOLD_DIM);
+            g.drawString(font, "МНЕНИЕ", x + 220, y, WFUi.GOLD_DIM);
+            g.drawString(font, "ДОГОВОРЫ", x + 290, y, WFUi.GOLD_DIM);
+            y += 14;
+            for (String entry : raw.split(";")) {
+                if (y > top + h - 65) break;
+                String[] p = entry.split("\\|", -1);
+                if (p.length < 5) continue;
+                if (firstOther.isBlank()) firstOther = p[0];
+                int opinion = 0, truce = 0;
+                try { opinion = Integer.parseInt(p[2]); truce = Integer.parseInt(p[4]); } catch (NumberFormatException ignored) { }
+                WFUi.rowBg(g, x + 4, y - 2, cw - 8, 18, p[0].hashCode(), false,
+                        WFUi.over(mx, my, x + 4, y - 2, cw - 8, 18));
+                g.drawString(font, font.plainSubstrByWidth(p[1], 202), x + 8, y + 3, WFUi.TX);
+                g.drawString(font, (opinion > 0 ? "+" : "") + opinion, x + 220, y + 3,
+                        opinion >= 20 ? WFUi.GOOD : opinion <= -20 ? WFUi.BAD : WFUi.MUTED);
+                g.drawString(font, font.plainSubstrByWidth(p[3].isBlank() ? "Нет договора" : p[3], 145),
+                        x + 290, y + 3, p[3].isBlank() ? WFUi.MUTED : WFUi.GOLD);
+                hit(x + 4, y - 2, cw - 8, 18, null, p[1],
+                        List.of("Мнение: " + opinion, "Перемирие до дня: " + truce,
+                                "Договоры: " + (p[3].isBlank() ? "нет" : p[3])));
+                y += 20;
+            }
+        }
+        String wars = String.valueOf(realmData.props.getOrDefault("politics.active_wars", ""));
+        int warCount = wars.isBlank() ? 0 : wars.split(";").length;
+        int controlsY = top + h - 48;
+        g.drawString(font, "Активные войны: " + warCount, x + 8, controlsY - 11, warCount > 0 ? WFUi.BAD : WFUi.GOOD);
+        String[] types = {"NON_AGGRESSION", "TRADE_PACT", "DEFENSIVE_PACT", "ALLIANCE"};
+        String[] labels = {"Ненап.", "Торговля", "Оборона", "Союз"};
+        int bw = (cw - 24) / 4;
+        final String target = firstOther;
+        for (int i = 0; i < types.length; i++) {
+            String type = types[i];
+            btn(g, x + 8 + i * (bw + 2), controlsY, bw, labels[i], !target.isBlank(), mx, my,
+                    () -> cmd.accept("wfrealm treaty " + target + " " + type + " true"),
+                    target.isBlank() ? "Нет доступного дипломатического контакта" : "Предложить договор государству " + target);
+        }
     }
 
     // ------------------------------------------------------------------ Козни

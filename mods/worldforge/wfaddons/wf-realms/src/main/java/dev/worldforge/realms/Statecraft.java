@@ -150,6 +150,12 @@ public final class Statecraft {
 
     public Title title(String id) { return titles.get(id); }
     public Collection<Title> titles() { return Collections.unmodifiableCollection(titles.values()); }
+    public static String mapTitleId(String mapName, String titleKey) {
+        String namespace = (mapName == null ? "map" : mapName.trim()).replaceAll("[^A-Za-z0-9_.-]", "_");
+        if (namespace.isEmpty()) namespace = "map";
+        return "map:" + UUID.nameUUIDFromBytes((namespace + "|" + titleKey)
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
 
     /**
      * Idempotently imports the existing WorldForge map title tree and realm overlord links.
@@ -168,8 +174,7 @@ public final class Statecraft {
             for (String key : realm.titleKeys) {
                 TitleData.Title source = sourceByKey.get(key);
                 if (source == null) continue;
-                String id = "map:" + UUID.nameUUIDFromBytes((namespace + "|" + key)
-                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                String id = mapTitleId(namespace, key);
                 ids.put(source.id, id);
                 Title target = titles.get(id);
                 if (target == null) {
@@ -500,6 +505,7 @@ public final class Statecraft {
         return relations.computeIfAbsent(pair(x,y), k -> new Relation(x,y));
     }
     public Relation relationOf(String a, String b) { return relation(a,b); }
+    public Collection<Relation> relations() { return Collections.unmodifiableCollection(relations.values()); }
     public boolean setOpinion(String a, String b, int opinion) {
         relation(a,b).opinion = Math.max(-100, Math.min(100, opinion)); return true;
     }

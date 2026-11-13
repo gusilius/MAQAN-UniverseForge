@@ -16,6 +16,9 @@ import dev.worldforge.mod.api.WorldForgeApi;
 import dev.worldforge.realms.RealmDefs;
 import dev.worldforge.realms.Realms;
 import dev.worldforge.realms.Statecraft;
+import dev.worldforge.people.Character;
+import dev.worldforge.people.CharacterRegistry;
+import dev.worldforge.people.mc.PeopleMod;
 import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.arguments.BoolArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
@@ -340,30 +343,89 @@ public class RealmsMod {
     private static void syncPoliticalMapState() {
         for (var map : WorldForgeMod.loadedMaps().values()) {
             if (map.titles == null) continue;
-            // Statecraft is authoritative after startup import; this pass only projects it.
             TitleEditor editor = EditorManager.editorFor(map);
             if (editor == null) continue;
+            boolean changed = false;
+            CharacterRegistry people = PeopleMod.registry(map);
+            if (people != null) {
+                Map<String, Character> founders = new LinkedHashMap<>();
+                for (Character character : people.all()) {
+                    if (character.house == null || character.house.isBlank()) continue;
+                    Character prior = founders.get(character.house);
+                    if (prior == null || character.birthYear < prior.birthYear)
+                        founders.put(character.house, character);
+                }
+                for (Character character : people.all()) {
+                    if (!character.house.isBlank()) {
+                        Character founder = founders.get(character.house);
+                        if (POLITICS.dynasty(character.house) == null)
+                            POLITICS.registerDynasty(character.house, founder.globalId);
+                        POLITICS.addDynastyMember(character.house, character.globalId);
+                    }
+                }
+            }
+            for (TitleData.Title title : map.titles.allTitles()) {
+                Statecraft.Title political = POLITICS.title(Statecraft.mapTitleId(map.name, title.key));
+                String holder = political == null ? "" : political.holderCharacterId;
+                String claimants = political == null ? "" : String.join(";", new TreeSet<>(political.claims));
+                int count = political == null ? 0 : political.claims.size();
+                changed |= editor.setDerivedTitleProp(title.id, "politics.holder_character", holder);
+                changed |= editor.setDerivedTitleProp(title.id, "politics.claimants", claimants);
+                changed |= editor.setDerivedTitleProp(title.id, "politics.claim_count", count);
+                changed |= editor.setDerivedTitleProp(title.id, "politics.contested", count > 0);
+            }
             for (TitleData.Realm realm : map.titles.realmList()) {
+                // Establish diplomatic contact only where title provinces actually share a border.
+                for (String key : realm.titleKeys) {
+                    TitleData.Title title = map.titles.byKey(key);
+                    if (title == null) continue;
+                    for (int neighborId : title.neighbors) {
+                        TitleData.Realm other = map.titles.realmOf(map.titles.get(neighborId));
+                        if (other != null && !other.id.equals(realm.id))
+                            POLITICS.relationOf(realm.id, other.id);
+                    }
+                }
                 Statecraft.VassalContract contract = POLITICS.vassalage(realm.id);
                 String desiredLiege = contract == null ? null : contract.liegeRealm;
                 if (!Objects.equals(realm.overlordId, desiredLiege)) {
-                    try { editor.setOverlord(realm.id, desiredLiege, null); }
+                    try { editor.setOverlord(realm.id, desiredLiege, null); changed = true; }
                     catch (RuntimeException ex) {
                         LOGGER.warn("wf_realms: cannot project vassal contract {} -> {} onto map {}: {}",
                                 realm.id, desiredLiege, map.name, ex.getMessage());
                         continue;
                     }
                 }
-                if (contract == null) {
-                    editor.setDerivedProp(realm.id, "tax_share", null);
-                    editor.setDerivedProp(realm.id, "levy_share", null);
-                    editor.setDerivedProp(realm.id, "politics.vassal_loyalty", null);
-                    continue;
+                changed |= editor.setDerivedProp(realm.id, "tax_share", contract == null ? null : contract.taxShare);
+                changed |= editor.setDerivedProp(realm.id, "levy_share", contract == null ? null : contract.levyShare);
+                changed |= editor.setDerivedProp(realm.id, "politics.vassal_loyalty", contract == null ? null : contract.loyalty);
+                int contested = 0;
+                for (String key : realm.titleKeys) {
+                    TitleData.Title title = map.titles.byKey(key);
+                    if (title != null && Boolean.TRUE.equals(title.props.get("politics.contested"))) contested++;
                 }
-                editor.setDerivedProp(realm.id, "tax_share", contract.taxShare);
-                editor.setDerivedProp(realm.id, "levy_share", contract.levyShare);
-                editor.setDerivedProp(realm.id, "politics.vassal_loyalty", contract.loyalty);
+                changed |= editor.setDerivedProp(realm.id, "politics.contested_titles", contested);
+                Object unrest = realm.props.get("politics.unrest");
+                int unrestValue = unrest instanceof Number n ? Math.max(0, Math.min(100, n.intValue())) : 0;
+                boolean rebellion = unrestValue >= 70 || Boolean.TRUE.equals(realm.props.get("politics.rebellion"));
+                changed |= editor.setDerivedProp(realm.id, "politics.rebellion", rebellion);
+                List<String> diplomatic = new ArrayList<>();
+                for (Statecraft.Relation relation : POLITICS.relations()) {
+                    if (!relation.realmA.equals(realm.id) && !relation.realmB.equals(realm.id)) continue;
+                    String other = relation.realmA.equals(realm.id) ? relation.realmB : relation.realmA;
+                    TitleData.Realm otherRealm = map.titles.realms.get(other);
+                    String treaties = relation.treaties.stream().map(Enum::name).sorted().collect(java.util.stream.Collectors.joining(","));
+                    diplomatic.add(other + "|" + (otherRealm == null ? other : otherRealm.name) + "|"
+                            + relation.opinion + "|" + treaties + "|" + relation.truceUntilDay);
+                }
+                changed |= editor.setDerivedProp(realm.id, "politics.diplomacy_options", String.join(";", diplomatic));
+                String activeWars = POLITICS.wars().stream()
+                        .filter(w -> w.status == Statecraft.WarStatus.ACTIVE
+                                && (w.attackerRealm.equals(realm.id) || w.defenderRealm.equals(realm.id)))
+                        .map(w -> w.id + "|" + w.attackerRealm + "|" + w.defenderRealm + "|" + w.casusBelli + "|" + w.warScore)
+                        .collect(java.util.stream.Collectors.joining(";"));
+                changed |= editor.setDerivedProp(realm.id, "politics.active_wars", activeWars);
             }
+            if (changed) EditorManager.touch(map);
         }
     }
 

@@ -104,6 +104,28 @@ public final class PoliticalMapRenderer {
                 img[gy * 128 + gx] = (byte) (lab > 0 ? codes[lab] : (isl ? CODE_LAND : CODE_WATER));
             }
         }
+        // Disputed title claims and active rebellions are visible overlays on the same political map.
+        int contestedCode = nearestCode(0xD65B4A, Set.of());
+        int rebellionCode = nearestCode(0xF04438, Set.of());
+        for (int gy = 0; gy < 128; gy++) for (int gx = 0; gx < 128; gx++) {
+            int lab = cell[gy * 128 + gx];
+            if (lab <= 0) continue;
+            boolean contested = false, rebellion = false;
+            if (realms) {
+                TitleData.Realm realm = d.realmList().get(lab - 1);
+                Object claims = realm.props.get("politics.contested_titles");
+                contested = claims instanceof Number n && n.intValue() > 0;
+                Object unrest = realm.props.get("politics.unrest");
+                rebellion = Boolean.TRUE.equals(realm.props.get("politics.rebellion"))
+                        || (unrest instanceof Number n && n.intValue() >= 70);
+            } else {
+                TitleData.Title title = d.get(lab);
+                contested = title != null && (Boolean.TRUE.equals(title.props.get("politics.contested"))
+                        || (title.props.get("politics.claim_count") instanceof Number n && n.intValue() > 0));
+            }
+            if (rebellion && ((gx + gy) & 1) == 0) img[gy * 128 + gx] = (byte) rebellionCode;
+            else if (contested && ((gx + gy) & 3) == 0) img[gy * 128 + gx] = (byte) contestedCode;
+        }
         if (realms) {
             for (int gy = 0; gy < 128; gy++) {
                 for (int gx = 0; gx < 128; gx++) {

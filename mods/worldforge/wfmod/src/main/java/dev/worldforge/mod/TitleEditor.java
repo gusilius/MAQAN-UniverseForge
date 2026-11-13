@@ -479,13 +479,25 @@ public final class TitleEditor {
         group(() -> { m.put(param, value); });
     }
 
-    /** Производное свойство, которое аддон пересчитывает сам (например эффекты совета): без снимка для отмены и без события, только пометка «есть изменения». */
-    public void setDerivedProp(String id, String key, Object value) {
+
+
+    /** Addon-owned projection into canonical map title data; persisted with the map overlay. */
+    public boolean setDerivedTitleProp(int id, String key, Object value) {
+        TitleData.Title title = title(id);
+        Object old = title.props.get(key);
+        if (java.util.Objects.equals(old, value)) return false;
+        if (value == null) title.props.remove(key); else title.props.put(key, value);
+        dirty = true;
+        return true;
+    }
+
+    public boolean setDerivedProp(String id, String key, Object value) {
         TitleData.Realm r = realm(id);
         Object old = r.props.get(key);
-        if (java.util.Objects.equals(old, value)) return;
+        if (java.util.Objects.equals(old, value)) return false;
         if (value == null) r.props.remove(key); else r.props.put(key, value);
         dirty = true;
+        return true;
     }
 
     public void setRealmProp(String id, String key, Object value) {
