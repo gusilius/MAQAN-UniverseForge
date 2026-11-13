@@ -916,7 +916,12 @@ public final class CourtSim {
         for (Opinions.Modifier m : opinions.mods) if (ids.contains(m.from) && ids.contains(m.to)) v.opinions.mods.add(m);
         for (Faction f : factions.values()) if (f.liege.equals(realm) || f.members.contains(realm)) v.factions.put(f.id, f);
         Regency regency = regencies.get(realm);
-        if (regency != null) v.regencies.put(realm, new Regency(regency.realm, regency.heir, regency.regent, regency.startedDay));
+        if (regency != null) {
+            Regency snapshot = new Regency(regency.realm, regency.heir, regency.regent, regency.startedDay);
+            snapshot.crisis = regency.crisis;
+            snapshot.crisisStage = regency.crisisStage;
+            v.regencies.put(realm, snapshot);
+        }
         for (Scheme sc : schemes.values()) if (me != null && sc.owner.equals(me.id)) v.schemes.put(sc.id, sc);
         for (Pending p : pending) if (p.realm.equals(realm)) v.pending.add(p);
         int from = Math.max(0, news.size() - 80);

@@ -177,6 +177,9 @@ public class CourtTest {
         minorCourt.reg.appoint(childHeir.id, minorCourt.defs.ruler().id, Courts.realmPlace(minorRealm));
         minorCourt.d.realms.get(minorRealm).ruler = childHeir.name;
         minorCourt.regencies.clear();
+        List<Character> expectedRegents = minorCourt.regencyCandidates(minorRealm);
+        ok(!expectedRegents.isEmpty(), "the test court has at least one eligible adult regent");
+        adultRegent = expectedRegents.isEmpty() ? adultRegent : expectedRegents.get(0);
         minorCourt.tick(30);
         ok(minorCourt.regency(minorRealm) != null
                         && minorCourt.regency(minorRealm).heir.equals(childHeir.id)
@@ -189,6 +192,14 @@ public class CourtTest {
                         && minorReload.regency(minorRealm).regent.equals(adultRegent.id)
                         && minorReload.toJson().equals(regencySave),
                 "regency appointment survives deterministic court save/load");
+        String[] regencyView = minorCourt.viewJson(minorRealm);
+        CourtSim clientCourt = new CourtSim(minorCourt.d, null, minorCourt.reg, minorCourt.defs,
+                minorCourt.names, minorCourt.seed, minorCourt.startYear);
+        clientCourt.fromJson(regencyView[1]);
+        ok(clientCourt.regency(minorRealm) != null
+                        && clientCourt.regency(minorRealm).crisis == minorCourt.regency(minorRealm).crisis
+                        && clientCourt.regency(minorRealm).crisisStage == minorCourt.regency(minorRealm).crisisStage,
+                "court client snapshot retains regency crisis pressure and stage");
         boolean rejectedRegent = false;
         try { minorCourt.appointRegent(minorRealm, childHeir.id); }
         catch (TitleEditor.EditException expected) { rejectedRegent = true; }
@@ -224,7 +235,7 @@ public class CourtTest {
         ok(minorCourt.negotiateRegencyCrisis(minorRealm)
                         && minorCourt.regency(minorRealm).crisis < crisisBeforeCompromise,
                 "a council-backed compromise reduces regency crisis pressure through the canonical court");
-        childHeir.birthYear = minorCourt.year() - 16;
+        childHeir.birthYear = minorCourt.year() - 17;
         minorCourt.tick(30);
         ok(minorCourt.regency(minorRealm) == null
                         && ((Number) minorCourt.d.realms.get(minorRealm).props.get("politics.regency.active")).intValue() == 0,
