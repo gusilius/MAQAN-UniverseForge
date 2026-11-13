@@ -7,6 +7,8 @@ JARS="\${2:?addon jar directory required}"
 OUTPUT="\${3:?output directory required}"
 MAP_ID="planetos"
 FORGE="1.20.1-47.3.0"
+# Derive reproducibility only from the selected map package; no extra scenario seed input.
+MAP_SEED="$(sha256sum "$MAP_SOURCE" | awk '{print substr($1,1,16)}')"
 MAX_RUNTIME_SECONDS="\${WF_CAMPAIGN_TIMEOUT_SECONDS:-3300}"
 MAP_SOURCE="$(cd "$(dirname "$MAP_SOURCE")" && pwd)/$(basename "$MAP_SOURCE")"
 JARS="$(cd "$JARS" && pwd)"
@@ -74,7 +76,7 @@ cat > server.properties <<'P'
 online-mode=false
 level-name=world
 level-type=minecraft\:normal
-level-seed=20261114
+level-seed=$MAP_SEED
 generate-structures=false
 view-distance=4
 simulation-distance=4
