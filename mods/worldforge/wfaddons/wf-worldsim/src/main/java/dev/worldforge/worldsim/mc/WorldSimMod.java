@@ -383,6 +383,7 @@ public final class WorldSimMod {
                 + ", clock_step=" + WorldForgeApi.clock().simulationDaysPerTick()
                 + ", materialized_settlements=" + materializedSettlementCount()
                 + ", completed_buildings=" + completedAutonomousBuildingCount()
+                + ", physically_built_settlements=" + physicallyBuiltAutonomousSettlementCount()
                 + ", events=" + WorldForgeApi.events().size()
                 + ", chronicle=" + HISTORICAL_CHRONICLE.size()), false);
         return 1;
@@ -431,8 +432,12 @@ public final class WorldSimMod {
         int campaignSettlements = autonomousSettlementCount();
         int materializedSettlements = materializedSettlementCount();
         int completedBuildings = completedAutonomousBuildingCount();
+        int physicallyCompletedBuildings = physicallyCompletedBuildingCount();
+        int physicallyBuiltSettlements = physicallyBuiltAutonomousSettlementCount();
         boolean physicalReady = campaignSettlements > 0
-                && materializedSettlements == campaignSettlements && completedBuildings > 0;
+                && materializedSettlements == campaignSettlements
+                && physicallyBuiltSettlements == campaignSettlements
+                && physicallyCompletedBuildings >= campaignSettlements;
         if (!allMature || !physicalReady || elapsedYear - latestFoundingYear < 25) return;
 
         campaignRunning = false;
@@ -458,6 +463,8 @@ public final class WorldSimMod {
             report.addProperty("settlements", campaignSettlements);
             report.addProperty("materialized_settlements", materializedSettlements);
             report.addProperty("completed_buildings", completedBuildings);
+            report.addProperty("physically_completed_buildings", physicallyCompletedBuildings);
+            report.addProperty("physically_built_settlements", physicallyBuiltSettlements);
             report.addProperty("canonical_ruler_generations_verified",
                     polities.asList().stream().filter(item -> item.isJsonObject()
                             && canonicalGenerationCount(item.getAsJsonObject()) >= 4).count());
@@ -511,6 +518,28 @@ public final class WorldSimMod {
                 && colony.s != null && colony.genesisOperationId != null
                 && colony.genesisOperationId.startsWith("worldsim:settlement:")
                 && colony.autonomousFoundingPopulation > 0).count();
+    }
+
+    private static int physicallyCompletedBuildingCount() {
+        return SettleMod.COLONIES.values().stream().filter(colony -> colony != null
+                && colony.s != null && colony.genesisOperationId != null
+                && colony.genesisOperationId.startsWith("worldsim:settlement:"))
+                .mapToInt(colony -> (int) colony.s.buildings.stream()
+                        .filter(building -> building.state == Building.State.DONE)
+                        .filter(building -> {
+                            Colony.Site site = colony.sites.get(building.uid);
+                            return site != null && !site.physicalPending && site.placed > 0;
+                        }).count()).sum();
+    }
+
+    private static int physicallyBuiltAutonomousSettlementCount() {
+        return (int) SettleMod.COLONIES.values().stream().filter(colony -> colony != null
+                && colony.s != null && colony.genesisOperationId != null
+                && colony.genesisOperationId.startsWith("worldsim:settlement:")
+                && colony.s.buildings.stream().anyMatch(building -> building.state == Building.State.DONE
+                        && colony.sites.containsKey(building.uid)
+                        && !colony.sites.get(building.uid).physicalPending
+                        && colony.sites.get(building.uid).placed > 0)).count();
     }
 
     private static int completedAutonomousBuildingCount() {

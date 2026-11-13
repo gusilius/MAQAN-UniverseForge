@@ -142,9 +142,13 @@ if int(report.get("canonical_ruler_generations_verified", 0)) != int(report.get(
     raise SystemExit("Not every surviving state has four verified canonical ruler generations")
 if int(report.get("materialized_settlements", 0)) != int(report.get("settlements", 0)):
     raise SystemExit("Not every emergent settlement reached physical local-LOD materialization")
+if int(report.get("physically_built_settlements", 0)) != int(report.get("settlements", 0)):
+    raise SystemExit("Not every emergent settlement completed a physical blueprint in the Planetos dimension")
+if int(report.get("physically_completed_buildings", 0)) < int(report.get("settlements", 0)):
+    raise SystemExit("The physical building count is below the one-building-per-settlement acceptance threshold")
 if not report.get("physical_world_dimension"):
     raise SystemExit("Campaign did not run in a registered Planetos map dimension")
-for key in ("stable_states", "characters", "settlements", "materialized_settlements", "completed_buildings", "canonical_ruler_generations_verified", "world_events", "chronicle_entries"):
+for key in ("stable_states", "characters", "settlements", "materialized_settlements", "completed_buildings", "physically_completed_buildings", "physically_built_settlements", "canonical_ruler_generations_verified", "world_events", "chronicle_entries"):
     if int(report.get(key, 0)) <= 0:
         raise SystemExit(f"Campaign report is missing required generated data: {key}")
 book = inventory_path.with_name("chronicle-book.md")
