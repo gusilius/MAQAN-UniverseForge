@@ -173,8 +173,13 @@ public class CourtTest {
         formerRuler.children.add(childHeir.id); childHeir.father = formerRuler.id;
         Succession.onDeath(minorCourt.reg, minorCourt.defs, minorCourt.d, minorCourt.ed, minorCourt.names,
                 112L, formerRuler.id, minorCourt.year(), "primogeniture");
-        // Force the test heir onto the throne to isolate regency from the random family setup.
-        minorCourt.reg.appoint(childHeir.id, minorCourt.defs.ruler().id, Courts.realmPlace(minorRealm));
+        // Replace every existing ruler post before appointing the fixture heir; appoint() is
+        // additive by design and must not leave two sovereigns in the same court.
+        String rulerRole = minorCourt.defs.ruler().id;
+        String rulerPlace = Courts.realmPlace(minorRealm);
+        for (Character existingRuler : new ArrayList<>(minorCourt.reg.holders(rulerRole, rulerPlace)))
+            minorCourt.reg.dismiss(existingRuler.id, rulerRole, rulerPlace);
+        minorCourt.reg.appoint(childHeir.id, rulerRole, rulerPlace);
         minorCourt.d.realms.get(minorRealm).ruler = childHeir.name;
         minorCourt.regencies.clear();
         List<Character> expectedRegents = minorCourt.regencyCandidates(minorRealm);
