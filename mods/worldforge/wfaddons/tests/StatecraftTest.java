@@ -32,6 +32,13 @@ public final class StatecraftTest {
                 "titles have holders and a ranked liege hierarchy");
         check(!state.setTitleLiege("crown", "winter_county"), "lower-rank liege is rejected");
         check(!state.setTitleLiege("crown", "crown"), "self-liege is rejected");
+        check(!state.setTitleRank("north_duchy", Statecraft.Rank.KINGDOM)
+                        && !state.setTitleRank("winter_county", Statecraft.Rank.KINGDOM),
+                "realm rank promotion cannot invalidate an existing liege hierarchy");
+        Statecraft.Title frontier = state.createTitle("frontier_rank", "frontier", Statecraft.Rank.COUNTY, "Frontier");
+        check(state.setTitleRank(frontier.id, Statecraft.Rank.KINGDOM)
+                        && frontier.rank == Statecraft.Rank.KINGDOM,
+                "an independent realm title can evolve its canonical rank");
         check(state.addClaim("crown", "c3") && state.inheritTitle("crown", "c1", "c3")
                 && kingdom.holderCharacterId.equals("c3"), "validated Character ID claim transfers a title on succession");
 
