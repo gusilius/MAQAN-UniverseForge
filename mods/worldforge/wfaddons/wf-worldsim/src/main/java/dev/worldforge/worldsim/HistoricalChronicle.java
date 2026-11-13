@@ -199,6 +199,8 @@ public final class HistoricalChronicle {
                     category.isBlank() ? "system" : category, text, realms));
         }
         if (restored.size() > MAX_ENTRIES) restored = new ArrayList<>(restored.subList(restored.size() - MAX_ENTRIES, restored.size()));
+        restored.sort(java.util.Comparator.comparingLong((Entry entry) -> entry.day)
+                .thenComparingLong(HistoricalChronicle::eventSequence));
         entries.clear();
         entries.addAll(restored);
         knownIds.clear();

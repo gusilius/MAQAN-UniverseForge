@@ -225,9 +225,31 @@ fn maybe_form_polity(map: &GeographicMap, seed: u64, year: u64, bands: &[Emergen
     }
 }
 
-fn update_polities(seed: u64, year: u64, bands: &[EmergentBand], polities: &mut Vec<EmergentPolity>,
-    events: &mut Vec<EmergenceEvent>) {
+fn update_polities(seed: u64, year: u64, bands: &[EmergentBand], maps: &[GeographicMap],
+    polities: &mut Vec<EmergentPolity>, events: &mut Vec<EmergenceEvent>) {
     for polity in polities.iter_mut() {
+        // If a province is transferred to an established realm, its settlement
+        // leaves the emergent polity's sovereign core. Existing physical colonies
+        // remain and are reconciled by the canonical map-ownership listener.
+        if let Some(map) = maps.iter().find(|map| map.map_id == polity.map_id) {
+            let own_realm_id = format!("emergent-{}", polity.id);
+            let absorbed = polity.settlement_ids.iter().filter_map(|settlement_id| {
+                let band = bands.iter().find(|band| band.id == *settlement_id)?;
+                let cell = cell_at(map, band.x, band.z)?;
+                let owner = cell.owner_realm_id.trim();
+                if !owner.is_empty() && owner != own_realm_id.as_str() {
+                    Some((settlement_id.clone(), owner.to_owned()))
+                } else { None }
+            }).collect::<Vec<_>>();
+            for (settlement_id, owner) in absorbed {
+                polity.settlement_ids.retain(|id| id != &settlement_id);
+                events.push(EmergenceEvent {
+                    year, kind: "settlement_absorbed".into(), subject_id: settlement_id.clone(),
+                    text: format!("Settlement {} is brought under the authority of {} after a territorial change",
+                        settlement_id, owner),
+                });
+            }
+        }
         let population = bands.iter().filter(|b| polity.settlement_ids.contains(&b.id) && b.settled)
             .map(|b| b.population).sum::<u64>();
         polity.population = population;
@@ -319,7 +341,7 @@ pub fn advance(request: EmergenceRequest) -> Result<EmergenceFrame, String> {
             }
         }
         for map in maps { maybe_form_polity(map, state.seed, year, &state.bands, &mut state.polities, &mut events); }
-        update_polities(state.seed, year, &state.bands, &mut state.polities, &mut events);
+        update_polities(state.seed, year, &state.bands, maps, &mut state.polities, &mut events);
         state.last_year = year;
         years_advanced += 1;
         if years_advanced > 20_000 { return Err("emergence-catch-up-exceeds-20000-years".into()); }
@@ -381,6 +403,33 @@ mod tests {
         maybe_form_polity(&geography, 8128, 41, &legacy_bands, &mut polities, &mut events);
         assert!(polities.is_empty(), "persisted settlements inside an established realm cannot declare new statehood");
         assert!(events.is_empty(), "blocked founding must not emit a false state-founding event");
+    }
+
+    #[test]
+    fn transferred_settlement_leaves_emergent_polity_core() {
+        let mut geography = map();
+        let occupied = geography.cells.iter_mut().find(|cell| cell.x == 10 && cell.z == 10).unwrap();
+        occupied.owner_realm_id = "established-kingdom".into();
+        let bands = vec![
+            EmergentBand { id:"transferred".into(), map_id:"planetos".into(), x:10, z:10,
+                population:30, food_reserve:4, settled:true, founded_year:20, hardship_years:0 },
+            EmergentBand { id:"remaining".into(), map_id:"planetos".into(), x:20, z:10,
+                population:40, food_reserve:8, settled:true, founded_year:20, hardship_years:0 },
+        ];
+        let mut polities = vec![EmergentPolity {
+            id:"frontier-polity".into(), map_id:"planetos".into(), name:"Frontier".into(),
+            settlement_ids:vec!["transferred".into(),"remaining".into()], population:70,
+            founded_year:20, stability:55, dynasty_id:"frontier-house".into(),
+            dynasty_generations:1, ruler_global_id:None, last_succession_year:20,
+            years_in_generation:0, succession_pressure:0, weak_years:0,
+        }];
+        let mut events = Vec::new();
+        update_polities(8128, 41, &bands, &[geography], &mut polities, &mut events);
+        assert_eq!(polities.len(), 1);
+        assert_eq!(polities[0].settlement_ids, vec!["remaining".to_string()]);
+        assert_eq!(polities[0].population, 40);
+        assert!(events.iter().any(|event| event.kind == "settlement_absorbed"
+            && event.subject_id == "transferred"));
     }
 
     #[test]

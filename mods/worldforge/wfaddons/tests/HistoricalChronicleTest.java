@@ -56,6 +56,12 @@ public final class HistoricalChronicleTest {
                 List.of("realm_north", "realm_south"), 40L * 1440L);
         check(delayedBook.entries().get(0).day == 5 && delayedBook.entries().get(1).day == 40,
                 "delayed event delivery is reordered by actual occurrence time, not listener arrival");
+        HistoricalChronicle restoredOutOfOrder = new HistoricalChronicle();
+        restoredOutOfOrder.fromJson("{\"starting_year\":300,\"entries\":["
+                + "{\"id\":\"worldforge-event:2\",\"day\":40,\"year\":300,\"epoch\":0,\"cycle\":0,\"category\":\"war\",\"text\":\"later\",\"realms\":[]},"
+                + "{\"id\":\"worldforge-event:1\",\"day\":5,\"year\":300,\"epoch\":0,\"cycle\":0,\"category\":\"people\",\"text\":\"earlier\",\"realms\":[]}]}" );
+        check(restoredOutOfOrder.entries().get(0).day == 5,
+                "legacy or imported chronicle saves are normalized into chronological order");
 
         if (failures > 0) throw new AssertionError(failures + " historical chronicle checks failed");
         System.out.println("HISTORICAL_CHRONICLE_STATUS=PASS");

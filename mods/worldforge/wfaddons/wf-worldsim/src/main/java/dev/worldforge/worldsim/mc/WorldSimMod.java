@@ -98,16 +98,20 @@ public final class WorldSimMod {
     public WorldSimMod() {
         MinecraftForge.EVENT_BUS.register(this);
         WorldForgeApi.events().addListener(item -> {
-            // EventLog.time is the authoritative occurrence time. Listener delivery may
-            // happen later (or after a batched simulation step), so never date history
-            // from the current wall/game clock when the event carries its own timestamp.
-            long eventDay = item == null ? WorldForgeApi.clock().dayNumber()
-                    : Math.max(0L, item.time / 1440L);
-            int eventYear = WorldForgeApi.clock().startYear
-                    + (int) (eventDay / HistoricalChronicle.DAYS_PER_YEAR);
-            HISTORICAL_CHRONICLE.record(item, eventDay, eventYear);
+            recordChronicleEvent(item);
             publishPlatformTimelineEvent(item);
         });
+    }
+
+    private static void recordChronicleEvent(dev.worldforge.mod.api.EventLog.Event item) {
+        if (item == null) return;
+        // EventLog.time is the authoritative occurrence time. Listener delivery may
+        // happen later (or after a batched simulation step), so never date history
+        // from the current wall/game clock when the event carries its own timestamp.
+        long eventDay = Math.max(0L, item.time / 1440L);
+        int eventYear = WorldForgeApi.clock().startYear
+                + (int) (eventDay / HistoricalChronicle.DAYS_PER_YEAR);
+        HISTORICAL_CHRONICLE.record(item, eventDay, eventYear);
     }
 
     @SubscribeEvent
@@ -121,6 +125,10 @@ public final class WorldSimMod {
         HISTORICAL_CHRONICLE.setStartingYear(WorldForgeApi.clock().startYear);
         publishObservers(event.getServer());
         loadState(event.getServer());
+        // Backfill the book from the persisted canonical journal. This also migrates
+        // worlds saved before the chronicle projection existed; seq-based identities
+        // make replay safe when the saved book already contains some of these events.
+        for (var item : WorldForgeApi.events().all()) recordChronicleEvent(item);
         LOGGER.info("wf_worldsim: autonomous coordinator started; native Rust core={}, initial LOD observers={}",
                 NativeWorldSimulation.load() ? "available" : "unavailable",
                 serverObserverCount(event.getServer()));
@@ -179,7 +187,7 @@ public final class WorldSimMod {
                     String eventCategory = switch (kind) {
                         case "settlement_founded" -> "settlement";
                         case "founding_ruler", "dynastic_succession", "population_origin" -> "people";
-                        case "state_founded", "state_dissolved" -> "diplomacy";
+                        case "state_founded", "state_dissolved", "settlement_absorbed" -> "diplomacy";
                         default -> "system";
                     };
                     long eventDay = Math.max(0L, emergenceEvent.has("year") ? emergenceEvent.get("year").getAsLong() * 365L : day);
@@ -537,13 +545,26 @@ public final class WorldSimMod {
                     band.addProperty("population_target_gap", 0);
                 }
                 if (!band.get("settled").getAsBoolean()) continue;
-                hasSettledBands = true;
                 String settlementId = "emg_" + bandId;
                 try {
                     int x = (int) Math.max(-29_999_000L, Math.min(29_999_000L,
                             Math.round((band.get("x").getAsDouble() - map.w / 2.0) * Math.max(0.001, map.bpp))));
                     int z = (int) Math.max(-29_999_000L, Math.min(29_999_000L,
                             Math.round((band.get("z").getAsDouble() - map.h / 2.0) * Math.max(0.001, map.bpp))));
+                    // Persisted legacy bands are rechecked before physical materialization.
+                    // A newly generated colony cannot appear inside an established realm.
+                    if (SettleMod.colony(settlementId) == null) {
+                        TitleData.Title province = map.provinceAt(x, z);
+                        TitleData.Realm owner = province == null || map.titles == null
+                                ? null : map.titles.realmOf(province);
+                        if (owner != null) {
+                            band.addProperty("territory_blocked_by", owner.id);
+                            LOGGER.info("wf_worldsim: deferred legacy settlement {} on territory owned by {}",
+                                    settlementId, owner.id);
+                            continue;
+                        }
+                    }
+                    hasSettledBands = true;
                     String display = "Settlement " + bandId.substring(0, Math.min(8, bandId.length()));
                     Colony colony = SettleMod.foundEmergentInMemory(server,
                             server.overworld().dimension().location().toString(), settlementId, display,
