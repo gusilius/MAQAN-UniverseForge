@@ -17,6 +17,17 @@ OUTPUT="$(cd "$OUTPUT" && pwd)"
 WORK="$(mktemp -d)"
 SERVER_PID=""
 CURRENT_STAGE="preflight"
+THREAD_DUMP_COUNT=0
+capture_server_threads() {
+  local stamp pid
+  stamp="$(date +%s)"
+  jcmd -l > "$OUTPUT/jcmd-processes-$stamp.txt" 2>&1 || return 0
+  pid="$(awk '/BootstrapLauncher|net.minecraft.server.Main|MinecraftServer/ {print $1; exit}' "$OUTPUT/jcmd-processes-$stamp.txt")"
+  [ -n "$pid" ] || return 0
+  jcmd "$pid" Thread.print -l > "$OUTPUT/thread-dump-$stamp.txt" 2>&1 || true
+  THREAD_DUMP_COUNT=$((THREAD_DUMP_COUNT + 1))
+  echo "CAMPAIGN_THREAD_DUMP=$stamp"
+}
 campaign_exit() {
   local exit_code="$1"
   trap - EXIT
@@ -119,6 +130,7 @@ echo "AUTONOMOUS_CAMPAIGN_RUNNING=1"
 CURRENT_STAGE="campaign_simulation"
 started=$(date +%s)
 last_status=$started
+last_thread_dump=$started
 REPORT="world/worldforge/autonomous-campaign/campaign-report.json"
 while [ ! -s "$REPORT" ]; do
   kill -0 "$SERVER_PID" 2>/dev/null || { tail -160 server.log; echo "ERROR: server exited before campaign completion"; exit 5; }
@@ -128,6 +140,10 @@ while [ ! -s "$REPORT" ]; do
     tail -160 server.log
     echo "ERROR: campaign did not reach stable four-generation acceptance before wall-clock timeout"
     exit 6
+  fi
+  if [ $((now - last_thread_dump)) -ge 90 ] && [ "$THREAD_DUMP_COUNT" -lt 8 ]; then
+    capture_server_threads
+    last_thread_dump=$now
   fi
   if [ $((now - last_status)) -ge 60 ]; then
     printf '%s\n' "wfworldsim campaign status" >> in.txt
