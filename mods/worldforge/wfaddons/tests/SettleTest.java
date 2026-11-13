@@ -146,6 +146,23 @@ public class SettleTest {
                         && founding.amount("wood") == foundingWood + 35,
                 "идемпотентный запас основания блокирует повтор ID с изменённым количеством");
 
+        Settlement adoptedSettlement = new Settlement("settle_adoption_receipt_test", "Adopted village", d);
+        Building adoptedHouse = adoptedSettlement.adoptExistingBuilding("mc.village.house.0.0", "house", 0, 0);
+        int adoptedCount = adoptedSettlement.buildings.size();
+        ok(adoptedHouse.state == Building.State.DONE && adoptedHouse.externallyMaterialized
+                        && adoptedSettlement.adoptExistingBuilding("mc.village.house.0.0", "house", 0, 0).uid == adoptedHouse.uid
+                        && adoptedSettlement.buildings.size() == adoptedCount,
+                "существующий физический дом становится завершённым зданием симуляции без дубликата");
+        Settlement adoptedReload = Settlement.fromJson(adoptedSettlement.toJson(), d);
+        Building restoredAdoption = adoptedReload.placement("mc.village.house.0.0");
+        ok(restoredAdoption != null && restoredAdoption.externallyMaterialized
+                        && restoredAdoption.state == Building.State.DONE,
+                "связь физического здания и симуляции сохраняется после перезагрузки");
+        boolean adoptionCollision = false;
+        try { adoptedReload.adoptExistingBuilding("mc.village.house.0.0", "house", 4, 0); }
+        catch (IllegalStateException expected) { adoptionCollision = true; }
+        ok(adoptionCollision, "повторный ID усыновления с другими координатами блокируется");
+
         Flow flow = new Flow();
         flow.record(1, "wood", 5, true);
         double validFlow = flow.perMinute(2, "wood", true);

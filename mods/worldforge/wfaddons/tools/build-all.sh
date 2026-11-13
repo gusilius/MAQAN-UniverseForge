@@ -11,17 +11,27 @@ ORDER=$(python3 tools/build_order.py | tr -d '\015') || { echo "ERROR: не уд
 [ -n "$ORDER" ] || { echo "ERROR: порядок сборки аддонов пуст"; exit 1; }
 echo "Порядок: $ORDER"
 
+# Keep module splitting deterministic on Windows Git Bash even after read loops.
+DEFAULT_IFS=$' \t\n'
+mapfile -t MODULES < <(printf '%s\n' "$ORDER" | tr ' ' '\n' | sed '/^$/d')
+EXPECTED_MODULES=$(find . -mindepth 1 -maxdepth 1 -type d -name 'wf-*' | wc -l | tr -d ' ')
+if [ "\${#MODULES[@]}" -ne "$EXPECTED_MODULES" ]; then
+  echo "ERROR: dependency order contains \${#MODULES[@]} modules, expected $EXPECTED_MODULES"
+  exit 1
+fi
+
 declare -A DEP_MAP=()
 while IFS='|' read -r module dep_list; do
   [ -n "$module" ] || continue
   DEP_MAP["$module"]="$dep_list"
 done < <(python3 tools/build_order.py --deps | tr -d '\015')
+IFS="$DEFAULT_IFS"
 
 FAILED=""; BLOCKED=""; OK=""
-for d in $ORDER; do
+for d in "${MODULES[@]}"; do
   dep_list="${DEP_MAP[$d]-}"
   dep_array=()
-  if [ -n "$dep_list" ]; then IFS=',' read -r -a dep_array <<< "$dep_list"; fi
+  if [ -n "$dep_list" ]; then IFS=',' read -r -a dep_array <<< "$dep_list"; IFS="$DEFAULT_IFS"; fi
   blocked_by=""
   for dep in "${dep_array[@]}"; do
     [ -n "$dep" ] || continue
