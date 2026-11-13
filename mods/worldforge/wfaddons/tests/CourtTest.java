@@ -217,6 +217,13 @@ public class CourtTest {
         for (int i = 0; i < 20 && minorCourt.regency(minorRealm).crisisStage < 1; i++) minorCourt.tick(30);
         ok(minorCourt.regency(minorRealm).crisisStage >= 1,
                 "sustained opposition from the existing royal council escalates into a visible regency crisis");
+        int crisisBeforeCompromise = minorCourt.regency(minorRealm).crisis;
+        for (Council.Seat seat : Council.seats(minorCourt.reg, minorCourt.defs, minorRealm))
+            if (seat.holder != null && seat.holder != adultRegent)
+                minorCourt.opinions.add(seat.holder.id, adultRegent.id, "Поддержка компромисса", 100, minorCourt.year() + 10);
+        ok(minorCourt.negotiateRegencyCrisis(minorRealm)
+                        && minorCourt.regency(minorRealm).crisis < crisisBeforeCompromise,
+                "a council-backed compromise reduces regency crisis pressure through the canonical court");
         childHeir.birthYear = minorCourt.year() - 16;
         minorCourt.tick(30);
         ok(minorCourt.regency(minorRealm) == null

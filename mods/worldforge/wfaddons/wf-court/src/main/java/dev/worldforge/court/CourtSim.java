@@ -368,6 +368,41 @@ public final class CourtSim {
         say(candidate.name + " назначен регентом " + realmName(realm) + " при " + heir.name);
     }
 
+    /**
+     * Resolve a regency crisis through the existing council: a supported candidate may replace
+     * the incumbent, or the council can renew confidence in the incumbent and lower pressure.
+     * No new political entity is created; all participants remain canonical court Characters.
+     */
+    public boolean negotiateRegencyCrisis(String realm) {
+        Regency current = regencies.get(realm);
+        if (current == null || current.crisisStage < 1) return false;
+        List<Character> candidates = regencyCandidates(realm);
+        if (candidates.isEmpty()) return false;
+        Character incumbent = reg.get(current.regent);
+        Character successor = candidates.stream()
+                .filter(candidate -> regencyCouncilSupport(realm, candidate) >= 2)
+                .max(Comparator.comparingInt((Character candidate) -> regencyCouncilSupport(realm, candidate))
+                        .thenComparingInt(candidate -> regentScore(realm, candidate, ruler(realm)))
+                        .thenComparing(candidate -> candidate.id, Comparator.reverseOrder()))
+                .orElse(null);
+        if (successor == null) return false;
+        int oldPressure = current.crisis;
+        if (incumbent != successor) {
+            Regency settled = new Regency(realm, current.heir, successor.id, current.startedDay);
+            settled.crisis = Math.max(0, oldPressure - 45);
+            settled.crisisStage = settled.crisis >= 60 ? 1 : 0;
+            regencies.put(realm, settled);
+            say("Совет добился компромисса в " + realmName(realm) + ": регентом вместо " 
+                    + (incumbent == null ? "вакантного места" : incumbent.name) + " становится " + successor.name);
+        } else {
+            current.crisis = Math.max(0, oldPressure - 35);
+            current.crisisStage = current.crisis >= 100 ? 2 : current.crisis >= 60 ? 1 : 0;
+            say("Королевский совет подтвердил полномочия регента " + successor.name + " в " + realmName(realm));
+        }
+        syncProps();
+        return true;
+    }
+
     private void updateRegencies() {
         for (String realm : new ArrayList<>(regencies.keySet())) ensureRegency(realm);
         for (TitleData.Realm realm : d.realmList()) {

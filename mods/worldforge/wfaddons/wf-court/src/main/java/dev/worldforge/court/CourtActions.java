@@ -40,6 +40,10 @@ public final class CourtActions {
             s.appointRegent(c.realmId, c.arg(0, "персонаж"));
             return ActionResult.ok("Регент назначен");
         });
+        reg("regency_negotiate", "Урегулировать кризис регентства", List.of(), "Королевский совет пытается заключить компромисс и восстановить легитимность власти", (s, c) ->
+                s.negotiateRegencyCrisis(c.realmId)
+                        ? ActionResult.ok("Компромисс совета заключён")
+                        : ActionResult.fail("Нет достаточной поддержки для компромисса"));
         reg("marriage_propose", "Предложить брак", List.of("наш персонаж", "их персонаж"), "Оценивает правитель другого государства: мнение, советники, возраст. Отказ объясняется", (s, c) -> {
             Character mine = s.reg.get(c.arg(0, "наш персонаж"));
             if (mine == null || !Marriages.family(s, mine).equals(c.realmId)) return ActionResult.fail("Это не член вашего дома");

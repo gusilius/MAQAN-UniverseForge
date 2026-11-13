@@ -798,10 +798,14 @@ public class CourtScreen extends Screen {
             g.drawString(font, crisisLabel + " · напряжение " + current.crisis + "/100",
                     x + 12, top + 110, current.crisisStage >= 2 ? WFUi.BAD
                             : current.crisisStage == 1 ? WFUi.GOLD : WFUi.GOOD);
+            if (current.crisisStage >= 1)
+                btn(g, x + 12, top + 120, Math.min(176, cw - 24), "Компромисс совета", true, mx, my,
+                        () -> cmd.accept("wfaction run regency_negotiate " + realm),
+                        "Совет может подтвердить регента или поддержать другого кандидата");
         }
-        g.drawString(font, "КАНДИДАТЫ ИЗ СУЩЕСТВУЮЩЕГО ДВОРА", x + 12, top + 108, WFUi.GOLD_DIM);
+        g.drawString(font, "КАНДИДАТЫ ИЗ СУЩЕСТВУЮЩЕГО ДВОРА", x + 12, top + 145, WFUi.GOLD_DIM);
         List<Character> candidates = s.regencyCandidates(realm);
-        int y = top + 124, row = 0;
+        int y = top + 161, row = 0;
         for (Character candidate : candidates) {
             if (y > top + h - 22) break;
             boolean selected = current != null && current.regent.equals(candidate.id);
