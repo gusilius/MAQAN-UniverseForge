@@ -100,7 +100,7 @@ jobs:
   worldforge-addons:
     name: WorldForge addons (Windows x64)
     runs-on: windows-latest
-    needs: [worldforge-core, worldforge-native]
+    needs: [worldforge-core, worldforge-native, worldforge-native-linux]
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
@@ -109,6 +109,11 @@ jobs:
         with:
           name: worldforge-worldsim-windows-x64
           path: mods/worldforge/wfaddons/wf-worldsim/src/main/resources/maqan-native-windows-x86_64
+      - name: Download Linux native WorldForge simulation core
+        uses: actions/download-artifact@v4
+        with:
+          name: worldforge-worldsim-linux-x64
+          path: mods/worldforge/wfaddons/wf-worldsim/src/main/resources/maqan-native-linux-x86_64
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -247,6 +252,26 @@ jobs:
         with:
           name: worldforge-worldsim-windows-x64
           path: mods/worldforge/native/worldforge-worldsim/target/x86_64-pc-windows-msvc/release/worldforge_worldsim.dll
+          if-no-files-found: error
+          retention-days: 30
+
+  worldforge-native-linux:
+    name: WorldForge simulation native core (Linux x64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test autonomous WorldForge decision engine
+        working-directory: mods/worldforge/native/worldforge-worldsim
+        run: cargo test
+      - name: Build Linux native library
+        working-directory: mods/worldforge/native/worldforge-worldsim
+        run: cargo build --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: worldforge-worldsim-linux-x64
+          path: mods/worldforge/native/worldforge-worldsim/target/release/libworldforge_worldsim.so
           if-no-files-found: error
           retention-days: 30
 

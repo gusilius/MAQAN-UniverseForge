@@ -6,8 +6,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Locale;
 
-/** Loads the optional Windows native decision core. Java remains authoritative if it is unavailable. */
+/** Loads the platform-native WorldSim core; Java remains authoritative if no supported binary is present. */
 public final class NativeWorldSimulation {
     private static volatile boolean attempted;
     private static volatile boolean available;
@@ -16,12 +17,26 @@ public final class NativeWorldSimulation {
     public static synchronized boolean load() {
         if (attempted) return available;
         attempted = true;
-        String resource = "/maqan-native-windows-x86_64/worldforge_worldsim.dll";
+        String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+        String resource;
+        String libraryName;
+        if (os.contains("win")) {
+            resource = "/maqan-native-windows-x86_64/worldforge_worldsim.dll";
+            libraryName = "worldforge_worldsim.dll";
+        } else if (os.contains("linux")) {
+            resource = "/maqan-native-linux-x86_64/libworldforge_worldsim.so";
+            libraryName = "libworldforge_worldsim.so";
+        } else if (os.contains("mac") || os.contains("darwin")) {
+            resource = "/maqan-native-macos-aarch64/libworldforge_worldsim.dylib";
+            libraryName = "libworldforge_worldsim.dylib";
+        } else {
+            return false;
+        }
         try (InputStream input = NativeWorldSimulation.class.getResourceAsStream(resource)) {
             if (input == null) return false;
             Path directory = FMLPaths.GAMEDIR.get().resolve("config").resolve("worldforge").resolve("native");
             Files.createDirectories(directory);
-            Path library = directory.resolve("worldforge_worldsim.dll");
+            Path library = directory.resolve(libraryName);
             Files.copy(input, library, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             System.load(library.toAbsolutePath().toString());
             available = true;
