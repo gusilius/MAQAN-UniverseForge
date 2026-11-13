@@ -109,6 +109,7 @@ public class SettleMod {
         MinecraftForge.EVENT_BUS.register(new ResidentInteraction());
         MinecraftForge.EVENT_BUS.register(new TaxService());
         MinecraftForge.EVENT_BUS.register(new VanillaVillageAdapter());
+        MinecraftForge.EVENT_BUS.register(new SettlementCaravans());
     }
 
     @net.minecraftforge.fml.common.Mod.EventBusSubscriber(modid = MOD_ID,
@@ -1594,7 +1595,36 @@ public class SettleMod {
                 Map<String, dev.worldforge.settle.Settlement> all = new java.util.LinkedHashMap<>();
                 for (Colony c : COLONIES.values()) all.put(c.s.id, c.s);
                 if (speed > 0) {
-                    NETWORK.tick(all, speed);
+                    Map<String, dev.worldforge.settle.TradeNetwork.Location> anchors = new LinkedHashMap<>();
+                    for (Colony colony : COLONIES.values())
+                        anchors.put(colony.s.id, new dev.worldforge.settle.TradeNetwork.Location(colony.dim, colony.cx, colony.cz));
+                    int pendingTradeEvents = NETWORK.events.size();
+                    NETWORK.tick(all, speed, anchors);
+                    if (NETWORK.events.size() > pendingTradeEvents) {
+                        // The ledger is authoritative. Persist it before the shipment projection; fail closed
+                        // if either side cannot be checkpointed so a dispatched consignment is never replayed.
+                        if (!WorldForgeMod.saveTreasuryNow(server) || !saveDurably(server)) {
+                            logisticsPersistenceBlocked = true;
+                            LOGGER.error("wf_settle: shipment checkpoint failed; trade simulation frozen for recovery");
+                            return;
+                        }
+                        for (String event : new ArrayList<>(NETWORK.events))
+                            dev.worldforge.mod.api.WorldForgeApi.postEvent("trade", event, List.of(),
+                                    dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute());
+                        NETWORK.events.clear();
+                    }
+                    // Checkpoint in-flight progress every 30 seconds of server ticks; cargo remains escrowed.
+                    if (NETWORK.events.isEmpty() && ticks % (STEP_TICKS * 30) == 0
+                            && NETWORK.shipments.values().stream().anyMatch(shipment ->
+                            shipment.status.equals("в пути") || shipment.status.equals("ожидает места")
+                                    || shipment.status.equals("ожидает расчёта"))) {
+                        if (!saveDurably(server)) {
+                            logisticsPersistenceBlocked = true;
+                            LOGGER.error("wf_settle: in-flight shipment progress checkpoint failed; trade simulation frozen");
+                            return;
+                        }
+                    }
+                    SettlementCaravans.tick(server, NETWORK.shipments.values());
                     if (ticks % (STEP_TICKS * 10) == 0) {
                         Set<Integer> routeIds = new LinkedHashSet<>(NETWORK.routes.keySet());
                         int created = NETWORK.ensureAutonomousRoutes(all, 2, Math.max(1, all.size() / 3), 2.0);

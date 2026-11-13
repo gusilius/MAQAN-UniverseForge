@@ -102,8 +102,21 @@ public class TradeNetTest {
         double sa = A.amount("silver"), sb = B.amount("silver"), spread0 = B.price("wood") / A.price("wood");
         double dutyBefore = TreasuryService.current().balance("realm:north");
         double wa = A.amount("wood"), wb = B.amount("wood");
+        A.tradeLeft = 100; B.tradeLeft = 100;
+        n.tick(cs, 30);
+        var firstShipment = n.shipments.values().stream().filter(shipment -> shipment.routeId == r.id).findFirst().orElse(null);
+        ok(firstShipment != null && firstShipment.status.equals("в пути")
+                        && A.amount("wood") < wa && Math.abs(B.amount("wood") - wb) < 1e-9,
+                "dispatch reserves source goods in transit without instantly crediting the destination");
+        ok(firstShipment != null && TreasuryService.current().balance(TradeNetwork.cargoEscrow(firstShipment.id)) > 0,
+                "shipment cargo is held in a canonical TreasuryLedger escrow account");
+        TradeNetwork inTransitReload = TradeNetwork.fromJson(n.toJson());
+        ok(inTransitReload.shipments.size() == n.shipments.size()
+                        && inTransitReload.shipments.get(firstShipment.id).status.equals("в пути")
+                        && Math.abs(inTransitReload.shipments.get(firstShipment.id).quantity - firstShipment.quantity) < 1e-9,
+                "in-flight cargo, route identity and progress state survive save/reload");
         for (int i = 0; i < 20; i++) { A.tradeLeft = 100; B.tradeLeft = 100; n.tick(cs, 30); }
-        ok(r.carried > 0 && A.amount("wood") < wa && B.amount("wood") > wb, "караван возит: " + (int) r.carried + " ед.");
+        ok(r.carried > 0 && A.amount("wood") < wa && B.amount("wood") > wb, "караван доставляет: " + (int) r.carried + " ед.");
         double protectedWoodReserve = Math.max(TradeNetwork.RESERVE * 2, A.consumedPerMin("wood") * 120.0);
         ok(A.amount("wood") + 1e-9 >= protectedWoodReserve,
                 "trade route never drains the supplier below its two-day domestic-consumption reserve");

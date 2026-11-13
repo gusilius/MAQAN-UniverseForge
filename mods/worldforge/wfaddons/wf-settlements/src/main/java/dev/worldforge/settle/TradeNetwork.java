@@ -2,6 +2,7 @@ package dev.worldforge.settle;
 
 import dev.worldforge.mod.Json;
 import dev.worldforge.mod.economy.TreasuryService;
+import dev.worldforge.mod.economy.TreasuryLedger;
 
 import java.util.*;
 
@@ -27,8 +28,32 @@ public final class TradeNetwork {
 
     public static final class TradeException extends RuntimeException { public TradeException(String m) { super(m); } }
 
+    /** Physical anchor supplied by the Minecraft adapter; absent anchors remain strategic-only. */
+    public record Location(String dimension, double x, double z) {
+        public Location { dimension = dimension == null ? "" : dimension; if (!Double.isFinite(x) || !Double.isFinite(z)) throw new IllegalArgumentException("invalid location"); }
+    }
+    /** Persisted consignment backed by real TreasuryLedger escrow accounts. */
+    public static final class Shipment {
+        public final long id; public final int routeId;
+        public final String from, to, res, dutyRealm, fromDimension, toDimension;
+        public final double quantity, sellerPayment, marketFee, duty, profit, fromX, fromZ, toX, toZ, travelSeconds;
+        public double elapsed; public String status = "в пути";
+        Shipment(long id,int routeId,String from,String to,String res,double quantity,double sellerPayment,
+                 double marketFee,double duty,String dutyRealm,Location a,Location b,double travelSeconds,double profit) {
+            this.id=id; this.routeId=routeId; this.from=from; this.to=to; this.res=res; this.quantity=quantity;
+            this.sellerPayment=sellerPayment; this.marketFee=marketFee; this.duty=duty; this.profit=profit; this.dutyRealm=dutyRealm == null ? "" : dutyRealm;
+            fromDimension=a==null?"":a.dimension(); toDimension=b==null?"":b.dimension();
+            fromX=a==null?0:a.x(); fromZ=a==null?0:a.z(); toX=b==null?0:b.x(); toZ=b==null?0:b.z();
+            this.travelSeconds=travelSeconds;
+        }
+        public double progress() { return Math.max(0,Math.min(1,elapsed/Math.max(1,travelSeconds))); }
+        public boolean physical() { return !fromDimension.isBlank() && fromDimension.equals(toDimension); }
+    }
     public final Map<Integer, Route> routes = new LinkedHashMap<>();
+    public final Map<Long, Shipment> shipments = new LinkedHashMap<>();
+    public final List<String> events = new ArrayList<>();
     private int next = 1;
+    private long nextShipment = 1;
 
     public Route add(Map<String, Settlement> cities, String from, String to, String res, double rate) {
         Settlement a = cities.get(from), b = cities.get(to);
@@ -54,52 +79,121 @@ public final class TradeNetwork {
         route.dutyRate = rate;
     }
 
-    public void tick(Map<String, Settlement> cities, double dt) {
+    public void tick(Map<String, Settlement> cities, double dt) { tick(cities, dt, Map.of()); }
+
+    /** Existing consignments settle first; new cargo is reserved in escrow and never teleported to the buyer. */
+    public void tick(Map<String, Settlement> cities, double dt, Map<String, Location> locations) {
         if (!Double.isFinite(dt) || dt <= 0) return;
-        for (Route r : routes.values()) {
-            Settlement a = cities.get(r.from), b = cities.get(r.to);
-            if (a == null || b == null) { r.status = "нет города"; continue; }
-            if (a.tradePerMin() <= 0 || b.tradePerMin() <= 0) { r.status = "нет рынка"; continue; }
-            r.acc += r.rate * dt / 60;
-            int n = (int) Math.floor(r.acc);
-            if (n <= 0) continue;
-            double pa = a.price(r.res), pb = b.price(r.res);
-            if (pb < pa * MIN_SPREAD) { r.status = "нет разницы"; r.acc = Math.min(r.acc, 1); continue; }
-            double mid = (pa + pb) / 2, give = mid * (1 - CUT), pay = mid * (1 + CUT * 0);
-            double dutyPerUnit = mid * r.dutyRate;
-            double buyerCostPerUnit = pay + dutyPerUnit;
-            double protectedReserve = exportReserve(a, r.res);
-            n = (int) Math.min(n, a.amount(r.res) - protectedReserve);
-            n = (int) Math.min(n, b.capacity(r.res) - b.amount(r.res));
-            n = (int) Math.min(n, Math.min(a.tradeLeft, b.tradeLeft));
-            if (buyerCostPerUnit > 0) n = (int) Math.min(n, Math.floor(b.amount(Defs.SILVER) / buyerCostPerUnit));
-            if (n <= 0) {
-                r.status = a.amount(r.res) - protectedReserve < 1 ? "защита резерва"
-                        : b.amount(Defs.SILVER) < pay ? "нет серебра" : "нет места";
-                continue;
+        Map<String,Location> anchors = locations == null ? Map.of() : locations;
+        TreasuryLedger ledger = TreasuryService.current();
+        for (Shipment shipment : shipments.values()) {
+            if (!shipment.status.equals("в пути") && !shipment.status.equals("ожидает места")
+                    && !shipment.status.equals("ожидает расчёта")) continue;
+            Settlement destination = cities.get(shipment.to), source = cities.get(shipment.from);
+            if (destination == null || source == null) { shipment.status = "нет поселения"; continue; }
+            shipment.elapsed = Math.min(shipment.travelSeconds, shipment.elapsed + dt);
+            if (shipment.elapsed + 1e-9 < shipment.travelSeconds) continue;
+            destination.amount(shipment.res);
+            String cargoEscrow = cargoEscrow(shipment.id), paymentEscrow = paymentEscrow(shipment.id);
+            String goodsRef = shipmentReference(shipment.id,"arrival-goods");
+            String destAccount = destination.ledgerAccountId(shipment.res);
+            boolean goodsPosted = ledger.hasTransaction(destAccount,TreasuryLedger.Kind.TRADE,goodsRef);
+            if (!goodsPosted && destination.capacity(shipment.res)-destination.amount(shipment.res)
+                    - reservedIncoming(shipment.to, shipment.res, shipment.id) + 1e-9 < shipment.quantity) {
+                shipment.status = "ожидает места"; continue;
             }
-            double sellerPayment = n * give;
-            double marketFee = n * Math.max(0, pay - give);
-            double duty = n * dutyPerUnit;
-            if (duty > 0) TreasuryService.current().open("realm:" + r.dutyRealm, r.dutyRealm, Defs.SILVER, 0);
-            if (!b.transferSilverTo(a, sellerPayment, "caravan-trade", "route:" + r.id)
-                    || !b.chargeSilver(marketFee, "market-fee", "route:" + r.id)
-                    || (duty > 0 && !b.transferSilverToAccount("realm:" + r.dutyRealm, duty,
-                    dev.worldforge.mod.economy.TreasuryLedger.Kind.DUTY, "customs-duty", "route:" + r.id))) {
-                r.status = "нет серебра";
-                continue;
+            if (!ledger.transferOnce(cargoEscrow,destAccount,shipment.quantity,TreasuryLedger.Kind.TRADE,
+                    "shipment-arrival",goodsRef,destination.worldMinute(),"settlement shipment delivered")) continue;
+            destination.amount(shipment.res);
+            if (!goodsPosted) {
+                destination.flow.recordTrade(destination.time,shipment.res,shipment.quantity,true);
+                destination.shiftDemand(shipment.res,-shipment.quantity);
             }
-            if (!a.transferResourceTo(b, r.res, n, "caravan-goods", "route:" + r.id)) {
-                // Preconditions above make this unreachable in the single-threaded server tick.
-                throw new TradeException("Inventory changed during route settlement " + r.id);
+            source.amount(Defs.SILVER);
+            if (!ledger.transferOnce(paymentEscrow,source.ledgerAccountId(Defs.SILVER),shipment.sellerPayment,
+                    TreasuryLedger.Kind.TRADE,"shipment-settlement",shipmentReference(shipment.id,"seller-payment"),
+                    source.worldMinute(),"settlement seller payment")) { shipment.status="ожидает расчёта"; continue; }
+            if (shipment.marketFee>1e-9 && !ledger.withdrawOnce(paymentEscrow,shipment.marketFee,
+                    TreasuryLedger.Kind.TRADE,"shipment-market-fee",shipmentReference(shipment.id,"market-fee"),
+                    destination.worldMinute(),"settlement market fee")) { shipment.status="ожидает расчёта"; continue; }
+            if (shipment.duty>1e-9) {
+                String realmAccount="realm:"+shipment.dutyRealm;
+                ledger.open(realmAccount,shipment.dutyRealm,Defs.SILVER,0);
+                if (!ledger.transferOnce(paymentEscrow,realmAccount,shipment.duty,TreasuryLedger.Kind.DUTY,
+                        "customs-duty",shipmentReference(shipment.id,"customs-duty"),destination.worldMinute(),
+                        "settlement shipment customs duty")) { shipment.status="ожидает расчёта"; continue; }
             }
-            a.tradeLeft -= n; b.tradeLeft -= n;
-            a.shiftDemand(r.res, n); b.shiftDemand(r.res, -n);
-            r.acc -= n; r.carried += n;
-            r.profit += n * (give - pa) + n * (pb - pay) - duty;
-            r.status = "возит";
+            source.amount(Defs.SILVER); shipment.status="доставлен";
+            Route route=routes.get(shipment.routeId);
+            if(route!=null){ route.carried+=shipment.quantity; route.profit+=shipment.profit; route.status="доставлен"; }
+            events.add("Доставка #"+shipment.id+": "+shipment.quantity+" "+shipment.res+" из "+shipment.from+" в "+shipment.to);
+        }
+
+        for(Route route:routes.values()){
+            Settlement a=cities.get(route.from), b=cities.get(route.to);
+            if(a==null||b==null){route.status="нет города";continue;}
+            if(a.tradePerMin()<=0||b.tradePerMin()<=0){route.status="нет рынка";continue;}
+            route.acc+=route.rate*dt/60; int n=(int)Math.floor(route.acc); if(n<=0)continue;
+            double pa=a.price(route.res),pb=b.price(route.res);
+            if(pb<pa*MIN_SPREAD){route.status="нет разницы";route.acc=Math.min(route.acc,1);continue;}
+            double mid=(pa+pb)/2,give=mid*(1-CUT),pay=mid;
+            double dutyPerUnit=mid*route.dutyRate,buyerCostPerUnit=pay+dutyPerUnit;
+            double reserve=exportReserve(a,route.res);
+            n=(int)Math.min(n,a.amount(route.res)-reserve);
+            n=(int)Math.min(n,b.capacity(route.res)-b.amount(route.res)-reservedIncoming(route.to,route.res,-1));
+            n=(int)Math.min(n,Math.min(a.tradeLeft,b.tradeLeft));
+            if(buyerCostPerUnit>0)n=(int)Math.min(n,Math.floor(b.amount(Defs.SILVER)/buyerCostPerUnit));
+            if(n<=0){route.status=a.amount(route.res)-reserve<1?"защита резерва":b.amount(Defs.SILVER)<pay?"нет серебра":"нет места";continue;}
+
+            long id=nextShipment++; double seller=n*give,fee=n*Math.max(0,pay-give),duty=n*dutyPerUnit,total=seller+fee+duty;
+            String owner="shipment:"+id, cargo=cargoEscrow(id), payment=paymentEscrow(id);
+            ledger.open(cargo,owner,route.res,0); ledger.open(payment,owner,Defs.SILVER,0);
+            String dispatch=shipmentReference(id,"dispatch");
+            if(!b.transferResourceToAccount(Defs.SILVER,payment,owner,total,TreasuryLedger.Kind.TRADE,
+                    "shipment-payment-escrow",dispatch)){route.status="нет серебра";continue;}
+            if(!a.transferResourceToAccount(route.res,cargo,owner,n,TreasuryLedger.Kind.TRADE,
+                    "shipment-cargo-escrow",dispatch)){
+                ledger.transferOnce(payment,b.ledgerAccountId(Defs.SILVER),total,TreasuryLedger.Kind.TRADE,
+                        "shipment-payment-refund",shipmentReference(id,"dispatch-refund"),b.worldMinute(),
+                        "refund failed shipment dispatch");
+                b.amount(Defs.SILVER);route.status="нет товара";continue;
+            }
+            a.tradeLeft-=n;b.tradeLeft-=n;a.shiftDemand(route.res,n);route.acc-=n;
+            Location from=anchors.get(route.from),to=anchors.get(route.to);
+            double travel=60;
+            if(from!=null&&to!=null&&from.dimension().equals(to.dimension()))
+                travel=Math.max(15,Math.hypot(to.x()-from.x(),to.z()-from.z())/8.0);
+            double expectedProfit=n*(give-pa)+n*(pb-pay)-duty;
+            Shipment shipment=new Shipment(id,route.id,route.from,route.to,route.res,n,seller,fee,duty,
+                    route.dutyRealm,from,to,travel,expectedProfit);
+            shipments.put(id,shipment);route.status="в пути";
+            events.add("Караван #"+id+" отправлен: "+n+" "+route.res+" из "+route.from+" в "+route.to);
+        }
+        if(shipments.size()>600){
+            Iterator<Map.Entry<Long,Shipment>> it=shipments.entrySet().iterator();
+            while(shipments.size()>500&&it.hasNext()){
+                String status=it.next().getValue().status;
+                if(!status.equals("в пути")&&!status.equals("ожидает места")&&!status.equals("ожидает расчёта"))it.remove();
+            }
         }
     }
+
+    /** Cargo already committed to this destination but not yet posted to its stock account. */
+    private double reservedIncoming(String city, String resource, long exceptShipment) {
+        double reserved = 0;
+        for (Shipment shipment : shipments.values()) {
+            if (shipment.id == exceptShipment || !shipment.to.equals(city) || !shipment.res.equals(resource)) continue;
+            if ((shipment.status.equals("в пути") || shipment.status.equals("ожидает места")
+                    || shipment.status.equals("ожидает расчёта"))
+                    && TreasuryService.current().balance(cargoEscrow(shipment.id)) > 1e-9)
+                reserved += shipment.quantity;
+        }
+        return reserved;
+    }
+
+    public static String cargoEscrow(long id){return "shipment:cargo:"+id;}
+    public static String paymentEscrow(long id){return "shipment:payment:"+id;}
+    public static String shipmentReference(long id,String leg){return "shipment:"+id+":"+leg;}
 
     /**
      * Creates a bounded set of autonomous supply links between staffed markets.
@@ -207,7 +301,7 @@ public final class TradeNetwork {
 
     public String toJson() {
         Map<String, Object> root = new LinkedHashMap<>();
-        root.put("format", "wf-trade/1"); root.put("next", next);
+        root.put("format", "wf-trade/2"); root.put("next", next); root.put("nextShipment", nextShipment);
         List<Object> l = new ArrayList<>();
         for (Route r : routes.values()) {
             Map<String, Object> m = new LinkedHashMap<>();
@@ -217,15 +311,28 @@ public final class TradeNetwork {
             l.add(m);
         }
         root.put("routes", l);
+        List<Object> consignments=new ArrayList<>();
+        for(Shipment s:shipments.values()){
+            Map<String,Object> m=new LinkedHashMap<>();
+            m.put("id",s.id);m.put("route",s.routeId);m.put("from",s.from);m.put("to",s.to);m.put("res",s.res);
+            m.put("quantity",s.quantity);m.put("sellerPayment",s.sellerPayment);m.put("marketFee",s.marketFee);
+            m.put("duty",s.duty);m.put("profit",s.profit);m.put("dutyRealm",s.dutyRealm);m.put("fromDimension",s.fromDimension);
+            m.put("toDimension",s.toDimension);m.put("fromX",s.fromX);m.put("fromZ",s.fromZ);
+            m.put("toX",s.toX);m.put("toZ",s.toZ);m.put("travelSeconds",s.travelSeconds);
+            m.put("elapsed",s.elapsed);m.put("status",s.status);consignments.add(m);
+        }
+        root.put("shipments",consignments);
         return Json.write(root);
     }
 
     @SuppressWarnings("unchecked")
     public static TradeNetwork fromJson(String json) {
         Map<String, Object> root = (Map<String, Object>) Json.parse(json);
-        if (!"wf-trade/1".equals(root.get("format"))) throw new IllegalArgumentException("Неверный формат торговли");
+        if (!"wf-trade/1".equals(root.get("format")) && !"wf-trade/2".equals(root.get("format")))
+            throw new IllegalArgumentException("Неверный формат торговли");
         TradeNetwork n = new TradeNetwork();
         n.next = ((Number) root.get("next")).intValue();
+        if(root.get("nextShipment") instanceof Number v)n.nextShipment=Math.max(1,v.longValue());
         for (Object o : (List<Object>) root.get("routes")) {
             Map<String, Object> m = (Map<String, Object>) o;
             Route r = new Route(((Number) m.get("id")).intValue(), (String) m.get("from"), (String) m.get("to"), (String) m.get("res"), ((Number) m.get("rate")).doubleValue());
@@ -234,6 +341,21 @@ public final class TradeNetwork {
             if (m.get("dutyRate") instanceof Number rate) r.dutyRate = Math.max(0, Math.min(0.5, rate.doubleValue()));
             n.routes.put(r.id, r);
         }
+        if(root.get("shipments") instanceof List<?> rows)for(Object row:rows){
+            if(!(row instanceof Map<?,?> m))continue;
+            long id=((Number)m.get("id")).longValue();
+            Location a=new Location(m.get("fromDimension") instanceof String v?v:"",num(m.get("fromX")),num(m.get("fromZ")));
+            Location b=new Location(m.get("toDimension") instanceof String v?v:"",num(m.get("toX")),num(m.get("toZ")));
+            Shipment shipment=new Shipment(id,((Number)m.get("route")).intValue(),(String)m.get("from"),
+                    (String)m.get("to"),(String)m.get("res"),((Number)m.get("quantity")).doubleValue(),
+                    ((Number)m.get("sellerPayment")).doubleValue(),((Number)m.get("marketFee")).doubleValue(),
+                    ((Number)m.get("duty")).doubleValue(),m.get("dutyRealm") instanceof String v?v:"",a,b,
+                    Math.max(1,((Number)m.get("travelSeconds")).doubleValue()),num(m.get("profit")));
+            shipment.elapsed=Math.max(0,Math.min(shipment.travelSeconds,num(m.get("elapsed"))));
+            shipment.status=m.get("status") instanceof String v?v:"в пути";
+            n.shipments.put(id,shipment);n.nextShipment=Math.max(n.nextShipment,id+1);
+        }
         return n;
     }
+    private static double num(Object value){return value instanceof Number n&&Double.isFinite(n.doubleValue())?n.doubleValue():0;}
 }
