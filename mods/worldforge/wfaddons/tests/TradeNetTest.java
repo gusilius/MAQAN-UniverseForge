@@ -92,6 +92,9 @@ public class TradeNetTest {
         double wa = A.amount("wood"), wb = B.amount("wood");
         for (int i = 0; i < 20; i++) { A.tradeLeft = 100; B.tradeLeft = 100; n.tick(cs, 30); }
         ok(r.carried > 0 && A.amount("wood") < wa && B.amount("wood") > wb, "караван возит: " + (int) r.carried + " ед.");
+        double protectedWoodReserve = Math.max(TradeNetwork.RESERVE * 2, A.consumedPerMin("wood") * 120.0);
+        ok(A.amount("wood") + 1e-9 >= protectedWoodReserve,
+                "trade route never drains the supplier below its two-day export reserve");
         ok(A.amount("silver") > sa - 1 && r.profit > 0, "обе стороны в плюсе, прибыль " + Math.round(r.profit));
         ok(TreasuryService.current().balance("realm:north") > dutyBefore,
                 "customs duty is transferred into the destination realm treasury");

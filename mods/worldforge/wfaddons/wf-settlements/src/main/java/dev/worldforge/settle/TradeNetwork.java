@@ -68,11 +68,16 @@ public final class TradeNetwork {
             double mid = (pa + pb) / 2, give = mid * (1 - CUT), pay = mid * (1 + CUT * 0);
             double dutyPerUnit = mid * r.dutyRate;
             double buyerCostPerUnit = pay + dutyPerUnit;
-            n = (int) Math.min(n, a.amount(r.res) - RESERVE);
+            double protectedReserve = exportReserve(a, r.res);
+            n = (int) Math.min(n, a.amount(r.res) - protectedReserve);
             n = (int) Math.min(n, b.capacity(r.res) - b.amount(r.res));
             n = (int) Math.min(n, Math.min(a.tradeLeft, b.tradeLeft));
             if (buyerCostPerUnit > 0) n = (int) Math.min(n, Math.floor(b.amount(Defs.SILVER) / buyerCostPerUnit));
-            if (n <= 0) { r.status = a.amount(r.res) - RESERVE < 1 ? "нет товара" : b.amount(Defs.SILVER) < pay ? "нет серебра" : "нет места"; continue; }
+            if (n <= 0) {
+                r.status = a.amount(r.res) - protectedReserve < 1 ? "защита резерва"
+                        : b.amount(Defs.SILVER) < pay ? "нет серебра" : "нет места";
+                continue;
+            }
             double sellerPayment = n * give;
             double marketFee = n * Math.max(0, pay - give);
             double duty = n * dutyPerUnit;
@@ -135,11 +140,14 @@ public final class TradeNetwork {
     }
 
     /** Shared eligibility rule for automatic route creation and the settlement trade panel. */
+    private static double exportReserve(Settlement settlement, String resource) {
+        return Math.max(RESERVE * 2, settlement.consumedPerMin(resource) * 120.0);
+    }
+
     private static boolean hasSupplyNeed(Settlement from, Settlement to, String resource) {
         if (from == null || to == null || resource == null || resource.isBlank()) return false;
         double sourceStock = from.amount(resource), destinationStock = to.amount(resource);
-        double exportReserve = Math.max(RESERVE * 2, from.consumedPerMin(resource) * 120.0);
-        return sourceStock >= exportReserve
+        return sourceStock >= exportReserve(from, resource)
                 && destinationStock < sourceStock * 0.5
                 && to.capacity(resource) - destinationStock >= 1.0;
     }
