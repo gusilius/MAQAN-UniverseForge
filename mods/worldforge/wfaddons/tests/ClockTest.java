@@ -74,11 +74,11 @@ public class ClockTest {
         campaign.setSimulationDaysPerTick(7);
         ok(campaign.simulationDaysPerTick() == 7 && campaign.multiplier() == 7.0,
                 "campaign step is reflected in real-time domain multipliers");
-        campaign.advance(1);
+        campaign.advanceServerTick();
         ok(campaign.dayNumber() == 7 && campaign.pull("people") == 0 && campaign.pull("people") == 0,
                 "one campaign server tick advances exactly seven shared calendar days");
         ok(campaign.pull("court") == 0, "each campaign consumer has an independent initial cursor");
-        campaign.advance(1);
+        campaign.advanceServerTick();
         ok(campaign.pull("people") == 7 && campaign.pull("court") == 7,
                 "all addon consumers observe the same seven-day elapsed interval");
         campaign.pause();

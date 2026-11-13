@@ -50,7 +50,7 @@ public final class ClockService {
     @SubscribeEvent
     public void onTick(TickEvent.ServerTickEvent e) {
         if (e.phase != TickEvent.Phase.START) return;
-        WorldForgeApi.clock().advance(1);
+        WorldForgeApi.clock().advanceServerTick();
         ticks++;
         if (ticks % 40 == 0) {
             GameClock c = WorldForgeApi.clock();

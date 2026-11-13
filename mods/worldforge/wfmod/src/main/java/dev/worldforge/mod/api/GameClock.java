@@ -64,7 +64,12 @@ public final class GameClock {
     /** Прошло столько серверных тиков (1 тик = 1/1200 дня при скорости x1). */
     public void advance(int ticks) {
         if (ticks < 0) throw new IllegalArgumentException("ticks cannot be negative");
-        elapsed += (double) SPEEDS[speed] * simulationDaysPerTick * ticks / TICKS_PER_DAY;
+        elapsed += (double) SPEEDS[speed] * ticks / TICKS_PER_DAY;
+    }
+
+    /** Advance one real server tick using the configured shared campaign step. */
+    public void advanceServerTick() {
+        advance(simulationDaysPerTick == 1 ? 1 : Math.multiplyExact(TICKS_PER_DAY, simulationDaysPerTick));
     }
 
     /** Сколько целых игровых дней прошло с прошлого вызова для этого потребителя; первый вызов возвращает 0. */
