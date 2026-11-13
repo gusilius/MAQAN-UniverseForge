@@ -43,11 +43,23 @@ public class TradeNetTest {
                 "autonomous route review is idempotent when supply capacity is already linked");
         Settlement rich = city("rich", d), richer = city("richer", d);
         rich.stock.put("wood", 30.0); richer.stock.put("wood", 120.0);
+        // Demand pressure makes the stocked destination more expensive, so the candidate
+        // direction is deliberately rich -> richer; stock checks must still reject it.
+        rich.pressure.put("wood", -0.8); richer.pressure.put("wood", 0.8);
+        ok(TradeNetwork.suggestions(Map.of("rich", rich, "richer", richer), 4).stream()
+                        .anyMatch(route -> route[0].equals("rich") && route[1].equals("richer")
+                                && route[2].equals("wood")),
+                "test fixture exposes a price spread toward a stocked destination");
         TradeNetwork noDemand = new TradeNetwork();
         ok(noDemand.ensureAutonomousRoutes(Map.of("rich", rich, "richer", richer), 2, 2, 2.0) == 0,
                 "autonomous supply network does not create a route toward a stocked destination");
         Settlement reserve = city("reserve", d), needy = city("needy", d);
         reserve.stock.put("wood", TradeNetwork.RESERVE + 1); needy.stock.put("wood", 0.0);
+        reserve.pressure.put("wood", -0.8); needy.pressure.put("wood", 0.8);
+        ok(TradeNetwork.suggestions(Map.of("reserve", reserve, "needy", needy), 4).stream()
+                        .anyMatch(route -> route[0].equals("reserve") && route[1].equals("needy")
+                                && route[2].equals("wood")),
+                "test fixture exposes a candidate whose source reserve is insufficient");
         TradeNetwork noExport = new TradeNetwork();
         ok(noExport.ensureAutonomousRoutes(Map.of("reserve", reserve, "needy", needy), 2, 2, 2.0) == 0,
                 "autonomous supply network protects the source settlement reserve");
