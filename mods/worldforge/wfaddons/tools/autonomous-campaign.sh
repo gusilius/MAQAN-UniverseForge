@@ -16,24 +16,30 @@ mkdir -p "$OUTPUT"
 OUTPUT="$(cd "$OUTPUT" && pwd)"
 WORK="$(mktemp -d)"
 SERVER_PID=""
-cleanup() {
-  if [ -f "$WORK/server.log" ]; then cp "$WORK/server.log" "$OUTPUT/server.log" 2>/dev/null || true; fi
-  if [ -f "$WORK/in.txt" ]; then printf '%s\n' "stop" >> "$WORK/in.txt" 2>/dev/null || true; fi
-  if [ -n "$SERVER_PID" ]; then
-    for _ in $(seq 1 30); do kill -0 "$SERVER_PID" 2>/dev/null || break; sleep 1; done
+CURRENT_STAGE="preflight"
+campaign_exit() {
+  local exit_code="$1"
+  trap - EXIT
+  if [ -f "$WORK/in.txt" ] && [ -n "$SERVER_PID" ]; then
+    printf '%s\n' "stop" >> "$WORK/in.txt" 2>/dev/null || true
+    for _ in $(seq 1 10); do kill -0 "$SERVER_PID" 2>/dev/null || break; sleep 1; done
     taskkill.exe //PID "$SERVER_PID" //T //F >/dev/null 2>&1 || kill "$SERVER_PID" 2>/dev/null || true
   fi
+  python3 "$SCRIPT_DIR/campaign-diagnostics.py" --work "$WORK" --output "$OUTPUT" --exit-code "$exit_code" --stage "$CURRENT_STAGE" --run-id "${GITHUB_RUN_ID:-local}" --commit "${GITHUB_SHA:-unknown}" --seed "$MAP_SEED" || true
   rm -rf "$WORK"
+  exit "$exit_code"
 }
-trap cleanup EXIT
+trap 'campaign_exit $?' EXIT
 [ -f "$MAP_SOURCE" ] || { echo "ERROR: Planetos map package missing: $MAP_SOURCE"; exit 2; }
 [ -d "$JARS" ] || { echo "ERROR: addon jar directory missing: $JARS"; exit 2; }
 expected_addons=$(find "$SCRIPT_DIR/.." -mindepth 1 -maxdepth 1 -type d -name 'wf-*' | wc -l)
 jar_count=$(find "$JARS" -maxdepth 1 -type f -name '*.jar' | wc -l)
 [ "$jar_count" -ge "$expected_addons" ] || { echo "ERROR: incomplete addon distribution ($jar_count jars, expected at least $expected_addons)"; exit 2; }
 cd "$WORK"
+CURRENT_STAGE="forge_install"
 curl -fsSL -o installer.jar "https://maven.minecraftforge.net/net/minecraftforge/forge/$FORGE/forge-$FORGE-installer.jar"
 java -jar installer.jar --installServer > install.log 2>&1 || { tail -60 install.log; exit 2; }
+CURRENT_STAGE="map_preparation"
 mkdir -p mods config/worldforge/maps
 cp "$JARS"/*.jar mods/
 python3 - "$MAP_SOURCE" "config/worldforge/maps/planetos.worldmap" <<'PY'
@@ -84,6 +90,7 @@ spawn-protection=0
 enable-command-block=false
 P
 : > in.txt
+CURRENT_STAGE="forge_startup"
 (tail -n +1 -f in.txt | java -Xms1G -Xmx4G -Dworldforge.campaign.empty-bootstrap=true @user_jvm_args.txt @libraries/net/minecraftforge/forge/$FORGE/win_args.txt nogui > server.log 2>&1) &
 SERVER_PID=$!
 echo "WAITING_FOR_FORGE_STARTUP=1"
@@ -96,6 +103,7 @@ for i in $(seq 1 150); do
   sleep 2
 done
 grep -q 'Done (' server.log || { tail -120 server.log; echo "ERROR: Forge startup timed out"; exit 3; }
+CURRENT_STAGE="campaign_preflight"
 printf '%s\n' "wfworldsim campaign start $MAP_ID" >> in.txt
 echo "WAITING_FOR_CAMPAIGN_PREFLIGHT=1"
 for i in $(seq 1 90); do
@@ -108,6 +116,7 @@ for i in $(seq 1 90); do
 done
 grep -q 'map-only autonomous campaign started' server.log || { tail -160 server.log; echo "ERROR: campaign command was not accepted"; exit 4; }
 echo "AUTONOMOUS_CAMPAIGN_RUNNING=1"
+CURRENT_STAGE="campaign_simulation"
 started=$(date +%s)
 last_status=$started
 REPORT="world/worldforge/autonomous-campaign/campaign-report.json"
@@ -127,6 +136,7 @@ while [ ! -s "$REPORT" ]; do
   fi
   sleep 5
 done
+CURRENT_STAGE="campaign_report_validation"
 printf '%s\n' "stop" >> in.txt
 for _ in $(seq 1 60); do kill -0 "$SERVER_PID" 2>/dev/null || break; sleep 2; done
 kill "$SERVER_PID" 2>/dev/null || true
