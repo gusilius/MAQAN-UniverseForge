@@ -552,12 +552,26 @@ public class SettleScreen extends Screen {
                     my2, inTransit > 0 ? WFUi.INFO : rt.status.equals("доставлен") ? WFUi.GOOD : WFUi.MUTED);
             final int rid = rt.id;
             WFUi.button(g, font, x + half - 12, my2 - 1, 11, 11, "x", true, false, WFUi.over(mx, my, x + half - 12, my2 - 1, 11, 11));
+            List<String> routeDetails = new ArrayList<>();
+            routeDetails.add("Прибыль: " + Math.round(rt.profit) + " серебра");
+            routeDetails.add(inTransit > 0 ? "Отправлений: " + activeShipments + " · груз: " + (int) inTransit + " ед."
+                    + " · макс. прогресс: " + (int) (routeProgress * 100) + "% · ближайшее прибытие: "
+                    + (int) Math.ceil(nextArrival / 60) + " мин. · точек пути: " + routePoints
+                    : "Доставлено всего: " + (int) rt.carried + " ед.");
+            int shownShipments = 0;
+            for (var shipment : net.shipments.values()) {
+                if (shipment.routeId != rt.id || !(shipment.status.equals("в пути")
+                        || shipment.status.equals("ожидает места") || shipment.status.equals("ожидает расчёта"))) continue;
+                if (shownShipments++ >= 5) break;
+                String cargoName = s.defs.resourceNames.getOrDefault(shipment.res, shipment.res);
+                routeDetails.add("#" + shipment.id + " · " + (int) shipment.quantity + " " + cargoName
+                        + " · " + (int) (shipment.progress() * 100) + "% · "
+                        + Math.max(1, (int)Math.ceil(shipment.remainingSeconds() / 60)) + " мин."
+                        + (shipment.physical() ? " · физический маршрут" : " · стратегическая доставка"));
+            }
+            if (activeShipments > 5) routeDetails.add("И ещё " + (activeShipments - 5) + " отправлений");
             hit(x + half - 12, my2 - 1, 11, 11, () -> cmd.accept("wfsettle route remove " + rid),
-                    "Закрыть маршрут", List.of("Прибыль " + Math.round(rt.profit) + " серебра",
-                            inTransit > 0 ? "Отправлений: " + activeShipments + " · груз: " + (int) inTransit + " ед."
-                                    + " · прогресс: " + (int) (routeProgress * 100) + "% · прибытие: " + (int) Math.ceil(nextArrival / 60) + " мин."
-                                    + " · точек маршрута: " + routePoints
-                                    : "Доставлено всего: " + (int) rt.carried + " ед."));
+                    "Закрыть маршрут", routeDetails);
             my2 += 14;
         }
         if (net.routes.isEmpty()) g.drawString(font, "Маршрутов нет. Выберите справа выгодную пару.", x + 8, my2, WFUi.MUTED);
