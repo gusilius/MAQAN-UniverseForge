@@ -292,6 +292,34 @@ public class RealmsMod {
                 .map(entry -> entry.getKey() + ":" + entry.getValue()).sorted()
                 .collect(java.util.stream.Collectors.joining(", ")));
         realm.props.put("politics.development_points", Math.round(state.points * 10.0) / 10.0);
+        realm.props.put("politics.succession_law", POLITICS.successionLawForPeople(realm.id));
+
+        int today = REALMS.hooks.today();
+        int governmentCooldown = Math.max(0, Realms.GOV_COOLDOWN - (today - state.govChanged));
+        List<String> governmentOptions = new ArrayList<>();
+        for (RealmDefs.Gov option : DEFS.govs.values()) {
+            String reason = option.id().equals(state.gov) ? "Уже действует" : REALMS.why(realm.id, option);
+            if (reason.isEmpty() && governmentCooldown > 0)
+                reason = "Смена строя через " + governmentCooldown + " дн.";
+            governmentOptions.add(option.id() + "|" + option.name() + "|" + reason);
+        }
+        realm.props.put("politics.government_options", String.join(";", governmentOptions));
+
+        List<String> lawOptions = new ArrayList<>();
+        int currentLevel = REALMS.level(realm.id);
+        for (RealmDefs.Law law : DEFS.laws.values()) for (RealmDefs.LawOption option : law.options()) {
+            String reason = "";
+            if (state.laws.getOrDefault(law.id(), "").equals(option.id())) reason = "Уже действует";
+            else if (currentLevel < option.minLevel()) reason = "Нужен уровень " + option.minLevel();
+            else if (!state.laws.containsKey(law.id()) && state.laws.size() >= lawSlots)
+                reason = "Нет свободной ячейки закона";
+            else {
+                int left = law.cooldownDays() - (today - state.lawChanged.getOrDefault(law.id(), -9999));
+                if (left > 0) reason = "Смена через " + left + " дн.";
+            }
+            lawOptions.add(law.id() + "|" + law.name() + "|" + option.id() + "|" + option.name() + "|" + reason);
+        }
+        realm.props.put("politics.law_options", String.join(";", lawOptions));
     }
 
     private static double normalizedProp(TitleData.Realm realm, String key) {
@@ -676,6 +704,8 @@ public class RealmsMod {
                 default -> REALMS.setLaw(realm, a, b);
             };
             if (!ok) return dev.worldforge.mod.api.ActionResult.fail(REALMS.lastError);
+            syncDevelopmentProjection(RealmsMod.realm(realm));
+            save(source.getServer());
             return dev.worldforge.mod.api.ActionResult.ok("Готово.");
         }, () -> rules(player, realm) ? null : "Это решение правителя.", false);
         if (result == 0) return 0;

@@ -27,7 +27,7 @@ import java.util.function.Consumer;
  */
 public class CourtScreen extends Screen {
     private static final int W = 780, H = 460;
-    private static final String[] TABS = {"Совет", "Вассалы", "Козни", "События", "Браки", "Хроника"};
+    private static final String[] TABS = {"Совет", "Вассалы", "Государство", "Козни", "События", "Браки", "Хроника"};
     private CourtSim s;
     private final String realm;
     private final Consumer<String> cmd;
@@ -149,16 +149,17 @@ public class CourtScreen extends Screen {
         if (mine != null) { String yo = "Вы: " + mine.name; g.drawString(font, yo, x + W - 10 - font.width(yo), y + 7 + 12, WFUi.GOLD); }
         String[] labels = TABS.clone();
         int pend = (int) s.pending.stream().filter(p -> p.realm.equals(realm)).count();
-        if (pend > 0) labels[3] = "События (" + pend + ")";
+        if (pend > 0) labels[4] = "События (" + pend + ")";
         int tw = WFUi.tabs(g, font, x + 10, y + 24, 430, labels, tab, mx, my);
         for (int i = 0; i < TABS.length; i++) { final int t = i; hit(x + 10 + i * (tw + 2), y + 24, tw, 15, () -> { tab = t; scroll = 0; }, null, null); }
         int top = y + 44, h = H - 54, cx = x + 10, cw = W - 20;
         switch (tab) {
             case 0 -> council(g, cx, top, cw, h, mx, my, ruler);
             case 1 -> vassals(g, cx, top, cw, h, mx, my, ruler);
-            case 2 -> schemes(g, cx, top, cw, h, mx, my, ruler);
-            case 3 -> events(g, cx, top, cw, h, mx, my);
-            case 4 -> marriages(g, cx, top, cw, h, mx, my);
+            case 2 -> governance(g, cx, top, cw, h, mx, my);
+            case 3 -> schemes(g, cx, top, cw, h, mx, my, ruler);
+            case 4 -> events(g, cx, top, cw, h, mx, my);
+            case 5 -> marriages(g, cx, top, cw, h, mx, my);
             default -> chronicle(g, cx, top, cw, h);
         }
         publishWorkspaceSelection();
@@ -245,8 +246,10 @@ public class CourtScreen extends Screen {
         int lw = 440, rx = x + lw + 8, rw = cw - lw - 8;
         WFUi.bevel(g, x, top, lw, h, true);
         g.drawString(font, "ВАССАЛЫ", x + 8, top + 6, WFUi.GOLD_DIM);
-        g.drawString(font, "МНЕНИЕ О ВАС", x + 190, top + 6, WFUi.GOLD_DIM);
-        g.drawString(font, "ФРАКЦИЯ", x + 290, top + 6, WFUi.GOLD_DIM);
+        g.drawString(font, "МНЕНИЕ", x + 128, top + 6, WFUi.GOLD_DIM);
+        g.drawString(font, "ЛОЯЛЬН.", x + 190, top + 6, WFUi.GOLD_DIM);
+        g.drawString(font, "НАЛОГ / ОПОЛЧ.", x + 234, top + 6, WFUi.GOLD_DIM);
+        g.drawString(font, "ФРАКЦИЯ", x + 310, top + 6, WFUi.GOLD_DIM);
         int ry = top + 20, i = 0;
         List<String> subs = re == null ? List.of() : re.subjectIds;
         for (String sid : subs) {
@@ -260,15 +263,25 @@ public class CourtScreen extends Screen {
                 Opinions.Result op = s.opinions.of(s.reg, sr.id, ruler.id, s.year());
                 double bonus = s.council(realm).getOrDefault("vassal_opinion", 0.0);
                 int tot = (int) Math.round(op.total + bonus);
-                g.drawString(font, (tot > 0 ? "+" : "") + tot + " " + op.label(), x + 190, ry + 3, opColor(tot));
+                g.drawString(font, (tot > 0 ? "+" : "") + tot, x + 128, ry + 3, opColor(tot));
                 List<String> tip = new ArrayList<>();
                 for (int k = 0; k < op.reasons.size(); k++) tip.add((op.values.get(k) >= 0 ? "+" : "-") + op.reasons.get(k) + ": " + op.values.get(k));
                 if (bonus != 0) tip.add("Совет (канцлер): " + Math.round(bonus * 10) / 10.0);
-                hit(x + 3, ry - 1, 280, 17, null, sr.name + " о вас", tip);
+                hit(x + 3, ry - 1, 185, 17, null, sr.name + " о вас · " + op.label(), tip);
             }
+            Object loyaltyRaw = sre == null ? null : sre.props.get("politics.vassal_loyalty");
+            int loyalty = loyaltyRaw instanceof Number n ? Math.max(0, Math.min(100, n.intValue())) : 50;
+            double tax = sre != null && sre.props.get("tax_share") instanceof Number n ? n.doubleValue() : 0;
+            double levy = sre != null && sre.props.get("levy_share") instanceof Number n ? n.doubleValue() : 0;
+            g.drawString(font, loyalty + "%", x + 190, ry + 3, loyalty < 25 ? WFUi.BAD : loyalty < 50 ? WFUi.GOLD : WFUi.GOOD);
+            String obligations = Math.round(tax * 100) + "/" + Math.round(levy * 100) + "%";
+            g.drawString(font, obligations, x + 234, ry + 3, tax > 0.35 || levy > 0.5 ? WFUi.GOLD : WFUi.TX);
+            hit(x + 186, ry - 1, 104, 17, null, "Феодальный договор · " + realmName(sid),
+                    List.of("Лояльность: " + loyalty + "%", "Доля налогов сюзерену: " + Math.round(tax * 100) + "%",
+                            "Военная повинность: " + Math.round(levy * 100) + "%"));
             Faction in = null;
             for (Faction f : s.factions.values()) if (f.liege.equals(realm) && f.members.contains(sid)) in = f;
-            g.drawString(font, in == null ? "-" : in.typeName(), x + 290, ry + 3, in == null ? WFUi.OFF : WFUi.BAD);
+            g.drawString(font, in == null ? "-" : in.typeName(), x + 310, ry + 3, in == null ? WFUi.OFF : WFUi.BAD);
             final String id = sid;
             btn(g, x + lw - 66, ry, 60, "Одарить", true, mx, my, () -> cmd.accept("wfaction run faction_appease " + realm + " " + id), "Мнение +20 на 5 лет");
             ry += 18;
@@ -304,6 +317,108 @@ public class CourtScreen extends Screen {
             g.drawString(font, "окрепнет, потребует независимости", rx + 8, top + 58, WFUi.MUTED);
             g.drawString(font, "войной.", rx + 8, top + 68, WFUi.MUTED);
         }
+    }
+
+    // ------------------------------------------------------------------ Государство: живая проекция wf-realms + доступные решения
+
+    private static String prop(TitleData.Realm realm, String key, String fallback) {
+        if (realm == null) return fallback;
+        Object value = realm.props.get(key);
+        return value == null ? fallback : String.valueOf(value);
+    }
+
+    private static int intProp(TitleData.Realm realm, String key, int fallback) {
+        if (realm == null) return fallback;
+        Object value = realm.props.get(key);
+        return value instanceof Number n ? n.intValue() : fallback;
+    }
+
+    private void governance(GuiGraphics g, int x, int top, int cw, int h, int mx, int my) {
+        TitleData.Realm re = d().realms.get(realm);
+        if (re == null) {
+            g.drawString(font, "Политическая проекция государства пока недоступна.", x + 8, top + 10, WFUi.MUTED);
+            return;
+        }
+        int lw = 300, rx = x + lw + 8, rw = cw - lw - 8;
+        WFUi.bevel(g, x, top, lw, h, true);
+        g.drawString(font, "ГОСУДАРСТВЕННОЕ УСТРОЙСТВО", x + 8, top + 6, WFUi.GOLD_DIM);
+        int yy = top + 22;
+        WFUi.kv(g, font, x + 8, yy, lw - 16, 105, "Форма правления", prop(re, "politics.government", "Не определена"), WFUi.TX); yy += 15;
+        WFUi.kv(g, font, x + 8, yy, lw - 16, 105, "Уровень", prop(re, "politics.realm_level", "—"), WFUi.TX); yy += 15;
+        WFUi.kv(g, font, x + 8, yy, lw - 16, 105, "Закон наследования", prop(re, "politics.succession_law", "Не задан"), WFUi.TX); yy += 15;
+        WFUi.kv(g, font, x + 8, yy, lw - 16, 105, "Очки развития", prop(re, "politics.development_points", "0"), WFUi.GOLD); yy += 18;
+        int stability = Math.max(0, Math.min(100, intProp(re, "stability", 50)));
+        int unrest = Math.max(0, Math.min(100, intProp(re, "politics.unrest", 0)));
+        WFUi.kv(g, font, x + 8, yy, lw - 16, 105, "Стабильность", stability + "%", stability < 30 ? WFUi.BAD : WFUi.GOOD);
+        WFUi.bar(g, x + 112, yy + 11, lw - 128, 5, stability / 100.0, stability < 30 ? WFUi.BAD : WFUi.GOOD); yy += 21;
+        WFUi.kv(g, font, x + 8, yy, lw - 16, 105, "Недовольство", unrest + "%", unrest > 60 ? WFUi.BAD : WFUi.TX);
+        WFUi.bar(g, x + 112, yy + 11, lw - 128, 5, unrest / 100.0, unrest > 60 ? WFUi.BAD : WFUi.GOLD); yy += 22;
+        WFUi.kv(g, font, x + 8, yy, lw - 16, 105, "Доктрины", prop(re, "politics.doctrine_count", "0") + " / " + prop(re, "politics.doctrine_slots", "0"), WFUi.TX); yy += 15;
+        WFUi.kv(g, font, x + 8, yy, lw - 16, 105, "Законы", prop(re, "politics.law_count", "0") + " / " + prop(re, "politics.law_slots", "0"), WFUi.TX); yy += 18;
+        g.drawString(font, "ДЕЙСТВУЮЩИЕ ДОКТРИНЫ", x + 8, yy, WFUi.GOLD_DIM); yy += 12;
+        yy = drawWrapped(g, prop(re, "politics.doctrines", "Нет принятых доктрин"), x + 8, yy, lw - 16, top + h - 8);
+        yy += 5;
+        if (yy < top + h - 10) {
+            g.drawString(font, "ДЕЙСТВУЮЩИЕ ЗАКОНЫ", x + 8, yy, WFUi.GOLD_DIM); yy += 12;
+            drawWrapped(g, prop(re, "politics.laws", "Нет принятых законов"), x + 8, yy, lw - 16, top + h - 8);
+        }
+
+        WFUi.bevel(g, rx, top, rw, h, true);
+        g.drawString(font, "ДОСТУПНЫЕ ПОЛИТИЧЕСКИЕ РЕШЕНИЯ", rx + 8, top + 6, WFUi.GOLD_DIM);
+        int ry = top + 22;
+        g.drawString(font, "ФОРМА ПРАВЛЕНИЯ", rx + 8, ry, WFUi.GOLD); ry += 13;
+        String govRaw = prop(re, "politics.government_options", "");
+        if (!govRaw.isBlank()) for (String item : govRaw.split(";")) {
+            if (ry > top + h - 22) break;
+            String[] parts = item.split("\\|", -1);
+            if (parts.length < 3) continue;
+            String id = parts[0], label = parts[1], reason = parts[2];
+            boolean current = id.equals(prop(re, "politics.government_id", ""));
+            int color = current ? WFUi.GOOD : reason.isEmpty() ? WFUi.TX : WFUi.MUTED;
+            g.drawString(font, font.plainSubstrByWidth(label, rw - 105), rx + 8, ry + 3, color);
+            String status = current ? "Текущий" : reason.isEmpty() ? "Подходит" : reason;
+            String shown = font.plainSubstrByWidth(status, 82);
+            g.drawString(font, shown, rx + rw - 94 - font.width(shown), ry + 3,
+                    current ? WFUi.GOOD : reason.isEmpty() ? WFUi.MUTED : WFUi.BAD);
+            btn(g, rx + rw - 76, ry, 68, "Выбрать", !current && reason.isEmpty(), mx, my,
+                    () -> cmd.accept("wfrealm gov " + id), reason.isEmpty() ? "Смена строя проверяется сервером; решение доступно правителю" : reason);
+            ry += 17;
+        } else {
+            g.drawString(font, "Нет загруженных определений строя.", rx + 8, ry, WFUi.MUTED);
+            ry += 16;
+        }
+        ry += 3;
+        if (ry < top + h - 16) {
+            g.drawString(font, "ЗАКОНЫ И ИХ ВАРИАНТЫ", rx + 8, ry, WFUi.GOLD); ry += 13;
+            String lawRaw = prop(re, "politics.law_options", "");
+            if (!lawRaw.isBlank()) for (String item : lawRaw.split(";")) {
+                if (ry > top + h - 22) break;
+                String[] parts = item.split("\\|", -1);
+                if (parts.length < 5) continue;
+                String lawId = parts[0], lawName = parts[1], optionId = parts[2], optionName = parts[3], reason = parts[4];
+                String label = lawName + ": " + optionName;
+                g.drawString(font, font.plainSubstrByWidth(label, rw - 86), rx + 8, ry + 3, reason.isEmpty() ? WFUi.TX : WFUi.MUTED);
+                btn(g, rx + rw - 76, ry, 68, "Принять", reason.isEmpty(), mx, my,
+                        () -> cmd.accept("wfrealm law " + lawId + " " + optionId),
+                        reason.isEmpty() ? "Принятие закона изменит действующие эффекты государства" : reason);
+                ry += 17;
+            } else {
+                g.drawString(font, "Нет загруженных определений законов.", rx + 8, ry, WFUi.MUTED);
+            }
+        }
+    }
+
+    private int drawWrapped(GuiGraphics g, String value, int x, int y, int width, int bottom) {
+        if (value == null || value.isBlank()) value = "—";
+        String remaining = value;
+        while (!remaining.isEmpty() && y <= bottom - 9) {
+            String line = font.plainSubstrByWidth(remaining, width);
+            if (line.isEmpty()) break;
+            g.drawString(font, line, x, y, WFUi.MUTED);
+            remaining = remaining.substring(line.length()).stripLeading();
+            y += 10;
+        }
+        return y;
     }
 
     // ------------------------------------------------------------------ Козни
