@@ -75,6 +75,18 @@ public class TradeNetTest {
         ok(projected.get(0).capacity.containsKey("wood") && projected.get(0).consumption.containsKey("wood")
                         && projected.get(0).tradeRate > 0,
                 "city panel projection includes market, stock capacity and consumption data");
+        Flow domesticFlow = new Flow();
+        domesticFlow.record(10, "wood", 4, false);
+        domesticFlow.recordTrade(10, "wood", 30, false);
+        ok(Math.abs(domesticFlow.perMinute(10, "wood", false) - 24) < 1e-9,
+                "outbound trade does not inflate domestic consumption statistics");
+        ok(Math.abs(domesticFlow.tradePerMinute(10, "wood", false) - 180) < 1e-9,
+                "trade throughput remains separately observable");
+        Flow restoredFlow = new Flow();
+        restoredFlow.load(domesticFlow.save());
+        ok(Math.abs(restoredFlow.perMinute(10, "wood", false) - 24) < 1e-9
+                        && Math.abs(restoredFlow.tradePerMinute(10, "wood", false) - 180) < 1e-9,
+                "domestic and trade flow channels survive save/reload");
         try { n.add(cs, "A", "A", "wood", 5); ok(false, "в себя нельзя"); } catch (TradeNetwork.TradeException e) { ok(true, "в себя нельзя"); }
         try { n.add(cs, "A", "B", "silver", 5); ok(false, "серебро не возят"); } catch (TradeNetwork.TradeException e) { ok(true, "серебро не возят"); }
         try { n.add(cs, "A", "B", "wood", Double.NaN); ok(false, "NaN скорость запрещена"); } catch (TradeNetwork.TradeException e) { ok(true, "NaN скорость запрещена"); }
