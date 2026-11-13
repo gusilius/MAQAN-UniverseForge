@@ -135,6 +135,23 @@ public class PeopleTest {
                 sovereign.id, 310, "primogeniture");
         ok(represented.size() == 1 && represented.get(0).heir == grandchild,
                 "наследование по представительству сохраняет линию умершего первенца");
+        // Representation must survive more than one deceased generation.
+        CharacterRegistry deepLine = new CharacterRegistry();
+        Character deepSovereign = deepLine.create("Династ", "house_deep", "test_culture", "m", 200);
+        Character deadFirstborn = deepLine.create("Умерший первенец", "house_deep", "test_culture", "m", 220);
+        Character livingYounger = deepLine.create("Младший наследник", "house_deep", "test_culture", "m", 225);
+        Character deadGrandchild = deepLine.create("Умерший внук", "house_deep", "test_culture", "m", 240);
+        Character greatGrandchild = deepLine.create("Правнук", "house_deep", "test_culture", "m", 260);
+        deepSovereign.children.add(deadFirstborn.id); deepSovereign.children.add(livingYounger.id);
+        deadFirstborn.children.add(deadGrandchild.id); deadFirstborn.father = deepSovereign.id;
+        livingYounger.father = deepSovereign.id; deadGrandchild.father = deadFirstborn.id;
+        deadGrandchild.children.add(greatGrandchild.id); greatGrandchild.father = deadGrandchild.id;
+        deadFirstborn.alive = false; deadGrandchild.alive = false;
+        deepLine.appoint(deepSovereign.id, "ruler", linePlace);
+        List<Succession.Result> deepRepresented = Succession.onDeath(deepLine, defs, d4, null, names, 101L,
+                deepSovereign.id, 311, "primogeniture");
+        ok(deepRepresented.size() == 1 && deepRepresented.get(0).heir == greatGrandchild,
+                "наследование по представительству проходит через несколько умерших поколений");
         TitleData.Title hereditaryTitle = d4.allTitles().get(0);
         hereditaryTitle.props.put("holderCharacterId", sovereign.globalId);
         CharacterRegistry mapLine = new CharacterRegistry();

@@ -87,22 +87,19 @@ public final class Succession {
     private static Character heirBranch(CharacterRegistry reg, Character branch, String law, Set<String> visited) {
         if (branch == null || !visited.add(branch.id)) return null;
         if (branch.alive) return branch;
-        List<Character> descendants = living(reg, branch.children);
+        // Representation applies recursively, not only to the first deceased child.
+        // A dead grandchild must not erase a great-grandchild's place in the same branch.
+        List<Character> descendants = new ArrayList<>();
+        for (String childId : branch.children) {
+            Character child = reg.get(childId);
+            if (child != null) descendants.add(child);
+        }
         sort(descendants, law);
         for (Character descendant : descendants) {
             Character heir = heirBranch(reg, descendant, law, visited);
             if (heir != null) return heir;
         }
         return null;
-    }
-
-    private static List<Character> living(CharacterRegistry reg, List<String> ids) {
-        List<Character> l = new ArrayList<>();
-        for (String id : ids) {
-            Character c = reg.get(id);
-            if (c != null && c.alive) l.add(c);
-        }
-        return l;
     }
 
     private static void sort(List<Character> l, String law) {
