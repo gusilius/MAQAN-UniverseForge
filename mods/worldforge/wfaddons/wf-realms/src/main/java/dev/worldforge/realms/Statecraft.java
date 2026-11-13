@@ -122,7 +122,7 @@ public final class Statecraft {
     private static String clean(String value, String what) {
         if (value == null) throw new IllegalArgumentException(what + " is required");
         String s = value.trim();
-        if (s.isEmpty() || s.length() > 96 || !s.matches("[A-Za-z0-9_.:-]+"))
+        if (s.isEmpty() || s.length() > 96 || !s.matches("[\\p{L}\\p{N}_.:-]+"))
             throw new IllegalArgumentException("invalid " + what + ": " + value);
         return s;
     }
