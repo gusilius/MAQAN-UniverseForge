@@ -98,7 +98,14 @@ public final class WorldSimMod {
     public WorldSimMod() {
         MinecraftForge.EVENT_BUS.register(this);
         WorldForgeApi.events().addListener(item -> {
-            HISTORICAL_CHRONICLE.record(item, WorldForgeApi.clock().dayNumber(), WorldForgeApi.clock().year());
+            // EventLog.time is the authoritative occurrence time. Listener delivery may
+            // happen later (or after a batched simulation step), so never date history
+            // from the current wall/game clock when the event carries its own timestamp.
+            long eventDay = item == null ? WorldForgeApi.clock().dayNumber()
+                    : Math.max(0L, item.time / 1440L);
+            int eventYear = WorldForgeApi.clock().startYear
+                    + (int) (eventDay / HistoricalChronicle.DAYS_PER_YEAR);
+            HISTORICAL_CHRONICLE.record(item, eventDay, eventYear);
             publishPlatformTimelineEvent(item);
         });
     }
@@ -167,10 +174,19 @@ public final class WorldSimMod {
                 for (var eventElement : emergenceFrame.getAsJsonArray("events")) {
                     if (!eventElement.isJsonObject()) continue;
                     JsonObject emergenceEvent = eventElement.getAsJsonObject();
-                    String category = emergenceEvent.has("kind") ? emergenceEvent.get("kind").getAsString() : "world";
+                    String kind = emergenceEvent.has("kind") ? emergenceEvent.get("kind").getAsString() : "world";
                     String subject = emergenceEvent.has("text") ? emergenceEvent.get("text").getAsString() : "Emergent world event";
+                    String eventCategory = switch (kind) {
+                        case "settlement_founded" -> "settlement";
+                        case "founding_ruler", "dynastic_succession", "population_origin" -> "people";
+                        case "state_founded", "state_dissolved" -> "diplomacy";
+                        default -> "system";
+                    };
                     long eventDay = Math.max(0L, emergenceEvent.has("year") ? emergenceEvent.get("year").getAsLong() * 365L : day);
-                    WorldForgeApi.postEvent("world", "[" + category + "] " + subject, List.of(), eventDay * 1440L);
+                    List<String> affected = kind.equals("state_founded") || kind.equals("state_dissolved")
+                            ? List.of("emergent-" + (emergenceEvent.has("subject_id")
+                                    ? emergenceEvent.get("subject_id").getAsString() : "unknown")) : List.of();
+                    WorldForgeApi.postEvent(eventCategory, "[" + kind + "] " + subject, affected, eventDay * 1440L);
                 }
             }
             JsonObject frame = GSON.fromJson(new String(NativeWorldSimulation.decide(input), StandardCharsets.UTF_8), JsonObject.class);

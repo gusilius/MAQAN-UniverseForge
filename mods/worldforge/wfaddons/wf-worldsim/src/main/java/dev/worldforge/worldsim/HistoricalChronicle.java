@@ -66,6 +66,10 @@ public final class HistoricalChronicle {
         entries.add(new Entry(id, Math.max(0L, worldDay), safeYear, epoch, cycle,
                 event.category == null ? "system" : event.category.id(),
                 event.text.trim(), event.realms == null ? List.of() : event.realms));
+        // Domain listeners can publish a delayed fact after a later event. The book
+        // follows occurrence time, with EventLog sequence as a stable tie-breaker.
+        entries.sort(java.util.Comparator.comparingLong((Entry entry) -> entry.day)
+                .thenComparingLong(HistoricalChronicle::eventSequence));
         while (entries.size() > MAX_ENTRIES) {
             Entry removed = entries.remove(0);
             knownIds.remove(removed.id);
@@ -126,6 +130,13 @@ public final class HistoricalChronicle {
             default -> "Летописцы сохранили для потомков такую запись: ";
         };
         return "Год " + entry.year + ", день " + entry.day + ". " + opening + fact + punctuation(fact);
+    }
+
+    private static long eventSequence(Entry entry) {
+        String prefix = "worldforge-event:";
+        if (entry == null || !entry.id.startsWith(prefix)) return Long.MAX_VALUE;
+        try { return Long.parseLong(entry.id.substring(prefix.length())); }
+        catch (NumberFormatException ignored) { return Long.MAX_VALUE; }
     }
 
     private static String cleanFact(String value) {

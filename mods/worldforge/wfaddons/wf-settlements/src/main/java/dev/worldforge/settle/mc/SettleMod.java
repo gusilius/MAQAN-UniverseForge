@@ -577,13 +577,46 @@ public class SettleMod {
         for (var entry : cost.entrySet()) site.colony().s.add(entry.getKey(), entry.getValue());
     }
 
+    /** Resolve the canonical realm owning the exact map pixel under a proposed founding site. */
+    private static String politicalOwnerAt(ServerLevel level, int x, int z) {
+        if (level == null || !(level.getChunkSource().getGenerator() instanceof MapChunkGenerator generator))
+            return "";
+        dev.worldforge.mod.MapData map = generator.data();
+        if (map == null || map.titles == null) return "";
+        dev.worldforge.mod.TitleData.Title province = map.provinceAt(x, z);
+        dev.worldforge.mod.TitleData.Realm owner = province == null ? null : map.titles.realmOf(province);
+        return owner == null || owner.id == null ? "" : owner.id;
+    }
+
+    /**
+     * A player cannot establish a new colony inside another realm by simply placing
+     * a settlement marker. Legal grants must be wired to a canonical political
+     * permission/charter before any bypass can be exposed.
+     */
+    private static void requireFoundingTerritoryPermission(ServerLevel level, String name, BlockPos position) {
+        String owner = politicalOwnerAt(level, position.getX(), position.getZ());
+        if (owner.isBlank()) return;
+        String settlementName = name == null || name.isBlank() ? "новое поселение" : name.trim();
+        dev.worldforge.mod.api.WorldForgeApi.postEvent("diplomacy",
+                "Попытка основания поселения «" + settlementName + "» на территории государства "
+                        + owner + " пресечена пограничной властью",
+                List.of(owner), dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute());
+        throw new IllegalStateException("Эта земля принадлежит государству " + owner
+                + ". Основание поселения требует разрешения владельца или законного изменения границы.");
+    }
+
     /** Закладывает поселение: 4 рабочих, склад дерево 60 / еда 40 / камень 10. */
     public static Colony found(ServerLevel lv, String name, BlockPos p) {
-        return found(lv, name, p, "");
+        return foundInternal(lv, name, p, "");
     }
 
     /** Idempotent Genesis-aware variant. The same operation always resolves to the same colony. */
     public static Colony found(ServerLevel lv, String name, BlockPos p, String genesisOperationId) {
+        return foundInternal(lv, name, p, genesisOperationId);
+    }
+
+    private static Colony foundInternal(ServerLevel lv, String name, BlockPos p,
+                                        String genesisOperationId) {
         String dimension = lv.dimension().location().toString();
         if (genesisOperationId != null && !genesisOperationId.isBlank()) {
             for (Colony existing : COLONIES.values()) {
@@ -593,6 +626,9 @@ public class SettleMod {
                         + " is already bound to dimension " + existing.dim + " and cannot create a second colony in " + dimension);
             }
         }
+        // Check only after idempotent replay has been resolved: a committed founding
+        // remains recoverable even if borders changed after the original operation.
+        requireFoundingTerritoryPermission(lv, name, p);
         String base = name.toLowerCase(Locale.ROOT).replaceAll("[^\\p{L}\\p{N}]+", "_").replaceAll("^_+|_+$", "");
         if (base.isEmpty()) base = "settlement";
         String id = base;

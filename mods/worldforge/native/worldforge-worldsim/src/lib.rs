@@ -98,6 +98,10 @@ pub struct GeographicCell {
     pub river: u8,
     pub land: bool,
     pub suitability: u8,
+    /// Empty for unclaimed land; otherwise the canonical map realm that owns this sample.
+    /// Older snapshots omit it and remain readable through serde's default.
+    #[serde(default)]
+    pub owner_realm_id: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -504,9 +508,9 @@ mod tests {
                 blocks_per_pixel_milli: 16000, political_layers_present: true, sample_stride: 4,
                 cells: vec![
                     GeographicCell { x: 4, z: 8, biome: "plains".into(), elevation: 70,
-                        river: 0, land: true, suitability: 82 },
+                        river: 0, land: true, suitability: 82, owner_realm_id: String::new() },
                     GeographicCell { x: 8, z: 8, biome: "forest".into(), elevation: 72,
-                        river: 255, land: true, suitability: 90 },
+                        river: 255, land: true, suitability: 90, owner_realm_id: String::new() },
                 ],
             }],
         };

@@ -15,8 +15,12 @@ public final class MapGeographyTest {
 
         check(Boolean.FALSE.equals(first.get("political_layers_present")),
                 "geography-only map does not require political layers");
-        check(Boolean.TRUE.equals(first.get("political_layers_ignored")),
-                "political overlays are explicitly excluded from geographic evidence");
+        check(Boolean.FALSE.equals(first.get("political_layers_ignored"))
+                        && Boolean.TRUE.equals(first.get("political_ownership_included")),
+                "only canonical territorial ownership is included as a founding exclusion signal");
+        Map<?, ?> firstCell = (Map<?, ?>) ((List<?>) first.get("cells")).get(0);
+        check("".equals(firstCell.get("owner_realm_id")),
+                "unclaimed geography is explicitly marked as available for autonomous emergence");
         check(((Number) first.get("sampled_cells")).intValue() > 0,
                 "geographic raster produces natural samples");
         check(((Number) first.get("land_samples")).intValue() > 0,

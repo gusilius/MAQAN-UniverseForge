@@ -45,6 +45,18 @@ public final class HistoricalChronicleTest {
                 "chronicle survives JSON save/restore without changing its pages");
         check(!restored.record(war, 12, 300), "restored event identity prevents replay duplicates");
 
+        EventLog delayedSource = new EventLog();
+        HistoricalChronicle delayedBook = new HistoricalChronicle();
+        delayedBook.setStartingYear(300);
+        delayedSource.addListener(event -> delayedBook.record(event, event.time / 1440L,
+                300 + (int) (event.time / 1440L / HistoricalChronicle.DAYS_PER_YEAR)));
+        delayedSource.post("people", "Поздно доставленное событие с ранней датой",
+                List.of("realm_north"), 5L * 1440L);
+        delayedSource.post("war", "Событие, произошедшее позже",
+                List.of("realm_north", "realm_south"), 40L * 1440L);
+        check(delayedBook.entries().get(0).day == 5 && delayedBook.entries().get(1).day == 40,
+                "delayed event delivery is reordered by actual occurrence time, not listener arrival");
+
         if (failures > 0) throw new AssertionError(failures + " historical chronicle checks failed");
         System.out.println("HISTORICAL_CHRONICLE_STATUS=PASS");
     }

@@ -122,7 +122,7 @@ fn bootstrap(map: &GeographicMap, seed: u64, bands: &mut Vec<EmergentBand>, even
     if map.cells.is_empty() { return; }
     let spacing = map_scale(map);
     let mut candidates = map.cells.iter()
-        .filter(|c| c.land && c.suitability >= 48)
+        .filter(|c| c.land && c.suitability >= 48 && c.owner_realm_id.trim().is_empty())
         .collect::<Vec<_>>();
     candidates.sort_by(|a,b| {
         b.suitability.cmp(&a.suitability)
@@ -183,7 +183,14 @@ fn advance_band(band: &mut EmergentBand, cell: &GeographicCell, seed: u64, year:
 fn maybe_form_polity(map: &GeographicMap, seed: u64, year: u64, bands: &[EmergentBand],
     polities: &mut Vec<EmergentPolity>, events: &mut Vec<EmergenceEvent>) {
     let spacing = map_scale(map) * 3;
-    let mut settled = bands.iter().filter(|b| b.map_id == map.map_id && b.settled).collect::<Vec<_>>();
+    // Legacy/persisted bands are rechecked against the live political raster before
+    // they can become sovereign. A settlement on another realm's land is not a
+    // legal seed for a new independent polity.
+    let mut settled = bands.iter().filter(|b| {
+        b.map_id == map.map_id && b.settled
+            && cell_at(map, b.x, b.z).is_some_and(|cell|
+                cell.land && cell.owner_realm_id.trim().is_empty())
+    }).collect::<Vec<_>>();
     settled.sort_by(|a,b| a.id.cmp(&b.id));
     for anchor in &settled {
         if polities.iter().any(|p| p.settlement_ids.contains(&anchor.id)) { continue; }
@@ -340,7 +347,8 @@ mod tests {
         for z in 0..128 {
             for x in 0..128 {
                 cells.push(GeographicCell { x, z, biome: if (x / 16 + z / 16) % 2 == 0 { "plains" } else { "forest" }.into(),
-                    elevation: 70, river: if x % 19 == 0 { 255 } else { 0 }, land: true, suitability: 92 });
+                    elevation: 70, river: if x % 19 == 0 { 255 } else { 0 }, land: true, suitability: 92,
+                    owner_realm_id: String::new() });
             }
         }
         GeographicMap { map_id:"planetos".into(), width_px:128, height_px:128,
@@ -349,6 +357,30 @@ mod tests {
     fn request(day: u64, state: Option<EmergentWorld>) -> EmergenceRequest {
         EmergenceRequest { snapshot:WorldSnapshot { world_id:"map-only".into(),seed:8128,day,
             realms:vec![],borders:vec![],settlements:vec![],characters:vec![],workforce:vec![],geography:vec![map()] }, state }
+    }
+
+    #[test]
+    fn occupied_territory_cannot_bootstrap_or_form_a_new_polity() {
+        let mut geography = map();
+        for cell in &mut geography.cells {
+            cell.owner_realm_id = "established-kingdom".into();
+        }
+
+        let mut bands = Vec::new();
+        let mut events = Vec::new();
+        bootstrap(&geography, 8128, &mut bands, &mut events);
+        assert!(bands.is_empty(), "owned provinces must not generate new autonomous founding bands");
+
+        let make_band = |index: u32| EmergentBand {
+            id: format!("legacy-settlement-{index}"), map_id: "planetos".into(),
+            x: 10 + index * 4, z: 10, population: 30, food_reserve: 4,
+            settled: true, founded_year: 20, hardship_years: 0,
+        };
+        let legacy_bands = vec![make_band(0), make_band(1), make_band(2), make_band(3)];
+        let mut polities = Vec::new();
+        maybe_form_polity(&geography, 8128, 41, &legacy_bands, &mut polities, &mut events);
+        assert!(polities.is_empty(), "persisted settlements inside an established realm cannot declare new statehood");
+        assert!(events.is_empty(), "blocked founding must not emit a false state-founding event");
     }
 
     #[test]
