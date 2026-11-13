@@ -94,7 +94,7 @@ public final class Flow {
             double t = tn.doubleValue(), p = pn.doubleValue(), c = cn.doubleValue();
             if (!validTime(t) || !Double.isFinite(p) || !Double.isFinite(c) || p < 0 || c < 0) continue;
             long idx = (long) Math.floor(t);
-            double[] v = buckets.computeIfAbsent(idx, k -> new TreeMap<>()).computeIfAbsent(res, k -> new double[2]);
+            double[] v = buckets.computeIfAbsent(idx, k -> new TreeMap<>()).computeIfAbsent(res, k -> new double[4]);
             v[0] += p;
             v[1] += c;
             Object tradeIn = m.get("ti"), tradeOut = m.get("to");
