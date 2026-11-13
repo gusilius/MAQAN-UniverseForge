@@ -358,11 +358,11 @@ public final class WorldSimMod {
         campaignForcedChunks.clear();
         campaignStartedDay = WorldForgeApi.clock().dayNumber();
         campaignRunning = true;
-        WorldForgeApi.clock().setSimulationTickMultiplier(8400);
+        WorldForgeApi.clock().setSimulationTickMultiplier(1200);
         lastDecisionDay = Long.MIN_VALUE;
         source.sendSuccess(() -> Component.literal("Autonomous campaign started on " + campaignMapId
-                + "; map-only bootstrap, shared clock multiplier=8400x; target=stable states + four canonical ruler generations"), true);
-        LOGGER.info("wf_worldsim: map-only autonomous campaign started map={} day={} multiplier=8400x target=4 canonical generations",
+                + "; map-only bootstrap, shared clock multiplier=1200x; target=stable states + four canonical ruler generations"), true);
+        LOGGER.info("wf_worldsim: map-only autonomous campaign started map={} day={} multiplier=1200x target=4 canonical generations",
                 campaignMapId, campaignStartedDay);
         return 1;
     }
