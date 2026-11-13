@@ -320,6 +320,14 @@ public class RealmsMod {
             lawOptions.add(law.id() + "|" + law.name() + "|" + option.id() + "|" + option.name() + "|" + reason);
         }
         realm.props.put("politics.law_options", String.join(";", lawOptions));
+
+        List<String> doctrineOptions = new ArrayList<>();
+        for (RealmDefs.Branch branch : DEFS.branches.values()) for (RealmDefs.Node node : branch.nodes()) {
+            String reason = state.nodes.contains(node.key()) ? "Уже изучено"
+                    : REALMS.canUnlock(realm.id, node.key()) ? "" : REALMS.lastError;
+            doctrineOptions.add(node.key() + "|" + node.name() + "|" + node.cost() + "|" + reason);
+        }
+        realm.props.put("politics.doctrine_options", String.join(";", doctrineOptions));
     }
 
     private static double normalizedProp(TitleData.Realm realm, String key) {
@@ -487,7 +495,9 @@ public class RealmsMod {
                 .then(Commands.literal("info").then(Commands.argument("realm", StringArgumentType.word()).executes(c -> info(c.getSource(), StringArgumentType.getString(c, "realm")))))
                 .then(Commands.literal("gov").then(Commands.argument("id", StringArgumentType.word()).executes(c -> act(c.getSource(), "gov", StringArgumentType.getString(c, "id"), ""))))
                 .then(Commands.literal("unlock").then(Commands.argument("key", StringArgumentType.word()).executes(c -> act(c.getSource(), "unlock", StringArgumentType.getString(c, "key"), ""))))
-                .then(Commands.literal("law").then(Commands.argument("law", StringArgumentType.word()).then(Commands.argument("option", StringArgumentType.word()).executes(c -> act(c.getSource(), "law", StringArgumentType.getString(c, "law"), StringArgumentType.getString(c, "option")))))));
+                .then(Commands.literal("law").then(Commands.argument("law", StringArgumentType.word()).then(Commands.argument("option", StringArgumentType.word()).executes(c -> act(c.getSource(), "law", StringArgumentType.getString(c, "law"), StringArgumentType.getString(c, "option"))))))
+                .then(Commands.literal("succession").then(Commands.argument("law", StringArgumentType.word())
+                        .executes(c -> act(c.getSource(), "succession", StringArgumentType.getString(c, "law"), "")))));
     }
 
     /** Operator-only bootstrap surface for the political simulation. */
@@ -701,6 +711,10 @@ public class RealmsMod {
             boolean ok = switch (what) {
                 case "gov" -> REALMS.setGov(realm, a, false);
                 case "unlock" -> REALMS.unlock(realm, a);
+                case "succession" -> {
+                    try { POLITICS.setInheritanceLaw(realm, Statecraft.InheritanceLaw.valueOf(a.toUpperCase(Locale.ROOT))); yield true; }
+                    catch (IllegalArgumentException ex) { REALMS.lastError = "Неизвестный закон наследования"; yield false; }
+                }
                 default -> REALMS.setLaw(realm, a, b);
             };
             if (!ok) return dev.worldforge.mod.api.ActionResult.fail(REALMS.lastError);

@@ -31,7 +31,7 @@ public class CourtScreen extends Screen {
     private CourtSim s;
     private final String realm;
     private final Consumer<String> cmd;
-    private int tab, scroll, selTarget, kind;
+    private int tab, scroll, selTarget, kind, governanceTab, governanceScroll;
     private String msg = "";
     private long msgUntil;
 
@@ -346,6 +346,16 @@ public class CourtScreen extends Screen {
         WFUi.kv(g, font, x + 8, yy, lw - 16, 105, "Форма правления", prop(re, "politics.government", "Не определена"), WFUi.TX); yy += 15;
         WFUi.kv(g, font, x + 8, yy, lw - 16, 105, "Уровень", prop(re, "politics.realm_level", "—"), WFUi.TX); yy += 15;
         WFUi.kv(g, font, x + 8, yy, lw - 16, 105, "Закон наследования", prop(re, "politics.succession_law", "Не задан"), WFUi.TX); yy += 15;
+        String[] successionIds = {"PRIMOGENITURE", "COGNATIC", "ULTIMOGENITURE"};
+        String[] successionLabels = {"Первородство", "Когнат.", "Младший"};
+        int sw = (lw - 24) / 3;
+        for (int i = 0; i < successionIds.length; i++) {
+            String id = successionIds[i];
+            boolean active = id.equalsIgnoreCase(prop(re, "politics.succession_law", ""));
+            btn(g, x + 8 + i * (sw + 2), yy, sw, successionLabels[i], !active, mx, my,
+                    () -> cmd.accept("wfrealm succession " + id), "Изменить закон наследования");
+        }
+        yy += 19;
         WFUi.kv(g, font, x + 8, yy, lw - 16, 105, "Очки развития", prop(re, "politics.development_points", "0"), WFUi.GOLD); yy += 18;
         int stability = Math.max(0, Math.min(100, intProp(re, "stability", 50)));
         int unrest = Math.max(0, Math.min(100, intProp(re, "politics.unrest", 0)));
@@ -364,32 +374,36 @@ public class CourtScreen extends Screen {
         }
 
         WFUi.bevel(g, rx, top, rw, h, true);
-        g.drawString(font, "ДОСТУПНЫЕ ПОЛИТИЧЕСКИЕ РЕШЕНИЯ", rx + 8, top + 6, WFUi.GOLD_DIM);
-        int ry = top + 22;
-        g.drawString(font, "ФОРМА ПРАВЛЕНИЯ", rx + 8, ry, WFUi.GOLD); ry += 13;
-        String govRaw = prop(re, "politics.government_options", "");
-        if (!govRaw.isBlank()) for (String item : govRaw.split(";")) {
-            if (ry > top + h - 22) break;
-            String[] parts = item.split("\\|", -1);
-            if (parts.length < 3) continue;
-            String id = parts[0], label = parts[1], reason = parts[2];
-            boolean current = id.equals(prop(re, "politics.government_id", ""));
-            int color = current ? WFUi.GOOD : reason.isEmpty() ? WFUi.TX : WFUi.MUTED;
-            g.drawString(font, font.plainSubstrByWidth(label, rw - 105), rx + 8, ry + 3, color);
-            String status = current ? "Текущий" : reason.isEmpty() ? "Подходит" : reason;
-            String shown = font.plainSubstrByWidth(status, 82);
-            g.drawString(font, shown, rx + rw - 94 - font.width(shown), ry + 3,
-                    current ? WFUi.GOOD : reason.isEmpty() ? WFUi.MUTED : WFUi.BAD);
-            btn(g, rx + rw - 76, ry, 68, "Выбрать", !current && reason.isEmpty(), mx, my,
-                    () -> cmd.accept("wfrealm gov " + id), reason.isEmpty() ? "Смена строя проверяется сервером; решение доступно правителю" : reason);
-            ry += 17;
-        } else {
-            g.drawString(font, "Нет загруженных определений строя.", rx + 8, ry, WFUi.MUTED);
-            ry += 16;
+        g.drawString(font, "ПОЛИТИЧЕСКИЕ РЕШЕНИЯ", rx + 8, top + 6, WFUi.GOLD_DIM);
+        String[] managementTabs = {"Строй", "Законы", "Доктрины"};
+        int mtw = WFUi.tabs(g, font, rx + 8, top + 20, rw - 16, managementTabs, governanceTab, mx, my);
+        for (int i = 0; i < managementTabs.length; i++) {
+            final int selected = i;
+            hit(rx + 8 + i * (mtw + 2), top + 20, mtw, 15, () -> {
+                governanceTab = selected;
+                governanceScroll = 0;
+            }, null, null);
         }
-        ry += 3;
-        if (ry < top + h - 16) {
-            g.drawString(font, "ЗАКОНЫ И ИХ ВАРИАНТЫ", rx + 8, ry, WFUi.GOLD); ry += 13;
+        int ry = top + 42;
+        if (governanceTab == 0) {
+            String govRaw = prop(re, "politics.government_options", "");
+            if (!govRaw.isBlank()) for (String item : govRaw.split(";")) {
+                if (ry > top + h - 22) break;
+                String[] parts = item.split("\\|", -1);
+                if (parts.length < 3) continue;
+                String id = parts[0], label = parts[1], reason = parts[2];
+                boolean current = id.equals(prop(re, "politics.government_id", ""));
+                g.drawString(font, font.plainSubstrByWidth(label, rw - 105), rx + 8, ry + 3,
+                        current ? WFUi.GOOD : reason.isEmpty() ? WFUi.TX : WFUi.MUTED);
+                String status = current ? "Текущий" : reason.isEmpty() ? "Подходит" : reason;
+                String shown = font.plainSubstrByWidth(status, 82);
+                g.drawString(font, shown, rx + rw - 94 - font.width(shown), ry + 3,
+                        current ? WFUi.GOOD : reason.isEmpty() ? WFUi.MUTED : WFUi.BAD);
+                btn(g, rx + rw - 76, ry, 68, "Выбрать", !current && reason.isEmpty(), mx, my,
+                        () -> cmd.accept("wfrealm gov " + id), reason.isEmpty() ? "Смена строя проверяется сервером; решение доступно правителю" : reason);
+                ry += 17;
+            } else g.drawString(font, "Нет загруженных форм правления.", rx + 8, ry, WFUi.MUTED);
+        } else if (governanceTab == 1) {
             String lawRaw = prop(re, "politics.law_options", "");
             if (!lawRaw.isBlank()) for (String item : lawRaw.split(";")) {
                 if (ry > top + h - 22) break;
@@ -402,9 +416,25 @@ public class CourtScreen extends Screen {
                         () -> cmd.accept("wfrealm law " + lawId + " " + optionId),
                         reason.isEmpty() ? "Принятие закона изменит действующие эффекты государства" : reason);
                 ry += 17;
-            } else {
-                g.drawString(font, "Нет загруженных определений законов.", rx + 8, ry, WFUi.MUTED);
+            } else g.drawString(font, "Нет загруженных вариантов законов.", rx + 8, ry, WFUi.MUTED);
+        } else {
+            String doctrineRaw = prop(re, "politics.doctrine_options", "");
+            List<String> doctrines = doctrineRaw.isBlank() ? List.of() : Arrays.asList(doctrineRaw.split(";"));
+            int rows = Math.max(1, (top + h - 24 - ry) / 17);
+            governanceScroll = Math.max(0, Math.min(Math.max(0, doctrines.size() - rows), governanceScroll));
+            for (int i = governanceScroll; i < doctrines.size() && i < governanceScroll + rows; i++) {
+                String[] parts = doctrines.get(i).split("\\|", -1);
+                if (parts.length < 4) continue;
+                String key = parts[0], label = parts[1], cost = parts[2], reason = parts[3];
+                String shown = font.plainSubstrByWidth(label + " · " + cost + " очк.", rw - 96);
+                g.drawString(font, shown, rx + 8, ry + 3, reason.isEmpty() ? WFUi.TX : WFUi.MUTED);
+                btn(g, rx + rw - 76, ry, 68, "Изучить", reason.isEmpty(), mx, my,
+                        () -> cmd.accept("wfrealm unlock " + key),
+                        reason.isEmpty() ? "Изучение расходует очки развития" : reason);
+                ry += 17;
             }
+            WFUi.scrollbar(g, rx + rw - 5, top + 42, h - 52, doctrines.size() * 17, governanceScroll * 17);
+            if (doctrines.isEmpty()) g.drawString(font, "Нет доступных доктрин.", rx + 8, ry, WFUi.MUTED);
         }
     }
 
@@ -645,7 +675,9 @@ public class CourtScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mx, double my, double d) {
-        scroll = Math.max(0, scroll - (int) Math.signum(d) * 2);
+        if (tab == 2 && governanceTab == 2)
+            governanceScroll = Math.max(0, governanceScroll - (int) Math.signum(d) * 2);
+        else scroll = Math.max(0, scroll - (int) Math.signum(d) * 2);
         return true;
     }
 }
