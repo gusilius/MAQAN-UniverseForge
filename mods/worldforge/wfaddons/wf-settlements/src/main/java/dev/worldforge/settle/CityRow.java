@@ -8,9 +8,10 @@ import java.util.*;
 public final class CityRow {
     public String id, name, season;
     public int pop, workforce, housing, approval, buildings, tax, repelled, lost;
-    public double silver, silverNet, food, foodNet, defense, wealth;
+    public double silver, silverNet, food, foodNet, defense, wealth, tradeRate;
     public boolean raid;
-    public final Map<String, Double> prices = new LinkedHashMap<>(), stock = new LinkedHashMap<>();
+    public final Map<String, Double> prices = new LinkedHashMap<>(), stock = new LinkedHashMap<>(),
+            capacity = new LinkedHashMap<>(), consumption = new LinkedHashMap<>();
 
     public static CityRow of(Settlement s) {
         CityRow r = new CityRow();
@@ -18,9 +19,14 @@ public final class CityRow {
         r.pop = s.population(); r.workforce = s.workers.size(); r.housing = s.housing(); r.approval = s.approval();
         for (Building b : s.buildings) if (b.state == Building.State.DONE) r.buildings++;
         r.tax = s.taxLevel; r.repelled = s.raidsRepelled; r.lost = s.raidsLost;
-        r.silver = s.amount(Defs.SILVER); r.silverNet = s.silverPerMin();
+        r.silver = s.amount(Defs.SILVER); r.silverNet = s.silverPerMin(); r.tradeRate = s.tradePerMin();
         r.food = s.amount("food"); r.foodNet = s.producedPerMin("food") - s.consumedPerMin("food");
-        for (String res : s.defs.prices.keySet()) if (!res.equals(Defs.SILVER)) { r.prices.put(res, Math.round(s.price(res) * 100) / 100.0); r.stock.put(res, Math.floor(s.amount(res))); }
+        for (String res : s.defs.prices.keySet()) if (!res.equals(Defs.SILVER)) {
+            r.prices.put(res, Math.round(s.price(res) * 100) / 100.0);
+            r.stock.put(res, Math.floor(s.amount(res)));
+            r.capacity.put(res, s.capacity(res));
+            r.consumption.put(res, s.consumedPerMin(res));
+        }
         r.defense = s.defense(); r.wealth = s.wealth(); r.raid = s.raidIncoming;
         return r;
     }
@@ -29,7 +35,9 @@ public final class CityRow {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("id", id); m.put("name", name); m.put("season", season); m.put("pop", pop); m.put("workforce", workforce); m.put("housing", housing); m.put("approval", approval);
         m.put("buildings", buildings); m.put("tax", tax); m.put("ok", repelled); m.put("bad", lost);
-        m.put("silver", silver); m.put("silverNet", silverNet); m.put("food", food); m.put("foodNet", foodNet); m.put("defense", defense); m.put("wealth", wealth); m.put("raid", raid); m.put("prices", new LinkedHashMap<String, Object>(prices)); m.put("stock", new LinkedHashMap<String, Object>(stock));
+        m.put("silver", silver); m.put("silverNet", silverNet); m.put("food", food); m.put("foodNet", foodNet); m.put("defense", defense); m.put("wealth", wealth); m.put("raid", raid);
+        m.put("tradeRate", tradeRate); m.put("prices", new LinkedHashMap<String, Object>(prices)); m.put("stock", new LinkedHashMap<String, Object>(stock));
+        m.put("capacity", new LinkedHashMap<String, Object>(capacity)); m.put("consumption", new LinkedHashMap<String, Object>(consumption));
         return m;
     }
 
@@ -55,6 +63,9 @@ public final class CityRow {
             r.food = ((Number) m.get("food")).doubleValue(); r.foodNet = ((Number) m.get("foodNet")).doubleValue();
             r.defense = ((Number) m.get("defense")).doubleValue(); r.wealth = ((Number) m.get("wealth")).doubleValue();
             r.raid = Boolean.TRUE.equals(m.get("raid"));
+            r.tradeRate = m.get("tradeRate") instanceof Number n ? n.doubleValue() : 0;
+            if (m.get("capacity") instanceof Map<?, ?> cm) for (var e : cm.entrySet()) r.capacity.put(String.valueOf(e.getKey()), ((Number) e.getValue()).doubleValue());
+            if (m.get("consumption") instanceof Map<?, ?> dm) for (var e : dm.entrySet()) r.consumption.put(String.valueOf(e.getKey()), ((Number) e.getValue()).doubleValue());
             if (m.get("prices") instanceof Map<?, ?> pm) for (var e : pm.entrySet()) r.prices.put(String.valueOf(e.getKey()), ((Number) e.getValue()).doubleValue());
             if (m.get("stock") instanceof Map<?, ?> sm) for (var e : sm.entrySet()) r.stock.put(String.valueOf(e.getKey()), ((Number) e.getValue()).doubleValue());
             out.add(r);

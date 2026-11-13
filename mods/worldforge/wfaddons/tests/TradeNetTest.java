@@ -68,6 +68,13 @@ public class TradeNetTest {
                         && route.to.equals("needy") && route.res.equals("wood")),
                 "autonomous supply network protects the source settlement reserve");
         ok(!sug.isEmpty() && sug.get(0)[0].equals("A") && sug.get(0)[1].equals("B") && sug.get(0)[2].equals("wood"), "подсказка: возить дрова из A в B");
+        List<CityRow> projected = CityRow.fromJson(CityRow.toJson(List.of(CityRow.of(A), CityRow.of(B))));
+        ok(TradeNetwork.suggestions(projected, 3).stream().anyMatch(route ->
+                        route[0].equals("A") && route[1].equals("B") && route[2].equals("wood")),
+                "settlement panel projection preserves supply-aware route candidates");
+        ok(projected.get(0).capacity.containsKey("wood") && projected.get(0).consumption.containsKey("wood")
+                        && projected.get(0).tradeRate > 0,
+                "city panel projection includes market, stock capacity and consumption data");
         try { n.add(cs, "A", "A", "wood", 5); ok(false, "в себя нельзя"); } catch (TradeNetwork.TradeException e) { ok(true, "в себя нельзя"); }
         try { n.add(cs, "A", "B", "silver", 5); ok(false, "серебро не возят"); } catch (TradeNetwork.TradeException e) { ok(true, "серебро не возят"); }
         try { n.add(cs, "A", "B", "wood", Double.NaN); ok(false, "NaN скорость запрещена"); } catch (TradeNetwork.TradeException e) { ok(true, "NaN скорость запрещена"); }

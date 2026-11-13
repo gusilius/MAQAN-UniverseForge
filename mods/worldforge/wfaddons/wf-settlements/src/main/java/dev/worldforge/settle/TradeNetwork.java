@@ -144,6 +144,38 @@ public final class TradeNetwork {
                 && to.capacity(resource) - destinationStock >= 1.0;
     }
 
+    /** Same candidate policy for the client projection; all values originate from Settlement. */
+    public static List<String[]> suggestions(List<CityRow> cities, int limit) {
+        List<double[]> scores = new ArrayList<>();
+        List<String[]> keys = new ArrayList<>();
+        if (cities == null || limit <= 0) return List.of();
+        for (CityRow from : cities) for (CityRow to : cities) {
+            if (from == to || from.tradeRate <= 0 || to.tradeRate <= 0) continue;
+            for (var entry : from.prices.entrySet()) {
+                String resource = entry.getKey();
+                double sourcePrice = entry.getValue(), destinationPrice = to.prices.getOrDefault(resource, 0.0);
+                double sourceStock = from.stock.getOrDefault(resource, 0.0);
+                double destinationStock = to.stock.getOrDefault(resource, 0.0);
+                double exportReserve = Math.max(RESERVE * 2,
+                        from.consumption.getOrDefault(resource, 0.0) * 120.0);
+                if (sourcePrice <= 0 || destinationPrice < sourcePrice * MIN_SPREAD
+                        || sourceStock < exportReserve || destinationStock >= sourceStock * 0.5
+                        || to.capacity.getOrDefault(resource, 0.0) - destinationStock < 1.0) continue;
+                scores.add(new double[]{destinationPrice / sourcePrice});
+                keys.add(new String[]{from.id, to.id, resource});
+            }
+        }
+        Integer[] order = new Integer[keys.size()];
+        for (int i = 0; i < order.length; i++) order[i] = i;
+        Arrays.sort(order, (a, b) -> Double.compare(scores.get(b)[0], scores.get(a)[0]));
+        List<String[]> result = new ArrayList<>();
+        for (int index : order) {
+            if (result.size() >= limit) break;
+            result.add(keys.get(index));
+        }
+        return result;
+    }
+
     /** Лучшие пары для маршрутов: отношение цен, убывание. */
     public static List<String[]> suggestions(Map<String, Settlement> cities, int limit) {
         List<double[]> tmp = new ArrayList<>();

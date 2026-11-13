@@ -545,18 +545,22 @@ public class SettleScreen extends Screen {
         int sx = x + half + 12, sw = cw - half - 18;
         WFArt.ribbon(g, font, sx - 4, by, sw + 4, "ВЫГОДНЫЕ ПАРЫ  (цена там выше, чем здесь)", WFUi.GOLD);
         java.util.List<Object[]> sug = new ArrayList<>();
-        for (var a : rows) for (var b : rows) {
-            if (a == b) continue;
-            for (var e2 : a.prices.entrySet()) {
-                Double pb = b.prices.get(e2.getKey());
-                double pa = e2.getValue();
-                if (pb == null || pa <= 0 || pb < pa * dev.worldforge.settle.TradeNetwork.MIN_SPREAD || a.stock.getOrDefault(e2.getKey(), 0.0) < dev.worldforge.settle.TradeNetwork.RESERVE) continue;
-                boolean dup = false;
-                for (var rt : net.routes.values()) if (rt.from.equals(a.id) && rt.to.equals(b.id) && rt.res.equals(e2.getKey())) dup = true;
-                if (!dup) sug.add(new Object[]{a, b, e2.getKey(), pb / pa});
+        for (String[] candidate : dev.worldforge.settle.TradeNetwork.suggestions(rows, 24)) {
+            boolean duplicate = false;
+            for (var route : net.routes.values()) {
+                if (route.from.equals(candidate[0]) && route.to.equals(candidate[1]) && route.res.equals(candidate[2])) {
+                    duplicate = true;
+                    break;
+                }
             }
+            if (duplicate) continue;
+            var fromRow = byId.get(candidate[0]);
+            var toRow = byId.get(candidate[1]);
+            if (fromRow == null || toRow == null) continue;
+            String resource = candidate[2];
+            double ratio = toRow.prices.getOrDefault(resource, 0.0) / Math.max(0.0001, fromRow.prices.getOrDefault(resource, 0.0));
+            sug.add(new Object[]{fromRow, toRow, resource, ratio});
         }
-        sug.sort((p, q) -> Double.compare((double) q[3], (double) p[3]));
         int sy = by + 15;
         for (int i = 0; i < sug.size() && i < 6; i++) {
             var a = (dev.worldforge.settle.CityRow) sug.get(i)[0]; var b = (dev.worldforge.settle.CityRow) sug.get(i)[1];
