@@ -371,8 +371,8 @@ public final class Settlement {
         syncResourceMirror(resource);
         recipient.syncResourceMirror(resource);
         if (ok && quantity > 0) {
-            flow.record(time, resource, quantity, false);
-            recipient.flow.record(recipient.time, resource, quantity, true);
+            flow.recordTrade(time, resource, quantity, false);
+            recipient.flow.recordTrade(recipient.time, resource, quantity, true);
         }
         return ok;
     }

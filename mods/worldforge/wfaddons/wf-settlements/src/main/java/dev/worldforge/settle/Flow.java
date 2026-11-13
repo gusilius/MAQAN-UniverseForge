@@ -14,7 +14,23 @@ public final class Flow {
     public void record(double now, String res, double amount, boolean produced) {
         if (!validTime(now) || res == null || res.isBlank() || !Double.isFinite(amount) || amount <= 0) return;
         long idx = (long) Math.floor(now);
-        buckets.computeIfAbsent(idx, k -> new TreeMap<>()).computeIfAbsent(res, k -> new double[2])[produced ? 0 : 1] += amount;
+        buckets.computeIfAbsent(idx, k -> new TreeMap<>()).computeIfAbsent(res, k -> new double[4])[produced ? 0 : 1] += amount;
+        prune(idx);
+    }
+
+    /**
+     * Records a transfer separately from local production/consumption.
+     * Inbound/outbound trade must not inflate a settlement's domestic demand
+     * (otherwise exporting goods increases its reserve and can create a feedback loop).
+     */
+    public void recordTrade(double now, String res, double amount, boolean inbound) {
+        if (!validTime(now) || res == null || res.isBlank() || !Double.isFinite(amount) || amount <= 0) return;
+        long idx = (long) Math.floor(now);
+        buckets.computeIfAbsent(idx, k -> new TreeMap<>()).computeIfAbsent(res, k -> new double[4])[inbound ? 2 : 3] += amount;
+        prune(idx);
+    }
+
+    private void prune(long idx) {
         while (!buckets.isEmpty() && buckets.firstKey() <= idx - WINDOW) buckets.pollFirstEntry();
     }
 
@@ -26,6 +42,19 @@ public final class Flow {
         for (Map.Entry<Long, TreeMap<String, double[]>> e : buckets.tailMap(idx - WINDOW, false).entrySet()) {
             double[] v = e.getValue().get(res);
             if (v != null) sum += v[produced ? 0 : 1];
+        }
+        double span = now >= WINDOW ? WINDOW - 1 + (now - idx) : now;
+        return sum / Math.max(1, span) * 60;
+    }
+
+    /** Trade throughput is observable without being treated as local production or consumption. */
+    public double tradePerMinute(double now, String res, boolean inbound) {
+        if (!validTime(now) || res == null || res.isBlank()) return 0;
+        long idx = (long) Math.floor(now);
+        double sum = 0;
+        for (Map.Entry<Long, TreeMap<String, double[]>> e : buckets.tailMap(idx - WINDOW, false).entrySet()) {
+            double[] v = e.getValue().get(res);
+            if (v != null && v.length > (inbound ? 2 : 3)) sum += v[inbound ? 2 : 3];
         }
         double span = now >= WINDOW ? WINDOW - 1 + (now - idx) : now;
         return sum / Math.max(1, span) * 60;
@@ -47,6 +76,7 @@ public final class Flow {
             for (Map.Entry<String, double[]> r : e.getValue().entrySet()) {
                 Map<String, Object> m = new LinkedHashMap<>();
                 m.put("t", e.getKey()); m.put("r", r.getKey()); m.put("p", r.getValue()[0]); m.put("c", r.getValue()[1]);
+                if (r.getValue().length > 2) { m.put("ti", r.getValue()[2]); m.put("to", r.getValue()[3]); }
                 out.add(m);
             }
         }
@@ -67,6 +97,9 @@ public final class Flow {
             double[] v = buckets.computeIfAbsent(idx, k -> new TreeMap<>()).computeIfAbsent(res, k -> new double[2]);
             v[0] += p;
             v[1] += c;
+            Object tradeIn = m.get("ti"), tradeOut = m.get("to");
+            if (tradeIn instanceof Number tin && Double.isFinite(tin.doubleValue()) && tin.doubleValue() >= 0) v[2] += tin.doubleValue();
+            if (tradeOut instanceof Number tout && Double.isFinite(tout.doubleValue()) && tout.doubleValue() >= 0) v[3] += tout.doubleValue();
         }
     }
 }
