@@ -115,6 +115,13 @@ public final class TradeNetwork {
             if (created >= maxNewRoutes) break;
             Settlement from = cities.get(suggestion[0]), to = cities.get(suggestion[1]);
             if (from == null || to == null || from.tradePerMin() <= 0 || to.tradePerMin() <= 0) continue;
+            String resource = suggestion[2];
+            double sourceStock = from.amount(resource), destinationStock = to.amount(resource);
+            // A route is a dependency, not a price-arbitrage toy: source must have a durable
+            // exportable reserve and destination must genuinely lack the same resource.
+            double exportReserve = Math.max(RESERVE * 2, from.consumedPerMin(resource) * 120.0);
+            if (sourceStock < exportReserve || destinationStock >= sourceStock * 0.5
+                    || to.capacity(resource) - destinationStock < 1.0) continue;
             if (participation.getOrDefault(from.id, 0) >= perSettlementLimit
                     || participation.getOrDefault(to.id, 0) >= perSettlementLimit) continue;
             boolean duplicate = routes.values().stream().anyMatch(route ->
