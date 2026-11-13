@@ -51,12 +51,13 @@ public final class GameClock {
     public void slower() { if (speed > 1) setSpeed(speed - 1); }
 
     /**
-     * Sets a bounded shared-calendar step for isolated long-running simulation campaigns.
-     * It is deliberately not persisted: ordinary worlds always restart at one day per tick.
+     * Applies one bounded multiplier to the shared calendar and all real-time addon consumers.
+     * It is deliberately not persisted: ordinary worlds always restart at x1.
      */
-    public void setSimulationDaysPerTick(int days) {
-        if (days < 1 || days > 30) throw new IllegalArgumentException("Simulation step must be between 1 and 30 days");
-        simulationTickMultiplier = days;
+    public void setSimulationTickMultiplier(int multiplier) {
+        if (multiplier < 1 || multiplier > 10_000)
+            throw new IllegalArgumentException("Simulation tick multiplier must be between 1 and 10000");
+        simulationTickMultiplier = multiplier;
     }
 
     public int simulationTickMultiplier() { return simulationTickMultiplier; }
