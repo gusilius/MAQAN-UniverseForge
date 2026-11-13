@@ -84,7 +84,7 @@ spawn-protection=0
 enable-command-block=false
 P
 : > in.txt
-(tail -n +1 -f in.txt | java -Xms1G -Xmx4G @user_jvm_args.txt @libraries/net/minecraftforge/forge/$FORGE/unix_args.txt nogui > server.log 2>&1) &
+(tail -n +1 -f in.txt | java -Xms1G -Xmx4G @user_jvm_args.txt @libraries/net/minecraftforge/forge/$FORGE/win_args.txt nogui > server.log 2>&1) &
 SERVER_PID=$!
 echo "WAITING_FOR_FORGE_STARTUP=1"
 for i in $(seq 1 150); do
