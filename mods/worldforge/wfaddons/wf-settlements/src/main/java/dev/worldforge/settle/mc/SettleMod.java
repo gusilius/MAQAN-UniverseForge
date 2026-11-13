@@ -287,7 +287,8 @@ public class SettleMod {
                         ? level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,px,pz) : 64;
                 path.add(atlasVertex(point[0],py+0.15,point[1]));
             }
-            double[] head = SettlementCaravans.routePositionForSnapshot(route, shipment.progress());
+            double[] head = SettlementCaravans.routePositionForSnapshot(route, shipment.progress(),
+                    shipment.fromX, shipment.fromZ, shipment.toX, shipment.toZ);
             int hx=(int)Math.floor(head[0]), hz=(int)Math.floor(head[1]);
             int hy=level.hasChunkAt(new net.minecraft.core.BlockPos(hx,level.getMinBuildHeight(),hz))
                     ? level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,hx,hz) : 64;
