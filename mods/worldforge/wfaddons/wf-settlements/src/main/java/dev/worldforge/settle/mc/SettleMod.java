@@ -110,6 +110,8 @@ public class SettleMod {
         MinecraftForge.EVENT_BUS.register(new TaxService());
         MinecraftForge.EVENT_BUS.register(new VanillaVillageAdapter());
         MinecraftForge.EVENT_BUS.register(new SettlementCaravans());
+        // Political title transfers must update the same physical settlement records.
+        dev.worldforge.mod.api.WorldForgeApi.addChangeListener(SettleMod::reconcilePoliticalOwnership);
     }
 
     @net.minecraftforge.fml.common.Mod.EventBusSubscriber(modid = MOD_ID,
@@ -963,6 +965,52 @@ public class SettleMod {
                     settlementId, failure.getMessage());
             return false;
         }
+    }
+
+    /**
+     * A title transfer is authoritative for settlements located inside that province.
+     * Reconcile persisted colony ownership against the map's canonical province graph;
+     * never keep a stale realmId that would make physical settlements ignore conquest,
+     * independence or a later border edit.
+     */
+    private static void reconcilePoliticalOwnership(dev.worldforge.mod.api.MapChange change) {
+        if (change == null || change.data == null || COLONIES.isEmpty()) return;
+        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+        if (server == null) return;
+        Map<String, String> before = new LinkedHashMap<>();
+        for (ServerLevel level : server.getAllLevels()) {
+            if (!(level.getChunkSource().getGenerator() instanceof MapChunkGenerator generator)) continue;
+            dev.worldforge.mod.MapData map = generator.data();
+            if (map == null || map.titles != change.data) continue;
+            String dimension = level.dimension().location().toString();
+            for (Colony colony : COLONIES.values()) {
+                if (colony == null || colony.s == null || !dimension.equals(colony.dim)) continue;
+                dev.worldforge.mod.TitleData.Title province = map.provinceAt(colony.cx, colony.cz);
+                dev.worldforge.mod.TitleData.Realm owner = province == null ? null : map.titles.realmOf(province);
+                String currentRealm = colony.realmId == null ? "" : colony.realmId;
+                // Emergent polities have no authored raster title yet; do not erase their
+                // explicit canonical owner merely because a nearby map edit was made.
+                if (owner == null && !currentRealm.isBlank()) {
+                    dev.worldforge.mod.TitleData.Realm current = map.titles.realms.get(currentRealm);
+                    if (current != null && Boolean.TRUE.equals(current.props.get("emergence.virtual"))) continue;
+                }
+                String nextRealm = owner == null ? "" : owner.id;
+                if (Objects.equals(currentRealm, nextRealm)) continue;
+                before.put(colony.s.id, currentRealm);
+                colony.realmId = nextRealm;
+            }
+        }
+        if (before.isEmpty()) return;
+        if (saveDurably(server)) {
+            LOGGER.info("wf_settle: reconciled political ownership for {} physical settlements after map change",
+                    before.size());
+            return;
+        }
+        for (Map.Entry<String, String> entry : before.entrySet()) {
+            Colony colony = COLONIES.get(entry.getKey());
+            if (colony != null) colony.realmId = entry.getValue();
+        }
+        LOGGER.error("wf_settle: political ownership reconciliation rolled back; settlement persistence failed");
     }
 
     /** In-memory owner binding used by WorldSim's per-map batch commit. */

@@ -83,6 +83,9 @@ public class WarTest {
         ok(fails(() -> e.acceptPeace(w.id, A)), "своё предложение принять нельзя");
         e.acceptPeace(w.id, B);
         ok(!w.active && e.ownerOf(gB) != null && e.ownerOf(gB).id.equals(A), "победитель получил титул: " + e.ownerOf(gB).id);
+        ok(WorldForgeApi.events().recent(1).stream().anyMatch(event -> event.category == EventLog.Category.WAR
+                        && event.text.contains(gB.name) && event.realms.contains(A) && event.realms.contains(B)),
+                "итог передачи титула опубликован в общей хронике с участниками");
         ok(prop(d, A, "enemies").isEmpty() && prop(d, A, "war.state").isEmpty() && prop(d, C, "enemies").isEmpty(), "после мира враги и состояние сняты");
         ok(prop(d, F, "enemies").equals("manual_enemy"), "ручной враг остался");
         ok(e.truceActive(A, B) && e.truceActive(D, C) && e.truceLeft(A, B) == 1825, "перемирие между участниками");

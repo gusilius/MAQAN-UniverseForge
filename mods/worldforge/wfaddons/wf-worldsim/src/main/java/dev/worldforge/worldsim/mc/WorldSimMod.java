@@ -595,7 +595,7 @@ public final class WorldSimMod {
             if (band == null) continue;
             int px = Math.max(0, Math.min(map.w - 1, band.get("x").getAsInt()));
             int pz = Math.max(0, Math.min(map.h - 1, band.get("z").getAsInt()));
-            TitleData.Title province = map.titles == null ? null : map.titles.provinceAtPixel(px, pz);
+            TitleData.Title province = map.titles == null ? null : map.titles.provinceAtPixelPublic(px, pz);
             if (province == null || map.titles == null) continue;
             TitleData.Realm occupying = map.titles.realmOf(province);
             if (occupying != null && !occupying.id.equals("emergent-" + polity.get("id").getAsString()))

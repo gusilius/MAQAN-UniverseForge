@@ -479,12 +479,25 @@ public final class WarEngine {
     /** winner == null - белый мир. Условия применяются, если победил нападающий; обороняющийся победитель сохраняет всё как было. */
     private void finish(War w, War.Side winner, String text) {
         CasusBelli cb = cbs.get(w.cb);
+        List<String> politicalChanges = new ArrayList<>();
         editor.group(() -> {
             if (winner == War.Side.ATTACKER && cb != null) {
                 switch (cb.goal) {
-                    case CONQUER -> { for (int g : w.goals) editor.give(w.attacker, g); }
-                    case SUBJUGATE -> editor.setOverlord(w.defender, w.attacker, cb.relation);
-                    case INDEPENDENCE -> editor.setOverlord(w.attacker, null, null);
+                    case CONQUER -> {
+                        for (int g : w.goals) {
+                            TitleData.Title title = d().get(g);
+                            if (title != null) politicalChanges.add("Передан титул «" + title.name + "» государству " + realm(w.attacker).name);
+                            editor.give(w.attacker, g);
+                        }
+                    }
+                    case SUBJUGATE -> {
+                        politicalChanges.add(realm(w.defender).name + " становится вассалом государства " + realm(w.attacker).name);
+                        editor.setOverlord(w.defender, w.attacker, cb.relation);
+                    }
+                    case INDEPENDENCE -> {
+                        politicalChanges.add(realm(w.attacker).name + " получает независимость");
+                        editor.setOverlord(w.attacker, null, null);
+                    }
                     default -> { }
                 }
             }
@@ -498,6 +511,10 @@ public final class WarEngine {
             for (String x : w.members(War.Side.ATTACKER)) for (String y : w.members(War.Side.DEFENDER)) truces.put(key(x, y), day + truce);
             syncProps();
         });
+        // Chronicle is a projection of the committed political outcome, not a second war simulation.
+        List<String> participants = new ArrayList<>(w.sides.keySet());
+        String details = politicalChanges.isEmpty() ? text : text + ". " + String.join("; ", politicalChanges);
+        WorldForgeApi.postEvent("war", details, participants, Math.max(0L, day * 1440L));
     }
 
     // ------------------------------------------------------------------ вывод на карту
