@@ -19,7 +19,7 @@ public final class GameClock {
     private int speed = 1;
     private int lastSpeed = 1;              // скорость до паузы
     // Test/campaign acceleration is applied at the shared clock, so every consumer observes the same elapsed days.
-    private int simulationDaysPerTick = 1;
+    private int simulationTickMultiplier = 1;
     public int startYear = 300;
     private final Map<String, Long> pulled = new HashMap<>();
 
@@ -30,7 +30,7 @@ public final class GameClock {
         elapsed = 0;
         speed = 1;
         lastSpeed = 1;
-        simulationDaysPerTick = 1;
+        simulationTickMultiplier = 1;
         startYear = 300;
         pulled.clear();
     }
@@ -56,10 +56,10 @@ public final class GameClock {
      */
     public void setSimulationDaysPerTick(int days) {
         if (days < 1 || days > 30) throw new IllegalArgumentException("Simulation step must be between 1 and 30 days");
-        simulationDaysPerTick = days;
+        simulationTickMultiplier = days;
     }
 
-    public int simulationDaysPerTick() { return simulationDaysPerTick; }
+    public int simulationTickMultiplier() { return simulationTickMultiplier; }
 
     /** Прошло столько серверных тиков (1 тик = 1/1200 дня при скорости x1). */
     public void advance(int ticks) {
@@ -67,9 +67,9 @@ public final class GameClock {
         elapsed += (double) SPEEDS[speed] * ticks / TICKS_PER_DAY;
     }
 
-    /** Advance one real server tick using the configured shared campaign step. */
+    /** Advance the same number of base clock ticks that every real-time addon multiplier represents. */
     public void advanceServerTick() {
-        advance(simulationDaysPerTick == 1 ? 1 : Math.multiplyExact(TICKS_PER_DAY, simulationDaysPerTick));
+        advance(simulationTickMultiplier);
     }
 
     /** Сколько целых игровых дней прошло с прошлого вызова для этого потребителя; первый вызов возвращает 0. */
@@ -80,7 +80,7 @@ public final class GameClock {
     }
 
     /** Множитель для систем реального времени (поселения): 0 на паузе, иначе скорость. */
-    public double multiplier() { return (double) SPEEDS[speed] * simulationDaysPerTick; }
+    public double multiplier() { return (double) SPEEDS[speed] * simulationTickMultiplier; }
 
     // ------------------------------------------------------------------ календарь
 

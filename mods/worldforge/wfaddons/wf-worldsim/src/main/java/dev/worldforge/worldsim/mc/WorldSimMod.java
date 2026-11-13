@@ -131,7 +131,7 @@ public final class WorldSimMod {
         campaignRunning = false;
         campaignMapId = "";
         campaignStartedDay = 0;
-        WorldForgeApi.clock().setSimulationDaysPerTick(1);
+        WorldForgeApi.clock().setSimulationTickMultiplier(1);
         releaseCampaignChunks(event.getServer());
         HISTORICAL_CHRONICLE.clear();
         HISTORICAL_CHRONICLE.setStartingYear(WorldForgeApi.clock().startYear);
@@ -151,7 +151,7 @@ public final class WorldSimMod {
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server != null) saveState(server);
         campaignRunning = false;
-        WorldForgeApi.clock().setSimulationDaysPerTick(1);
+        WorldForgeApi.clock().setSimulationTickMultiplier(1);
         releaseCampaignChunks(server);
         lastDecisionDay = Long.MIN_VALUE;
         lodTicks = 0;
@@ -356,11 +356,11 @@ public final class WorldSimMod {
         campaignForcedChunks.clear();
         campaignStartedDay = WorldForgeApi.clock().dayNumber();
         campaignRunning = true;
-        WorldForgeApi.clock().setSimulationDaysPerTick(7);
+        WorldForgeApi.clock().setSimulationTickMultiplier(8400);
         lastDecisionDay = Long.MIN_VALUE;
         source.sendSuccess(() -> Component.literal("Autonomous campaign started on " + campaignMapId
-                + "; map-only bootstrap, shared clock step=7 days/tick; target=stable states + four canonical ruler generations"), true);
-        LOGGER.info("wf_worldsim: map-only autonomous campaign started map={} day={} step=7 target=4 canonical generations",
+                + "; map-only bootstrap, shared clock multiplier=8400x; target=stable states + four canonical ruler generations"), true);
+        LOGGER.info("wf_worldsim: map-only autonomous campaign started map={} day={} multiplier=8400x target=4 canonical generations",
                 campaignMapId, campaignStartedDay);
         return 1;
     }
@@ -380,7 +380,7 @@ public final class WorldSimMod {
                 + ", map=" + (campaignMapId.isBlank() ? "-" : campaignMapId)
                 + ", elapsed_days=" + Math.max(0L, WorldForgeApi.clock().dayNumber() - campaignStartedDay)
                 + ", stable_four-generation_states=" + completed + "/" + total
-                + ", clock_step=" + WorldForgeApi.clock().simulationDaysPerTick()
+                + ", clock_multiplier=" + WorldForgeApi.clock().simulationTickMultiplier()
                 + ", materialized_settlements=" + materializedSettlementCount()
                 + ", completed_buildings=" + completedAutonomousBuildingCount()
                 + ", physically_built_settlements=" + physicallyBuiltAutonomousSettlementCount()
@@ -395,7 +395,7 @@ public final class WorldSimMod {
             return 0;
         }
         campaignRunning = false;
-        WorldForgeApi.clock().setSimulationDaysPerTick(1);
+        WorldForgeApi.clock().setSimulationTickMultiplier(1);
         MinecraftServer server = source.getServer();
         releaseCampaignChunks(server);
         saveState(server);
@@ -441,7 +441,7 @@ public final class WorldSimMod {
         if (!allMature || !physicalReady || elapsedYear - latestFoundingYear < 25) return;
 
         campaignRunning = false;
-        WorldForgeApi.clock().setSimulationDaysPerTick(1);
+        WorldForgeApi.clock().setSimulationTickMultiplier(1);
         releaseCampaignChunks(server);
         WorldForgeApi.postEvent("system", "Autonomous map-only campaign completed: all surviving states are stable and have four canonical ruler generations",
                 List.of(), WorldForgeApi.clock().worldMinute());
