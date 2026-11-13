@@ -631,6 +631,21 @@ public final class WorldSimMod {
         return neighbors;
     }
 
+    /** Counts distinct canonical map provinces occupied by the polity's settlement network. */
+    private static int emergentProvinceCount(Set<String> bandIds, JsonArray bands, MapData map) {
+        if (bandIds == null || bandIds.isEmpty() || bands == null || map == null || map.titles == null) return 0;
+        Set<Integer> provinceIds = new HashSet<>();
+        for (var item : bands) if (item.isJsonObject()) {
+            JsonObject band = item.getAsJsonObject();
+            if (!map.name.equals(band.get("map_id").getAsString()) || !bandIds.contains(band.get("id").getAsString())) continue;
+            int x = Math.max(0, Math.min(map.w - 1, band.get("x").getAsInt()));
+            int z = Math.max(0, Math.min(map.h - 1, band.get("z").getAsInt()));
+            TitleData.Title province = map.titles.provinceAtPixelPublic(x, z);
+            if (province != null) provinceIds.add(province.id);
+        }
+        return provinceIds.size();
+    }
+
     private static String emergentBiomeSummary(Set<String> bandIds, JsonArray bands, MapData map) {
         Map<String, Integer> counts = new TreeMap<>();
         for (var item : bands) if (item.isJsonObject()) {
@@ -740,10 +755,12 @@ public final class WorldSimMod {
                 String biomes = emergentBiomeSummary(bandIds, state.getAsJsonArray("bands"), map);
                 String currentRuler = polity.has("ruler_global_id") && !polity.get("ruler_global_id").isJsonNull()
                         ? polity.get("ruler_global_id").getAsString() : "";
-                RealmsMod.registerEmergentRealm(realmId,
+                TitleData.Realm initialProjection = RealmsMod.registerEmergentRealm(realmId,
                         polity.get("name").getAsString(), map.name, currentRuler,
                         polity.get("population").getAsLong(), polity.get("stability").getAsInt(),
                         bandIds.size(), neighbors, biomes, emergentRaceShares(members));
+                initialProjection.props.put("emergence.province_count", emergentProvinceCount(
+                        bandIds, state.getAsJsonArray("bands"), map));
                 if (members.isEmpty()) continue;
                 if (polityName.equals(polityId + " Confederation") || polityName.startsWith("band_")) {
                     String generatedName = emergentRealmName(polityId, members, polityName);

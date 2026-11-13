@@ -102,9 +102,13 @@ public class RealmsMod {
             @Override public int provinces(String realm) {
                 TitleData.Realm r = realm(realm);
                 if (r == null) return 1;
-                Object emergent = r.props.get("emergence.settlement_count");
-                int emergentSettlements = emergent instanceof Number n ? n.intValue() : 0;
-                return Math.max(1, Math.max(r.titleKeys.size(), emergentSettlements));
+                if (Boolean.TRUE.equals(r.props.get("emergence.virtual"))) {
+                    Object provinces = r.props.get("emergence.province_count");
+                    if (provinces instanceof Number n) return Math.max(0, n.intValue());
+                    Object settlements = r.props.get("emergence.settlement_count");
+                    return Math.max(0, settlements instanceof Number n ? n.intValue() : 0);
+                }
+                return Math.max(1, r.titleKeys.size());
             }
             @Override public int prestige(String realm) { TitleData.Realm r = realm(realm); return r != null && r.props.get("prestige") instanceof Number n ? n.intValue() : 0; }
             @Override public boolean flag(String realm, String flag) { TitleData.Realm r = realm(realm); return r != null && Boolean.parseBoolean(String.valueOf(r.props.get("flag." + flag))); }
