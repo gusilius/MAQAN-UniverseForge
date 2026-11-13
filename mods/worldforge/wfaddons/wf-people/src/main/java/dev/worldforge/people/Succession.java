@@ -36,7 +36,24 @@ public final class Succession {
                 usurper = true;
             }
             reg.appoint(heir.id, role.id, p.place);
-            if (ed != null && p.place.startsWith("realm:")) ed.setRuler(p.place.substring(6), heir.name + (heir.house.isEmpty() ? "" : " " + heir.house));
+            if (p.place.startsWith("realm:")) {
+                String realmId = p.place.substring(6);
+                if (ed != null) ed.setRuler(realmId, heir.name + (heir.house.isEmpty() ? "" : " " + heir.house));
+                // Keep the map's canonical title-holder references in step with the same
+                // succession result. RealmsMod imports these IDs into Statecraft on sync.
+                String deceasedGlobalId = dead.globalId;
+                String heirGlobalId = heir.globalId;
+                for (TitleData.Title title : d.allTitles()) {
+                    Object holder = title.props.get("holderCharacterId");
+                    if (holder instanceof String holderId
+                            && (holderId.equals(deceasedGlobalId) || holderId.equals(dead.id))) {
+                        title.props.put("holderCharacterId", heirGlobalId);
+                        title.props.put("succession.last_deceased", deceasedGlobalId);
+                        title.props.put("succession.last_heir", heirGlobalId);
+                        title.props.put("succession.last_year", year);
+                    }
+                }
+            }
             out.add(new Result(dead, heir, usurper, p.place));
         }
         return out;

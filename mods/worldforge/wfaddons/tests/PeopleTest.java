@@ -135,6 +135,18 @@ public class PeopleTest {
                 sovereign.id, 310, "primogeniture");
         ok(represented.size() == 1 && represented.get(0).heir == grandchild,
                 "наследование по представительству сохраняет линию умершего первенца");
+        TitleData.Title hereditaryTitle = d4.allTitles().get(0);
+        hereditaryTitle.props.put("holderCharacterId", sovereign.globalId);
+        CharacterRegistry mapLine = new CharacterRegistry();
+        Character mapRuler = mapLine.create("Старый владыка", "house_map", "test_culture", "m", 220);
+        Character mapHeir = mapLine.create("Новый владыка", "house_map", "test_culture", "m", 245);
+        mapRuler.children.add(mapHeir.id); mapHeir.father = mapRuler.id;
+        mapLine.appoint(mapRuler.id, "ruler", linePlace);
+        hereditaryTitle.props.put("holderCharacterId", mapRuler.globalId);
+        Succession.onDeath(mapLine, defs, d4, e4, names, 100L, mapRuler.id, 311, "primogeniture");
+        ok(mapHeir.globalId.equals(hereditaryTitle.props.get("holderCharacterId"))
+                        && mapRuler.globalId.equals(hereditaryTitle.props.get("succession.last_deceased")),
+                "смена правителя обновляет держателя титула в общей политической карте по global Character ID");
 
         Character lone = r4.holder("ruler", Courts.realmPlace(d4.realmList().get(2).id));
         for (String k : new ArrayList<>(lone.children)) r4.get(k).alive = false;
