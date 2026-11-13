@@ -43,9 +43,14 @@ public final class Succession {
     }
 
     private static Character chooseHeir(CharacterRegistry reg, Character dead, String law, String place) {
+        // Preserve a deceased elder child's branch through its living descendants.
         List<Character> kids = living(reg, dead.children);
         sort(kids, law);
-        if (!kids.isEmpty()) return kids.get(0);
+        Set<String> visited = new HashSet<>();
+        for (Character child : kids) {
+            Character branchHeir = heirBranch(reg, child, law, visited);
+            if (branchHeir != null) return branchHeir;
+        }
         List<Character> sibs = new ArrayList<>();
         for (Character c : reg.all()) if (c.alive && c != dead && !dead.father.isEmpty() && dead.father.equals(c.father)) sibs.add(c);
         sort(sibs, law);
@@ -54,6 +59,18 @@ public final class Succession {
         for (Character c : reg.all()) if (c.alive && !c.house.isEmpty() && c.posts.stream().anyMatch(po -> po.place.equals(place))) nobles.add(c);
         nobles.sort(Comparator.comparingInt((Character c) -> c.birthYear).thenComparing(c -> c.id));
         return nobles.isEmpty() ? null : nobles.get(0);
+    }
+
+    private static Character heirBranch(CharacterRegistry reg, Character branch, String law, Set<String> visited) {
+        if (branch == null || !visited.add(branch.id)) return null;
+        if (branch.alive) return branch;
+        List<Character> descendants = living(reg, branch.children);
+        sort(descendants, law);
+        for (Character descendant : descendants) {
+            Character heir = heirBranch(reg, descendant, law, visited);
+            if (heir != null) return heir;
+        }
+        return null;
     }
 
     private static List<Character> living(CharacterRegistry reg, List<String> ids) {

@@ -119,6 +119,23 @@ public class PeopleTest {
         boolean sons = kids.stream().anyMatch(k -> k.gender.equals("m"));
         Character expected = kids.stream().sorted(Comparator.comparingInt((Character c) -> c.gender.equals("m") ? 0 : 1).thenComparingInt(c -> c.birthYear)).findFirst().get();
         ok(res.size() == 1 && nw == expected && !res.get(0).usurper && d4.realms.get(heirRealm).ruler.startsWith(nw.name), "наследник по примогенитуре (" + (sons ? "сын" : "дочь") + "), запись государства обновлена");
+        // Representation inheritance: a deceased firstborn's living child precedes a younger sibling.
+        CharacterRegistry line = new CharacterRegistry();
+        String linePlace = Courts.realmPlace(d4.realmList().get(0).id);
+        Character sovereign = line.create("Монарх", "house_line", "test_culture", "m", 250);
+        Character firstborn = line.create("Первенец", "house_line", "test_culture", "m", 270);
+        Character younger = line.create("Младший", "house_line", "test_culture", "m", 272);
+        Character grandchild = line.create("Внук", "house_line", "test_culture", "m", 290);
+        sovereign.children.add(firstborn.id); sovereign.children.add(younger.id);
+        firstborn.children.add(grandchild.id);
+        firstborn.father = sovereign.id; younger.father = sovereign.id; grandchild.father = firstborn.id;
+        firstborn.alive = false;
+        line.appoint(sovereign.id, "ruler", linePlace);
+        List<Succession.Result> represented = Succession.onDeath(line, defs, d4, null, names, 99L,
+                sovereign.id, 310, "primogeniture");
+        ok(represented.size() == 1 && represented.get(0).heir == grandchild,
+                "наследование по представительству сохраняет линию умершего первенца");
+
         Character lone = r4.holder("ruler", Courts.realmPlace(d4.realmList().get(2).id));
         for (String k : new ArrayList<>(lone.children)) r4.get(k).alive = false;
         for (Character c : r4.all()) if (c != lone && c.alive && !lone.father.isEmpty() && lone.father.equals(c.father)) c.alive = false;
