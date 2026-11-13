@@ -32,7 +32,7 @@ jar_count=$(find "$JARS" -maxdepth 1 -type f -name '*.jar' | wc -l)
 cd "$WORK"
 curl -fsSL -o installer.jar "https://maven.minecraftforge.net/net/minecraftforge/forge/$FORGE/forge-$FORGE-installer.jar"
 java -jar installer.jar --installServer > install.log 2>&1 || { tail -60 install.log; exit 2; }
-mkdir -p mods config/worldforge/maps world/datapacks/planetos/data/worldforge/dimension
+mkdir -p mods config/worldforge/maps
 cp "$JARS"/*.jar mods/
 python3 - "$MAP_SOURCE" "config/worldforge/maps/planetos.worldmap" <<'PY'
 import json, pathlib, sys, zipfile
@@ -68,18 +68,7 @@ print("PLANETOS_MAP_PREPARED=1")
 print(f"AUTHORED_REALMS_REMOVED={authored_realms}")
 print(f"GEOGRAPHY_FILES_RETAINED={len(files)}")
 PY
-cat > world/datapacks/planetos/pack.mcmeta <<'P'
-{"pack":{"pack_format":15,"description":"Planetos geography-only autonomous campaign"}}
-P
-cat > world/datapacks/planetos/data/worldforge/dimension/planetos.json <<'P'
-{
-  "type": "worldforge:mapworld",
-  "generator": {
-    "type": "worldforge:image",
-    "map": "planetos"
-  }
-}
-P
+# The mod already registers worldforge:planetos in its built-in dimension data; do not shadow it in a second datapack.
 echo "eula=true" > eula.txt
 cat > server.properties <<'P'
 online-mode=false
