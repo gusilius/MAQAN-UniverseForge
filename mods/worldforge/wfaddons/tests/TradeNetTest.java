@@ -51,7 +51,9 @@ public class TradeNetTest {
                                 && route[2].equals("wood")),
                 "test fixture exposes a price spread toward a stocked destination");
         TradeNetwork noDemand = new TradeNetwork();
-        ok(noDemand.ensureAutonomousRoutes(Map.of("rich", rich, "richer", richer), 2, 2, 2.0) == 0,
+        noDemand.ensureAutonomousRoutes(Map.of("rich", rich, "richer", richer), 2, 2, 2.0);
+        ok(noDemand.routes.values().stream().noneMatch(route -> route.from.equals("rich")
+                        && route.to.equals("richer") && route.res.equals("wood")),
                 "autonomous supply network does not create a route toward a stocked destination");
         Settlement reserve = city("reserve", d), needy = city("needy", d);
         reserve.stock.put("wood", TradeNetwork.RESERVE + 1); needy.stock.put("wood", 0.0);
@@ -61,7 +63,9 @@ public class TradeNetTest {
                                 && route[2].equals("wood")),
                 "test fixture exposes a candidate whose source reserve is insufficient");
         TradeNetwork noExport = new TradeNetwork();
-        ok(noExport.ensureAutonomousRoutes(Map.of("reserve", reserve, "needy", needy), 2, 2, 2.0) == 0,
+        noExport.ensureAutonomousRoutes(Map.of("reserve", reserve, "needy", needy), 2, 2, 2.0);
+        ok(noExport.routes.values().stream().noneMatch(route -> route.from.equals("reserve")
+                        && route.to.equals("needy") && route.res.equals("wood")),
                 "autonomous supply network protects the source settlement reserve");
         ok(!sug.isEmpty() && sug.get(0)[0].equals("A") && sug.get(0)[1].equals("B") && sug.get(0)[2].equals("wood"), "подсказка: возить дрова из A в B");
         try { n.add(cs, "A", "A", "wood", 5); ok(false, "в себя нельзя"); } catch (TradeNetwork.TradeException e) { ok(true, "в себя нельзя"); }
