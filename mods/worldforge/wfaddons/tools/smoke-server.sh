@@ -1,14 +1,33 @@
 #!/usr/bin/env bash
-# Дымовой тест: ставит Forge-сервер 1.20.1, кладёт все jar, запускает, гоняет несколько команд и останавливает.
-# Результат: сводка проблем из лога (ERROR / Exception / отказ загрузки мода). Запуск: smoke-server.sh <папка с jar>
-set -uo pipefail
+# Windows x64 Forge smoke test. Runs the full staged addon set and exits cleanly.
+set -euo pipefail
 JARS="$(cd "$1" && pwd)"
-W=$(mktemp -d); cd "$W"
-FORGE=1.20.1-47.3.0
-curl -fsSL -o installer.jar "https://maven.minecraftforge.net/net/minecraftforge/forge/$FORGE/forge-$FORGE-installer.jar" || { echo "не скачался установщик Forge"; exit 2; }
-java -jar installer.jar --installServer > install.log 2>&1 || { tail -40 install.log; echo "установка сервера не удалась"; exit 2; }
+WORK="$(mktemp -d)"
+FORGE="1.20.1-47.3.0"
+SERVER_PID=""
+cleanup() {
+  if [ -n "$SERVER_PID" ]; then
+    printf '%s\n' "stop" >> "$WORK/in.txt" 2>/dev/null || true
+    for _ in $(seq 1 30); do
+      kill -0 "$SERVER_PID" 2>/dev/null || break
+      sleep 2
+    done
+    taskkill.exe //PID "$SERVER_PID" //T //F >/dev/null 2>&1 || true
+  fi
+  if [ -f "$WORK/server.log" ]; then
+    echo "--- Forge server log tail ---"
+    tail -60 "$WORK/server.log"
+    cp "$WORK/server.log" "$RUNNER_TEMP/worldforge-smoke-server.log" 2>/dev/null || true
+  fi
+  rm -rf "$WORK"
+}
+trap cleanup EXIT
+cd "$WORK"
+curl -fsSL -o installer.jar "https://maven.minecraftforge.net/net/minecraftforge/forge/$FORGE/forge-$FORGE-installer.jar"
+java -jar installer.jar --installServer > install.log 2>&1 || { tail -60 install.log; exit 2; }
 echo "eula=true" > eula.txt
-mkdir -p mods && cp "$JARS"/*.jar mods/
+mkdir -p mods
+cp "$JARS"/*.jar mods/
 cat > server.properties <<'P'
 online-mode=false
 level-type=minecraft\:flat
@@ -19,26 +38,26 @@ spawn-protection=0
 enable-command-block=false
 P
 : > in.txt
-( tail -n +1 -f in.txt | java -Xmx3G @user_jvm_args.txt @libraries/net/minecraftforge/forge/$FORGE/unix_args.txt nogui > server.log 2>&1 ) &
-PID=$!
-ok=0
-for i in $(seq 1 90); do
-  if grep -q 'Done (' server.log 2>/dev/null; then ok=1; break; fi
-  if grep -qa 'Mod loading has failed\|Failed to start\|Exception in thread "main"\|java.lang.Error' server.log 2>/dev/null && ! pgrep -f unix_args >/dev/null; then break; fi
-  sleep 4
+(tail -n +1 -f in.txt | java -Xmx3G @user_jvm_args.txt @libraries/net/minecraftforge/forge/$FORGE/win_args.txt nogui > server.log 2>&1) &
+SERVER_PID=$!
+ready=0
+for _ in $(seq 1 120); do
+  if grep -q 'Done (' server.log 2>/dev/null; then ready=1; break; fi
+  if grep -aqE 'Mod loading has failed|Failed to start|Exception in thread "main"|java.lang.Error' server.log 2>/dev/null; then
+    tail -120 server.log
+    exit 3
+  fi
+  kill -0 "$SERVER_PID" 2>/dev/null || { tail -120 server.log; exit 3; }
+  sleep 3
 done
-if [ $ok = 1 ]; then
-  for c in "list" "wftroops types" "wftroops fort list" "wftroops list" "wfsettle list" "wftrade ambush" "wfform" "worldforge" "wfaction list"; do echo "$c" >> in.txt; sleep 3; done
-  sleep 5
-  echo "stop" >> in.txt
-  for i in $(seq 1 30); do pgrep -f unix_args >/dev/null || break; sleep 2; done
+[ "$ready" = 1 ] || { tail -120 server.log; echo "ERROR: Windows Forge startup timed out"; exit 3; }
+for command in "list" "wftroops types" "wftroops fort list" "wftroops list" "wfsettle list" "wftrade ambush" "wfform" "worldforge" "wfaction list" "wfworldsim status"; do
+  printf '%s\n' "$command" >> in.txt
+  sleep 3
+done
+sleep 5
+if grep -aqE '\[(ERROR|FATAL)\]|Mod loading has failed|Exception in thread|Caused by:' server.log; then
+  grep -aiE '\[(ERROR|FATAL)\]|Mod loading has failed|Exception in thread|Caused by:' server.log | head -80
+  exit 4
 fi
-pkill -f unix_args 2>/dev/null; pkill -f "tail -n +1 -f in.txt" 2>/dev/null
-echo "=================== ИТОГ ЗАПУСКА: $([ $ok = 1 ] && echo 'сервер поднялся' || echo 'СЕРВЕР НЕ ПОДНЯЛСЯ')"
-echo "--- загруженные моды:"; grep -a "Loading .* mods\|mods:" server.log | head -5
-echo "--- ошибки и исключения:"
-grep -aiE "\[(ERROR|FATAL)\]|Exception|Mod loading has failed|Caused by|missing|Failed to" server.log | grep -av "DEBUG" | head -80
-echo "--- ответы команд:"; grep -aE "Soldier|солдат|Крепостей|Засад|поселен|There are" server.log | head -20
-echo "--- хвост лога:"; tail -25 server.log
-cp server.log /tmp/smoke-server.log 2>/dev/null || true
-[ $ok = 1 ] && ! grep -aqE "\[(ERROR|FATAL)\]" server.log
+echo "WINDOWS_FORGE_ADDON_SMOKE=PASS"
