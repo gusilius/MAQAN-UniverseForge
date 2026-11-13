@@ -5,6 +5,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.mojang.logging.LogUtils;
 import dev.worldforge.mod.MapData;
+import dev.worldforge.mod.MapChunkGenerator;
 import dev.worldforge.mod.TitleData;
 import dev.worldforge.mod.EditorManager;
 import dev.worldforge.mod.WorldForgeMod;
@@ -30,6 +31,7 @@ import dev.worldforge.settle.Worker;
 import dev.worldforge.settle.Building;
 import dev.worldforge.settle.mc.SettleMod;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.storage.LevelResource;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
@@ -74,6 +76,7 @@ public final class WorldSimMod {
     private static boolean campaignRunning;
     private static String campaignMapId = "";
     private static long campaignStartedDay;
+    private static final Set<String> campaignForcedChunks = new HashSet<>();
 
 
     /**
@@ -129,6 +132,7 @@ public final class WorldSimMod {
         campaignMapId = "";
         campaignStartedDay = 0;
         WorldForgeApi.clock().setSimulationDaysPerTick(1);
+        releaseCampaignChunks(event.getServer());
         HISTORICAL_CHRONICLE.clear();
         HISTORICAL_CHRONICLE.setStartingYear(WorldForgeApi.clock().startYear);
         publishObservers(event.getServer());
@@ -148,6 +152,7 @@ public final class WorldSimMod {
         if (server != null) saveState(server);
         campaignRunning = false;
         WorldForgeApi.clock().setSimulationDaysPerTick(1);
+        releaseCampaignChunks(server);
         lastDecisionDay = Long.MIN_VALUE;
         lodTicks = 0;
         emergentRealmsRehydrated = false;
@@ -332,6 +337,11 @@ public final class WorldSimMod {
             source.sendFailure(Component.literal("Campaign map must retain province geography but contain no pre-authored realms"));
             return 0;
         }
+        String campaignDimension = mapDimension(server, map);
+        if (campaignDimension == null) {
+            source.sendFailure(Component.literal("Campaign map dimension is not loaded; refusing data-only simulation"));
+            return 0;
+        }
         if (WorldForgeMod.loadedMaps().size() != 1 || !WorldForgeMod.loadedMaps().containsValue(map)) {
             source.sendFailure(Component.literal("Campaign requires exactly one loaded map: " + mapId));
             return 0;
@@ -343,6 +353,7 @@ public final class WorldSimMod {
             return 0;
         }
         campaignMapId = map.name;
+        campaignForcedChunks.clear();
         campaignStartedDay = WorldForgeApi.clock().dayNumber();
         campaignRunning = true;
         WorldForgeApi.clock().setSimulationDaysPerTick(7);
@@ -370,6 +381,8 @@ public final class WorldSimMod {
                 + ", elapsed_days=" + Math.max(0L, WorldForgeApi.clock().dayNumber() - campaignStartedDay)
                 + ", stable_four-generation_states=" + completed + "/" + total
                 + ", clock_step=" + WorldForgeApi.clock().simulationDaysPerTick()
+                + ", materialized_settlements=" + materializedSettlementCount()
+                + ", completed_buildings=" + completedAutonomousBuildingCount()
                 + ", events=" + WorldForgeApi.events().size()
                 + ", chronicle=" + HISTORICAL_CHRONICLE.size()), false);
         return 1;
@@ -383,6 +396,7 @@ public final class WorldSimMod {
         campaignRunning = false;
         WorldForgeApi.clock().setSimulationDaysPerTick(1);
         MinecraftServer server = source.getServer();
+        releaseCampaignChunks(server);
         saveState(server);
         source.sendSuccess(() -> Component.literal("Autonomous campaign stopped at " + WorldForgeApi.clock().dateText()), true);
         return 1;
@@ -401,11 +415,10 @@ public final class WorldSimMod {
             JsonObject polity = item.getAsJsonObject();
             long founded = polity.has("founded_year") ? polity.get("founded_year").getAsLong() : elapsedYear;
             latestFoundingYear = Math.max(latestFoundingYear, founded);
-            int generations = polity.has("dynasty_generations") ? polity.get("dynasty_generations").getAsInt() : 0;
             long population = polity.has("population") ? polity.get("population").getAsLong() : 0;
             int stability = polity.has("stability") ? polity.get("stability").getAsInt() : 0;
             int weakYears = polity.has("weak_years") ? polity.get("weak_years").getAsInt() : 0;
-            if (generations < 4 || population < 120 || stability < 50 || weakYears > 0
+            if (canonicalGenerationCount(polity) < 4 || population < 120 || stability < 50 || weakYears > 0
                     || elapsedYear - founded < 25) allMature = false;
         }
         if (elapsedYear > 0 && elapsedYear % 5 == 0)
@@ -415,10 +428,16 @@ public final class WorldSimMod {
                             && item.getAsJsonObject().has("dynasty_generations")
                             && item.getAsJsonObject().get("dynasty_generations").getAsInt() >= 4).count(),
                     WorldForgeApi.events().size());
-        if (!allMature || elapsedYear - latestFoundingYear < 25) return;
+        int campaignSettlements = autonomousSettlementCount();
+        int materializedSettlements = materializedSettlementCount();
+        int completedBuildings = completedAutonomousBuildingCount();
+        boolean physicalReady = campaignSettlements > 0
+                && materializedSettlements == campaignSettlements && completedBuildings > 0;
+        if (!allMature || !physicalReady || elapsedYear - latestFoundingYear < 25) return;
 
         campaignRunning = false;
         WorldForgeApi.clock().setSimulationDaysPerTick(1);
+        releaseCampaignChunks(server);
         WorldForgeApi.postEvent("system", "Autonomous map-only campaign completed: all surviving states are stable and have four canonical ruler generations",
                 List.of(), WorldForgeApi.clock().worldMinute());
         saveState(server);
@@ -426,7 +445,7 @@ public final class WorldSimMod {
             Path output = server.getWorldPath(LevelResource.ROOT).resolve("worldforge").resolve("autonomous-campaign");
             Files.createDirectories(output);
             Files.writeString(output.resolve("chronicle-book.md"),
-                    String.join("\\n\\n", HISTORICAL_CHRONICLE.book(0)), StandardCharsets.UTF_8);
+                    String.join("\n\n", HISTORICAL_CHRONICLE.book(0)), StandardCharsets.UTF_8);
             JsonObject report = new JsonObject();
             report.addProperty("status", "PASS");
             report.addProperty("map", campaignMapId);
@@ -436,7 +455,14 @@ public final class WorldSimMod {
             report.addProperty("elapsed_years", Math.max(0L, (day - campaignStartedDay) / 365L));
             report.addProperty("target_dynasty_generations", 4);
             report.addProperty("stable_states", polities.size());
-            report.addProperty("settlements", SettleMod.COLONIES.size());
+            report.addProperty("settlements", campaignSettlements);
+            report.addProperty("materialized_settlements", materializedSettlements);
+            report.addProperty("completed_buildings", completedBuildings);
+            report.addProperty("canonical_ruler_generations_verified",
+                    polities.asList().stream().filter(item -> item.isJsonObject()
+                            && canonicalGenerationCount(item.getAsJsonObject()) >= 4).count());
+            report.addProperty("physical_world_dimension", mapDimension(server,
+                    WorldForgeMod.loadedMaps().get(campaignMapId)));
             report.addProperty("characters", PeopleMod.registry(WorldForgeMod.loadedMaps().get(campaignMapId)).size());
             report.addProperty("world_events", WorldForgeApi.events().size());
             report.addProperty("chronicle_entries", HISTORICAL_CHRONICLE.size());
@@ -448,6 +474,84 @@ public final class WorldSimMod {
         } catch (Exception error) {
             LOGGER.error("wf_worldsim: campaign reached its world-state target but report/book export failed", error);
         }
+    }
+
+    /** Returns the already registered physical dimension whose generator uses this exact map package. */
+    private static String mapDimension(MinecraftServer server, MapData map) {
+        if (server == null || map == null) return null;
+        for (ServerLevel level : server.getAllLevels()) {
+            if (level.getChunkSource().getGenerator() instanceof MapChunkGenerator generator
+                    && generator.data() != null && map.name.equals(generator.data().name))
+                return level.dimension().location().toString();
+        }
+        return null;
+    }
+
+    private static int canonicalGenerationCount(JsonObject polity) {
+        if (polity == null || !polity.has("ruler_history") || !polity.get("ruler_history").isJsonArray()) return 0;
+        Set<String> unique = new HashSet<>();
+        for (var value : polity.getAsJsonArray("ruler_history")) {
+            if (!value.isJsonPrimitive()) continue;
+            String id = value.getAsString();
+            if (id.isBlank()) continue;
+            var canonical = PeopleMod.authority().getGlobal(id);
+            if (canonical != null) unique.add(id);
+        }
+        return unique.size();
+    }
+
+    private static int autonomousSettlementCount() {
+        return (int) SettleMod.COLONIES.values().stream().filter(colony -> colony != null
+                && colony.s != null && colony.genesisOperationId != null
+                && colony.genesisOperationId.startsWith("worldsim:settlement:")).count();
+    }
+
+    private static int materializedSettlementCount() {
+        return (int) SettleMod.COLONIES.values().stream().filter(colony -> colony != null
+                && colony.s != null && colony.genesisOperationId != null
+                && colony.genesisOperationId.startsWith("worldsim:settlement:")
+                && colony.autonomousFoundingPopulation > 0).count();
+    }
+
+    private static int completedAutonomousBuildingCount() {
+        return SettleMod.COLONIES.values().stream().filter(colony -> colony != null
+                && colony.s != null && colony.genesisOperationId != null
+                && colony.genesisOperationId.startsWith("worldsim:settlement:"))
+                .mapToInt(colony -> (int) colony.s.buildings.stream()
+                        .filter(building -> building.state == Building.State.DONE).count()).sum();
+    }
+
+    private static void forceCampaignSettlementChunks(MinecraftServer server) {
+        for (Colony colony : SettleMod.COLONIES.values()) {
+            if (colony == null || colony.s == null || colony.genesisOperationId == null
+                    || !colony.genesisOperationId.startsWith("worldsim:settlement:")) continue;
+            ServerLevel level = colony.level(server);
+            if (level == null) continue;
+            int centerX = colony.cx >> 4, centerZ = colony.cz >> 4;
+            // A 3x3 forced area lets ordinary terrain sampling and construction operate
+            // on real chunks without loading the whole Planetos map.
+            for (int dx = -1; dx <= 1; dx++) for (int dz = -1; dz <= 1; dz++) {
+                int chunkX = centerX + dx, chunkZ = centerZ + dz;
+                String key = colony.dim + "|" + chunkX + "|" + chunkZ;
+                if (campaignForcedChunks.add(key)) level.setChunkForced(chunkX, chunkZ, true);
+            }
+        }
+    }
+
+    private static void releaseCampaignChunks(MinecraftServer server) {
+        if (server != null) for (String key : new HashSet<>(campaignForcedChunks)) {
+            String[] parts = key.split("\\|", -1);
+            if (parts.length != 3) continue;
+            try {
+                int chunkX = Integer.parseInt(parts[1]), chunkZ = Integer.parseInt(parts[2]);
+                for (ServerLevel level : server.getAllLevels())
+                    if (level.dimension().location().toString().equals(parts[0])) {
+                        level.setChunkForced(chunkX, chunkZ, false);
+                        break;
+                    }
+            } catch (RuntimeException ignored) { }
+        }
+        campaignForcedChunks.clear();
     }
 
     private static int serverObserverCount(MinecraftServer server) {
@@ -466,6 +570,17 @@ public final class WorldSimMod {
                 if (player.isSpectator()) continue;
                 observers.add(new SimulationLod.Observer(dimension, player.getX(), player.getZ()));
             }
+        }
+        if (campaignRunning) {
+            // The disposable acceptance world has no human player. Treat each emergent
+            // settlement as a temporary local observer so the real LOD/building pipeline
+            // can materialize it instead of silently testing data-only colonies.
+            for (Colony colony : SettleMod.COLONIES.values()) {
+                if (colony == null || colony.s == null || colony.genesisOperationId == null
+                        || !colony.genesisOperationId.startsWith("worldsim:settlement:")) continue;
+                observers.add(new SimulationLod.Observer(colony.dim, colony.cx, colony.cz));
+            }
+            forceCampaignSettlementChunks(server);
         }
         SimulationLod.publish(observers);
     }
@@ -717,8 +832,11 @@ public final class WorldSimMod {
                     }
                     hasSettledBands = true;
                     String display = "Settlement " + bandId.substring(0, Math.min(8, bandId.length()));
+                    String settlementDimension = mapDimension(server, map);
+                    if (settlementDimension == null)
+                        throw new IllegalStateException("No loaded physical dimension for map " + map.name);
                     Colony colony = SettleMod.foundEmergentInMemory(server,
-                            server.overworld().dimension().location().toString(), settlementId, display,
+                            settlementDimension, settlementId, display,
                             x, z, "worldsim:settlement:" + bandId);
                     List<String> residentIds = registry.all().stream()
                             .filter(person -> person.alive && bandId.equals(person.props.get("emergence.band_id")))
@@ -1007,10 +1125,18 @@ public final class WorldSimMod {
                                 ruler.globalId, polityId);
                         continue;
                     }
+                    JsonArray rulerHistory = polity.has("ruler_history") && polity.get("ruler_history").isJsonArray()
+                            ? polity.getAsJsonArray("ruler_history") : new JsonArray();
+                    if (foundedNewDynasty) rulerHistory = new JsonArray();
+                    boolean alreadyRecorded = false;
+                    for (var recorded : rulerHistory) if (ruler.globalId.equals(recorded.getAsString())) {
+                        alreadyRecorded = true;
+                        break;
+                    }
+                    if (!alreadyRecorded) rulerHistory.add(ruler.globalId);
+                    polity.add("ruler_history", rulerHistory);
                     binding.addProperty("ruler_global_id", ruler.globalId);
-                    int generation = previousRulerId.isBlank() || foundedNewDynasty ? 1
-                            : (polity.has("dynasty_generations") ? polity.get("dynasty_generations").getAsInt()
-                                : (binding.has("generation") ? binding.get("generation").getAsInt() : 1)) + 1;
+                    int generation = rulerHistory.size();
                     binding.addProperty("generation", generation);
                     polity.addProperty("ruler_global_id", ruler.globalId);
                     polity.addProperty("dynasty_generations", generation);

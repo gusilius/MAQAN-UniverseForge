@@ -172,6 +172,38 @@ jobs:
         shell: bash
         run: bash mods/worldforge/wfaddons/tools/smoke-server.sh mods/worldforge/wfaddons/dist
 
+  worldforge-autonomous-campaign:
+    name: WorldForge — Planetos autonomous four-generation campaign (Linux)
+    runs-on: ubuntu-latest
+    needs: [worldforge-addons, worldforge-runtime-smoke]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: maqan-worldforge-addons-windows-x64
+          path: mods/worldforge/wfaddons/dist
+      - name: Run autonomous campaign on geography-only Planetos
+        working-directory: mods/worldforge/wfaddons
+        shell: bash
+        env:
+          WF_CAMPAIGN_TIMEOUT_SECONDS: "3300"
+        run: bash tools/autonomous-campaign.sh ../wfmod/examples/maps/planetos.worldmap dist "$RUNNER_TEMP/maqan-planetos-campaign"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: maqan-planetos-autonomous-campaign
+          path: ${{ runner.temp }}/maqan-planetos-campaign/
+          if-no-files-found: warn
+          retention-days: 30
+
   worldforge-tests:
     name: WorldForge logic tests (Windows x64)
     runs-on: windows-latest
