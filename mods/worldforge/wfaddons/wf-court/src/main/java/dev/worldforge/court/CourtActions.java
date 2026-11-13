@@ -36,6 +36,10 @@ public final class CourtActions {
             boolean ok = s.crush(c.realmId, num(c.arg(0, "номер")));
             return ok ? ActionResult.ok("Заговор подавлен") : ActionResult.fail("Не удалось: заговор окреп");
         });
+        reg("regency_appoint", "Назначить регента", List.of("id персонажа"), "Назначает совершеннолетнего члена текущего двора регентом малолетнего правителя", (s, c) -> {
+            s.appointRegent(c.realmId, c.arg(0, "персонаж"));
+            return ActionResult.ok("Регент назначен");
+        });
         reg("marriage_propose", "Предложить брак", List.of("наш персонаж", "их персонаж"), "Оценивает правитель другого государства: мнение, советники, возраст. Отказ объясняется", (s, c) -> {
             Character mine = s.reg.get(c.arg(0, "наш персонаж"));
             if (mine == null || !Marriages.family(s, mine).equals(c.realmId)) return ActionResult.fail("Это не член вашего дома");

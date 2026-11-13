@@ -61,6 +61,16 @@ public final class CourtSim {
     public final NameBank names;
     public final Opinions opinions = new Opinions();
     public final Map<Integer, Faction> factions = new LinkedHashMap<>();
+    /** Temporary stewardship of an underage sovereign; both references point to canonical Characters. */
+    public static final class Regency {
+        public final String realm, heir;
+        public String regent;
+        public final long startedDay;
+        Regency(String realm, String heir, String regent, long startedDay) {
+            this.realm = realm; this.heir = heir; this.regent = regent; this.startedDay = startedDay;
+        }
+    }
+    public final Map<String, Regency> regencies = new LinkedHashMap<>();
     public final Map<Integer, Scheme> schemes = new LinkedHashMap<>();
     public final Map<String, EventDef> events = new LinkedHashMap<>();
     public final List<Pending> pending = new ArrayList<>();
@@ -186,6 +196,7 @@ public final class CourtSim {
 
     private void monthly() {
         opinions.expire(year());
+        updateRegencies();
         updateFactions();
         rollEvents();
         syncProps();
@@ -255,7 +266,10 @@ public final class CourtSim {
                         politicalRealm.props.getOrDefault("succession", "primogeniture")));
         if (wasRuler) {
             List<Succession.Result> res = Succession.onDeath(reg, defs, d, ed, names, seed + day, c.id, year(), law);
-            for (Succession.Result s : res) say(c.name + " (" + realmName(realm) + ") " + cause + ". Наследует " + s.heir.name + (s.usurper ? " (узурпатор)" : ""));
+            for (Succession.Result result : res) {
+                say(c.name + " (" + realmName(realm) + ") " + cause + ". Наследует " + result.heir.name + (result.usurper ? " (узурпатор)" : ""));
+                if (result.place.startsWith("realm:")) ensureRegency(result.place.substring(6));
+            }
         } else {
             reg.kill(c.id);
             if (!realm.isEmpty()) say(c.name + " (" + realmName(realm) + ") " + cause);
@@ -269,6 +283,80 @@ public final class CourtSim {
             handOver(pl, c, heir);
         }
         if (wasRuler && ed != null) syncProps();
+    }
+
+    // ------------------------------------------------------------------ регентство
+
+    public Regency regency(String realm) { return regencies.get(realm); }
+
+    /** Adult members of the realm court who can legally serve as regent. */
+    public List<Character> regencyCandidates(String realm) {
+        String place = Courts.realmPlace(realm);
+        Character sovereign = ruler(realm);
+        List<Character> candidates = new ArrayList<>();
+        for (Character candidate : reg.all()) {
+            if (!candidate.alive || candidate == sovereign || year() - candidate.birthYear < 16
+                    || candidate.posts.stream().noneMatch(post -> post.place.equals(place))) continue;
+            candidates.add(candidate);
+        }
+        candidates.sort(Comparator.comparingInt((Character candidate) -> regentScore(candidate, sovereign)).reversed()
+                .thenComparing(candidate -> candidate.id));
+        return candidates;
+    }
+
+    private int regentScore(Character candidate, Character heir) {
+        int score = CharacterStats.value(candidate, "diplomacy") * 2
+                + CharacterStats.value(candidate, "stewardship") * 2
+                + CharacterStats.value(candidate, "intrigue");
+        if (heir != null) score += Math.max(-20, Math.min(20, opinion(candidate.id, heir.id) / 3));
+        Set<String> traits = new HashSet<>(CharacterStats.traits(candidate));
+        if (traits.contains("just")) score += 5;
+        if (traits.contains("honorable") || traits.contains("loyal")) score += 4;
+        if (traits.contains("ambitious_schemer") || traits.contains("cruel")) score -= 5;
+        return score;
+    }
+
+    private void ensureRegency(String realm) {
+        Character heir = ruler(realm);
+        if (heir == null || !heir.alive || year() - heir.birthYear >= 16) {
+            regencies.remove(realm);
+            return;
+        }
+        Regency current = regencies.get(realm);
+        if (current != null && current.heir.equals(heir.id)) {
+            Character regent = reg.get(current.regent);
+            if (regent != null && regent.alive && year() - regent.birthYear >= 16) return;
+        }
+        List<Character> candidates = regencyCandidates(realm);
+        String regentId = candidates.isEmpty() ? "" : candidates.get(0).id;
+        regencies.put(realm, new Regency(realm, heir.id, regentId, current == null ? day : current.startedDay));
+        Character regent = regentId.isEmpty() ? null : reg.get(regentId);
+        say(regent == null
+                ? "В " + realmName(realm) + " началось малолетнее правление " + heir.name + ": двор должен назначить регента"
+                : regent.name + " становится регентом при малолетнем правителе " + heir.name + " (" + realmName(realm) + ")");
+    }
+
+    /** Explicit appointment is limited to adult members of this realm's existing court. */
+    public void appointRegent(String realm, String candidateId) {
+        Character heir = ruler(realm), candidate = reg.get(candidateId);
+        if (heir == null || !heir.alive || year() - heir.birthYear >= 16)
+            throw new TitleEditor.EditException("Регентство сейчас не требуется");
+        if (candidate == null || !candidate.alive || candidate == heir || year() - candidate.birthYear < 16
+                || candidate.posts.stream().noneMatch(post -> post.place.equals(Courts.realmPlace(realm))))
+            throw new TitleEditor.EditException("Регентом может стать только совершеннолетний член этого двора");
+        Regency current = regencies.get(realm);
+        long started = current == null ? day : current.startedDay;
+        regencies.put(realm, new Regency(realm, heir.id, candidate.id, started));
+        say(candidate.name + " назначен регентом " + realmName(realm) + " при " + heir.name);
+    }
+
+    private void updateRegencies() {
+        for (String realm : new ArrayList<>(regencies.keySet())) ensureRegency(realm);
+        for (TitleData.Realm realm : d.realmList()) {
+            Character sovereign = ruler(realm.id);
+            if (sovereign != null && sovereign.alive && year() - sovereign.birthYear < 16
+                    && !regencies.containsKey(realm.id)) ensureRegency(realm.id);
+        }
     }
 
     // ------------------------------------------------------------------ фракции
@@ -712,6 +800,7 @@ public final class CourtSim {
         if (!mine.isEmpty() && reg.get(mine) != null) ids.add(mine);
         for (TitleData.Realm r : d.realmList()) { Character c = ruler(r.id); if (c != null) ids.add(c.id); }
         for (Council.Seat st : Council.seats(reg, defs, realm)) if (st.holder != null) ids.add(st.holder.id);
+        for (Character candidate : regencyCandidates(realm)) { if (ids.size() > 48) break; ids.add(candidate.id); }
         Character me = ruler(realm);
         for (Scheme sc : schemes.values()) if (me != null && sc.owner.equals(me.id)) { ids.add(sc.owner); ids.add(sc.target); }
         for (Pending p : pending) if (p.realm.equals(realm)) ids.add(p.character);
@@ -728,6 +817,8 @@ public final class CourtSim {
         v.me = mine;
         for (Opinions.Modifier m : opinions.mods) if (ids.contains(m.from) && ids.contains(m.to)) v.opinions.mods.add(m);
         for (Faction f : factions.values()) if (f.liege.equals(realm) || f.members.contains(realm)) v.factions.put(f.id, f);
+        Regency regency = regencies.get(realm);
+        if (regency != null) v.regencies.put(realm, new Regency(regency.realm, regency.heir, regency.regent, regency.startedDay));
         for (Scheme sc : schemes.values()) if (me != null && sc.owner.equals(me.id)) v.schemes.put(sc.id, sc);
         for (Pending p : pending) if (p.realm.equals(realm)) v.pending.add(p);
         int from = Math.max(0, news.size() - 80);
@@ -754,6 +845,10 @@ public final class CourtSim {
             fl.add(m);
         }
         root.put("factions", fl);
+        List<Object> rl = new ArrayList<>();
+        for (Regency r : regencies.values())
+            rl.add(new ArrayList<Object>(List.of(r.realm, r.heir, r.regent, r.startedDay)));
+        root.put("regencies", rl);
         List<Object> sl = new ArrayList<>();
         for (Scheme s : schemes.values()) sl.add(new ArrayList<Object>(List.of(s.id, s.kind.name(), s.owner, s.target, s.ownerRealm, s.progress, s.secrecy)));
         root.put("schemes", sl);
@@ -769,7 +864,7 @@ public final class CourtSim {
         Map<String, Object> root = (Map<String, Object>) Json.parse(json);
         if (!"wf-court/1".equals(root.get("format"))) throw new IllegalArgumentException("Неверный формат двора");
         day = ((Number) root.get("day")).longValue(); nextId = ((Number) root.get("next")).intValue();
-        humans.clear(); cooldown.clear(); opinions.mods.clear(); factions.clear(); schemes.clear(); pending.clear(); news.clear();
+        humans.clear(); cooldown.clear(); opinions.mods.clear(); factions.clear(); regencies.clear(); schemes.clear(); pending.clear(); news.clear();
         for (Object o : (List<Object>) root.get("humans")) humans.add((String) o);
         players.clear();
         if (root.get("players") instanceof Map<?, ?> pm) for (var e : pm.entrySet()) players.put(String.valueOf(e.getKey()), String.valueOf(e.getValue()));
@@ -782,6 +877,12 @@ public final class CourtSim {
             for (Object x : (List<Object>) m.get("members")) f.members.add((String) x);
             f.power = ((Number) m.get("power")).doubleValue(); f.leader = (String) m.get("leader"); f.progress = ((Number) m.get("progress")).doubleValue();
             factions.put(f.id, f);
+        }
+        if (root.get("regencies") instanceof List<?> savedRegencies) for (Object o : savedRegencies) {
+            List<Object> values = (List<Object>) o;
+            Regency regency = new Regency((String) values.get(0), (String) values.get(1),
+                    (String) values.get(2), ((Number) values.get(3)).longValue());
+            regencies.put(regency.realm, regency);
         }
         for (Object o : (List<Object>) root.get("schemes")) {
             List<Object> l = (List<Object>) o;

@@ -28,7 +28,7 @@ import java.util.function.Consumer;
  */
 public class CourtScreen extends Screen {
     private static final int W = 780, H = 460;
-    private static final String[] TABS = {"Совет", "Вассалы", "Государство", "Козни", "События", "Браки", "Титулы", "Дипломатия", "Хроника"};
+    private static final String[] TABS = {"Совет", "Вассалы", "Государство", "Козни", "События", "Браки", "Титулы", "Дипломатия", "Хроника", "Регентство"};
     private CourtSim s;
     private final String realm;
     private final Consumer<String> cmd;
@@ -163,7 +163,8 @@ public class CourtScreen extends Screen {
             case 5 -> marriages(g, cx, top, cw, h, mx, my);
             case 6 -> titles(g, cx, top, cw, h, mx, my);
             case 7 -> diplomacy(g, cx, top, cw, h, mx, my);
-            default -> chronicle(g, cx, top, cw, h);
+            case 8 -> chronicle(g, cx, top, cw, h);
+            default -> regency(g, cx, top, cw, h, mx, my);
         }
         publishWorkspaceSelection();
         if (System.currentTimeMillis() < msgUntil && !msg.isEmpty()) {
@@ -761,6 +762,51 @@ public class CourtScreen extends Screen {
             hit(x + 10, cy, iw, 28, () -> cmd.accept("wfaction run event_choose " + realm + " " + id + "|" + n), null, null);
             cy += 32;
         }
+    }
+
+    // ------------------------------------------------------------------ Регентство
+
+    private void regency(GuiGraphics g, int x, int top, int cw, int h, int mx, int my) {
+        WFUi.bevel(g, x, top, cw, h, true);
+        Character heir = s.ruler(realm);
+        CourtSim.Regency current = s.regency(realm);
+        if (heir == null) {
+            g.drawString(font, "У государства пока нет правителя.", x + 12, top + 14, WFUi.MUTED);
+            return;
+        }
+        int age = s.year() - heir.birthYear;
+        g.drawString(font, "МАЛОЛЕТНЕЕ ПРАВЛЕНИЕ", x + 12, top + 12, WFUi.GOLD_DIM);
+        g.drawString(font, heir.name + (heir.house.isEmpty() ? "" : " " + heir.house), x + 12, top + 31, WFUi.GOLD);
+        g.drawString(font, "Возраст: " + age + " лет", x + 12, top + 45, WFUi.TX);
+        if (age >= 16) {
+            g.drawString(font, "Правитель совершеннолетний. Регентство не требуется.", x + 12, top + 68, WFUi.GOOD);
+            return;
+        }
+        if (current == null) {
+            g.drawString(font, "Регент не назначен. Двор должен выбрать совершеннолетнего советника.", x + 12, top + 68, WFUi.BAD);
+        } else {
+            Character regent = s.reg.get(current.regent);
+            g.drawString(font, "Регент: " + (regent == null ? "не назначен" : regent.name), x + 12, top + 68,
+                    regent == null ? WFUi.BAD : WFUi.GOOD);
+            g.drawString(font, "Срок: с " + (s.startYear + (int) (current.startedDay / 365)) + " года", x + 12, top + 82, WFUi.MUTED);
+        }
+        g.drawString(font, "КАНДИДАТЫ ИЗ СУЩЕСТВУЮЩЕГО ДВОРА", x + 12, top + 108, WFUi.GOLD_DIM);
+        List<Character> candidates = s.regencyCandidates(realm);
+        int y = top + 124, row = 0;
+        for (Character candidate : candidates) {
+            if (y > top + h - 22) break;
+            boolean selected = current != null && current.regent.equals(candidate.id);
+            WFUi.rowBg(g, x + 8, y - 2, cw - 16, 20, row++, selected, WFUi.over(mx, my, x + 8, y - 2, cw - 16, 20));
+            g.drawString(font, candidate.name + (candidate.house.isEmpty() ? "" : " · " + candidate.house),
+                    x + 16, y + 3, selected ? WFUi.GOLD : WFUi.TX);
+            g.drawString(font, (s.year() - candidate.birthYear) + " лет", x + cw - 145, y + 3, WFUi.MUTED);
+            final String id = candidate.id;
+            btn(g, x + cw - 92, y, 78, selected ? "Назначен" : "Назначить",
+                    !selected, mx, my, () -> cmd.accept("wfaction run regency_appoint " + realm + " " + id),
+                    "Назначить этого придворного регентом");
+            y += 22;
+        }
+        if (candidates.isEmpty()) g.drawString(font, "Нет подходящих совершеннолетних придворных.", x + 16, y + 4, WFUi.MUTED);
     }
 
     // ------------------------------------------------------------------ Хроника

@@ -164,6 +164,35 @@ public class CourtTest {
         t.die(old, "умер");
         Character neu = t.ruler(r2);
         ok(neu != null && neu != old && neu.alive, "у государства новый правитель после смерти");
+        // A child heir receives an automatically selected adult regent from the same court.
+        CourtSim minorCourt = build(a[0], 111);
+        String minorRealm = minorCourt.d.realmList().get(0).id;
+        Character formerRuler = minorCourt.ruler(minorRealm);
+        Character childHeir = minorCourt.reg.create("Малолетний наследник", "Тест", "north", "m", minorCourt.year() - 8);
+        Character adultRegent = minorCourt.reg.holder("chancellor", Courts.realmPlace(minorRealm));
+        formerRuler.children.add(childHeir.id); childHeir.father = formerRuler.id;
+        Succession.onDeath(minorCourt.reg, minorCourt.defs, minorCourt.d, minorCourt.ed, minorCourt.names,
+                112L, formerRuler.id, minorCourt.year(), "primogeniture");
+        // Force the test heir onto the throne to isolate regency from the random family setup.
+        minorCourt.reg.appoint(childHeir.id, minorCourt.defs.ruler().id, Courts.realmPlace(minorRealm));
+        minorCourt.d.realms.get(minorRealm).ruler = childHeir.name;
+        minorCourt.regencies.clear();
+        minorCourt.updateRegencies();
+        ok(minorCourt.regency(minorRealm) != null
+                        && minorCourt.regency(minorRealm).heir.equals(childHeir.id)
+                        && minorCourt.regency(minorRealm).regent.equals(adultRegent.id),
+                "underage sovereign receives a regent from the existing adult court");
+        String regencySave = minorCourt.toJson();
+        CourtSim minorReload = build(a[0], 112);
+        minorReload.fromJson(regencySave);
+        ok(minorReload.regency(minorRealm) != null
+                        && minorReload.regency(minorRealm).regent.equals(adultRegent.id)
+                        && minorReload.toJson().equals(regencySave),
+                "regency appointment survives deterministic court save/load");
+        boolean rejectedRegent = false;
+        try { minorCourt.appointRegent(minorRealm, childHeir.id); }
+        catch (TitleEditor.EditException expected) { rejectedRegent = true; }
+        ok(rejectedRegent, "underage ruler cannot appoint themself as regent");
         TitleData.Title highestRealmTitle = null;
         for (String key : t.d.realms.get(r2).titleKeys) {
             TitleData.Title candidate = t.d.findTitle(key);
