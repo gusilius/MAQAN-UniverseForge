@@ -36,6 +36,7 @@ import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.RegisterCommandsEvent;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.arguments.StringArgumentType;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
@@ -70,6 +71,9 @@ public final class WorldSimMod {
     private static JsonObject emergenceBindings = new JsonObject();
     private static boolean emergentRealmsRehydrated;
     private static final HistoricalChronicle HISTORICAL_CHRONICLE = new HistoricalChronicle();
+    private static boolean campaignRunning;
+    private static String campaignMapId = "";
+    private static long campaignStartedDay;
 
 
     /**
@@ -121,6 +125,10 @@ public final class WorldSimMod {
         emergenceState = null;
         emergenceBindings = new JsonObject();
         emergentRealmsRehydrated = false;
+        campaignRunning = false;
+        campaignMapId = "";
+        campaignStartedDay = 0;
+        WorldForgeApi.clock().setSimulationDaysPerTick(1);
         HISTORICAL_CHRONICLE.clear();
         HISTORICAL_CHRONICLE.setStartingYear(WorldForgeApi.clock().startYear);
         publishObservers(event.getServer());
@@ -138,6 +146,8 @@ public final class WorldSimMod {
     public void onStopping(ServerStoppingEvent event) {
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server != null) saveState(server);
+        campaignRunning = false;
+        WorldForgeApi.clock().setSimulationDaysPerTick(1);
         lastDecisionDay = Long.MIN_VALUE;
         lodTicks = 0;
         emergentRealmsRehydrated = false;
@@ -251,6 +261,7 @@ public final class WorldSimMod {
             LOGGER.info("wf_worldsim: day={} realms={} settlements={} proposals={} applied={} rejected={}",
                     day, snapshot.getAsJsonArray("realms").size(), snapshot.getAsJsonArray("settlements").size(),
                     frame.getAsJsonArray("proposals").size(), accepted, rejected);
+            updateCampaign(server, day);
         } catch (Exception error) {
             LOGGER.error("wf_worldsim: decision cycle failed safely at day {}", day, error);
         }
@@ -260,6 +271,14 @@ public final class WorldSimMod {
     @SubscribeEvent
     public void onCommands(RegisterCommandsEvent event) {
         CommandDispatcher<CommandSourceStack> dispatcher = event.getDispatcher();
+        dispatcher.register(Commands.literal("wfworldsim")
+                .then(Commands.literal("campaign")
+                        .then(Commands.literal("start")
+                                .then(Commands.argument("map", StringArgumentType.word())
+                                        .executes(context -> startCampaign(context.getSource().getServer(),
+                                                StringArgumentType.getString(context, "map"), context.getSource()))))
+                        .then(Commands.literal("status").executes(context -> campaignStatus(context.getSource())))
+                        .then(Commands.literal("stop").executes(context -> stopCampaign(context.getSource()))));
         dispatcher.register(Commands.literal("wfworldsim")
                 .then(Commands.literal("status").executes(context -> {
                     MinecraftServer server = context.getSource().getServer();
@@ -297,6 +316,138 @@ public final class WorldSimMod {
                             for (String page : pages) context.getSource().sendSuccess(() -> Component.literal(page), false);
                             return Math.min(count, HISTORICAL_CHRONICLE.size());
                         }))));
+    }
+
+    private static int startCampaign(MinecraftServer server, String mapId, CommandSourceStack source) {
+        if (campaignRunning) {
+            source.sendFailure(Component.literal("An autonomous campaign is already running"));
+            return 0;
+        }
+        if (!NativeWorldSimulation.load()) {
+            source.sendFailure(Component.literal("Native WorldSim engine is unavailable; campaign was not started"));
+            return 0;
+        }
+        MapData map = WorldForgeMod.map(mapId);
+        if (map.titles == null || !map.titles.realmList().isEmpty()) {
+            source.sendFailure(Component.literal("Campaign map must retain province geography but contain no pre-authored realms"));
+            return 0;
+        }
+        if (WorldForgeMod.loadedMaps().size() != 1 || !WorldForgeMod.loadedMaps().containsValue(map)) {
+            source.sendFailure(Component.literal("Campaign requires exactly one loaded map: " + mapId));
+            return 0;
+        }
+        CharacterRegistry registry = PeopleMod.registry(map);
+        if (registry == null || registry.size() != 0 || !SettleMod.COLONIES.isEmpty()
+                || !RealmsMod.emergentRealms().isEmpty()) {
+            source.sendFailure(Component.literal("Campaign requires an empty isolated world: no pre-seeded Characters, settlements or emergent realms"));
+            return 0;
+        }
+        campaignMapId = map.name;
+        campaignStartedDay = WorldForgeApi.clock().dayNumber();
+        campaignRunning = true;
+        WorldForgeApi.clock().setSimulationDaysPerTick(7);
+        lastDecisionDay = Long.MIN_VALUE;
+        source.sendSuccess(() -> Component.literal("Autonomous campaign started on " + campaignMapId
+                + "; map-only bootstrap, shared clock step=7 days/tick; target=stable states + four canonical ruler generations"), true);
+        LOGGER.info("wf_worldsim: map-only autonomous campaign started map={} day={} step=7 target=4 canonical generations",
+                campaignMapId, campaignStartedDay);
+        return 1;
+    }
+
+    private static int campaignStatus(CommandSourceStack source) {
+        JsonArray polities = emergenceState != null && emergenceState.has("polities")
+                && emergenceState.get("polities").isJsonArray() ? emergenceState.getAsJsonArray("polities") : new JsonArray();
+        int completed = 0;
+        for (var item : polities) if (item.isJsonObject()) {
+            JsonObject polity = item.getAsJsonObject();
+            if (polity.has("dynasty_generations") && polity.get("dynasty_generations").getAsInt() >= 4
+                    && polity.has("stability") && polity.get("stability").getAsInt() >= 50
+                    && polity.has("population") && polity.get("population").getAsLong() >= 120) completed++;
+        }
+        int total = polities.size();
+        source.sendSuccess(() -> Component.literal("Campaign=" + (campaignRunning ? "RUNNING" : "STOPPED")
+                + ", map=" + (campaignMapId.isBlank() ? "-" : campaignMapId)
+                + ", elapsed_days=" + Math.max(0L, WorldForgeApi.clock().dayNumber() - campaignStartedDay)
+                + ", stable_four-generation_states=" + completed + "/" + total
+                + ", clock_step=" + WorldForgeApi.clock().simulationDaysPerTick()
+                + ", events=" + WorldForgeApi.events().size()
+                + ", chronicle=" + HISTORICAL_CHRONICLE.size()), false);
+        return 1;
+    }
+
+    private static int stopCampaign(CommandSourceStack source) {
+        if (!campaignRunning) {
+            source.sendFailure(Component.literal("No autonomous campaign is running"));
+            return 0;
+        }
+        campaignRunning = false;
+        WorldForgeApi.clock().setSimulationDaysPerTick(1);
+        MinecraftServer server = source.getServer();
+        saveState(server);
+        source.sendSuccess(() -> Component.literal("Autonomous campaign stopped at " + WorldForgeApi.clock().dateText()), true);
+        return 1;
+    }
+
+    private static void updateCampaign(MinecraftServer server, long day) {
+        if (!campaignRunning || emergenceState == null || !emergenceState.has("polities")
+                || !emergenceState.get("polities").isJsonArray()) return;
+        JsonArray polities = emergenceState.getAsJsonArray("polities");
+        if (polities.isEmpty()) return;
+        long elapsedYear = emergenceState.has("last_year") ? emergenceState.get("last_year").getAsLong() : 0;
+        long latestFoundingYear = 0;
+        boolean allMature = true;
+        for (var item : polities) {
+            if (!item.isJsonObject()) { allMature = false; break; }
+            JsonObject polity = item.getAsJsonObject();
+            long founded = polity.has("founded_year") ? polity.get("founded_year").getAsLong() : elapsedYear;
+            latestFoundingYear = Math.max(latestFoundingYear, founded);
+            int generations = polity.has("dynasty_generations") ? polity.get("dynasty_generations").getAsInt() : 0;
+            long population = polity.has("population") ? polity.get("population").getAsLong() : 0;
+            int stability = polity.has("stability") ? polity.get("stability").getAsInt() : 0;
+            int weakYears = polity.has("weak_years") ? polity.get("weak_years").getAsInt() : 0;
+            if (generations < 4 || population < 120 || stability < 50 || weakYears > 0
+                    || elapsedYear - founded < 25) allMature = false;
+        }
+        if (elapsedYear > 0 && elapsedYear % 5 == 0)
+            LOGGER.info("wf_worldsim: campaign progress map={} year={} states={} mature_four_generation_states={} events={}",
+                    campaignMapId, elapsedYear, polities.size(),
+                    polities.asList().stream().filter(item -> item.isJsonObject()
+                            && item.getAsJsonObject().has("dynasty_generations")
+                            && item.getAsJsonObject().get("dynasty_generations").getAsInt() >= 4).count(),
+                    WorldForgeApi.events().size());
+        if (!allMature || elapsedYear - latestFoundingYear < 25) return;
+
+        campaignRunning = false;
+        WorldForgeApi.clock().setSimulationDaysPerTick(1);
+        WorldForgeApi.postEvent("system", "Autonomous map-only campaign completed: all surviving states are stable and have four canonical ruler generations",
+                List.of(), WorldForgeApi.clock().worldMinute());
+        saveState(server);
+        try {
+            Path output = server.getWorldPath(LevelResource.ROOT).resolve("worldforge").resolve("autonomous-campaign");
+            Files.createDirectories(output);
+            Files.writeString(output.resolve("chronicle-book.md"),
+                    String.join("\\n\\n", HISTORICAL_CHRONICLE.book(0)), StandardCharsets.UTF_8);
+            JsonObject report = new JsonObject();
+            report.addProperty("status", "PASS");
+            report.addProperty("map", campaignMapId);
+            report.addProperty("start_day", campaignStartedDay);
+            report.addProperty("end_day", day);
+            report.addProperty("elapsed_days", Math.max(0L, day - campaignStartedDay));
+            report.addProperty("elapsed_years", Math.max(0L, (day - campaignStartedDay) / 365L));
+            report.addProperty("target_dynasty_generations", 4);
+            report.addProperty("stable_states", polities.size());
+            report.addProperty("settlements", SettleMod.COLONIES.size());
+            report.addProperty("characters", PeopleMod.registry(WorldForgeMod.loadedMaps().get(campaignMapId)).size());
+            report.addProperty("world_events", WorldForgeApi.events().size());
+            report.addProperty("chronicle_entries", HISTORICAL_CHRONICLE.size());
+            report.add("emergence_state", emergenceState.deepCopy());
+            Files.writeString(output.resolve("campaign-report.json"), GSON.toJson(report), StandardCharsets.UTF_8);
+            LOGGER.info("wf_worldsim: campaign PASS map={} years={} states={} settlements={} events={} chronicle={}",
+                    campaignMapId, report.get("elapsed_years").getAsLong(), polities.size(),
+                    SettleMod.COLONIES.size(), WorldForgeApi.events().size(), HISTORICAL_CHRONICLE.size());
+        } catch (Exception error) {
+            LOGGER.error("wf_worldsim: campaign reached its world-state target but report/book export failed", error);
+        }
     }
 
     private static int serverObserverCount(MinecraftServer server) {
