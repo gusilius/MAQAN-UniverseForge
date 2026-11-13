@@ -371,7 +371,7 @@ public final class WorldSimMod {
         int completed = 0;
         for (var item : polities) if (item.isJsonObject()) {
             JsonObject polity = item.getAsJsonObject();
-            if (polity.has("dynasty_generations") && polity.get("dynasty_generations").getAsInt() >= 4
+            if (canonicalGenerationCount(polity) >= 4
                     && polity.has("stability") && polity.get("stability").getAsInt() >= 50
                     && polity.has("population") && polity.get("population").getAsLong() >= 120) completed++;
         }

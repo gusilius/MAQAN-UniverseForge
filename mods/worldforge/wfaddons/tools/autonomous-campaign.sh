@@ -149,6 +149,12 @@ report_path, inventory_path, jars_dir = pathlib.Path(sys.argv[1]), pathlib.Path(
 report = json.loads(report_path.read_text(encoding="utf-8"))
 if report.get("status") != "PASS" or report.get("target_dynasty_generations") != 4:
     raise SystemExit("Campaign report does not confirm four canonical ruler generations")
+if int(report.get("canonical_ruler_generations_verified", 0)) != int(report.get("stable_states", 0)):
+    raise SystemExit("Not every surviving state has four verified canonical ruler generations")
+if int(report.get("materialized_settlements", 0)) != int(report.get("settlements", 0)):
+    raise SystemExit("Not every emergent settlement reached physical local-LOD materialization")
+if not report.get("physical_world_dimension"):
+    raise SystemExit("Campaign did not run in a registered Planetos map dimension")
 for key in ("stable_states", "characters", "settlements", "materialized_settlements", "completed_buildings", "canonical_ruler_generations_verified", "world_events", "chronicle_entries"):
     if int(report.get(key, 0)) <= 0:
         raise SystemExit(f"Campaign report is missing required generated data: {key}")
