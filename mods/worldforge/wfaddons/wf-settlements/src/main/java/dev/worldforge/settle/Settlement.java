@@ -209,6 +209,12 @@ public final class Settlement {
 
     private void syncResourceMirror(String resource) { stock.put(resource, resourceAccount(resource).balance); }
 
+    /** Refresh a settlement projection after another canonical ledger account posts a transfer into it. */
+    public void refreshResourceMirror(String resource) {
+        if (resource == null || resource.isBlank()) return;
+        syncResourceMirror(resource);
+    }
+
     private void syncAllResourceMirrors() {
         Set<String> resources = new TreeSet<>(stock.keySet());
         resources.add(Defs.SILVER);
@@ -424,7 +430,11 @@ public final class Settlement {
         boolean transferred = ledger.transferOnce(sourceId, targetAccountId, quantity, kind,
                 cleanCategory, cleanReference, worldMinute(), "settlement resource transfer to external account");
         syncResourceMirror(resource);
-        if (transferred && quantity > 0) flow.record(time, resource, quantity, false);
+        if (transferred && quantity > 0) {
+            if ("shipment-cargo-escrow".equals(cleanCategory))
+                flow.recordTrade(time, resource, quantity, false);
+            else flow.record(time, resource, quantity, false);
+        }
         return transferred;
     }
 

@@ -104,6 +104,7 @@ public final class TradeNetwork {
             }
             if (!ledger.transferOnce(cargoEscrow,destAccount,shipment.quantity,TreasuryLedger.Kind.TRADE,
                     "shipment-arrival",goodsRef,destination.worldMinute(),"settlement shipment delivered")) continue;
+            destination.refreshResourceMirror(shipment.res);
             destination.amount(shipment.res);
             if (!goodsPosted) {
                 destination.flow.recordTrade(destination.time,shipment.res,shipment.quantity,true);
@@ -113,6 +114,7 @@ public final class TradeNetwork {
             if (!ledger.transferOnce(paymentEscrow,source.ledgerAccountId(Defs.SILVER),shipment.sellerPayment,
                     TreasuryLedger.Kind.TRADE,"shipment-settlement",shipmentReference(shipment.id,"seller-payment"),
                     source.worldMinute(),"settlement seller payment")) { shipment.status="ожидает расчёта"; continue; }
+            source.refreshResourceMirror(Defs.SILVER);
             if (shipment.marketFee>1e-9 && !ledger.withdrawOnce(paymentEscrow,shipment.marketFee,
                     TreasuryLedger.Kind.TRADE,"shipment-market-fee",shipmentReference(shipment.id,"market-fee"),
                     destination.worldMinute(),"settlement market fee")) { shipment.status="ожидает расчёта"; continue; }
@@ -156,7 +158,7 @@ public final class TradeNetwork {
                 ledger.transferOnce(payment,b.ledgerAccountId(Defs.SILVER),total,TreasuryLedger.Kind.TRADE,
                         "shipment-payment-refund",shipmentReference(id,"dispatch-refund"),b.worldMinute(),
                         "refund failed shipment dispatch");
-                b.amount(Defs.SILVER);route.status="нет товара";continue;
+                b.refreshResourceMirror(Defs.SILVER); b.amount(Defs.SILVER);route.status="нет товара";continue;
             }
             a.tradeLeft-=n;b.tradeLeft-=n;a.shiftDemand(route.res,n);route.acc-=n;
             Location from=anchors.get(route.from),to=anchors.get(route.to);
