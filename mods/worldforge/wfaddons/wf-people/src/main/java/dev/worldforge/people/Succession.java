@@ -61,7 +61,13 @@ public final class Succession {
 
     private static Character chooseHeir(CharacterRegistry reg, Character dead, String law, String place) {
         // Preserve a deceased elder child's branch through its living descendants.
-        List<Character> kids = living(reg, dead.children);
+        // Keep deceased children in the ordered branch list: their descendants may inherit
+        // by representation. Filtering to living children here would erase the entire branch.
+        List<Character> kids = new ArrayList<>();
+        for (String childId : dead.children) {
+            Character child = reg.get(childId);
+            if (child != null) kids.add(child);
+        }
         sort(kids, law);
         Set<String> visited = new HashSet<>();
         for (Character child : kids) {
