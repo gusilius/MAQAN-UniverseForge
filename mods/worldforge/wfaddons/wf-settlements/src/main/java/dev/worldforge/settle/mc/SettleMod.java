@@ -674,7 +674,16 @@ public class SettleMod {
                     TreasuryLedger.Kind.IMPORT, newlyPostedStock);
             validStock &= ensureFoundingStock(colony, "stone", 20, "founding-stone",
                     TreasuryLedger.Kind.IMPORT, newlyPostedStock);
-            if (!validStock) return false;
+            if (!validStock) {
+                // Earlier resource postings may already have succeeded; persist them before
+                // returning so a later retry cannot leave an in-memory-only ledger mutation.
+                if (!newlyPostedStock.isEmpty() && !WorldForgeMod.saveTreasuryNow(server)) {
+                    colony.actionPersistenceBlocked = true;
+                    LOGGER.error("wf_settle: partial founding stock for {} could not be persisted; settlement frozen for recovery",
+                            settlementId);
+                }
+                return false;
+            }
 
             int[][] preferredHouses = {
                     {-12, -8}, {-4, -12}, {4, -12}, {12, -8},
