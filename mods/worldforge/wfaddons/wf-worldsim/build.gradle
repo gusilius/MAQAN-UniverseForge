@@ -27,7 +27,7 @@ sourceSets.main.resources { srcDir 'src/generated/resources' }
 repositories { flatDir { dir 'libs' } }
 dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
-    compileOnly fileTree(dir: 'libs', include: ['worldforge-*.jar','wf_people-*.jar','wf_court-*.jar','wf_war-*.jar','wf_army-*.jar','wf_realms-*.jar','wf_settle-*.jar','wf_trade-*.jar','wf_troops-*.jar','wf_rts-*.jar','wf_genesis-*.jar','wf_progress-*.jar','wf_relations-*.jar','wf_reputation-*.jar'])
+    compileOnly fileTree(dir: 'libs', include: ['worldforge-*.jar','wf_people-*.jar','wf_court-*.jar','wf_war-*.jar','wf_army-*.jar','wf_realms-*.jar','wf_settle-*.jar','wf_trade-*.jar','wf_troops-*.jar','wf_rts-*.jar','wf_genesis-*.jar','wf_progress-*.jar','wf_relations-*.jar','wf_reputation-*.jar','wf_origins-*.jar'])
 }
 tasks.named('processResources', ProcessResources).configure {
     var props = [minecraft_version:minecraft_version,minecraft_version_range:minecraft_version_range,
