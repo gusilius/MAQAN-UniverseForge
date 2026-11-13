@@ -651,7 +651,7 @@ public class SettleMod {
         double food = settlement.amount("food");
         double foodNet = settlement.producedPerMin("food") - settlement.consumedPerMin("food");
         if (food < Math.max(40, population * 1.5) || foodNet < -1e-6) return false;
-        if (settlement.amount("wood") < settlement.defs.buildings.get("house").cost.getOrDefault("wood", 0.0)) return false;
+        if (settlement.amount("wood") < settlement.defs.buildings.get("house").cost.getOrDefault("wood", 0)) return false;
 
         int ordinal = settlement.count("house", false);
         String request = "wfworldgen.expansion.house." + ordinal;
