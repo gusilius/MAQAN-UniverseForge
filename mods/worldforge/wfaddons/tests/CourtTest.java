@@ -193,6 +193,16 @@ public class CourtTest {
         try { minorCourt.appointRegent(minorRealm, childHeir.id); }
         catch (TitleEditor.EditException expected) { rejectedRegent = true; }
         ok(rejectedRegent, "underage ruler cannot appoint themself as regent");
+        Object regencyProjection = minorCourt.d.realms.get(minorRealm).props.get("politics.regency.active");
+        Object regentProjection = minorCourt.d.realms.get(minorRealm).props.get("politics.regency.regent");
+        ok(regencyProjection instanceof Number active && active.intValue() == 1
+                        && adultRegent.globalId.equals(regentProjection),
+                "active regency and its canonical regent UUID are published to the shared realm projection");
+        childHeir.birthYear = minorCourt.year() - 16;
+        minorCourt.tick(30);
+        ok(minorCourt.regency(minorRealm) == null
+                        && ((Number) minorCourt.d.realms.get(minorRealm).props.get("politics.regency.active")).intValue() == 0,
+                "regency ends automatically when the sovereign reaches adulthood");
         TitleData.Title highestRealmTitle = null;
         for (String key : t.d.realms.get(r2).titleKeys) {
             TitleData.Title candidate = t.d.findTitle(key);

@@ -405,7 +405,12 @@ public final class CourtSim {
                 double personalityPressure = (CharacterDevelopment.drive(vassalRuler, CharacterDevelopment.Drive.INDEPENDENCE) - 50) * 0.03
                         + (CharacterDevelopment.temperament(vassalRuler, CharacterDevelopment.Temperament.AMBITION) - 50) * 0.02
                         - (CharacterDevelopment.drive(vassalRuler, CharacterDevelopment.Drive.SECURITY) - 50) * 0.01;
-                double adjustedOpinion = opinion(vassalRuler.id, liegeRuler.id) + councilBonus + personalityPressure
+                Regency regency = regencies.get(liege.id);
+                Character regent = regency == null ? null : reg.get(regency.regent);
+                double regentInfluence = regent == null || !regent.alive ? 0
+                        : (CharacterStats.value(regent, "diplomacy") - 10) * 0.6
+                        + (CharacterStats.value(regent, "stewardship") - 10) * 0.2;
+                double adjustedOpinion = opinion(vassalRuler.id, liegeRuler.id) + councilBonus + personalityPressure + regentInfluence
                         + (loyalty - 50) * 0.5
                         - Math.max(0, taxShare - 0.20) * 70.0
                         - Math.max(0, levyShare - 0.30) * 50.0;
@@ -740,6 +745,16 @@ public final class CourtSim {
             double factionPressure = Math.min(1.0, realmFactions.stream().mapToDouble(f -> Math.max(0, f.power)).sum());
             ed.setDerivedProp(r.id, "politics.faction_pressure", Math.round(factionPressure * 1000) / 1000.0);
             ed.setDerivedProp(r.id, "politics.faction_count", realmFactions.size());
+            Regency activeRegency = regencies.get(r.id);
+            Character regent = activeRegency == null ? null : reg.get(activeRegency.regent);
+            ed.setDerivedProp(r.id, "politics.regency.active",
+                    activeRegency != null && regent != null && regent.alive ? 1 : 0);
+            ed.setDerivedProp(r.id, "politics.regency.heir",
+                    activeRegency == null ? "" : activeRegency.heir);
+            ed.setDerivedProp(r.id, "politics.regency.regent",
+                    regent == null || !regent.alive ? "" : regent.globalId);
+            ed.setDerivedProp(r.id, "politics.regency.started_year",
+                    activeRegency == null ? 0 : startYear + (int) (activeRegency.startedDay / 365));
 
             long activeSchemes = schemes.values().stream().filter(sc -> {
                 Character target = reg.get(sc.target);
