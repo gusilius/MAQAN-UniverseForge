@@ -21,7 +21,7 @@ cleanup() {
   if [ -f "$WORK/in.txt" ]; then printf '%s\n' "stop" >> "$WORK/in.txt" 2>/dev/null || true; fi
   if [ -n "$SERVER_PID" ]; then
     for _ in $(seq 1 30); do kill -0 "$SERVER_PID" 2>/dev/null || break; sleep 1; done
-    kill "$SERVER_PID" 2>/dev/null || true
+    taskkill.exe //PID "$SERVER_PID" //T //F >/dev/null 2>&1 || kill "$SERVER_PID" 2>/dev/null || true
   fi
   rm -rf "$WORK"
 }
@@ -84,7 +84,7 @@ spawn-protection=0
 enable-command-block=false
 P
 : > in.txt
-(tail -n +1 -f in.txt | java -Xms1G -Xmx4G @user_jvm_args.txt @libraries/net/minecraftforge/forge/$FORGE/win_args.txt nogui > server.log 2>&1) &
+(tail -n +1 -f in.txt | java -Xms1G -Xmx4G -Dworldforge.campaign.empty-bootstrap=true @user_jvm_args.txt @libraries/net/minecraftforge/forge/$FORGE/win_args.txt nogui > server.log 2>&1) &
 SERVER_PID=$!
 echo "WAITING_FOR_FORGE_STARTUP=1"
 for i in $(seq 1 150); do
