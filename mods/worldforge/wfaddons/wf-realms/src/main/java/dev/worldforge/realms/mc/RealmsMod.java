@@ -333,6 +333,24 @@ public class RealmsMod {
         realm.props.put("politics.doctrine_options", String.join(";", doctrineOptions));
     }
 
+    private static String characterText(Object character, String field) {
+        try {
+            Object value = character.getClass().getField(field).get(character);
+            return value == null ? "" : String.valueOf(value);
+        } catch (ReflectiveOperationException | SecurityException ignored) {
+            return "";
+        }
+    }
+
+    private static int characterNumber(Object character, String field) {
+        try {
+            Object value = character.getClass().getField(field).get(character);
+            return value instanceof Number number ? number.intValue() : 0;
+        } catch (ReflectiveOperationException | SecurityException ignored) {
+            return 0;
+        }
+    }
+
     private static double normalizedProp(TitleData.Realm realm, String key) {
         Object value = realm.props.get(key);
         if (!(value instanceof Number n) || !Double.isFinite(n.doubleValue())) return 0;
@@ -348,20 +366,28 @@ public class RealmsMod {
             boolean changed = false;
             CharacterRegistry people = PeopleMod.registry(map);
             if (people != null) {
-                Map<String, Character> founders = new LinkedHashMap<>();
-                for (Character character : people.all()) {
-                    if (character.house == null || character.house.isBlank()) continue;
-                    Character prior = founders.get(character.house);
-                    if (prior == null || character.birthYear < prior.birthYear)
-                        founders.put(character.house, character);
-                }
-                for (Character character : people.all()) {
-                    if (!character.house.isBlank()) {
-                        Character founder = founders.get(character.house);
-                        if (POLITICS.dynasty(character.house) == null)
-                            POLITICS.registerDynasty(character.house, founder.globalId);
-                        POLITICS.addDynastyMember(character.house, character.globalId);
+                // wf-realms is intentionally compiled against the stable people API jar, which can
+                // lag the source module in the addon build order. Read optional dynasty metadata
+                // reflectively so this bridge remains binary-compatible without copying Character.
+                Map<String, String> founders = new LinkedHashMap<>();
+                Map<String, Integer> founderYears = new LinkedHashMap<>();
+                for (Object character : people.all()) {
+                    String house = characterText(character, "house");
+                    if (house.isBlank()) continue;
+                    int birthYear = characterNumber(character, "birthYear");
+                    if (!founders.containsKey(house) || birthYear < founderYears.getOrDefault(house, Integer.MAX_VALUE)) {
+                        founders.put(house, characterText(character, "globalId"));
+                        founderYears.put(house, birthYear);
                     }
+                }
+                for (Object character : people.all()) {
+                    String house = characterText(character, "house");
+                    String globalId = characterText(character, "globalId");
+                    if (house.isBlank() || globalId.isBlank()) continue;
+                    String founderId = founders.get(house);
+                    if (founderId != null && POLITICS.dynasty(house) == null)
+                        POLITICS.registerDynasty(house, founderId);
+                    POLITICS.addDynastyMember(house, globalId);
                 }
             }
             for (TitleData.Title title : map.titles.allTitles()) {
