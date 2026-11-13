@@ -793,6 +793,11 @@ public class CourtScreen extends Screen {
                             + (support >= 3 ? " · устойчивая" : support <= 1 ? " · оспаривается" : " · шаткая"),
                     x + 12, top + 82, support >= 3 ? WFUi.GOOD : support <= 1 ? WFUi.BAD : WFUi.MUTED);
             g.drawString(font, "Срок: с " + (s.startYear + (int) (current.startedDay / 365)) + " года", x + 12, top + 96, WFUi.MUTED);
+            String crisisLabel = current.crisisStage >= 2 ? "ОТКРЫТАЯ БОРЬБА ЗА ВЛАСТЬ"
+                    : current.crisisStage == 1 ? "КРИЗИС РЕГЕНТСТВА" : "Положение при дворе устойчиво";
+            g.drawString(font, crisisLabel + " · напряжение " + current.crisis + "/100",
+                    x + 12, top + 110, current.crisisStage >= 2 ? WFUi.BAD
+                            : current.crisisStage == 1 ? WFUi.GOLD : WFUi.GOOD);
         }
         g.drawString(font, "КАНДИДАТЫ ИЗ СУЩЕСТВУЮЩЕГО ДВОРА", x + 12, top + 108, WFUi.GOLD_DIM);
         List<Character> candidates = s.regencyCandidates(realm);

@@ -202,6 +202,21 @@ public class CourtTest {
         ok(supportProjection instanceof Number votes && votes.intValue() >= 0 && votes.intValue() <= 4
                         && minorCourt.regencyCouncilSupport(minorRealm, adultRegent) == votes.intValue(),
                 "regent council backing is derived from the existing four canonical council seats");
+        for (Council.Seat seat : Council.seats(minorCourt.reg, minorCourt.defs, minorRealm))
+            if (seat.holder != null && seat.holder != adultRegent)
+                minorCourt.opinions.add(seat.holder.id, adultRegent.id, "Противостояние регенту", -100, minorCourt.year() + 10);
+        minorCourt.tick(30);
+        ok(minorCourt.regency(minorRealm).crisis >= 8
+                        && minorCourt.regency(minorRealm).crisisStage == 0,
+                "divided council gradually increases regency crisis pressure without an instant coup");
+        String crisisSave = minorCourt.toJson();
+        CourtSim crisisReload = build(a[0], 113);
+        crisisReload.fromJson(crisisSave);
+        ok(crisisReload.regency(minorRealm).crisis == minorCourt.regency(minorRealm).crisis,
+                "regency crisis pressure persists through save/load");
+        for (int i = 0; i < 20 && minorCourt.regency(minorRealm).crisisStage < 1; i++) minorCourt.tick(30);
+        ok(minorCourt.regency(minorRealm).crisisStage >= 1,
+                "sustained opposition from the existing royal council escalates into a visible regency crisis");
         childHeir.birthYear = minorCourt.year() - 16;
         minorCourt.tick(30);
         ok(minorCourt.regency(minorRealm) == null

@@ -66,6 +66,9 @@ public final class CourtSim {
         public final String realm, heir;
         public String regent;
         public final long startedDay;
+        /** 0..100 pressure from a divided court; stage 1 is a regency crisis, stage 2 an open power struggle. */
+        public int crisis;
+        public int crisisStage;
         Regency(String realm, String heir, String regent, long startedDay) {
             this.realm = realm; this.heir = heir; this.regent = regent; this.startedDay = startedDay;
         }
@@ -372,6 +375,30 @@ public final class CourtSim {
             if (sovereign != null && sovereign.alive && year() - sovereign.birthYear < 16
                     && !regencies.containsKey(realm.id)) ensureRegency(realm.id);
         }
+        updateRegencyCrises();
+    }
+
+    /** A regency crisis grows from actual council opposition and recedes when the court reunites. */
+    private void updateRegencyCrises() {
+        for (Regency regency : regencies.values()) {
+            Character regent = reg.get(regency.regent);
+            int support = regent == null || !regent.alive ? 0 : regencyCouncilSupport(regency.realm, regent);
+            int change = regent == null || !regent.alive ? 15 : support <= 1 ? 8 : support >= 3 ? -12 : -2;
+            if (regent != null && regent.alive
+                    && CharacterStats.traits(regent).stream().anyMatch(t -> t.equals("ambitious") || t.equals("ambitious_schemer")))
+                change += 2;
+            int previousStage = regency.crisisStage;
+            regency.crisis = Math.max(0, Math.min(100, regency.crisis + change));
+            int nextStage = regency.crisis >= 100 ? 2 : regency.crisis >= 60 ? 1 : 0;
+            if (nextStage != previousStage) {
+                Character heir = reg.get(regency.heir);
+                String subject = heir == null ? realmName(regency.realm) : heir.name + " в " + realmName(regency.realm);
+                if (nextStage == 1) say("Придворный совет расколот: регентство при " + subject + " переживает кризис");
+                else if (nextStage == 2) say("Открытая борьба за власть вокруг регентства при " + subject);
+                else say("Придворный кризис регентства в " + realmName(regency.realm) + " пошёл на спад");
+                regency.crisisStage = nextStage;
+            }
+        }
     }
 
     // ------------------------------------------------------------------ фракции
@@ -424,7 +451,8 @@ public final class CourtSim {
                 double regentInfluence = regent == null || !regent.alive ? 0
                         : (CharacterStats.value(regent, "diplomacy") - 10) * 0.6
                         + (CharacterStats.value(regent, "stewardship") - 10) * 0.2
-                        + (regencyCouncilSupport(liege.id, regent) - 2) * 2.5;
+                        + (regencyCouncilSupport(liege.id, regent) - 2) * 2.5
+                        - (regency.crisisStage == 2 ? 12 : regency.crisisStage == 1 ? 5 : 0);
                 double adjustedOpinion = opinion(vassalRuler.id, liegeRuler.id) + councilBonus + personalityPressure + regentInfluence
                         + (loyalty - 50) * 0.5
                         - Math.max(0, taxShare - 0.20) * 70.0
@@ -772,6 +800,8 @@ public final class CourtSim {
                     activeRegency == null ? 0 : startYear + (int) (activeRegency.startedDay / 365));
             ed.setDerivedProp(r.id, "politics.regency.council_support",
                     regent == null || !regent.alive ? 0 : regencyCouncilSupport(r.id, regent));
+            ed.setDerivedProp(r.id, "politics.regency.crisis", activeRegency == null ? 0 : activeRegency.crisis);
+            ed.setDerivedProp(r.id, "politics.regency.crisis_stage", activeRegency == null ? 0 : activeRegency.crisisStage);
 
             long activeSchemes = schemes.values().stream().filter(sc -> {
                 Character target = reg.get(sc.target);
@@ -880,7 +910,7 @@ public final class CourtSim {
         root.put("factions", fl);
         List<Object> rl = new ArrayList<>();
         for (Regency r : regencies.values())
-            rl.add(new ArrayList<Object>(List.of(r.realm, r.heir, r.regent, r.startedDay)));
+            rl.add(new ArrayList<Object>(List.of(r.realm, r.heir, r.regent, r.startedDay, r.crisis, r.crisisStage)));
         root.put("regencies", rl);
         List<Object> sl = new ArrayList<>();
         for (Scheme s : schemes.values()) sl.add(new ArrayList<Object>(List.of(s.id, s.kind.name(), s.owner, s.target, s.ownerRealm, s.progress, s.secrecy)));
@@ -915,6 +945,8 @@ public final class CourtSim {
             List<Object> values = (List<Object>) o;
             Regency regency = new Regency((String) values.get(0), (String) values.get(1),
                     (String) values.get(2), ((Number) values.get(3)).longValue());
+            if (values.size() > 4) regency.crisis = ((Number) values.get(4)).intValue();
+            if (values.size() > 5) regency.crisisStage = ((Number) values.get(5)).intValue();
             regencies.put(regency.realm, regency);
         }
         for (Object o : (List<Object>) root.get("schemes")) {
