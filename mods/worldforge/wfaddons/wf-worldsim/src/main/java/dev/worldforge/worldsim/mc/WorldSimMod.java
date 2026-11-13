@@ -677,6 +677,37 @@ public final class WorldSimMod {
         return ruler.has(role.id, place);
     }
 
+    /** Maps the existing Realms development ladder onto the canonical Statecraft title hierarchy. */
+    private static dev.worldforge.realms.Statecraft.Rank emergentTitleRank(String realmId) {
+        int level = RealmsMod.REALMS.level(realmId);
+        return switch (Math.max(0, Math.min(4, level))) {
+            case 0 -> dev.worldforge.realms.Statecraft.Rank.BARONY;
+            case 1 -> dev.worldforge.realms.Statecraft.Rank.COUNTY;
+            case 2 -> dev.worldforge.realms.Statecraft.Rank.DUCHY;
+            case 3 -> dev.worldforge.realms.Statecraft.Rank.KINGDOM;
+            default -> dev.worldforge.realms.Statecraft.Rank.EMPIRE;
+        };
+    }
+
+    /** A deterministic culture/race-aware name is stored in the canonical emergence state once. */
+    private static String emergentRealmName(String polityId, List<dev.worldforge.people.Character> members,
+            String fallback) {
+        if (members == null || members.isEmpty()) return fallback;
+        Map<String, Long> races = members.stream().map(person -> String.valueOf(person.props.getOrDefault("origin.race", "")))
+                .filter(value -> !value.isBlank()).collect(java.util.stream.Collectors.groupingBy(value -> value, TreeMap::new, java.util.stream.Collectors.counting()));
+        Map<String, Long> cultures = members.stream().map(person -> person.culture == null ? "" : person.culture)
+                .filter(value -> !value.isBlank()).collect(java.util.stream.Collectors.groupingBy(value -> value, TreeMap::new, java.util.stream.Collectors.counting()));
+        String race = races.entrySet().stream().max(Map.Entry.<String, Long>comparingByValue()
+                .thenComparing(Map.Entry::getKey, Comparator.reverseOrder())).map(Map.Entry::getKey).orElse("");
+        String culture = cultures.entrySet().stream().max(Map.Entry.<String, Long>comparingByValue()
+                .thenComparing(Map.Entry::getKey, Comparator.reverseOrder())).map(Map.Entry::getKey).orElse("");
+        try {
+            return PeopleMod.NAMES.generate(race, culture, "realms", new Random(polityId.hashCode()));
+        } catch (RuntimeException unavailableNamePool) {
+            return fallback;
+        }
+    }
+
     /** Binds emergent polities to canonical rulers; succession follows actual Character identity. */
     private static void syncEmergentPolities(MinecraftServer server, JsonObject state, int year) {
         if (server == null || state == null || !state.has("polities") || !state.get("polities").isJsonArray()) return;
@@ -697,6 +728,7 @@ public final class WorldSimMod {
                 String realmId = "emergent-" + polityId;
                 activeRealmIds.add(realmId);
                 String dynastyId = polity.get("dynasty_id").getAsString();
+                String polityName = polity.has("name") ? polity.get("name").getAsString() : polityId;
                 Set<String> bandIds = new LinkedHashSet<>();
                 if (polity.has("settlement_ids") && polity.get("settlement_ids").isJsonArray())
                     for (var band : polity.getAsJsonArray("settlement_ids")) bandIds.add(band.getAsString());
@@ -713,6 +745,13 @@ public final class WorldSimMod {
                         polity.get("population").getAsLong(), polity.get("stability").getAsInt(),
                         bandIds.size(), neighbors, biomes, emergentRaceShares(members));
                 if (members.isEmpty()) continue;
+                if (polityName.equals(polityId + " Confederation") || polityName.startsWith("band_")) {
+                    String generatedName = emergentRealmName(polityId, members, polityName);
+                    if (!generatedName.equals(polityName)) {
+                        polityName = generatedName;
+                        polity.addProperty("name", polityName);
+                    }
+                }
                 JsonObject binding = emergenceBindings.has(polityId) && emergenceBindings.get(polityId).isJsonObject()
                         ? emergenceBindings.getAsJsonObject(polityId) : new JsonObject();
                 String previousRulerId = polity.has("ruler_global_id") && !polity.get("ruler_global_id").isJsonNull()
@@ -815,11 +854,17 @@ public final class WorldSimMod {
                 var politicalTitle = RealmsMod.POLITICS.title(titleId);
                 if (politicalTitle == null) {
                     RealmsMod.POLITICS.createTitle(titleId, realmId,
-                            dev.worldforge.realms.Statecraft.Rank.DUCHY, polity.get("name").getAsString());
+                            emergentTitleRank(realmId), polityName);
                     RealmsMod.POLITICS.grantTitle(titleId, ruler.globalId);
                     RealmsMod.POLITICS.setInheritanceLaw(realmId,
                             dev.worldforge.realms.Statecraft.InheritanceLaw.PRIMOGENITURE);
-                } else if (!politicalTitle.holderCharacterId.equals(ruler.globalId)) {
+                } else {
+                    if (!RealmsMod.POLITICS.setTitleRank(titleId, emergentTitleRank(realmId))) {
+                        LOGGER.warn("wf_worldsim: deferred rank change for {}: {}", titleId, RealmsMod.POLITICS.lastError);
+                    }
+                    politicalTitle.name = polityName;
+                }
+                if (politicalTitle != null && !politicalTitle.holderCharacterId.equals(ruler.globalId)) {
                     if (!previousRulerId.isBlank() && politicalTitle.holderCharacterId.equals(previousRulerId)) {
                         RealmsMod.POLITICS.addClaim(titleId, ruler.globalId);
                         if (!RealmsMod.POLITICS.inheritTitle(titleId, previousRulerId, ruler.globalId))
@@ -832,10 +877,16 @@ public final class WorldSimMod {
                     RealmsMod.POLITICS.registerDynasty(dynastyId, ruler.globalId);
                 else RealmsMod.POLITICS.addDynastyMember(dynastyId, ruler.globalId);
                 TitleData.Realm politicalActor = RealmsMod.registerEmergentRealm(realmId,
-                        polity.get("name").getAsString(), map.name, ruler.globalId,
+                        polityName, map.name, ruler.globalId,
                         polity.get("population").getAsLong(), polity.get("stability").getAsInt(),
                         bandIds.size(), neighbors, biomes, emergentRaceShares(members));
                 politicalActor.ruler = ruler.name + (ruler.house == null || ruler.house.isBlank() ? "" : " " + ruler.house);
+                int politicalLevel = RealmsMod.REALMS.level(realmId);
+                politicalActor.props.put("emergence.form_stage", RealmsMod.DEFS.levels.isEmpty()
+                        ? "band" : RealmsMod.DEFS.levels.get(politicalLevel).id());
+                politicalActor.props.put("emergence.form_stage_name", RealmsMod.DEFS.levels.isEmpty()
+                        ? "Стоянка" : RealmsMod.DEFS.levels.get(politicalLevel).name());
+                politicalActor.props.put("emergence.title_rank", emergentTitleRank(realmId).name().toLowerCase(Locale.ROOT));
                 // The political realm points at the same physically materialized colonies;
                 // this is a projection, not a second settlement/territory registry.
                 List<String> physicalSettlementIds = new ArrayList<>();
