@@ -4,6 +4,7 @@ import dev.worldforge.mod.Json;
 import dev.worldforge.mod.TitleData;
 import dev.worldforge.mod.TitleEditor;
 import dev.worldforge.mod.api.Diplomacy;
+import dev.worldforge.mod.api.WorldForgeApi;
 
 import java.util.*;
 
@@ -29,6 +30,8 @@ public final class WarEngine {
     private final LinkedHashMap<String, String> actionOperations = new LinkedHashMap<>();
     public long day;
     private int nextWar = 1;
+    /** Last 30-day autonomous diplomacy review, persisted to make world reloads deterministic. */
+    private long lastAutonomousDiplomacyDay = -1;
     public Authority authority;
     /** Если задан (аддон армий), он двигает время вместо {@link #tick}: армии ходят до того, как война считает день. */
     public java.util.function.DoubleConsumer driver;
@@ -396,6 +399,7 @@ public final class WarEngine {
                 }
                 if (day - w.startDay >= STALEMATE_DAYS) finish(w, null, "Война выдохлась: белый мир");
             }
+            if (day > 0 && day % 30 == 0) advanceAutonomousDiplomacyDay();
         }
         truces.values().removeIf(u -> u <= day);
     }
@@ -539,13 +543,85 @@ public final class WarEngine {
 
     private Map<String, Set<String>> adjCache;
 
-    /** Соседство государств (кэш; сбрасывается при смене карты после мира). */
+    /**
+     * Adjacency combines authored province borders with the live settlement-neighbour
+     * graph published by WorldSim. The base raster graph is cached; emergent edges are
+     * re-read each call because the native world can found, merge or dissolve settlements.
+     */
     public Map<String, Set<String>> adjacency() {
         if (adjCache == null) adjCache = Diplomacy.adjacency(d());
-        return adjCache;
+        Map<String, Set<String>> live = new LinkedHashMap<>();
+        for (TitleData.Realm realm : d().realmList())
+            live.put(realm.id, new LinkedHashSet<>(adjCache.getOrDefault(realm.id, Set.of())));
+        for (TitleData.Realm realm : d().realmList()) {
+            Object raw = realm.props.get("emergence.neighbors");
+            if (raw == null) continue;
+            for (String neighbor : String.valueOf(raw).split(",")) {
+                String id = neighbor.trim();
+                if (id.isEmpty() || id.equals(realm.id) || !d().realms.containsKey(id)) continue;
+                live.computeIfAbsent(realm.id, ignored -> new LinkedHashSet<>()).add(id);
+                live.computeIfAbsent(id, ignored -> new LinkedHashSet<>()).add(realm.id);
+            }
+        }
+        Map<String, Set<String>> result = new LinkedHashMap<>();
+        live.forEach((id, neighbors) -> result.put(id, Collections.unmodifiableSet(neighbors)));
+        return Collections.unmodifiableMap(result);
     }
 
     public boolean neighbours(String a, String b) { return adjacency().getOrDefault(a, Set.of()).contains(b); }
+
+    private boolean autonomousRealm(TitleData.Realm realm) {
+        if (realm == null || realm.props.containsKey("player")) return false;
+        Object enabled = realm.props.get("politics.ai_diplomacy");
+        return !(enabled instanceof Boolean value) || value;
+    }
+
+    private int realmStability(TitleData.Realm realm) {
+        Object value = realm.props.get("stability");
+        return value instanceof Number number ? Math.max(0, Math.min(100, number.intValue())) : 60;
+    }
+
+    /**
+     * Monthly autonomous diplomatic review. It reuses the same alliance action, attitude
+     * calculation, war/truce checks and durable action receipts as player diplomacy.
+     * AI only forms a defensive alignment where both courts are stable and share a threat;
+     * it does not invent military strength or launch wars from population-only guesses.
+     */
+    private void advanceAutonomousDiplomacyDay() {
+        if (lastAutonomousDiplomacyDay == day) return;
+        lastAutonomousDiplomacyDay = day;
+        Map<String, Set<String>> graph = adjacency();
+        List<String> ids = d().realmList().stream().map(realm -> realm.id).sorted().toList();
+        for (String firstId : ids) {
+            TitleData.Realm first = d().realms.get(firstId);
+            if (!autonomousRealm(first) || realmStability(first) < 45) continue;
+            for (String secondId : graph.getOrDefault(firstId, Set.of()).stream().sorted().toList()) {
+                if (firstId.compareTo(secondId) >= 0) continue;
+                TitleData.Realm second = d().realms.get(secondId);
+                if (!autonomousRealm(second) || realmStability(second) < 45) continue;
+                if (warBetween(firstId, secondId) != null || truceActive(firstId, secondId)
+                        || alliesOf(firstId).contains(secondId) || allyBlock(firstId, secondId) != null) continue;
+                Attitude attitude = Attitude.of(this, firstId, secondId);
+                // Shared enemies are a concrete common-interest signal; mere proximity is not enough.
+                if (attitude.total < 15 || attitude.reasons.stream().noneMatch(reason -> reason.startsWith("Общие враги"))) continue;
+                String requestId = "ai-diplomacy:" + UUID.nameUUIDFromBytes((day + "|" + firstId + "|" + secondId).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                try {
+                    allyOnce(requestId, firstId, secondId);
+                    editor.group(() -> {
+                        editor.setRealmProp(firstId, "diplomacy.ai.last_action", "Заключён оборонительный союз с " + second.name);
+                        editor.setRealmProp(firstId, "diplomacy.ai.last_day", day);
+                        editor.setRealmProp(secondId, "diplomacy.ai.last_action", "Заключён оборонительный союз с " + first.name);
+                        editor.setRealmProp(secondId, "diplomacy.ai.last_day", day);
+                    });
+                    WorldForgeApi.postEvent("diplomacy",
+                            first.name + " и " + second.name + " заключили оборонительный союз",
+                            List.of(firstId, secondId), Math.max(0L, day * 1440L));
+                } catch (RuntimeException error) {
+                    // One failed negotiation must not stop the remaining countries' review.
+                }
+            }
+        }
+    }
 
     private boolean overlordOf(String top, String low) {
         int g = 0;
@@ -658,6 +734,7 @@ public final class WarEngine {
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("format", "wf-war/2");
         root.put("day", day); root.put("next_war", nextWar);
+        root.put("ai_diplomacy_day", lastAutonomousDiplomacyDay);
         root.put("truces", new LinkedHashMap<String, Object>(truces));
         Map<String, Object> mg = new LinkedHashMap<>();
         for (Map.Entry<String, Set<String>> e : managedEnemies.entrySet()) mg.put(e.getKey(), new ArrayList<Object>(e.getValue()));
@@ -695,7 +772,10 @@ public final class WarEngine {
         if (!legacy && !"wf-war/2".equals(format)) throw new IllegalArgumentException("Неверный формат войн");
         day = ((Number) root.get("day")).longValue();
         nextWar = ((Number) root.get("next_war")).intValue();
+        lastAutonomousDiplomacyDay = root.get("ai_diplomacy_day") instanceof Number aiDay
+                ? aiDay.longValue() : -1L;
         truces.clear(); wars.clear(); managedEnemies.clear(); actionOperations.clear();
+        adjCache = null;
         for (Map.Entry<String, Object> e : ((Map<String, Object>) root.get("truces")).entrySet()) truces.put(e.getKey(), ((Number) e.getValue()).longValue());
         for (Map.Entry<String, Object> e : ((Map<String, Object>) root.get("managed")).entrySet()) {
             Set<String> s = new LinkedHashSet<>();

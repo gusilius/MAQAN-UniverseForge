@@ -369,14 +369,12 @@ public final class WorldSimMod {
             item.addProperty("last_war_day", lastWarDay);
             realms.add(item);
         }
-        Set<String> emergentIds = RealmsMod.emergentRealms().stream()
-                .map(realm -> realm.id).collect(java.util.stream.Collectors.toSet());
         Set<String> emittedEmergentBorders = new TreeSet<>();
         for (TitleData.Realm realm : RealmsMod.emergentRealms()) {
             Object raw = realm.props.get("emergence.neighbors");
             if (raw == null) continue;
             for (String neighbor : String.valueOf(raw).split(",")) {
-                if (neighbor.isBlank() || !emergentIds.contains(neighbor)) continue;
+                if (neighbor.isBlank() || RealmsMod.realm(neighbor) == null) continue;
                 String a = realm.id.compareTo(neighbor) < 0 ? realm.id : neighbor;
                 String b = realm.id.compareTo(neighbor) < 0 ? neighbor : realm.id;
                 if (!emittedEmergentBorders.add(a + "|" + b)) continue;
@@ -589,6 +587,26 @@ public final class WorldSimMod {
         }
         double maxDistanceSq = Math.pow(Math.min(map.w, map.h) / 4.0, 2.0);
         Set<String> neighbors = new TreeSet<>();
+        // Emergent settlement clusters inherit the real political borders of the map
+        // provinces they occupy or touch. This bridges new settlements into authored
+        // countries without inventing raster provinces or a parallel territory registry.
+        for (String bandId : own) {
+            JsonObject band = samples.get(bandId);
+            if (band == null) continue;
+            int px = Math.max(0, Math.min(map.w - 1, band.get("x").getAsInt()));
+            int pz = Math.max(0, Math.min(map.h - 1, band.get("z").getAsInt()));
+            TitleData.Title province = map.titles == null ? null : map.titles.provinceAtPixel(px, pz);
+            if (province == null || map.titles == null) continue;
+            TitleData.Realm occupying = map.titles.realmOf(province);
+            if (occupying != null && !occupying.id.equals("emergent-" + polity.get("id").getAsString()))
+                neighbors.add(occupying.id);
+            for (int adjacentProvinceId : province.neighbors) {
+                TitleData.Title adjacentProvince = map.titles.get(adjacentProvinceId);
+                TitleData.Realm adjacentRealm = adjacentProvince == null ? null : map.titles.realmOf(adjacentProvince);
+                if (adjacentRealm != null && !adjacentRealm.id.equals("emergent-" + polity.get("id").getAsString()))
+                    neighbors.add(adjacentRealm.id);
+            }
+        }
         for (var item : polities) {
             if (!item.isJsonObject()) continue;
             JsonObject other = item.getAsJsonObject();
@@ -670,6 +688,7 @@ public final class WorldSimMod {
             var registry = PeopleMod.registry(map);
             if (registry == null) continue;
             boolean changed = false;
+            boolean settlementMapMarkersChanged = false;
             for (var element : state.getAsJsonArray("polities")) {
                 if (!element.isJsonObject()) continue;
                 JsonObject polity = element.getAsJsonObject();
@@ -817,6 +836,34 @@ public final class WorldSimMod {
                         polity.get("population").getAsLong(), polity.get("stability").getAsInt(),
                         bandIds.size(), neighbors, biomes, emergentRaceShares(members));
                 politicalActor.ruler = ruler.name + (ruler.house == null || ruler.house.isBlank() ? "" : " " + ruler.house);
+                // The political realm points at the same physically materialized colonies;
+                // this is a projection, not a second settlement/territory registry.
+                List<String> physicalSettlementIds = new ArrayList<>();
+                List<String> physicalSettlementNames = new ArrayList<>();
+                List<String> physicalSettlementCenters = new ArrayList<>();
+                for (String bandId : bandIds) {
+                    String settlementId = "emg_" + bandId;
+                    Colony physical = SettleMod.colony(settlementId);
+                    if (physical == null) continue;
+                    if (!realmId.equals(SettleMod.realmOf(physical))
+                            && !SettleMod.bindEmergentRealmInMemory(settlementId, realmId)) continue;
+                    if (!realmId.equals(SettleMod.realmOf(physical))) continue;
+                    physicalSettlementIds.add(settlementId);
+                    physicalSettlementNames.add(physical.s.name);
+                    physicalSettlementCenters.add(settlementId + "@" + physical.cx + "," + physical.cz);
+                }
+                Collections.sort(physicalSettlementIds);
+                Collections.sort(physicalSettlementNames);
+                Collections.sort(physicalSettlementCenters);
+                String settlementIdsProjection = String.join(",", physicalSettlementIds);
+                String settlementNamesProjection = String.join(", ", physicalSettlementNames);
+                String settlementCentersProjection = String.join(";", physicalSettlementCenters);
+                settlementMapMarkersChanged |= !Objects.equals(
+                        String.valueOf(politicalActor.props.getOrDefault("emergence.settlement_centers", "")),
+                        settlementCentersProjection);
+                politicalActor.props.put("emergence.settlement_ids", settlementIdsProjection);
+                politicalActor.props.put("emergence.settlement_names", settlementNamesProjection);
+                politicalActor.props.put("emergence.settlement_centers", settlementCentersProjection);
                 politicalActor.props.put("emergence.ruler_global_id", ruler.globalId);
                 for (String bandId : bandIds) {
                     String settlementId = "emg_" + bandId;
@@ -849,6 +896,8 @@ public final class WorldSimMod {
                 if (durable != null && !PeopleMod.persistCharacter(durable, server))
                     LOGGER.error("wf_worldsim: ruler/dynasty/court bindings for map {} could not be persisted", map.name);
             }
+            if (settlementMapMarkersChanged)
+                dev.worldforge.mod.PoliticalMapRenderer.regenerateAll(map);
         }
         RealmsMod.reconcileEmergentRealms(activeRealmIds);
         if (!activeRealmIds.isEmpty() && !SettleMod.saveDurably(server))
@@ -1137,8 +1186,16 @@ public final class WorldSimMod {
                 if (map.titles == null || !map.titles.realms.containsKey(attacker) || !map.titles.realms.containsKey(defender)) continue;
                 WarEngine war = WarMod.engine(map);
                 if (war.cbs.isEmpty()) return false;
-                String cb = war.cbs.keySet().stream().sorted().findFirst().orElse("");
-                war.declareOnce(requestId, attacker, defender, cb, List.of());
+                WarEngine.CbOption selected = war.cbOptions(attacker, defender).stream()
+                        .filter(option -> option.available)
+                        .min(Comparator.comparingInt(option -> option.cb.goal == dev.worldforge.war.CasusBelli.Goal.SUBJUGATE ? 0
+                                : option.cb.goal == dev.worldforge.war.CasusBelli.Goal.CONQUER ? 1 : 2))
+                        .orElse(null);
+                if (selected == null) return false;
+                List<Integer> goals = selected.cb.goal == dev.worldforge.war.CasusBelli.Goal.CONQUER
+                        ? war.goalCandidates(defender).stream().limit(selected.cb.maxGoals).map(title -> title.id).toList()
+                        : List.of();
+                war.declareOnce(requestId, attacker, defender, selected.cb.id, goals);
                 return WarMod.persistNow(server);
             }
             return false;

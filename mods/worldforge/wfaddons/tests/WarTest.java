@@ -221,6 +221,49 @@ public class WarTest {
             ok(nc.values.contains(Attitude.PAST_WAR_CAP), "мнение: штраф за прошлые войны ограничен " + Attitude.PAST_WAR_CAP + " после " + (capCount + 1) + " войн");
         }
 
+        // --- autonomous monthly diplomacy uses live emergent borders and the shared attitude model
+        {
+            for (TitleData.Realm candidate : d.realmList()) {
+                candidate.props.remove("allies");
+                candidate.props.remove("enemies");
+                candidate.props.remove("war.state");
+            }
+            TitleData.Realm left = d.realms.get(B), right = d.realms.get(F);
+            left.props.put("emergence.virtual", true);
+            right.props.put("emergence.virtual", true);
+            left.props.put("emergence.neighbors", F);
+            left.props.put("stability", 75);
+            right.props.put("stability", 72);
+            left.props.put("enemies", E);
+            right.props.put("enemies", E);
+            WarEngine ai = new WarEngine(ed);
+            ok(ai.neighbours(B, F), "live autonomous settlement border is included in diplomatic adjacency");
+            ai.tick(30);
+            ok(ai.alliesOf(B).contains(F) && ai.alliesOf(F).contains(B),
+                    "monthly AI review forms a defensive alliance only with a stable neighbor sharing a threat");
+            ok("30".equals(prop(d, B, "diplomacy.ai.last_day"))
+                            && prop(d, B, "diplomacy.ai.last_action").contains(d.realms.get(F).name),
+                    "AI diplomatic outcome is published on both canonical realm projections");
+            String aiSnapshot = ai.toJson();
+            WarEngine restoredAi = new WarEngine(ed);
+            restoredAi.fromJson(aiSnapshot);
+            ok(restoredAi.toJson().equals(aiSnapshot),
+                    "monthly autonomous diplomacy review cursor survives the war-engine save");
+            left.props.remove("emergence.neighbors");
+            left.props.remove("emergence.virtual");
+            right.props.remove("emergence.virtual");
+            left.props.remove("stability");
+            right.props.remove("stability");
+            left.props.remove("enemies");
+            right.props.remove("enemies");
+            left.props.remove("allies");
+            right.props.remove("allies");
+            left.props.remove("diplomacy.ai.last_day");
+            right.props.remove("diplomacy.ai.last_day");
+            left.props.remove("diplomacy.ai.last_action");
+            right.props.remove("diplomacy.ai.last_action");
+        }
+
         // --- durable political action receipts and replay after restart
         {
             WarEngine receiptEngine = new WarEngine(ed);

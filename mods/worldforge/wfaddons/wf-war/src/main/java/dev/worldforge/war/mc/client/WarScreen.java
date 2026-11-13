@@ -278,7 +278,20 @@ public class WarScreen extends Screen {
             cy += 11;
             g.drawString(font, "Доктрины " + doctrines + "/" + doctrineSlots + " · законы " + laws + "/" + lawSlots,
                     ix, cy, WFUi.MUTED);
-            cy += 14;
+            cy += 11;
+            String settlementNames = String.valueOf(sr.props.getOrDefault("emergence.settlement_names", ""));
+            if (!settlementNames.isBlank()) {
+                g.drawString(font, font.plainSubstrByWidth("ВЛАДЕНИЯ: " + settlementNames, iw), ix, cy, WFUi.MUTED);
+                cy += 11;
+            }
+            cy += 3;
+        }
+        if (sr != null) {
+            String lastAction = String.valueOf(sr.props.getOrDefault("diplomacy.ai.last_action", ""));
+            if (!lastAction.isBlank()) {
+                g.drawString(font, font.plainSubstrByWidth("Дипломатия ИИ: " + lastAction, iw), ix, cy, WFUi.GOLD_DIM);
+                cy += 12;
+            }
         }
         WarEngine.DipStatus st = e.diplomacyStatus(realm, sel);
         WFUi.badge(g, font, ix, cy, st.text, statusColor(st.kind));

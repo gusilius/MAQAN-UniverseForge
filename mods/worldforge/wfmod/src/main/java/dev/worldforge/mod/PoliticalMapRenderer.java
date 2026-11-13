@@ -135,6 +135,22 @@ public final class PoliticalMapRenderer {
                     if (t != null && (top == null || t.tier > top.tier)) top = t;
                 }
                 if (top != null) dot(img, top, w, h, ox, oy, side);
+                else if (Boolean.TRUE.equals(r.props.get("emergence.virtual"))) {
+                    // Emergent countries have no fabricated raster provinces. Their actual
+                    // materialized settlements are shown as map markers at their Minecraft centers.
+                    Object rawCenters = r.props.get("emergence.settlement_centers");
+                    if (rawCenters != null) for (String center : String.valueOf(rawCenters).split(";")) {
+                        int at = center.lastIndexOf('@'), comma = center.indexOf(',', at + 1);
+                        if (at < 0 || comma < 0) continue;
+                        try {
+                            double worldX = Double.parseDouble(center.substring(at + 1, comma));
+                            double worldZ = Double.parseDouble(center.substring(comma + 1));
+                            double pixelX = worldX / Math.max(0.001, m.bpp) + w * 0.5;
+                            double pixelZ = worldZ / Math.max(0.001, m.bpp) + h * 0.5;
+                            dot(img, pixelX / w, pixelZ / h, w, h, ox, oy, side);
+                        } catch (NumberFormatException ignored) { }
+                    }
+                }
             }
         } else if (tierIdx > 0) {
             for (TitleData.Title t : d.allTitles()) if (t.tier == tierIdx) dot(img, t, w, h, ox, oy, side);
@@ -143,8 +159,12 @@ public final class PoliticalMapRenderer {
     }
 
     private static void dot(byte[] img, TitleData.Title t, int w, int h, int ox, int oy, int side) {
-        int x = (int) Math.floor(t.capNx * w), y = (int) Math.floor(t.capNy * h);
-        int gx = (int) ((x + ox) / (double) side * 128), gy = (int) ((y + oy) / (double) side * 128);
+        dot(img, t.capNx, t.capNy, w, h, ox, oy, side);
+    }
+
+    private static void dot(byte[] img, double nx, double ny, int w, int h, int ox, int oy, int side) {
+        int gx = (int) Math.floor((nx * w + ox) / (double) side * 128);
+        int gy = (int) Math.floor((ny * h + oy) / (double) side * 128);
         img[Math.min(127, Math.max(0, gy)) * 128 + Math.min(127, Math.max(0, gx))] = (byte) CODE_DOT;
     }
 }
