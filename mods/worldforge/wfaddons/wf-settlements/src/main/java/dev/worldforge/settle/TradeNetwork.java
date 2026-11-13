@@ -116,12 +116,7 @@ public final class TradeNetwork {
             Settlement from = cities.get(suggestion[0]), to = cities.get(suggestion[1]);
             if (from == null || to == null || from.tradePerMin() <= 0 || to.tradePerMin() <= 0) continue;
             String resource = suggestion[2];
-            double sourceStock = from.amount(resource), destinationStock = to.amount(resource);
-            // A route is a dependency, not a price-arbitrage toy: source must have a durable
-            // exportable reserve and destination must genuinely lack the same resource.
-            double exportReserve = Math.max(RESERVE * 2, from.consumedPerMin(resource) * 120.0);
-            if (sourceStock < exportReserve || destinationStock >= sourceStock * 0.5
-                    || to.capacity(resource) - destinationStock < 1.0) continue;
+            if (!hasSupplyNeed(from, to, resource)) continue;
             if (participation.getOrDefault(from.id, 0) >= perSettlementLimit
                     || participation.getOrDefault(to.id, 0) >= perSettlementLimit) continue;
             boolean duplicate = routes.values().stream().anyMatch(route ->
@@ -139,6 +134,16 @@ public final class TradeNetwork {
         return created;
     }
 
+    /** Shared eligibility rule for automatic route creation and the settlement trade panel. */
+    private static boolean hasSupplyNeed(Settlement from, Settlement to, String resource) {
+        if (from == null || to == null || resource == null || resource.isBlank()) return false;
+        double sourceStock = from.amount(resource), destinationStock = to.amount(resource);
+        double exportReserve = Math.max(RESERVE * 2, from.consumedPerMin(resource) * 120.0);
+        return sourceStock >= exportReserve
+                && destinationStock < sourceStock * 0.5
+                && to.capacity(resource) - destinationStock >= 1.0;
+    }
+
     /** Лучшие пары для маршрутов: отношение цен, убывание. */
     public static List<String[]> suggestions(Map<String, Settlement> cities, int limit) {
         List<double[]> tmp = new ArrayList<>();
@@ -148,7 +153,7 @@ public final class TradeNetwork {
             for (String res : a.defs.prices.keySet()) {
                 if (res.equals(Defs.SILVER)) continue;
                 double pa = a.price(res), pb = b.price(res);
-                if (pa <= 0 || pb < pa * MIN_SPREAD || a.amount(res) < RESERVE) continue;
+                if (pa <= 0 || pb < pa * MIN_SPREAD || !hasSupplyNeed(a, b, res)) continue;
                 tmp.add(new double[]{pb / pa}); keys.add(new String[]{a.id, b.id, res});
             }
         }

@@ -47,9 +47,9 @@ public class TradeNetTest {
         // direction is deliberately rich -> richer; stock checks must still reject it.
         rich.pressure.put("wood", -0.8); richer.pressure.put("wood", 0.8);
         ok(TradeNetwork.suggestions(Map.of("rich", rich, "richer", richer), 4).stream()
-                        .anyMatch(route -> route[0].equals("rich") && route[1].equals("richer")
+                        .noneMatch(route -> route[0].equals("rich") && route[1].equals("richer")
                                 && route[2].equals("wood")),
-                "test fixture exposes a price spread toward a stocked destination");
+                "trade panel hides a price-spread route when the destination is already stocked");
         TradeNetwork noDemand = new TradeNetwork();
         noDemand.ensureAutonomousRoutes(Map.of("rich", rich, "richer", richer), 2, 2, 2.0);
         ok(noDemand.routes.values().stream().noneMatch(route -> route.from.equals("rich")
@@ -59,9 +59,9 @@ public class TradeNetTest {
         reserve.stock.put("wood", TradeNetwork.RESERVE + 1); needy.stock.put("wood", 0.0);
         reserve.pressure.put("wood", -0.8); needy.pressure.put("wood", 0.8);
         ok(TradeNetwork.suggestions(Map.of("reserve", reserve, "needy", needy), 4).stream()
-                        .anyMatch(route -> route[0].equals("reserve") && route[1].equals("needy")
+                        .noneMatch(route -> route[0].equals("reserve") && route[1].equals("needy")
                                 && route[2].equals("wood")),
-                "test fixture exposes a candidate whose source reserve is insufficient");
+                "trade panel hides a route that would consume the source reserve");
         TradeNetwork noExport = new TradeNetwork();
         noExport.ensureAutonomousRoutes(Map.of("reserve", reserve, "needy", needy), 2, 2, 2.0);
         ok(noExport.routes.values().stream().noneMatch(route -> route.from.equals("reserve")
