@@ -150,7 +150,7 @@ if int(report.get("physically_completed_buildings", 0)) < int(report.get("settle
     raise SystemExit("The physical building count is below the one-building-per-settlement acceptance threshold")
 if not report.get("physical_world_dimension"):
     raise SystemExit("Campaign did not run in a registered Planetos map dimension")
-for key in ("stable_states", "characters", "settlements", "materialized_settlements", "completed_buildings", "physically_completed_buildings", "physically_built_settlements", "canonical_ruler_generations_verified", "world_events", "chronicle_entries"):
+for key in ("stable_states", "characters", "settlements", "materialized_settlements", "completed_buildings", "physically_completed_buildings", "physically_built_settlements", "canonical_ruler_generations_verified", "origin_race_characters", "origin_distinct_races", "origin_class_characters", "origin_profession_characters", "world_events", "chronicle_entries"):
     if int(report.get(key, 0)) <= 0:
         raise SystemExit(f"Campaign report is missing required generated data: {key}")
 book = inventory_path.with_name("chronicle-book.md")
@@ -163,7 +163,7 @@ inventory_path.write_text(json.dumps({
     "runtime": "Forge server campaign; see campaign-report.json and server.log"
 }, ensure_ascii=False, indent=2), encoding="utf-8")
 print("AUTONOMOUS_CAMPAIGN_STATUS=PASS")
-for key in ("map", "physical_world_dimension", "elapsed_years", "stable_states", "characters", "settlements", "materialized_settlements", "completed_buildings", "canonical_ruler_generations_verified", "world_events", "chronicle_entries"):
+for key in ("map", "physical_world_dimension", "elapsed_years", "stable_states", "characters", "settlements", "materialized_settlements", "completed_buildings", "canonical_ruler_generations_verified", "origin_race_characters", "origin_distinct_races", "origin_class_characters", "origin_profession_characters", "world_events", "chronicle_entries"):
     print(f"AUTONOMOUS_CAMPAIGN_{key.upper()}={report.get(key)}")
 print(f"AUTONOMOUS_CAMPAIGN_ADDON_JARS={len(inventory)}")
 PY

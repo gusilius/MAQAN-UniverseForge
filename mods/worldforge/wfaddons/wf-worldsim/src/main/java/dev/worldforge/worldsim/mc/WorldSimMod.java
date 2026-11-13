@@ -18,6 +18,8 @@ import dev.worldforge.court.CourtSim;
 import dev.worldforge.court.mc.CourtMod;
 import dev.worldforge.court.Marriages;
 import dev.worldforge.people.CharacterRegistry;
+import dev.worldforge.origins.Origins;
+import dev.worldforge.origins.mc.OriginsMod;
 import dev.worldforge.people.PopulationSimulation;
 import dev.worldforge.people.mc.PeopleMod;
 import dev.worldforge.realms.mc.RealmsMod;
@@ -470,7 +472,17 @@ public final class WorldSimMod {
                             && canonicalGenerationCount(item.getAsJsonObject()) >= 4).count());
             report.addProperty("physical_world_dimension", mapDimension(server,
                     WorldForgeMod.loadedMaps().get(campaignMapId)));
-            report.addProperty("characters", PeopleMod.registry(WorldForgeMod.loadedMaps().get(campaignMapId)).size());
+            CharacterRegistry campaignPeople = PeopleMod.registry(WorldForgeMod.loadedMaps().get(campaignMapId));
+            report.addProperty("characters", campaignPeople.size());
+            report.addProperty("origin_race_characters", campaignPeople.all().stream()
+                    .filter(person -> person.props.containsKey("origin.race")).count());
+            report.addProperty("origin_distinct_races", campaignPeople.all().stream()
+                    .map(person -> String.valueOf(person.props.getOrDefault("origin.race", "")))
+                    .filter(value -> !value.isBlank()).distinct().count());
+            report.addProperty("origin_class_characters", campaignPeople.all().stream()
+                    .filter(person -> person.props.containsKey("origin.class")).count());
+            report.addProperty("origin_profession_characters", campaignPeople.all().stream()
+                    .filter(person -> person.props.containsKey("origin.profession")).count());
             report.addProperty("world_events", WorldForgeApi.events().size());
             report.addProperty("chronicle_entries", HISTORICAL_CHRONICLE.size());
             report.add("emergence_state", emergenceState.deepCopy());
@@ -828,6 +840,10 @@ public final class WorldSimMod {
                     if (created == null) break;
                     residents.add(created);
                 }
+                // Attach the existing Origins addon to the same canonical Character UUID.
+                // This gives emergent NPCs real race, class and profession progression records.
+                for (int index = 0; index < residents.size(); index++)
+                    ensureEmergentOrigin(residents.get(index), map, year, index);
                 // The native cohort count is a demographic target, not an order to kill
                 // canonical people. A lower target can result from migration, scarcity or
                 // modelled decline; only the individual life/death simulation may end a life.
@@ -1354,6 +1370,35 @@ public final class WorldSimMod {
         tagEmergentResident(person, bandId);
         person.props.put("identity.source", "autonomous-emergence");
         return person;
+    }
+
+    private static void ensureEmergentOrigin(dev.worldforge.people.Character person,
+            MapData map, int year, int ordinal) {
+        if (person == null || person.globalId == null || person.globalId.isBlank()) return;
+        String owner = "n:" + person.globalId;
+        try {
+            Origins.Build existing = OriginsMod.ORIGINS.peek(owner);
+            if (existing == null) {
+                long seed = PeopleMod.seed(map) ^ person.globalId.hashCode();
+                List<String> groups = OriginsMod.DEFS.professions.values().stream()
+                        .map(profession -> profession.group()).filter(group -> group != null && !group.isBlank())
+                        .distinct().sorted().toList();
+                boolean adult = PopulationSimulation.age(person, year) >= 18;
+                String hint = adult && !groups.isEmpty()
+                        ? groups.get(Math.floorMod((int) seed, groups.size())) : "";
+                int level = adult ? Math.max(5, Math.min(60, PopulationSimulation.age(person, year) / 2)) : 1;
+                existing = OriginsMod.ORIGINS.assign(owner, seed, hint, level);
+            }
+            if (existing.race != null && !existing.race.isBlank())
+                person.props.put("origin.race", existing.race);
+            if (existing.cls != null && !existing.cls.isBlank())
+                person.props.put("origin.class", existing.cls);
+            if (!existing.prof.isEmpty())
+                person.props.put("origin.profession", existing.prof.keySet().iterator().next());
+        } catch (RuntimeException unavailable) {
+            LOGGER.debug("wf_worldsim: Origins assignment deferred for canonical Character {}: {}",
+                    person.globalId, unavailable.toString());
+        }
     }
 
     private static void tagEmergentResident(dev.worldforge.people.Character person, String bandId) {
