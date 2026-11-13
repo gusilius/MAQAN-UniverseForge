@@ -27,3 +27,13 @@
 ## Закрытые проблемы
 
 Пока нет.
+
+
+### WF-RT-0002 — повторная загрузка чанка из ChunkEvent.Load
+
+- **Статус:** исправление внесено; ожидает полного Windows Forge CI и повторной кампании.
+- **Подсистемы:** `wf-settlements` / `VanillaVillageAdapter`, интеграция с `wf-worldsim`.
+- **Доказательство:** crash report из [CI run 43525730168](https://github.com/gusilius/MAQAN-UniverseForge/actions/runs/43525730168), Watchdog stack: `WorldSimMod.forceCampaignSettlementChunks:578` → `VanillaVillageAdapter.onChunkLoad:57` → `reconcileInfrastructureChunk:196` → `adoptInfrastructureChunk:209` → `ServerChunkCache.getChunk`.
+- **Причина:** обработчик `ChunkEvent.Load` синхронно запускал инфраструктурное сканирование чанка, пока `ServerChunkCache` ещё интегрировал этот же чанк. Внутри сканирования вызов `Level.getHeight` повторно запрашивал чанк через `getChunk`, блокируя главный поток ожиданием самого себя.
+- **Исправление:** обработчик теперь только ставит позицию чанка в очередь. Очередь обрабатывается на последующих `ServerTickEvent.END`, максимум два уже загруженных чанка за тик. Немедленный обход соседних чанков при обнаружении деревни удалён; периодическая синхронизация жителей и уже загруженной инфраструктуры сохранена.
+- **Критерий закрытия:** кампания проходит этап физической материализации без Watchdog; vanilla village инфраструктура продолжает связываться с общей моделью; обычный мир проходит smoke-тест.

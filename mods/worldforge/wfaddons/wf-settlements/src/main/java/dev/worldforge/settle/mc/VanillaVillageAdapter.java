@@ -24,12 +24,15 @@ import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.level.ChunkEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import net.minecraft.world.level.ChunkPos;
 
 /**
  * Adopts vanilla generated villages into the same settlement and Character systems.
@@ -38,6 +41,9 @@ import java.util.Set;
  */
 public final class VanillaVillageAdapter {
     private static final int RECONCILE_RADIUS = 64;
+    private static final int MAX_INFRASTRUCTURE_CHUNKS_PER_TICK = 2;
+    private static final Map<String, ArrayDeque<ChunkPos>> PENDING_INFRASTRUCTURE = new LinkedHashMap<>();
+    private static final Set<String> PENDING_INFRASTRUCTURE_KEYS = new HashSet<>();
 
     @SubscribeEvent
     public void onChunkLoad(ChunkEvent.Load event) {
@@ -54,7 +60,46 @@ public final class VanillaVillageAdapter {
             int z = (bounds.minZ() + bounds.maxZ()) / 2;
             adopt(level, x, z, typeKey.toString());
         }
-        reconcileInfrastructureChunk(level, chunk.getPos());
+        enqueueInfrastructureChunk(level, chunk.getPos());
+    }
+
+    /**
+     * ChunkEvent.Load fires while the chunk is still being integrated into ServerChunkCache.
+     * Infrastructure inspection calls height/block accessors that may request that same chunk
+     * again and deadlock the server thread. Defer inspection until a later server tick and
+     * process a bounded number of already-loaded chunks per tick.
+     */
+    @SubscribeEvent
+    public void onServerTick(TickEvent.ServerTickEvent event) {
+        if (event.phase != TickEvent.Phase.END) return;
+        MinecraftServer server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
+        if (server == null) return;
+        int processed = 0;
+        for (ServerLevel level : server.getAllLevels()) {
+            String dimension = level.dimension().location().toString();
+            ArrayDeque<ChunkPos> queue = PENDING_INFRASTRUCTURE.get(dimension);
+            if (queue == null) continue;
+            while (processed < MAX_INFRASTRUCTURE_CHUNKS_PER_TICK && !queue.isEmpty()) {
+                ChunkPos position = queue.peekFirst();
+                if (level.getChunkSource().getChunkNow(position.x, position.z) == null) break;
+                queue.removeFirst();
+                PENDING_INFRASTRUCTURE_KEYS.remove(chunkKey(dimension, position));
+                reconcileInfrastructureChunk(level, position);
+                processed++;
+            }
+            if (queue.isEmpty()) PENDING_INFRASTRUCTURE.remove(dimension);
+            if (processed >= MAX_INFRASTRUCTURE_CHUNKS_PER_TICK) break;
+        }
+    }
+
+    private static void enqueueInfrastructureChunk(ServerLevel level, ChunkPos position) {
+        String dimension = level.dimension().location().toString();
+        if (!PENDING_INFRASTRUCTURE_KEYS.add(chunkKey(dimension, position))) return;
+        PENDING_INFRASTRUCTURE.computeIfAbsent(dimension, ignored -> new ArrayDeque<>()).addLast(position);
+    }
+
+    private static String chunkKey(String dimension, ChunkPos position) {
+        return dimension + "|" + position.x + "|" + position.z;
     }
 
     /** New villagers may arrive after the structure-start chunk; periodically reconcile the loaded area. */
@@ -101,8 +146,9 @@ public final class VanillaVillageAdapter {
                     realm == null ? List.of() : List.of(realm.id), WorldForgeApi.clock().worldMinute());
         }
         reconcileResidents(level, colony);
-        reconcileLoadedInfrastructure(level, colony);
-        // Future chunks are adopted incrementally by the chunk-load listener.
+        // Infrastructure scans are queued by ChunkEvent.Load and drained on later ticks;
+        // never inspect the chunk currently being integrated by ServerChunkCache.
+        // Future chunks are adopted incrementally by the deferred chunk queue.
         if (created && !SettleMod.saveDurably(level.getServer()))
             SettleMod.LOGGER.error("wf_settle: discovered vanilla village {} could not be durably saved", id);
     }
