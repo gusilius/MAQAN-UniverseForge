@@ -35,8 +35,9 @@ public final class SettlementCaravans {
                     || !shipment.physical()) continue;
             ServerLevel level = level(server, shipment.fromDimension);
             if (level == null) continue;
-            double x = shipment.fromX + (shipment.toX - shipment.fromX) * shipment.progress();
-            double z = shipment.fromZ + (shipment.toZ - shipment.fromZ) * shipment.progress();
+            double[] head = routePositionForSnapshot(shipment.path(), shipment.progress(),
+                    shipment.fromX, shipment.fromZ, shipment.toX, shipment.toZ);
+            double x = head[0], z = head[1], yaw = head[2];
             ServerPlayer nearest = null;
             double nearestDistance = Double.MAX_VALUE;
             for (ServerPlayer player : server.getPlayerList().getPlayers()) {
@@ -56,7 +57,6 @@ public final class SettlementCaravans {
                 Entity entity = level.getEntity(id);
                 if (entity == null) continue;
                 double offset = index++ * 2.4;
-                double yaw = Math.atan2(-(shipment.toX - shipment.fromX), shipment.toZ - shipment.fromZ);
                 double px = x - Math.sin(yaw) * offset;
                 double pz = z - Math.cos(yaw) * offset;
                 int y = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
@@ -70,6 +70,35 @@ public final class SettlementCaravans {
             discard(server, entry.getValue());
             it.remove();
         }
+    }
+
+    /** Reuse wf-trade's CaravanPath interpolation when installed; deterministic polyline fallback otherwise. */
+    public static double[] routePositionForSnapshot(double[][] path, double progress,
+                                           double fromX, double fromZ, double toX, double toZ) {
+        if (path == null || path.length < 2) path = new double[][]{{fromX,fromZ},{toX,toZ}};
+        try {
+            Class<?> worldLayer = Class.forName("dev.worldforge.trade.mc.WorldLayer");
+            Object result = worldLayer.getMethod("settlementPosition", double[][].class, double.class)
+                    .invoke(null, path, progress);
+            if (result instanceof double[] position && position.length >= 3
+                    && Double.isFinite(position[0]) && Double.isFinite(position[1]) && Double.isFinite(position[2]))
+                return position;
+        } catch (ReflectiveOperationException | LinkageError ignored) {
+            // Optional wf-trade not installed.
+        }
+        double total=0;
+        for(int i=1;i<path.length;i++) total+=Math.hypot(path[i][0]-path[i-1][0],path[i][1]-path[i-1][1]);
+        if(total<=1e-9)return new double[]{fromX,fromZ,0};
+        double target=Math.max(0,Math.min(1,progress))*total, walked=0;
+        for(int i=1;i<path.length;i++){
+            double dx=path[i][0]-path[i-1][0], dz=path[i][1]-path[i-1][1], length=Math.hypot(dx,dz);
+            if(walked+length>=target || i==path.length-1){
+                double part=length<=1e-9?1:(target-walked)/length;
+                return new double[]{path[i-1][0]+dx*part,path[i-1][1]+dz*part,Math.atan2(-dx,dz)};
+            }
+            walked+=length;
+        }
+        return new double[]{toX,toZ,0};
     }
 
     private static ServerLevel level(MinecraftServer server, String dimension) {

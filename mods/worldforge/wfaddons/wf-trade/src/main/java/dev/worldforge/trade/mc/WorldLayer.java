@@ -174,6 +174,65 @@ public final class WorldLayer {
         });
     }
 
+    /**
+     * Settlement shipments reuse the exact province-graph route and CaravanPath interpolation
+     * used by national trade caravans. Settlement anchors are prepended/appended to the capital path.
+     */
+    public static double[][] settlementRoute(String fromRealm, String toRealm,
+                                               double fromX, double fromZ, double toX, double toZ) {
+        String sourceRealm = fromRealm == null ? "" : fromRealm;
+        String destinationRealm = toRealm == null ? "" : toRealm;
+        double[][] provincial = settlementProvinceRoute(sourceRealm, destinationRealm, fromX, fromZ, toX, toZ);
+        double[][] capitals = provincial.length >= 2 ? provincial
+                : sourceRealm.isBlank() || sourceRealm.equals(destinationRealm)
+                ? new double[0][] : route(sourceRealm, destinationRealm);
+        List<double[]> points = new ArrayList<>();
+        points.add(new double[]{fromX, fromZ});
+        if (capitals != null) for (double[] point : capitals) {
+            if (point == null || point.length < 2 || !Double.isFinite(point[0]) || !Double.isFinite(point[1])) continue;
+            double[] last = points.get(points.size() - 1);
+            if (CaravanPath.dist(last[0], last[1], point[0], point[1]) > 1.0) points.add(point.clone());
+        }
+        double[] last = points.get(points.size() - 1);
+        if (CaravanPath.dist(last[0], last[1], toX, toZ) > 1.0) points.add(new double[]{toX, toZ});
+        if (points.size() == 1) points.add(new double[]{toX, toZ});
+        return points.toArray(double[][]::new);
+    }
+
+    /** Shortest route between the settlements' actual provinces on the loaded strategic map graph. */
+    private static double[][] settlementProvinceRoute(String fromRealm, String toRealm,
+                                                               double fromX, double fromZ, double toX, double toZ) {
+        for (MapData map : WorldForgeMod.loadedMaps().values()) {
+            if (map.titles == null) continue;
+            TitleData.Title from = map.provinceAt(fromX, fromZ), to = map.provinceAt(toX, toZ);
+            if (from == null || to == null) continue;
+            TitleData.Realm sourceOwner = map.titles.realmOf(from), destinationOwner = map.titles.realmOf(to);
+            if (sourceOwner == null || destinationOwner == null
+                    || (!fromRealm.isBlank() && !fromRealm.equals(sourceOwner.id))
+                    || (!toRealm.isBlank() && !toRealm.equals(destinationOwner.id))) continue;
+            if (from.id == to.id) return new double[0][];
+            List<Integer> ids = CaravanPath.bfs(id -> {
+                TitleData.Title province = map.titles.get(id);
+                return province == null ? null : province.neighbors;
+            }, from.id, to.id, 160);
+            if (ids.size() < 2) continue;
+            double[][] points = new double[ids.size()][];
+            for (int i=0;i<ids.size();i++) {
+                TitleData.Title province=map.titles.get(ids.get(i));
+                if(province==null) return new double[0][];
+                points[i]=new double[]{province.capX,province.capZ};
+            }
+            return points;
+        }
+        return new double[0][];
+    }
+
+    /** Position query for settlement shipment projections; interpolation is shared with existing caravans. */
+    public static double[] settlementPosition(double[][] path, double progress) {
+        CaravanPath.Pos pos = CaravanPath.along(path == null ? new double[0][] : path, progress);
+        return new double[]{pos.x(), pos.z(), pos.yaw()};
+    }
+
     private static void moveCaravans(MinecraftServer server) {
         double dayFrac = WorldForgeApi.clock().elapsedDays() % 1.0;
         Set<Integer> active = new HashSet<>();

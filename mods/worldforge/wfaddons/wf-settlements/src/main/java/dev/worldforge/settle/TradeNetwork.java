@@ -32,22 +32,30 @@ public final class TradeNetwork {
     public record Location(String dimension, double x, double z) {
         public Location { dimension = dimension == null ? "" : dimension; if (!Double.isFinite(x) || !Double.isFinite(z)) throw new IllegalArgumentException("invalid location"); }
     }
+    /** Route planner is supplied by the Minecraft adapter; simulation remains independent of loaded chunks. */
+    @FunctionalInterface public interface RoutePlanner {
+        double[][] plan(String from, String to, Location origin, Location destination);
+    }
     /** Persisted consignment backed by real TreasuryLedger escrow accounts. */
     public static final class Shipment {
         public final long id; public final int routeId;
         public final String from, to, res, dutyRealm, fromDimension, toDimension;
         public final double quantity, sellerPayment, marketFee, duty, profit, fromX, fromZ, toX, toZ, travelSeconds;
+        private final double[][] path;
         public double elapsed; public String status = "в пути";
         Shipment(long id,int routeId,String from,String to,String res,double quantity,double sellerPayment,
-                 double marketFee,double duty,String dutyRealm,Location a,Location b,double travelSeconds,double profit) {
+                 double marketFee,double duty,String dutyRealm,Location a,Location b,double travelSeconds,double profit,double[][] path) {
             this.id=id; this.routeId=routeId; this.from=from; this.to=to; this.res=res; this.quantity=quantity;
             this.sellerPayment=sellerPayment; this.marketFee=marketFee; this.duty=duty; this.profit=profit; this.dutyRealm=dutyRealm == null ? "" : dutyRealm;
             fromDimension=a==null?"":a.dimension(); toDimension=b==null?"":b.dimension();
             fromX=a==null?0:a.x(); fromZ=a==null?0:a.z(); toX=b==null?0:b.x(); toZ=b==null?0:b.z();
             this.travelSeconds=travelSeconds;
+            this.path = copyPath(path);
         }
         public double progress() { return Math.max(0,Math.min(1,elapsed/Math.max(1,travelSeconds))); }
         public boolean physical() { return !fromDimension.isBlank() && fromDimension.equals(toDimension); }
+        public double[][] path() { return copyPath(path); }
+        public double remainingSeconds() { return Math.max(0, travelSeconds - elapsed); }
     }
     public final Map<Integer, Route> routes = new LinkedHashMap<>();
     public final Map<Long, Shipment> shipments = new LinkedHashMap<>();
@@ -83,6 +91,11 @@ public final class TradeNetwork {
 
     /** Existing consignments settle first; new cargo is reserved in escrow and never teleported to the buyer. */
     public void tick(Map<String, Settlement> cities, double dt, Map<String, Location> locations) {
+        tick(cities, dt, locations, null);
+    }
+
+    /** The adapter may provide the same title-road route used by national trade caravans. */
+    public void tick(Map<String, Settlement> cities, double dt, Map<String, Location> locations, RoutePlanner planner) {
         if (!Double.isFinite(dt) || dt <= 0) return;
         Map<String,Location> anchors = locations == null ? Map.of() : locations;
         TreasuryLedger ledger = TreasuryService.current();
@@ -162,12 +175,16 @@ public final class TradeNetwork {
             }
             a.tradeLeft-=n;b.tradeLeft-=n;a.shiftDemand(route.res,n);route.acc-=n;
             Location from=anchors.get(route.from),to=anchors.get(route.to);
+            double[][] path = planner == null ? null : planner.plan(route.from, route.to, from, to);
+            if (!validPath(path) && from != null && to != null && from.dimension().equals(to.dimension()))
+                path = new double[][]{{from.x(),from.z()},{to.x(),to.z()}};
+            if (!validPath(path)) path = new double[0][];
             double travel=60;
             if(from!=null&&to!=null&&from.dimension().equals(to.dimension()))
-                travel=Math.max(15,Math.hypot(to.x()-from.x(),to.z()-from.z())/8.0);
+                travel=Math.max(15,pathLength(path)/8.0);
             double expectedProfit=n*(give-pa)+n*(pb-pay)-duty;
             Shipment shipment=new Shipment(id,route.id,route.from,route.to,route.res,n,seller,fee,duty,
-                    route.dutyRealm,from,to,travel,expectedProfit);
+                    route.dutyRealm,from,to,travel,expectedProfit,path);
             shipments.put(id,shipment);route.status="в пути";
             events.add("Караван #"+id+" отправлен: "+n+" "+route.res+" из "+route.from+" в "+route.to);
         }
@@ -321,7 +338,10 @@ public final class TradeNetwork {
             m.put("duty",s.duty);m.put("profit",s.profit);m.put("dutyRealm",s.dutyRealm);m.put("fromDimension",s.fromDimension);
             m.put("toDimension",s.toDimension);m.put("fromX",s.fromX);m.put("fromZ",s.fromZ);
             m.put("toX",s.toX);m.put("toZ",s.toZ);m.put("travelSeconds",s.travelSeconds);
-            m.put("elapsed",s.elapsed);m.put("status",s.status);consignments.add(m);
+            m.put("elapsed",s.elapsed);m.put("status",s.status);
+            List<Object> routePoints=new ArrayList<>();
+            for(double[] point:s.path()) routePoints.add(List.of(point[0],point[1]));
+            m.put("path",routePoints);consignments.add(m);
         }
         root.put("shipments",consignments);
         return Json.write(root);
@@ -352,7 +372,7 @@ public final class TradeNetwork {
                     (String)m.get("to"),(String)m.get("res"),((Number)m.get("quantity")).doubleValue(),
                     ((Number)m.get("sellerPayment")).doubleValue(),((Number)m.get("marketFee")).doubleValue(),
                     ((Number)m.get("duty")).doubleValue(),m.get("dutyRealm") instanceof String v?v:"",a,b,
-                    Math.max(1,((Number)m.get("travelSeconds")).doubleValue()),num(m.get("profit")));
+                    Math.max(1,((Number)m.get("travelSeconds")).doubleValue()),num(m.get("profit")),readPath(m.get("path"),a,b));
             shipment.elapsed=Math.max(0,Math.min(shipment.travelSeconds,num(m.get("elapsed"))));
             shipment.status=m.get("status") instanceof String v?v:"в пути";
             n.shipments.put(id,shipment);n.nextShipment=Math.max(n.nextShipment,id+1);
@@ -360,4 +380,35 @@ public final class TradeNetwork {
         return n;
     }
     private static double num(Object value){return value instanceof Number n&&Double.isFinite(n.doubleValue())?n.doubleValue():0;}
+    private static boolean validPath(double[][] path) {
+        if (path == null || path.length < 2) return false;
+        for (double[] point : path) if (point == null || point.length < 2
+                || !Double.isFinite(point[0]) || !Double.isFinite(point[1])) return false;
+        return true;
+    }
+    private static double pathLength(double[][] path) {
+        if (!validPath(path)) return 0;
+        double length=0;
+        for(int i=1;i<path.length;i++) length+=Math.hypot(path[i][0]-path[i-1][0],path[i][1]-path[i-1][1]);
+        return length;
+    }
+    private static double[][] copyPath(double[][] path) {
+        if (path == null) return new double[0][];
+        double[][] copy=new double[path.length][];
+        for(int i=0;i<path.length;i++) copy[i]=path[i]==null?new double[0]:path[i].clone();
+        return copy;
+    }
+    private static double[][] readPath(Object raw, Location from, Location to) {
+        if(raw instanceof List<?> rows) {
+            List<double[]> points=new ArrayList<>();
+            for(Object row:rows) if(row instanceof List<?> pair && pair.size()>=2) {
+                double x=num(pair.get(0)),z=num(pair.get(1));
+                if(Double.isFinite(x)&&Double.isFinite(z)) points.add(new double[]{x,z});
+            }
+            double[][] path=points.toArray(double[][]::new);
+            if(validPath(path)) return path;
+        }
+        return from!=null&&to!=null&&from.dimension().equals(to.dimension())
+                ? new double[][]{{from.x(),from.z()},{to.x(),to.z()}} : new double[0][];
+    }
 }

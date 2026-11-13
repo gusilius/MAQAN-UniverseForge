@@ -103,7 +103,11 @@ public class TradeNetTest {
         double dutyBefore = TreasuryService.current().balance("realm:north");
         double wa = A.amount("wood"), wb = B.amount("wood");
         A.tradeLeft = 100; B.tradeLeft = 100;
-        n.tick(cs, 30);
+        Map<String, TradeNetwork.Location> anchors = Map.of(
+                "A", new TradeNetwork.Location("minecraft:overworld", 0, 0),
+                "B", new TradeNetwork.Location("minecraft:overworld", 80, 0));
+        n.tick(cs, 30, anchors, (from, to, origin, destination) ->
+                new double[][]{{0,0},{20,10},{60,10},{80,0}});
         var firstShipment = n.shipments.values().stream().filter(shipment -> shipment.routeId == r.id).findFirst().orElse(null);
         ok(firstShipment != null && firstShipment.status.equals("в пути")
                         && A.amount("wood") < wa && Math.abs(B.amount("wood") - wb) < 1e-9,
@@ -115,6 +119,10 @@ public class TradeNetTest {
                         && inTransitReload.shipments.get(firstShipment.id).status.equals("в пути")
                         && Math.abs(inTransitReload.shipments.get(firstShipment.id).quantity - firstShipment.quantity) < 1e-9,
                 "in-flight cargo, route identity and progress state survive save/reload");
+        ok(firstShipment.path().length == 4
+                        && inTransitReload.shipments.get(firstShipment.id).path().length == 4
+                        && Math.abs(firstShipment.path()[1][0] - 20) < 1e-9,
+                "province-road polyline is persisted with the shipment and survives reload");
         for (int i = 0; i < 20; i++) { A.tradeLeft = 100; B.tradeLeft = 100; n.tick(cs, 30); }
         ok(r.carried > 0 && A.amount("wood") < wa && B.amount("wood") > wb, "караван доставляет: " + (int) r.carried + " ед.");
         double protectedWoodReserve = Math.max(TradeNetwork.RESERVE * 2, A.consumedPerMin("wood") * 120.0);

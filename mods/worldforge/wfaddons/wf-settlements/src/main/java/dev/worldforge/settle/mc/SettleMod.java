@@ -272,6 +272,41 @@ public class SettleMod {
                 features.add(roadFeature);
             }
         }
+
+        // Active settlement consignments are projected onto the same Atlas world snapshot as roads and settlements.
+        for (dev.worldforge.settle.TradeNetwork.Shipment shipment : NETWORK.shipments.values()) {
+            if (!shipment.physical() || !dimension.equals(shipment.fromDimension)
+                    || !(shipment.status.equals("в пути") || shipment.status.equals("ожидает места")
+                    || shipment.status.equals("ожидает расчёта"))) continue;
+            double[][] route = shipment.path();
+            if (route.length < 2) route = new double[][]{{shipment.fromX,shipment.fromZ},{shipment.toX,shipment.toZ}};
+            List<Object> path = new ArrayList<>();
+            for (double[] point : route) {
+                int px=(int)Math.floor(point[0]), pz=(int)Math.floor(point[1]);
+                int py=level.hasChunkAt(new net.minecraft.core.BlockPos(px,level.getMinBuildHeight(),pz))
+                        ? level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,px,pz) : 64;
+                path.add(atlasVertex(point[0],py+0.15,point[1]));
+            }
+            double[] head = SettlementCaravans.routePositionForSnapshot(route, shipment.progress());
+            int hx=(int)Math.floor(head[0]), hz=(int)Math.floor(head[1]);
+            int hy=level.hasChunkAt(new net.minecraft.core.BlockPos(hx,level.getMinBuildHeight(),hz))
+                    ? level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,hx,hz) : 64;
+            Map<String,String> attrs=new LinkedHashMap<>();
+            attrs.put("shipment_id",Long.toString(shipment.id));
+            attrs.put("route_id",Integer.toString(shipment.routeId));
+            attrs.put("from_settlement",shipment.from);
+            attrs.put("to_settlement",shipment.to);
+            attrs.put("resource",shipment.res);
+            attrs.put("quantity",Double.toString(shipment.quantity));
+            attrs.put("progress",Double.toString(shipment.progress()));
+            attrs.put("remaining_seconds",Double.toString(shipment.remainingSeconds()));
+            attrs.put("status",shipment.status);
+            Map<String,Object> feature=atlasFeature("worldforge:shipment:"+shipment.id,
+                    "trade_caravan","Caravan "+shipment.id,dimension,head[0],hy,head[1],
+                    "",shipment.res,attrs);
+            feature.put("path",path);
+            features.add(feature);
+        }
     }
 
     private static Map<String,Object> atlasVertex(double x,double y,double z) {
@@ -331,6 +366,31 @@ public class SettleMod {
             }
         } catch (RuntimeException ex) { /* карта ещё не загружена */ }
         return "";
+    }
+
+    /** Optional bridge to wf-trade's existing province-graph caravan planner; no duplicate route graph. */
+    private static double[][] planShipmentPath(String from, String to,
+            dev.worldforge.settle.TradeNetwork.Location origin,
+            dev.worldforge.settle.TradeNetwork.Location destination) {
+        if (origin == null || destination == null || !origin.dimension().equals(destination.dimension()))
+            return new double[0][];
+        Colony a = COLONIES.get(from), b = COLONIES.get(to);
+        if (a == null || b == null) return new double[][]{{origin.x(), origin.z()}, {destination.x(), destination.z()}};
+        try {
+            Class<?> worldLayer = Class.forName("dev.worldforge.trade.mc.WorldLayer");
+            MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+            ServerLevel sourceLevel = server == null ? null : a.level(server);
+            ServerLevel destinationLevel = server == null ? null : b.level(server);
+            String sourceRealm = sourceLevel == null ? realmOf(a) : realmOf(a, sourceLevel);
+            String destinationRealm = destinationLevel == null ? realmOf(b) : realmOf(b, destinationLevel);
+            Object result = worldLayer.getMethod("settlementRoute", String.class, String.class,
+                    double.class, double.class, double.class, double.class)
+                    .invoke(null, sourceRealm, destinationRealm, origin.x(), origin.z(), destination.x(), destination.z());
+            if (result instanceof double[][] path && path.length >= 2) return path;
+        } catch (ReflectiveOperationException | LinkageError ignored) {
+            // wf-trade is optional. Keep the shipment functional with a direct strategic route.
+        }
+        return new double[][]{{origin.x(), origin.z()}, {destination.x(), destination.z()}};
     }
 
     public static Colony colony(String id) { return COLONIES.get(id); }
@@ -1599,7 +1659,7 @@ public class SettleMod {
                     for (Colony colony : COLONIES.values())
                         anchors.put(colony.s.id, new dev.worldforge.settle.TradeNetwork.Location(colony.dim, colony.cx, colony.cz));
                     int pendingTradeEvents = NETWORK.events.size();
-                    NETWORK.tick(all, speed, anchors);
+                    NETWORK.tick(all, speed, anchors, SettleMod::planShipmentPath);
                     if (NETWORK.events.size() > pendingTradeEvents) {
                         // The ledger is authoritative. Persist it before the shipment projection; fail closed
                         // if either side cannot be checkpointed so a dispatched consignment is never replayed.

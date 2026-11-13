@@ -534,13 +534,19 @@ public class SettleScreen extends Screen {
             var a = byId.get(rt.from); var b = byId.get(rt.to);
             String res = s.defs.resourceNames.getOrDefault(rt.res, rt.res);
             g.drawString(font, font.plainSubstrByWidth((a == null ? rt.from : a.name) + " > " + (b == null ? rt.to : b.name) + ": " + res, half - 100), x + 8, my2, WFUi.TX);
-            double inTransit = 0, routeProgress = 0;
+            double inTransit = 0, routeProgress = 0, nextArrival = Double.POSITIVE_INFINITY;
+            int routePoints = 0, activeShipments = 0;
             for (var shipment : net.shipments.values()) if (shipment.routeId == rt.id
-                    && (shipment.status.equals("в пути") || shipment.status.equals("ожидает места"))) {
+                    && (shipment.status.equals("в пути") || shipment.status.equals("ожидает места")
+                    || shipment.status.equals("ожидает расчёта"))) {
                 inTransit += shipment.quantity;
                 routeProgress = Math.max(routeProgress, shipment.progress());
+                nextArrival = Math.min(nextArrival, shipment.remainingSeconds());
+                routePoints = Math.max(routePoints, shipment.path().length);
+                activeShipments++;
             }
-            String st = inTransit > 0 ? "груз " + (int) inTransit + " · " + (int) (routeProgress * 100) + "%"
+            String eta = Double.isFinite(nextArrival) ? " · " + Math.max(1, (int)Math.ceil(nextArrival / 60)) + "м" : "";
+            String st = inTransit > 0 ? "груз " + (int) inTransit + " · " + (int) (routeProgress * 100) + "%" + eta
                     : rt.status + ", " + (int) rt.carried + " ед.";
             g.drawString(font, font.plainSubstrByWidth(st, 90), x + half - 18 - Math.min(90, font.width(st)),
                     my2, inTransit > 0 ? WFUi.INFO : rt.status.equals("доставлен") ? WFUi.GOOD : WFUi.MUTED);
@@ -548,7 +554,9 @@ public class SettleScreen extends Screen {
             WFUi.button(g, font, x + half - 12, my2 - 1, 11, 11, "x", true, false, WFUi.over(mx, my, x + half - 12, my2 - 1, 11, 11));
             hit(x + half - 12, my2 - 1, 11, 11, () -> cmd.accept("wfsettle route remove " + rid),
                     "Закрыть маршрут", List.of("Прибыль " + Math.round(rt.profit) + " серебра",
-                            inTransit > 0 ? "Груз в пути: " + (int) inTransit + " ед. · прогресс " + (int) (routeProgress * 100) + "%"
+                            inTransit > 0 ? "Отправлений: " + activeShipments + " · груз: " + (int) inTransit + " ед."
+                                    + " · прогресс: " + (int) (routeProgress * 100) + "% · прибытие: " + (int) Math.ceil(nextArrival / 60) + " мин."
+                                    + " · точек маршрута: " + routePoints
                                     : "Доставлено всего: " + (int) rt.carried + " ед."));
             my2 += 14;
         }
