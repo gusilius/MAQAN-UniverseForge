@@ -427,3 +427,12 @@
 - **Test diagnosis:** the fixture removed the only class that carried `req_prof`, then attempted to observe that requirement through `options()`. With no remaining class entry, the options projection had no value to inspect. This was a test-fixture coverage error, not evidence that the null guard failed.
 - **Correction:** keep a separate root class `requires_prof` with `req_prof=required_prof`, while removing `required_prof` and the unrelated `base` class. This independently exercises the missing profession requirement through the class options path, while the `needs_class` profession exercises missing `req_classes` and `specialist` exercises missing `from`. Added a local exception report to expose any unexpected runtime failure in the test log.
 - **Commits:** `a9bd15bd`, `860730b7`. Await fresh CI; previous run remains failed and must not be treated as green.
+
+
+### Migration progress accounting — 2026-11-14
+
+- Source-audited production Rust compute ownership is currently **2 operations**: `worldsim.emergence.advance` and `worldsim.decide`.
+- `worldsim.generate` has a Rust implementation and JNI wrapper but no production caller was found; it is not counted as migrated.
+- Snapshot collection, canonical Character/settlement materialization and authoritative proposal application remain Java by design.
+- A project-wide percentage is not published because the complete Java compute call-site denominator and third-party optimization inventory are not yet complete. See the progress table in `COMPUTE_OWNERSHIP_REGISTRY.md`.
+- Latest logic failure from run `43604115781` is the dormant Origins prerequisite assertion. Follow-up fixture corrections are in `a9bd15bd` and `860730b7`; run `43604403465` is the required recheck.
