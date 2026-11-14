@@ -66,5 +66,11 @@ pub fn advance(r:Request)->Result<Frame,String>{
  #[test]fn elapsed_days_saturate_at_java_long_max(){let mut p=p("p");p.elapsed_days=9;p.simulated_days=i64::MAX-1;let f=advance(Request{schema_version:1,world_id:"w".into(),year:303,elapsed_days:9,world_day:303,characters:vec![p]}).unwrap();assert_eq!(f.characters[0].simulated_days,i64::MAX);}
  #[test]fn output_must_acknowledge_per_character_elapsed_and_world_day(){let mut a=p("a");a.elapsed_days=7;let mut b=p("b");b.elapsed_days=2;let f=advance(Request{schema_version:1,world_id:"w".into(),year:303,elapsed_days:7,world_day:303,characters:vec![a,b]}).unwrap();assert_eq!(f.elapsed_days,7);assert_eq!(f.characters[0].simulated_days,7);assert_eq!(f.characters[1].simulated_days,2);assert_eq!(f.characters[0].last_simulated_year,303);assert_eq!(f.characters[0].world_day,303);}
  #[test]fn profession_requires_the_same_can_work_gate_as_java(){let mut child=p("child");child.birth_year=300;child.profession="farmer".into();child.can_work=false;let f=advance(Request{schema_version:1,world_id:"w".into(),year:303,elapsed_days:1,world_day:303,characters:vec![child]}).unwrap();assert_eq!(f.characters[0].intent,"idle");}
+ #[test]fn shared_java_rust_population_parity_fixture(){
+  #[derive(Deserialize)]struct Fixture{request:Request,expected:Frame}
+  let fixture:Fixture=serde_json::from_str(include_str!("../../../../../shared/contracts/population-compute-parity-v1.json")).unwrap();
+  let actual=advance(fixture.request).unwrap();
+  assert_eq!(actual,fixture.expected);
+ }
  #[test]fn invalid_schema_and_duplicate_ids_fail_closed(){let a=p("same");let r=Request{schema_version:1,world_id:"w".into(),year:303,elapsed_days:1,world_day:303,characters:vec![a.clone(),a]};assert!(advance(r).unwrap_err().contains("duplicate"));let r=Request{schema_version:2,world_id:"w".into(),year:303,elapsed_days:1,world_day:303,characters:vec![]};assert!(advance(r).unwrap_err().contains("schema"));}
 }

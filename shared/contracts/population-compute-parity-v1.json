@@ -1,0 +1,321 @@
+{
+  "schema_version": 1,
+  "request": {
+    "schema_version": 1,
+    "world_id": "population-parity-fixture",
+    "year": 303,
+    "elapsed_days": 3,
+    "world_day": "303",
+    "characters": [
+      {
+        "id": "adult_farmer",
+        "birth_year": 280,
+        "alive": true,
+        "needs": {
+          "hunger": 0,
+          "rest": 0,
+          "safety": 0,
+          "social": 0,
+          "purpose": 64,
+          "leisure": 0
+        },
+        "duties": [],
+        "profession": "farmer",
+        "training_target": "",
+        "command": "",
+        "can_work": true,
+        "elapsed_days": 1,
+        "simulated_days": "10"
+      },
+      {
+        "id": "child_farmer",
+        "birth_year": 300,
+        "alive": true,
+        "needs": {
+          "hunger": 0,
+          "rest": 0,
+          "safety": 0,
+          "social": 0,
+          "purpose": 0,
+          "leisure": 0
+        },
+        "duties": [],
+        "profession": "farmer",
+        "training_target": "",
+        "command": "",
+        "can_work": false,
+        "elapsed_days": 2,
+        "simulated_days": "0"
+      },
+      {
+        "id": "hero",
+        "birth_year": 280,
+        "alive": true,
+        "needs": {
+          "hunger": 0,
+          "rest": 0,
+          "safety": 0,
+          "social": 0,
+          "purpose": 0,
+          "leisure": 0
+        },
+        "duties": [
+          "hero"
+        ],
+        "profession": "",
+        "training_target": "",
+        "command": "defend",
+        "can_work": true,
+        "elapsed_days": 1,
+        "simulated_days": "4"
+      },
+      {
+        "id": "hungry",
+        "birth_year": 280,
+        "alive": true,
+        "needs": {
+          "hunger": 85,
+          "rest": 0,
+          "safety": 0,
+          "social": 0,
+          "purpose": 0,
+          "leisure": 0
+        },
+        "duties": [],
+        "profession": "",
+        "training_target": "",
+        "command": "",
+        "can_work": true,
+        "elapsed_days": 2,
+        "simulated_days": "7"
+      },
+      {
+        "id": "safety",
+        "birth_year": 280,
+        "alive": true,
+        "needs": {
+          "hunger": 0,
+          "rest": 0,
+          "safety": 70,
+          "social": 0,
+          "purpose": 0,
+          "leisure": 0
+        },
+        "duties": [],
+        "profession": "",
+        "training_target": "",
+        "command": "",
+        "can_work": true,
+        "elapsed_days": 1,
+        "simulated_days": "1"
+      },
+      {
+        "id": "teen_training",
+        "birth_year": 286,
+        "alive": true,
+        "needs": {
+          "hunger": 0,
+          "rest": 0,
+          "safety": 0,
+          "social": 0,
+          "purpose": 44,
+          "leisure": 0
+        },
+        "duties": [],
+        "profession": "",
+        "training_target": "",
+        "command": "",
+        "can_work": true,
+        "elapsed_days": 1,
+        "simulated_days": "0"
+      },
+      {
+        "id": "trained",
+        "birth_year": 280,
+        "alive": true,
+        "needs": {
+          "hunger": 0,
+          "rest": 0,
+          "safety": 0,
+          "social": 0,
+          "purpose": 65,
+          "leisure": 0
+        },
+        "duties": [],
+        "profession": "",
+        "training_target": "smithing",
+        "command": "",
+        "can_work": true,
+        "elapsed_days": 1,
+        "simulated_days": "3"
+      },
+      {
+        "id": "veteran",
+        "birth_year": 280,
+        "alive": true,
+        "needs": {
+          "hunger": 0,
+          "rest": 0,
+          "safety": 0,
+          "social": 0,
+          "purpose": 0,
+          "leisure": 0
+        },
+        "duties": [
+          "soldier"
+        ],
+        "profession": "",
+        "training_target": "",
+        "command": "",
+        "can_work": true,
+        "elapsed_days": 3,
+        "simulated_days": "9"
+      }
+    ]
+  },
+  "expected": {
+    "schema_version": 1,
+    "world_id": "population-parity-fixture",
+    "year": 303,
+    "elapsed_days": 3,
+    "world_day": "303",
+    "characters": [
+      {
+        "id": "adult_farmer",
+        "needs": {
+          "hunger": 10,
+          "rest": 6,
+          "safety": 0,
+          "social": 2,
+          "purpose": 65,
+          "leisure": 3
+        },
+        "intent": "work",
+        "age_years": 23,
+        "life_stage": "adult",
+        "simulated_days": "11",
+        "last_simulated_year": 303,
+        "world_day": "303"
+      },
+      {
+        "id": "child_farmer",
+        "needs": {
+          "hunger": 20,
+          "rest": 12,
+          "safety": 0,
+          "social": 4,
+          "purpose": 2,
+          "leisure": 6
+        },
+        "intent": "idle",
+        "age_years": 3,
+        "life_stage": "infant",
+        "simulated_days": "2",
+        "last_simulated_year": 303,
+        "world_day": "303"
+      },
+      {
+        "id": "hero",
+        "needs": {
+          "hunger": 10,
+          "rest": 6,
+          "safety": 0,
+          "social": 2,
+          "purpose": 1,
+          "leisure": 3
+        },
+        "intent": "follow_command",
+        "age_years": 23,
+        "life_stage": "adult",
+        "simulated_days": "5",
+        "last_simulated_year": 303,
+        "world_day": "303"
+      },
+      {
+        "id": "hungry",
+        "needs": {
+          "hunger": 100,
+          "rest": 12,
+          "safety": 0,
+          "social": 4,
+          "purpose": 2,
+          "leisure": 6
+        },
+        "intent": "eat",
+        "age_years": 23,
+        "life_stage": "adult",
+        "simulated_days": "9",
+        "last_simulated_year": 303,
+        "world_day": "303"
+      },
+      {
+        "id": "safety",
+        "needs": {
+          "hunger": 10,
+          "rest": 6,
+          "safety": 70,
+          "social": 2,
+          "purpose": 1,
+          "leisure": 3
+        },
+        "intent": "seek_safety",
+        "age_years": 23,
+        "life_stage": "adult",
+        "simulated_days": "2",
+        "last_simulated_year": 303,
+        "world_day": "303"
+      },
+      {
+        "id": "teen_training",
+        "needs": {
+          "hunger": 10,
+          "rest": 6,
+          "safety": 0,
+          "social": 2,
+          "purpose": 45,
+          "leisure": 3
+        },
+        "intent": "train",
+        "age_years": 17,
+        "life_stage": "adolescent",
+        "simulated_days": "1",
+        "last_simulated_year": 303,
+        "world_day": "303"
+      },
+      {
+        "id": "trained",
+        "needs": {
+          "hunger": 10,
+          "rest": 6,
+          "safety": 0,
+          "social": 2,
+          "purpose": 66,
+          "leisure": 3
+        },
+        "intent": "train",
+        "age_years": 23,
+        "life_stage": "adult",
+        "simulated_days": "4",
+        "last_simulated_year": 303,
+        "world_day": "303"
+      },
+      {
+        "id": "veteran",
+        "needs": {
+          "hunger": 30,
+          "rest": 18,
+          "safety": 0,
+          "social": 6,
+          "purpose": 3,
+          "leisure": 9
+        },
+        "intent": "patrol",
+        "age_years": 23,
+        "life_stage": "adult",
+        "simulated_days": "12",
+        "last_simulated_year": 303,
+        "world_day": "303"
+      }
+    ]
+  }
+}

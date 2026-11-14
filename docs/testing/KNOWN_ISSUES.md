@@ -523,3 +523,12 @@
 - Rust population fixtures now provide the newly required per-Character elapsed interval; the multi-day and saturation fixtures explicitly assert the intended interval. The JSON ABI fixture now supplies the required world-day and per-person elapsed-day fields.
 - Population apply validation now preserves extension-defined integer needs outside the built-in [0,100] range while still requiring canonical built-in needs to remain bounded. This avoids silently narrowing extension semantics during migration.
 - The shared runtime candidate remains subject to full CI, Java/Rust parity and persistence validation. Do not call the operation fully migrated until those gates pass.
+
+
+### WF-RT-0024 — CI failure diagnosis and cross-language parity suite
+
+- CI run `43615802356` passed native Rust Windows/Linux, WorldForge Core, Atlas and MAQAN Platform. The logic test job reported one failure in the new per-Character receipt assertion; addons were still running at the last status poll.
+- The failed assertion incorrectly expected a Character acknowledged through world day 10 to be excluded from a new world-day-14 batch. Correct behavior is to include that Character with exactly four elapsed days. Same-day replay (world day 10) must exclude it.
+- Replaced the incorrect expectation with two explicit cases: same-day replay produces no Character update; a later target day includes only the unacknowledged four-day interval.
+- Added one shared fixture at `shared/contracts/population-compute-parity-v1.json`, consumed by both Java domain tests and Rust production-function unit tests. It covers decision priority, life stages, work eligibility, command/soldier duties, training, needs drift, mixed elapsed intervals and receipts.
+- This is a parity gate improvement, not proof that Population cutover is complete. WF-RT-0021 and WF-RT-0023 remain open; save/reload campaign evidence is still required.

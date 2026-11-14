@@ -445,3 +445,10 @@ Population submits through the existing process-wide WorldForgeComputeRuntime un
 Each Character carries `population.last_simulated_world_day`. Rust snapshots include each Character's own elapsed interval and the exact Java `canWork` eligibility bit. Successful apply stores the world-day receipt in the same Character mutation batch as needs, intent, age and simulated-day counters. This makes retries after partial registry persistence/reload idempotent per Character: already acknowledged Characters are excluded, while unsaved/unacknowledged Characters are recomputed from their last persisted receipt. The session cursor is only a fallback for legacy Characters with no receipt.
 
 The Rust intent decision now consumes the Java-derived `can_work` predicate rather than inferring work eligibility from profession presence. This preserves Java's adolescent/adult/elder eligibility gate. Java and Rust still require full fixture parity across all decision branches and all current Character writers; this pipeline does not close WF-RT-0021 or WF-RT-0023 and does not authorize a claim that the entire simulation has migrated.
+
+
+## Shared Java/Rust Population parity fixture
+
+The canonical cross-language fixture is `shared/contracts/population-compute-parity-v1.json`. The Java logic suite executes the Java domain/fallback owner against it; the Rust unit suite executes `population::advance` against the same request and expected frame. This keeps decision priority, life-stage boundaries, per-Character elapsed time, needs drift, duties, profession/training and durable day receipts aligned without running both production engines or applying shadow results in a live world.
+
+The fixture is a test-only oracle, not a production data source. Extend it whenever Population semantics change. A passing fixture is necessary but not sufficient for cutover: randomized/property parity, persistence/reload, stale-snapshot, lifecycle, and addon writer coverage remain required.

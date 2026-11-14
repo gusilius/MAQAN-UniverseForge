@@ -315,3 +315,10 @@ This is an operation-count status, not a percentage of all UniverseForge computa
 - wf-people remains independent; wf-worldsim is an optional integration. Java fallback is exclusive and used only when the native provider is unavailable or fails before apply.
 - Per-Character `population.last_simulated_world_day` receipts make partially saved/reloaded batches idempotent. The Rust snapshot contains per-person elapsed days and Java's canonical `canWork` eligibility result.
 - Rust now follows Java's profession work eligibility gate. Production migration count should be updated only after full parity and save/reload evidence; do not claim full Population completion yet.
+
+
+### Shared Population parity oracle
+
+- Added `shared/contracts/population-compute-parity-v1.json` as one fixture consumed by both the Java Population logic test and Rust `population::advance` unit test.
+- It covers adult work, child eligibility, hero command, hunger/safety priority, adolescent training, explicit training targets, soldier patrol, mixed per-Character elapsed intervals, needs drift and durable day acknowledgements.
+- The production operation count remains unchanged until broader parity and persistence gates pass.

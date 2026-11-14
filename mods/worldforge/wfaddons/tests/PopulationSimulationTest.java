@@ -1,5 +1,6 @@
 package dev.worldforge.tests;
 
+import dev.worldforge.mod.Json;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.PopulationSimulation;
@@ -573,10 +574,72 @@ public final class PopulationSimulationTest {
         ok(hungerAfterFirstApply == 55 && PopulationSimulation.need(resumable, Need.HUNGER) == 55
                         && ((Number) resumable.props.get("population.last_simulated_world_day")).longValue() == 10,
                 "per-Character world-day receipts make Java fallback replay-safe");
-        PopulationComputeBridge.Captured resumableCapture = PopulationComputeBridge.captureForWorldDay(
+        PopulationComputeBridge.Captured sameDayCapture = PopulationComputeBridge.captureForWorldDay(
+                "population-resume-test", 300, 10, 5, java.util.List.of(resumableRegistry));
+        ok(sameDayCapture.characterIds().isEmpty() && sameDayCapture.elapsedDays() == 5,
+                "same-day Rust retry excludes Characters already acknowledged by durable receipts");
+        PopulationComputeBridge.Captured nextDayCapture = PopulationComputeBridge.captureForWorldDay(
                 "population-resume-test", 300, 14, 5, java.util.List.of(resumableRegistry));
-        ok(resumableCapture.characterIds().isEmpty() && resumableCapture.elapsedDays() == 9,
-                "Rust snapshot excludes Characters already acknowledged through their durable world-day receipt");
+        Map<?,?> nextDayRequest = (Map<?,?>) Json.parse(new String(nextDayCapture.request(), java.nio.charset.StandardCharsets.UTF_8));
+        Map<?,?> nextDayPerson = (Map<?,?>) ((java.util.List<?>) nextDayRequest.get("characters")).get(0);
+        ok(nextDayCapture.characterIds().equals(java.util.List.of(resumable.globalId))
+                        && ((Number) nextDayPerson.get("elapsed_days")).longValue() == 4,
+                "next-day Rust catch-up uses only the four days after the Character's last receipt");
+
+        // One shared JSON fixture is consumed by both Java and Rust tests to guard semantic parity.
+        try {
+            Map<?,?> fixtureRoot = (Map<?,?>) Json.parse(java.nio.file.Files.readString(
+                    java.nio.file.Path.of("../../../shared/contracts/population-compute-parity-v1.json")));
+            Map<?,?> request = (Map<?,?>) fixtureRoot.get("request");
+            Map<?,?> expected = (Map<?,?>) fixtureRoot.get("expected");
+            int fixtureYear = ((Number) request.get("year")).intValue();
+            long fixtureWorldDay = Long.parseLong(String.valueOf(request.get("world_day")));
+            CharacterRegistry parityRegistry = new CharacterRegistry();
+            Map<String,Character> parityCharacters = new java.util.TreeMap<>();
+            for (Object raw : (java.util.List<?>) request.get("characters")) {
+                Map<?,?> person = (Map<?,?>) raw;
+                String id = String.valueOf(person.get("id"));
+                int birthYear = ((Number) person.get("birth_year")).intValue();
+                Character character = parityRegistry.create(id, "", "parity", "n", birthYear);
+                Map<String,Object> needs = new java.util.TreeMap<>();
+                ((Map<?,?>) person.get("needs")).forEach((key,value) -> needs.put(String.valueOf(key), value));
+                character.props.put("population.needs", needs);
+                character.props.put("population.duties", new java.util.ArrayList<>((java.util.List<?>) person.get("duties")));
+                character.props.put("population.profession", person.get("profession"));
+                character.props.put("population.training_target", person.get("training_target"));
+                character.props.put("population.command", person.get("command"));
+                character.props.put("population.simulated_days", Long.parseLong(String.valueOf(person.get("simulated_days"))));
+                long elapsed = ((Number) person.get("elapsed_days")).longValue();
+                character.props.put("population.last_simulated_world_day", fixtureWorldDay - elapsed);
+                ok(PopulationSimulation.canWork(character, fixtureYear) == Boolean.TRUE.equals(person.get("can_work")),
+                        "shared parity fixture canWork input matches canonical Java age rules for " + id);
+                parityCharacters.put(id, character);
+            }
+            PopulationSimulation.advanceToWorldDay(parityRegistry, fixtureWorldDay, 0, fixtureYear);
+            java.util.List<?> expectedPeople = (java.util.List<?>) expected.get("characters");
+            for (Object raw : expectedPeople) {
+                Map<?,?> person = (Map<?,?>) raw;
+                String id = String.valueOf(person.get("id"));
+                Character character = parityCharacters.get(id);
+                Map<?,?> expectedNeeds = (Map<?,?>) person.get("needs");
+                boolean needsMatch = PopulationSimulation.need(character, Need.HUNGER) == ((Number) expectedNeeds.get("hunger")).intValue()
+                        && PopulationSimulation.need(character, Need.REST) == ((Number) expectedNeeds.get("rest")).intValue()
+                        && PopulationSimulation.need(character, Need.SAFETY) == ((Number) expectedNeeds.get("safety")).intValue()
+                        && PopulationSimulation.need(character, Need.SOCIAL) == ((Number) expectedNeeds.get("social")).intValue()
+                        && PopulationSimulation.need(character, Need.PURPOSE) == ((Number) expectedNeeds.get("purpose")).intValue()
+                        && PopulationSimulation.need(character, Need.LEISURE) == ((Number) expectedNeeds.get("leisure")).intValue();
+                boolean stateMatch = needsMatch
+                        && PopulationSimulation.decide(character, fixtureYear).name().toLowerCase(java.util.Locale.ROOT).equals(person.get("intent"))
+                        && ((Number) character.props.get("population.age_years")).intValue() == ((Number) person.get("age_years")).intValue()
+                        && String.valueOf(character.props.get("population.life_stage")).equals(person.get("life_stage"))
+                        && ((Number) character.props.get("population.simulated_days")).longValue() == Long.parseLong(String.valueOf(person.get("simulated_days")))
+                        && ((Number) character.props.get("population.last_simulated_world_day")).longValue() == fixtureWorldDay;
+                ok(stateMatch, "Java population result matches shared Rust parity fixture for " + id);
+            }
+        } catch (Exception fixtureFailure) {
+            fixtureFailure.printStackTrace(System.out);
+            ok(false, "shared Java/Rust population parity fixture loads and matches");
+        }
 
         System.out.println(failures == 0 ? "ALL OK" : failures + " FAILED");
         if (failures > 0) System.exit(1);
