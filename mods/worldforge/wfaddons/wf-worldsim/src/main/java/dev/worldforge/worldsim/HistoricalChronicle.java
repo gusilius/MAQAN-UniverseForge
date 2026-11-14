@@ -6,7 +6,7 @@ import dev.worldforge.mod.api.EventLog;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -46,7 +46,7 @@ public final class HistoricalChronicle {
     }
 
     private final List<Entry> entries = new ArrayList<>();
-    private final Set<String> knownIds = new LinkedHashSet<>();
+    private final Set<String> knownIds = new HashSet<>();
     private int startingYear = 300;
 
     public synchronized void setStartingYear(int year) {
@@ -63,13 +63,23 @@ public final class HistoricalChronicle {
         int safeYear = Math.max(startingYear, calendarYear);
         int epoch = Math.max(0, (safeYear - startingYear) / YEARS_PER_EPOCH);
         int cycle = Math.max(0, (safeYear - startingYear) / YEARS_PER_CYCLE);
-        entries.add(new Entry(id, Math.max(0L, worldDay), safeYear, epoch, cycle,
+        Entry added = new Entry(id, Math.max(0L, worldDay), safeYear, epoch, cycle,
                 event.category == null ? "system" : event.category.id(),
-                event.text.trim(), event.realms == null ? List.of() : event.realms));
-        // Domain listeners can publish a delayed fact after a later event. The book
-        // follows occurrence time, with EventLog sequence as a stable tie-breaker.
-        entries.sort(java.util.Comparator.comparingLong((Entry entry) -> entry.day)
-                .thenComparingLong(HistoricalChronicle::eventSequence));
+                event.text.trim(), event.realms == null ? List.of() : event.realms);
+        // The normal path is chronological: append in O(1) instead of sorting the
+        // complete history after every event. Delayed facts retain exact ordering via
+        // binary search; only the exceptional insertion shifts the suffix.
+        if (entries.isEmpty() || compareEntries(entries.get(entries.size() - 1), added) <= 0) {
+            entries.add(added);
+        } else {
+            int low = 0, high = entries.size();
+            while (low < high) {
+                int middle = (low + high) >>> 1;
+                if (compareEntries(entries.get(middle), added) <= 0) low = middle + 1;
+                else high = middle;
+            }
+            entries.add(low, added);
+        }
         while (entries.size() > MAX_ENTRIES) {
             Entry removed = entries.remove(0);
             knownIds.remove(removed.id);
@@ -132,6 +142,11 @@ public final class HistoricalChronicle {
         return "Год " + entry.year + ", день " + entry.day + ". " + opening + fact + punctuation(fact);
     }
 
+    private static int compareEntries(Entry left, Entry right) {
+        int byDay = Long.compare(left.day, right.day);
+        return byDay != 0 ? byDay : Long.compare(eventSequence(left), eventSequence(right));
+    }
+
     private static long eventSequence(Entry entry) {
         String prefix = "worldforge-event:";
         if (entry == null || !entry.id.startsWith(prefix)) return Long.MAX_VALUE;
@@ -181,7 +196,7 @@ public final class HistoricalChronicle {
         Object rawEntries = root.get("entries");
         if (!(rawEntries instanceof List<?> list)) throw new IllegalArgumentException("Chronicle entries are missing");
         List<Entry> restored = new ArrayList<>();
-        Set<String> restoredIds = new LinkedHashSet<>();
+        Set<String> restoredIds = new HashSet<>();
         for (Object raw : list) {
             if (!(raw instanceof Map<?, ?> item)) continue;
             String id = string(item.get("id"));
