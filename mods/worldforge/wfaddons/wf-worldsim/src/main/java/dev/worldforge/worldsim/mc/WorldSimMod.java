@@ -72,7 +72,7 @@ public final class WorldSimMod {
     private static long lastDecisionDay = Long.MIN_VALUE;
     private static long lodTicks;
     private static final Map<String, Long> lastProjectDay = new HashMap<>();
-    private static final List<String> journal = new ArrayList<>();
+    private static final Deque<String> journal = new ArrayDeque<>();
     private static JsonObject emergenceState;
     private static JsonObject emergenceBindings = new JsonObject();
     private static boolean emergentRealmsRehydrated;
@@ -1716,7 +1716,7 @@ public final class WorldSimMod {
         if (action.has("first")) event.add("first", action.get("first"));
         if (action.has("second")) event.add("second", action.get("second"));
         journal.add(GSON.toJson(event));
-        while (journal.size() > 10000) journal.remove(0);
+        while (journal.size() > 10000) journal.removeFirst();
 
         String type = action.has("type") ? action.get("type").getAsString() : "unknown";
         String outcome = applied ? "Исполнено" : "Отклонено исполнительной системой";
