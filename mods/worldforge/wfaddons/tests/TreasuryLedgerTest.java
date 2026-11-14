@@ -16,6 +16,35 @@ public final class TreasuryLedgerTest {
     private static boolean close(double a,double b) { return Math.abs(a-b)<1e-8; }
 
     public static void main(String[] args) {
+        dev.worldforge.mod.api.DomainMutationRevisions revisions = dev.worldforge.mod.api.WorldForgeApi.revisions();
+        revisions.resetForTests();
+        TreasuryLedger revisionLedger = new TreasuryLedger();
+        long economyBefore = revisions.snapshot().orElseThrow().revision(
+                dev.worldforge.mod.api.DomainMutationRevisions.Domain.ECONOMY_TRADE);
+        revisionLedger.open("revision:account", "revision:account", "silver", 100);
+        long afterOpen = revisions.snapshot().orElseThrow().revision(
+                dev.worldforge.mod.api.DomainMutationRevisions.Domain.ECONOMY_TRADE);
+        ok(afterOpen == economyBefore + 1, "opening account publishes one economy revision");
+        revisionLedger.setCreditLimit("revision:account", 50);
+        long afterLimit = revisions.snapshot().orElseThrow().revision(
+                dev.worldforge.mod.api.DomainMutationRevisions.Domain.ECONOMY_TRADE);
+        revisionLedger.setCreditLimit("revision:account", 50);
+        ok(afterLimit == afterOpen + 1 && revisions.snapshot().orElseThrow().revision(
+                dev.worldforge.mod.api.DomainMutationRevisions.Domain.ECONOMY_TRADE) == afterLimit,
+                "credit limit mutation publishes once and an identical value is a no-op");
+        revisionLedger.open("revision:target", "revision:target", "silver", 0);
+        long beforeTransfer = revisions.snapshot().orElseThrow().revision(
+                dev.worldforge.mod.api.DomainMutationRevisions.Domain.ECONOMY_TRADE);
+        revisionLedger.transferOnce("revision:account", "revision:target", 10,
+                TreasuryLedger.Kind.GRANT, "revision-test", "revision-transfer", 1, "revision test");
+        long afterTransfer = revisions.snapshot().orElseThrow().revision(
+                dev.worldforge.mod.api.DomainMutationRevisions.Domain.ECONOMY_TRADE);
+        ok(afterTransfer == beforeTransfer + 1, "nested transferOnce and transfer publish one economy revision");
+        TreasuryLedger.fromJson(revisionLedger.toJson());
+        ok(revisions.snapshot().orElseThrow().revision(
+                dev.worldforge.mod.api.DomainMutationRevisions.Domain.ECONOMY_TRADE) == afterTransfer,
+                "ledger restore rebuilds state without publishing a live economy mutation");
+
         TreasuryLedger ledger=new TreasuryLedger();
         ledger.open("realm:kingdom","realm:kingdom","silver",1000);
         ledger.open("settlement:capital","settlement:capital","silver",100);
