@@ -403,3 +403,12 @@
 - **CI evidence:** workflow `43603310589` failed in `WorldForge logic tests` and `WorldForge core`. The logs show the read-side synchronization edit had placed Java's `synchronized` modifier after the return type (`public String synchronized ...`), which is invalid syntax and caused cascading missing-symbol errors in TreasuryLedger consumers (including Settlements and Army). This is a source regression, not an Origins or Rust-native failure.
 - **Correction:** normalized declarations to legal Java modifier order (`public synchronized <return-type> method(...)`) for all 17 affected read/serialization methods. Existing public method signatures and call sites are preserved; no consumer API was removed.
 - **Validation status:** source correction committed as `489d8cc637bb05452d35dedfe999e09d6f29d4ab`. A fresh CI run against this corrected commit is required; do not mark the Treasury concurrency work verified until both logic tests and core compilation pass. The previous run is not green.
+
+
+### WF-ORIGINS — dormant prerequisite definitions in runtime validation
+
+- **Обнаружено при аудите:** сохранённые race/class/profession IDs уже переживают удаление datapack definitions, но runtime-проверки `Origins.reqProblem` и `Origins.canLearn` всё ещё безусловно разыменовывали связанные определения (`req_prof`, `from`, `req_classes`). Валидный ранее набор datapack definitions может стать неполным после последующего reload; выбор/просмотр вариантов тогда мог завершиться `NullPointerException`.
+- **Исправление:** отсутствующая требуемая профессия, класс или родительская профессия теперь возвращает явный отказ с ID и пометкой о временном отсутствии. Проверка ранга родительской профессии также ограничивает индекс доступным списком рангов. Прогресс и сохранённые ID не удаляются.
+- **Регрессионное покрытие:** `OriginsTest` создаёт корректный набор, имитирует временно удалённые связанные определения и проверяет безопасные ответы для `req_prof`, `from` и `req_classes`, включая восстановленный dormant profession ID.
+- **Коммиты:** `dfb0a1a1`, `134114b5`, `1eec10db`. CI обязателен; не считать проверенным до addon job PASS.
+- **Остаточная архитектурная задача:** `OriginDefs` остаётся изменяемым агрегатом из шести публичных карт; `replaceWith` последовательно меняет их, а `Origins` читает их в нескольких местах операции. Нужен единый deep-immutable snapshot и захват одной версии на операцию. Поверхностный `Map.copyOf` недостаточен: records содержат вложенные изменяемые Map/List/TreeMap.
