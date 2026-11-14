@@ -298,3 +298,14 @@
 - **Архитектурное решение:** не ставить слепой revision increment на каждый `Map.put` и не добавлять второй параллельный счётчик. Сначала разделить authoritative gameplay writes и derived/cache/initialization writes, определить транзакционные границы и свести их к canonical mutation APIs с одной revision на логическую операцию.
 - **Безопасность:** пока эти writers не охвачены, `CHARACTERS` lane остаётся неполной, а WorldSim apply fence запрещён.
 - **Следующий шаг:** рефакторить по владельцам и группам операций с parity-тестами: population lifecycle, character development/psychology, court identity, succession. Затем аналогично проверить settlement/realm consumers.
+
+
+### WF-RT-0023 — Canonical Character mutation batches (2026-11-14)
+
+- Added CharacterRegistry.MutationBatch: nested same-thread Character writes share one DomainMutationRevisions.CHARACTERS writer scope and commit at most one revision.
+- The outer scope opens the shared writer fence before the first mutation. DomainMutationRevisions.snapshot() must return empty while the batch is active; the lane advances only after the outer batch closes dirty.
+- Wired PopulationSimulation authoritative setters/actions (profession, duties, command, needs, skills/training, intent, death and daily advancement) to open scopes before writes. Daily advancement coalesces the complete tick into one revision, not one revision per field or NPC.
+- Wired CharacterDevelopment authoritative setters, mood, stress, memory, injuries and abilities; compound conduct, experience, inheritance, upbringing and combat-injury operations use nested batches.
+- CharacterRegistry compound lifecycle operations (profession, hire/fire, migrate, duties, life-stage refresh), Courts.ensure and Succession.onDeath are batched to avoid revision churn.
+- Added tests for idempotent setters, one-revision compound population/development operations, daily tick coalescing, and snapshot refusal while a Character batch is active.
+- Still incomplete: direct Character field/list/set/props writers in external addons and any unclassified cache/derived writers remain under audit. This is not yet a global cross-domain apply fence. CI for the latest HEAD is pending.
