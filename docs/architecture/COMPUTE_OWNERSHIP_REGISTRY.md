@@ -230,3 +230,17 @@ Remaining bypass surface: Character still exposes mutable public fields, childre
 - The canonical progression IDs/XP remain in `Origins`; no second progression registry or cached definition index was introduced.
 - `OriginDefs` publication is **not yet atomic**. Its public mutable maps and nested mutable record members remain legacy build-time/reload surfaces. The next definition-lifecycle change must introduce one deep-immutable snapshot and make each Origins operation capture exactly one snapshot reference; a shallow map wrapper is not sufficient.
 - Regression tests: `OriginsTest` dormant prerequisite cases. Source/test commits: `dfb0a1a1`, `1eec10db`. CI run `43603966100` queued at documentation update time.
+
+
+## Migration progress — source-audited production ownership (2026-11-14)
+
+This is an operation-count status, not a percentage of all UniverseForge computation. The repository does not yet contain a complete denominator/inventory of every Java compute path, addon writer, and third-party optimizer, so a project-wide completion percentage would be fabricated.
+
+| Status | Operation keys | Count | Evidence / limitation |
+|---|---|---:|---|
+| Rust owns production computation | `worldsim.emergence.advance`, `worldsim.decide` | 2 | Both enter through the shared `WorldSimComputeScheduler` and JNI; Java remains snapshot/apply/materialization boundary. Campaign catch-up and parity evidence remain open. |
+| Rust implementation exists, production ownership unverified | `worldsim.generate` | 1 | JNI wrapper and Rust `worldgen::generate_world` exist; current source audit found no production caller. Do not count as migrated. |
+| Java remains the intended owner | `worldsim.snapshot`, `worldsim.materialize.people`, `worldsim.materialize.polities`, `worldsim.proposal.apply` | 4 | These operations cross Minecraft/domain authority boundaries; do not move Minecraft API or authoritative side effects into Rust. |
+| Remaining compute domains | population micro-simulation, economy/trade, logistics/path planning, political/diplomatic planning, military/tactical simulation, etc. | Not yet exhaustively counted | Target ownership in the migration contract is not evidence of implementation. Each domain needs source-call-site inventory, profile, parity fixtures, one-owner cutover, and addon compatibility audit. |
+
+**Current honest headline:** 2 confirmed Rust-owned production compute operations; 1 unverified Rust entry point; no defensible overall percentage yet. The next progress report must increase the count only after a production cutover is evidenced in source and CI/parity checks, not when a Rust function or wrapper is merely added.
