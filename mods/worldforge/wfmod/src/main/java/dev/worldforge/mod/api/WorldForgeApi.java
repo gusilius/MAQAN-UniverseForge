@@ -30,6 +30,7 @@ public final class WorldForgeApi {
     }
 
     private static final DomainMutationRevisions REVISIONS = new DomainMutationRevisions();
+    private static final WorldForgeComputeRuntime COMPUTE_RUNTIME = new WorldForgeComputeRuntime();
     private static final Map<String, MapAction> ACTIONS = new LinkedHashMap<>();
     private static final List<Guard> GUARDS = new CopyOnWriteArrayList<>();
     private static final List<Consumer<MapChange>> LISTENERS = new CopyOnWriteArrayList<>();
@@ -62,6 +63,9 @@ public final class WorldForgeApi {
 
     /** Shared canonical-domain revision vector; lanes are advanced by authoritative writers only. */
     public static DomainMutationRevisions revisions() { return REVISIONS; }
+
+    /** One process-wide bounded worker shared by every native compute domain. */
+    public static WorldForgeComputeRuntime computeRuntime() { return COMPUTE_RUNTIME; }
 
     /** Shared durable action queue. WorldForgeMod loads/saves it with the active world. */
     public static ActionExecutionService actionExecution() { return ACTION_EXECUTION; }

@@ -1,64 +1,44 @@
 package dev.worldforge.worldsim;
 
+import dev.worldforge.mod.api.WorldForgeApi;
+import dev.worldforge.mod.api.WorldForgeComputeRuntime;
+
 import java.util.Objects;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.ThreadFactory;
 
 /**
- * Bounded single-flight executor for immutable WorldSim compute requests.
+ * WorldSim compatibility facade over the single WorldForge-wide compute runtime.
  *
- * Exactly one request may be queued or executing. The caller must poll completed
- * results and validate the ticket on the authoritative server thread before apply.
- * This class never touches Minecraft or domain objects.
+ * It deliberately owns no executor, queue, semaphore or native worker. Closing a
+ * WorldSim lifecycle only invalidates its caller-side lifecycle epoch; an in-flight
+ * native call retains the shared slot until it actually exits and its result is
+ * collected by the next WorldSim lifecycle.
  */
 public final class WorldSimComputeScheduler implements AutoCloseable {
-    // Shared across scheduler instances so a native call that ignores interruption
-    // cannot overlap a new world's compute after integrated-server restart.
-    private static final Semaphore NATIVE_COMPUTE_LEASE = new Semaphore(1, true);
     @FunctionalInterface
     public interface ComputeOperation {
         Output compute(byte[] snapshot, byte[] emergenceRequest) throws Exception;
     }
 
     public static final class Ticket {
-        private final String worldId;
-        private final String operationKey;
-        private final long revision;
-        private final long lifecycleEpoch;
-        private final int snapshotSchemaVersion;
-        private final int nativeAbiVersion;
-        private final long submittedNanos;
+        private final WorldForgeComputeRuntime.Ticket shared;
 
         public Ticket(String worldId, String operationKey, long revision, long lifecycleEpoch,
                       int snapshotSchemaVersion, int nativeAbiVersion) {
-            if (worldId == null || worldId.isBlank()) throw new IllegalArgumentException("worldId is required");
-            if (operationKey == null || operationKey.isBlank()) throw new IllegalArgumentException("operationKey is required");
-            if (snapshotSchemaVersion < 1) throw new IllegalArgumentException("snapshotSchemaVersion must be positive");
-            if (nativeAbiVersion < 1) throw new IllegalArgumentException("nativeAbiVersion must be positive");
-            this.worldId = worldId;
-            this.operationKey = operationKey;
-            this.revision = revision;
-            this.lifecycleEpoch = lifecycleEpoch;
-            this.snapshotSchemaVersion = snapshotSchemaVersion;
-            this.nativeAbiVersion = nativeAbiVersion;
-            this.submittedNanos = System.nanoTime();
+            shared = new WorldForgeComputeRuntime.Ticket(worldId, operationKey, revision, lifecycleEpoch,
+                    snapshotSchemaVersion, nativeAbiVersion);
         }
-        public String worldId() { return worldId; }
-        public String operationKey() { return operationKey; }
-        public long revision() { return revision; }
-        public long lifecycleEpoch() { return lifecycleEpoch; }
-        public int snapshotSchemaVersion() { return snapshotSchemaVersion; }
-        public int nativeAbiVersion() { return nativeAbiVersion; }
-        public long submittedNanos() { return submittedNanos; }
-        public boolean matches(String expectedWorldId, String expectedOperationKey, long expectedRevision,
-                               long expectedLifecycleEpoch, int expectedSchemaVersion, int expectedNativeAbiVersion) {
-            return worldId.equals(expectedWorldId) && operationKey.equals(expectedOperationKey) && revision == expectedRevision
-                    && lifecycleEpoch == expectedLifecycleEpoch && snapshotSchemaVersion == expectedSchemaVersion
-                    && nativeAbiVersion == expectedNativeAbiVersion;
+
+        private Ticket(WorldForgeComputeRuntime.Ticket shared) { this.shared = shared; }
+        public String worldId() { return shared.worldId(); }
+        public String operationKey() { return shared.operationKey(); }
+        public long revision() { return shared.revision(); }
+        public long lifecycleEpoch() { return shared.lifecycleEpoch(); }
+        public int snapshotSchemaVersion() { return shared.snapshotSchemaVersion(); }
+        public int nativeAbiVersion() { return shared.nativeAbiVersion(); }
+        public long submittedNanos() { return shared.submittedNanos(); }
+        public boolean matches(String worldId, String operationKey, long revision, long epoch,
+                               int schema, int abi) {
+            return shared.matches(worldId, operationKey, revision, epoch, schema, abi);
         }
     }
 
@@ -75,91 +55,44 @@ public final class WorldSimComputeScheduler implements AutoCloseable {
     }
 
     public static final class Result {
-        private final Ticket ticket;
-        private final byte[] snapshot;
-        private final Output output;
-        private final long computeStartedNanos;
-        private final long computeCompletedNanos;
-
-        private Result(Ticket ticket, byte[] snapshot, Output output,
-                       long computeStartedNanos, long computeCompletedNanos) {
-            this.ticket = ticket;
-            this.snapshot = snapshot.clone();
-            this.output = output;
-            this.computeStartedNanos = computeStartedNanos;
-            this.computeCompletedNanos = computeCompletedNanos;
-        }
-        public Ticket ticket() { return ticket; }
-        public byte[] snapshot() { return snapshot.clone(); }
-        public byte[] emergenceFrame() { return output.emergenceFrame(); }
-        public byte[] decisionFrame() { return output.decisionFrame(); }
-        public long queueWaitNanos() { return Math.max(0L, computeStartedNanos - ticket.submittedNanos()); }
-        public long computeNanos() { return Math.max(0L, computeCompletedNanos - computeStartedNanos); }
+        private final WorldForgeComputeRuntime.Result shared;
+        private Result(WorldForgeComputeRuntime.Result shared) { this.shared = shared; }
+        public Ticket ticket() { return new Ticket(shared.ticket()); }
+        public byte[] snapshot() { return shared.snapshot(); }
+        public byte[] emergenceFrame() { return shared.first(); }
+        public byte[] decisionFrame() { return shared.second(); }
+        public long queueWaitNanos() { return shared.queueWaitNanos(); }
+        public long computeNanos() { return shared.computeNanos(); }
     }
 
-    private final ExecutorService executor;
-    private Future<Result> active;
+    private static final String OPERATION_KEY = "worldsim.compute.cycle";
+    private final WorldForgeComputeRuntime runtime = WorldForgeApi.computeRuntime();
+    private boolean closed;
 
-    public WorldSimComputeScheduler() {
-        ThreadFactory factory = task -> {
-            Thread thread = new Thread(task, "worldforge-worldsim-compute");
-            thread.setDaemon(true);
-            return thread;
-        };
-        executor = Executors.newSingleThreadExecutor(factory);
-    }
-
-    /** Returns false while the sole slot is occupied; no request is silently queued or dropped. */
     public synchronized boolean submit(Ticket ticket, byte[] snapshot, byte[] emergenceRequest,
-                                       ComputeOperation operation) {
-        Objects.requireNonNull(ticket, "ticket");
+                                        ComputeOperation operation) {
+        if (closed) return false;
         Objects.requireNonNull(operation, "operation");
-        if (active != null) return false;
-        byte[] immutableSnapshot = copyRequired(snapshot, "snapshot");
-        byte[] immutableEmergence = copyRequired(emergenceRequest, "emergenceRequest");
-        active = executor.submit(() -> {
-            boolean acquired = false;
-            try {
-                NATIVE_COMPUTE_LEASE.acquire();
-                acquired = true;
-                long computeStarted = System.nanoTime();
-                Output output = operation.compute(immutableSnapshot.clone(), immutableEmergence.clone());
-                return new Result(ticket, immutableSnapshot, output, computeStarted, System.nanoTime());
-            } catch (InterruptedException interrupted) {
-                Thread.currentThread().interrupt();
-                throw new IllegalStateException("Interrupted while waiting for the WorldSim native compute lease", interrupted);
-            } finally {
-                if (acquired) NATIVE_COMPUTE_LEASE.release();
-            }
+        return runtime.submit(ticket.shared, snapshot, emergenceRequest, (primary, secondary) -> {
+            Output output = operation.compute(primary, secondary);
+            if (output == null) throw new IllegalStateException("WorldSim compute returned no output");
+            return new WorldForgeComputeRuntime.Output(output.emergenceFrame(), output.decisionFrame());
         });
-        return true;
     }
 
-    /** Returns null while work is running. Completed work is removed from the single slot exactly once. */
-    public synchronized Result poll() {
-        if (active == null || !active.isDone()) return null;
-        Future<Result> completed = active;
-        active = null;
-        try {
-            return completed.get();
-        } catch (InterruptedException interrupted) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("Interrupted while collecting WorldSim compute result", interrupted);
-        } catch (ExecutionException failed) {
-            Throwable cause = failed.getCause() == null ? failed : failed.getCause();
-            throw new IllegalStateException("WorldSim compute operation failed", cause);
-        }
+    public Result poll() {
+        WorldForgeComputeRuntime.Result result = runtime.poll(OPERATION_KEY);
+        return result == null ? null : new Result(result);
     }
 
-    public synchronized boolean busy() {
-        return active != null;
-    }
+    /** Global backpressure: WorldSim yields while any domain owns the shared worker. */
+    public boolean busy() { return runtime.busy(); }
 
     @Override
     public synchronized void close() {
-        if (active != null) active.cancel(true);
-        active = null;
-        executor.shutdownNow();
+        // Do not interrupt or release the process-wide slot: native code may ignore
+        // interruption. The lifecycle epoch on Ticket makes its eventual result stale.
+        closed = true;
     }
 
     private static byte[] copyRequired(byte[] bytes, String name) {

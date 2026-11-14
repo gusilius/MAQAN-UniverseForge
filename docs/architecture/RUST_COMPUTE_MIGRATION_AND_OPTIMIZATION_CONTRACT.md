@@ -409,3 +409,10 @@ Within the existing `worldsim.decide` Rust owner, the recruitment phase previous
 ### Population query purity correction — 2026-11-14
 
 A source audit found that several read-only `PopulationSimulation` APIs (`skillRanksSnapshot`, `need`, `skillRank`, `trainingXp`, and `decide`) used the write-oriented `mapProp` helper. On absent optional data this silently inserted empty maps into `Character.props`, making observation mutate canonical state without a `MutationBatch` or revision. Added a separate non-materializing `readMapProp` path for these queries; write paths retain `mapProp`. Added a regression assertion that the reads leave absent maps absent and do not advance `CharacterRegistry.revision()`. This is a correctness fix to the existing Java domain owner, not a new compute implementation or Rust migration. Java remains the owner until a later parity-tested Rust cutover can preserve canonical Character application semantics.
+
+
+### Shared compute runtime extraction — 2026-11-14
+
+The first WorldSim asynchronous worker has been moved behind `WorldForgeApi.computeRuntime()`, a process-wide bounded single-worker runtime in wfmod. `WorldSimComputeScheduler` is now a compatibility facade and owns no executor, semaphore, or native worker. This establishes one execution slot for future domain operations without introducing a second scheduler. The shared slot remains occupied until the owning operation collects its completed result; closing a WorldSim lifecycle does not pretend that an interrupt stopped native code. The WorldSim ticket lifecycle epoch remains the stale-result fence.
+
+This is runtime consolidation only. It does **not** add a new Rust production operation, complete WF-RT-0023 domain freshness, or authorize increasing worker count. Population progression remains Java-owned until its immutable snapshot, native parity, durable pending-day handling, stale-input validation, and save/reload gates are implemented.

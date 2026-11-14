@@ -82,15 +82,28 @@ public final class WorldSimComputeSchedulerTest {
                     }), "old world task must start");
             check(oldStarted.await(5, TimeUnit.SECONDS), "old world native task must acquire lease");
             oldWorld.close();
+            check(!newWorld.submit(new WorldSimComputeScheduler.Ticket("new", "worldsim.compute.cycle", 2, 2, 1, 1),
+                    new byte[]{2}, new byte[]{2}, (input, request) -> {
+                        newStarted.countDown();
+                        return new WorldSimComputeScheduler.Output(new byte[]{2}, new byte[]{2});
+                    }), "the shared process-wide slot must reject a second domain while old JNI is active");
+            check(!newStarted.await(100, TimeUnit.MILLISECONDS),
+                    "new world must not overlap a native call from the previous server lifecycle");
+            finishOld.countDown();
+            WorldSimComputeScheduler.Result oldResult = null;
+            long oldDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (oldResult == null && System.nanoTime() < oldDeadline) {
+                oldResult = newWorld.poll();
+                Thread.yield();
+            }
+            check(oldResult != null && oldResult.ticket().worldId().equals("old"),
+                    "new lifecycle can collect and reject the completed old-world result without losing the shared slot");
             check(newWorld.submit(new WorldSimComputeScheduler.Ticket("new", "worldsim.compute.cycle", 2, 2, 1, 1),
                     new byte[]{2}, new byte[]{2}, (input, request) -> {
                         newStarted.countDown();
                         return new WorldSimComputeScheduler.Output(new byte[]{2}, new byte[]{2});
-                    }), "new world task must be accepted by its scheduler");
-            check(!newStarted.await(100, TimeUnit.MILLISECONDS),
-                    "new world must not overlap a native call from the previous server lifecycle");
-            finishOld.countDown();
-            check(newStarted.await(5, TimeUnit.SECONDS), "new world task must start after old JNI call exits");
+                    }), "shared slot becomes reusable only after the old result is collected");
+            check(newStarted.await(5, TimeUnit.SECONDS), "new world task starts after old JNI call exits");
         }
         System.out.println("WorldSimComputeSchedulerTest: OK");
     }

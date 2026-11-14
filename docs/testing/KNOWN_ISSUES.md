@@ -468,3 +468,13 @@
 - Corrected query paths to use `readMapProp`; write paths remain unchanged. Added a regression test verifying no map creation and no revision increment.
 - This is a correctness issue, not a Rust migration count increase. Run full logic tests and native CI; keep Java as the sole owner of individual Character progression until an explicit Rust parity/cutover contract is ready.
 - Source/test commits: `358b28f7`, `c8b28164`.
+
+
+### WF-RT-0020 — shared compute runtime consolidation (2026-11-14)
+
+- Extracted the process-wide single-worker executor into `wfmod` as `WorldForgeComputeRuntime`, exposed by `WorldForgeApi.computeRuntime()`.
+- Refactored `WorldSimComputeScheduler` into a compatibility facade over the shared runtime. No second executor, native lease, or scheduler was added.
+- The global slot remains occupied until the owning operation collects the completed result. Lifecycle close no longer assumes JNI interruption succeeded; ticket lifecycle epochs continue to reject results from an old server world.
+- Extended scheduler regression coverage to prove a replacement world cannot start overlapping work and can collect the previous world's result before reusing the slot.
+- **Scope:** infrastructure consolidation only; no new Rust production operation and no population cutover. WF-RT-0023 remains open, and worker count remains one.
+- **Validation:** requires the full Windows x64 addon/combined-server CI run on the resulting commit. No local build or measured speedup is claimed.

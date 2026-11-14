@@ -271,3 +271,12 @@ This is an operation-count status, not a percentage of all UniverseForge computa
 - Regression test asserts absent needs/skills/training maps remain absent and registry revision is unchanged after read queries.
 - This is a Java correctness repair; it does not count as a Rust-owned production operation. `PopulationSimulation.advance` remains Java-owned and is not duplicated in Rust.
 - Source/test commits: `358b28f7`, `c8b28164`. CI pending.
+
+
+## Shared execution runtime
+
+- `WorldForgeApi.computeRuntime()` is the sole process-wide bounded compute executor for addon domains.
+- `WorldSimComputeScheduler` delegates to that runtime; it no longer owns an executor or native semaphore.
+- The runtime has one global in-flight/completed-uncollected slot. A result remains in the slot until its operation key polls it, so another domain cannot overlap native work or silently displace a completed result.
+- Closing a domain lifecycle does not cancel native code or release the slot early. The caller's world/lifecycle ticket decides whether the eventual result is still applicable.
+- This is infrastructure, not another compute operation. The production Rust operation count remains two. Population remains Java-owned pending parity and safe asynchronous apply.
