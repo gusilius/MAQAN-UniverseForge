@@ -419,3 +419,11 @@
 - **CI run:** `43603966100`, job `WorldForge logic tests (Windows x64)` failed after 64 suites passed. The failure was isolated to the newly added dormant-prerequisite fixture: profession `needs_class` omitted the required non-empty `ranks` list, so `OriginDefs.addProfession` correctly rejected the fixture before the runtime missing-definition assertions ran.
 - **Correction:** added a valid one-rank definition to `needs_class` before removing its required class. The test now reaches the intended runtime scenario instead of failing during fixture setup. Source behavior was not weakened.
 - **Correction commit:** `5749294777ccb91fceb38d9c517073b377e16f46`. New CI required; the previous run is still not green.
+
+
+### WF-ORIGINS — dormant prerequisite regression test correction (follow-up)
+
+- **CI evidence:** run `43604115781` reports `WorldForge logic tests` failed with `64 passed / 1 failed`; the failing assertion is the new dormant-prerequisite test. Native Windows/Linux, Atlas + Rust, Core and Platform jobs passed. Addons was still running at the last poll.
+- **Test diagnosis:** the fixture removed the only class that carried `req_prof`, then attempted to observe that requirement through `options()`. With no remaining class entry, the options projection had no value to inspect. This was a test-fixture coverage error, not evidence that the null guard failed.
+- **Correction:** keep a separate root class `requires_prof` with `req_prof=required_prof`, while removing `required_prof` and the unrelated `base` class. This independently exercises the missing profession requirement through the class options path, while the `needs_class` profession exercises missing `req_classes` and `specialist` exercises missing `from`. Added a local exception report to expose any unexpected runtime failure in the test log.
+- **Commits:** `a9bd15bd`, `860730b7`. Await fresh CI; previous run remains failed and must not be treated as green.
