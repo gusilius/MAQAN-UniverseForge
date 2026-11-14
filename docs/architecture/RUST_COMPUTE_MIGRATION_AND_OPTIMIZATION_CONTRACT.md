@@ -339,3 +339,8 @@ A shared `DomainMutationRevisions` coordinator has been introduced in WorldForge
 ### Character revision integration status
 
 The shared `CHARACTERS` lane is now advanced by canonical `CharacterRegistry` lifecycle publication, restore, entity binding changes and calendar-derived age/life-stage updates. The legacy registry revision remains a membership/identity counter. This integration is post-write invalidation for current server-thread-owned paths; it is not yet a complete cross-thread mutation fence because direct mutable Character/props writers in addons remain under audit. Do not enable WorldSim global revision-based apply rejection until all such writers are scoped and covered by tests.
+
+
+### Character lane precision follow-up
+
+Idempotent Character operations must not create needless revision churn. The registry now treats same-destination migration as a no-op and normalizes entity body-kind keys consistently for bind/unbind. Tests cover repeated appointment/binding/migration, ignored unbinding and unchanged calendar refresh. These are precision improvements only; they do not authorize global WorldSim apply fencing while external mutable props writers remain unaudited.
