@@ -46,6 +46,10 @@ public final class WorldSimComputeSchedulerTest {
             check(result.ticket().worldId().equals("world-A")
                     && result.ticket().revision() == 42
                     && result.ticket().lifecycleEpoch() == 7, "result must preserve revision fence ticket");
+            check(result.ticket().matches("world-A", 42, 7), "matching world/revision/epoch must be accepted");
+            check(!result.ticket().matches("world-B", 42, 7), "results from another world must be rejected");
+            check(!result.ticket().matches("world-A", 43, 7), "stale revisions must be rejected");
+            check(!result.ticket().matches("world-A", 42, 8), "results from an earlier lifecycle must be rejected");
             check(result.snapshot()[0] == 1, "snapshot must be defensively copied");
             check(result.emergenceFrame()[0] == 6 && result.decisionFrame()[0] == 7,
                     "both compute outputs must be retained");
