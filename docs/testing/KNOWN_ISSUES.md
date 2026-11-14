@@ -278,3 +278,12 @@
 - **Сохранена семантика:** существующий `CharacterRegistry.revision()` остаётся membership/identity revision; новый coordinator не подменяет его и не меняет Character IDs, props, семейные связи, инвентарь или события.
 - **Тесты расширены:** создание персонажа, назначение должности, bind/unbind физической Entity проверяют продвижение общей CHARACTERS lane.
 - **Ограничение:** это post-write revision wiring для текущих server-thread-owned путей, а не доказательство межпоточной блокировки всех прямых записей в mutable `Character.props`. Внешние addon writers, напрямую меняющие Character/props, ещё должны быть инвентаризированы и подключены. Не использовать vector как глобальный apply fence до введения mutation scopes вокруг всех canonical writers и проверки snapshot/apply на server thread.
+
+
+### WF-RT-0023 — Character lane precision follow-up
+
+- **Идемпотентность:** повторное назначение уже существующей должности и повторная привязка той же Entity не продвигают lane; игнорируемая отвязка не продвигает lane.
+- **Исправление нормализации:** `unbindEntity` теперь нормализует body kind так же, как `bindEntity`, и проверяет непустой UUID.
+- **Лишние invalidations:** миграция в уже текущую локацию стала no-op и не создаёт lifecycle event/revision.
+- **Тесты:** `DomainMutationRevisionsTest` расширен проверками этих случаев и повторного календарного refresh.
+- **Ограничение без изменений:** revision lane остаётся post-write invalidation, не межпоточным mutation fence; WorldSim ещё не использует её как глобальный apply fence. Windows CI для актуального HEAD не подтверждён.
