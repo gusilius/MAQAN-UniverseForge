@@ -1,6 +1,8 @@
 package dev.worldforge.people;
 
 import dev.worldforge.mod.Json;
+import dev.worldforge.mod.api.DomainMutationRevisions;
+import dev.worldforge.mod.api.WorldForgeApi;
 
 import java.util.*;
 
@@ -93,14 +95,19 @@ public final class CharacterRegistry {
 
     /** Updates calendar-derived life stages and emits only real stage transitions. */
     public void refreshLifeStages(int year) {
+        boolean changed = false;
         for (Character character : byId.values()) {
             if (!character.alive) continue;
             String current = PopulationSimulation.lifeStage(character, year).name().toLowerCase(Locale.ROOT);
             Object previous = character.props.put("population.life_stage", current);
+            if (!Objects.equals(previous, current)) changed = true;
             if (previous instanceof String old && !old.equals(current))
                 emit(character, LifecycleKind.LIFE_STAGE_CHANGED, old, current, year);
-            character.props.put("population.age_years", PopulationSimulation.age(character, year));
+            Object age = PopulationSimulation.age(character, year);
+            Object previousAge = character.props.put("population.age_years", age);
+            if (!Objects.equals(previousAge, age)) changed = true;
         }
+        if (changed) recordDomainMutation();
     }
 
     public void changeProfession(String id, String professionId, int year) {
@@ -184,8 +191,10 @@ public final class CharacterRegistry {
             for (Map.Entry<?, ?> entry : map.entrySet())
                 if (entry.getKey() instanceof String key) bindings.put(key, entry.getValue());
         } else bindings = new LinkedHashMap<>();
+        if (Objects.equals(bindings.get(kind), uuid)) return true;
         bindings.put(kind, uuid);
         c.props.put("population.entity_bindings", bindings);
+        recordDomainMutation();
         return true;
     }
 
@@ -200,6 +209,7 @@ public final class CharacterRegistry {
             if (entry.getKey() instanceof String key && !key.equals(bodyKind)) bindings.put(key, entry.getValue());
         if (bindings.isEmpty()) c.props.remove("population.entity_bindings");
         else c.props.put("population.entity_bindings", bindings);
+        recordDomainMutation();
     }
 
     private static void addGlobalChild(Character parent, String childGlobalId) {
@@ -238,7 +248,16 @@ public final class CharacterRegistry {
         while (history.size() > 64) history.remove(0);
         character.props.put("character.lifecycle.sequence", sequence);
         character.props.put("character.lifecycle.events", history);
+        recordDomainMutation();
         for (Listener listener : listeners) listener.lifecycle(character, event);
+    }
+
+    /** Advances the shared lane after a canonical Character write has completed. */
+    private static void recordDomainMutation() {
+        try (DomainMutationRevisions.Mutation mutation =
+                     WorldForgeApi.revisions().begin(DomainMutationRevisions.Domain.CHARACTERS)) {
+            mutation.commit();
+        }
     }
 
     public List<Map<String, Object>> recentLifecycle(String characterId, int limit) {
@@ -566,6 +585,7 @@ public final class CharacterRegistry {
         byId.putAll(loaded);
         next = safeNext;
         revision++;
+        recordDomainMutation();
         for (Character character : byId.values()) {
             LifecycleEvent restored = new LifecycleEvent(LifecycleKind.RESTORED, character.id, "", "", 0);
             for (Listener listener : listeners) listener.lifecycle(character, restored);
