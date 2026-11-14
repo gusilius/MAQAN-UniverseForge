@@ -256,6 +256,25 @@ public class OriginsTest {
         ok(winners.get() == 1 && raceRevision == 1
                         && Set.of("human", "orc").contains(concurrent.build("p:race-race").race),
                 "параллельный выбор расы сериализован: один победитель и одна revision");
+        // Removed prerequisite definitions must block gracefully, never dereference null.
+        OriginDefs missingPrerequisites = new OriginDefs();
+        missingPrerequisites.load("{\"races\":[{\"id\":\"r\"}],\"classes\":[{\"id\":\"base\",\"req_prof\":{\"required_prof\":0}}],\"professions\":[{\"id\":\"required_prof\",\"ranks\":[{\"xp\":0}]},{\"id\":\"specialist\",\"from\":\"root_prof\",\"ranks\":[{\"xp\":0}]},{\"id\":\"needs_class\",\"req_classes\":[\"base\"]},{\"id\":\"root_prof\",\"ranks\":[{\"xp\":0}]}]}");
+        missingPrerequisites.professions.remove("required_prof");
+        missingPrerequisites.professions.remove("root_prof");
+        missingPrerequisites.classes.remove("base");
+        Origins missingPrerequisiteOrigins = new Origins(missingPrerequisites);
+        missingPrerequisiteOrigins.setRace("p:missing-prereq", "r");
+        String missingClassRequirement = missingPrerequisiteOrigins.canLearn("p:missing-prereq", "needs_class");
+        String missingProfessionParent = missingPrerequisiteOrigins.canLearn("p:missing-prereq", "specialist");
+        Origins.Build noClassBuild = missingPrerequisiteOrigins.build("p:missing-prereq");
+        noClassBuild.prof.put("required_prof", 0);
+        String missingClassProfessionRequirement = missingPrerequisiteOrigins.options("p:missing-prereq").values().stream()
+                .filter(Objects::nonNull).findFirst().orElse("");
+        ok(missingClassRequirement != null && missingClassRequirement.contains("временно отсутствует")
+                        && missingProfessionParent != null && missingProfessionParent.contains("временно отсутствует")
+                        && missingClassProfessionRequirement.contains("временно отсутствует"),
+                "удалённые prerequisite definitions дают безопасный отказ вместо NullPointerException");
+
         System.out.println(fails == 0 ? "ALL OK" : fails + " FAIL");
         if (fails > 0) System.exit(1);
     }
