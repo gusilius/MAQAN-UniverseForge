@@ -133,6 +133,10 @@ public final class CharacterRegistry {
 
     /** Updates calendar-derived life stages and emits only real stage transitions. */
     public void refreshLifeStages(int year) {
+        try (MutationBatch ignored = beginMutationBatch()) { refreshLifeStagesBatched(year); }
+    }
+
+    private void refreshLifeStagesBatched(int year) {
         boolean changed = false;
         boolean lifecyclePublished = false;
         for (Character character : byId.values()) {
@@ -154,6 +158,10 @@ public final class CharacterRegistry {
     }
 
     public void changeProfession(String id, String professionId, int year) {
+        try (MutationBatch ignored = beginMutationBatch()) { changeProfessionBatched(id, professionId, year); }
+    }
+
+    private void changeProfessionBatched(String id, String professionId, int year) {
         Character c = require(id);
         String previous = PopulationSimulation.profession(c);
         PopulationSimulation.assignProfession(c, professionId, year);
@@ -164,6 +172,10 @@ public final class CharacterRegistry {
 
     /** Employment is an assignment on the existing person, never a new population record. */
     public void hire(String id, String employerId, String professionId, int year) {
+        try (MutationBatch ignored = beginMutationBatch()) { hireBatched(id, employerId, professionId, year); }
+    }
+
+    private void hireBatched(String id, String employerId, String professionId, int year) {
         Character c = require(id);
         if (!c.alive) throw new IllegalStateException(c.name + " is dead");
         String employer = requireText(employerId, "employer");
@@ -183,6 +195,10 @@ public final class CharacterRegistry {
 
     /** Releases employment without deleting the Character or any skills/family/history. */
     public void fire(String id, String employerId, int year) {
+        try (MutationBatch ignored = beginMutationBatch()) { fireBatched(id, employerId, year); }
+    }
+
+    private void fireBatched(String id, String employerId, int year) {
         Character c = require(id);
         String employer = employerId == null || employerId.isBlank()
                 ? String.valueOf(c.props.getOrDefault("population.employer", "")) : employerId.trim();
@@ -195,6 +211,10 @@ public final class CharacterRegistry {
 
     /** Moves the same person to another population scope and releases the old settlement post. */
     public void migrate(String id, String destinationId, int year) {
+        try (MutationBatch ignored = beginMutationBatch()) { migrateBatched(id, destinationId, year); }
+    }
+
+    private void migrateBatched(String id, String destinationId, int year) {
         Character c = require(id);
         if (!c.alive) throw new IllegalStateException(c.name + " is dead");
         String destination = requireText(destinationId, "destination");
@@ -207,6 +227,10 @@ public final class CharacterRegistry {
     }
 
     public void setDuty(String id, PopulationSimulation.Duty duty, boolean assigned, int year) {
+        try (MutationBatch ignored = beginMutationBatch()) { setDutyBatched(id, duty, assigned, year); }
+    }
+
+    private void setDutyBatched(String id, PopulationSimulation.Duty duty, boolean assigned, int year) {
         Character c = require(id);
         if (!c.alive && assigned) throw new IllegalStateException(c.name + " is dead");
         boolean before = PopulationSimulation.hasDuty(c, duty);
