@@ -34,6 +34,10 @@ public final class WorldSimComputeScheduler implements AutoCloseable {
         public String worldId() { return worldId; }
         public long revision() { return revision; }
         public long lifecycleEpoch() { return lifecycleEpoch; }
+        public boolean matches(String expectedWorldId, long expectedRevision, long expectedLifecycleEpoch) {
+            return worldId.equals(expectedWorldId) && revision == expectedRevision
+                    && lifecycleEpoch == expectedLifecycleEpoch;
+        }
     }
 
     public static final class Output {
