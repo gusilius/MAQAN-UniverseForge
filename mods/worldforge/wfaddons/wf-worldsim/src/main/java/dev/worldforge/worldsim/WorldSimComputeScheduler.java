@@ -5,6 +5,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.ThreadFactory;
 
 /**
@@ -15,6 +16,9 @@ import java.util.concurrent.ThreadFactory;
  * This class never touches Minecraft or domain objects.
  */
 public final class WorldSimComputeScheduler implements AutoCloseable {
+    // Shared across scheduler instances so a native call that ignores interruption
+    // cannot overlap a new world's compute after integrated-server restart.
+    private static final Semaphore NATIVE_COMPUTE_LEASE = new Semaphore(1, true);
     @FunctionalInterface
     public interface ComputeOperation {
         Output compute(byte[] snapshot, byte[] emergenceRequest) throws Exception;
@@ -88,8 +92,20 @@ public final class WorldSimComputeScheduler implements AutoCloseable {
         if (active != null) return false;
         byte[] immutableSnapshot = copyRequired(snapshot, "snapshot");
         byte[] immutableEmergence = copyRequired(emergenceRequest, "emergenceRequest");
-        active = executor.submit(() -> new Result(ticket, immutableSnapshot,
-                operation.compute(immutableSnapshot.clone(), immutableEmergence.clone())));
+        active = executor.submit(() -> {
+            boolean acquired = false;
+            try {
+                NATIVE_COMPUTE_LEASE.acquire();
+                acquired = true;
+                return new Result(ticket, immutableSnapshot,
+                        operation.compute(immutableSnapshot.clone(), immutableEmergence.clone()));
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("Interrupted while waiting for the WorldSim native compute lease", interrupted);
+            } finally {
+                if (acquired) NATIVE_COMPUTE_LEASE.release();
+            }
+        });
         return true;
     }
 
