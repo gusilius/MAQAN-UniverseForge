@@ -45,6 +45,37 @@ public final class TreasuryLedgerTest {
                 dev.worldforge.mod.api.DomainMutationRevisions.Domain.ECONOMY_TRADE) == afterTransfer,
                 "ledger restore rebuilds state without publishing a live economy mutation");
 
+        TreasuryLedger concurrent = new TreasuryLedger();
+        concurrent.open("concurrent:source", "concurrent:source", "silver", 1000);
+        concurrent.open("concurrent:target", "concurrent:target", "silver", 0);
+        long concurrentBefore = revisions.snapshot().orElseThrow().revision(
+                dev.worldforge.mod.api.DomainMutationRevisions.Domain.ECONOMY_TRADE);
+        java.util.concurrent.atomic.AtomicInteger concurrentSuccess = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.List<Thread> writers = new java.util.ArrayList<>();
+        for (int worker = 0; worker < 4; worker++) {
+            final int workerId = worker;
+            Thread writer = new Thread(() -> {
+                for (int i = 0; i < 25; i++) {
+                    if (concurrent.transfer("concurrent:source", "concurrent:target", 1,
+                            TreasuryLedger.Kind.TRADE, "concurrency", "worker:" + workerId + ":" + i,
+                            i, "concurrent transfer")) concurrentSuccess.incrementAndGet();
+                }
+            });
+            writers.add(writer);
+            writer.start();
+        }
+        for (Thread writer : writers) {
+            try { writer.join(); }
+            catch (InterruptedException ex) { Thread.currentThread().interrupt(); throw new AssertionError(ex); }
+        }
+        long concurrentAfter = revisions.snapshot().orElseThrow().revision(
+                dev.worldforge.mod.api.DomainMutationRevisions.Domain.ECONOMY_TRADE);
+        ok(concurrentSuccess.get() == 100 && close(concurrent.balance("concurrent:source"), 900)
+                        && close(concurrent.balance("concurrent:target"), 100),
+                "concurrent treasury writers serialize without lost transfers or balance corruption");
+        ok(concurrentAfter == concurrentBefore + 100,
+                "each concurrent logical transfer publishes exactly one economy revision");
+
         TreasuryLedger ledger=new TreasuryLedger();
         ledger.open("realm:kingdom","realm:kingdom","silver",1000);
         ledger.open("settlement:capital","settlement:capital","silver",100);
