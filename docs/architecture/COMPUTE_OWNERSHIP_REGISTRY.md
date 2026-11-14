@@ -329,3 +329,10 @@ This is an operation-count status, not a percentage of all UniverseForge computa
 - The process-local PeopleMod cursor is not treated as proof of durable Character application. On server start, a Character partition can restore an older `population.last_simulated_world_day` even when the global clock is current.
 - Population now captures at the current world day even when it equals the process-local cursor. Per-Character receipts decide who needs catch-up; legacy Characters without receipts use the current fallback baseline.
 - Batch-level elapsed metadata is the maximum positive per-Character interval; each Rust Character still receives its own elapsed interval. Empty batches remain unsubmitted.
+
+
+### Population reload cursor correction
+
+- The process-local PeopleMod cursor is not treated as proof of durable Character application. On server start, a Character partition can restore an older `population.last_simulated_world_day` even when the global clock is current.
+- Population now captures at the current world day even when it equals the process-local cursor. Per-Character receipts decide who needs catch-up; legacy Characters without receipts use the current fallback baseline.
+- Batch-level elapsed metadata is the maximum positive per-Character interval; each Rust Character still receives its own elapsed interval. Empty batches remain unsubmitted.

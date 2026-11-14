@@ -72,7 +72,8 @@ public final class PopulationComputeCoordinator {
         if(runtime.busy()) return true;
 
         long fallbackStartDay=PeopleMod.populationProcessedDay();
-        if(currentWorldDay<=fallbackStartDay) return true;
+        // The process cursor is not durable proof that every Character partition was saved.
+        // Always inspect per-Character receipts, including when the cursor equals the world day.
         String worldId=WorldForgeMod.worldId()==null
                 ?server.overworld().dimension().location().toString()
                 :WorldForgeMod.worldId().toString();

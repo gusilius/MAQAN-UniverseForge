@@ -459,3 +459,10 @@ The fixture is a test-only oracle, not a production data source. Extend it whene
 The process-local PeopleMod population cursor is a scheduling hint, not durable evidence that every Character partition was saved. On server reload the cursor may initialize to the current world day while one or more Character registries restore older per-Character receipts. Therefore the coordinator must still capture at the current day even when `currentWorldDay == populationProcessedDay`. Characters with current receipts are excluded; older receipts are caught up individually. Legacy Characters without a receipt use the current fallback baseline and are not incorrectly advanced through the entire world history.
 
 The batch-level `elapsed_days` is now the maximum positive per-Character interval in the snapshot (zero only for an empty batch); Rust still computes each Character using its own `elapsed_days`. This preserves the ABI's non-empty-batch validation while supporting recovery when the global process cursor is already current.
+
+
+### Reload recovery: Character receipts outrank the process-local cursor
+
+The process-local PeopleMod population cursor is a scheduling hint, not durable evidence that every Character partition was saved. On server reload the cursor may initialize to the current world day while one or more Character registries restore older per-Character receipts. Therefore the coordinator must still capture at the current day even when `currentWorldDay == populationProcessedDay`. Characters with current receipts are excluded; older receipts are caught up individually. Legacy Characters without a receipt use the current fallback baseline and are not incorrectly advanced through the entire world history.
+
+The batch-level `elapsed_days` is the maximum positive per-Character interval in the snapshot (zero only for an empty batch); Rust still computes each Character using its own `elapsed_days`. This preserves the ABI's non-empty-batch validation while supporting recovery when the global process cursor is already current.
