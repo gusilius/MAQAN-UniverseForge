@@ -15,6 +15,8 @@ JARS="$(cd "$JARS" && pwd)"
 mkdir -p "$OUTPUT"
 OUTPUT="$(cd "$OUTPUT" && pwd)"
 WORK="$(mktemp -d)"
+# Convert Git Bash temporary paths before passing JVM output paths on Windows.
+JAVA_WORK="$(cygpath -m "$WORK")"
 SERVER_PID=""
 SERVER_EXIT_CODE="not_observed"
 CURRENT_STAGE="preflight"
@@ -107,9 +109,9 @@ P
 CURRENT_STAGE="forge_startup"
 java -Xms1G -Xmx4G \
   -XX:+HeapDumpOnOutOfMemoryError \
-  -XX:HeapDumpPath="$WORK/java_pid%p.hprof" \
-  -XX:ErrorFile="$WORK/hs_err_pid%p.log" \
-  -Xlog:gc*:file="$WORK/gc-%p.log":time,uptime,level,tags \
+  -XX:HeapDumpPath="$JAVA_WORK/java_pid%p.hprof" \
+  -XX:ErrorFile="$JAVA_WORK/hs_err_pid%p.log" \
+  -Xlog:gc*:file="$JAVA_WORK/gc-%p.log":time,uptime,level,tags \
   -Dworldforge.campaign.empty-bootstrap=true \
   @user_jvm_args.txt @libraries/net/minecraftforge/forge/$FORGE/win_args.txt nogui \
   < <(tail -n +1 -f in.txt) > server.log 2>&1 &

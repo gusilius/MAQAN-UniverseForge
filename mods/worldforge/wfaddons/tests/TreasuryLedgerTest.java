@@ -109,11 +109,15 @@ public final class TreasuryLedgerTest {
             ok(false, "large treasury journal streaming serialization completes");
         }
 
-        ok(rationIndex.entriesForAccount("stock:settlement:one:food").size() == 1
+        ok(rationIndex.entriesForAccount("stock:settlement:one:food").size() == 2
+                        && rationIndex.entriesForAccount("stock:settlement:one:food").get(0).kind() == TreasuryLedger.Kind.OPENING
+                        && rationIndex.entriesForAccount("stock:settlement:one:food").get(1).reference().equals("ration:one")
                         && rationIndex.entriesForReference("stock:settlement:one:food", TreasuryLedger.Kind.LOGISTICS, "ration:one").size() == 1
                         && rationIndex.hasEntries("stock:settlement:one:food"),
                 "account and reference journal indexes are populated on append");
-        ok(rationRestored.entriesForAccount("stock:settlement:one:food").size() == 1
+        ok(rationRestored.entriesForAccount("stock:settlement:one:food").size() == 2
+                        && rationRestored.entriesForAccount("stock:settlement:one:food").get(0).kind() == TreasuryLedger.Kind.OPENING
+                        && rationRestored.entriesForAccount("stock:settlement:one:food").get(1).reference().equals("ration:one")
                         && rationRestored.entriesForReference("stock:settlement:one:food", TreasuryLedger.Kind.LOGISTICS, "ration:one").size() == 1
                         && rationRestored.accountIdsWithPrefix("stock:").contains("stock:settlement:one:food"),
                 "account/reference indexes and account enumeration are rebuilt on restore");
