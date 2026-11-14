@@ -33,13 +33,13 @@ This registry records only ownership supported by the current source audit. Unkn
 
 The first migration slice is `worldsim.emergence.advance` + `worldsim.decide`. They must share one bounded WorldSim compute scheduler unless profiling proves independent scheduling is necessary. Do not create one executor per domain.
 
-1. **Implemented:** server thread builds a detached immutable snapshot/request and copies byte arrays. No Minecraft object, Level, Entity, registry or mutable Gson object crosses to a worker.
-2. **Partially implemented:** ticket records world save identity, operation day/revision, lifecycle epoch, snapshot schema version, native ABI version and combined operation key `worldsim.compute.cycle`. A shared all-domain mutation revision remains open.
+1. **Implemented:** server thread builds a detached immutable snapshot/request and copies byte arrays. Snapshot carries `schema_version=1`. No Minecraft object, Level, Entity, registry or mutable Gson object crosses to a worker.
+2. **Partially implemented:** ticket records world save identity, operation day/revision, lifecycle epoch, snapshot schema version, native ABI version and combined operation key `worldsim.compute.cycle`; JNI validates schema and the loaded library reports ABI version. A shared all-domain mutation revision remains open.
 3. **Implemented:** one worker invokes both native methods sequentially and returns immutable result bytes/frame. It performs no Forge calls and applies no effects. A process-wide native lease prevents overlap across scheduler instances during server restart.
 4. **Implemented with remaining limits:** server thread polls completed frames and checks lifecycle epoch, world save identity, operation key and submitted day token before apply; result schema and idempotent domain receipts are validated by existing apply pipeline. Cross-domain mutation revision is not yet available.
 5. Lifecycle/world/token mismatches are rejected and diagnosed. A shared revision that detects every external domain mutation is still required for a complete freshness fence.
 6. **Implemented single-flight backpressure:** at most one request is active; no unbounded queue. While busy, the next snapshot is not enqueued; after completion the coordinator builds a fresh snapshot, while Rust emergence resumes from the last committed state and current simulation day. Campaign catch-up parity must verify that no elapsed work is lost.
-7. Stop/reload increments the lifecycle epoch, rejects in-flight completions, and persists the last committed state/cursor. Native work must not outlive the world authority it belongs to.
+7. Stop/reload increments the lifecycle epoch and rejects in-flight completions. Native emergence state is staged and committed only after apply stages complete; a durable cross-domain frame receipt/resumable apply journal is still required for full crash consistency. Native work must not outlive the world authority it belongs to.
 8. **Production owner:** Rust async is the only WorldSim compute path; no parallel Java compute fallback or shadow calculation runs. If a safe fallback is later needed, it must be exclusive per operation/revision.
 9. Existing profiler measures snapshot, native stages, validation/apply and persistence. Queue wait and end-to-end compute latency are now recorded by the scheduler result and existing profiler; runtime distribution data awaits CI/campaign artifacts.
 
@@ -86,3 +86,8 @@ Record the exact class/method and tests before assigning or changing ownership. 
 - `WorldSimMod.java`: `advanceEmergence` and `decide` execute sequentially on the worker; all state sync, proposal validation, event publication and persistence remain on the server thread.
 - `WorldSimComputeSchedulerTest.java`: backpressure, defensive-copy, ticket-fence and lifecycle-overlap tests. Windows CI and autonomous campaign evidence are pending.
 - Remaining limitation: no global mutation revision exists across all authoritative addon domains yet. Do not claim full snapshot freshness until this contract is implemented and tested.
+
+
+## Apply atomicity status
+
+The coordinator now stages the candidate Rust emergence state and advances the committed in-memory cursor only after materialization, event publication and proposal processing complete. This prevents the Rust cursor itself from moving ahead on an apply exception. It does **not** make independent Character, Settlement, EventLog and other domain persistence operations one atomic transaction. Track that remaining work under `WF-RT-0021`; do not add a parallel journal or event store—extend existing canonical receipts/IDs.
