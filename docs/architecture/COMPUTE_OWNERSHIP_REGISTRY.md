@@ -91,3 +91,10 @@ Record the exact class/method and tests before assigning or changing ownership. 
 ## Apply atomicity status
 
 The coordinator now stages the candidate Rust emergence state and advances the committed in-memory cursor only after materialization, event publication and proposal processing complete. This prevents the Rust cursor itself from moving ahead on an apply exception. It does **not** make independent Character, Settlement, EventLog and other domain persistence operations one atomic transaction. Track that remaining work under `WF-RT-0021`; do not add a parallel journal or event store—extend existing canonical receipts/IDs.
+
+
+## Presentation and history projections
+
+| Operation key | Domain | Current owner | Optimization boundary | Evidence / status |
+|---|---|---|---|---|
+| `worldsim.chronicle.ordering` | Chronological presentation of canonical EventLog facts | Java `HistoricalChronicle` | O(1) append for ordered events; binary-search insertion for delayed events; no second event store and no simulation authority | WF-RT-0022; implementation and 2,000-event ordering test added; Windows/campaign profile pending |
