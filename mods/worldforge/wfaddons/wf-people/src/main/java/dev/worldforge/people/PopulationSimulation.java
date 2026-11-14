@@ -75,6 +75,12 @@ public final class PopulationSimulation {
 
     /** Imports ranks from the shared RPG progression profile into this Character's canonical skill store. */
     public static void syncSkillRanks(Character character, Map<String, Integer> ranks) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            syncSkillRanksBatched(character, ranks);
+        }
+    }
+
+    private static void syncSkillRanksBatched(Character character, Map<String, Integer> ranks) {
         Objects.requireNonNull(character, "character");
         Map<String, Object> next = new TreeMap<>();
         for (var entry : ranks.entrySet()) {
@@ -134,6 +140,12 @@ public final class PopulationSimulation {
 
     /** Low-level migration/admin path; prefer the catalog-validated overload. */
     public static void assignProfession(Character character, String professionId, int year) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            assignProfessionBatched(character, professionId, year);
+        }
+    }
+
+    private static void assignProfessionBatched(Character character, String professionId, int year) {
         requireAlive(character);
         String next = normalizeId(professionId, "profession");
         String previous = profession(character);
@@ -162,6 +174,12 @@ public final class PopulationSimulation {
 
     /** Duties are orthogonal tags: one person may be a specialist and a soldier in reserve. */
     public static void addDuty(Character character, Duty duty) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            addDutyBatched(character, duty);
+        }
+    }
+
+    private static void addDutyBatched(Character character, Duty duty) {
         requireAlive(character);
         List<Object> duties = listProp(character, DUTIES);
         if (!duties.contains(duty.name().toLowerCase(Locale.ROOT))) {
@@ -171,6 +189,12 @@ public final class PopulationSimulation {
     }
 
     public static void removeDuty(Character character, Duty duty) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            removeDutyBatched(character, duty);
+        }
+    }
+
+    private static void removeDutyBatched(Character character, Duty duty) {
         if (listProp(character, DUTIES).remove(duty.name().toLowerCase(Locale.ROOT)))
             CharacterRegistry.recordCharacterMutation();
     }
@@ -183,6 +207,12 @@ public final class PopulationSimulation {
     public static void promoteToHero(Character character) { addDuty(character, Duty.HERO); }
 
     public static void setCommand(Character character, String commandId) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            setCommandBatched(character, commandId);
+        }
+    }
+
+    private static void setCommandBatched(Character character, String commandId) {
         requireAlive(character);
         Object previous = character.props.get("population.command");
         if (commandId == null || commandId.isBlank()) {
@@ -209,6 +239,12 @@ public final class PopulationSimulation {
     }
 
     public static void setNeed(Character character, Need need, int deficit) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            setNeedBatched(character, need, deficit);
+        }
+    }
+
+    private static void setNeedBatched(Character character, Need need, int deficit) {
         Objects.requireNonNull(need, "need");
         Map<String, Object> needs = mapProp(character, NEEDS);
         int next = clamp(deficit, 0, MAX_NEED);
@@ -219,6 +255,12 @@ public final class PopulationSimulation {
     }
 
     public static void changeNeed(Character character, Need need, int delta) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            changeNeedBatched(character, need, delta);
+        }
+    }
+
+    private static void changeNeedBatched(Character character, Need need, int delta) {
         Objects.requireNonNull(character, "character");
         Objects.requireNonNull(need, "need");
         Map<String, Object> needs = mapProp(character, NEEDS);
@@ -252,6 +294,12 @@ public final class PopulationSimulation {
     }
 
     public static void setTrainingXp(Character character, String skillId, long xp) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            setTrainingXpBatched(character, skillId, xp);
+        }
+    }
+
+    private static void setTrainingXpBatched(Character character, String skillId, long xp) {
         requireAlive(character);
         if (xp < 0) throw new IllegalArgumentException("Training XP cannot be negative");
         Map<String, Object> training = mapProp(character, TRAINING);
@@ -263,6 +311,12 @@ public final class PopulationSimulation {
     }
 
     public static void setSkillRank(Character character, String skillId, int rank) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            setSkillRankBatched(character, skillId, rank);
+        }
+    }
+
+    private static void setSkillRankBatched(Character character, String skillId, int rank) {
         requireAlive(character);
         Map<String, Object> skills = mapProp(character, SKILLS);
         String id = normalizeId(skillId, "skill");
@@ -275,6 +329,12 @@ public final class PopulationSimulation {
 
     /** Adds training XP and returns the number of ranks gained. */
     public static int train(Character character, String skillId, long xp) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            return trainBatched(character, skillId, xp);
+        }
+    }
+
+    private static int trainBatched(Character character, String skillId, long xp) {
         requireAlive(character);
         String profession = profession(character);
         if ("laborer".equals(profession) || "general_worker".equals(profession))
@@ -300,6 +360,12 @@ public final class PopulationSimulation {
     }
 
     public static void setTrainingTarget(Character character, String skillId) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            setTrainingTargetBatched(character, skillId);
+        }
+    }
+
+    private static void setTrainingTargetBatched(Character character, String skillId) {
         requireAlive(character);
         String next = normalizeId(skillId, "skill");
         if (!Objects.equals(character.props.get(TRAINING_TARGET), next)) {
@@ -346,6 +412,12 @@ public final class PopulationSimulation {
 
     /** Records the chosen intent for UI/other addons; it does not spend food or move entities. */
     public static Intent updateIntent(Character character, int year) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            return updateIntentBatched(character, year);
+        }
+    }
+
+    private static Intent updateIntentBatched(Character character, int year) {
         Map<String, Object> needs = mapProp(character, NEEDS);
         Intent intent = character == null || !character.alive ? Intent.IDLE : decide(character, year, needs);
         LifeStage stage = character == null ? LifeStage.INFANT : lifeStage(character, year);
