@@ -357,3 +357,10 @@
 - **Commit:** `16b2b3e445e221edfb4b5668ffdd63e4db20ab78`.
 - **Status:** validated by run `43600742122` on source commit `16b2b3e`: Windows logic tests PASS (including compilation); WorldForge core PASS; native Windows/Linux PASS; MAQAN Platform PASS. Atlas + Rust and WorldForge addons were still running at the latest check. The compile regression is resolved; broader WF-RT-0023 remains open until the addon build and remaining writer/snapshot audits pass.
 
+### WF-RT-0023 — Origins mutation bypass and revision coverage
+
+- **Обнаружено:** публичные `build(owner)`/`peek(owner)` возвращали ссылки на изменяемый `Origins.Build`; чтение неизвестного owner через `build` создавало пустую запись. Это позволяло обходить revision lane и засорять сохранение пустыми owners.
+- **Исправление:** getters теперь возвращают detached copies, неизвестное чтение не материализует состояние. Канонические записи меняются через внутренний state owner и существующий `ORIGINS` lane. Подключены race/class/retrain/profession/NPC assignment/restore операции; добавлены проверки revision count, no-op и detached mutation.
+- **Дополнительная корректировка:** class choice и NPC assignment собирают staged Build и публикуют его только после успешной подготовки, уменьшая риск частичного состояния при сбое archetype hook.
+- **Ограничение:** изменение пока ожидает CI; нужны отдельные проверки всех путей мутации, восстановления, concurrent snapshots и Progress/Character cross-domain semantics. Глобальный apply fence остаётся выключен.
+
