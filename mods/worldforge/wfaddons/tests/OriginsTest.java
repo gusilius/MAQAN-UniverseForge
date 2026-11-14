@@ -263,15 +263,21 @@ public class OriginsTest {
         missingPrerequisites.professions.remove("root_prof");
         missingPrerequisites.classes.remove("base");
         Origins missingPrerequisiteOrigins = new Origins(missingPrerequisites);
-        missingPrerequisiteOrigins.setRace("p:missing-prereq", "r");
-        String missingClassRequirement = missingPrerequisiteOrigins.canLearn("p:missing-prereq", "needs_class");
-        String missingProfessionParent = missingPrerequisiteOrigins.canLearn("p:missing-prereq", "specialist");
-        missingPrerequisiteOrigins.fromJson("{\"p:missing-prereq\":{\"race\":\"r\",\"class\":\"\",\"history\":[],\"prof\":{\"required_prof\":0}}}");
-        String missingClassProfessionRequirement = missingPrerequisiteOrigins.options("p:missing-prereq").values().stream()
-                .filter(Objects::nonNull).findFirst().orElse("");
+        String missingClassRequirement = null, missingProfessionParent = null, missingClassProfessionRequirement = null;
+        try {
+            missingPrerequisiteOrigins.setRace("p:missing-prereq", "r");
+            missingClassRequirement = missingPrerequisiteOrigins.canLearn("p:missing-prereq", "needs_class");
+            missingProfessionParent = missingPrerequisiteOrigins.canLearn("p:missing-prereq", "specialist");
+            missingPrerequisiteOrigins.fromJson("{\"p:missing-prq\":{\"race\":\"r\",\"class\":\"\",\"history\":[],\"prof\":{\"required_prof\":0}}}".replace("missing-prq", "missing-prereq"));
+            missingClassProfessionRequirement = missingPrerequisiteOrigins.options("p:missing-prereq").values().stream()
+                    .filter(Objects::nonNull).findFirst().orElse("");
+        } catch (RuntimeException failure) {
+            failure.printStackTrace(System.err);
+            ok(false, "dormant prerequisite runtime path threw " + failure.getClass().getSimpleName());
+        }
         ok(missingClassRequirement != null && missingClassRequirement.contains("временно отсутствует")
                         && missingProfessionParent != null && missingProfessionParent.contains("временно отсутствует")
-                        && missingClassProfessionRequirement.contains("временно отсутствует"),
+                        && missingClassProfessionRequirement != null && missingClassProfessionRequirement.contains("временно отсутствует"),
                 "удалённые prerequisite definitions дают безопасный отказ вместо NullPointerException");
 
         System.out.println(fails == 0 ? "ALL OK" : fails + " FAIL");
