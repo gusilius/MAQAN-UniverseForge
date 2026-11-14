@@ -18,6 +18,7 @@ import dev.worldforge.court.CourtSim;
 import dev.worldforge.court.mc.CourtMod;
 import dev.worldforge.court.Marriages;
 import dev.worldforge.people.CharacterRegistry;
+import dev.worldforge.worldsim.EmergentPopulationIndex;
 import dev.worldforge.origins.Origins;
 import dev.worldforge.origins.mc.OriginsMod;
 import dev.worldforge.people.PopulationSimulation;
@@ -826,20 +827,21 @@ public final class WorldSimMod {
                 continue;
             }
             boolean hasSettledBands = false;
+            EmergentPopulationIndex populationIndex = new EmergentPopulationIndex(registry.all());
             for (var element : bands) {
                 if (!element.isJsonObject()) continue;
                 JsonObject band = element.getAsJsonObject();
                 if (!band.has("map_id") || !map.name.equals(band.get("map_id").getAsString())) continue;
                 String bandId = band.get("id").getAsString();
                 int target = (int) Math.max(0L, Math.min(100_000L, band.get("population").getAsLong()));
-                List<dev.worldforge.people.Character> residents = registry.all().stream()
-                        .filter(person -> person.alive && bandId.equals(person.props.get("emergence.band_id")))
-                        .sorted(Comparator.comparingInt(person -> person.birthYear))
-                        .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+                List<dev.worldforge.people.Character> residents = populationIndex.livingResidents(bandId);
+                residents.sort(Comparator.comparingInt(person -> person.birthYear));
+                EmergentParents parents = EmergentParents.from(residents, year);
                 while (residents.size() < target) {
-                    dev.worldforge.people.Character created = createEmergentResident(registry, map, bandId, residents, year, residents.size());
+                    dev.worldforge.people.Character created = createEmergentResident(
+                            registry, map, bandId, year, residents.size(), parents);
                     if (created == null) break;
-                    residents.add(created);
+                    populationIndex.add(created);
                 }
                 // Attach the existing Origins addon to the same canonical Character UUID.
                 // This gives emergent NPCs real race, class and profession progression records.
@@ -884,8 +886,8 @@ public final class WorldSimMod {
                     Colony colony = SettleMod.foundEmergentInMemory(server,
                             settlementDimension, settlementId, display,
                             x, z, "worldsim:settlement:" + bandId);
-                    List<String> residentIds = registry.all().stream()
-                            .filter(person -> person.alive && bandId.equals(person.props.get("emergence.band_id")))
+                    List<String> residentIds = residents.stream()
+                            .filter(person -> person.alive)
                             .map(person -> person.globalId).toList();
                     if (!SettleMod.replaceCanonicalResidentsInMemory(colony.s.id, residentIds))
                         LOGGER.error("wf_worldsim: canonical residents for settlement {} could not be staged", settlementId);
@@ -898,8 +900,7 @@ public final class WorldSimMod {
                         colony.s.removeWorkerByPerson(worker.person, reason);
                     }
                     for (String residentId : residentIds) {
-                        dev.worldforge.people.Character resident = registry.all().stream()
-                                .filter(person -> residentId.equals(person.globalId)).findFirst().orElse(null);
+                        dev.worldforge.people.Character resident = populationIndex.byGlobalId(residentId);
                         if (resident == null) continue;
                         boolean workingAge = dev.worldforge.people.PopulationSimulation.age(resident, year) >= 18
                                 && dev.worldforge.people.PopulationSimulation.canWork(resident, year);
@@ -915,8 +916,7 @@ public final class WorldSimMod {
                     LOGGER.warn("wf_worldsim: settlement materialization deferred for band {}: {}", bandId, deferred.getMessage());
                 }
             }
-            List<dev.worldforge.people.Character> emergentResidents = registry.all().stream()
-                    .filter(person -> person.props.containsKey("emergence.band_id")).toList();
+            List<dev.worldforge.people.Character> emergentResidents = populationIndex.emergentResidents();
             boolean peopleDurable = emergentResidents.isEmpty()
                     || PeopleMod.persistCharacter(emergentResidents.get(0), server);
             if (!peopleDurable) {
@@ -1087,6 +1087,7 @@ public final class WorldSimMod {
             if (registry == null) continue;
             boolean changed = false;
             boolean settlementMapMarkersChanged = false;
+            EmergentPopulationIndex populationIndex = new EmergentPopulationIndex(registry.all());
             for (var element : state.getAsJsonArray("polities")) {
                 if (!element.isJsonObject()) continue;
                 JsonObject polity = element.getAsJsonObject();
@@ -1099,9 +1100,8 @@ public final class WorldSimMod {
                 Set<String> bandIds = new LinkedHashSet<>();
                 if (polity.has("settlement_ids") && polity.get("settlement_ids").isJsonArray())
                     for (var band : polity.getAsJsonArray("settlement_ids")) bandIds.add(band.getAsString());
-                List<dev.worldforge.people.Character> members = registry.all().stream()
-                        .filter(person -> person.alive && bandIds.contains(String.valueOf(person.props.get("emergence.band_id"))))
-                        .toList();
+                List<dev.worldforge.people.Character> members = new ArrayList<>();
+                for (String bandId : bandIds) members.addAll(populationIndex.livingResidents(bandId));
                 Set<String> neighbors = emergentNeighbors(polity, state.getAsJsonArray("polities"),
                         state.getAsJsonArray("bands"), map);
                 String biomes = emergentBiomeSummary(bandIds, state.getAsJsonArray("bands"), map);
@@ -1131,8 +1131,7 @@ public final class WorldSimMod {
                         .filter(person -> person.globalId.equals(previousRulerId)).findFirst().orElse(null);
                 boolean foundedNewDynasty = false;
                 if (ruler == null) {
-                    dev.worldforge.people.Character previous = registry.all().stream()
-                            .filter(person -> person.globalId.equals(previousRulerId)).findFirst().orElse(null);
+                    dev.worldforge.people.Character previous = populationIndex.byGlobalId(previousRulerId);
                     ruler = members.stream()
                             .filter(person -> dev.worldforge.people.PopulationSimulation.age(person, year) >= 18)
                             .sorted(Comparator
@@ -1332,20 +1331,35 @@ public final class WorldSimMod {
             LOGGER.error("wf_worldsim: emergent settlement realm bindings could not be durably saved");
     }
 
+    private static final class EmergentParents {
+        private dev.worldforge.people.Character father;
+        private dev.worldforge.people.Character mother;
+        private static EmergentParents from(List<dev.worldforge.people.Character> residents, int year) {
+            EmergentParents parents = new EmergentParents();
+            for (dev.worldforge.people.Character candidate : residents) {
+                if (!candidate.alive || dev.worldforge.people.PopulationSimulation.age(candidate, year) < 18) continue;
+                if ("m".equals(candidate.gender) && parents.father == null) parents.father = candidate;
+                if ("f".equals(candidate.gender) && parents.mother == null) parents.mother = candidate;
+                if (parents.father != null && parents.mother != null) break;
+            }
+            return parents;
+        }
+    }
+
     private static dev.worldforge.people.Character createEmergentResident(
             dev.worldforge.people.CharacterRegistry registry, MapData map, String bandId,
-            List<dev.worldforge.people.Character> residents, int year, int ordinal) {
-        dev.worldforge.people.Character father = null, mother = null;
-        for (dev.worldforge.people.Character candidate : residents) {
-            if (!candidate.alive || dev.worldforge.people.PopulationSimulation.age(candidate, year) < 18) continue;
-            if ("m".equals(candidate.gender) && father == null) father = candidate;
-            if ("f".equals(candidate.gender) && mother == null) mother = candidate;
-        }
+            int year, int ordinal, EmergentParents parents) {
+        dev.worldforge.people.Character father = parents.father, mother = parents.mother;
+        if (father != null && !father.spouse.isBlank() && (mother == null || !father.spouse.equals(mother.id)))
+            parents.father = father = null;
+        if (mother != null && !mother.spouse.isBlank() && (father == null || !mother.spouse.equals(father.id)))
+            parents.mother = mother = null;
         if (father == null || mother == null || !father.spouse.equals(mother.id) || !mother.spouse.equals(father.id)) {
             String gender = father == null ? "m" : (mother == null ? "f" : (ordinal % 2 == 0 ? "m" : "f"));
             dev.worldforge.people.Character adult = createEmergentAdult(registry, map, bandId, gender, year, ordinal);
             if (adult == null) return null;
-            if ("m".equals(gender)) father = adult; else mother = adult;
+            if ("m".equals(gender)) parents.father = adult; else parents.mother = adult;
+            father = parents.father; mother = parents.mother;
             if (father != null && mother != null && father.spouse.isBlank() && mother.spouse.isBlank()) {
                 try { registry.marry(father.id, mother.id, year); } catch (RuntimeException ignored) { }
             }
