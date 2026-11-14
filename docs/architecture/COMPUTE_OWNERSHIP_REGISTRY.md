@@ -194,3 +194,11 @@ Remaining bypass surface: Character still exposes mutable public fields, childre
 - `StatApi` documents both `p:<uuid>` and `n:<id>`, while the Forge Origins adapter currently only exposes player owners. Audit any NPC Origins assignment callers before deciding whether NPC origins should be mirrored or migrated.
 - The shared `ORIGINS` revision lane exists but has no verified writer integration yet. `Origins.Build` and its collections are mutable/public, so simply adding revision increments to a few setters would leave bypasses. Next work must first close or encapsulate this mutable API and cover assignment, player actions, profession XP, save restore and datapack reload semantics.
 - Do not introduce a second character identity/progression calculation or enable the global apply fence until this is resolved.
+
+### Origins canonical writer boundary — revision lane and detached reads
+
+- `Origins.Build` is retained as a value shape for compatibility, but public `build(owner)` and `peek(owner)` now return detached copies. Mutating those values cannot bypass the canonical writer API. Reads of unknown owners do not create persistent empty records.
+- Internal canonical state is accessed only through private `state(owner)` and `builds` methods. Race selection/reset, class choice, retraining, profession learning/drop/work, deterministic NPC assignment, and validated save restore open the existing `ORIGINS` lane and commit once for a real change.
+- Class choice and NPC assignment stage a new Build before publishing it into the canonical map, so a failing archetype hook cannot leave a partially published Origins record.
+- Save restore validates a staged map first and skips revision advancement when the restored state is identical.
+- This closes the known getter-based mutation bypass, not every possible concurrency hazard: `Origins.Build` remains a mutable detached DTO, definitions reload is a separate definitions lifecycle, and cross-domain Progress/Character hooks are not yet a durable atomic transaction.
