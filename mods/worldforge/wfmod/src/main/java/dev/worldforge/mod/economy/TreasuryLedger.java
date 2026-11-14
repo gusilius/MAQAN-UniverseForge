@@ -1,6 +1,8 @@
 package dev.worldforge.mod.economy;
 
 import dev.worldforge.mod.Json;
+import dev.worldforge.mod.api.DomainMutationRevisions;
+import dev.worldforge.mod.api.WorldForgeApi;
 import java.util.*;
 
 /**
@@ -37,6 +39,64 @@ public final class TreasuryLedger {
     private final Set<String> accountsWithEntries = new HashSet<>();
     private long sequence=1, transactionSequence=1;
     private String lastError="";
+
+    private boolean restoring;
+
+    private static final ThreadLocal<LedgerMutationState> ACTIVE_MUTATION = new ThreadLocal<>();
+
+    private static final class LedgerMutationState {
+        final TreasuryLedger owner;
+        final DomainMutationRevisions.Mutation revision;
+        int depth = 1;
+        boolean dirty;
+        LedgerMutationState(TreasuryLedger owner) {
+            this.owner = owner;
+            this.revision = WorldForgeApi.revisions().begin(DomainMutationRevisions.Domain.ECONOMY_TRADE);
+        }
+    }
+
+    /** Nested ledger calls (for example transferOnce -> transfer) publish one economy revision. */
+    private final class MutationBatch implements AutoCloseable {
+        private final LedgerMutationState state;
+        private boolean closed;
+        MutationBatch(LedgerMutationState state) { this.state = state; }
+        @Override public void close() {
+            if (closed) return;
+            closed = true;
+            if (--state.depth == 0) {
+                ACTIVE_MUTATION.remove();
+                try {
+                    if (state.dirty) state.revision.commit();
+                } finally {
+                    state.revision.close();
+                }
+            }
+        }
+    }
+
+    private MutationBatch beginMutationBatch() {
+        if (restoring) return new MutationBatch(null) {
+            @Override public void close() { }
+        };
+        LedgerMutationState state = ACTIVE_MUTATION.get();
+        if (state == null) {
+            state = new LedgerMutationState(this);
+            ACTIVE_MUTATION.set(state);
+        } else if (state.owner != this) {
+            throw new IllegalStateException("Cannot nest mutations across different TreasuryLedger instances");
+        } else {
+            state.depth++;
+        }
+        return new MutationBatch(state);
+    }
+
+    private void markMutation() {
+        if (restoring) return;
+        LedgerMutationState state = ACTIVE_MUTATION.get();
+        if (state == null || state.owner != this)
+            throw new IllegalStateException("TreasuryLedger mutation escaped its canonical writer scope");
+        state.dirty = true;
+    }
 
     private static String required(String v,String field) {
         if(v==null || v.isBlank() || v.length()>128) throw new IllegalArgumentException(field+" is required");
@@ -112,6 +172,7 @@ public final class TreasuryLedger {
     }
 
     public Account open(String id,String ownerId,String currency,double openingBalance) {
+        try (MutationBatch ignored = beginMutationBatch()) {
         id=required(id,"account id"); ownerId=required(ownerId,"owner id"); currency=required(currency,"currency");
         double opening=amount(openingBalance);
         Account existing=accounts.get(id);
@@ -119,20 +180,27 @@ public final class TreasuryLedger {
             if(!existing.ownerId.equals(ownerId) || !existing.currency.equals(currency)) throw new IllegalArgumentException("account identity mismatch: "+id);
             return existing;
         }
-        Account a=new Account(id,ownerId,currency,opening); accounts.put(id,a);
+        Account a=new Account(id,ownerId,currency,opening); accounts.put(id,a); markMutation();
         if(opening>0) append("opening:"+transactionSequence++,id,"",currency,opening,true,Kind.OPENING,"opening",id,0,a.balance,"opening balance");
         return a;
-    }
+    
+        }}
     public boolean setCreditLimit(String accountId,double limit) {
+        try (MutationBatch ignored = beginMutationBatch()) {
         Account a=accounts.get(accountId); if(a==null) return fail("unknown account");
-        a.creditLimit=amount(limit); updateBankruptcy(a); return true;
-    }
+        double normalized = amount(limit);
+        if (Double.compare(a.creditLimit, normalized) == 0) return true;
+        a.creditLimit=normalized; updateBankruptcy(a); markMutation(); return true;
+    
+        }}
     public boolean deposit(String accountId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
+        try (MutationBatch ignored = beginMutationBatch()) {
         Account a=accounts.get(accountId); if(a==null) return fail("unknown account");
         value=amount(value); minute(worldMinute); if(value==0) return true;
         double offset=Math.min(a.debt,value); a.debt-=offset; a.balance+=value-offset; append("tx:"+transactionSequence++,a.id,"external",a.currency,value,true,kind,clean(category),clean(reference),worldMinute,a.balance,clean(memo));
         updateBankruptcy(a); return true;
-    }
+    
+        }}
     private static boolean sameAmount(double left, double right) {
         return Double.isFinite(left) && Double.isFinite(right) && Math.abs(left - right) <= 1e-8;
     }
@@ -150,13 +218,16 @@ public final class TreasuryLedger {
     }
 
     public boolean depositOnce(String accountId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
+        try (MutationBatch ignored = beginMutationBatch()) {
         if (hasTransaction(accountId, kind, reference)) {
             if (matchesExternalPosting(accountId, value, kind, category, reference, true)) return true;
             return false;
         }
         return deposit(accountId,value,kind,category,reference,worldMinute,memo);
-    }
+    
+        }}
     public boolean withdraw(String accountId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
+        try (MutationBatch ignored = beginMutationBatch()) {
         Account a=accounts.get(accountId); if(a==null) return fail("unknown account");
         value=amount(value); minute(worldMinute);
         if(a.available()+1e-9<value) return fail("insufficient funds");
@@ -166,16 +237,20 @@ public final class TreasuryLedger {
         a.debt+=value-cash;
         append("tx:"+transactionSequence++,a.id,"external",a.currency,value,false,kind,clean(category),clean(reference),worldMinute,a.balance,clean(memo));
         updateBankruptcy(a); return true;
-    }
+    
+        }}
     public boolean withdrawOnce(String accountId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
+        try (MutationBatch ignored = beginMutationBatch()) {
         if (hasTransaction(accountId, kind, reference)) {
             if (matchesExternalPosting(accountId, value, kind, category, reference, false)) return true;
             return false;
         }
         return withdraw(accountId,value,kind,category,reference,worldMinute,memo);
-    }
+    
+        }}
     /** Atomic transfer: no balance changes occur unless both accounts and currency match and payer can cover it. */
     public boolean transfer(String fromId,String toId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
+        try (MutationBatch ignored = beginMutationBatch()) {
         Account from=accounts.get(fromId), to=accounts.get(toId);
         if(from==null || to==null) return fail("unknown transfer account");
         if(from==to || from.id.equals(to.id)) return fail("self transfer is not allowed");
@@ -193,7 +268,8 @@ public final class TreasuryLedger {
         append(tx,from.id,to.id,from.currency,value,false,kind,clean(category),clean(reference),worldMinute,from.balance,clean(memo));
         append(tx,to.id,from.id,to.currency,value,true,kind,clean(category),clean(reference),worldMinute,to.balance,clean(memo));
         updateBankruptcy(from); updateBankruptcy(to); return true;
-    }
+    
+        }}
     private boolean matchesExistingTransfer(String fromId, String toId, double value,
                                             Kind kind, String category, String reference) {
         List<Entry> debits = entriesForReference(fromId, kind, reference).stream()
@@ -216,15 +292,18 @@ public final class TreasuryLedger {
     }
 
     public boolean transferOnce(String fromId,String toId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
+        try (MutationBatch ignored = beginMutationBatch()) {
         if (hasTransaction(fromId, kind, reference)) {
             return matchesExistingTransfer(fromId,toId,value,kind,category,reference);
         }
         if (hasTransaction(toId, kind, reference))
             return fail("idempotency key collision: destination already has a posting for this reference");
         return transfer(fromId,toId,value,kind,category,reference,worldMinute,memo);
-    }
+    
+        }}
     /** Creates matched cash and debt; unlike a deposit, loan proceeds do not repay existing liabilities. */
     public boolean borrow(String accountId,double value,long worldMinute,String reference) {
+        try (MutationBatch ignored = beginMutationBatch()) {
         Account a=accounts.get(accountId); if(a==null) return fail("unknown account");
         value=amount(value); minute(worldMinute);
         if(a.debt+value>a.creditLimit+1e-9) return fail("credit limit exceeded");
@@ -232,8 +311,10 @@ public final class TreasuryLedger {
         a.balance+=value; a.debt+=value;
         append("tx:"+transactionSequence++,a.id,"lender",a.currency,value,true,Kind.LOAN,"finance",clean(reference),worldMinute,a.balance,"loan proceeds");
         updateBankruptcy(a); return true;
-    }
+    
+        }}
     public boolean accrueInterest(String accountId,double rate,long worldMinute,String reference) {
+        try (MutationBatch ignored = beginMutationBatch()) {
         Account a=accounts.get(accountId); if(a==null) return fail("unknown account");
         if(!Double.isFinite(rate)||rate<0||rate>1) throw new IllegalArgumentException("interest rate must be 0..1");
         if(a.debt<=0 || rate==0) return true;
@@ -241,19 +322,23 @@ public final class TreasuryLedger {
         a.debt+=interest;
         append("tx:"+transactionSequence++,a.id,"external",a.currency,interest,false,Kind.INTEREST,"finance",clean(reference),minute(worldMinute),a.balance,"debt interest");
         updateBankruptcy(a); return true;
-    }
+    
+        }}
     public boolean repayDebt(String accountId,double value,long worldMinute,String reference) {
+        try (MutationBatch ignored = beginMutationBatch()) {
         Account a=accounts.get(accountId); if(a==null) return fail("unknown account");
         value=Math.min(amount(value),Math.min(a.debt,Math.max(0,a.balance)));
         if(value<=0) return true;
         a.balance-=value; a.debt-=value;
         append("tx:"+transactionSequence++,a.id,"debt",a.currency,value,false,Kind.REPAYMENT,"finance",clean(reference),minute(worldMinute),a.balance,"debt repayment");
         updateBankruptcy(a); return true;
-    }
+    
+        }}
     private void updateBankruptcy(Account a) { a.bankrupt=a.debt>a.creditLimit+1e-9; }
     private boolean fail(String s) { lastError=s; return false; }
     private static String clean(String s) { return s==null?"":s.trim(); }
     private void append(String tx,String account,String other,String currency,double value,boolean credit,Kind kind,String category,String reference,long minute,double balance,String memo) {
+        markMutation();
         Entry entry = new Entry(sequence++,tx,account,other,currency,value,credit,kind,category,reference,minute,balance,memo);
         journal.add(entry);
         indexEntry(entry);
@@ -326,6 +411,7 @@ public final class TreasuryLedger {
             throw new IllegalArgumentException("Treasury ledger requires accounts and journal arrays");
 
         TreasuryLedger ledger = new TreasuryLedger();
+        ledger.restoring = true;
         for (Object row : accountRows) {
             if (!(row instanceof Map<?, ?> m)) throw new IllegalArgumentException("Invalid treasury account row");
             String id = requiredString(m.get("id"), "account id");
@@ -400,6 +486,7 @@ public final class TreasuryLedger {
         ledger.sequence = Math.max(1, requiredLong(root.get("sequence"), "journal next sequence"));
         ledger.transactionSequence = Math.max(1, requiredLong(root.get("transactionSequence"), "transaction next sequence"));
         if (ledger.sequence <= previousSequence) throw new IllegalArgumentException("Treasury journal sequence is not ahead of the journal");
+        ledger.restoring = false;
         return ledger;
     }
 
