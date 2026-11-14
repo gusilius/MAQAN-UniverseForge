@@ -377,3 +377,8 @@ Source fix: `fe94acfca57a2510fb27bd3379bb044ee694f739`. Windows CI must validate
 ### Succession cross-domain revision follow-up
 
 The canonical `Succession.onDeath` path now declares both domains it mutates: the existing Character batch covers Character death, posts and heir assignment; a pre-write `REALMS_POLITICS` mutation scope covers realm ruler and title-holder/succession metadata. One changed succession advances the political lane once, with a regression assertion in CourtTest. This does not introduce duplicate political calculations or a second succession owner. It does not yet provide a durable atomic commit across the two domains, and other Realm/Politics writers remain to be audited. Do not enable the global WorldSim apply fence based on this partial wiring.
+
+### Political map writer ownership — TitleEditor
+
+`TitleEditor.group` now owns the shared `REALMS_POLITICS` revision scope for all grouped map/title/realm edits, including undo and redo. Succession batches ruler and title-holder metadata through this owner rather than opening a nested political scope. This prevents duplicate revision advancement for one logical map mutation and keeps snapshots unavailable while the editor is changing canonical map data. The cross-domain Character + Politics operation is still not a durable atomic commit; do not enable the global WorldSim apply fence yet.
+
