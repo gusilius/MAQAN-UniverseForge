@@ -374,3 +374,6 @@ Latest source HEAD: 9d567612bde231394e0e17c705b2d78108a618c3. Windows CI run 435
 
 Source fix: `fe94acfca57a2510fb27bd3379bb044ee694f739`. Windows CI must validate this new source commit before it is treated as accepted. Public mutable Character state and external addon writers remain an open audit item; the global WorldSim apply fence remains disabled.
 
+### Succession cross-domain revision follow-up
+
+The canonical `Succession.onDeath` path now declares both domains it mutates: the existing Character batch covers Character death, posts and heir assignment; a pre-write `REALMS_POLITICS` mutation scope covers realm ruler and title-holder/succession metadata. One changed succession advances the political lane once, with a regression assertion in CourtTest. This does not introduce duplicate political calculations or a second succession owner. It does not yet provide a durable atomic commit across the two domains, and other Realm/Politics writers remain to be audited. Do not enable the global WorldSim apply fence based on this partial wiring.
