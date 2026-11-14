@@ -123,11 +123,15 @@ public final class DomainMutationRevisionsTest {
                 "idempotent population need assignment does not advance Character revision");
 
         long beforePopulationBatch = afterRepeatedNeed.revision(DomainMutationRevisions.Domain.CHARACTERS);
+        boolean batchHidesSnapshot;
         try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            batchHidesSnapshot = WorldForgeApi.revisions().snapshot().isEmpty();
             PopulationSimulation.setNeed(founder, PopulationSimulation.Need.HUNGER, 55);
             PopulationSimulation.setCommand(founder, "defend_capital");
             PopulationSimulation.setTrainingTarget(founder, "tactics");
         }
+        check(batchHidesSnapshot,
+                "active Character mutation batch prevents concurrent snapshot capture before writes commit");
         var afterPopulationBatch = WorldForgeApi.revisions().snapshot().orElseThrow();
         check(afterPopulationBatch.revision(DomainMutationRevisions.Domain.CHARACTERS)
                         == beforePopulationBatch + 1,
