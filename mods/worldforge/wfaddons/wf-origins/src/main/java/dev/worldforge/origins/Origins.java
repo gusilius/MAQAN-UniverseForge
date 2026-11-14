@@ -40,10 +40,27 @@ public final class Origins {
 
     public Origins(OriginDefs defs) { this.defs = defs; }
 
-    /** Read access never materializes an empty owner record. Mutations create records inside an ORIGINS writer scope. */
-    public Build build(String owner) { Build value = builds.get(owner); return value == null ? new Build() : value; }
+    /** Public access returns a detached value; callers cannot mutate canonical state through a getter. */
+    public Build build(String owner) { return copy(builds.get(owner)); }
 
-    public Build peek(String owner) { return builds.get(owner); }
+    /** Non-materializing detached lookup. */
+    public Build peek(String owner) { return builds.containsKey(owner) ? copy(builds.get(owner)) : null; }
+
+    private Build state(String owner) {
+        Build value = builds.get(owner);
+        return value == null ? new Build() : value;
+    }
+
+    private static Build copy(Build source) {
+        Build out = new Build();
+        if (source == null) return out;
+        out.race = source.race;
+        out.cls = source.cls;
+        out.history.addAll(source.history);
+        out.retrainDay = source.retrainDay;
+        out.prof.putAll(source.prof);
+        return out;
+    }
 
     /** Регистрирует поставщика поправок и меток в общей шине. */
     public void publish() {
@@ -132,7 +149,7 @@ public final class Origins {
     // ---------- классы ----------
 
     private String reqProblem(OriginDefs.ClassDef c, String owner) {
-        Build b = build(owner);
+        Build b = state(owner);
         Map<String, Double> sh = hooks.sheet(owner);
         double lv = sh.getOrDefault("level", 1.0);
         if (lv < c.minLevel()) return "Нужен уровень " + c.minLevel() + ".";
@@ -234,7 +251,7 @@ public final class Origins {
     }
 
     public int rank(String owner, String id) {
-        Integer xp = build(owner).prof.get(id);
+        Integer xp = state(owner).prof.get(id);
         OriginDefs.Profession p = defs.professions.get(id);
         if (xp == null || p == null) return -1;
         int r = 0;
