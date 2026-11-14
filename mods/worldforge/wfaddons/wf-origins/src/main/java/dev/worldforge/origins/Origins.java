@@ -40,7 +40,8 @@ public final class Origins {
 
     public Origins(OriginDefs defs) { this.defs = defs; }
 
-    public Build build(String owner) { return builds.computeIfAbsent(owner, k -> new Build()); }
+    /** Read access never materializes an empty owner record. Mutations create records inside an ORIGINS writer scope. */
+    public Build build(String owner) { Build value = builds.get(owner); return value == null ? new Build() : value; }
 
     public Build peek(String owner) { return builds.get(owner); }
 
@@ -105,14 +106,28 @@ public final class Origins {
     // ---------- раса ----------
 
     public boolean setRace(String owner, String id) {
-        Build b = build(owner);
+        if (owner == null || owner.isBlank()) throw new IllegalArgumentException("Пустой идентификатор владельца");
         if (!defs.races.containsKey(id)) { lastError = "Нет такой расы."; return false; }
-        if (!b.race.isEmpty()) { lastError = "Раса уже выбрана."; return false; }
-        b.race = id;
+        Build existing = builds.get(owner);
+        if (existing != null && !existing.race.isEmpty()) { lastError = "Раса уже выбрана."; return false; }
+        try (var mutation = dev.worldforge.mod.api.WorldForgeApi.revisions().begin(
+                dev.worldforge.mod.api.DomainMutationRevisions.Domain.ORIGINS)) {
+            Build target = builds.computeIfAbsent(owner, ignored -> new Build());
+            target.race = id;
+            mutation.commit();
+        }
         return true;
     }
 
-    public void resetRace(String owner) { build(owner).race = ""; }
+    public void resetRace(String owner) {
+        Build existing = builds.get(owner);
+        if (existing == null || existing.race.isEmpty()) return;
+        try (var mutation = dev.worldforge.mod.api.WorldForgeApi.revisions().begin(
+                dev.worldforge.mod.api.DomainMutationRevisions.Domain.ORIGINS)) {
+            existing.race = "";
+            mutation.commit();
+        }
+    }
 
     // ---------- классы ----------
 
@@ -148,8 +163,13 @@ public final class Origins {
         if (b.cls.isEmpty() ? !c.from().isEmpty() : !defs.isParent(c, b.cls)) { lastError = "Этот класс не следует из вашего."; return false; }
         String why = reqProblem(c, owner);
         if (why != null) { lastError = why; return false; }
-        b.cls = id; b.history.add(id);
-        if (!c.archetype().isEmpty()) hooks.archetype(owner, c.archetype());
+        try (var mutation = dev.worldforge.mod.api.WorldForgeApi.revisions().begin(
+                dev.worldforge.mod.api.DomainMutationRevisions.Domain.ORIGINS)) {
+            Build target = builds.computeIfAbsent(owner, ignored -> new Build());
+            target.cls = id; target.history.add(id);
+            if (!c.archetype().isEmpty()) hooks.archetype(owner, c.archetype());
+            mutation.commit();
+        }
         return true;
     }
 
@@ -158,10 +178,14 @@ public final class Origins {
         Build b = build(owner);
         if (b.history.isEmpty()) { lastError = "Нечего менять."; return null; }
         if (day - b.retrainDay < RETRAIN_DAYS && b.retrainDay > 0) { lastError = "Переучиваться можно раз в " + RETRAIN_DAYS + " дней (ещё " + (RETRAIN_DAYS - (day - b.retrainDay)) + ")."; return null; }
-        String gone = b.history.remove(b.history.size() - 1);
-        b.cls = b.history.isEmpty() ? "" : b.history.get(b.history.size() - 1);
-        b.retrainDay = Math.max(1, day);
-        return gone;
+        try (var mutation = dev.worldforge.mod.api.WorldForgeApi.revisions().begin(
+                dev.worldforge.mod.api.DomainMutationRevisions.Domain.ORIGINS)) {
+            String gone = b.history.remove(b.history.size() - 1);
+            b.cls = b.history.isEmpty() ? "" : b.history.get(b.history.size() - 1);
+            b.retrainDay = Math.max(1, day);
+            mutation.commit();
+            return gone;
+        }
     }
 
     // ---------- профессии ----------
@@ -189,13 +213,24 @@ public final class Origins {
     public boolean learn(String owner, String id) {
         String why = canLearn(owner, id);
         if (why != null) { lastError = why; return false; }
-        build(owner).prof.put(id, 0);
+        try (var mutation = dev.worldforge.mod.api.WorldForgeApi.revisions().begin(
+                dev.worldforge.mod.api.DomainMutationRevisions.Domain.ORIGINS)) {
+            builds.computeIfAbsent(owner, ignored -> new Build()).prof.put(id, 0);
+            mutation.commit();
+        }
         return true;
     }
 
     public void drop(String owner, String id) {
-        build(owner).prof.remove(id);
-        build(owner).prof.keySet().removeIf(x -> { var p = defs.professions.get(x); return p != null && p.from().equals(id); });
+        Build b = builds.get(owner);
+        if (b == null || !b.prof.containsKey(id)) return;
+        boolean dependent = b.prof.keySet().stream().anyMatch(x -> { var p = defs.professions.get(x); return p != null && p.from().equals(id); });
+        try (var mutation = dev.worldforge.mod.api.WorldForgeApi.revisions().begin(
+                dev.worldforge.mod.api.DomainMutationRevisions.Domain.ORIGINS)) {
+            b.prof.remove(id);
+            b.prof.keySet().removeIf(x -> { var p = defs.professions.get(x); return p != null && p.from().equals(id); });
+            if (dependent || !b.prof.containsKey(id)) mutation.commit();
+        }
     }
 
     public int rank(String owner, String id) {
@@ -212,10 +247,16 @@ public final class Origins {
         Build b = build(owner);
         if (!b.prof.containsKey(id) || units <= 0) return -1;
         int before = rank(owner, id);
-        long earned = (long) b.prof.get(id) + (long) units;
-        b.prof.put(id, (int) Math.min(Integer.MAX_VALUE, earned));
-        int after = rank(owner, id);
-        return after > before ? after : -1;
+        int previousXp = b.prof.get(id);
+        int nextXp = (int) Math.min(Integer.MAX_VALUE, (long) previousXp + (long) units);
+        if (nextXp == previousXp) return -1;
+        try (var mutation = dev.worldforge.mod.api.WorldForgeApi.revisions().begin(
+                dev.worldforge.mod.api.DomainMutationRevisions.Domain.ORIGINS)) {
+            b.prof.put(id, nextXp);
+            int after = rank(owner, id);
+            mutation.commit();
+            return after > before ? after : -1;
+        }
     }
 
     // ---------- поправки ----------
@@ -274,6 +315,8 @@ public final class Origins {
         if (owner == null || owner.isBlank()) throw new IllegalArgumentException("Пустой идентификатор владельца");
         Random rng = new Random(seed);
         Build b = new Build();
+        try (var mutation = dev.worldforge.mod.api.WorldForgeApi.revisions().begin(
+                dev.worldforge.mod.api.DomainMutationRevisions.Domain.ORIGINS)) {
         builds.put(owner, b);
         String forced = realm.isEmpty() ? "" : pickRace(realm, rng);
         int total = 0;
@@ -303,7 +346,9 @@ public final class Origins {
                 b.cls = n.id(); b.history.add(n.id());
             }
         }
+        mutation.commit();
         return b;
+        }
     }
 
     // ---------- вид и сохранение ----------
@@ -452,7 +497,20 @@ public final class Origins {
                 throw new IllegalArgumentException("Превышен лимит основных профессий: " + owner);
             loaded.put(owner, b);
         }
-        builds.clear();
-        builds.putAll(loaded);
+        if (toJson().equals(Json.write(loaded.entrySet().stream().collect(LinkedHashMap::new,
+                (map, entry) -> {
+                    Build b = entry.getValue();
+                    Map<String, Object> value = new LinkedHashMap<>();
+                    value.put("race", b.race); value.put("class", b.cls);
+                    value.put("history", new ArrayList<Object>(b.history)); value.put("retrain", b.retrainDay);
+                    value.put("prof", new LinkedHashMap<String, Object>(b.prof));
+                    map.put(entry.getKey(), value);
+                }, LinkedHashMap::putAll)))) return;
+        try (var mutation = dev.worldforge.mod.api.WorldForgeApi.revisions().begin(
+                dev.worldforge.mod.api.DomainMutationRevisions.Domain.ORIGINS)) {
+            builds.clear();
+            builds.putAll(loaded);
+            mutation.commit();
+        }
     }
 }
