@@ -53,11 +53,15 @@ public final class EventLog {
 
     public Event post(Category c, String text, Collection<String> realmIds, long time) {
         Event e;
-        synchronized (this) {
-            List<String> ids = realmIds == null ? List.of() : List.copyOf(new ArrayList<>(realmIds));
-            e = new Event(++seq, c == null ? Category.SYSTEM : c, text == null ? "" : text, ids, time);
-            buf.addLast(e);
-            while (buf.size() > CAPACITY) buf.removeFirst();
+        try (DomainMutationRevisions.Mutation mutation =
+                     WorldForgeApi.revisions().begin(DomainMutationRevisions.Domain.EVENTS_ACTIONS)) {
+            synchronized (this) {
+                List<String> ids = realmIds == null ? List.of() : List.copyOf(new ArrayList<>(realmIds));
+                e = new Event(++seq, c == null ? Category.SYSTEM : c, text == null ? "" : text, ids, time);
+                buf.addLast(e);
+                while (buf.size() > CAPACITY) buf.removeFirst();
+            }
+            mutation.commit();
         }
         for (Consumer<Event> l : listeners) {
             try { l.accept(e); } catch (RuntimeException ex) { System.err.println("WorldForge: ошибка слушателя журнала: " + ex); }
@@ -73,7 +77,13 @@ public final class EventLog {
 
     public synchronized int size() { return buf.size(); }
 
-    public synchronized void clear() { buf.clear(); }
+    public void clear() {
+        try (DomainMutationRevisions.Mutation mutation =
+                     WorldForgeApi.revisions().begin(DomainMutationRevisions.Domain.EVENTS_ACTIONS)) {
+            synchronized (this) { buf.clear(); }
+            mutation.commit();
+        }
+    }
 
     /** Все записи, старые первыми. */
     public synchronized List<Event> all() { return new ArrayList<>(buf); }
@@ -117,21 +127,26 @@ public final class EventLog {
     public synchronized void fromJson(String json) {
         Object root = Json.parse(json);
         List<Object> arr = root instanceof Map ? (List<Object>) ((Map<String, Object>) root).get("events") : (List<Object>) root;
-        buf.clear();
-        seq = 0;
-        if (arr == null) return;
-        for (Object o : arr) {
-            if (!(o instanceof Map)) continue;
-            Map<String, Object> m = (Map<String, Object>) o;
-            List<String> ids = new ArrayList<>();
-            Object rs = m.get("realms");
-            if (rs instanceof List) for (Object x : (List<Object>) rs) ids.add(String.valueOf(x));
-            Object t = m.get("time"), s = m.get("seq");
-            long sq = s instanceof Number ? ((Number) s).longValue() : seq + 1;
-            seq = Math.max(seq + 1, sq);
-            buf.addLast(new Event(seq, Category.parse(m.get("category") == null ? null : m.get("category").toString()),
-                    m.get("text") == null ? "" : m.get("text").toString(), List.copyOf(ids), t instanceof Number ? ((Number) t).longValue() : 0));
-            while (buf.size() > CAPACITY) buf.removeFirst();
+        try (DomainMutationRevisions.Mutation mutation =
+                     WorldForgeApi.revisions().begin(DomainMutationRevisions.Domain.EVENTS_ACTIONS)) {
+            synchronized (this) {
+                buf.clear();
+                seq = 0;
+                if (arr != null) for (Object o : arr) {
+                    if (!(o instanceof Map)) continue;
+                    Map<String, Object> m = (Map<String, Object>) o;
+                    List<String> ids = new ArrayList<>();
+                    Object rs = m.get("realms");
+                    if (rs instanceof List) for (Object x : (List<Object>) rs) ids.add(String.valueOf(x));
+                    Object t = m.get("time"), s = m.get("seq");
+                    long sq = s instanceof Number ? ((Number) s).longValue() : seq + 1;
+                    seq = Math.max(seq + 1, sq);
+                    buf.addLast(new Event(seq, Category.parse(m.get("category") == null ? null : m.get("category").toString()),
+                            m.get("text") == null ? "" : m.get("text").toString(), List.copyOf(ids), t instanceof Number ? ((Number) t).longValue() : 0));
+                    while (buf.size() > CAPACITY) buf.removeFirst();
+                }
+            }
+            mutation.commit();
         }
     }
 }
