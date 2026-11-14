@@ -451,3 +451,12 @@
 - **CI evidence:** run `43604742736`, Linux native core failed during `cargo test`. The production call sites had been updated to the indexed lookup signatures, but three direct unit-test call sites still used the old signatures; one new order-independence test also attempted to clone `EmergenceRequest`, which intentionally does not implement `Clone`.
 - **Correction:** updated the direct tests to build request-scoped borrowed indexes explicitly, aligned the polity reduction call, and construct the two order variants independently. No production algorithm/formula was changed in this correction.
 - **Status:** corrected source commit `807fed9d`; a fresh Linux/Windows native CI run is required. The failed run is not green.
+
+
+### WF-RT-0015 — Rust decision recruitment border-scan follow-up
+
+- Source audit found that `worldsim.decide` rescanned all normalized borders for each settlement during recruitment eligibility checks.
+- Replaced the repeated scan with one request-scoped ordered membership set derived from the same border snapshot. Proposal conditions and identifiers remain unchanged.
+- Added positive/negative regression coverage for contested border membership.
+- Require native Windows/Linux and logic-test CI plus representative large-world profiling before treating performance impact as verified. This is a complexity improvement, not a measured benchmark result.
+- Source commit: `f8e6381e`.
