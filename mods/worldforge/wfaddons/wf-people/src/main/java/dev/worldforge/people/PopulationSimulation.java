@@ -417,7 +417,7 @@ public final class PopulationSimulation {
 
     /** Applies a validated Rust proposal inside the caller's single Character mutation batch. */
     static void applyComputedResult(Character character, Map<String, Integer> nextNeeds, String intentKey,
-                                    long simulatedDays, int lastSimulatedYear) {
+                                    long simulatedDays, int lastSimulatedYear,long lastWorldDay) {
         requireAlive(character);
         Intent intent = intentFromKey(intentKey);
         Map<String, Object> needs = mapProp(character, NEEDS);
@@ -432,6 +432,9 @@ public final class PopulationSimulation {
         if (currentDays != simulatedDays) { character.props.put("population.simulated_days", simulatedDays); changed = true; }
         if (!Objects.equals(character.props.get("population.last_simulated_year"), lastSimulatedYear)) {
             character.props.put("population.last_simulated_year", lastSimulatedYear); changed = true;
+        }
+        if (!Objects.equals(character.props.get("population.last_simulated_world_day"), lastWorldDay)) {
+            character.props.put("population.last_simulated_world_day", lastWorldDay); changed = true;
         }
         if (changed) CharacterRegistry.recordCharacterMutation();
     }
@@ -503,43 +506,57 @@ public final class PopulationSimulation {
     public static void advance(CharacterRegistry registry, long elapsedDays, int year) {
         Objects.requireNonNull(registry, "registry");
         try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
-            advanceBatched(registry, elapsedDays, year);
+            advanceBatched(registry, elapsedDays, year, -1L);
         }
     }
 
-    private static void advanceBatched(CharacterRegistry registry, long elapsedDays, int year) {
-        if (elapsedDays < 0) throw new IllegalArgumentException("elapsedDays cannot be negative");
-        if (elapsedDays == 0) return;
-        registry.refreshLifeStages(year);
-        int hungerDrift = drift(10, elapsedDays);
-        int restDrift = drift(6, elapsedDays);
-        int socialDrift = drift(2, elapsedDays);
-        int purposeDrift = drift(1, elapsedDays);
-        int leisureDrift = drift(3, elapsedDays);
-        for (Character character : registry.all()) {
-            if (!character.alive) continue;
-            // Resolve the nested needs map once per person and update it in place.
-            // The previous path repeatedly called mapProp/name().toLowerCase for every
-            // need, then repeated the same lookups again while deciding the daily intent.
-            Map<String, Object> needs = mapProp(character, NEEDS);
-            setNeed(needs, Need.HUNGER, need(needs, Need.HUNGER) + hungerDrift);
-            setNeed(needs, Need.REST, need(needs, Need.REST) + restDrift);
-            setNeed(needs, Need.SOCIAL, need(needs, Need.SOCIAL) + socialDrift);
-            setNeed(needs, Need.PURPOSE, need(needs, Need.PURPOSE) + purposeDrift);
-            setNeed(needs, Need.LEISURE, need(needs, Need.LEISURE) + leisureDrift);
-            Intent intent = decide(character, year, needs);
-            LifeStage stage = lifeStage(character, year);
-            character.props.put(LAST_INTENT, intent.key);
-            character.props.put("population.age_years", age(character, year));
-            character.props.put("population.life_stage", stage.name().toLowerCase(Locale.ROOT));
-            Object previous = character.props.get("population.simulated_days");
-            long simulated = previous instanceof Number n ? Math.max(0, n.longValue()) : 0;
-            long nextSimulated = elapsedDays > Long.MAX_VALUE - simulated
-                    ? Long.MAX_VALUE : simulated + elapsedDays;
-            character.props.put("population.simulated_days", nextSimulated);
-            character.props.put("population.last_simulated_year", year);
-            CharacterRegistry.recordCharacterMutation();
+    /** Exclusive Java fallback with per-Character durable world-day receipts. */
+    public static void advanceToWorldDay(CharacterRegistry registry,long targetWorldDay,long fallbackStartDay,int year) {
+        Objects.requireNonNull(registry,"registry");
+        if(targetWorldDay<0||fallbackStartDay<0)throw new IllegalArgumentException("world days cannot be negative");
+        if(targetWorldDay<=fallbackStartDay)return;
+        try(CharacterRegistry.MutationBatch ignored=CharacterRegistry.beginMutationBatch()){
+            registry.refreshLifeStages(year);
+            for(Character character:registry.all()){
+                if(!character.alive)continue;
+                Object raw=character.props.get("population.last_simulated_world_day");
+                long previous=raw instanceof Number n?Math.max(0L,n.longValue()):fallbackStartDay;
+                if(previous>=targetWorldDay)continue;
+                advanceCharacterBatched(character,targetWorldDay-previous,year,targetWorldDay);
+            }
         }
+    }
+
+    private static void advanceBatched(CharacterRegistry registry,long elapsedDays,int year,long worldDay) {
+        if(elapsedDays<0)throw new IllegalArgumentException("elapsedDays cannot be negative");
+        if(elapsedDays==0)return;
+        registry.refreshLifeStages(year);
+        for(Character character:registry.all())if(character.alive)
+            advanceCharacterBatched(character,elapsedDays,year,worldDay);
+    }
+
+    private static void advanceCharacterBatched(Character character,long elapsedDays,int year,long worldDay){
+        if(elapsedDays<=0)return;
+        int hungerDrift=drift(10,elapsedDays),restDrift=drift(6,elapsedDays),socialDrift=drift(2,elapsedDays);
+        int purposeDrift=drift(1,elapsedDays),leisureDrift=drift(3,elapsedDays);
+        Map<String,Object> needs=mapProp(character,NEEDS);
+        setNeed(needs,Need.HUNGER,need(needs,Need.HUNGER)+hungerDrift);
+        setNeed(needs,Need.REST,need(needs,Need.REST)+restDrift);
+        setNeed(needs,Need.SOCIAL,need(needs,Need.SOCIAL)+socialDrift);
+        setNeed(needs,Need.PURPOSE,need(needs,Need.PURPOSE)+purposeDrift);
+        setNeed(needs,Need.LEISURE,need(needs,Need.LEISURE)+leisureDrift);
+        Intent intent=decide(character,year,needs);
+        LifeStage stage=lifeStage(character,year);
+        character.props.put(LAST_INTENT,intent.key);
+        character.props.put("population.age_years",age(character,year));
+        character.props.put("population.life_stage",stage.name().toLowerCase(Locale.ROOT));
+        Object previous=character.props.get("population.simulated_days");
+        long simulated=previous instanceof Number n?Math.max(0L,n.longValue()):0L;
+        long nextSimulated=elapsedDays>Long.MAX_VALUE-simulated?Long.MAX_VALUE:simulated+elapsedDays;
+        character.props.put("population.simulated_days",nextSimulated);
+        character.props.put("population.last_simulated_year",year);
+        if(worldDay>=0)character.props.put("population.last_simulated_world_day",worldDay);
+        CharacterRegistry.recordCharacterMutation();
     }
 
     private static void requireAlive(Character character) {

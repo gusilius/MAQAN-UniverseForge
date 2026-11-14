@@ -503,3 +503,15 @@
 - The bridge now retains captured birth years and prior simulated-day counters and validates age, life stage, elapsed-day acknowledgement, last simulated year, required need keys and every need value before the first write.
 - Added a malformed-frame regression proving out-of-range need values are rejected without changing canonical Character state.
 - The candidate remains non-production; Java remains sole production owner pending parity, async shared-runtime integration, durable retry/save-reload, and completion of all canonical writer lanes.
+
+
+### WF-RT-0024 — shared-runtime Population pipeline and resumable receipts
+
+- Added optional `PopulationComputeCoordinator` in wf-worldsim. wf-people delegates reflectively so NPC/Population remains independently usable without wf-worldsim.
+- Population uses the existing `WorldForgeComputeRuntime` operation slot with key `worldsim.population.advance`; no new executor, queue, worker or optimizer is created. Strategic WorldSim and Population compute are globally serialized.
+- If the shared worker is occupied, Population leaves the world-day cursor unacknowledged and retries. It does not run Java formulas concurrently with an in-flight Rust request.
+- Added per-Character `population.last_simulated_world_day` receipts. Snapshots include each Character's own elapsed interval; successful apply stores the receipt with the canonical Character batch. Already saved Characters are excluded after reload, while unacknowledged Characters are retried.
+- Java fallback now uses the same per-Character receipt protocol and is mutually exclusive with native execution. wf-people remains standalone if wf-worldsim/native is absent.
+- Rust now receives Java's canonical `canWork` eligibility predicate; profession-only inference was not equivalent to Java's age-stage rule.
+- Added regression tests for replay-safe Java catch-up and exclusion of already acknowledged Characters.
+- **Not closed:** complete Java/Rust fixture parity, external Character writer audit, cross-domain atomicity (WF-RT-0021), and real save/reload campaign verification. Do not claim all Population semantics migrated until those gates pass.

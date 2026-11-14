@@ -94,6 +94,7 @@ public class PeopleMod {
     public static final int TICKS_PER_DAY = 1200;
     private static final Map<UUID, Set<String>> FLAGS = new ConcurrentHashMap<>();
     private static long ticks;
+    private static volatile long populationProcessedDay = Long.MIN_VALUE;
 
     public PeopleMod() {
         IEventBus bus = FMLJavaModLoadingContext.get().getModEventBus();
@@ -137,6 +138,7 @@ public class PeopleMod {
         else AUTHORITY.clear();
         FLAGS.clear();
         ticks = 0;
+        populationProcessedDay = Long.MIN_VALUE;
         RoleDefs roles = new RoleDefs();
         dev.worldforge.people.ProfessionDefs professions = new dev.worldforge.people.ProfessionDefs();
         NameBank names = new NameBank();
@@ -188,6 +190,7 @@ public class PeopleMod {
         }
         for (MapData m : WorldForgeMod.loadedMaps().values()) registry(m);
         reconcileIdentityPartitions(server);
+        populationProcessedDay = WorldForgeApi.clock().dayNumber();
     }
 
     private static boolean allIdentityPartitionsLoaded() {
@@ -509,11 +512,15 @@ public class PeopleMod {
         if (e.phase != TickEvent.Phase.END) return;
         ticks++;
         try {
-            int elapsedDays = WorldForgeApi.clock().pull("wf-people");
+            long currentWorldDay = WorldForgeApi.clock().dayNumber();
             YEAR = WorldForgeApi.clock().year();
-            if (elapsedDays > 0) {
-                for (CharacterRegistry registry : REGS.values()) PopulationSimulation.advance(registry, elapsedDays, YEAR);
-                PopulationSimulation.advance(PLAYER_REGISTRY, elapsedDays, YEAR);
+            boolean rustOwnsPopulation = tryRustPopulationCompute(e.getServer(), currentWorldDay, YEAR);
+            if (!rustOwnsPopulation && currentWorldDay > populationProcessedDay) {
+                long fallbackStartDay = populationProcessedDay == Long.MIN_VALUE ? currentWorldDay : populationProcessedDay;
+                for (CharacterRegistry registry : REGS.values())
+                    PopulationSimulation.advanceToWorldDay(registry, currentWorldDay, fallbackStartDay, YEAR);
+                PopulationSimulation.advanceToWorldDay(PLAYER_REGISTRY, currentWorldDay, fallbackStartDay, YEAR);
+                populationProcessedDay = currentWorldDay;
             }
             if (ticks % SPAWN_EVERY == 0) NpcSpawner.pass(e.getServer());
             if (ticks % 20 == 0) socialInitiatives(e.getServer());
@@ -521,6 +528,25 @@ public class PeopleMod {
         } catch (Exception ex) {
             LOGGER.error("wf_people: ошибка тика: {}", ex.toString());
         }
+    }
+
+    private static boolean tryRustPopulationCompute(MinecraftServer server,long worldDay,int year) {
+        if (!ModList.get().isLoaded("wf_worldsim")) return false;
+        try {
+            Class<?> coordinator = Class.forName("dev.worldforge.worldsim.mc.PopulationComputeCoordinator");
+            Object result = coordinator.getMethod("tick", MinecraftServer.class, long.class, int.class)
+                    .invoke(null, server, worldDay, year);
+            return Boolean.TRUE.equals(result);
+        } catch (ReflectiveOperationException | LinkageError failure) {
+            // Fail closed: never run Java while an optional native pipeline may still own this interval.
+            LOGGER.error("wf_people: optional WorldSim population coordinator failed; Java population fallback is held to prevent double execution", failure);
+            return true;
+        }
+    }
+
+    public static long populationProcessedDay() { return populationProcessedDay; }
+    public static void markPopulationProcessed(long worldDay) {
+        if (worldDay > populationProcessedDay) populationProcessedDay = worldDay;
     }
 
     /**

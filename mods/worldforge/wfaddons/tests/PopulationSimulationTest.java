@@ -525,10 +525,10 @@ public final class PopulationSimulationTest {
         java.util.Map<String, Object> resultPerson = new java.util.LinkedHashMap<>();
         resultPerson.put("id", bridgeChild.globalId); resultPerson.put("needs", resultNeeds);
         resultPerson.put("intent", "idle"); resultPerson.put("age_years", 6); resultPerson.put("life_stage", "child");
-        resultPerson.put("simulated_days", "1"); resultPerson.put("last_simulated_year", 301);
+        resultPerson.put("simulated_days", "1"); resultPerson.put("last_simulated_year", 301); resultPerson.put("world_day", "1");
         java.util.Map<String, Object> resultRoot = new java.util.LinkedHashMap<>();
         resultRoot.put("schema_version", 1); resultRoot.put("world_id", "population-bridge-test");
-        resultRoot.put("year", 301); resultRoot.put("elapsed_days", 1); resultRoot.put("characters", java.util.List.of(resultPerson));
+        resultRoot.put("year", 301); resultRoot.put("elapsed_days", 1); resultRoot.put("world_day", "1"); resultRoot.put("characters", java.util.List.of(resultPerson));
         java.util.List<CharacterRegistry.LifecycleEvent> bridgeEvents = new java.util.ArrayList<>();
         bridgeRegistry.addListener(new CharacterRegistry.Listener() {
             @Override public void lifecycle(Character c, CharacterRegistry.LifecycleEvent event) { bridgeEvents.add(event); }
@@ -563,6 +563,20 @@ public final class PopulationSimulationTest {
                         dev.worldforge.mod.Json.write(resultRoot).getBytes(java.nio.charset.StandardCharsets.UTF_8),
                         java.util.List.of(bridgeRegistry)),
                 "population bridge rejects stale revision before applying a result");
+
+        CharacterRegistry resumableRegistry = new CharacterRegistry();
+        Character resumable = resumableRegistry.create("Resumable", "", "north", "f", 270);
+        PopulationSimulation.setNeed(resumable, Need.HUNGER, 5);
+        PopulationSimulation.advanceToWorldDay(resumableRegistry, 10, 5, 300);
+        int hungerAfterFirstApply = PopulationSimulation.need(resumable, Need.HUNGER);
+        PopulationSimulation.advanceToWorldDay(resumableRegistry, 10, 5, 300);
+        ok(hungerAfterFirstApply == 55 && PopulationSimulation.need(resumable, Need.HUNGER) == 55
+                        && ((Number) resumable.props.get("population.last_simulated_world_day")).longValue() == 10,
+                "per-Character world-day receipts make Java fallback replay-safe");
+        PopulationComputeBridge.Captured resumableCapture = PopulationComputeBridge.captureForWorldDay(
+                "population-resume-test", 300, 14, 5, java.util.List.of(resumableRegistry));
+        ok(resumableCapture.characterIds().isEmpty() && resumableCapture.elapsedDays() == 9,
+                "Rust snapshot excludes Characters already acknowledged through their durable world-day receipt");
 
         System.out.println(failures == 0 ? "ALL OK" : failures + " FAILED");
         if (failures > 0) System.exit(1);

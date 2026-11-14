@@ -434,3 +434,14 @@ The Java JSON parser represents numeric tokens as doubles. The signed Java-long 
 ### Population frame integrity and elapsed-time acknowledgement
 
 The Java apply boundary now validates every result's age against the captured birth year, life-stage threshold, exact simulated-day acknowledgement (saturating at `Long.MAX_VALUE`), and last-simulated year. All required needs must be present and every built-in or extension need must be an integral value in `[0,100]`. The complete frame is validated before the first canonical write; malformed output cannot partially update earlier Characters. This remains a non-production candidate until native parity, the shared-runtime ticket path, durable retry/save-reload handling and the full writer audit are complete.
+
+
+## Population production pipeline — shared runtime and resumable Character receipts
+
+The optional wf-worldsim addon now owns the production scheduling boundary for population when its native library is available. wf-people remains independently usable: if wf-worldsim is absent or native loading is unavailable, the existing Java implementation runs exclusively. wf-people delegates through a narrow reflective addon boundary to avoid a hard product dependency or a second compute engine.
+
+Population submits through the existing process-wide WorldForgeComputeRuntime under operation key `worldsim.population.advance`; it creates no executor, worker pool, queue or optimizer. WorldSim strategic/emergence and Population therefore serialize through the same bounded worker slot. If another operation owns the slot, population retains its unacknowledged world-day cursor and retries; it never runs the Java formula concurrently as a fallback.
+
+Each Character carries `population.last_simulated_world_day`. Rust snapshots include each Character's own elapsed interval and the exact Java `canWork` eligibility bit. Successful apply stores the world-day receipt in the same Character mutation batch as needs, intent, age and simulated-day counters. This makes retries after partial registry persistence/reload idempotent per Character: already acknowledged Characters are excluded, while unsaved/unacknowledged Characters are recomputed from their last persisted receipt. The session cursor is only a fallback for legacy Characters with no receipt.
+
+The Rust intent decision now consumes the Java-derived `can_work` predicate rather than inferring work eligibility from profession presence. This preserves Java's adolescent/adult/elder eligibility gate. Java and Rust still require full fixture parity across all decision branches and all current Character writers; this pipeline does not close WF-RT-0021 or WF-RT-0023 and does not authorize a claim that the entire simulation has migrated.

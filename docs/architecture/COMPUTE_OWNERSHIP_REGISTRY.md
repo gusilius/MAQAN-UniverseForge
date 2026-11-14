@@ -304,3 +304,14 @@ This is an operation-count status, not a percentage of all UniverseForge computa
 - Captured birth years and prior day counters are retained as immutable apply metadata.
 - Apply verifies age/life-stage consistency, exact elapsed-day acknowledgement, year acknowledgement, required needs, and bounded integral values for all need keys before any mutation.
 - Invalid frames fail closed before writes; this does not add Java-side duplicate simulation formulas and does not authorize production cutover.
+
+
+### Population shared-runtime production pipeline
+
+| Operation key | Current production compute owner | Execution | Java responsibility | State |
+| `worldsim.population.advance` | Rust when native library is available; otherwise exclusive Java fallback | Existing process-wide `WorldForgeComputeRuntime`, one worker shared with WorldSim | Canonical Character snapshot, per-Character world-day receipt, revision freshness, lifecycle event and state application | Native async pipeline wired; parity and save/reload campaign evidence pending |
+
+- Population does not create its own executor or worker pool. It submits and polls by its own operation key on the existing shared slot.
+- wf-people remains independent; wf-worldsim is an optional integration. Java fallback is exclusive and used only when the native provider is unavailable or fails before apply.
+- Per-Character `population.last_simulated_world_day` receipts make partially saved/reloaded batches idempotent. The Rust snapshot contains per-person elapsed days and Java's canonical `canWork` eligibility result.
+- Rust now follows Java's profession work eligibility gate. Production migration count should be updated only after full parity and save/reload evidence; do not claim full Population completion yet.
