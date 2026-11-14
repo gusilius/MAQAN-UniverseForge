@@ -103,3 +103,11 @@ The coordinator now stages the candidate Rust emergence state and advances the c
 ## Next cross-domain freshness blocker
 
 WF-RT-0023 tracks the missing shared mutation revision across authoritative domain write APIs. The current WorldSim ticket's day/revision token is not a substitute for a global domain revision vector. Extend canonical write boundaries; do not create a duplicate WorldSim-only shadow state/counter.
+
+
+## Mutation revision audit — WF-RT-0023
+
+- `CharacterRegistry.revision()` is explicitly a membership/identity revision, not a state revision. Current increments are on character creation and registry restore; lifecycle changes to posts, profession, employment, duties, family, death and entity bindings are not comprehensively represented.
+- `Settlement` has resource/placement receipts and uses the canonical TreasuryLedger, but no single revision covering all settlement/resource/worker/building/task mutations was found.
+- `WorldForgeApi.fireChange` observes map-action notifications; it is not a universal hook for addon tick handlers or direct domain API writes.
+- Therefore none of these existing counters/notifications may be treated as a complete snapshot freshness token. A WorldForge Core revision coordinator must be wired into verified canonical write boundaries, domain by domain, before WorldSim uses it as an apply fence.
