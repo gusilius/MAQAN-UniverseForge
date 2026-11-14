@@ -153,8 +153,19 @@ public class OriginsMod {
         ServerPlayer sp = s.getPlayer();
         if (sp == null) return 0;
         Origins.Build b = ORIGINS.build(owner(sp));
-        StringBuilder sb = new StringBuilder("Раса: " + (b.race.isEmpty() ? "не выбрана" : DEFS.races.get(b.race).name()) + "; класс: " + (b.cls.isEmpty() ? "нет" : DEFS.classes.get(b.cls).name()));
-        for (var e : b.prof.entrySet()) { OriginDefs.Profession p = DEFS.professions.get(e.getKey()); if (p != null) sb.append("; ").append(p.name()).append(" - ").append(p.ranks().get(ORIGINS.rank(owner(sp), e.getKey())).name()).append(" (").append(e.getValue()).append(" оп.)"); }
+        OriginDefs.Race race = b.race.isEmpty() ? null : DEFS.races.get(b.race);
+        OriginDefs.ClassDef cls = b.cls.isEmpty() ? null : DEFS.classes.get(b.cls);
+        String raceLabel = b.race.isEmpty() ? "не выбрана" : race == null ? b.race + " (определение временно отсутствует)" : race.name();
+        String classLabel = b.cls.isEmpty() ? "нет" : cls == null ? b.cls + " (определение временно отсутствует)" : cls.name();
+        StringBuilder sb = new StringBuilder("Раса: " + raceLabel + "; класс: " + classLabel);
+        for (var e : b.prof.entrySet()) {
+            OriginDefs.Profession p = DEFS.professions.get(e.getKey());
+            if (p == null) sb.append("; ").append(e.getKey()).append(" (определение временно отсутствует, ").append(e.getValue()).append(" оп.)");
+            else {
+                int rank = Math.max(0, Math.min(p.ranks().size() - 1, ORIGINS.rank(owner(sp), e.getKey())));
+                sb.append("; ").append(p.name()).append(" - ").append(p.ranks().get(rank).name()).append(" (").append(e.getValue()).append(" оп.)");
+            }
+        }
         String m = sb.toString();
         s.sendSuccess(() -> Component.literal(m), false);
         return 1;
