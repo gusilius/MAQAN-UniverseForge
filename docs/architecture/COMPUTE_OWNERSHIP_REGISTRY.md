@@ -222,3 +222,11 @@ Remaining bypass surface: Character still exposes mutable public fields, childre
 - Added a concurrent regression fixture: four writer threads perform 100 distinct transfers; the expected result is 100 successful transfers, conserved source/destination balances, and exactly 100 economy revisions.
 - Direct mutable `Account` exposure remains a bypass risk. Synchronization of canonical methods does not make external field writes safe. Do not enable global snapshot/apply fencing until a read-only account view and external-writer audit are complete.
 - Commits: `f48ee6a5`, `af5c18a6`. CI pending.
+
+
+### Origins runtime prerequisite compatibility audit
+
+- Runtime consumers must treat a missing datapack prerequisite as dormant/unavailable, not dereference a null definition. `Origins.reqProblem` and `Origins.canLearn` now return explicit blocked reasons for missing required professions/classes and missing profession parents; rank indexes are guarded against the current rank list.
+- The canonical progression IDs/XP remain in `Origins`; no second progression registry or cached definition index was introduced.
+- `OriginDefs` publication is **not yet atomic**. Its public mutable maps and nested mutable record members remain legacy build-time/reload surfaces. The next definition-lifecycle change must introduce one deep-immutable snapshot and make each Origins operation capture exactly one snapshot reference; a shallow map wrapper is not sufficient.
+- Regression tests: `OriginsTest` dormant prerequisite cases. Source/test commits: `dfb0a1a1`, `1eec10db`. CI run `43603966100` queued at documentation update time.
