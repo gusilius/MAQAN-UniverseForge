@@ -96,18 +96,23 @@ public final class CharacterRegistry {
     /** Updates calendar-derived life stages and emits only real stage transitions. */
     public void refreshLifeStages(int year) {
         boolean changed = false;
+        boolean lifecyclePublished = false;
         for (Character character : byId.values()) {
             if (!character.alive) continue;
             String current = PopulationSimulation.lifeStage(character, year).name().toLowerCase(Locale.ROOT);
             Object previous = character.props.put("population.life_stage", current);
             if (!Objects.equals(previous, current)) changed = true;
-            if (previous instanceof String old && !old.equals(current))
+            if (previous instanceof String old && !old.equals(current)) {
                 emit(character, LifecycleKind.LIFE_STAGE_CHANGED, old, current, year);
+                lifecyclePublished = true;
+            }
             Object age = PopulationSimulation.age(character, year);
             Object previousAge = character.props.put("population.age_years", age);
             if (!Objects.equals(previousAge, age)) changed = true;
         }
-        if (changed) recordDomainMutation();
+        // publish() already advanced the lane for lifecycle changes; age-only refreshes
+        // still invalidate snapshots without counting the same character transition twice.
+        if (changed && !lifecyclePublished) recordDomainMutation();
     }
 
     public void changeProfession(String id, String professionId, int year) {
