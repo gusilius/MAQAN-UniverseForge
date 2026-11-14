@@ -369,7 +369,7 @@ pub fn advance(request: EmergenceRequest) -> Result<EmergenceFrame, String> {
                 maybe_form_polity(map, cells, state.seed, year, &state.bands, &mut state.polities, &mut events);
             }
         }
-        update_polities(state.seed, year, &state.bands, &maps_by_id, &cells_by_map,
+        update_polities(state.seed, year, &state.bands, &cells_by_map,
             &mut state.polities, &mut events);
         state.last_year = year;
         years_advanced += 1;
