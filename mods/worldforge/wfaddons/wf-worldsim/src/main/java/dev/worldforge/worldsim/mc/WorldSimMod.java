@@ -166,7 +166,26 @@ public final class WorldSimMod {
         PROFILER.setGauge("worldsim.compute.busy", 0);
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server != null) saveState(server);
-        campaignRunning = f    private void processServerTick(TickEvent.ServerTickEvent event) {
+        campaignRunning = false;
+        WorldForgeApi.clock().setSimulationTickMultiplier(1);
+        releaseCampaignChunks(server);
+        lastDecisionDay = Long.MIN_VALUE;
+        lodTicks = 0;
+        emergentRealmsRehydrated = false;
+        SimulationLod.clear();
+        lastProjectDay.clear();
+        journal.clear();
+    }
+
+    @SubscribeEvent
+    public void onTick(TickEvent.ServerTickEvent event) {
+        if (event.phase != TickEvent.Phase.END) return;
+        try (WorldSimProfiler.Scope ignored = PROFILER.begin("worldsim.server_tick_handler")) {
+            processServerTick(event);
+        }
+    }
+
+    private void processServerTick(TickEvent.ServerTickEvent event) {
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server == null) return;
         if (++lodTicks % 20 == 0) publishObservers(server);
@@ -181,13 +200,15 @@ public final class WorldSimMod {
             completed = COMPUTE_SCHEDULER.poll();
         } catch (RuntimeException error) {
             pendingComputeRevision = Long.MIN_VALUE;
+            PROFILER.setGauge("worldsim.compute.busy", 0);
             PROFILER.setGauge("worldsim.compute.failures", 1);
             LOGGER.error("wf_worldsim: native compute failed; canonical state was not advanced", error);
         }
         if (completed != null) {
             WorldSimComputeScheduler.Ticket ticket = completed.ticket();
-            if (!ticket.matches(worldId, ticket.revision(), lifecycleEpoch)
-                    || ticket.revision() != pendingComputeRevision) {
+            if (!ticket.matches(worldId, pendingComputeRevision, lifecycleEpoch)) {
+                pendingComputeRevision = Long.MIN_VALUE;
+                PROFILER.setGauge("worldsim.compute.busy", 0);
                 PROFILER.setGauge("worldsim.compute.stale_results", 1);
                 LOGGER.warn("wf_worldsim: discarded stale compute result world={} revision={} epoch={}",
                         ticket.worldId(), ticket.revision(), ticket.lifecycleEpoch());
@@ -196,6 +217,7 @@ public final class WorldSimMod {
                 try {
                     applyComputeResult(server, completed);
                 } catch (Exception error) {
+                    PROFILER.setGauge("worldsim.compute.busy", 0);
                     LOGGER.error("wf_worldsim: compute result rejected safely at day {}; canonical state was not advanced",
                             ticket.revision(), error);
                 }
@@ -353,17 +375,6 @@ public final class WorldSimMod {
     private static String worldIdentity(MinecraftServer server) {
         return server.getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize().toString();
     }
-eState(server);
-            PROFILER.record("worldsim.save_state", System.nanoTime() - phaseStarted);
-            LOGGER.info("wf_worldsim: day={} realms={} settlements={} proposals={} applied={} rejected={}",
-                    day, snapshot.getAsJsonArray("realms").size(), snapshot.getAsJsonArray("settlements").size(),
-                    frame.getAsJsonArray("proposals").size(), accepted, rejected);
-            updateCampaign(server, day);
-        } catch (Exception error) {
-            LOGGER.error("wf_worldsim: decision cycle failed safely at day {}", day, error);
-        }
-    }
-
 
     @SubscribeEvent
     public void onCommands(RegisterCommandsEvent event) {
