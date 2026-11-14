@@ -12,10 +12,10 @@ public final class PopulationComputeBridge {
     public static final class Captured {
         private final String worldId; private final int year; private final long elapsedDays;
         private final DomainMutationRevisions.Snapshot revisions;
-        private final List<String> characterIds; private final byte[] request;
-        private Captured(String worldId,int year,long elapsedDays,DomainMutationRevisions.Snapshot revisions,List<String> ids,byte[] request){
+        private final List<String> characterIds; private final Map<String,Integer> birthYears; private final Map<String,Long> priorDays; private final byte[] request;
+        private Captured(String worldId,int year,long elapsedDays,DomainMutationRevisions.Snapshot revisions,List<String> ids,Map<String,Integer> birthYears,Map<String,Long> priorDays,byte[] request){
             this.worldId=worldId;this.year=year;this.elapsedDays=elapsedDays;this.revisions=revisions;
-            this.characterIds=List.copyOf(ids);this.request=request.clone();
+            this.characterIds=List.copyOf(ids);this.birthYears=Map.copyOf(birthYears);this.priorDays=Map.copyOf(priorDays);this.request=request.clone();
         }
         public String worldId(){return worldId;} public int year(){return year;} public long elapsedDays(){return elapsedDays;}
         public DomainMutationRevisions.Snapshot revisions(){return revisions;}
@@ -38,6 +38,7 @@ public final class PopulationComputeBridge {
             if(ordered.putIfAbsent(c.globalId,c)!=null)throw new IllegalStateException("Duplicate canonical Character UUID: "+c.globalId);
         }
         List<Object> people=new ArrayList<>(ordered.size());List<String> ids=new ArrayList<>(ordered.size());
+        Map<String,Integer> birthYears=new TreeMap<>();Map<String,Long> priorDays=new TreeMap<>();
         for(Character c:ordered.values()){
             Map<String,Object> person=new LinkedHashMap<>();
             person.put("id",c.globalId);person.put("birth_year",c.birthYear);person.put("alive",true);
@@ -48,6 +49,7 @@ public final class PopulationComputeBridge {
             long days=rawDays instanceof Number n?Math.max(0L,n.longValue()):0L;
             // The local Java JSON parser uses Double for numeric tokens; preserve signed-long precision as decimal text.
             person.put("simulated_days",Long.toString(days));people.add(person);ids.add(c.globalId);
+            birthYears.put(c.globalId,c.birthYear);priorDays.put(c.globalId,days);
         }
         Map<String,Object> request=new LinkedHashMap<>();
         request.put("schema_version",SCHEMA_VERSION);request.put("world_id",worldId);request.put("year",year);
@@ -56,7 +58,7 @@ public final class PopulationComputeBridge {
         DomainMutationRevisions.Snapshot after=WorldForgeApi.revisions().snapshot()
                 .orElseThrow(()->new IllegalStateException("Canonical mutation overlapped population capture"));
         if(!before.equals(after))throw new IllegalStateException("Canonical domain changed during population capture");
-        return new Captured(worldId,year,elapsedDays,before,ids,bytes);
+        return new Captured(worldId,year,elapsedDays,before,ids,birthYears,priorDays,bytes);
     }
 
     /** Validates the complete frame before the first write. False means stale and requires retry. */
@@ -76,14 +78,27 @@ public final class PopulationComputeBridge {
             Map<String,Integer> needs=new TreeMap<>();
             for(Map.Entry<?,?> e:object(value.get("needs"),"needs").entrySet()){
                 if(!(e.getKey() instanceof String key)||!(e.getValue() instanceof Number n))throw new IllegalArgumentException("Invalid need entry");
-                needs.put(key,n.intValue());
+                double numeric=n.doubleValue();
+                if(!Double.isFinite(numeric)||numeric!=Math.rint(numeric)||numeric<0||numeric>100)
+                    throw new IllegalArgumentException("Need value must be an integer in [0,100]: "+key);
+                needs.put(key,(int)numeric);
             }
+            for(String required:List.of("hunger","rest","social","purpose","leisure"))
+                if(!needs.containsKey(required))throw new IllegalArgumentException("Missing required need: "+required);
             String intent=string(value.get("intent"),"intent");PopulationSimulation.intentFromKey(intent);
-            int age=integer(value.get("age_years"),"age_years");String stage=string(value.get("life_stage"),"life_stage");
-            PopulationSimulation.LifeStage.valueOf(stage.toUpperCase(Locale.ROOT));
+            int age=integer(value.get("age_years"),"age_years");
+            Integer birthYear=captured.birthYears.get(id);
+            if(birthYear==null||age!=Math.max(0,captured.year-birthYear))throw new IllegalArgumentException("Population age does not match captured birth year: "+id);
+            String stage=string(value.get("life_stage"),"life_stage");
+            String expectedStage=age<6?"infant":age<13?"child":age<18?"adolescent":age<60?"adult":"elder";
+            if(!stage.equals(expectedStage))throw new IllegalArgumentException("Population life stage does not match age: "+id);
             long days=decimalLong(value.get("simulated_days"),"simulated_days");
-            if(days<0)throw new IllegalArgumentException("Negative simulated_days");
-            updates.add(new Update(id,needs,intent,age,stage,days,integer(value.get("last_simulated_year"),"last_simulated_year")));
+            long prior=captured.priorDays.get(id);
+            long expectedDays=captured.elapsedDays>Long.MAX_VALUE-prior?Long.MAX_VALUE:prior+captured.elapsedDays;
+            if(days!=expectedDays)throw new IllegalArgumentException("Population elapsed-day acknowledgement mismatch: "+id);
+            int lastYear=integer(value.get("last_simulated_year"),"last_simulated_year");
+            if(lastYear!=captured.year)throw new IllegalArgumentException("Population year acknowledgement mismatch: "+id);
+            updates.add(new Update(id,needs,intent,age,stage,days,lastYear));
         }
         if(!seen.equals(new TreeSet<>(captured.characterIds)))throw new IllegalArgumentException("Population frame Character set differs from captured snapshot");
         Map<String,Location> current=new HashMap<>();

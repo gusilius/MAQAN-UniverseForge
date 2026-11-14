@@ -297,3 +297,10 @@ This is an operation-count status, not a percentage of all UniverseForge computa
 - Application is one nested Character mutation batch; age/life-stage proposals use the existing lifecycle event publisher.
 - Java long counters use exact decimal-string JSON encoding to avoid precision loss in the lightweight Java JSON parser.
 - This is not a production cutover. Public mutable Character state and external addon writers remain an incomplete revision-fence surface; durable pending-day handling and async shared-runtime submission remain open. Production Rust ownership remains two operations.
+
+
+### Population frame integrity gate
+
+- Captured birth years and prior day counters are retained as immutable apply metadata.
+- Apply verifies age/life-stage consistency, exact elapsed-day acknowledgement, year acknowledgement, required needs, and bounded integral values for all need keys before any mutation.
+- Invalid frames fail closed before writes; this does not add Java-side duplicate simulation formulas and does not authorize production cutover.

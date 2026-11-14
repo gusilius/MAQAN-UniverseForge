@@ -495,3 +495,11 @@
 - Rust now excludes dead Characters, matching Java semantics, and uses exact decimal-string encoding for signed Java-long simulated-day counters.
 - Added logic coverage for global identity projection, dead-character exclusion, extension needs, lifecycle events, frame application and stale rejection.
 - Still not cut over: public mutable Character fields/props and external addon writers remain incompletely covered by revisions; durable elapsed-day acknowledgement and async shared-runtime submission remain pending. Java is still the only production owner.
+
+
+### WF-RT-0024 — population frame validation follow-up
+
+- CI run `43613116550` exposed a test compilation failure: `PopulationSimulationTest` referenced `PopulationComputeBridge` without importing it. The source class is included by the existing `tools/test-all.sh` source discovery; this was a missing test import, not a missing production source path.
+- The bridge now retains captured birth years and prior simulated-day counters and validates age, life stage, elapsed-day acknowledgement, last simulated year, required need keys and every need value before the first write.
+- Added a malformed-frame regression proving out-of-range need values are rejected without changing canonical Character state.
+- The candidate remains non-production; Java remains sole production owner pending parity, async shared-runtime integration, durable retry/save-reload, and completion of all canonical writer lanes.

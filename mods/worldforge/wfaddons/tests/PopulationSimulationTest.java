@@ -3,6 +3,7 @@ package dev.worldforge.tests;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.PopulationSimulation;
+import dev.worldforge.people.PopulationComputeBridge;
 import dev.worldforge.people.LifeSimulation;
 import dev.worldforge.people.CharacterDevelopment;
 import dev.worldforge.people.CharacterStats;
@@ -532,6 +533,19 @@ public final class PopulationSimulationTest {
         bridgeRegistry.addListener(new CharacterRegistry.Listener() {
             @Override public void lifecycle(Character c, CharacterRegistry.LifecycleEvent event) { bridgeEvents.add(event); }
         });
+        java.util.Map<String, Object> invalidRoot = new java.util.LinkedHashMap<>(resultRoot);
+        java.util.Map<String, Object> invalidPerson = new java.util.LinkedHashMap<>(resultPerson);
+        java.util.Map<String, Object> invalidNeeds = new java.util.LinkedHashMap<>(resultNeeds);
+        invalidNeeds.put("hunger", 101); invalidPerson.put("needs", invalidNeeds);
+        invalidRoot.put("characters", java.util.List.of(invalidPerson));
+        boolean rejectedInvalidFrame = false;
+        try {
+            PopulationComputeBridge.apply(captured,
+                    dev.worldforge.mod.Json.write(invalidRoot).getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                    java.util.List.of(bridgeRegistry));
+        } catch (IllegalArgumentException expected) { rejectedInvalidFrame = true; }
+        ok(rejectedInvalidFrame && PopulationSimulation.need(bridgeChild, Need.HUNGER) == 5,
+                "population bridge rejects out-of-range results before any canonical write");
         boolean applied = PopulationComputeBridge.apply(captured,
                 dev.worldforge.mod.Json.write(resultRoot).getBytes(java.nio.charset.StandardCharsets.UTF_8),
                 java.util.List.of(bridgeRegistry));
