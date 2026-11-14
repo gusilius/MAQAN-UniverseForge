@@ -380,3 +380,12 @@
 - **Тесты добавлены:** открытие счёта, изменение/повтор credit limit, вложенный `transferOnce -> transfer`, restore без изменения revision.
 - **Остаточный риск:** `TreasuryLedger.Account.balance/creditLimit/debt/bankrupt` остаются публичными изменяемыми полями; `account()` возвращает сам объект. Прямые записи из внешних модов могут обойти writer boundary. Не включать global snapshot/apply fence до инвентаризации этих writers и безопасного read API.
 - **Коммиты:** `3726bab9`, `5812300a`, `1023ded9`, `72e34b7f`. CI нового HEAD ожидается.
+
+
+### WF-RT-0023 — TreasuryLedger concurrent writer race
+
+- **Обнаружено:** `MutationBatch` использует thread-local nesting, но сами `accounts`, journal и derived indexes ранее не были защищены от параллельных вызовов. Разные потоки могли одновременно менять структуры ledger; один ThreadLocal не является блокировкой и не обеспечивает атомарность.
+- **Исправление:** все публичные canonical mutators `TreasuryLedger` синхронизированы на экземпляре ledger. Java monitor reentrant, поэтому вложенные `transferOnce -> transfer`, `depositOnce -> deposit` и подобные вызовы остаются одной логической batch/revision, а конкурирующие writers сериализуются.
+- **Регрессионный тест:** четыре потока выполняют 100 уникальных переводов; проверяются сохранение общей суммы, точные балансы и 100 revision для 100 успешных операций.
+- **Остаточный риск:** `account()` всё ещё возвращает mutable `Account`, а поля баланса/долга публичны. Внешние прямые записи обходят monitor и revision. Нужен read-only view + полный аудит writers; global snapshot/apply fence запрещён до этого.
+- **Коммиты:** `f48ee6a5`, `af5c18a6`, `836ddc07`. CI ожидается.
