@@ -3,6 +3,8 @@ package dev.worldforge.tests;
 import dev.worldforge.mod.api.DomainMutationRevisions;
 import dev.worldforge.mod.api.EventLog;
 import dev.worldforge.mod.api.WorldForgeApi;
+import dev.worldforge.people.Character;
+import dev.worldforge.people.CharacterRegistry;
 
 public final class DomainMutationRevisionsTest {
     private static int failures;
@@ -45,6 +47,30 @@ public final class DomainMutationRevisionsTest {
         check(eventAfter.revision(DomainMutationRevisions.Domain.EVENTS_ACTIONS)
                         == eventBefore.revision(DomainMutationRevisions.Domain.EVENTS_ACTIONS) + 1,
                 "canonical EventLog publication advances the shared EVENTS_ACTIONS lane exactly once");
+
+        CharacterRegistry people = new CharacterRegistry();
+        var peopleBefore = WorldForgeApi.revisions().snapshot().orElseThrow();
+        Character founder = people.create("Founder", "House A", "human", "m", 1);
+        var born = WorldForgeApi.revisions().snapshot().orElseThrow();
+        check(born.revision(DomainMutationRevisions.Domain.CHARACTERS)
+                        == peopleBefore.revision(DomainMutationRevisions.Domain.CHARACTERS) + 1,
+                "canonical Character creation advances the shared CHARACTERS lane");
+        people.appoint(founder.id, "steward", "capital", 2);
+        var appointed = WorldForgeApi.revisions().snapshot().orElseThrow();
+        check(appointed.revision(DomainMutationRevisions.Domain.CHARACTERS)
+                        > born.revision(DomainMutationRevisions.Domain.CHARACTERS),
+                "canonical post assignment advances the shared CHARACTERS lane");
+        check(people.bindEntity(founder.id, "npc", "entity-1"),
+                "canonical Character entity binding succeeds");
+        var bound = WorldForgeApi.revisions().snapshot().orElseThrow();
+        check(bound.revision(DomainMutationRevisions.Domain.CHARACTERS)
+                        > appointed.revision(DomainMutationRevisions.Domain.CHARACTERS),
+                "entity binding advances the shared CHARACTERS lane");
+        people.unbindEntity(founder.id, "npc", "entity-1");
+        var unbound = WorldForgeApi.revisions().snapshot().orElseThrow();
+        check(unbound.revision(DomainMutationRevisions.Domain.CHARACTERS)
+                        > bound.revision(DomainMutationRevisions.Domain.CHARACTERS),
+                "entity unbinding advances the shared CHARACTERS lane");
 
         if (failures > 0) throw new AssertionError(failures + " domain mutation revision checks failed");
         System.out.println("DOMAIN_MUTATION_REVISIONS_STATUS=PASS");
