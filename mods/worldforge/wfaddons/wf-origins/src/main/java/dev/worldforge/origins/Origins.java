@@ -418,9 +418,11 @@ public final class Origins {
         return Json.write(root);
     }
 
-    public String toJson() {
+    public String toJson() { return toJson(builds); }
+
+    private static String toJson(Map<String, Build> source) {
         Map<String, Object> root = new LinkedHashMap<>();
-        for (var e : builds.entrySet()) {
+        for (var e : source.entrySet()) {
             Build b = e.getValue();
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("race", b.race); m.put("class", b.cls); m.put("history", new ArrayList<Object>(b.history)); m.put("retrain", b.retrainDay); m.put("prof", new LinkedHashMap<String, Object>(b.prof));
@@ -497,15 +499,7 @@ public final class Origins {
                 throw new IllegalArgumentException("Превышен лимит основных профессий: " + owner);
             loaded.put(owner, b);
         }
-        if (toJson().equals(Json.write(loaded.entrySet().stream().collect(LinkedHashMap::new,
-                (map, entry) -> {
-                    Build b = entry.getValue();
-                    Map<String, Object> value = new LinkedHashMap<>();
-                    value.put("race", b.race); value.put("class", b.cls);
-                    value.put("history", new ArrayList<Object>(b.history)); value.put("retrain", b.retrainDay);
-                    value.put("prof", new LinkedHashMap<String, Object>(b.prof));
-                    map.put(entry.getKey(), value);
-                }, LinkedHashMap::putAll)))) return;
+        if (toJson().equals(toJson(loaded))) return;
         try (var mutation = dev.worldforge.mod.api.WorldForgeApi.revisions().begin(
                 dev.worldforge.mod.api.DomainMutationRevisions.Domain.ORIGINS)) {
             builds.clear();
