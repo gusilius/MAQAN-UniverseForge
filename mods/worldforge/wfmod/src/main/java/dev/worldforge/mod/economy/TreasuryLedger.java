@@ -63,6 +63,7 @@ public final class TreasuryLedger {
         @Override public void close() {
             if (closed) return;
             closed = true;
+            if (state == null) return;
             if (--state.depth == 0) {
                 ACTIVE_MUTATION.remove();
                 try {
@@ -75,9 +76,7 @@ public final class TreasuryLedger {
     }
 
     private MutationBatch beginMutationBatch() {
-        if (restoring) return new MutationBatch(null) {
-            @Override public void close() { }
-        };
+        if (restoring) return new MutationBatch(null);
         LedgerMutationState state = ACTIVE_MUTATION.get();
         if (state == null) {
             state = new LedgerMutationState(this);
