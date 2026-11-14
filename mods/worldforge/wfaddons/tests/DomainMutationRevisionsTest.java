@@ -188,6 +188,19 @@ public final class DomainMutationRevisionsTest {
                         && afterTrait.revision(DomainMutationRevisions.Domain.CHARACTERS) == beforeTrait + 1,
                 "CharacterStats trait mutation advances one revision and duplicate trait is a no-op");
 
+        long beforePsychologyInit = afterTrait.revision(DomainMutationRevisions.Domain.CHARACTERS);
+        CharacterDevelopment.ensurePsychology(founder);
+        var afterPsychologyInit = WorldForgeApi.revisions().snapshot().orElseThrow();
+        check(afterPsychologyInit.revision(DomainMutationRevisions.Domain.CHARACTERS)
+                        == beforePsychologyInit + 1
+                        && CharacterDevelopment.stress(founder) == 0,
+                "lazy psychology initialization persists stable facets and advances one Character revision");
+        CharacterDevelopment.ensurePsychology(founder);
+        var afterRepeatedPsychologyInit = WorldForgeApi.revisions().snapshot().orElseThrow();
+        check(afterRepeatedPsychologyInit.revision(DomainMutationRevisions.Domain.CHARACTERS)
+                        == afterPsychologyInit.revision(DomainMutationRevisions.Domain.CHARACTERS),
+                "repeated psychology initialization is idempotent and does not churn Character revisions");
+
         if (failures > 0) throw new AssertionError(failures + " domain mutation revision checks failed");
         System.out.println("DOMAIN_MUTATION_REVISIONS_STATUS=PASS");
     }
