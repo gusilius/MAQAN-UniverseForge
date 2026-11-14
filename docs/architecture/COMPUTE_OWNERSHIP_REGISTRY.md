@@ -262,3 +262,12 @@ This is an operation-count status, not a percentage of all UniverseForge computa
 - No persistent cache, parallel decision logic, extra executor, or Java duplicate calculation is introduced.
 - Added regression coverage for contested vs. uncontested border recruitment.
 - Source commit: `f8e6381e`. CI and large-snapshot profiling pending; no measured performance claim yet.
+
+
+### `PopulationSimulation` query/write boundary audit
+
+- Read-only APIs now use `readMapProp`, which returns an immutable empty view for absent maps without materializing data.
+- Mutation APIs continue to use `mapProp` and the existing Character mutation batch.
+- Regression test asserts absent needs/skills/training maps remain absent and registry revision is unchanged after read queries.
+- This is a Java correctness repair; it does not count as a Rust-owned production operation. `PopulationSimulation.advance` remains Java-owned and is not duplicated in Rust.
+- Source/test commits: `358b28f7`, `c8b28164`. CI pending.
