@@ -2,6 +2,8 @@ package dev.worldforge.people;
 
 import dev.worldforge.mod.TitleData;
 import dev.worldforge.mod.TitleEditor;
+import dev.worldforge.mod.api.DomainMutationRevisions;
+import dev.worldforge.mod.api.WorldForgeApi;
 
 import java.util.*;
 
@@ -44,20 +46,39 @@ public final class Succession {
             reg.appoint(heir.id, role.id, p.place);
             if (p.place.startsWith("realm:")) {
                 String realmId = p.place.substring(6);
-                if (ed != null) ed.setRuler(realmId, heir.name + (heir.house.isEmpty() ? "" : " " + heir.house));
-                // Keep the map's canonical title-holder references in step with the same
-                // succession result. RealmsMod imports these IDs into Statecraft on sync.
-                String deceasedGlobalId = dead.globalId;
-                String heirGlobalId = heir.globalId;
-                for (TitleData.Title title : d.allTitles()) {
-                    Object holder = title.props.get("holderCharacterId");
-                    if (holder instanceof String holderId
-                            && (holderId.equals(deceasedGlobalId) || holderId.equals(dead.id))) {
-                        title.props.put("holderCharacterId", heirGlobalId);
-                        title.props.put("succession.last_deceased", deceasedGlobalId);
-                        title.props.put("succession.last_heir", heirGlobalId);
-                        title.props.put("succession.last_year", year);
+                // Succession mutates two canonical domains in one logical operation:
+                // Character ownership/posts are covered by the outer Character batch,
+                // while title-holder metadata and the realm ruler belong to REALMS_POLITICS.
+                // Open the political writer before any map mutation so snapshots cannot
+                // observe the mixed old/new state. Do not advance the lane for a no-op.
+                try (DomainMutationRevisions.Mutation realmMutation =
+                             WorldForgeApi.revisions().begin(DomainMutationRevisions.Domain.REALMS_POLITICS)) {
+                    boolean realmChanged = false;
+                    String rulerName = heir.name + (heir.house.isEmpty() ? "" : " " + heir.house);
+                    TitleData.Realm realm = d.realms.get(realmId);
+                    if (ed != null) {
+                        realmChanged = realm != null && !Objects.equals(realm.ruler, rulerName);
+                        ed.setRuler(realmId, rulerName);
                     }
+                    // Keep the map's canonical title-holder references in step with the same
+                    // succession result. RealmsMod imports these IDs into Statecraft on sync.
+                    String deceasedGlobalId = dead.globalId;
+                    String heirGlobalId = heir.globalId;
+                    for (TitleData.Title title : d.allTitles()) {
+                        Object holder = title.props.get("holderCharacterId");
+                        if (holder instanceof String holderId
+                                && (holderId.equals(deceasedGlobalId) || holderId.equals(dead.id))) {
+                            realmChanged |= !Objects.equals(holder, heirGlobalId)
+                                    || !Objects.equals(title.props.get("succession.last_deceased"), deceasedGlobalId)
+                                    || !Objects.equals(title.props.get("succession.last_heir"), heirGlobalId)
+                                    || !Objects.equals(title.props.get("succession.last_year"), year);
+                            title.props.put("holderCharacterId", heirGlobalId);
+                            title.props.put("succession.last_deceased", deceasedGlobalId);
+                            title.props.put("succession.last_heir", heirGlobalId);
+                            title.props.put("succession.last_year", year);
+                        }
+                    }
+                    if (realmChanged) realmMutation.commit();
                 }
             }
             out.add(new Result(dead, heir, usurper, p.place));
