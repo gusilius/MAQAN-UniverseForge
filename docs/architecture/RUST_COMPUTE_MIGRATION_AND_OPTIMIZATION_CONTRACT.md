@@ -329,3 +329,8 @@ CI green подтверждает только выполненные в нём 
 ### Масштабирование и конечные ресурсы
 
 Отсутствие искусственного потолка сущностей не означает обещание бесконечной производительности на одном сервере. Архитектура должна масштабироваться по CPU/RAM и, в отдельном будущем этапе, по нескольким узлам. До появления revision fences, durable apply receipts и deterministic partition/reduce нельзя превращать текущий single-flight scheduler в произвольный пул параллельных writers. Подробный контракт профилей single-player/co-op/large-server и будущего multi-process ownership находится в `docs/architecture/WORLDSIM_SCALE_AND_BATTLE_CONTRACT.md`.
+
+
+### WF-RT-0023 implementation note
+
+A shared `DomainMutationRevisions` coordinator has been introduced in WorldForge Core. It supports domain lanes and commit-after-success mutation scopes; canonical EventLog writes are the first integrated lane. This is a foundation, not a complete global freshness guarantee. Character/Origins, Realm/Politics, Settlement, Treasury/Trade, Army/War and Inventory/Ownership writers remain to be audited and wired before WorldSim can use the vector as an apply fence.
