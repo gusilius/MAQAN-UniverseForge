@@ -486,3 +486,12 @@
 - Preserved current daily need drift, priority order, age/life-stage rules, role/command behavior and dead-character semantics in the candidate projection.
 - Added native unit tests for multi-day progression, stable ordering, role/age cases, dead characters, duplicate IDs and unsupported schemas.
 - Cutover is intentionally pending: no canonical Java snapshot adapter, parity harness, asynchronous apply ticket or durable pending-day protocol exists yet. Java remains the only production owner. Do not double-run the formulas and do not count this as a third migrated production operation.
+
+
+### WF-RT-0024 — immutable population snapshot/apply boundary
+
+- Added a canonical Java projection bridge keyed by global Character UUID, deterministic ordering, before/after revision-vector capture checks and extension-need preservation.
+- Added complete frame validation and stale revision rejection before mutation; life-stage transitions retain existing CharacterRegistry lifecycle events and all result writes coalesce into one Character mutation batch.
+- Rust now excludes dead Characters, matching Java semantics, and uses exact decimal-string encoding for signed Java-long simulated-day counters.
+- Added logic coverage for global identity projection, dead-character exclusion, extension needs, lifecycle events, frame application and stale rejection.
+- Still not cut over: public mutable Character fields/props and external addon writers remain incompletely covered by revisions; durable elapsed-day acknowledgement and async shared-runtime submission remain pending. Java is still the only production owner.

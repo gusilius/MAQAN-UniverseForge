@@ -2,12 +2,20 @@
 use serde::{Deserialize,Serialize};
 use std::collections::{BTreeMap,BTreeSet};
 const MAX:i32=100;
+mod i64_decimal_string {
+ use serde::{Deserialize,Deserializer,Serializer};
+ pub fn serialize<S:Serializer>(value:&i64,serializer:S)->Result<S::Ok,S::Error>{serializer.serialize_str(&value.to_string())}
+ pub fn deserialize<'de,D:Deserializer<'de>>(deserializer:D)->Result<i64,D::Error>{
+  #[derive(Deserialize)] #[serde(untagged)] enum Value{Text(String),Number(i64)}
+  match Value::deserialize(deserializer)?{Value::Text(v)=>v.parse::<i64>().map_err(serde::de::Error::custom),Value::Number(v)=>Ok(v)}
+ }
+}
 #[derive(Clone,Debug,Default,PartialEq,Eq,Serialize,Deserialize)]
-pub struct Person{pub id:String,pub birth_year:i32,pub alive:bool,#[serde(default)]pub needs:BTreeMap<String,i32>,#[serde(default)]pub duties:BTreeSet<String>,#[serde(default)]pub profession:String,#[serde(default)]pub training_target:String,#[serde(default)]pub command:String,#[serde(default)]pub simulated_days:i64}
+pub struct Person{pub id:String,pub birth_year:i32,pub alive:bool,#[serde(default)]pub needs:BTreeMap<String,i32>,#[serde(default)]pub duties:BTreeSet<String>,#[serde(default)]pub profession:String,#[serde(default)]pub training_target:String,#[serde(default)]pub command:String,#[serde(default,with="i64_decimal_string")]pub simulated_days:i64}
 #[derive(Clone,Debug,PartialEq,Eq,Serialize,Deserialize)]
 pub struct Request{pub schema_version:u32,pub world_id:String,pub year:i32,pub elapsed_days:u64,pub characters:Vec<Person>}
 #[derive(Clone,Debug,PartialEq,Eq,Serialize,Deserialize)]
-pub struct PersonResult{pub id:String,pub needs:BTreeMap<String,i32>,pub intent:String,pub age_years:i32,pub life_stage:String,pub simulated_days:i64,pub last_simulated_year:i32}
+pub struct PersonResult{pub id:String,pub needs:BTreeMap<String,i32>,pub intent:String,pub age_years:i32,pub life_stage:String,#[serde(with="i64_decimal_string")]pub simulated_days:i64,pub last_simulated_year:i32}
 #[derive(Clone,Debug,PartialEq,Eq,Serialize,Deserialize)]
 pub struct Frame{pub schema_version:u32,pub world_id:String,pub year:i32,pub elapsed_days:u64,pub characters:Vec<PersonResult>}
 fn need(n:&BTreeMap<String,i32>,k:&str)->i32{n.get(k).copied().unwrap_or(0).clamp(0,MAX)}
@@ -30,7 +38,7 @@ pub fn advance(r:Request)->Result<Frame,String>{
  let d=r.elapsed_days.min(MAX as u64) as i32;
  let drifts=[("hunger",10*d),("rest",6*d),("social",2*d),("purpose",d),("leisure",3*d)];
  let mut seen=BTreeSet::new();let mut out=Vec::with_capacity(r.characters.len());
- for p in &r.characters{
+ for p in r.characters.iter().filter(|person| person.alive){
   if p.id.trim().is_empty()||!seen.insert(p.id.as_str()){return Err(format!("empty or duplicate character id: {}",p.id))}
   let age=r.year.saturating_sub(p.birth_year).max(0);let mut needs=p.needs.clone();
   if p.alive{for (key,drift) in drifts{needs.insert(key.into(),need(&needs,key).saturating_add(drift).clamp(0,MAX));}}
@@ -51,7 +59,8 @@ pub fn advance(r:Request)->Result<Frame,String>{
  #[test]fn life_stage_profession_and_hero_command(){let mut worker=p("w");worker.profession="farmer".into();let mut child=p("c");child.birth_year=300;let mut hero=p("h");hero.duties.insert("hero".into());hero.command="defend".into();
  let f=advance(Request{schema_version:1,world_id:"w".into(),year:303,elapsed_days:1,characters:vec![worker,child,hero]}).unwrap();
  let m:BTreeMap<_,_>=f.characters.iter().map(|x|(x.id.as_str(),x)).collect();assert_eq!(m["w"].intent,"work");assert_eq!(m["c"].life_stage,"infant");assert_eq!(m["c"].intent,"idle");assert_eq!(m["h"].intent,"follow_command");}
- #[test]fn dead_people_are_not_advanced(){let mut dead=p("d");dead.alive=false;dead.simulated_days=42;let f=advance(Request{schema_version:1,world_id:"w".into(),year:303,elapsed_days:7,characters:vec![dead]}).unwrap();assert_eq!(f.characters[0].simulated_days,42);assert!(f.characters[0].needs.is_empty());}
+ #[test]fn dead_people_are_not_in_the_population_batch(){let mut dead=p("d");dead.alive=false;dead.simulated_days=42;let f=advance(Request{schema_version:1,world_id:"w".into(),year:303,elapsed_days:7,characters:vec![dead]}).unwrap();assert!(f.characters.is_empty());}
+ #[test]fn java_long_is_encoded_as_an_exact_decimal_string(){let json=r#"{"schema_version":1,"world_id":"w","year":303,"elapsed_days":1,"characters":[{"id":"p","birth_year":280,"alive":true,"simulated_days":"9223372036854775806"}]}"#;let request:Request=serde_json::from_str(json).unwrap();let frame=advance(request).unwrap();let encoded=serde_json::to_value(frame).unwrap();assert_eq!(encoded["characters"][0]["simulated_days"],"9223372036854775807");}
  #[test]fn elapsed_days_saturate_at_java_long_max(){let mut p=p("p");p.simulated_days=i64::MAX-1;let f=advance(Request{schema_version:1,world_id:"w".into(),year:303,elapsed_days:9,characters:vec![p]}).unwrap();assert_eq!(f.characters[0].simulated_days,i64::MAX);}
  #[test]fn invalid_schema_and_duplicate_ids_fail_closed(){let a=p("same");let r=Request{schema_version:1,world_id:"w".into(),year:303,elapsed_days:1,characters:vec![a.clone(),a]};assert!(advance(r).unwrap_err().contains("duplicate"));let r=Request{schema_version:2,world_id:"w".into(),year:303,elapsed_days:1,characters:vec![]};assert!(advance(r).unwrap_err().contains("schema"));}
 }

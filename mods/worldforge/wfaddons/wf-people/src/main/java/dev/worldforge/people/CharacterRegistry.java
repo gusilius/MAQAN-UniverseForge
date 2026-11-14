@@ -155,6 +155,28 @@ public final class CharacterRegistry {
         }
     }
 
+    /** Applies a precomputed stage while retaining canonical lifecycle publication semantics. */
+    public void applyLifeStageResult(Character character, int age, String stage, int year) {
+        Objects.requireNonNull(character, "character");
+        String next = Objects.requireNonNull(stage, "stage").toLowerCase(Locale.ROOT);
+        if (!Set.of("infant", "child", "adolescent", "adult", "elder").contains(next))
+            throw new IllegalArgumentException("Invalid life stage: " + stage);
+        try (MutationBatch ignored = beginMutationBatch()) {
+            if (byId.get(character.id) != character || !character.alive)
+                throw new IllegalStateException("Character is no longer a living member of this registry");
+            boolean changed = false, lifecyclePublished = false;
+            Object previous = character.props.put("population.life_stage", next);
+            if (!Objects.equals(previous, next)) changed = true;
+            if (previous instanceof String old && !old.equals(next)) {
+                emit(character, LifecycleKind.LIFE_STAGE_CHANGED, old, next, year);
+                lifecyclePublished = true;
+            }
+            Object previousAge = character.props.put("population.age_years", age);
+            if (!Objects.equals(previousAge, age)) changed = true;
+            if (changed && !lifecyclePublished) recordDomainMutation();
+        }
+    }
+
     /** Updates calendar-derived life stages and emits only real stage transitions. */
     public void refreshLifeStages(int year) {
         try (MutationBatch ignored = beginMutationBatch()) { refreshLifeStagesBatched(year); }

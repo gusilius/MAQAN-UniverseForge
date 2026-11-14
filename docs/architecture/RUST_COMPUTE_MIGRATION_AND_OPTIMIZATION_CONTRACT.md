@@ -422,3 +422,10 @@ This is runtime consolidation only. It does **not** add a new Rust production op
 ### Population batch candidate — Rust implementation, no cutover
 
 The native crate now contains a deterministic population batch candidate and JNI/Java entry point. It operates only on immutable Character projections and returns derived fields; it does not mutate canonical state. Existing Java progression formulas and priority order are mirrored for parity work. This candidate is not a production owner until snapshot capture, parity, revision/lifecycle validation, durable elapsed-day handling and authoritative Java apply are integrated. Production Rust ownership remains two operations.
+
+
+## Population immutable snapshot/apply bridge
+
+The wf-people domain now has a server-thread capture codec and a fully validated frame-application boundary. Capture uses canonical global Character UUIDs, stable ordering, a before/after shared revision-vector check, and existing needs/duties/profession/training/command fields. Dead Characters are excluded, matching the current Java population tick. Apply validates the complete envelope and exact Character set before mutation, rejects stale revisions, and routes life-stage transitions through CharacterRegistry's canonical lifecycle event path inside one nested Character mutation batch.
+
+The Java JSON parser represents numeric tokens as doubles. The signed Java-long simulated-day counter therefore crosses the JSON boundary as an exact decimal string and is parsed/serialized losslessly by Rust. This completes the projection/apply boundary only; public mutable Character fields and external addon writers remain incompletely audited, and durable elapsed-day acknowledgement plus shared-runtime async submission are not yet wired. Java remains the sole production owner until all gates pass.

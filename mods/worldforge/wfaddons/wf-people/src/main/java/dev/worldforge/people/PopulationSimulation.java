@@ -410,6 +410,32 @@ public final class PopulationSimulation {
         return Intent.IDLE;
     }
 
+    static Intent intentFromKey(String key) {
+        for (Intent intent : Intent.values()) if (intent.key.equals(key)) return intent;
+        throw new IllegalArgumentException("Unknown population intent: " + key);
+    }
+
+    /** Applies a validated Rust proposal inside the caller's single Character mutation batch. */
+    static void applyComputedResult(Character character, Map<String, Integer> nextNeeds, String intentKey,
+                                    long simulatedDays, int lastSimulatedYear) {
+        requireAlive(character);
+        Intent intent = intentFromKey(intentKey);
+        Map<String, Object> needs = mapProp(character, NEEDS);
+        Map<String, Object> replacement = new LinkedHashMap<>(nextNeeds);
+        boolean changed = false;
+        if (!needs.equals(replacement)) { needs.clear(); needs.putAll(replacement); changed = true; }
+        if (!Objects.equals(character.props.get(LAST_INTENT), intent.key)) {
+            character.props.put(LAST_INTENT, intent.key); changed = true;
+        }
+        Object rawDays = character.props.get("population.simulated_days");
+        long currentDays = rawDays instanceof Number n ? Math.max(0L, n.longValue()) : 0L;
+        if (currentDays != simulatedDays) { character.props.put("population.simulated_days", simulatedDays); changed = true; }
+        if (!Objects.equals(character.props.get("population.last_simulated_year"), lastSimulatedYear)) {
+            character.props.put("population.last_simulated_year", lastSimulatedYear); changed = true;
+        }
+        if (changed) CharacterRegistry.recordCharacterMutation();
+    }
+
     /** Records the chosen intent for UI/other addons; it does not spend food or move entities. */
     public static Intent updateIntent(Character character, int year) {
         try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {

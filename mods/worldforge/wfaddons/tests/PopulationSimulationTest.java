@@ -502,6 +502,54 @@ public final class PopulationSimulationTest {
                         && CharacterDevelopment.stress(trustedFriend) == friendGrief,
                 "death creates idempotent bereavement for spouse, child and trusted friend");
 
+        CharacterRegistry bridgeRegistry = new CharacterRegistry();
+        Character bridgeChild = bridgeRegistry.create("Bridge Child", "", "north", "f", 295);
+        bridgeRegistry.refreshLifeStages(300);
+        PopulationSimulation.setNeed(bridgeChild, Need.HUNGER, 5);
+        @SuppressWarnings("unchecked")
+        java.util.Map<String, Object> bridgeNeeds = (java.util.Map<String, Object>) bridgeChild.props.get("population.needs");
+        bridgeNeeds.put("custom_need", 7);
+        Character bridgeDead = bridgeRegistry.create("Bridge Dead", "", "north", "m", 250);
+        PopulationSimulation.die(bridgeRegistry, bridgeDead.id, 300, "test");
+        PopulationComputeBridge.Captured captured = PopulationComputeBridge.capture(
+                "population-bridge-test", 301, 1, java.util.List.of(bridgeRegistry));
+        String requestText = new String(captured.request(), java.nio.charset.StandardCharsets.UTF_8);
+        ok(captured.characterIds().equals(java.util.List.of(bridgeChild.globalId))
+                        && requestText.contains(bridgeChild.globalId) && requestText.contains("custom_need")
+                        && requestText.contains("\"simulated_days\":\"0\""),
+                "population snapshot uses canonical global UUIDs, preserves extension needs and excludes dead Characters");
+        java.util.Map<String, Object> resultNeeds = new java.util.LinkedHashMap<>();
+        resultNeeds.put("hunger", 15); resultNeeds.put("rest", 6); resultNeeds.put("social", 2);
+        resultNeeds.put("purpose", 1); resultNeeds.put("leisure", 3); resultNeeds.put("custom_need", 7);
+        java.util.Map<String, Object> resultPerson = new java.util.LinkedHashMap<>();
+        resultPerson.put("id", bridgeChild.globalId); resultPerson.put("needs", resultNeeds);
+        resultPerson.put("intent", "idle"); resultPerson.put("age_years", 6); resultPerson.put("life_stage", "child");
+        resultPerson.put("simulated_days", "1"); resultPerson.put("last_simulated_year", 301);
+        java.util.Map<String, Object> resultRoot = new java.util.LinkedHashMap<>();
+        resultRoot.put("schema_version", 1); resultRoot.put("world_id", "population-bridge-test");
+        resultRoot.put("year", 301); resultRoot.put("elapsed_days", 1); resultRoot.put("characters", java.util.List.of(resultPerson));
+        java.util.List<CharacterRegistry.LifecycleEvent> bridgeEvents = new java.util.ArrayList<>();
+        bridgeRegistry.addListener(new CharacterRegistry.Listener() {
+            @Override public void lifecycle(Character c, CharacterRegistry.LifecycleEvent event) { bridgeEvents.add(event); }
+        });
+        boolean applied = PopulationComputeBridge.apply(captured,
+                dev.worldforge.mod.Json.write(resultRoot).getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                java.util.List.of(bridgeRegistry));
+        ok(applied && PopulationSimulation.need(bridgeChild, Need.HUNGER) == 15
+                        && ((Number) bridgeNeeds.get("custom_need")).intValue() == 7
+                        && ((Number) bridgeChild.props.get("population.simulated_days")).longValue() == 1
+                        && PopulationSimulation.lastIntent(bridgeChild) == Intent.IDLE
+                        && bridgeEvents.stream().anyMatch(event -> event.kind() == CharacterRegistry.LifecycleKind.LIFE_STAGE_CHANGED
+                                && event.from().equals("infant") && event.to().equals("child")),
+                "validated population frame applies one Character batch and preserves lifecycle events");
+        PopulationComputeBridge.Captured staleCapture = PopulationComputeBridge.capture(
+                "population-bridge-test", 301, 1, java.util.List.of(bridgeRegistry));
+        PopulationSimulation.setNeed(bridgeChild, Need.HUNGER, 9);
+        ok(!PopulationComputeBridge.apply(staleCapture,
+                        dev.worldforge.mod.Json.write(resultRoot).getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                        java.util.List.of(bridgeRegistry)),
+                "population bridge rejects stale revision before applying a result");
+
         System.out.println(failures == 0 ? "ALL OK" : failures + " FAILED");
         if (failures > 0) System.exit(1);
     }

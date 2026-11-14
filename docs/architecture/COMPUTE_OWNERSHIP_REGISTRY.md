@@ -288,3 +288,12 @@ This is an operation-count status, not a percentage of all UniverseForge computa
 - Added native unit tests for multi-day drift, priority ordering, life-stage and role behavior, dead characters, duplicate IDs and schema rejection.
 - **Not yet production-owned:** no live Character snapshot adapter, Java/Rust parity harness, asynchronous ticket/apply integration or durable pending-day protocol has been wired. Java remains the sole production owner; do not execute both implementations in production and do not count this candidate as a third migrated production operation.
 - Next integration package must capture the canonical immutable Character projection, compare both implementations on identical snapshots, preserve one Java mutation batch, persist/acknowledge elapsed days only after successful apply, and reject stale revision/lifecycle results.
+
+
+## Population compute bridge — immutable capture and validated apply
+
+- Added deterministic server-thread projection using canonical global Character UUIDs, preserving extension needs and excluding dead Characters.
+- Full native-frame validation checks schema, world, year, elapsed days, unique/exact Character IDs, need entries, intent, age/life stage and signed-long day counters before the first write.
+- Application is one nested Character mutation batch; age/life-stage proposals use the existing lifecycle event publisher.
+- Java long counters use exact decimal-string JSON encoding to avoid precision loss in the lightweight Java JSON parser.
+- This is not a production cutover. Public mutable Character state and external addon writers remain an incomplete revision-fence surface; durable pending-day handling and async shared-runtime submission remain open. Production Rust ownership remains two operations.
