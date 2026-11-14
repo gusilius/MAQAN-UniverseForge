@@ -400,6 +400,9 @@ public final class WorldSimMod {
                                     + ", proposal_records=" + journal.size()
                                     + ", world_events=" + WorldForgeApi.events().size()
                                     + ", chronicle_records=" + HISTORICAL_CHRONICLE.size()
+                                    + ", compute_busy=" + COMPUTE_SCHEDULER.busy()
+                                    + ", compute_pending_day=" + (pendingComputeRevision == Long.MIN_VALUE ? "-" : pendingComputeRevision)
+                                    + ", compute_epoch=" + lifecycleEpoch
                                     + ", day=" + WorldForgeApi.clock().dayNumber()), false);
                     return 1;
                 }))
