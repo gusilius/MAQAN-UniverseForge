@@ -204,3 +204,12 @@ Remaining bypass surface: Character still exposes mutable public fields, childre
 - Save restore retains syntactically valid unknown race/class/profession IDs as dormant progression. Definitions removed by a datapack reload therefore do not erase history/XP or make the save unloadable; reintroducing the IDs reactivates the stored progression. Invalid shapes, duplicate history IDs, invalid XP ranges and known-definition dependency violations remain rejected.
 - **Still open:** `OriginDefs.replaceWith` publishes through several public mutable maps; it is not yet a single immutable definitions snapshot for concurrent readers. Do not claim datapack definition publication is globally atomic. Cross-domain Progress/Character hooks also remain outside a durable multi-domain transaction.
 - This closes the known getter-based mutation bypass, not every possible concurrency hazard: `Origins.Build` remains a mutable detached DTO, definitions reload is a separate definitions lifecycle, and cross-domain Progress/Character hooks are not yet a durable atomic transaction.
+
+
+### TreasuryLedger canonical economy writer boundary — WF-RT-0023
+
+- `TreasuryLedger` now opens the existing `ECONOMY_TRADE` revision lane around canonical account/ledger mutations (`open`, credit-limit changes, deposit/withdrawal, transfer, loan, interest and repayment).
+- Nested public operations such as `transferOnce -> transfer` join one thread-local, ledger-instance-scoped mutation batch and publish at most one revision for the logical operation. No-op/idempotent retries do not advance the lane.
+- `fromJson` rebuilds indexes and balances in restore mode without publishing live-world revisions.
+- This is revision ownership, not a complete immutable ledger snapshot: `Account` still exposes mutable balance/credit/debt fields and remains a known bypass surface. Direct external writes must be audited before snapshot/apply fencing. The ledger journal and existing indexes remain the sole financial record; no parallel cache or executor was added.
+- Source commits: `3726bab9`, `5812300a`; regression tests: `1023ded9`. CI must pass before treating this boundary as verified.
