@@ -350,3 +350,10 @@
 - **Исправление:** после назначения наследника фиксируется локальная ссылка `successor`; lambda использует её, не меняя семантику выбора наследника.
 - **Исправление сохранено:** `7dce50244fb103e14602f3c3f800265d8dda53ff`. Повторный logic-test run ожидает результата; не считать проблему закрытой до зелёной компиляции и тестов.
 
+### WF-RT-0023 — Second effectively-final compile failure
+
+- **CI run:** `43600642066`, Windows logic tests. The first stable-reference fix left one lambda capture as `heir.house` while the same expression used `successor`; javac rejected it because `heir` is reassigned in the enclosing method.
+- **Fix:** all lambda references to the selected heir now use the stable `successor` local.
+- **Commit:** `16b2b3e445e221edfb4b5668ffdd63e4db20ab78`.
+- **Status:** source correction saved; new CI verification is pending. Do not close WF-RT-0023 until compile, CourtTest, and addon build pass.
+
