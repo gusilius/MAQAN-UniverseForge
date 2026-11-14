@@ -208,7 +208,7 @@ public final class WorldSimMod {
             PROFILER.record("worldsim.compute.queue_wait", completed.queueWaitNanos());
             PROFILER.record("worldsim.compute.total", completed.computeNanos());
             WorldSimComputeScheduler.Ticket ticket = completed.ticket();
-            if (!ticket.matches(worldId, pendingComputeRevision, lifecycleEpoch)) {
+            if (!ticket.matches(worldId, "worldsim.compute.cycle", pendingComputeRevision, lifecycleEpoch)) {
                 pendingComputeRevision = Long.MIN_VALUE;
                 PROFILER.setGauge("worldsim.compute.busy", 0);
                 PROFILER.setGauge("worldsim.compute.stale_results", 1);
@@ -246,7 +246,7 @@ public final class WorldSimMod {
             PROFILER.record("worldsim.snapshot_and_json", System.nanoTime() - phaseStarted);
 
             WorldSimComputeScheduler.Ticket ticket =
-                    new WorldSimComputeScheduler.Ticket(worldId, day, lifecycleEpoch);
+                    new WorldSimComputeScheduler.Ticket(worldId, "worldsim.compute.cycle", day, lifecycleEpoch);
             boolean submitted = COMPUTE_SCHEDULER.submit(ticket, input, emergenceInput, (snapshotBytes, emergenceBytes) -> {
                 long nativeStarted = System.nanoTime();
                 byte[] emergenceFrame = NativeWorldSimulation.advanceEmergence(emergenceBytes);
