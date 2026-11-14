@@ -173,7 +173,7 @@ public final class PopulationSimulationTest {
         PopulationSimulation.advance(registry, 1, 303);
         ok(PopulationSimulation.age(smith, 303) == 23, "population clock advances calendar age");
         ok(PopulationSimulation.lastIntent(smith) == Intent.PATROL, "daily simulation refreshes deterministic AI intent");
-        ok(((Number) smith.props.get("population.simulated_days")).longValue() == 1, "elapsed population days are persisted on the Character");
+        ok(Long.parseLong(String.valueOf(smith.props.get("population.simulated_days"))) == 1, "elapsed population days are persisted on the Character");
         ok(PopulationSimulation.need(smith, Need.HUNGER) == 10 && PopulationSimulation.need(smith, Need.REST) == 6,
                 "shared needs accumulate from the same world-day clock");
 
@@ -185,7 +185,7 @@ public final class PopulationSimulationTest {
                         && PopulationSimulation.need(batched, Need.SOCIAL) == 6
                         && PopulationSimulation.need(batched, Need.PURPOSE) == 3
                         && PopulationSimulation.need(batched, Need.LEISURE) == 9
-                        && ((Number) batched.props.get("population.simulated_days")).longValue() == 3,
+                        && Long.parseLong(String.valueOf(batched.props.get("population.simulated_days"))) == 3,
                 "batched population advancement preserves exact per-day need drift and persisted elapsed days");
 
         Character autonomous = registry.create("Rowan", "", "north", "m", 280);
@@ -552,7 +552,7 @@ public final class PopulationSimulationTest {
                 java.util.List.of(bridgeRegistry));
         ok(applied && PopulationSimulation.need(bridgeChild, Need.HUNGER) == 15
                         && ((Number) bridgeNeeds.get("custom_need")).intValue() == 7
-                        && ((Number) bridgeChild.props.get("population.simulated_days")).longValue() == 1
+                        && Long.parseLong(String.valueOf(bridgeChild.props.get("population.simulated_days"))) == 1
                         && PopulationSimulation.lastIntent(bridgeChild) == Intent.IDLE
                         && bridgeEvents.stream().anyMatch(event -> event.kind() == CharacterRegistry.LifecycleKind.LIFE_STAGE_CHANGED
                                 && event.from().equals("infant") && event.to().equals("child")),
@@ -572,15 +572,15 @@ public final class PopulationSimulationTest {
         int hungerAfterFirstApply = PopulationSimulation.need(resumable, Need.HUNGER);
         PopulationSimulation.advanceToWorldDay(resumableRegistry, 10, 5, 300);
         ok(hungerAfterFirstApply == 55 && PopulationSimulation.need(resumable, Need.HUNGER) == 55
-                        && ((Number) resumable.props.get("population.last_simulated_world_day")).longValue() == 10,
+                        && Long.parseLong(String.valueOf(resumable.props.get("population.last_simulated_world_day"))) == 10,
                 "per-Character world-day receipts make Java fallback replay-safe");
         CharacterRegistry partiallySavedRegistry = new CharacterRegistry();
         Character partiallySaved = partiallySavedRegistry.create("PartiallySaved", "", "north", "f", 270);
         PopulationSimulation.setNeed(partiallySaved, Need.HUNGER, 5);
-        partiallySaved.props.put("population.last_simulated_world_day", 5L);
+        partiallySaved.props.put("population.last_simulated_world_day", "5");
         PopulationSimulation.advanceToWorldDay(partiallySavedRegistry, 10, 10, 300);
         ok(PopulationSimulation.need(partiallySaved, Need.HUNGER) == 55
-                        && ((Number) partiallySaved.props.get("population.last_simulated_world_day")).longValue() == 10,
+                        && Long.parseLong(String.valueOf(partiallySaved.props.get("population.last_simulated_world_day"))) == 10,
                 "server reload catches up an older Character receipt even when the process cursor is already current");
 
         PopulationComputeBridge.Captured sameDayCapture = PopulationComputeBridge.captureForWorldDay(
@@ -617,9 +617,9 @@ public final class PopulationSimulationTest {
                 character.props.put("population.profession", person.get("profession"));
                 character.props.put("population.training_target", person.get("training_target"));
                 character.props.put("population.command", person.get("command"));
-                character.props.put("population.simulated_days", Long.parseLong(String.valueOf(person.get("simulated_days"))));
+                character.props.put("population.simulated_days", String.valueOf(person.get("simulated_days")));
                 long elapsed = ((Number) person.get("elapsed_days")).longValue();
-                character.props.put("population.last_simulated_world_day", fixtureWorldDay - elapsed);
+                character.props.put("population.last_simulated_world_day", Long.toString(fixtureWorldDay - elapsed));
                 ok(PopulationSimulation.canWork(character, fixtureYear) == Boolean.TRUE.equals(person.get("can_work")),
                         "shared parity fixture canWork input matches canonical Java age rules for " + id);
                 parityCharacters.put(id, character);
@@ -641,8 +641,8 @@ public final class PopulationSimulationTest {
                         && PopulationSimulation.decide(character, fixtureYear).name().toLowerCase(java.util.Locale.ROOT).equals(person.get("intent"))
                         && ((Number) character.props.get("population.age_years")).intValue() == ((Number) person.get("age_years")).intValue()
                         && String.valueOf(character.props.get("population.life_stage")).equals(person.get("life_stage"))
-                        && ((Number) character.props.get("population.simulated_days")).longValue() == Long.parseLong(String.valueOf(person.get("simulated_days")))
-                        && ((Number) character.props.get("population.last_simulated_world_day")).longValue() == fixtureWorldDay;
+                        && Long.parseLong(String.valueOf(character.props.get("population.simulated_days"))) == Long.parseLong(String.valueOf(person.get("simulated_days")))
+                        && Long.parseLong(String.valueOf(character.props.get("population.last_simulated_world_day"))) == fixtureWorldDay;
                 ok(stateMatch, "Java population result matches shared Rust parity fixture for " + id);
             }
         } catch (Exception fixtureFailure) {

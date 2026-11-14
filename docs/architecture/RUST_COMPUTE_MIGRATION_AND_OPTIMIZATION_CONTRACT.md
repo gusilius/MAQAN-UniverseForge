@@ -466,3 +466,8 @@ The batch-level `elapsed_days` is now the maximum positive per-Character interva
 The process-local PeopleMod population cursor is a scheduling hint, not durable evidence that every Character partition was saved. On server reload the cursor may initialize to the current world day while one or more Character registries restore older per-Character receipts. Therefore the coordinator must still capture at the current day even when `currentWorldDay == populationProcessedDay`. Characters with current receipts are excluded; older receipts are caught up individually. Legacy Characters without a receipt use the current fallback baseline and are not incorrectly advanced through the entire world history.
 
 The batch-level `elapsed_days` is the maximum positive per-Character interval in the snapshot (zero only for an empty batch); Rust still computes each Character using its own `elapsed_days`. This preserves the ABI's non-empty-batch validation while supporting recovery when the global process cursor is already current.
+
+
+### Exact durable 64-bit population counters
+
+The repository JSON reader represents JSON numeric tokens as `Double`. Persisting long-lived world-day/simulated-day counters as JSON numbers can therefore lose integer precision above 2^53 on save/reload. Population now stores `population.simulated_days` and `population.last_simulated_world_day` as decimal strings, reads them exactly, and accepts legacy numeric values during migration. The Rust ABI already uses decimal strings for these counters. This aligns the durable Character representation with the existing versioned native contract and prevents clock/counter drift after long campaigns.

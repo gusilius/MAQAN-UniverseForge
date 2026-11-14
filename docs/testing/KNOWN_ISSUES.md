@@ -552,3 +552,11 @@
 - Batch-level elapsed metadata now derives from the maximum per-Character elapsed interval, while Rust continues to calculate each Character with its own interval.
 - Added a regression test that starts with a current process cursor and an older Character receipt, then verifies the missing days are applied once.
 - This fixes receipt-based recovery semantics; real save/reload campaign verification and complete Character writer audit remain open.
+
+
+### WF-RT-0024 — exact 64-bit Character population receipts
+
+- Audited `wfmod.Json`: JSON number tokens decode as `Double`. Persisting 64-bit elapsed/day counters as JSON numbers can silently lose integer precision beyond 2^53.
+- Population now writes simulated-day totals and last-processed world-day receipts as decimal strings, reads exact strings, and remains backward-compatible with legacy numeric props.
+- The native ABI already serializes these values as decimal strings; Java Character persistence now uses the same exact representation.
+- Updated logic assertions to validate decimal-string persistence and legacy-compatible reads. This is a correctness requirement for long autonomous campaigns, not an optimization that reduces simulation scope.

@@ -428,13 +428,16 @@ public final class PopulationSimulation {
             character.props.put(LAST_INTENT, intent.key); changed = true;
         }
         Object rawDays = character.props.get("population.simulated_days");
-        long currentDays = rawDays instanceof Number n ? Math.max(0L, n.longValue()) : 0L;
-        if (currentDays != simulatedDays) { character.props.put("population.simulated_days", simulatedDays); changed = true; }
+        long currentDays = persistedNonNegativeLong(rawDays);
+        if (currentDays != simulatedDays || !(rawDays instanceof String)) {
+            character.props.put("population.simulated_days", Long.toString(simulatedDays)); changed = true;
+        }
         if (!Objects.equals(character.props.get("population.last_simulated_year"), lastSimulatedYear)) {
             character.props.put("population.last_simulated_year", lastSimulatedYear); changed = true;
         }
-        if (!Objects.equals(character.props.get("population.last_simulated_world_day"), lastWorldDay)) {
-            character.props.put("population.last_simulated_world_day", lastWorldDay); changed = true;
+        Object rawWorldDay = character.props.get("population.last_simulated_world_day");
+        if (persistedNonNegativeLong(rawWorldDay) != lastWorldDay || !(rawWorldDay instanceof String)) {
+            character.props.put("population.last_simulated_world_day", Long.toString(lastWorldDay)); changed = true;
         }
         if (changed) CharacterRegistry.recordCharacterMutation();
     }
@@ -520,7 +523,7 @@ public final class PopulationSimulation {
             for(Character character:registry.all()){
                 if(!character.alive)continue;
                 Object raw=character.props.get("population.last_simulated_world_day");
-                long previous=raw instanceof Number n?Math.max(0L,n.longValue()):fallbackStartDay;
+                long previous=raw==null?fallbackStartDay:persistedNonNegativeLong(raw);
                 if(previous>=targetWorldDay)continue;
                 advanceCharacterBatched(character,targetWorldDay-previous,year,targetWorldDay);
             }
@@ -551,12 +554,30 @@ public final class PopulationSimulation {
         character.props.put("population.age_years",age(character,year));
         character.props.put("population.life_stage",stage.name().toLowerCase(Locale.ROOT));
         Object previous=character.props.get("population.simulated_days");
-        long simulated=previous instanceof Number n?Math.max(0L,n.longValue()):0L;
+        long simulated=persistedNonNegativeLong(previous);
         long nextSimulated=elapsedDays>Long.MAX_VALUE-simulated?Long.MAX_VALUE:simulated+elapsedDays;
-        character.props.put("population.simulated_days",nextSimulated);
+        character.props.put("population.simulated_days",Long.toString(nextSimulated));
         character.props.put("population.last_simulated_year",year);
-        if(worldDay>=0)character.props.put("population.last_simulated_world_day",worldDay);
+        if(worldDay>=0)character.props.put("population.last_simulated_world_day",Long.toString(worldDay));
         CharacterRegistry.recordCharacterMutation();
+    }
+
+    /** Exact non-negative long reader for durable decimal-string counters; accepts legacy JSON numbers. */
+    static long persistedNonNegativeLong(Object raw) {
+        if (raw instanceof String text) {
+            try { return Math.max(0L, Long.parseLong(text)); }
+            catch (NumberFormatException ignored) { return 0L; }
+        }
+        if (raw instanceof Number number) {
+            if (number instanceof Double || number instanceof Float) {
+                double value = number.doubleValue();
+                if (!Double.isFinite(value) || value < 0 || value != Math.rint(value)) return 0L;
+                if (value >= 0x1.0p63) return Long.MAX_VALUE;
+                return (long) value;
+            }
+            return Math.max(0L, number.longValue());
+        }
+        return 0L;
     }
 
     private static void requireAlive(Character character) {

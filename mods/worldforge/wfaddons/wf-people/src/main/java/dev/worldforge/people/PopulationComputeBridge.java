@@ -61,7 +61,7 @@ public final class PopulationComputeBridge {
         for(Character c:ordered.values()){
             allIds.add(c.globalId);
             Object rawWorldDay=c.props.get("population.last_simulated_world_day");
-            long previousWorldDay=rawWorldDay instanceof Number n?Math.max(0L,n.longValue()):fallbackStartDay;
+            long previousWorldDay=rawWorldDay==null?fallbackStartDay:PopulationSimulation.persistedNonNegativeLong(rawWorldDay);
             long elapsed=previousWorldDay>=targetWorldDay?0L:targetWorldDay-previousWorldDay;
             if(elapsed==0)continue;
             Map<String,Object> person=new LinkedHashMap<>();
@@ -72,7 +72,7 @@ public final class PopulationComputeBridge {
             person.put("can_work",PopulationSimulation.canWork(c,year));
             person.put("elapsed_days",elapsed);
             Object rawDays=c.props.get("population.simulated_days");
-            long days=rawDays instanceof Number n?Math.max(0L,n.longValue()):0L;
+            long days=PopulationSimulation.persistedNonNegativeLong(rawDays);
             person.put("simulated_days",Long.toString(days));people.add(person);ids.add(c.globalId);
             birthYears.put(c.globalId,c.birthYear);priorDays.put(c.globalId,days);elapsedById.put(c.globalId,elapsed);
         }
