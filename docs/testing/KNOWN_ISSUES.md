@@ -270,3 +270,11 @@
 - **Тесты добавлены:** aborted write не продвигает revision; незавершённый writer блокирует snapshot; commit меняет только свою lane; несколько доменов отражаются раздельно; EventLog продвигает EVENTS_ACTIONS ровно один раз.
 - **Не закрыто:** Character/Origins, Realm/Politics, Settlement/ResidentTaskGraph, Treasury/Trade, Army/War и Inventory/Ownership ещё не подключены. WorldSim пока не использует vector как apply fence. Нельзя объявлять cross-domain snapshot freshness готовой до полного writer audit и wiring.
 - **CI:** тесты добавлены в glob `tests/*.java`; результат Windows CI ещё не подтверждён.
+
+
+### WF-RT-0023 — Character lane wiring progress
+
+- **Код подключён:** `CharacterRegistry` публикует revision в общей `CHARACTERS` lane после canonical lifecycle writes: создание/рождение, должности, профессии, найм/увольнение, миграция, duty, брак/развод, смерть/наследование и восстановление. Также учитываются изменения entity bindings и календарных age/life-stage props.
+- **Сохранена семантика:** существующий `CharacterRegistry.revision()` остаётся membership/identity revision; новый coordinator не подменяет его и не меняет Character IDs, props, семейные связи, инвентарь или события.
+- **Тесты расширены:** создание персонажа, назначение должности, bind/unbind физической Entity проверяют продвижение общей CHARACTERS lane.
+- **Ограничение:** это post-write revision wiring для текущих server-thread-owned путей, а не доказательство межпоточной блокировки всех прямых записей в mutable `Character.props`. Внешние addon writers, напрямую меняющие Character/props, ещё должны быть инвентаризированы и подключены. Не использовать vector как глобальный apply fence до введения mutation scopes вокруг всех canonical writers и проверки snapshot/apply на server thread.
