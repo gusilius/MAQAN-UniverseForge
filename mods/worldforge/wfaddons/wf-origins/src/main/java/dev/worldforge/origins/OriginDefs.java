@@ -202,7 +202,7 @@ public final class OriginDefs {
     public void addClass(Map<String, Object> c) {
         String id = str(c.get("id"), "");
         if (id.isEmpty()) throw new IllegalArgumentException("У класса нет id");
-        if (classes.containsKey(id)) throw new IllegalArgumentException("Повторный id класса: " + id);
+        if (buildingClasses.containsKey(id)) throw new IllegalArgumentException("Повторный id класса: " + id);
         NavigableMap<Integer, Map<String, Double>> perks = new TreeMap<>();
         Map<String, String> pn = new LinkedHashMap<>();
         if (c.get("perks") instanceof Map<?, ?> pm) for (var e : pm.entrySet()) {
@@ -220,7 +220,7 @@ public final class OriginDefs {
     public void addProfession(Map<String, Object> p) {
         String id = str(p.get("id"), "");
         if (id.isEmpty()) throw new IllegalArgumentException("У профессии нет id");
-        if (professions.containsKey(id)) throw new IllegalArgumentException("Повторный id профессии: " + id);
+        if (buildingProfessions.containsKey(id)) throw new IllegalArgumentException("Повторный id профессии: " + id);
         List<Rank> ranks = new ArrayList<>();
         if (p.get("ranks") instanceof List<?> l) for (Object o : l) { Map<String, Object> r = (Map<String, Object>) o; ranks.add(new Rank(str(r.get("name"), "Ранг"), num(r.get("xp"), 0), mods(r.get("mods")))); }
         if (ranks.isEmpty()) throw new IllegalArgumentException(id + ": нужен хотя бы один ранг");
@@ -234,20 +234,20 @@ public final class OriginDefs {
     public NavigableMap<Integer,Map<String,Double>> perksOf(String race){return snapshot().perksOf(race);}
     public String perkName(String race,int level){return snapshot().perkName(race,level);}
 
-    public List<String> validate() {
+    public synchronized List<String> validate() {
         List<String> p = new ArrayList<>();
-        for (Race r : races.values()) {
-            if (!r.parent().isEmpty() && !races.containsKey(r.parent())) p.add("Раса " + r.id() + ": нет родителя " + r.parent());
+        for (Race r : buildingRaces.values()) {
+            if (!r.parent().isEmpty() && !buildingRaces.containsKey(r.parent())) p.add("Раса " + r.id() + ": нет родителя " + r.parent());
             Set<String> seen = new HashSet<>();
-            for (String x = r.id(); races.containsKey(x); x = races.get(x).parent()) if (!seen.add(x)) { p.add("Раса " + r.id() + ": цикл родителей"); break; }
+            for (String x = r.id(); buildingRaces.containsKey(x); x = buildingRaces.get(x).parent()) if (!seen.add(x)) { p.add("Раса " + r.id() + ": цикл родителей"); break; }
         }
-        for (ClassDef c : classes.values()) {
-            if (!c.from().isEmpty() && !classes.containsKey(c.from())) p.add("Класс " + c.id() + ": нет предка " + c.from());
+        for (ClassDef c : buildingClasses.values()) {
+            if (!c.from().isEmpty() && !buildingClasses.containsKey(c.from())) p.add("Класс " + c.id() + ": нет предка " + c.from());
             if (c.tier() > 1 && c.from().isEmpty()) p.add("Класс " + c.id() + ": ступень " + c.tier() + " требует from");
-            if (!c.from().isEmpty() && classes.containsKey(c.from()) && classes.get(c.from()).tier() >= c.tier()) p.add("Класс " + c.id() + ": ступень должна быть выше предка");
-            for (String r : c.reqRaces()) if (!races.containsKey(r)) p.add("Класс " + c.id() + ": нет расы " + r);
+            if (!c.from().isEmpty() && buildingClasses.containsKey(c.from()) && buildingClasses.get(c.from()).tier() >= c.tier()) p.add("Класс " + c.id() + ": ступень должна быть выше предка");
+            for (String r : c.reqRaces()) if (!buildingRaces.containsKey(r)) p.add("Класс " + c.id() + ": нет расы " + r);
             for (String x : c.alsoFrom()) {
-                if (!classes.containsKey(x)) p.add("Класс " + c.id() + ": нет второго предка " + x);
+                if (!buildingClasses.containsKey(x)) p.add("Класс " + c.id() + ": нет второго предка " + x);
                 else if (buildingClasses.get(x).tier() >= c.tier()) p.add("Класс " + c.id() + ": ступень должна быть выше предка " + x);
             }
             for (var req : c.reqProf().entrySet()) {
@@ -259,8 +259,8 @@ public final class OriginDefs {
         }
         for (String rid : buildingExtraPerks.keySet()) if (!buildingRaces.containsKey(rid)) p.add("race_perks: нет расы " + rid);
         for (Synergy y : buildingSynergies.values()) {
-            for (String r : y.buildingRaces()) if (!buildingRaces.containsKey(r)) p.add("Переплетение " + y.id() + ": нет расы " + r);
-            for (String c : y.buildingClasses()) if (!buildingClasses.containsKey(c)) p.add("Переплетение " + y.id() + ": нет класса " + c);
+            for (String r : y.races()) if (!buildingRaces.containsKey(r)) p.add("Переплетение " + y.id() + ": нет расы " + r);
+            for (String c : y.classes()) if (!buildingClasses.containsKey(c)) p.add("Переплетение " + y.id() + ": нет класса " + c);
             for (var req : y.profs().entrySet()) {
                 Profession required = buildingProfessions.get(req.getKey());
                 if (required == null) p.add("Переплетение " + y.id() + ": нет профессии " + req.getKey());

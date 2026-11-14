@@ -589,3 +589,10 @@
 - `Origins` now holds one active snapshot and uses it throughout each synchronized operation. Datapack reload updates OriginDefs and Origins under the same owner lock. Commands/work output also reads one captured snapshot.
 - Updated dormant-prerequisite tests to construct incomplete definitions as a complete fixture rather than mutating the published maps.
 - This closes the datapack definition publication boundary only. ORIGINS progression writes, player↔Character identity binding, cross-domain atomicity and global WorldSim apply fencing remain separate gates.
+
+
+### WF-RT-0023 — immutable OriginDefs validation and constructor follow-up
+
+- Follow-up review caught integration defects in the first atomic-snapshot patch: Origins initialized its active snapshot from the uninitialized field rather than the constructor argument; class/profession duplicate checks and parts of validation still consulted compatibility read views; synergy validation had mechanically renamed record accessors.
+- Corrected the constructor and routed validation/duplicate detection through private staging maps. Added regression coverage for immutable outer/nested maps, unchanged published generation on invalid replacement, and stable old-snapshot reads after replacement.
+- These are CI-gated source corrections; do not treat the Origins snapshot lane as accepted until logic tests and full Windows builds pass.

@@ -39,7 +39,7 @@ public final class Origins {
     public Hooks hooks = new Hooks() {};
     public String lastError = "";
 
-    public Origins(OriginDefs defs) { this.defs=Objects.requireNonNull(defs,"defs");this.activeDefs=activeDefs.snapshot(); }
+    public Origins(OriginDefs defs) { this.defs=Objects.requireNonNull(defs,"defs");this.activeDefs=defs.snapshot(); }
     public synchronized OriginDefs.Snapshot definitionSnapshot(){return activeDefs;}
     public synchronized void replaceDefinitions(OriginDefs.Snapshot snapshot){activeDefs=Objects.requireNonNull(snapshot,"snapshot");}
 
