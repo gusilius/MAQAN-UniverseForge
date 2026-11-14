@@ -164,3 +164,12 @@ One daily world population tick and one compound gameplay action now produce one
 The Character transaction scope now wraps create/restore, appointment/dismissal, entity binding/unbinding, death, marriage/divorce and child creation. CharacterStats trait add/remove are canonical scoped writes; succession uses CharacterStats for the usurper trait. These scopes prevent revision snapshots during the owning operation and coalesce nested lifecycle changes.
 
 Remaining bypass surface: Character still exposes mutable public fields, children/posts/traits collections and props. External addon direct writers remain under audit. The lane is not yet globally complete.
+
+### CharacterDevelopment.ensurePsychology — canonical writer follow-up
+
+- Owner remains `wf-people.CharacterDevelopment`; this is not a new compute domain or a second psychology store.
+- Lazy persistence of deterministic temperament/drive defaults and initial stress now uses the existing nested `CharacterRegistry.MutationBatch` and publishes one `CHARACTERS` lane revision only when state actually changes.
+- Repeated initialization is idempotent and does not invalidate snapshots unnecessarily.
+- Commit: `fe94acfca57a2510fb27bd3379bb044ee694f739`.
+- This closes one identified in-module writer bypass only. Public mutable Character state and external addon writers remain unaudited; do not enable the global WorldSim apply fence.
+
