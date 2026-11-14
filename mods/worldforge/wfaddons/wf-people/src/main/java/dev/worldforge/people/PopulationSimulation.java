@@ -67,7 +67,7 @@ public final class PopulationSimulation {
     /** Immutable copy used by the shared RPG progression adapter. */
     public static Map<String, Integer> skillRanksSnapshot(Character character) {
         Map<String, Integer> copy = new TreeMap<>();
-        for (var entry : mapProp(character, SKILLS).entrySet()) {
+        for (var entry : readMapProp(character, SKILLS).entrySet()) {
             if (entry.getValue() instanceof Number n) copy.put(entry.getKey(), clamp(n.intValue(), 0, MAX_SKILL_RANK));
         }
         return Collections.unmodifiableMap(copy);
@@ -235,7 +235,7 @@ public final class PopulationSimulation {
 
     /** Needs are shared by civilian, specialist, soldier and hero AI; values are deficits (0=met, 100=critical). */
     public static int need(Character character, Need need) {
-        return need(mapProp(character, NEEDS), need);
+        return need(readMapProp(character, NEEDS), need);
     }
 
     public static void setNeed(Character character, Need need, int deficit) {
@@ -283,13 +283,13 @@ public final class PopulationSimulation {
     /** Skill history is retained across profession changes; training never creates another Character. */
     public static int skillRank(Character character, String skillId) {
         String id = normalizeId(skillId, "skill");
-        Object value = mapProp(character, SKILLS).get(id);
+        Object value = readMapProp(character, SKILLS).get(id);
         return value instanceof Number n ? clamp(n.intValue(), 0, MAX_SKILL_RANK) : 0;
     }
 
     public static long trainingXp(Character character, String skillId) {
         String id = normalizeId(skillId, "skill");
-        Object value = mapProp(character, TRAINING).get(id);
+        Object value = readMapProp(character, TRAINING).get(id);
         return value instanceof Number n ? Math.max(0, n.longValue()) : 0;
     }
 
@@ -385,7 +385,7 @@ public final class PopulationSimulation {
      */
     public static Intent decide(Character character, int year) {
         if (character == null || !character.alive) return Intent.IDLE;
-        return decide(character, year, mapProp(character, NEEDS));
+        return decide(character, year, readMapProp(character, NEEDS));
     }
 
     private static Intent decide(Character character, int year, Map<String, Object> needs) {
@@ -526,6 +526,13 @@ public final class PopulationSimulation {
         String id = value.trim().toLowerCase(Locale.ROOT);
         if (!id.matches("[a-z0-9_.:-]{1,64}")) throw new IllegalArgumentException("Invalid " + label + " id: " + value);
         return id;
+    }
+
+    /** Read-only property access. Missing maps stay absent; queries must never mutate Character state. */
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> readMapProp(Character character, String key) {
+        Object raw = character.props.get(key);
+        return raw instanceof Map<?, ?> map ? (Map<String, Object>) map : Map.of();
     }
 
     @SuppressWarnings("unchecked")
