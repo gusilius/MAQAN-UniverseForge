@@ -103,13 +103,13 @@ public class OriginsTest {
         long repeatedRestoreRevision = dev.worldforge.mod.api.WorldForgeApi.revisions().snapshot().orElseThrow()
                 .revision(dev.worldforge.mod.api.DomainMutationRevisions.Domain.ORIGINS);
         ok(repeatedRestoreRevision == restoredRevision, "повторное восстановление идентичного snapshot не продвигает revision");
-        String corruptOriginsSave = validOriginsSave.replace("\"race\":\"orc\"", "\"race\":\"unknown_race\"");
+        String corruptOriginsSave = validOriginsSave.replace("\"race\":\"orc\"", "\"race\":7");
         boolean invalidOriginsRejected = false;
         try { o2.fromJson(corruptOriginsSave); } catch (IllegalArgumentException invalidSave) { invalidOriginsRejected = true; }
         long rejectedRestoreRevision = dev.worldforge.mod.api.WorldForgeApi.revisions().snapshot().orElseThrow()
                 .revision(dev.worldforge.mod.api.DomainMutationRevisions.Domain.ORIGINS);
         ok(invalidOriginsRejected && o2.toJson().equals(validOriginsSave) && rejectedRestoreRevision == restoredRevision,
-                "неизвестная раса отклоняется без изменения состояния и revision");
+                "некорректный тип расы отклоняется без изменения состояния и revision");
 
         // Datapack removal must not make a previously valid world save unloadable.
         OriginDefs temporarilyEmpty = new OriginDefs();
