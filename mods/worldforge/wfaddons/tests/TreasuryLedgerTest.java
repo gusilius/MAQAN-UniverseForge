@@ -73,6 +73,22 @@ public final class TreasuryLedgerTest {
                         && !ledger.account("realm:debt-test").bankrupt,
                 "repayment restores solvency at the credit limit");
 
+        TreasuryLedger rationIndex = new TreasuryLedger();
+        rationIndex.open("stock:settlement:one:food", "settlement:one", "food", 50);
+        rationIndex.open("army:field", "army:field", "food", 0);
+        ok(!rationIndex.hasArmyFieldRationDebit("stock:settlement:one:food"),
+                "army-ration journal index starts empty");
+        ok(rationIndex.withdraw("stock:settlement:one:food", 3, TreasuryLedger.Kind.LOGISTICS,
+                        "army-field-rations", "ration:one", 60, "field rations")
+                        && rationIndex.hasArmyFieldRationDebit("stock:settlement:one:food"),
+                "army field-ration debit is indexed immediately without scanning journal");
+        ok(!rationIndex.hasArmyFieldRationDebit("army:field"),
+                "army ration index only marks the source debit account");
+        TreasuryLedger rationRestored = TreasuryLedger.fromJson(rationIndex.toJson());
+        ok(rationRestored.hasArmyFieldRationDebit("stock:settlement:one:food")
+                        && !rationRestored.hasArmyFieldRationDebit("army:field"),
+                "army field-ration debit index is rebuilt from durable journal on load");
+
         TreasuryLedger restored=TreasuryLedger.fromJson(ledger.toJson());
         ok(close(restored.balance("realm:kingdom"),875)&&close(restored.balance("settlement:capital"),225)
                 && restored.journal().size()==ledger.journal().size(),

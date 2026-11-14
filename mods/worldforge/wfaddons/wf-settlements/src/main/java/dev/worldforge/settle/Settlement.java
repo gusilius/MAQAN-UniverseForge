@@ -243,10 +243,9 @@ public final class Settlement {
 
         TreasuryLedger.Account account = resourceAccount(resource);
         Double legacyMirror = stock.get(resource);
-        boolean committedArmyFoodTransfer = ledger.journal().stream().anyMatch(entry ->
-                entry.accountId().equals(sourceAccountId) && !entry.credit()
-                        && entry.kind() == TreasuryLedger.Kind.LOGISTICS
-                        && entry.category().equals("army-field-rations"));
+        // The journal is append-only; TreasuryLedger maintains this predicate as an index.
+        // Never scan the full world-wide journal on every resource read/tick.
+        boolean committedArmyFoodTransfer = ledger.hasArmyFieldRationDebit(sourceAccountId);
         if (reconcileStockMirror && !committedArmyFoodTransfer
                 && legacyMirror != null && Double.isFinite(legacyMirror)
                 && Math.abs(legacyMirror - account.balance) > 1e-9) {

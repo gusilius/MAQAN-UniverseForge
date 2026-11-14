@@ -28,6 +28,8 @@ public final class TreasuryLedger {
     private final Set<String> postedReferences = new HashSet<>();
     private final Set<String> postedDebits = new HashSet<>();
     private final Set<String> postedCredits = new HashSet<>();
+    /** Indexed once on append/load; avoids rescanning the ever-growing journal in settlement hot paths. */
+    private final Set<String> armyFieldRationDebitAccounts = new HashSet<>();
     private long sequence=1, transactionSequence=1;
     private String lastError="";
 
@@ -70,6 +72,10 @@ public final class TreasuryLedger {
     }
     public boolean hasCredit(String accountId, Kind kind, String reference) {
         return postedCredits.contains(referenceKey(accountId, kind, reference));
+    }
+    /** O(1) query for the legacy stock-reconciliation guard used by settlement resource reads. */
+    public boolean hasArmyFieldRationDebit(String accountId) {
+        return armyFieldRationDebitAccounts.contains(accountId);
     }
 
     public Account open(String id,String ownerId,String currency,double openingBalance) {
@@ -229,6 +235,8 @@ public final class TreasuryLedger {
         String key = referenceKey(account, kind, reference);
         postedReferences.add(key);
         (credit ? postedCredits : postedDebits).add(key);
+        if (!credit && kind == Kind.LOGISTICS && "army-field-rations".equals(category))
+            armyFieldRationDebitAccounts.add(account);
     }
 
     public String toJson() {
@@ -297,6 +305,8 @@ public final class TreasuryLedger {
             String referenceKey = referenceKey(accountId, kind, reference);
             ledger.postedReferences.add(referenceKey);
             (credit ? ledger.postedCredits : ledger.postedDebits).add(referenceKey);
+            if (!credit && kind == Kind.LOGISTICS && "army-field-rations".equals(category))
+                ledger.armyFieldRationDebitAccounts.add(accountId);
             transactions.computeIfAbsent(tx, ignored -> new ArrayList<>()).add(entry);
             previousSequence = seq;
         }
