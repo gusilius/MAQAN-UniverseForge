@@ -436,3 +436,11 @@
 - Snapshot collection, canonical Character/settlement materialization and authoritative proposal application remain Java by design.
 - A project-wide percentage is not published because the complete Java compute call-site denominator and third-party optimization inventory are not yet complete. See the progress table in `COMPUTE_OWNERSHIP_REGISTRY.md`.
 - Latest logic failure from run `43604115781` is the dormant Origins prerequisite assertion. Follow-up fixture corrections are in `a9bd15bd` and `860730b7`; run `43604403465` is the required recheck.
+
+
+### WF-RT-0015 / `worldsim.emergence.advance` — indexed hot-path follow-up
+
+- Repeated linear scans were found in `cell_at`, map lookup, band lookup, and polity population aggregation inside annual emergence advancement.
+- Added request-scoped borrowed indexes and replaced the repeated scans without changing formulas or ownership. Added a regression test asserting identical output after reversing geographic cell order.
+- This is an algorithmic complexity improvement, not yet a measured benchmark result. Require Rust unit tests, Windows/Linux native CI, and representative large-map profiling before marking performance impact verified.
+- Source commits: `10b20f8d`, `680dfbff`, `33a1bec7`.
