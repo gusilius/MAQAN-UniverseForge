@@ -112,7 +112,7 @@ fn index_cells(map: &GeographicMap) -> CellIndex<'_> {
     map.cells.iter().map(|cell| ((cell.x, cell.z), cell)).collect()
 }
 
-fn cell_at<'a>(cells: &'a CellIndex<'a>, x: u32, z: u32) -> Option<&'a GeographicCell> {
+fn cell_at<'map>(cells: &CellIndex<'map>, x: u32, z: u32) -> Option<&'map GeographicCell> {
     cells.get(&(x, z)).copied()
 }
 
@@ -544,6 +544,16 @@ mod tests {
         let c = advance(request(365 * 180, Some(a.state.clone()))).unwrap();
         assert_eq!(a.state, c.state);
         assert!(c.events.is_empty());
+    }
+
+    #[test]
+    fn geography_lookup_is_independent_of_snapshot_cell_order() {
+        let mut ordered = request(365 * 180, None);
+        let mut shuffled = ordered.clone();
+        shuffled.snapshot.geography[0].cells.reverse();
+        let a = advance(ordered.clone()).unwrap();
+        let b = advance(shuffled).unwrap();
+        assert_eq!(a, b, "coordinate indexing must not change deterministic emergence output");
     }
 
     #[test]
