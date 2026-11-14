@@ -429,7 +429,8 @@ mod tests {
         };
         let legacy_bands = vec![make_band(0), make_band(1), make_band(2), make_band(3)];
         let mut polities = Vec::new();
-        maybe_form_polity(&geography, 8128, 41, &legacy_bands, &mut polities, &mut events);
+        let cells = index_cells(&geography);
+        maybe_form_polity(&geography, &cells, 8128, 41, &legacy_bands, &mut polities, &mut events);
         assert!(polities.is_empty(), "persisted settlements inside an established realm cannot declare new statehood");
         assert!(events.is_empty(), "blocked founding must not emit a false state-founding event");
     }
@@ -453,7 +454,12 @@ mod tests {
             years_in_generation:0, succession_pressure:0, weak_years:0,
         }];
         let mut events = Vec::new();
-        update_polities(8128, 41, &bands, &[geography], &mut polities, &mut events);
+        let maps = vec![geography];
+        let maps_by_id: HashMap<&str, &GeographicMap> =
+            maps.iter().map(|map| (map.map_id.as_str(), map)).collect();
+        let cells_by_map: HashMap<&str, CellIndex<'_>> =
+            maps.iter().map(|map| (map.map_id.as_str(), index_cells(map))).collect();
+        update_polities(8128, 41, &bands, &maps_by_id, &cells_by_map, &mut polities, &mut events);
         assert_eq!(polities.len(), 1);
         assert_eq!(polities[0].settlement_ids, vec!["remaining".to_string()]);
         assert_eq!(polities[0].population, 40);
@@ -474,14 +480,15 @@ mod tests {
         let three = vec![
             make_band(0, 30, 4), make_band(1, 30, 4), make_band(2, 30, 4),
         ];
-        maybe_form_polity(&geography, 8128, 40, &three, &mut polities, &mut events);
+        let cells = index_cells(&geography);
+        maybe_form_polity(&geography, &cells, 8128, 40, &three, &mut polities, &mut events);
         assert!(polities.is_empty(), "three settlements must not become a sovereign state");
 
         let four = vec![
             make_band(0, 30, 4), make_band(1, 30, 4),
             make_band(2, 30, 4), make_band(3, 30, 4),
         ];
-        maybe_form_polity(&geography, 8128, 41, &four, &mut polities, &mut events);
+        maybe_form_polity(&geography, &cells, 8128, 41, &four, &mut polities, &mut events);
         assert_eq!(polities.len(), 1, "four viable communities with 120 people may form a polity");
 
         let starving = vec![
@@ -489,7 +496,7 @@ mod tests {
             make_band(2, 30, -20), make_band(3, 30, -20),
         ];
         let mut starving_polities = Vec::new();
-        maybe_form_polity(&geography, 8128, 42, &starving, &mut starving_polities, &mut Vec::new());
+        maybe_form_polity(&geography, &cells, 8128, 42, &starving, &mut starving_polities, &mut Vec::new());
         assert!(starving_polities.is_empty(), "a starving regional cluster cannot found a viable state");
     }
 
@@ -554,10 +561,10 @@ mod tests {
 
     #[test]
     fn geography_lookup_is_independent_of_snapshot_cell_order() {
-        let mut ordered = request(365 * 180, None);
-        let mut shuffled = ordered.clone();
+        let ordered = request(365 * 180, None);
+        let mut shuffled = request(365 * 180, None);
         shuffled.snapshot.geography[0].cells.reverse();
-        let a = advance(ordered.clone()).unwrap();
+        let a = advance(ordered).unwrap();
         let b = advance(shuffled).unwrap();
         assert_eq!(a, b, "coordinate indexing must not change deterministic emergence output");
     }
