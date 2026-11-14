@@ -171,6 +171,9 @@ echo "CAMPAIGN_JVM_EXIT_CODE=$SERVER_EXIT_CODE"
 SERVER_PID=""
 cp "$REPORT" "$OUTPUT/campaign-report.json"
 cp "world/worldforge/autonomous-campaign/chronicle-book.md" "$OUTPUT/chronicle-book.md"
+if [ -s "world/worldforge/autonomous-campaign/performance-profile.json" ]; then
+  cp "world/worldforge/autonomous-campaign/performance-profile.json" "$OUTPUT/performance-profile.json"
+fi
 cp server.log "$OUTPUT/server.log"
 python3 - "$OUTPUT/campaign-report.json" "$OUTPUT/addon-inventory.json" "$JARS" <<'PY'
 import json, pathlib, sys

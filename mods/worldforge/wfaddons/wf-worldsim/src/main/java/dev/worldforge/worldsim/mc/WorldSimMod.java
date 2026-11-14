@@ -66,6 +66,7 @@ import java.util.*;
 public final class WorldSimMod {
     public static final String MOD_ID = "wf_worldsim";
     public static final Logger LOGGER = LogUtils.getLogger();
+    private static final WorldSimProfiler PROFILER = new WorldSimProfiler();
     private static final Gson GSON = new Gson();
     private static final int DECISION_INTERVAL_DAYS = 30;
     private static long lastDecisionDay = Long.MIN_VALUE;
@@ -167,6 +168,12 @@ public final class WorldSimMod {
     @SubscribeEvent
     public void onTick(TickEvent.ServerTickEvent event) {
         if (event.phase != TickEvent.Phase.END) return;
+        try (WorldSimProfiler.Scope ignored = PROFILER.begin("worldsim.server_tick_handler")) {
+            processServerTick(event);
+        }
+    }
+
+    private void processServerTick(TickEvent.ServerTickEvent event) {
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server == null) return;
         if (++lodTicks % 20 == 0) publishObservers(server);
@@ -183,19 +190,27 @@ public final class WorldSimMod {
         // the clock may jump over exact multiples and otherwise starve the coordinator.
         if (!NativeWorldSimulation.load()) return;
         try {
+            long phaseStarted = System.nanoTime();
             JsonObject snapshot = snapshot(server, day);
             byte[] input = GSON.toJson(snapshot).getBytes(StandardCharsets.UTF_8);
+            PROFILER.record("worldsim.snapshot_and_json", System.nanoTime() - phaseStarted);
             JsonObject emergenceRequest = new JsonObject();
             emergenceRequest.add("snapshot", snapshot);
             if (emergenceState != null) emergenceRequest.add("state", emergenceState);
+            phaseStarted = System.nanoTime();
             JsonObject emergenceFrame = GSON.fromJson(new String(
                     NativeWorldSimulation.advanceEmergence(GSON.toJson(emergenceRequest).getBytes(StandardCharsets.UTF_8)),
                     StandardCharsets.UTF_8), JsonObject.class);
+            PROFILER.record("worldsim.native_emergence", System.nanoTime() - phaseStarted);
             if (emergenceFrame == null || !emergenceFrame.has("state") || !emergenceFrame.get("state").isJsonObject())
                 throw new IllegalStateException("Native emergence engine returned an invalid state frame");
             emergenceState = emergenceFrame.getAsJsonObject("state").deepCopy();
+            phaseStarted = System.nanoTime();
             syncEmergentPeople(server, emergenceState, WorldForgeApi.clock().year());
+            PROFILER.record("worldsim.sync_emergent_people", System.nanoTime() - phaseStarted);
+            phaseStarted = System.nanoTime();
             syncEmergentPolities(server, emergenceState, WorldForgeApi.clock().year());
+            PROFILER.record("worldsim.sync_emergent_polities", System.nanoTime() - phaseStarted);
             if (emergenceFrame.has("events") && emergenceFrame.get("events").isJsonArray()) {
                 for (var eventElement : emergenceFrame.getAsJsonArray("events")) {
                     if (!eventElement.isJsonObject()) continue;
@@ -215,9 +230,12 @@ public final class WorldSimMod {
                     WorldForgeApi.postEvent(eventCategory, "[" + kind + "] " + subject, affected, eventDay * 1440L);
                 }
             }
+            phaseStarted = System.nanoTime();
             JsonObject frame = GSON.fromJson(new String(NativeWorldSimulation.decide(input), StandardCharsets.UTF_8), JsonObject.class);
+            PROFILER.record("worldsim.native_decide", System.nanoTime() - phaseStarted);
             if (frame == null || !frame.has("proposals") || !frame.get("proposals").isJsonArray()) return;
             int accepted = 0, rejected = 0;
+            phaseStarted = System.nanoTime();
             for (var element : frame.getAsJsonArray("proposals")) {
                 if (!element.isJsonObject()) continue;
                 JsonObject proposal = element.getAsJsonObject();
@@ -264,8 +282,13 @@ public final class WorldSimMod {
                     recordEvent(day, proposalId, kind, false);
                 }
             }
+            PROFILER.record("worldsim.apply_proposals", System.nanoTime() - phaseStarted);
+            PROFILER.setGauge("worldsim.proposals.accepted", accepted);
+            PROFILER.setGauge("worldsim.proposals.rejected", rejected);
             lastDecisionDay = day;
+            phaseStarted = System.nanoTime();
             saveState(server);
+            PROFILER.record("worldsim.save_state", System.nanoTime() - phaseStarted);
             LOGGER.info("wf_worldsim: day={} realms={} settlements={} proposals={} applied={} rejected={}",
                     day, snapshot.getAsJsonArray("realms").size(), snapshot.getAsJsonArray("settlements").size(),
                     frame.getAsJsonArray("proposals").size(), accepted, rejected);
@@ -488,6 +511,9 @@ public final class WorldSimMod {
             report.addProperty("world_events", WorldForgeApi.events().size());
             report.addProperty("chronicle_entries", HISTORICAL_CHRONICLE.size());
             report.add("emergence_state", emergenceState.deepCopy());
+            JsonObject performanceProfile = PROFILER.snapshot();
+            report.add("performance_profile", performanceProfile);
+            Files.writeString(output.resolve("performance-profile.json"), GSON.toJson(performanceProfile), StandardCharsets.UTF_8);
             Files.writeString(output.resolve("campaign-report.json"), GSON.toJson(report), StandardCharsets.UTF_8);
             LOGGER.info("wf_worldsim: campaign PASS map={} years={} states={} settlements={} events={} chronicle={}",
                     campaignMapId, report.get("elapsed_years").getAsLong(), polities.size(),
@@ -1738,6 +1764,7 @@ public final class WorldSimMod {
             state.add("emergence_bindings", emergenceBindings);
             state.add("shared_event_log", com.google.gson.JsonParser.parseString(WorldForgeApi.events().toJson()));
             state.add("historical_chronicle", com.google.gson.JsonParser.parseString(HISTORICAL_CHRONICLE.toJson()));
+            state.add("performance_profile", PROFILER.snapshot());
             Path target = stateFile(server);
             Files.createDirectories(target.getParent());
             Path temp = target.resolveSibling(target.getFileName() + ".tmp");
