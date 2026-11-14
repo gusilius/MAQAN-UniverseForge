@@ -412,3 +412,10 @@
 - **Регрессионное покрытие:** `OriginsTest` создаёт корректный набор, имитирует временно удалённые связанные определения и проверяет безопасные ответы для `req_prof`, `from` и `req_classes`, включая восстановленный dormant profession ID.
 - **Коммиты:** `dfb0a1a1`, `134114b5`, `1eec10db`. CI обязателен; не считать проверенным до addon job PASS.
 - **Остаточная архитектурная задача:** `OriginDefs` остаётся изменяемым агрегатом из шести публичных карт; `replaceWith` последовательно меняет их, а `Origins` читает их в нескольких местах операции. Нужен единый deep-immutable snapshot и захват одной версии на операцию. Поверхностный `Map.copyOf` недостаточен: records содержат вложенные изменяемые Map/List/TreeMap.
+
+
+### WF-ORIGINS — regression fixture rejected by its own schema
+
+- **CI run:** `43603966100`, job `WorldForge logic tests (Windows x64)` failed after 64 suites passed. The failure was isolated to the newly added dormant-prerequisite fixture: profession `needs_class` omitted the required non-empty `ranks` list, so `OriginDefs.addProfession` correctly rejected the fixture before the runtime missing-definition assertions ran.
+- **Correction:** added a valid one-rank definition to `needs_class` before removing its required class. The test now reaches the intended runtime scenario instead of failing during fixture setup. Source behavior was not weakened.
+- **Correction commit:** `5749294777ccb91fceb38d9c517073b377e16f46`. New CI required; the previous run is still not green.
