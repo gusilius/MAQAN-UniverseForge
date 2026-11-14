@@ -14,6 +14,7 @@ import dev.worldforge.mod.api.WorldForgeApi;
 import dev.worldforge.mod.api.SimulationLod;
 import dev.worldforge.worldsim.HistoricalChronicle;
 import dev.worldforge.worldsim.MapGeography;
+import dev.worldforge.worldsim.WorldSimComputeScheduler;
 import dev.worldforge.court.CourtSim;
 import dev.worldforge.court.mc.CourtMod;
 import dev.worldforge.court.Marriages;
@@ -67,6 +68,9 @@ public final class WorldSimMod {
     public static final String MOD_ID = "wf_worldsim";
     public static final Logger LOGGER = LogUtils.getLogger();
     private static final WorldSimProfiler PROFILER = new WorldSimProfiler();
+    private static WorldSimComputeScheduler COMPUTE_SCHEDULER = new WorldSimComputeScheduler();
+    private static long lifecycleEpoch;
+    private static long pendingComputeRevision = Long.MIN_VALUE;
     private static final Gson GSON = new Gson();
     private static final int DECISION_INTERVAL_DAYS = 30;
     private static long lastDecisionDay = Long.MIN_VALUE;
@@ -127,6 +131,10 @@ public final class WorldSimMod {
 
     @SubscribeEvent
     public void onStarted(ServerStartedEvent event) {
+        lifecycleEpoch++;
+        COMPUTE_SCHEDULER.close();
+        COMPUTE_SCHEDULER = new WorldSimComputeScheduler();
+        pendingComputeRevision = Long.MIN_VALUE;
         lastDecisionDay = Long.MIN_VALUE;
         lodTicks = 0;
         emergenceState = null;
@@ -152,142 +160,200 @@ public final class WorldSimMod {
 
     @SubscribeEvent
     public void onStopping(ServerStoppingEvent event) {
+        lifecycleEpoch++;
+        COMPUTE_SCHEDULER.close();
+        pendingComputeRevision = Long.MIN_VALUE;
+        PROFILER.setGauge("worldsim.compute.busy", 0);
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server != null) saveState(server);
-        campaignRunning = false;
-        WorldForgeApi.clock().setSimulationTickMultiplier(1);
-        releaseCampaignChunks(server);
-        lastDecisionDay = Long.MIN_VALUE;
-        lodTicks = 0;
-        emergentRealmsRehydrated = false;
-        SimulationLod.clear();
-        lastProjectDay.clear();
-        journal.clear();
-    }
-
-    @SubscribeEvent
-    public void onTick(TickEvent.ServerTickEvent event) {
-        if (event.phase != TickEvent.Phase.END) return;
-        try (WorldSimProfiler.Scope ignored = PROFILER.begin("worldsim.server_tick_handler")) {
-            processServerTick(event);
-        }
-    }
-
-    private void processServerTick(TickEvent.ServerTickEvent event) {
+        campaignRunning = f    private void processServerTick(TickEvent.ServerTickEvent event) {
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server == null) return;
         if (++lodTicks % 20 == 0) publishObservers(server);
-        // Rebuild virtual realm/trade projections from the persisted emergence state only
-        // after all ServerStarted listeners (including wf-realms) have restored their files.
         if (!emergentRealmsRehydrated && emergenceState != null) {
             syncEmergentPolities(server, emergenceState, WorldForgeApi.clock().year());
             emergentRealmsRehydrated = true;
         }
+
+        String worldId = worldIdentity(server);
+        WorldSimComputeScheduler.Result completed = null;
+        try {
+            completed = COMPUTE_SCHEDULER.poll();
+        } catch (RuntimeException error) {
+            pendingComputeRevision = Long.MIN_VALUE;
+            PROFILER.setGauge("worldsim.compute.failures", 1);
+            LOGGER.error("wf_worldsim: native compute failed; canonical state was not advanced", error);
+        }
+        if (completed != null) {
+            WorldSimComputeScheduler.Ticket ticket = completed.ticket();
+            if (!ticket.matches(worldId, ticket.revision(), lifecycleEpoch)
+                    || ticket.revision() != pendingComputeRevision) {
+                PROFILER.setGauge("worldsim.compute.stale_results", 1);
+                LOGGER.warn("wf_worldsim: discarded stale compute result world={} revision={} epoch={}",
+                        ticket.worldId(), ticket.revision(), ticket.lifecycleEpoch());
+            } else {
+                pendingComputeRevision = Long.MIN_VALUE;
+                try {
+                    applyComputeResult(server, completed);
+                } catch (Exception error) {
+                    LOGGER.error("wf_worldsim: compute result rejected safely at day {}; canonical state was not advanced",
+                            ticket.revision(), error);
+                }
+            }
+        }
+
         long day = WorldForgeApi.clock().dayNumber();
         if (day <= 0 || (lastDecisionDay != Long.MIN_VALUE
                 && day - lastDecisionDay < DECISION_INTERVAL_DAYS)) return;
-        // Compare elapsed game days instead of day % interval: at accelerated speeds
-        // the clock may jump over exact multiples and otherwise starve the coordinator.
         if (!NativeWorldSimulation.load()) return;
+        if (COMPUTE_SCHEDULER.busy()) {
+            PROFILER.setGauge("worldsim.compute.busy", 1);
+            return;
+        }
+
         try {
             long phaseStarted = System.nanoTime();
             JsonObject snapshot = snapshot(server, day);
             byte[] input = GSON.toJson(snapshot).getBytes(StandardCharsets.UTF_8);
-            PROFILER.record("worldsim.snapshot_and_json", System.nanoTime() - phaseStarted);
             JsonObject emergenceRequest = new JsonObject();
             emergenceRequest.add("snapshot", snapshot);
-            if (emergenceState != null) emergenceRequest.add("state", emergenceState);
-            phaseStarted = System.nanoTime();
-            JsonObject emergenceFrame = GSON.fromJson(new String(
-                    NativeWorldSimulation.advanceEmergence(GSON.toJson(emergenceRequest).getBytes(StandardCharsets.UTF_8)),
-                    StandardCharsets.UTF_8), JsonObject.class);
-            PROFILER.record("worldsim.native_emergence", System.nanoTime() - phaseStarted);
-            if (emergenceFrame == null || !emergenceFrame.has("state") || !emergenceFrame.get("state").isJsonObject())
-                throw new IllegalStateException("Native emergence engine returned an invalid state frame");
-            emergenceState = emergenceFrame.getAsJsonObject("state").deepCopy();
-            phaseStarted = System.nanoTime();
-            syncEmergentPeople(server, emergenceState, WorldForgeApi.clock().year());
-            PROFILER.record("worldsim.sync_emergent_people", System.nanoTime() - phaseStarted);
-            phaseStarted = System.nanoTime();
-            syncEmergentPolities(server, emergenceState, WorldForgeApi.clock().year());
-            PROFILER.record("worldsim.sync_emergent_polities", System.nanoTime() - phaseStarted);
-            if (emergenceFrame.has("events") && emergenceFrame.get("events").isJsonArray()) {
-                for (var eventElement : emergenceFrame.getAsJsonArray("events")) {
-                    if (!eventElement.isJsonObject()) continue;
-                    JsonObject emergenceEvent = eventElement.getAsJsonObject();
-                    String kind = emergenceEvent.has("kind") ? emergenceEvent.get("kind").getAsString() : "world";
-                    String subject = emergenceEvent.has("text") ? emergenceEvent.get("text").getAsString() : "Emergent world event";
-                    String eventCategory = switch (kind) {
-                        case "settlement_founded" -> "settlement";
-                        case "founding_ruler", "dynastic_succession", "population_origin" -> "people";
-                        case "state_founded", "state_dissolved", "settlement_absorbed" -> "diplomacy";
-                        default -> "system";
-                    };
-                    long eventDay = Math.max(0L, emergenceEvent.has("year") ? emergenceEvent.get("year").getAsLong() * 365L : day);
-                    List<String> affected = kind.equals("state_founded") || kind.equals("state_dissolved")
-                            ? List.of("emergent-" + (emergenceEvent.has("subject_id")
-                                    ? emergenceEvent.get("subject_id").getAsString() : "unknown")) : List.of();
-                    WorldForgeApi.postEvent(eventCategory, "[" + kind + "] " + subject, affected, eventDay * 1440L);
-                }
+            if (emergenceState != null) emergenceRequest.add("state", emergenceState.deepCopy());
+            byte[] emergenceInput = GSON.toJson(emergenceRequest).getBytes(StandardCharsets.UTF_8);
+            PROFILER.record("worldsim.snapshot_and_json", System.nanoTime() - phaseStarted);
+
+            WorldSimComputeScheduler.Ticket ticket =
+                    new WorldSimComputeScheduler.Ticket(worldId, day, lifecycleEpoch);
+            boolean submitted = COMPUTE_SCHEDULER.submit(ticket, input, emergenceInput, (snapshotBytes, emergenceBytes) -> {
+                long nativeStarted = System.nanoTime();
+                byte[] emergenceFrame = NativeWorldSimulation.advanceEmergence(emergenceBytes);
+                PROFILER.record("worldsim.native_emergence", System.nanoTime() - nativeStarted);
+                nativeStarted = System.nanoTime();
+                byte[] decisionFrame = NativeWorldSimulation.decide(snapshotBytes);
+                PROFILER.record("worldsim.native_decide", System.nanoTime() - nativeStarted);
+                return new WorldSimComputeScheduler.Output(emergenceFrame, decisionFrame);
+            });
+            if (submitted) {
+                pendingComputeRevision = day;
+                PROFILER.setGauge("worldsim.compute.busy", 1);
+                PROFILER.setGauge("worldsim.compute.pending_day", day);
+            } else {
+                PROFILER.setGauge("worldsim.compute.backpressure", 1);
             }
-            phaseStarted = System.nanoTime();
-            JsonObject frame = GSON.fromJson(new String(NativeWorldSimulation.decide(input), StandardCharsets.UTF_8), JsonObject.class);
-            PROFILER.record("worldsim.native_decide", System.nanoTime() - phaseStarted);
-            if (frame == null || !frame.has("proposals") || !frame.get("proposals").isJsonArray()) return;
-            int accepted = 0, rejected = 0;
-            phaseStarted = System.nanoTime();
-            for (var element : frame.getAsJsonArray("proposals")) {
-                if (!element.isJsonObject()) continue;
-                JsonObject proposal = element.getAsJsonObject();
-                JsonObject kind = proposal.has("kind") && proposal.get("kind").isJsonObject()
-                        ? proposal.getAsJsonObject("kind") : null;
-                if (kind == null) continue;
-                String proposalId = proposal.get("id").getAsString();
-                try {
-                    // Reconcile interrupted tasks against authoritative domain receipts before
-                    // allowing the action service to retry anything after a restart.
-                    String requestId = "worldsim:" + proposalId;
-                    String payload = GSON.toJson(kind);
-                    long worldMinute = Math.max(0L, day * 1440L);
-                    var actionService = WorldForgeApi.actionExecution();
-                    var priorTask = actionService.task(requestId);
-                    if (priorTask != null && priorTask.status() == dev.worldforge.mod.api.ActionExecutionService.Status.FAILED
-                            && priorTask.message().startsWith("Interrupted by server restart")) {
-                        var reconciliation = reconcileInterrupted(server, requestId, kind);
-                        priorTask = actionService.reconcileInterrupted(requestId, reconciliation,
-                                reconciliation == dev.worldforge.mod.api.ActionExecutionService.Reconciliation.APPLIED
-                                        ? "Authoritative domain receipt confirms the effect"
-                                        : "Authoritative domain state confirms safe retry",
-                                worldMinute, WorldForgeMod.actionExecutionFile(server));
-                    }
-                    var task = actionService.execute(
-                            new dev.worldforge.mod.api.ActionExecutionService.Request(
-                                    requestId, "worldsim.apply", "worldsim", "world",
-                                    List.of(payload), worldMinute),
-                            request -> null,
-                            (request, attempt) -> {
-                                JsonObject decoded = GSON.fromJson(request.args().get(0), JsonObject.class);
-                                boolean applied = decoded != null && apply(server, request.requestId(), decoded, day);
-                                return applied
-                                        ? dev.worldforge.mod.api.ActionResult.ok("Autonomous proposal applied")
-                                        : dev.worldforge.mod.api.ActionResult.fail("Proposal rejected by authoritative domain API");
-                            },
-                            null, worldMinute, WorldForgeMod.actionExecutionFile(server));
-                    boolean applied = task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED;
-                    if (applied) accepted++; else rejected++;
-                    recordEvent(day, proposalId, kind, applied);
-                } catch (RuntimeException error) {
-                    rejected++;
-                    LOGGER.warn("wf_worldsim: proposal {} rejected: {}", proposalId, error.toString());
-                    recordEvent(day, proposalId, kind, false);
-                }
+        } catch (RuntimeException error) {
+            LOGGER.error("wf_worldsim: unable to submit native compute at day {}", day, error);
+        }
+    }
+
+    /** Applies a completed immutable native frame on the authoritative Minecraft server thread only. */
+    private void applyComputeResult(MinecraftServer server, WorldSimComputeScheduler.Result result) {
+        long day = result.ticket().revision();
+        JsonObject snapshot = GSON.fromJson(new String(result.snapshot(), StandardCharsets.UTF_8), JsonObject.class);
+        JsonObject emergenceFrame = GSON.fromJson(new String(result.emergenceFrame(), StandardCharsets.UTF_8), JsonObject.class);
+        JsonObject frame = GSON.fromJson(new String(result.decisionFrame(), StandardCharsets.UTF_8), JsonObject.class);
+        if (snapshot == null || emergenceFrame == null || !emergenceFrame.has("state")
+                || !emergenceFrame.get("state").isJsonObject()) {
+            throw new IllegalStateException("Native emergence engine returned an invalid state frame");
+        }
+        if (frame == null || !frame.has("proposals") || !frame.get("proposals").isJsonArray()) {
+            throw new IllegalStateException("Native decision engine returned an invalid proposal frame");
+        }
+
+        emergenceState = emergenceFrame.getAsJsonObject("state").deepCopy();
+        long phaseStarted = System.nanoTime();
+        syncEmergentPeople(server, emergenceState, WorldForgeApi.clock().year());
+        PROFILER.record("worldsim.sync_emergent_people", System.nanoTime() - phaseStarted);
+        phaseStarted = System.nanoTime();
+        syncEmergentPolities(server, emergenceState, WorldForgeApi.clock().year());
+        PROFILER.record("worldsim.sync_emergent_polities", System.nanoTime() - phaseStarted);
+
+        if (emergenceFrame.has("events") && emergenceFrame.get("events").isJsonArray()) {
+            for (var eventElement : emergenceFrame.getAsJsonArray("events")) {
+                if (!eventElement.isJsonObject()) continue;
+                JsonObject emergenceEvent = eventElement.getAsJsonObject();
+                String kind = emergenceEvent.has("kind") ? emergenceEvent.get("kind").getAsString() : "world";
+                String subject = emergenceEvent.has("text") ? emergenceEvent.get("text").getAsString() : "Emergent world event";
+                String eventCategory = switch (kind) {
+                    case "settlement_founded" -> "settlement";
+                    case "founding_ruler", "dynastic_succession", "population_origin" -> "people";
+                    case "state_founded", "state_dissolved", "settlement_absorbed" -> "diplomacy";
+                    default -> "system";
+                };
+                long eventDay = Math.max(0L, emergenceEvent.has("year")
+                        ? emergenceEvent.get("year").getAsLong() * 365L : day);
+                List<String> affected = kind.equals("state_founded") || kind.equals("state_dissolved")
+                        ? List.of("emergent-" + (emergenceEvent.has("subject_id")
+                                ? emergenceEvent.get("subject_id").getAsString() : "unknown")) : List.of();
+                WorldForgeApi.postEvent(eventCategory, "[" + kind + "] " + subject, affected, eventDay * 1440L);
             }
-            PROFILER.record("worldsim.apply_proposals", System.nanoTime() - phaseStarted);
-            PROFILER.setGauge("worldsim.proposals.accepted", accepted);
-            PROFILER.setGauge("worldsim.proposals.rejected", rejected);
-            lastDecisionDay = day;
-            phaseStarted = System.nanoTime();
-            saveState(server);
+        }
+
+        int accepted = 0, rejected = 0;
+        phaseStarted = System.nanoTime();
+        for (var element : frame.getAsJsonArray("proposals")) {
+            if (!element.isJsonObject()) continue;
+            JsonObject proposal = element.getAsJsonObject();
+            JsonObject kind = proposal.has("kind") && proposal.get("kind").isJsonObject()
+                    ? proposal.getAsJsonObject("kind") : null;
+            if (kind == null) continue;
+            String proposalId = proposal.get("id").getAsString();
+            try {
+                String requestId = "worldsim:" + proposalId;
+                String payload = GSON.toJson(kind);
+                long worldMinute = Math.max(0L, day * 1440L);
+                var actionService = WorldForgeApi.actionExecution();
+                var priorTask = actionService.task(requestId);
+                if (priorTask != null && priorTask.status() == dev.worldforge.mod.api.ActionExecutionService.Status.FAILED
+                        && priorTask.message().startsWith("Interrupted by server restart")) {
+                    var reconciliation = reconcileInterrupted(server, requestId, kind);
+                    priorTask = actionService.reconcileInterrupted(requestId, reconciliation,
+                            reconciliation == dev.worldforge.mod.api.ActionExecutionService.Reconciliation.APPLIED
+                                    ? "Authoritative domain receipt confirms the effect"
+                                    : "Authoritative domain state confirms safe retry",
+                            worldMinute, WorldForgeMod.actionExecutionFile(server));
+                }
+                var task = actionService.execute(
+                        new dev.worldforge.mod.api.ActionExecutionService.Request(
+                                requestId, "worldsim.apply", "worldsim", "world",
+                                List.of(payload), worldMinute),
+                        request -> null,
+                        (request, attempt) -> {
+                            JsonObject decoded = GSON.fromJson(request.args().get(0), JsonObject.class);
+                            boolean applied = decoded != null && apply(server, request.requestId(), decoded, day);
+                            return applied
+                                    ? dev.worldforge.mod.api.ActionResult.ok("Autonomous proposal applied")
+                                    : dev.worldforge.mod.api.ActionResult.fail("Proposal rejected by authoritative domain API");
+                        },
+                        null, worldMinute, WorldForgeMod.actionExecutionFile(server));
+                boolean applied = task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED;
+                if (applied) accepted++; else rejected++;
+                recordEvent(day, proposalId, kind, applied);
+            } catch (RuntimeException error) {
+                rejected++;
+                LOGGER.warn("wf_worldsim: proposal {} rejected: {}", proposalId, error.toString());
+                recordEvent(day, proposalId, kind, false);
+            }
+        }
+        PROFILER.record("worldsim.apply_proposals", System.nanoTime() - phaseStarted);
+        PROFILER.setGauge("worldsim.proposals.accepted", accepted);
+        PROFILER.setGauge("worldsim.proposals.rejected", rejected);
+        PROFILER.setGauge("worldsim.compute.busy", 0);
+        lastDecisionDay = day;
+        phaseStarted = System.nanoTime();
+        saveState(server);
+        PROFILER.record("worldsim.save_state", System.nanoTime() - phaseStarted);
+        LOGGER.info("wf_worldsim: day={} realms={} settlements={} proposals={} applied={} rejected={} compute=async",
+                day, snapshot.has("realms") && snapshot.get("realms").isJsonArray()
+                        ? snapshot.getAsJsonArray("realms").size() : 0,
+                snapshot.has("settlements") && snapshot.get("settlements").isJsonArray()
+                        ? snapshot.getAsJsonArray("settlements").size() : 0,
+                frame.getAsJsonArray("proposals").size(), accepted, rejected);
+        updateCampaign(server, day);
+    }
+
+    private static String worldIdentity(MinecraftServer server) {
+        return server.getWorldPath(LevelResource.ROOT).toAbsolutePath().normalize().toString();
+    }
+eState(server);
             PROFILER.record("worldsim.save_state", System.nanoTime() - phaseStarted);
             LOGGER.info("wf_worldsim: day={} realms={} settlements={} proposals={} applied={} rejected={}",
                     day, snapshot.getAsJsonArray("realms").size(), snapshot.getAsJsonArray("settlements").size(),
