@@ -90,6 +90,19 @@ public final class DomainMutationRevisionsTest {
         check(ignoredUnbind.revision(DomainMutationRevisions.Domain.CHARACTERS)
                         == repeatedBinding.revision(DomainMutationRevisions.Domain.CHARACTERS),
                 "ignored entity unbind does not invalidate the Character snapshot");
+        people.unbindEntity(founder.id, "NPC", "entity-2");
+        var normalizedUnbind = WorldForgeApi.revisions().snapshot().orElseThrow();
+        check(normalizedUnbind.revision(DomainMutationRevisions.Domain.CHARACTERS)
+                        == repeatedBinding.revision(DomainMutationRevisions.Domain.CHARACTERS) + 1,
+                "entity unbinding normalizes body-kind casing and records the real mutation");
+
+        people.migrate(founder.id, "settlement-a", 1);
+        var afterMigration = WorldForgeApi.revisions().snapshot().orElseThrow();
+        people.migrate(founder.id, "settlement-a", 2);
+        var repeatedMigration = WorldForgeApi.revisions().snapshot().orElseThrow();
+        check(repeatedMigration.revision(DomainMutationRevisions.Domain.CHARACTERS)
+                        == afterMigration.revision(DomainMutationRevisions.Domain.CHARACTERS),
+                "same-destination migration is a no-op and does not invalidate snapshots");
 
         people.refreshLifeStages(1);
         var afterAgeRefresh = WorldForgeApi.revisions().snapshot().orElseThrow();
