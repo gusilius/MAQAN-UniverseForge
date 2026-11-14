@@ -30,6 +30,11 @@ public final class TreasuryLedger {
     private final Set<String> postedCredits = new HashSet<>();
     /** Indexed once on append/load; avoids rescanning the ever-growing journal in settlement hot paths. */
     private final Set<String> armyFieldRationDebitAccounts = new HashSet<>();
+    /** Append-only secondary indexes keep journal queries proportional to the selected account/reference. */
+    private final Map<String, List<Entry>> entriesByAccount = new HashMap<>();
+    private final Map<String, List<Entry>> entriesByReference = new HashMap<>();
+    private final Map<String, Double> debitTotals = new HashMap<>();
+    private final Set<String> accountsWithEntries = new HashSet<>();
     private long sequence=1, transactionSequence=1;
     private String lastError="";
 
@@ -49,14 +54,42 @@ public final class TreasuryLedger {
     public boolean hasAccount(String id) { return accounts.containsKey(id); }
     public double balance(String id) { Account a=accounts.get(id); return a==null?0:a.balance; }
 
+    /** Account-scoped immutable journal view in original append order. */
+    public List<Entry> entriesForAccount(String accountId) {
+        return Collections.unmodifiableList(entriesByAccount.getOrDefault(accountId, List.of()));
+    }
+
+    /** O(1) lookup of the postings sharing one account/kind/reference idempotency key. */
+    public List<Entry> entriesForReference(String accountId, Kind kind, String reference) {
+        return Collections.unmodifiableList(entriesByReference.getOrDefault(
+                referenceKey(accountId, kind, reference), List.of()));
+    }
+
+    public boolean hasEntries(String accountId) { return accountsWithEntries.contains(accountId); }
+
+    /** Enumerates canonical account IDs; unlike journal-derived discovery this scales with accounts. */
+    public Set<String> accountIdsWithPrefix(String prefix) {
+        Set<String> result = new TreeSet<>();
+        for (String id : accounts.keySet()) if (id.startsWith(prefix)) result.add(id);
+        return Collections.unmodifiableSet(result);
+    }
+
     /** Total successfully posted debit value for an account/category, rebuilt from the durable journal. */
     public double totalDebits(String accountId, Kind kind, String category) {
-        double total = 0;
-        for (Entry entry : journal) {
-            if (entry.accountId().equals(accountId) && !entry.credit() && entry.kind() == kind
-                    && entry.category().equals(clean(category))) total += entry.amount();
-        }
-        return total;
+        return debitTotals.getOrDefault(debitTotalKey(accountId, kind, category), 0.0);
+    }
+
+    private static String debitTotalKey(String accountId, Kind kind, String category) {
+        return String.valueOf(accountId) + "\\u0000" + String.valueOf(kind) + "\\u0000" + clean(category);
+    }
+
+    private void indexEntry(Entry entry) {
+        entriesByAccount.computeIfAbsent(entry.accountId(), ignored -> new ArrayList<>()).add(entry);
+        entriesByReference.computeIfAbsent(referenceKey(entry.accountId(), entry.kind(), entry.reference()),
+                ignored -> new ArrayList<>()).add(entry);
+        accountsWithEntries.add(entry.accountId());
+        if (!entry.credit()) debitTotals.merge(
+                debitTotalKey(entry.accountId(), entry.kind(), entry.category()), entry.amount(), Double::sum);
     }
 
     private static String referenceKey(String accountId, Kind kind, String reference) {
@@ -105,13 +138,7 @@ public final class TreasuryLedger {
     }
 
     private List<Entry> entriesForReference(String accountId, Kind kind, String reference) {
-        String cleanReference = clean(reference);
-        List<Entry> matches = new ArrayList<>();
-        for (Entry entry : journal) {
-            if (entry.accountId().equals(accountId) && entry.kind() == kind
-                    && entry.reference().equals(cleanReference)) matches.add(entry);
-        }
-        return matches;
+        return entriesByReference.getOrDefault(referenceKey(accountId, kind, reference), List.of());
     }
 
     private boolean matchesExternalPosting(String accountId, double value, Kind kind,
@@ -231,7 +258,9 @@ public final class TreasuryLedger {
     private boolean fail(String s) { lastError=s; return false; }
     private static String clean(String s) { return s==null?"":s.trim(); }
     private void append(String tx,String account,String other,String currency,double value,boolean credit,Kind kind,String category,String reference,long minute,double balance,String memo) {
-        journal.add(new Entry(sequence++,tx,account,other,currency,value,credit,kind,category,reference,minute,balance,memo));
+        Entry entry = new Entry(sequence++,tx,account,other,currency,value,credit,kind,category,reference,minute,balance,memo);
+        journal.add(entry);
+        indexEntry(entry);
         String key = referenceKey(account, kind, reference);
         postedReferences.add(key);
         (credit ? postedCredits : postedDebits).add(key);
@@ -346,6 +375,7 @@ public final class TreasuryLedger {
             Entry entry = new Entry(seq, tx, accountId, other, currency, value, credit, kind,
                     category, reference, worldMinute, balanceAfter, memo);
             ledger.journal.add(entry);
+            ledger.indexEntry(entry);
             String referenceKey = referenceKey(accountId, kind, reference);
             ledger.postedReferences.add(referenceKey);
             (credit ? ledger.postedCredits : ledger.postedDebits).add(referenceKey);

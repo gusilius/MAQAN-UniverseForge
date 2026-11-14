@@ -398,13 +398,11 @@ public final class Settlement {
         String sourceId = accountId(resource);
         String cleanCategory = category.trim(), cleanReference = reference.trim();
         TreasuryLedger ledger = TreasuryService.current();
-        List<TreasuryLedger.Entry> debits = ledger.journal().stream()
-                .filter(entry -> entry.accountId().equals(sourceId) && !entry.credit()
-                        && entry.kind() == kind && entry.reference().equals(cleanReference)).toList();
+        List<TreasuryLedger.Entry> debits = ledger.entriesForReference(sourceId, kind, cleanReference).stream()
+                .filter(entry -> !entry.credit()).toList();
         if (!debits.isEmpty()) {
-            List<TreasuryLedger.Entry> credits = ledger.journal().stream()
-                    .filter(entry -> entry.accountId().equals(targetAccountId) && entry.credit()
-                            && entry.kind() == kind && entry.reference().equals(cleanReference)).toList();
+            List<TreasuryLedger.Entry> credits = ledger.entriesForReference(targetAccountId, kind, cleanReference).stream()
+                    .filter(TreasuryLedger.Entry::credit).toList();
             if (debits.size() != 1 || credits.size() != 1) return false;
             TreasuryLedger.Entry debit = debits.get(0), credit = credits.get(0);
             boolean match = debit.counterpartyId().equals(targetAccountId)

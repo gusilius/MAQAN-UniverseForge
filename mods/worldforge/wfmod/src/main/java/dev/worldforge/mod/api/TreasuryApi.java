@@ -77,7 +77,7 @@ public final class TreasuryApi {
         TreasuryLedger.Account account = ledger().account(id);
         if (account == null) account = ledger().open(id, realm, "silver", openingGold * SILVER_PER_GOLD);
         else if (openingGold > 0 && account.balance <= 1e-9 && account.debt <= 1e-9
-                && ledger().journal().stream().noneMatch(entry -> id.equals(entry.accountId()))) {
+                && !ledger().hasEntries(id)) {
             ledger().depositOnce(id, openingGold * SILVER_PER_GOLD, TreasuryLedger.Kind.OPENING,
                     "realm-opening", "realm-opening:" + realm, worldMinute(), "initial realm treasury");
         }
@@ -174,8 +174,8 @@ public final class TreasuryApi {
         Map<String, Double> result = new LinkedHashMap<>();
         if (realm == null || realm.isBlank()) return result;
         String id = accountId(realm);
-        for (TreasuryLedger.Entry entry : ledger().journal()) {
-            if (!id.equals(entry.accountId()) || !"silver".equals(entry.currency())) continue;
+        for (TreasuryLedger.Entry entry : ledger().entriesForAccount(id)) {
+            if (!"silver".equals(entry.currency())) continue;
             double signed = (entry.credit() ? 1 : -1) * entry.amount() / SILVER_PER_GOLD;
             result.merge(entry.category().isBlank() ? "Прочее" : entry.category(), signed, Double::sum);
         }
@@ -190,9 +190,8 @@ public final class TreasuryApi {
 
     public static synchronized Map<String, Map<String, Double>> allLedgers() {
         Set<String> realms = new LinkedHashSet<>(LEGACY_LEDGER.keySet());
-        for (TreasuryLedger.Entry entry : ledger().journal()) {
-            if (entry.accountId().startsWith("realm:")) realms.add(entry.accountId().substring("realm:".length()));
-        }
+        for (String accountId : ledger().accountIdsWithPrefix("realm:"))
+            realms.add(accountId.substring("realm:".length()));
         Map<String, Map<String, Double>> result = new LinkedHashMap<>();
         for (String realm : realms) result.put(realm, ledger(realm));
         return result;

@@ -109,6 +109,18 @@ public final class TreasuryLedgerTest {
             ok(false, "large treasury journal streaming serialization completes");
         }
 
+        ok(rationIndex.entriesForAccount("stock:settlement:one:food").size() == 1
+                        && rationIndex.entriesForReference("stock:settlement:one:food", TreasuryLedger.Kind.LOGISTICS, "ration:one").size() == 1
+                        && rationIndex.hasEntries("stock:settlement:one:food"),
+                "account and reference journal indexes are populated on append");
+        ok(rationRestored.entriesForAccount("stock:settlement:one:food").size() == 1
+                        && rationRestored.entriesForReference("stock:settlement:one:food", TreasuryLedger.Kind.LOGISTICS, "ration:one").size() == 1
+                        && rationRestored.accountIdsWithPrefix("stock:").contains("stock:settlement:one:food"),
+                "account/reference indexes and account enumeration are rebuilt on restore");
+        ok(close(rationRestored.totalDebits("stock:settlement:one:food", TreasuryLedger.Kind.LOGISTICS,
+                        "army-field-rations"), 3),
+                "debit category aggregates are rebuilt from the durable journal");
+
         TreasuryLedger restored=TreasuryLedger.fromJson(ledger.toJson());
         ok(close(restored.balance("realm:kingdom"),875)&&close(restored.balance("settlement:capital"),225)
                 && restored.journal().size()==ledger.journal().size(),

@@ -466,8 +466,8 @@ public class SettleMod {
             if (amount <= 1e-9) continue;
             String referenceStem = referencePrefix + ":" + colony.s.id;
             String sourceAccount = colony.s.ledgerAccountId("food");
-            long previousLegs = TreasuryService.current().journal().stream()
-                    .filter(entry -> entry.accountId().equals(sourceAccount) && !entry.credit()
+            long previousLegs = TreasuryService.current().entriesForAccount(sourceAccount).stream()
+                    .filter(entry -> !entry.credit()
                             && entry.kind() == TreasuryLedger.Kind.LOGISTICS
                             && entry.category().equals("army-field-rations")
                             && entry.reference().startsWith(referenceStem + ":"))
