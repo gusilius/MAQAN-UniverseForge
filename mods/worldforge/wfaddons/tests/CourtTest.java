@@ -35,6 +35,10 @@ public class CourtTest {
 
     public static void main(String[] a) throws Exception {
         CourtSim s = build(a[0], 7);
+        int courtPopulationBeforeRepeat = s.reg.size();
+        int repeatCourtCreations = Courts.ensure(s.d, s.ed, s.reg, s.defs, s.names, 7, 300);
+        ok(repeatCourtCreations == 0 && s.reg.size() == courtPopulationBeforeRepeat,
+                "repeated court reconciliation is idempotent and does not duplicate canonical people");
         ok(s.events.size() >= 10, "события загружены из файлов: " + s.events.size());
 
         // Autonomous polities must enter the same map realm registry and ordinary court office,

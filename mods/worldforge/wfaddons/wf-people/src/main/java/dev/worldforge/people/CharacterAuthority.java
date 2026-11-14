@@ -12,6 +12,8 @@ public final class CharacterAuthority {
     private final Map<String, Set<CharacterIdentity>> byLegacyId = new ConcurrentHashMap<>();
     private final Map<String, CharacterRegistry> registries = new ConcurrentHashMap<>();
     private final Map<String, Long> indexedRevisions = new HashMap<>();
+    /** Immutable sorted identity snapshot reused by estate/succession queries until membership changes. */
+    private List<CharacterIdentity> sortedIdentityCache;
     private volatile WorldId worldId;
 
     public synchronized void beginWorld(WorldId id) {
@@ -32,6 +34,7 @@ public final class CharacterAuthority {
         byGlobalId.clear();
         byLegacyId.clear();
         indexedRevisions.clear();
+        sortedIdentityCache = null;
         worldId = null;
     }
 
@@ -119,6 +122,7 @@ public final class CharacterAuthority {
             byLegacyId.put(entry.getKey(), new HashSet<>(entry.getValue()));
         indexedRevisions.clear();
         indexedRevisions.putAll(nextRevisions);
+        sortedIdentityCache = null;
     }
 
     public synchronized Character get(CharacterIdentity identity) {
@@ -181,11 +185,14 @@ public final class CharacterAuthority {
 
     public synchronized Collection<CharacterIdentity> identities() {
         refreshIndex();
-        List<CharacterIdentity> result = new ArrayList<>(byIdentity.keySet());
-        result.sort(Comparator.comparing((CharacterIdentity id) -> id.worldId().toString())
-                .thenComparing(CharacterIdentity::mapId)
-                .thenComparing(CharacterIdentity::globalCharacterId));
-        return Collections.unmodifiableList(result);
+        if (sortedIdentityCache == null) {
+            List<CharacterIdentity> result = new ArrayList<>(byIdentity.keySet());
+            result.sort(Comparator.comparing((CharacterIdentity id) -> id.worldId().toString())
+                    .thenComparing(CharacterIdentity::mapId)
+                    .thenComparing(CharacterIdentity::globalCharacterId));
+            sortedIdentityCache = Collections.unmodifiableList(result);
+        }
+        return sortedIdentityCache;
     }
 
     public synchronized int size() { refreshIndex(); return byIdentity.size(); }
