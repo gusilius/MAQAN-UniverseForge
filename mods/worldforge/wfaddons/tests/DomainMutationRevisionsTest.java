@@ -7,6 +7,7 @@ import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.PopulationSimulation;
 import dev.worldforge.people.CharacterDevelopment;
+import dev.worldforge.people.CharacterStats;
 
 public final class DomainMutationRevisionsTest {
     private static int failures;
@@ -179,6 +180,13 @@ public final class DomainMutationRevisionsTest {
         var afterExperience = WorldForgeApi.revisions().snapshot().orElseThrow();
         check(afterExperience.revision(DomainMutationRevisions.Domain.CHARACTERS) == beforeExperience + 1,
                 "compound psychological experience commits one Character revision despite nested writes");
+
+        long beforeTrait = afterExperience.revision(DomainMutationRevisions.Domain.CHARACTERS);
+        check(CharacterStats.addTrait(founder, "brave"), "canonical Character trait addition succeeds");
+        var afterTrait = WorldForgeApi.revisions().snapshot().orElseThrow();
+        check(!CharacterStats.addTrait(founder, "brave")
+                        && afterTrait.revision(DomainMutationRevisions.Domain.CHARACTERS) == beforeTrait + 1,
+                "CharacterStats trait mutation advances one revision and duplicate trait is a no-op");
 
         if (failures > 0) throw new AssertionError(failures + " domain mutation revision checks failed");
         System.out.println("DOMAIN_MUTATION_REVISIONS_STATUS=PASS");
