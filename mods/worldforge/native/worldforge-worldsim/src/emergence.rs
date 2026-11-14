@@ -234,7 +234,7 @@ fn maybe_form_polity(map: &GeographicMap, cells: &CellIndex<'_>, seed: u64, year
 }
 
 fn update_polities(seed: u64, year: u64, bands: &[EmergentBand],
-    maps_by_id: &HashMap<&str, &GeographicMap>, cells_by_map: &HashMap<&str, CellIndex<'_>>,
+    cells_by_map: &HashMap<&str, CellIndex<'_>>,
     polities: &mut Vec<EmergentPolity>, events: &mut Vec<EmergenceEvent>) {
     // This index is scoped to this yearly reduction and points into the canonical bands.
     let bands_by_id: HashMap<&str, &EmergentBand> = bands.iter().map(|band| (band.id.as_str(), band)).collect();
@@ -242,7 +242,7 @@ fn update_polities(seed: u64, year: u64, bands: &[EmergentBand],
         // If a province is transferred to an established realm, its settlement
         // leaves the emergent polity's sovereign core. Existing physical colonies
         // remain and are reconciled by the canonical map-ownership listener.
-        if let (Some(map), Some(cells)) = (maps_by_id.get(polity.map_id.as_str()), cells_by_map.get(polity.map_id.as_str())) {
+        if let Some(cells) = cells_by_map.get(polity.map_id.as_str()) {
             let own_realm_id = format!("emergent-{}", polity.id);
             let absorbed = polity.settlement_ids.iter().filter_map(|settlement_id| {
                 let band = bands_by_id.get(settlement_id.as_str()).copied()?;
@@ -455,11 +455,9 @@ mod tests {
         }];
         let mut events = Vec::new();
         let maps = vec![geography];
-        let maps_by_id: HashMap<&str, &GeographicMap> =
-            maps.iter().map(|map| (map.map_id.as_str(), map)).collect();
         let cells_by_map: HashMap<&str, CellIndex<'_>> =
             maps.iter().map(|map| (map.map_id.as_str(), index_cells(map))).collect();
-        update_polities(8128, 41, &bands, &maps_by_id, &cells_by_map, &mut polities, &mut events);
+        update_polities(8128, 41, &bands, &cells_by_map, &mut polities, &mut events);
         assert_eq!(polities.len(), 1);
         assert_eq!(polities[0].settlement_ids, vec!["remaining".to_string()]);
         assert_eq!(polities[0].population, 40);
