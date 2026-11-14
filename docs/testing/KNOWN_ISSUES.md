@@ -515,3 +515,11 @@
 - Rust now receives Java's canonical `canWork` eligibility predicate; profession-only inference was not equivalent to Java's age-stage rule.
 - Added regression tests for replay-safe Java catch-up and exclusion of already acknowledged Characters.
 - **Not closed:** complete Java/Rust fixture parity, external Character writer audit, cross-domain atomicity (WF-RT-0021), and real save/reload campaign verification. Do not claim all Population semantics migrated until those gates pass.
+
+
+### WF-RT-0024 — shared Population pipeline integration audit follow-up
+
+- Follow-up source audit caught an integration compile defect before CI completion: the new Captured type declared its revision snapshot field twice. Removed the duplicate declaration.
+- Rust population fixtures now provide the newly required per-Character elapsed interval; the multi-day and saturation fixtures explicitly assert the intended interval. The JSON ABI fixture now supplies the required world-day and per-person elapsed-day fields.
+- Population apply validation now preserves extension-defined integer needs outside the built-in [0,100] range while still requiring canonical built-in needs to remain bounded. This avoids silently narrowing extension semantics during migration.
+- The shared runtime candidate remains subject to full CI, Java/Rust parity and persistence validation. Do not call the operation fully migrated until those gates pass.

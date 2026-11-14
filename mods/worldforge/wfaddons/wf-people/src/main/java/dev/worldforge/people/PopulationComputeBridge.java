@@ -11,7 +11,6 @@ public final class PopulationComputeBridge {
     public static final int SCHEMA_VERSION = 1;
     public static final class Captured {
         private final String worldId; private final int year; private final long elapsedDays;
-        private final DomainMutationRevisions.Snapshot revisions;
         private final long targetWorldDay;
         private final DomainMutationRevisions.Snapshot revisions;
         private final List<String> characterIds, allCharacterIds;
@@ -107,8 +106,12 @@ public final class PopulationComputeBridge {
             for(Map.Entry<?,?> e:object(value.get("needs"),"needs").entrySet()){
                 if(!(e.getKey() instanceof String key)||!(e.getValue() instanceof Number n))throw new IllegalArgumentException("Invalid need entry");
                 double numeric=n.doubleValue();
-                if(!Double.isFinite(numeric)||numeric!=Math.rint(numeric)||numeric<0||numeric>100)
-                    throw new IllegalArgumentException("Need value must be an integer in [0,100]: "+key);
+                if(!Double.isFinite(numeric)||numeric!=Math.rint(numeric)
+                        ||numeric<Integer.MIN_VALUE||numeric>Integer.MAX_VALUE)
+                    throw new IllegalArgumentException("Need value must be a 32-bit integer: "+key);
+                boolean canonicalNeed=Set.of("hunger","rest","safety","social","purpose","leisure").contains(key);
+                if(canonicalNeed&&(numeric<0||numeric>100))
+                    throw new IllegalArgumentException("Canonical need must be in [0,100]: "+key);
                 needs.put(key,(int)numeric);
             }
             for(String required:List.of("hunger","rest","social","purpose","leisure"))
