@@ -30,6 +30,19 @@ public final class PopulationSimulationTest {
         registry.addListener(new CharacterRegistry.Listener() {
             @Override public void lifecycle(Character c, CharacterRegistry.LifecycleEvent event) { lifecycle.add(event); }
         });
+        Character readOnlyProbe = registry.create("ReadOnly", "", "north", "m", 280);
+        long readRevision = registry.revision();
+        PopulationSimulation.skillRanksSnapshot(readOnlyProbe);
+        PopulationSimulation.need(readOnlyProbe, Need.HUNGER);
+        PopulationSimulation.skillRank(readOnlyProbe, "smithing");
+        PopulationSimulation.trainingXp(readOnlyProbe, "smithing");
+        PopulationSimulation.decide(readOnlyProbe, 280);
+        ok(!readOnlyProbe.props.containsKey("population.skills")
+                        && !readOnlyProbe.props.containsKey("population.needs")
+                        && !readOnlyProbe.props.containsKey("population.training")
+                        && registry.revision() == readRevision,
+                "population read queries do not materialize empty Character state or advance revisions");
+
         Character smith = registry.create("Aldric", "House Forge", "north", "m", 280);
         CharacterDevelopment.setRace(smith, "elf_forest");
         CharacterDevelopment.setClass(smith, "ranger");
