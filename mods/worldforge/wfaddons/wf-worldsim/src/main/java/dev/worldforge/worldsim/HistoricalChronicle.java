@@ -21,6 +21,7 @@ public final class HistoricalChronicle {
     public static final int YEARS_PER_CYCLE = 5;
     public static final int YEARS_PER_EPOCH = 25;
     public static final int MAX_ENTRIES = 100_000;
+    private static final int PREFIX_COMPACTION_BATCH = 4_096;
 
     public static final class Entry {
         public final String id;
@@ -47,6 +48,8 @@ public final class HistoricalChronicle {
 
     private final List<Entry> entries = new ArrayList<>();
     private final Set<String> knownIds = new HashSet<>();
+    // Logical prefix is evicted immediately; physical ArrayList compaction is amortized.
+    private int firstEntryIndex;
     private int startingYear = 300;
 
     public synchronized void setStartingYear(int year) {
@@ -69,10 +72,10 @@ public final class HistoricalChronicle {
         // The normal path is chronological: append in O(1) instead of sorting the
         // complete history after every event. Delayed facts retain exact ordering via
         // binary search; only the exceptional insertion shifts the suffix.
-        if (entries.isEmpty() || compareEntries(entries.get(entries.size() - 1), added) <= 0) {
+        if (firstEntryIndex == entries.size() || compareEntries(entries.get(entries.size() - 1), added) <= 0) {
             entries.add(added);
         } else {
-            int low = 0, high = entries.size();
+            int low = firstEntryIndex, high = entries.size();
             while (low < high) {
                 int middle = (low + high) >>> 1;
                 if (compareEntries(entries.get(middle), added) <= 0) low = middle + 1;
@@ -80,22 +83,29 @@ public final class HistoricalChronicle {
             }
             entries.add(low, added);
         }
-        while (entries.size() > MAX_ENTRIES) {
-            Entry removed = entries.remove(0);
+        while (entries.size() - firstEntryIndex > MAX_ENTRIES) {
+            Entry removed = entries.get(firstEntryIndex++);
             knownIds.remove(removed.id);
+        }
+        // ArrayList prefix removal is O(n). Compact only once per batch, while keeping
+        // the public logical history strictly capped at MAX_ENTRIES.
+        if (firstEntryIndex >= PREFIX_COMPACTION_BATCH) {
+            entries.subList(0, firstEntryIndex).clear();
+            firstEntryIndex = 0;
         }
         return true;
     }
 
-    public synchronized int size() { return entries.size(); }
+    public synchronized int size() { return entries.size() - firstEntryIndex; }
 
     public synchronized void clear() {
         entries.clear();
+        firstEntryIndex = 0;
         knownIds.clear();
     }
 
     public synchronized List<Entry> entries() {
-        return Collections.unmodifiableList(new ArrayList<>(entries));
+        return Collections.unmodifiableList(new ArrayList<>(entries.subList(firstEntryIndex, entries.size())));
     }
 
     /**
@@ -103,8 +113,9 @@ public final class HistoricalChronicle {
      * calendar divisions, not claims that a political era actually began.
      */
     public synchronized List<String> book(int requestedEntries) {
-        int from = requestedEntries <= 0 ? 0 : Math.max(0, entries.size() - requestedEntries);
-        List<Entry> selected = entries.subList(from, entries.size());
+        int logicalSize = entries.size() - firstEntryIndex;
+        int from = requestedEntries <= 0 ? 0 : Math.max(0, logicalSize - requestedEntries);
+        List<Entry> selected = entries.subList(firstEntryIndex + from, entries.size());
         List<String> pages = new ArrayList<>();
         pages.add("ЛЕТОПИСЬ ЖИВОГО МИРА");
         pages.add("История, записанная не заранее, а прожитая самим миром.");
@@ -168,7 +179,8 @@ public final class HistoricalChronicle {
 
     public synchronized String toJson() {
         List<Object> serialized = new ArrayList<>();
-        for (Entry entry : entries) {
+        for (int i = firstEntryIndex; i < entries.size(); i++) {
+            Entry entry = entries.get(i);
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("id", entry.id);
             item.put("day", entry.day);
@@ -218,6 +230,7 @@ public final class HistoricalChronicle {
                 .thenComparingLong(HistoricalChronicle::eventSequence));
         entries.clear();
         entries.addAll(restored);
+        firstEntryIndex = 0;
         knownIds.clear();
         for (Entry entry : entries) knownIds.add(entry.id);
     }
