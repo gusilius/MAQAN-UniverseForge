@@ -261,8 +261,14 @@ fn update_polities(seed: u64, year: u64, bands: &[EmergentBand],
                 });
             }
         }
-        let population = bands.iter().filter(|b| polity.settlement_ids.contains(&b.id) && b.settled)
-            .map(|b| b.population).sum::<u64>();
+        // Resolve only this polity's canonical settlement IDs. Scanning every band
+        // and linearly searching settlement_ids made this O(all_bands × polity_members)
+        // for every polity on every simulated year.
+        let population = polity.settlement_ids.iter()
+            .filter_map(|id| bands_by_id.get(id.as_str()).copied())
+            .filter(|band| band.settled)
+            .map(|band| band.population)
+            .sum::<u64>();
         polity.population = population;
         if population < 45 { polity.weak_years = polity.weak_years.saturating_add(1); }
         else { polity.weak_years = polity.weak_years.saturating_sub(1); }
