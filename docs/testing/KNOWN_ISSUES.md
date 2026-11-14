@@ -574,3 +574,9 @@
 - wf-people now increments a lightweight registry generation when the player partition or a new map CharacterRegistry is registered. Native and Java fallback recovery inspect receipts on first server scan, world-day advance, or registry-generation change.
 - A native batch records the generation it captured; a new registry appearing during compute forces another scan after the current batch completes.
 - This preserves partial-save recovery without creating a new per-tick O(population) scan or a second index/cache of Character state.
+
+
+### WF-RT-0024 — scan-gate compile integration
+
+- Completed the coordinator wiring for day/registry-generation receipt scans. The captured generation is now attached to each pending batch and used to schedule one follow-up scan if a registry was loaded while native work was in flight.
+- This keeps recovery bounded to lifecycle/day/registry changes instead of a full population walk on every tick.
