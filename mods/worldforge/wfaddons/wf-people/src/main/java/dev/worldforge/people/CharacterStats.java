@@ -227,12 +227,21 @@ public final class CharacterStats {
         if (next.contains(id)) return false;
         next.add(id);
         if (!compatibleTraits(next)) return false;
-        c.traits.clear();
-        c.traits.addAll(next);
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            c.traits.clear();
+            c.traits.addAll(next);
+            CharacterRegistry.recordCharacterMutation();
+        }
         return true;
     }
 
-    public static boolean removeTrait(Character c, String id) { return c.traits.remove(id); }
+    public static boolean removeTrait(Character c, String id) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            boolean changed = c.traits.remove(id);
+            if (changed) CharacterRegistry.recordCharacterMutation();
+            return changed;
+        }
+    }
 
     /** 3–5 stable, varied and mutually compatible traits; the same identity always yields the same profile. */
     public static List<String> traits(Character c) {
