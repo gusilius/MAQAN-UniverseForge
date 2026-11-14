@@ -84,8 +84,12 @@ public class OriginsTest {
         ok(n1.race.equals(n2.race) && n1.history.equals(n2.history), "NPC детерминированы по сиду");
         ok(n1.prof.containsKey("smith") && !n1.history.isEmpty(), "NPC 30 уровня: профессия и класс " + n1.history);
         Origins.Build n1Again = o.assign("n:a", 999, "trade", 55);
-        ok(n1Again == n1 && n1Again.history.equals(n1.history) && n1Again.prof.equals(n1.prof),
-                "повторное назначение NPC не перезаписывает его развитие");
+        ok(n1Again != n1 && n1Again.history.equals(n1.history) && n1Again.prof.equals(n1.prof),
+                "повторное назначение NPC сохраняет развитие и возвращает detached snapshot");
+        n1Again.history.clear();
+        n1Again.prof.clear();
+        ok(o.build("n:a").history.equals(n1.history) && o.build("n:a").prof.equals(n1.prof),
+                "изменение результата assign не обходит канонический Origins writer");
         ok(n3.history.isEmpty(), "новичок без класса");
         // сохранение
         Origins o2 = new Origins(d);
