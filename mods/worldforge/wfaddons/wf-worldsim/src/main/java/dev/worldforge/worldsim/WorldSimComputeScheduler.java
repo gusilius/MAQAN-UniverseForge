@@ -26,23 +26,27 @@ public final class WorldSimComputeScheduler implements AutoCloseable {
 
     public static final class Ticket {
         private final String worldId;
+        private final String operationKey;
         private final long revision;
         private final long lifecycleEpoch;
         private final long submittedNanos;
 
-        public Ticket(String worldId, long revision, long lifecycleEpoch) {
+        public Ticket(String worldId, String operationKey, long revision, long lifecycleEpoch) {
             if (worldId == null || worldId.isBlank()) throw new IllegalArgumentException("worldId is required");
+            if (operationKey == null || operationKey.isBlank()) throw new IllegalArgumentException("operationKey is required");
             this.worldId = worldId;
+            this.operationKey = operationKey;
             this.revision = revision;
             this.lifecycleEpoch = lifecycleEpoch;
             this.submittedNanos = System.nanoTime();
         }
         public String worldId() { return worldId; }
+        public String operationKey() { return operationKey; }
         public long revision() { return revision; }
         public long lifecycleEpoch() { return lifecycleEpoch; }
         public long submittedNanos() { return submittedNanos; }
-        public boolean matches(String expectedWorldId, long expectedRevision, long expectedLifecycleEpoch) {
-            return worldId.equals(expectedWorldId) && revision == expectedRevision
+        public boolean matches(String expectedWorldId, String expectedOperationKey, long expectedRevision, long expectedLifecycleEpoch) {
+            return worldId.equals(expectedWorldId) && operationKey.equals(expectedOperationKey) && revision == expectedRevision
                     && lifecycleEpoch == expectedLifecycleEpoch;
         }
     }
