@@ -28,10 +28,27 @@ public class OriginsTest {
             @Override public boolean flag(String owner, String f) { return f.equals("quest:trial_of_arms") && owner.equals("p:1"); }
         };
         o.publish();
+        dev.worldforge.mod.api.WorldForgeApi.revisions().resetForTests();
         String P = "p:1";
         double hp0 = pr.get(P, "max_health");
+        long originRevisionBeforeRace = dev.worldforge.mod.api.WorldForgeApi.revisions().snapshot().orElseThrow()
+                .revision(dev.worldforge.mod.api.DomainMutationRevisions.Domain.ORIGINS);
         ok(o.setRace(P, "orc") && pr.get(P, "max_health") > hp0 + 5, "раса меняет здоровье через общую шину: " + hp0 + " → " + pr.get(P, "max_health"));
+        long originRevisionAfterRace = dev.worldforge.mod.api.WorldForgeApi.revisions().snapshot().orElseThrow()
+                .revision(dev.worldforge.mod.api.DomainMutationRevisions.Domain.ORIGINS);
+        ok(originRevisionAfterRace == originRevisionBeforeRace + 1, "выбор расы продвигает ORIGINS revision ровно один раз");
         ok(!o.setRace(P, "elf"), "раса выбирается один раз");
+        ok(dev.worldforge.mod.api.WorldForgeApi.revisions().snapshot().orElseThrow()
+                .revision(dev.worldforge.mod.api.DomainMutationRevisions.Domain.ORIGINS) == originRevisionAfterRace,
+                "отклонённый выбор расы не меняет revision");
+        Origins.Build detached = o.build(P);
+        detached.race = "elf";
+        detached.history.add("untracked");
+        ok("orc".equals(o.peek(P).race) && o.peek(P).history.isEmpty(),
+                "публичные Build getters возвращают detached snapshot, обход writer API невозможен");
+        Origins.Build missing = o.build("p:missing");
+        missing.race = "human";
+        ok(o.peek("p:missing") == null, "чтение отсутствующего владельца не материализует запись");
         ok(StatApi.tag(P, "race").equals("orc"), "метка расы в шине");
 
         // классы
