@@ -205,6 +205,8 @@ public final class WorldSimMod {
             LOGGER.error("wf_worldsim: native compute failed; canonical state was not advanced", error);
         }
         if (completed != null) {
+            PROFILER.record("worldsim.compute.queue_wait", completed.queueWaitNanos());
+            PROFILER.record("worldsim.compute.total", completed.computeNanos());
             WorldSimComputeScheduler.Ticket ticket = completed.ticket();
             if (!ticket.matches(worldId, pendingComputeRevision, lifecycleEpoch)) {
                 pendingComputeRevision = Long.MIN_VALUE;
