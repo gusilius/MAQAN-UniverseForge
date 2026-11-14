@@ -267,7 +267,7 @@ public final class OriginDefs {
                 else if (req.getValue() < 0 || req.getValue() >= required.ranks().size())
                     p.add("Переплетение " + y.id() + ": ранг вне диапазона профессии " + req.getKey());
             }
-            if (y.buildingRaces().isEmpty() && y.buildingClasses().isEmpty() && y.profs().isEmpty() && y.flags().isEmpty()) p.add("Переплетение " + y.id() + ": нет условий");
+            if (y.races().isEmpty() && y.classes().isEmpty() && y.profs().isEmpty() && y.flags().isEmpty()) p.add("Переплетение " + y.id() + ": нет условий");
         }
         for (Profession pr : buildingProfessions.values()) {
             if (!pr.from().isEmpty()) {

@@ -596,3 +596,9 @@
 - Follow-up review caught integration defects in the first atomic-snapshot patch: Origins initialized its active snapshot from the uninitialized field rather than the constructor argument; class/profession duplicate checks and parts of validation still consulted compatibility read views; synergy validation had mechanically renamed record accessors.
 - Corrected the constructor and routed validation/duplicate detection through private staging maps. Added regression coverage for immutable outer/nested maps, unchanged published generation on invalid replacement, and stable old-snapshot reads after replacement.
 - These are CI-gated source corrections; do not treat the Origins snapshot lane as accepted until logic tests and full Windows builds pass.
+
+
+### WF-RT-0023 — snapshot regression fixture correction
+
+- Corrected the immutability fixture to inspect the actual published `human` definition and assert failed replacement leaves the target generation unchanged. Invalid builder data is validated at the replacement boundary; parsing alone intentionally remains a staging operation so multiple datapack files can be merged before validation.
+- Corrected the final synergy validation accessors to the record's canonical `races()` and `classes()` methods.

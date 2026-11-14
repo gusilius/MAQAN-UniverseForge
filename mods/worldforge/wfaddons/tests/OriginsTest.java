@@ -192,17 +192,13 @@ public class OriginsTest {
                 "повторное определение расы отклоняется без частичной перезаписи датапака");
         OriginDefs.Snapshot previousDefinitions = duplicateDefs.snapshot();
         boolean publishedMapsAreReadOnly = false;
-        try { duplicateDefs.races.put("intruder", previousDefinitions.races().get("elf")); }
+        try { duplicateDefs.races.put("intruder", previousDefinitions.races().get("human")); }
         catch (UnsupportedOperationException expected) { publishedMapsAreReadOnly = true; }
         boolean nestedMapsAreReadOnly = false;
-        try { previousDefinitions.races().get("elf").mods().put("max_health", 999.0); }
+        try { previousDefinitions.races().get("human").mods().put("max_health", 999.0); }
         catch (UnsupportedOperationException expected) { nestedMapsAreReadOnly = true; }
-        long beforeBadLoad = duplicateDefs.snapshot().generation();
-        boolean badLoadKeptSnapshot = false;
-        try { duplicateDefs.load("{\"races\":[{\"id\":\"broken\",\"parent\":\"missing\"}]}"); duplicateDefs.replaceWith(duplicateDefs); }
-        catch (RuntimeException expected) { badLoadKeptSnapshot = duplicateDefs.snapshot().generation() == beforeBadLoad; }
-        ok(publishedMapsAreReadOnly && nestedMapsAreReadOnly && badLoadKeptSnapshot,
-                "опубликованный OriginDefs snapshot и вложенные maps неизменяемы; ошибочная сборка не меняет generation");
+        ok(publishedMapsAreReadOnly && nestedMapsAreReadOnly,
+                "опубликованный OriginDefs snapshot и вложенные maps неизменяемы");
         OriginDefs replacementSource = new OriginDefs();
         replacementSource.load("{\"races\":[{\"id\":\"elf\",\"name\":\"Elf\"}]}");
         duplicateDefs.replaceWith(replacementSource);
@@ -214,10 +210,11 @@ public class OriginsTest {
                 "перезагрузка определений заменяет удалённые записи, не накапливая устаревшие расы");
         OriginDefs invalidReplacement = new OriginDefs();
         invalidReplacement.load("{\"races\":[{\"id\":\"child\",\"parent\":\"missing\"}]}");
+        long validGeneration = duplicateDefs.snapshot().generation();
         boolean invalidReplacementRejected = false;
         try { duplicateDefs.replaceWith(invalidReplacement); } catch (IllegalArgumentException expected) { invalidReplacementRejected = true; }
-        ok(invalidReplacementRejected && duplicateDefs.races.containsKey("elf")
-                && !duplicateDefs.races.containsKey("child"),
+        ok(invalidReplacementRejected && duplicateDefs.snapshot().generation() == validGeneration
+                && duplicateDefs.races.containsKey("elf") && !duplicateDefs.races.containsKey("child"),
                 "некорректный набор не заменяет последнюю корректную версию");
         // специализации: взаимоисключающие, по классам
         Origins o6 = new Origins(d); o6.hooks = new Origins.Hooks() {};
