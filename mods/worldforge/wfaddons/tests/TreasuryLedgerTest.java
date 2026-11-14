@@ -5,6 +5,7 @@ import dev.worldforge.mod.economy.TreasuryService;
 import dev.worldforge.mod.api.TreasuryApi;
 import dev.worldforge.mod.Json;
 import java.util.*;
+import java.io.StringWriter;
 
 public final class TreasuryLedgerTest {
     private static int failures;
@@ -88,6 +89,25 @@ public final class TreasuryLedgerTest {
         ok(rationRestored.hasArmyFieldRationDebit("stock:settlement:one:food")
                         && !rationRestored.hasArmyFieldRationDebit("army:field"),
                 "army field-ration debit index is rebuilt from durable journal on load");
+
+        TreasuryLedger streaming = new TreasuryLedger();
+        streaming.open("streaming:account", "streaming:account", "silver", 1_000_000);
+        boolean streamingEntriesAccepted = true;
+        for (int i = 0; i < 12000; i++) {
+            streamingEntriesAccepted &= streaming.deposit("streaming:account", 1, TreasuryLedger.Kind.PRODUCTION,
+                    "streaming-stress", "streaming:" + i, i, "streamed journal entry");
+        }
+        ok(streamingEntriesAccepted, "large treasury journal stress fixture records every entry");
+        StringWriter streamingWriter = new StringWriter();
+        try {
+            streaming.writeJson(streamingWriter);
+            TreasuryLedger streamingRestored = TreasuryLedger.fromJson(streamingWriter.toString());
+            ok(streamingRestored.journal().size() == streaming.journal().size()
+                            && close(streamingRestored.balance("streaming:account"), 1_012_000),
+                    "large treasury journals stream to JSON and restore without changing balances or receipts");
+        } catch (java.io.IOException ex) {
+            ok(false, "large treasury journal streaming serialization completes");
+        }
 
         TreasuryLedger restored=TreasuryLedger.fromJson(ledger.toJson());
         ok(close(restored.balance("realm:kingdom"),875)&&close(restored.balance("settlement:capital"),225)

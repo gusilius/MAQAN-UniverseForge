@@ -46,8 +46,10 @@ import dev.worldforge.mod.economy.TreasuryService;
 import dev.worldforge.mod.identity.WorldId;
 import dev.worldforge.mod.identity.WorldIdentityStore;
 
+import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.Files;
 import java.util.List;
@@ -167,7 +169,9 @@ public class WorldForgeMod {
         try {
             Files.createDirectories(file.getParent());
             Path temp = file.resolveSibling(file.getFileName() + ".tmp");
-            Files.writeString(temp, TreasuryService.current().toJson());
+            try (BufferedWriter writer = Files.newBufferedWriter(temp, StandardCharsets.UTF_8)) {
+                TreasuryService.current().writeJson(writer);
+            }
             try { Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE); }
             catch (java.nio.file.AtomicMoveNotSupportedException ignored) { Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING); }
             return true;

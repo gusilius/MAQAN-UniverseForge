@@ -239,14 +239,58 @@ public final class TreasuryLedger {
             armyFieldRationDebitAccounts.add(account);
     }
 
+    /**
+     * Writes the durable ledger incrementally. The journal is intentionally append-only,
+     * so building a second object graph and one giant JSON String for every autosave can
+     * temporarily require several times the ledger's retained heap.
+     */
+    public void writeJson(java.io.Writer writer) throws java.io.IOException {
+        writer.write("{\"format\":\"wf-treasury-ledger/1\",\"sequence\":");
+        writer.write(Long.toString(sequence));
+        writer.write(",\"transactionSequence\":");
+        writer.write(Long.toString(transactionSequence));
+        writer.write(",\"accounts\":[");
+        boolean first = true;
+        for (Account account : accounts.values()) {
+            if (!first) writer.write(',');
+            first = false;
+            writer.write(Json.write(Map.of(
+                    "id", account.id, "owner", account.ownerId, "currency", account.currency,
+                    "balance", account.balance, "creditLimit", account.creditLimit,
+                    "debt", account.debt, "bankrupt", account.bankrupt)));
+        }
+        writer.write("],\"journal\":[");
+        first = true;
+        for (Entry entry : journal) {
+            if (!first) writer.write(',');
+            first = false;
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("seq", entry.sequence());
+            row.put("tx", entry.transactionId());
+            row.put("account", entry.accountId());
+            row.put("other", entry.counterpartyId());
+            row.put("currency", entry.currency());
+            row.put("amount", entry.amount());
+            row.put("credit", entry.credit());
+            row.put("kind", entry.kind().name());
+            row.put("category", entry.category());
+            row.put("reference", entry.reference());
+            row.put("minute", entry.worldMinute());
+            row.put("balance", entry.balanceAfter());
+            row.put("memo", entry.memo());
+            writer.write(Json.write(row));
+        }
+        writer.write("]}");
+    }
+
     public String toJson() {
-        Map<String,Object> root=new LinkedHashMap<>(); root.put("format","wf-treasury-ledger/1"); root.put("sequence",sequence); root.put("transactionSequence",transactionSequence);
-        List<Object> aa=new ArrayList<>();
-        for(Account a:accounts.values()) aa.add(Map.of("id",a.id,"owner",a.ownerId,"currency",a.currency,"balance",a.balance,"creditLimit",a.creditLimit,"debt",a.debt,"bankrupt",a.bankrupt));
-        root.put("accounts",aa);
-        List<Object> jj=new ArrayList<>();
-        for(Entry e:journal) { Map<String,Object> m=new LinkedHashMap<>();m.put("seq",e.sequence());m.put("tx",e.transactionId());m.put("account",e.accountId());m.put("other",e.counterpartyId());m.put("currency",e.currency());m.put("amount",e.amount());m.put("credit",e.credit());m.put("kind",e.kind().name());m.put("category",e.category());m.put("reference",e.reference());m.put("minute",e.worldMinute());m.put("balance",e.balanceAfter());m.put("memo",e.memo());jj.add(m); }
-        root.put("journal",jj); return Json.write(root);
+        java.io.StringWriter writer = new java.io.StringWriter();
+        try {
+            writeJson(writer);
+        } catch (java.io.IOException impossible) {
+            throw new IllegalStateException("Unexpected in-memory treasury serialization failure", impossible);
+        }
+        return writer.toString();
     }
     @SuppressWarnings("unchecked")
     public static TreasuryLedger fromJson(String json) {
