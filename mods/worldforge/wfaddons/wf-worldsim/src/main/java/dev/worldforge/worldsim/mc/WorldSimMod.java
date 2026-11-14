@@ -190,7 +190,7 @@ public final class WorldSimMod {
         if (server == null) return;
         if (++lodTicks % 20 == 0) publishObservers(server);
         if (!emergentRealmsRehydrated && emergenceState != null) {
-            syncEmergentPolities(server, emergenceState, WorldForgeApi.clock().year());
+            syncEmergentPolities(server, emergenceState, emergenceYear(emergenceState, WorldForgeApi.clock().year()));
             emergentRealmsRehydrated = true;
         }
 
@@ -284,10 +284,11 @@ public final class WorldSimMod {
 
         emergenceState = emergenceFrame.getAsJsonObject("state").deepCopy();
         long phaseStarted = System.nanoTime();
-        syncEmergentPeople(server, emergenceState, WorldForgeApi.clock().year());
+        int materializationYear = emergenceYear(emergenceState, WorldForgeApi.clock().year());
+        syncEmergentPeople(server, emergenceState, materializationYear);
         PROFILER.record("worldsim.sync_emergent_people", System.nanoTime() - phaseStarted);
         phaseStarted = System.nanoTime();
-        syncEmergentPolities(server, emergenceState, WorldForgeApi.clock().year());
+        syncEmergentPolities(server, emergenceState, materializationYear);
         PROFILER.record("worldsim.sync_emergent_polities", System.nanoTime() - phaseStarted);
 
         if (emergenceFrame.has("events") && emergenceFrame.get("events").isJsonArray()) {
@@ -372,6 +373,12 @@ public final class WorldSimMod {
                         ? snapshot.getAsJsonArray("settlements").size() : 0,
                 frame.getAsJsonArray("proposals").size(), accepted, rejected);
         updateCampaign(server, day);
+    }
+
+    private static int emergenceYear(JsonObject state, int fallback) {
+        if (state == null || !state.has("last_year") || state.get("last_year").isJsonNull()) return fallback;
+        long year = state.get("last_year").getAsLong();
+        return (int) Math.max(Integer.MIN_VALUE, Math.min(Integer.MAX_VALUE, year));
     }
 
     private static String worldIdentity(MinecraftServer server) {
