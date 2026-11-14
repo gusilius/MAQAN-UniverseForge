@@ -148,7 +148,18 @@ public final class DomainMutationRevisionsTest {
                         && PopulationSimulation.profession(founder).equals("farmer"),
                 "canonical population profession write advances the shared Character lane");
 
-        long beforeRace = afterProfession.revision(DomainMutationRevisions.Domain.CHARACTERS);
+        long beforeHire = afterProfession.revision(DomainMutationRevisions.Domain.CHARACTERS);
+        people.hire(founder.id, "settlement:capital", "farmer", 4);
+        var afterHire = WorldForgeApi.revisions().snapshot().orElseThrow();
+        check(afterHire.revision(DomainMutationRevisions.Domain.CHARACTERS) == beforeHire + 1,
+                "compound hire operation commits one Character revision across profession, duty, employer and post");
+        people.fire(founder.id, "settlement:capital", 5);
+        var afterFire = WorldForgeApi.revisions().snapshot().orElseThrow();
+        check(afterFire.revision(DomainMutationRevisions.Domain.CHARACTERS)
+                        == afterHire.revision(DomainMutationRevisions.Domain.CHARACTERS) + 1,
+                "compound fire operation commits one Character revision across employer, duty and post release");
+
+        long beforeRace = afterFire.revision(DomainMutationRevisions.Domain.CHARACTERS);
         CharacterDevelopment.setRace(founder, "elf_forest");
         var afterRace = WorldForgeApi.revisions().snapshot().orElseThrow();
         CharacterDevelopment.setRace(founder, "elf_forest");
