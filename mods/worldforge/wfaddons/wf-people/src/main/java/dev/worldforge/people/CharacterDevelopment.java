@@ -210,6 +210,7 @@ public final class CharacterDevelopment {
         while (history.size() > 96) history.remove(0);
         observer.props.put("character.memory.events", history);
         observer.props.put("character.memory.last_minute", worldMinute);
+        CharacterRegistry.recordCharacterMutation();
         return true;
     }
 
@@ -229,6 +230,13 @@ public final class CharacterDevelopment {
     /** Returns stress caused by acting against the character's own principles. */
     public static int recordConduct(Character actor, Conduct conduct, Character affected,
                                     String operationId, long worldMinute) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            return recordConductBatched(actor, conduct, affected, operationId, worldMinute);
+        }
+    }
+
+    private static int recordConductBatched(Character actor, Conduct conduct, Character affected,
+                                             String operationId, long worldMinute) {
         Objects.requireNonNull(actor); Objects.requireNonNull(conduct);
         if (operationId == null || operationId.isBlank()) throw new IllegalArgumentException("conduct operation ID required");
         int conflict = switch (conduct) {
@@ -288,6 +296,13 @@ public final class CharacterDevelopment {
     /** Experiences slowly alter motivation and temperament; repeated experiences may unlock a compatible trait. */
     public static void recordExperience(Character c, Experience experience, String eventId,
                                          String detail, long worldMinute, int intensity) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            recordExperienceBatched(c, experience, eventId, detail, worldMinute, intensity);
+        }
+    }
+
+    private static void recordExperienceBatched(Character c, Experience experience, String eventId,
+                                                  String detail, long worldMinute, int intensity) {
         Objects.requireNonNull(c); Objects.requireNonNull(experience);
         if (eventId == null || eventId.isBlank() || intensity < 1 || intensity > 5)
             throw new IllegalArgumentException("invalid experience");
@@ -353,6 +368,12 @@ public final class CharacterDevelopment {
 
     /** Blended inherited psychology and a small, compatible sample of family traits. */
     public static void inheritPsychology(Character child, Character father, Character mother, long worldMinute) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            inheritPsychologyBatched(child, father, mother, worldMinute);
+        }
+    }
+
+    private static void inheritPsychologyBatched(Character child, Character father, Character mother, long worldMinute) {
         Objects.requireNonNull(child); Objects.requireNonNull(father); Objects.requireNonNull(mother);
         List<String> initial = new ArrayList<>(CharacterStats.traits(child));
         child.traits.clear(); child.traits.addAll(initial);
@@ -382,6 +403,13 @@ public final class CharacterDevelopment {
     /** Parents shape early temperament; a kin guardian can provide a real substitute caregiver. */
     public static void upbringingTick(Character child, Character father, Character mother,
                                       Character guardian, int year) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            upbringingTickBatched(child, father, mother, guardian, year);
+        }
+    }
+
+    private static void upbringingTickBatched(Character child, Character father, Character mother,
+                                               Character guardian, int year) {
         if (child == null || !child.alive || year < child.birthYear || year-child.birthYear > 16) return;
         Object previous = child.props.get("family.upbringing.last_year");
         if (previous instanceof Number n && n.intValue() >= year) return;
@@ -480,6 +508,12 @@ public final class CharacterDevelopment {
 
     /** One physical hit produces one durable wound and one trauma response. */
     public static boolean recordCombatInjury(Character c,int severity,String eventId,String cause,long worldMinute) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            return recordCombatInjuryBatched(c,severity,eventId,cause,worldMinute);
+        }
+    }
+
+    private static boolean recordCombatInjuryBatched(Character c,int severity,String eventId,String cause,long worldMinute) {
         Objects.requireNonNull(c);
         if(severity<1||severity>3||eventId==null||eventId.isBlank()||worldMinute<0)
             throw new IllegalArgumentException("invalid combat injury event");
@@ -506,13 +540,14 @@ public final class CharacterDevelopment {
     /** Healing is explicit and gradual; injuries do not vanish merely because an entity reloads. */
     public static int healInjury(Character c,int severityPoints) {
         if(severityPoints<0)throw new IllegalArgumentException("healing must be nonnegative");
-        int next=Math.max(0,injurySeverity(c)-severityPoints);
+        int previous=injurySeverity(c);
+        int next=Math.max(0,previous-severityPoints);
         if(next==0){
             c.props.remove("military.injury.severity");
             c.props.remove("military.injury.cause");
             c.props.remove("military.injury.last_minute");
         } else c.props.put("military.injury.severity",next);
-        if (next != injurySeverity(c)) CharacterRegistry.recordCharacterMutation();
+        if (next != previous) CharacterRegistry.recordCharacterMutation();
         return next;
     }
 
