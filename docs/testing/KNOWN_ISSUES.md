@@ -326,5 +326,6 @@
 - **Исправление:** инициализация теперь выполняется внутри одного nested-safe Character mutation batch; если хотя бы одно значение действительно добавлено, публикуется ровно одна CHARACTERS revision. Повторный вызов без изменений остаётся no-op и не создаёт revision churn. Формулы, значения, ключи сохранения и доступные психологические механики не меняются.
 - **Проверка исходника:** commit `fe94acfca57a2510fb27bd3379bb044ee694f739`.
 - **Остаточный риск:** другие публичные mutable Character fields/collections/props и внешние addon writers всё ещё могут обходить canonical mutation APIs. Global WorldSim apply fence остаётся запрещённым до завершения полного writer audit и snapshot/apply stale-result tests.
-- **Критерий закрытия:** тест first initialization advances one revision, repeated initialization advances none; existing psychology deterministic/save-reload tests and Windows logic/addon CI pass.
+- **Тест добавлен:** `DomainMutationRevisionsTest` проверяет, что первая lazy initialization создаёт ровно одну CHARACTERS revision и повторная инициализация не создаёт новую; проверяется исходное значение stress.
+- **Критерий закрытия:** новый тест и существующие psychology deterministic/save-reload tests, а также Windows logic/addon CI проходят.
 
