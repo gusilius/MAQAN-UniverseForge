@@ -74,10 +74,10 @@ public final class HistoricalChronicleTest {
 
         HistoricalChronicle boundedBook = new HistoricalChronicle();
         boundedBook.setStartingYear(300);
+        EventLog boundedSource = new EventLog();
+        boundedSource.addListener(event -> boundedBook.record(event, event.time, 300));
         for (int i = 0; i < HistoricalChronicle.MAX_ENTRIES + 50; i++) {
-            EventLog.Event event = new EventLog.Event(i + 1L, EventLog.Category.PEOPLE,
-                    "Bounded history event " + i, List.of(), i);
-            boundedBook.record(event, i, 300);
+            boundedSource.post("people", "Bounded history event " + i, List.of(), i);
         }
         List<HistoricalChronicle.Entry> boundedEntries = boundedBook.entries();
         check(boundedBook.size() == HistoricalChronicle.MAX_ENTRIES
