@@ -291,6 +291,7 @@ public final class CharacterDevelopment {
                 subject, conduct.name().toLowerCase(Locale.ROOT), stressDelta, worldMinute)) {
             receipts.put(operationId, payload);
             actor.props.put(receiptKey, receipts);
+            CharacterRegistry.recordCharacterMutation();
             return 0;
         }
         changeStress(actor, stressDelta);
