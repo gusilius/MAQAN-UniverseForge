@@ -476,3 +476,8 @@ The repository JSON reader represents JSON numeric tokens as `Double`. Persistin
 ### Event-driven Population receipt scans
 
 Receipt recovery must not turn into a full Character-registry scan on every server tick. The process-local coordinator tracks the last world day and canonical registry generation it has inspected. It scans on first server tick after lifecycle change, on world-day advance, or when a new Character registry is loaded. A successful apply records the generation captured with that batch; if another registry appeared while compute was in flight, the generation mismatch forces one follow-up scan. The Java fallback uses the same registry-generation signal and only scans on day advance or new registry load.
+
+
+### OriginDefs immutable datapack publication
+
+The six Origins definition collections (races, classes, professions, synergies, extra race perks and perk names) are built off to the side and published as one versioned deep-immutable snapshot. Consumers capture one snapshot for an entire Origins operation; reload swaps the active snapshot under the same Origins owner lock. Nested maps, lists, perk trees and profession-rank modifiers are copied and frozen, not merely wrapped at the outer map. Compatibility map fields remain read-only views; writes go through staged load/replacement. This closes the sequential six-map publication race without creating a second definitions owner, duplicate registry or compute cache.

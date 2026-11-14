@@ -351,3 +351,10 @@ This is an operation-count status, not a percentage of all UniverseForge computa
 - Native receipt recovery scans only on first server tick after lifecycle change, world-day advance, or registry-generation change. It does not walk every Character every tick.
 - Completed batches remember the generation they captured; a registry loaded during compute forces a follow-up scan rather than being hidden by a successful older batch.
 - Java fallback uses the same day/generation gate. Per-Character receipts remain the source of truth; the generation is only a scan invalidation signal.
+
+
+### Origins datapack definition ownership
+
+- `OriginDefs` remains the sole owner of race/class/profession/synergy definitions. Its six mutable builder collections are private; a complete deep-immutable, generation-tagged `Snapshot` is published through one volatile reference.
+- `Origins` captures one snapshot for each synchronized logical operation. Datapack reload swaps the OriginDefs publication and Origins active generation under the same owner lock, preventing mixed-definition operations.
+- Existing public collection names remain compatibility read views, but are no longer mutable; nested records/maps/lists/perk trees are defensively frozen. No second registry/cache or duplicated definition owner was added.

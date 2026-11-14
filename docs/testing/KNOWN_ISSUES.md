@@ -580,3 +580,12 @@
 
 - Completed the coordinator wiring for day/registry-generation receipt scans. The captured generation is now attached to each pending batch and used to schedule one follow-up scan if a registry was loaded while native work was in flight.
 - This keeps recovery bounded to lifecycle/day/registry changes instead of a full population walk on every tick.
+
+
+### WF-RT-0023 — OriginDefs atomic immutable publication
+
+- Audited the six Origins definition collections. Sequential `clear/putAll` publication could expose a mixed datapack generation to readers; public mutable maps and nested record collections also allowed writes to bypass publication.
+- Replaced public mutable builders with private staging maps and read-only compatibility views. All six collections are deep-copied into one generation-tagged immutable `OriginDefs.Snapshot` and published with one volatile reference.
+- `Origins` now holds one active snapshot and uses it throughout each synchronized operation. Datapack reload updates OriginDefs and Origins under the same owner lock. Commands/work output also reads one captured snapshot.
+- Updated dormant-prerequisite tests to construct incomplete definitions as a complete fixture rather than mutating the published maps.
+- This closes the datapack definition publication boundary only. ORIGINS progression writes, player↔Character identity binding, cross-domain atomicity and global WorldSim apply fencing remain separate gates.

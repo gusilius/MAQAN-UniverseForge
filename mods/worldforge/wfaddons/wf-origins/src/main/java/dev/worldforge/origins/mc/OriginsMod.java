@@ -71,9 +71,10 @@ public class OriginsMod {
             }
             List<String> problems = staged.validate();
             if (!problems.isEmpty()) throw new IllegalArgumentException(String.join("; ", problems));
-            DEFS.replaceWith(staged);
+            synchronized (ORIGINS) { DEFS.replaceWith(staged); ORIGINS.replaceDefinitions(DEFS.snapshot()); }
+            OriginDefs.Snapshot published=ORIGINS.definitionSnapshot();
             LOGGER.info("wf_origins: загружено рас {}, классов {}, профессий {}, переплетений {}",
-                    DEFS.races.size(), DEFS.classes.size(), DEFS.professions.size(), DEFS.synergies.size());
+                    published.races().size(),published.classes().size(),published.professions().size(),published.synergies().size());
         } catch (Exception ex) {
             // Keep the last known-good registry; never accumulate stale or partially reloaded datapack entries.
             LOGGER.error("wf_origins: набор определений не применён, сохранена предыдущая версия: {}", ex.toString());
@@ -101,9 +102,10 @@ public class OriginsMod {
     // ------------------------------------------------------------------ работа даёт опыт профессии
 
     private static void work(ServerPlayer p, String prof, int units) {
-        int r = ORIGINS.work(owner(p), prof, units);
-        if (r >= 0) {
-            OriginDefs.Profession d = DEFS.professions.get(prof);
+        int r; OriginDefs.Snapshot definitions;
+        synchronized(ORIGINS){definitions=ORIGINS.definitionSnapshot();r=ORIGINS.work(owner(p),prof,units);}
+        if(r>=0){
+            OriginDefs.Profession d=definitions.professions().get(prof);
             p.sendSystemMessage(Component.literal("Новое звание: " + d.name() + " - " + d.ranks().get(r).name()));
         }
     }
@@ -152,14 +154,15 @@ public class OriginsMod {
     private static int show(CommandSourceStack s) {
         ServerPlayer sp = s.getPlayer();
         if (sp == null) return 0;
-        Origins.Build b = ORIGINS.build(owner(sp));
-        OriginDefs.Race race = b.race.isEmpty() ? null : DEFS.races.get(b.race);
-        OriginDefs.ClassDef cls = b.cls.isEmpty() ? null : DEFS.classes.get(b.cls);
+        Origins.Build b; OriginDefs.Snapshot definitions;
+        synchronized(ORIGINS){definitions=ORIGINS.definitionSnapshot();b=ORIGINS.build(owner(sp));}
+        OriginDefs.Race race=b.race.isEmpty()?null:definitions.races().get(b.race);
+        OriginDefs.ClassDef cls=b.cls.isEmpty()?null:definitions.classes().get(b.cls);
         String raceLabel = b.race.isEmpty() ? "не выбрана" : race == null ? b.race + " (определение временно отсутствует)" : race.name();
         String classLabel = b.cls.isEmpty() ? "нет" : cls == null ? b.cls + " (определение временно отсутствует)" : cls.name();
         StringBuilder sb = new StringBuilder("Раса: " + raceLabel + "; класс: " + classLabel);
         for (var e : b.prof.entrySet()) {
-            OriginDefs.Profession p = DEFS.professions.get(e.getKey());
+            OriginDefs.Profession p = definitions.professions().get(e.getKey());
             if (p == null) sb.append("; ").append(e.getKey()).append(" (определение временно отсутствует, ").append(e.getValue()).append(" оп.)");
             else {
                 int rank = Math.max(0, Math.min(p.ranks().size() - 1, ORIGINS.rank(owner(sp), e.getKey())));
@@ -174,8 +177,11 @@ public class OriginsMod {
     private static int list(CommandSourceStack s) {
         ServerPlayer sp = s.getPlayer();
         if (sp == null) return 0;
-        StringBuilder sb = new StringBuilder("Расы: " + String.join(", ", DEFS.races.keySet()) + "\nПрофессии: " + String.join(", ", DEFS.professions.keySet()) + "\nКлассы, доступные сейчас:");
-        for (var e : ORIGINS.options(owner(sp)).entrySet()) sb.append("\n  ").append(e.getKey().id()).append(" - ").append(e.getKey().name()).append(e.getValue() == null ? "" : " (недоступен: " + e.getValue() + ")");
+        StringBuilder sb;
+        synchronized(ORIGINS){OriginDefs.Snapshot definitions=ORIGINS.definitionSnapshot();
+            sb=new StringBuilder("Расы: "+String.join(", ",definitions.races().keySet())+"\nПрофессии: "+String.join(", ",definitions.professions().keySet())+"\nКлассы, доступные сейчас:");
+            for(var e:ORIGINS.options(owner(sp)).entrySet())sb.append("\n  ").append(e.getKey().id()).append(" - ").append(e.getKey().name()).append(e.getValue()==null?"":" (недоступен: "+e.getValue()+")");
+        }
         String m = sb.toString();
         s.sendSuccess(() -> Component.literal(m), false);
         return 1;

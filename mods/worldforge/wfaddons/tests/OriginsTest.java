@@ -258,10 +258,7 @@ public class OriginsTest {
                 "параллельный выбор расы сериализован: один победитель и одна revision");
         // Removed prerequisite definitions must block gracefully, never dereference null.
         OriginDefs missingPrerequisites = new OriginDefs();
-        missingPrerequisites.load("{\"races\":[{\"id\":\"r\"}],\"classes\":[{\"id\":\"base\",\"req_prof\":{\"required_prof\":0}},{\"id\":\"requires_prof\",\"req_prof\":{\"required_prof\":0}}],\"professions\":[{\"id\":\"required_prof\",\"ranks\":[{\"xp\":0}]},{\"id\":\"specialist\",\"from\":\"root_prof\",\"ranks\":[{\"xp\":0}]},{\"id\":\"needs_class\",\"req_classes\":[\"base\"],\"ranks\":[{\"xp\":0}]},{\"id\":\"root_prof\",\"ranks\":[{\"xp\":0}]}]}");
-        missingPrerequisites.professions.remove("required_prof");
-        missingPrerequisites.professions.remove("root_prof");
-        missingPrerequisites.classes.remove("base");
+        missingPrerequisites.load("{\"races\":[{\"id\":\"r\"}],\"classes\":[{\"id\":\"requires_prof\",\"req_prof\":{\"required_prof\":0}}],\"professions\":[{\"id\":\"specialist\",\"from\":\"root_prof\",\"ranks\":[{\"xp\":0}]},{\"id\":\"needs_class\",\"req_classes\":[\"base\"],\"ranks\":[{\"xp\":0}]}]}");
         Origins missingPrerequisiteOrigins = new Origins(missingPrerequisites);
         String missingClassRequirement = null, missingProfessionParent = null, missingClassProfessionRequirement = null;
         try {
