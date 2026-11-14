@@ -309,3 +309,11 @@
 - CharacterRegistry compound lifecycle operations (profession, hire/fire, migrate, duties, life-stage refresh), Courts.ensure and Succession.onDeath are batched to avoid revision churn.
 - Added tests for idempotent setters, one-revision compound population/development operations, daily tick coalescing, and snapshot refusal while a Character batch is active.
 - Still incomplete: direct Character field/list/set/props writers in external addons and any unclassified cache/derived writers remain under audit. This is not yet a global cross-domain apply fence. CI for the latest HEAD is pending.
+
+
+### WF-RT-0023 — Registry identity and trait writer coverage
+
+- Extended pre-write Character batches to create/restore, appoint/dismiss, bind/unbind Entity, kill, marry/divorce and addChild operations.
+- CharacterStats.addTrait/removeTrait now use the canonical Character transaction scope; Succession routes usurper trait assignment through CharacterStats instead of writing the public trait set directly.
+- The latest source HEAD is 9d567612bde231394e0e17c705b2d78108a618c3. Windows CI run 43599718531 is in progress; the logic-test compile/run step has not completed yet.
+- Remaining gap: public mutable Character fields, children/posts/traits collections and props map still permit bypasses by external addon code. Audit and migration must continue before global apply fencing.
