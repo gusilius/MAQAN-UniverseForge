@@ -514,7 +514,7 @@ public final class PopulationSimulation {
     public static void advanceToWorldDay(CharacterRegistry registry,long targetWorldDay,long fallbackStartDay,int year) {
         Objects.requireNonNull(registry,"registry");
         if(targetWorldDay<0||fallbackStartDay<0)throw new IllegalArgumentException("world days cannot be negative");
-        if(targetWorldDay<=fallbackStartDay)return;
+        if(targetWorldDay<fallbackStartDay)throw new IllegalArgumentException("targetWorldDay cannot precede fallbackStartDay");
         try(CharacterRegistry.MutationBatch ignored=CharacterRegistry.beginMutationBatch()){
             registry.refreshLifeStages(year);
             for(Character character:registry.all()){

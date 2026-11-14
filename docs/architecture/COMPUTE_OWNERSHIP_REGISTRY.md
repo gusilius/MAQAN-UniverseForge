@@ -322,3 +322,10 @@ This is an operation-count status, not a percentage of all UniverseForge computa
 - Added `shared/contracts/population-compute-parity-v1.json` as one fixture consumed by both the Java Population logic test and Rust `population::advance` unit test.
 - It covers adult work, child eligibility, hero command, hunger/safety priority, adolescent training, explicit training targets, soldier patrol, mixed per-Character elapsed intervals, needs drift and durable day acknowledgements.
 - The production operation count remains unchanged until broader parity and persistence gates pass.
+
+
+### Population reload cursor correction
+
+- The process-local PeopleMod cursor is not treated as proof of durable Character application. On server start, a Character partition can restore an older `population.last_simulated_world_day` even when the global clock is current.
+- Population now captures at the current world day even when it equals the process-local cursor. Per-Character receipts decide who needs catch-up; legacy Characters without receipts use the current fallback baseline.
+- Batch-level elapsed metadata is the maximum positive per-Character interval; each Rust Character still receives its own elapsed interval. Empty batches remain unsubmitted.

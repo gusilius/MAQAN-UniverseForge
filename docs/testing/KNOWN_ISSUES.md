@@ -532,3 +532,13 @@
 - Replaced the incorrect expectation with two explicit cases: same-day replay produces no Character update; a later target day includes only the unacknowledged four-day interval.
 - Added one shared fixture at `shared/contracts/population-compute-parity-v1.json`, consumed by both Java domain tests and Rust production-function unit tests. It covers decision priority, life stages, work eligibility, command/soldier duties, training, needs drift, mixed elapsed intervals and receipts.
 - This is a parity gate improvement, not proof that Population cutover is complete. WF-RT-0021 and WF-RT-0023 remain open; save/reload campaign evidence is still required.
+
+
+### WF-RT-0024 — reload recovery cursor correctness
+
+- A follow-up lifecycle audit found that `PeopleMod.onStarted` initializes the process-local cursor to the current world day. The coordinator previously returned early when that cursor equaled the current day, which could strand Characters restored from a partially saved older registry receipt after a restart.
+- Removed the global-cursor early return from both native capture and Java fallback. The process-local cursor is now only a legacy baseline/scheduling hint; each Character receipt is authoritative for whether it needs catch-up.
+- Legacy Characters without receipts start at the current fallback baseline, preventing accidental simulation of the entire world history on upgrade.
+- Batch-level elapsed metadata now derives from the maximum per-Character elapsed interval, while Rust continues to calculate each Character with its own interval.
+- Added a regression test that starts with a current process cursor and an older Character receipt, then verifies the missing days are applied once.
+- This fixes receipt-based recovery semantics; real save/reload campaign verification and complete Character writer audit remain open.

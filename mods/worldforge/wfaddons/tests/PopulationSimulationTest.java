@@ -574,10 +574,18 @@ public final class PopulationSimulationTest {
         ok(hungerAfterFirstApply == 55 && PopulationSimulation.need(resumable, Need.HUNGER) == 55
                         && ((Number) resumable.props.get("population.last_simulated_world_day")).longValue() == 10,
                 "per-Character world-day receipts make Java fallback replay-safe");
+        Character partiallySaved = resumableRegistry.create("PartiallySaved", "", "north", "f", 270);
+        PopulationSimulation.setNeed(partiallySaved, Need.HUNGER, 5);
+        partiallySaved.props.put("population.last_simulated_world_day", 5L);
+        PopulationSimulation.advanceToWorldDay(resumableRegistry, 10, 10, 300);
+        ok(PopulationSimulation.need(partiallySaved, Need.HUNGER) == 55
+                        && ((Number) partiallySaved.props.get("population.last_simulated_world_day")).longValue() == 10,
+                "server reload catches up an older Character receipt even when the process cursor is already current");
+
         PopulationComputeBridge.Captured sameDayCapture = PopulationComputeBridge.captureForWorldDay(
                 "population-resume-test", 300, 10, 5, java.util.List.of(resumableRegistry));
-        ok(sameDayCapture.characterIds().isEmpty() && sameDayCapture.elapsedDays() == 5,
-                "same-day Rust retry excludes Characters already acknowledged by durable receipts");
+        ok(sameDayCapture.characterIds().isEmpty() && sameDayCapture.elapsedDays() == 0,
+                "same-day Rust retry excludes Characters already acknowledged by durable receipts, even when the global cursor equals the target");
         PopulationComputeBridge.Captured nextDayCapture = PopulationComputeBridge.captureForWorldDay(
                 "population-resume-test", 300, 14, 5, java.util.List.of(resumableRegistry));
         Map<?,?> nextDayRequest = (Map<?,?>) Json.parse(new String(nextDayCapture.request(), java.nio.charset.StandardCharsets.UTF_8));

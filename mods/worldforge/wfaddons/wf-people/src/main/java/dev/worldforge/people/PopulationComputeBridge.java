@@ -46,8 +46,8 @@ public final class PopulationComputeBridge {
     public static Captured captureForWorldDay(String worldId,int year,long targetWorldDay,long fallbackStartDay,
                                                Collection<CharacterRegistry> registries){
         if(worldId==null||worldId.isBlank())throw new IllegalArgumentException("worldId is required");
-        if(targetWorldDay<0||fallbackStartDay<0||targetWorldDay<=fallbackStartDay)
-            throw new IllegalArgumentException("targetWorldDay must be after fallbackStartDay");
+        if(targetWorldDay<0||fallbackStartDay<0||targetWorldDay<fallbackStartDay)
+            throw new IllegalArgumentException("targetWorldDay cannot precede fallbackStartDay");
         Objects.requireNonNull(registries,"registries");
         DomainMutationRevisions.Snapshot before=WorldForgeApi.revisions().snapshot()
                 .orElseThrow(()->new IllegalStateException("Canonical domain mutation is active"));
@@ -76,7 +76,7 @@ public final class PopulationComputeBridge {
             person.put("simulated_days",Long.toString(days));people.add(person);ids.add(c.globalId);
             birthYears.put(c.globalId,c.birthYear);priorDays.put(c.globalId,days);elapsedById.put(c.globalId,elapsed);
         }
-        long batchElapsed=targetWorldDay-fallbackStartDay;
+        long batchElapsed=elapsedById.values().stream().mapToLong(Long::longValue).max().orElse(0L);
         Map<String,Object> request=new LinkedHashMap<>();
         request.put("schema_version",SCHEMA_VERSION);request.put("world_id",worldId);request.put("year",year);
         request.put("elapsed_days",batchElapsed);request.put("world_day",targetWorldDay);request.put("characters",people);

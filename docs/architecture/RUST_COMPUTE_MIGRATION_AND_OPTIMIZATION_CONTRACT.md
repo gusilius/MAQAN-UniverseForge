@@ -452,3 +452,10 @@ The Rust intent decision now consumes the Java-derived `can_work` predicate rath
 The canonical cross-language fixture is `shared/contracts/population-compute-parity-v1.json`. The Java logic suite executes the Java domain/fallback owner against it; the Rust unit suite executes `population::advance` against the same request and expected frame. This keeps decision priority, life-stage boundaries, per-Character elapsed time, needs drift, duties, profession/training and durable day receipts aligned without running both production engines or applying shadow results in a live world.
 
 The fixture is a test-only oracle, not a production data source. Extend it whenever Population semantics change. A passing fixture is necessary but not sufficient for cutover: randomized/property parity, persistence/reload, stale-snapshot, lifecycle, and addon writer coverage remain required.
+
+
+### Reload recovery: Character receipts outrank the process-local cursor
+
+The process-local PeopleMod population cursor is a scheduling hint, not durable evidence that every Character partition was saved. On server reload the cursor may initialize to the current world day while one or more Character registries restore older per-Character receipts. Therefore the coordinator must still capture at the current day even when `currentWorldDay == populationProcessedDay`. Characters with current receipts are excluded; older receipts are caught up individually. Legacy Characters without a receipt use the current fallback baseline and are not incorrectly advanced through the entire world history.
+
+The batch-level `elapsed_days` is now the maximum positive per-Character interval in the snapshot (zero only for an empty batch); Rust still computes each Character using its own `elapsed_days`. This preserves the ABI's non-empty-batch validation while supporting recovery when the global process cursor is already current.
