@@ -616,3 +616,9 @@
 - Covers age/life-stage transitions, priority thresholds, role combinations, per-person elapsed intervals, long-duration saturation, extension needs, and stable ID ordering under reversed input order.
 - Java validates the complete needs projection and both year/day receipts against the shared fixture; Rust executes the same fixture through population::advance.
 - This is a stronger semantic parity gate, not a claim that Population is fully cut over. WF-RT-0023 writer coverage and WF-RT-0021 cross-domain atomicity remain open.
+
+
+### WF-RT-0024 — expanded fixture envelope correction
+
+- Linux native CI exposed a parity-fixture envelope mismatch: the new boundary rows and per-Character acknowledgements used world day 10,000, but the top-level expected frame retained the original day 303. Rust output correctly propagated the request day; this was a test-oracle metadata defect, not a simulation formula difference.
+- Corrected the expected frame envelope to use the same 10,000 world day as the request. Keep the full Java/Rust fixture gate; do not weaken the comparison.

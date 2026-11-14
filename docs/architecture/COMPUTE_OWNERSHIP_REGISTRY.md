@@ -366,3 +366,8 @@ This is an operation-count status, not a percentage of all UniverseForge computa
 - Input order is deliberately reversed while expected output remains ID-sorted. Rust and Java must agree on the complete projection and stable ordering.
 - Java assertions compare the complete needs map, including extension keys, and verify durable year/world-day acknowledgements. Rust executes the same complete fixture.
 - This strengthens the existing population parity gate; it does not add a second calculation or count a new production owner. External Character writers and WF-RT-0021 cross-domain atomicity remain cutover blockers.
+
+
+### Population parity fixture envelope follow-up
+
+- The expanded fixture now uses world day 10,000 consistently at request and expected-frame levels, allowing all 1–1,000 day per-Character receipt intervals to remain nonnegative. CI had caught the expected top-level envelope retaining the old day 303; Rust correctly echoed the request's day.

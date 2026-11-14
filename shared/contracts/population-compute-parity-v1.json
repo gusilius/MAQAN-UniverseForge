@@ -1500,7 +1500,7 @@
     "world_id": "population-parity-fixture",
     "year": 303,
     "elapsed_days": 3,
-    "world_day": "303",
+    "world_day": "10000",
     "characters": [
       {
         "id": "adult_farmer",
