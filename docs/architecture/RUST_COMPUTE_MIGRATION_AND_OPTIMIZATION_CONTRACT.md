@@ -416,3 +416,9 @@ A source audit found that several read-only `PopulationSimulation` APIs (`skillR
 The first WorldSim asynchronous worker has been moved behind `WorldForgeApi.computeRuntime()`, a process-wide bounded single-worker runtime in wfmod. `WorldSimComputeScheduler` is now a compatibility facade and owns no executor, semaphore, or native worker. This establishes one execution slot for future domain operations without introducing a second scheduler. The shared slot remains occupied until the owning operation collects its completed result; closing a WorldSim lifecycle does not pretend that an interrupt stopped native code. The WorldSim ticket lifecycle epoch remains the stale-result fence.
 
 This is runtime consolidation only. It does **not** add a new Rust production operation, complete WF-RT-0023 domain freshness, or authorize increasing worker count. Population progression remains Java-owned until its immutable snapshot, native parity, durable pending-day handling, stale-input validation, and save/reload gates are implemented.
+
+
+
+### Population batch candidate — Rust implementation, no cutover
+
+The native crate now contains a deterministic population batch candidate and JNI/Java entry point. It operates only on immutable Character projections and returns derived fields; it does not mutate canonical state. Existing Java progression formulas and priority order are mirrored for parity work. This candidate is not a production owner until snapshot capture, parity, revision/lifecycle validation, durable elapsed-day handling and authoritative Java apply are integrated. Production Rust ownership remains two operations.

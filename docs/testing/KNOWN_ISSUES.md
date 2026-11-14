@@ -478,3 +478,11 @@
 - Extended scheduler regression coverage to prove a replacement world cannot start overlapping work and can collect the previous world's result before reusing the slot.
 - **Scope:** infrastructure consolidation only; no new Rust production operation and no population cutover. WF-RT-0023 remains open, and worker count remains one.
 - **Validation:** requires the full Windows x64 addon/combined-server CI run on the resulting commit. No local build or measured speedup is claimed.
+
+
+### WF-RT-0024 — Rust population batch candidate
+
+- Added a pure Rust batch transformation plus JNI and Java native entry point for population progression.
+- Preserved current daily need drift, priority order, age/life-stage rules, role/command behavior and dead-character semantics in the candidate projection.
+- Added native unit tests for multi-day progression, stable ordering, role/age cases, dead characters, duplicate IDs and unsupported schemas.
+- Cutover is intentionally pending: no canonical Java snapshot adapter, parity harness, asynchronous apply ticket or durable pending-day protocol exists yet. Java remains the only production owner. Do not double-run the formulas and do not count this as a third migrated production operation.

@@ -106,3 +106,21 @@ pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulat
     };
     make_bytes(env, &response)
 }
+
+#[no_mangle]
+pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulation_nativeAdvancePopulation(
+    env: JNIEnvPtr, _class: JObject, input: JObject,
+) -> JObject {
+    let response = match read_bytes(env, input, 16 * 1024 * 1024) {
+        None => error_json("invalid_input", "population input unavailable or too large"),
+        Some(bytes) if !has_supported_schema(&bytes) => error_json("unsupported_schema", "expected population schema_version=1"),
+        Some(bytes) => match serde_json::from_slice::<crate::population::Request>(&bytes) {
+            Ok(request) => match crate::population::advance(request) {
+                Ok(frame) => serde_json::to_vec(&frame).unwrap_or_else(|_| error_json("serialization_error", "population frame")),
+                Err(error) => error_json("population_rejected", &error),
+            },
+            Err(error) => error_json("invalid_population_request", &error.to_string()),
+        },
+    };
+    make_bytes(env, &response)
+}

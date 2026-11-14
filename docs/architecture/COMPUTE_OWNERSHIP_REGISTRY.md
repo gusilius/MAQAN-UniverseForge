@@ -280,3 +280,11 @@ This is an operation-count status, not a percentage of all UniverseForge computa
 - The runtime has one global in-flight/completed-uncollected slot. A result remains in the slot until its operation key polls it, so another domain cannot overlap native work or silently displace a completed result.
 - Closing a domain lifecycle does not cancel native code or release the slot early. The caller's world/lifecycle ticket decides whether the eventual result is still applicable.
 - This is infrastructure, not another compute operation. The production Rust operation count remains two. Population remains Java-owned pending parity and safe asynchronous apply.
+
+### Population batch compute — Rust candidate implementation (2026-11-14)
+
+- Added pure Rust `population::advance` over immutable Character projections. It mirrors the current Java daily need drift, intent priority, age/life-stage thresholds, profession/duty/command selection, dead-character handling and elapsed-day accumulation.
+- Added a dedicated schema-v1 JNI entry and Java native wrapper. Unknown need keys are preserved, missing needs default to zero, duplicate/empty IDs fail closed, and results are sorted by stable Character ID.
+- Added native unit tests for multi-day drift, priority ordering, life-stage and role behavior, dead characters, duplicate IDs and schema rejection.
+- **Not yet production-owned:** no live Character snapshot adapter, Java/Rust parity harness, asynchronous ticket/apply integration or durable pending-day protocol has been wired. Java remains the sole production owner; do not execute both implementations in production and do not count this candidate as a third migrated production operation.
+- Next integration package must capture the canonical immutable Character projection, compare both implementations on identical snapshots, preserve one Java mutation batch, persist/acknowledge elapsed days only after successful apply, and reject stale revision/lifecycle results.
