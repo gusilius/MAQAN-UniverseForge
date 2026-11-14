@@ -38,7 +38,7 @@ public final class Succession {
                 NameBank.Pool pool = names.pool(names.culture(dead.culture));
                 boolean male = r.nextBoolean();
                 heir = reg.create(pool.male.isEmpty() ? "?" : (male ? pool.male : pool.female).get(r.nextInt((male ? pool.male : pool.female).size())), pool.houses.get(r.nextInt(pool.houses.size())), dead.culture, male ? "m" : "f", year - 30);
-                heir.traits.add("usurper");
+                CharacterStats.addTrait(heir, "usurper");
                 usurper = true;
             }
             reg.appoint(heir.id, role.id, p.place);
