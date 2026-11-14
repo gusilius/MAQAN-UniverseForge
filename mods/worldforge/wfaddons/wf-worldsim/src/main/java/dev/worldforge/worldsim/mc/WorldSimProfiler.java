@@ -11,7 +11,7 @@ import java.util.TreeMap;
  *
  * The profiler never throttles or skips simulation work. It stores only a rolling
  * sample window while preserving lifetime count, total and maximum durations.
- * All measurements are nanoseconds from the authoritative server thread.
+ * Measurements are nanoseconds; synchronized recording accepts both server-thread and compute-worker samples.
  */
 final class WorldSimProfiler {
     private static final int SAMPLE_CAPACITY = 4096;
