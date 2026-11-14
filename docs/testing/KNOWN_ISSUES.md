@@ -336,3 +336,11 @@
 - **Тест:** `CourtTest` проверяет, что одна операция наследования продвигает `REALMS_POLITICS` ровно на одну revision.
 - **Ограничение:** это не полная атомарная транзакция двух доменов; прочие Realm/Politics writers и прямые props writes ещё требуют аудита. Global WorldSim apply fence запрещён.
 - **Исходники/тест:** `2623288d90c29fb67990b4fbf5f72174d6e333a8`, `e246dac4af44b727c549618fe9585a6cf133a3c2`. CI для нового HEAD ожидает.
+
+### WF-RT-0023 — TitleEditor political writer ownership
+
+- **Проблема:** политические изменения через `TitleEditor.group`, undo и redo ранее не открывали `REALMS_POLITICS` writer scope. При простом добавлении scope вокруг Succession возник бы двойной revision count из-за вложенного `setRuler`.
+- **Исправление:** единственным владельцем scope стал `TitleEditor.group`; undo/redo также открывают scope. Succession теперь включает ruler и holder metadata в один group, не создавая вложенную политическую транзакцию.
+- **Проверка:** существующий `CourtTest` требует ровно одну политическую revision на наследование. CI для последнего HEAD ещё выполняется.
+- **Ограничение:** глобальный snapshot/apply fence по-прежнему запрещён до аудита всех writers и cross-domain stale-result тестов.
+
