@@ -120,10 +120,12 @@ public final class PopulationSimulation {
             if (skillRank(character, requirement.getKey()) < requirement.getValue())
                 throw new IllegalStateException("Requires skill " + requirement.getKey() + " rank " + requirement.getValue());
         }
-        assignProfession(character, definition.id, year);
-        removeDuty(character, Duty.WORKER);
-        removeDuty(character, Duty.SPECIALIST);
-        addDuty(character, definition.duty);
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            assignProfession(character, definition.id, year);
+            removeDuty(character, Duty.WORKER);
+            removeDuty(character, Duty.SPECIALIST);
+            addDuty(character, definition.duty);
+        }
     }
 
     /** Low-level migration/admin path; prefer the catalog-validated overload. */
@@ -213,8 +215,14 @@ public final class PopulationSimulation {
     }
 
     public static void changeNeed(Character character, Need need, int delta) {
+        Objects.requireNonNull(character, "character");
+        Objects.requireNonNull(need, "need");
         Map<String, Object> needs = mapProp(character, NEEDS);
-        setNeed(needs, need, need(needs, need) + delta);
+        int previous = need(needs, need);
+        int next = clamp(previous + delta, 0, MAX_NEED);
+        if (previous == next) return;
+        setNeed(needs, need, next);
+        CharacterRegistry.recordCharacterMutation();
     }
 
     private static int need(Map<String, Object> needs, Need need) {
@@ -349,6 +357,7 @@ public final class PopulationSimulation {
     /** Applies the need changes of a completed action. Call only after the owning system confirms success. */
     public static void completeIntent(Character character, Intent intent) {
         requireAlive(character);
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
         switch (Objects.requireNonNull(intent, "intent")) {
             case EAT -> changeNeed(character, Need.HUNGER, -70);
             case REST -> changeNeed(character, Need.REST, -70);
@@ -359,6 +368,7 @@ public final class PopulationSimulation {
             case PATROL -> { changeNeed(character, Need.SAFETY, -20); changeNeed(character, Need.REST, 10); }
             case FOLLOW_COMMAND -> { changeNeed(character, Need.PURPOSE, -20); changeNeed(character, Need.REST, 8); }
             case IDLE -> { }
+        }
         }
     }
 
@@ -374,6 +384,13 @@ public final class PopulationSimulation {
 
     /** Daily hook used by PeopleMod. Aging is calendar-derived; AI intents are refreshed, but actions remain externally owned. */
     public static void advance(CharacterRegistry registry, long elapsedDays, int year) {
+        Objects.requireNonNull(registry, "registry");
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            advanceBatched(registry, elapsedDays, year);
+        }
+    }
+
+    private static void advanceBatched(CharacterRegistry registry, long elapsedDays, int year) {
         if (elapsedDays < 0) throw new IllegalArgumentException("elapsedDays cannot be negative");
         if (elapsedDays == 0) return;
         registry.refreshLifeStages(year);
