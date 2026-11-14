@@ -39,6 +39,14 @@ fn error_json(status: &str, error: &str) -> Vec<u8> {
         .unwrap_or_else(|_| br#"{"status":"serialization_error"}"#.to_vec())
 }
 
+/// Version of the JNI/data contract implemented by this exact native library.
+#[no_mangle]
+pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulation_nativeAbiVersion(
+    _env: JNIEnvPtr, _class: JObject,
+) -> i32 {
+    1
+}
+
 #[no_mangle]
 pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulation_nativeDecide(
     env: JNIEnvPtr, _class: JObject, input: JObject,
