@@ -180,3 +180,10 @@ Remaining bypass surface: Character still exposes mutable public fields, childre
 - The political lane advances once for a changed realm succession and remains unchanged for an identical metadata state. The existing CourtTest now asserts one political revision for one succession operation.
 - Source: `2623288d90c29fb67990b4fbf5f72174d6e333a8`; regression assertion: `e246dac4af44b727c549618fe9585a6cf133a3c2`.
 - This is a two-domain freshness improvement, not a complete atomic cross-domain transaction or proof that all Realm/Politics writers are covered. Global WorldSim apply fencing remains disabled.
+
+### TitleEditor canonical political writer boundary — WF-RT-0023
+
+- `TitleEditor.group` is now the single canonical `REALMS_POLITICS` writer boundary for map/title/realm edits, including grouped edits and undo/redo. A changed group commits one lane revision; a no-op group does not advance it.
+- `Succession.onDeath` routes ruler plus title-holder/succession metadata through that existing group when an editor is available. It must not open a second nested REALMS_POLITICS scope around `TitleEditor`, which would double-count the same logical mutation.
+- Headless succession without an editor retains a single direct lane scope. This does not yet provide durable atomicity across CHARACTERS and REALMS_POLITICS.
+
