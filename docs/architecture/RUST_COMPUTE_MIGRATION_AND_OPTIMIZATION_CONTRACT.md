@@ -367,3 +367,10 @@ This improves the CHARACTERS lane only. Public mutable Character fields/collecti
 CharacterRegistry identity/family operations now open the shared Character writer scope before mutation. CharacterStats trait changes also use the same scope, and Succession no longer directly mutates the trait set for usurper assignment. This closes more canonical in-module writers but does not close the public mutable-field/collection/props bypass surface across addons.
 
 Latest source HEAD: 9d567612bde231394e0e17c705b2d78108a618c3. Windows CI run 43599718531 is still running; do not treat this code as validated until logic tests and addon build finish successfully.
+
+### Character mutation coverage — psychology initialization follow-up
+
+`CharacterDevelopment.ensurePsychology` persists deterministic defaults on the canonical Character. Those writes now execute inside the existing nested Character mutation batch and advance the shared CHARACTERS revision once only when initialization changes state. Repeated calls are idempotent. No second psychology model, calculation owner, cache, or optimization layer is introduced; formulas and gameplay behavior are unchanged.
+
+Source fix: `fe94acfca57a2510fb27bd3379bb044ee694f739`. Windows CI must validate this new source commit before it is treated as accepted. Public mutable Character state and external addon writers remain an open audit item; the global WorldSim apply fence remains disabled.
+
