@@ -275,6 +275,13 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
         }
     }).collect::<Vec<_>>();
     borders.sort_by(|x, y| (&x.a, &x.b).cmp(&(&y.a, &y.b)));
+    // Recruitment only needs to know whether a realm touches any contested
+    // border. Derive that membership once instead of rescanning every border
+    // for every settlement in the recruitment pass.
+    let contested_realms: BTreeSet<&str> = borders.iter()
+        .filter(|border| border.contested_claim)
+        .flat_map(|border| [border.a.as_str(), border.b.as_str()])
+        .collect();
     for border in &borders {
         let a = realms[border.a.as_str()];
         let b = realms[border.b.as_str()];
@@ -378,9 +385,7 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
     recruitment_settlements.sort_by(|a, b| a.id.cmp(&b.id));
     for s in recruitment_settlements {
         let Some(r) = realms.get(s.realm_id.as_str()) else { continue; };
-        let threatened = borders.iter().any(|b| {
-            (b.a == r.id || b.b == r.id) && b.contested_claim
-        });
+        let threatened = contested_realms.contains(r.id.as_str());
         if threatened && s.barracks > 0 && r.treasury >= 250 && s.food > (s.population as i64) {
             proposals.push(Proposal {
                 id: proposal_id(snapshot.seed, snapshot.day, "recruit", &r.id, &s.id),
@@ -491,6 +496,21 @@ mod tests {
         let mut s=base(); s.workforce.push(Workforce{settlement_id:"village".into(),farmers:0,lumberjacks:0,miners:0,builders:0,soldiers:0,unemployed:3,food_need:100,food_output:0,wood_need:0,wood_output:0,stone_need:0,stone_output:0});
         assert!(decide(&s).unwrap().proposals.iter().any(|p| matches!(&p.kind,ProposalKind::ReassignProfession{to,..} if to=="farmer")));
     }
+    #[test] fn recruitment_uses_contested_border_membership() {
+        let mut s = base();
+        s.settlements[0].barracks = 1;
+        s.settlements[0].food = 100;
+        s.realms[0].treasury = 500;
+        let frame = decide(&s).unwrap();
+        assert!(frame.proposals.iter().any(|p| matches!(&p.kind,
+            ProposalKind::Recruit { realm, settlement, .. } if realm == "north" && settlement == "village")));
+
+        s.borders[0].contested_claim = false;
+        let frame = decide(&s).unwrap();
+        assert!(!frame.proposals.iter().any(|p| matches!(p.kind, ProposalKind::Recruit { .. })),
+            "a realm without contested borders must not recruit from this rule");
+    }
+
     #[test] fn marriage_requires_two_distinct_realms() {
         let mut s=base(); s.seed=0; s.characters=vec![
             Character{id:"a".into(),realm_id:"north".into(),age:22,alive:true,married:false,gender:0,fertility:10,prestige:50,opinion:50,house_id:"A".into()},
