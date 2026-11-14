@@ -5,7 +5,7 @@
     "world_id": "population-parity-fixture",
     "year": 303,
     "elapsed_days": 3,
-    "world_day": "303",
+    "world_day": "10000",
     "characters": [
       {
         "id": "boundary_059",
@@ -1517,7 +1517,7 @@
         "life_stage": "adult",
         "simulated_days": "11",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_000",
@@ -1536,7 +1536,7 @@
         "life_stage": "infant",
         "simulated_days": "1",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_001",
@@ -1553,7 +1553,7 @@
         "life_stage": "infant",
         "simulated_days": "102",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_002",
@@ -1570,7 +1570,7 @@
         "life_stage": "child",
         "simulated_days": "34",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_003",
@@ -1587,7 +1587,7 @@
         "life_stage": "child",
         "simulated_days": "102",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_004",
@@ -1604,7 +1604,7 @@
         "life_stage": "adolescent",
         "simulated_days": "9223372036854775807",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_005",
@@ -1621,7 +1621,7 @@
         "life_stage": "adolescent",
         "simulated_days": "9223372036854775807",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_006",
@@ -1638,7 +1638,7 @@
         "life_stage": "adult",
         "simulated_days": "3",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_007",
@@ -1655,7 +1655,7 @@
         "life_stage": "adult",
         "simulated_days": "1001",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_008",
@@ -1672,7 +1672,7 @@
         "life_stage": "elder",
         "simulated_days": "104",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_009",
@@ -1690,7 +1690,7 @@
         "life_stage": "elder",
         "simulated_days": "107",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_010",
@@ -1707,7 +1707,7 @@
         "life_stage": "elder",
         "simulated_days": "9223372036854775701",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_011",
@@ -1724,7 +1724,7 @@
         "life_stage": "elder",
         "simulated_days": "9223372036854775807",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_012",
@@ -1741,7 +1741,7 @@
         "life_stage": "infant",
         "simulated_days": "30",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_013",
@@ -1759,7 +1759,7 @@
         "life_stage": "infant",
         "simulated_days": "3",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_014",
@@ -1776,7 +1776,7 @@
         "life_stage": "child",
         "simulated_days": "254",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_015",
@@ -1793,7 +1793,7 @@
         "life_stage": "child",
         "simulated_days": "199",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_016",
@@ -1810,7 +1810,7 @@
         "life_stage": "adolescent",
         "simulated_days": "9223372036854775703",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_017",
@@ -1827,7 +1827,7 @@
         "life_stage": "adolescent",
         "simulated_days": "9223372036854775807",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_018",
@@ -1845,7 +1845,7 @@
         "life_stage": "adult",
         "simulated_days": "100",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_019",
@@ -1862,7 +1862,7 @@
         "life_stage": "adult",
         "simulated_days": "8",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_020",
@@ -1879,7 +1879,7 @@
         "life_stage": "elder",
         "simulated_days": "5",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_021",
@@ -1896,7 +1896,7 @@
         "life_stage": "elder",
         "simulated_days": "201",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_022",
@@ -1913,7 +1913,7 @@
         "life_stage": "elder",
         "simulated_days": "9223372036854775730",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_023",
@@ -1930,7 +1930,7 @@
         "life_stage": "elder",
         "simulated_days": "9223372036854775807",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_024",
@@ -1947,7 +1947,7 @@
         "life_stage": "infant",
         "simulated_days": "250",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_025",
@@ -1964,7 +1964,7 @@
         "life_stage": "infant",
         "simulated_days": "100",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_026",
@@ -1982,7 +1982,7 @@
         "life_stage": "child",
         "simulated_days": "7",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_027",
@@ -2000,7 +2000,7 @@
         "life_stage": "child",
         "simulated_days": "1100",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_028",
@@ -2017,7 +2017,7 @@
         "life_stage": "adolescent",
         "simulated_days": "9223372036854775800",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_029",
@@ -2034,7 +2034,7 @@
         "life_stage": "adolescent",
         "simulated_days": "9223372036854775807",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_030",
@@ -2051,7 +2051,7 @@
         "life_stage": "adult",
         "simulated_days": "1",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_031",
@@ -2068,7 +2068,7 @@
         "life_stage": "adult",
         "simulated_days": "102",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_032",
@@ -2085,7 +2085,7 @@
         "life_stage": "elder",
         "simulated_days": "34",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_033",
@@ -2102,7 +2102,7 @@
         "life_stage": "elder",
         "simulated_days": "102",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_034",
@@ -2119,7 +2119,7 @@
         "life_stage": "elder",
         "simulated_days": "9223372036854775807",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_035",
@@ -2136,7 +2136,7 @@
         "life_stage": "elder",
         "simulated_days": "9223372036854775807",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_036",
@@ -2154,7 +2154,7 @@
         "life_stage": "infant",
         "simulated_days": "3",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_037",
@@ -2171,7 +2171,7 @@
         "life_stage": "infant",
         "simulated_days": "1001",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_038",
@@ -2188,7 +2188,7 @@
         "life_stage": "child",
         "simulated_days": "104",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_039",
@@ -2206,7 +2206,7 @@
         "life_stage": "child",
         "simulated_days": "107",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_040",
@@ -2223,7 +2223,7 @@
         "life_stage": "adolescent",
         "simulated_days": "9223372036854775701",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_041",
@@ -2240,7 +2240,7 @@
         "life_stage": "adolescent",
         "simulated_days": "9223372036854775807",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_042",
@@ -2257,7 +2257,7 @@
         "life_stage": "adult",
         "simulated_days": "30",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_043",
@@ -2274,7 +2274,7 @@
         "life_stage": "adult",
         "simulated_days": "3",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_044",
@@ -2291,7 +2291,7 @@
         "life_stage": "elder",
         "simulated_days": "254",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_045",
@@ -2309,7 +2309,7 @@
         "life_stage": "elder",
         "simulated_days": "199",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_046",
@@ -2326,7 +2326,7 @@
         "life_stage": "elder",
         "simulated_days": "9223372036854775703",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_047",
@@ -2343,7 +2343,7 @@
         "life_stage": "elder",
         "simulated_days": "9223372036854775807",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_048",
@@ -2360,7 +2360,7 @@
         "life_stage": "infant",
         "simulated_days": "100",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_049",
@@ -2377,7 +2377,7 @@
         "life_stage": "infant",
         "simulated_days": "8",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_050",
@@ -2394,7 +2394,7 @@
         "life_stage": "child",
         "simulated_days": "5",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_051",
@@ -2411,7 +2411,7 @@
         "life_stage": "child",
         "simulated_days": "201",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_052",
@@ -2429,7 +2429,7 @@
         "life_stage": "adolescent",
         "simulated_days": "9223372036854775730",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_053",
@@ -2446,7 +2446,7 @@
         "life_stage": "adolescent",
         "simulated_days": "9223372036854775807",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_054",
@@ -2464,7 +2464,7 @@
         "life_stage": "adult",
         "simulated_days": "250",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_055",
@@ -2481,7 +2481,7 @@
         "life_stage": "adult",
         "simulated_days": "100",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_056",
@@ -2498,7 +2498,7 @@
         "life_stage": "elder",
         "simulated_days": "7",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_057",
@@ -2515,7 +2515,7 @@
         "life_stage": "elder",
         "simulated_days": "1100",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_058",
@@ -2532,7 +2532,7 @@
         "life_stage": "elder",
         "simulated_days": "9223372036854775800",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "boundary_059",
@@ -2549,7 +2549,7 @@
         "life_stage": "elder",
         "simulated_days": "9223372036854775807",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "child_farmer",
@@ -2566,7 +2566,7 @@
         "life_stage": "infant",
         "simulated_days": "2",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "hero",
@@ -2583,7 +2583,7 @@
         "life_stage": "adult",
         "simulated_days": "5",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "hungry",
@@ -2600,7 +2600,7 @@
         "life_stage": "adult",
         "simulated_days": "9",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "safety",
@@ -2617,7 +2617,7 @@
         "life_stage": "adult",
         "simulated_days": "2",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "teen_training",
@@ -2634,7 +2634,7 @@
         "life_stage": "adolescent",
         "simulated_days": "1",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "trained",
@@ -2651,7 +2651,7 @@
         "life_stage": "adult",
         "simulated_days": "4",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       },
       {
         "id": "veteran",
@@ -2668,7 +2668,7 @@
         "life_stage": "adult",
         "simulated_days": "12",
         "last_simulated_year": 303,
-        "world_day": "303"
+        "world_day": "10000"
       }
     ]
   }
