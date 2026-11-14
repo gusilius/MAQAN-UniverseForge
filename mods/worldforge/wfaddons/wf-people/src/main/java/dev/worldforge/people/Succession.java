@@ -51,7 +51,7 @@ public final class Succession {
                 // TitleEditor.group is the single canonical REALMS_POLITICS writer boundary:
                 // include ruler and holder metadata in that same group so the lane advances once.
                 Runnable updatePoliticalState = () -> {
-                    String rulerName = successor.name + (successor.house.isEmpty() ? "" : " " + heir.house);
+                    String rulerName = successor.name + (successor.house.isEmpty() ? "" : " " + successor.house);
                     if (ed != null) ed.setRuler(realmId, rulerName);
                     String deceasedGlobalId = dead.globalId;
                     String heirGlobalId = successor.globalId;
