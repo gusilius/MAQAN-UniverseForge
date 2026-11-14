@@ -111,6 +111,21 @@ public class OriginsTest {
         ok(invalidOriginsRejected && o2.toJson().equals(validOriginsSave) && rejectedRestoreRevision == restoredRevision,
                 "неизвестная раса отклоняется без изменения состояния и revision");
 
+        // Datapack removal must not make a previously valid world save unloadable.
+        OriginDefs temporarilyEmpty = new OriginDefs();
+        Origins dormant = new Origins(temporarilyEmpty);
+        dormant.fromJson(validOriginsSave);
+        ok(dormant.toJson().equals(validOriginsSave)
+                        && dormant.build(P).race.equals(o.build(P).race)
+                        && dormant.build(P).history.equals(o.build(P).history)
+                        && dormant.build(P).prof.equals(o.build(P).prof),
+                "удалённые datapack IDs сохраняются как dormant progression без потери истории и XP");
+        Origins reactivated = new Origins(d);
+        reactivated.fromJson(dormant.toJson());
+        ok(reactivated.toJson().equals(validOriginsSave)
+                        && reactivated.mods(P).equals(o.mods(P)),
+                "возвращение прежних datapack definitions реактивирует сохранённый прогресс");
+
         ok(o.viewJson(P).contains("champion") || o.viewJson(P).contains("professions"), "viewJson");
 
         // подрасы и специализации профессий
