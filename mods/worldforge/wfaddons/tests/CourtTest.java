@@ -175,8 +175,16 @@ public class CourtTest {
         Character childHeir = minorCourt.reg.create("Малолетний наследник", "Тест", "north", "m", minorCourt.year() - 8);
         Character adultRegent = minorCourt.reg.holder("chancellor", Courts.realmPlace(minorRealm));
         formerRuler.children.add(childHeir.id); childHeir.father = formerRuler.id;
+        var politicalRevisionBeforeSuccession = dev.worldforge.mod.api.WorldForgeApi.revisions()
+                .snapshot().orElseThrow()
+                .revision(dev.worldforge.mod.api.DomainMutationRevisions.Domain.REALMS_POLITICS);
         Succession.onDeath(minorCourt.reg, minorCourt.defs, minorCourt.d, minorCourt.ed, minorCourt.names,
                 112L, formerRuler.id, minorCourt.year(), "primogeniture");
+        var politicalRevisionAfterSuccession = dev.worldforge.mod.api.WorldForgeApi.revisions()
+                .snapshot().orElseThrow()
+                .revision(dev.worldforge.mod.api.DomainMutationRevisions.Domain.REALMS_POLITICS);
+        ok(politicalRevisionAfterSuccession == politicalRevisionBeforeSuccession + 1,
+                "one canonical succession operation advances REALMS_POLITICS exactly once");
         // Replace every existing ruler post before appointing the fixture heir; appoint() is
         // additive by design and must not leave two sovereigns in the same court.
         String rulerRole = minorCourt.defs.ruler().id;
