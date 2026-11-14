@@ -444,3 +444,10 @@
 - Added request-scoped borrowed indexes and replaced the repeated scans without changing formulas or ownership. Added a regression test asserting identical output after reversing geographic cell order.
 - This is an algorithmic complexity improvement, not yet a measured benchmark result. Require Rust unit tests, Windows/Linux native CI, and representative large-map profiling before marking performance impact verified.
 - Source commits: `10b20f8d`, `680dfbff`, `33a1bec7`.
+
+
+### WF-RT-0015 — indexed emergence CI compile failure and correction
+
+- **CI evidence:** run `43604742736`, Linux native core failed during `cargo test`. The production call sites had been updated to the indexed lookup signatures, but three direct unit-test call sites still used the old signatures; one new order-independence test also attempted to clone `EmergenceRequest`, which intentionally does not implement `Clone`.
+- **Correction:** updated the direct tests to build request-scoped borrowed indexes explicitly, aligned the polity reduction call, and construct the two order variants independently. No production algorithm/formula was changed in this correction.
+- **Status:** corrected source commit `807fed9d`; a fresh Linux/Windows native CI run is required. The failed run is not green.
