@@ -396,3 +396,10 @@
 - Read/query APIs and JSON serialization now synchronize on the same ledger monitor as canonical writers, preventing these APIs from observing an in-progress canonical mutation or serializing a partially applied transfer.
 - **Still not a complete immutable read model:** `account()` and `accounts()` expose mutable `Account` instances, so callers can read fields outside the monitor and can still write them directly. `Account.available()` is likewise a direct object method. This is an explicit compatibility boundary to address with a staged read-only view/API migration; do not claim full thread safety or enable global snapshot/apply fencing yet.
 - Source commit: `58cf012a`. New CI run required.
+
+
+### WF-RT-0023 — CI regression: invalid synchronized modifier placement
+
+- **CI evidence:** workflow `43603310589` failed in `WorldForge logic tests` and `WorldForge core`. The logs show the read-side synchronization edit had placed Java's `synchronized` modifier after the return type (`public String synchronized ...`), which is invalid syntax and caused cascading missing-symbol errors in TreasuryLedger consumers (including Settlements and Army). This is a source regression, not an Origins or Rust-native failure.
+- **Correction:** normalized declarations to legal Java modifier order (`public synchronized <return-type> method(...)`) for all 17 affected read/serialization methods. Existing public method signatures and call sites are preserved; no consumer API was removed.
+- **Validation status:** source correction committed as `489d8cc637bb05452d35dedfe999e09d6f29d4ab`. A fresh CI run against this corrected commit is required; do not mark the Treasury concurrency work verified until both logic tests and core compilation pass. The previous run is not green.
