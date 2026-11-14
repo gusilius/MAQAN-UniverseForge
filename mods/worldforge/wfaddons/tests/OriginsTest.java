@@ -93,14 +93,23 @@ public class OriginsTest {
         ok(n3.history.isEmpty(), "новичок без класса");
         // сохранение
         Origins o2 = new Origins(d);
+        dev.worldforge.mod.api.WorldForgeApi.revisions().resetForTests();
         o2.fromJson(o.toJson());
         ok(o2.build(P).history.equals(o.build(P).history) && o2.build(P).prof.equals(o.build(P).prof) && o2.mods(P).equals(o.mods(P)), "save/load сохраняет историю, профессии и рассчитанные бонусы");
         String validOriginsSave = o.toJson();
+        long restoredRevision = dev.worldforge.mod.api.WorldForgeApi.revisions().snapshot().orElseThrow()
+                .revision(dev.worldforge.mod.api.DomainMutationRevisions.Domain.ORIGINS);
+        o2.fromJson(validOriginsSave);
+        long repeatedRestoreRevision = dev.worldforge.mod.api.WorldForgeApi.revisions().snapshot().orElseThrow()
+                .revision(dev.worldforge.mod.api.DomainMutationRevisions.Domain.ORIGINS);
+        ok(repeatedRestoreRevision == restoredRevision, "повторное восстановление идентичного snapshot не продвигает revision");
         String corruptOriginsSave = validOriginsSave.replace("\"race\":\"orc\"", "\"race\":\"unknown_race\"");
         boolean invalidOriginsRejected = false;
         try { o2.fromJson(corruptOriginsSave); } catch (IllegalArgumentException invalidSave) { invalidOriginsRejected = true; }
-        ok(invalidOriginsRejected && o2.toJson().equals(validOriginsSave),
-                "неизвестная раса отклоняется без очистки действующего прогресса");
+        long rejectedRestoreRevision = dev.worldforge.mod.api.WorldForgeApi.revisions().snapshot().orElseThrow()
+                .revision(dev.worldforge.mod.api.DomainMutationRevisions.Domain.ORIGINS);
+        ok(invalidOriginsRejected && o2.toJson().equals(validOriginsSave) && rejectedRestoreRevision == restoredRevision,
+                "неизвестная раса отклоняется без изменения состояния и revision");
 
         ok(o.viewJson(P).contains("champion") || o.viewJson(P).contains("professions"), "viewJson");
 
