@@ -277,6 +277,8 @@ public final class WorldSimMod {
         JsonObject snapshot = GSON.fromJson(new String(result.snapshot(), StandardCharsets.UTF_8), JsonObject.class);
         JsonObject emergenceFrame = GSON.fromJson(new String(result.emergenceFrame(), StandardCharsets.UTF_8), JsonObject.class);
         JsonObject frame = GSON.fromJson(new String(result.decisionFrame(), StandardCharsets.UTF_8), JsonObject.class);
+        requireNativeSuccess(emergenceFrame, "emergence");
+        requireNativeSuccess(frame, "decision");
         if (snapshot == null || emergenceFrame == null || !emergenceFrame.has("state")
                 || !emergenceFrame.get("state").isJsonObject()) {
             throw new IllegalStateException("Native emergence engine returned an invalid state frame");
@@ -376,6 +378,17 @@ public final class WorldSimMod {
                         ? snapshot.getAsJsonArray("settlements").size() : 0,
                 frame.getAsJsonArray("proposals").size(), accepted, rejected);
         updateCampaign(server, day);
+    }
+
+    private static void requireNativeSuccess(JsonObject frame, String stage) {
+        if (frame == null) throw new IllegalStateException("Native " + stage + " frame is null");
+        if (frame.has("status") && !frame.get("status").isJsonNull()) {
+            String status = frame.get("status").getAsString();
+            if (!"ok".equalsIgnoreCase(status)) {
+                String detail = frame.has("error") ? frame.get("error").getAsString() : "unspecified native error";
+                throw new IllegalStateException("Native " + stage + " rejected request: " + status + ": " + detail);
+            }
+        }
     }
 
     private static int emergenceYear(JsonObject state, int fallback) {
