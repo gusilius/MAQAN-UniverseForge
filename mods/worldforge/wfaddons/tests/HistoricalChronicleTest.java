@@ -71,6 +71,19 @@ public final class HistoricalChronicleTest {
                         && orderedEntries.get(0).day == 0
                         && orderedEntries.get(1_999).day == 1_999,
                 "large in-order event streams preserve full chronological order on the append fast path");
+
+        HistoricalChronicle boundedBook = new HistoricalChronicle();
+        boundedBook.setStartingYear(300);
+        for (int i = 0; i < HistoricalChronicle.MAX_ENTRIES + 50; i++) {
+            EventLog.Event event = new EventLog.Event(i + 1L, EventLog.Category.PEOPLE,
+                    "Bounded history event " + i, List.of(), i);
+            boundedBook.record(event, i, 300);
+        }
+        List<HistoricalChronicle.Entry> boundedEntries = boundedBook.entries();
+        check(boundedBook.size() == HistoricalChronicle.MAX_ENTRIES
+                        && boundedEntries.get(0).day == 50
+                        && boundedEntries.get(boundedEntries.size() - 1).day == HistoricalChronicle.MAX_ENTRIES + 49L,
+                "history remains strictly bounded and preserves the newest 100,000 entries after prefix compaction");
         HistoricalChronicle restoredOutOfOrder = new HistoricalChronicle();
         restoredOutOfOrder.fromJson("{\"starting_year\":300,\"entries\":["
                 + "{\"id\":\"worldforge-event:2\",\"day\":40,\"year\":300,\"epoch\":0,\"cycle\":0,\"category\":\"war\",\"text\":\"later\",\"realms\":[]},"
