@@ -355,5 +355,5 @@
 - **CI run:** `43600642066`, Windows logic tests. The first stable-reference fix left one lambda capture as `heir.house` while the same expression used `successor`; javac rejected it because `heir` is reassigned in the enclosing method.
 - **Fix:** all lambda references to the selected heir now use the stable `successor` local.
 - **Commit:** `16b2b3e445e221edfb4b5668ffdd63e4db20ab78`.
-- **Status:** source correction saved; new CI verification is pending. Do not close WF-RT-0023 until compile, CourtTest, and addon build pass.
+- **Status:** validated by run `43600742122` on source commit `16b2b3e`: Windows logic tests PASS (including compilation); WorldForge core PASS; native Windows/Linux PASS; MAQAN Platform PASS. Atlas + Rust and WorldForge addons were still running at the latest check. The compile regression is resolved; broader WF-RT-0023 remains open until the addon build and remaining writer/snapshot audits pass.
 
