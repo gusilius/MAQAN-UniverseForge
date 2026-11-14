@@ -360,3 +360,10 @@ The Character lane now has a nested transaction boundary. Its outer scope opens 
 PopulationSimulation and CharacterDevelopment canonical APIs are being migrated to this boundary. Daily population advancement is one batch for the tick; composite hire/fire, profession, court generation and succession operations are coalesced. Idempotent writes should not churn revisions.
 
 This improves the CHARACTERS lane only. Public mutable Character fields/collections, external addon writers, and other domain lanes remain incomplete. Global WorldSim apply fencing stays disabled until all snapshot inputs and writers are covered and stale-result tests pass.
+
+
+### Additional canonical Character writer integration
+
+CharacterRegistry identity/family operations now open the shared Character writer scope before mutation. CharacterStats trait changes also use the same scope, and Succession no longer directly mutates the trait set for usurper assignment. This closes more canonical in-module writers but does not close the public mutable-field/collection/props bypass surface across addons.
+
+Latest source HEAD: 9d567612bde231394e0e17c705b2d78108a618c3. Windows CI run 43599718531 is still running; do not treat this code as validated until logic tests and addon build finish successfully.
