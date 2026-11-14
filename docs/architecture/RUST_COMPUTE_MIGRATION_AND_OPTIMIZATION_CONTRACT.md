@@ -317,4 +317,4 @@ CI green подтверждает только выполненные в нём 
 
 **Важно:** целевая матрица этого документа не означает, что перенос уже завершён. При расхождении текущий production owner указывается в Compute Ownership Registry; переключение разрешено только после parity и acceptance gates. Реестр от 2026-11-14 пока неполон по сторонним runtime-модам и должен уточняться по фактическому modpack, loader/version и исходникам всех addon-подсистем.
 
-Последнее документированное изменение синхронного JNI compute: `WF-RT-0020` в `KNOWN_ISSUES.md`. Асинхронный scheduler, revision fence и bounded result handling ещё не внедрены.
+`WF-RT-0020` отслеживает асинхронную миграцию WorldSim. Первая реализация scheduler и lifecycle fence уже находится в исходниках; CI, campaign regression и общий cross-domain mutation revision ещё не подтверждены.
