@@ -187,3 +187,10 @@ Remaining bypass surface: Character still exposes mutable public fields, childre
 - `Succession.onDeath` routes ruler plus title-holder/succession metadata through that existing group when an editor is available. It must not open a second nested REALMS_POLITICS scope around `TitleEditor`, which would double-count the same logical mutation.
 - Headless succession without an editor retains a single direct lane scope. This does not yet provide durable atomicity across CHARACTERS and REALMS_POLITICS.
 
+### Origins ownership audit — WF-RT-0023 follow-up
+
+- `wf-origins.OriginsMod.owner(ServerPlayer)` currently returns `p:<UUID>`; its state is held in `Origins.builds` and persisted through the dedicated `wf_origins.json` save file.
+- NPC Character race/class facets are stored by `wf-people.CharacterDevelopment` on the canonical Character (`identity.race`, `rpg.class`). This is a different observed owner path, not sufficient evidence to merge the stores.
+- `StatApi` documents both `p:<uuid>` and `n:<id>`, while the Forge Origins adapter currently only exposes player owners. Audit any NPC Origins assignment callers before deciding whether NPC origins should be mirrored or migrated.
+- The shared `ORIGINS` revision lane exists but has no verified writer integration yet. `Origins.Build` and its collections are mutable/public, so simply adding revision increments to a few setters would leave bypasses. Next work must first close or encapsulate this mutable API and cover assignment, player actions, profession XP, save restore and datapack reload semantics.
+- Do not introduce a second character identity/progression calculation or enable the global apply fence until this is resolved.
