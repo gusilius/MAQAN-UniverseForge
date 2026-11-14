@@ -364,4 +364,8 @@
 - **Дополнительная корректировка:** class choice и NPC assignment собирают staged Build и публикуют его только после успешной подготовки, уменьшая риск частичного состояния при сбое archetype hook.
 - **CI:** run `43601262472` на исходном коммите `04d5373` — `OriginsTest` прошёл, весь WorldForge logic suite: 65 passed / 0 failed. WorldForge Core, native Windows/Linux и MAQAN Platform также PASS. Atlas + Rust и WorldForge addons ещё выполнялись при последней проверке.
 - **Ограничение:** нужны отдельные проверки конкурентных snapshots и Progress/Character cross-domain semantics; addon build ещё не завершён. Глобальный apply fence остаётся выключен.
+### WF-RT-0023 — Origins follow-up: restore revision and datapack lifecycle
 
+- **Проверка добавлена:** повторный `fromJson` идентичного состояния не должен увеличивать `ORIGINS` revision; отклонённый повреждённый save не должен менять ни состояние, ни revision. Изменение теста сохранено в `a39085abbbdec5e904ed311b0e8be2327887790c`.
+- **CI:** run `43601510981` на `7d8d5deb` подтвердил PASS для WorldForge logic tests, WorldForge Core, native Windows/Linux, Atlas + Rust и MAQAN Platform; job WorldForge addons на момент проверки ещё выполнялся. Новый run `43601727218` на `a39085ab` создан и ожидает старта/результата.
+- **Оставшиеся вопросы:** datapack reload может удалить/переопределить definitions, на которые ссылается сохранённый progression; нужна политика совместимости/миграции без потери истории. Также не доказана атомарность внешних `Progress`/`Character` hooks. Глобальный apply fence и увеличение Rust worker count остаются выключенными.
