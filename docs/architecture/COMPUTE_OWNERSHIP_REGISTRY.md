@@ -213,3 +213,12 @@ Remaining bypass surface: Character still exposes mutable public fields, childre
 - `fromJson` rebuilds indexes and balances in restore mode without publishing live-world revisions.
 - This is revision ownership, not a complete immutable ledger snapshot: `Account` still exposes mutable balance/credit/debt fields and remains a known bypass surface. Direct external writes must be audited before snapshot/apply fencing. The ledger journal and existing indexes remain the sole financial record; no parallel cache or executor was added.
 - Source commits: `3726bab9`, `5812300a`; regression tests: `1023ded9`. CI must pass before treating this boundary as verified.
+
+
+### TreasuryLedger concurrent writer serialization — WF-RT-0023
+
+- The canonical mutating public methods on `TreasuryLedger` are now synchronized on the ledger instance. Nested calls remain reentrant and continue to join the existing thread-local `MutationBatch`; this closes the race where concurrent callers could share one thread-local batch and mutate account/journal structures simultaneously.
+- The ledger still uses the existing `ECONOMY_TRADE` revision lane and the existing account/journal indexes. No new executor, cache, ledger, or revision coordinator was introduced.
+- Added a concurrent regression fixture: four writer threads perform 100 distinct transfers; the expected result is 100 successful transfers, conserved source/destination balances, and exactly 100 economy revisions.
+- Direct mutable `Account` exposure remains a bypass risk. Synchronization of canonical methods does not make external field writes safe. Do not enable global snapshot/apply fencing until a read-only account view and external-writer audit are complete.
+- Commits: `f48ee6a5`, `af5c18a6`. CI pending.
