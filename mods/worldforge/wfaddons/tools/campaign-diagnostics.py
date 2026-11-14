@@ -19,7 +19,8 @@ for listing in work.glob("jcmd-processes-*.txt"): shutil.copy2(listing,out/listi
 for pattern in ("hs_err_pid*.log", "java_pid*.hprof", "gc-*.log"):
     for diagnostic_file in work.glob(pattern): shutil.copy2(diagnostic_file, out/diagnostic_file.name)
 profile_src=work/"performance-profile.json"
-if profile_src.is_file(): shutil.copy2(profile_src,out/"performance-profile.json")
+if profile_src.is_file() and profile_src.resolve() != (out/"performance-profile.json").resolve():
+    shutil.copy2(profile_src,out/"performance-profile.json")
 content=log.read_text(encoding="utf-8",errors="replace") if log.exists() else ""
 rules=[("watchdog",r"Watchdog|A single server tick took|Considering it to be crashed"),("out_of_memory",r"OutOfMemoryError|Java heap space|GC overhead limit exceeded"),("native_failure",r"UnsatisfiedLinkError|EXCEPTION_ACCESS_VIOLATION|worldforge_worldsim"),("timeout",r"wall-clock timeout|did not reach stable four-generation acceptance"),("startup_failure",r"Mod loading has failed|Failed to start|Exception in thread \"main\""),("preflight_failure",r"Campaign map must retain|Campaign requires|Native WorldSim engine is unavailable|Unknown or incomplete command"),("exception",r"Caused by:|Exception")]
 detected=[n for n,pat in rules if re.search(pat,content,re.I)]
