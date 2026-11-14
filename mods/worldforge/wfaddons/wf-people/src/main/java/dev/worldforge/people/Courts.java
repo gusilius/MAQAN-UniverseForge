@@ -25,6 +25,12 @@ public final class Courts {
 
     /** Возвращает число созданных персонажей. ed может быть null (тогда правитель в данных государства не меняется). */
     public static int ensure(TitleData d, TitleEditor ed, CharacterRegistry reg, RoleDefs defs, NameBank names, long seed, int year) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            return ensureBatched(d, ed, reg, defs, names, seed, year);
+        }
+    }
+
+    private static int ensureBatched(TitleData d, TitleEditor ed, CharacterRegistry reg, RoleDefs defs, NameBank names, long seed, int year) {
         int created = 0;
         // Only title offices inside an actually owned realm belong to the living political
         // hierarchy. Geography-only maps still contain thousands of unowned barony/county
