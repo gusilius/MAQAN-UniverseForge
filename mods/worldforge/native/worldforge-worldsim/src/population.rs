@@ -3,11 +3,11 @@ use serde::{Deserialize,Serialize};
 use std::collections::{BTreeMap,BTreeSet};
 const MAX:i32=100;
 #[derive(Clone,Debug,Default,PartialEq,Eq,Serialize,Deserialize)]
-pub struct Person{pub id:String,pub birth_year:i32,pub alive:bool,#[serde(default)]pub needs:BTreeMap<String,i32>,#[serde(default)]pub duties:BTreeSet<String>,#[serde(default)]pub profession:String,#[serde(default)]pub training_target:String,#[serde(default)]pub command:String,#[serde(default)]pub simulated_days:u64}
+pub struct Person{pub id:String,pub birth_year:i32,pub alive:bool,#[serde(default)]pub needs:BTreeMap<String,i32>,#[serde(default)]pub duties:BTreeSet<String>,#[serde(default)]pub profession:String,#[serde(default)]pub training_target:String,#[serde(default)]pub command:String,#[serde(default)]pub simulated_days:i64}
 #[derive(Clone,Debug,PartialEq,Eq,Serialize,Deserialize)]
 pub struct Request{pub schema_version:u32,pub world_id:String,pub year:i32,pub elapsed_days:u64,pub characters:Vec<Person>}
 #[derive(Clone,Debug,PartialEq,Eq,Serialize,Deserialize)]
-pub struct PersonResult{pub id:String,pub needs:BTreeMap<String,i32>,pub intent:String,pub age_years:i32,pub life_stage:String,pub simulated_days:u64,pub last_simulated_year:i32}
+pub struct PersonResult{pub id:String,pub needs:BTreeMap<String,i32>,pub intent:String,pub age_years:i32,pub life_stage:String,pub simulated_days:i64,pub last_simulated_year:i32}
 #[derive(Clone,Debug,PartialEq,Eq,Serialize,Deserialize)]
 pub struct Frame{pub schema_version:u32,pub world_id:String,pub year:i32,pub elapsed_days:u64,pub characters:Vec<PersonResult>}
 fn need(n:&BTreeMap<String,i32>,k:&str)->i32{n.get(k).copied().unwrap_or(0).clamp(0,MAX)}
@@ -35,7 +35,7 @@ pub fn advance(r:Request)->Result<Frame,String>{
   let age=r.year.saturating_sub(p.birth_year).max(0);let mut needs=p.needs.clone();
   if p.alive{for (key,drift) in drifts{needs.insert(key.into(),need(&needs,key).saturating_add(drift).clamp(0,MAX));}}
   out.push(PersonResult{id:p.id.clone(),needs:needs.clone(),intent:decide(p,&needs,age).into(),age_years:age,
-   life_stage:stage(age).into(),simulated_days:if p.alive{p.simulated_days.saturating_add(r.elapsed_days)}else{p.simulated_days},last_simulated_year:r.year});
+   life_stage:stage(age).into(),simulated_days:if p.alive{p.simulated_days.max(0).saturating_add(r.elapsed_days.min(i64::MAX as u64) as i64)}else{p.simulated_days},last_simulated_year:r.year});
  }
  out.sort_by(|a,b|a.id.cmp(&b.id));
  Ok(Frame{schema_version:1,world_id:r.world_id,year:r.year,elapsed_days:r.elapsed_days,characters:out})
@@ -52,5 +52,6 @@ pub fn advance(r:Request)->Result<Frame,String>{
  let f=advance(Request{schema_version:1,world_id:"w".into(),year:303,elapsed_days:1,characters:vec![worker,child,hero]}).unwrap();
  let m:BTreeMap<_,_>=f.characters.iter().map(|x|(x.id.as_str(),x)).collect();assert_eq!(m["w"].intent,"work");assert_eq!(m["c"].life_stage,"infant");assert_eq!(m["c"].intent,"idle");assert_eq!(m["h"].intent,"follow_command");}
  #[test]fn dead_people_are_not_advanced(){let mut dead=p("d");dead.alive=false;dead.simulated_days=42;let f=advance(Request{schema_version:1,world_id:"w".into(),year:303,elapsed_days:7,characters:vec![dead]}).unwrap();assert_eq!(f.characters[0].simulated_days,42);assert!(f.characters[0].needs.is_empty());}
+ #[test]fn elapsed_days_saturate_at_java_long_max(){let mut p=p("p");p.simulated_days=i64::MAX-1;let f=advance(Request{schema_version:1,world_id:"w".into(),year:303,elapsed_days:9,characters:vec![p]}).unwrap();assert_eq!(f.characters[0].simulated_days,i64::MAX);}
  #[test]fn invalid_schema_and_duplicate_ids_fail_closed(){let a=p("same");let r=Request{schema_version:1,world_id:"w".into(),year:303,elapsed_days:1,characters:vec![a.clone(),a]};assert!(advance(r).unwrap_err().contains("duplicate"));let r=Request{schema_version:2,world_id:"w".into(),year:303,elapsed_days:1,characters:vec![]};assert!(advance(r).unwrap_err().contains("schema"));}
 }

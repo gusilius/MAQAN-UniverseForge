@@ -51,7 +51,7 @@ fn error_json(status: &str, error: &str) -> Vec<u8> {
 pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulation_nativeAbiVersion(
     _env: JNIEnvPtr, _class: JObject,
 ) -> i32 {
-    1
+    2
 }
 
 #[no_mangle]

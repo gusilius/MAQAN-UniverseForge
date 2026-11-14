@@ -11,7 +11,7 @@ import java.util.Locale;
 /** Loads the platform-native WorldSim core; Java remains authoritative if no supported binary is present. */
 public final class NativeWorldSimulation {
     public static final int SNAPSHOT_SCHEMA_VERSION = 1;
-    public static final int NATIVE_ABI_VERSION = 1;
+    public static final int NATIVE_ABI_VERSION = 2;
     private static volatile boolean attempted;
     private static volatile boolean available;
     private NativeWorldSimulation() {}
