@@ -244,3 +244,12 @@ This is an operation-count status, not a percentage of all UniverseForge computa
 | Remaining compute domains | population micro-simulation, economy/trade, logistics/path planning, political/diplomatic planning, military/tactical simulation, etc. | Not yet exhaustively counted | Target ownership in the migration contract is not evidence of implementation. Each domain needs source-call-site inventory, profile, parity fixtures, one-owner cutover, and addon compatibility audit. |
 
 **Current honest headline:** 2 confirmed Rust-owned production compute operations; 1 unverified Rust entry point; no defensible overall percentage yet. The next progress report must increase the count only after a production cutover is evidenced in source and CI/parity checks, not when a Rust function or wrapper is merely added.
+
+
+### `worldsim.emergence.advance` — request-scoped lookup indexes
+
+- Rust remains the sole production compute owner for this operation.
+- Reuses one request-local borrowed index for map IDs, geographic coordinates and canonical band IDs; no duplicate geographic store, persistent cache, extra worker, or Java fallback calculation is introduced.
+- Replaces repeated linear coordinate lookup and polity-member aggregation scans with indexed lookup.
+- Determinism guard: reversed geographic-cell input order must produce an identical `EmergenceFrame`.
+- Source commits: `10b20f8d`, `680dfbff`, `33a1bec7`. Await CI and large-map benchmark evidence; no numeric performance claim yet.
