@@ -173,3 +173,10 @@ Remaining bypass surface: Character still exposes mutable public fields, childre
 - Commit: `fe94acfca57a2510fb27bd3379bb044ee694f739`.
 - This closes one identified in-module writer bypass only. Public mutable Character state and external addon writers remain unaudited; do not enable the global WorldSim apply fence.
 
+### Succession political-domain writer follow-up — WF-RT-0023
+
+- `Succession.onDeath` remains the canonical owner of ruler succession; no second succession model or political cache is introduced.
+- Its realm ruler and title-holder metadata writes now open the existing `REALMS_POLITICS` lane before mutation, while Character death/posts/heir operations remain under the existing `CHARACTERS` batch.
+- The political lane advances once for a changed realm succession and remains unchanged for an identical metadata state. The existing CourtTest now asserts one political revision for one succession operation.
+- Source: `2623288d90c29fb67990b4fbf5f72174d6e333a8`; regression assertion: `e246dac4af44b727c549618fe9585a6cf133a3c2`.
+- This is a two-domain freshness improvement, not a complete atomic cross-domain transaction or proof that all Realm/Politics writers are covered. Global WorldSim apply fencing remains disabled.
