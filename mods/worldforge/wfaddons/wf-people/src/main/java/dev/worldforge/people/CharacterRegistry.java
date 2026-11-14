@@ -42,6 +42,44 @@ public final class CharacterRegistry {
     }
     private long revision;
 
+    private static final ThreadLocal<MutationBatchState> MUTATION_BATCH = new ThreadLocal<>();
+
+    private static final class MutationBatchState {
+        int depth;
+        boolean dirty;
+    }
+
+    /**
+     * Coalesces nested canonical Character writes into one shared revision.
+     * This is transaction metadata only; it does not own or duplicate Character state.
+     */
+    public static final class MutationBatch implements AutoCloseable {
+        private final MutationBatchState state;
+        private boolean closed;
+        private MutationBatch(MutationBatchState state) { this.state = state; }
+        @Override public void close() {
+            if (closed) return;
+            closed = true;
+            if (--state.depth == 0) {
+                MUTATION_BATCH.remove();
+                if (state.dirty) commitDomainMutation();
+            }
+        }
+    }
+
+    public static MutationBatch beginMutationBatch() {
+        MutationBatchState state = MUTATION_BATCH.get();
+        if (state == null) {
+            state = new MutationBatchState();
+            MUTATION_BATCH.set(state);
+        }
+        state.depth++;
+        return new MutationBatch(state);
+    }
+
+    /** Records one authoritative Character write, coalescing it inside an owning operation. */
+    public static void recordCharacterMutation() { recordDomainMutation(); }
+
     /** Changes only when registry membership or identity records are replaced. */
     public long revision() { return revision; }
 
@@ -262,6 +300,15 @@ public final class CharacterRegistry {
 
     /** Advances the shared lane after a canonical Character write has completed. */
     private static void recordDomainMutation() {
+        MutationBatchState batch = MUTATION_BATCH.get();
+        if (batch != null) {
+            batch.dirty = true;
+            return;
+        }
+        commitDomainMutation();
+    }
+
+    private static void commitDomainMutation() {
         try (DomainMutationRevisions.Mutation mutation =
                      WorldForgeApi.revisions().begin(DomainMutationRevisions.Domain.CHARACTERS)) {
             mutation.commit();
