@@ -51,6 +51,8 @@ public final class WorldSimComputeSchedulerTest {
             check(!result.ticket().matches("world-A", 43, 7), "stale revisions must be rejected");
             check(!result.ticket().matches("world-A", 42, 8), "results from an earlier lifecycle must be rejected");
             check(result.snapshot()[0] == 1, "snapshot must be defensively copied");
+            check(result.queueWaitNanos() >= 0 && result.computeNanos() >= 0,
+                    "queue wait and compute duration must be measurable");
             check(result.emergenceFrame()[0] == 6 && result.decisionFrame()[0] == 7,
                     "both compute outputs must be retained");
             check(calls.get() == 1, "one submitted request must execute exactly once");
