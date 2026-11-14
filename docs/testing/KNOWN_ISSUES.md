@@ -389,3 +389,10 @@
 - **Регрессионный тест:** четыре потока выполняют 100 уникальных переводов; проверяются сохранение общей суммы, точные балансы и 100 revision для 100 успешных операций.
 - **Остаточный риск:** `account()` всё ещё возвращает mutable `Account`, а поля баланса/долга публичны. Внешние прямые записи обходят monitor и revision. Нужен read-only view + полный аудит writers; global snapshot/apply fence запрещён до этого.
 - **Коммиты:** `f48ee6a5`, `af5c18a6`, `836ddc07`. CI ожидается.
+
+
+### WF-RT-0023 — TreasuryLedger read-side consistency follow-up
+
+- Read/query APIs and JSON serialization now synchronize on the same ledger monitor as canonical writers, preventing these APIs from observing an in-progress canonical mutation or serializing a partially applied transfer.
+- **Still not a complete immutable read model:** `account()` and `accounts()` expose mutable `Account` instances, so callers can read fields outside the monitor and can still write them directly. `Account.available()` is likewise a direct object method. This is an explicit compatibility boundary to address with a staged read-only view/API migration; do not claim full thread safety or enable global snapshot/apply fencing yet.
+- Source commit: `58cf012a`. New CI run required.
