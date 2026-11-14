@@ -5,6 +5,7 @@ import dev.worldforge.mod.api.EventLog;
 import dev.worldforge.mod.api.WorldForgeApi;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
+import dev.worldforge.people.PopulationSimulation;
 
 public final class DomainMutationRevisionsTest {
     private static int failures;
@@ -111,6 +112,40 @@ public final class DomainMutationRevisionsTest {
         check(repeatedAgeRefresh.revision(DomainMutationRevisions.Domain.CHARACTERS)
                         == afterAgeRefresh.revision(DomainMutationRevisions.Domain.CHARACTERS),
                 "repeating the same calendar refresh does not create redundant Character revisions");
+
+        PopulationSimulation.setNeed(founder, PopulationSimulation.Need.HUNGER, 40);
+        var afterNeedWrite = WorldForgeApi.revisions().snapshot().orElseThrow();
+        PopulationSimulation.setNeed(founder, PopulationSimulation.Need.HUNGER, 40);
+        var afterRepeatedNeed = WorldForgeApi.revisions().snapshot().orElseThrow();
+        check(afterRepeatedNeed.revision(DomainMutationRevisions.Domain.CHARACTERS)
+                        == afterNeedWrite.revision(DomainMutationRevisions.Domain.CHARACTERS),
+                "idempotent population need assignment does not advance Character revision");
+
+        long beforePopulationBatch = afterRepeatedNeed.revision(DomainMutationRevisions.Domain.CHARACTERS);
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            PopulationSimulation.setNeed(founder, PopulationSimulation.Need.HUNGER, 55);
+            PopulationSimulation.setCommand(founder, "defend_capital");
+            PopulationSimulation.setTrainingTarget(founder, "tactics");
+        }
+        var afterPopulationBatch = WorldForgeApi.revisions().snapshot().orElseThrow();
+        check(afterPopulationBatch.revision(DomainMutationRevisions.Domain.CHARACTERS)
+                        == beforePopulationBatch + 1,
+                "multiple nested population writes coalesce into one canonical Character revision");
+
+        long beforeDailyAdvance = afterPopulationBatch.revision(DomainMutationRevisions.Domain.CHARACTERS);
+        PopulationSimulation.advance(people, 2, 4);
+        var afterDailyAdvance = WorldForgeApi.revisions().snapshot().orElseThrow();
+        check(afterDailyAdvance.revision(DomainMutationRevisions.Domain.CHARACTERS)
+                        == beforeDailyAdvance + 1,
+                "one daily population batch commits one Character revision for the complete world tick");
+
+        long beforeProfession = afterDailyAdvance.revision(DomainMutationRevisions.Domain.CHARACTERS);
+        PopulationSimulation.assignProfession(founder, "farmer", 4);
+        var afterProfession = WorldForgeApi.revisions().snapshot().orElseThrow();
+        check(afterProfession.revision(DomainMutationRevisions.Domain.CHARACTERS)
+                        == beforeProfession + 1
+                        && PopulationSimulation.profession(founder).equals("farmer"),
+                "canonical population profession write advances the shared Character lane");
 
         if (failures > 0) throw new AssertionError(failures + " domain mutation revision checks failed");
         System.out.println("DOMAIN_MUTATION_REVISIONS_STATUS=PASS");
