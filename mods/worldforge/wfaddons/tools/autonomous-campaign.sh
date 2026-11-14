@@ -16,6 +16,7 @@ mkdir -p "$OUTPUT"
 OUTPUT="$(cd "$OUTPUT" && pwd)"
 WORK="$(mktemp -d)"
 SERVER_PID=""
+SERVER_EXIT_CODE="not_observed"
 CURRENT_STAGE="preflight"
 THREAD_DUMP_COUNT=0
 capture_server_threads() {
@@ -35,6 +36,8 @@ campaign_exit() {
     printf '%s\n' "stop" >> "$WORK/in.txt" 2>/dev/null || true
     for _ in $(seq 1 10); do kill -0 "$SERVER_PID" 2>/dev/null || break; sleep 1; done
     taskkill.exe //PID "$SERVER_PID" //T //F >/dev/null 2>&1 || kill "$SERVER_PID" 2>/dev/null || true
+    if wait "$SERVER_PID"; then SERVER_EXIT_CODE=0; else SERVER_EXIT_CODE=$?; fi
+    echo "CAMPAIGN_JVM_EXIT_CODE=$SERVER_EXIT_CODE"
   fi
   python3 "$SCRIPT_DIR/campaign-diagnostics.py" --work "$WORK" --output "$OUTPUT" --exit-code "$exit_code" --stage "$CURRENT_STAGE" --run-id "${GITHUB_RUN_ID:-local}" --commit "${GITHUB_SHA:-unknown}" --seed "$MAP_SEED" || true
   rm -rf "$WORK"
@@ -102,7 +105,14 @@ enable-command-block=false
 P
 : > in.txt
 CURRENT_STAGE="forge_startup"
-(tail -n +1 -f in.txt | java -Xms1G -Xmx4G -Dworldforge.campaign.empty-bootstrap=true @user_jvm_args.txt @libraries/net/minecraftforge/forge/$FORGE/win_args.txt nogui > server.log 2>&1) &
+java -Xms1G -Xmx4G \
+  -XX:+HeapDumpOnOutOfMemoryError \
+  -XX:HeapDumpPath="$WORK/java_pid%p.hprof" \
+  -XX:ErrorFile="$WORK/hs_err_pid%p.log" \
+  -Xlog:gc*:file="$WORK/gc-%p.log":time,uptime,level,tags \
+  -Dworldforge.campaign.empty-bootstrap=true \
+  @user_jvm_args.txt @libraries/net/minecraftforge/forge/$FORGE/win_args.txt nogui \
+  < <(tail -n +1 -f in.txt) > server.log 2>&1 &
 SERVER_PID=$!
 echo "WAITING_FOR_FORGE_STARTUP=1"
 for i in $(seq 1 150); do
@@ -110,7 +120,7 @@ for i in $(seq 1 150); do
   if grep -aqE 'Mod loading has failed|Failed to start|Exception in thread "main"|java.lang.Error' server.log 2>/dev/null; then
     tail -120 server.log; echo "ERROR: Forge server failed to start"; exit 3
   fi
-  kill -0 "$SERVER_PID" 2>/dev/null || { tail -120 server.log; echo "ERROR: Forge server process exited"; exit 3; }
+  kill -0 "$SERVER_PID" 2>/dev/null || { if wait "$SERVER_PID"; then SERVER_EXIT_CODE=0; else SERVER_EXIT_CODE=$?; fi; tail -120 server.log; echo "ERROR: Forge JVM exited with code $SERVER_EXIT_CODE"; exit 3; }
   sleep 2
 done
 grep -q 'Done (' server.log || { tail -120 server.log; echo "ERROR: Forge startup timed out"; exit 3; }
@@ -122,7 +132,7 @@ for i in $(seq 1 90); do
   if grep -qiE 'Campaign map must retain|Campaign requires|Native WorldSim engine is unavailable|Unknown or incomplete command' server.log; then
     tail -160 server.log; echo "ERROR: autonomous campaign preflight rejected the world"; exit 4
   fi
-  kill -0 "$SERVER_PID" 2>/dev/null || { tail -160 server.log; echo "ERROR: server exited during campaign preflight"; exit 4; }
+  kill -0 "$SERVER_PID" 2>/dev/null || { if wait "$SERVER_PID"; then SERVER_EXIT_CODE=0; else SERVER_EXIT_CODE=$?; fi; tail -160 server.log; echo "ERROR: Forge JVM exited during campaign preflight with code $SERVER_EXIT_CODE"; exit 4; }
   sleep 2
 done
 grep -q 'map-only autonomous campaign started' server.log || { tail -160 server.log; echo "ERROR: campaign command was not accepted"; exit 4; }
@@ -133,7 +143,7 @@ last_status=$started
 last_thread_dump=$started
 REPORT="world/worldforge/autonomous-campaign/campaign-report.json"
 while [ ! -s "$REPORT" ]; do
-  kill -0 "$SERVER_PID" 2>/dev/null || { tail -160 server.log; echo "ERROR: server exited before campaign completion"; exit 5; }
+  kill -0 "$SERVER_PID" 2>/dev/null || { if wait "$SERVER_PID"; then SERVER_EXIT_CODE=0; else SERVER_EXIT_CODE=$?; fi; tail -160 server.log; echo "ERROR: Forge JVM exited before campaign completion with code $SERVER_EXIT_CODE"; exit 5; }
   now=$(date +%s)
   if [ $((now - started)) -ge "$MAX_RUNTIME_SECONDS" ]; then
     printf '%s\n' "wfworldsim campaign status" >> in.txt
@@ -156,6 +166,8 @@ CURRENT_STAGE="campaign_report_validation"
 printf '%s\n' "stop" >> in.txt
 for _ in $(seq 1 60); do kill -0 "$SERVER_PID" 2>/dev/null || break; sleep 2; done
 kill "$SERVER_PID" 2>/dev/null || true
+if wait "$SERVER_PID"; then SERVER_EXIT_CODE=0; else SERVER_EXIT_CODE=$?; fi
+echo "CAMPAIGN_JVM_EXIT_CODE=$SERVER_EXIT_CODE"
 SERVER_PID=""
 cp "$REPORT" "$OUTPUT/campaign-report.json"
 cp "world/worldforge/autonomous-campaign/chronicle-book.md" "$OUTPUT/chronicle-book.md"
