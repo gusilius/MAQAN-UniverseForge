@@ -46,12 +46,12 @@ public final class CharacterDevelopment {
     public static int level(Character c){
         Object v=c.props.get(LEVEL);return v instanceof Number n?Math.max(1,Math.min(1000,n.intValue())):1;
     }
-    public static void setRace(Character c,String id){c.props.put(RACE,id(id,"race"));}
-    public static void setClass(Character c,String id){c.props.put(CLASS,id(id,"class"));}
-    public static void setRarity(Character c,Rarity rarity){c.props.put(RARITY,Objects.requireNonNull(rarity).name());}
+    public static void setRace(Character c,String id){ setValue(c,RACE,id(id,"race")); }
+    public static void setClass(Character c,String id){ setValue(c,CLASS,id(id,"class")); }
+    public static void setRarity(Character c,Rarity rarity){ setValue(c,RARITY,Objects.requireNonNull(rarity).name()); }
     public static void setLevel(Character c,int level){
         if(level<1||level>1000)throw new IllegalArgumentException("level must be in 1..1000");
-        c.props.put(LEVEL,level);
+        setValue(c,LEVEL,level);
     }
 
     public static Mood mood(Character c,long worldMinute){
@@ -62,6 +62,7 @@ public final class CharacterDevelopment {
         Object until=c.props.get(MOOD_UNTIL);
         if(mood!=Mood.NEUTRAL&&until instanceof Number n&&worldMinute>=n.longValue()){
             c.props.put(MOOD,Mood.NEUTRAL.name());c.props.remove(MOOD_UNTIL);c.props.remove(MOOD_CAUSE);
+            CharacterRegistry.recordCharacterMutation();
             return Mood.NEUTRAL;
         }
         return mood;
@@ -69,12 +70,18 @@ public final class CharacterDevelopment {
     public static void setMood(Character c,Mood mood,long worldMinute,long duration,String cause){
         Objects.requireNonNull(mood);
         if(worldMinute<0||duration<0)throw new IllegalArgumentException("invalid mood time");
+        Map<String,Object> before = new LinkedHashMap<>();
+        before.put(MOOD,c.props.get(MOOD)); before.put(MOOD_UNTIL,c.props.get(MOOD_UNTIL)); before.put(MOOD_CAUSE,c.props.get(MOOD_CAUSE));
         c.props.put(MOOD,mood.name());
         if(mood==Mood.NEUTRAL||duration==0){c.props.remove(MOOD_UNTIL);c.props.remove(MOOD_CAUSE);}
         else{
             c.props.put(MOOD_UNTIL,Math.addExact(worldMinute,duration));
             c.props.put(MOOD_CAUSE,cause==null?"":cause);
         }
+        if (!Objects.equals(before.get(MOOD),c.props.get(MOOD))
+                || !Objects.equals(before.get(MOOD_UNTIL),c.props.get(MOOD_UNTIL))
+                || !Objects.equals(before.get(MOOD_CAUSE),c.props.get(MOOD_CAUSE)))
+            CharacterRegistry.recordCharacterMutation();
     }
     public static String moodCause(Character c){return string(c,MOOD_CAUSE,"");}
 
@@ -115,7 +122,7 @@ public final class CharacterDevelopment {
 
     public static void setTemperament(Character c, Temperament facet, int value) {
         Objects.requireNonNull(c); Objects.requireNonNull(facet);
-        c.props.put("personality.temperament." + facet.name().toLowerCase(Locale.ROOT), clamp(value, 0, 100));
+        setValue(c,"personality.temperament." + facet.name().toLowerCase(Locale.ROOT),clamp(value,0,100));
     }
 
     /** Motivation strength is not an exclusive alignment: several strong, even competing drives are valid. */
@@ -144,7 +151,7 @@ public final class CharacterDevelopment {
 
     public static void setDrive(Character c, Drive drive, int value) {
         Objects.requireNonNull(c); Objects.requireNonNull(drive);
-        c.props.put("personality.drive." + drive.name().toLowerCase(Locale.ROOT), clamp(value, 0, 100));
+        setValue(c,"personality.drive." + drive.name().toLowerCase(Locale.ROOT),clamp(value,0,100));
     }
 
     /** Materializes all stable facets into the canonical Character save without creating another profile. */
@@ -167,7 +174,7 @@ public final class CharacterDevelopment {
 
     public static int changeStress(Character c, int delta) {
         int next = clamp(stress(c) + delta, 0, 100);
-        c.props.put("psychology.stress", next);
+        if (stress(c) != next) { c.props.put("psychology.stress", next); CharacterRegistry.recordCharacterMutation(); }
         return next;
     }
 
@@ -441,7 +448,7 @@ public final class CharacterDevelopment {
         return raw instanceof Number n ? Math.max(0,Math.min(100,n.intValue())) : 100;
     }
     public static void setMilitaryMorale(Character c,int morale) {
-        c.props.put("military.morale",Math.max(0,Math.min(100,morale)));
+        setValue(c,"military.morale",Math.max(0,Math.min(100,morale)));
     }
 
     /** Records a lasting injury on the canonical person, not on the disposable troop entity. */
@@ -467,6 +474,7 @@ public final class CharacterDevelopment {
         history.add(event);
         while(history.size()>24)history.remove(0);
         c.props.put("military.injury.history",history);
+        CharacterRegistry.recordCharacterMutation();
         return next;
     }
 
@@ -504,6 +512,7 @@ public final class CharacterDevelopment {
             c.props.remove("military.injury.cause");
             c.props.remove("military.injury.last_minute");
         } else c.props.put("military.injury.severity",next);
+        if (next != injurySeverity(c)) CharacterRegistry.recordCharacterMutation();
         return next;
     }
 
@@ -545,14 +554,22 @@ public final class CharacterDevelopment {
         String id=id(abilityId,"ability");
         List<String> values=new ArrayList<>(abilities(c));
         if(values.contains(id))return false;
-        values.add(id);Collections.sort(values);c.props.put(ABILITIES,values);return true;
+        values.add(id);Collections.sort(values);c.props.put(ABILITIES,values);CharacterRegistry.recordCharacterMutation();return true;
     }
     public static boolean forgetAbility(Character c,String abilityId){
         List<String> values=new ArrayList<>(abilities(c));
         boolean changed=values.remove(id(abilityId,"ability"));
-        if(changed)c.props.put(ABILITIES,values);
+        if(changed){c.props.put(ABILITIES,values);CharacterRegistry.recordCharacterMutation();}
         return changed;
     }
+    private static void setValue(Character c,String key,Object value){
+        Objects.requireNonNull(c,"character");
+        if(!Objects.equals(c.props.get(key),value)){
+            c.props.put(key,value);
+            CharacterRegistry.recordCharacterMutation();
+        }
+    }
+
     private static String string(Character c,String key,String fallback){
         Object value=c.props.get(key);return value==null?fallback:String.valueOf(value);
     }
