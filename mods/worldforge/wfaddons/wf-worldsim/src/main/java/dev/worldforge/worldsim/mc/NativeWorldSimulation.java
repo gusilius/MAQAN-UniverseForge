@@ -10,6 +10,8 @@ import java.util.Locale;
 
 /** Loads the platform-native WorldSim core; Java remains authoritative if no supported binary is present. */
 public final class NativeWorldSimulation {
+    public static final int SNAPSHOT_SCHEMA_VERSION = 1;
+    public static final int NATIVE_ABI_VERSION = 1;
     private static volatile boolean attempted;
     private static volatile boolean available;
     private NativeWorldSimulation() {}
@@ -39,6 +41,11 @@ public final class NativeWorldSimulation {
             Path library = directory.resolve(libraryName);
             Files.copy(input, library, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             System.load(library.toAbsolutePath().toString());
+            int loadedAbi = nativeAbiVersion();
+            if (loadedAbi != NATIVE_ABI_VERSION) {
+                throw new UnsatisfiedLinkError("WorldSim native ABI mismatch: expected "
+                        + NATIVE_ABI_VERSION + ", found " + loadedAbi);
+            }
             available = true;
         } catch (IOException | UnsatisfiedLinkError | SecurityException error) {
             available = false;
@@ -67,6 +74,7 @@ public final class NativeWorldSimulation {
         return result;
     }
 
+    private static native int nativeAbiVersion();
     private static native byte[] nativeDecide(byte[] snapshot);
     private static native byte[] nativeGenerate(byte[] request);
     private static native byte[] nativeAdvanceEmergence(byte[] request);
