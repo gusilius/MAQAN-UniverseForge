@@ -72,6 +72,33 @@ public final class DomainMutationRevisionsTest {
                         > bound.revision(DomainMutationRevisions.Domain.CHARACTERS),
                 "entity unbinding advances the shared CHARACTERS lane");
 
+        people.appoint(founder.id, "steward", "capital", 3);
+        var afterNoOpAppointment = WorldForgeApi.revisions().snapshot().orElseThrow();
+        check(afterNoOpAppointment.revision(DomainMutationRevisions.Domain.CHARACTERS)
+                        == unbound.revision(DomainMutationRevisions.Domain.CHARACTERS),
+                "idempotent appointment does not invalidate an unchanged Character snapshot");
+        check(people.bindEntity(founder.id, "npc", "entity-2"),
+                "replacement entity binding succeeds");
+        var replacementBinding = WorldForgeApi.revisions().snapshot().orElseThrow();
+        people.bindEntity(founder.id, "npc", "entity-2");
+        var repeatedBinding = WorldForgeApi.revisions().snapshot().orElseThrow();
+        check(repeatedBinding.revision(DomainMutationRevisions.Domain.CHARACTERS)
+                        == replacementBinding.revision(DomainMutationRevisions.Domain.CHARACTERS),
+                "idempotent entity binding does not advance the Character lane");
+        people.unbindEntity(founder.id, "npc", "not-the-bound-entity");
+        var ignoredUnbind = WorldForgeApi.revisions().snapshot().orElseThrow();
+        check(ignoredUnbind.revision(DomainMutationRevisions.Domain.CHARACTERS)
+                        == repeatedBinding.revision(DomainMutationRevisions.Domain.CHARACTERS),
+                "ignored entity unbind does not invalidate the Character snapshot");
+
+        people.refreshLifeStages(1);
+        var afterAgeRefresh = WorldForgeApi.revisions().snapshot().orElseThrow();
+        people.refreshLifeStages(1);
+        var repeatedAgeRefresh = WorldForgeApi.revisions().snapshot().orElseThrow();
+        check(repeatedAgeRefresh.revision(DomainMutationRevisions.Domain.CHARACTERS)
+                        == afterAgeRefresh.revision(DomainMutationRevisions.Domain.CHARACTERS),
+                "repeating the same calendar refresh does not create redundant Character revisions");
+
         if (failures > 0) throw new AssertionError(failures + " domain mutation revision checks failed");
         System.out.println("DOMAIN_MUTATION_REVISIONS_STATUS=PASS");
     }
