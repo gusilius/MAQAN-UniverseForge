@@ -29,25 +29,36 @@ public final class WorldSimComputeScheduler implements AutoCloseable {
         private final String operationKey;
         private final long revision;
         private final long lifecycleEpoch;
+        private final int snapshotSchemaVersion;
+        private final int nativeAbiVersion;
         private final long submittedNanos;
 
-        public Ticket(String worldId, String operationKey, long revision, long lifecycleEpoch) {
+        public Ticket(String worldId, String operationKey, long revision, long lifecycleEpoch,
+                      int snapshotSchemaVersion, int nativeAbiVersion) {
             if (worldId == null || worldId.isBlank()) throw new IllegalArgumentException("worldId is required");
             if (operationKey == null || operationKey.isBlank()) throw new IllegalArgumentException("operationKey is required");
+            if (snapshotSchemaVersion < 1) throw new IllegalArgumentException("snapshotSchemaVersion must be positive");
+            if (nativeAbiVersion < 1) throw new IllegalArgumentException("nativeAbiVersion must be positive");
             this.worldId = worldId;
             this.operationKey = operationKey;
             this.revision = revision;
             this.lifecycleEpoch = lifecycleEpoch;
+            this.snapshotSchemaVersion = snapshotSchemaVersion;
+            this.nativeAbiVersion = nativeAbiVersion;
             this.submittedNanos = System.nanoTime();
         }
         public String worldId() { return worldId; }
         public String operationKey() { return operationKey; }
         public long revision() { return revision; }
         public long lifecycleEpoch() { return lifecycleEpoch; }
+        public int snapshotSchemaVersion() { return snapshotSchemaVersion; }
+        public int nativeAbiVersion() { return nativeAbiVersion; }
         public long submittedNanos() { return submittedNanos; }
-        public boolean matches(String expectedWorldId, String expectedOperationKey, long expectedRevision, long expectedLifecycleEpoch) {
+        public boolean matches(String expectedWorldId, String expectedOperationKey, long expectedRevision,
+                               long expectedLifecycleEpoch, int expectedSchemaVersion, int expectedNativeAbiVersion) {
             return worldId.equals(expectedWorldId) && operationKey.equals(expectedOperationKey) && revision == expectedRevision
-                    && lifecycleEpoch == expectedLifecycleEpoch;
+                    && lifecycleEpoch == expectedLifecycleEpoch && snapshotSchemaVersion == expectedSchemaVersion
+                    && nativeAbiVersion == expectedNativeAbiVersion;
         }
     }
 
