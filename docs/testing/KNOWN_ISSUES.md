@@ -329,3 +329,10 @@
 - **Тест добавлен:** `DomainMutationRevisionsTest` проверяет, что первая lazy initialization создаёт ровно одну CHARACTERS revision и повторная инициализация не создаёт новую; проверяется исходное значение stress.
 - **Критерий закрытия:** новый тест и существующие psychology deterministic/save-reload tests, а также Windows logic/addon CI проходят.
 
+### WF-RT-0023 — Succession Realm/Politics writer integration
+
+- **Проблема:** `Succession.onDeath` уже объединял Character lifecycle операции в Character batch, но параллельно напрямую изменял `TitleData.Realm.ruler` через `TitleEditor` и `TitleData.Title.props` (holder/succession metadata) без `REALMS_POLITICS` revision.
+- **Исправление:** перед политическими изменениями открывается существующая `REALMS_POLITICS` mutation scope. Она фиксируется один раз, только если ruler/title metadata действительно изменились. Character writes остаются у существующего Character batch.
+- **Тест:** `CourtTest` проверяет, что одна операция наследования продвигает `REALMS_POLITICS` ровно на одну revision.
+- **Ограничение:** это не полная атомарная транзакция двух доменов; прочие Realm/Politics writers и прямые props writes ещё требуют аудита. Global WorldSim apply fence запрещён.
+- **Исходники/тест:** `2623288d90c29fb67990b4fbf5f72174d6e333a8`, `e246dac4af44b727c549618fe9585a6cf133a3c2`. CI для нового HEAD ожидает.
