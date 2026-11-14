@@ -343,3 +343,11 @@ This is an operation-count status, not a percentage of all UniverseForge computa
 - Character props now persist `population.simulated_days` and `population.last_simulated_world_day` as exact decimal strings, matching the Rust ABI.
 - The reader accepts legacy numeric saves and upgrades them to strings on the next authoritative population apply.
 - This is required because the repository JSON parser decodes JSON numeric tokens as `Double`, which cannot exactly represent all 64-bit integer values above 2^53.
+
+
+### Population receipt scan scheduling
+
+- Added a canonical registry-generation signal to wf-people. It advances when the player partition is loaded or a new map CharacterRegistry is registered.
+- Native receipt recovery scans only on first server tick after lifecycle change, world-day advance, or registry-generation change. It does not walk every Character every tick.
+- Completed batches remember the generation they captured; a registry loaded during compute forces a follow-up scan rather than being hidden by a successful older batch.
+- Java fallback uses the same day/generation gate. Per-Character receipts remain the source of truth; the generation is only a scan invalidation signal.

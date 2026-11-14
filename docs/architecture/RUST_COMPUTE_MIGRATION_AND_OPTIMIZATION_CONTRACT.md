@@ -471,3 +471,8 @@ The batch-level `elapsed_days` is the maximum positive per-Character interval in
 ### Exact durable 64-bit population counters
 
 The repository JSON reader represents JSON numeric tokens as `Double`. Persisting long-lived world-day/simulated-day counters as JSON numbers can therefore lose integer precision above 2^53 on save/reload. Population now stores `population.simulated_days` and `population.last_simulated_world_day` as decimal strings, reads them exactly, and accepts legacy numeric values during migration. The Rust ABI already uses decimal strings for these counters. This aligns the durable Character representation with the existing versioned native contract and prevents clock/counter drift after long campaigns.
+
+
+### Event-driven Population receipt scans
+
+Receipt recovery must not turn into a full Character-registry scan on every server tick. The process-local coordinator tracks the last world day and canonical registry generation it has inspected. It scans on first server tick after lifecycle change, on world-day advance, or when a new Character registry is loaded. A successful apply records the generation captured with that batch; if another registry appeared while compute was in flight, the generation mismatch forces one follow-up scan. The Java fallback uses the same registry-generation signal and only scans on day advance or new registry load.

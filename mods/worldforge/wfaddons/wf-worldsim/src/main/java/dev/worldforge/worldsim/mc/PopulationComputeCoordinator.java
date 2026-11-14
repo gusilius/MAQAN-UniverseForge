@@ -25,15 +25,21 @@ public final class PopulationComputeCoordinator {
     private static MinecraftServer activeServer;
     private static long lifecycleEpoch;
     private static boolean nativeDisabled;
+    private static long lastScannedWorldDay = Long.MIN_VALUE;
+    private static long lastScannedRegistryGeneration = Long.MIN_VALUE;
 
     private record Pending(PopulationComputeBridge.Captured captured,
-                           WorldForgeComputeRuntime.Ticket ticket) {}
+                           WorldForgeComputeRuntime.Ticket ticket,long registryGeneration) {}
     private PopulationComputeCoordinator() {}
 
     /** Called reflectively by wf-people so that wf-worldsim remains an optional addon. */
     public static synchronized boolean tick(MinecraftServer server,long currentWorldDay,int year) {
         if(server==null||currentWorldDay<0) return false;
-        if(activeServer!=server){activeServer=server;lifecycleEpoch++;}
+        if(activeServer!=server){
+            activeServer=server;lifecycleEpoch++;
+            lastScannedWorldDay=Long.MIN_VALUE;
+            lastScannedRegistryGeneration=Long.MIN_VALUE;
+        }
         if(nativeDisabled||!NativeWorldSimulation.load()) return false;
 
         WorldForgeComputeRuntime runtime=WorldForgeApi.computeRuntime();
@@ -58,7 +64,11 @@ public final class PopulationComputeCoordinator {
                 try {
                     List<CharacterRegistry> registries=registries();
                     boolean applied=PopulationComputeBridge.apply(done.captured,completed.first(),registries);
-                    if(applied) PeopleMod.markPopulationProcessed(done.captured.targetWorldDay());
+                    if(applied) {
+                        PeopleMod.markPopulationProcessed(done.captured.targetWorldDay());
+                        lastScannedWorldDay=done.captured.targetWorldDay();
+                        lastScannedRegistryGeneration=done.registryGeneration();
+                    }
                 } catch(RuntimeException rejected) {
                     // The bridge validates the entire frame before the first canonical write.
                     // Keep Rust ownership and retry from per-Character receipts; never double-run Java here.
@@ -86,6 +96,8 @@ public final class PopulationComputeCoordinator {
         }
         if(!captured.hasWork()){
             PeopleMod.markPopulationProcessed(currentWorldDay);
+            lastScannedWorldDay=currentWorldDay;
+            lastScannedRegistryGeneration=registryGeneration;
             return true;
         }
         WorldForgeComputeRuntime.Ticket ticket=new WorldForgeComputeRuntime.Ticket(
@@ -94,7 +106,7 @@ public final class PopulationComputeCoordinator {
         boolean submitted=runtime.submit(ticket,captured.request(),EMPTY_SECONDARY,
                 (primary,secondary)->new WorldForgeComputeRuntime.Output(
                         NativeWorldSimulation.advancePopulation(primary),EMPTY_SECONDARY));
-        if(submitted) pending=new Pending(captured,ticket);
+        if(submitted) pending=new Pending(captured,ticket,registryGeneration);
         // If another domain owns the single worker, keep the clock cursor unchanged and retry later.
         return true;
     }

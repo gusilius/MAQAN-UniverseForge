@@ -95,6 +95,8 @@ public class PeopleMod {
     private static final Map<UUID, Set<String>> FLAGS = new ConcurrentHashMap<>();
     private static long ticks;
     private static volatile long populationProcessedDay = Long.MIN_VALUE;
+    private static volatile long populationRegistryGeneration;
+    private static volatile long populationFallbackGeneration = Long.MIN_VALUE;
 
     public PeopleMod() {
         IEventBus bus = FMLJavaModLoadingContext.get().getModEventBus();
@@ -139,6 +141,8 @@ public class PeopleMod {
         FLAGS.clear();
         ticks = 0;
         populationProcessedDay = Long.MIN_VALUE;
+        populationRegistryGeneration = 0L;
+        populationFallbackGeneration = Long.MIN_VALUE;
         RoleDefs roles = new RoleDefs();
         dev.worldforge.people.ProfessionDefs professions = new dev.worldforge.people.ProfessionDefs();
         NameBank names = new NameBank();
@@ -191,6 +195,7 @@ public class PeopleMod {
         for (MapData m : WorldForgeMod.loadedMaps().values()) registry(m);
         reconcileIdentityPartitions(server);
         populationProcessedDay = WorldForgeApi.clock().dayNumber();
+        populationRegistryGeneration = Math.incrementExact(populationRegistryGeneration);
     }
 
     private static boolean allIdentityPartitionsLoaded() {
@@ -266,6 +271,7 @@ public class PeopleMod {
         }
         CharacterRegistry prev = REGS.putIfAbsent(m, reg);
         CharacterRegistry selected = prev != null ? prev : reg;
+        if (prev == null) populationRegistryGeneration = Math.incrementExact(populationRegistryGeneration);
         if (WorldForgeMod.worldId() != null) {
             try {
                 AUTHORITY.registerMap(m.name, selected);
@@ -515,12 +521,15 @@ public class PeopleMod {
             long currentWorldDay = WorldForgeApi.clock().dayNumber();
             YEAR = WorldForgeApi.clock().year();
             boolean rustOwnsPopulation = tryRustPopulationCompute(e.getServer(), currentWorldDay, YEAR);
-            if (!rustOwnsPopulation && currentWorldDay > populationProcessedDay) {
+            long registryGeneration = populationRegistryGeneration;
+            if (!rustOwnsPopulation && (currentWorldDay > populationProcessedDay
+                    || populationFallbackGeneration != registryGeneration)) {
                 long fallbackStartDay = populationProcessedDay == Long.MIN_VALUE ? currentWorldDay : populationProcessedDay;
                 for (CharacterRegistry registry : REGS.values())
                     PopulationSimulation.advanceToWorldDay(registry, currentWorldDay, fallbackStartDay, YEAR);
                 PopulationSimulation.advanceToWorldDay(PLAYER_REGISTRY, currentWorldDay, fallbackStartDay, YEAR);
-                populationProcessedDay = currentWorldDay;
+                populationProcessedDay = Math.max(populationProcessedDay, currentWorldDay);
+                populationFallbackGeneration = registryGeneration;
             }
             if (ticks % SPAWN_EVERY == 0) NpcSpawner.pass(e.getServer());
             if (ticks % 20 == 0) socialInitiatives(e.getServer());
@@ -545,6 +554,7 @@ public class PeopleMod {
     }
 
     public static long populationProcessedDay() { return populationProcessedDay; }
+    public static long populationRegistryGeneration() { return populationRegistryGeneration; }
     public static void markPopulationProcessed(long worldDay) {
         if (worldDay > populationProcessedDay) populationProcessedDay = worldDay;
     }

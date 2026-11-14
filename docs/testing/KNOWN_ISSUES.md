@@ -566,3 +566,11 @@
 
 - CI run `43616670983` caught a missing `java.util.Map` import in the expanded Java shared-fixture assertions. The production sources compiled; this was isolated to the test harness.
 - Added the missing import. Re-run the full Windows logic suite and native Rust suite before accepting the fixture gate.
+
+
+### WF-RT-0024 — bounded receipt recovery scans
+
+- Removed the potential full Character-registry scan on every server tick introduced by receipt-first recovery.
+- wf-people now increments a lightweight registry generation when the player partition or a new map CharacterRegistry is registered. Native and Java fallback recovery inspect receipts on first server scan, world-day advance, or registry-generation change.
+- A native batch records the generation it captured; a new registry appearing during compute forces another scan after the current batch completes.
+- This preserves partial-save recovery without creating a new per-tick O(population) scan or a second index/cache of Character state.
