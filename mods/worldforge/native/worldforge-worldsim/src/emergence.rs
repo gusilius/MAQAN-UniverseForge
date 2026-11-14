@@ -2,7 +2,7 @@
 //! No political or population entities are read from the map package. The only
 //! initial conditions are geography, world seed and elapsed simulation time.
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use crate::{stable_hash, GeographicCell, GeographicMap, WorldSnapshot};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -104,8 +104,16 @@ fn roll(seed: u64, domain: &str, a: &str, b: &str, year: u64) -> u64 {
     stable_hash(seed, domain, a, b, year)
 }
 
-fn cell_at<'a>(map: &'a GeographicMap, x: u32, z: u32) -> Option<&'a GeographicCell> {
-    map.cells.iter().find(|c| c.x == x && c.z == z)
+/// Per-call coordinate index over the immutable snapshot. Stores references only:
+/// no copied cell payload, persistent cache, or second source of geographic truth.
+type CellIndex<'a> = HashMap<(u32, u32), &'a GeographicCell>;
+
+fn index_cells(map: &GeographicMap) -> CellIndex<'_> {
+    map.cells.iter().map(|cell| ((cell.x, cell.z), cell)).collect()
+}
+
+fn cell_at<'a>(cells: &'a CellIndex<'a>, x: u32, z: u32) -> Option<&'a GeographicCell> {
+    cells.get(&(x, z)).copied()
 }
 
 fn distance_sq(a: (u32,u32), b: (u32,u32)) -> u64 {
@@ -180,7 +188,7 @@ fn advance_band(band: &mut EmergentBand, cell: &GeographicCell, seed: u64, year:
     }
 }
 
-fn maybe_form_polity(map: &GeographicMap, seed: u64, year: u64, bands: &[EmergentBand],
+fn maybe_form_polity(map: &GeographicMap, cells: &CellIndex<'_>, seed: u64, year: u64, bands: &[EmergentBand],
     polities: &mut Vec<EmergentPolity>, events: &mut Vec<EmergenceEvent>) {
     let spacing = map_scale(map) * 3;
     // Legacy/persisted bands are rechecked against the live political raster before
@@ -188,7 +196,7 @@ fn maybe_form_polity(map: &GeographicMap, seed: u64, year: u64, bands: &[Emergen
     // legal seed for a new independent polity.
     let mut settled = bands.iter().filter(|b| {
         b.map_id == map.map_id && b.settled
-            && cell_at(map, b.x, b.z).is_some_and(|cell|
+            && cell_at(cells, b.x, b.z).is_some_and(|cell|
                 cell.land && cell.owner_realm_id.trim().is_empty())
     }).collect::<Vec<_>>();
     settled.sort_by(|a,b| a.id.cmp(&b.id));
@@ -225,17 +233,20 @@ fn maybe_form_polity(map: &GeographicMap, seed: u64, year: u64, bands: &[Emergen
     }
 }
 
-fn update_polities(seed: u64, year: u64, bands: &[EmergentBand], maps: &[GeographicMap],
+fn update_polities(seed: u64, year: u64, bands: &[EmergentBand],
+    maps_by_id: &HashMap<&str, &GeographicMap>, cells_by_map: &HashMap<&str, CellIndex<'_>>,
     polities: &mut Vec<EmergentPolity>, events: &mut Vec<EmergenceEvent>) {
+    // This index is scoped to this yearly reduction and points into the canonical bands.
+    let bands_by_id: HashMap<&str, &EmergentBand> = bands.iter().map(|band| (band.id.as_str(), band)).collect();
     for polity in polities.iter_mut() {
         // If a province is transferred to an established realm, its settlement
         // leaves the emergent polity's sovereign core. Existing physical colonies
         // remain and are reconciled by the canonical map-ownership listener.
-        if let Some(map) = maps.iter().find(|map| map.map_id == polity.map_id) {
+        if let (Some(map), Some(cells)) = (maps_by_id.get(polity.map_id.as_str()), cells_by_map.get(polity.map_id.as_str())) {
             let own_realm_id = format!("emergent-{}", polity.id);
             let absorbed = polity.settlement_ids.iter().filter_map(|settlement_id| {
-                let band = bands.iter().find(|band| band.id == *settlement_id)?;
-                let cell = cell_at(map, band.x, band.z)?;
+                let band = bands_by_id.get(settlement_id.as_str()).copied()?;
+                let cell = cell_at(cells, band.x, band.z)?;
                 let owner = cell.owner_realm_id.trim();
                 if !owner.is_empty() && owner != own_realm_id.as_str() {
                     Some((settlement_id.clone(), owner.to_owned()))
@@ -321,6 +332,13 @@ pub fn advance(request: EmergenceRequest) -> Result<EmergenceFrame, String> {
     let mut events = Vec::new();
     let mut diagnostics = Vec::new();
     let maps = &request.snapshot.geography;
+    // Build lookup indexes once per compute request. The snapshot remains the only
+    // owner of geography; these maps contain borrowed references and are discarded
+    // when this deterministic compute call returns.
+    let maps_by_id: HashMap<&str, &GeographicMap> =
+        maps.iter().map(|map| (map.map_id.as_str(), map)).collect();
+    let cells_by_map: HashMap<&str, CellIndex<'_>> =
+        maps.iter().map(|map| (map.map_id.as_str(), index_cells(map))).collect();
 
     // A map may be loaded after the world has already developed. Bootstrap each map
     // independently instead of treating the first non-empty map as the whole universe.
@@ -334,14 +352,19 @@ pub fn advance(request: EmergenceRequest) -> Result<EmergenceFrame, String> {
     while state.last_year < target_year {
         let year = state.last_year + 1;
         for band in &mut state.bands {
-            if let Some(map) = maps.iter().find(|m| m.map_id == band.map_id) {
-                if let Some(cell) = cell_at(map, band.x, band.z) {
+            if let (Some(_map), Some(cells)) = (maps_by_id.get(band.map_id.as_str()), cells_by_map.get(band.map_id.as_str())) {
+                if let Some(cell) = cell_at(cells, band.x, band.z) {
                     advance_band(band, cell, state.seed, year, &mut events);
                 }
             }
         }
-        for map in maps { maybe_form_polity(map, state.seed, year, &state.bands, &mut state.polities, &mut events); }
-        update_polities(state.seed, year, &state.bands, maps, &mut state.polities, &mut events);
+        for map in maps {
+            if let Some(cells) = cells_by_map.get(map.map_id.as_str()) {
+                maybe_form_polity(map, cells, state.seed, year, &state.bands, &mut state.polities, &mut events);
+            }
+        }
+        update_polities(state.seed, year, &state.bands, &maps_by_id, &cells_by_map,
+            &mut state.polities, &mut events);
         state.last_year = year;
         years_advanced += 1;
         if years_advanced > 20_000 { return Err("emergence-catch-up-exceeds-20000-years".into()); }
