@@ -344,3 +344,10 @@ The shared `CHARACTERS` lane is now advanced by canonical `CharacterRegistry` li
 ### Character lane precision follow-up
 
 Idempotent Character operations must not create needless revision churn. The registry now treats same-destination migration as a no-op and normalizes entity body-kind keys consistently for bind/unbind. Tests cover repeated appointment/binding/migration, ignored unbinding and unchanged calendar refresh. These are precision improvements only; they do not authorize global WorldSim apply fencing while external mutable props writers remain unaudited.
+
+
+### Character domain — broadened writer ownership audit
+
+The first Character lane pass was incomplete: several canonical state mutations occur outside CharacterRegistry. The in-repository audit identified PopulationSimulation, CharacterDevelopment, Courts and Succession as additional writers. These are not automatically all authoritative snapshot inputs: lazy defaults, derived age/stage values, simulation cursors, observer memories and action receipts must be classified separately from gameplay state.
+
+Do not instrument every props write or create a second Character state model. Refactor the owning APIs so one logical gameplay mutation commits one shared CHARACTERS revision, while derived/cache writes are excluded or represented by their owning domain. Keep WorldSim global apply fencing disabled until this audit, transaction wiring, snapshot capture and stale-result tests are complete.
