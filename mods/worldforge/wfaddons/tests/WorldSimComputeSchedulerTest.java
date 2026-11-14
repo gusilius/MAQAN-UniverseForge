@@ -56,6 +56,35 @@ public final class WorldSimComputeSchedulerTest {
             check(calls.get() == 1, "one submitted request must execute exactly once");
             check(!scheduler.busy(), "slot must be released after poll");
         }
+        // A native call may ignore interruption during server shutdown. A replacement
+        // scheduler must wait for that call to leave JNI before starting another one.
+        try (WorldSimComputeScheduler oldWorld = new WorldSimComputeScheduler();
+             WorldSimComputeScheduler newWorld = new WorldSimComputeScheduler()) {
+            CountDownLatch oldStarted = new CountDownLatch(1);
+            CountDownLatch finishOld = new CountDownLatch(1);
+            CountDownLatch newStarted = new CountDownLatch(1);
+            check(oldWorld.submit(new WorldSimComputeScheduler.Ticket("old", 1, 1),
+                    new byte[]{1}, new byte[]{1}, (input, request) -> {
+                        oldStarted.countDown();
+                        boolean done = false;
+                        while (!done) {
+                            try { done = finishOld.await(5, TimeUnit.SECONDS); }
+                            catch (InterruptedException ignored) { /* simulate JNI that cannot be cancelled */ }
+                        }
+                        return new WorldSimComputeScheduler.Output(new byte[]{1}, new byte[]{1});
+                    }), "old world task must start");
+            check(oldStarted.await(5, TimeUnit.SECONDS), "old world native task must acquire lease");
+            oldWorld.close();
+            check(newWorld.submit(new WorldSimComputeScheduler.Ticket("new", 2, 2),
+                    new byte[]{2}, new byte[]{2}, (input, request) -> {
+                        newStarted.countDown();
+                        return new WorldSimComputeScheduler.Output(new byte[]{2}, new byte[]{2});
+                    }), "new world task must be accepted by its scheduler");
+            check(!newStarted.await(100, TimeUnit.MILLISECONDS),
+                    "new world must not overlap a native call from the previous server lifecycle");
+            finishOld.countDown();
+            check(newStarted.await(5, TimeUnit.SECONDS), "new world task must start after old JNI call exits");
+        }
         System.out.println("WorldSimComputeSchedulerTest: OK");
     }
 }
