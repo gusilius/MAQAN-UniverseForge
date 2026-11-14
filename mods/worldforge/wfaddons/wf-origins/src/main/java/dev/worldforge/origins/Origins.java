@@ -466,8 +466,8 @@ public final class Origins {
                 throw new IllegalArgumentException("Некорректная раса или класс: " + owner);
             b.race = race == null ? "" : (String) race;
             b.cls = cls == null ? "" : (String) cls;
-            if (!b.race.isEmpty() && !defs.races.containsKey(b.race))
-                throw new IllegalArgumentException("Неизвестная раса: " + b.race);
+            // A datapack may temporarily remove an ID. Preserve it as dormant progression
+            // instead of rejecting the entire world save; it can become active again on a later reload.
             Object retrain = data.get("retrain");
             if (retrain != null && !(retrain instanceof Number))
                 throw new IllegalArgumentException("Некорректный день переобучения: " + owner);
@@ -484,7 +484,9 @@ public final class Origins {
                     if (!(item instanceof String id) || !unique.add(id))
                         throw new IllegalArgumentException("Повреждена или повторяется ступень класса: " + owner);
                     OriginDefs.ClassDef def = defs.classes.get(id);
-                    if (def == null || (previous.isEmpty() ? !def.from().isEmpty() : !defs.isParent(def, previous)))
+                    // Unknown historical class IDs are retained as dormant entries. Known
+                    // adjacent definitions must still form a valid progression edge.
+                    if (def != null && (previous.isEmpty() ? !def.from().isEmpty() : !defs.isParent(def, previous)))
                         throw new IllegalArgumentException("Нарушена последовательность классов: " + owner + " / " + id);
                     b.history.add(id);
                     previous = id;
@@ -498,15 +500,17 @@ public final class Origins {
             if (professions != null && !(professions instanceof Map<?, ?>))
                 throw new IllegalArgumentException("Повреждены профессии: " + owner);
             if (professions instanceof Map<?, ?> values) for (var p : values.entrySet()) {
-                if (!(p.getKey() instanceof String id) || !(p.getValue() instanceof Number xp)
-                        || xp.longValue() < 0 || xp.longValue() > Integer.MAX_VALUE || !defs.professions.containsKey(id))
+                if (!(p.getKey() instanceof String id) || id.isBlank() || !(p.getValue() instanceof Number xp)
+                        || xp.longValue() < 0 || xp.longValue() > Integer.MAX_VALUE)
                     throw new IllegalArgumentException("Некорректная профессия: " + owner);
+                // Keep removed profession IDs and XP dormant; a later datapack can restore them.
                 b.prof.put(id, xp.intValue());
             }
             int roots = 0;
             Set<String> exclusive = new HashSet<>();
             for (String id : b.prof.keySet()) {
                 OriginDefs.Profession def = defs.professions.get(id);
+                if (def == null) continue; // Removed definition: retain XP without interpreting obsolete rules.
                 if (!def.from().isEmpty() && !b.prof.containsKey(def.from()))
                     throw new IllegalArgumentException("Специализация без основной профессии: " + owner + " / " + id);
                 if (def.from().isEmpty()) roots++;
