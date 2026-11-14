@@ -317,3 +317,14 @@
 - CharacterStats.addTrait/removeTrait now use the canonical Character transaction scope; Succession routes usurper trait assignment through CharacterStats instead of writing the public trait set directly.
 - The latest source HEAD is 9d567612bde231394e0e17c705b2d78108a618c3. Windows CI run 43599718531 is in progress; the logic-test compile/run step has not completed yet.
 - Remaining gap: public mutable Character fields, children/posts/traits collections and props map still permit bypasses by external addon code. Audit and migration must continue before global apply fencing.
+
+### WF-RT-0023 — Psychology initialization mutation boundary
+
+- **Статус:** исправление внесено; Windows logic tests и полный addon CI ожидают повторного подтверждения.
+- **Подсистема:** `wf-people.CharacterDevelopment.ensurePsychology`.
+- **Причина:** метод лениво материализует детерминированные temperament/drive defaults и stress в канонический `Character.props`, но раньше делал прямые записи вне `CharacterRegistry.MutationBatch`. Это позволяло изменить входные данные персонажа без продвижения CHARACTERS lane.
+- **Исправление:** инициализация теперь выполняется внутри одного nested-safe Character mutation batch; если хотя бы одно значение действительно добавлено, публикуется ровно одна CHARACTERS revision. Повторный вызов без изменений остаётся no-op и не создаёт revision churn. Формулы, значения, ключи сохранения и доступные психологические механики не меняются.
+- **Проверка исходника:** commit `fe94acfca57a2510fb27bd3379bb044ee694f739`.
+- **Остаточный риск:** другие публичные mutable Character fields/collections/props и внешние addon writers всё ещё могут обходить canonical mutation APIs. Global WorldSim apply fence остаётся запрещённым до завершения полного writer audit и snapshot/apply stale-result tests.
+- **Критерий закрытия:** тест first initialization advances one revision, repeated initialization advances none; existing psychology deterministic/save-reload tests and Windows logic/addon CI pass.
+
