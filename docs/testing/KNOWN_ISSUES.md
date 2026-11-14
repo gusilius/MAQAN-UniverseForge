@@ -287,3 +287,14 @@
 - **Лишние invalidations:** миграция в уже текущую локацию стала no-op и не создаёт lifecycle event/revision.
 - **Тесты:** `DomainMutationRevisionsTest` расширен проверками этих случаев и повторного календарного refresh.
 - **Ограничение без изменений:** revision lane остаётся post-write invalidation, не межпоточным mutation fence; WorldSim ещё не использует её как глобальный apply fence. Windows CI для актуального HEAD не подтверждён.
+
+
+### WF-RT-0023 — Character writer audit expansion (2026-11-14)
+
+- **Найдено важное расширение области аудита:** Character state изменяется не только через `CharacterRegistry`. Внутри самого `wf-people` обнаружены прямые writers в `PopulationSimulation`, `CharacterDevelopment`, `Courts` и `Succession`.
+- **PopulationSimulation:** прямые записи profession/start year, command, training target, last intent, age/life stage, death year/cause, simulated days/last simulated year и динамические state props. Часть этих путей вызывается из CharacterRegistry, часть — из симуляции населения.
+- **CharacterDevelopment:** прямые записи race/class/rarity/level, mood, temperament/drives, stress, conduct receipts, growth/traits, upbringing, morale, injury, abilities и character-memory.
+- **Courts/Succession:** прямые записи origin race, surname, title holder/succession metadata и heir traits.
+- **Архитектурное решение:** не ставить слепой revision increment на каждый `Map.put` и не добавлять второй параллельный счётчик. Сначала разделить authoritative gameplay writes и derived/cache/initialization writes, определить транзакционные границы и свести их к canonical mutation APIs с одной revision на логическую операцию.
+- **Безопасность:** пока эти writers не охвачены, `CHARACTERS` lane остаётся неполной, а WorldSim apply fence запрещён.
+- **Следующий шаг:** рефакторить по владельцам и группам операций с parity-тестами: population lifecycle, character development/psychology, court identity, succession. Затем аналогично проверить settlement/realm consumers.
