@@ -46,39 +46,48 @@ public final class Succession {
             reg.appoint(heir.id, role.id, p.place);
             if (p.place.startsWith("realm:")) {
                 String realmId = p.place.substring(6);
-                // Succession mutates two canonical domains in one logical operation:
-                // Character ownership/posts are covered by the outer Character batch,
-                // while title-holder metadata and the realm ruler belong to REALMS_POLITICS.
-                // Open the political writer before any map mutation so snapshots cannot
-                // observe the mixed old/new state. Do not advance the lane for a no-op.
-                try (DomainMutationRevisions.Mutation realmMutation =
-                             WorldForgeApi.revisions().begin(DomainMutationRevisions.Domain.REALMS_POLITICS)) {
-                    boolean realmChanged = false;
+                // Character ownership/posts are covered by the outer Character batch.
+                // TitleEditor.group is the single canonical REALMS_POLITICS writer boundary:
+                // include ruler and holder metadata in that same group so the lane advances once.
+                Runnable updatePoliticalState = () -> {
                     String rulerName = heir.name + (heir.house.isEmpty() ? "" : " " + heir.house);
-                    TitleData.Realm realm = d.realms.get(realmId);
-                    if (ed != null) {
-                        realmChanged = realm != null && !Objects.equals(realm.ruler, rulerName);
-                        ed.setRuler(realmId, rulerName);
-                    }
-                    // Keep the map's canonical title-holder references in step with the same
-                    // succession result. RealmsMod imports these IDs into Statecraft on sync.
+                    if (ed != null) ed.setRuler(realmId, rulerName);
                     String deceasedGlobalId = dead.globalId;
                     String heirGlobalId = heir.globalId;
                     for (TitleData.Title title : d.allTitles()) {
                         Object holder = title.props.get("holderCharacterId");
                         if (holder instanceof String holderId
                                 && (holderId.equals(deceasedGlobalId) || holderId.equals(dead.id))) {
-                            realmChanged |= !Objects.equals(holder, heirGlobalId)
-                                    || !Objects.equals(title.props.get("succession.last_deceased"), deceasedGlobalId)
-                                    || !Objects.equals(title.props.get("succession.last_heir"), heirGlobalId)
-                                    || !Objects.equals(title.props.get("succession.last_year"), year);
                             title.props.put("holderCharacterId", heirGlobalId);
                             title.props.put("succession.last_deceased", deceasedGlobalId);
                             title.props.put("succession.last_heir", heirGlobalId);
                             title.props.put("succession.last_year", year);
                         }
                     }
-                    if (realmChanged) realmMutation.commit();
+                };
+                if (ed != null) {
+                    ed.group(updatePoliticalState);
+                } else {
+                    // Fallback for headless callers without a TitleEditor: preserve the
+                    // same single lane owner and revision semantics.
+                    try (DomainMutationRevisions.Mutation realmMutation =
+                                 WorldForgeApi.revisions().begin(DomainMutationRevisions.Domain.REALMS_POLITICS)) {
+                        TitleData.Realm realm = d.realms.get(realmId);
+                        String rulerName = heir.name + (heir.house.isEmpty() ? "" : " " + heir.house);
+                        boolean changed = realm != null && !Objects.equals(realm.ruler, rulerName);
+                        for (TitleData.Title title : d.allTitles()) {
+                            Object holder = title.props.get("holderCharacterId");
+                            if (holder instanceof String holderId
+                                    && (holderId.equals(dead.globalId) || holderId.equals(dead.id))) {
+                                changed |= !Objects.equals(holder, heir.globalId)
+                                        || !Objects.equals(title.props.get("succession.last_deceased"), dead.globalId)
+                                        || !Objects.equals(title.props.get("succession.last_heir"), heir.globalId)
+                                        || !Objects.equals(title.props.get("succession.last_year"), year);
+                            }
+                        }
+                        updatePoliticalState.run();
+                        if (changed) realmMutation.commit();
+                    }
                 }
             }
             out.add(new Result(dead, heir, usurper, p.place));
