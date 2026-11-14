@@ -486,7 +486,7 @@ public final class Origins {
                     OriginDefs.ClassDef def = defs.classes.get(id);
                     // Unknown historical class IDs are retained as dormant entries. Known
                     // adjacent definitions must still form a valid progression edge.
-                    if (def != null && (previous.isEmpty() ? !def.from().isEmpty() : !defs.isParent(def, previous)))
+                    if (def != null && (previous.isEmpty() ? !def.from().isEmpty() : defs.classes.containsKey(previous) && !defs.isParent(def, previous)))
                         throw new IllegalArgumentException("Нарушена последовательность классов: " + owner + " / " + id);
                     b.history.add(id);
                     previous = id;
