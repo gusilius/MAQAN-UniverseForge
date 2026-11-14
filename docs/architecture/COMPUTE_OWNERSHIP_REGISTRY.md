@@ -157,3 +157,10 @@ Integrated owners:
 - Courts.ensure and Succession.onDeath: generation/succession batches.
 
 One daily world population tick and one compound gameplay action now produce one revision, rather than one increment per nested field write. Idempotent setters do not invalidate unchanged snapshots. Remaining direct public mutable Character fields/collections and addon writers still require a complete audit; do not enable a global apply fence yet.
+
+
+### Registry identity and trait mutation coverage — WF-RT-0023
+
+The Character transaction scope now wraps create/restore, appointment/dismissal, entity binding/unbinding, death, marriage/divorce and child creation. CharacterStats trait add/remove are canonical scoped writes; succession uses CharacterStats for the usurper trait. These scopes prevent revision snapshots during the owning operation and coalesce nested lifecycle changes.
+
+Remaining bypass surface: Character still exposes mutable public fields, children/posts/traits collections and props. External addon direct writers remain under audit. The lane is not yet globally complete.
