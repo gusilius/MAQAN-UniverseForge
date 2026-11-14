@@ -26,6 +26,11 @@ public final class Courts {
     /** Возвращает число созданных персонажей. ed может быть null (тогда правитель в данных государства не меняется). */
     public static int ensure(TitleData d, TitleEditor ed, CharacterRegistry reg, RoleDefs defs, NameBank names, long seed, int year) {
         int created = 0;
+        // Only title offices inside an actually owned realm belong to the living political
+        // hierarchy. Geography-only maps still contain thousands of unowned barony/county
+        // records; filling offices for every one of them creates a phantom population before
+        // any polity has claimed territory.
+        Set<Integer> realmOwnedTitles = realmOwnedTitleIds(d);
         // Courts.ensure may run during world emergence. Build the role/place counts once:
         // CharacterRegistry.holders() scans the complete population, so calling it for every
         // role and every title made this pass O(roles * places * population).
@@ -46,7 +51,9 @@ public final class Courts {
                 int tier = -1;
                 for (TitleData.Tier t : d.tiers) if (t.key.equals(role.per)) tier = t.index;
                 if (tier < 0) throw new IllegalArgumentException("Роль " + role.id + ": нет уровня титулов '" + role.per + "'");
-                for (TitleData.Title t : d.allTitles()) if (t.tier == tier) places.add(new String[]{titlePlace(t.id), cultureOf(d, t), String.valueOf(t.id), raceOf(d, t)});
+                for (TitleData.Title t : d.allTitles())
+                    if (t.tier == tier && realmOwnedTitles.contains(t.id))
+                        places.add(new String[]{titlePlace(t.id), cultureOf(d, t), String.valueOf(t.id), raceOf(d, t)});
             }
             for (String[] pl : places) {
                 String key = holderKey(role.id, pl[0]);
@@ -60,6 +67,23 @@ public final class Courts {
             }
         }
         return created;
+    }
+
+    /**
+     * Returns title IDs that lie on the parent chain of at least one province owned by
+     * a canonical realm. TitleData.realmOf accepts province IDs only, so derive the
+     * ancestor set from owned tier-0 provinces in one pass.
+     */
+    private static Set<Integer> realmOwnedTitleIds(TitleData data) {
+        Set<Integer> owned = new HashSet<>();
+        for (TitleData.Title province : data.allTitles()) {
+            if (province.tier != 0 || data.realmOf(province) == null) continue;
+            for (TitleData.Title current = province; current != null;
+                 current = current.parent > 0 ? data.get(current.parent) : null) {
+                owned.add(current.id);
+            }
+        }
+        return owned;
     }
 
     private static String holderKey(String role, String place) {

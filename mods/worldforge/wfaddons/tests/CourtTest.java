@@ -378,6 +378,22 @@ public class CourtTest {
         CourtSim x = build(a[0], 33);
         x.fromJson(js);
         ok(x.toJson().equals(js), "сохранение и загрузка двора совпадают");
+        // A geography-only map may have thousands of unowned titles. They must not
+        // receive castellan/villager offices until a realm actually owns their provinces.
+        CourtSim unownedMap = build(a[0], 47);
+        for (TitleData.Realm realm : unownedMap.d.realmList()) realm.titleKeys.clear();
+        unownedMap.d.recompute();
+        CharacterRegistry unownedRegistry = new CharacterRegistry();
+        int unownedCreated = Courts.ensure(unownedMap.d, unownedMap.ed, unownedRegistry,
+                unownedMap.defs, unownedMap.names, 47, 300);
+        boolean phantomTitleOffice = unownedRegistry.all().stream()
+                .flatMap(person -> person.posts.stream())
+                .anyMatch(post -> post.place.startsWith("title:"));
+        boolean realmCouncilPresent = unownedMap.d.realmList().stream().allMatch(realm ->
+                !unownedRegistry.holders(unownedMap.defs.ruler().id, Courts.realmPlace(realm.id)).isEmpty());
+        ok(unownedCreated > 0 && !phantomTitleOffice && realmCouncilPresent,
+                "unowned map titles do not generate phantom county/barony people while sovereign realm offices remain active");
+
         System.out.println(fails == 0 ? "ALL OK" : fails + " FAILED");
         if (fails > 0) System.exit(1);
     }
