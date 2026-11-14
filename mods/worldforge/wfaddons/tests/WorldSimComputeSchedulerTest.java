@@ -17,7 +17,7 @@ public final class WorldSimComputeSchedulerTest {
             AtomicInteger calls = new AtomicInteger();
             byte[] snapshot = new byte[]{1, 2, 3};
             byte[] emergence = new byte[]{4, 5};
-            var ticket = new WorldSimComputeScheduler.Ticket("world-A", "worldsim.compute.cycle", 42, 7);
+            var ticket = new WorldSimComputeScheduler.Ticket("world-A", "worldsim.compute.cycle", 42, 7, 1, 1);
 
             check(scheduler.submit(ticket, snapshot, emergence, (input, request) -> {
                 calls.incrementAndGet();
@@ -46,11 +46,15 @@ public final class WorldSimComputeSchedulerTest {
             check(result.ticket().worldId().equals("world-A")
                     && result.ticket().revision() == 42
                     && result.ticket().lifecycleEpoch() == 7, "result must preserve revision fence ticket");
-            check(result.ticket().matches("world-A", "worldsim.compute.cycle", 42, 7), "matching world/revision/epoch must be accepted");
-            check(!result.ticket().matches("world-B", "worldsim.compute.cycle", 42, 7), "results from another world must be rejected");
-            check(!result.ticket().matches("world-A", "worldsim.compute.cycle", 43, 7), "stale revisions must be rejected");
-            check(!result.ticket().matches("world-A", "worldsim.compute.cycle", 42, 8), "results from an earlier lifecycle must be rejected");
-            check(!result.ticket().matches("world-A", "worldsim.other", 42, 7), "results from another operation must be rejected");
+            check(result.ticket().matches("world-A", "worldsim.compute.cycle", 42, 7, 1, 1), "matching world/revision/epoch must be accepted");
+            check(!result.ticket().matches("world-B", "worldsim.compute.cycle", 42, 7, 1, 1), "results from another world must be rejected");
+            check(!result.ticket().matches("world-A", "worldsim.compute.cycle", 43, 7, 1, 1), "stale revisions must be rejected");
+            check(!result.ticket().matches("world-A", "worldsim.compute.cycle", 42, 8, 1, 1), "results from an earlier lifecycle must be rejected");
+            check(!result.ticket().matches("world-A", "worldsim.other", 42, 7, 1, 1), "results from another operation must be rejected");
+            check(!result.ticket().matches("world-A", "worldsim.compute.cycle", 42, 7, 2, 1),
+                    "results from another snapshot schema must be rejected");
+            check(!result.ticket().matches("world-A", "worldsim.compute.cycle", 42, 7, 1, 2),
+                    "results from another native ABI must be rejected");
             check(result.snapshot()[0] == 1, "snapshot must be defensively copied");
             check(result.queueWaitNanos() >= 0 && result.computeNanos() >= 0,
                     "queue wait and compute duration must be measurable");
@@ -66,7 +70,7 @@ public final class WorldSimComputeSchedulerTest {
             CountDownLatch oldStarted = new CountDownLatch(1);
             CountDownLatch finishOld = new CountDownLatch(1);
             CountDownLatch newStarted = new CountDownLatch(1);
-            check(oldWorld.submit(new WorldSimComputeScheduler.Ticket("old", "worldsim.compute.cycle", 1, 1),
+            check(oldWorld.submit(new WorldSimComputeScheduler.Ticket("old", "worldsim.compute.cycle", 1, 1, 1, 1),
                     new byte[]{1}, new byte[]{1}, (input, request) -> {
                         oldStarted.countDown();
                         boolean done = false;
@@ -78,7 +82,7 @@ public final class WorldSimComputeSchedulerTest {
                     }), "old world task must start");
             check(oldStarted.await(5, TimeUnit.SECONDS), "old world native task must acquire lease");
             oldWorld.close();
-            check(newWorld.submit(new WorldSimComputeScheduler.Ticket("new", "worldsim.compute.cycle", 2, 2),
+            check(newWorld.submit(new WorldSimComputeScheduler.Ticket("new", "worldsim.compute.cycle", 2, 2, 1, 1),
                     new byte[]{2}, new byte[]{2}, (input, request) -> {
                         newStarted.countDown();
                         return new WorldSimComputeScheduler.Output(new byte[]{2}, new byte[]{2});
