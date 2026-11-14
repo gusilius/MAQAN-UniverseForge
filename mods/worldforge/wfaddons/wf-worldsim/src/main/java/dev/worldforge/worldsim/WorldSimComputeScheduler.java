@@ -28,16 +28,19 @@ public final class WorldSimComputeScheduler implements AutoCloseable {
         private final String worldId;
         private final long revision;
         private final long lifecycleEpoch;
+        private final long submittedNanos;
 
         public Ticket(String worldId, long revision, long lifecycleEpoch) {
             if (worldId == null || worldId.isBlank()) throw new IllegalArgumentException("worldId is required");
             this.worldId = worldId;
             this.revision = revision;
             this.lifecycleEpoch = lifecycleEpoch;
+            this.submittedNanos = System.nanoTime();
         }
         public String worldId() { return worldId; }
         public long revision() { return revision; }
         public long lifecycleEpoch() { return lifecycleEpoch; }
+        public long submittedNanos() { return submittedNanos; }
         public boolean matches(String expectedWorldId, long expectedRevision, long expectedLifecycleEpoch) {
             return worldId.equals(expectedWorldId) && revision == expectedRevision
                     && lifecycleEpoch == expectedLifecycleEpoch;
@@ -60,16 +63,23 @@ public final class WorldSimComputeScheduler implements AutoCloseable {
         private final Ticket ticket;
         private final byte[] snapshot;
         private final Output output;
+        private final long computeStartedNanos;
+        private final long computeCompletedNanos;
 
-        private Result(Ticket ticket, byte[] snapshot, Output output) {
+        private Result(Ticket ticket, byte[] snapshot, Output output,
+                       long computeStartedNanos, long computeCompletedNanos) {
             this.ticket = ticket;
             this.snapshot = snapshot.clone();
             this.output = output;
+            this.computeStartedNanos = computeStartedNanos;
+            this.computeCompletedNanos = computeCompletedNanos;
         }
         public Ticket ticket() { return ticket; }
         public byte[] snapshot() { return snapshot.clone(); }
         public byte[] emergenceFrame() { return output.emergenceFrame(); }
         public byte[] decisionFrame() { return output.decisionFrame(); }
+        public long queueWaitNanos() { return Math.max(0L, computeStartedNanos - ticket.submittedNanos()); }
+        public long computeNanos() { return Math.max(0L, computeCompletedNanos - computeStartedNanos); }
     }
 
     private final ExecutorService executor;
@@ -97,8 +107,9 @@ public final class WorldSimComputeScheduler implements AutoCloseable {
             try {
                 NATIVE_COMPUTE_LEASE.acquire();
                 acquired = true;
-                return new Result(ticket, immutableSnapshot,
-                        operation.compute(immutableSnapshot.clone(), immutableEmergence.clone()));
+                long computeStarted = System.nanoTime();
+                Output output = operation.compute(immutableSnapshot.clone(), immutableEmergence.clone());
+                return new Result(ticket, immutableSnapshot, output, computeStarted, System.nanoTime());
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
                 throw new IllegalStateException("Interrupted while waiting for the WorldSim native compute lease", interrupted);
