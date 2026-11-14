@@ -41,10 +41,10 @@ public final class Origins {
     public Origins(OriginDefs defs) { this.defs = defs; }
 
     /** Public access returns a detached value; callers cannot mutate canonical state through a getter. */
-    public Build build(String owner) { return copy(builds.get(owner)); }
+    public synchronized Build build(String owner) { return copy(builds.get(owner)); }
 
     /** Non-materializing detached lookup. */
-    public Build peek(String owner) { return builds.containsKey(owner) ? copy(builds.get(owner)) : null; }
+    public synchronized Build peek(String owner) { return builds.containsKey(owner) ? copy(builds.get(owner)) : null; }
 
     private Build state(String owner) {
         Build value = builds.get(owner);
@@ -83,7 +83,7 @@ public final class Origins {
      * Состав жителей государства. Если у государства задано свойство races ("human:60,elf:30") - оно; иначе перепись известных персонажей (игроки и NPC) с этим
      * государством. Каждая подраса засчитывается и своей расе, и всем предкам, поэтому доля «human» включает имперцев и знатных.
      */
-    public Map<String, Double> races(String realm) {
+    public synchronized Map<String, Double> races(String realm) {
         Map<String, Double> declared = DemoApi.shares(DemoApi.parse(hooks.realmProp(realm, "races")));
         if (!declared.isEmpty()) {
             Map<String, Double> out = new LinkedHashMap<>(declared);
@@ -122,7 +122,7 @@ public final class Origins {
 
     // ---------- раса ----------
 
-    public boolean setRace(String owner, String id) {
+    public synchronized boolean setRace(String owner, String id) {
         if (owner == null || owner.isBlank()) throw new IllegalArgumentException("Пустой идентификатор владельца");
         if (!defs.races.containsKey(id)) { lastError = "Нет такой расы."; return false; }
         Build existing = builds.get(owner);
@@ -136,7 +136,7 @@ public final class Origins {
         return true;
     }
 
-    public void resetRace(String owner) {
+    public synchronized void resetRace(String owner) {
         Build existing = builds.get(owner);
         if (existing == null || existing.race.isEmpty()) return;
         try (var mutation = dev.worldforge.mod.api.WorldForgeApi.revisions().begin(
@@ -163,7 +163,7 @@ public final class Origins {
     }
 
     /** Классы, на которые можно перейти или которые видны как цель. Значение - причина отказа или null, если можно сейчас. */
-    public Map<OriginDefs.ClassDef, String> options(String owner) {
+    public synchronized Map<OriginDefs.ClassDef, String> options(String owner) {
         Build b = state(owner);
         Map<OriginDefs.ClassDef, String> out = new LinkedHashMap<>();
         for (OriginDefs.ClassDef c : defs.classes.values()) {
@@ -173,7 +173,7 @@ public final class Origins {
         return out;
     }
 
-    public boolean chooseClass(String owner, String id) {
+    public synchronized boolean chooseClass(String owner, String id) {
         OriginDefs.ClassDef c = defs.classes.get(id);
         Build b = state(owner);
         if (c == null) { lastError = "Нет такого класса."; return false; }
@@ -192,7 +192,7 @@ public final class Origins {
     }
 
     /** Переобучение: снимает последний выбранный класс и возвращает к предыдущему. Раз в RETRAIN_DAYS дней. Возвращает снятый класс или null. */
-    public String retrain(String owner, int day) {
+    public synchronized String retrain(String owner, int day) {
         Build b = state(owner);
         if (b.history.isEmpty()) { lastError = "Нечего менять."; return null; }
         if (day - b.retrainDay < RETRAIN_DAYS && b.retrainDay > 0) { lastError = "Переучиваться можно раз в " + RETRAIN_DAYS + " дней (ещё " + (RETRAIN_DAYS - (day - b.retrainDay)) + ")."; return null; }
@@ -208,7 +208,7 @@ public final class Origins {
 
     // ---------- профессии ----------
 
-    public String canLearn(String owner, String id) {
+    public synchronized String canLearn(String owner, String id) {
         OriginDefs.Profession p = defs.professions.get(id);
         Build b = state(owner);
         if (p == null) return "Нет такой профессии.";
@@ -228,7 +228,7 @@ public final class Origins {
 
     private int rootCount(Build b) { int n = 0; for (String id : b.prof.keySet()) { var p = defs.professions.get(id); if (p != null && p.from().isEmpty()) n++; } return n; }
 
-    public boolean learn(String owner, String id) {
+    public synchronized boolean learn(String owner, String id) {
         String why = canLearn(owner, id);
         if (why != null) { lastError = why; return false; }
         try (var mutation = dev.worldforge.mod.api.WorldForgeApi.revisions().begin(
@@ -239,7 +239,7 @@ public final class Origins {
         return true;
     }
 
-    public void drop(String owner, String id) {
+    public synchronized void drop(String owner, String id) {
         Build b = builds.get(owner);
         if (b == null || !b.prof.containsKey(id)) return;
         boolean dependent = b.prof.keySet().stream().anyMatch(x -> { var p = defs.professions.get(x); return p != null && p.from().equals(id); });
@@ -251,7 +251,7 @@ public final class Origins {
         }
     }
 
-    public int rank(String owner, String id) {
+    public synchronized int rank(String owner, String id) {
         Integer xp = state(owner).prof.get(id);
         OriginDefs.Profession p = defs.professions.get(id);
         if (xp == null || p == null) return -1;
@@ -261,7 +261,7 @@ public final class Origins {
     }
 
     /** Работа по профессии (units - единиц выполненной работы). Возвращает новый ранг, если он вырос, иначе -1. */
-    public int work(String owner, String id, int units) {
+    public synchronized int work(String owner, String id, int units) {
         Build b = state(owner);
         if (!b.prof.containsKey(id) || units <= 0) return -1;
         int before = rank(owner, id);
@@ -279,7 +279,7 @@ public final class Origins {
 
     // ---------- поправки ----------
 
-    public Map<String, Double> mods(String owner) {
+    public synchronized Map<String, Double> mods(String owner) {
         Build b = peek(owner);
         Map<String, Double> out = new LinkedHashMap<>();
         if (b == null) return out;
@@ -305,7 +305,7 @@ public final class Origins {
     }
 
     /** Переплетения, условия которых сейчас выполнены. */
-    public List<OriginDefs.Synergy> activeSynergies(String owner) {
+    public synchronized List<OriginDefs.Synergy> activeSynergies(String owner) {
         List<OriginDefs.Synergy> l = new ArrayList<>();
         Build b = peek(owner);
         if (b == null) return l;
@@ -324,10 +324,10 @@ public final class Origins {
     // ---------- NPC ----------
 
     /** Происхождение NPC по сиду. hint - id профессии или группа ("craft", "trade", "military"...); level - для выбора класса. */
-    public Build assign(String owner, long seed, String hint, int level) { return assign(owner, seed, hint, level, ""); }
+    public synchronized Build assign(String owner, long seed, String hint, int level) { return assign(owner, seed, hint, level, ""); }
 
     /** То же, но раса берётся из состава жителей государства realm (если он известен). */
-    public Build assign(String owner, long seed, String hint, int level, String realm) {
+    public synchronized Build assign(String owner, long seed, String hint, int level, String realm) {
         Build existing = builds.get(owner);
         if (existing != null) return copy(existing); // Repeated NPC population passes preserve progression and expose only a detached value.
         if (owner == null || owner.isBlank()) throw new IllegalArgumentException("Пустой идентификатор владельца");
@@ -375,7 +375,7 @@ public final class Origins {
 
     public int today;
 
-    public String viewJson(String owner) {
+    public synchronized String viewJson(String owner) {
         Build b = state(owner);
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("race", b.race); root.put("class", b.cls); root.put("history", new ArrayList<Object>(b.history));
@@ -436,7 +436,7 @@ public final class Origins {
         return Json.write(root);
     }
 
-    public String toJson() { return toJson(builds); }
+    public synchronized String toJson() { return toJson(builds); }
 
     private static String toJson(Map<String, Build> source) {
         Map<String, Object> root = new LinkedHashMap<>();
@@ -449,7 +449,7 @@ public final class Origins {
         return Json.write(root);
     }
 
-    public void fromJson(String json) {
+    public synchronized void fromJson(String json) {
         // Build and validate an isolated snapshot before replacing live progression.
         Object parsed = Json.parse(json == null ? "" : json);
         if (!(parsed instanceof Map<?, ?> root))
