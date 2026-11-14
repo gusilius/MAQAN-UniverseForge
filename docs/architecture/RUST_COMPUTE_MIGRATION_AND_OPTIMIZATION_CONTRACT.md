@@ -351,3 +351,12 @@ Idempotent Character operations must not create needless revision churn. The reg
 The first Character lane pass was incomplete: several canonical state mutations occur outside CharacterRegistry. The in-repository audit identified PopulationSimulation, CharacterDevelopment, Courts and Succession as additional writers. These are not automatically all authoritative snapshot inputs: lazy defaults, derived age/stage values, simulation cursors, observer memories and action receipts must be classified separately from gameplay state.
 
 Do not instrument every props write or create a second Character state model. Refactor the owning APIs so one logical gameplay mutation commits one shared CHARACTERS revision, while derived/cache writes are excluded or represented by their owning domain. Keep WorldSim global apply fencing disabled until this audit, transaction wiring, snapshot capture and stale-result tests are complete.
+
+
+### Character transaction batching — implementation progress
+
+The Character lane now has a nested transaction boundary. Its outer scope opens the shared DomainMutationRevisions writer before touching Character state; nested operations coalesce into the same scope. This both prevents snapshot capture during the transaction and advances the lane once after a dirty commit.
+
+PopulationSimulation and CharacterDevelopment canonical APIs are being migrated to this boundary. Daily population advancement is one batch for the tick; composite hire/fire, profession, court generation and succession operations are coalesced. Idempotent writes should not churn revisions.
+
+This improves the CHARACTERS lane only. Public mutable Character fields/collections, external addon writers, and other domain lanes remain incomplete. Global WorldSim apply fencing stays disabled until all snapshot inputs and writers are covered and stale-result tests pass.
