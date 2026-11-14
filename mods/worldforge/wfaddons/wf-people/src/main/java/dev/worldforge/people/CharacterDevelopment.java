@@ -87,7 +87,6 @@ public final class CharacterDevelopment {
             CharacterRegistry.recordCharacterMutation();
         }
     }
-    }
     public static String moodCause(Character c){return string(c,MOOD_CAUSE,"");}
 
     private static String psychologyIdentity(Character c) {
