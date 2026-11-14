@@ -106,35 +106,35 @@ public final class TreasuryLedger {
         return v;
     }
     private static long minute(long v) { if(v<0) throw new IllegalArgumentException("worldMinute cannot be negative"); return v; }
-    public String synchronized lastError() { return lastError; }
-    public Collection<Account> synchronized accounts() { return Collections.unmodifiableCollection(accounts.values()); }
-    public List<Entry> synchronized journal() { return Collections.unmodifiableList(journal); }
-    public Account synchronized account(String id) { return accounts.get(id); }
-    public boolean synchronized hasAccount(String id) { return accounts.containsKey(id); }
-    public double synchronized balance(String id) { Account a=accounts.get(id); return a==null?0:a.balance; }
+    public synchronized String lastError() { return lastError; }
+    public synchronized Collection<Account> accounts() { return Collections.unmodifiableCollection(accounts.values()); }
+    public synchronized List<Entry> journal() { return Collections.unmodifiableList(journal); }
+    public synchronized Account account(String id) { return accounts.get(id); }
+    public synchronized boolean hasAccount(String id) { return accounts.containsKey(id); }
+    public synchronized double balance(String id) { Account a=accounts.get(id); return a==null?0:a.balance; }
 
     /** Account-scoped immutable journal view in original append order. */
-    public List<Entry> synchronized entriesForAccount(String accountId) {
+    public synchronized List<Entry> entriesForAccount(String accountId) {
         return Collections.unmodifiableList(entriesByAccount.getOrDefault(accountId, List.of()));
     }
 
     /** O(1) lookup of the postings sharing one account/kind/reference idempotency key. */
-    public List<Entry> synchronized entriesForReference(String accountId, Kind kind, String reference) {
+    public synchronized List<Entry> entriesForReference(String accountId, Kind kind, String reference) {
         return Collections.unmodifiableList(entriesByReference.getOrDefault(
                 referenceKey(accountId, kind, reference), List.of()));
     }
 
-    public boolean synchronized hasEntries(String accountId) { return accountsWithEntries.contains(accountId); }
+    public synchronized boolean hasEntries(String accountId) { return accountsWithEntries.contains(accountId); }
 
     /** Enumerates canonical account IDs; unlike journal-derived discovery this scales with accounts. */
-    public Set<String> synchronized accountIdsWithPrefix(String prefix) {
+    public synchronized Set<String> accountIdsWithPrefix(String prefix) {
         Set<String> result = new TreeSet<>();
         for (String id : accounts.keySet()) if (id.startsWith(prefix)) result.add(id);
         return Collections.unmodifiableSet(result);
     }
 
     /** Total successfully posted debit value for an account/category, rebuilt from the durable journal. */
-    public double synchronized totalDebits(String accountId, Kind kind, String category) {
+    public synchronized double totalDebits(String accountId, Kind kind, String category) {
         return debitTotals.getOrDefault(debitTotalKey(accountId, kind, category), 0.0);
     }
 
@@ -156,17 +156,17 @@ public final class TreasuryLedger {
     }
 
     /** True when this account already posted the same economic event; used for crash-safe retries. */
-    public boolean synchronized hasTransaction(String accountId, Kind kind, String reference) {
+    public synchronized boolean hasTransaction(String accountId, Kind kind, String reference) {
         return postedReferences.contains(referenceKey(accountId, kind, reference));
     }
-    public boolean synchronized hasDebit(String accountId, Kind kind, String reference) {
+    public synchronized boolean hasDebit(String accountId, Kind kind, String reference) {
         return postedDebits.contains(referenceKey(accountId, kind, reference));
     }
-    public boolean synchronized hasCredit(String accountId, Kind kind, String reference) {
+    public synchronized boolean hasCredit(String accountId, Kind kind, String reference) {
         return postedCredits.contains(referenceKey(accountId, kind, reference));
     }
     /** O(1) query for the legacy stock-reconciliation guard used by settlement resource reads. */
-    public boolean synchronized hasArmyFieldRationDebit(String accountId) {
+    public synchronized boolean hasArmyFieldRationDebit(String accountId) {
         return armyFieldRationDebitAccounts.contains(accountId);
     }
 
@@ -353,7 +353,7 @@ public final class TreasuryLedger {
      * so building a second object graph and one giant JSON String for every autosave can
      * temporarily require several times the ledger's retained heap.
      */
-    public void synchronized writeJson(java.io.Writer writer) throws java.io.IOException {
+    public synchronized void writeJson(java.io.Writer writer) throws java.io.IOException {
         writer.write("{\"format\":\"wf-treasury-ledger/1\",\"sequence\":");
         writer.write(Long.toString(sequence));
         writer.write(",\"transactionSequence\":");
@@ -392,7 +392,7 @@ public final class TreasuryLedger {
         writer.write("]}");
     }
 
-    public String synchronized toJson() {
+    public synchronized String toJson() {
         java.io.StringWriter writer = new java.io.StringWriter();
         try {
             writeJson(writer);
