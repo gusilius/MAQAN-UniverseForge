@@ -44,16 +44,17 @@ public final class Succession {
                 usurper = true;
             }
             reg.appoint(heir.id, role.id, p.place);
+            final Character successor = heir;
             if (p.place.startsWith("realm:")) {
                 String realmId = p.place.substring(6);
                 // Character ownership/posts are covered by the outer Character batch.
                 // TitleEditor.group is the single canonical REALMS_POLITICS writer boundary:
                 // include ruler and holder metadata in that same group so the lane advances once.
                 Runnable updatePoliticalState = () -> {
-                    String rulerName = heir.name + (heir.house.isEmpty() ? "" : " " + heir.house);
+                    String rulerName = successor.name + (successor.house.isEmpty() ? "" : " " + heir.house);
                     if (ed != null) ed.setRuler(realmId, rulerName);
                     String deceasedGlobalId = dead.globalId;
-                    String heirGlobalId = heir.globalId;
+                    String heirGlobalId = successor.globalId;
                     for (TitleData.Title title : d.allTitles()) {
                         Object holder = title.props.get("holderCharacterId");
                         if (holder instanceof String holderId
