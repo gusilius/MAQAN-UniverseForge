@@ -182,9 +182,10 @@ public final class Origins {
         if (why != null) { lastError = why; return false; }
         try (var mutation = dev.worldforge.mod.api.WorldForgeApi.revisions().begin(
                 dev.worldforge.mod.api.DomainMutationRevisions.Domain.ORIGINS)) {
-            Build target = builds.computeIfAbsent(owner, ignored -> new Build());
+            Build target = copy(builds.get(owner));
             target.cls = id; target.history.add(id);
             if (!c.archetype().isEmpty()) hooks.archetype(owner, c.archetype());
+            builds.put(owner, target);
             mutation.commit();
         }
         return true;
@@ -334,7 +335,6 @@ public final class Origins {
         Build b = new Build();
         try (var mutation = dev.worldforge.mod.api.WorldForgeApi.revisions().begin(
                 dev.worldforge.mod.api.DomainMutationRevisions.Domain.ORIGINS)) {
-        builds.put(owner, b);
         String forced = realm.isEmpty() ? "" : pickRace(realm, rng);
         int total = 0;
         for (OriginDefs.Race r : defs.races.values()) total += Math.max(1, r.weight());
@@ -363,6 +363,7 @@ public final class Origins {
                 b.cls = n.id(); b.history.add(n.id());
             }
         }
+        builds.put(owner, b);
         mutation.commit();
         return b;
         }
