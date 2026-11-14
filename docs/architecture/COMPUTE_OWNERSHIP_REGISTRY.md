@@ -253,3 +253,12 @@ This is an operation-count status, not a percentage of all UniverseForge computa
 - Replaces repeated linear coordinate lookup and polity-member aggregation scans with indexed lookup.
 - Determinism guard: reversed geographic-cell input order must produce an identical `EmergenceFrame`.
 - Source commits: `10b20f8d`, `680dfbff`, `33a1bec7`. Await CI and large-map benchmark evidence; no numeric performance claim yet.
+
+
+### `worldsim.decide` — contested realm membership
+
+- Existing Rust decision owner remains authoritative for proposal computation.
+- Recruitment no longer scans every border for each settlement. One request-local ordered set of realm IDs touching contested borders is built from the already-normalized border list and reused for membership checks.
+- No persistent cache, parallel decision logic, extra executor, or Java duplicate calculation is introduced.
+- Added regression coverage for contested vs. uncontested border recruitment.
+- Source commit: `f8e6381e`. CI and large-snapshot profiling pending; no measured performance claim yet.
