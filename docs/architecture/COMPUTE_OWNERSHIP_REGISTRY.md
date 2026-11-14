@@ -133,3 +133,14 @@ WF-RT-0023 tracks the missing shared mutation revision across authoritative doma
 ### Character lane precision follow-up — WF-RT-0023
 
 The CharacterRegistry integration now avoids revision churn for idempotent appointment, identical entity binding, ignored entity unbinding, same-destination migration and repeated unchanged calendar refresh. Entity body-kind normalization is consistent across bind/unbind. The lane remains post-write invalidation; it does not establish a cross-thread lock around mutable Character state.
+
+
+### Expanded Character writer inventory — WF-RT-0023
+
+The Character domain is not owned exclusively by `CharacterRegistry`. Direct authoritative/derived writes also exist in:
+- `PopulationSimulation`: profession, command, training, intent, age/life-stage, death metadata and simulation progress.
+- `CharacterDevelopment`: race/class/rarity/level, mood/personality/stress, conduct receipts, growth/traits, upbringing, morale/injury, abilities and observer memory.
+- `Courts`: origin race and surname initialization.
+- `Succession`: heir traits and title succession metadata.
+
+These writers must be classified before integration. Do not use a blanket observable-map hook: it would count lazy defaults, derived caches and multi-field operations as separate mutations, creating revision churn and duplicate invalidation. Target one canonical transaction boundary per logical operation; preserve existing semantics and public gameplay capabilities.
