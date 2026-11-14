@@ -6,6 +6,7 @@ import dev.worldforge.mod.api.WorldForgeApi;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.PopulationSimulation;
+import dev.worldforge.people.CharacterDevelopment;
 
 public final class DomainMutationRevisionsTest {
     private static int failures;
@@ -146,6 +147,23 @@ public final class DomainMutationRevisionsTest {
                         == beforeProfession + 1
                         && PopulationSimulation.profession(founder).equals("farmer"),
                 "canonical population profession write advances the shared Character lane");
+
+        long beforeRace = afterProfession.revision(DomainMutationRevisions.Domain.CHARACTERS);
+        CharacterDevelopment.setRace(founder, "elf_forest");
+        var afterRace = WorldForgeApi.revisions().snapshot().orElseThrow();
+        CharacterDevelopment.setRace(founder, "elf_forest");
+        var afterRepeatedRace = WorldForgeApi.revisions().snapshot().orElseThrow();
+        check(afterRace.revision(DomainMutationRevisions.Domain.CHARACTERS) == beforeRace + 1
+                        && afterRepeatedRace.revision(DomainMutationRevisions.Domain.CHARACTERS)
+                        == afterRace.revision(DomainMutationRevisions.Domain.CHARACTERS),
+                "Character development setter records real changes and ignores idempotent writes");
+
+        long beforeExperience = afterRepeatedRace.revision(DomainMutationRevisions.Domain.CHARACTERS);
+        CharacterDevelopment.recordExperience(founder, CharacterDevelopment.Experience.BATTLE_VICTORY,
+                "revision-test:victory", "deterministic revision fixture", 100, 2);
+        var afterExperience = WorldForgeApi.revisions().snapshot().orElseThrow();
+        check(afterExperience.revision(DomainMutationRevisions.Domain.CHARACTERS) == beforeExperience + 1,
+                "compound psychological experience commits one Character revision despite nested writes");
 
         if (failures > 0) throw new AssertionError(failures + " domain mutation revision checks failed");
         System.out.println("DOMAIN_MUTATION_REVISIONS_STATUS=PASS");
