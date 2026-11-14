@@ -121,3 +121,10 @@ WF-RT-0023 tracks the missing shared mutation revision across authoritative doma
 | Character / Origins / Realm / Settlement / Economy / Army / Inventory | Existing owning addon APIs | Dedicated coordinator lanes are defined | Not yet wired; do not treat vector as complete |
 
 `DomainMutationRevisions` lives in wfmod API and owns only revision metadata. It does not duplicate domain state. WorldSim must not reject/apply based on this partial vector until every snapshot field has an audited canonical writer and a wired lane.
+
+
+### Character lane wiring — WF-RT-0023
+
+| Canonical owner | Writes observed | Lane | Status |
+|---|---|---|---|
+| `CharacterRegistry` | lifecycle publication for create, posts, profession/employment, migration, duties, family, death; restore; entity bind/unbind; age/life-stage refresh | `CHARACTERS` | Wired post-write; direct mutable props writers outside registry still require audit |
