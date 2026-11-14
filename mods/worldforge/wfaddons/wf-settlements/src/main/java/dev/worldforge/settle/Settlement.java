@@ -233,10 +233,7 @@ public final class Settlement {
             } else {
                 // Legacy snapshots have no sequence marker. Keep their old one-time mirror
                 // reconciliation unless a durable army food transfer proves the ledger is newer.
-                reconcileStockMirror = ledger.journal().stream().noneMatch(entry ->
-                        entry.accountId().equals(sourceAccountId) && !entry.credit()
-                                && entry.kind() == TreasuryLedger.Kind.LOGISTICS
-                                && entry.category().equals("army-field-rations"));
+                reconcileStockMirror = !ledger.hasArmyFieldRationDebit(sourceAccountId);
             }
             stockReconciliationChecked = true;
         }
