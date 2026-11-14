@@ -602,3 +602,9 @@
 
 - Corrected the immutability fixture to inspect the actual published `human` definition and assert failed replacement leaves the target generation unchanged. Invalid builder data is validated at the replacement boundary; parsing alone intentionally remains a staging operation so multiple datapack files can be merged before validation.
 - Corrected the final synergy validation accessors to the record's canonical `races()` and `classes()` methods.
+
+
+### WF-RT-0023 — CI accessor compile correction
+
+- CI run `43618666018` caught 32 compile errors where the first Origins migration referenced private Snapshot fields instead of their immutable accessors. Updated all Origins consumers to use the snapshot accessors; no state or formula changes.
+- Re-run the full logic and addon/Core/Atlas matrix before accepting the immutable definition publication.
