@@ -144,3 +144,16 @@ The Character domain is not owned exclusively by `CharacterRegistry`. Direct aut
 - `Succession`: heir traits and title succession metadata.
 
 These writers must be classified before integration. Do not use a blanket observable-map hook: it would count lazy defaults, derived caches and multi-field operations as separate mutations, creating revision churn and duplicate invalidation. Target one canonical transaction boundary per logical operation; preserve existing semantics and public gameplay capabilities.
+
+
+### Character canonical writer batch — WF-RT-0023
+
+CharacterRegistry.MutationBatch is the shared Character transaction boundary. The outer batch opens one DomainMutationRevisions.CHARACTERS writer scope before mutation; nested batches join it. A dirty outer close commits one lane revision, and snapshots are unavailable during the active scope.
+
+Integrated owners:
+- PopulationSimulation: profession, duty, command, needs, skill/training, intent, death and daily population tick.
+- CharacterDevelopment: race/class/rarity/level, mood, psychology, memory, injuries, morale and abilities; compound conduct/experience/inheritance/upbringing/combat injury operations.
+- CharacterRegistry: hire/fire/migrate/profession/duty/life-stage composite operations.
+- Courts.ensure and Succession.onDeath: generation/succession batches.
+
+One daily world population tick and one compound gameplay action now produce one revision, rather than one increment per nested field write. Idempotent setters do not invalidate unchanged snapshots. Remaining direct public mutable Character fields/collections and addon writers still require a complete audit; do not enable a global apply fence yet.
