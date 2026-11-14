@@ -266,8 +266,7 @@ public class OriginsTest {
         missingPrerequisiteOrigins.setRace("p:missing-prereq", "r");
         String missingClassRequirement = missingPrerequisiteOrigins.canLearn("p:missing-prereq", "needs_class");
         String missingProfessionParent = missingPrerequisiteOrigins.canLearn("p:missing-prereq", "specialist");
-        Origins.Build noClassBuild = missingPrerequisiteOrigins.build("p:missing-prereq");
-        noClassBuild.prof.put("required_prof", 0);
+        missingPrerequisiteOrigins.fromJson("{\"p:missing-prereq\":{\"race\":\"r\",\"class\":\"\",\"history\":[],\"prof\":{\"required_prof\":0}}}");
         String missingClassProfessionRequirement = missingPrerequisiteOrigins.options("p:missing-prereq").values().stream()
                 .filter(Objects::nonNull).findFirst().orElse("");
         ok(missingClassRequirement != null && missingClassRequirement.contains("временно отсутствует")
