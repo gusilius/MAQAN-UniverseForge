@@ -287,13 +287,15 @@ public final class WorldSimMod {
             throw new IllegalStateException("Native decision engine returned an invalid proposal frame");
         }
 
-        emergenceState = emergenceFrame.getAsJsonObject("state").deepCopy();
+        // Keep the last committed native state as the retry base until every apply
+        // stage below completes. The candidate is immutable staged data for this cycle.
+        JsonObject candidateEmergenceState = emergenceFrame.getAsJsonObject("state").deepCopy();
         long phaseStarted = System.nanoTime();
-        int materializationYear = emergenceYear(emergenceState, WorldForgeApi.clock().year());
-        syncEmergentPeople(server, emergenceState, materializationYear);
+        int materializationYear = emergenceYear(candidateEmergenceState, WorldForgeApi.clock().year());
+        syncEmergentPeople(server, candidateEmergenceState, materializationYear);
         PROFILER.record("worldsim.sync_emergent_people", System.nanoTime() - phaseStarted);
         phaseStarted = System.nanoTime();
-        syncEmergentPolities(server, emergenceState, materializationYear);
+        syncEmergentPolities(server, candidateEmergenceState, materializationYear);
         PROFILER.record("worldsim.sync_emergent_polities", System.nanoTime() - phaseStarted);
 
         if (emergenceFrame.has("events") && emergenceFrame.get("events").isJsonArray()) {
@@ -366,6 +368,9 @@ public final class WorldSimMod {
         PROFILER.record("worldsim.apply_proposals", System.nanoTime() - phaseStarted);
         PROFILER.setGauge("worldsim.proposals.accepted", accepted);
         PROFILER.setGauge("worldsim.proposals.rejected", rejected);
+        // Commit the native emergence cursor only after materialization, event publication,
+        // and proposal processing have completed. A failed apply retries from prior state.
+        emergenceState = candidateEmergenceState.deepCopy();
         PROFILER.setGauge("worldsim.compute.busy", 0);
         lastDecisionDay = day;
         phaseStarted = System.nanoTime();
