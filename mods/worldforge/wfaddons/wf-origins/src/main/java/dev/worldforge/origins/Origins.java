@@ -157,7 +157,12 @@ public final class Origins {
         if (!defs.raceOk(b.race, c.reqRaces())) return "Только для: " + String.join(", ", c.reqRaces()) + ".";
         for (String f : c.reqFlags()) if (!hooks.flag(owner, f)) return "Нужно выполнить: " + f + ".";
         for (String f : c.banFlags()) if (hooks.flag(owner, f)) return "Несовместимо с вашим состоянием: " + f + ".";
-        for (var e : c.reqProf().entrySet()) if (rank(owner, e.getKey()) < e.getValue()) return "Нужна профессия «" + defs.professions.get(e.getKey()).name() + "», звание не ниже " + (e.getValue() + 1) + "-го.";
+        for (var e : c.reqProf().entrySet()) {
+            OriginDefs.Profession required = defs.professions.get(e.getKey());
+            if (required == null) return "Требуемая профессия временно отсутствует: " + e.getKey() + ".";
+            if (rank(owner, e.getKey()) < e.getValue())
+                return "Нужна профессия «" + required.name() + "», звание не ниже " + (e.getValue() + 1) + "-го.";
+        }
         if (!c.exclusive().isEmpty()) for (String h : b.history) { var o = defs.classes.get(h); if (o != null && o.exclusive().equals(c.exclusive()) && !o.id().equals(c.id())) return "Несовместимо с выбранным путём: " + o.name() + ".";}
         return null;
     }
@@ -215,13 +220,26 @@ public final class Origins {
         if (b.prof.containsKey(id)) return "Уже освоена.";
         if (!p.from().isEmpty()) {
             int pr = rank(owner, p.from());
-            if (pr < 0) return "Сначала освойте: " + defs.professions.get(p.from()).name() + ".";
-            if (pr < p.minRank()) return "Нужно звание «" + defs.professions.get(p.from()).ranks().get(p.minRank()).name() + "» в профессии " + defs.professions.get(p.from()).name() + ".";
+            OriginDefs.Profession prerequisite = defs.professions.get(p.from());
+            if (prerequisite == null) return "Определение требуемой профессии временно отсутствует: " + p.from() + ".";
+            if (pr < 0) return "Сначала освойте: " + prerequisite.name() + ".";
+            if (pr < p.minRank()) {
+                if (prerequisite.ranks().isEmpty()) return "У требуемой профессии временно отсутствуют звания: " + p.from() + ".";
+                int requiredRank = Math.max(0, Math.min(prerequisite.ranks().size() - 1, p.minRank()));
+                return "Нужно звание «" + prerequisite.ranks().get(requiredRank).name() + "» в профессии " + prerequisite.name() + ".";
+            }
         } else if (rootCount(b) >= MAX_PROFESSIONS) return "Можно владеть не более " + MAX_PROFESSIONS + " профессиями.";
         Map<String, Double> sh = hooks.sheet(owner);
         for (var e : p.reqStat().entrySet()) if (sh.getOrDefault(e.getKey(), 0.0) < e.getValue()) return "Нужно: " + e.getKey() + " " + e.getValue() + ".";
         if (!defs.raceOk(b.race, p.reqRaces())) return "Эта профессия не для вашей расы.";
-        if (!p.reqClasses().isEmpty() && b.history.stream().noneMatch(p.reqClasses()::contains)) return "Нужен класс: " + String.join(" / ", p.reqClasses().stream().map(x -> defs.classes.get(x).name()).toList()) + ".";
+        if (!p.reqClasses().isEmpty() && b.history.stream().noneMatch(p.reqClasses()::contains)) {
+            List<String> requiredClasses = new ArrayList<>();
+            for (String requiredId : p.reqClasses()) {
+                OriginDefs.ClassDef required = defs.classes.get(requiredId);
+                requiredClasses.add(required == null ? requiredId + " (определение временно отсутствует)" : required.name());
+            }
+            return "Нужен класс: " + String.join(" / ", requiredClasses) + ".";
+        }
         if (!p.exclusive().isEmpty()) for (String x : b.prof.keySet()) { var o = defs.professions.get(x); if (o != null && o.exclusive().equals(p.exclusive())) return "Несовместимо с освоенным: " + o.name() + ".";}
         return null;
     }
