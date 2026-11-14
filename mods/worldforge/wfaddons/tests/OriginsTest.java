@@ -218,6 +218,20 @@ public class OriginsTest {
         ok(o8.chooseClass("p:v", "blood_knight"), "с вампиризмом открыт: " + o8.lastError);
         flags.clear(); o8.setRace("p:h", "human"); o8.chooseClass("p:h", "ranger"); o8.chooseClass("p:h", "night_hunter"); flags.add("form:vampire");
         ok(!o8.chooseClass("p:h", "witch_hunter") && o8.lastError.contains("Несовместимо"), "охотник на ведьм не может быть вампиром: " + o8.lastError);
+
+        // Concurrent commands must not both win the one-time race selection.
+        dev.worldforge.mod.api.WorldForgeApi.revisions().resetForTests();
+        Origins concurrent = new Origins(d);
+        java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicInteger winners = new java.util.concurrent.atomic.AtomicInteger();
+        Thread raceA = new Thread(() -> { try { start.await(); if (concurrent.setRace("p:race-race", "human")) winners.incrementAndGet(); } catch (InterruptedException ex) { Thread.currentThread().interrupt(); } });
+        Thread raceB = new Thread(() -> { try { start.await(); if (concurrent.setRace("p:race-race", "orc")) winners.incrementAndGet(); } catch (InterruptedException ex) { Thread.currentThread().interrupt(); } });
+        raceA.start(); raceB.start(); start.countDown(); raceA.join(); raceB.join();
+        long raceRevision = dev.worldforge.mod.api.WorldForgeApi.revisions().snapshot().orElseThrow()
+                .revision(dev.worldforge.mod.api.DomainMutationRevisions.Domain.ORIGINS);
+        ok(winners.get() == 1 && raceRevision == 1
+                        && Set.of("human", "orc").contains(concurrent.build("p:race-race").race),
+                "параллельный выбор расы сериализован: один победитель и одна revision");
         System.out.println(fails == 0 ? "ALL OK" : fails + " FAIL");
         if (fails > 0) System.exit(1);
     }
