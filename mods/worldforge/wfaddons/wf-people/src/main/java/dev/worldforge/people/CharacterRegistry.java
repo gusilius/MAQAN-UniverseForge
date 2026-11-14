@@ -161,6 +161,7 @@ public final class CharacterRegistry {
         if (!c.alive) throw new IllegalStateException(c.name + " is dead");
         String destination = requireText(destinationId, "destination");
         String previous = String.valueOf(c.props.getOrDefault("population.location", ""));
+        if (destination.equals(previous)) return;
         String employer = String.valueOf(c.props.getOrDefault("population.employer", ""));
         if (!employer.isEmpty()) fire(id, employer, year);
         c.props.put("population.location", destination);
@@ -205,13 +206,15 @@ public final class CharacterRegistry {
 
     public void unbindEntity(String id, String bodyKind, String entityUuid) {
         Character c = require(id);
+        String kind = requireText(bodyKind, "body kind").toLowerCase(Locale.ROOT);
+        String uuid = requireText(entityUuid, "entity UUID");
         Object raw = c.props.get("population.entity_bindings");
         if (!(raw instanceof Map<?, ?> map)) return;
-        Object current = map.get(bodyKind);
-        if (!Objects.equals(current, entityUuid)) return;
+        Object current = map.get(kind);
+        if (!Objects.equals(current, uuid)) return;
         Map<String, Object> bindings = new LinkedHashMap<>();
         for (Map.Entry<?, ?> entry : map.entrySet())
-            if (entry.getKey() instanceof String key && !key.equals(bodyKind)) bindings.put(key, entry.getValue());
+            if (entry.getKey() instanceof String key && !key.equals(kind)) bindings.put(key, entry.getValue());
         if (bindings.isEmpty()) c.props.remove("population.entity_bindings");
         else c.props.put("population.entity_bindings", bindings);
         recordDomainMutation();
