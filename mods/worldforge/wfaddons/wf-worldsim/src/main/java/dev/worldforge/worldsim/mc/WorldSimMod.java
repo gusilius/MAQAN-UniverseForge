@@ -208,7 +208,8 @@ public final class WorldSimMod {
             PROFILER.record("worldsim.compute.queue_wait", completed.queueWaitNanos());
             PROFILER.record("worldsim.compute.total", completed.computeNanos());
             WorldSimComputeScheduler.Ticket ticket = completed.ticket();
-            if (!ticket.matches(worldId, "worldsim.compute.cycle", pendingComputeRevision, lifecycleEpoch)) {
+            if (!ticket.matches(worldId, "worldsim.compute.cycle", pendingComputeRevision, lifecycleEpoch,
+                    NativeWorldSimulation.SNAPSHOT_SCHEMA_VERSION, NativeWorldSimulation.NATIVE_ABI_VERSION)) {
                 pendingComputeRevision = Long.MIN_VALUE;
                 PROFILER.setGauge("worldsim.compute.busy", 0);
                 PROFILER.setGauge("worldsim.compute.stale_results", 1);
@@ -240,13 +241,15 @@ public final class WorldSimMod {
             JsonObject snapshot = snapshot(server, day);
             byte[] input = GSON.toJson(snapshot).getBytes(StandardCharsets.UTF_8);
             JsonObject emergenceRequest = new JsonObject();
+            emergenceRequest.addProperty("schema_version", NativeWorldSimulation.SNAPSHOT_SCHEMA_VERSION);
             emergenceRequest.add("snapshot", snapshot);
             if (emergenceState != null) emergenceRequest.add("state", emergenceState.deepCopy());
             byte[] emergenceInput = GSON.toJson(emergenceRequest).getBytes(StandardCharsets.UTF_8);
             PROFILER.record("worldsim.snapshot_and_json", System.nanoTime() - phaseStarted);
 
             WorldSimComputeScheduler.Ticket ticket =
-                    new WorldSimComputeScheduler.Ticket(worldId, "worldsim.compute.cycle", day, lifecycleEpoch);
+                    new WorldSimComputeScheduler.Ticket(worldId, "worldsim.compute.cycle", day, lifecycleEpoch,
+                            NativeWorldSimulation.SNAPSHOT_SCHEMA_VERSION, NativeWorldSimulation.NATIVE_ABI_VERSION);
             boolean submitted = COMPUTE_SCHEDULER.submit(ticket, input, emergenceInput, (snapshotBytes, emergenceBytes) -> {
                 long nativeStarted = System.nanoTime();
                 byte[] emergenceFrame = NativeWorldSimulation.advanceEmergence(emergenceBytes);
@@ -748,6 +751,7 @@ public final class WorldSimMod {
         var canonicalWorldId = WorldForgeMod.worldId();
         if (canonicalWorldId == null)
             throw new IllegalStateException("Canonical WorldId is unavailable; refusing autonomous simulation without stable world identity");
+        root.addProperty("schema_version", NativeWorldSimulation.SNAPSHOT_SCHEMA_VERSION);
         root.addProperty("world_id", canonicalWorldId.toString());
         root.addProperty("seed", server.getWorldData().worldGenOptions().seed() & Long.MAX_VALUE);
         root.addProperty("day", day);
