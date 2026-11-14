@@ -334,3 +334,8 @@ CI green подтверждает только выполненные в нём 
 ### WF-RT-0023 implementation note
 
 A shared `DomainMutationRevisions` coordinator has been introduced in WorldForge Core. It supports domain lanes and commit-after-success mutation scopes; canonical EventLog writes are the first integrated lane. This is a foundation, not a complete global freshness guarantee. Character/Origins, Realm/Politics, Settlement, Treasury/Trade, Army/War and Inventory/Ownership writers remain to be audited and wired before WorldSim can use the vector as an apply fence.
+
+
+### Character revision integration status
+
+The shared `CHARACTERS` lane is now advanced by canonical `CharacterRegistry` lifecycle publication, restore, entity binding changes and calendar-derived age/life-stage updates. The legacy registry revision remains a membership/identity counter. This integration is post-write invalidation for current server-thread-owned paths; it is not yet a complete cross-thread mutation fence because direct mutable Character/props writers in addons remain under audit. Do not enable WorldSim global revision-based apply rejection until all such writers are scoped and covered by tests.
