@@ -632,18 +632,20 @@ public final class PopulationSimulationTest {
                 String id = String.valueOf(person.get("id"));
                 Character character = parityCharacters.get(id);
                 Map<?,?> expectedNeeds = (Map<?,?>) person.get("needs");
-                boolean needsMatch = PopulationSimulation.need(character, Need.HUNGER) == ((Number) expectedNeeds.get("hunger")).intValue()
-                        && PopulationSimulation.need(character, Need.REST) == ((Number) expectedNeeds.get("rest")).intValue()
-                        && PopulationSimulation.need(character, Need.SAFETY) == ((Number) expectedNeeds.get("safety")).intValue()
-                        && PopulationSimulation.need(character, Need.SOCIAL) == ((Number) expectedNeeds.get("social")).intValue()
-                        && PopulationSimulation.need(character, Need.PURPOSE) == ((Number) expectedNeeds.get("purpose")).intValue()
-                        && PopulationSimulation.need(character, Need.LEISURE) == ((Number) expectedNeeds.get("leisure")).intValue();
+                Map<?,?> actualNeeds = (Map<?,?>) character.props.get("population.needs");
+                boolean needsMatch = actualNeeds != null && actualNeeds.size() == expectedNeeds.size()
+                        && expectedNeeds.entrySet().stream().allMatch(entry -> {
+                            Object actual = actualNeeds.get(entry.getKey());
+                            return actual instanceof Number a && entry.getValue() instanceof Number e
+                                    && a.intValue() == e.intValue();
+                        });
                 boolean stateMatch = needsMatch
                         && PopulationSimulation.decide(character, fixtureYear).name().toLowerCase(java.util.Locale.ROOT).equals(person.get("intent"))
                         && ((Number) character.props.get("population.age_years")).intValue() == ((Number) person.get("age_years")).intValue()
                         && String.valueOf(character.props.get("population.life_stage")).equals(person.get("life_stage"))
                         && Long.parseLong(String.valueOf(character.props.get("population.simulated_days"))) == Long.parseLong(String.valueOf(person.get("simulated_days")))
-                        && Long.parseLong(String.valueOf(character.props.get("population.last_simulated_world_day"))) == fixtureWorldDay;
+                        && Long.parseLong(String.valueOf(character.props.get("population.last_simulated_world_day"))) == fixtureWorldDay
+                        && ((Number) character.props.get("population.last_simulated_year")).intValue() == fixtureYear;
                 ok(stateMatch, "Java population result matches shared Rust parity fixture for " + id);
             }
         } catch (Exception fixtureFailure) {

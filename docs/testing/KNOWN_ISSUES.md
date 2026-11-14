@@ -608,3 +608,11 @@
 
 - CI run `43618666018` caught 32 compile errors where the first Origins migration referenced private Snapshot fields instead of their immutable accessors. Updated all Origins consumers to use the snapshot accessors; no state or formula changes.
 - Re-run the full logic and addon/Core/Atlas matrix before accepting the immutable definition publication.
+
+
+### WF-RT-0024 — expanded deterministic Java/Rust parity matrix
+
+- Extended population-compute-parity-v1.json with 60 deterministic boundary Characters and full expected frames.
+- Covers age/life-stage transitions, priority thresholds, role combinations, per-person elapsed intervals, long-duration saturation, extension needs, and stable ID ordering under reversed input order.
+- Java validates the complete needs projection and both year/day receipts against the shared fixture; Rust executes the same fixture through population::advance.
+- This is a stronger semantic parity gate, not a claim that Population is fully cut over. WF-RT-0023 writer coverage and WF-RT-0021 cross-domain atomicity remain open.

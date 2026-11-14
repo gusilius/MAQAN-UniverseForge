@@ -358,3 +358,11 @@ This is an operation-count status, not a percentage of all UniverseForge computa
 - `OriginDefs` remains the sole owner of race/class/profession/synergy definitions. Its six mutable builder collections are private; a complete deep-immutable, generation-tagged `Snapshot` is published through one volatile reference.
 - `Origins` captures one snapshot for each synchronized logical operation. Datapack reload swaps the OriginDefs publication and Origins active generation under the same owner lock, preventing mixed-definition operations.
 - Existing public collection names remain compatibility read views, but are no longer mutable; nested records/maps/lists/perk trees are defensively frozen. No second registry/cache or duplicated definition owner was added.
+
+
+### Population Rust parity matrix expansion — WF-RT-0024
+
+- Expanded the shared cross-language fixture to a deterministic 60-Character boundary matrix: life-stage boundaries, need/intent thresholds, worker/specialist/soldier/hero roles, command whitespace, training targets, mixed elapsed intervals through 1,000 days, extension-defined needs outside the built-in range, and exact near-i64::MAX simulated-day receipts.
+- Input order is deliberately reversed while expected output remains ID-sorted. Rust and Java must agree on the complete projection and stable ordering.
+- Java assertions compare the complete needs map, including extension keys, and verify durable year/world-day acknowledgements. Rust executes the same complete fixture.
+- This strengthens the existing population parity gate; it does not add a second calculation or count a new production owner. External Character writers and WF-RT-0021 cross-domain atomicity remain cutover blockers.

@@ -481,3 +481,8 @@ Receipt recovery must not turn into a full Character-registry scan on every serv
 ### OriginDefs immutable datapack publication
 
 The six Origins definition collections (races, classes, professions, synergies, extra race perks and perk names) are built off to the side and published as one versioned deep-immutable snapshot. Consumers capture one snapshot for an entire Origins operation; reload swaps the active snapshot under the same Origins owner lock. Nested maps, lists, perk trees and profession-rank modifiers are copied and frozen, not merely wrapped at the outer map. Compatibility map fields remain read-only views; writes go through staged load/replacement. This closes the sequential six-map publication race without creating a second definitions owner, duplicate registry or compute cache.
+
+
+### Expanded Population parity requirement
+
+The shared Population fixture is a multi-Character contract. It must cover age-stage boundaries, intent priority thresholds, role/duty combinations, per-Character elapsed intervals, counter saturation, extension-defined need preservation, and deterministic output ordering. Both Java's exclusive fallback/domain oracle and Rust's production transformation execute the exact same fixture. Any rule change updates the fixture and both implementations together; production ownership is not declared complete from a narrow fixture alone.
