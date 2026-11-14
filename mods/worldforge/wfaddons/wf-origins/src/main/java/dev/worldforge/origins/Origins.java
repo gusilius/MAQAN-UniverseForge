@@ -329,7 +329,7 @@ public final class Origins {
     /** То же, но раса берётся из состава жителей государства realm (если он известен). */
     public Build assign(String owner, long seed, String hint, int level, String realm) {
         Build existing = builds.get(owner);
-        if (existing != null) return existing; // Repeated NPC population passes must not erase learned progression.
+        if (existing != null) return copy(existing); // Repeated NPC population passes preserve progression and expose only a detached value.
         if (owner == null || owner.isBlank()) throw new IllegalArgumentException("Пустой идентификатор владельца");
         Random rng = new Random(seed);
         Build b = new Build();
@@ -365,7 +365,7 @@ public final class Origins {
         }
         builds.put(owner, b);
         mutation.commit();
-        return b;
+        return copy(b);
         }
     }
 
