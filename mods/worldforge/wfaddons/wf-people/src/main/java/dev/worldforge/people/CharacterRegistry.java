@@ -99,6 +99,12 @@ public final class CharacterRegistry {
     public int size() { return byId.size(); }
 
     public Character create(String name, String house, String culture, String gender, int birthYear) {
+        try (MutationBatch ignored = beginMutationBatch()) {
+            return createBatched(name, house, culture, gender, birthYear);
+        }
+    }
+
+    private Character createBatched(String name, String house, String culture, String gender, int birthYear) {
         while (byId.containsKey("c" + next)) {
             if (next == Integer.MAX_VALUE) throw new IllegalStateException("Исчерпаны ID персонажей");
             next++;
@@ -119,6 +125,12 @@ public final class CharacterRegistry {
     public void appoint(String id, String role, String place) { appoint(id, role, place, 0); }
 
     public void appoint(String id, String role, String place, int year) {
+        try (MutationBatch ignored = beginMutationBatch()) {
+            appointBatched(id, role, place, year);
+        }
+    }
+
+    private void appointBatched(String id, String role, String place, int year) {
         Character c = require(id);
         if (!c.alive) throw new IllegalStateException(c.name + " мёртв и не может занять должность");
         if (c.has(role, place)) return;
@@ -130,6 +142,12 @@ public final class CharacterRegistry {
     public void dismiss(String id, String role, String place) { dismiss(id, role, place, 0); }
 
     public void dismiss(String id, String role, String place, int year) {
+        try (MutationBatch ignored = beginMutationBatch()) {
+            dismissBatched(id, role, place, year);
+        }
+    }
+
+    private void dismissBatched(String id, String role, String place, int year) {
         Character c = require(id);
         if (c.posts.removeIf(p -> p.role.equals(role) && p.place.equals(place))) {
             for (Listener l : listeners) l.dismissed(c, role, place);
@@ -249,6 +267,12 @@ public final class CharacterRegistry {
 
     /** Entity UUID is a replaceable body reference, scoped by body kind; Character.id remains authoritative. */
     public boolean bindEntity(String id, String bodyKind, String entityUuid) {
+        try (MutationBatch ignored = beginMutationBatch()) {
+            return bindEntityBatched(id, bodyKind, entityUuid);
+        }
+    }
+
+    private boolean bindEntityBatched(String id, String bodyKind, String entityUuid) {
         Character c = require(id);
         if (!c.alive) return false;
         String kind = requireText(bodyKind, "body kind").toLowerCase(Locale.ROOT);
@@ -273,6 +297,12 @@ public final class CharacterRegistry {
     }
 
     public void unbindEntity(String id, String bodyKind, String entityUuid) {
+        try (MutationBatch ignored = beginMutationBatch()) {
+            unbindEntityBatched(id, bodyKind, entityUuid);
+        }
+    }
+
+    private void unbindEntityBatched(String id, String bodyKind, String entityUuid) {
         Character c = require(id);
         String kind = requireText(bodyKind, "body kind").toLowerCase(Locale.ROOT);
         String uuid = requireText(entityUuid, "entity UUID");
@@ -368,6 +398,12 @@ public final class CharacterRegistry {
 
     /** Смерть освобождает все должности. Возвращает их список (чтобы назначить преемников). */
     public List<Character.Post> kill(String id) {
+        try (MutationBatch ignored = beginMutationBatch()) {
+            return killBatched(id);
+        }
+    }
+
+    private List<Character.Post> killBatched(String id) {
         Character c = require(id);
         if (c.alive) c.alive = false;
         // A pending cross-registry transfer marker must be reconciled even when the estate
@@ -451,6 +487,12 @@ public final class CharacterRegistry {
     public void marry(String a, String b) { marry(a, b, 0); }
 
     public void marry(String a, String b, int year) {
+        try (MutationBatch ignored = beginMutationBatch()) {
+            marryBatched(a, b, year);
+        }
+    }
+
+    private void marryBatched(String a, String b, int year) {
         Character x = require(a), y = require(b);
         if (x == y) throw new IllegalArgumentException("Персонаж не может вступить в брак с самим собой");
         if (!x.alive || !y.alive) throw new IllegalStateException("Умерший персонаж не может вступить в брак");
@@ -481,6 +523,12 @@ public final class CharacterRegistry {
 
     /** Ends a reciprocal marriage while preserving both Character identities and family links. */
     public boolean divorce(String firstId, String secondId, int year) {
+        try (MutationBatch ignored = beginMutationBatch()) {
+            return divorceBatched(firstId, secondId, year);
+        }
+    }
+
+    private boolean divorceBatched(String firstId, String secondId, int year) {
         Character first = require(firstId), second = require(secondId);
         if (first == second || !first.id.equals(second.spouse) || !second.id.equals(first.spouse)) return false;
         first.spouse = "";
@@ -495,6 +543,12 @@ public final class CharacterRegistry {
     }
 
     public Character addChild(Character father, Character mother, String name, String gender, int year) {
+        try (MutationBatch ignored = beginMutationBatch()) {
+            return addChildBatched(father, mother, name, gender, year);
+        }
+    }
+
+    private Character addChildBatched(Character father, Character mother, String name, String gender, int year) {
         Character c = create(name, father.house, father.culture, gender, year);
         if (c.house.isEmpty()) {
             Object inheritedSurname = father.props.get("identity.surname");
@@ -553,6 +607,12 @@ public final class CharacterRegistry {
 
     /** Loads old map-local saves and deterministically assigns stable IDs within the supplied world/map namespace. */
     public void fromJson(String json, String identityNamespace) {
+        try (MutationBatch ignored = beginMutationBatch()) {
+            fromJsonBatched(json, identityNamespace);
+        }
+    }
+
+    private void fromJsonBatched(String json, String identityNamespace) {
         if (identityNamespace == null || identityNamespace.isBlank()) throw new IllegalArgumentException("identityNamespace is required");
         // Parse and validate into an isolated snapshot. Never destroy the live registry
         // until the entire save has been accepted.
