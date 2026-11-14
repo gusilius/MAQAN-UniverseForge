@@ -1,6 +1,6 @@
 # Compute Ownership Registry — UniverseForge
 
-**Status:** initial source-audited registry; not a claim that Rust migration is complete.  
+**Status:** source-audited registry; first asynchronous WorldSim execution slice implemented, CI/campaign verification pending.  
 **Repository:** `gusilius/MAQAN-UniverseForge`  
 **Branch:** `feature/autonomous-world-simulation-engine`  
 **Last audited:** 2026-11-14  
@@ -21,26 +21,26 @@ This registry records only ownership supported by the current source audit. Unkn
 
 | Operation key | Domain | Current production compute owner | Target owner | Java responsibility | Source evidence | Migration state |
 |---|---|---|---|---|---|---|
-| `worldsim.emergence.advance` | Emergence/population macro-state | Rust JNI, invoked synchronously by Java server tick | Rust | Build snapshot, persist state, materialize canonical Characters/settlements/polities, validate/apply events | `wf-worldsim/.../mc/WorldSimMod.processServerTick`; `NativeWorldSimulation.advanceEmergence`; Rust `emergence::advance`; JNI `nativeAdvanceEmergence` | Rust algorithm exists; async execution and bounded resumable catch-up not implemented |
-| `worldsim.decide` | Strategic proposals | Rust JNI, invoked synchronously by Java server tick | Rust | Build canonical snapshot; validate and execute proposals through ActionExecutionService; persist receipts/events | `WorldSimMod.processServerTick`; `NativeWorldSimulation.decide`; Rust `decide`; JNI `nativeDecide` | Rust algorithm exists; async execution not implemented |
+| `worldsim.emergence.advance` | Emergence/population macro-state | Rust JNI on the shared WorldSim compute worker | Rust | Build snapshot, persist state, materialize canonical Characters/settlements/polities, validate/apply events | `WorldSimMod.processServerTick` → `WorldSimComputeScheduler`; `NativeWorldSimulation.advanceEmergence`; Rust `emergence::advance`; JNI `nativeAdvanceEmergence` | Async single-flight execution implemented; CI/campaign and resumable catch-up verification pending |
+| `worldsim.decide` | Strategic proposals | Rust JNI on the same shared WorldSim compute worker | Rust | Build canonical snapshot; validate and execute proposals through ActionExecutionService; persist receipts/events | `WorldSimMod.processServerTick` → `WorldSimComputeScheduler`; `NativeWorldSimulation.decide`; Rust `decide`; JNI `nativeDecide` | Async single-flight execution implemented; CI/parity verification pending |
 | `worldsim.snapshot` | Domain/Minecraft observation | Java | Java | Sole adapter from canonical domain APIs and loaded Minecraft state | `WorldSimMod.snapshot` | Remains Java; must run on server thread |
 | `worldsim.materialize.people` | Canonical Character/Origins materialization | Java | Java | Create/update existing canonical Character and Origins records, preserve UUID and relationships | `WorldSimMod.syncEmergentPeople`; `EmergentPopulationIndex`; canonical `CharacterRegistry` | Java execution boundary; incremental bounded batches not implemented |
 | `worldsim.materialize.polities` | Realm/settlement projection | Java | Java | Reconcile existing realm/settlement authorities and physical world | `WorldSimMod.syncEmergentPolities`; Realm/Settlement APIs | Java execution boundary; requires audit of all projection costs |
 | `worldsim.proposal.apply` | Authoritative action execution | Java | Java | Validate and commit through ActionExecutionService and domain owner | `WorldSimMod.processServerTick`; persisted action receipts | Remains Java; never move Minecraft side effects to Rust |
 
-## Single-flight / async migration design (not yet implemented)
+## Single-flight / async migration design (first implementation in source; verification pending)
 
 The first migration slice is `worldsim.emergence.advance` + `worldsim.decide`. They must share one bounded WorldSim compute scheduler unless profiling proves independent scheduling is necessary. Do not create one executor per domain.
 
-1. Server thread builds a detached immutable snapshot/request. No Minecraft object, Level, Entity, registry or mutable Gson object crosses to a worker.
-2. A single-flight operation token records world ID, operation key, input revision/day, schema version and server lifecycle epoch.
-3. One worker invokes the native methods and returns immutable result bytes/frame. It performs no Forge calls and applies no effects.
-4. Server thread polls completed frames; it checks epoch, world identity, expected input revision, result schema and idempotency before any state mutation.
-5. If a newer input revision exists, stale results are rejected and diagnosed; they are never applied to current state.
-6. Backpressure is explicit. Do not queue unbounded snapshots. If busy, retain the next required work as a durable/coalesced pending operation; never silently drop elapsed simulation work.
+1. **Implemented:** server thread builds a detached immutable snapshot/request and copies byte arrays. No Minecraft object, Level, Entity, registry or mutable Gson object crosses to a worker.
+2. **Partially implemented:** ticket records world save identity, operation day/revision and server lifecycle epoch. A shared all-domain mutation revision and schema/engine version fence remain open.
+3. **Implemented:** one worker invokes both native methods sequentially and returns immutable result bytes/frame. It performs no Forge calls and applies no effects. A process-wide native lease prevents overlap across scheduler instances during server restart.
+4. **Implemented with remaining limits:** server thread polls completed frames and checks lifecycle epoch, world save identity and submitted day token before apply; result schema and idempotent domain receipts are validated by existing apply pipeline. Cross-domain mutation revision is not yet available.
+5. Lifecycle/world/token mismatches are rejected and diagnosed. A shared revision that detects every external domain mutation is still required for a complete freshness fence.
+6. **Implemented single-flight backpressure:** at most one request is active; no unbounded queue. While busy, the next snapshot is not enqueued; after completion the coordinator builds a fresh snapshot, while Rust emergence resumes from the last committed state and current simulation day. Campaign catch-up parity must verify that no elapsed work is lost.
 7. Stop/reload increments the lifecycle epoch, rejects in-flight completions, and persists the last committed state/cursor. Native work must not outlive the world authority it belongs to.
-8. Keep the current synchronous implementation as an exclusive fallback until async parity and regression gates pass. Never run synchronous and asynchronous implementations for the same operation/revision.
-9. Measure snapshot, encode/decode, queue wait, native compute, result validation, apply and persistence separately.
+8. **Production owner:** Rust async is the only WorldSim compute path; no parallel Java compute fallback or shadow calculation runs. If a safe fallback is later needed, it must be exclusive per operation/revision.
+9. Existing profiler measures snapshot, native stages, validation/apply and persistence. Queue wait and end-to-end compute latency still need explicit measurements.
 
 ## External optimization inventory
 
@@ -77,3 +77,11 @@ Record the exact class/method and tests before assigning or changing ownership. 
 - Save/reload recovery of pending cursor and committed state.
 - Windows x64 native load + Forge build + addon logic tests.
 - Full campaign and ordinary-world regression. CI build success alone is not campaign acceptance.
+
+
+## Current implementation evidence (2026-11-14)
+
+- `WorldSimComputeScheduler.java`: bounded single-flight worker, immutable byte copies, world/revision/lifecycle ticket, process-wide native semaphore, server-thread polling boundary.
+- `WorldSimMod.java`: `advanceEmergence` and `decide` execute sequentially on the worker; all state sync, proposal validation, event publication and persistence remain on the server thread.
+- `WorldSimComputeSchedulerTest.java`: backpressure, defensive-copy, ticket-fence and lifecycle-overlap tests. Windows CI and autonomous campaign evidence are pending.
+- Remaining limitation: no global mutation revision exists across all authoritative addon domains yet. Do not claim full snapshot freshness until this contract is implemented and tested.
