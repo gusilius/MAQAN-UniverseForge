@@ -34,6 +34,13 @@ unsafe fn make_bytes(env: JNIEnvPtr, bytes: &[u8]) -> JObject {
     if exception(env) != 0 { return std::ptr::null_mut(); }
     array
 }
+fn has_supported_schema(bytes: &[u8]) -> bool {
+    serde_json::from_slice::<serde_json::Value>(bytes)
+        .ok()
+        .and_then(|value| value.get("schema_version").and_then(|v| v.as_u64()))
+        == Some(1)
+}
+
 fn error_json(status: &str, error: &str) -> Vec<u8> {
     serde_json::to_vec(&serde_json::json!({"status":status,"error":error}))
         .unwrap_or_else(|_| br#"{"status":"serialization_error"}"#.to_vec())
@@ -53,6 +60,7 @@ pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulat
 ) -> JObject {
     let response = match read_bytes(env, input, 16 * 1024 * 1024) {
         None => error_json("invalid_input", "JNI input unavailable or too large"),
+        Some(bytes) if !has_supported_schema(&bytes) => error_json("unsupported_schema", "expected snapshot schema_version=1"),
         Some(bytes) => match serde_json::from_slice::<WorldSnapshot>(&bytes) {
             Ok(snapshot) => match decide(&snapshot) {
                 Ok(frame) => serde_json::to_vec(&frame).unwrap_or_else(|_| error_json("serialization_error", "decision frame")),
@@ -87,6 +95,7 @@ pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulat
 ) -> JObject {
     let response = match read_bytes(env, input, 16 * 1024 * 1024) {
         None => error_json("invalid_input", "emergence input unavailable or too large"),
+        Some(bytes) if !has_supported_schema(&bytes) => error_json("unsupported_schema", "expected emergence request schema_version=1"),
         Some(bytes) => match serde_json::from_slice::<EmergenceRequest>(&bytes) {
             Ok(request) => match advance(request) {
                 Ok(frame) => serde_json::to_vec(&frame).unwrap_or_else(|_| error_json("serialization_error", "emergence frame")),
