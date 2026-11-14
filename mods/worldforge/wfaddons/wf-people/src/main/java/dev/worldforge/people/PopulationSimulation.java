@@ -139,8 +139,10 @@ public final class PopulationSimulation {
             entry.put("ended_year", year);
             history.add(entry);
         }
+        if (previous.equals(next) && Objects.equals(character.props.get("population.profession_started_year"), year)) return;
         character.props.put(PROFESSION, next);
         character.props.put("population.profession_started_year", year);
+        CharacterRegistry.recordCharacterMutation();
     }
 
     public static List<String> professionHistory(Character character) {
@@ -156,11 +158,15 @@ public final class PopulationSimulation {
     public static void addDuty(Character character, Duty duty) {
         requireAlive(character);
         List<Object> duties = listProp(character, DUTIES);
-        if (!duties.contains(duty.name().toLowerCase(Locale.ROOT))) duties.add(duty.name().toLowerCase(Locale.ROOT));
+        if (!duties.contains(duty.name().toLowerCase(Locale.ROOT))) {
+            duties.add(duty.name().toLowerCase(Locale.ROOT));
+            CharacterRegistry.recordCharacterMutation();
+        }
     }
 
     public static void removeDuty(Character character, Duty duty) {
-        listProp(character, DUTIES).remove(duty.name().toLowerCase(Locale.ROOT));
+        if (listProp(character, DUTIES).remove(duty.name().toLowerCase(Locale.ROOT)))
+            CharacterRegistry.recordCharacterMutation();
     }
 
     public static boolean hasDuty(Character character, Duty duty) {
@@ -172,8 +178,16 @@ public final class PopulationSimulation {
 
     public static void setCommand(Character character, String commandId) {
         requireAlive(character);
-        if (commandId == null || commandId.isBlank()) character.props.remove("population.command");
-        else character.props.put("population.command", normalizeId(commandId, "command"));
+        Object previous = character.props.get("population.command");
+        if (commandId == null || commandId.isBlank()) {
+            if (character.props.remove("population.command") != null) CharacterRegistry.recordCharacterMutation();
+        } else {
+            String next = normalizeId(commandId, "command");
+            if (!Objects.equals(previous, next)) {
+                character.props.put("population.command", next);
+                CharacterRegistry.recordCharacterMutation();
+            }
+        }
     }
 
     public static Set<String> duties(Character character) {
@@ -189,7 +203,13 @@ public final class PopulationSimulation {
     }
 
     public static void setNeed(Character character, Need need, int deficit) {
-        setNeed(mapProp(character, NEEDS), need, deficit);
+        Objects.requireNonNull(need, "need");
+        Map<String, Object> needs = mapProp(character, NEEDS);
+        int next = clamp(deficit, 0, MAX_NEED);
+        if (need(needs, need) != next) {
+            setNeed(needs, need, next);
+            CharacterRegistry.recordCharacterMutation();
+        }
     }
 
     public static void changeNeed(Character character, Need need, int delta) {
@@ -222,12 +242,23 @@ public final class PopulationSimulation {
     public static void setTrainingXp(Character character, String skillId, long xp) {
         requireAlive(character);
         if (xp < 0) throw new IllegalArgumentException("Training XP cannot be negative");
-        mapProp(character, TRAINING).put(normalizeId(skillId, "skill"), xp);
+        Map<String, Object> training = mapProp(character, TRAINING);
+        String id = normalizeId(skillId, "skill");
+        if (!Objects.equals(training.get(id), xp)) {
+            training.put(id, xp);
+            CharacterRegistry.recordCharacterMutation();
+        }
     }
 
     public static void setSkillRank(Character character, String skillId, int rank) {
         requireAlive(character);
-        mapProp(character, SKILLS).put(normalizeId(skillId, "skill"), clamp(rank, 0, MAX_SKILL_RANK));
+        Map<String, Object> skills = mapProp(character, SKILLS);
+        String id = normalizeId(skillId, "skill");
+        int next = clamp(rank, 0, MAX_SKILL_RANK);
+        if (!Objects.equals(skills.get(id), next)) {
+            skills.put(id, next);
+            CharacterRegistry.recordCharacterMutation();
+        }
     }
 
     /** Adds training XP and returns the number of ranks gained. */
@@ -252,7 +283,11 @@ public final class PopulationSimulation {
 
     public static void setTrainingTarget(Character character, String skillId) {
         requireAlive(character);
-        character.props.put(TRAINING_TARGET, normalizeId(skillId, "skill"));
+        String next = normalizeId(skillId, "skill");
+        if (!Objects.equals(character.props.get(TRAINING_TARGET), next)) {
+            character.props.put(TRAINING_TARGET, next);
+            CharacterRegistry.recordCharacterMutation();
+        }
     }
 
     public static String trainingTarget(Character character) {
