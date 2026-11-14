@@ -560,3 +560,9 @@
 - Population now writes simulated-day totals and last-processed world-day receipts as decimal strings, reads exact strings, and remains backward-compatible with legacy numeric props.
 - The native ABI already serializes these values as decimal strings; Java Character persistence now uses the same exact representation.
 - Updated logic assertions to validate decimal-string persistence and legacy-compatible reads. This is a correctness requirement for long autonomous campaigns, not an optimization that reduces simulation scope.
+
+
+### WF-RT-0024 — shared fixture test compilation follow-up
+
+- CI run `43616670983` caught a missing `java.util.Map` import in the expanded Java shared-fixture assertions. The production sources compiled; this was isolated to the test harness.
+- Added the missing import. Re-run the full Windows logic suite and native Rust suite before accepting the fixture gate.
