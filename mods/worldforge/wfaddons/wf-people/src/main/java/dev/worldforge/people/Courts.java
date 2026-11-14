@@ -63,7 +63,7 @@ public final class Courts {
     }
 
     private static String holderKey(String role, String place) {
-        return role + '\\u0000' + place;
+        return role + "#" + place;
     }
 
     private static String cultureOf(TitleData d, TitleData.Title t) {
