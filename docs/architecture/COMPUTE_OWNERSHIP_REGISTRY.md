@@ -97,4 +97,9 @@ The coordinator now stages the candidate Rust emergence state and advances the c
 
 | Operation key | Domain | Current owner | Optimization boundary | Evidence / status |
 |---|---|---|---|---|
-| `worldsim.chronicle.ordering` | Chronological presentation of canonical EventLog facts | Java `HistoricalChronicle` | O(1) append for ordered events; binary-search insertion for delayed events; no second event store and no simulation authority | WF-RT-0022; implementation and 2,000-event ordering test added; Windows/campaign profile pending |
+| `worldsim.chronicle.ordering` | Chronological presentation of canonical EventLog facts | Java `HistoricalChronicle` | O(1) append for ordered events; binary-search insertion for delayed events; logical head + batched prefix compaction at 4,096 evictions; no second event store and no simulation authority | WF-RT-0022; 2,000-event ordering and 100,050-event bounded-capacity tests added; Windows/campaign profile pending |
+
+
+## Next cross-domain freshness blocker
+
+WF-RT-0023 tracks the missing shared mutation revision across authoritative domain write APIs. The current WorldSim ticket's day/revision token is not a substitute for a global domain revision vector. Extend canonical write boundaries; do not create a duplicate WorldSim-only shadow state/counter.
