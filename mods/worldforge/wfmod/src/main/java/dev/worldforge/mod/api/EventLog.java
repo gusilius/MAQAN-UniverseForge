@@ -124,7 +124,7 @@ public final class EventLog {
 
     /** Заменяет содержимое журнала записями из JSON (лишнее сверх ёмкости отбрасывается с начала). Слушатели не зовутся. */
     @SuppressWarnings("unchecked")
-    public synchronized void fromJson(String json) {
+    public void fromJson(String json) {
         Object root = Json.parse(json);
         List<Object> arr = root instanceof Map ? (List<Object>) ((Map<String, Object>) root).get("events") : (List<Object>) root;
         try (DomainMutationRevisions.Mutation mutation =
