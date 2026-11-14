@@ -137,10 +137,6 @@ public final class TreasuryLedger {
         return Double.isFinite(left) && Double.isFinite(right) && Math.abs(left - right) <= 1e-8;
     }
 
-    private List<Entry> entriesForReference(String accountId, Kind kind, String reference) {
-        return entriesByReference.getOrDefault(referenceKey(accountId, kind, reference), List.of());
-    }
-
     private boolean matchesExternalPosting(String accountId, double value, Kind kind,
                                            String category, String reference, boolean credit) {
         List<Entry> matches = entriesForReference(accountId, kind, reference);

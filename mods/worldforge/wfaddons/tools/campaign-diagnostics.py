@@ -29,7 +29,7 @@ elif "timeout" in detected: outcome="failed_timeout"
 elif "startup_failure" in detected: outcome="failed_startup"
 elif "preflight_failure" in detected: outcome="failed_preflight"
 else: outcome="failed_unclassified"
-rejected_matches = re.findall(r"proposal\\s+([^\\s]+)\\s+rejected:\\s*(.+)", content, re.I)
+rejected_matches = re.findall(r"proposal\s+([^\s]+)\s+rejected:\s*(.+)", content, re.I)
 rejected_reasons = {}
 for _proposal_id, reason in rejected_matches:
     normalized = reason.strip()[:240] or "unspecified"
