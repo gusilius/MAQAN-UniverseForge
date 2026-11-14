@@ -62,27 +62,32 @@ public final class TitleEditor {
     /** Выполняет несколько правок как одну (одна отмена). При ошибке всё откатывается. */
     public <T> T group(java.util.function.Supplier<T> body) {
         if (depth > 0) return body.get();
-        Snap s = snap();
-        current = s;
-        depth++;
-        boolean changed = false;
-        try {
-            T r = body.get();
-            if (s.idx.length == 0 && s.titles.equals(d.titlesJson()) && s.realms.equals(d.realmsJson())) return r;   // ничего не изменилось
-            undo.push(s);
-            redo.clear();
-            while (undo.size() > MAX_UNDO) undo.removeLast();
-            dirty = true;
-            mods++;
-            changed = true;
-            return r;
-        } catch (RuntimeException e) {
-            restore(s);
-            throw e;
-        } finally {
-            depth--;
-            current = null;
-            if (changed && depth == 0) dev.worldforge.mod.api.WorldForgeApi.fireChange(new dev.worldforge.mod.api.MapChange(d, "edit", ""));
+        try (dev.worldforge.mod.api.DomainMutationRevisions.Mutation mutation =
+                     dev.worldforge.mod.api.WorldForgeApi.revisions().begin(
+                             dev.worldforge.mod.api.DomainMutationRevisions.Domain.REALMS_POLITICS)) {
+            Snap s = snap();
+            current = s;
+            depth++;
+            boolean changed = false;
+            try {
+                T r = body.get();
+                if (s.idx.length == 0 && s.titles.equals(d.titlesJson()) && s.realms.equals(d.realmsJson())) return r;   // ничего не изменилось
+                undo.push(s);
+                redo.clear();
+                while (undo.size() > MAX_UNDO) undo.removeLast();
+                dirty = true;
+                mods++;
+                mutation.commit();
+                changed = true;
+                return r;
+            } catch (RuntimeException e) {
+                restore(s);
+                throw e;
+            } finally {
+                depth--;
+                current = null;
+                if (changed && depth == 0) dev.worldforge.mod.api.WorldForgeApi.fireChange(new dev.worldforge.mod.api.MapChange(d, "edit", ""));
+            }
         }
     }
 
@@ -101,22 +106,32 @@ public final class TitleEditor {
 
     public boolean undo() {
         if (undo.isEmpty()) return false;
-        Snap s = undo.pop();
-        redo.push(inverse(s));
-        restore(s);
-        dirty = true;
-        mods++;
+        try (dev.worldforge.mod.api.DomainMutationRevisions.Mutation mutation =
+                     dev.worldforge.mod.api.WorldForgeApi.revisions().begin(
+                             dev.worldforge.mod.api.DomainMutationRevisions.Domain.REALMS_POLITICS)) {
+            Snap s = undo.pop();
+            redo.push(inverse(s));
+            restore(s);
+            dirty = true;
+            mods++;
+            mutation.commit();
+        }
         dev.worldforge.mod.api.WorldForgeApi.fireChange(new dev.worldforge.mod.api.MapChange(d, "edit", "undo"));
         return true;
     }
 
     public boolean redo() {
         if (redo.isEmpty()) return false;
-        Snap s = redo.pop();
-        undo.push(inverse(s));
-        restore(s);
-        dirty = true;
-        mods++;
+        try (dev.worldforge.mod.api.DomainMutationRevisions.Mutation mutation =
+                     dev.worldforge.mod.api.WorldForgeApi.revisions().begin(
+                             dev.worldforge.mod.api.DomainMutationRevisions.Domain.REALMS_POLITICS)) {
+            Snap s = redo.pop();
+            undo.push(inverse(s));
+            restore(s);
+            dirty = true;
+            mods++;
+            mutation.commit();
+        }
         dev.worldforge.mod.api.WorldForgeApi.fireChange(new dev.worldforge.mod.api.MapChange(d, "edit", "redo"));
         return true;
     }
