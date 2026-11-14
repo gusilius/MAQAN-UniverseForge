@@ -76,12 +76,16 @@ public final class PopulationSimulation {
     /** Imports ranks from the shared RPG progression profile into this Character's canonical skill store. */
     public static void syncSkillRanks(Character character, Map<String, Integer> ranks) {
         Objects.requireNonNull(character, "character");
-        Map<String, Object> target = mapProp(character, SKILLS);
-        target.clear();
+        Map<String, Object> next = new TreeMap<>();
         for (var entry : ranks.entrySet()) {
             String id = normalizeId(entry.getKey(), "skill");
-            target.put(id, clamp(entry.getValue(), 0, MAX_SKILL_RANK));
+            next.put(id, clamp(entry.getValue(), 0, MAX_SKILL_RANK));
         }
+        Map<String, Object> target = mapProp(character, SKILLS);
+        if (target.equals(next)) return;
+        target.clear();
+        target.putAll(next);
+        CharacterRegistry.recordCharacterMutation();
     }
 
     public static int age(Character character, int year) {
@@ -284,8 +288,14 @@ public final class PopulationSimulation {
         long total = Math.min((long) (MAX_SKILL_RANK - rank) * SKILL_XP_PER_RANK, sum);
         int gained = (int) (total / SKILL_XP_PER_RANK);
         int nextRank = Math.min(MAX_SKILL_RANK, rank + gained);
-        mapProp(character, SKILLS).put(id, nextRank);
-        mapProp(character, TRAINING).put(id, nextRank >= MAX_SKILL_RANK ? 0L : total % SKILL_XP_PER_RANK);
+        long remaining = nextRank >= MAX_SKILL_RANK ? 0L : total % SKILL_XP_PER_RANK;
+        Map<String, Object> skills = mapProp(character, SKILLS);
+        Map<String, Object> training = mapProp(character, TRAINING);
+        if (nextRank != rank || !Objects.equals(training.get(id), remaining)) {
+            skills.put(id, nextRank);
+            training.put(id, remaining);
+            CharacterRegistry.recordCharacterMutation();
+        }
         return nextRank - rank;
     }
 
@@ -340,9 +350,15 @@ public final class PopulationSimulation {
         Intent intent = character == null || !character.alive ? Intent.IDLE : decide(character, year, needs);
         LifeStage stage = character == null ? LifeStage.INFANT : lifeStage(character, year);
         if (character != null) {
+            String nextStage = stage.name().toLowerCase(Locale.ROOT);
+            int nextAge = age(character, year);
+            boolean changed = !Objects.equals(character.props.get(LAST_INTENT), intent.key)
+                    || !Objects.equals(character.props.get("population.age_years"), nextAge)
+                    || !Objects.equals(character.props.get("population.life_stage"), nextStage);
             character.props.put(LAST_INTENT, intent.key);
-            character.props.put("population.age_years", age(character, year));
-            character.props.put("population.life_stage", stage.name().toLowerCase(Locale.ROOT));
+            character.props.put("population.age_years", nextAge);
+            character.props.put("population.life_stage", nextStage);
+            if (changed) CharacterRegistry.recordCharacterMutation();
         }
         return intent;
     }
@@ -377,9 +393,12 @@ public final class PopulationSimulation {
         Character character = registry.get(characterId);
         if (character == null) throw new IllegalArgumentException("No character " + characterId);
         if (!character.alive) return List.of();
-        character.props.put("population.death_year", year);
-        character.props.put("population.death_cause", cause == null || cause.isBlank() ? "unknown" : cause);
-        return registry.kill(characterId);
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            character.props.put("population.death_year", year);
+            character.props.put("population.death_cause", cause == null || cause.isBlank() ? "unknown" : cause);
+            CharacterRegistry.recordCharacterMutation();
+            return registry.kill(characterId);
+        }
     }
 
     /** Daily hook used by PeopleMod. Aging is calendar-derived; AI intents are refreshed, but actions remain externally owned. */
@@ -421,6 +440,7 @@ public final class PopulationSimulation {
                     ? Long.MAX_VALUE : simulated + elapsedDays;
             character.props.put("population.simulated_days", nextSimulated);
             character.props.put("population.last_simulated_year", year);
+            CharacterRegistry.recordCharacterMutation();
         }
     }
 
