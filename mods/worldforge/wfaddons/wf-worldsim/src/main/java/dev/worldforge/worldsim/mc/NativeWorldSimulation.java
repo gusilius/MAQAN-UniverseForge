@@ -84,5 +84,6 @@ public final class NativeWorldSimulation {
     private static native int nativeAbiVersion();
     private static native byte[] nativeDecide(byte[] snapshot);
     private static native byte[] nativeGenerate(byte[] request);
-    private static native byte[] nativeAdvanceEmergence(byte[] request);\n    private static native byte[] nativeAdvancePopulation(byte[] request);
+    private static native byte[] nativeAdvanceEmergence(byte[] request);
+    private static native byte[] nativeAdvancePopulation(byte[] request);
 }
