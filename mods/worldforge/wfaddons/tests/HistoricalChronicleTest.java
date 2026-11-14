@@ -56,6 +56,21 @@ public final class HistoricalChronicleTest {
                 List.of("realm_north", "realm_south"), 40L * 1440L);
         check(delayedBook.entries().get(0).day == 5 && delayedBook.entries().get(1).day == 40,
                 "delayed event delivery is reordered by actual occurrence time, not listener arrival");
+
+        EventLog orderedSource = new EventLog();
+        HistoricalChronicle orderedBook = new HistoricalChronicle();
+        orderedBook.setStartingYear(300);
+        orderedSource.addListener(event -> orderedBook.record(event, event.time / 1440L,
+                300 + (int) (event.time / 1440L / HistoricalChronicle.DAYS_PER_YEAR)));
+        for (int i = 0; i < 2_000; i++) {
+            orderedSource.post("people", "Chronological event " + i, List.of(),
+                    (long) i * 1440L);
+        }
+        List<HistoricalChronicle.Entry> orderedEntries = orderedBook.entries();
+        check(orderedEntries.size() == 2_000
+                        && orderedEntries.get(0).day == 0
+                        && orderedEntries.get(1_999).day == 1_999,
+                "large in-order event streams preserve full chronological order on the append fast path");
         HistoricalChronicle restoredOutOfOrder = new HistoricalChronicle();
         restoredOutOfOrder.fromJson("{\"starting_year\":300,\"entries\":["
                 + "{\"id\":\"worldforge-event:2\",\"day\":40,\"year\":300,\"epoch\":0,\"cycle\":0,\"category\":\"war\",\"text\":\"later\",\"realms\":[]},"
