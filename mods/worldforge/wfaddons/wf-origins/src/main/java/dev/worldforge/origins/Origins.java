@@ -164,7 +164,7 @@ public final class Origins {
 
     /** Классы, на которые можно перейти или которые видны как цель. Значение - причина отказа или null, если можно сейчас. */
     public Map<OriginDefs.ClassDef, String> options(String owner) {
-        Build b = build(owner);
+        Build b = state(owner);
         Map<OriginDefs.ClassDef, String> out = new LinkedHashMap<>();
         for (OriginDefs.ClassDef c : defs.classes.values()) {
             boolean visible = b.cls.isEmpty() ? c.from().isEmpty() : defs.isParent(c, b.cls);
@@ -175,7 +175,7 @@ public final class Origins {
 
     public boolean chooseClass(String owner, String id) {
         OriginDefs.ClassDef c = defs.classes.get(id);
-        Build b = build(owner);
+        Build b = state(owner);
         if (c == null) { lastError = "Нет такого класса."; return false; }
         if (b.cls.isEmpty() ? !c.from().isEmpty() : !defs.isParent(c, b.cls)) { lastError = "Этот класс не следует из вашего."; return false; }
         String why = reqProblem(c, owner);
@@ -192,7 +192,7 @@ public final class Origins {
 
     /** Переобучение: снимает последний выбранный класс и возвращает к предыдущему. Раз в RETRAIN_DAYS дней. Возвращает снятый класс или null. */
     public String retrain(String owner, int day) {
-        Build b = build(owner);
+        Build b = state(owner);
         if (b.history.isEmpty()) { lastError = "Нечего менять."; return null; }
         if (day - b.retrainDay < RETRAIN_DAYS && b.retrainDay > 0) { lastError = "Переучиваться можно раз в " + RETRAIN_DAYS + " дней (ещё " + (RETRAIN_DAYS - (day - b.retrainDay)) + ")."; return null; }
         try (var mutation = dev.worldforge.mod.api.WorldForgeApi.revisions().begin(
@@ -209,7 +209,7 @@ public final class Origins {
 
     public String canLearn(String owner, String id) {
         OriginDefs.Profession p = defs.professions.get(id);
-        Build b = build(owner);
+        Build b = state(owner);
         if (p == null) return "Нет такой профессии.";
         if (b.prof.containsKey(id)) return "Уже освоена.";
         if (!p.from().isEmpty()) {
@@ -261,7 +261,7 @@ public final class Origins {
 
     /** Работа по профессии (units - единиц выполненной работы). Возвращает новый ранг, если он вырос, иначе -1. */
     public int work(String owner, String id, int units) {
-        Build b = build(owner);
+        Build b = state(owner);
         if (!b.prof.containsKey(id) || units <= 0) return -1;
         int before = rank(owner, id);
         int previousXp = b.prof.get(id);
@@ -375,7 +375,7 @@ public final class Origins {
     public int today;
 
     public String viewJson(String owner) {
-        Build b = build(owner);
+        Build b = state(owner);
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("race", b.race); root.put("class", b.cls); root.put("history", new ArrayList<Object>(b.history));
         List<Object> opts = new ArrayList<>();
