@@ -128,3 +128,8 @@ WF-RT-0023 tracks the missing shared mutation revision across authoritative doma
 | Canonical owner | Writes observed | Lane | Status |
 |---|---|---|---|
 | `CharacterRegistry` | lifecycle publication for create, posts, profession/employment, migration, duties, family, death; restore; entity bind/unbind; age/life-stage refresh | `CHARACTERS` | Wired post-write; direct mutable props writers outside registry still require audit |
+
+
+### Character lane precision follow-up — WF-RT-0023
+
+The CharacterRegistry integration now avoids revision churn for idempotent appointment, identical entity binding, ignored entity unbinding, same-destination migration and repeated unchanged calendar refresh. Entity body-kind normalization is consistent across bind/unbind. The lane remains post-write invalidation; it does not establish a cross-thread lock around mutable Character state.
