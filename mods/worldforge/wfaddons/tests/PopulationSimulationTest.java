@@ -64,8 +64,12 @@ public final class PopulationSimulationTest {
                         && CharacterDevelopment.forgetAbility(smith, "forest_sense"),
                 "ability acquisition is idempotent and persists on the same Character");
         String stableId = smith.id;
-        ok(lifecycle.size() == 1 && lifecycle.get(0).kind() == CharacterRegistry.LifecycleKind.BORN,
-                "birth emits one canonical lifecycle event");
+        ok(lifecycle.size() == 2
+                        && lifecycle.stream().filter(e -> e.kind() == CharacterRegistry.LifecycleKind.BORN
+                                && e.characterId().equals(readOnlyProbe.id)).count() == 1
+                        && lifecycle.stream().filter(e -> e.kind() == CharacterRegistry.LifecycleKind.BORN
+                                && e.characterId().equals(smith.id)).count() == 1,
+                "each newly created Character emits exactly one canonical birth event");
         Character childStage = registry.create("Nell", "", "north", "f", 295);
         registry.refreshLifeStages(300);
         registry.refreshLifeStages(301);
