@@ -111,3 +111,13 @@ WF-RT-0023 tracks the missing shared mutation revision across authoritative doma
 - `Settlement` has resource/placement receipts and uses the canonical TreasuryLedger, but no single revision covering all settlement/resource/worker/building/task mutations was found.
 - `WorldForgeApi.fireChange` observes map-action notifications; it is not a universal hook for addon tick handlers or direct domain API writes.
 - Therefore none of these existing counters/notifications may be treated as a complete snapshot freshness token. A WorldForge Core revision coordinator must be wired into verified canonical write boundaries, domain by domain, before WorldSim uses it as an apply fence.
+
+
+## Shared revision coordinator foundation — WF-RT-0023
+
+| Operation key | Canonical owner | Revision lane | Wiring state |
+|---|---|---|---|
+| `worldforge.events` | `WorldForgeApi.events() / EventLog` | `EVENTS_ACTIONS` | `post`, `clear`, `fromJson` commit after successful canonical journal mutation; callbacks run after commit |
+| Character / Origins / Realm / Settlement / Economy / Army / Inventory | Existing owning addon APIs | Dedicated coordinator lanes are defined | Not yet wired; do not treat vector as complete |
+
+`DomainMutationRevisions` lives in wfmod API and owns only revision metadata. It does not duplicate domain state. WorldSim must not reject/apply based on this partial vector until every snapshot field has an audited canonical writer and a wired lane.
