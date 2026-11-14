@@ -460,3 +460,11 @@
 - Added positive/negative regression coverage for contested border membership.
 - Require native Windows/Linux and logic-test CI plus representative large-world profiling before treating performance impact as verified. This is a complexity improvement, not a measured benchmark result.
 - Source commit: `f8e6381e`.
+
+
+### WF-RT-0023 — PopulationSimulation read methods materialized canonical maps
+
+- Audit found read-only population APIs using the write-oriented `mapProp` helper. Reading an absent skill/needs/training map created an empty map in `Character.props` without a mutation batch or revision, violating read purity and snapshot consistency.
+- Corrected query paths to use `readMapProp`; write paths remain unchanged. Added a regression test verifying no map creation and no revision increment.
+- This is a correctness issue, not a Rust migration count increase. Run full logic tests and native CI; keep Java as the sole owner of individual Character progression until an explicit Rust parity/cutover contract is ready.
+- Source/test commits: `358b28f7`, `c8b28164`.
