@@ -170,7 +170,7 @@ public final class TreasuryLedger {
         return armyFieldRationDebitAccounts.contains(accountId);
     }
 
-    public Account open(String id,String ownerId,String currency,double openingBalance) {
+    public synchronized Account open(String id,String ownerId,String currency,double openingBalance) {
         try (MutationBatch ignored = beginMutationBatch()) {
         id=required(id,"account id"); ownerId=required(ownerId,"owner id"); currency=required(currency,"currency");
         double opening=amount(openingBalance);
@@ -184,7 +184,7 @@ public final class TreasuryLedger {
         return a;
     
         }}
-    public boolean setCreditLimit(String accountId,double limit) {
+    public synchronized boolean setCreditLimit(String accountId,double limit) {
         try (MutationBatch ignored = beginMutationBatch()) {
         Account a=accounts.get(accountId); if(a==null) return fail("unknown account");
         double normalized = amount(limit);
@@ -192,7 +192,7 @@ public final class TreasuryLedger {
         a.creditLimit=normalized; updateBankruptcy(a); markMutation(); return true;
     
         }}
-    public boolean deposit(String accountId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
+    public synchronized boolean deposit(String accountId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
         try (MutationBatch ignored = beginMutationBatch()) {
         Account a=accounts.get(accountId); if(a==null) return fail("unknown account");
         value=amount(value); minute(worldMinute); if(value==0) return true;
@@ -216,7 +216,7 @@ public final class TreasuryLedger {
         return true;
     }
 
-    public boolean depositOnce(String accountId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
+    public synchronized boolean depositOnce(String accountId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
         try (MutationBatch ignored = beginMutationBatch()) {
         if (hasTransaction(accountId, kind, reference)) {
             if (matchesExternalPosting(accountId, value, kind, category, reference, true)) return true;
@@ -225,7 +225,7 @@ public final class TreasuryLedger {
         return deposit(accountId,value,kind,category,reference,worldMinute,memo);
     
         }}
-    public boolean withdraw(String accountId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
+    public synchronized boolean withdraw(String accountId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
         try (MutationBatch ignored = beginMutationBatch()) {
         Account a=accounts.get(accountId); if(a==null) return fail("unknown account");
         value=amount(value); minute(worldMinute);
@@ -238,7 +238,7 @@ public final class TreasuryLedger {
         updateBankruptcy(a); return true;
     
         }}
-    public boolean withdrawOnce(String accountId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
+    public synchronized boolean withdrawOnce(String accountId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
         try (MutationBatch ignored = beginMutationBatch()) {
         if (hasTransaction(accountId, kind, reference)) {
             if (matchesExternalPosting(accountId, value, kind, category, reference, false)) return true;
@@ -248,7 +248,7 @@ public final class TreasuryLedger {
     
         }}
     /** Atomic transfer: no balance changes occur unless both accounts and currency match and payer can cover it. */
-    public boolean transfer(String fromId,String toId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
+    public synchronized boolean transfer(String fromId,String toId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
         try (MutationBatch ignored = beginMutationBatch()) {
         Account from=accounts.get(fromId), to=accounts.get(toId);
         if(from==null || to==null) return fail("unknown transfer account");
@@ -290,7 +290,7 @@ public final class TreasuryLedger {
         return true;
     }
 
-    public boolean transferOnce(String fromId,String toId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
+    public synchronized boolean transferOnce(String fromId,String toId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
         try (MutationBatch ignored = beginMutationBatch()) {
         if (hasTransaction(fromId, kind, reference)) {
             return matchesExistingTransfer(fromId,toId,value,kind,category,reference);
@@ -301,7 +301,7 @@ public final class TreasuryLedger {
     
         }}
     /** Creates matched cash and debt; unlike a deposit, loan proceeds do not repay existing liabilities. */
-    public boolean borrow(String accountId,double value,long worldMinute,String reference) {
+    public synchronized boolean borrow(String accountId,double value,long worldMinute,String reference) {
         try (MutationBatch ignored = beginMutationBatch()) {
         Account a=accounts.get(accountId); if(a==null) return fail("unknown account");
         value=amount(value); minute(worldMinute);
@@ -312,7 +312,7 @@ public final class TreasuryLedger {
         updateBankruptcy(a); return true;
     
         }}
-    public boolean accrueInterest(String accountId,double rate,long worldMinute,String reference) {
+    public synchronized boolean accrueInterest(String accountId,double rate,long worldMinute,String reference) {
         try (MutationBatch ignored = beginMutationBatch()) {
         Account a=accounts.get(accountId); if(a==null) return fail("unknown account");
         if(!Double.isFinite(rate)||rate<0||rate>1) throw new IllegalArgumentException("interest rate must be 0..1");
@@ -323,7 +323,7 @@ public final class TreasuryLedger {
         updateBankruptcy(a); return true;
     
         }}
-    public boolean repayDebt(String accountId,double value,long worldMinute,String reference) {
+    public synchronized boolean repayDebt(String accountId,double value,long worldMinute,String reference) {
         try (MutationBatch ignored = beginMutationBatch()) {
         Account a=accounts.get(accountId); if(a==null) return fail("unknown account");
         value=Math.min(amount(value),Math.min(a.debt,Math.max(0,a.balance)));
