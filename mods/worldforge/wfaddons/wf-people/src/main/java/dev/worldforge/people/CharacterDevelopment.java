@@ -160,15 +160,31 @@ public final class CharacterDevelopment {
 
     /** Materializes all stable facets into the canonical Character save without creating another profile. */
     public static void ensurePsychology(Character c) {
-        for (Temperament facet : Temperament.values()) {
-            String key = "personality.temperament." + facet.name().toLowerCase(Locale.ROOT);
-            if (!(c.props.get(key) instanceof Number)) c.props.put(key, temperament(c, facet));
+        Objects.requireNonNull(c, "character");
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            boolean changed = false;
+            for (Temperament facet : Temperament.values()) {
+                String key = "personality.temperament." + facet.name().toLowerCase(Locale.ROOT);
+                if (!(c.props.get(key) instanceof Number)) {
+                    c.props.put(key, temperament(c, facet));
+                    changed = true;
+                }
+            }
+            for (Drive drive : Drive.values()) {
+                String key = "personality.drive." + drive.name().toLowerCase(Locale.ROOT);
+                if (!(c.props.get(key) instanceof Number)) {
+                    c.props.put(key, drive(c, drive));
+                    changed = true;
+                }
+            }
+            if (!(c.props.get("psychology.stress") instanceof Number)) {
+                c.props.put("psychology.stress", 0);
+                changed = true;
+            }
+            // Stable defaults become persisted Character state; publish one revision for the
+            // complete initialization, but do not churn revisions on subsequent idempotent calls.
+            if (changed) CharacterRegistry.recordCharacterMutation();
         }
-        for (Drive drive : Drive.values()) {
-            String key = "personality.drive." + drive.name().toLowerCase(Locale.ROOT);
-            if (!(c.props.get(key) instanceof Number)) c.props.put(key, drive(c, drive));
-        }
-        if (!(c.props.get("psychology.stress") instanceof Number)) c.props.put("psychology.stress", 0);
     }
 
     public static int stress(Character c) {
