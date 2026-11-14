@@ -47,6 +47,8 @@ public final class CharacterRegistry {
     private static final class MutationBatchState {
         int depth;
         boolean dirty;
+        final DomainMutationRevisions.Mutation mutation =
+                WorldForgeApi.revisions().begin(DomainMutationRevisions.Domain.CHARACTERS);
     }
 
     /**
@@ -62,7 +64,11 @@ public final class CharacterRegistry {
             closed = true;
             if (--state.depth == 0) {
                 MUTATION_BATCH.remove();
-                if (state.dirty) commitDomainMutation();
+                try {
+                    if (state.dirty) state.mutation.commit();
+                } finally {
+                    state.mutation.close();
+                }
             }
         }
     }
