@@ -29,6 +29,7 @@ public final class WorldForgeApi {
         String check(MapAction action, ActionContext ctx);
     }
 
+    private static final DomainMutationRevisions REVISIONS = new DomainMutationRevisions();
     private static final Map<String, MapAction> ACTIONS = new LinkedHashMap<>();
     private static final List<Guard> GUARDS = new CopyOnWriteArrayList<>();
     private static final List<Consumer<MapChange>> LISTENERS = new CopyOnWriteArrayList<>();
@@ -58,6 +59,9 @@ public final class WorldForgeApi {
 
     /** Общие часы мира: пауза, скорость, календарь; все симуляции берут дни отсюда (GameClock.pull). */
     public static GameClock clock() { return CLOCK; }
+
+    /** Shared canonical-domain revision vector; lanes are advanced by authoritative writers only. */
+    public static DomainMutationRevisions revisions() { return REVISIONS; }
 
     /** Shared durable action queue. WorldForgeMod loads/saves it with the active world. */
     public static ActionExecutionService actionExecution() { return ACTION_EXECUTION; }
@@ -145,6 +149,7 @@ public final class WorldForgeApi {
         LISTENERS.clear();
         REPLANNERS.clear();
         EVENTS.clear();
+        REVISIONS.resetForTests();
         builtinsDone = false;
     }
 
