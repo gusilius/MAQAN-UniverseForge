@@ -158,6 +158,17 @@ public final class PopulationSimulationTest {
         ok(PopulationSimulation.need(smith, Need.HUNGER) == 10 && PopulationSimulation.need(smith, Need.REST) == 6,
                 "shared needs accumulate from the same world-day clock");
 
+        CharacterRegistry batchedRegistry = new CharacterRegistry();
+        Character batched = batchedRegistry.create("Batched", "", "north", "f", 280);
+        PopulationSimulation.advance(batchedRegistry, 3, 303);
+        ok(PopulationSimulation.need(batched, Need.HUNGER) == 30
+                        && PopulationSimulation.need(batched, Need.REST) == 18
+                        && PopulationSimulation.need(batched, Need.SOCIAL) == 6
+                        && PopulationSimulation.need(batched, Need.PURPOSE) == 3
+                        && PopulationSimulation.need(batched, Need.LEISURE) == 9
+                        && ((Number) batched.props.get("population.simulated_days")).longValue() == 3,
+                "batched population advancement preserves exact per-day need drift and persisted elapsed days");
+
         Character autonomous = registry.create("Rowan", "", "north", "m", 280);
         PopulationSimulation.setNeed(autonomous, Need.HUNGER, 92);
         LifeSimulation.Context activeMorning = new LifeSimulation.Context(

@@ -14,10 +14,20 @@ public final class PopulationSimulation {
     public static final int SKILL_XP_PER_RANK = 100;
     public static final int MAX_SKILL_RANK = 20;
 
-    public enum Need { HUNGER, REST, SAFETY, SOCIAL, PURPOSE, LEISURE }
+    public enum Need {
+        HUNGER("hunger"), REST("rest"), SAFETY("safety"),
+        SOCIAL("social"), PURPOSE("purpose"), LEISURE("leisure");
+        private final String key;
+        Need(String key) { this.key = key; }
+    }
     public enum Duty { WORKER, SPECIALIST, SOLDIER, HERO }
     public enum LifeStage { INFANT, CHILD, ADOLESCENT, ADULT, ELDER }
-    public enum Intent { EAT, REST, SEEK_SAFETY, SOCIALIZE, WORK, TRAIN, PATROL, FOLLOW_COMMAND, IDLE }
+    public enum Intent {
+        EAT("eat"), REST("rest"), SEEK_SAFETY("seek_safety"), SOCIALIZE("socialize"),
+        WORK("work"), TRAIN("train"), PATROL("patrol"), FOLLOW_COMMAND("follow_command"), IDLE("idle");
+        private final String key;
+        Intent(String key) { this.key = key; }
+    }
 
     private static final String PROFESSION = "population.profession";
     private static final String PROFESSION_HISTORY = "population.profession_history";
@@ -175,16 +185,25 @@ public final class PopulationSimulation {
 
     /** Needs are shared by civilian, specialist, soldier and hero AI; values are deficits (0=met, 100=critical). */
     public static int need(Character character, Need need) {
-        Object value = mapProp(character, NEEDS).get(need.name().toLowerCase(Locale.ROOT));
-        return value instanceof Number n ? clamp(n.intValue(), 0, MAX_NEED) : 0;
+        return need(mapProp(character, NEEDS), need);
     }
 
     public static void setNeed(Character character, Need need, int deficit) {
-        mapProp(character, NEEDS).put(need.name().toLowerCase(Locale.ROOT), clamp(deficit, 0, MAX_NEED));
+        setNeed(mapProp(character, NEEDS), need, deficit);
     }
 
     public static void changeNeed(Character character, Need need, int delta) {
-        setNeed(character, need, need(character, need) + delta);
+        Map<String, Object> needs = mapProp(character, NEEDS);
+        setNeed(needs, need, need(needs, need) + delta);
+    }
+
+    private static int need(Map<String, Object> needs, Need need) {
+        Object value = needs.get(need.key);
+        return value instanceof Number n ? clamp(n.intValue(), 0, MAX_NEED) : 0;
+    }
+
+    private static void setNeed(Map<String, Object> needs, Need need, int deficit) {
+        needs.put(need.key, clamp(deficit, 0, MAX_NEED));
     }
 
     /** Skill history is retained across profession changes; training never creates another Character. */
@@ -247,16 +266,20 @@ public final class PopulationSimulation {
      */
     public static Intent decide(Character character, int year) {
         if (character == null || !character.alive) return Intent.IDLE;
-        if (need(character, Need.HUNGER) >= 70) return Intent.EAT;
-        if (need(character, Need.REST) >= 70) return Intent.REST;
-        if (need(character, Need.SAFETY) >= 70) return Intent.SEEK_SAFETY;
-        if (need(character, Need.SOCIAL) >= 70) return Intent.SOCIALIZE;
+        return decide(character, year, mapProp(character, NEEDS));
+    }
+
+    private static Intent decide(Character character, int year, Map<String, Object> needs) {
+        if (need(needs, Need.HUNGER) >= 70) return Intent.EAT;
+        if (need(needs, Need.REST) >= 70) return Intent.REST;
+        if (need(needs, Need.SAFETY) >= 70) return Intent.SEEK_SAFETY;
+        if (need(needs, Need.SOCIAL) >= 70) return Intent.SOCIALIZE;
 
         LifeStage stage = lifeStage(character, year);
         if (stage == LifeStage.INFANT || stage == LifeStage.CHILD) return Intent.IDLE;
-        if (stage == LifeStage.ADOLESCENT && need(character, Need.PURPOSE) >= 45) return Intent.TRAIN;
+        if (stage == LifeStage.ADOLESCENT && need(needs, Need.PURPOSE) >= 45) return Intent.TRAIN;
 
-        if (need(character, Need.PURPOSE) >= 65) {
+        if (need(needs, Need.PURPOSE) >= 65) {
             return trainingTarget(character).isEmpty() ? Intent.WORK : Intent.TRAIN;
         }
         if (hasDuty(character, Duty.HERO) && !String.valueOf(character.props.getOrDefault("population.command", "")).isBlank()) return Intent.FOLLOW_COMMAND;
@@ -270,10 +293,14 @@ public final class PopulationSimulation {
 
     /** Records the chosen intent for UI/other addons; it does not spend food or move entities. */
     public static Intent updateIntent(Character character, int year) {
-        Intent intent = decide(character, year);
-        character.props.put(LAST_INTENT, intent.name().toLowerCase(Locale.ROOT));
-        character.props.put("population.age_years", age(character, year));
-        character.props.put("population.life_stage", lifeStage(character, year).name().toLowerCase(Locale.ROOT));
+        Map<String, Object> needs = mapProp(character, NEEDS);
+        Intent intent = character == null || !character.alive ? Intent.IDLE : decide(character, year, needs);
+        LifeStage stage = character == null ? LifeStage.INFANT : lifeStage(character, year);
+        if (character != null) {
+            character.props.put(LAST_INTENT, intent.key);
+            character.props.put("population.age_years", age(character, year));
+            character.props.put("population.life_stage", stage.name().toLowerCase(Locale.ROOT));
+        }
         return intent;
     }
 
@@ -315,17 +342,32 @@ public final class PopulationSimulation {
         if (elapsedDays < 0) throw new IllegalArgumentException("elapsedDays cannot be negative");
         if (elapsedDays == 0) return;
         registry.refreshLifeStages(year);
+        int hungerDrift = drift(10, elapsedDays);
+        int restDrift = drift(6, elapsedDays);
+        int socialDrift = drift(2, elapsedDays);
+        int purposeDrift = drift(1, elapsedDays);
+        int leisureDrift = drift(3, elapsedDays);
         for (Character character : registry.all()) {
             if (!character.alive) continue;
-            changeNeed(character, Need.HUNGER, drift(10, elapsedDays));
-            changeNeed(character, Need.REST, drift(6, elapsedDays));
-            changeNeed(character, Need.SOCIAL, drift(2, elapsedDays));
-            changeNeed(character, Need.PURPOSE, drift(1, elapsedDays));
-            changeNeed(character, Need.LEISURE, drift(3, elapsedDays));
-            updateIntent(character, year);
+            // Resolve the nested needs map once per person and update it in place.
+            // The previous path repeatedly called mapProp/name().toLowerCase for every
+            // need, then repeated the same lookups again while deciding the daily intent.
+            Map<String, Object> needs = mapProp(character, NEEDS);
+            setNeed(needs, Need.HUNGER, need(needs, Need.HUNGER) + hungerDrift);
+            setNeed(needs, Need.REST, need(needs, Need.REST) + restDrift);
+            setNeed(needs, Need.SOCIAL, need(needs, Need.SOCIAL) + socialDrift);
+            setNeed(needs, Need.PURPOSE, need(needs, Need.PURPOSE) + purposeDrift);
+            setNeed(needs, Need.LEISURE, need(needs, Need.LEISURE) + leisureDrift);
+            Intent intent = decide(character, year, needs);
+            LifeStage stage = lifeStage(character, year);
+            character.props.put(LAST_INTENT, intent.key);
+            character.props.put("population.age_years", age(character, year));
+            character.props.put("population.life_stage", stage.name().toLowerCase(Locale.ROOT));
             Object previous = character.props.get("population.simulated_days");
             long simulated = previous instanceof Number n ? Math.max(0, n.longValue()) : 0;
-            character.props.put("population.simulated_days", simulated + elapsedDays);
+            long nextSimulated = elapsedDays > Long.MAX_VALUE - simulated
+                    ? Long.MAX_VALUE : simulated + elapsedDays;
+            character.props.put("population.simulated_days", nextSimulated);
             character.props.put("population.last_simulated_year", year);
         }
     }
