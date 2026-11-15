@@ -64,7 +64,7 @@ public final class DomainMutationRevisions {
     }
 
     /** Global capture: unavailable while any canonical domain writer is active. */
-    public synchronized Optional<Snapshot> snapshot() { return snapshot(EnumSet.allOf(Domain.class)); }
+    public synchronized Optional<Snapshot> snapshot() { return snapshot(Domain.values()); }
 
     /** Scoped capture ignores writers in domains absent from the immutable input projection. */
     public synchronized Optional<Snapshot> snapshot(Domain... dependencies) {
