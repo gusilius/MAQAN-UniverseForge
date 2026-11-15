@@ -97,7 +97,7 @@ jobs:
         working-directory: mods/worldforge/wfaddons
         shell: bash
         run: bash tools/test-all.sh ../wfmod
-      - name: Build People, Settlements and WorldSim with only dependency closure
+      - name: Build Army, Troops, People, Settlements and WorldSim with only dependency closure
         working-directory: mods/worldforge/wfaddons
         shell: bash
         run: bash tools/build-selected-addons.sh ../wfmod wf-army wf-troops wf-people wf-settlements wf-worldsim

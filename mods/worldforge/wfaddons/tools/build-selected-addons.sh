@@ -40,6 +40,23 @@ for module in order:
         print(module + "|" + ",".join(sorted(deps[module])))
 PY
 
+python3 - "$PLAN" "$@" <<'PY'
+import sys
+plan_path, *targets = sys.argv[1:]
+with open(plan_path, encoding="utf-8") as source:
+    lines = [line.rstrip("\\r\\n") for line in source if line.strip()]
+modules = [line.split("|", 1)[0] for line in lines]
+missing = sorted(set(targets) - set(modules))
+if missing:
+    raise SystemExit("ERROR: requested addon(s) missing from dependency-closure plan: " + ", ".join(missing))
+if len(modules) != len(set(modules)):
+    raise SystemExit("ERROR: dependency-closure plan contains duplicate addon rows")
+print("=== VERIFIED TARGETED ADDON BUILD PLAN ===")
+for module in modules:
+    print("  " + module)
+print("=== ALL REQUESTED ADDONS ARE IN THE BUILD PLAN ===")
+PY
+
 ( cd "$CORE" && gradle build --no-daemon )
 CORE_JAR="$(find "$CORE/build/libs" -maxdepth 1 -type f -name 'worldforge-*.jar' ! -name '*-sources.jar' -print -quit)"
 if [ -z "$CORE_JAR" ]; then
