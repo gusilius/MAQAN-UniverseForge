@@ -181,6 +181,20 @@ final class TroopController {
             t.setMorale((int) Math.round(s.morale * 100));
             TroopsMod.syncMilitaryMorale(t);
         }
+        // Preserve the original rout behavior: once routed, every soldier receives
+        // a concrete retreat destination away from the nearby enemy centroid.
+        if (s.routed) {
+            double[] retreat = near ? Morale.flee(frame.cx(), frame.cz(),
+                    frame.enemies()[1], frame.enemies()[2], 30) : new double[]{frame.cx(), frame.cz()};
+            for (TroopEntity troop : alive) {
+                troop.hasDest = true;
+                troop.destX = retreat[0];
+                troop.destZ = retreat[1];
+                troop.destYaw = Double.NaN;
+                troop.forced = null;
+                troop.engage = TroopEntity.Engage.NONE;
+            }
+        }
         for (TroopEntity h : alive) {
             if (h.def() == null || h.def().heal() <= 0) continue;
             List<TroopEntity> near2 = new ArrayList<>();
