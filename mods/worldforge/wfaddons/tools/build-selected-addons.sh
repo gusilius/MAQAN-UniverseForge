@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # Build only requested addons and their transitive compileOnly addon dependencies.
 set -euo pipefail
-CORE="$1"
-if [ -z "$CORE" ]; then CORE="../wfmod"; fi
-shift || true
+CORE="../wfmod"
+if [ "$#" -gt 0 ]; then CORE="$1"; shift; fi
 if [ "$#" -eq 0 ]; then
-  echo "Usage: $0 <core-dir> <wf-addon> [wf-addon ...]" >&2
+  echo "Usage: $0 [core-dir] <wf-addon> [wf-addon ...]" >&2
   exit 2
 fi
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -58,7 +57,7 @@ while IFS='|' read -r module dep_list; do
   cp "$CORE_JAR" "$module/libs/"
 
   if [ -n "$dep_list" ]; then
-    for dep in $(printf '%s' "$dep_list" | tr ',' '\n'); do
+    for dep in $(printf '%s' "$dep_list" | tr ',' ' '); do
       dep="$(printf '%s' "$dep" | tr -d '\r')"
       [ -n "$dep" ] || continue
       found=0
