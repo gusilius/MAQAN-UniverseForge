@@ -1,72 +1,81 @@
 #!/usr/bin/env bash
-# Build only the requested addons plus their transitive compileOnly dependency closure.
+# Build only requested addons and their transitive compileOnly addon dependencies.
 set -euo pipefail
-CORE="${1:-../wfmod}"
+CORE="\${1:-../wfmod}"
 shift || true
-if [ "$#" -eq 0 ]; then echo "Usage: $0 <core-dir> <wf-addon> [wf-addon ...]" >&2; exit 2; fi
+if [ "$#" -eq 0 ]; then
+  echo "Usage: $0 <core-dir> <wf-addon> [wf-addon ...]" >&2
+  exit 2
+fi
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
-python3 - "$@" <<'PY' > "$ROOT/.selected-addon-order"
+PLAN="$ROOT/.selected-addon-build.tmp"
+trap 'rm -f "$PLAN"' EXIT
+
+python3 - "$@" > "$PLAN" <<'PY'
 import subprocess, sys
-targets=set(sys.argv[1:])
-raw=subprocess.check_output([sys.executable,"tools/build_order.py","--deps"],text=True)
-deps={}
-order=[]
+targets = set(sys.argv[1:])
+raw = subprocess.check_output([sys.executable, "tools/build_order.py", "--deps"], text=True)
+deps, order = {}, []
 for line in raw.splitlines():
-    module, values=line.split("|",1)
+    module, values = line.split("|", 1)
+    module = module.rstrip("\r")
+    values = values.rstrip("\r")
     order.append(module)
-    deps[module]=set(filter(None,values.split(",")))
-unknown=targets-set(order)
+    deps[module] = set(x.rstrip("\r") for x in values.split(",") if x.rstrip("\r"))
+unknown = targets - set(order)
 if unknown:
-    raise SystemExit("Unknown addon(s): "+", ".join(sorted(unknown)))
-needed=set()
+    raise SystemExit("Unknown addon(s): " + ", ".join(sorted(unknown)))
+needed = set()
 def include(module):
-    if module in needed: return
+    if module in needed:
+        return
     needed.add(module)
-    for dep in deps[module]: include(dep)
-for target in targets: include(target)
-print(" ".join(module for module in order if module in needed))
+    for dependency in deps[module]:
+        include(dependency)
+for target in targets:
+    include(target)
+for module in order:
+    if module in needed:
+        print(module + "|" + ",".join(sorted(deps[module])))
 PY
-mapfile -t MODULES < <(tr ' ' '\n' < .selected-addon-order | sed '/^$/d')
-rm -f .selected-addon-order
+
 ( cd "$CORE" && gradle build --no-daemon )
 CORE_JAR="$(find "$CORE/build/libs" -maxdepth 1 -type f -name 'worldforge-*.jar' ! -name '*-sources.jar' -print -quit)"
-[ -n "$CORE_JAR" ] || { echo "ERROR: WorldForge core jar missing"; exit 1; }
-declare -A DEP_MAP=()
-while IFS='|' read -r module dep_list; do DEP_MAP["$module"]="$dep_list"; done < <(python3 tools/build_order.py --deps)
-for module in "${MODULES[@]}"; do
+if [ -z "$CORE_JAR" ]; then
+  echo "ERROR: WorldForge core jar missing" >&2
+  exit 1
+fi
+
+while IFS='|' read -r module dep_list; do
+  module="$(printf '%s' "$module" | tr -d '\r')"
+  dep_list="$(printf '%s' "$dep_list" | tr -d '\r')"
+  [ -n "$module" ] || continue
   echo "=== TARGETED ADDON BUILD: $module"
   mkdir -p "$module/libs"
   rm -f "$module"/libs/wf_*.jar
   cp "$CORE_JAR" "$module/libs/"
-  dep_list="${DEP_MAP[$module]:-}"
-  deps=()
-  if [[ -n "$dep_list" ]]; then IFS=',' read -r -a deps <<< "$dep_list"; fi
-  for dep in "${deps[@]}"; do
-    dep="${dep//
-    found=0
-    for jar in "$dep"/build/libs/wf_*.jar; do
-      [ -f "$jar" ] || continue
-      case "$jar" in *-sources.jar) continue ;; esac
-      cp "$jar" "$module/libs/"
-      found=1
+
+  if [ -n "$dep_list" ]; then
+    IFS=',' read -r -a deps <<< "$dep_list"
+    for dep in "\${deps[@]}"; do
+      dep="$(printf '%s' "$dep" | tr -d '\r')"
+      [ -n "$dep" ] || continue
+      found=0
+      for jar in "$dep"/build/libs/wf_*.jar; do
+        [ -f "$jar" ] || continue
+        case "$jar" in *-sources.jar) continue ;; esac
+        cp "$jar" "$module/libs/"
+        found=1
+      done
+      if [ "$found" -ne 1 ]; then
+        echo "ERROR: missing dependency artifact $dep for $module" >&2
+        exit 1
+      fi
     done
-    [ "$found" -eq 1 ] || { echo "ERROR: missing dependency artifact $dep for $module"; exit 1; }
-  done
+  fi
+
   ( cd "$module" && gradle build --no-daemon -q )
-done
-echo "TARGETED ADDON BUILDS PASSED: ${MODULES[*]}"
-\\r'/}"
-    [ -n "$dep" ] || continue
-    found=0
-    for jar in "$dep"/build/libs/wf_*.jar; do
-      [ -f "$jar" ] || continue
-      case "$jar" in *-sources.jar) continue ;; esac
-      cp "$jar" "$module/libs/"
-      found=1
-    done
-    [ "$found" -eq 1 ] || { echo "ERROR: missing dependency artifact $dep for $module"; exit 1; }
-  done
-  ( cd "$module" && gradle build --no-daemon -q )
-done
-echo "TARGETED ADDON BUILDS PASSED: ${MODULES[*]}"
+done < "$PLAN"
+
+echo "TARGETED ADDON BUILDS PASSED"
