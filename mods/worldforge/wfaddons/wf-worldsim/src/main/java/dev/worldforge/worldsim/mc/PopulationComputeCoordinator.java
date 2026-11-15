@@ -57,6 +57,7 @@ public final class PopulationComputeCoordinator {
             Pending done=pending;
             pending=null;
             if(done!=null&&done.ticket.lifecycleEpoch()==lifecycleEpoch
+                    &&done.registryGeneration()==PeopleMod.populationRegistryGeneration()
                     &&done.ticket.matches(done.captured.worldId(),OPERATION_KEY,done.captured.targetWorldDay(),
                     lifecycleEpoch,PopulationComputeBridge.SCHEMA_VERSION,NativeWorldSimulation.NATIVE_ABI_VERSION)
                     &&completed.ticket().matches(done.captured.worldId(),OPERATION_KEY,done.captured.targetWorldDay(),
@@ -75,7 +76,7 @@ public final class PopulationComputeCoordinator {
                     LOGGER.error("wf_worldsim: population result rejected; retaining unacknowledged world days for retry",rejected);
                 }
             } else {
-                LOGGER.warn("wf_worldsim: discarded stale population ticket from an earlier world lifecycle");
+                LOGGER.warn("wf_worldsim: discarded stale population ticket (world lifecycle or Character registry generation changed)");
             }
         }
         if(pending!=null) return true;

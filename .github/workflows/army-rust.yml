@@ -4,6 +4,7 @@ on:
   push:
     branches: [feature/autonomous-world-simulation-engine]
     paths:
+      - ".github/workflows/army-rust.yml"
       - "mods/worldforge/wfaddons/wf-army/**"
       - "mods/worldforge/wfaddons/wf-troops/**"
       - "mods/worldforge/wfaddons/wf-settlements/**"

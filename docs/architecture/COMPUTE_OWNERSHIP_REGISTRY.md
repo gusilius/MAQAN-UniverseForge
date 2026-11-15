@@ -406,3 +406,11 @@ The route planner may only traverse chunks already recorded in `NavigatorExplora
 - The dependency-closure build explicitly targets `wf-people`, `wf-settlements` and `wf-worldsim`; this ensures the canonical Character owner and its population bridge are compiled in the same focused validation run.
 - The pure-Java logic suite continues to run in full, including `PopulationSimulationTest`; native tests include the Population module on both Windows and Linux.
 - This closes a CI routing/coverage gap only. It does not mark `worldsim.population.advance` accepted: parity, restart/save-reload and revision-freshness campaign gates remain open until evidence is recorded.
+
+### Population completion generation fence — 2026-11-15
+
+- PopulationComputeCoordinator now compares the generation captured with each pending Rust batch against the live PeopleMod.populationRegistryGeneration() before accepting its result.
+- A map/player Character partition registered while native compute is in flight invalidates that result even if the new partition currently contains no alive Character IDs. The coordinator discards the frame and captures a fresh canonical snapshot on the next tick; per-Character receipts prevent already-applied work from being repeated.
+- The generation is a scan/freshness fence, not a second identity index or revision owner. The scoped CHARACTERS mutation revision and exact live UUID-set check remain in PopulationComputeBridge.apply.
+- Added .github/workflows/army-rust.yml to its own push path filters so edits to the targeted validation workflow trigger the validation run.
+- Acceptance remains pending until the targeted Windows/Linux Rust tests, Java regression suite and People/Settlements/WorldSim dependency-closure build pass.
