@@ -86,7 +86,7 @@ public class TradeNetTest {
         ok(settlementRevision() == beforePopulationNoop,
                 "unchanged canonical resident count does not churn the revision");
         long beforeWorker = settlementRevision();
-        Settlement.Worker revisionWorker = revisionSettlement.addWorker("revision-worker");
+        Worker revisionWorker = revisionSettlement.addWorker("revision-worker");
         ok(settlementRevision() == beforeWorker + 1,
                 "worker creation publishes one SETTLEMENTS revision");
         long beforeManualOrder = settlementRevision();
