@@ -238,13 +238,23 @@ This is an operation-count status, not a percentage of all UniverseForge computa
 
 | Status | Operation keys | Count | Evidence / limitation |
 |---|---|---:|---|
-| Rust owns production computation | `worldsim.emergence.advance`, `worldsim.decide` | 2 | Both enter through the shared `WorldSimComputeScheduler` and JNI; Java remains snapshot/apply/materialization boundary. Campaign catch-up and parity evidence remain open. |
-| Rust implementation exists, production ownership unverified | `worldsim.generate` | 1 | JNI wrapper and Rust `worldgen::generate_world` exist; current source audit found no production caller. Do not count as migrated. |
+| Rust owns production computation and is accepted as migrated | `worldsim.emergence.advance`, `worldsim.decide` | 2 | Shared `WorldSimComputeRuntime`/JNI production path. Population parity and save/reload acceptance are still pending, so it is deliberately excluded from this count. |
+| Rust production pipeline connected; migration acceptance pending | `worldsim.population.advance` | 1 | Native Rust runs through the same process-wide runtime when available; Java fallback is exclusive. Full parity, save/reload and writer-freshness gates remain open. |
+| Rust implementation exists, production ownership unverified | `worldsim.generate` | 1 | JNI wrapper and Rust `worldgen::generate_world` exist; no production caller is evidenced. Do not count as migrated. |
 | Java remains the intended owner | `worldsim.snapshot`, `worldsim.materialize.people`, `worldsim.materialize.polities`, `worldsim.proposal.apply` | 4 | These operations cross Minecraft/domain authority boundaries; do not move Minecraft API or authoritative side effects into Rust. |
-| Remaining compute domains | population micro-simulation, economy/trade, logistics/path planning, political/diplomatic planning, military/tactical simulation, etc. | Not yet exhaustively counted | Target ownership in the migration contract is not evidence of implementation. Each domain needs source-call-site inventory, profile, parity fixtures, one-owner cutover, and addon compatibility audit. |
+| Remaining candidate compute groups | economy/trade; logistics/path planning; additional political/diplomatic planning; military/tactical simulation; spatial/geographic calculations | 5 groups for audit, not five guaranteed Rust ports | Each group must be decomposed into actual operations, profiled, checked against installed optimizers and existing indexes, then selectively ported only where pure compute and measured benefit justify it. |
 
-**Current honest headline:** 2 confirmed Rust-owned production compute operations; 1 unverified Rust entry point; no defensible overall percentage yet. The next progress report must increase the count only after a production cutover is evidenced in source and CI/parity checks, not when a Rust function or wrapper is merely added.
+**Current honest headline:** 2 fully accepted Rust-owned production operations; 1 additional Rust-backed Population pipeline connected but not yet accepted; 1 dormant/unverified generation entry point; 5 remaining candidate groups requiring source-level decomposition. This is not a project completion percentage or a guaranteed count of ports. Java/Minecraft integration, canonical mutation, persistence, materialization, rendering and side effects are intentionally not migration targets.
 
+
+
+### No-double-compute audit — Population production path (2026-11-15)
+
+- `PeopleMod.onTick` first delegates the world-day interval to the optional `PopulationComputeCoordinator`. If that coordinator returns ownership, the Java fallback is not invoked for that interval.
+- When the optional addon is absent, or native execution is unavailable before submission, the coordinator returns control to the exclusive Java fallback. A reflective/linkage failure after coordinator discovery fails closed and holds Java fallback rather than risking concurrent execution.
+- Rust and Java do not both apply results for one interval. The parity fixture is test-only and does not mutate production Characters.
+- `PopulationSimulation.advanceToWorldDay` remains the Java fallback implementation; it must not be called alongside the native pipeline. The Rust pipeline remains a candidate until parity, save/reload and revision-freshness acceptance gates pass.
+- Current CI run `43709019239` exposed one test assertion bug in `DomainMutationRevisionsTest`: it expected the Settlement lane to equal absolute revision 1 even though an earlier successful Settlement mutation had already advanced it. The corrected test compares each lane against its own pre-operation revision. This is a test expectation correction, not a production revision-vector defect.
 
 ### `worldsim.emergence.advance` — request-scoped lookup indexes
 

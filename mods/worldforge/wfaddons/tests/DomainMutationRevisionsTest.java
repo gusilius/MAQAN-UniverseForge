@@ -51,6 +51,7 @@ public final class DomainMutationRevisionsTest {
                 "successful mutation advances exactly its own domain lane");
         check(!revisions.isCurrent(initial), "committed domain mutation invalidates the prior snapshot");
 
+        var beforeMulti = revisions.snapshot().orElseThrow();
         try (var outer = revisions.begin(DomainMutationRevisions.Domain.ORIGINS);
              var inner = revisions.begin(DomainMutationRevisions.Domain.SETTLEMENTS)) {
             outer.commit();
@@ -58,9 +59,11 @@ public final class DomainMutationRevisionsTest {
             inner.commit();
         }
         var multi = revisions.snapshot().orElseThrow();
-        check(multi.revision(DomainMutationRevisions.Domain.ORIGINS) == 1
-                        && multi.revision(DomainMutationRevisions.Domain.SETTLEMENTS) == 1,
-                "multiple canonical domains are represented independently in one revision vector");
+        check(multi.revision(DomainMutationRevisions.Domain.ORIGINS)
+                        == beforeMulti.revision(DomainMutationRevisions.Domain.ORIGINS) + 1
+                        && multi.revision(DomainMutationRevisions.Domain.SETTLEMENTS)
+                        == beforeMulti.revision(DomainMutationRevisions.Domain.SETTLEMENTS) + 1,
+                "multiple canonical domains advance independently from their prior revisions in one vector");
 
         WorldForgeApi.resetForTests();
         var eventBefore = WorldForgeApi.revisions().snapshot().orElseThrow();
