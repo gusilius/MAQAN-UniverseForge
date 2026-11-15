@@ -2,6 +2,8 @@ package dev.worldforge.tests;
 
 import dev.worldforge.settle.*;
 import dev.worldforge.mod.economy.TreasuryService;
+import dev.worldforge.mod.api.DomainMutationRevisions;
+import dev.worldforge.mod.api.WorldForgeApi;
 
 import java.nio.file.*;
 import java.util.*;
@@ -9,6 +11,11 @@ import java.util.*;
 public class TradeNetTest {
     static int fails;
     static void ok(boolean c, String what) { System.out.println((c ? "ok   " : "FAIL ") + what); if (!c) fails++; }
+
+    static long economyRevision() {
+        return WorldForgeApi.revisions().snapshot(DomainMutationRevisions.Domain.ECONOMY_TRADE)
+                .orElseThrow().revision(DomainMutationRevisions.Domain.ECONOMY_TRADE);
+    }
 
     static Settlement city(String id, Defs d) {
         Settlement s = new Settlement(id, id, d);
@@ -27,6 +34,38 @@ public class TradeNetTest {
         cs.put("A", A); cs.put("B", B);
         A.stock.put("wood", 150.0); B.stock.put("wood", 12.0);
         ok(A.price("wood") < B.price("wood"), "в A дрова дешевле: " + A.price("wood") + " < " + B.price("wood"));
+        TradeNetwork revisionNet = new TradeNetwork();
+        Settlement revisionSource = new Settlement("revision-source", "revision-source", d);
+        Settlement revisionTarget = new Settlement("revision-target", "revision-target", d);
+        revisionSource.add("wood", 100);
+        revisionTarget.add("wood", 10);
+        Map<String, Settlement> revisionCities = Map.of(
+                revisionSource.id, revisionSource, revisionTarget.id, revisionTarget);
+        long revisionBeforeAdd = economyRevision();
+        var revisionRoute = revisionNet.add(revisionCities, revisionSource.id, revisionTarget.id, "wood", 2.0);
+        ok(economyRevision() == revisionBeforeAdd + 1,
+                "canonical route creation publishes one ECONOMY_TRADE revision");
+        long revisionBeforeDuty = economyRevision();
+        revisionNet.setDuty(revisionRoute.id, "revision-realm", 0.05);
+        ok(economyRevision() == revisionBeforeDuty + 1,
+                "customs policy change publishes one ECONOMY_TRADE revision");
+        long revisionBeforeNoopDuty = economyRevision();
+        revisionNet.setDuty(revisionRoute.id, "revision-realm", 0.05);
+        ok(economyRevision() == revisionBeforeNoopDuty,
+                "idempotent customs policy does not churn the revision");
+        long revisionBeforeInvalidTick = economyRevision();
+        revisionNet.tick(revisionCities, Double.NaN);
+        ok(economyRevision() == revisionBeforeInvalidTick,
+                "invalid trade tick does not publish a revision");
+        long revisionBeforeTick = economyRevision();
+        revisionNet.tick(revisionCities, 1.0);
+        ok(economyRevision() == revisionBeforeTick + 1,
+                "trade simulation tick publishes one coalesced revision");
+        long revisionBeforeRemove = economyRevision();
+        revisionNet.remove(revisionRoute.id);
+        ok(economyRevision() == revisionBeforeRemove + 1,
+                "canonical route removal publishes one ECONOMY_TRADE revision");
+
         TradeNetwork n = new TradeNetwork();
         var sug = TradeNetwork.suggestions(cs, 3);
         TradeNetwork autonomous = new TradeNetwork();

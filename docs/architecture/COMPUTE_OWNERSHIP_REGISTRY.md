@@ -457,3 +457,11 @@ The route planner may only traverse chunks already recorded in `NavigatorExplora
 - `CharacterRegistry.create` stamps newly created Characters with their creation-day receipt; old persisted Characters without receipts use the stable world baseline.
 - Rust coordinator and Java fallback now use the same durable baseline. The process cursor is only a scheduling/progress hint, never the fallback origin.
 - Added regression coverage for missing receipts, baseline reload stability, and cross-world mismatch rejection. Acceptance remains pending targeted CI and an actual server crash/restart campaign.
+
+### TradeNetwork mutation boundary — 2026-11-16
+
+- `TradeNetwork` now publishes the shared `ECONOMY_TRADE` lane for canonical route creation/removal, customs-duty changes and valid simulation ticks.
+- Nested autonomous route creation joins the outer network mutation batch; one logical review publishes at most one revision. Idempotent duty updates and invalid/non-positive ticks do not publish a revision.
+- The network batch owns only route/shipment state. Financial account postings continue to publish through `TreasuryLedger` as the sole journal/balance owner; no second ledger revision or financial calculation was introduced.
+- Added focused regression assertions for create, remove, changed/no-op customs policy, valid simulation tick and invalid tick.
+- **Still incomplete:** `routes`, `shipments` and `events` remain public mutable collections; `Route` and `Shipment` expose mutable fields. Direct external writes can bypass the lane. The tick currently conservatively invalidates when active network state exists; it does not yet provide a deep immutable network snapshot. Do not enable global WorldSim apply fencing or claim `ECONOMY_TRADE` complete until these bypasses and Settlement writers are closed.

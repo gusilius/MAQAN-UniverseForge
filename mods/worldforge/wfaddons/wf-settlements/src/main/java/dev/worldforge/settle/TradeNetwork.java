@@ -3,8 +3,11 @@ package dev.worldforge.settle;
 import dev.worldforge.mod.Json;
 import dev.worldforge.mod.economy.TreasuryService;
 import dev.worldforge.mod.economy.TreasuryLedger;
+import dev.worldforge.mod.api.DomainMutationRevisions;
+import dev.worldforge.mod.api.WorldForgeApi;
 
 import java.util.*;
+import java.util.function.Supplier;
 
 /**
  * Торговые маршруты между поселениями. Караван возит ресурс из города, где он дешевле, в город, где дороже, пока есть разница в цене.
@@ -65,19 +68,84 @@ public final class TradeNetwork {
     private int next = 1;
     private long nextShipment = 1;
 
-    public Route add(Map<String, Settlement> cities, String from, String to, String res, double rate) {
-        Settlement a = cities.get(from), b = cities.get(to);
-        if (a == null || b == null) throw new TradeException("Нет такого поселения");
-        if (from.equals(to)) throw new TradeException("Нужны два разных поселения");
-        if (a.basePrice(res) <= 0 || res.equals(Defs.SILVER)) throw new TradeException("Этот ресурс не торгуется");
-        if (!Double.isFinite(rate) || rate <= 0 || rate > 30) throw new TradeException("Скорость должна быть конечной величиной от 0 до 30 ед. в минуту");
-        for (Route r : routes.values()) if (r.from.equals(from) && r.to.equals(to) && r.res.equals(res)) throw new TradeException("Такой маршрут уже есть");
-        Route r = new Route(next++, from, to, res, rate);
-        routes.put(r.id, r);
-        return r;
+    private static final ThreadLocal<MutationState> ACTIVE_MUTATION = new ThreadLocal<>();
+
+    private static final class MutationState {
+        final TradeNetwork owner;
+        final DomainMutationRevisions.Mutation revision;
+        int depth = 1;
+        boolean dirty;
+        MutationState(TradeNetwork owner) {
+            this.owner = owner;
+            this.revision = WorldForgeApi.revisions().begin(DomainMutationRevisions.Domain.ECONOMY_TRADE);
+        }
     }
 
-    public void remove(int id) { if (routes.remove(id) == null) throw new TradeException("Нет маршрута " + id); }
+    private final class MutationBatch implements AutoCloseable {
+        private final MutationState state;
+        private boolean closed;
+        MutationBatch(MutationState state) { this.state = state; }
+        @Override public void close() {
+            if (closed) return;
+            closed = true;
+            if (--state.depth != 0) return;
+            ACTIVE_MUTATION.remove();
+            try {
+                if (state.dirty) state.revision.commit();
+            } finally {
+                state.revision.close();
+            }
+        }
+    }
+
+    private MutationBatch beginMutationBatch() {
+        MutationState state = ACTIVE_MUTATION.get();
+        if (state == null) {
+            state = new MutationState(this);
+            ACTIVE_MUTATION.set(state);
+        } else if (state.owner != this) {
+            throw new IllegalStateException("Cannot nest trade mutations across different networks");
+        } else {
+            state.depth++;
+        }
+        return new MutationBatch(state);
+    }
+
+    private void markMutation() {
+        MutationState state = ACTIVE_MUTATION.get();
+        if (state == null || state.owner != this)
+            throw new IllegalStateException("TradeNetwork mutation escaped its canonical writer scope");
+        state.dirty = true;
+    }
+
+    private <T> T mutate(Supplier<T> action) {
+        try (MutationBatch ignored = beginMutationBatch()) {
+            return action.get();
+        }
+    }
+
+    public Route add(Map<String, Settlement> cities, String from, String to, String res, double rate) {
+        return mutate(() -> {
+            Settlement a = cities.get(from), b = cities.get(to);
+            if (a == null || b == null) throw new TradeException("Нет такого поселения");
+            if (from.equals(to)) throw new TradeException("Нужны два разных поселения");
+            if (a.basePrice(res) <= 0 || res.equals(Defs.SILVER)) throw new TradeException("Этот ресурс не торгуется");
+            if (!Double.isFinite(rate) || rate <= 0 || rate > 30) throw new TradeException("Скорость должна быть конечной величиной от 0 до 30 ед. в минуту");
+            for (Route r : routes.values()) if (r.from.equals(from) && r.to.equals(to) && r.res.equals(res)) throw new TradeException("Такой маршрут уже есть");
+            Route r = new Route(next++, from, to, res, rate);
+            routes.put(r.id, r);
+            markMutation();
+            return r;
+        });
+    }
+
+    public void remove(int id) {
+        mutate(() -> {
+            if (routes.remove(id) == null) throw new TradeException("Нет маршрута " + id);
+            markMutation();
+            return null;
+        });
+    }
 
     /** Configure an ad-valorem customs duty paid by the importing settlement to the destination realm. */
     public void setDuty(int routeId, String realmId, double rate) {
@@ -85,8 +153,15 @@ public final class TradeNetwork {
         if (route == null) throw new TradeException("Нет маршрута " + routeId);
         if (!Double.isFinite(rate) || rate < 0 || rate > 0.5) throw new TradeException("Пошлина должна быть от 0 до 50%");
         if (rate > 0 && (realmId == null || realmId.isBlank())) throw new TradeException("Для пошлины нужна казна государства");
-        route.dutyRealm = rate == 0 ? "" : realmId.trim();
-        route.dutyRate = rate;
+        String nextRealm = rate == 0 ? "" : realmId.trim();
+        if (!route.dutyRealm.equals(nextRealm) || Double.compare(route.dutyRate, rate) != 0) {
+            mutate(() -> {
+                route.dutyRealm = nextRealm;
+                route.dutyRate = rate;
+                markMutation();
+                return null;
+            });
+        }
     }
 
     public void tick(Map<String, Settlement> cities, double dt) { tick(cities, dt, Map.of()); }
@@ -99,6 +174,14 @@ public final class TradeNetwork {
     /** The adapter may provide the same title-road route used by national trade caravans. */
     public void tick(Map<String, Settlement> cities, double dt, Map<String, Location> locations, RoutePlanner planner) {
         if (!Double.isFinite(dt) || dt <= 0) return;
+        mutate(() -> {
+            if (!routes.isEmpty() || !shipments.isEmpty()) markMutation();
+            tickInternal(cities, dt, locations, planner);
+            return null;
+        });
+    }
+
+    private void tickInternal(Map<String, Settlement> cities, double dt, Map<String, Location> locations, RoutePlanner planner) {
         Map<String,Location> anchors = locations == null ? Map.of() : locations;
         TreasuryLedger ledger = TreasuryService.current();
         for (Shipment shipment : shipments.values()) {
@@ -225,6 +308,11 @@ public final class TradeNetwork {
                                       int maxNewRoutes, double rate) {
         if (cities == null || cities.size() < 2 || perSettlementLimit < 1 || maxNewRoutes < 1
                 || !Double.isFinite(rate) || rate <= 0 || rate > 30) return 0;
+        return mutate(() -> ensureAutonomousRoutesInternal(cities, perSettlementLimit, maxNewRoutes, rate));
+    }
+
+    private int ensureAutonomousRoutesInternal(Map<String, Settlement> cities, int perSettlementLimit,
+                                               int maxNewRoutes, double rate) {
         Map<String, Integer> participation = new HashMap<>();
         Set<RouteKey> existingRoutes = new HashSet<>();
         for (Route route : routes.values()) {
