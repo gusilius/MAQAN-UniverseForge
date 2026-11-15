@@ -1,4 +1,4 @@
-name: WorldForge Settlements / Trade targeted validation
+name: WorldForge Population / Settlements / Trade targeted validation
 
 on:
   push:
@@ -9,10 +9,14 @@ on:
       - "mods/worldforge/wfaddons/wf-settlements/**"
       - "mods/worldforge/wfaddons/wf-war/**"
       - "mods/worldforge/wfaddons/wf-worldsim/**"
+      - "mods/worldforge/wfaddons/wf-people/**"
       - "mods/worldforge/wfaddons/tests/**"
       - "mods/worldforge/wfaddons/tools/build-selected-addons.sh"
       - "mods/worldforge/wfaddons/tools/build_order.py"
       - "mods/worldforge/native/worldforge-worldsim/**"
+      - "shared/contracts/population-*.md"
+      - "shared/contracts/population-*.json"
+      - "shared/contracts/worldforge-population-*.md"
   workflow_dispatch:
 
 permissions:
@@ -32,7 +36,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
-      - name: Test native simulation, army combat and settlement trade compute
+      - name: Test native simulation, population, army combat and settlement trade compute
         working-directory: mods/worldforge/native/worldforge-worldsim
         run: cargo test --target x86_64-pc-windows-msvc
       - name: Build Windows native library
@@ -51,7 +55,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Test native simulation and army combat
+      - name: Test native simulation, population and army combat
         working-directory: mods/worldforge/native/worldforge-worldsim
         run: cargo test
       - name: Build Linux native library
@@ -64,7 +68,7 @@ jobs:
           if-no-files-found: error
 
   targeted-addons:
-    name: Settlements / Trade / WorldSim dependency-closure build and logic tests
+    name: People / Population / Settlements / Trade / WorldSim dependency-closure build and logic tests
     runs-on: windows-latest
     needs: [native-windows, native-linux]
     timeout-minutes: 90
@@ -88,12 +92,12 @@ jobs:
         with:
           name: worldforge-rts-native-linux
           path: mods/worldforge/wfaddons/wf-worldsim/src/main/resources/maqan-native-linux-x86_64
-      - name: Run complete pure-Java logic regression suite
+      - name: Run complete pure-Java logic regression suite (including wf-people population)
         working-directory: mods/worldforge/wfaddons
         shell: bash
         run: bash tools/test-all.sh ../wfmod
-      - name: Build Settlements and WorldSim with only dependency closure
+      - name: Build People, Settlements and WorldSim with only dependency closure
         working-directory: mods/worldforge/wfaddons
         shell: bash
-        run: bash tools/build-selected-addons.sh ../wfmod wf-settlements wf-worldsim
+        run: bash tools/build-selected-addons.sh ../wfmod wf-people wf-settlements wf-worldsim
 

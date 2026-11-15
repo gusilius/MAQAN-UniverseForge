@@ -398,3 +398,11 @@ This is an operation-count status, not a percentage of all UniverseForge computa
 | `atlas.surface.explored-route` | Java `ExploredSurfaceRoutePlanner.find` | Rust `surface_route::find` through MAQAN native JNI | Capture the persisted explored-chunk snapshot, validate route endpoints, preserve surface heights and render/execute navigation | Native A* path added with exact mode/biome/slope costs and exclusive Java fallback when native provider is unavailable or fails; Windows/Linux CI and route parity fixtures pending |
 
 The route planner may only traverse chunks already recorded in `NavigatorExplorationStore`; native code receives a detached packed snapshot and never queries or loads Minecraft chunks. The existing `ExplorationIndex::route` remains a separate lower-level Dijkstra API and is not used as a duplicate production route calculation.
+
+
+### Population CI dependency-closure coverage — 2026-11-15
+
+- The targeted Rust/Java validation workflow now triggers on changes under `wf-people` and the shared Population compute contracts, not only on `wf-worldsim` and native Rust changes.
+- The dependency-closure build explicitly targets `wf-people`, `wf-settlements` and `wf-worldsim`; this ensures the canonical Character owner and its population bridge are compiled in the same focused validation run.
+- The pure-Java logic suite continues to run in full, including `PopulationSimulationTest`; native tests include the Population module on both Windows and Linux.
+- This closes a CI routing/coverage gap only. It does not mark `worldsim.population.advance` accepted: parity, restart/save-reload and revision-freshness campaign gates remain open until evidence is recorded.
