@@ -164,14 +164,14 @@ public class SettleTest {
         ok(adoptionCollision, "повторный ID усыновления с другими координатами блокируется");
 
         Flow flow = new Flow();
-        flow.record(1, "wood", 5, true);
+        SettlementTestAccess.flowRecord(flow,1, "wood", 5, true);
         double validFlow = flow.perMinute(2, "wood", true);
-        flow.record(Double.NaN, "wood", 100, true);
-        flow.record(Double.POSITIVE_INFINITY, "wood", 100, true);
-        flow.record(2, "wood", Double.NaN, true);
-        flow.record(2, "wood", Double.POSITIVE_INFINITY, true);
-        flow.record(2, "wood", -1, true);
-        flow.record(2, "", 100, true);
+        SettlementTestAccess.flowRecord(flow,Double.NaN, "wood", 100, true);
+        SettlementTestAccess.flowRecord(flow,Double.POSITIVE_INFINITY, "wood", 100, true);
+        SettlementTestAccess.flowRecord(flow,2, "wood", Double.NaN, true);
+        SettlementTestAccess.flowRecord(flow,2, "wood", Double.POSITIVE_INFINITY, true);
+        SettlementTestAccess.flowRecord(flow,2, "wood", -1, true);
+        SettlementTestAccess.flowRecord(flow,2, "", 100, true);
         ok(flow.perMinute(2, "wood", true) == validFlow, "невалидные события не портят статистику производства");
         ok(flow.perMinute(Double.NaN, "wood", true) == 0 && flow.perMinute(Double.POSITIVE_INFINITY, "wood", true) == 0, "некорректное время запроса статистики безопасно");
         List<Object> corruptedFlow = new ArrayList<>();
@@ -180,7 +180,7 @@ public class SettleTest {
         corruptedFlow.add("broken-entry");
         corruptedFlow.add(Map.of("t", 3L, "r", "food", "p", 4.0, "c", 1.0));
         Flow restoredFlow = new Flow();
-        restoredFlow.load(corruptedFlow);
+        SettlementTestAccess.flowLoad(restoredFlow,corruptedFlow);
         ok(restoredFlow.resources().equals(Set.of("food")) && restoredFlow.perMinute(4, "food", true) > 0, "загрузка статистики пропускает повреждённые записи");
 
         Settlement s = fresh(d, 4);
@@ -320,33 +320,33 @@ public class SettleTest {
         // но не даёт завершённой истории бесконечно заполнять журнал.
         ResidentTaskGraph durableGraph = new ResidentTaskGraph();
         for (int i = 0; i < 6000; i++) {
-            durableGraph.extract(1, 1, "wood", 1, i);
-            okGraphDelivery(durableGraph.deliver(1, 2, "wood", 1, i), 1);
-            okGraphDelivery(durableGraph.consume(ResidentTaskGraph.Stage.PROCESSED, 2, 3, "wood", 1, i), 1);
+            SettlementTestAccess.residentExtract(durableGraph,1, 1, "wood", 1, i);
+            okGraphDelivery(SettlementTestAccess.residentDeliver(durableGraph,1, 2, "wood", 1, i), 1);
+            okGraphDelivery(SettlementTestAccess.residentConsume(durableGraph,ResidentTaskGraph.Stage.PROCESSED, 2, 3, "wood", 1, i), 1);
         }
         ResidentTaskGraph graphRestored = new ResidentTaskGraph();
-        graphRestored.fromJson(durableGraph.toJson());
+        SettlementTestAccess.residentLoad(graphRestored,durableGraph.toJson());
         ok(graphRestored.nextId() == durableGraph.nextId()
                         && graphRestored.receipts().size() < 10,
                 "долгий цикл добычи/переноса/потребления компактизирует завершённую историю, сохраняя монотонный ID");
         ResidentTaskGraph stockConsumptionGraph = new ResidentTaskGraph();
         for (int i = 0; i < 6000; i++) {
-            stockConsumptionGraph.extract(1, 1, "food", 1, i);
-            okGraphDelivery(stockConsumptionGraph.deliver(1, 2, "food", 1, i), 1);
-            okGraphDelivery(stockConsumptionGraph.consumeStock("food", 1), 1);
+            SettlementTestAccess.residentExtract(stockConsumptionGraph,1, 1, "food", 1, i);
+            okGraphDelivery(SettlementTestAccess.residentDeliver(stockConsumptionGraph,1, 2, "food", 1, i), 1);
+            okGraphDelivery(SettlementTestAccess.residentConsumeStock(stockConsumptionGraph,"food", 1), 1);
         }
         ok(stockConsumptionGraph.receipts().size() < 10,
                 "long-running stock debits retire consumed provenance without exhausting the active-lot journal");
 
         ResidentTaskGraph activeGraph = new ResidentTaskGraph();
-        activeGraph.extract(7, 4, "stone", 3, 1);
+        SettlementTestAccess.residentExtract(activeGraph,7, 4, "stone", 3, 1);
         ResidentTaskGraph activeRestored = new ResidentTaskGraph();
-        activeRestored.fromJson(activeGraph.toJson());
+        SettlementTestAccess.residentLoad(activeRestored,activeGraph.toJson());
         ok(activeRestored.count(ResidentTaskGraph.Stage.EXTRACTED) == 1,
                 "активный складской лот сохраняет свою квитанцию происхождения при компактизации и перезапуске");
         boolean missingProvenanceRejected = false;
         try {
-            activeRestored.fromJson(Json.write(Map.of(
+            SettlementTestAccess.residentLoad(activeRestored,Json.write(Map.of(
                     "format", "wf-resident-task-graph/1", "next", 2, "receipts", List.of(),
                     "local", Map.of("7|stone", List.of(Map.of("receipt", 1, "quantity", 3))),
                     "stored", Map.of())));
@@ -497,6 +497,27 @@ public class SettleTest {
         boolean badMoveRejected = false;
         try { manual.moveTo(commanded.id, Double.NaN, 0); } catch (Settlement.OrderException expectedMove) { badMoveRejected = true; }
         ok(badMoveRejected && commanded.manualOrder, "некорректные координаты не сбрасывают действующий приказ");
+
+        // Adapter-side Worker projection updates must participate in the SETTLEMENTS lane.
+        dev.worldforge.mod.api.WorldForgeApi.resetForTests();
+        Settlement workerBoundary = fresh(d, 1);
+        Worker boundaryWorker = workerBoundary.workers.get(0);
+        var workerRevision0 = dev.worldforge.mod.api.WorldForgeApi.revisions().snapshot().orElseThrow();
+        ok(workerBoundary.updateWorker(boundaryWorker, current -> current.status = current.status),
+                "worker projection accepts an update for its exact owning settlement");
+        var workerRevisionNoOp = dev.worldforge.mod.api.WorldForgeApi.revisions().snapshot().orElseThrow();
+        ok(workerRevisionNoOp.revision(dev.worldforge.mod.api.DomainMutationRevisions.Domain.SETTLEMENTS)
+                        == workerRevision0.revision(dev.worldforge.mod.api.DomainMutationRevisions.Domain.SETTLEMENTS),
+                "no-op Worker projection update does not advance the Settlement revision");
+        workerBoundary.updateWorker(boundaryWorker, current -> current.status = "adapter update");
+        var workerRevisionChanged = dev.worldforge.mod.api.WorldForgeApi.revisions().snapshot().orElseThrow();
+        ok(workerRevisionChanged.revision(dev.worldforge.mod.api.DomainMutationRevisions.Domain.SETTLEMENTS)
+                        == workerRevisionNoOp.revision(dev.worldforge.mod.api.DomainMutationRevisions.Domain.SETTLEMENTS) + 1,
+                "one changed Worker projection update advances exactly one Settlement revision");
+        Settlement foreignSettlement = fresh(d, 1);
+        ok(!workerBoundary.updateWorker(foreignSettlement.workers.get(0), current -> current.status = "foreign")
+                        && workerBoundary.workers.get(0).status.equals("adapter update"),
+                "foreign Worker instances cannot be mutated through another Settlement boundary");
 
         // детерминизм и сохранение
         Settlement x = fresh(d, 5), y = fresh(d, 5);

@@ -8,6 +8,7 @@ import dev.worldforge.mod.api.WorldForgeApi;
 
 import java.util.*;
 import java.util.function.Supplier;
+import java.util.function.Consumer;
 
 /**
  * Поселение как числа: склад, здания, рабочие. Считается шагами {@link #tick}, поэтому тянет сотни поселений на сервере;
@@ -776,6 +777,54 @@ public final class Settlement {
     public Worker worker(int id) {
         for (Worker w : workers) if (w.id == id) return w;
         return null;
+    }
+
+    /**
+     * Apply an adapter-side update to a resident projection under the settlement revision boundary.
+     * The exact worker instance must still belong to this settlement; no-op updates do not advance
+     * the revision. Character identity/lifecycle mutations remain owned by CharacterRegistry.
+     */
+    public boolean updateWorker(Worker worker, Consumer<Worker> update) {
+        if (worker == null || update == null) throw new IllegalArgumentException("worker update is required");
+        if (workers.stream().noneMatch(current -> current == worker)) return false;
+        return mutate(() -> {
+            List<Object> before = workerMutationState(worker);
+            try {
+                update.accept(worker);
+            } finally {
+                if (!before.equals(workerMutationState(worker))) markMutation();
+            }
+            return true;
+        });
+    }
+
+    private static List<Object> workerMutationState(Worker worker) {
+        List<Object> state = new ArrayList<>(25);
+        state.add(worker.name);
+        state.add(worker.profession);
+        state.add(worker.person);
+        state.add(worker.assignedProfession);
+        state.add(worker.building);
+        state.add(worker.status);
+        state.add(worker.x);
+        state.add(worker.z);
+        state.add(worker.jobPrio == null ? null : new TreeMap<>(worker.jobPrio));
+        state.add(worker.manualOrder);
+        state.add(worker.manualFollow);
+        state.add(worker.manualFollowOwner);
+        state.add(worker.orderX);
+        state.add(worker.orderZ);
+        state.add(new ArrayList<>(worker.orderQueue));
+        state.add(worker.lifeAction);
+        state.add(worker.lifeTargetX);
+        state.add(worker.lifeTargetZ);
+        state.add(worker.lifeActionUntil);
+        state.add(worker.lifeActionStage);
+        state.add(worker.lifeSocialTarget);
+        state.add(worker.lifeActionDuration);
+        state.add(worker.haulProgress);
+        state.add(worker.manualHauler);
+        return state;
     }
 
     private static void clearLifeAction(Worker worker) {

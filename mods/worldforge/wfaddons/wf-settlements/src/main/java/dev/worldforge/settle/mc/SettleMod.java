@@ -1316,9 +1316,9 @@ public class SettleMod {
             if (person == null) {
                 person = registry.create(worker.name, "", culture, "m", PeopleMod.YEAR - 20);
                 personRegistry = registry;
-                worker.person = person.globalId;
             }
-            worker.person = person.globalId; // migrate legacy local cN reference to canonical global UUID
+            String canonicalPersonId = person.globalId; // migrate legacy local cN reference to canonical global UUID
+            colony.s.updateWorker(worker, current -> current.person = canonicalPersonId);
             if (!person.has("settlement_worker", place)) personRegistry.appoint(person.id, "settlement_worker", place, PeopleMod.YEAR);
             person.props.put("population.employer", place);
             person.props.put("population.location", colony.s.id);
@@ -1445,12 +1445,12 @@ public class SettleMod {
             // Explicit player/RTS orders always preempt autonomous life goals without granting their effects.
             if (worker.manualOrder || worker.manualFollow) {
                 LifeSimulation.cancelPending(person, "preempted-by-player-order");
-                clearLifeAction(worker);
+                settlement.updateWorker(worker, SettleMod::clearLifeAction);
                 continue;
             }
             if ("fleeing".equals(worker.lifeAction) || "defending".equals(worker.lifeAction)) {
                 if (settlement.raidIncoming) continue;
-                clearLifeAction(worker);
+                settlement.updateWorker(worker, SettleMod::clearLifeAction);
             }
             if (!worker.lifeAction.isBlank()
                     && !("travelling".equals(worker.lifeActionStage) || "performing".equals(worker.lifeActionStage))) {
@@ -1461,10 +1461,12 @@ public class SettleMod {
                     || person.traits.contains("brave") || person.traits.contains("courageous")
                     || person.traits.contains("protective");
             if (worker.lifeAction.isBlank() && settlement.raidIncoming && brave) {
-                worker.lifeAction = "defending";
-                worker.lifeTargetX = 0; worker.lifeTargetZ = 0;
-                worker.lifeActionUntil = 1.0e12;
-                worker.status = "спешит на помощь поселению";
+                settlement.updateWorker(worker, current -> {
+                    current.lifeAction = "defending";
+                    current.lifeTargetX = 0; current.lifeTargetZ = 0;
+                    current.lifeActionUntil = 1.0e12;
+                    current.status = "спешит на помощь поселению";
+                });
                 continue;
             }
             boolean hasTraining = !worker.generalist() && !PopulationSimulation.trainingTarget(person).isBlank();
@@ -1492,7 +1494,7 @@ public class SettleMod {
                     if (!LifeSimulation.matchesPhysicalAction(action, worker.lifeAction)) {
                         LOGGER.warn("wf_settle: cancelling mismatched life action for Character {} (AI={}, worker={})",
                                 character.globalId, action, worker.lifeAction);
-                        clearLifeAction(worker);
+                        settlement.updateWorker(worker, SettleMod::clearLifeAction);
                         return LifeSimulation.Outcome.BLOCKED;
                     }
                     if (!"performing".equals(worker.lifeActionStage)) return LifeSimulation.Outcome.IN_PROGRESS;
@@ -1500,7 +1502,7 @@ public class SettleMod {
                     // Settlement.eat(dt) is the authoritative ration ledger for every resident.
                     // Do not debit a second meal here; only ensure the stock has not collapsed to zero.
                     if (action == LifeSimulation.Action.EAT && settlement.amount("food") <= 0) {
-                        clearLifeAction(worker);
+                        settlement.updateWorker(worker, SettleMod::clearLifeAction);
                         return LifeSimulation.Outcome.BLOCKED;
                     }
                     if (action == LifeSimulation.Action.SOCIALIZE) {
@@ -1509,19 +1511,19 @@ public class SettleMod {
                                 .findFirst().orElse(null);
                         Character companionPerson = companion == null ? null : resolvePerson(registry, companion.person);
                         if (companion == null || companionPerson == null || !companionPerson.alive) {
-                            clearLifeAction(worker);
+                            settlement.updateWorker(worker, SettleMod::clearLifeAction);
                             return LifeSimulation.Outcome.BLOCKED;
                         }
                         if (ignored.lod() == LifeSimulation.LOD.ACTIVE) {
                             double dx = worker.x - companion.x, dz = worker.z - companion.z;
                             if (dx * dx + dz * dz > 16.0) {
-                                clearLifeAction(worker);
+                                settlement.updateWorker(worker, SettleMod::clearLifeAction);
                                 return LifeSimulation.Outcome.BLOCKED;
                             }
                         }
                         Object tokenRaw = character.props.get("population.ai.pending_token");
                         if (!(tokenRaw instanceof String operationId) || operationId.isBlank()) {
-                            clearLifeAction(worker);
+                            settlement.updateWorker(worker, SettleMod::clearLifeAction);
                             return LifeSimulation.Outcome.BLOCKED;
                         }
                         int opinion = dev.worldforge.settle.ResidentSocial.interactionDelta(character, companionPerson);
@@ -1532,10 +1534,12 @@ public class SettleMod {
                         if (!PeopleMod.persistCharacter(character, server)
                                 || !PeopleMod.persistCharacter(companionPerson, server))
                             return LifeSimulation.Outcome.IN_PROGRESS;
-                        companion.status = "общался: " + character.name;
+                        settlement.updateWorker(companion, current -> current.status = "общался: " + character.name);
                     }
-                    clearLifeAction(worker);
-                    worker.status = worker.building == 0 ? "свободен" : "работает";
+                    settlement.updateWorker(worker, current -> {
+                        clearLifeAction(current);
+                        current.status = current.building == 0 ? "свободен" : "работает";
+                    });
                     return LifeSimulation.Outcome.SUCCESS;
                 }
 
@@ -1544,23 +1548,29 @@ public class SettleMod {
                     case EAT -> {
                         if (settlement.amount("food") < 1.0) return LifeSimulation.Outcome.BLOCKED;
                         double[] meal = residentMealPlace(settlement, worker);
-                        beginLifeAction(worker, "eating", meal[0], meal[1], 30, worldMinute, context.lod());
-                        worker.status = "идёт принимать пищу";
+                        settlement.updateWorker(worker, current -> {
+                            beginLifeAction(current, "eating", meal[0], meal[1], 30, worldMinute, context.lod());
+                            current.status = "идёт принимать пищу";
+                        });
                         return LifeSimulation.Outcome.IN_PROGRESS;
                     }
                     case SLEEP -> {
                         double[] home = residentShelter(settlement, worker);
-                        beginLifeAction(worker, "sleeping", home[0], home[1], 8 * 60, worldMinute, context.lod());
-                        worker.status = "идёт отдыхать";
+                        settlement.updateWorker(worker, current -> {
+                            beginLifeAction(current, "sleeping", home[0], home[1], 8 * 60, worldMinute, context.lod());
+                            current.status = "идёт отдыхать";
+                        });
                         return LifeSimulation.Outcome.IN_PROGRESS;
                     }
                     case SEEK_SAFETY -> {
                         if (!settlement.raidIncoming) return LifeSimulation.Outcome.BLOCKED;
                         double[] shelter = residentShelter(settlement, worker);
-                        worker.lifeAction = "fleeing";
-                        worker.lifeTargetX = shelter[0]; worker.lifeTargetZ = shelter[1];
-                        worker.lifeActionUntil = 1.0e12;
-                        worker.status = "бежит в укрытие";
+                        settlement.updateWorker(worker, current -> {
+                            current.lifeAction = "fleeing";
+                            current.lifeTargetX = shelter[0]; current.lifeTargetZ = shelter[1];
+                            current.lifeActionUntil = 1.0e12;
+                            current.status = "бежит в укрытие";
+                        });
                         return LifeSimulation.Outcome.SUCCESS;
                     }
                     case SOCIALIZE -> {
@@ -1575,9 +1585,13 @@ public class SettleMod {
                             }
                         }
                         if (companion == null) return LifeSimulation.Outcome.BLOCKED;
-                        worker.lifeSocialTarget = companion.person;
-                        beginLifeAction(worker, "socializing", companion.x, companion.z, 3 * 60, worldMinute, context.lod());
-                        worker.status = "идёт на встречу";
+                        String companionId = companion.person;
+                        double companionX = companion.x, companionZ = companion.z;
+                        settlement.updateWorker(worker, current -> {
+                            current.lifeSocialTarget = companionId;
+                            beginLifeAction(current, "socializing", companionX, companionZ, 3 * 60, worldMinute, context.lod());
+                            current.status = "идёт на встречу";
+                        });
                         return LifeSimulation.Outcome.IN_PROGRESS;
                     }
                     case WORK -> {
@@ -1586,12 +1600,12 @@ public class SettleMod {
                     case TRAIN -> {
                         if (worker.generalist() || PopulationSimulation.trainingTarget(character).isBlank())
                             return LifeSimulation.Outcome.BLOCKED;
-                        worker.status = "обучается";
+                        settlement.updateWorker(worker, current -> current.status = "обучается");
                         return LifeSimulation.Outcome.SUCCESS; // skill XP is granted once by LifeSimulation.applyEffects
                     }
                     case RECREATE -> {
                         if (!hasLeisure) return LifeSimulation.Outcome.BLOCKED;
-                        worker.status = "досуг";
+                        settlement.updateWorker(worker, current -> current.status = "досуг");
                         return LifeSimulation.Outcome.SUCCESS;
                     }
                     case IDLE -> { return LifeSimulation.Outcome.SUCCESS; }
@@ -1660,8 +1674,12 @@ public class SettleMod {
         if (profession == null || profession.isBlank() || DEFS == null || !DEFS.professions.containsKey(profession))
             profession = "laborer";
         dev.worldforge.settle.Worker worker = colony.s.addWorker(person.name);
-        worker.person = person.globalId;
-        worker.profession = profession;
+        String restoredPersonId = person.globalId;
+        String restoredProfession = profession;
+        colony.s.updateWorker(worker, current -> {
+            current.person = restoredPersonId;
+            current.profession = restoredProfession;
+        });
         // Keep the canonical Character's active profession in sync with the restored worker assignment.
         // This records the military service interval in the normal profession history.
         if (!profession.equals(PopulationSimulation.profession(person)))
