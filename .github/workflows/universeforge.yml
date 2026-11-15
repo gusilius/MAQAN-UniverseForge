@@ -74,6 +74,20 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  atlas-native-linux:
+    name: Atlas native core (Linux x64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test Atlas native core
+        working-directory: mods/atlas/native/maqan-core
+        run: cargo test --locked
+      - name: Build Atlas native core
+        working-directory: mods/atlas/native/maqan-core
+        run: cargo build --release --locked
+
   worldforge-core:
     name: WorldForge core — Forge 47.3.0 (Windows x64)
     runs-on: windows-latest

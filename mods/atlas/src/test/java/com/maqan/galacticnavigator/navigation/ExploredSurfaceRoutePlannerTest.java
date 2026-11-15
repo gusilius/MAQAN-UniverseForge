@@ -33,7 +33,7 @@ class ExploredSurfaceRoutePlannerTest {
         int[] packet=NavigatorNativeBridge.routeExploredSurface(explored,0,0,2,0,0,100);
         assertNotNull(packet);
         assertEquals(1,packet[0]);
-        assertEquals(4,packet.length);
+        assertEquals(10,packet.length);
         double cost=Double.longBitsToDouble((Integer.toUnsignedLong(packet[3])<<32)
                 |Integer.toUnsignedLong(packet[2]));
         assertEquals(2.0,cost,1.0e-9);
