@@ -130,6 +130,11 @@ mod tests {
             side_a:vec![ArmySnapshot{martial:8,morale:1.0,units:vec![unit("spear",100,1.1,1.5)]}],
             side_b:vec![ArmySnapshot{martial:3,morale:1.0,units:vec![unit("cavalry",90,2.4,1.1)]}]}
     }
+    #[test] fn java_random_matches_java_util_random_sequence() {
+        let mut rng=JavaRandom::new(0);
+        assert_eq!(rng.next_double().to_bits(),0.730967787376657f64.to_bits());
+        assert_eq!(rng.next_double().to_bits(),0.24053641567148587f64.to_bits());
+    }
     #[test] fn same_snapshot_is_bitwise_deterministic(){
         let a=simulate(sample()).unwrap(); let b=simulate(sample()).unwrap(); assert_eq!(a.rounds.len(),b.rounds.len());
         for (x,y) in a.rounds.iter().zip(&b.rounds){assert_eq!(x.kill_a.to_bits(),y.kill_a.to_bits());assert_eq!(x.kill_b.to_bits(),y.kill_b.to_bits());}
