@@ -3,8 +3,11 @@ package dev.worldforge.settle;
 import dev.worldforge.mod.Json;
 import dev.worldforge.mod.economy.TreasuryService;
 import dev.worldforge.mod.economy.TreasuryLedger;
+import dev.worldforge.mod.api.DomainMutationRevisions;
+import dev.worldforge.mod.api.WorldForgeApi;
 
 import java.util.*;
+import java.util.function.Supplier;
 
 /**
  * Поселение как числа: склад, здания, рабочие. Считается шагами {@link #tick}, поэтому тянет сотни поселений на сервере;
@@ -70,12 +73,73 @@ public final class Settlement {
     /** -1 keeps legacy worker-count semantics; >=0 is the authoritative canonical resident count. */
     private int canonicalPopulation = -1;
 
+    private static final ThreadLocal<MutationState> ACTIVE_MUTATION = new ThreadLocal<>();
+
+    private static final class MutationState {
+        final Settlement owner;
+        final DomainMutationRevisions.Mutation revision;
+        int depth = 1;
+        boolean dirty;
+        MutationState(Settlement owner) {
+            this.owner = owner;
+            this.revision = WorldForgeApi.revisions().begin(DomainMutationRevisions.Domain.SETTLEMENTS);
+        }
+    }
+
+    private final class MutationBatch implements AutoCloseable {
+        private final MutationState state;
+        private boolean closed;
+        MutationBatch(MutationState state) { this.state = state; }
+        @Override public void close() {
+            if (closed) return;
+            closed = true;
+            if (--state.depth != 0) return;
+            ACTIVE_MUTATION.remove();
+            try {
+                if (state.dirty) state.revision.commit();
+            } finally {
+                state.revision.close();
+            }
+        }
+    }
+
+    private MutationBatch beginMutationBatch() {
+        MutationState state = ACTIVE_MUTATION.get();
+        if (state == null) {
+            state = new MutationState(this);
+            ACTIVE_MUTATION.set(state);
+        } else if (state.owner != this) {
+            throw new IllegalStateException("Cannot nest mutations across different settlements");
+        } else {
+            state.depth++;
+        }
+        return new MutationBatch(state);
+    }
+
+    private void markMutation() {
+        MutationState state = ACTIVE_MUTATION.get();
+        if (state == null || state.owner != this)
+            throw new IllegalStateException("Settlement mutation escaped its canonical writer scope");
+        state.dirty = true;
+    }
+
+    private <T> T mutate(Supplier<T> action) {
+        try (MutationBatch ignored = beginMutationBatch()) {
+            return action.get();
+        }
+    }
+
     public int population() { return canonicalPopulation >= 0 ? canonicalPopulation : workers.size(); }
     public boolean hasCanonicalPopulation() { return canonicalPopulation >= 0; }
     public void setCanonicalPopulation(int residents) {
         if (residents < 0 || residents > 100_000) throw new IllegalArgumentException("canonical population out of range");
-        canonicalPopulation = residents;
-        growTimer = 0;
+        if (canonicalPopulation == residents) return;
+        mutate(() -> {
+            canonicalPopulation = residents;
+            growTimer = 0;
+            markMutation();
+            return null;
+        });
     }
 
     // ---- времена года и набеги
@@ -84,8 +148,13 @@ public final class Settlement {
     private int externalWorldYear = -1;
     public void setWorldCalendar(long worldMinute, int worldYear) {
         if (worldMinute < 0 || worldYear < 1) throw new IllegalArgumentException("invalid world calendar");
-        externalWorldMinute = worldMinute;
-        externalWorldYear = worldYear;
+        if (externalWorldMinute == worldMinute && externalWorldYear == worldYear) return;
+        mutate(() -> {
+            externalWorldMinute = worldMinute;
+            externalWorldYear = worldYear;
+            markMutation();
+            return null;
+        });
     }
     public long worldMinute() { return externalWorldMinute >= 0 ? externalWorldMinute : Math.max(0L, (long) Math.floor(time * 24.0)); }
     public static final String[] SEASONS = {"Весна", "Лето", "Осень", "Зима"};
@@ -679,10 +748,13 @@ public final class Settlement {
     }
 
     public Worker addWorker(String name) {
-        int id = nextWorker++;
-        Worker w = new Worker(id, name == null ? "Поселенец " + id : name);
-        workers.add(w);
-        return w;
+        return mutate(() -> {
+            int id = nextWorker++;
+            Worker w = new Worker(id, name == null ? "Поселенец " + id : name);
+            workers.add(w);
+            markMutation();
+            return w;
+        });
     }
 
     private void removeWorker(Worker worker, String reason) {
@@ -694,13 +766,16 @@ public final class Settlement {
     /** Removes a worker by canonical Character ID and persists the reason for lifecycle reconciliation. */
     public boolean removeWorkerByPerson(String personId, String reason) {
         if (personId == null || personId.isBlank() || reason == null || reason.isBlank()) return false;
-        for (Worker worker : new ArrayList<>(workers)) {
-            if (personId.equals(worker.person)) {
-                removeWorker(worker, reason);
-                return true;
+        return mutate(() -> {
+            for (Worker worker : new ArrayList<>(workers)) {
+                if (personId.equals(worker.person)) {
+                    removeWorker(worker, reason);
+                    markMutation();
+                    return true;
+                }
             }
-        }
-        return false;
+            return false;
+        });
     }
 
     /** Drained only after the owning CharacterRegistry confirms the lifecycle transition. */
@@ -753,18 +828,22 @@ public final class Settlement {
     }
 
     public Building place(String defId, int x, int z) {
-        String err = placeError(defId, x, z);
-        if (err != null) throw new OrderException(err);
-        Defs.Building d = defs.buildings.get(defId);
-        Building b = new Building(nextBuilding++, d, x, z);
-        b.status = "ждёт материалов";
-        buildings.add(b);
-        say("Заложено: " + d.name);
-        return b;
+        return mutate(() -> {
+            String err = placeError(defId, x, z);
+            if (err != null) throw new OrderException(err);
+            Defs.Building d = defs.buildings.get(defId);
+            Building b = new Building(nextBuilding++, d, x, z);
+            b.status = "ждёт материалов";
+            buildings.add(b);
+            say("Заложено: " + d.name);
+            markMutation();
+            return b;
+        });
     }
 
     /** Replay-safe placement; receipt and building are written in the same settlement snapshot. */
     public Building placeOnce(String requestId, String defId, int x, int z) {
+        return mutate(() -> {
         if (requestId == null || !requestId.matches("[A-Za-z0-9_.:-]{1,128}"))
             throw new OrderException("Некорректный идентификатор строительного приказа");
         String fingerprint = defId + "|" + x + "|" + z;
@@ -784,7 +863,9 @@ public final class Settlement {
             throw new IllegalStateException("Settlement placement receipt limit reached");
         Building created = place(defId, x, z);
         placementReceipts.put(requestId, fingerprint + "|" + created.uid);
+        markMutation();
         return created;
+        });
     }
 
     public boolean hasPlacementReceipt(String requestId) { return placementReceipts.containsKey(requestId); }
@@ -1013,11 +1094,16 @@ public final class Settlement {
     public void tick(double dt) {
         if (!Double.isFinite(dt) || dt <= 0) return;
         if (dt > MAX_TICK) throw new IllegalArgumentException("За один вызов можно обработать не более " + (int) MAX_TICK + " секунд симуляции");
-        while (dt > 0) {
-            double step = Math.min(dt, MAX_STEP);
-            step(step);
-            dt -= step;
-        }
+        mutate(() -> {
+            markMutation();
+            double remaining = dt;
+            while (remaining > 0) {
+                double step = Math.min(remaining, MAX_STEP);
+                step(step);
+                remaining -= step;
+            }
+            return null;
+        });
     }
 
     private void step(double dt) {

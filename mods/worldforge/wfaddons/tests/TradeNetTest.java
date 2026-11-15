@@ -12,10 +12,12 @@ public class TradeNetTest {
     static int fails;
     static void ok(boolean c, String what) { System.out.println((c ? "ok   " : "FAIL ") + what); if (!c) fails++; }
 
-    static long economyRevision() {
-        return WorldForgeApi.revisions().snapshot(DomainMutationRevisions.Domain.ECONOMY_TRADE)
-                .orElseThrow().revision(DomainMutationRevisions.Domain.ECONOMY_TRADE);
+    static long domainRevision(DomainMutationRevisions.Domain domain) {
+        return WorldForgeApi.revisions().snapshot(domain).orElseThrow().revision(domain);
     }
+
+    static long economyRevision() { return domainRevision(DomainMutationRevisions.Domain.ECONOMY_TRADE); }
+    static long settlementRevision() { return domainRevision(DomainMutationRevisions.Domain.SETTLEMENTS); }
 
     static Settlement city(String id, Defs d) {
         Settlement s = new Settlement(id, id, d);
@@ -65,6 +67,28 @@ public class TradeNetTest {
         revisionNet.remove(revisionRoute.id);
         ok(economyRevision() == revisionBeforeRemove + 1,
                 "canonical route removal publishes one ECONOMY_TRADE revision");
+
+        Settlement revisionSettlement = new Settlement("revision-settlement", "revision-settlement", d);
+        long beforeSettlementTick = settlementRevision();
+        revisionSettlement.tick(1.0);
+        ok(settlementRevision() == beforeSettlementTick + 1,
+                "settlement simulation tick publishes one SETTLEMENTS revision");
+        long beforeInvalidSettlementTick = settlementRevision();
+        revisionSettlement.tick(Double.NaN);
+        ok(settlementRevision() == beforeInvalidSettlementTick,
+                "invalid settlement tick does not publish a revision");
+        long beforePopulation = settlementRevision();
+        revisionSettlement.setCanonicalPopulation(5);
+        ok(settlementRevision() == beforePopulation + 1,
+                "canonical resident count change publishes one SETTLEMENTS revision");
+        long beforePopulationNoop = settlementRevision();
+        revisionSettlement.setCanonicalPopulation(5);
+        ok(settlementRevision() == beforePopulationNoop,
+                "unchanged canonical resident count does not churn the revision");
+        long beforeWorker = settlementRevision();
+        revisionSettlement.addWorker("revision-worker");
+        ok(settlementRevision() == beforeWorker + 1,
+                "worker creation publishes one SETTLEMENTS revision");
 
         TradeNetwork n = new TradeNetwork();
         var sug = TradeNetwork.suggestions(cs, 3);

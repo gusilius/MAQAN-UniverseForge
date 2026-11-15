@@ -465,3 +465,11 @@ The route planner may only traverse chunks already recorded in `NavigatorExplora
 - The network batch owns only route/shipment state. Financial account postings continue to publish through `TreasuryLedger` as the sole journal/balance owner; no second ledger revision or financial calculation was introduced.
 - Added focused regression assertions for create, remove, changed/no-op customs policy, valid simulation tick and invalid tick.
 - **Still incomplete:** `routes`, `shipments` and `events` remain public mutable collections; `Route` and `Shipment` expose mutable fields. Direct external writes can bypass the lane. The tick currently conservatively invalidates when active network state exists; it does not yet provide a deep immutable network snapshot. Do not enable global WorldSim apply fencing or claim `ECONOMY_TRADE` complete until these bypasses and Settlement writers are closed.
+
+### Settlement simulation mutation boundary — 2026-11-16
+
+- `Settlement.tick` now runs under one nested `SETTLEMENTS` mutation batch. The whole bounded simulation tick (needs, economy, growth, construction, production, hauling, raids and worker movement) invalidates one revision rather than publishing per sub-step.
+- Canonical resident-count changes, world-calendar changes, worker creation/removal and placement requests use the same lane; nested `placeOnce -> place` publishes once. Idempotent resident/calendar writes do not advance the lane.
+- Treasury postings continue to publish `ECONOMY_TRADE` through `TreasuryLedger`; Settlement owns its simulation/projection lane and does not duplicate the financial journal.
+- Added regression coverage for valid/invalid tick, resident-count no-op, and worker creation.
+- **Still incomplete:** direct public `stock`, `buildings`, `workers`, `flow`, `taskGraph` and mutable domain fields remain bypass surfaces. Several direct order and lifecycle writers (including external Character reconciliation and transfer projections) still need canonical scopes. Do not treat `SETTLEMENTS` as globally complete or enable global WorldSim apply fencing.
