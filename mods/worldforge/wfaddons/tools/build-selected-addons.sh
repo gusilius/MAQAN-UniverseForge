@@ -44,7 +44,7 @@ python3 - "$PLAN" "$@" <<'PY'
 import sys
 plan_path, *targets = sys.argv[1:]
 with open(plan_path, encoding="utf-8") as source:
-    lines = [line.rstrip("\\r\\n") for line in source if line.strip()]
+    lines = [line.rstrip("\r\n") for line in source if line.strip()]
 modules = [line.split("|", 1)[0] for line in lines]
 missing = sorted(set(targets) - set(modules))
 if missing:
