@@ -205,7 +205,7 @@ public final class TradeNetwork {
             destination.refreshResourceMirror(shipment.res);
             destination.amount(shipment.res);
             if (!goodsPosted) {
-                destination.flow.recordTrade(destination.time,shipment.res,shipment.quantity,true);
+                destination.recordTradeFlow(shipment.res, shipment.quantity, true);
                 destination.shiftDemand(shipment.res,-shipment.quantity);
             }
             source.amount(Defs.SILVER);

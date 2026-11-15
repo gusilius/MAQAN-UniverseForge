@@ -73,7 +73,8 @@ public final class Settlement {
     /** -1 keeps legacy worker-count semantics; >=0 is the authoritative canonical resident count. */
     private int canonicalPopulation = -1;
 
-    private static final ThreadLocal<MutationState> ACTIVE_MUTATION = new ThreadLocal<>();
+    private static final ThreadLocal<IdentityHashMap<Settlement, MutationState>> ACTIVE_MUTATIONS =
+            ThreadLocal.withInitial(IdentityHashMap::new);
 
     private static final class MutationState {
         final Settlement owner;
@@ -94,7 +95,9 @@ public final class Settlement {
             if (closed) return;
             closed = true;
             if (--state.depth != 0) return;
-            ACTIVE_MUTATION.remove();
+            IdentityHashMap<Settlement, MutationState> active = ACTIVE_MUTATIONS.get();
+            active.remove(state.owner);
+            if (active.isEmpty()) ACTIVE_MUTATIONS.remove();
             try {
                 if (state.dirty) state.revision.commit();
             } finally {
@@ -104,12 +107,11 @@ public final class Settlement {
     }
 
     private MutationBatch beginMutationBatch() {
-        MutationState state = ACTIVE_MUTATION.get();
+        IdentityHashMap<Settlement, MutationState> active = ACTIVE_MUTATIONS.get();
+        MutationState state = active.get(this);
         if (state == null) {
             state = new MutationState(this);
-            ACTIVE_MUTATION.set(state);
-        } else if (state.owner != this) {
-            throw new IllegalStateException("Cannot nest mutations across different settlements");
+            active.put(this, state);
         } else {
             state.depth++;
         }
@@ -117,8 +119,8 @@ public final class Settlement {
     }
 
     private void markMutation() {
-        MutationState state = ACTIVE_MUTATION.get();
-        if (state == null || state.owner != this)
+        MutationState state = ACTIVE_MUTATIONS.get().get(this);
+        if (state == null)
             throw new IllegalStateException("Settlement mutation escaped its canonical writer scope");
         state.dirty = true;
     }
@@ -235,7 +237,7 @@ public final class Settlement {
 
     public Settlement(String id, String name, Defs defs) { this.id = id; this.name = name; this.defs = defs; }
 
-    public void setLedgerScope(String scope) { ledgerScope = scope == null ? "" : scope.trim(); }
+    public void setLedgerScope(String scope) { mutate(() -> { String next = scope == null ? "" : scope.trim(); if (!Objects.equals(ledgerScope, next)) { ledgerScope = next; markMutation(); } return null; }); }
     public String ledgerOwnerId() { return ledgerScope.isBlank() ? id : ledgerScope + ":" + id; }
     public String ledgerAccountId(String resource) { return accountId(resource); }
 
@@ -281,7 +283,7 @@ public final class Settlement {
     /** Refresh a settlement projection after another canonical ledger account posts a transfer into it. */
     public void refreshResourceMirror(String resource) {
         if (resource == null || resource.isBlank()) return;
-        syncResourceMirror(resource);
+        mutate(() -> { double before = stock.getOrDefault(resource, Double.NaN); syncResourceMirror(resource); if (Double.compare(before, stock.getOrDefault(resource, Double.NaN)) != 0) markMutation(); return null; });
     }
 
     private void syncAllResourceMirrors() {
@@ -291,6 +293,23 @@ public final class Settlement {
     }
 
     public double amount(String resource) {
+        if (resource == null || resource.isBlank()) return 0;
+        return mutate(() -> {
+            TreasuryLedger ledger = TreasuryService.current();
+            long beforeVersion = ledger.mutationVersion();
+            double beforeMirror = stock.getOrDefault(resource, Double.NaN);
+            boolean beforeChecked = stockReconciliationChecked;
+            boolean beforeReconcile = reconcileStockMirror;
+            double value = amountInternal(resource);
+            if (ledger.mutationVersion() != beforeVersion
+                    || Double.compare(beforeMirror, stock.getOrDefault(resource, Double.NaN)) != 0
+                    || beforeChecked != stockReconciliationChecked
+                    || beforeReconcile != reconcileStockMirror) markMutation();
+            return value;
+        });
+    }
+
+    private double amountInternal(String resource) {
         if (resource == null || resource.isBlank()) return 0;
         TreasuryLedger ledger = TreasuryService.current();
         String sourceAccountId = accountId(resource);
@@ -366,19 +385,26 @@ public final class Settlement {
     /** Atomic fractional withdrawal for individual Character actions and production inputs. */
     public boolean consumeResource(String resource, double quantity) {
         if (resource == null || resource.isBlank() || !Double.isFinite(quantity) || quantity < 0) return false;
-        if (amount(resource) + 1e-9 < quantity) return false;
-        if (quantity == 0) return true;
-        if (!debitResource(resource, quantity, Defs.SILVER.equals(resource)
-                ? TreasuryLedger.Kind.WITHDRAWAL : TreasuryLedger.Kind.CONSUMPTION,
-                "consumption", "settlement-consumption")) return false;
-        flow.record(time, resource, quantity, false);
-        return true;
+        return mutate(() -> {
+            if (amount(resource) + 1e-9 < quantity) return false;
+            if (quantity == 0) return true;
+            if (!debitResource(resource, quantity, Defs.SILVER.equals(resource)
+                    ? TreasuryLedger.Kind.WITHDRAWAL : TreasuryLedger.Kind.CONSUMPTION,
+                    "consumption", "settlement-consumption")) return false;
+            flow.record(time, resource, quantity, false);
+            markMutation();
+            return true;
+        });
     }
 
     /** Deposits output or income into the shared resource ledger, respecting physical stock capacity. */
     public double add(String resource, double quantity) {
-        return addResourceWithKind(resource, quantity, Defs.SILVER.equals(resource)
-                ? TreasuryLedger.Kind.DEPOSIT : TreasuryLedger.Kind.IMPORT, "settlement-stock-in", "settlement:" + id);
+        return mutate(() -> {
+            double accepted = addResourceWithKind(resource, quantity, Defs.SILVER.equals(resource)
+                    ? TreasuryLedger.Kind.DEPOSIT : TreasuryLedger.Kind.IMPORT, "settlement-stock-in", "settlement:" + id);
+            if (accepted > 0) markMutation();
+            return accepted;
+        });
     }
 
     /**
@@ -387,22 +413,26 @@ public final class Settlement {
      * same founding stock twice even when the settlement snapshot is replayed.
      */
     public boolean addOnce(String resource, double quantity, String operationId) {
-        if (resource == null || resource.isBlank() || operationId == null
-                || !operationId.matches("[A-Za-z0-9_.:-]{1,128}")
-                || !Double.isFinite(quantity) || quantity <= 0) return false;
-        amount(resource);
-        String reference = "worldgen:" + id + ":" + operationId + ":" + resource;
-        TreasuryLedger ledger = TreasuryService.current();
-        boolean alreadyPosted = ledger.hasTransaction(accountId(resource), Defs.SILVER.equals(resource)
-                ? TreasuryLedger.Kind.DEPOSIT : TreasuryLedger.Kind.IMPORT, reference);
-        boolean accepted = ledger.depositOnce(accountId(resource), quantity,
-                Defs.SILVER.equals(resource) ? TreasuryLedger.Kind.DEPOSIT : TreasuryLedger.Kind.IMPORT,
-                "autonomous-settlement-founding", reference, worldMinute(),
-                "one-time founding endowment for " + id);
-        if (!accepted) return false;
-        syncResourceMirror(resource);
-        if (!alreadyPosted) flow.record(time, resource, quantity, true);
-        return true;
+        return mutate(() -> {
+            if (resource == null || resource.isBlank() || operationId == null
+                    || !operationId.matches("[A-Za-z0-9_.:-]{1,128}")
+                    || !Double.isFinite(quantity) || quantity <= 0) return false;
+            amount(resource);
+            String reference = "worldgen:" + id + ":" + operationId + ":" + resource;
+            TreasuryLedger ledger = TreasuryService.current();
+            long beforeVersion = ledger.mutationVersion();
+            boolean alreadyPosted = ledger.hasTransaction(accountId(resource), Defs.SILVER.equals(resource)
+                    ? TreasuryLedger.Kind.DEPOSIT : TreasuryLedger.Kind.IMPORT, reference);
+            boolean accepted = ledger.depositOnce(accountId(resource), quantity,
+                    Defs.SILVER.equals(resource) ? TreasuryLedger.Kind.DEPOSIT : TreasuryLedger.Kind.IMPORT,
+                    "autonomous-settlement-founding", reference, worldMinute(),
+                    "one-time founding endowment for " + id);
+            if (!accepted) return false;
+            syncResourceMirror(resource);
+            if (!alreadyPosted) flow.record(time, resource, quantity, true);
+            if (ledger.mutationVersion() != beforeVersion) markMutation();
+            return true;
+        });
     }
 
     private double addResourceWithKind(String resource, double quantity, TreasuryLedger.Kind kind, String category, String reference) {
@@ -423,29 +453,41 @@ public final class Settlement {
 
     /** Receive physical goods into canonical settlement stock and record the inbound flow. */
     public double receiveResource(String resource, double quantity) {
-        double accepted = add(resource, quantity);
-        if (accepted > 0) flow.record(time, resource, accepted, true);
-        return accepted;
+        return mutate(() -> {
+            double accepted = add(resource, quantity);
+            if (accepted > 0) { flow.record(time, resource, accepted, true); markMutation(); }
+            return accepted;
+        });
+    }
+
+    /** Publish trade-flow changes through the Settlement revision boundary. */
+    public void recordTradeFlow(String resource, double quantity, boolean inbound) {
+        if (resource == null || resource.isBlank() || !Double.isFinite(quantity) || quantity <= 0) return;
+        mutate(() -> { flow.recordTrade(time, resource, quantity, inbound); markMutation(); return null; });
     }
 
     /** Double-entry transfer of a commodity between settlement accounts. */
     public boolean transferResourceTo(Settlement recipient, String resource, double quantity, String category, String reference) {
-        if (recipient == null || recipient == this || resource == null || resource.isBlank()
-                || !Double.isFinite(quantity) || quantity < 0
-                || amount(resource) + 1e-9 < quantity
-                || recipient.capacity(resource) - recipient.amount(resource) + 1e-9 < quantity) return false;
-        resourceAccount(resource);
-        recipient.resourceAccount(resource);
-        boolean ok = TreasuryService.current().transfer(accountId(resource), recipient.accountId(resource), quantity,
-                TreasuryLedger.Kind.TRADE, category, reference, worldMinute(),
-                "settlement-to-settlement commodity transfer");
-        syncResourceMirror(resource);
-        recipient.syncResourceMirror(resource);
-        if (ok && quantity > 0) {
-            flow.recordTrade(time, resource, quantity, false);
-            recipient.flow.recordTrade(recipient.time, resource, quantity, true);
-        }
-        return ok;
+        if (recipient == null || recipient == this) return false;
+        return mutate(() -> recipient.mutate(() -> {
+            if (resource == null || resource.isBlank() || !Double.isFinite(quantity) || quantity < 0
+                    || amount(resource) + 1e-9 < quantity
+                    || recipient.capacity(resource) - recipient.amount(resource) + 1e-9 < quantity) return false;
+            resourceAccount(resource);
+            recipient.resourceAccount(resource);
+            boolean ok = TreasuryService.current().transfer(accountId(resource), recipient.accountId(resource), quantity,
+                    TreasuryLedger.Kind.TRADE, category, reference, worldMinute(),
+                    "settlement-to-settlement commodity transfer");
+            syncResourceMirror(resource);
+            recipient.syncResourceMirror(resource);
+            if (ok && quantity > 0) {
+                flow.recordTrade(time, resource, quantity, false);
+                recipient.flow.recordTrade(recipient.time, resource, quantity, true);
+                markMutation();
+                recipient.markMutation();
+            }
+            return ok;
+        }));
     }
 
     public boolean transferSilverTo(Settlement recipient, double quantity, String category, String reference) {
@@ -460,6 +502,19 @@ public final class Settlement {
     public boolean transferResourceToAccount(String resource, String targetAccountId, String targetOwnerId,
                                              double quantity, TreasuryLedger.Kind kind,
                                              String category, String reference) {
+        return mutate(() -> {
+            TreasuryLedger ledger = TreasuryService.current();
+            long beforeVersion = ledger.mutationVersion();
+            boolean transferred = transferResourceToAccountInternal(resource, targetAccountId, targetOwnerId,
+                    quantity, kind, category, reference);
+            if (ledger.mutationVersion() != beforeVersion) markMutation();
+            return transferred;
+        });
+    }
+
+    private boolean transferResourceToAccountInternal(String resource, String targetAccountId, String targetOwnerId,
+                                                       double quantity, TreasuryLedger.Kind kind,
+                                                       String category, String reference) {
         if (resource == null || resource.isBlank() || targetAccountId == null || targetAccountId.isBlank()
                 || targetOwnerId == null || targetOwnerId.isBlank() || !Double.isFinite(quantity)
                 || quantity < 0 || kind == null || category == null || category.isBlank()
@@ -503,22 +558,28 @@ public final class Settlement {
 
     /** Transfer settlement silver to a realm, army or other canonical treasury account. */
     public boolean transferSilverToAccount(String targetAccountId, double quantity, TreasuryLedger.Kind kind,
-                                            String category, String reference) {
-        if (targetAccountId == null || targetAccountId.isBlank() || !Double.isFinite(quantity) || quantity < 0) return false;
-        amount(Defs.SILVER);
-        boolean ok = TreasuryService.current().transfer(accountId(Defs.SILVER), targetAccountId, quantity,
-                kind, category, reference, worldMinute(),
-                "settlement treasury transfer");
-        syncResourceMirror(Defs.SILVER);
-        if (ok && quantity > 0) flow.record(time, Defs.SILVER, quantity, false);
-        return ok;
+                                             String category, String reference) {
+        return mutate(() -> {
+            TreasuryLedger ledger = TreasuryService.current();
+            long beforeVersion = ledger.mutationVersion();
+            if (targetAccountId == null || targetAccountId.isBlank() || !Double.isFinite(quantity) || quantity < 0) return false;
+            amount(Defs.SILVER);
+            boolean ok = ledger.transfer(accountId(Defs.SILVER), targetAccountId, quantity,
+                    kind, category, reference, worldMinute(), "settlement treasury transfer");
+            syncResourceMirror(Defs.SILVER);
+            if (ok && quantity > 0) flow.record(time, Defs.SILVER, quantity, false);
+            if (ok && ledger.mutationVersion() != beforeVersion) markMutation();
+            return ok;
+        });
     }
 
     /** Book market fees and other external charges against settlement cash. */
     public boolean chargeSilver(double quantity, String category, String reference) {
-        if (!debitSilver(quantity, TreasuryLedger.Kind.TRADE, category, reference)) return false;
-        if (quantity > 0) flow.record(time, Defs.SILVER, quantity, false);
-        return true;
+        return mutate(() -> {
+            if (!debitSilver(quantity, TreasuryLedger.Kind.TRADE, category, reference)) return false;
+            if (quantity > 0) { flow.record(time, Defs.SILVER, quantity, false); markMutation(); }
+            return true;
+        });
     }
 
     public boolean canPay(Map<String, Integer> cost) {
@@ -535,8 +596,8 @@ public final class Settlement {
 
     /** Atomic resource withdrawal used by recruitment and other settlement services. */
     public boolean spend(Map<String, Integer> cost) {
-        if (cost == null || !canPay(cost)) return false;
-        return pay(cost);
+        if (cost == null) return false;
+        return mutate(() -> { if (!canPay(cost) || !pay(cost)) return false; if (!cost.isEmpty()) markMutation(); return true; });
     }
 
     /**
@@ -547,6 +608,16 @@ public final class Settlement {
      * domain snapshot has been committed.
      */
     public synchronized boolean spendOnce(Map<String, Integer> cost, String operationId) {
+        return mutate(() -> {
+            TreasuryLedger ledger = TreasuryService.current();
+            long beforeVersion = ledger.mutationVersion();
+            boolean spent = spendOnceInternal(cost, operationId);
+            if (spent && ledger.mutationVersion() != beforeVersion) markMutation();
+            return spent;
+        });
+    }
+
+    private boolean spendOnceInternal(Map<String, Integer> cost, String operationId) {
         if (operationId == null || !operationId.matches("[A-Za-z0-9_.:-]{1,96}")
                 || cost == null || cost.size() > 64) return false;
 

@@ -118,6 +118,22 @@ public class TradeNetTest {
         revisionSettlement.shiftDemand("wood", 1.0);
         ok(settlementRevision() == beforeDemand + 1,
                 "external market demand shift publishes one SETTLEMENTS revision");
+        long beforeFlow = settlementRevision();
+        revisionSettlement.recordTradeFlow("wood", 2.0, true);
+        ok(settlementRevision() == beforeFlow + 1,
+                "settlement trade-flow projection publishes one SETTLEMENTS revision");
+        Settlement transferSource = new Settlement("revision-transfer-source", "source", d);
+        Settlement transferTarget = new Settlement("revision-transfer-target", "target", d);
+        transferSource.add("wood", 20);
+        transferTarget.amount("wood"); // pre-open the destination stock account outside the measured transfer
+        long beforeSourceTransfer = settlementRevision();
+        long beforeTransferEconomy = economyRevision();
+        ok(transferSource.transferResourceTo(transferTarget, "wood", 5, "revision-test", "revision-transfer-1"),
+                "cross-settlement transfer succeeds");
+        ok(settlementRevision() == beforeSourceTransfer + 2,
+                "cross-settlement transfer invalidates both Settlement projections");
+        ok(economyRevision() == beforeTransferEconomy + 1,
+                "cross-settlement transfer publishes one canonical Treasury revision");
 
         TradeNetwork n = new TradeNetwork();
         var sug = TradeNetwork.suggestions(cs, 3);

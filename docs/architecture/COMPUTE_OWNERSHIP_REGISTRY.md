@@ -487,3 +487,10 @@ The route planner may only traverse chunks already recorded in `NavigatorExplora
 - Treasury postings remain independently owned by `TreasuryLedger` and its `ECONOMY_TRADE` lane. A market transaction can therefore invalidate both projections, without duplicating the account journal.
 - Added regression assertions for changed/no-op tax policy, auto-trade policy and external demand changes.
 - **Remaining bypasses:** public mutable collections/fields and mutable Worker/Building objects; resource transfers and CharacterRegistry reconciliation still require an explicit cross-domain writer protocol. Do not enable global WorldSim apply fencing based on this partial coverage.
+
+### Settlement resource and projection boundaries — 2026-11-16
+
+- Settlement mutation nesting is now tracked per Settlement instance on a thread, allowing a single cross-settlement transfer to hold both SETTLEMENTS writer scopes without rejecting the recipient as a foreign nested writer.
+- Canonical resource reads (`amount`) now fence lazy ledger-account creation, legacy stock reconciliation and stock-mirror synchronization. Resource additions/consumption, founding endowments, spend/spendOnce, external account transfers, silver transfers and trade-flow projection writes are routed through Settlement mutation scopes.
+- Cross-settlement commodity transfers hold both source and destination SETTLEMENTS scopes while the TreasuryLedger publishes its own ECONOMY_TRADE mutation. Trade shipment arrival now records destination trade flow through the Settlement API rather than writing `Flow` directly.
+- **Still not closed:** public mutable `stock`, `workers`, `buildings`, `flow`, `taskGraph`, policy/identity fields and mutable Worker/Building properties remain escape hatches. `Flow` and `ResidentTaskGraph` still expose public mutation methods; direct callers can bypass the Settlement fence. TreasuryLedger.Account still exposes mutable balance/debt/credit-limit/bankruptcy fields. External CharacterRegistry reconciliation, world-save ordering, and shipment lifecycle cross-domain atomicity remain under audit. Do not enable the global WorldSim apply fence.
