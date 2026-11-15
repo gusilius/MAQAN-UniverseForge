@@ -169,32 +169,36 @@ public class WorldForgeMod {
             return false;
         }
         TreasuryLedger ledger = TreasuryService.current();
-        if (ledger.mutationVersion() == persistedTreasuryVersion) return true;
-        Path file = treasuryFile(server);
-        long startedNanos = System.nanoTime();
-        long writtenVersion;
-        try {
-            Files.createDirectories(file.getParent());
-            Path temp = file.resolveSibling(file.getFileName() + ".tmp");
-            try (BufferedWriter writer = Files.newBufferedWriter(temp, StandardCharsets.UTF_8)) {
-                writtenVersion = ledger.writeJsonVersioned(writer);
+        // Hold the canonical ledger monitor across dirty-check, snapshot and atomic replacement.
+        // Otherwise a concurrent writer could mutate immediately after a no-op check and receive
+        // a false durable acknowledgement before the next autosave.
+        synchronized (ledger) {
+            if (ledger.mutationVersion() == persistedTreasuryVersion) return true;
+            Path file = treasuryFile(server);
+            long startedNanos = System.nanoTime();
+            long writtenVersion;
+            try {
+                Files.createDirectories(file.getParent());
+                Path temp = file.resolveSibling(file.getFileName() + ".tmp");
+                try (BufferedWriter writer = Files.newBufferedWriter(temp, StandardCharsets.UTF_8)) {
+                    writtenVersion = ledger.writeJsonVersioned(writer);
+                }
+                try { Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE); }
+                catch (java.nio.file.AtomicMoveNotSupportedException ignored) { Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING); }
+                persistedTreasuryVersion = writtenVersion;
+                long elapsedMillis = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos);
+                int accounts = ledger.accountCount(), entries = ledger.journalSize();
+                LOGGER.info("WorldForge treasury: durable snapshot accounts={} journalEntries={} mutationVersion={} elapsedMs={}",
+                        accounts, entries, writtenVersion, elapsedMillis);
+                if (elapsedMillis >= 1000)
+                    LOGGER.warn("WorldForge treasury snapshot exceeded 1s; journalEntries={} elapsedMs={}", entries, elapsedMillis);
+                return true;
+            } catch (IOException ex) {
+                LOGGER.error("WorldForge treasury save failed; canonical ledger remains dirty for retry: {}", ex.toString());
+                return false;
             }
-            try { Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE); }
-            catch (java.nio.file.AtomicMoveNotSupportedException ignored) { Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING); }
-            persistedTreasuryVersion = writtenVersion;
-            long elapsedMillis = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos);
-            int accounts = ledger.accountCount(), entries = ledger.journalSize();
-            LOGGER.info("WorldForge treasury: durable snapshot accounts={} journalEntries={} mutationVersion={} elapsedMs={}",
-                    accounts, entries, writtenVersion, elapsedMillis);
-            if (elapsedMillis >= 1000)
-                LOGGER.warn("WorldForge treasury snapshot exceeded 1s; journalEntries={} elapsedMs={}", entries, elapsedMillis);
-            return true;
-        } catch (IOException ex) {
-            LOGGER.error("WorldForge treasury save failed; canonical ledger remains dirty for retry: {}", ex.toString());
-            return false;
         }
     }
-
     public static Map<String, MapData> loadedMaps() {
         return MAPS;
     }

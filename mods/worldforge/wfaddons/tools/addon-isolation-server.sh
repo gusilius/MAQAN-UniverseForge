@@ -10,6 +10,7 @@ OUTPUT="$(cd "$OUTPUT" && pwd)"
 WORK="$(mktemp -d)"
 FORGE="1.20.1-47.3.0"
 SERVER_PID=""
+SERVER_JAVA_PID=""
 PROFILE_LOG=""
 copy_diagnostics() {
   [ -f "$WORK/install.log" ] && cp "$WORK/install.log" "$OUTPUT/forge-install.log" 2>/dev/null || true
@@ -85,15 +86,21 @@ P
     exit 5
   fi
 
+  SERVER_JAVA_PID="$(jcmd -l | awk '/BootstrapLauncher|net.minecraft.server.Main/ {print $1; exit}')"
+  if [ -z "$SERVER_JAVA_PID" ]; then
+    echo "ERROR: could not identify the Forge server JVM for graceful shutdown"
+    copy_diagnostics
+    exit 5
+  fi
+
   printf '%s\n' "list" "help" "stop" >> in.txt
   stopped=0
   for _ in $(seq 1 90); do
-    if grep -aq 'All dimensions are saved' server.log; then stopped=1; break; fi
-    kill -0 "$SERVER_PID" 2>/dev/null || { stopped=1; break; }
+    if ! jcmd -l | awk '{print $1}' | grep -qx "$SERVER_JAVA_PID"; then stopped=1; break; fi
     sleep 1
   done
-  if [ "$stopped" -ne 1 ] || ! grep -aq 'All dimensions are saved' server.log; then
-    echo "ERROR: profile $profile_id did not complete a graceful save/shutdown"
+  if [ "$stopped" -ne 1 ]; then
+    echo "ERROR: profile $profile_id did not shut down its Forge JVM cleanly"
     tail -100 server.log
     copy_diagnostics
     exit 6
