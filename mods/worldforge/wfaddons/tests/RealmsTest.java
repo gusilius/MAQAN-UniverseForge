@@ -17,6 +17,16 @@ public class RealmsTest {
         List<String> bad = d.validate();
         ok(bad.isEmpty(), "данные корректны " + bad);
         ok(d.govs.size() >= 10 && d.levels.size() == 5 && d.terrains.size() == 7 && d.branches.size() == 4 && d.laws.size() == 4, "объём данных");
+        String displayHouseId = Statecraft.stableDynastyId("planetos", "human", "House of the Northern Coast");
+        ok(displayHouseId.matches("[A-Za-z0-9_.:-]{3,96}")
+                        && displayHouseId.equals(Statecraft.stableDynastyId("planetos", "human", "House of the Northern Coast")),
+                "human-readable family names map to deterministic valid dynasty IDs");
+        ok(!displayHouseId.equals(Statecraft.stableDynastyId("planetos", "dwarf", "House of the Northern Coast"))
+                        && !displayHouseId.equals(Statecraft.stableDynastyId("other-map", "human", "House of the Northern Coast")),
+                "canonical dynasty IDs are isolated by map and culture");
+        ok(Statecraft.stableDynastyId("planetos", "human", "house_0123456789abcdef")
+                        .equals("house_0123456789abcdef"),
+                "existing generated canonical house IDs remain unchanged");
 
         StatApi.resetForTests();
         Realms r = new Realms(d);

@@ -7,6 +7,7 @@ import dev.worldforge.mod.api.WorldForgeApi;
 import dev.worldforge.mod.economy.TreasuryLedger;
 
 import java.util.*;
+import java.nio.charset.StandardCharsets;
 
 /**
  * Persistent political simulation for WorldForge.
@@ -119,6 +120,17 @@ public final class Statecraft {
     public String lastError = "";
 
     private boolean fail(String message) { lastError = message; return false; }
+
+    /** Stable canonical key for a human-readable family label; never use display text as an ID. */
+    public static String stableDynastyId(String mapId, String culture, String houseLabel) {
+        String label = houseLabel == null ? "" : houseLabel.trim();
+        if (label.isEmpty()) return "";
+        if (label.startsWith("house_") && label.matches("[A-Za-z0-9_.:-]{3,96}")) return label;
+        String identity = String.valueOf(mapId) + (char) 0 + String.valueOf(culture) + (char) 0 + label;
+        String suffix = UUID.nameUUIDFromBytes(identity.getBytes(StandardCharsets.UTF_8)).toString().replace("-", "");
+        return "house_" + suffix;
+    }
+
     private static String clean(String value, String what) {
         if (value == null) throw new IllegalArgumentException(what + " is required");
         String s = value.trim();

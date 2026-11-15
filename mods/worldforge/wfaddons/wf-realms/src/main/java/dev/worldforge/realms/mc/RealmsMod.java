@@ -346,6 +346,23 @@ public class RealmsMod {
         }
     }
 
+    private static String characterPropText(Object character, String key) {
+        try {
+            Object value = character.getClass().getField("props").get(character);
+            if (value instanceof Map<?, ?> props) {
+                Object property = props.get(key);
+                return property == null ? "" : String.valueOf(property);
+            }
+        } catch (ReflectiveOperationException | SecurityException ignored) { }
+        return "";
+    }
+
+    private static String characterDynastyId(Object character, String mapId) {
+        String explicit = characterPropText(character, "emergence.dynasty_id");
+        String house = explicit.isBlank() ? characterText(character, "house") : explicit;
+        return Statecraft.stableDynastyId(mapId, characterText(character, "culture"), house);
+    }
+
     private static int characterNumber(Object character, String field) {
         try {
             Object value = character.getClass().getField(field).get(character);
@@ -376,7 +393,7 @@ public class RealmsMod {
                 Map<String, String> founders = new LinkedHashMap<>();
                 Map<String, Integer> founderYears = new LinkedHashMap<>();
                 for (Object character : people.all()) {
-                    String house = characterText(character, "house");
+                    String house = characterDynastyId(character, map.name);
                     if (house.isBlank()) continue;
                     int birthYear = characterNumber(character, "birthYear");
                     if (!founders.containsKey(house) || birthYear < founderYears.getOrDefault(house, Integer.MAX_VALUE)) {
@@ -385,7 +402,7 @@ public class RealmsMod {
                     }
                 }
                 for (Object character : people.all()) {
-                    String house = characterText(character, "house");
+                    String house = characterDynastyId(character, map.name);
                     String globalId = characterText(character, "globalId");
                     if (house.isBlank() || globalId.isBlank()) continue;
                     String founderId = founders.get(house);
