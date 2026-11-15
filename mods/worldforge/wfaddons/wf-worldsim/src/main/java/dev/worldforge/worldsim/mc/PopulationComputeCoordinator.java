@@ -15,7 +15,7 @@ import java.util.List;
 
 /**
  * Population pipeline on the existing process-wide compute slot.
- * Character-level world-day receipts make catch-up resumable across partial registry saves.
+ * Character receipts plus the durable world baseline make catch-up resumable across partial saves and restarts.
  */
 public final class PopulationComputeCoordinator {
     private static final Logger LOGGER = WorldSimMod.LOGGER;
@@ -82,7 +82,7 @@ public final class PopulationComputeCoordinator {
         if(pending!=null) return true;
         if(runtime.busy()) return true;
 
-        long fallbackStartDay=PeopleMod.populationProcessedDay();
+        long fallbackStartDay=PeopleMod.populationBaselineDay();
         long registryGeneration=PeopleMod.populationRegistryGeneration();
         // The process cursor is not durable proof that every Character partition was saved.
         // Inspect receipts once per world day and canonical registry generation, not every tick.

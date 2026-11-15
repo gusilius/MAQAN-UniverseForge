@@ -334,11 +334,13 @@ This is an operation-count status, not a percentage of all UniverseForge computa
 - The production operation count remains unchanged until broader parity and persistence gates pass.
 
 
-### Population reload cursor correction
+### Population durable restart baseline
 
-- The process-local PeopleMod cursor is not treated as proof of durable Character application. On server start, a Character partition can restore an older `population.last_simulated_world_day` even when the global clock is current.
-- Population now captures at the current world day even when it equals the process-local cursor. Per-Character receipts decide who needs catch-up; legacy Characters without receipts use the current fallback baseline.
-- Batch-level elapsed metadata is the maximum positive per-Character interval; each Rust Character still receives its own elapsed interval. Empty batches remain unsubmitted.
+- A world-scoped, atomically written `worldforge/wf_population_baseline.json` records the first day on which Population receipts became authoritative. It is initialized once from the loaded world clock and never advances with the process-local cursor.
+- Existing legacy Characters without a per-Character receipt catch up from that stable baseline. Newly created Characters receive their current world-day receipt immediately, so they are not simulated for days before they existed.
+- Both Rust capture and exclusive Java fallback use the durable baseline for missing receipts. Per-Character receipts still determine each actual elapsed interval, so partially saved registries catch up after restart without replaying already persisted partitions.
+- A corrupt baseline or one bound to another world identity fails startup closed instead of silently resetting simulation history.
+- Batch-level elapsed metadata remains the maximum positive per-Character interval; each Rust Character receives its own elapsed interval. Empty batches remain unsubmitted.
 
 
 ### Population reload cursor correction
@@ -414,3 +416,11 @@ The route planner may only traverse chunks already recorded in `NavigatorExplora
 - The generation is a scan/freshness fence, not a second identity index or revision owner. The scoped CHARACTERS mutation revision and exact live UUID-set check remain in PopulationComputeBridge.apply.
 - Added .github/workflows/army-rust.yml to its own push path filters so edits to the targeted validation workflow trigger the validation run.
 - Acceptance remains pending until the targeted Windows/Linux Rust tests, Java regression suite and People/Settlements/WorldSim dependency-closure build pass.
+
+### Population baseline recovery fix — 2026-11-16
+
+- Closed the restart gap where the process cursor was initialized to the current world day and therefore caused legacy Characters without receipts to be treated as already simulated.
+- `PopulationWorldBaseline` persists the first authoritative world day atomically in the world save and validates its world identity on reload.
+- `CharacterRegistry.create` stamps newly created Characters with their creation-day receipt; old persisted Characters without receipts use the stable world baseline.
+- Rust coordinator and Java fallback now use the same durable baseline. The process cursor is only a scheduling/progress hint, never the fallback origin.
+- Added regression coverage for missing receipts, baseline reload stability, and cross-world mismatch rejection. Acceptance remains pending targeted CI and an actual server crash/restart campaign.

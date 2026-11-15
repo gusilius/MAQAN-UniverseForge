@@ -115,6 +115,8 @@ public final class CharacterRegistry {
         c.culture = culture == null ? "" : culture;
         c.gender = gender;
         c.birthYear = birthYear;
+        // New Characters start at their creation day; they must not catch up before they existed.
+        c.props.put("population.last_simulated_world_day", Long.toString(WorldForgeApi.clock().dayNumber()));
         byId.put(c.id, c);
         revision++;
         for (Listener l : listeners) l.born(c);

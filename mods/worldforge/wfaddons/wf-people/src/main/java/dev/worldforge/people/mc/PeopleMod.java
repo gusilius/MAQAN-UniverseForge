@@ -15,6 +15,7 @@ import dev.worldforge.mod.identity.WorldId;
 import dev.worldforge.people.Courts;
 import dev.worldforge.people.NameBank;
 import dev.worldforge.people.PopulationSimulation;
+import dev.worldforge.people.PopulationWorldBaseline;
 import dev.worldforge.people.Role;
 import dev.worldforge.people.RoleDefs;
 import dev.worldforge.people.bridge.DialogueBridge;
@@ -95,6 +96,7 @@ public class PeopleMod {
     private static final Map<UUID, Set<String>> FLAGS = new ConcurrentHashMap<>();
     private static long ticks;
     private static volatile long populationProcessedDay = Long.MIN_VALUE;
+    private static volatile long populationBaselineDay = Long.MIN_VALUE;
     private static volatile long populationRegistryGeneration;
     private static volatile long populationFallbackGeneration = Long.MIN_VALUE;
 
@@ -141,6 +143,7 @@ public class PeopleMod {
         FLAGS.clear();
         ticks = 0;
         populationProcessedDay = Long.MIN_VALUE;
+        populationBaselineDay = Long.MIN_VALUE;
         populationRegistryGeneration = 0L;
         populationFallbackGeneration = Long.MIN_VALUE;
         RoleDefs roles = new RoleDefs();
@@ -177,6 +180,18 @@ public class PeopleMod {
         YEAR = WorldForgeApi.clock().year();
         if (WorldForgeMod.worldId() != null) AUTHORITY.beginWorld(WorldForgeMod.worldId());
         MinecraftServer server = e.getServer();
+        try {
+            String worldKey = WorldForgeMod.worldId() == null
+                    ? server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT).toAbsolutePath().normalize().toString()
+                    : WorldForgeMod.worldId().toString();
+            Path baselineFile = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
+                    .resolve("worldforge").resolve("wf_population_baseline.json");
+            populationBaselineDay = PopulationWorldBaseline.loadOrInitialize(
+                    baselineFile, worldKey, WorldForgeApi.clock().dayNumber());
+            populationProcessedDay = populationBaselineDay;
+        } catch (Exception ex) {
+            throw new IllegalStateException("wf_people cannot start: durable Population baseline is unreadable", ex);
+        }
         playerRegistryAvailable = true;
         try {
             Path playerFile = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
@@ -524,7 +539,7 @@ public class PeopleMod {
             long registryGeneration = populationRegistryGeneration;
             if (!rustOwnsPopulation && (currentWorldDay > populationProcessedDay
                     || populationFallbackGeneration != registryGeneration)) {
-                long fallbackStartDay = populationProcessedDay == Long.MIN_VALUE ? currentWorldDay : populationProcessedDay;
+                long fallbackStartDay = populationBaselineDay == Long.MIN_VALUE ? currentWorldDay : populationBaselineDay;
                 for (CharacterRegistry registry : REGS.values())
                     PopulationSimulation.advanceToWorldDay(registry, currentWorldDay, fallbackStartDay, YEAR);
                 PopulationSimulation.advanceToWorldDay(PLAYER_REGISTRY, currentWorldDay, fallbackStartDay, YEAR);
@@ -554,6 +569,8 @@ public class PeopleMod {
     }
 
     public static long populationProcessedDay() { return populationProcessedDay; }
+    /** Stable world-save baseline for legacy Characters without per-Character receipts. */
+    public static long populationBaselineDay() { return populationBaselineDay; }
     public static long populationRegistryGeneration() { return populationRegistryGeneration; }
     public static void markPopulationProcessed(long worldDay) {
         if (worldDay > populationProcessedDay) populationProcessedDay = worldDay;

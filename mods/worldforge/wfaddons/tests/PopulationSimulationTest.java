@@ -584,6 +584,32 @@ public final class PopulationSimulationTest {
                         && Long.parseLong(String.valueOf(partiallySaved.props.get("population.last_simulated_world_day"))) == 10,
                 "server reload catches up an older Character receipt even when the process cursor is already current");
 
+        CharacterRegistry legacyMissingReceiptRegistry = new CharacterRegistry();
+        Character legacyMissingReceipt = legacyMissingReceiptRegistry.create("LegacyWithoutReceipt", "", "north", "f", 270);
+        legacyMissingReceipt.props.remove("population.last_simulated_world_day");
+        PopulationSimulation.advanceToWorldDay(legacyMissingReceiptRegistry, 10, 4, 300);
+        ok(PopulationSimulation.need(legacyMissingReceipt, Need.HUNGER) == 65
+                        && Long.parseLong(String.valueOf(legacyMissingReceipt.props.get("population.last_simulated_world_day"))) == 10,
+                "legacy Character without a receipt catches up from the durable baseline rather than the process cursor");
+
+        try {
+            java.nio.file.Path baselineDir = java.nio.file.Files.createTempDirectory("wf-population-baseline");
+            java.nio.file.Path baselineFile = baselineDir.resolve("wf_population_baseline.json");
+            long firstBaseline = dev.worldforge.people.PopulationWorldBaseline.loadOrInitialize(baselineFile, "world:test", 42);
+            long reloadedBaseline = dev.worldforge.people.PopulationWorldBaseline.loadOrInitialize(baselineFile, "world:test", 90);
+            boolean wrongWorldRejected = false;
+            try { dev.worldforge.people.PopulationWorldBaseline.loadOrInitialize(baselineFile, "world:other", 90); }
+            catch (IllegalStateException expected) { wrongWorldRejected = true; }
+            ok(firstBaseline == 42 && reloadedBaseline == 42,
+                    "durable Population baseline survives reload without advancing with the process cursor");
+            ok(wrongWorldRejected, "Population baseline rejects a mismatched world identity");
+            java.nio.file.Files.deleteIfExists(baselineFile);
+            java.nio.file.Files.deleteIfExists(baselineDir);
+        } catch (Exception baselineFailure) {
+            baselineFailure.printStackTrace(System.out);
+            ok(false, "durable Population baseline initializes, reloads and validates world identity");
+        }
+
         PopulationComputeBridge.Captured sameDayCapture = PopulationComputeBridge.captureForWorldDay(
                 "population-resume-test", 300, 10, 10, java.util.List.of(resumableRegistry));
         ok(sameDayCapture.characterIds().isEmpty() && sameDayCapture.elapsedDays() == 0,
