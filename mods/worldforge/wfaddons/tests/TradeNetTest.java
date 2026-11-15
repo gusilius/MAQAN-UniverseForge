@@ -103,11 +103,11 @@ public class TradeNetTest {
         ok(settlementRevision() == beforePriority + 1,
                 "worker profession priority publishes one SETTLEMENTS revision");
         long beforeTax = settlementRevision();
-        revisionSettlement.setTax(2);
+        revisionSettlement.setTax(3);
         ok(settlementRevision() == beforeTax + 1,
                 "tax policy change publishes one SETTLEMENTS revision");
         long beforeTaxNoop = settlementRevision();
-        revisionSettlement.setTax(2);
+        revisionSettlement.setTax(3);
         ok(settlementRevision() == beforeTaxNoop,
                 "unchanged tax policy does not churn the revision");
         long beforeAutoTrade = settlementRevision();
