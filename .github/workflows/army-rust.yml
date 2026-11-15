@@ -1,4 +1,4 @@
-name: WorldForge Population / Settlements / Trade targeted validation
+name: WorldForge Army / Troops / Population / Settlements / Trade targeted validation
 
 on:
   push:
@@ -37,7 +37,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
-      - name: Test native simulation, population, army combat and settlement trade compute
+      - name: Test native simulation, population, army combat, troop and settlement trade compute
         working-directory: mods/worldforge/native/worldforge-worldsim
         run: cargo test --target x86_64-pc-windows-msvc
       - name: Build Windows native library
@@ -56,7 +56,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Test native simulation, population and army combat
+      - name: Test native simulation, population, army combat and troop compute
         working-directory: mods/worldforge/native/worldforge-worldsim
         run: cargo test
       - name: Build Linux native library
@@ -69,7 +69,7 @@ jobs:
           if-no-files-found: error
 
   targeted-addons:
-    name: People / Population / Settlements / Trade / WorldSim dependency-closure build and logic tests
+    name: Army / Troops / People / Population / Settlements / Trade / WorldSim dependency-closure build and logic tests
     runs-on: windows-latest
     needs: [native-windows, native-linux]
     timeout-minutes: 90
@@ -100,5 +100,5 @@ jobs:
       - name: Build People, Settlements and WorldSim with only dependency closure
         working-directory: mods/worldforge/wfaddons
         shell: bash
-        run: bash tools/build-selected-addons.sh ../wfmod wf-people wf-settlements wf-worldsim
+        run: bash tools/build-selected-addons.sh ../wfmod wf-army wf-troops wf-people wf-settlements wf-worldsim
 

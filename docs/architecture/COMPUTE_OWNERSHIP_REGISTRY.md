@@ -334,6 +334,29 @@ This is an operation-count status, not a percentage of all UniverseForge computa
 - The production operation count remains unchanged until broader parity and persistence gates pass.
 
 
+
+## Army / Troops production ownership audit — 2026-11-16
+
+### Strategic Army combat
+
+- `ArmyEngine.fight` calls `ArmyCombatCompute.trySimulate` with detached roster/type data, deterministic day/location seed and defender flag. Rust `army::simulate` computes the bounded eight-round combat frame; Java retains canonical roster mutation, casualty application, morale application, war score/events and retreat.
+- Provider absence before ownership selects the exclusive Java combat path. A failure after provider discovery fails closed; it does not execute Java combat in parallel.
+- Rust tests cover Java-compatible seeded RNG, deterministic output, counter effectiveness and malformed roster/schema rejection. The current pure-Java `ArmyTest` battle scenario does not load `NativeWorldSimulation`, so it exercises the Java fallback rather than proving end-to-end Rust/Java parity.
+- The native combat path is production-connected but is not yet counted as fully accepted until a shared deterministic combat parity fixture and native-path integration test run on Windows/Linux are present.
+
+### Physical Troops compute
+
+- `TroopCompute` invokes the native provider synchronously through JNI. `TroopController.step` reaches morale and formation calculations per live squad during its half-second control step; operational supply calls the same provider from its state-advance path.
+- These calls do not use `WorldForgeComputeRuntime`. Morale and supply are constant-time arithmetic; formation planning is bounded by the physical squad size. JNI/JSON overhead may exceed the work being moved, and synchronous calls occur on the server thread.
+- Do not count these kernels as an optimization acceptance or expand them to more per-entity operations without a measured crossover. The next decision is to batch genuinely expensive tactical work through the shared runtime, or keep/remove the small kernels from the native production path so there is one clear owner and no pointless JNI overhead.
+- Java remains authoritative for entity state, squad orders, canonical Character links, persistence and Minecraft effects.
+
+### Targeted addon validation coverage
+
+- `.github/workflows/army-rust.yml` now includes `wf-army` and `wf-troops` in the dependency-closure Gradle build, in addition to People, Settlements and WorldSim.
+- The same run executes the complete pure-Java logic suite and native Rust tests/builds on Windows x64 and Linux x64. This closes a previous validation gap: Java logic tests alone do not compile the Forge `mc/` source sets of Army and Troops.
+- This workflow coverage change improves acceptance evidence; it does not itself mark Army/Troops compute as migrated or accepted.
+
 ### Population durable restart baseline
 
 - A world-scoped, atomically written `worldforge/wf_population_baseline.json` records the first day on which Population receipts became authoritative. It is initialized once from the loaded world clock and never advances with the process-local cursor.
