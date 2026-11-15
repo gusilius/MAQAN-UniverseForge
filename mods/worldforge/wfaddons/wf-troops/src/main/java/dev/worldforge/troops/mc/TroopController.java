@@ -49,16 +49,15 @@ final class TroopController {
                     double yaw = Formations.yawTo(cx, cz, o.x(), o.z());
                     boolean far = Math.hypot(o.x() - cx, o.z() - cz) > 2;
                     if (!far) yaw = s.yaw; else s.yaw = yaw;
-                    List<Formations.Slot> slots = Formations.slots(s.formation, alive.size(), SPACING);
-                    List<double[]> world = Formations.place(slots, o.x(), o.z(), yaw);
                     List<String> roles = new ArrayList<>();
                     List<double[]> local = new ArrayList<>();
                     double rad = Math.toRadians(yaw), rx = Math.cos(rad), rz = Math.sin(rad);
                     for (TroopEntity t : alive) {
                         roles.add(t.def() == null ? "melee" : t.def().role());
-                        local.add(new double[]{-(t.getX() - cx) * rx - (t.getZ() - cz) * rz, 0});            // боковое положение относительно курса
+                        local.add(new double[]{-(t.getX() - cx) * rx - (t.getZ() - cz) * rz, 0});
                     }
-                    int[] as = Formations.assign(roles, slots, local);
+                    Formations.Plan plan = Formations.plan(s.formation, alive.size(), SPACING, roles, local, o.x(), o.z(), yaw);
+                    List<double[]> world = plan.world(); int[] as = plan.assignment();
                     double sum = 0;
                     TroopEntity.Engage eng = o.kind() == Squads.Kind.ATTACK_MOVE ? (s.stance == Squads.Stance.PASSIVE ? TroopEntity.Engage.NONE : TroopEntity.Engage.FULL) : TroopEntity.Engage.NONE;
                     for (int i = 0; i < alive.size(); i++) {
@@ -79,9 +78,8 @@ final class TroopController {
                         Entity owner = ownerId == null ? null : server.getPlayerList().getPlayer(ownerId);
                         destination = owner == null ? new double[]{cx, cz} : new double[]{owner.getX(), owner.getZ()};
                     }
-                    List<Formations.Slot> slots = Formations.slots(s.formation, alive.size(), SPACING);
                     double yaw = Formations.yawTo(cx, cz, destination[0], destination[1]);
-                    List<double[]> world = Formations.place(slots, destination[0], destination[1], yaw);
+                    List<double[]> world = Formations.plan(s.formation, alive.size(), SPACING, List.of(), List.of(), destination[0], destination[1], yaw).world();
                     for (int i = 0; i < alive.size(); i++) {
                         TroopEntity t = alive.get(i);
                         double[] point = world.get(i);
@@ -101,9 +99,8 @@ final class TroopController {
                     UUID targetId = safeUuid(o.target().isEmpty() ? s.owner : o.target());
                     Entity target = targetId == null ? null : TroopsMod.find(targetId);
                     if (target == null) { TroopsMod.SQUADS.completeCurrent(s.id); break; }
-                    List<Formations.Slot> slots = Formations.slots(s.formation, alive.size(), SPACING);
                     double yaw = target.getYRot() + 180;
-                    List<double[]> world = Formations.place(slots, target.getX(), target.getZ() - 0, yaw);
+                    List<double[]> world = Formations.plan(s.formation, alive.size(), SPACING, List.of(), List.of(), target.getX(), target.getZ(), yaw).world();
                     for (int i = 0; i < alive.size(); i++) {
                         TroopEntity t = alive.get(i);
                         t.hasDest = true; t.destX = world.get(i)[0] + Math.sin(Math.toRadians(yaw)) * 3; t.destZ = world.get(i)[1] - Math.cos(Math.toRadians(yaw)) * 3;

@@ -77,13 +77,13 @@ final class ArmyCombatCompute {
             List<Object> units = new ArrayList<>();
             for (Map.Entry<String,Integer> entry : army.units.entrySet()) {
                 UnitType type = types.get(entry.getKey());
-                if (type == null || entry.getValue() <= 0) continue;
+                // Preserve unknown roster entries in headcount/casualty distribution, matching Java strength().
                 Map<String,Object> unit = new LinkedHashMap<>();
                 unit.put("id", entry.getKey());
                 unit.put("count", entry.getValue());
-                unit.put("attack", type.attack);
-                unit.put("defense", type.defense);
-                unit.put("counters", type.counters);
+                unit.put("attack", type == null ? 0.0 : type.attack);
+                unit.put("defense", type == null ? 0.0 : type.defense);
+                unit.put("counters", type == null ? Map.of() : type.counters);
                 units.add(unit);
             }
             row.put("units", units);

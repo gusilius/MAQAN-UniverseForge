@@ -20,6 +20,8 @@ public final class Morale {
      * @param enemiesNear  есть враги рядом
      */
     public static double step(double morale, double aliveRatio, double lostNow, double outnumber, boolean leader, boolean enemiesNear, double dt) {
+        Double nativeValue = TroopCompute.moraleStep(morale, aliveRatio, lostNow, outnumber, leader, enemiesNear, dt);
+        if (nativeValue != null) return nativeValue;
         morale -= lostNow * SHOCK;
         double target = 0.4 + 0.6 * clamp(aliveRatio, 0, 1);
         if (enemiesNear) target -= clamp(outnumber - 1, 0, 1) * 0.25;

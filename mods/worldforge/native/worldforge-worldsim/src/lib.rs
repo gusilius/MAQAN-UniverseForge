@@ -9,6 +9,7 @@ pub mod worldgen;
 pub mod emergence;
 pub mod population;
 pub mod army;
+pub mod troops;
 
 use std::collections::{BTreeMap, BTreeSet};
 

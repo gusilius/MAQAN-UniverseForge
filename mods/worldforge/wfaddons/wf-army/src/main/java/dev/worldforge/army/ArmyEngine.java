@@ -770,7 +770,7 @@ public final class ArmyEngine {
     }
 
     private double[] strength(List<Army> side, List<Army> foe) {
-        Map<String, Double> share = new HashMap<>();
+        Map<String, Double> share = new TreeMap<>();
         double tot = 0;
         for (Army f : foe) for (Map.Entry<String, Integer> u : f.units.entrySet()) { share.merge(u.getKey(), (double) u.getValue(), Double::sum); tot += u.getValue(); }
         double off = 0, def = 0;

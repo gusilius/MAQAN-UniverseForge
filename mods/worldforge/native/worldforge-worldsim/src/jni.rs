@@ -51,7 +51,7 @@ fn error_json(status: &str, error: &str) -> Vec<u8> {
 pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulation_nativeAbiVersion(
     _env: JNIEnvPtr, _class: JObject,
 ) -> i32 {
-    3
+    4
 }
 
 #[no_mangle]
@@ -139,6 +139,15 @@ pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulat
             },
             Err(error) => error_json("invalid_army_combat_snapshot", &error.to_string()),
         },
+    };
+    make_bytes(env, &response)
+}
+
+#[no_mangle]
+pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulation_nativeAdvanceTroopCompute(env: JNIEnvPtr, _class: JObject, input: JObject) -> JObject {
+    let response = match read_bytes(env, input, 8 * 1024 * 1024) {
+        None => error_json("invalid_input", "troop compute snapshot unavailable or too large"),
+        Some(bytes) => match crate::troops::compute(&bytes) { Ok(frame) => frame, Err(error) => error_json("troop_compute_rejected", &error) },
     };
     make_bytes(env, &response)
 }

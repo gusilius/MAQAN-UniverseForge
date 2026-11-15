@@ -39,8 +39,24 @@ for module in "${MODULES[@]}"; do
   mkdir -p "$module/libs"
   rm -f "$module"/libs/wf_*.jar
   cp "$CORE_JAR" "$module/libs/"
-  IFS=',' read -r -a deps <<< "${DEP_MAP[$module]:-}"
+  dep_list="${DEP_MAP[$module]:-}"
+  deps=()
+  if [[ -n "$dep_list" ]]; then IFS=',' read -r -a deps <<< "$dep_list"; fi
   for dep in "${deps[@]}"; do
+    dep="${dep//
+    found=0
+    for jar in "$dep"/build/libs/wf_*.jar; do
+      [ -f "$jar" ] || continue
+      case "$jar" in *-sources.jar) continue ;; esac
+      cp "$jar" "$module/libs/"
+      found=1
+    done
+    [ "$found" -eq 1 ] || { echo "ERROR: missing dependency artifact $dep for $module"; exit 1; }
+  done
+  ( cd "$module" && gradle build --no-daemon -q )
+done
+echo "TARGETED ADDON BUILDS PASSED: ${MODULES[*]}"
+\\r'/}"
     [ -n "$dep" ] || continue
     found=0
     for jar in "$dep"/build/libs/wf_*.jar; do
