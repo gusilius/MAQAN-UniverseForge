@@ -64,6 +64,8 @@ if [ -z "$CORE_JAR" ]; then
   exit 1
 fi
 
+expected_builds="$(wc -l < "$PLAN" | tr -d ' ')"
+built_addons=0
 while IFS='|' read -r module dep_list; do
   module="$(printf '%s' "$module" | tr -d '\r')"
   dep_list="$(printf '%s' "$dep_list" | tr -d '\r')"
@@ -91,7 +93,19 @@ while IFS='|' read -r module dep_list; do
     done
   fi
 
-  ( cd "$module" && gradle build --no-daemon -q )
+  # Gradle must not inherit the plan file as stdin; otherwise it can consume
+  # the remaining while-read rows and silently skip requested addons.
+  ( cd "$module" && gradle build --no-daemon -q < /dev/null )
+  addon_jar="$(find "$module/build/libs" -maxdepth 1 -type f -name 'wf_*.jar' ! -name '*-sources.jar' -print -quit)"
+  if [ -z "$addon_jar" ]; then
+    echo "ERROR: $module build completed without producing its addon jar" >&2
+    exit 1
+  fi
+  built_addons=$((built_addons + 1))
 done < "$PLAN"
 
-echo "TARGETED ADDON BUILDS PASSED"
+if [ "$built_addons" -ne "$expected_builds" ]; then
+  echo "ERROR: built $built_addons addons, but dependency-closure plan requested $expected_builds" >&2
+  exit 1
+fi
+echo "TARGETED ADDON BUILDS PASSED: $built_addons/$expected_builds"
