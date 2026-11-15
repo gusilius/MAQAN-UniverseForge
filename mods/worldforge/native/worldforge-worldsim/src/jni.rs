@@ -4,6 +4,9 @@ use crate::{decide, WorldSnapshot};
 use crate::worldgen::{generate_world, WorldGenRequest};
 use crate::emergence::{advance, EmergenceRequest};
 
+/// Must match NativeWorldSimulation.NATIVE_ABI_VERSION in the Java host.
+pub const NATIVE_ABI_VERSION: i32 = 6;
+
 type JNIEnvPtr = *mut *const *const c_void;
 type JObject = *mut c_void;
 
@@ -51,7 +54,7 @@ fn error_json(status: &str, error: &str) -> Vec<u8> {
 pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulation_nativeAbiVersion(
     _env: JNIEnvPtr, _class: JObject,
 ) -> i32 {
-    5
+    crate::jni::NATIVE_ABI_VERSION
 }
 
 #[no_mangle]
@@ -177,4 +180,13 @@ pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulat
         Some(bytes) => match crate::trade::compute(&bytes) { Ok(frame) => frame, Err(error) => error_json("trade_compute_rejected", &error) },
     };
     make_bytes(env, &response)
+}
+
+
+#[cfg(test)]
+mod abi_tests {
+    #[test]
+    fn native_abi_matches_java_host_contract() {
+        assert_eq!(super::NATIVE_ABI_VERSION, 6);
+    }
 }
