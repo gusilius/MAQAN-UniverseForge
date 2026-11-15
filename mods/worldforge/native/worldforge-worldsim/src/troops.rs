@@ -24,9 +24,9 @@ fn slots(kind:&str,count:usize,s:f64)->Result<Vec<Slot>,String>{
  _=>return Err("unknown formation".into())}Ok(out)
 }
 fn formation(v:&Value)->Result<Value,String>{
- let kind=v.get("formation").and_then(Value::as_str).ok_or("missing formation")?;let count=i(v,"count")?;if count<0{return Err("negative count".into());}let n=count as usize;
+ let kind=v.get("formation").and_then(Value::as_str).ok_or("missing formation")?;let count=i(v,"count")?;if count<0{return Err("negative count".into());}let count_usize=count as usize;
  let spacing=n(v,"spacing")?;let cx=n(v,"cx")?;let cz=n(v,"cz")?;let yaw=n(v,"yaw")?;if spacing<=0.0||spacing>100.0{return Err("spacing out of range".into());}
- let s=slots(kind,n,spacing)?;let roles=v.get("roles").and_then(Value::as_array).ok_or("missing roles")?;let current=v.get("current_local").and_then(Value::as_array).ok_or("missing current_local")?;
+ let n=count_usize;let s=slots(kind,n,spacing)?;let roles=v.get("roles").and_then(Value::as_array).ok_or("missing roles")?;let current=v.get("current_local").and_then(Value::as_array).ok_or("missing current_local")?;
  if (!roles.is_empty()&&(roles.len()!=n||current.len()!=n))||(!current.is_empty()&&current.len()!=n){return Err("role/current count mismatch".into());}
  let mut assign=Vec::<usize>::new();if !roles.is_empty(){let mut units:Vec<usize>=(0..n).collect();let mut positions:Vec<usize>=(0..n).collect();let mut side=vec![0.0;n];for k in 0..n{let p=current[k].as_array().ok_or("bad current point")?;side[k]=p.first().and_then(Value::as_f64).ok_or("bad local x")?;}
  let rank=|x:&Value|match x.as_str().unwrap_or(""){"melee"=>0,"cavalry"=>1,"ranged"=>2,_=>3};
