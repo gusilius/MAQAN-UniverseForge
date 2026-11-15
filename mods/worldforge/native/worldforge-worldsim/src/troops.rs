@@ -40,14 +40,14 @@ fn supply(v:&Value)->Result<Value,String>{
  let soldiers=i(v,"soldiers")?;let days=n(v,"days")?;let stock=n(v,"available_rations")?;let requested=n(v,"consumed")?;let readiness=n(v,"readiness")?;let prior_days=n(v,"days_without_full_rations")?;let total=n(v,"total_consumed")?;let persisted=b(v,"persisted_advance")?;
  if soldiers<0||days<0.0||days>365.0||stock<0.0||requested<0.0||!(0.0..=1.0).contains(&readiness)||prior_days<0.0||total<0.0{return Err("supply input out of range".into());}
  let needed=soldiers as f64*days;let used=if persisted{requested}else{stock.min(needed)};if used>needed+1e-8||used>stock+1e-8{return Err("ration settlement exceeds demand or stock".into());}
- let shortage=(needed-used).max(0.0);let(mut ready,mut days_short)=(readiness,prior_days);
- if needed>0.0&&shortage>1e-9{let f=shortage/needed;days_short+=days*f;ready=clamp(readiness-days*f*0.12,0.0,1.0);}else{days_short=(prior_days-days).max(0.0);ready=clamp(readiness+days*0.025,0.0,1.0);}
+ let shortage=(needed-used).max(0.0);
+ let (ready,days_short)=if needed>0.0&&shortage>1e-9{let f=shortage/needed;(clamp(readiness-days*f*0.12,0.0,1.0),prior_days+days*f)}else{(clamp(readiness+days*0.025,0.0,1.0),(prior_days-days).max(0.0))};
  Ok(json!({"status":"ok","consumed":used,"remaining_rations":(stock-used).max(0.0),"total_consumed":total+used,"readiness":ready,"days_without_full_rations":days_short,"shortage":shortage}))
 }
 pub fn compute(bytes:&[u8])->Result<Vec<u8>,String>{let v:Value=serde_json::from_slice(bytes).map_err(|e|e.to_string())?;if v.get("schema_version").and_then(Value::as_u64)!=Some(1){return Err("unsupported troop schema".into());}
  let op=v.get("operation").and_then(Value::as_str).ok_or("missing operation")?;let out=match op{"morale_step"=>morale(&v)?,"formation_plan"=>formation(&v)?,"supply"=>supply(&v)?,_=>return Err("unsupported troop operation".into())};serde_json::to_vec(&out).map_err(|e|e.to_string())}
 #[cfg(test)]mod tests{use super::*;
- #[test]fn morale_formula_parity(){let v=json!({"morale":0.72,"alive_ratio":0.8,"lost_now":0.04,"outnumber":1.5,"leader":true,"enemies_near":true,"dt":0.5});let got=morale(&v).unwrap()["morale"].as_f64().unwrap();let mut e=0.72f64-0.04*1.2;let mut t=0.4+0.6*0.8-0.5*0.25+0.1;if e>t{e-=(e-t).min(0.15*0.5);}else{e+=(t-e).min(0.01*0.5);}assert!((got-e.clamp(0.0,1.0)).abs()<1e-12);}
+ #[test]fn morale_formula_parity(){let v=json!({"morale":0.72,"alive_ratio":0.8,"lost_now":0.04,"outnumber":1.5,"leader":true,"enemies_near":true,"dt":0.5});let got=morale(&v).unwrap()["morale"].as_f64().unwrap();let mut e=0.72f64-0.04*1.2;let t=0.4+0.6*0.8-0.5*0.25+0.1;if e>t{e-=(e-t).min(0.15*0.5);}else{e+=(t-e).min(0.01*0.5);}assert!((got-e.clamp(0.0,1.0)).abs()<1e-12);}
  #[test]fn all_formations_keep_count(){for k in ["LINE","BLOCK","COLUMN","WEDGE","CIRCLE","LOOSE"]{for n in [1,5,17,40]{assert_eq!(slots(k,n,1.5).unwrap().len(),n);}}}
  #[test]fn rejects_bad_supply(){let v=json!({"schema_version":1,"operation":"supply","soldiers":-1,"days":1.0,"available_rations":1.0,"consumed":1.0,"readiness":1.0,"days_without_full_rations":0.0,"total_consumed":0.0,"persisted_advance":true});assert!(supply(&v).is_err());}
 }

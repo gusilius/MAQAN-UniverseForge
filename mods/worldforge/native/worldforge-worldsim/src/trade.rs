@@ -150,8 +150,10 @@ mod tests {
     #[test] fn bounded_large_market_catalog_is_deterministic() {
         let mut cities = Vec::new();
         for i in 0..300 {
+            // First half exports from a stocked market; second half is genuinely undersupplied.
+            let stock = if i < 150 { 100.0 } else { 0.0 };
             cities.push(json!({"id":format!("city-{i:03}"),"trade_rate":1.0,"resources":[
-                {"id":"wood","price":1.0 + i as f64 * 0.01,"stock":100.0,"capacity":200.0,"consumption":0.0}
+                {"id":"wood","price":1.0 + i as f64 * 0.01,"stock":stock,"capacity":200.0,"consumption":0.0}
             ]}));
         }
         let request = json!({"schema_version":1,"operation":"suggestions","limit":100,"cities":cities});
