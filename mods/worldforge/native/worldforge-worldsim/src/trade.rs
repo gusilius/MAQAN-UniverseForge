@@ -19,9 +19,11 @@ struct City {
     by_resource: HashMap<String, usize>,
 }
 struct Candidate {
-    from: String,
-    to: String,
-    resource: String,
+    // Keep only stable indexes while ranking. Cloning three Strings for every
+    // retained candidate creates avoidable allocator traffic in large markets.
+    from_index: usize,
+    to_index: usize,
+    resource_index: usize,
     score: f64,
     sequence: usize,
 }
@@ -106,11 +108,11 @@ pub fn compute(bytes: &[u8]) -> Result<Vec<u8>, String> {
 
     let mut candidates = BinaryHeap::<Candidate>::with_capacity(limit.min(4096));
     let mut sequence = 0usize;
-    for from in &cities {
+    for (from_index, from) in cities.iter().enumerate() {
         if from.trade_rate <= 0.0 { continue; }
-        for to in &cities {
-            if from.id == to.id || to.trade_rate <= 0.0 { continue; }
-            for source in &from.resources {
+        for (to_index, to) in cities.iter().enumerate() {
+            if from_index == to_index || to.trade_rate <= 0.0 { continue; }
+            for (resource_index, source) in from.resources.iter().enumerate() {
                 if source.price <= 0.0 { continue; }
                 let Some(destination_index) = to.by_resource.get(&source.id) else { continue; };
                 let destination = &to.resources[*destination_index];
@@ -128,8 +130,7 @@ pub fn compute(bytes: &[u8]) -> Result<Vec<u8>, String> {
                 // serialize a non-finite ranking score into a malformed result.
                 if !score.is_finite() { continue; }
                 candidates.push(Candidate {
-                    from: from.id.clone(), to: to.id.clone(), resource: source.id.clone(),
-                    score, sequence,
+                    from_index, to_index, resource_index, score, sequence,
                 });
                 sequence = sequence.saturating_add(1);
                 if candidates.len() > limit { candidates.pop(); }
@@ -141,7 +142,10 @@ pub fn compute(bytes: &[u8]) -> Result<Vec<u8>, String> {
     let mut selected = candidates.into_vec();
     selected.sort_by(|a, b| b.score.total_cmp(&a.score).then_with(|| a.sequence.cmp(&b.sequence)));
     let result = selected.into_iter().map(|candidate| json!({
-        "from": candidate.from, "to": candidate.to, "resource": candidate.resource, "score": candidate.score
+        "from": cities[candidate.from_index].id,
+        "to": cities[candidate.to_index].id,
+        "resource": cities[candidate.from_index].resources[candidate.resource_index].id,
+        "score": candidate.score
     })).collect::<Vec<_>>();
     serde_json::to_vec(&json!({"status":"ok","suggestions":result})).map_err(|e| e.to_string())
 }
