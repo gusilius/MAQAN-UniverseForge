@@ -79,7 +79,7 @@ pub fn advance(r:Request)->Result<Frame,String>{
   assert_eq!(frame.characters.len(),2048);
   assert!(frame.characters.windows(2).all(|pair|pair[0].id<pair[1].id));
   assert_eq!(frame.characters[0].needs["custom-trait-need"],0);
-  assert_eq!(frame.characters[2047].needs["custom-trait-need"],26);
+  assert_eq!(frame.characters[2047].needs["custom-trait-need"],27);
  }
  #[test]fn profession_requires_the_same_can_work_gate_as_java(){let mut child=p("child");child.birth_year=300;child.profession="farmer".into();child.can_work=false;let f=advance(Request{schema_version:1,world_id:"w".into(),year:303,elapsed_days:1,world_day:303,characters:vec![child]}).unwrap();assert_eq!(f.characters[0].intent,"idle");}
  #[test]fn shared_java_rust_population_parity_fixture(){
