@@ -165,8 +165,3 @@ LOD не меняет доступные игроку механики и не �
 - отсутствие starvation: старые задачи имеют измеряемый возраст и гарантированный прогресс;
 - multiplayer: один канонический результат для всех клиентов, reconnect/restart/unload recovery;
 - при переходе к нескольким процессам — тесты split-brain, lease expiry, ownership migration, delayed/replayed messages и crash between prepare/commit.
-
-
-## Army member identity and physical presence
-
-For the distinction between strategic Army presence, persistent resident/militia Characters, temporary camp/battle projections and chunk/restart recovery, follow the mandatory contract in `docs/architecture/ARMY_CHARACTER_PRESENCE_AND_DEPLOYMENT_CONTRACT.md`. In particular, optimization may reduce distant ticking, but must not discard living settlement residents or erase their canonical Character/military membership.

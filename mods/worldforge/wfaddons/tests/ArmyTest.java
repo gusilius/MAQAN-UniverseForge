@@ -157,6 +157,24 @@ public class ArmyTest {
         ok(cav.men() > arch.men(), "конница бьёт лучников: " + cav.men() + " против " + arch.men());
         ok(t.war.wars.values().iterator().next().score != 0, "бой изменил счёт");
 
+        // Custom datapacks may define counters outside the Rust v1 numeric envelope.
+        // This must choose Java before native ownership, never fail halfway through the tick.
+        ArmyEngine customCombat = fresh(a[0], ids);
+        customCombat.ai = false;
+        customCombat.war.declare(ids[0], ids[1], "conquest",
+                List.of(customCombat.war.goalCandidates(ids[1]).get(0).id));
+        UnitType baseSpear = customCombat.types.get("spear");
+        customCombat.types.put("spear", new UnitType(baseSpear.id, baseSpear.name,
+                baseSpear.attack, baseSpear.defense, baseSpear.speed, baseSpear.siege,
+                baseSpear.cost, baseSpear.upkeep, baseSpear.levy, Map.of("cavalry", 150.0)));
+        Army customA = customCombat.raise(ids[0], "levy", 10);
+        customA.units.clear(); customA.add("spear", 100); customA.location = customCombat.capital(ids[0]);
+        Army customB = customCombat.raise(ids[1], "levy", 10);
+        customB.units.clear(); customB.add("cavalry", 100); customB.location = customA.location;
+        customCombat.tick(1);
+        ok(customCombat.events.stream().anyMatch(x -> x.contains("Битва за")),
+                "custom unit counter outside Rust v1 envelope safely uses Java fallback");
+
         // ИИ: полная война без игроков
         ArmyEngine ai = fresh(a[0], ids);
         War aw = ai.war.declare(ids[0], ids[1], "conquest", List.of(ai.war.goalCandidates(ids[1]).get(0).id));

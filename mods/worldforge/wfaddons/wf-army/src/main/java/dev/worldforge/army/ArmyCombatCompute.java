@@ -20,6 +20,9 @@ final class ArmyCombatCompute {
 
     static List<Result> trySimulateBatch(List<Battle> battles, Map<String, UnitType> types) {
         if (battles.isEmpty()) return List.of();
+        // Rust v1 has a narrower numeric envelope than legacy Java datapacks.
+        // Choose the exclusive Java fallback before acquiring native ownership.
+        if (!rustRepresentable(battles, types)) return null;
         if (battles.size() > MAX_BATCH_BATTLES)
             throw new IllegalArgumentException("Army combat batch exceeds " + MAX_BATCH_BATTLES + " battles");
         final Class<?> provider;
@@ -85,6 +88,30 @@ final class ArmyCombatCompute {
         }
         if (rounds.size() > 8) throw new IllegalStateException("Rust combat exceeded round budget");
         return new Result(List.copyOf(rounds));
+    }
+
+    private static boolean rustRepresentable(List<Battle> battles, Map<String, UnitType> types) {
+        for (Battle battle : battles) {
+            for (Army army : battle.sideA()) if (!rustRepresentable(army, types)) return false;
+            for (Army army : battle.sideB()) if (!rustRepresentable(army, types)) return false;
+        }
+        return true;
+    }
+
+    private static boolean rustRepresentable(Army army, Map<String, UnitType> types) {
+        if (army.martial < 0 || !Double.isFinite(army.morale)
+                || army.morale < 0.0 || army.morale > 1.0) return false;
+        for (Map.Entry<String, Integer> entry : army.units.entrySet()) {
+            if (entry.getKey() == null || entry.getKey().isBlank() || entry.getValue() == null
+                    || entry.getValue() < 0) return false;
+            UnitType type = types.get(entry.getKey());
+            if (type == null) continue;
+            if (!Double.isFinite(type.attack) || type.attack < 0.0
+                    || !Double.isFinite(type.defense) || type.defense < 0.0) return false;
+            for (double counter : type.counters.values())
+                if (!Double.isFinite(counter) || counter < 0.0 || counter > 100.0) return false;
+        }
+        return true;
     }
 
     private static boolean finiteNonnegative(double value) { return Double.isFinite(value) && value >= 0; }
