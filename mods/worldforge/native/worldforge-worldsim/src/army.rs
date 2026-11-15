@@ -119,6 +119,27 @@ pub fn simulate(mut request:CombatRequest)->Result<CombatFrame,String>{
     }
     Ok(CombatFrame{status:"ok",rounds})
 }
+#[derive(Clone, Debug, Deserialize)]
+pub struct CombatBatchRequest {
+    pub schema_version: u32,
+    pub battles: Vec<CombatRequest>,
+}
+#[derive(Clone, Debug, Serialize)]
+pub struct CombatBatchFrame {
+    pub status: &'static str,
+    pub battles: Vec<CombatFrame>,
+}
+
+pub fn simulate_batch(request: CombatBatchRequest) -> Result<CombatBatchFrame, String> {
+    if request.schema_version != 1 { return Err("unsupported combat batch schema version".into()); }
+    if request.battles.len() > 4096 { return Err("combat batch exceeds 4096 battles".into()); }
+    let mut frames = Vec::with_capacity(request.battles.len());
+    for battle in request.battles {
+        frames.push(simulate(battle)?);
+    }
+    Ok(CombatBatchFrame { status: "ok", battles: frames })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -130,6 +151,39 @@ mod tests {
             side_a:vec![ArmySnapshot{martial:8,morale:1.0,units:vec![unit("spear",100,1.1,1.5)]}],
             side_b:vec![ArmySnapshot{martial:3,morale:1.0,units:vec![unit("cavalry",90,2.4,1.1)]}]}
     }
+    #[test] fn batch_matches_individual_battle_frames_in_input_order() {
+        let first = sample();
+        let mut second = sample();
+        second.seed = 99173;
+        second.defender_a = false;
+        let expected_first = simulate(first.clone()).unwrap();
+        let expected_second = simulate(second.clone()).unwrap();
+        let batch = simulate_batch(CombatBatchRequest {
+            schema_version: 1,
+            battles: vec![first, second],
+        }).unwrap();
+        assert_eq!(batch.battles.len(), 2);
+        assert_eq!(serde_json::to_vec(&batch.battles[0]).unwrap(),
+                   serde_json::to_vec(&expected_first).unwrap());
+        assert_eq!(serde_json::to_vec(&batch.battles[1]).unwrap(),
+                   serde_json::to_vec(&expected_second).unwrap());
+    }
+
+    #[test] fn batch_rejects_oversized_and_invalid_later_battle_atomically() {
+        let too_many = CombatBatchRequest {
+            schema_version: 1,
+            battles: vec![sample(); 4097],
+        };
+        assert!(simulate_batch(too_many).is_err());
+        let good = sample();
+        let mut bad = sample();
+        bad.side_b[0].units[0].count = -1;
+        assert!(simulate_batch(CombatBatchRequest {
+            schema_version: 1,
+            battles: vec![good, bad],
+        }).is_err());
+    }
+
     #[test] fn java_random_matches_java_util_random_sequence() {
         let mut rng=JavaRandom::new(0);
         assert_eq!(rng.next_double().to_bits(),0.730967787376657f64.to_bits());

@@ -747,25 +747,55 @@ public final class ArmyEngine {
 
     // ------------------------------------------------------------------ сражения
 
+    private record BattlePlan(War war, int location, War.Side sideOfA,
+                              List<Army> sideA, List<Army> sideB, boolean defenderA) {}
+
     private void battles() {
         Map<Integer, List<Army>> byLoc = new LinkedHashMap<>();
         for (Army a : armies.values()) byLoc.computeIfAbsent(a.location, k -> new ArrayList<>()).add(a);
-        for (Map.Entry<Integer, List<Army>> e : byLoc.entrySet()) {
-            List<Army> here = e.getValue();
+
+        // Battles at different baronies are independent: capture all immutable inputs
+        // before applying any outcome, then cross JNI once for the complete strategic day.
+        List<BattlePlan> plans = new ArrayList<>();
+        for (Map.Entry<Integer, List<Army>> entry : byLoc.entrySet()) {
+            List<Army> here = entry.getValue();
             if (here.size() < 2) continue;
-            // найти пару врагов и разыграть бой между всеми армиями их сторон (один бой на место в день)
             boolean done = false;
-            for (Army a : here) { if (done) break; for (Army b : here) {
-                if (a.men() <= 0 || b.men() <= 0) continue;
-                War w = enemyWar(a.realm, b.realm);
-                if (w == null) continue;
-                War.Side sa = w.sides.get(a.realm);
-                List<Army> sideA = new ArrayList<>(), sideB = new ArrayList<>();
-                for (Army x : here) { War.Side s = w.sides.get(x.realm); if (x.men() <= 0 || s == null) continue; (s == sa ? sideA : sideB).add(x); }
-                fight(w, e.getKey(), sa, sideA, sideB);
-                done = true;
-                break;
-            } }
+            for (Army a : here) {
+                if (done) break;
+                for (Army b : here) {
+                    if (a.men() <= 0 || b.men() <= 0) continue;
+                    War activeWar = enemyWar(a.realm, b.realm);
+                    if (activeWar == null) continue;
+                    War.Side sideOfA = activeWar.sides.get(a.realm);
+                    List<Army> sideA = new ArrayList<>(), sideB = new ArrayList<>();
+                    for (Army candidate : here) {
+                        War.Side side = activeWar.sides.get(candidate.realm);
+                        if (candidate.men() <= 0 || side == null) continue;
+                        (side == sideOfA ? sideA : sideB).add(candidate);
+                    }
+                    boolean defenderA = sideA.stream().anyMatch(x -> x.realm.equals(ownerOf(entry.getKey())))
+                            || !sideA.stream().anyMatch(Army::moving) && sideB.stream().anyMatch(Army::moving);
+                    plans.add(new BattlePlan(activeWar, entry.getKey(), sideOfA,
+                            List.copyOf(sideA), List.copyOf(sideB), defenderA));
+                    done = true;
+                    break;
+                }
+            }
+        }
+        if (plans.isEmpty()) return;
+
+        List<ArmyCombatCompute.Battle> requests = new ArrayList<>(plans.size());
+        for (BattlePlan plan : plans) requests.add(new ArmyCombatCompute.Battle(
+                plan.sideA(), plan.sideB(), war.day * 7919L + plan.location(), plan.defenderA()));
+        List<ArmyCombatCompute.Result> results = ArmyCombatCompute.trySimulateBatch(requests, types);
+
+        for (int i = 0; i < plans.size(); i++) {
+            BattlePlan plan = plans.get(i);
+            // A missing provider selects the exclusive Java fallback for every battle.
+            // A discovered provider failure throws and never mixes Java/Rust ownership.
+            fight(plan.war(), plan.location(), plan.sideOfA(), plan.sideA(), plan.sideB(),
+                    plan.defenderA(), results == null ? null : results.get(i));
         }
     }
 
@@ -788,14 +818,11 @@ public final class ArmyEngine {
         return new double[]{off, def};
     }
 
-    private void fight(War w, int loc, War.Side sideOfA, List<Army> A, List<Army> B) {
+    private void fight(War w, int loc, War.Side sideOfA, List<Army> A, List<Army> B,
+                       boolean defA, ArmyCombatCompute.Result nativeCombat) {
         int menA0 = men(A), menB0 = men(B);
-        String owner = ownerOf(loc);
-        boolean defA = A.stream().anyMatch(x -> x.realm.equals(owner)) || !A.stream().anyMatch(Army::moving) && B.stream().anyMatch(Army::moving);
         double tA = 1, tB = 1;
         if (defA) tA = 1.15; else tB = 1.15;
-        ArmyCombatCompute.Result nativeCombat = ArmyCombatCompute.trySimulate(A, B, types,
-                war.day * 7919L + loc, defA);
         if (nativeCombat == null) {
             // The native provider was unavailable before taking ownership: execute the exclusive Java path.
             Random rnd = new Random(war.day * 7919L + loc);

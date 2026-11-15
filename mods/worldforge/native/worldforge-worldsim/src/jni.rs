@@ -144,6 +144,24 @@ pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulat
 }
 
 #[no_mangle]
+pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulation_nativeAdvanceArmyCombatBatch(
+    env: JNIEnvPtr, _class: JObject, input: JObject,
+) -> JObject {
+    let response = match read_bytes(env, input, 8 * 1024 * 1024) {
+        None => error_json("invalid_input", "army combat batch unavailable or exceeds 8 MiB"),
+        Some(bytes) if !has_supported_schema(&bytes) => error_json("unsupported_schema", "expected army combat batch schema_version=1"),
+        Some(bytes) => match serde_json::from_slice::<crate::army::CombatBatchRequest>(&bytes) {
+            Ok(request) => match crate::army::simulate_batch(request) {
+                Ok(frame) => serde_json::to_vec(&frame).unwrap_or_else(|_| error_json("serialization_error", "army combat batch frame")),
+                Err(error) => error_json("army_combat_batch_rejected", &error),
+            },
+            Err(error) => error_json("invalid_army_combat_batch", &error.to_string()),
+        },
+    };
+    make_bytes(env, &response)
+}
+
+#[no_mangle]
 pub unsafe extern "system" fn Java_dev_worldforge_worldsim_mc_NativeWorldSimulation_nativeAdvanceTroopCompute(env: JNIEnvPtr, _class: JObject, input: JObject) -> JObject {
     let response = match read_bytes(env, input, 8 * 1024 * 1024) {
         None => error_json("invalid_input", "troop compute snapshot unavailable or too large"),
