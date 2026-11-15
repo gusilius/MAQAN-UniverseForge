@@ -9,6 +9,7 @@ pub mod worldgen;
 pub mod emergence;
 pub mod population;
 pub mod army;
+pub mod strategic_army;
 pub mod troops;
 pub mod trade;
 

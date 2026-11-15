@@ -95,6 +95,13 @@ public final class NativeWorldSimulation {
         return result;
     }
 
+    public static byte[] advanceArmyStrategic(byte[] request) {
+        if (!load()) throw new IllegalStateException("WorldForge native strategic army core is unavailable");
+        byte[] result = nativeAdvanceArmyStrategic(request);
+        if (result == null || result.length == 0) throw new IllegalStateException("WorldForge native strategic army core returned an empty frame");
+        return result;
+    }
+
     public static byte[] advanceArmyCombatBatch(byte[] request) {
         if (!load()) throw new IllegalStateException("WorldForge native combat core is unavailable");
         byte[] result = nativeAdvanceArmyCombatBatch(request);
@@ -116,6 +123,7 @@ public final class NativeWorldSimulation {
     private static native byte[] nativeAdvancePopulation(byte[] request);
     private static native byte[] nativeAdvanceArmyCombat(byte[] request);
     private static native byte[] nativeAdvanceArmyCombatBatch(byte[] request);
+    private static native byte[] nativeAdvanceArmyStrategic(byte[] request);
     private static native byte[] nativeAdvanceTroopCompute(byte[] request);
     private static native byte[] nativeAdvanceTradeCompute(byte[] request);
 }

@@ -869,6 +869,38 @@ public final class ArmyEngine {
     /** Распределить потери пропорционально по всем отрядам стороны. */
     /** Свои и союзные земли кормят войско; в чужих припасы тают (быстрее у больших армий), а без них идут потери и падает мораль. */
     private void supplies() {
+        List<Army> snapshot = new ArrayList<>(armies.values());
+        Map<Integer, Boolean> homeByArmy = new HashMap<>();
+        for (Army a : snapshot) {
+            if (a.men() <= 0) continue;
+            String owner = ownerOf(a.location);
+            boolean home = owner == null || owner.equals(a.realm) || war.alliesOf(a.realm).contains(owner);
+            if (!home) {
+                War active = enemyWar(a.realm, owner);
+                if (active != null && active.occupied.get(a.location) == active.sides.get(a.realm)) home = true;
+            }
+            homeByArmy.put(a.id, home);
+        }
+        List<ArmyStrategicCompute.Result> nativeResults =
+                ArmyStrategicCompute.tryComputeSupply(snapshot, homeByArmy, war.day);
+        if (nativeResults != null) {
+            Map<Integer, Army> byId = new HashMap<>();
+            for (Army army : snapshot) byId.put(army.id, army);
+            for (ArmyStrategicCompute.Result result : nativeResults) {
+                Army army = byId.get(result.armyId());
+                if (army == null) throw new IllegalStateException("Strategic army result references unknown army " + result.armyId());
+                army.supply = result.supply();
+                army.morale = result.morale();
+                if (result.casualties() > 0) casualties(List.of(army), result.casualties());
+                if (result.starved()) {
+                    if (war.day % 5 == 0) say(army.name + " голодает вдали от своих земель");
+                    army.lastEvent = "голодает";
+                } else if (result.lowSupply() && war.day % 5 == 0) {
+                    say(army.name + ": припасы на исходе");
+                }
+            }
+            return;
+        }
         for (Army a : new ArrayList<>(armies.values())) {
             if (a.men() <= 0) continue;
             String owner = ownerOf(a.location);
