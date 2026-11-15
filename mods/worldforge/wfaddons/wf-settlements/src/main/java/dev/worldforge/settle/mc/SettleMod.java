@@ -1310,7 +1310,7 @@ public class SettleMod {
                 continue;
             }
             if (person != null && !person.alive) {
-                colony.s.workers.remove(worker);
+                colony.s.removeWorkerProjectionByPerson(person.globalId);
                 continue;
             }
             if (person == null) {
@@ -1695,18 +1695,18 @@ public class SettleMod {
         ledger.open(target, realmId, Defs.SILVER, 0);
         // The financial journal is authoritative: recover remittances even if the settlement snapshot
         // was not saved after the ledger transfer (crash between the two world files).
-        settlement.remittedSilver = ledger.totalDebits(source, TreasuryLedger.Kind.TAX, "crown-remittance");
+        double remitted = ledger.totalDebits(source, TreasuryLedger.Kind.TAX, "crown-remittance");
         double due = Math.max(0, settlement.taxCollected * Math.max(0, Math.min(100, settlement.crownShare)) / 100.0
-                - settlement.remittedSilver);
+                - remitted);
         double payment = Math.min(due, ledger.balance(source));
         if (payment <= 1e-9) return;
         boolean transferred = ledger.transfer(source, target, payment, TreasuryLedger.Kind.TAX,
                 "crown-remittance", settlement.id + ":" + Double.toHexString(settlement.remittedSilver),
                 settlement.worldMinute(), "settlement tax remitted to realm treasury");
         if (transferred) {
-            settlement.remittedSilver = ledger.totalDebits(source, TreasuryLedger.Kind.TAX, "crown-remittance");
-            settlement.stock.put(Defs.SILVER, ledger.balance(source));
+            remitted = ledger.totalDebits(source, TreasuryLedger.Kind.TAX, "crown-remittance");
         }
+        settlement.applyTreasuryProjection(remitted, ledger.balance(source));
     }
 
     @SubscribeEvent

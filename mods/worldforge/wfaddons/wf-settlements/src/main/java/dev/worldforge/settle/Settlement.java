@@ -466,6 +466,26 @@ public final class Settlement {
         mutate(() -> { flow.recordTrade(time, resource, quantity, inbound); markMutation(); return null; });
     }
 
+    /**
+     * Reconciles the settlement's persisted treasury projection after an external
+     * canonical ledger operation (for example, realm tax remittance).
+     */
+    public void applyTreasuryProjection(double remitted, double silverBalance) {
+        if (!Double.isFinite(remitted) || remitted < 0
+                || !Double.isFinite(silverBalance) || silverBalance < 0)
+            throw new IllegalArgumentException("Invalid settlement treasury projection");
+        mutate(() -> {
+            double previousSilver = stock.getOrDefault(Defs.SILVER, Double.NaN);
+            if (Double.compare(remittedSilver, remitted) != 0
+                    || Double.compare(previousSilver, silverBalance) != 0) {
+                remittedSilver = remitted;
+                stock.put(Defs.SILVER, silverBalance);
+                markMutation();
+            }
+            return null;
+        });
+    }
+
     /** Double-entry transfer of a commodity between settlement accounts. */
     public boolean transferResourceTo(Settlement recipient, String resource, double quantity, String category, String reference) {
         if (recipient == null || recipient == this) return false;
@@ -847,6 +867,24 @@ public final class Settlement {
             for (Worker worker : new ArrayList<>(workers)) {
                 if (personId.equals(worker.person)) {
                     removeWorker(worker, reason);
+                    markMutation();
+                    return true;
+                }
+            }
+            return false;
+        });
+    }
+
+    /**
+     * Removes an already-dead canonical resident from the settlement projection.
+     * Unlike removeWorkerByPerson this does not enqueue another lifecycle transition.
+     */
+    public boolean removeWorkerProjectionByPerson(String personId) {
+        if (personId == null || personId.isBlank()) return false;
+        return mutate(() -> {
+            for (Worker worker : new ArrayList<>(workers)) {
+                if (personId.equals(worker.person)) {
+                    if (!workers.remove(worker)) return false;
                     markMutation();
                     return true;
                 }

@@ -89,6 +89,24 @@ public class TradeNetTest {
         Worker revisionWorker = revisionSettlement.addWorker("revision-worker");
         ok(settlementRevision() == beforeWorker + 1,
                 "worker creation publishes one SETTLEMENTS revision");
+        Worker deadProjectionWorker = revisionSettlement.addWorker("already-dead-worker");
+        deadProjectionWorker.person = "dead-character-uuid";
+        long beforeDeadProjectionRemoval = settlementRevision();
+        ok(revisionSettlement.removeWorkerProjectionByPerson("dead-character-uuid"),
+                "already-dead Character is removed from the settlement projection");
+        ok(settlementRevision() == beforeDeadProjectionRemoval + 1,
+                "dead resident projection removal publishes one SETTLEMENTS revision");
+        ok(revisionSettlement.pendingDepartures().stream()
+                        .noneMatch(departure -> "dead-character-uuid".equals(departure.personId())),
+                "already-dead projection removal does not enqueue a duplicate lifecycle transition");
+        long beforeTreasuryProjection = settlementRevision();
+        revisionSettlement.applyTreasuryProjection(12.5, 87.5);
+        ok(settlementRevision() == beforeTreasuryProjection + 1,
+                "external treasury reconciliation publishes one SETTLEMENTS revision");
+        long beforeTreasuryProjectionNoop = settlementRevision();
+        revisionSettlement.applyTreasuryProjection(12.5, 87.5);
+        ok(settlementRevision() == beforeTreasuryProjectionNoop,
+                "unchanged treasury projection does not churn the SETTLEMENTS revision");
         long beforeManualOrder = settlementRevision();
         revisionSettlement.moveTo(revisionWorker.id, 12.0, -4.0);
         ok(settlementRevision() == beforeManualOrder + 1,
