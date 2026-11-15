@@ -85,6 +85,37 @@ public final class WorldSimMod {
     private static String campaignMapId = "";
     private static long campaignStartedDay;
     private static final Set<String> campaignForcedChunks = new HashSet<>();
+    private static final int PEOPLE_MATERIALIZATION_BUDGET_PER_TICK = 256;
+    private static WorldSimComputeScheduler.Result pendingApplyResult;
+    private static JsonObject pendingCandidateEmergenceState;
+    private static EmergentPeopleProgress emergentPeopleProgress;
+
+    private static final class EmergentBandProgress {
+        final List<dev.worldforge.people.Character> residents;
+        final EmergentParents parents;
+        int originCursor;
+        boolean settlementReconciled;
+        EmergentBandProgress(List<dev.worldforge.people.Character> residents, int year) {
+            this.residents = residents;
+            this.residents.sort(Comparator.comparingInt(person -> person.birthYear));
+            this.parents = EmergentParents.from(this.residents, year);
+        }
+    }
+
+    private static final class EmergentMapProgress {
+        final EmergentPopulationIndex index;
+        final Map<String, EmergentBandProgress> bands = new HashMap<>();
+        EmergentMapProgress(CharacterRegistry registry) {
+            this.index = new EmergentPopulationIndex(registry.all());
+        }
+    }
+
+    private static final class EmergentPeopleProgress {
+        final JsonObject state;
+        final int year;
+        final Map<String, EmergentMapProgress> maps = new HashMap<>();
+        EmergentPeopleProgress(JsonObject state, int year) { this.state = state; this.year = year; }
+    }
 
 
     /**
@@ -135,6 +166,9 @@ public final class WorldSimMod {
         COMPUTE_SCHEDULER.close();
         COMPUTE_SCHEDULER = new WorldSimComputeScheduler();
         pendingComputeRevision = Long.MIN_VALUE;
+        pendingApplyResult = null;
+        pendingCandidateEmergenceState = null;
+        emergentPeopleProgress = null;
         lastDecisionDay = Long.MIN_VALUE;
         lodTicks = 0;
         emergenceState = null;
@@ -163,6 +197,9 @@ public final class WorldSimMod {
         lifecycleEpoch++;
         COMPUTE_SCHEDULER.close();
         pendingComputeRevision = Long.MIN_VALUE;
+        pendingApplyResult = null;
+        pendingCandidateEmergenceState = null;
+        emergentPeopleProgress = null;
         PROFILER.setGauge("worldsim.compute.busy", 0);
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server != null) saveState(server);
@@ -195,35 +232,51 @@ public final class WorldSimMod {
         }
 
         String worldId = worldIdentity(server);
-        WorldSimComputeScheduler.Result completed = null;
-        try {
-            completed = COMPUTE_SCHEDULER.poll();
-        } catch (RuntimeException error) {
-            pendingComputeRevision = Long.MIN_VALUE;
-            PROFILER.setGauge("worldsim.compute.busy", 0);
-            PROFILER.setGauge("worldsim.compute.failures", 1);
-            LOGGER.error("wf_worldsim: native compute failed; canonical state was not advanced", error);
-        }
-        if (completed != null) {
-            PROFILER.record("worldsim.compute.queue_wait", completed.queueWaitNanos());
-            PROFILER.record("worldsim.compute.total", completed.computeNanos());
-            WorldSimComputeScheduler.Ticket ticket = completed.ticket();
-            if (!ticket.matches(worldId, "worldsim.compute.cycle", pendingComputeRevision, lifecycleEpoch,
-                    NativeWorldSimulation.SNAPSHOT_SCHEMA_VERSION, NativeWorldSimulation.NATIVE_ABI_VERSION)) {
+        if (pendingApplyResult == null) {
+            WorldSimComputeScheduler.Result completed = null;
+            try {
+                completed = COMPUTE_SCHEDULER.poll();
+            } catch (RuntimeException error) {
                 pendingComputeRevision = Long.MIN_VALUE;
                 PROFILER.setGauge("worldsim.compute.busy", 0);
-                PROFILER.setGauge("worldsim.compute.stale_results", 1);
-                LOGGER.warn("wf_worldsim: discarded stale compute result world={} revision={} epoch={}",
-                        ticket.worldId(), ticket.revision(), ticket.lifecycleEpoch());
-            } else {
-                pendingComputeRevision = Long.MIN_VALUE;
-                try {
-                    applyComputeResult(server, completed);
-                } catch (Exception error) {
+                PROFILER.setGauge("worldsim.compute.failures", 1);
+                LOGGER.error("wf_worldsim: native compute failed; canonical state was not advanced", error);
+            }
+            if (completed != null) {
+                PROFILER.record("worldsim.compute.queue_wait", completed.queueWaitNanos());
+                PROFILER.record("worldsim.compute.total", completed.computeNanos());
+                WorldSimComputeScheduler.Ticket ticket = completed.ticket();
+                if (!ticket.matches(worldId, "worldsim.compute.cycle", pendingComputeRevision, lifecycleEpoch,
+                        NativeWorldSimulation.SNAPSHOT_SCHEMA_VERSION, NativeWorldSimulation.NATIVE_ABI_VERSION)) {
+                    pendingComputeRevision = Long.MIN_VALUE;
                     PROFILER.setGauge("worldsim.compute.busy", 0);
-                    LOGGER.error("wf_worldsim: compute result rejected safely at day {}; canonical state was not advanced",
-                            ticket.revision(), error);
+                    PROFILER.setGauge("worldsim.compute.stale_results", 1);
+                    LOGGER.warn("wf_worldsim: discarded stale compute result world={} revision={} epoch={}",
+                            ticket.worldId(), ticket.revision(), ticket.lifecycleEpoch());
+                } else {
+                    pendingApplyResult = completed;
+                    pendingCandidateEmergenceState = null;
+                    emergentPeopleProgress = null;
                 }
+            }
+        }
+        if (pendingApplyResult != null) {
+            try {
+                if (!applyComputeResult(server, pendingApplyResult)) {
+                    PROFILER.setGauge("worldsim.compute.busy", 1);
+                    return; // Continue the same authoritative frame on the next server tick.
+                }
+                pendingApplyResult = null;
+                pendingCandidateEmergenceState = null;
+                emergentPeopleProgress = null;
+                pendingComputeRevision = Long.MIN_VALUE;
+            } catch (Exception error) {
+                // Keep the frame and its staged native state. A transient save/materialization
+                // failure must not discard the only result or start a competing compute cycle.
+                PROFILER.setGauge("worldsim.compute.busy", 1);
+                LOGGER.error("wf_worldsim: authoritative frame remains pending at day {}; retrying next server tick",
+                        pendingComputeRevision, error);
+                return;
             }
         }
 
@@ -272,7 +325,7 @@ public final class WorldSimMod {
     }
 
     /** Applies a completed immutable native frame on the authoritative Minecraft server thread only. */
-    private void applyComputeResult(MinecraftServer server, WorldSimComputeScheduler.Result result) {
+    private boolean applyComputeResult(MinecraftServer server, WorldSimComputeScheduler.Result result) {
         long day = result.ticket().revision();
         JsonObject snapshot = GSON.fromJson(new String(result.snapshot(), StandardCharsets.UTF_8), JsonObject.class);
         JsonObject emergenceFrame = GSON.fromJson(new String(result.emergenceFrame(), StandardCharsets.UTF_8), JsonObject.class);
@@ -288,12 +341,15 @@ public final class WorldSimMod {
         }
 
         // Keep the last committed native state as the retry base until every apply
-        // stage below completes. The candidate is immutable staged data for this cycle.
-        JsonObject candidateEmergenceState = emergenceFrame.getAsJsonObject("state").deepCopy();
+        // stage below completes. Retain the same candidate object across tick-sized batches.
+        if (pendingCandidateEmergenceState == null)
+            pendingCandidateEmergenceState = emergenceFrame.getAsJsonObject("state").deepCopy();
+        JsonObject candidateEmergenceState = pendingCandidateEmergenceState;
         long phaseStarted = System.nanoTime();
         int materializationYear = emergenceYear(candidateEmergenceState, WorldForgeApi.clock().year());
-        syncEmergentPeople(server, candidateEmergenceState, materializationYear);
+        boolean peopleComplete = syncEmergentPeople(server, candidateEmergenceState, materializationYear);
         PROFILER.record("worldsim.sync_emergent_people", System.nanoTime() - phaseStarted);
+        if (!peopleComplete) return false;
         phaseStarted = System.nanoTime();
         syncEmergentPolities(server, candidateEmergenceState, materializationYear);
         PROFILER.record("worldsim.sync_emergent_polities", System.nanoTime() - phaseStarted);
@@ -383,6 +439,7 @@ public final class WorldSimMod {
                         ? snapshot.getAsJsonArray("settlements").size() : 0,
                 frame.getAsJsonArray("proposals").size(), accepted, rejected);
         updateCampaign(server, day);
+        return true;
     }
 
     private static void requireNativeSuccess(JsonObject frame, String stage) {
@@ -952,58 +1009,79 @@ public final class WorldSimMod {
     }
 
 
-    /** Materializes map-first demographic cohorts into the canonical wf-people registry. */
-    private static void syncEmergentPeople(MinecraftServer server, JsonObject state, int year) {
-        if (server == null || state == null || !state.has("bands") || !state.get("bands").isJsonArray()) return;
-        JsonArray bands = state.getAsJsonArray("bands");
+    /**
+     * Materializes canonical people incrementally. The native frame remains pending until every
+     * resident and Origins record is reconciled; a large cohort can never monopolize one server tick.
+     */
+    private static boolean syncEmergentPeople(MinecraftServer server, JsonObject state, int year) {
+        if (server == null || state == null || !state.has("bands") || !state.get("bands").isJsonArray()) return true;
+        if (emergentPeopleProgress == null || emergentPeopleProgress.state != state || emergentPeopleProgress.year != year)
+            emergentPeopleProgress = new EmergentPeopleProgress(state, year);
+
+        int budget = PEOPLE_MATERIALIZATION_BUDGET_PER_TICK;
+        boolean complete = true;
         for (MapData map : WorldForgeMod.loadedMaps().values()) {
             if (map == null) continue;
-            var registry = PeopleMod.registry(map);
+            CharacterRegistry registry = PeopleMod.registry(map);
             if (registry == null) {
                 LOGGER.warn("wf_worldsim: canonical Character registry unavailable for map {}; materialization deferred", map.name);
+                complete = false;
                 continue;
             }
+            EmergentMapProgress mapProgress = emergentPeopleProgress.maps.computeIfAbsent(
+                    map.name, ignored -> new EmergentMapProgress(registry));
             boolean hasSettledBands = false;
-            EmergentPopulationIndex populationIndex = new EmergentPopulationIndex(registry.all());
-            for (var element : bands) {
+            for (var element : state.getAsJsonArray("bands")) {
                 if (!element.isJsonObject()) continue;
                 JsonObject band = element.getAsJsonObject();
                 if (!band.has("map_id") || !map.name.equals(band.get("map_id").getAsString())) continue;
                 String bandId = band.get("id").getAsString();
                 int target = (int) Math.max(0L, Math.min(100_000L, band.get("population").getAsLong()));
-                List<dev.worldforge.people.Character> residents = populationIndex.livingResidents(bandId);
-                residents.sort(Comparator.comparingInt(person -> person.birthYear));
-                EmergentParents parents = EmergentParents.from(residents, year);
-                while (residents.size() < target) {
+                EmergentBandProgress bandProgress = mapProgress.bands.computeIfAbsent(bandId,
+                        ignored -> new EmergentBandProgress(mapProgress.index.livingResidents(bandId), year));
+                List<dev.worldforge.people.Character> residents = bandProgress.residents;
+
+                // Reconcile existing Origins assignments in bounded slices. New Characters are
+                // assigned immediately below, so restart/retry resumes from canonical records.
+                while (bandProgress.originCursor < residents.size() && budget > 0) {
+                    int ordinal = bandProgress.originCursor++;
+                    ensureEmergentOrigin(residents.get(ordinal), map, year, ordinal);
+                    budget--;
+                }
+                // Creation is bounded by the same per-server-tick budget. The target is never
+                // reduced; the remaining cohort is materialized on subsequent server ticks.
+                while (residents.size() < target && budget > 0) {
+                    int ordinal = residents.size();
                     dev.worldforge.people.Character created = createEmergentResident(
-                            registry, map, bandId, year, residents.size(), parents);
+                            registry, map, bandId, year, ordinal, bandProgress.parents);
                     if (created == null) break;
-                    populationIndex.add(created);
+                    mapProgress.index.add(created);
+                    ensureEmergentOrigin(created, map, year, ordinal);
+                    bandProgress.originCursor = residents.size();
+                    budget--;
                 }
-                // Attach the existing Origins addon to the same canonical Character UUID.
-                // This gives emergent NPCs real race, class and profession progression records.
-                for (int index = 0; index < residents.size(); index++)
-                    ensureEmergentOrigin(residents.get(index), map, year, index);
-                // The native cohort count is a demographic target, not an order to kill
-                // canonical people. A lower target can result from migration, scarcity or
-                // modelled decline; only the individual life/death simulation may end a life.
-                // Keep every living Character and expose the materialized count separately.
-                if (residents.size() != target) {
-                    band.addProperty("materialized_population", residents.size());
-                    band.addProperty("population_target_gap", target - residents.size());
-                } else {
-                    band.addProperty("materialized_population", residents.size());
-                    band.addProperty("population_target_gap", 0);
+
+                boolean bandComplete = residents.size() >= target
+                        && bandProgress.originCursor >= residents.size();
+                band.addProperty("materialized_population", residents.size());
+                band.addProperty("population_target_gap", target - residents.size());
+                if (!bandComplete) {
+                    complete = false;
+                    if (budget == 0) break;
+                    continue;
                 }
-                if (!band.get("settled").getAsBoolean()) continue;
+                if (!band.get("settled").getAsBoolean()) {
+                    bandProgress.settlementReconciled = true;
+                    continue;
+                }
+                if (bandProgress.settlementReconciled) continue;
+
                 String settlementId = "emg_" + bandId;
                 try {
                     int x = (int) Math.max(-29_999_000L, Math.min(29_999_000L,
                             Math.round((band.get("x").getAsDouble() - map.w / 2.0) * Math.max(0.001, map.bpp))));
                     int z = (int) Math.max(-29_999_000L, Math.min(29_999_000L,
                             Math.round((band.get("z").getAsDouble() - map.h / 2.0) * Math.max(0.001, map.bpp))));
-                    // Persisted legacy bands are rechecked before physical materialization.
-                    // A newly generated colony cannot appear inside an established realm.
                     if (SettleMod.colony(settlementId) == null) {
                         TitleData.Title province = map.provinceAt(x, z);
                         TitleData.Realm owner = province == null || map.titles == null
@@ -1012,10 +1090,10 @@ public final class WorldSimMod {
                             band.addProperty("territory_blocked_by", owner.id);
                             LOGGER.info("wf_worldsim: deferred legacy settlement {} on territory owned by {}",
                                     settlementId, owner.id);
+                            bandProgress.settlementReconciled = true;
                             continue;
                         }
                     }
-                    hasSettledBands = true;
                     String display = "Settlement " + bandId.substring(0, Math.min(8, bandId.length()));
                     String settlementDimension = mapDimension(server, map);
                     if (settlementDimension == null)
@@ -1027,7 +1105,7 @@ public final class WorldSimMod {
                             .filter(person -> person.alive)
                             .map(person -> person.globalId).toList();
                     if (!SettleMod.replaceCanonicalResidentsInMemory(colony.s.id, residentIds))
-                        LOGGER.error("wf_worldsim: canonical residents for settlement {} could not be staged", settlementId);
+                        throw new IllegalStateException("Canonical residents could not be attached to settlement " + settlementId);
                     colony.s.setCanonicalPopulation(residentIds.size());
                     for (Worker worker : new ArrayList<>(colony.s.workers)) {
                         if (worker.person == null || worker.person.isBlank() || residentIds.contains(worker.person)) continue;
@@ -1037,32 +1115,42 @@ public final class WorldSimMod {
                         colony.s.removeWorkerByPerson(worker.person, reason);
                     }
                     for (String residentId : residentIds) {
-                        dev.worldforge.people.Character resident = populationIndex.byGlobalId(residentId);
+                        dev.worldforge.people.Character resident = mapProgress.index.byGlobalId(residentId);
                         if (resident == null) continue;
-                        boolean workingAge = dev.worldforge.people.PopulationSimulation.age(resident, year) >= 18
-                                && dev.worldforge.people.PopulationSimulation.canWork(resident, year);
+                        boolean workingAge = PopulationSimulation.age(resident, year) >= 18
+                                && PopulationSimulation.canWork(resident, year);
                         if (!workingAge) {
                             colony.s.removeWorkerByPerson(residentId, "transfer:underage");
                             continue;
                         }
                         if (!SettleMod.attachExistingCharacter(colony.s.id, residentId))
-                            LOGGER.warn("wf_worldsim: canonical resident {} could not be attached to settlement {}",
-                                    residentId, settlementId);
+                            throw new IllegalStateException("Canonical resident " + residentId
+                                    + " could not be attached to settlement " + settlementId);
                     }
+                    bandProgress.settlementReconciled = true;
+                    hasSettledBands = true;
                 } catch (IllegalStateException deferred) {
                     LOGGER.warn("wf_worldsim: settlement materialization deferred for band {}: {}", bandId, deferred.getMessage());
+                    complete = false;
                 }
+                if (budget == 0) break;
             }
-            List<dev.worldforge.people.Character> emergentResidents = populationIndex.emergentResidents();
+
+            List<dev.worldforge.people.Character> emergentResidents = mapProgress.index.emergentResidents();
             boolean peopleDurable = emergentResidents.isEmpty()
                     || PeopleMod.persistCharacter(emergentResidents.get(0), server);
             if (!peopleDurable) {
-                LOGGER.error("wf_worldsim: canonical residents for map {} could not be durably saved; settlement batch deferred", map.name);
-                continue;
+                LOGGER.error("wf_worldsim: canonical residents for map {} could not be durably saved; materialization remains pending", map.name);
+                return false;
             }
-            if (hasSettledBands && !SettleMod.saveDurably(server))
-                LOGGER.error("wf_worldsim: settlement/Worker batch for map {} could not be durably saved", map.name);
+            if (hasSettledBands && !SettleMod.saveDurably(server)) {
+                LOGGER.error("wf_worldsim: settlement/Worker batch for map {} could not be durably saved; materialization remains pending", map.name);
+                return false;
+            }
+            if (budget == 0) complete = false;
         }
+        if (complete) emergentPeopleProgress = null;
+        return complete;
     }
 
     private static Set<String> emergentNeighbors(JsonObject polity, JsonArray polities, JsonArray bands, MapData map) {
@@ -1547,6 +1635,7 @@ public final class WorldSimMod {
                 person.props.put("origin.class", existing.cls);
             if (!existing.prof.isEmpty())
                 person.props.put("origin.profession", existing.prof.keySet().iterator().next());
+            person.props.put("emergence.origins_initialized", "1");
         } catch (RuntimeException unavailable) {
             LOGGER.debug("wf_worldsim: Origins assignment deferred for canonical Character {}: {}",
                     person.globalId, unavailable.toString());
