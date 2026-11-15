@@ -5,10 +5,10 @@ use serde::{Deserialize,Serialize};
 struct Request { schema_version:u32, armies:Vec<ArmyInput> }
 #[derive(Deserialize,Serialize)]
 struct ArmyInput { army_id:i32, men:i32, supply:f64, morale:f64, home:bool }
-#[derive(Serialize)]
+#[derive(Serialize,Deserialize)]
 struct ArmyOutput { army_id:i32, supply:f64, morale:f64, casualties:i32, starved:bool, low_supply:bool }
-#[derive(Serialize)]
-struct Frame { status:&'static str, armies:Vec<ArmyOutput> }
+#[derive(Serialize,Deserialize)]
+struct Frame { status:String, armies:Vec<ArmyOutput> }
 fn validate(input:&ArmyInput)->bool {
  input.army_id>0 && input.men>0 && input.supply.is_finite() && (0.0..=1.0).contains(&input.supply)
  && input.morale.is_finite() && (0.0..=1.0).contains(&input.morale)
@@ -35,7 +35,7 @@ pub fn compute(bytes:&[u8])->Result<Vec<u8>,String>{
  if request.armies.len()>100_000{return Err("strategic army batch exceeds 100000 armies".into());}
  let mut ids=std::collections::BTreeSet::new();
  if request.armies.iter().any(|a|!validate(a)||!ids.insert(a.army_id)){return Err("invalid or duplicate strategic army input".into());}
- let frame=Frame{status:"ok",armies:request.armies.iter().map(compute_one).collect()};
+ let frame=Frame{status:"ok".to_string(),armies:request.armies.iter().map(compute_one).collect()};
  serde_json::to_vec(&frame).map_err(|e|e.to_string())
 }
 #[cfg(test)]
