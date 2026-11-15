@@ -115,10 +115,12 @@ pub fn compute(bytes: &[u8]) -> Result<Vec<u8>, String> {
                 let Some(destination_index) = to.by_resource.get(&source.id) else { continue; };
                 let destination = &to.resources[*destination_index];
                 let export_reserve = (20.0_f64).max(source.consumption * 120.0);
-                if destination.price + 1e-12 < source.price * 1.08
-                    || source.stock + 1e-9 < export_reserve
-                    || destination.stock + 1e-9 >= source.stock * 0.5
-                    || destination.capacity - destination.stock + 1e-9 < 1.0 {
+                // Match the Java market policy exactly at every boundary. Epsilon
+                // tolerances here can create routes Java would reject (or vice versa).
+                if destination.price < source.price * 1.08
+                    || source.stock < export_reserve
+                    || destination.stock >= source.stock * 0.5
+                    || destination.capacity - destination.stock < 1.0 {
                     continue;
                 }
                 let score = destination.price / source.price;
@@ -206,6 +208,27 @@ mod tests {
         ]}"#;
         let output: Value = serde_json::from_slice(&compute(input).unwrap()).unwrap();
         assert_eq!(output["suggestions"].as_array().unwrap().len(), 0);
+    }
+    #[test] fn strict_market_thresholds_match_java_policy() {
+        fn request(source_price:f64, destination_price:f64, source_stock:f64,
+                   destination_stock:f64, destination_capacity:f64) -> Vec<u8> {
+            serde_json::to_vec(&json!({"schema_version":1,"operation":"suggestions","limit":5,"cities":[
+                {"id":"A","trade_rate":1.0,"resources":[{"id":"wood","price":source_price,"stock":source_stock,"capacity":200.0,"consumption":0.0}]},
+                {"id":"B","trade_rate":1.0,"resources":[{"id":"wood","price":destination_price,"stock":destination_stock,"capacity":destination_capacity,"consumption":0.0}]}
+            ]})).unwrap()
+        }
+        let below_spread = request(100.0, 108.0 - 5e-13, 100.0, 0.0, 200.0);
+        let below_reserve = request(100.0, 108.0, 20.0 - 5e-10, 0.0, 200.0);
+        let below_half_stock = request(100.0, 108.0, 100.0, 50.0 - 5e-10, 200.0);
+        let below_capacity = request(100.0, 108.0, 100.0, 0.0, 1.0 - 5e-10);
+        let count = |bytes:&[u8]| -> usize {
+            let value:Value = serde_json::from_slice(&compute(bytes).unwrap()).unwrap();
+            value["suggestions"].as_array().unwrap().len()
+        };
+        assert_eq!(count(&below_spread), 0, "price spread below 1.08 is rejected without epsilon");
+        assert_eq!(count(&below_reserve), 0, "source stock below reserve is rejected without epsilon");
+        assert_eq!(count(&below_half_stock), 1, "destination below half source stock remains eligible");
+        assert_eq!(count(&below_capacity), 0, "free capacity below one unit is rejected without epsilon");
     }
     #[test] fn bounded_large_market_catalog_is_deterministic() {
         let mut cities = Vec::new();

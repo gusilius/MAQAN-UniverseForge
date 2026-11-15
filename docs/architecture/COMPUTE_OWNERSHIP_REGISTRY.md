@@ -335,6 +335,14 @@ This is an operation-count status, not a percentage of all UniverseForge computa
 
 
 
+
+## Trade ranking parity boundary audit — 2026-11-16
+
+- Rust `trade::compute` owns only immutable market candidate ranking; Java remains owner of route creation, route caps, escrow, cargo, treasury, stock, shipment delivery, duties and persistence.
+- Removed epsilon relaxations from Rust's spread, export-reserve, destination-stock and capacity eligibility comparisons. These now use the same strict thresholds as the Java fallback, so near-boundary values cannot produce different route candidates solely due to provider selection.
+- Added Rust boundary coverage for just-below-spread, just-below-export-reserve, just-below-half-stock and just-below-capacity inputs. Exact candidate order remains descending score with stable snapshot traversal tie-break.
+- The new parity change is pending Windows/Linux native tests and the targeted addon dependency-closure workflow. Do not mark Trade fully accepted until that run passes and the server-level candidate/route lifecycle is verified.
+
 ## Army / Troops production ownership audit — 2026-11-16
 
 ### Strategic Army combat
