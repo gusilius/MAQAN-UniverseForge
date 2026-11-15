@@ -35,11 +35,17 @@ pub fn advance(r:Request)->Result<Frame,String>{
  if r.schema_version!=1{return Err("unsupported population schema".into())}
  if r.world_id.trim().is_empty(){return Err("empty world id".into())}
  if r.elapsed_days==0{return Err("elapsed_days must be positive".into())}
- let mut seen=BTreeSet::new();let mut out=Vec::with_capacity(r.characters.len());
+ // Validate IDs in a borrowed pass, then release those borrows before
+ // consuming the request. This avoids cloning IDs merely for uniqueness checks.
+ let mut seen=BTreeSet::new();
+ for p in r.characters.iter().filter(|person| person.alive){
+  if p.id.trim().is_empty()||!seen.insert(p.id.as_str()){return Err(format!("empty or duplicate character id: {}",p.id))}
+ }
+ drop(seen);
+ let mut out=Vec::with_capacity(r.characters.len());
  // The request owns every Character projection. Mutate each owned needs map
  // in place and move it into the result instead of cloning it for the output.
  for mut p in r.characters.into_iter().filter(|person| person.alive){
-  if p.id.trim().is_empty()||!seen.insert(p.id.as_str()){return Err(format!("empty or duplicate character id: {}",p.id))}
   if p.elapsed_days==0{return Err(format!("zero elapsed days for active Character: {}",p.id))}
   let d=p.elapsed_days.min(MAX as u64) as i32;
   let drifts=[("hunger",10*d),("rest",6*d),("social",2*d),("purpose",d),("leisure",3*d)];
