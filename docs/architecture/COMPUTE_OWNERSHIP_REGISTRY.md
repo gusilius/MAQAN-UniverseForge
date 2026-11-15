@@ -457,3 +457,8 @@ The route planner may only traverse chunks already recorded in `NavigatorExplora
 - `CharacterRegistry.create` stamps newly created Characters with their creation-day receipt; old persisted Characters without receipts use the stable world baseline.
 - Rust coordinator and Java fallback now use the same durable baseline. The process cursor is only a scheduling/progress hint, never the fallback origin.
 - Added regression coverage for missing receipts, baseline reload stability, and cross-world mismatch rejection. Acceptance remains pending targeted CI and an actual server crash/restart campaign.
+
+
+## Army and resident-character deployment contract
+
+The mandatory identity/body/deployment rules are defined in `docs/architecture/ARMY_CHARACTER_PRESENCE_AND_DEPLOYMENT_CONTRACT.md`. The current source audit found that settlement worker bodies are still distance-culled and not saved (`Bodies.LIVE`, `Bodies.tick`, `WFWorker.shouldBeSaved() == false`), while Character identity is durable. Treat resident body persistence, concurrent civilian+militia duties, per-member Army roster reconciliation and camp/battle lifecycle as open implementation work. Do not interpret the strategic Army token or folded camp as permission to remove residents or militia. The native `army.combat.batch` operation remains compute-only.
