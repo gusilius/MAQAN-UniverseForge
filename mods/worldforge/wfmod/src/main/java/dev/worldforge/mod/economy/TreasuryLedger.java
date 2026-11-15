@@ -38,6 +38,7 @@ public final class TreasuryLedger {
     private final Map<String, Double> debitTotals = new HashMap<>();
     private final Set<String> accountsWithEntries = new HashSet<>();
     private long sequence=1, transactionSequence=1;
+    private long mutationVersion;
     private String lastError="";
 
     private boolean restoring;
@@ -95,6 +96,7 @@ public final class TreasuryLedger {
         if (state == null || state.owner != this)
             throw new IllegalStateException("TreasuryLedger mutation escaped its canonical writer scope");
         state.dirty = true;
+        mutationVersion++;
     }
 
     private static String required(String v,String field) {
@@ -107,6 +109,9 @@ public final class TreasuryLedger {
     }
     private static long minute(long v) { if(v<0) throw new IllegalArgumentException("worldMinute cannot be negative"); return v; }
     public synchronized String lastError() { return lastError; }
+    public synchronized long mutationVersion() { return mutationVersion; }
+    public synchronized int accountCount() { return accounts.size(); }
+    public synchronized int journalSize() { return journal.size(); }
     public synchronized Collection<Account> accounts() { return Collections.unmodifiableCollection(accounts.values()); }
     public synchronized List<Entry> journal() { return Collections.unmodifiableList(journal); }
     public synchronized Account account(String id) { return accounts.get(id); }
@@ -354,6 +359,15 @@ public final class TreasuryLedger {
      * temporarily require several times the ledger's retained heap.
      */
     public synchronized void writeJson(java.io.Writer writer) throws java.io.IOException {
+        writeJsonContents(writer);
+    }
+
+    public synchronized long writeJsonVersioned(java.io.Writer writer) throws java.io.IOException {
+        writeJsonContents(writer);
+        return mutationVersion;
+    }
+
+    private void writeJsonContents(java.io.Writer writer) throws java.io.IOException {
         writer.write("{\"format\":\"wf-treasury-ledger/1\",\"sequence\":");
         writer.write(Long.toString(sequence));
         writer.write(",\"transactionSequence\":");
@@ -363,31 +377,34 @@ public final class TreasuryLedger {
         for (Account account : accounts.values()) {
             if (!first) writer.write(',');
             first = false;
-            writer.write(Json.write(Map.of(
-                    "id", account.id, "owner", account.ownerId, "currency", account.currency,
-                    "balance", account.balance, "creditLimit", account.creditLimit,
-                    "debt", account.debt, "bankrupt", account.bankrupt)));
+            writer.write("{\"id\":"); Json.writeString(writer, account.id);
+            writer.write(",\"owner\":"); Json.writeString(writer, account.ownerId);
+            writer.write(",\"currency\":"); Json.writeString(writer, account.currency);
+            writer.write(",\"balance\":"); Json.writeNumber(writer, account.balance);
+            writer.write(",\"creditLimit\":"); Json.writeNumber(writer, account.creditLimit);
+            writer.write(",\"debt\":"); Json.writeNumber(writer, account.debt);
+            writer.write(",\"bankrupt\":"); writer.write(Boolean.toString(account.bankrupt));
+            writer.write('}');
         }
         writer.write("],\"journal\":[");
         first = true;
         for (Entry entry : journal) {
             if (!first) writer.write(',');
             first = false;
-            Map<String, Object> row = new LinkedHashMap<>();
-            row.put("seq", entry.sequence());
-            row.put("tx", entry.transactionId());
-            row.put("account", entry.accountId());
-            row.put("other", entry.counterpartyId());
-            row.put("currency", entry.currency());
-            row.put("amount", entry.amount());
-            row.put("credit", entry.credit());
-            row.put("kind", entry.kind().name());
-            row.put("category", entry.category());
-            row.put("reference", entry.reference());
-            row.put("minute", entry.worldMinute());
-            row.put("balance", entry.balanceAfter());
-            row.put("memo", entry.memo());
-            writer.write(Json.write(row));
+            writer.write("{\"seq\":"); Json.writeNumber(writer, entry.sequence());
+            writer.write(",\"tx\":"); Json.writeString(writer, entry.transactionId());
+            writer.write(",\"account\":"); Json.writeString(writer, entry.accountId());
+            writer.write(",\"other\":"); Json.writeString(writer, entry.counterpartyId());
+            writer.write(",\"currency\":"); Json.writeString(writer, entry.currency());
+            writer.write(",\"amount\":"); Json.writeNumber(writer, entry.amount());
+            writer.write(",\"credit\":"); writer.write(Boolean.toString(entry.credit()));
+            writer.write(",\"kind\":"); Json.writeString(writer, entry.kind().name());
+            writer.write(",\"category\":"); Json.writeString(writer, entry.category());
+            writer.write(",\"reference\":"); Json.writeString(writer, entry.reference());
+            writer.write(",\"minute\":"); Json.writeNumber(writer, entry.worldMinute());
+            writer.write(",\"balance\":"); Json.writeNumber(writer, entry.balanceAfter());
+            writer.write(",\"memo\":"); Json.writeString(writer, entry.memo());
+            writer.write('}');
         }
         writer.write("]}");
     }

@@ -1,5 +1,8 @@
 package dev.worldforge.mod;
 
+import java.io.IOException;
+import java.io.Writer;
+
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -7,6 +10,7 @@ import java.util.Map;
 
 /** Минимальный разборщик JSON (без внешних библиотек): объекты, массивы, строки, числа, true/false/null. */
 public final class Json {
+    private static final String HEX_DIGITS = "0123456789abcdef";
     private final String s;
     private int i;
 
@@ -95,6 +99,37 @@ public final class Json {
     }
 
     // ------------------------------------------------------------------ запись
+
+    public static void writeString(Writer writer, String value) throws IOException {
+        if (value == null) { writer.write("null"); return; }
+        writer.write('"');
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            switch (c) {
+                case '"': writer.write("\\\""); break;
+                case '\\': writer.write("\\\\"); break;
+                case '\n': writer.write("\\n"); break;
+                case '\r': writer.write("\\r"); break;
+                case '\t': writer.write("\\t"); break;
+                default:
+                    if (c < 0x20) {
+                        writer.write("\\u00");
+                        writer.write(HEX_DIGITS.charAt((c >>> 4) & 15));
+                        writer.write(HEX_DIGITS.charAt(c & 15));
+                    } else writer.write(c);
+            }
+        }
+        writer.write('"');
+    }
+
+    public static void writeNumber(Writer writer, Number value) throws IOException {
+        if (value == null) { writer.write("null"); return; }
+        double d = value.doubleValue();
+        if (value instanceof Double || value instanceof Float) {
+            if (d == Math.rint(d) && Math.abs(d) < 1e15) writer.write(Long.toString((long) d));
+            else writer.write(value.toString());
+        } else writer.write(Long.toString(value.longValue()));
+    }
 
     /** Компактная запись JSON: Map, List, String, Number, Boolean, null. Целые числа пишутся без «.0». */
     public static String write(Object o) {

@@ -25,13 +25,29 @@ public final class TreasuryLedgerTest {
         long afterOpen = revisions.snapshot().orElseThrow().revision(
                 dev.worldforge.mod.api.DomainMutationRevisions.Domain.ECONOMY_TRADE);
         ok(afterOpen == economyBefore + 1, "opening account publishes one economy revision");
+        long versionBeforeLimit = revisionLedger.mutationVersion();
         revisionLedger.setCreditLimit("revision:account", 50);
+        long versionAfterLimit = revisionLedger.mutationVersion();
         long afterLimit = revisions.snapshot().orElseThrow().revision(
                 dev.worldforge.mod.api.DomainMutationRevisions.Domain.ECONOMY_TRADE);
         revisionLedger.setCreditLimit("revision:account", 50);
         ok(afterLimit == afterOpen + 1 && revisions.snapshot().orElseThrow().revision(
-                dev.worldforge.mod.api.DomainMutationRevisions.Domain.ECONOMY_TRADE) == afterLimit,
-                "credit limit mutation publishes once and an identical value is a no-op");
+                dev.worldforge.mod.api.DomainMutationRevisions.Domain.ECONOMY_TRADE) == afterLimit
+                && versionAfterLimit > versionBeforeLimit && revisionLedger.mutationVersion() == versionAfterLimit,
+                "credit limit publishes once; mutation version advances only for canonical changes");
+        StringWriter versionedSnapshot = new StringWriter();
+        try {
+            long writtenVersion = revisionLedger.writeJsonVersioned(versionedSnapshot);
+            ok(writtenVersion == versionAfterLimit
+                    && TreasuryLedger.fromJson(versionedSnapshot.toString()).accountCount() == 1,
+                    "versioned streaming snapshot returns the exact revision represented by its bytes");
+        } catch (java.io.IOException ex) { ok(false, "versioned streaming snapshot completes"); }
+        StringWriter escapedString = new StringWriter();
+        try {
+            String fixture = "quote=\" slash=\\ line=\n tab=\t control=" + (char) 1;
+            Json.writeString(escapedString, fixture);
+            ok(escapedString.toString().equals(Json.write(fixture)), "direct JSON string writer preserves canonical escaping");
+        } catch (java.io.IOException ex) { ok(false, "direct JSON string writer completes"); }
         revisionLedger.open("revision:target", "revision:target", "silver", 0);
         long beforeTransfer = revisions.snapshot().orElseThrow().revision(
                 dev.worldforge.mod.api.DomainMutationRevisions.Domain.ECONOMY_TRADE);
@@ -168,6 +184,28 @@ public final class TreasuryLedgerTest {
         } catch (java.io.IOException ex) {
             ok(false, "large treasury journal streaming serialization completes");
         }
+
+        TreasuryLedger scale = new TreasuryLedger();
+        scale.open("scale:account", "scale:account", "silver", 1_000_000);
+        for (int i = 0; i < 100_000; i++)
+            scale.deposit("scale:account", 1, TreasuryLedger.Kind.PRODUCTION, "scale-stress",
+                    "scale:" + i, i, "large campaign ledger");
+        final long[] streamedChars = {0};
+        java.io.Writer countingWriter = new java.io.Writer() {
+            @Override public void write(char[] chars, int off, int len) { streamedChars[0] += len; }
+            @Override public void write(int c) { streamedChars[0]++; }
+            @Override public void write(String value, int off, int len) { streamedChars[0] += len; }
+            @Override public void flush() { }
+            @Override public void close() { }
+        };
+        long benchmarkStarted = System.nanoTime();
+        try {
+            long version = scale.writeJsonVersioned(countingWriter);
+            long elapsedMillis = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - benchmarkStarted);
+            ok(version == scale.mutationVersion() && streamedChars[0] > 10_000_000,
+                    "100k-entry treasury journal streams directly without a giant JSON string");
+            System.out.println("TREASURY_STREAM_BENCHMARK entries=100000 chars=" + streamedChars[0] + " elapsedMs=" + elapsedMillis);
+        } catch (java.io.IOException ex) { ok(false, "100k-entry treasury streaming stress completes"); }
 
         ok(rationIndex.entriesForAccount("stock:settlement:one:food").size() == 2
                         && rationIndex.entriesForAccount("stock:settlement:one:food").get(0).kind() == TreasuryLedger.Kind.OPENING

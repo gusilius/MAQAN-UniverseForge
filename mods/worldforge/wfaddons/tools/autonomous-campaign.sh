@@ -153,7 +153,7 @@ while [ ! -s "$REPORT" ]; do
     echo "ERROR: campaign did not reach stable four-generation acceptance before wall-clock timeout"
     exit 6
   fi
-  if [ $((now - last_thread_dump)) -ge 90 ] && [ "$THREAD_DUMP_COUNT" -lt 8 ]; then
+  if [ $((now - last_thread_dump)) -ge 90 ]; then
     capture_server_threads
     last_thread_dump=$now
   fi
