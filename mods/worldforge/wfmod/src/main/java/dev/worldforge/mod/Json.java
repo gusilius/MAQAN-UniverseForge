@@ -127,7 +127,7 @@ public final class Json {
         double d = value.doubleValue();
         if (value instanceof Double || value instanceof Float) {
             if (d == Math.rint(d) && Math.abs(d) < 1e15) writer.write(Long.toString((long) d));
-            else writer.write(value.toString());
+            else writer.write(Double.toString(d));
         } else writer.write(Long.toString(value.longValue()));
     }
 
