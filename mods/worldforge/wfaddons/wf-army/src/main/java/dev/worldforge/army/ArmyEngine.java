@@ -1168,12 +1168,40 @@ public final class ArmyEngine {
         }
     }
 
+    /**
+     * One bounded BFS per source army, rather than one full route BFS per enemy pair.
+     * The returned distances preserve route()'s unweighted shortest-path semantics.
+     */
+    private Map<Integer, Integer> nearbyRouteDistances(int from, int maxDistance) {
+        Map<Integer, Integer> distance = new HashMap<>();
+        Deque<Integer> queue = new ArrayDeque<>();
+        distance.put(from, 0);
+        queue.add(from);
+        while (!queue.isEmpty()) {
+            int current = queue.poll();
+            int nextDistance = distance.get(current) + 1;
+            if (nextDistance > maxDistance) continue;
+            for (int next : nb(current)) {
+                if (distance.containsKey(next)) continue;
+                distance.put(next, nextDistance);
+                queue.add(next);
+            }
+        }
+        return distance;
+    }
+
     private Army nearestEnemyArmy(Army a) {
-        Army best = null; int bd = 1 << 30;
+        Army best = null;
+        int bestDistance = Integer.MAX_VALUE;
+        Map<Integer, Integer> distances = nearbyRouteDistances(a.location, 8);
+        // Keep armies.values() iteration order and strict '<' tie handling exactly as before.
         for (Army b : armies.values()) {
             if (enemyWar(a.realm, b.realm) == null) continue;
-            int dist = route(a.location, b.location).size();
-            if (dist > 0 && dist < bd && dist <= 8) { bd = dist; best = b; }
+            int distance = distances.getOrDefault(b.location, 0);
+            if (distance > 0 && distance < bestDistance) {
+                bestDistance = distance;
+                best = b;
+            }
         }
         return best;
     }
