@@ -76,7 +76,10 @@ for root_id in sorted(modules):
     })
 
 Path(args.output).write_text(json.dumps(profiles, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-print(f"ADDON_ISOLATION_PROFILE_COUNT={len(profiles)}")
 if args.lines:
+    # stdout is a machine-readable protocol consumed by mapfile; never mix diagnostics into it.
     for profile in profiles:
         print(profile["id"] + "|" + ",".join(profile["jars"]) + "|" + ",".join(profile["addons"]))
+    print(f"ADDON_ISOLATION_PROFILE_COUNT={len(profiles)}", file=__import__("sys").stderr)
+else:
+    print(f"ADDON_ISOLATION_PROFILE_COUNT={len(profiles)}")
