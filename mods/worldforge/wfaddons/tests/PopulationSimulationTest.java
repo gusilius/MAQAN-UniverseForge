@@ -569,6 +569,8 @@ public final class PopulationSimulationTest {
         CharacterRegistry resumableRegistry = new CharacterRegistry();
         Character resumable = resumableRegistry.create("Resumable", "", "north", "f", 270);
         PopulationSimulation.setNeed(resumable, Need.HUNGER, 5);
+        // Simulate a persisted Character whose last successful application was world day 5.
+        resumable.props.put("population.last_simulated_world_day", "5");
         PopulationSimulation.advanceToWorldDay(resumableRegistry, 10, 5, 300);
         int hungerAfterFirstApply = PopulationSimulation.need(resumable, Need.HUNGER);
         PopulationSimulation.advanceToWorldDay(resumableRegistry, 10, 5, 300);
@@ -586,6 +588,7 @@ public final class PopulationSimulationTest {
 
         CharacterRegistry legacyMissingReceiptRegistry = new CharacterRegistry();
         Character legacyMissingReceipt = legacyMissingReceiptRegistry.create("LegacyWithoutReceipt", "", "north", "f", 270);
+        PopulationSimulation.setNeed(legacyMissingReceipt, Need.HUNGER, 5);
         legacyMissingReceipt.props.remove("population.last_simulated_world_day");
         PopulationSimulation.advanceToWorldDay(legacyMissingReceiptRegistry, 10, 4, 300);
         ok(PopulationSimulation.need(legacyMissingReceipt, Need.HUNGER) == 65
