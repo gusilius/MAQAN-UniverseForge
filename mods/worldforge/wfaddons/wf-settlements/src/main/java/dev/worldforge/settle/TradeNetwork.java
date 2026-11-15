@@ -28,6 +28,8 @@ public final class TradeNetwork {
 
     public static final class TradeException extends RuntimeException { public TradeException(String m) { super(m); } }
 
+    private record RouteKey(String from, String to, String resource) {}
+
     /** Physical anchor supplied by the Minecraft adapter; absent anchors remain strategic-only. */
     public record Location(String dimension, double x, double z) {
         public Location { dimension = dimension == null ? "" : dimension; if (!Double.isFinite(x) || !Double.isFinite(z)) throw new IllegalArgumentException("invalid location"); }
@@ -224,9 +226,11 @@ public final class TradeNetwork {
         if (cities == null || cities.size() < 2 || perSettlementLimit < 1 || maxNewRoutes < 1
                 || !Double.isFinite(rate) || rate <= 0 || rate > 30) return 0;
         Map<String, Integer> participation = new HashMap<>();
+        Set<RouteKey> existingRoutes = new HashSet<>();
         for (Route route : routes.values()) {
             participation.merge(route.from, 1, Integer::sum);
             participation.merge(route.to, 1, Integer::sum);
+            existingRoutes.add(new RouteKey(route.from, route.to, route.res));
         }
         int created = 0;
         for (String[] suggestion : suggestions(cities, Math.max(8, cities.size() * 4))) {
@@ -237,11 +241,11 @@ public final class TradeNetwork {
             if (!hasSupplyNeed(from, to, resource)) continue;
             if (participation.getOrDefault(from.id, 0) >= perSettlementLimit
                     || participation.getOrDefault(to.id, 0) >= perSettlementLimit) continue;
-            boolean duplicate = routes.values().stream().anyMatch(route ->
-                    route.from.equals(from.id) && route.to.equals(to.id) && route.res.equals(suggestion[2]));
-            if (duplicate) continue;
+            RouteKey routeKey = new RouteKey(from.id, to.id, resource);
+            if (existingRoutes.contains(routeKey)) continue;
             try {
-                add(cities, from.id, to.id, suggestion[2], rate);
+                add(cities, from.id, to.id, resource, rate);
+                existingRoutes.add(routeKey);
                 participation.merge(from.id, 1, Integer::sum);
                 participation.merge(to.id, 1, Integer::sum);
                 created++;
