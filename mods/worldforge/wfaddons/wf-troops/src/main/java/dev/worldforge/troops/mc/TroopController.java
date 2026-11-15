@@ -24,6 +24,8 @@ final class TroopController {
     }
 
     static void step(MinecraftServer server) {
+        List<SquadFrame> frames = new ArrayList<>();
+        List<Morale.Input> moraleInputs = new ArrayList<>();
         for (Squads.Squad s : new ArrayList<>(TroopsMod.SQUADS.all())) {
             List<TroopEntity> alive = new ArrayList<>();
             for (String id : s.members) { TroopEntity t = TroopsMod.LIVE.get(id); if (t != null && t.isAlive()) alive.add(t); }
@@ -32,7 +34,17 @@ final class TroopController {
             for (TroopEntity t : alive) { cx += t.getX(); cz += t.getZ(); }
             cx /= alive.size(); cz /= alive.size();
             s.cx = cx; s.cz = cz;
-            if (morale(server, s, alive, cx, cz)) continue;                          // отряд бежит: приказов не слушает
+            SquadFrame frame = prepareMorale(s, alive, cx, cz);
+            frames.add(frame);
+            moraleInputs.add(frame.input());
+        }
+        double[] moraleValues = Morale.stepBatch(moraleInputs);
+        for (int frameIndex = 0; frameIndex < frames.size(); frameIndex++) {
+            SquadFrame frame = frames.get(frameIndex);
+            Squads.Squad s = frame.squad();
+            List<TroopEntity> alive = frame.alive();
+            double cx = frame.cx(), cz = frame.cz();
+            if (morale(server, frame, moraleValues[frameIndex])) continue;           // отряд бежит: приказов не слушает
             Squads.Order o = s.current();
             TroopEntity.Engage defaultEngage = switch (s.stance) {
                 case AGGRESSIVE -> TroopEntity.Engage.FULL;
@@ -112,22 +124,44 @@ final class TroopController {
         }
     }
 
-    /** Шаг морали, ауры командира и лечения. Возвращает true, если отряд бежит. */
-    private static boolean morale(MinecraftServer server, Squads.Squad s, List<TroopEntity> alive, double cx, double cz) {
-        int n = alive.size();
-        double[] en = alive.get(0).enemiesAround(cx, cz, 28);
-        boolean near = en[0] > 0;
-        if (s.lastAlive < 0) s.lastAlive = n;
-        double lost = Math.max(0, s.lastAlive - n) / (double) Math.max(1, s.initial);
-        s.lastAlive = n;
-        List<TroopEntity> leaders = new ArrayList<>();
-        for (TroopEntity t : alive) {
-            boolean appointed = !s.leaderCharacterId.isEmpty() && s.leaderCharacterId.equals(t.characterId);
-            double aura = Leadership.aura(t.def() == null ? 0 : t.def().aura(),
-                    appointed, appointed && s.leaderHero, appointed ? s.leadershipRank : 0);
-            if (aura > 0) leaders.add(t);
+    private record SquadFrame(Squads.Squad squad, List<TroopEntity> alive,
+                              double cx, double cz, double[] enemies, boolean near,
+                              double lost, List<TroopEntity> leaders) {
+        Morale.Input input() {
+            int count = alive.size();
+            return new Morale.Input(squad.morale, count / (double) Math.max(1, squad.initial),
+                    lost, near ? enemies[0] / count : 0, !leaders.isEmpty(), near, 0.5);
         }
-        s.morale = Morale.step(s.morale, n / (double) Math.max(1, s.initial), lost, near ? en[0] / n : 0, !leaders.isEmpty(), near, 0.5);
+    }
+
+    /** Captures only scalar inputs on the server thread; no entity or mutable squad crosses JNI. */
+    private static SquadFrame prepareMorale(Squads.Squad squad, List<TroopEntity> alive,
+                                             double cx, double cz) {
+        int count = alive.size();
+        double[] enemies = alive.get(0).enemiesAround(cx, cz, 28);
+        boolean near = enemies[0] > 0;
+        double lost = Math.max(0, squad.lastAlive < 0 ? 0 : squad.lastAlive - count)
+                / (double) Math.max(1, squad.initial);
+        List<TroopEntity> leaders = new ArrayList<>();
+        for (TroopEntity troop : alive) {
+            boolean appointed = !squad.leaderCharacterId.isEmpty()
+                    && squad.leaderCharacterId.equals(troop.characterId);
+            double aura = Leadership.aura(troop.def() == null ? 0 : troop.def().aura(),
+                    appointed, appointed && squad.leaderHero, appointed ? squad.leadershipRank : 0);
+            if (aura > 0) leaders.add(troop);
+        }
+        return new SquadFrame(squad, List.copyOf(alive), cx, cz, enemies, near, lost, List.copyOf(leaders));
+    }
+
+    /** Applies Rust's batch result and keeps all entity/Character effects on the server thread. */
+    private static boolean morale(MinecraftServer server, SquadFrame frame, double nextMorale) {
+        Squads.Squad s = frame.squad();
+        List<TroopEntity> alive = frame.alive();
+        int n = alive.size();
+        s.lastAlive = n;
+        s.morale = nextMorale;
+        boolean near = frame.near();
+        List<TroopEntity> leaders = frame.leaders();
         boolean was = s.routed;
         s.routed = Morale.routed(was, s.morale, near);
         if (s.routed != was) {
@@ -145,11 +179,9 @@ final class TroopController {
             }
             t.setDamageMult(Morale.damage(s.morale, led));
             t.setMorale((int) Math.round(s.morale * 100));
-            // Squad morale is gameplay state: keep the soldier's canonical Character in sync
-            // so personality, dialogue, leadership and future decisions observe the same value.
             TroopsMod.syncMilitaryMorale(t);
         }
-        for (TroopEntity h : alive) {                                               // лекари лечат раненых своего отряда рядом
+        for (TroopEntity h : alive) {
             if (h.def() == null || h.def().heal() <= 0) continue;
             List<TroopEntity> near2 = new ArrayList<>();
             for (TroopEntity t : alive) if (t.distanceToSqr(h) <= Morale.HEAL_RANGE * Morale.HEAL_RANGE) near2.add(t);
@@ -158,9 +190,6 @@ final class TroopController {
             double[] plan = Morale.healPlan(hp, mx, Morale.HEAL_TARGETS, h.def().heal() * 0.5);
             for (int i = 0; i < plan.length; i++) if (plan[i] > 0) near2.get(i).heal((float) plan[i]);
         }
-        if (!s.routed) return false;
-        double[] f = near ? Morale.flee(cx, cz, en[1], en[2], 30) : new double[]{cx, cz};
-        for (TroopEntity t : alive) { t.hasDest = true; t.destX = f[0]; t.destZ = f[1]; t.destYaw = Double.NaN; t.forced = null; t.engage = TroopEntity.Engage.NONE; }
-        return true;
+        return s.routed;
     }
 }

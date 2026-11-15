@@ -35,6 +35,13 @@ final class TroopCompute {
         }catch(InvocationTargetException e){throw new IllegalStateException("native troop compute failed after ownership",e.getCause());}
         catch(ReflectiveOperationException e){throw new IllegalStateException("native troop invocation failed",e);}
     }
+    static double[] moraleBatch(List<Morale.Input> inputs){
+        Map<String,Object> q=base("morale_batch");List<Object> rows=new ArrayList<>(inputs.size());
+        for(Morale.Input input:inputs){Map<String,Object> row=new LinkedHashMap<>();row.put("morale",input.morale());row.put("alive_ratio",input.aliveRatio());row.put("lost_now",input.lostNow());row.put("outnumber",input.outnumber());row.put("leader",input.leader());row.put("enemies_near",input.enemiesNear());row.put("dt",input.dt());rows.add(row);}
+        q.put("items",rows);Map<?,?> result=call(q);if(result==null)return null;
+        List<?> values=list(result,"morale");if(values.size()!=inputs.size())throw new IllegalStateException("native morale batch cardinality mismatch");
+        double[] out=new double[values.size()];for(int i=0;i<out.length;i++){out[i]=num(values.get(i));if(out[i]<0||out[i]>1)throw new IllegalStateException("native morale batch value out of range");}return out;
+    }
     static Double moraleStep(double morale,double alive,double lost,double outnumber,boolean leader,boolean enemies,double dt){
         Map<String,Object> q=base("morale_step");q.put("morale",morale);q.put("alive_ratio",alive);q.put("lost_now",lost);q.put("outnumber",outnumber);q.put("leader",leader);q.put("enemies_near",enemies);q.put("dt",dt);
         Map<?,?> r=call(q);return r==null?null:num(r,"morale");

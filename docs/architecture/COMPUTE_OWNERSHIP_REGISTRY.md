@@ -3,7 +3,7 @@
 **Status:** source-audited registry; first asynchronous WorldSim execution slice implemented, CI/campaign verification pending.  
 **Repository:** `gusilius/MAQAN-UniverseForge`  
 **Branch:** `feature/autonomous-world-simulation-engine`  
-**Last audited:** 2026-11-14  
+**Last audited:** 2026-11-16  
 **Architecture contract:** `docs/architecture/RUST_COMPUTE_MIGRATION_AND_OPTIMIZATION_CONTRACT.md`
 
 This registry records only ownership supported by the current source audit. Unknown owners and unverified integrations are explicitly marked; they must not be guessed.
@@ -28,6 +28,7 @@ This registry records only ownership supported by the current source audit. Unkn
 | `worldsim.materialize.people` | Canonical Character/Origins materialization | Java | Java | Create/update existing canonical Character and Origins records, preserve UUID and relationships | `WorldSimMod.syncEmergentPeople`; `EmergentPopulationIndex`; canonical `CharacterRegistry` | Java execution boundary; incremental bounded batches not implemented |
 | `worldsim.materialize.polities` | Realm/settlement projection | Java | Java | Reconcile existing realm/settlement authorities and physical world | `WorldSimMod.syncEmergentPolities`; Realm/Settlement APIs | Java execution boundary; requires audit of all projection costs |
 | `worldsim.proposal.apply` | Authoritative action execution | Java | Java | Validate and commit through ActionExecutionService and domain owner | `WorldSimMod.processServerTick`; persisted action receipts | Remains Java; never move Minecraft side effects to Rust |
+| `troops.squad_morale.batch` | Tactical squad morale | Rust JNI, one synchronous batch call from `TroopController.step` every 10 server ticks | Rust | Snapshot scalar morale inputs and collect squads on server thread; apply morale, routing, aura damage, healing and canonical Character sync on server thread | `TroopsMod.tick` → `TroopController.step` → `Morale.stepBatch` → `TroopCompute.moraleBatch`; Rust `troops::morale_batch` / `troops::morale` | Batch transport implemented in source; targeted Rust/Java/Forge CI pending. No new executor; Java fallback is exclusive when native provider is unavailable |
 
 ## Single-flight / async migration design (first implementation in source; verification pending)
 
@@ -50,7 +51,7 @@ The first migration slice is `worldsim.emergence.advance` + `worldsim.decide`. T
 | Area | Current owner | Required audit before adding optimization | Status |
 |---|---|---|---|
 | Forge/Minecraft tick lifecycle | Minecraft/Forge plus registered addon listeners | Enumerate all ServerTickEvent listeners, event subscribers, mixins/coremods and their execution cost | Open |
-| WorldSim native compute | UniverseForge Rust through JNI | Replace synchronous invocation with one bounded scheduler; do not add another per-addon pool | Open |
+| WorldSim native compute | UniverseForge Rust through JNI | WorldSim emergence/decide use the shared bounded scheduler; troop morale uses one synchronous batched JNI call per controller pass and does not create another pool | Mixed: WorldSim async path; troop morale batch path now source-implemented |
 | Character identity/index | Canonical wf-people CharacterRegistry; EmergentPopulationIndex is a short-lived lookup index | Confirm invalidation and no second identity store | Existing source; regression required |
 | Treasury journal/indexes | Canonical TreasuryLedger | Audit every `journal()` call site and index invalidation; no second ledger/cache | WF-RT-0013 partially addressed |
 | Chunk loading/generation | Minecraft/Forge and installed integrations | Inventory actual runtime mods and hooks before adding parallel chunk work | Open |

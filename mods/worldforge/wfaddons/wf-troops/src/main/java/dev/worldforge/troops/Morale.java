@@ -19,9 +19,28 @@ public final class Morale {
      * @param leader       рядом командир с аурой
      * @param enemiesNear  есть враги рядом
      */
+    public record Input(double morale,double aliveRatio,double lostNow,double outnumber,boolean leader,boolean enemiesNear,double dt) {}
+
+    public static double[] stepBatch(java.util.List<Input> inputs) {
+        if (inputs == null) throw new IllegalArgumentException("morale inputs are required");
+        double[] nativeValues = TroopCompute.moraleBatch(inputs);
+        if (nativeValues != null) return nativeValues;
+        double[] values = new double[inputs.size()];
+        for (int i = 0; i < values.length; i++) {
+            Input input = inputs.get(i);
+            values[i] = stepJava(input.morale(), input.aliveRatio(), input.lostNow(),
+                    input.outnumber(), input.leader(), input.enemiesNear(), input.dt());
+        }
+        return values;
+    }
+
     public static double step(double morale, double aliveRatio, double lostNow, double outnumber, boolean leader, boolean enemiesNear, double dt) {
         Double nativeValue = TroopCompute.moraleStep(morale, aliveRatio, lostNow, outnumber, leader, enemiesNear, dt);
         if (nativeValue != null) return nativeValue;
+        return stepJava(morale, aliveRatio, lostNow, outnumber, leader, enemiesNear, dt);
+    }
+
+    private static double stepJava(double morale, double aliveRatio, double lostNow, double outnumber, boolean leader, boolean enemiesNear, double dt) {
         morale -= lostNow * SHOCK;
         double target = 0.4 + 0.6 * clamp(aliveRatio, 0, 1);
         if (enemiesNear) target -= clamp(outnumber - 1, 0, 1) * 0.25;
