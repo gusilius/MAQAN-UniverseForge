@@ -597,7 +597,13 @@ public final class Settlement {
     /** Atomic resource withdrawal used by recruitment and other settlement services. */
     public boolean spend(Map<String, Integer> cost) {
         if (cost == null) return false;
-        return mutate(() -> { if (!canPay(cost) || !pay(cost)) return false; if (!cost.isEmpty()) markMutation(); return true; });
+        return mutate(() -> {
+            TreasuryLedger ledger = TreasuryService.current();
+            long beforeVersion = ledger.mutationVersion();
+            boolean spent = canPay(cost) && pay(cost);
+            if (ledger.mutationVersion() != beforeVersion) markMutation();
+            return spent;
+        });
     }
 
     /**
@@ -612,7 +618,7 @@ public final class Settlement {
             TreasuryLedger ledger = TreasuryService.current();
             long beforeVersion = ledger.mutationVersion();
             boolean spent = spendOnceInternal(cost, operationId);
-            if (spent && ledger.mutationVersion() != beforeVersion) markMutation();
+            if (ledger.mutationVersion() != beforeVersion) markMutation();
             return spent;
         });
     }
