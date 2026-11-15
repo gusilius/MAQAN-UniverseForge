@@ -11,7 +11,7 @@ import java.util.Locale;
 /** Loads the platform-native WorldSim core; Java remains authoritative if no supported binary is present. */
 public final class NativeWorldSimulation {
     public static final int SNAPSHOT_SCHEMA_VERSION = 1;
-    public static final int NATIVE_ABI_VERSION = 4;
+    public static final int NATIVE_ABI_VERSION = 5;
     private static volatile boolean attempted;
     private static volatile boolean available;
     private NativeWorldSimulation() {}
@@ -81,6 +81,13 @@ public final class NativeWorldSimulation {
         return result;
     }
 
+    public static byte[] advanceTradeCompute(byte[] request) {
+        if (!load()) throw new IllegalStateException("WorldForge native trade compute core is unavailable");
+        byte[] result = nativeAdvanceTradeCompute(request);
+        if (result == null || result.length == 0) throw new IllegalStateException("WorldForge native trade compute returned an empty frame");
+        return result;
+    }
+
     public static byte[] advanceArmyCombat(byte[] request) {
         if (!load()) throw new IllegalStateException("WorldForge native combat core is unavailable");
         byte[] result = nativeAdvanceArmyCombat(request);
@@ -102,4 +109,5 @@ public final class NativeWorldSimulation {
     private static native byte[] nativeAdvancePopulation(byte[] request);
     private static native byte[] nativeAdvanceArmyCombat(byte[] request);
     private static native byte[] nativeAdvanceTroopCompute(byte[] request);
+    private static native byte[] nativeAdvanceTradeCompute(byte[] request);
 }

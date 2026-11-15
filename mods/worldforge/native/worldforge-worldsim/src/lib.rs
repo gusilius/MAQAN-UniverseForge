@@ -10,6 +10,7 @@ pub mod emergence;
 pub mod population;
 pub mod army;
 pub mod troops;
+pub mod trade;
 
 use std::collections::{BTreeMap, BTreeSet};
 

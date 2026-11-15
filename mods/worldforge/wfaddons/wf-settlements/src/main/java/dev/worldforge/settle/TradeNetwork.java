@@ -267,6 +267,8 @@ public final class TradeNetwork {
 
     /** Same candidate policy for the client projection; all values originate from Settlement. */
     public static List<String[]> suggestions(List<CityRow> cities, int limit) {
+        List<String[]> nativeSuggestions = TradeCompute.suggestions(cities, limit);
+        if (nativeSuggestions != null) return nativeSuggestions;
         List<double[]> scores = new ArrayList<>();
         List<String[]> keys = new ArrayList<>();
         if (cities == null || limit <= 0) return List.of();
@@ -299,6 +301,8 @@ public final class TradeNetwork {
 
     /** Лучшие пары для маршрутов: отношение цен, убывание. */
     public static List<String[]> suggestions(Map<String, Settlement> cities, int limit) {
+        List<String[]> nativeSuggestions = TradeCompute.suggestions(cities, limit);
+        if (nativeSuggestions != null) return nativeSuggestions;
         List<double[]> tmp = new ArrayList<>();
         List<String[]> keys = new ArrayList<>();
         for (Settlement a : cities.values()) for (Settlement b : cities.values()) {

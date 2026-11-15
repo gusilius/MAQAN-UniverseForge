@@ -1,4 +1,4 @@
-name: WorldForge RTS / Army / Troops targeted validation
+name: WorldForge Settlements / Trade targeted validation
 
 on:
   push:
@@ -6,6 +6,7 @@ on:
     paths:
       - "mods/worldforge/wfaddons/wf-army/**"
       - "mods/worldforge/wfaddons/wf-troops/**"
+      - "mods/worldforge/wfaddons/wf-settlements/**"
       - "mods/worldforge/wfaddons/wf-war/**"
       - "mods/worldforge/wfaddons/wf-worldsim/**"
       - "mods/worldforge/wfaddons/tests/**"
@@ -18,7 +19,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: worldforge-rts-targeted-${{ github.ref }}
+  group: worldforge-settlement-trade-targeted-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -31,7 +32,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
-      - name: Test native simulation and army combat
+      - name: Test native simulation, army combat and settlement trade compute
         working-directory: mods/worldforge/native/worldforge-worldsim
         run: cargo test --target x86_64-pc-windows-msvc
       - name: Build Windows native library
@@ -63,7 +64,7 @@ jobs:
           if-no-files-found: error
 
   targeted-addons:
-    name: Army / Troops / WorldSim dependency-closure build and logic tests
+    name: Settlements / Trade / WorldSim dependency-closure build and logic tests
     runs-on: windows-latest
     needs: [native-windows, native-linux]
     timeout-minutes: 90
@@ -91,8 +92,8 @@ jobs:
         working-directory: mods/worldforge/wfaddons
         shell: bash
         run: bash tools/test-all.sh ../wfmod
-      - name: Build Army, Troops and WorldSim with only dependency closure
+      - name: Build Settlements and WorldSim with only dependency closure
         working-directory: mods/worldforge/wfaddons
         shell: bash
-        run: bash tools/build-selected-addons.sh ../wfmod wf-army wf-troops wf-worldsim
+        run: bash tools/build-selected-addons.sh ../wfmod wf-settlements wf-worldsim
 
