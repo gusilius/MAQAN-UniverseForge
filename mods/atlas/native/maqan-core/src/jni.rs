@@ -366,8 +366,12 @@ pub unsafe extern "system" fn Java_com_maqan_galacticnavigator_navigation_Naviga
     }).collect();
     let result=crate::surface_route::find(&cells,(start_x,start_z),(goal_x,goal_z),mode,
         max_expansions.clamp(1,250_000) as usize);
-    let mut packed=Vec::with_capacity(2+result.points.len()*2);
-    packed.push(if result.found{1}else{0});packed.push(result.expanded.min(i32::MAX as usize) as i32);
+    let cost_bits=result.cost.to_bits();
+    let mut packed=Vec::with_capacity(4+result.points.len()*2);
+    packed.push(if result.found{1}else{0});
+    packed.push(result.expanded.min(i32::MAX as usize) as i32);
+    packed.push(cost_bits as u32 as i32);
+    packed.push((cost_bits>>32) as u32 as i32);
     for (x,z) in result.points{packed.push(x);packed.push(z);}
     let array=new_array(env,packed.len() as i32);if array.is_null(){return std::ptr::null_mut();}
     set_region(env,array,0,packed.len() as i32,packed.as_ptr());

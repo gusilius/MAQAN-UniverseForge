@@ -107,7 +107,7 @@ public final class NavigatorNativeBridge {
         try {
             int[] result=nativeRouteExploredSurface(exploredXzHeightBiome,startX,startZ,goalX,goalZ,
                     mode,Math.max(1,Math.min(maxExpansions,250_000)));
-            if(result==null||result.length<2||(result.length-2)%2!=0)return null;
+            if(result==null||result.length<4||(result.length-4)%2!=0)return null;
             return result;
         } catch(Throwable ignored){return null;}
     }
