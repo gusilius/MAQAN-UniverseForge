@@ -473,3 +473,10 @@ The route planner may only traverse chunks already recorded in `NavigatorExplora
 - Treasury postings continue to publish `ECONOMY_TRADE` through `TreasuryLedger`; Settlement owns its simulation/projection lane and does not duplicate the financial journal.
 - Added regression coverage for valid/invalid tick, resident-count no-op, and worker creation.
 - **Still incomplete:** direct public `stock`, `buildings`, `workers`, `flow`, `taskGraph` and mutable domain fields remain bypass surfaces. Several direct order and lifecycle writers (including external Character reconciliation and transfer projections) still need canonical scopes. Do not treat `SETTLEMENTS` as globally complete or enable global WorldSim apply fencing.
+
+### Settlement command/lifecycle write coverage — 2026-11-16
+
+- Public settlement command APIs for worker assignment/unassignment, profession changes, manual movement/waypoint completion, hauling assignment, batch assignment, building pause/priority/cancel/adoption, departure acknowledgement, and work-priority updates now enter the shared nested `SETTLEMENTS` mutation scope.
+- Nested batch commands and lifecycle operations coalesce into one revision per outer logical command; the tick remains a single bounded revision.
+- Added focused revision assertions for manual worker orders and work-priority changes.
+- **Not closed yet:** economic/resource transfer methods mutate TreasuryLedger and Settlement mirrors; direct public state (`stock`, `workers`, `buildings`, `flow`, `taskGraph`, policy fields and mutable Worker/Building objects) remains externally writable. External CharacterRegistry reconciliation and trade delivery paths need an explicit ownership contract. This is partial writer coverage, not a safe global snapshot fence.

@@ -86,9 +86,22 @@ public class TradeNetTest {
         ok(settlementRevision() == beforePopulationNoop,
                 "unchanged canonical resident count does not churn the revision");
         long beforeWorker = settlementRevision();
-        revisionSettlement.addWorker("revision-worker");
+        Settlement.Worker revisionWorker = revisionSettlement.addWorker("revision-worker");
         ok(settlementRevision() == beforeWorker + 1,
                 "worker creation publishes one SETTLEMENTS revision");
+        long beforeManualOrder = settlementRevision();
+        revisionSettlement.moveTo(revisionWorker.id, 12.0, -4.0);
+        ok(settlementRevision() == beforeManualOrder + 1,
+                "manual worker movement order publishes one SETTLEMENTS revision");
+        long beforeOrderAdvance = settlementRevision();
+        revisionSettlement.advanceManualOrder(revisionWorker.id);
+        ok(settlementRevision() == beforeOrderAdvance + 1,
+                "manual worker order completion publishes one SETTLEMENTS revision");
+        long beforePriority = settlementRevision();
+        String revisionProfession = revisionWorker.profession;
+        revisionSettlement.setWorkPriority(revisionWorker.id, revisionProfession, 2);
+        ok(settlementRevision() == beforePriority + 1,
+                "worker profession priority publishes one SETTLEMENTS revision");
 
         TradeNetwork n = new TradeNetwork();
         var sug = TradeNetwork.suggestions(cs, 3);
