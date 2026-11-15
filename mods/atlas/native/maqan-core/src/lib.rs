@@ -8,6 +8,7 @@ pub mod ui;
 pub mod motion;
 pub mod layout;
 pub mod jni;
+pub mod surface_route;
 
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap};

@@ -100,6 +100,21 @@ public final class NavigatorNativeBridge {
     }
 
 
+    /** Native A* route over an immutable explored-chunk projection; null means native unavailable/failure. */
+    public static int[] routeExploredSurface(int[] exploredXzHeightBiome,int startX,int startZ,
+                                             int goalX,int goalZ,int mode,int maxExpansions) {
+        if(!AVAILABLE||exploredXzHeightBiome==null||exploredXzHeightBiome.length%4!=0)return null;
+        try {
+            int[] result=nativeRouteExploredSurface(exploredXzHeightBiome,startX,startZ,goalX,goalZ,
+                    mode,Math.max(1,Math.min(maxExpansions,250_000)));
+            if(result==null||result.length<2||(result.length-2)%2!=0)return null;
+            return result;
+        } catch(Throwable ignored){return null;}
+    }
+
+    private static native int[] nativeRouteExploredSurface(int[] exploredXzHeightBiome,
+            int startX,int startZ,int goalX,int goalZ,int mode,int maxExpansions);
+
     /**
      * Requests one complete animated chrome frame from Rust and submits its
      * batched draw commands to Minecraft's existing GuiGraphics context.

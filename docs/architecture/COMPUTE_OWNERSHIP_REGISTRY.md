@@ -389,3 +389,12 @@ This is an operation-count status, not a percentage of all UniverseForge computa
 - A projection must name every canonical domain it reads. PopulationComputeBridge now captures and validates only CHARACTERS; unrelated Settlement/Economy/Politics writers no longer starve or stale a result that never read those domains.
 - Global WorldSim snapshot/apply fencing remains prohibited until every domain writer and cross-domain transaction is audited. The unscoped API remains conservative and observes every lane.
 - Regression tests cover unrelated active/committed writers, relevant active writers, and preservation of global freshness semantics.
+
+
+## Atlas native routing ownership
+
+| Operation | Current owner | Rust owner | Java responsibility | Status |
+|---|---|---|---|---|
+| `atlas.surface.explored-route` | Java `ExploredSurfaceRoutePlanner.find` | Rust `surface_route::find` through MAQAN native JNI | Capture the persisted explored-chunk snapshot, validate route endpoints, preserve surface heights and render/execute navigation | Native A* path added with exact mode/biome/slope costs and exclusive Java fallback when native provider is unavailable or fails; Windows/Linux CI and route parity fixtures pending |
+
+The route planner may only traverse chunks already recorded in `NavigatorExplorationStore`; native code receives a detached packed snapshot and never queries or loads Minecraft chunks. The existing `ExplorationIndex::route` remains a separate lower-level Dijkstra API and is not used as a duplicate production route calculation.

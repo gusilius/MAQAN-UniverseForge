@@ -25,6 +25,31 @@ public final class ExploredSurfaceRoutePlanner {
         Objects.requireNonNull(mode,"mode");
         Map<Node,NavigatorExplorationStore.ExploredChunk> known=new HashMap<>();
         for(var chunk:explored)known.put(new Node(chunk.chunkX(),chunk.chunkZ()),chunk);
+        if(NavigatorNativeBridge.nativeAvailable()&&explored!=null&&!explored.isEmpty()){
+            int[] packed=new int[explored.size()*4];int offset=0;
+            for(var chunk:explored){
+                packed[offset++]=chunk.chunkX();packed[offset++]=chunk.chunkZ();packed[offset++]=chunk.surfaceY();
+                packed[offset++]=biomeCode(chunk.biome());
+            }
+            int[] nativeRoute=NavigatorNativeBridge.routeExploredSurface(packed,startX,startZ,goalX,goalZ,
+                    mode.ordinal(),Math.min(250_000,Math.max(2_000,known.size()*4)));
+            if(nativeRoute!=null){
+                int expanded=nativeRoute[1];
+                if(nativeRoute[0]==0)return failure(expanded>=Math.min(250_000,Math.max(2_000,known.size()*4))
+                        ?"Search limit reached; zoom in or explore a smaller corridor."
+                        :"No continuous explored corridor connects these points.",expanded);
+                List<Point> points=new ArrayList<>((nativeRoute.length-2)/2);
+                for(int i=2;i<nativeRoute.length;i+=2){
+                    var cell=known.get(new Node(nativeRoute[i],nativeRoute[i+1]));
+                    if(cell==null)return failure("Native route referenced a chunk outside the captured explored snapshot.",expanded);
+                    points.add(new Point(cell.chunkX(),cell.chunkZ(),cell.surfaceY()));
+                }
+                if(points.isEmpty()||points.get(0).chunkX()!=startX||points.get(0).chunkZ()!=startZ
+                        ||points.get(points.size()-1).chunkX()!=goalX||points.get(points.size()-1).chunkZ()!=goalZ)
+                    return failure("Native route failed endpoint validation.",expanded);
+                return new Result(true,"Route found through explored terrain.",points,nativeCost(points,mode,known),expanded);
+            }
+        }
         Node start=new Node(startX,startZ),goal=new Node(goalX,goalZ);
         if(!known.containsKey(start))
             return failure("Your current chunk has not been recorded yet.",0);
@@ -87,6 +112,25 @@ public final class ExploredSurfaceRoutePlanner {
         return failure(expanded>=maxExpanded
                 ?"Search limit reached; zoom in or explore a smaller corridor."
                 :"No continuous explored corridor connects these points.",expanded);
+    }
+
+    private static int biomeCode(String biome){
+        String id=biome==null?"":biome.toLowerCase(Locale.ROOT);
+        if(id.contains("lava")||id.contains("basalt_deltas")||id.contains("fire"))return 1;
+        if(id.contains("ocean")||id.contains("river")||id.contains("beach"))return 2;
+        if(id.contains("mountain")||id.contains("peaks")||id.contains("cliff"))return 3;
+        return 0;
+    }
+    private static double nativeCost(List<Point> points,Mode mode,Map<Node,NavigatorExplorationStore.ExploredChunk> known){
+        double cost=0;
+        for(int i=1;i<points.size();i++){
+            Point a=points.get(i-1),b=points.get(i);
+            int dx=Math.abs(b.chunkX()-a.chunkX()),dz=Math.abs(b.chunkZ()-a.chunkZ());
+            cost+=dx!=0&&dz!=0?Math.sqrt(2.0):1.0;
+            cost+=heightCost(Math.abs(b.surfaceY()-a.surfaceY()),mode);
+            cost+=biomeCost(known.get(new Node(b.chunkX(),b.chunkZ())).biome(),mode);
+        }
+        return cost;
     }
 
     private static double heightCost(int delta,Mode mode){
