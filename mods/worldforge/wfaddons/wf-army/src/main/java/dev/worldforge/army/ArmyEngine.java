@@ -789,25 +789,37 @@ public final class ArmyEngine {
     }
 
     private void fight(War w, int loc, War.Side sideOfA, List<Army> A, List<Army> B) {
-        Random rnd = new Random(war.day * 7919L + loc);
         int menA0 = men(A), menB0 = men(B);
         String owner = ownerOf(loc);
         boolean defA = A.stream().anyMatch(x -> x.realm.equals(owner)) || !A.stream().anyMatch(Army::moving) && B.stream().anyMatch(Army::moving);
         double tA = 1, tB = 1;
         if (defA) tA = 1.15; else tB = 1.15;
-        for (int round = 0; round < 8 && men(A) > 0 && men(B) > 0; round++) {
-            double[] sa = strength(A, B), sb = strength(B, A);
-            double dmgToB = sa[0] * tA * 0.10 * (0.85 + 0.3 * rnd.nextDouble());
-            double dmgToA = sb[0] * tB * 0.10 * (0.85 + 0.3 * rnd.nextDouble());
-            // защита снижает потери: доля убитых = урон / (оборона + урон)
-            double kB = Math.min(men(B), dmgToB * (men(B) / Math.max(1, sb[1] + dmgToB)));
-            double kA = Math.min(men(A), dmgToA * (men(A) / Math.max(1, sa[1] + dmgToA)));
-            casualties(B, kB);
-            casualties(A, kA);
-            double lossShareA = kA / Math.max(1, men(A) + kA), lossShareB = kB / Math.max(1, men(B) + kB);
-            for (Army x : A) x.morale = Math.max(0, x.morale - lossShareA * 2.2 - 0.03);
-            for (Army x : B) x.morale = Math.max(0, x.morale - lossShareB * 2.2 - 0.03);
-            if (avgMorale(A) <= 0.15 || avgMorale(B) <= 0.15) break;
+        ArmyCombatCompute.Result nativeCombat = ArmyCombatCompute.trySimulate(A, B, types,
+                war.day * 7919L + loc, defA);
+        if (nativeCombat == null) {
+            // The native provider was unavailable before taking ownership: execute the exclusive Java path.
+            Random rnd = new Random(war.day * 7919L + loc);
+            for (int round = 0; round < 8 && men(A) > 0 && men(B) > 0; round++) {
+                double[] sa = strength(A, B), sb = strength(B, A);
+                double dmgToB = sa[0] * tA * 0.10 * (0.85 + 0.3 * rnd.nextDouble());
+                double dmgToA = sb[0] * tB * 0.10 * (0.85 + 0.3 * rnd.nextDouble());
+                double kB = Math.min(men(B), dmgToB * (men(B) / Math.max(1, sb[1] + dmgToB)));
+                double kA = Math.min(men(A), dmgToA * (men(A) / Math.max(1, sa[1] + dmgToA)));
+                casualties(B, kB);
+                casualties(A, kA);
+                double lossShareA = kA / Math.max(1, men(A) + kA), lossShareB = kB / Math.max(1, men(B) + kB);
+                for (Army x : A) x.morale = Math.max(0, x.morale - lossShareA * 2.2 - 0.03);
+                for (Army x : B) x.morale = Math.max(0, x.morale - lossShareB * 2.2 - 0.03);
+                if (avgMorale(A) <= 0.15 || avgMorale(B) <= 0.15) break;
+            }
+        } else {
+            // Rust owns the complete immutable combat calculation; Java applies its validated deltas.
+            for (ArmyCombatCompute.Round round : nativeCombat.rounds()) {
+                casualties(B, round.killB());
+                casualties(A, round.killA());
+                for (Army x : A) x.morale = Math.max(0, x.morale - round.lossShareA() * 2.2 - 0.03);
+                for (Army x : B) x.morale = Math.max(0, x.morale - round.lossShareB() * 2.2 - 0.03);
+            }
         }
         int la = menA0 - men(A), lb = menB0 - men(B);
         boolean aWins = men(A) > 0 && (men(B) == 0 || avgMorale(A) * Math.sqrt(men(A)) >= avgMorale(B) * Math.sqrt(men(B)));
