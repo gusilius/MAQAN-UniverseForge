@@ -2,7 +2,7 @@
 //! Java retains route creation, cargo escrow, stock mutation, treasury settlement and persistence.
 use serde_json::{json, Value};
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BinaryHeap, HashMap, HashSet};
 
 #[derive(Clone)]
 struct Resource {
@@ -23,6 +23,25 @@ struct Candidate {
     to: String,
     resource: String,
     score: f64,
+    sequence: usize,
+}
+
+// BinaryHeap keeps the worst retained candidate at its root. This lets the
+// market scan retain only the requested top-K rows instead of allocating every
+// possible city-pair/resource combination.
+impl PartialEq for Candidate {
+    fn eq(&self, other: &Self) -> bool {
+        self.score.total_cmp(&other.score) == Ordering::Equal && self.sequence == other.sequence
+    }
+}
+impl Eq for Candidate {}
+impl PartialOrd for Candidate {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> { Some(self.cmp(other)) }
+}
+impl Ord for Candidate {
+    fn cmp(&self, other: &Self) -> Ordering {
+        other.score.total_cmp(&self.score).then_with(|| self.sequence.cmp(&other.sequence))
+    }
 }
 
 fn number(v: &Value, key: &str) -> Result<f64, String> {
@@ -81,7 +100,12 @@ pub fn compute(bytes: &[u8]) -> Result<Vec<u8>, String> {
         cities.push(city);
     }
 
-    let mut candidates = Vec::<Candidate>::new();
+    if limit == 0 {
+        return serde_json::to_vec(&json!({"status":"ok","suggestions":[]})).map_err(|e| e.to_string());
+    }
+
+    let mut candidates = BinaryHeap::<Candidate>::with_capacity(limit.min(4096));
+    let mut sequence = 0usize;
     for from in &cities {
         if from.trade_rate <= 0.0 { continue; }
         for to in &cities {
@@ -97,16 +121,24 @@ pub fn compute(bytes: &[u8]) -> Result<Vec<u8>, String> {
                     || destination.capacity - destination.stock + 1e-9 < 1.0 {
                     continue;
                 }
+                let score = destination.price / source.price;
+                // Both prices can be finite while their ratio overflows. Never
+                // serialize a non-finite ranking score into a malformed result.
+                if !score.is_finite() { continue; }
                 candidates.push(Candidate {
                     from: from.id.clone(), to: to.id.clone(), resource: source.id.clone(),
-                    score: destination.price / source.price,
+                    score, sequence,
                 });
+                sequence = sequence.saturating_add(1);
+                if candidates.len() > limit { candidates.pop(); }
             }
         }
     }
-    // Stable sort preserves the source iteration order for equal price ratios, matching Java's stable sort.
-    candidates.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(Ordering::Equal));
-    let result = candidates.into_iter().take(limit).map(|candidate| json!({
+    // Restore descending score and original snapshot traversal order for ties,
+    // exactly matching Java's stable sort while keeping memory bounded by limit.
+    let mut selected = candidates.into_vec();
+    selected.sort_by(|a, b| b.score.total_cmp(&a.score).then_with(|| a.sequence.cmp(&b.sequence)));
+    let result = selected.into_iter().map(|candidate| json!({
         "from": candidate.from, "to": candidate.to, "resource": candidate.resource, "score": candidate.score
     })).collect::<Vec<_>>();
     serde_json::to_vec(&json!({"status":"ok","suggestions":result})).map_err(|e| e.to_string())
@@ -146,6 +178,34 @@ mod tests {
         assert!(compute(duplicate).is_err());
         let bad = br#"{"schema_version":1,"operation":"suggestions","limit":5,"cities":[{"id":"A","trade_rate":1,"resources":[{"id":"wood","price":-1,"stock":1,"capacity":2,"consumption":0}]}]}"#;
         assert!(compute(bad).is_err());
+    }
+    #[test] fn zero_limit_returns_empty_without_candidate_materialization() {
+        let input = br#"{"schema_version":1,"operation":"suggestions","limit":0,"cities":[
+          {"id":"A","trade_rate":1,"resources":[{"id":"wood","price":1,"stock":100,"capacity":200,"consumption":0}]},
+          {"id":"B","trade_rate":1,"resources":[{"id":"wood","price":2,"stock":0,"capacity":200,"consumption":0}]}
+        ]}"#;
+        let output: Value = serde_json::from_slice(&compute(input).unwrap()).unwrap();
+        assert_eq!(output["suggestions"].as_array().unwrap().len(), 0);
+    }
+    #[test] fn bounded_top_k_keeps_earliest_candidate_for_equal_scores() {
+        let input = br#"{"schema_version":1,"operation":"suggestions","limit":1,"cities":[
+          {"id":"A","trade_rate":1,"resources":[{"id":"wood","price":1,"stock":100,"capacity":200,"consumption":0}]},
+          {"id":"B","trade_rate":1,"resources":[{"id":"wood","price":2,"stock":0,"capacity":200,"consumption":0}]},
+          {"id":"C","trade_rate":1,"resources":[{"id":"wood","price":2,"stock":0,"capacity":200,"consumption":0}]}
+        ]}"#;
+        let output: Value = serde_json::from_slice(&compute(input).unwrap()).unwrap();
+        let rows = output["suggestions"].as_array().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["from"], "A");
+        assert_eq!(rows[0]["to"], "B");
+    }
+    #[test] fn skips_non_finite_price_ratio() {
+        let input = br#"{"schema_version":1,"operation":"suggestions","limit":5,"cities":[
+          {"id":"A","trade_rate":1,"resources":[{"id":"wood","price":1e-308,"stock":100,"capacity":200,"consumption":0}]},
+          {"id":"B","trade_rate":1,"resources":[{"id":"wood","price":1e308,"stock":0,"capacity":200,"consumption":0}]}
+        ]}"#;
+        let output: Value = serde_json::from_slice(&compute(input).unwrap()).unwrap();
+        assert_eq!(output["suggestions"].as_array().unwrap().len(), 0);
     }
     #[test] fn bounded_large_market_catalog_is_deterministic() {
         let mut cities = Vec::new();
