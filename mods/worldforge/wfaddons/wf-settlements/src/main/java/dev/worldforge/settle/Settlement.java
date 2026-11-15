@@ -780,7 +780,7 @@ public final class Settlement {
 
     /** Drained only after the owning CharacterRegistry confirms the lifecycle transition. */
     public List<WorkerDeparture> pendingDepartures() { return Collections.unmodifiableList(departures); }
-    public void acknowledgeDeparture(WorkerDeparture departure) { departures.remove(departure); }
+    public void acknowledgeDeparture(WorkerDeparture departure) { mutate(() -> { if (departures.remove(departure)) markMutation(); return null; }); }
 
     /**
      * Cancels a stale departure after the same canonical person has been reattached.
@@ -788,9 +788,7 @@ public final class Settlement {
      */
     public int acknowledgeDepartureForPerson(String personId, String reason) {
         if (personId == null || personId.isBlank() || reason == null || reason.isBlank()) return 0;
-        int before = departures.size();
-        departures.removeIf(event -> personId.equals(event.personId()) && reason.equals(event.reason()));
-        return before - departures.size();
+        return mutate(() -> { int before = departures.size(); departures.removeIf(event -> personId.equals(event.personId()) && reason.equals(event.reason())); int changed = before - departures.size(); if (changed > 0) markMutation(); return changed; });
     }
 
     // ------------------------------------------------------------------ приказы
@@ -816,7 +814,9 @@ public final class Settlement {
     public String typeId = "";
 
     /** Выбирает лучший вид по числу жителей, зданиям, местности и расам; возвращает id вида (пусто - нет подходящего). */
-    public String refreshType(int pop, Map<String, Double> terrain, Map<String, Double> races) {
+    public String refreshType(int pop, Map<String, Double> terrain, Map<String, Double> races) { return mutate(() -> { String before = typeId; String result = refreshTypeInternal(pop, terrain, races); if (!Objects.equals(before, typeId)) markMutation(); return result; }); }
+
+    private String refreshTypeInternal(int pop, Map<String, Double> terrain, Map<String, Double> races) {
         if (types == null) return typeId;
         List<String> built = new ArrayList<>();
         for (Building b : buildings) if (b.state == Building.State.DONE) built.add(b.def.id);
@@ -885,7 +885,9 @@ public final class Settlement {
     }
 
     /** Register an existing physical building without charging resources or placing a blueprint. */
-    public Building adoptExistingBuilding(String requestId, String defId, int x, int z) {
+    public Building adoptExistingBuilding(String requestId, String defId, int x, int z) { return mutate(() -> { Building result = adoptExistingBuildingInternal(requestId, defId, x, z); markMutation(); return result; }); }
+
+    private Building adoptExistingBuildingInternal(String requestId, String defId, int x, int z) {
         if (requestId == null || !requestId.matches("[A-Za-z0-9_.:-]{1,128}"))
             throw new OrderException("Некорректный идентификатор существующего здания");
         Defs.Building definition = defs.buildings.get(defId);
@@ -917,7 +919,9 @@ public final class Settlement {
     }
 
     /** Отмена стройки или снос. Возврат: не начатое 100%, строящееся 50%, готовое 25%. */
-    public void cancel(int uid) {
+    public void cancel(int uid) { mutate(() -> { cancelInternal(uid); markMutation(); return null; }); }
+
+    private void cancelInternal(int uid) {
         Building b = building(uid);
         if (b == null) throw new OrderException("Нет здания " + uid);
         if (b.state == Building.State.DONE) {
@@ -935,7 +939,9 @@ public final class Settlement {
     public void assign(int workerId, int uid) { assign(workerId, uid, null); }
 
     /** Assigns a resident to one exact role when requested by a direct dialogue/RTS order. */
-    public void assign(int workerId, int uid, String requestedRole) {
+    public void assign(int workerId, int uid, String requestedRole) { mutate(() -> { assignInternal(workerId, uid, requestedRole); markMutation(); return null; }); }
+
+    private void assignInternal(int workerId, int uid, String requestedRole) {
         Worker w = worker(workerId);
         Building b = building(uid);
         if (w == null) throw new OrderException("Нет рабочего " + workerId);
@@ -956,7 +962,9 @@ public final class Settlement {
         w.status = "";
     }
 
-    public void unassign(int workerId) {
+    public void unassign(int workerId) { mutate(() -> { unassignInternal(workerId); markMutation(); return null; }); }
+
+    private void unassignInternal(int workerId) {
         Worker w = worker(workerId);
         if (w == null) throw new OrderException("Нет рабочего " + workerId);
         w.building = 0;
@@ -974,7 +982,9 @@ public final class Settlement {
     public void moveTo(int workerId,double x,double z){moveTo(workerId,x,z,false);}
 
     /** Queue appends a bounded waypoint; otherwise the current manual route is replaced. */
-    public void moveTo(int workerId,double x,double z,boolean queue) {
+    public void moveTo(int workerId,double x,double z,boolean queue) { mutate(() -> { moveToInternal(workerId, x, z, queue); markMutation(); return null; }); }
+
+    private void moveToInternal(int workerId,double x,double z,boolean queue) {
         Worker w=worker(workerId);
         if(w==null)throw new OrderException("Нет рабочего "+workerId);
         if(!Double.isFinite(x)||!Double.isFinite(z)||Math.abs(x)>100000||Math.abs(z)>100000)
@@ -993,7 +1003,9 @@ public final class Settlement {
     }
 
     /** Called by the physical worker after reaching its active waypoint. */
-    public boolean advanceManualOrder(int workerId) {
+    public boolean advanceManualOrder(int workerId) { return mutate(() -> { Worker current = worker(workerId); boolean hadManualOrder = current != null && current.manualOrder; boolean changed = advanceManualOrderInternal(workerId); if (hadManualOrder) markMutation(); return changed; }); }
+
+    private boolean advanceManualOrderInternal(int workerId) {
         Worker w=worker(workerId);
         if(w==null||!w.manualOrder)return false;
         Worker.ManualOrder next=w.orderQueue.pollFirst();
@@ -1003,13 +1015,17 @@ public final class Settlement {
     }
 
     /** Stop means hold here and discard all queued waypoints. */
-    public void holdAt(int workerId,double x,double z) {
+    public void holdAt(int workerId,double x,double z) { mutate(() -> { moveTo(workerId, x, z, false); Worker w = worker(workerId); w.status = "приказ: удерживать позицию"; markMutation(); return null; }); }
+
+    private void holdAtInternal(int workerId,double x,double z) {
         moveTo(workerId,x,z,false);
         Worker w=worker(workerId);
         w.status="приказ: удерживать позицию";
     }
 
-    public void setProfession(int workerId, String profession) {
+    public void setProfession(int workerId, String profession) { mutate(() -> { setProfessionInternal(workerId, profession); markMutation(); return null; }); }
+
+    private void setProfessionInternal(int workerId, String profession) {
         Worker w = worker(workerId);
         if (w == null) throw new OrderException("Нет рабочего " + workerId);
         if (!defs.professions.containsKey(profession)) throw new OrderException("Нет профессии " + profession);
@@ -1026,7 +1042,9 @@ public final class Settlement {
     }
 
     /** Пауза производства. Только для готового здания; на паузе здание не берёт сырьё, не даёт товар и не зовёт новых работников. */
-    public void setPaused(int uid, boolean paused) {
+    public void setPaused(int uid, boolean paused) { mutate(() -> { Building before = building(uid); boolean wasPaused = before != null && before.paused; setPausedInternal(uid, paused); if (before != null && wasPaused != before.paused) markMutation(); return null; }); }
+
+    private void setPausedInternal(int uid, boolean paused) {
         Building b = building(uid);
         if (b == null) throw new OrderException("Нет здания " + uid);
         if (b.state != Building.State.DONE) throw new OrderException(b.def.name + ": пауза только для готового здания");
@@ -1035,7 +1053,9 @@ public final class Settlement {
     }
 
     /** Отправляет нескольких рабочих в здание; кому места не хватило или профессия не подошла - пропускаются. Возвращает, сколько назначено; 0 - ошибка с причиной первого отказа. */
-    public int assignMany(Collection<Integer> workerIds, int uid) {
+    public int assignMany(Collection<Integer> workerIds, int uid) { return mutate(() -> { int changed = assignManyInternal(workerIds, uid); if (changed > 0) markMutation(); return changed; }); }
+
+    private int assignManyInternal(Collection<Integer> workerIds, int uid) {
         if (building(uid) == null) throw new OrderException("Нет здания " + uid);
         int n = 0;
         String first = null;
@@ -1047,7 +1067,9 @@ public final class Settlement {
     }
 
     /** Меняет профессию нескольким рабочим (они становятся свободными). Неизвестные номера пропускаются; возвращает число изменённых. */
-    public int setProfessionMany(Collection<Integer> workerIds, String profession) {
+    public int setProfessionMany(Collection<Integer> workerIds, String profession) { return mutate(() -> { int changed = setProfessionManyInternal(workerIds, profession); if (changed > 0) markMutation(); return changed; }); }
+
+    private int setProfessionManyInternal(Collection<Integer> workerIds, String profession) {
         if (!defs.professions.containsKey(profession)) throw new OrderException("Нет профессии " + profession);
         int n = 0;
         for (int id : new LinkedHashSet<>(workerIds)) if (worker(id) != null) { setProfession(id, profession); n++; }
@@ -1056,7 +1078,9 @@ public final class Settlement {
     }
 
     /** Снимает всех работников со здания; возвращает сколько. */
-    public int unassignAll(int uid) {
+    public int unassignAll(int uid) { return mutate(() -> { int changed = unassignAllInternal(uid); if (changed > 0) markMutation(); return changed; }); }
+
+    private int unassignAllInternal(int uid) {
         if (building(uid) == null) throw new OrderException("Нет здания " + uid);
         int n = 0;
         for (Worker w : assigned(uid)) { unassign(w.id); n++; }
@@ -1083,7 +1107,9 @@ public final class Settlement {
         return out;
     }
 
-    public void setPriority(int uid, int p) {
+    public void setPriority(int uid, int p) { mutate(() -> { Building before = building(uid); int old = before == null ? Integer.MIN_VALUE : before.priority; setPriorityInternal(uid, p); if (before != null && old != before.priority) markMutation(); return null; }); }
+
+    private void setPriorityInternal(int uid, int p) {
         Building b = building(uid);
         if (b == null) throw new OrderException("Нет здания " + uid);
         b.priority = Math.max(1, Math.min(9, p));
@@ -1254,7 +1280,9 @@ public final class Settlement {
     }
 
     /** Explicit management command for a porter/general worker. */
-    public void assignHauler(int workerId, int buildingId) {
+    public void assignHauler(int workerId, int buildingId) { mutate(() -> { assignHaulerInternal(workerId, buildingId); markMutation(); return null; }); }
+
+    private void assignHaulerInternal(int workerId, int buildingId) {
         Worker worker = worker(workerId);
         Building source = building(buildingId);
         if (worker == null || source == null) throw new OrderException("Нет рабочего или здания");
@@ -1406,7 +1434,7 @@ public final class Settlement {
     public int priceTrend(String res) { double p = pressure.getOrDefault(res, 0.0); return p > 0.03 ? 1 : p < -0.03 ? -1 : 0; }
 
     /** Сдвиг цены внешней торговлей: n>0 - товар уходит (дорожает), n<0 - приходит (дешевеет). */
-    public void shiftDemand(String res, double n) { moveDemand(res, n); }
+    public void shiftDemand(String res, double n) { if (!Double.isFinite(n) || n == 0) return; mutate(() -> { double before = pressure.getOrDefault(res, 0.0); moveDemand(res, n); if (Double.compare(before, pressure.getOrDefault(res, 0.0)) != 0) markMutation(); return null; }); }
 
     private void moveDemand(String res, double n) { pressure.merge(res, n * PRESSURE_STEP, Double::sum); pressure.put(res, Math.max(-0.5, Math.min(0.5, pressure.get(res)))); }
 
@@ -1423,7 +1451,9 @@ public final class Settlement {
 
     public double sellPrice(String res) { return price(res) * (1 - TRADE_MARGIN); }
 
-    public void setTax(int level) {
+    public void setTax(int level) { mutate(() -> { int before = taxLevel; setTaxInternal(level); if (before != taxLevel) markMutation(); return null; }); }
+
+    private void setTaxInternal(int level) {
         if (level < 0 || level > 3) throw new OrderException("Налог: 0..3");
         taxLevel = level;
     }
@@ -1436,7 +1466,9 @@ public final class Settlement {
         if (n > tradeLeft + 1e-9) throw new OrderException("Рынок успевает ещё " + (int) tradeLeft + " ед.");
     }
 
-    public void buy(String res, int n) {
+    public void buy(String res, int n) { mutate(() -> { buyInternal(res, n); markMutation(); return null; }); }
+
+    private void buyInternal(String res, int n) {
         checkTrade(res, n);
         double cost = buyPrice(res) * n;
         if (amount(Defs.SILVER) < cost) throw new OrderException("Не хватает серебра: " + (int) amount(Defs.SILVER) + " из " + (int) Math.ceil(cost));
@@ -1449,7 +1481,9 @@ public final class Settlement {
         say("Куплено " + n + " " + resourceName(res).toLowerCase() + " за " + Math.round(cost) + " серебра");
     }
 
-    public void sell(String res, int n) {
+    public void sell(String res, int n) { mutate(() -> { sellInternal(res, n); markMutation(); return null; }); }
+
+    private void sellInternal(String res, int n) {
         checkTrade(res, n);
         if (amount(res) < n) throw new OrderException("Нет столько: " + (int) amount(res));
         double gain = sellPrice(res) * n;
@@ -1462,7 +1496,9 @@ public final class Settlement {
     }
 
     /** Правило автоторговли: mode "sell" - продавать всё выше порога, "buy" - докупать до порога, "off" - убрать. */
-    public void setAutoTrade(String res, String mode, int threshold) {
+    public void setAutoTrade(String res, String mode, int threshold) { mutate(() -> { Map<String, Integer> beforeSell = new TreeMap<>(autoSell), beforeBuy = new TreeMap<>(autoBuy); setAutoTradeInternal(res, mode, threshold); if (!beforeSell.equals(autoSell) || !beforeBuy.equals(autoBuy)) markMutation(); return null; }); }
+
+    private void setAutoTradeInternal(String res, String mode, int threshold) {
         if (!defs.resourceNames.containsKey(res)) throw new OrderException("Нет ресурса " + res);
         autoSell.remove(res); autoBuy.remove(res);
         switch (mode) {
@@ -1553,7 +1589,9 @@ public final class Settlement {
         return 1;
     }
 
-    public void setWorkPriority(int workerId, String prof, int n) {
+    public void setWorkPriority(int workerId, String prof, int n) { mutate(() -> { Worker w = worker(workerId); Map<String,Integer> before = w == null || w.jobPrio == null ? Map.of() : new TreeMap<>(w.jobPrio); setWorkPriorityInternal(workerId, prof, n); if (w != null && !before.equals(w.jobPrio)) markMutation(); return null; }); }
+
+    private void setWorkPriorityInternal(int workerId, String prof, int n) {
         Worker w = worker(workerId);
         if (w == null) throw new OrderException("Нет рабочего " + workerId);
         if (!defs.professions.containsKey(prof)) throw new OrderException("Нет профессии " + prof);
