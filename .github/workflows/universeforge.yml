@@ -203,7 +203,7 @@ jobs:
         if: always()
         with:
           name: maqan-addon-isolation-server-profiles
-          path: \${{ runner.temp }}/maqan-addon-isolation/
+          path: ${{ runner.temp }}/maqan-addon-isolation/
           if-no-files-found: warn
           retention-days: 30
 

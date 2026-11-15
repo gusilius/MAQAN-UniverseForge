@@ -37,16 +37,16 @@ curl -fsSL -o installer.jar "https://maven.minecraftforge.net/net/minecraftforge
 java -jar installer.jar --installServer > install.log 2>&1 || { tail -80 install.log; exit 2; }
 echo "eula=true" > eula.txt
 
-for profile in "\${PROFILES[@]}"; do
+for profile in "${PROFILES[@]}"; do
   IFS='|' read -r profile_id jar_csv addon_csv <<< "$profile"
   [[ "$profile_id" =~ ^[a-zA-Z0-9_-]+$ ]] || { echo "Invalid profile id: $profile_id"; exit 2; }
-  echo "=== ADDON_PROFILE_BEGIN=$profile_id addons=\${addon_csv:-none}"
+  echo "=== ADDON_PROFILE_BEGIN=$profile_id addons=${addon_csv:-none}"
   PROFILE_LOG="profile-$profile_id.log"
 
   rm -rf mods config defaultconfigs logs "world-$profile_id"
   mkdir -p mods
   IFS=',' read -r -a profile_jars <<< "$jar_csv"
-  for jar in "\${profile_jars[@]}"; do
+  for jar in "${profile_jars[@]}"; do
     [ -f "$JARS/$jar" ] || { echo "Missing staged jar: $jar"; exit 3; }
     cp "$JARS/$jar" mods/
   done
@@ -54,7 +54,7 @@ for profile in "\${PROFILES[@]}"; do
   cat > server.properties <<P
 online-mode=false
 level-name=world-$profile_id
-level-type=minecraft\\:flat
+level-type=minecraft\:flat
 generate-structures=false
 view-distance=3
 simulation-distance=3
@@ -87,13 +87,13 @@ P
 
   printf '%s\n' "list" "help" "stop" >> in.txt
   stopped=0
-  for _ in $(seq 1 30); do
-    grep -aq 'Stopping server' server.log && { stopped=1; break; }
+  for _ in $(seq 1 90); do
+    if grep -aq 'All dimensions are saved' server.log; then stopped=1; break; fi
     kill -0 "$SERVER_PID" 2>/dev/null || { stopped=1; break; }
     sleep 1
   done
-  if [ "$stopped" -ne 1 ]; then
-    echo "ERROR: profile $profile_id did not accept a clean stop"
+  if [ "$stopped" -ne 1 ] || ! grep -aq 'All dimensions are saved' server.log; then
+    echo "ERROR: profile $profile_id did not complete a graceful save/shutdown"
     tail -100 server.log
     copy_diagnostics
     exit 6
@@ -106,7 +106,7 @@ P
     grep -aiE 'Mod loading has failed|Exception in thread|A single server tick took' server.log | head -80
     exit 7
   fi
-  echo "ADDON_PROFILE_STATUS=PASS mod=$profile_id addons=\${addon_csv:-none}"
+  echo "ADDON_PROFILE_STATUS=PASS mod=$profile_id addons=${addon_csv:-none}"
 done
 
-echo "ADDON_ISOLATION_STATUS=PASS profiles=\${#PROFILES[@]}"
+echo "ADDON_ISOLATION_STATUS=PASS profiles=${#PROFILES[@]}"
