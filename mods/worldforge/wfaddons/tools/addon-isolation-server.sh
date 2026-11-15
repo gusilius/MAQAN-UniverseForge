@@ -19,9 +19,17 @@ copy_diagnostics() {
 cleanup() {
   if [ -n "$SERVER_PID" ]; then
     printf '%s\n' "stop" >> "$WORK/in.txt" 2>/dev/null || true
-    for _ in $(seq 1 20); do kill -0 "$SERVER_PID" 2>/dev/null || break; sleep 1; done
+    if [ -n "$SERVER_JAVA_PID" ]; then
+      for _ in $(seq 1 30); do
+        tasklist.exe //FI "PID eq $SERVER_JAVA_PID" //NH 2>/dev/null | grep -q "$SERVER_JAVA_PID" || break
+        sleep 1
+      done
+      taskkill.exe //PID "$SERVER_JAVA_PID" //T //F >/dev/null 2>&1 || true
+    fi
     taskkill.exe //PID "$SERVER_PID" //T //F >/dev/null 2>&1 || true
+    wait "$SERVER_PID" 2>/dev/null || true
     SERVER_PID=""
+    SERVER_JAVA_PID=""
   fi
   copy_diagnostics
   rm -rf "$WORK"
@@ -39,9 +47,11 @@ java -jar installer.jar --installServer > install.log 2>&1 || { tail -80 install
 echo "eula=true" > eula.txt
 
 for profile in "${PROFILES[@]}"; do
+  profile_started=$SECONDS
   IFS='|' read -r profile_id jar_csv addon_csv <<< "$profile"
   [[ "$profile_id" =~ ^[a-zA-Z0-9_-]+$ ]] || { echo "Invalid profile id: $profile_id"; exit 2; }
   echo "=== ADDON_PROFILE_BEGIN=$profile_id addons=${addon_csv:-none}"
+  echo "ADDON_PROFILE_STAGE=prepare profile=$profile_id"
   PROFILE_LOG="profile-$profile_id.log"
 
   rm -rf mods config defaultconfigs logs "world-$profile_id"
@@ -69,8 +79,15 @@ P
   SERVER_PID=$!
 
   ready=0
+  echo "ADDON_PROFILE_STAGE=startup profile=$profile_id"
   for _ in $(seq 1 90); do
     if grep -q 'Done (' server.log 2>/dev/null; then ready=1; break; fi
+    if [ $((SECONDS - profile_started)) -ge 240 ]; then
+      tail -120 server.log
+      copy_diagnostics
+      echo "ERROR: profile $profile_id exceeded its 240-second startup budget"
+      exit 5
+    fi
     if grep -aqE 'Mod loading has failed|Failed to start|Exception in thread "main"|java.lang.Error|A single server tick took' server.log 2>/dev/null; then
       tail -120 server.log
       copy_diagnostics
@@ -86,21 +103,28 @@ P
     exit 5
   fi
 
-  SERVER_JAVA_PID="$(jcmd -l | awk '/BootstrapLauncher|net.minecraft.server.Main/ {print $1; exit}')"
+  echo "ADDON_PROFILE_STAGE=identify-jvm profile=$profile_id"
+  if ! timeout 15s jcmd -l > "$WORK/jcmd-processes.txt" 2>&1; then
+    echo "ERROR: jcmd could not enumerate the Forge JVM within 15 seconds"
+    copy_diagnostics
+    exit 5
+  fi
+  SERVER_JAVA_PID="$(awk '/BootstrapLauncher|net.minecraft.server.Main/ {print $1; exit}' "$WORK/jcmd-processes.txt")"
   if [ -z "$SERVER_JAVA_PID" ]; then
     echo "ERROR: could not identify the Forge server JVM for graceful shutdown"
     copy_diagnostics
     exit 5
   fi
 
+  echo "ADDON_PROFILE_STAGE=shutdown profile=$profile_id"
   printf '%s\n' "list" "help" "stop" >> in.txt
   stopped=0
-  for _ in $(seq 1 90); do
-    if ! jcmd -l | awk '{print $1}' | grep -qx "$SERVER_JAVA_PID"; then stopped=1; break; fi
+  for _ in $(seq 1 30); do
+    if ! tasklist.exe //FI "PID eq $SERVER_JAVA_PID" //NH 2>/dev/null | grep -q "$SERVER_JAVA_PID"; then stopped=1; break; fi
     sleep 1
   done
   if [ "$stopped" -ne 1 ]; then
-    echo "ERROR: profile $profile_id did not shut down its Forge JVM cleanly"
+    echo "ERROR: profile $profile_id did not shut down its Forge JVM within 30 seconds"
     tail -100 server.log
     copy_diagnostics
     exit 6
@@ -108,12 +132,13 @@ P
   taskkill.exe //PID "$SERVER_PID" //T //F >/dev/null 2>&1 || true
   wait "$SERVER_PID" 2>/dev/null || true
   SERVER_PID=""
+  SERVER_JAVA_PID=""
   copy_diagnostics
   if grep -aqE 'Mod loading has failed|Exception in thread|A single server tick took' server.log; then
     grep -aiE 'Mod loading has failed|Exception in thread|A single server tick took' server.log | head -80
     exit 7
   fi
-  echo "ADDON_PROFILE_STATUS=PASS mod=$profile_id addons=${addon_csv:-none}"
+  echo "ADDON_PROFILE_STATUS=PASS mod=$profile_id addons=${addon_csv:-none} elapsed_seconds=$((SECONDS - profile_started))"
 done
 
 echo "ADDON_ISOLATION_STATUS=PASS profiles=${#PROFILES[@]}"
