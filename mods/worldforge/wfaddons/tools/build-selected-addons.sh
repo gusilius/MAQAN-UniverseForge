@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Build only requested addons and their transitive compileOnly addon dependencies.
 set -euo pipefail
-CORE="\${1:-../wfmod}"
+CORE="$1"
+if [ -z "$CORE" ]; then CORE="../wfmod"; fi
 shift || true
 if [ "$#" -eq 0 ]; then
   echo "Usage: $0 <core-dir> <wf-addon> [wf-addon ...]" >&2
@@ -57,8 +58,7 @@ while IFS='|' read -r module dep_list; do
   cp "$CORE_JAR" "$module/libs/"
 
   if [ -n "$dep_list" ]; then
-    IFS=',' read -r -a deps <<< "$dep_list"
-    for dep in "\${deps[@]}"; do
+    for dep in $(printf '%s' "$dep_list" | tr ',' '\n'); do
       dep="$(printf '%s' "$dep" | tr -d '\r')"
       [ -n "$dep" ] || continue
       found=0
