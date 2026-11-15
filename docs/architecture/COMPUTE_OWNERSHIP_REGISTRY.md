@@ -371,3 +371,11 @@ This is an operation-count status, not a percentage of all UniverseForge computa
 ### Population parity fixture envelope follow-up
 
 - The expanded fixture now uses world day 10,000 consistently at request and expected-frame levels, allowing all 1–1,000 day per-Character receipt intervals to remain nonnegative. CI had caught the expected top-level envelope retaining the old day 303; Rust correctly echoed the request's day.
+
+
+### Scoped revision dependencies — WF-RT-0023
+
+- DomainMutationRevisions now tracks active writers per domain lane and exposes scoped snapshot(Domain...) / isCurrent(snapshot, Domain...) checks alongside unchanged global methods.
+- A projection must name every canonical domain it reads. PopulationComputeBridge now captures and validates only CHARACTERS; unrelated Settlement/Economy/Politics writers no longer starve or stale a result that never read those domains.
+- Global WorldSim snapshot/apply fencing remains prohibited until every domain writer and cross-domain transaction is audited. The unscoped API remains conservative and observes every lane.
+- Regression tests cover unrelated active/committed writers, relevant active writers, and preservation of global freshness semantics.

@@ -24,6 +24,25 @@ public final class DomainMutationRevisionsTest {
         }
         check(revisions.isCurrent(initial), "aborted write scope does not advance committed revisions");
 
+        var characterOnly = revisions.snapshot(DomainMutationRevisions.Domain.CHARACTERS).orElseThrow();
+        try (var unrelated = revisions.begin(DomainMutationRevisions.Domain.SETTLEMENTS)) {
+            check(revisions.snapshot(DomainMutationRevisions.Domain.CHARACTERS).isPresent(),
+                    "Character snapshot is not blocked by an unrelated Settlement writer");
+            check(!revisions.isCurrent(characterOnly, DomainMutationRevisions.Domain.SETTLEMENTS),
+                    "Settlement-dependent snapshot rejects an active Settlement writer");
+            unrelated.commit();
+        }
+        check(revisions.isCurrent(characterOnly, DomainMutationRevisions.Domain.CHARACTERS),
+                "unrelated committed Settlement mutation does not stale a Character-only snapshot");
+        check(!revisions.isCurrent(characterOnly),
+                "global freshness still observes every committed domain mutation");
+        try (var characterWriter = revisions.begin(DomainMutationRevisions.Domain.CHARACTERS)) {
+            check(revisions.snapshot(DomainMutationRevisions.Domain.CHARACTERS).isEmpty(),
+                    "Character-only snapshot refuses an in-progress Character writer");
+            check(!revisions.isCurrent(characterOnly, DomainMutationRevisions.Domain.CHARACTERS),
+                    "Character-only result is stale while its canonical writer is active");
+        }
+
         try (var mutation = revisions.begin(DomainMutationRevisions.Domain.CHARACTERS)) {
             mutation.commit();
         }

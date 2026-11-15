@@ -486,3 +486,8 @@ The six Origins definition collections (races, classes, professions, synergies, 
 ### Expanded Population parity requirement
 
 The shared Population fixture is a multi-Character contract. It must cover age-stage boundaries, intent priority thresholds, role/duty combinations, per-Character elapsed intervals, counter saturation, extension-defined need preservation, and deterministic output ordering. Both Java's exclusive fallback/domain oracle and Rust's production transformation execute the exact same fixture. Any rule change updates the fixture and both implementations together; production ownership is not declared complete from a narrow fixture alone.
+
+
+### Scoped revision vectors
+
+Asynchronous compute owners must declare the exact canonical domains represented in their immutable input snapshot. Use scoped revision capture and validation for those dependencies; do not invalidate a Character-only population result because an unrelated market or settlement changed. Conversely, a strategic snapshot that reads Characters, Realms, Settlements, Economy, Army and Events must depend on every one of those lanes. The global unscoped revision API remains conservative. Never use a partial dependency set as a substitute for completing WF-RT-0023 writer audit or WF-RT-0021 cross-domain atomicity.

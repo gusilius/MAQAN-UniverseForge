@@ -49,7 +49,7 @@ public final class PopulationComputeBridge {
         if(targetWorldDay<0||fallbackStartDay<0||targetWorldDay<fallbackStartDay)
             throw new IllegalArgumentException("targetWorldDay cannot precede fallbackStartDay");
         Objects.requireNonNull(registries,"registries");
-        DomainMutationRevisions.Snapshot before=WorldForgeApi.revisions().snapshot()
+        DomainMutationRevisions.Snapshot before=WorldForgeApi.revisions().snapshot(DomainMutationRevisions.Domain.CHARACTERS)
                 .orElseThrow(()->new IllegalStateException("Canonical domain mutation is active"));
         TreeMap<String,Character> ordered=new TreeMap<>();
         for(CharacterRegistry registry:registries)for(Character c:Objects.requireNonNull(registry).all()){
@@ -81,7 +81,7 @@ public final class PopulationComputeBridge {
         request.put("schema_version",SCHEMA_VERSION);request.put("world_id",worldId);request.put("year",year);
         request.put("elapsed_days",batchElapsed);request.put("world_day",targetWorldDay);request.put("characters",people);
         byte[] bytes=Json.write(request).getBytes(StandardCharsets.UTF_8);
-        DomainMutationRevisions.Snapshot after=WorldForgeApi.revisions().snapshot()
+        DomainMutationRevisions.Snapshot after=WorldForgeApi.revisions().snapshot(DomainMutationRevisions.Domain.CHARACTERS)
                 .orElseThrow(()->new IllegalStateException("Canonical mutation overlapped population capture"));
         if(!before.equals(after))throw new IllegalStateException("Canonical domain changed during population capture");
         return new Captured(worldId,year,batchElapsed,targetWorldDay,before,ids,allIds,birthYears,priorDays,elapsedById,bytes);
@@ -90,7 +90,7 @@ public final class PopulationComputeBridge {
     /** Validates the complete frame before the first write. False means stale and requires retry. */
     public static boolean apply(Captured captured,byte[] frameBytes,Collection<CharacterRegistry> registries){
         Objects.requireNonNull(captured);Objects.requireNonNull(frameBytes);Objects.requireNonNull(registries);
-        if(!WorldForgeApi.revisions().isCurrent(captured.revisions))return false;
+        if(!WorldForgeApi.revisions().isCurrent(captured.revisions,DomainMutationRevisions.Domain.CHARACTERS))return false;
         Map<?,?> frame=object(Json.parse(new String(frameBytes,StandardCharsets.UTF_8)),"frame");
         if(integer(frame.get("schema_version"),"schema_version")!=SCHEMA_VERSION)throw new IllegalArgumentException("Unsupported population frame schema");
         if(!captured.worldId.equals(string(frame.get("world_id"),"world_id"))
@@ -138,7 +138,7 @@ public final class PopulationComputeBridge {
         for(CharacterRegistry registry:registries)for(Character c:registry.all())if(c.alive){
             if(current.putIfAbsent(c.globalId,new Location(registry,c))!=null)throw new IllegalStateException("Duplicate current Character UUID: "+c.globalId);
         }
-        if(!current.keySet().equals(new TreeSet<>(captured.allCharacterIds))||!WorldForgeApi.revisions().isCurrent(captured.revisions))return false;
+        if(!current.keySet().equals(new TreeSet<>(captured.allCharacterIds))||!WorldForgeApi.revisions().isCurrent(captured.revisions,DomainMutationRevisions.Domain.CHARACTERS))return false;
         for(Update u:updates){Location location=current.get(u.id);if(location==null||!location.character.alive)return false;}
         try(CharacterRegistry.MutationBatch ignored=CharacterRegistry.beginMutationBatch()){
             for(Update u:updates){

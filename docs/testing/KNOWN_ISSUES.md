@@ -622,3 +622,11 @@
 
 - Linux native CI exposed a parity-fixture envelope mismatch: the new boundary rows and per-Character acknowledgements used world day 10,000, but the top-level expected frame retained the original day 303. Rust output correctly propagated the request day; this was a test-oracle metadata defect, not a simulation formula difference.
 - Corrected the expected frame envelope to use the same 10,000 world day as the request. Keep the full Java/Rust fixture gate; do not weaken the comparison.
+
+
+### WF-RT-0023 — scoped revision dependencies
+
+- Added per-domain active-writer accounting and scoped snapshot/freshness APIs to the shared revision coordinator.
+- PopulationComputeBridge declares its actual input/write dependency as CHARACTERS; unrelated Settlement/Economy/Politics changes no longer invalidate its result or prevent capture.
+- The global API remains conservative across every domain. WorldSim strategic snapshots must not adopt a partial dependency set; all fields they read and every canonical writer still require audit.
+- Regression coverage verifies relevant active writers reject capture/apply, unrelated writers do not stale Character-only results, and global freshness still detects any committed lane.
