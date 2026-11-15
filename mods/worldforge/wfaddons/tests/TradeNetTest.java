@@ -102,6 +102,22 @@ public class TradeNetTest {
         revisionSettlement.setWorkPriority(revisionWorker.id, revisionProfession, 2);
         ok(settlementRevision() == beforePriority + 1,
                 "worker profession priority publishes one SETTLEMENTS revision");
+        long beforeTax = settlementRevision();
+        revisionSettlement.setTax(2);
+        ok(settlementRevision() == beforeTax + 1,
+                "tax policy change publishes one SETTLEMENTS revision");
+        long beforeTaxNoop = settlementRevision();
+        revisionSettlement.setTax(2);
+        ok(settlementRevision() == beforeTaxNoop,
+                "unchanged tax policy does not churn the revision");
+        long beforeAutoTrade = settlementRevision();
+        revisionSettlement.setAutoTrade("wood", "sell", 20);
+        ok(settlementRevision() == beforeAutoTrade + 1,
+                "auto-trade policy change publishes one SETTLEMENTS revision");
+        long beforeDemand = settlementRevision();
+        revisionSettlement.shiftDemand("wood", 1.0);
+        ok(settlementRevision() == beforeDemand + 1,
+                "external market demand shift publishes one SETTLEMENTS revision");
 
         TradeNetwork n = new TradeNetwork();
         var sug = TradeNetwork.suggestions(cs, 3);

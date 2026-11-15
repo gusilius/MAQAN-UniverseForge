@@ -820,7 +820,9 @@ public final class Settlement {
     public String typeId = "";
 
     /** Выбирает лучший вид по числу жителей, зданиям, местности и расам; возвращает id вида (пусто - нет подходящего). */
-    public String refreshType(int pop, Map<String, Double> terrain, Map<String, Double> races) {
+    public String refreshType(int pop, Map<String, Double> terrain, Map<String, Double> races) { return mutate(() -> { String before = typeId; String result = refreshTypeInternal(pop, terrain, races); if (!Objects.equals(before, typeId)) markMutation(); return result; }); }
+
+    private String refreshType refreshTypeInternal(int pop, Map<String, Double> terrain, Map<String, Double> races) {
         if (types == null) return typeId;
         List<String> built = new ArrayList<>();
         for (Building b : buildings) if (b.state == Building.State.DONE) built.add(b.def.id);
@@ -1436,7 +1438,9 @@ public final class Settlement {
     public int priceTrend(String res) { double p = pressure.getOrDefault(res, 0.0); return p > 0.03 ? 1 : p < -0.03 ? -1 : 0; }
 
     /** Сдвиг цены внешней торговлей: n>0 - товар уходит (дорожает), n<0 - приходит (дешевеет). */
-    public void shiftDemand(String res, double n) { moveDemand(res, n); }
+    public void shiftDemand(String res, double n) { if (!Double.isFinite(n) || n == 0) return; mutate(() -> { shiftDemandInternal(res, n); markMutation(); return null; }); }
+
+    private void shiftDemand shiftDemandInternal(String res, double n) { moveDemand(res, n); }
 
     private void moveDemand(String res, double n) { pressure.merge(res, n * PRESSURE_STEP, Double::sum); pressure.put(res, Math.max(-0.5, Math.min(0.5, pressure.get(res)))); }
 
@@ -1453,7 +1457,9 @@ public final class Settlement {
 
     public double sellPrice(String res) { return price(res) * (1 - TRADE_MARGIN); }
 
-    public void setTax(int level) {
+    public void setTax(int level) { mutate(() -> { int before = taxLevel; setTaxInternal(level); if (before != taxLevel) markMutation(); return null; }); }
+
+    private void setTax setTaxInternal(int level) {
         if (level < 0 || level > 3) throw new OrderException("Налог: 0..3");
         taxLevel = level;
     }
@@ -1466,7 +1472,9 @@ public final class Settlement {
         if (n > tradeLeft + 1e-9) throw new OrderException("Рынок успевает ещё " + (int) tradeLeft + " ед.");
     }
 
-    public void buy(String res, int n) {
+    public void buy(String res, int n) { mutate(() -> { buyInternal(res, n); markMutation(); return null; }); }
+
+    private void buy buyInternal(String res, int n) {
         checkTrade(res, n);
         double cost = buyPrice(res) * n;
         if (amount(Defs.SILVER) < cost) throw new OrderException("Не хватает серебра: " + (int) amount(Defs.SILVER) + " из " + (int) Math.ceil(cost));
@@ -1479,7 +1487,9 @@ public final class Settlement {
         say("Куплено " + n + " " + resourceName(res).toLowerCase() + " за " + Math.round(cost) + " серебра");
     }
 
-    public void sell(String res, int n) {
+    public void sell(String res, int n) { mutate(() -> { sellInternal(res, n); markMutation(); return null; }); }
+
+    private void sell sellInternal(String res, int n) {
         checkTrade(res, n);
         if (amount(res) < n) throw new OrderException("Нет столько: " + (int) amount(res));
         double gain = sellPrice(res) * n;
@@ -1492,7 +1502,9 @@ public final class Settlement {
     }
 
     /** Правило автоторговли: mode "sell" - продавать всё выше порога, "buy" - докупать до порога, "off" - убрать. */
-    public void setAutoTrade(String res, String mode, int threshold) {
+    public void setAutoTrade(String res, String mode, int threshold) { mutate(() -> { setAutoTradeInternal(res, mode, threshold); markMutation(); return null; }); }
+
+    private void setAutoTrade setAutoTradeInternal(String res, String mode, int threshold) {
         if (!defs.resourceNames.containsKey(res)) throw new OrderException("Нет ресурса " + res);
         autoSell.remove(res); autoBuy.remove(res);
         switch (mode) {

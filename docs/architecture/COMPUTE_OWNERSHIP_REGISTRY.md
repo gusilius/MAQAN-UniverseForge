@@ -480,3 +480,10 @@ The route planner may only traverse chunks already recorded in `NavigatorExplora
 - Nested batch commands and lifecycle operations coalesce into one revision per outer logical command; the tick remains a single bounded revision.
 - Added focused revision assertions for manual worker orders and work-priority changes.
 - **Not closed yet:** economic/resource transfer methods mutate TreasuryLedger and Settlement mirrors; direct public state (`stock`, `workers`, `buildings`, `flow`, `taskGraph`, policy fields and mutable Worker/Building objects) remains externally writable. External CharacterRegistry reconciliation and trade delivery paths need an explicit ownership contract. This is partial writer coverage, not a safe global snapshot fence.
+
+### Settlement economy controls — 2026-11-16
+
+- Settlement-level tax policy, auto-trade policy, external market-demand shifts and manual buy/sell commands now enter the same nested `SETTLEMENTS` mutation boundary. Internal auto-trading during `Settlement.tick` joins the existing tick scope rather than publishing a separate settlement revision per order.
+- Treasury postings remain independently owned by `TreasuryLedger` and its `ECONOMY_TRADE` lane. A market transaction can therefore invalidate both projections, without duplicating the account journal.
+- Added regression assertions for changed/no-op tax policy, auto-trade policy and external demand changes.
+- **Remaining bypasses:** public mutable collections/fields and mutable Worker/Building objects; resource transfers and CharacterRegistry reconciliation still require an explicit cross-domain writer protocol. Do not enable global WorldSim apply fencing based on this partial coverage.
