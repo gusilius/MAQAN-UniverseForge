@@ -36,17 +36,17 @@ pub fn advance(r:Request)->Result<Frame,String>{
  if r.world_id.trim().is_empty(){return Err("empty world id".into())}
  if r.elapsed_days==0{return Err("elapsed_days must be positive".into())}
  let mut seen=BTreeSet::new();let mut out=Vec::with_capacity(r.characters.len());
- for p in r.characters.iter().filter(|person| person.alive){
+ // The request owns every Character projection. Mutate each owned needs map
+ // in place and move it into the result instead of cloning it for the output.
+ for mut p in r.characters.into_iter().filter(|person| person.alive){
   if p.id.trim().is_empty()||!seen.insert(p.id.as_str()){return Err(format!("empty or duplicate character id: {}",p.id))}
   if p.elapsed_days==0{return Err(format!("zero elapsed days for active Character: {}",p.id))}
   let d=p.elapsed_days.min(MAX as u64) as i32;
   let drifts=[("hunger",10*d),("rest",6*d),("social",2*d),("purpose",d),("leisure",3*d)];
-  let age=r.year.saturating_sub(p.birth_year).max(0);let mut needs=p.needs.clone();
-  for (key,drift) in drifts{needs.insert(key.into(),need(&needs,key).saturating_add(drift).clamp(0,MAX));}
-  // Decide while the updated needs are borrowed, then move the map into the
-  // result. Cloning it again here doubled per-Character map allocations.
-  let intent=decide(p,&needs,age).to_owned();
-  out.push(PersonResult{id:p.id.clone(),needs,intent,age_years:age,
+  let age=r.year.saturating_sub(p.birth_year).max(0);
+  for (key,drift) in drifts{let value=need(&p.needs,key).saturating_add(drift).clamp(0,MAX);p.needs.insert(key.into(),value);}
+  let intent=decide(&p,&p.needs,age).to_owned();
+  out.push(PersonResult{id:p.id,needs:p.needs,intent,age_years:age,
    life_stage:stage(age).into(),simulated_days:p.simulated_days.max(0).saturating_add(p.elapsed_days.min(i64::MAX as u64) as i64),
    last_simulated_year:r.year,world_day:r.world_day});
  }
