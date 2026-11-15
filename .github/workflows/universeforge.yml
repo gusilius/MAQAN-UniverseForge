@@ -15,6 +15,7 @@ on:
       - ".github/workflows/**"
       - "!mods/worldforge/wfaddons/wf-army/**"
       - "!mods/worldforge/wfaddons/wf-troops/**"
+      - "!mods/worldforge/wfaddons/wf-settlements/**"
       - "!mods/worldforge/wfaddons/wf-war/**"
       - "!mods/worldforge/wfaddons/wf-worldsim/**"
       - "!mods/worldforge/wfaddons/tests/**"
