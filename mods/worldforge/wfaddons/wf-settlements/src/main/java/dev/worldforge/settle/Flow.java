@@ -11,7 +11,7 @@ public final class Flow {
 
     private final TreeMap<Long, TreeMap<String, double[]>> buckets = new TreeMap<>();   // секунда -> ресурс -> {произведено, потрачено}
 
-    public void record(double now, String res, double amount, boolean produced) {
+    void record(double now, String res, double amount, boolean produced) {
         if (!validTime(now) || res == null || res.isBlank() || !Double.isFinite(amount) || amount <= 0) return;
         long idx = (long) Math.floor(now);
         buckets.computeIfAbsent(idx, k -> new TreeMap<>()).computeIfAbsent(res, k -> new double[4])[produced ? 0 : 1] += amount;
@@ -23,7 +23,7 @@ public final class Flow {
      * Inbound/outbound trade must not inflate a settlement's domestic demand
      * (otherwise exporting goods increases its reserve and can create a feedback loop).
      */
-    public void recordTrade(double now, String res, double amount, boolean inbound) {
+    void recordTrade(double now, String res, double amount, boolean inbound) {
         if (!validTime(now) || res == null || res.isBlank() || !Double.isFinite(amount) || amount <= 0) return;
         long idx = (long) Math.floor(now);
         buckets.computeIfAbsent(idx, k -> new TreeMap<>()).computeIfAbsent(res, k -> new double[4])[inbound ? 2 : 3] += amount;
@@ -83,7 +83,7 @@ public final class Flow {
         return out;
     }
 
-    public void load(Object o) {
+    void load(Object o) {
         buckets.clear();
         if (!(o instanceof List<?> list)) return;
         for (Object x : list) {

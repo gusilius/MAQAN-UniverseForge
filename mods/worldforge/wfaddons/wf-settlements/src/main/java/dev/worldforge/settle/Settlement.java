@@ -502,7 +502,7 @@ public final class Settlement {
             recipient.syncResourceMirror(resource);
             if (ok && quantity > 0) {
                 flow.recordTrade(time, resource, quantity, false);
-                recipient.flow.recordTrade(recipient.time, resource, quantity, true);
+                recipient.recordTradeFlow(resource, quantity, true);
                 markMutation();
                 recipient.markMutation();
             }

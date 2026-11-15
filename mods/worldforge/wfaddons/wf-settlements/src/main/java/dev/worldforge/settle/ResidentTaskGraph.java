@@ -23,7 +23,7 @@ public final class ResidentTaskGraph {
     public List<Receipt> receipts() { return Collections.unmodifiableList(receipts); }
     public long nextId() { return nextId; }
 
-    public Receipt extract(int buildingId, int workerId, String resource, double quantity, double time) {
+    Receipt extract(int buildingId, int workerId, String resource, double quantity, double time) {
         validate(resource, quantity, time);
         ensureCapacity(1);
         Receipt receipt = record(Stage.EXTRACTED, buildingId, workerId, resource, quantity, 0, time);
@@ -34,7 +34,7 @@ public final class ResidentTaskGraph {
     }
 
     /** Records a processed output lot and links it to the input-processing receipt. */
-    public Receipt produce(int buildingId, int workerId, String resource, double quantity, double time) {
+    Receipt produce(int buildingId, int workerId, String resource, double quantity, double time) {
         validate(resource, quantity, time);
         ensureCapacity(1);
         long parent = 0;
@@ -53,7 +53,7 @@ public final class ResidentTaskGraph {
     }
 
     /** Delivers only goods already present in the source building's local output buffer. */
-    public double deliver(int buildingId, int workerId, String resource, double quantity, double time) {
+    double deliver(int buildingId, int workerId, String resource, double quantity, double time) {
         validate(resource, quantity, time);
         Deque<Lot> source = localLots.get(localKey(buildingId, resource));
         if (source == null || source.isEmpty()) return 0;
@@ -80,7 +80,7 @@ public final class ResidentTaskGraph {
     }
 
     /** Records resource consumption by a real production or construction commit. */
-    public double consume(Stage stage, int buildingId, int workerId, String resource, double quantity, double time) {
+    double consume(Stage stage, int buildingId, int workerId, String resource, double quantity, double time) {
         if (stage != Stage.PROCESSED && stage != Stage.CONSTRUCTION)
             throw new IllegalArgumentException("Consumption stage must be PROCESSED or CONSTRUCTION");
         validate(resource, quantity, time);
@@ -111,7 +111,7 @@ public final class ResidentTaskGraph {
     }
 
     /** Records the completed construction after all required material and work commits succeeded. */
-    public Receipt built(int buildingId, int workerId, double time) {
+    Receipt built(int buildingId, int workerId, double time) {
         ensureCapacity(1);
         long parent = 0;
         for (int i = receipts.size() - 1; i >= 0; i--) {
@@ -132,7 +132,7 @@ public final class ResidentTaskGraph {
      * The canonical treasury journal records the debit; this graph tracks only
      * provenance for quantities that remain in active inventory.
      */
-    public double consumeStock(String resource, double quantity) {
+    double consumeStock(String resource, double quantity) {
         if (resource == null || resource.isBlank() || !Double.isFinite(quantity) || quantity <= 0) return 0;
         Deque<Lot> available = storedLots.get(resource);
         if (available == null || available.isEmpty()) return 0;
@@ -235,7 +235,7 @@ public final class ResidentTaskGraph {
     }
 
     @SuppressWarnings("unchecked")
-    public void fromJson(String json) {
+    void fromJson(String json) {
         Object parsed = Json.parse(json == null ? "" : json);
         if (!(parsed instanceof Map<?,?> root) || !"wf-resident-task-graph/1".equals(root.get("format")))
             throw new IllegalArgumentException("Invalid resident task graph save");
