@@ -1719,7 +1719,7 @@ public class NavigatorScreen extends Screen {
                 int py = drawCenterY + (int) Math.round((source[1] - centerZ) * scale);
                 boolean selected = node.id.equals(selectedNodeId) || node.id.equals(selectedId);
                 int radius = selected ? 3 : ("galaxy".equals(node.kind) ? 2 : 1);
-                int color = selected ? GOLD : kindColor(node.kind);
+                int color = selected ? GOLD : kindColor(node.kind == null ? "" : node.kind);
                 if (selected) g.renderOutline(px - 5, py - 5, 10, 10, 0xFF7EDDF4);
                 g.fill(px - radius, py - radius, px + radius + 1, py + radius + 1, color);
                 minimapPoints.put(node.id, new Point(px, py, Math.max(4, radius + 2)));
