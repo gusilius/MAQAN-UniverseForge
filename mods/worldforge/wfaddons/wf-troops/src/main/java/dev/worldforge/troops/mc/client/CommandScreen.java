@@ -449,7 +449,7 @@ public final class CommandScreen extends Screen {
         int[] view = embeddedInMaqan ? workspaceViewport() : new int[]{0, 0, width, height};
         int minX = view[0] + 4, minY = view[1] + 4;
         int maxX = Math.max(minX, view[0] + view[2] - 198);
-        int maxY = Math.max(minY, view[1] + view[3] - 98);
+        int maxY = Math.max(minY, view[1] + view[3] - 116);
         x = Math.max(minX, Math.min(maxX, x));
         y = Math.max(minY, Math.min(maxY, y));
         return new int[]{x, y, 194, unitToolsCollapsed ? 16 : 112};
@@ -510,7 +510,9 @@ public final class CommandScreen extends Screen {
         for (TroopEntity troop : selectedTroops()) {
             String squadId = troop.squadId();
             if (squadId == null || squadId.isBlank()) continue;
-            representatives.putIfAbsent(squadId, troop);
+            TroopEntity current = representatives.get(squadId);
+            if (current == null || current.syncedCharacterId().isBlank()
+                    && !troop.syncedCharacterId().isBlank()) representatives.put(squadId, troop);
         }
         if (representatives.isEmpty() || minecraft.player == null) return;
         int sent = 0;
@@ -569,6 +571,8 @@ public final class CommandScreen extends Screen {
         g.drawString(font, (troops.size() == 1 ? "ЮНИТ" : "ГРУППА") + " · " + troops.size(), r[0] + 6, r[1] + 4, 0xFFE6C875, false);
         g.drawString(font, (unitToolsPinned ? "◆" : "◇") + (unitToolsCollapsed ? "+" : "−"), r[0] + r[2] - 25, r[1] + 4, 0xFFB8C5D6, false);
         if (unitToolsCollapsed) return;
+        g.drawString(font, "КОМАНДОВАНИЕ · назначьте лидера кнопкой выше", r[0] + 6, r[1] + 80,
+                0xFF9FC9E8, false);
         String traits;
         if (troops.size() == 1 && troops.get(0).def() != null) {
             TroopEntity unit = troops.get(0);
