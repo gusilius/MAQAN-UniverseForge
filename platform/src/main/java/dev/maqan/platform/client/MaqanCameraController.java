@@ -40,6 +40,8 @@ public final class MaqanCameraController {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.player == null || minecraft.level == null) {
             deactivate(minecraft);
+            WorkspaceViewState.setCameraMode(WorkspaceViewState.CameraMode.FIRST_PERSON);
+            appliedMode = WorkspaceViewState.CameraMode.FIRST_PERSON;
             return;
         }
 
@@ -66,13 +68,14 @@ public final class MaqanCameraController {
         if (minecraft.player == null || minecraft.level == null) return;
         if (proxy != null && minecraft.getCameraEntity() == proxy) deactivate(minecraft);
 
-        previousCamera = minecraft.getCameraEntity();
-        previousCameraType = minecraft.options.getCameraType();
-        proxy = EntityType.ARMOR_STAND.create(minecraft.level);
-        if (proxy == null) {
+        Entity cameraAnchor = EntityType.ARMOR_STAND.create(minecraft.level);
+        if (cameraAnchor == null) {
             LOGGER.warn("Unable to create client camera anchor; keeping the current camera");
             return;
         }
+        previousCamera = minecraft.getCameraEntity();
+        previousCameraType = minecraft.options.getCameraType();
+        proxy = cameraAnchor;
         proxy.setNoGravity(true);
         rig = new MaqanCameraRig();
         rig.start(minecraft.player.getX(), minecraft.player.getZ(),
