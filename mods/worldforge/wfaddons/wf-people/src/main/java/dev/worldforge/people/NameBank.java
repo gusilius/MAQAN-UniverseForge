@@ -48,7 +48,7 @@ public final class NameBank {
     private final Map<String, Pool> cultures = new LinkedHashMap<>(), races = new LinkedHashMap<>();
     private final Map<String, String> raceParents = new LinkedHashMap<>();
     /** Resolved ancestry+culture pools are immutable after construction and reused across thousands of names. */
-    private final Map<String, Pool> resolvedPools = new HashMap<>();
+    private final Map<String, Pool> resolvedPools = new java.util.concurrent.ConcurrentHashMap<>();
     private static final Set<String> FALLBACK_CATEGORIES = Set.of("realms","regions","provinces","settlements",
             "villages","cities","hamlets","camps","communities","outposts","colonies","stations",
             "nomad_camps","tribal_camps","holds","ports");
@@ -67,7 +67,6 @@ public final class NameBank {
             for (Map.Entry<?,?> entry : parents.entrySet()) {
                 String race = String.valueOf(entry.getKey()), parent = String.valueOf(entry.getValue());
                 if (!race.isBlank() && !parent.isBlank() && !race.equals(parent)) raceParents.put(race, parent);
-        resolvedPools.clear();
             }
     }
 
@@ -155,6 +154,7 @@ public final class NameBank {
             if (race != null && parent != null && !race.isBlank() && !parent.isBlank()
                     && !race.equals(parent)) raceParents.put(race, parent);
         }
+        resolvedPools.clear();
     }
 
     public String culture(String wanted) { return cultures.containsKey(wanted) ? wanted : def; }
