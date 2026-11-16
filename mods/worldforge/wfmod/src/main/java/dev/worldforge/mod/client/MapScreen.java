@@ -291,8 +291,9 @@ public class MapScreen extends Screen {
         double[] s = blockToScreen(mc.player.getX(), mc.player.getZ());
         zoom = Math.max(zoom, 2.0);
         s = blockToScreen(mc.player.getX(), mc.player.getZ());
-        camX += width / 2.0 - s[0];
-        camY += height / 2.0 - s[1];
+        int[] viewport = workspaceViewport();
+        camX += viewport[0] + viewport[2] / 2.0 - s[0];
+        camY += viewport[1] + viewport[3] / 2.0 - s[1];
     }
 
     private void freeOverlay() {
@@ -328,9 +329,11 @@ public class MapScreen extends Screen {
     @Override
     public void render(GuiGraphics g, int mx, int my, float pt) {
         MapTextures.ensure(ClientState.mode);
-        g.fill(0, 0, width, height, 0xFF12141B);
+        if (!embeddedInMaqan) g.fill(0, 0, width, height, 0xFF12141B);
         if (!MapTextures.ready()) {
-            g.drawCenteredString(font, ClientState.state == null ? "На этой планете нет политической карты" : "Строю карту…", width / 2, height / 2, 0xFFE8E2D0);
+            int[] viewport = workspaceViewport();
+            g.drawCenteredString(font, ClientState.state == null ? "На этой планете нет политической карты" : "Строю карту…",
+                    viewport[0] + viewport[2] / 2, viewport[1] + viewport[3] / 2, 0xFFE8E2D0);
             super.render(g, mx, my, pt);
             return;
         }
@@ -417,14 +420,16 @@ public class MapScreen extends Screen {
     private void drawPlate(GuiGraphics g) {
         String t = modeName(ClientState.mode);
         String sub = MapTextures.w + "x" + MapTextures.h + " px · " + Math.round(MapTextures.w * bpp() / 1000) + "x" + Math.round(MapTextures.h * bpp() / 1000) + " км";
+        int[] viewport = workspaceViewport();
+        int x = viewport[0] + 8, y = viewport[1] + 8;
         int w = Math.max(font.width(t) * 3 / 2, font.width(sub)) + 20;
-        bevel(g, 8, 8, w, 34, false);
+        bevel(g, x, y, w, 34, false);
         g.pose().pushPose();
-        g.pose().translate(15f, 13f, 0f);
+        g.pose().translate(x + 7f, y + 5f, 0f);
         g.pose().scale(1.5f, 1.5f, 1f);
         g.drawString(font, t, 0, 0, 0xFFF0C85A);
         g.pose().popPose();
-        g.drawString(font, sub, 15, 29, 0xFFA6A8B3);
+        g.drawString(font, sub, x + 7, y + 21, 0xFFA6A8B3);
     }
 
     private void drawCoords(GuiGraphics g, int mx, int my) {
@@ -432,9 +437,11 @@ public class MapScreen extends Screen {
         int[] p = screenToPixel(mx, my);
         TitleData d = MapTextures.titles;
         String t = "X " + Math.round((p[0] + 0.5 - d.w / 2.0) * d.bpp) + "  Z " + Math.round((p[1] + 0.5 - d.h / 2.0) * d.bpp);
+        int[] viewport = workspaceViewport();
+        int x = viewport[0] + 8, y = viewport[1] + viewport[3] - 26;
         int w = font.width(t) + 14;
-        bevel(g, 8, height - 26, w, 18, false);
-        g.drawString(font, t, 15, height - 21, 0xFFECEBE4);
+        bevel(g, x, y, w, 18, false);
+        g.drawString(font, t, x + 7, y + 5, 0xFFECEBE4);
     }
 
     private void drawScale(GuiGraphics g) {
@@ -442,8 +449,10 @@ public class MapScreen extends Screen {
         double step = (f < 1.5 ? 1 : f < 3.5 ? 2 : f < 7.5 ? 5 : 10) * pw;
         int px = (int) Math.round(step * per);
         String t = step >= 1000 ? (long) (step / 1000) + " км" : (long) step + " бл.";
-        int w = Math.max(px, font.width(t)) + 14, x = width - w - 8, y = height - 24;
-        if (ovwW > 0) x = ovwX + ovwW + 4 - w;
+        int[] viewport = workspaceViewport();
+        int w = Math.max(px, font.width(t)) + 14;
+        int x = viewport[0] + viewport[2] - w - 8, y = viewport[1] + viewport[3] - 24;
+        if (!embeddedInMaqan && ovwW > 0) x = ovwX + ovwW + 4 - w;
         bevel(g, x, y, w, 16, false);
         g.drawString(font, t, x + w - 7 - font.width(t), y + 2, 0xFFA6A8B3);
         g.fill(x + w - 7 - px, y + 12, x + w - 7, y + 13, 0xFFECEBE4);
