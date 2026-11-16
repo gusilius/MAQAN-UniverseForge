@@ -19,13 +19,15 @@ public final class WorkspaceViewState {
     }
 
     public enum MapMode {
-        LOCAL_MINIMAP("Local map"),
-        WORLD_MAP("World map"),
-        POLITICAL_MAP("Political map");
+        LOCAL_MINIMAP("Local map", "⌖"),
+        WORLD_MAP("World map", "▦"),
+        POLITICAL_MAP("Political map", "♜");
 
         private final String label;
-        MapMode(String label) { this.label = label; }
+        private final String icon;
+        MapMode(String label, String icon) { this.label = label; this.icon = icon; }
         public String label() { return label; }
+        public String icon() { return icon; }
     }
 
     private static CameraMode cameraMode = CameraMode.FIRST_PERSON;
