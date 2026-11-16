@@ -24,7 +24,7 @@ import numpy as np
 
 from image_map_analysis import CLASSES as ANALYSIS_CLASSES, classify, make_heightfield
 
-GENERATOR_VERSION = "maqan-image-blueprint/0.4.0"
+GENERATOR_VERSION = "maqan-image-blueprint/0.5.0"
 BIOMES = [
     {"index": 0, "key": "deep_ocean", "color": "#315f85", "candidates": ["minecraft:deep_ocean", "minecraft:ocean"]},
     {"index": 1, "key": "plains", "color": "#dac78f", "candidates": ["minecraft:plains"]},
@@ -539,7 +539,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     # at least one profile-sized territory. This prevents coast antialiasing,
     # tiny islets and scattered pixels from becoming hundreds of micro-states.
     major_components = [component for component in components
-                        if len(component) >= minimum_territory_pixels][:settlement_profile["realms"]]
+                        if len(component) >= minimum_territory_pixels]
     if not major_components:
         # Keep the largest island as the initial realm when the world has no
         # profile-sized continent; it must not be counted again as a minor island.
