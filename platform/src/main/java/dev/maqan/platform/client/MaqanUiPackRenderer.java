@@ -53,7 +53,9 @@ public final class MaqanUiPackRenderer {
                     "lp", new int[]{428,793}, "rp", new int[]{460,809}, "rcol", new int[]{60,771},
                     "mm", new int[]{464,345}, "bot", new int[]{1334,272}, "cor", new int[]{217,150})
     );
-    private static String activeTheme = "royal";
+    private static final java.util.prefs.Preferences THEME_PREFS =
+            java.util.prefs.Preferences.userNodeForPackage(MaqanUiPackRenderer.class).node("ui-pack");
+    private static String activeTheme = THEME_PREFS.get("theme", "royal");
     private static MaqanUiPackLayout loadedLayout;
     private static boolean availabilityLogged;
     private static boolean availabilityChecked;
@@ -62,10 +64,23 @@ public final class MaqanUiPackRenderer {
     private MaqanUiPackRenderer() {}
 
     public static void setTheme(String theme) {
-        if (theme != null && MaqanUiPackLayout.load().map(layout -> layout.hasTheme(theme)).orElse(false)) activeTheme = theme;
+        if (theme == null || !MaqanUiPackLayout.load().map(layout -> layout.hasTheme(theme)).orElse(false)) return;
+        activeTheme = theme;
+        try { THEME_PREFS.put("theme", theme); THEME_PREFS.flush(); }
+        catch (java.util.prefs.BackingStoreException error) {
+            LOGGER.warn("Could not persist MAQAN UI theme {}", theme, error);
+        }
     }
 
     public static String activeTheme() {
+        return activeTheme;
+    }
+
+    public static String cycleTheme() {
+        List<String> themes = List.of("royal", "iron", "grim", "elf");
+        int index = themes.indexOf(activeTheme);
+        String next = themes.get((index + 1 + themes.size()) % themes.size());
+        setTheme(next);
         return activeTheme;
     }
 
