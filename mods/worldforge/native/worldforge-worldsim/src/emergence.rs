@@ -398,7 +398,7 @@ mod tests {
         for z in 0..128 {
             for x in 0..128 {
                 cells.push(GeographicCell { x, z, biome: if (x / 16 + z / 16) % 2 == 0 { "plains" } else { "forest" }.into(),
-                    elevation: 70, river: if x % 19 == 0 { 255 } else { 0 }, land: true, suitability: 92,
+                    elevation: 70, river: if x % 19 == 0 { 255 } else { 0 }, land: true, water_claimed_by_player: false, suitability: 92,
                     owner_realm_id: String::new() });
             }
         }
