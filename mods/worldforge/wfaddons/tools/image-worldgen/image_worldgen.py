@@ -784,13 +784,18 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         },
     }
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    terrain_preview = render_terrain_preview(
+        np.asarray(biome_values, dtype=np.uint8),
+        np.asarray(height_values, dtype=np.uint16), width, height)
+    terrain_buffer = BytesIO()
+    terrain_preview.save(terrain_buffer, format="PNG", optimize=False)
     files = {
         "meta.json": json.dumps(meta_doc, sort_keys=True, separators=(",", ":")).encode(),
         "biomes.png": image_bytes(width, height, biome_values, "L"),
         "height16.png": image_bytes(width, height, height_values, "I;16"),
         "rivers.png": image_bytes(width, height, river_values, "L"),
         "provinces.png": image_bytes(width, height, province_ids, "I;16"),
-        "political-preview.png": political_buffer.getvalue(),
+        "political-preview.png": political_buffer.getvalue(),\n        "terrain-preview.png": terrain_buffer.getvalue(),
         "titles.json": json.dumps(titles_doc, sort_keys=True, separators=(",", ":")).encode(),
         "realms.json": json.dumps(realms_doc, sort_keys=True, separators=(",", ":")).encode(),
         "world-blueprint.json": json.dumps(blueprint, sort_keys=True, separators=(",", ":"), default=lambda value: value.item() if isinstance(value, np.generic) else str(value)).encode(),
@@ -813,6 +818,39 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     return blueprint
 
 
+
+def render_terrain_preview(biome_values: np.ndarray, height_values: np.ndarray,
+                           width: int, height: int) -> Image.Image:
+    """Render a shaded relief QA image with biome tint and coherent lighting."""
+    palette = np.asarray([
+        [49, 95, 133], [190, 180, 119], [48, 105, 66], [133, 132, 128],
+        [204, 160, 83], [47, 119, 190], [36, 78, 56], [220, 231, 238],
+        [57, 130, 190], [103, 99, 91]
+    ], dtype=np.float32)
+    biomes = np.asarray(biome_values, dtype=np.uint8).reshape((height, width))
+    elevation = np.asarray(height_values, dtype=np.float32).reshape((height, width))
+    elevation = elevation / 65535.0
+    # Smooth the lighting surface only; the semantic coastline and biome
+    # boundaries remain crisp in the underlying map layers.
+    from scipy import ndimage
+    smooth = ndimage.gaussian_filter(elevation, sigma=1.15, mode="nearest")
+    dz_dy, dz_dx = np.gradient(smooth)
+    nx, ny, nz = -dz_dx * 8.0, -dz_dy * 8.0, np.ones_like(smooth)
+    norm = np.sqrt(nx * nx + ny * ny + nz * nz)
+    nx, ny, nz = nx / norm, ny / norm, nz / norm
+    azimuth, altitude = math.radians(315), math.radians(42)
+    lx, ly, lz = math.cos(altitude) * math.cos(azimuth), math.cos(altitude) * math.sin(azimuth), math.sin(altitude)
+    shade = np.clip(nx * lx + ny * ly + nz * lz, 0.24, 1.0)
+    shade = 0.58 + shade * 0.58
+    color = palette[biomes] * shade[..., None]
+    # Slight altitude tint makes highlands and snowfields read clearly.
+    highland = np.clip((elevation - 0.34) * 1.25, 0.0, 0.18)
+    color[..., 0] = color[..., 0] * (1.0 - highland * 0.30)
+    color[..., 1] = color[..., 1] * (1.0 - highland * 0.08)
+    color[..., 2] = color[..., 2] * (1.0 + highland * 0.35)
+    return Image.fromarray(np.uint8(np.clip(color, 0, 255)), "RGB")
+
+
 def image_bytes(width: int, height: int, values: list[int], mode: str) -> bytes:
     from io import BytesIO
     image = Image.new(mode, (width, height))
@@ -826,7 +864,7 @@ def validate_package(path: Path) -> dict:
     with zipfile.ZipFile(path) as archive:
         names = set(archive.namelist())
         required = {"meta.json", "biomes.png", "height16.png", "rivers.png",
-                    "provinces.png", "political-preview.png", "titles.json", "realms.json", "world-blueprint.json"}
+                    "provinces.png", "political-preview.png", "terrain-preview.png", "titles.json", "realms.json", "world-blueprint.json"}
         missing = required - names
         if missing:
             raise AssertionError(f"worldmap is missing layers: {sorted(missing)}")
