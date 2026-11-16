@@ -1114,11 +1114,13 @@ public final class PlatformShellScreen extends Screen {
             contextMenuVisible = false;
             return true;
         }
-        for (WorkspaceDockTree.Splitter splitter : WorkspaceDockTree.splitters(workspaceRoot, workspaceBounds())) {
-            boolean hit = splitter.axis() == WorkspaceDockTree.Axis.HORIZONTAL
-                    ? Math.abs(mx - splitter.position()) <= 4 && my >= splitter.start() && my <= splitter.end()
-                    : Math.abs(my - splitter.position()) <= 4 && mx >= splitter.start() && mx <= splitter.end();
-            if (hit) { resizingSplitterPath = splitter.path(); return true; }
+        if (!MaqanUiPackRenderer.assetsAvailable()) {
+            for (WorkspaceDockTree.Splitter splitter : WorkspaceDockTree.splitters(workspaceRoot, workspaceBounds())) {
+                boolean hit = splitter.axis() == WorkspaceDockTree.Axis.HORIZONTAL
+                        ? Math.abs(mx - splitter.position()) <= 4 && my >= splitter.start() && my <= splitter.end()
+                        : Math.abs(my - splitter.position()) <= 4 && mx >= splitter.start() && mx <= splitter.end();
+                if (hit) { resizingSplitterPath = splitter.path(); return true; }
+            }
         }
         if (my < MaqanUiPackRenderer.topBarHeight(width, height)) {
             if (mx >= width - 88 && mx < width - 64) {
