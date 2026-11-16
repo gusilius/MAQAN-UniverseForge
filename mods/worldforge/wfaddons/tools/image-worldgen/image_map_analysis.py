@@ -32,7 +32,7 @@ def _hsv(rgb):
     return h * 60, np.divide(d, mx, out=np.zeros_like(d), where=mx > 1e-6), mx
 
 def classify(rgb):
-    """Classify an RGB map; never silently coerce unknown pixels into grassland."""
+    """Classify map pixels with mutually exclusive semantic masks and palette-aware land rules."""
     h, w = rgb.shape[:2]
     hue, sat, val = _hsv(rgb)
     r, g, b = [rgb[..., i].astype(np.float32) for i in range(3)]
@@ -40,7 +40,8 @@ def classify(rgb):
     labels = np.full((h, w), idx["unknown"], np.uint8)
     assigned = np.zeros((h, w), bool)
 
-    # Only blue components connected to the image boundary are open ocean.
+    # Open ocean is blue water connected to the image boundary. Inland water
+    # is segmented separately so coastlines and rivers are not mistaken for land.
     blue = (hue >= 165) & (hue <= 235) & (sat >= .38) & (b > g * 1.08) & (b > 55)
     edge = np.zeros((h, w), bool)
     edge[0] = blue[0]; edge[-1] = blue[-1]
@@ -49,16 +50,12 @@ def classify(rgb):
         structure=np.array([[0,1,0],[1,1,1],[0,1,0]], bool))
     labels[ocean] = idx["ocean"]; assigned |= ocean
 
-    # Enclosed pools are lakes when broad enough; narrow components are waterways.
     inland = blue & ~ocean
     components, count = ndimage.label(inland, structure=np.ones((3,3), bool))
     if count:
         sizes = np.bincount(components.ravel())
         distance = ndimage.distance_transform_edt(inland)
         max_width = ndimage.maximum(distance, labels=components, index=np.arange(1, count + 1)) * 2
-        # Classify all inland-water components in O(N + C), not O(N * C).
-        # The previous per-component full-raster mask scan became pathological
-        # on detailed maps containing many narrow rivers and small pools.
         lake_by_component = np.zeros(count + 1, dtype=bool)
         lake_by_component[1:] = (sizes[1:] >= 90) & (max_width >= 7)
         lake_mask = inland & lake_by_component[components]
@@ -66,28 +63,35 @@ def classify(rgb):
         labels[lake_mask] = idx["lake"]
         assigned |= inland
 
-    snow = (sat < .19) & (val > .70) & (b > 150) & (g > 150)
+    # Snow/ice takes precedence over vegetation and earth tones. The wider
+    # saturation threshold preserves shaded blue-white snowfields.
+    snow = (~assigned) & (sat < .22) & (val > .68) & (b > 145) & (g > 145)
     labels[snow] = idx["snow"]; assigned |= snow
 
-    # Vegetation: broad olive-green range for grassland; darker canopy for forest/taiga.
-    green = (hue >= 48) & (hue <= 158) & (g >= r * .97) & (g > b * 1.08) & (g > 32)
+    # The source map uses olive/yellow-green as well as vivid green. Keep this
+    # palette family together: the old warm-earth rule overlapped it and
+    # overwrote large areas of grassland as desert.
+    green = (~assigned) & (hue >= 48) & (hue <= 158) & (g >= r * .94) & (g > b * 1.05) & (g > 32)
     dark_green = green & (val < .48) & (sat > .28)
     labels[green] = idx["grassland"]
     labels[dark_green] = idx["forest"]
     latitude = np.abs(np.linspace(-1.0, 1.0, h, dtype=np.float32))[:, None]
-    taiga = dark_green & (latitude > .56)
+    # Taiga is a narrower cool/dark canopy subset, not every dark pixel near a pole.
+    taiga = dark_green & (hue >= 82) & (latitude > .58)
     labels[taiga] = idx["taiga"]
     assigned |= green
 
-    # Ochre/brown: pale saturated tones are arid land; darker earth tones are relief.
-    warm = (hue >= 12) & (hue <= 58) & (sat > .16) & (r > g * 1.015) & (g > b * 1.025)
-    desert = warm & (val > .55) & (sat > .22)
-    mountains = warm & ~desert
+    # Sandy ochre and brown relief have their own palette family. Excluding
+    # already assigned greens prevents yellow-green plains from being relabeled.
+    earth = (~assigned) & (hue >= 12) & (hue < 48) & (sat > .16) & (r > g * 1.01) & (g > b * 1.02)
+    desert = earth & (val > .55) & (sat > .22)
+    mountains = earth & ~desert
     labels[mountains] = idx["mountains"]
     labels[desert] = idx["desert"]
-    assigned |= warm
+    assigned |= earth
 
-    grey_rock = (sat < .25) & (val > .16) & (val < .70) & ~assigned
+    # Neutral shaded stone is kept distinct from brown mountains and snow.
+    grey_rock = (~assigned) & (sat < .28) & (val > .16) & (val < .72)
     labels[grey_rock] = idx["rock"]; assigned |= grey_rock
 
     counts = np.bincount(labels.ravel(), minlength=len(CLASSES))
@@ -101,10 +105,10 @@ def classify(rgb):
     else:
         unknown_color_samples = []
     unknown = int(counts[idx["unknown"]])
-    report = {
+    return labels, {
         "format": "maqan-image-analysis/2", "width": int(w), "height": int(h),
         "source_sha256": hashlib.sha256(rgb.tobytes()).hexdigest(),
-        "classifier": "hsv-context-components-v2",
+        "classifier": "palette-context-components-v3",
         "classes": {name: int(counts[i]) for i, name in enumerate(CLASSES)},
         "class_percent": {name: round(100.0 * int(counts[i]) / total, 3) for i, name in enumerate(CLASSES)},
         "unknown_pixels": unknown, "unknown_percent": round(100.0 * unknown / total, 3),
@@ -113,14 +117,20 @@ def classify(rgb):
         "water_model": {"ocean": "blue components connected to image boundary",
                         "lake": "enclosed component >=90 px and estimated width >=7 px",
                         "waterway": "remaining enclosed blue components"},
+        "land_model": {"grassland": "olive/yellow-green and green palette, excluding water and snow",
+                       "forest": "dark saturated green canopy",
+                       "taiga": "cool dark-green canopy with a latitude context prior",
+                       "desert": "bright saturated ochre/sand palette",
+                       "mountains": "darker brown/ochre relief palette",
+                       "rock": "neutral shaded stone palette"},
         "notes": [
             "Deterministic palette/context analysis; not general-purpose AI image understanding.",
-            "Unknown pixels are preserved as unknown and visualized magenta, never silently relabeled as grassland.",
-            "Taiga is an initial latitude heuristic over dark vegetation; validate against the map legend.",
+            "Semantic masks are mutually exclusive; water and snow are protected from later land rules.",
+            "Land classes use source-palette color families; textured terrain and legend-specific calibration remain future improvements.",
+            "Taiga uses a conservative latitude prior and should be validated against the source map legend.",
             "River/lake split is geometric and may need map-specific threshold calibration."
         ]
     }
-    return labels, report
 
 def make_heightfield(labels, seed, sea_level=63, min_y=-64, max_y=320):
     """Create deterministic multi-scale relief with explicit class height anchors."""
