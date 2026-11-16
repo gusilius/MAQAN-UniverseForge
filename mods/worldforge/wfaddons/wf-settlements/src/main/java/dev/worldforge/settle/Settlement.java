@@ -1603,7 +1603,19 @@ public final class Settlement {
                         w.orderQueue.addLast(new Worker.ManualOrder(qxx,qzz));
                 }
             }
-            if (m.get("prio") instanceof Map<?, ?> pm) { w.jobPrio = new TreeMap<>(); for (var e : pm.entrySet()) w.jobPrio.put(String.valueOf(e.getKey()), ((Number) e.getValue()).intValue()); }
+            if (m.get("prio") instanceof Map<?, ?> pm) {
+                w.jobPrio = new TreeMap<>();
+                for (var e : pm.entrySet()) {
+                    if (!(e.getKey() instanceof String role) || !defs.professions.containsKey(role)
+                            || !(e.getValue() instanceof Number priority)) continue;
+                    int value = priority.intValue();
+                    if (value < 0 || value > 4) continue;
+                    // Keep explicit zeroes for temporarily incompatible roles: a later profession
+                    // change may make that role available again without losing the resident's policy.
+                    w.jobPrio.put(role, value);
+                }
+                if (w.jobPrio.isEmpty()) w.jobPrio = null;
+            }
             if (w.building != 0 && s.building(w.building) == null) w.building = 0;
             s.workers.add(w);
         }
