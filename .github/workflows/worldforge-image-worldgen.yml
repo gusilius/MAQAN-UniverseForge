@@ -30,7 +30,19 @@ jobs:
           python-version: "3.12"
 
       - name: Install image decoder dependency
-        run: python -m pip install --disable-pip-version-check Pillow==11.3.0
+        run: python -m pip install --disable-pip-version-check Pillow==11.3.0 numpy==2.3.2 scipy==1.16.1
+
+      - name: Test semantic image classifier and seeded relief
+        shell: pwsh
+        run: |
+          $tool = "mods/worldforge/wfaddons/tools/image-worldgen"
+          python -m unittest discover -s $tool -p "test_image_map_analysis.py" -v
+          if ($LASTEXITCODE -ne 0) { throw "Semantic image analysis tests failed" }
+          $fixture = Join-Path $env:RUNNER_TEMP "maqan-semantic-fixture.png"
+          $out = Join-Path $env:RUNNER_TEMP "maqan-semantic-preview"
+          python -c "from PIL import Image,ImageDraw; i=Image.new('RGB',(256,192),(0,74,119)); d=ImageDraw.Draw(i); d.ellipse((15,10,235,180),fill=(150,180,80)); d.polygon([(30,80),(80,20),(130,65),(100,140)],fill=(35,90,35)); d.polygon([(100,40),(150,15),(190,80),(140,100)],fill=(110,100,90)); d.rectangle((160,100,220,160),fill=(225,185,100)); d.rectangle((20,10,75,45),fill=(225,235,240)); d.line((110,50,125,90,150,130),fill=(0,145,210),width=4); i.save(r'$fixture')"
+          python $tool/image_map_analysis.py --input $fixture --output $out --seed 424242
+          if ($LASTEXITCODE -ne 0) { throw "Semantic image fixture analysis failed" }
 
       - name: Generate image-based world twice with the same seed and once with a different seed
         shell: pwsh
