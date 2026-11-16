@@ -65,6 +65,10 @@ class WorkspaceResponsiveLayoutTest {
         for (int[] size : new int[][]{{1, 1}, {32, 24}, {96, 64}}) {
             for (String id : new String[]{"navigation", "inspector", "tools", "timeline"}) {
                 var result = WorkspaceResponsiveLayout.calculate(size[0], size[1], id);
+                var canvas = result.rectangles().get("content");
+                assertNotNull(canvas);
+                assertTrue(canvas.x() + canvas.width() <= size[0]);
+                assertTrue(canvas.y() + canvas.height() <= size[1]);
                 var drawer = result.rectangles().get(id);
                 assertNotNull(drawer);
                 assertTrue(drawer.x() >= 0 && drawer.y() >= 0);
