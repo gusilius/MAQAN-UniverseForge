@@ -28,20 +28,6 @@ public final class MaqanUiPackRenderer {
             "minimap.png", "rts_console.png", "window_state.png", "window_diplomacy.png",
             "window_left_blank.png", "window_right_blank.png"
     );
-    private static final Map<String, Map<String, int[]>> SOURCE_SIZES = Map.of(
-            "royal", Map.of("top", new int[]{2188,99}, "lcol", new int[]{92,694},
-                    "lp", new int[]{444,739}, "rp", new int[]{480,739}, "rcol", new int[]{67,764},
-                    "mm", new int[]{467,361}, "bot", new int[]{1353,281}, "cor", new int[]{217,150}),
-            "iron", Map.of("top", new int[]{2188,99}, "lcol", new int[]{100,675},
-                    "lp", new int[]{363,675}, "rp", new int[]{323,665}, "rcol", new int[]{57,764},
-                    "mm", new int[]{489,345}, "bot", new int[]{1344,278}, "cor", new int[]{217,150}),
-            "grim", Map.of("top", new int[]{2188,99}, "lcol", new int[]{102,662},
-                    "lp", new int[]{473,732}, "rp", new int[]{502,740}, "rcol", new int[]{83,768},
-                    "mm", new int[]{470,355}, "bot", new int[]{1414,304}, "cor", new int[]{217,131}),
-            "elf", Map.of("top", new int[]{2188,99}, "lcol", new int[]{99,760},
-                    "lp", new int[]{428,793}, "rp", new int[]{460,809}, "rcol", new int[]{60,771},
-                    "mm", new int[]{464,345}, "bot", new int[]{1334,272}, "cor", new int[]{217,150})
-    );
     private static final java.util.prefs.Preferences THEME_PREFS =
             java.util.prefs.Preferences.userNodeForPackage(MaqanUiPackRenderer.class).node("ui-pack");
     private static String activeTheme = THEME_PREFS.get("theme", "royal");
@@ -138,7 +124,11 @@ public final class MaqanUiPackRenderer {
             MaqanUiPackAdaptiveLayout.Rect rect = adaptive.get(key);
             if (rect == null || rect.width() <= 0 || rect.height() <= 0) continue;
             ResourceLocation texture = texture(activeTheme, loadedLayout.textureName(key));
-            int[] sourceSize = SOURCE_SIZES.get(activeTheme).get(key);
+            int[] sourceSize = loadedLayout.textureSize(activeTheme, key);
+            if (sourceSize == null) {
+                LOGGER.warn("Missing source dimensions for MAQAN texture {}/{}", activeTheme, key);
+                continue;
+            }
             graphics.blit(texture, rect.x(), rect.y(), rect.width(), rect.height(),
                     0, 0, sourceSize[0], sourceSize[1], sourceSize[0], sourceSize[1]);
         }
