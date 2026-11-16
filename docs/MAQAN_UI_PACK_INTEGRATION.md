@@ -63,3 +63,10 @@ The importer validates all four themes and all ten image layers per theme, decod
 5. Verify 1920×1080, 1366×768, 1024×768, 800×600, 640×480 and ultrawide layouts at multiple Minecraft GUI scales.
 6. Verify drag, resize, dock, tab, minimize, restore, focus, tooltips, mouse and keyboard behavior.
 7. Run Platform unit tests and the Windows x64 Platform build before calling this integration complete.
+
+### Compact workspace and persistent dock integration
+
+- The compact workspace receives a reserved-bottom measurement from the active skin layout. The content canvas and every native drawer stop above the minimap/command dock; they no longer render underneath persistent controls.
+- The concept top bar is decorative artwork with native shell controls layered over it. Profile tabs, workspace profiles, notifications and close actions remain visible and retain the same hit regions.
+- The compact navigation rail calculates how many drawer shortcuts fit above its settings control. Short viewports hide shortcuts that cannot fit rather than allowing them to overlap the settings button or bottom dock.
+- The top bar keeps a minimum usable control height on narrow screens; the original reference layout remains unchanged at the supplied 1368×760 geometry.
