@@ -92,3 +92,11 @@ The importer validates all four themes and all ten image layers per theme, decod
 - Its settlement minimap is rendered from live buildings/workers into the imported minimap frame. The command card is hosted by the imported RTS console frame; selection/unit details occupy the left window and settlement resources, population, approval and alerts occupy the right window.
 - Existing RTS selection, command-card actions, placement, priority editing, worker/building orders and provider selection publication remain owned by the RTS HUD. The shell only supplies the shared visual surfaces and viewport boundaries.
 - Compact layouts keep the minimap and command card in the persistent bottom dock; the selection summary moves into the available map canvas rather than creating another side column.
+
+### Independent camera and map modes
+
+- `WorkspaceViewState` stores camera and map mode independently. Camera modes are `FIRST_PERSON`, `FREE` and `RTS`; map modes are `LOCAL_MINIMAP`, `WORLD_MAP` and `POLITICAL_MAP`. Switching one axis never resets the other or the provider-owned selection.
+- `MaqanCameraRig` is pure camera geometry: camera-relative pan, yaw/pitch orbit, bounded zoom and a leash around the player to avoid moving beyond client-loaded terrain.
+- `MaqanCameraController` creates an unspawned client-only camera anchor. It does not move the player, send movement packets, add entities to the world, or alter server simulation. Leaving a world restores the previous camera and resets the mode to first person.
+- In the shared shell, F8 and the camera icon cycle camera modes; WASD/arrows pan, Shift accelerates, Q/E rotate yaw, R/F adjust pitch, middle-mouse drag orbits, and the mouse wheel zooms while over the central workspace viewport. F9 and the map icon cycle the independent map-mode state.
+- The current slice establishes the actual camera anchor and independent mode state. Map-mode routing to concrete Atlas/WorldForge provider views, edge scrolling, and direct world-click selection outside the provider HUD remain subsequent integration work; they are not represented as complete by this commit.
