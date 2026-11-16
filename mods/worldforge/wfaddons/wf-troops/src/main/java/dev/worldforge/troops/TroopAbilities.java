@@ -63,9 +63,12 @@ public final class TroopAbilities {
         List<Offer> offers = new ArrayList<>();
         for (Ability ability : CATALOG) {
             int eligible = 0;
-            for (int i = 0; i < units.size(); i++) {
+            if (ability.commanderOnly()) {
+                // A commander ability belongs to the appointed leader, not every selected soldier.
+                eligible = hasCommander ? 1 : 0;
+            } else for (int i = 0; i < units.size(); i++) {
                 TroopDefs.Unit unit = units.get(i);
-                if (unit != null && forUnit(unit, ranks.get(i) == null ? 0 : ranks.get(i), hasCommander)
+                if (unit != null && forUnit(unit, ranks.get(i) == null ? 0 : ranks.get(i), false)
                         .stream().anyMatch(candidate -> candidate.id().equals(ability.id()))) eligible++;
             }
             if (eligible > 0) offers.add(new Offer(ability, eligible, units.size()));
