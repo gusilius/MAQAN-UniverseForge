@@ -16,7 +16,7 @@ Do not move Minecraft-owned objects, registries, level access, rendering, or sav
 
 ## WorldForge native slice 0.1
 
-`mods/worldforge/native/worldforge-sim` is the first isolated Rust simulation crate. It currently implements a deterministic fixed-point food ledger with explicit elapsed days, capacity limits, shortage reporting and unit tests. It has no JNI or external dependencies yet. This is intentional: validate domain rules before binding the engine to Forge.
+`mods/worldforge/native/worldforge-sim` is the isolated Rust simulation crate. It implements a deterministic fixed-point food ledger and now contains an initial pure tactical proposal function (`src/tactical.rs`) for one squad snapshot. Tactical results echo the source revision and are advisory for player-direct command. The tactical slice has no JNI, Java caller, scheduler registration, entity access or order application yet. This is intentional: validate domain rules and cross-addon ownership before binding the engine to Forge.
 
 ## Native boundary rules
 
@@ -36,7 +36,8 @@ Do not move Minecraft-owned objects, registries, level access, rendering, or sav
 - WFS-03: population cohorts, needs, migration and household lifecycle.
 - WFS-04: route capacity, trade flows and logistics.
 - WFS-05: army supply, movement costs and siege pressure.
-- WFS-06: strategic AI scoring and event proposals.
-- WFS-07: JNI adapter, capability detection and Java fallback.
+- WFS-06: deterministic squad tactical proposals (initial pure-Rust slice started; Java contract documented, runtime integration pending).
+- WFS-07: multi-squad / corps coordination, strategic AI scoring and event proposals.
+- WFS-08: JNI adapter, capability detection, shared scheduler integration and Java fallback.
 
 Atlas remains the first native integration target because it already contains `maqan-core` and a Java bridge. Its native motion implementation must be audited for parity with `CosmicMotionClock` and the in-game Cosmic Horizons controller before changing simulation ownership.
