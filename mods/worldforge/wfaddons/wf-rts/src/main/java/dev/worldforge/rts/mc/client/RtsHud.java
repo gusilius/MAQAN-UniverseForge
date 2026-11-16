@@ -100,6 +100,143 @@ public class RtsHud extends Screen {
 
     public void setEmbeddedInMaqan(boolean embedded) { this.embeddedInMaqan = embedded; }
 
+    /** The shared shell must not paint an opaque background over the live Minecraft world. */
+    public boolean isWorldOverlay() { return embeddedInMaqan; }
+
+    private int[] skinRect(String key) {
+        if (!embeddedInMaqan) return null;
+        try {
+            Class<?> renderer = Class.forName("dev.maqan.platform.client.MaqanUiPackRenderer");
+            Object layout = renderer.getMethod("adaptiveLayout", int.class, int.class)
+                    .invoke(null, width, height);
+            if (layout == null) return null;
+            Object rect = layout.getClass().getMethod("get", String.class).invoke(layout, key);
+            if (rect == null) return null;
+            Class<?> type = rect.getClass();
+            return new int[]{(Integer) type.getMethod("x").invoke(rect),
+                    (Integer) type.getMethod("y").invoke(rect),
+                    (Integer) type.getMethod("width").invoke(rect),
+                    (Integer) type.getMethod("height").invoke(rect)};
+        } catch (ReflectiveOperationException | LinkageError ignored) {
+            return null;
+        }
+    }
+
+    private int[] workspaceViewport() {
+        int[] left = skinRect("lp"), right = skinRect("rp"), top = skinRect("top");
+        int[] minimap = skinRect("mm"), console = skinRect("bot");
+        if (left != null && right != null && top != null && minimap != null && console != null) {
+            int x = left[0] + left[2] + 8, y = top[1] + top[3] + 8;
+            int r = right[0] - 8, b = Math.min(minimap[1], console[1]) - 8;
+            if (r > x && b > y) return new int[]{x, y, r - x, b - y};
+        }
+        int topY = top == null ? 62 : top[1] + top[3];
+        int dockY = minimap == null ? height - BH : minimap[1];
+        return new int[]{44, topY, Math.max(1, width - 44), Math.max(1, dockY - topY)};
+    }
+
+    private void drawSettlementMiniMap(GuiGraphics g, int mx, int my, int x, int y, int w, int h) {
+        if (w <= 4 || h <= 4) return;
+        WFUi.bevel(g, x - 2, y - 2, w + 4, h + 4, true);
+        g.fill(x, y, x + w, y + h, 0xFF1B2418);
+        mv = MapView.fit(s, x, y, w, h);
+        g.enableScissor(x, y, x + w, y + h);
+        for (Building b : s.buildings) {
+            int bw = Math.max(4, (int) Math.round(b.def.sizeX * mv.scale));
+            int bh = Math.max(4, (int) Math.round(b.def.sizeZ * mv.scale));
+            int cx = mv.sx(b.x), cz = mv.sy(b.z), col = Look.buildingColor(s, b);
+            g.fill(cx - bw / 2 - 1, cz - bh / 2 - 1, cx + bw / 2 + 2, cz + bh / 2 + 2,
+                    b.uid == sel.building() ? WFUi.GOLD : 0xFF000000);
+            g.fill(cx - bw / 2, cz - bh / 2, cx + bw / 2 + 1, cz + bh / 2 + 1, col);
+        }
+        for (Worker worker : s.workers) {
+            int cx = mv.sx(worker.x), cz = mv.sy(worker.z);
+            boolean selected = sel.contains(worker.id);
+            g.fill(cx - 2, cz - 2, cx + 3, cz + 3, selected ? WFUi.GOLD : 0xFF000000);
+            g.fill(cx - 1, cz - 1, cx + 2, cz + 2,
+                    selected ? 0xFFFFFFFF : Look.stateColor(Look.state(s, worker)));
+        }
+        if (dragX >= 0) {
+            int x1 = Math.min(dragX, curX), y1 = Math.min(dragY, curY);
+            int x2 = Math.max(dragX, curX), y2 = Math.max(dragY, curY);
+            g.fill(x1, y1, x2, y1 + 1, 0xFF4FCF5A);
+            g.fill(x1, y2, x2, y2 + 1, 0xFF4FCF5A);
+            g.fill(x1, y1, x1 + 1, y2, 0xFF4FCF5A);
+            g.fill(x2, y1, x2 + 1, y2 + 1, 0xFF4FCF5A);
+        }
+        g.disableScissor();
+        hit(x, y, w, h, null, null, "Settlement overview",
+                List.of("ЛКМ: выбрать работника или здание", "Рамка: выбрать несколько", "ПКМ: приказ"));
+    }
+
+    private void drawEmbeddedSummary(GuiGraphics g, int[] rect, int mx, int my) {
+        int x = rect[0] + 12, y = rect[1] + 34, max = rect[0] + rect[2] - 12;
+        g.drawString(font, s.name, x, rect[1] + 12, WFUi.GOLD);
+        g.drawString(font, "НАСЕЛЕНИЕ", x, y, WFUi.MUTED); y += 14;
+        g.drawString(font, s.workers.size() + " / " + s.housing() + " жителей", x, y, WFUi.TX); y += 16;
+        g.drawString(font, "ОДОБРЕНИЕ", x, y, WFUi.MUTED); y += 13;
+        int approvalColor = s.approval() < 30 ? WFUi.BAD : s.approval() < 50 ? WFUi.GOLD : WFUi.GOOD;
+        g.drawString(font, s.approval() + "%", x, y, approvalColor); y += 17;
+        g.drawString(font, "РЕСУРСЫ", x, y, WFUi.MUTED); y += 14;
+        for (var entry : s.defs.resourceNames.entrySet()) {
+            if (y + 14 >= rect[1] + rect[3] - 10) break;
+            String label = entry.getValue();
+            String value = (int) s.amount(entry.getKey()) + "  " + String.format("%+.1f", s.income(entry.getKey())) + "/мин";
+            g.fill(x, y + 2, x + 5, y + 7, Look.resourceColor(entry.getKey()));
+            g.drawString(font, label, x + 10, y, WFUi.MUTED);
+            g.drawString(font, font.plainSubstrByWidth(value, Math.max(16, max - x - 10 - font.width(label))),
+                    Math.min(max - font.width(value), x + 112), y, WFUi.TX);
+            y += 14;
+        }
+        List<Settlement.Alert> alerts = s.alerts();
+        if (!alerts.isEmpty() && y + 16 < rect[1] + rect[3]) {
+            g.drawString(font, "ТРЕБУЕТ ВНИМАНИЯ", x, y + 3, WFUi.GOLD);
+            y += 17;
+            for (int i = 0; i < Math.min(4, alerts.size()) && y + 12 < rect[1] + rect[3]; i++) {
+                Settlement.Alert alert = alerts.get(i);
+                int color = alert.severity >= 2 ? WFUi.BAD : alert.severity == 1 ? WFUi.GOLD : WFUi.MUTED;
+                g.fill(x, y + 2, x + 3, y + 8, color);
+                g.drawString(font, font.plainSubstrByWidth(alert.text, max - x - 8), x + 8, y, color);
+                if (alert.building != 0) {
+                    int uid = alert.building;
+                    hit(x, y, max - x, 12, () -> { sel.selectBuilding(uid); menu = CommandCard.ROOT; },
+                            null, "Перейти к зданию", List.of("Выбрать здание"));
+                }
+                y += 13;
+            }
+        }
+    }
+
+    private void embeddedPanels(GuiGraphics g, int mx, int my) {
+        int[] minimap = skinRect("mm"), console = skinRect("bot");
+        int[] left = skinRect("lp"), right = skinRect("rp");
+        if (minimap == null || console == null) {
+            bottomBar(g, mx, my);
+            return;
+        }
+        drawSettlementMiniMap(g, mx, my, minimap[0] + 14, minimap[1] + 16,
+                Math.max(1, minimap[2] - 28), Math.max(1, minimap[3] - 32));
+        if (left != null) {
+            int sx = left[0] + 12, sy = left[1] + 36, sw = left[2] - 24, sh = left[3] - 48;
+            g.drawString(font, "ВЫБОР / ПОДРАЗДЕЛЕНИЕ", sx, left[1] + 12, WFUi.GOLD);
+            selectionPanel(g, sx, sy, sw, sh, mx, my);
+        } else {
+            int[] viewport = workspaceViewport();
+            int sx = viewport[0] + 10, sy = viewport[1] + 10;
+            g.drawString(font, "ВЫБОР / ПОДРАЗДЕЛЕНИЕ", sx, sy, WFUi.GOLD);
+            selectionPanel(g, sx, sy + 16, Math.min(280, viewport[2] - 20), 92, mx, my);
+        }
+        if (right != null) drawEmbeddedSummary(g, right, mx, my);
+        int cw = CommandCard.COLS * (CELL + GAP) + 8;
+        int cx = console[0] + console[2] - cw - 14;
+        int cy = console[1] + Math.max(22, (console[3] - 108) / 2);
+        g.drawString(font, "ПРИКАЗЫ", console[0] + 14, console[1] + 12, WFUi.GOLD);
+        WFUi.bevel(g, cx, cy - 8, cw, Math.min(console[3] - 12, 116), true);
+        card(g, cx + 4, cy, mx, my);
+        if (menu.startsWith("build:"))
+            buildCards(g, console[0] + 14, console[1] - 76, console[2] - 28, mx, my);
+    }
+
     private void publishWorkspaceSelection() {
         if (sel.hasBuilding()) {
             Building b = sel.building(s);
