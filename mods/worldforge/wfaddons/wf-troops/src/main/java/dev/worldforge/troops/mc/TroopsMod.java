@@ -193,8 +193,8 @@ public class TroopsMod {
             Path hf = dir(server).resolve("wf_army_hierarchy.json");
             if (Files.exists(hf)) HIERARCHY.fromJson(Files.readString(hf));
             Path cf = dir(server).resolve("wf_command_delegation.json");
-            DELEGATION.fromJson(Files.exists(cf) ? Files.readString(cf)
-                    : "{\\"format\\":\\"wf-command-delegation/1\\",\\"policies\\":[]}");
+            if (Files.exists(cf)) DELEGATION.fromJson(Files.readString(cf));
+            else DELEGATION.clear();
             Path ff = dir(server).resolve("wf_forts.json");
             if (Files.exists(ff)) FORTS.fromJson(Files.readString(ff));
             Path df = dir(server).resolve("wf_military_deaths.json");
