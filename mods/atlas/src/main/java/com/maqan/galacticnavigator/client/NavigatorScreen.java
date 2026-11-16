@@ -1515,7 +1515,9 @@ public class NavigatorScreen extends Screen {
     public void render(GuiGraphics g, int mx, int my, float partial) {
         com.maqan.galacticnavigator.navigation.MaqanAnimationClock.beginFrame();
         if (embeddedInMaqan) {
-            drawCosmicBackdrop(g);
+            // MAQAN paints the shared workspace background and concept frames
+            // before this provider view. Keep Atlas' own map/data content, but
+            // do not repaint the host chrome or opaque panel surfaces over it.
             drawBreadcrumbs(g, mx, my);
         } else {
             renderBackground(g);
@@ -1981,7 +1983,7 @@ public class NavigatorScreen extends Screen {
     }
 
     private void panel(GuiGraphics g, int l, int t, int r, int b) {
-        MaqanUiTheme.panel(g, l, t, r, b);
+        if (!embeddedInMaqan) MaqanUiTheme.panel(g, l, t, r, b);
     }
 
     private void drawList(GuiGraphics g, int mx, int my, List<Node> nodes) {
