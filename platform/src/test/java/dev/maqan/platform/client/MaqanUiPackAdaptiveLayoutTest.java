@@ -28,6 +28,12 @@ class MaqanUiPackAdaptiveLayoutTest {
         assertEquals(1920, result.get("top").width());
         assertEquals(1080, result.get("mm").bottom());
         assertEquals(1080, result.get("bot").bottom());
+        assertTrue(result.get("lp").bottom() < result.get("mm").y());
+        assertTrue(result.get("rp").bottom() < result.get("mm").y());
+        for (var rect : result.rectangles().values()) {
+            assertTrue(rect.x() >= 0 && rect.y() >= 0);
+            assertTrue(rect.right() <= 1920 && rect.bottom() <= 1080);
+        }
         assertEquals(292.0 / 226.0,
                 result.get("mm").width() / (double) result.get("mm").height(), 0.02);
         assertEquals(846.0 / 176.0,
