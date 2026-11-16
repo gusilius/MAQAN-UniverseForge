@@ -200,8 +200,10 @@ public final class PlatformShellScreen extends Screen {
     private void layoutWorkspace() {
         if (workspaceRoot == null || panels.isEmpty()) return;
         if (WorkspaceResponsiveLayout.isCompact(width, height)) {
+            int reservedBottom = MaqanUiPackRenderer.assetsAvailable()
+                    ? Math.max(0, height - MaqanUiPackRenderer.compactDockTop(width, height)) : 0;
             Map<String, WorkspaceDockTree.Rect> compact = WorkspaceResponsiveLayout
-                    .calculate(width, height, activeCompactDrawer).rectangles();
+                    .calculate(width, height, activeCompactDrawer, reservedBottom).rectangles();
             for (Panel panel : panels.values()) {
                 WorkspaceDockTree.Rect rect = compact.get(panel.id);
                 panel.visible = rect != null && !hiddenPanels.contains(panel.id);
