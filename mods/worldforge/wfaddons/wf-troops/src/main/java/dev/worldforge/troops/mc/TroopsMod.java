@@ -1499,6 +1499,7 @@ public class TroopsMod {
     }
 
     private static int showSquadCommandStatus(CommandSourceStack src, String squadId) {
+        syncArmyHierarchy();
         ServerPlayer player;
         try { player = src.getPlayerOrException(); }
         catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
