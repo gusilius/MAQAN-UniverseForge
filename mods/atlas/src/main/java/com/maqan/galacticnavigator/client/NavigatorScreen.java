@@ -171,6 +171,8 @@ public class NavigatorScreen extends Screen {
     private record RouteLegendHit(int filter, Rect bounds) {}
 
     private boolean embeddedInMaqan;
+    private Rect minimapRect;
+    private final Map<String, Point> minimapPoints = new LinkedHashMap<>();
 
     /** Marks this existing Atlas view as hosted by the MAQAN global workspace. */
     public void setEmbeddedInMaqan(boolean embedded) {
@@ -1580,6 +1582,7 @@ public class NavigatorScreen extends Screen {
         if (hoveredNode == null) hoveredNode = listHover;
         if (hoveredNode != null && (pinnedNode == null || !hoveredNode.id.equals(pinnedNode.id)))
             drawHoverCard(g, hoveredNode, mx, my);
+        drawMaqanAtlasMinimap(g, nodes);
         if (width >= 560) {
             g.fill(0, height - 30, width, height, 0xF00B1520);
             String mapCaption = bodyViewId != null ? "BODY VIEW · " + mapModeName() + " · SATELLITE ORBITS" :
@@ -1616,6 +1619,129 @@ public class NavigatorScreen extends Screen {
         MaqanUiTheme.inputFrame(g, yInput);
         MaqanUiTheme.inputFrame(g, zInput);
         renderAtlasTransition(g);
+    }
+
+    /**
+     * Draws a compact, live Atlas overview inside the imported MAQAN minimap frame.
+     * Positions come from the same authored Atlas coordinates as the main scene;
+     * missing coordinates use the same explicitly schematic spiral fallback.
+     */
+    private void drawMaqanAtlasMinimap(GuiGraphics g, List<Node> nodes) {
+        minimapRect = null;
+        minimapPoints.clear();
+        if (!embeddedInMaqan) return;
+        try {
+            Class<?> renderer = Class.forName("dev.maqan.platform.client.MaqanUiPackRenderer");
+            Object layout = renderer.getMethod("adaptiveLayout", int.class, int.class)
+                    .invoke(null, width, height);
+            if (layout == null) return;
+            Object frame = layout.getClass().getMethod("get", String.class).invoke(layout, "mm");
+            if (frame == null) return;
+            Class<?> rectType = frame.getClass();
+            int frameX = (Integer) rectType.getMethod("x").invoke(frame);
+            int frameY = (Integer) rectType.getMethod("y").invoke(frame);
+            int frameW = (Integer) rectType.getMethod("width").invoke(frame);
+            int frameH = (Integer) rectType.getMethod("height").invoke(frame);
+            int inset = Math.max(7, Math.min(13, frameW / 18));
+            int x = frameX + inset;
+            int y = frameY + inset + 9;
+            int w = Math.max(1, frameW - inset * 2);
+            int h = Math.max(1, frameH - inset * 2 - 9);
+            minimapRect = new Rect(x, y, w, h);
+            g.fill(x, y, x + w, y + h, 0xD9081420);
+            g.fill(x, y, x + w, y + 1, 0x665E9AB4);
+            g.drawString(font, "ATLAS · " + nodes.size(), x + 4, y + 3, 0xFF9BC9D9, false);
+            if (nodes.isEmpty()) {
+                g.drawCenteredString(font, "NO DATA", x + w / 2, y + h / 2, MUTED);
+                return;
+            }
+
+            Map<String, double[]> positions = new LinkedHashMap<>();
+            int authored = 0;
+            for (Node node : nodes) {
+                double[] position = null;
+                if (level == 3 && hasPosition(node.first())) {
+                    position = new double[]{coordinate(node.first(), 0), coordinate(node.first(), 2)};
+                } else if ("galaxy".equals(node.kind)) {
+                    position = atlasGalaxySourcePosition(node);
+                } else if (level < 3) {
+                    position = atlasSourcePosition(node);
+                }
+                if (position != null && Double.isFinite(position[0]) && Double.isFinite(position[1])) {
+                    positions.put(node.id, position);
+                    authored++;
+                }
+            }
+            if (authored == 0) {
+                // Same deterministic schematic fallback as Atlas' main overview.
+                for (int i = 0; i < nodes.size(); i++) {
+                    double angle = i * 2.399963229728653;
+                    double radius = Math.sqrt(i + .5);
+                    positions.put(nodes.get(i).id,
+                            new double[]{Math.cos(angle) * radius, Math.sin(angle) * radius});
+                }
+            } else {
+                double minX = Double.POSITIVE_INFINITY, maxX = Double.NEGATIVE_INFINITY;
+                double minZ = Double.POSITIVE_INFINITY, maxZ = Double.NEGATIVE_INFINITY;
+                for (double[] point : positions.values()) {
+                    minX = Math.min(minX, point[0]); maxX = Math.max(maxX, point[0]);
+                    minZ = Math.min(minZ, point[1]); maxZ = Math.max(maxZ, point[1]);
+                }
+                double span = Math.max(1.0, Math.max(maxX - minX, maxZ - minZ));
+                int missing = 0;
+                for (Node node : nodes) if (!positions.containsKey(node.id)) {
+                    double angle = missing * 2.399963229728653;
+                    double radius = span * (.12 + .035 * Math.sqrt(missing + 1.0));
+                    positions.put(node.id, new double[]{(minX + maxX) * .5 + Math.cos(angle) * radius,
+                            (minZ + maxZ) * .5 + Math.sin(angle) * radius});
+                    missing++;
+                }
+            }
+
+            double minX = Double.POSITIVE_INFINITY, maxX = Double.NEGATIVE_INFINITY;
+            double minZ = Double.POSITIVE_INFINITY, maxZ = Double.NEGATIVE_INFINITY;
+            for (double[] point : positions.values()) {
+                minX = Math.min(minX, point[0]); maxX = Math.max(maxX, point[0]);
+                minZ = Math.min(minZ, point[1]); maxZ = Math.max(maxZ, point[1]);
+            }
+            double spanX = Math.max(1.0E-6, maxX - minX);
+            double spanZ = Math.max(1.0E-6, maxZ - minZ);
+            double scale = Math.min(Math.max(1, w - 14) / spanX, Math.max(1, h - 30) / spanZ) * .86;
+            double centerX = (minX + maxX) * .5, centerZ = (minZ + maxZ) * .5;
+            int drawCenterX = x + w / 2, drawCenterY = y + h / 2 + 5;
+            g.enableScissor(x + 2, y + 15, x + w - 2, y + h - 2);
+            int stride = Math.max(1, (int) Math.ceil(nodes.size() / 220.0));
+            for (int i = 0; i < nodes.size(); i += stride) {
+                Node node = nodes.get(i);
+                double[] source = positions.get(node.id);
+                if (source == null) continue;
+                int px = drawCenterX + (int) Math.round((source[0] - centerX) * scale);
+                int py = drawCenterY + (int) Math.round((source[1] - centerZ) * scale);
+                boolean selected = node.id.equals(selectedNodeId) || node.id.equals(selectedId);
+                int radius = selected ? 3 : ("galaxy".equals(node.kind) ? 2 : 1);
+                int color = selected ? GOLD : kindColor(node.kind);
+                if (selected) g.renderOutline(px - 5, py - 5, 10, 10, 0xFF7EDDF4);
+                g.fill(px - radius, py - radius, px + radius + 1, py + radius + 1, color);
+                minimapPoints.put(node.id, new Point(px, py, Math.max(4, radius + 2)));
+            }
+            Node selectedNode = selectedId != null ? bodyNode(selectedId)
+                    : selectedNodeId != null ? findNode(selectedNodeId) : null;
+            if (selectedNode != null && positions.containsKey(selectedNode.id)
+                    && !minimapPoints.containsKey(selectedNode.id)) {
+                double[] source = positions.get(selectedNode.id);
+                int px = drawCenterX + (int) Math.round((source[0] - centerX) * scale);
+                int py = drawCenterY + (int) Math.round((source[1] - centerZ) * scale);
+                g.renderOutline(px - 5, py - 5, 10, 10, 0xFF7EDDF4);
+                g.fill(px - 2, py - 2, px + 3, py + 3, GOLD);
+                minimapPoints.put(selectedNode.id, new Point(px, py, 6));
+            }
+            g.disableScissor();
+            if (authored == 0)
+                g.drawString(font, "SCHEMATIC", x + 4, y + h - 10, 0xFF8297AA, false);
+        } catch (ReflectiveOperationException | LinkageError error) {
+            minimapRect = null;
+            minimapPoints.clear();
+        }
     }
 
     private void beginAtlasTransition(boolean backward) {
@@ -4566,6 +4692,21 @@ public class NavigatorScreen extends Screen {
         if (systemPickerOpen) {
             if (button == 0) return selectSystemAt(x, y);
             systemPickerOpen = false;
+            return true;
+        }
+        if (button == 0 && minimapRect != null && minimapRect.contains(x, y)) {
+            Node nearest = null;
+            double best = Double.MAX_VALUE;
+            for (Map.Entry<String, Point> entry : minimapPoints.entrySet()) {
+                Point point = entry.getValue();
+                double distance = Math.hypot(x - point.x, y - point.y);
+                if (distance <= Math.max(8, point.radius + 3) && distance < best) {
+                    nearest = findNode(entry.getKey());
+                    if (nearest == null && level == 3) nearest = bodyNode(entry.getKey());
+                    best = distance;
+                }
+            }
+            if (nearest != null) selectNode(nearest);
             return true;
         }
         if (button == 0) {
