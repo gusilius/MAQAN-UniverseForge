@@ -352,8 +352,9 @@ public final class CommandScreen extends Screen {
         if(x<inspectX()||x>=inspectX()+inspectW()||y<inspectY()+22)return false;
         int row=(int)((y-(inspectY()+22))/INSPECT_ROW);
         List<String> ids=CommandMode.selected();
-        if(row<0||row>=Math.min(8,ids.size()))return false;
-        if(row>=ids.size())return y<inspectY()+22+8*INSPECT_ROW;
+        int maxRows = compactSkin() ? 3 : 8;
+        if(row<0||row>=Math.min(maxRows,ids.size()))return false;
+        if(row>=ids.size())return y<inspectY()+22+maxRows*INSPECT_ROW;
         String id=ids.get(row);
         for(net.minecraft.world.entity.Entity entity:minecraft.level.entitiesForRendering()){
             if(!entity.isAlive()||!entity.getUUID().toString().equals(id))continue;
@@ -368,9 +369,9 @@ public final class CommandScreen extends Screen {
         if (settlement == null || buildOpen) return;
         int[] frame = skinRect("rp");
         int[] top = skinRect("top");
+        int w = frame == null ? (compactSkin() ? Math.max(112, Math.min(144, width / 2 - 24)) : 250) : Math.max(120, frame[2] - 24);
         int x = frame == null ? (compactSkin() ? width - w - 12 : 4) : frame[0] + 12;
         int y = frame == null ? (compactSkin() && top != null ? top[1] + top[3] + 8 : 34) : frame[1] + 34;
-        int w = frame == null ? (compactSkin() ? Math.max(112, Math.min(144, width / 2 - 24)) : 250) : Math.max(120, frame[2] - 24);
         int h = frame == null ? 106 : Math.min(150, Math.max(88, frame[3] / 3));
         g.fill(x, y, x + w, y + h, 0xD910121A);
         g.fill(x, y, x + w, y + 1, 0xFF8A7040);
@@ -441,7 +442,7 @@ public final class CommandScreen extends Screen {
             }
             row++;
         }
-        if(ids.size()>8)g.drawString(font,"Ещё "+(ids.size()-8)+" · выберите строку для фокуса",
+        if(ids.size()>(compactSkin()?3:8))g.drawString(font,"Ещё "+(ids.size()-(compactSkin()?3:8))+" · выберите строку для фокуса",
                 ix+6,iy+h-10,0xFF9EA4B5,false);
     }
 
