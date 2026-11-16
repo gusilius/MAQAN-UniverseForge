@@ -641,7 +641,11 @@ public final class Settlement {
             }
         }
         double share = b.state == Building.State.PLANNED ? 0 : b.state == Building.State.BUILDING ? 0.5 : 0.25;
-        for (Worker w : assigned(uid)) { w.building = 0; w.status = "свободен"; }
+        for (Worker w : assigned(uid)) {
+            w.building = 0; w.assignedProfession = ""; w.manualHauler = false;
+            w.releaseTask(Worker.TaskOwner.SETTLEMENT, null);
+            w.status = "свободен";
+        }
         buildings.remove(b);
         if (share > 0) refund(b.def.cost, share);
         say((b.state == Building.State.DONE ? "Снесено: " : "Отменено: ") + b.def.name);
@@ -785,6 +789,8 @@ public final class Settlement {
         w.claimTask(Worker.TaskOwner.SETTLEMENT, "settlement:building:" + uid, true);
         w.suspendedTaskOwner = Worker.TaskOwner.NONE;
         w.suspendedTaskId = "";
+        w.suspendedProfession = ""; w.suspendedBuilding = 0; w.suspendedManualHauler = false;
+        w.suspendedLifeAction = "";
         w.assignedProfession = role;
         w.manualHauler = false;
         w.lifeAction = "";
@@ -804,6 +810,8 @@ public final class Settlement {
         w.releaseTask(w.taskOwner, w.taskId);
         w.suspendedTaskOwner = Worker.TaskOwner.NONE;
         w.suspendedTaskId = "";
+        w.suspendedProfession = ""; w.suspendedBuilding = 0; w.suspendedManualHauler = false;
+        w.suspendedLifeAction = "";
         w.building = 0;
         w.assignedProfession = "";
         w.manualHauler = false;
@@ -862,8 +870,8 @@ public final class Settlement {
         Worker w = worker(workerId);
         if (w == null) throw new OrderException("Нет рабочего " + workerId);
         if (!defs.professions.containsKey(profession)) throw new OrderException("Нет профессии " + profession);
-        if (w.taskOwner == Worker.TaskOwner.MILITARY)
-            throw new OrderException("Нельзя сменить профессию во время военного приказа");
+        if (w.taskOwner == Worker.TaskOwner.MILITARY || w.taskOwner == Worker.TaskOwner.PLAYER)
+            throw new OrderException("Нельзя сменить профессию во время активного приказа");
         w.releaseTask(w.taskOwner, w.taskId);
         w.suspendedTaskOwner = Worker.TaskOwner.NONE;
         w.suspendedTaskId = "";
