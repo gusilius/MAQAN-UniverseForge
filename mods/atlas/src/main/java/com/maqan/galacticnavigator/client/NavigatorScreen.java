@@ -4706,7 +4706,14 @@ public class NavigatorScreen extends Screen {
                     best = distance;
                 }
             }
-            if (nearest != null) selectNode(nearest);
+            if (nearest != null) {
+                selectNode(nearest);
+                Point target = mapPoints.get(nearest.id);
+                if (target != null) {
+                    panX += atlasCameraCenterX() - target.x;
+                    panY += atlasCameraCenterY() - target.y;
+                }
+            }
             return true;
         }
         if (button == 0) {
