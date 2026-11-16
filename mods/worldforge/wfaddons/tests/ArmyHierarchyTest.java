@@ -124,7 +124,7 @@ public final class ArmyHierarchyTest {
                         && scopedReload.getEffective(second.id, hierarchy).commanderCharacterId().equals("c18"),
                 "army, corps and squad overrides survive hierarchical save/reload");
         CommandDelegation legacyReload = new CommandDelegation();
-        legacyReload.fromJson("{\\"format\\":\\"wf-command-delegation/1\\",\\"policies\\":[{\\"squad\\":\\"s9\\",\\"mode\\":\\"DELEGATED\\",\\"commander\\":\\"c9\\",\\"objective\\":\\"legacy\\",\\"leash\\":64,\\"engage\\":true,\\"pursue\\":false,\\"retreat\\":true}]}");
+        legacyReload.fromJson("{\"format\":\"wf-command-delegation/1\",\"policies\":[{\"squad\":\"s9\",\"mode\":\"DELEGATED\",\"commander\":\"c9\",\"objective\":\"legacy\",\"leash\":64,\"engage\":true,\"pursue\":false,\"retreat\":true}]}");
         check(legacyReload.get("s9").mode() == CommandDelegation.Mode.DELEGATED
                         && legacyReload.get("s9").commanderCharacterId().equals("c9"),
                 "legacy squad-only command delegation saves remain readable");
