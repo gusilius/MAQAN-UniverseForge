@@ -396,6 +396,9 @@ public final class PlatformShellScreen extends Screen {
         if (contextMenuVisible) drawContextMenu(g, mouseX, mouseY);
         if (workspaceManagerVisible) drawWorkspaceManager(g, mouseX, mouseY);
         if (notificationCenterVisible) drawNotificationCenter(g, mouseX, mouseY);
+        // The concept frame is a native texture overlay. The active provider
+        // view remains the world/map canvas beneath it.
+        MaqanUiPackRenderer.render(g, width, height);
         super.render(g, mouseX, mouseY, partialTick);
     }
 
