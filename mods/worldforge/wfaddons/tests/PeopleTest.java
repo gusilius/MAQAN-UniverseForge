@@ -45,7 +45,7 @@ public class PeopleTest {
                     "NameBank supplies stable " + category + " names through race/culture/default inheritance");
         }
         NameBank minimalNames = new NameBank();
-        minimalNames.add("{\\"default\\":\\"basic\\",\\"cultures\\":{\\"basic\\":{\\"male\\":[\\"Aren\\"],\\"female\\":[\\"Mira\\"],\\"houses\\":[\\"Stone\"]}}}");
+        minimalNames.add("{\"default\":\"basic\",\"cultures\":{\"basic\":{\"male\":[\"Aren\"],\"female\":[\"Mira\"],\"houses\":[\"Stone\"]}}}");
         for (String category : List.of("realms", "regions", "provinces", "settlements")) {
             String generated = minimalNames.generate("unknown-race", "missing-culture", category, new Random(19L));
             ok(!generated.isBlank(), "minimal third-party NameBank safely generates " + category + " names");
