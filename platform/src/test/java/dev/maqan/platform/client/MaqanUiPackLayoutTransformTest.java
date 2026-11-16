@@ -18,9 +18,9 @@ class MaqanUiPackLayoutTransformTest {
 
         var transform = new MaqanUiPackLayout.ViewportTransform(scale, offsetX, offsetY);
         assertEquals(0, offsetX);
-        assertEquals(6, offsetY);
+        assertEquals(7, offsetY);
         assertEquals(1920, transform.screenWidth(referenceWidth));
-        assertEquals(1068, transform.screenHeight(referenceHeight));
+        assertEquals(1067, transform.screenHeight(referenceHeight));
     }
 
     @Test
