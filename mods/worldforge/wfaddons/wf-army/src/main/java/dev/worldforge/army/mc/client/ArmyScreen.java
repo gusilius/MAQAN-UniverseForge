@@ -104,7 +104,7 @@ public class ArmyScreen extends Screen {
     }
 
     private Army armyForEntity(String entityId) {
-        if (entityId == null || !entityId.startsWith("army:")) return null;
+        if (ar == null || entityId == null || !entityId.startsWith("army:")) return null;
         try {
             Army army = ar.armies.get(Integer.parseInt(entityId.substring("army:".length())));
             return army != null && (realm == null || realm.equals(army.realm)) ? army : null;
@@ -134,6 +134,12 @@ public class ArmyScreen extends Screen {
     public boolean isPauseScreen() { return false; }
 
     public void setModel(WarEngine e, ArmyEngine a) { this.e = e; this.ar = a; }
+
+    @Override
+    public void removed() {
+        dev.worldforge.mod.client.PlatformWorkspaceBridge.clear("wf_army");
+        super.removed();
+    }
 
     private int refresh;
 
