@@ -65,6 +65,12 @@ public final class MaqanUiPackRenderer {
         return activeTheme;
     }
 
+    /** Shared geometry source for the shell's live content and its decorative skin. */
+    public static MaqanUiPackAdaptiveLayout.Result adaptiveLayout(int screenWidth, int screenHeight) {
+        if (!assetsAvailable() || screenWidth <= 0 || screenHeight <= 0) return null;
+        return MaqanUiPackAdaptiveLayout.calculate(screenWidth, screenHeight, loadedLayout.skin(activeTheme));
+    }
+
     public static int topBarHeight(int screenWidth, int screenHeight) {
         if (!assetsAvailable()) return 34;
         MaqanUiPackAdaptiveLayout.Rect rect = MaqanUiPackAdaptiveLayout
