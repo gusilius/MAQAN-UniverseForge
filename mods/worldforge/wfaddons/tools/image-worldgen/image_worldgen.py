@@ -1233,6 +1233,9 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
                 "formation_area_pct_of_land": round(100.0 * realm_formation_area_pixels.get(rid, 0) / max(1, land_count), 4),
                 "area_pct_of_land": round(100.0 * total_area / max(1, land_count), 4),
                 "province_count": len(pids), "region_count": len(region_ids),
+                # Deterministic founding prestige lets the existing wf-realms level ladder
+                # reflect territorial scale immediately (band -> tribe -> principality -> kingdom -> empire).
+                "prestige": int(round(25 * (len(pids) ** 1.5))),
                 "identity_status": "unassigned",
                 "identity_provider": "wf_people+wf_realms",
                 "territorial_model": "province_region_state_honeycomb",

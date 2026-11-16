@@ -145,7 +145,10 @@ public final class ImageWorldIdentityTest {
                             && id.equals(titles.realmOf(title).id)) count++;
                 return count;
             }
-            @Override public int prestige(String id) { return 0; }
+            @Override public int prestige(String id) {
+                TitleData.Realm realm = titles.realms.get(id);
+                return realm != null && realm.props.get("prestige") instanceof Number n ? n.intValue() : 0;
+            }
             @Override public Map<String, Double> races(String id) { return realmRaces.getOrDefault(id, Map.of()); }
             @Override public Map<String, Double> terrain(String id) { return realmTerrain.getOrDefault(id, Map.of()); }
         };
