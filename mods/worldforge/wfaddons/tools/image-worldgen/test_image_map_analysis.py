@@ -79,7 +79,7 @@ class ImageMapAnalysisTests(unittest.TestCase):
         image[:] = (0, 74, 119)
         image[4:20, 4:20] = (154, 172, 58)
         image[4:20, 22:38] = (32, 64, 16)
-        image[4:20, 40:60] = (208, 192, 112)
+        image[4:20, 40:60] = (224, 185, 105)
         labels, report = classify(image)
         self.assertEqual(CLASSES[int(labels[10, 10])], "grassland")
         self.assertEqual(CLASSES[int(labels[10, 28])], "forest")
