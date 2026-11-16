@@ -98,7 +98,7 @@ public class CharacterScreen extends Screen {
         });
         dev.worldforge.mod.client.PlatformWorkspaceBridge.registerEntityOpener("wf_people", entityId -> {
             if (ch(entityId) == null) return;
-            if (!focus.equals(entityId)) history.add(focus);
+            if (!java.util.Objects.equals(focus, entityId)) history.add(focus);
             focus = entityId;
             famScroll = 0;
             appointOpen = false;
@@ -107,7 +107,7 @@ public class CharacterScreen extends Screen {
                 "wf_people.focus", "Focus character", "wf_people",
                 entityId -> ch(entityId) != null,
                 entityId -> {
-                    if (!focus.equals(entityId)) history.add(focus);
+                    if (!java.util.Objects.equals(focus, entityId)) history.add(focus);
                     focus = entityId;
                     famScroll = 0;
                     appointOpen = false;
