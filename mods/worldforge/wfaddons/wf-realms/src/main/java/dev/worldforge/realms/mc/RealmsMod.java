@@ -577,7 +577,12 @@ public class RealmsMod {
 
     @SubscribeEvent public void onStarting(ServerStartingEvent e) { loadDefs(e.getServer().getResourceManager()); }
     @SubscribeEvent public void onReload(AddReloadListenerEvent e) { e.addListener((ResourceManagerReloadListener) RealmsMod::loadDefs); }
-    @SubscribeEvent public void onStopping(ServerStoppingEvent e) { save(e.getServer()); }
+    @SubscribeEvent public void onStopping(ServerStoppingEvent e) {
+        // wf-people and wf-settlements own their shutdown hooks and may already have released
+        // their in-memory registries by the time this listener runs. Persist only this domain here.
+        if (!persistPoliticalOnly(e.getServer()))
+            LOGGER.error("wf_realms: final political checkpoint remains dirty");
+    }
 
     @SubscribeEvent
     public void onStarted(ServerStartedEvent e) {
@@ -644,15 +649,14 @@ public class RealmsMod {
         return true;
     }
 
-    public static synchronized boolean persistNow(MinecraftServer server) {
-        if (server == null || !persistIdentityDomains(server)) return false;
+    private static boolean persistPoliticalOnly(MinecraftServer server) {
+        if (server == null) return false;
         try {
             Path root = server.getWorldPath(LevelResource.ROOT).resolve("worldforge");
             Map<Path, byte[]> writes = new LinkedHashMap<>();
             writes.put(file(server), REALMS.toJson().getBytes(StandardCharsets.UTF_8));
             writes.put(politicsFile(server), POLITICS.toJson().getBytes(StandardCharsets.UTF_8));
             AtomicFileBatch.commit(root, writes);
-            LOGGER.info("wf_realms: coordinated identity checkpoint committed (Characters, Colonies, Realms, Statecraft)");
             return true;
         } catch (Exception ex) {
             LOGGER.error("wf_realms: atomic political checkpoint failed: {}", ex.toString(), ex);
@@ -660,8 +664,15 @@ public class RealmsMod {
         }
     }
 
+    public static synchronized boolean persistNow(MinecraftServer server) {
+        if (server == null || !persistIdentityDomains(server)) return false;
+        if (!persistPoliticalOnly(server)) return false;
+        LOGGER.info("wf_realms: coordinated identity checkpoint committed (Characters, Colonies, Realms, Statecraft)");
+        return true;
+    }
+
     private static void save(MinecraftServer s) {
-        if (!persistNow(s)) LOGGER.error("wf_realms: political checkpoint remains dirty");
+        if (!persistNow(s)) LOGGER.error("wf_realms: coordinated identity checkpoint remains dirty");
     }
 
     @SubscribeEvent
