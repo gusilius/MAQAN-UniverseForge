@@ -174,16 +174,15 @@ public final class VanillaVillageAdapter {
     private static void adopt(ServerLevel level, int x, int z, String structureType) {
         if (SettleMod.DEFS == null || !net.minecraftforge.fml.ModList.get().isLoaded("wf_people")) return;
         MapData map = EditorManager.dataFor(level);
-        if (map == null) return;
-        CharacterRegistry registry = PeopleMod.registry(map);
+        CharacterRegistry registry = PeopleMod.registryFor(level);
         if (registry == null) return;
 
         String dimension = level.dimension().location().toString();
         String id = "vanilla_village_" + Integer.toHexString(dimension.hashCode()) + "_" + x + "_" + z;
         String operation = "minecraft:village:" + dimension + ":" + x + ":" + z;
         boolean created = !SettleMod.COLONIES.containsKey(id);
-        TitleData.Title province = map.titles == null ? null : map.provinceAt(x, z);
-        TitleData.Realm realm = province == null || map.titles == null ? null : map.titles.realmOf(province);
+        TitleData.Title province = map == null || map.titles == null ? null : map.provinceAt(x, z);
+        TitleData.Realm realm = province == null || map == null || map.titles == null ? null : map.titles.realmOf(province);
         String settlementName = generatedVillageName(map, realm, id, dimension, x, z);
         Colony colony;
         try {
@@ -211,8 +210,7 @@ public final class VanillaVillageAdapter {
 
     private static void reconcileResidents(ServerLevel level, Colony colony) {
         if (colony == null || colony.s == null || !level.hasChunkAt(new BlockPos(colony.cx, 64, colony.cz))) return;
-        MapData map = EditorManager.dataFor(level);
-        CharacterRegistry registry = PeopleMod.registry(map);
+        CharacterRegistry registry = PeopleMod.registryFor(level);
         if (registry == null) return;
 
         AABB area = new AABB(colony.cx - RECONCILE_RADIUS, level.getMinBuildHeight(),
