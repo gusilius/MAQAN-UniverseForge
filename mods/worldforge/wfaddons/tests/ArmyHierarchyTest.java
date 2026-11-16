@@ -135,6 +135,18 @@ public final class ArmyHierarchyTest {
         check(scopedReload.getEffective(first.id, hierarchy).mode() == CommandDelegation.Mode.PLAYER_DIRECT
                         && scopedReload.getEffective(second.id, hierarchy).commanderCharacterId().equals("c18"),
                 "army, corps and squad overrides survive hierarchical save/reload");
+        CommandDelegation parentReset = new CommandDelegation();
+        check(parentReset.assignScope(CommandDelegation.ScopeType.ARMY, "42",
+                        CommandDelegation.Mode.DELEGATED, "c17", "", 120, true, false, false)
+                        && parentReset.assignScope(CommandDelegation.ScopeType.CORPS, reserve.id,
+                        CommandDelegation.Mode.AUTONOMOUS, "c18", "", 80, true, true, true)
+                        && parentReset.getEffective(second.id, hierarchy).mode() == CommandDelegation.Mode.AUTONOMOUS
+                        && parentReset.reclaimScope(CommandDelegation.ScopeType.CORPS, reserve.id)
+                        && parentReset.getEffective(second.id, hierarchy).mode() == CommandDelegation.Mode.DELEGATED
+                        && parentReset.reclaimScope(CommandDelegation.ScopeType.ARMY, "42")
+                        && parentReset.getEffective(second.id, hierarchy).mode() == CommandDelegation.Mode.PLAYER_DIRECT,
+                "removing corps and army policies restores the next parent or safe direct default");
+
         CommandDelegation legacyReload = new CommandDelegation();
         legacyReload.fromJson("{\"format\":\"wf-command-delegation/1\",\"policies\":[{\"squad\":\"s9\",\"mode\":\"DELEGATED\",\"commander\":\"c9\",\"objective\":\"legacy\",\"leash\":64,\"engage\":true,\"pursue\":false,\"retreat\":true}]}");
         check(legacyReload.get("s9").mode() == CommandDelegation.Mode.DELEGATED
