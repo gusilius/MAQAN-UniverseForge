@@ -27,12 +27,15 @@ public final class MaqanUiPackLayout {
     private final int referenceWidth;
     private final int referenceHeight;
     private final Map<String, Map<String, int[]>> skins;
+    private final Map<String, String> textureNames;
 
     private MaqanUiPackLayout(int referenceWidth, int referenceHeight,
-                              Map<String, Map<String, int[]>> skins) {
+                              Map<String, Map<String, int[]>> skins,
+                              Map<String, String> textureNames) {
         this.referenceWidth = referenceWidth;
         this.referenceHeight = referenceHeight;
         this.skins = Map.copyOf(skins);
+        this.textureNames = Map.copyOf(textureNames);
     }
 
     public static Optional<MaqanUiPackLayout> load() {
@@ -46,6 +49,16 @@ public final class MaqanUiPackLayout {
             int width = viewport.get("width").getAsInt();
             int height = viewport.get("height").getAsInt();
             if (width <= 0 || height <= 0) throw new IllegalStateException("Invalid reference viewport");
+
+            JsonObject textureObject = root.getAsJsonObject("textureNames");
+            Map<String, String> parsedTextures = new LinkedHashMap<>();
+            for (String key : new String[]{"top", "lcol", "lp", "rp", "rcol", "mm", "bot", "cor", "lw", "rw"}) {
+                if (textureObject == null || !textureObject.has(key))
+                    throw new IllegalStateException("Missing texture mapping: " + key);
+                parsedTextures.put(key, textureObject.get(key).getAsString());
+            }
+            if (parsedTextures.values().stream().anyMatch(name -> name == null || name.isBlank()))
+                throw new IllegalStateException("Texture names must not be blank");
 
             JsonObject skinObjects = root.getAsJsonObject("skins");
             Map<String, Map<String, int[]>> parsedSkins = new LinkedHashMap<>();
@@ -66,7 +79,7 @@ public final class MaqanUiPackLayout {
                 }
                 parsedSkins.put(theme, Map.copyOf(rectangles));
             }
-            cached = new MaqanUiPackLayout(width, height, parsedSkins);
+            cached = new MaqanUiPackLayout(width, height, parsedSkins, parsedTextures);
             LOGGER.info("Loaded MAQAN UI layout manifest: {}x{}, {} themes",
                     width, height, parsedSkins.size());
             return Optional.of(cached);
@@ -81,6 +94,8 @@ public final class MaqanUiPackLayout {
     public int referenceHeight() { return referenceHeight; }
     public boolean hasTheme(String theme) { return skins.containsKey(theme); }
     public Map<String, int[]> skin(String theme) { return skins.get(theme); }
+    public Map<String, String> textureNames() { return textureNames; }
+    public String textureName(String layer) { return textureNames.get(layer); }
 
     public ViewportTransform transform(int screenWidth, int screenHeight) {
         double scale = Math.min(screenWidth / (double) referenceWidth,
