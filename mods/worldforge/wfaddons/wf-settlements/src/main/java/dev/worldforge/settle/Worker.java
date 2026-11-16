@@ -11,9 +11,41 @@ public final class Worker {
         public final int priority;
         TaskOwner(int priority) { this.priority = priority; }
     }
+    public record TaskSnapshot(TaskOwner owner, String id, String profession, int building,
+                               boolean manualHauler, String lifeAction, double lifeTargetX,
+                               double lifeTargetZ, double lifeActionUntil) { }
+    public final java.util.ArrayDeque<TaskSnapshot> suspendedTasks = new java.util.ArrayDeque<>();
     public TaskOwner taskOwner = TaskOwner.NONE;
     public String taskId = "";
     public long taskRevision;
+
+    public void pushSuspendedTask() {
+        suspendedTasks.addLast(new TaskSnapshot(taskOwner, taskId, assignedProfession, building,
+                manualHauler, lifeAction, lifeTargetX, lifeTargetZ, lifeActionUntil));
+        syncSuspendedTaskMirror();
+    }
+
+    public TaskSnapshot popSuspendedTask() {
+        TaskSnapshot snapshot = suspendedTasks.pollLast();
+        syncSuspendedTaskMirror();
+        return snapshot;
+    }
+
+    public void syncSuspendedTaskMirror() {
+        TaskSnapshot top = suspendedTasks.peekLast();
+        if (top == null) {
+            suspendedTaskOwner = TaskOwner.NONE; suspendedTaskId = "";
+            suspendedProfession = ""; suspendedBuilding = 0; suspendedManualHauler = false;
+            suspendedLifeAction = ""; suspendedLifeTargetX = 0; suspendedLifeTargetZ = 0;
+            suspendedLifeActionUntil = 0;
+            return;
+        }
+        suspendedTaskOwner = top.owner(); suspendedTaskId = top.id();
+        suspendedProfession = top.profession(); suspendedBuilding = top.building();
+        suspendedManualHauler = top.manualHauler(); suspendedLifeAction = top.lifeAction();
+        suspendedLifeTargetX = top.lifeTargetX(); suspendedLifeTargetZ = top.lifeTargetZ();
+        suspendedLifeActionUntil = top.lifeActionUntil();
+    }
     /** The exact task lease suspended by a military assignment; restored when that order ends. */
     public TaskOwner suspendedTaskOwner = TaskOwner.NONE;
     public String suspendedTaskId = "";
