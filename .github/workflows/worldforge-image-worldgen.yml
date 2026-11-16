@@ -22,7 +22,7 @@ jobs:
   image-blueprint:
     name: PNG image -> deterministic World Blueprint -> WorldForge package (Windows x64)
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -54,16 +54,21 @@ jobs:
           if (!(Test-Path (Join-Path $out "image-world-seed-424242.worldmap"))) { throw "WorldForge package was not created" }
           if (!(Test-Path (Join-Path $out "world-blueprint.json"))) { throw "World Blueprint was not created" }
 
-      - name: Generate the actual repository map.png into the WorldForge package
+      - name: Generate and compare all seven settlement profiles from the real map.png
         shell: pwsh
         run: |
           $out = Join-Path $env:RUNNER_TEMP "maqan-image-worldgen"
+          $suite = Join-Path $out "seven-profile-suite"
           Copy-Item "map.png" (Join-Path $out "source-map.png") -Force
           python mods/worldforge/wfaddons/tools/image-worldgen/image_map_analysis.py --input "map.png" --output $out --seed 424242
           if ($LASTEXITCODE -ne 0) { throw "Original map semantic analysis failed" }
-          python mods/worldforge/wfaddons/tools/image-worldgen/image_worldgen.py convert --input "map.png" --output (Join-Path $out "image-world-seed-424242.worldmap") --seed 424242
-          if ($LASTEXITCODE -ne 0) { throw "Original map to WorldForge conversion failed" }
-          Copy-Item (Join-Path $out "image-analysis-report.json") (Join-Path $out "source-map-analysis-report.json") -Force
+          python mods/worldforge/wfaddons/tools/image-worldgen/image_worldgen.py profile-suite --input "map.png" --output-dir $suite --seed 424242 --blocks-per-pixel 16
+          if ($LASTEXITCODE -ne 0) { throw "Seven-profile map generation or QA failed" }
+          Copy-Item (Join-Path $suite "level-4/map-level-4-seed-424242.worldmap") (Join-Path $out "image-world-seed-424242.worldmap") -Force
+          Copy-Item (Join-Path $suite "level-4/terrain-preview.png") (Join-Path $out "terrain-preview.png") -Force
+          Copy-Item (Join-Path $suite "level-4/political-preview.png") (Join-Path $out "political-preview.png") -Force
+          Copy-Item (Join-Path $suite "level-4/image-analysis-report.json") (Join-Path $out "source-map-analysis-report.json") -Force
+          if (!(Test-Path (Join-Path $suite "seven-profile-comparison.json"))) { throw "Seven-profile comparison report missing" }
 
       - uses: actions/setup-java@v4
         with:
@@ -98,7 +103,7 @@ jobs:
           java -cp $classes SmokeTest $out image-world-seed-424242 (Join-Path $out "terrain-preview.png")
           if ($LASTEXITCODE -ne 0) { throw "Terrain sampling failed" }
 
-      - name: Upload blueprint, worldmap, source image, report and terrain preview
+      - name: Upload seven-profile worlds, previews, source image and QA reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
