@@ -97,6 +97,7 @@ public final class MaqanUiPackRenderer {
             assetsReady = false;
             return false;
         }
+        if (!loadedLayout.hasTheme(activeTheme)) activeTheme = "royal";
         for (String theme : List.of("royal", "iron", "grim", "elf")) {
             for (String filename : REQUIRED_TEXTURES) {
                 ResourceLocation location = texture(theme, filename);
