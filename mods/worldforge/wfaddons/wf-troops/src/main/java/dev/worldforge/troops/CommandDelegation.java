@@ -106,7 +106,7 @@ public final class CommandDelegation {
                 }
             }
         }
-        return new Resolution(direct(squadKey), null, "", true);
+        return new Resolution(direct(squadKey), null, "", false);
     }
 
     /** Legacy squad API: PLAYER_DIRECT removes a squad override and resumes parent inheritance. */
