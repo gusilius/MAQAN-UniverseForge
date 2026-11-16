@@ -2,6 +2,7 @@ package dev.worldforge.tests;
 
 import dev.worldforge.troops.ArmyHierarchy;
 import dev.worldforge.troops.Squads;
+import dev.worldforge.troops.CommandDelegation;
 
 import java.util.List;
 
@@ -93,6 +94,48 @@ public final class ArmyHierarchyTest {
         legacyCorps.squadIds.add(legacy.id);
         check(legacyHierarchy.corpsForSquad(legacy.id) == legacyCorps,
                 "reverse corps index repairs legacy direct squad-list mutations");
+        CommandDelegation delegation = new CommandDelegation();
+        check(delegation.assign(first.id, CommandDelegation.Mode.DELEGATED, "commander-18",
+                        "hold-the-river", 48, true, false, false),
+                "delegation requires a canonical commander and stores an explicit operational leash");
+        check(!delegation.acceptsInheritedOrder(first.id)
+                        && delegation.acceptsInheritedOrder(second.id),
+                "army/corps orders pass through only to player-direct squads");
+        check(delegation.mayIssue(first.id, "commander-18", CommandDelegation.Action.ENGAGE_VISIBLE_THREAT)
+                        && !delegation.mayIssue(first.id, "commander-18", CommandDelegation.Action.PURSUE)
+                        && !delegation.mayIssue(first.id, "commander-18", CommandDelegation.Action.RETREAT)
+                        && !delegation.mayIssue(first.id, "intruder", CommandDelegation.Action.REPOSITION),
+                "delegated commander authority enforces engagement, pursuit, retreat and identity permissions");
+        check(!delegation.assign(second.id, CommandDelegation.Mode.AUTONOMOUS, "", "advance", 20,
+                        true, true, true),
+                "autonomous command cannot be enabled without an appointed Character commander");
+        String delegationSave = delegation.toJson();
+        CommandDelegation restoredDelegation = new CommandDelegation();
+        restoredDelegation.fromJson(delegationSave);
+        check(!restoredDelegation.acceptsInheritedOrder(first.id)
+                        && restoredDelegation.get(first.id).objective().equals("hold-the-river"),
+                "delegated command policy and objective survive save/reload");
+        check(restoredDelegation.reclaim(first.id) && restoredDelegation.acceptsInheritedOrder(first.id)
+                        && !restoredDelegation.reclaim(first.id),
+                "player reclaim is immediate, idempotent and restores inherited direct orders");
+        restoredDelegation.assign(second.id, CommandDelegation.Mode.AUTONOMOUS, "commander-22",
+                "secure-crossing", 64, true, true, false);
+        ArmyHierarchy.DispatchStats dispatch = restored.commandArmy(42, squads,
+                new Squads.Order(Squads.Kind.MOVE, 300, 200, ""), false, restoredDelegation);
+        check(dispatch.issued() == 1 && dispatch.delegated() == 1
+                        && first.current().kind() == Squads.Kind.MOVE
+                        && second.current().kind() == Squads.Kind.MOVE,
+                "army fan-out counts and skips delegated squads without overwriting their local orders");
+        restoredDelegation.prune(squads);
+        check(restoredDelegation.get(second.id).mode() == CommandDelegation.Mode.PLAYER_DIRECT,
+                "disbanded squad delegation policy is pruned");
+        CommandDelegation invalidDelegation = new CommandDelegation();
+        invalidDelegation.fromJson("{\\"format\\":\\"wf-command-delegation/1\\",\\"policies\\":["
+                + "{\\"squad\\":\\"bad\\",\\"mode\\":\\"DELEGATED\\",\\"commander\\":\\"\\","
+                + "\\"objective\\":\\"\\",\\"leash\\":-1,\\"engage\\":true}]}" );
+        check(invalidDelegation.all().isEmpty(),
+                "invalid persisted command policies are rejected instead of granting authority");
+
         restoredIndex.fromJson("{broken");
         check(restoredIndex.squadOf("legacy-1") == null,
                 "invalid persistence input clears stale reverse membership entries");
