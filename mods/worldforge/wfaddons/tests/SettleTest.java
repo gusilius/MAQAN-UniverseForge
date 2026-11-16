@@ -262,6 +262,8 @@ public class SettleTest {
                         && restoredLease.suspendedProfession.equals("builder")
                         && restoredLease.suspendedBuilding == assignedSite.uid,
                 "текущий и приостановленный task lease сохраняются вместе с точной ролью");
+        ok(!militaryLeaseBack.releaseMilitaryTask(restoredLease.id, "campaign:stale-order"),
+                "устаревшая отмена не может снять lease более нового военного приказа");
         ok(militaryLeaseBack.releaseMilitaryTask(restoredLease.id, "campaign:raid-17")
                         && restoredLease.taskOwner == Worker.TaskOwner.SETTLEMENT
                         && restoredLease.building == assignedSite.uid
