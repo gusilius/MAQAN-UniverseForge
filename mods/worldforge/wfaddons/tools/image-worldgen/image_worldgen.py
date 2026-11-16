@@ -167,20 +167,22 @@ def color_for(index: int) -> str:
 
 def create_test_image(path: Path) -> None:
     w, h = 192, 128
-    img = Image.new("RGB", (w, h), PALETTE["deep_ocean"])
+    colors = {
+        "ocean": (5, 65, 105), "grassland": (151, 183, 83),
+        "forest": (25, 91, 39), "mountains": (119, 105, 88),
+        "desert": (224, 185, 105), "waterway": (30, 175, 225),
+    }
+    img = Image.new("RGB", (w, h), colors["ocean"])
     draw = ImageDraw.Draw(img)
-    # One large, connected landmass and a small island: all shapes are deliberate
-    # semantic pixels, not a prebuilt .worldmap or political package.
-    draw.ellipse((17, 12, 170, 116), fill=PALETTE["plains"])
-    draw.polygon([(34, 36), (66, 18), (102, 25), (121, 45), (96, 72), (58, 77), (29, 62)], fill=PALETTE["forest"])
-    draw.polygon([(84, 18), (111, 20), (139, 38), (131, 59), (111, 55), (95, 42)], fill=PALETTE["mountains"])
-    draw.polygon([(117, 75), (148, 69), (162, 90), (145, 107), (119, 101)], fill=PALETTE["desert"])
-    draw.line([(87, 30), (91, 48), (102, 62), (107, 82), (125, 98)], fill=PALETTE["river"], width=4)
-    draw.ellipse((151, 8, 180, 30), fill=PALETTE["plains"])
-    draw.line([(162, 13), (166, 19)], fill=PALETTE["river"], width=2)
+    draw.ellipse((17, 12, 170, 116), fill=colors["grassland"])
+    draw.polygon([(34, 36), (66, 18), (102, 25), (121, 45), (96, 72), (58, 77), (29, 62)], fill=colors["forest"])
+    draw.polygon([(84, 18), (111, 20), (139, 38), (131, 59), (111, 55), (95, 42)], fill=colors["mountains"])
+    draw.polygon([(117, 75), (148, 69), (162, 90), (145, 107), (119, 101)], fill=colors["desert"])
+    draw.line([(87, 30), (91, 48), (102, 62), (107, 82), (125, 98)], fill=colors["waterway"], width=4)
+    draw.ellipse((151, 8, 180, 30), fill=colors["grassland"])
+    draw.line([(162, 13), (166, 19)], fill=colors["waterway"], width=2)
     path.parent.mkdir(parents=True, exist_ok=True)
     img.save(path, format="PNG", optimize=False)
-
 
 def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: int = 4,
                   provinces_per_realm: int = 4, blocks_per_pixel: int = 16) -> dict:
