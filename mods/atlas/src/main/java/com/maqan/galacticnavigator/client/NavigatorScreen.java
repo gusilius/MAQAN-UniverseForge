@@ -233,6 +233,7 @@ public class NavigatorScreen extends Screen {
         List<String> availableUniverses = GalaxyCatalog.universes();
         if (availableUniverses.isEmpty()) universe = "";
         else if (!availableUniverses.contains(universe)) universe = availableUniverses.get(0);
+        registerMaqanWorkspaceProvider();
 
         // Compact MAQAN command bar. Secondary controls live in a tools popover,
         // keeping the star map clear without removing any functionality.
@@ -1431,6 +1432,53 @@ public class NavigatorScreen extends Screen {
         infoScroll = 0;
         publishPlatformSelection(node);
         if (openButton != null) openButton.active = selectedNodeId != null;
+    }
+
+    /**
+     * Attach Atlas's live catalogue objects to the shared MAQAN Inspector,
+     * global search opener and context action registry. All lookups resolve
+     * against GalaxyCatalog at invocation time; the Platform stores no copy
+     * of celestial simulation or catalogue state.
+     */
+    private void registerMaqanWorkspaceProvider() {
+        com.maqan.galacticnavigator.navigation.NavigatorPlatformSelectionBridge.registerInspector(
+                entityId -> {
+                    Node node = entityId == null ? null : bodyNode(entityId);
+                    if (node == null) node = findNode(entityId);
+                    if (node == null) return List.of(
+                            new String[]{"Atlas", "Status", "Object is no longer in the active catalogue"});
+                    List<String[]> rows = new ArrayList<>();
+                    rows.add(new String[]{"Identity", "Name", node.label});
+                    rows.add(new String[]{"Identity", "Type", node.kind});
+                    rows.add(new String[]{"Identity", "Catalogue ID", node.id});
+                    if (!node.entries.isEmpty()) {
+                        JsonObject data = node.first();
+                        String dimension = value(data, "dimension", "dimension_id", "attached_dimension_id");
+                        if (!dimension.isBlank())
+                            rows.add(new String[]{"Location", "Dimension", dimension});
+                        for (InfoField field : buildInfoFields(data, 0)) {
+                            if (rows.size() >= 14) break;
+                            if (field.value() != null && !field.value().isBlank())
+                                rows.add(new String[]{"Catalogue", field.label(), field.value()});
+                        }
+                    }
+                    return rows;
+                });
+        com.maqan.galacticnavigator.navigation.NavigatorPlatformSelectionBridge.registerEntityOpener(
+                entityId -> focusPlatformEntity(entityId));
+        com.maqan.galacticnavigator.navigation.NavigatorPlatformSelectionBridge.registerAction(
+                "atlas.focus", "Focus in Atlas",
+                entityId -> entityId != null && (findNode(entityId) != null || bodyNode(entityId) != null),
+                entityId -> focusPlatformEntity(entityId));
+    }
+
+    private void focusPlatformEntity(String entityId) {
+        Node node = entityId == null ? null : bodyNode(entityId);
+        if (node == null) node = findNode(entityId);
+        if (node == null) return;
+        selectNode(node);
+        focusSelected();
+        refreshButtons();
     }
 
     /** Publish Atlas identity through the shared optional Platform bridge. */
