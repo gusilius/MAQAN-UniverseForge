@@ -14,14 +14,34 @@ final class ArmyLink {
 
     record Found(ArmyEngine engine, Army army) {}
 
-    static Found find(int armyId) {
+    /** Resolve only when the scoped identity is unique; duplicate IDs across maps fail closed. */
+    static Found find(int armyId, String realm) {
+        if (armyId <= 0 || realm == null || realm.isBlank()) return null;
+        Found match = null;
         for (MapData m : WorldForgeMod.loadedMaps().values()) {
             if (m.titles == null) continue;
             ArmyEngine e = ArmyMod.armies(m);
             Army a = e.armies.get(armyId);
-            if (a != null) return new Found(e, a);
+            if (a == null || !realm.equals(a.realm)) continue;
+            if (match != null && match.army() != a) return null;
+            match = new Found(e, a);
         }
-        return null;
+        return match;
+    }
+
+    /** Used by commands that only receive an integer ID. Ambiguity is rejected, never first-match wins. */
+    static Found findUnique(int armyId) {
+        if (armyId <= 0) return null;
+        Found match = null;
+        for (MapData m : WorldForgeMod.loadedMaps().values()) {
+            if (m.titles == null) continue;
+            ArmyEngine e = ArmyMod.armies(m);
+            Army a = e.armies.get(armyId);
+            if (a == null) continue;
+            if (match != null && match.army() != a) return null;
+            match = new Found(e, a);
+        }
+        return match;
     }
 
     /** Снимает людей с армии. Вызывать только после успешного плана. */
@@ -32,9 +52,9 @@ final class ArmyLink {
         }
     }
 
-    static boolean give(int armyId, Map<String, Integer> men) {
-        Found f = find(armyId);
-        if (f == null) return false;
+    static boolean give(int armyId, String realm, Map<String, Integer> men) {
+        Found f = find(armyId, realm);
+        if (f == null || men == null) return false;
         for (var e : men.entrySet()) f.army().add(e.getKey(), e.getValue());
         return true;
     }
