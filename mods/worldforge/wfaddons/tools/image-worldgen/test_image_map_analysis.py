@@ -84,7 +84,7 @@ class ImageMapAnalysisTests(unittest.TestCase):
         self.assertEqual(CLASSES[int(labels[10, 10])], "grassland")
         self.assertEqual(CLASSES[int(labels[10, 28])], "forest")
         self.assertEqual(CLASSES[int(labels[10, 48])], "desert")
-        self.assertEqual(report["classifier"], "palette-context-components-v3")
+        self.assertEqual(report["classifier"], "palette-texture-context-v4")
         self.assertIn("land_model", report)
 
 
@@ -96,6 +96,18 @@ class ImageMapAnalysisTests(unittest.TestCase):
         ocean_median = int(np.median(height[:, 4:20]))
         lake_median = int(np.median(height[36:60, 66:90]))
         self.assertGreater(lake_median, ocean_median)
+
+
+    def test_local_texture_can_distinguish_canopy_from_smooth_plains(self):
+        image = np.zeros((48, 80, 3), dtype=np.uint8)
+        image[:] = (0, 74, 119)
+        image[8:40, 4:36] = (145, 165, 75)
+        for y in range(8, 40):
+            for x in range(44, 76):
+                image[y, x] = (78, 128, 42) if (x + y) % 2 else (160, 180, 72)
+        labels, _ = classify(image)
+        self.assertEqual(CLASSES[int(labels[24, 20])], "grassland")
+        self.assertEqual(CLASSES[int(labels[24, 60])], "forest")
 
 
 if __name__ == "__main__":
