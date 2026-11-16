@@ -390,10 +390,10 @@ public final class CommandScreen extends Screen {
     private int[] unitToolsBounds() {
         int[] console = skinRect("bot");
         int x = console == null ? width - 202 : console[0] + 10;
-        int y = console == null ? height - 100 : console[1] - 86;
+        int y = console == null ? height - 112 : console[1] - 98;
         if (x + 194 > width - 4) x = Math.max(4, width - 198);
         if (y < 4) y = 4;
-        return new int[]{x, y, 194, 82};
+        return new int[]{x, y, 194, 94};
     }
 
     private boolean inUnitToolsPanel(double px, double py) {
@@ -443,17 +443,21 @@ public final class CommandScreen extends Screen {
         if (troops.size() == 1 && troops.get(0).def() != null) {
             TroopEntity unit = troops.get(0);
             var def = unit.def();
-            traits = "Ранг " + unit.veteranRank() + " · XP " + unit.combatXp() + " · Дальность " + def.range();
+            traits = "Ранг " + unit.veteranRank() + " · XP " + unit.combatXp() + " · HP "
+                    + Math.round(100 * unit.getHealth() / Math.max(1, unit.getMaxHealth())) + "%";
             g.drawString(font, font.plainSubstrByWidth(traits, r[2] - 12), r[0] + 6, r[1] + 16, 0xFFB8C5D6, false);
-            String abilities = "Аура " + def.aura() + " · Лечение " + def.heal() + " · Осада " + def.siege();
-            g.drawString(font, font.plainSubstrByWidth(abilities, r[2] - 12), r[0] + 6, r[1] + 27, 0xFF9FC9E8, false);
+            String combat = "Урон " + def.dmg() + " · Броня " + def.armor() + " · Скорость " + def.speed();
+            g.drawString(font, font.plainSubstrByWidth(combat, r[2] - 12), r[0] + 6, r[1] + 27, 0xFFB8C5D6, false);
+            String abilities = "Дальн. " + def.range() + " · Аура " + def.aura() + " · Лечение " + def.heal() + " · Осада " + def.siege();
+            g.drawString(font, font.plainSubstrByWidth(abilities, r[2] - 12), r[0] + 6, r[1] + 38, 0xFF9FC9E8, false);
         } else {
             String composition = roles.entrySet().stream()
                     .map(e -> e.getKey() + " " + e.getValue()).collect(java.util.stream.Collectors.joining(" · "));
             g.drawString(font, font.plainSubstrByWidth(composition, r[2] - 12), r[0] + 6, r[1] + 16, 0xFFB8C5D6, false);
-            String abilities = "Аура " + aura + " · Медики " + medic + " · Осадные " + siege + " · Ветераны " + veterans
-                    + " · Мораль " + (morale / Math.max(1, troops.size())) + "%";
+            String abilities = "Аура " + aura + " · Медики " + medic + " · Осадные " + siege;
             g.drawString(font, font.plainSubstrByWidth(abilities, r[2] - 12), r[0] + 6, r[1] + 27, 0xFF9FC9E8, false);
+            String condition = "Ветераны " + veterans + " · Мораль " + (morale / Math.max(1, troops.size())) + "%";
+            g.drawString(font, font.plainSubstrByWidth(condition, r[2] - 12), r[0] + 6, r[1] + 38, 0xFFB8C5D6, false);
         }
     }
 
@@ -633,7 +637,7 @@ public final class CommandScreen extends Screen {
         String[] labels = {"Строй", "Поза", "Лидер", "Группа", "Удерж.", "Стоп"};
         for (int i = 0; i < labels.length; i++) {
             int col = i % 3, row = i / 3;
-            out.add(new Btn(labels[i], x + col * 60, r[1] + 44 + row * 18,
+            out.add(new Btn(labels[i], x + col * 60, r[1] + 54 + row * 18,
                     widths[i], false, actions[i]));
         }
     }
