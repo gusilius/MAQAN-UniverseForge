@@ -35,7 +35,7 @@ public final class MapData {
     public final TitleData titles;           // иерархия титулов и государства (может быть null)
     public final Map<String, byte[]> mapItems; // карты-предметы по уровням и "realms"
     /** Named settlement anchors authored by image-worldgen in world-blueprint.json. */
-    public record SettlementSeed(String id, String type, String name, String realmId, String provinceId,
+    public record SettlementSeed(String id, String type, String name, String realmId, int provinceId,
                                  int pixelX, int pixelZ, int blockX, int blockZ) {}
     public final List<SettlementSeed> settlementSeeds;
 
@@ -242,14 +242,15 @@ public final class MapData {
                 for (Object row : rows) {
                     if (!(row instanceof Map<?, ?> item) || !(item.get("block") instanceof List<?> block)
                             || block.size() < 2 || !(item.get("pixel") instanceof List<?> pixel) || pixel.size() < 2
-                            || !(block.get(0) instanceof Number) || !(block.get(1) instanceof Number)
-                            || !(pixel.get(0) instanceof Number) || !(pixel.get(1) instanceof Number))
+                            || !(item.get("province_id") instanceof Number) || !(block.get(0) instanceof Number)
+                            || !(block.get(1) instanceof Number) || !(pixel.get(0) instanceof Number)
+                            || !(pixel.get(1) instanceof Number))
                         throw new IOException("Некорректная запись поселения в world-blueprint.json карты '" + name + "'");
                     String id = String.valueOf(item.get("id"));
                     if (id.isBlank() || !ids.add(id)) throw new IOException("Пустой или повторяющийся ID поселения: " + id);
                     settlementSeeds.add(new SettlementSeed(id, String.valueOf(item.get("type")),
                             String.valueOf(item.get("name")), String.valueOf(item.get("realm_id")),
-                            String.valueOf(item.get("province_id")),
+                            ((Number) item.get("province_id")).intValue(),
                             ((Number) pixel.get(0)).intValue(), ((Number) pixel.get(1)).intValue(),
                             ((Number) block.get(0)).intValue(), ((Number) block.get(1)).intValue()));
                 }
