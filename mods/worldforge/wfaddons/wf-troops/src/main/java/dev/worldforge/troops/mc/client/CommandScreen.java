@@ -63,7 +63,22 @@ public final class CommandScreen extends Screen {
             Defs defs = new Defs();
             if (m.get("defs") instanceof List<?> raw) for (Object o : raw) if (o instanceof String id) defs.add(id);
             incomingSettlement = Settlement.fromJson((String) m.get("s"), defs);
-            if (Minecraft.getInstance().screen instanceof CommandScreen screen) screen.setSettlement(incomingSettlement);
+            Minecraft minecraft = Minecraft.getInstance();
+            if (minecraft.screen instanceof CommandScreen screen) {
+                screen.setSettlement(incomingSettlement);
+            } else if (minecraft.screen != null) {
+                // The Platform shell keeps provider screens cached while switching
+                // map/profile tabs. Update that same command view instead of
+                // replacing it or creating a second settlement model.
+                try {
+                    Object hosted = minecraft.screen.getClass()
+                            .getMethod("providerView", String.class)
+                            .invoke(minecraft.screen, "worldforge.troops");
+                    if (hosted instanceof CommandScreen screen) screen.setSettlement(incomingSettlement);
+                } catch (ReflectiveOperationException ignored) {
+                    // Standalone/older hosts have no provider lookup bridge.
+                }
+            }
         } catch (RuntimeException ex) {
             org.slf4j.LoggerFactory.getLogger("wf_troops").error("Не удалось подключить модель поселения к общей RTS-панели", ex);
         }
