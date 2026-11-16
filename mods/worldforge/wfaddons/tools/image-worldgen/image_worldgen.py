@@ -46,6 +46,22 @@ ANALYSIS_TO_WORLD = {
 LAND_CLASSES = {"plains", "forest", "taiga", "mountains", "desert", "snow", "rock"}
 WATER_CLASSES = {"deep_ocean", "lake", "river"}
 NAME_START = ("A", "Bel", "Cor", "Dor", "Eld", "Fen", "Gal", "Har", "Ith", "Kel", "Lor", "Mor", "Nor", "Or", "Pel", "Quel")
+
+GOVERNMENT_MODELS = [
+    {"government":"hereditary_monarchy","structure":"feudal_monarchy","ruler_title":"King","council":"royal_council","succession":"hereditary"},
+    {"government":"elective_monarchy","structure":"elective_crown","ruler_title":"High King","council":"electors_council","succession":"elective"},
+    {"government":"imperial_autocracy","structure":"composite_empire","ruler_title":"Emperor","council":"imperial_court","succession":"dynastic_or_conquest"},
+    {"government":"merchant_republic","structure":"oligarchic_republic","ruler_title":"First Doge","council":"merchant_senate","succession":"elected_by_houses"},
+    {"government":"civic_republic","structure":"federal_republic","ruler_title":"First Consul","council":"popular_assembly","succession":"elected"},
+    {"government":"theocracy","structure":"temple_state","ruler_title":"Hierophant","council":"synod","succession":"clerical_election"},
+    {"government":"tribal_confederation","structure":"clan_confederacy","ruler_title":"High Chieftain","council":"tribal moot","succession":"clan_acclamation"},
+    {"government":"military_dictatorship","structure":"military_junta","ruler_title":"Lord Marshal","council":"war_council","succession":"military_selection"},
+    {"government":"magocracy","structure":"magocratic_conclave","ruler_title":"Archmage","council":"arcane_conclave","succession":"magical_merit"},
+    {"government":"guild_oligarchy","structure":"chartered_city_league","ruler_title":"Guildmaster","council":"guild_congress","succession":"guild_vote"},
+    {"government":"sacred_order","structure":"order_state","ruler_title":"Grand Master","council":"chapter_council","succession":"order_election"},
+    {"government":"necromantic_dynasty","structure":"undying_dynasty","ruler_title":"Death Sovereign","council":"court_of_lichlords","succession":"ritual_designation"},
+]
+
 NAME_END = ("aria", "en", "oria", "gard", "mere", "hold", "wyn", "mark", "eth", "a", "or", "heim")
 
 
@@ -201,7 +217,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     if sum(map(len, components)) < 32:
         raise ValueError("The map has too little land for meaningful territory generation.")
 
-    realm_total = max(realm_count, len(components))
+    # Avoid creating politically meaningless micro-states on tiny islands/components.\n    realm_total = max(len(components), min(realm_count, max(1, sum(map(len, components)) // 4096)))
     realm_counts = allocate_counts(components, realm_total)
     realm_labels = [-1] * (width * height)
     realm_seeds: dict[int, int] = {}
@@ -223,7 +239,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         realm_cells = [i for i, label in enumerate(realm_labels) if label == realm_id]
         if not realm_cells:
             continue
-        count = min(provinces_per_realm, max(1, len(realm_cells) // 24))
+        # At least 4,096 source pixels per smallest political territory (~1,048,576 blocks at 16 blocks/px).\n        count = min(provinces_per_realm, max(1, len(realm_cells) // 4096))
         seeds = farthest_seeds(realm_cells, count, width, seed ^ (realm_id * 7919))
         labels, _ = partition(realm_cells, seeds, width, height, next_province)
         ids = list(range(next_province, next_province + len(seeds)))
@@ -265,7 +281,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
                         realm_neighbors[ra].add(rb)
                         realm_neighbors[rb].add(ra)
 
-    realm_names = {rid: stable_name(seed, rid + 1) for rid in realm_provinces}
+    realm_names = {rid: stable_name(seed, rid + 1) for rid in realm_provinces}\n    government_by_realm = {rid: GOVERNMENT_MODELS[random.Random((seed & 0xFFFFFFFFFFFFFFFF) ^ (rid * 0xD1B54A32D192ED03)).randrange(len(GOVERNMENT_MODELS))] for rid in realm_provinces}
     county_id_for_realm = {rid: len(province_meta) + offset + 1 for offset, rid in enumerate(realm_provinces)}
     titles = []
     realms = []
@@ -356,13 +372,13 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         "relation_types": {"vassal": {"label": "Vassal", "tribute": 10, "levy": 10, "can_declare_war": False}},
         "realms": realms,
     }
-    source_hash = hashlib.sha256(input_path.read_bytes()).hexdigest()
+    province_rgb = province_labels.tolist()  # zero is reserved for sea; labels are 16-bit safe.\n    source_hash = hashlib.sha256(input_path.read_bytes()).hexdigest()
     blueprint = {
         "format": "maqan-world-blueprint/1", "generator": GENERATOR_VERSION,
         "seed": seed, "source_image_sha256": source_hash, "size_px": [width, height],
         "blocks_per_pixel": blocks_per_pixel, "land_pixels": land_count,
         "realm_count": len(realms), "province_count": len(province_meta),
-        "settlement_count": len(settlements), "realms": realms,
+        "settlement_count": len(settlements), "realms": realms,\n        "generation_seconds": round(time.perf_counter() - started_at, 4),
         "territories": [{"id": pid, "realm_id": f"realm_{meta['realm'] + 1:02d}",
                          "capital_pixel": [meta["seed"] % width, meta["seed"] // width],
                          "area_pixels": meta["area"], "neighbors": sorted(province_neighbors[pid])}
@@ -370,7 +386,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         "settlements": settlements,
         "generation_policy": {
             "chunk_materialization": "deferred", "territory_partition": "connected-land-multisource-bfs",
-            "political_seed": seed, "source_semantics": "maqan-image-analysis/2",
+            "political_seed": seed, "source_semantics": "maqan-image-analysis/2",\n            "minimum_territory_pixels": 4096, "government_variety": sorted({r["props"]["government"] for r in realms}),
             "geography_classifier": analysis_report["classifier"],
             "unknown_percent": analysis_report["unknown_percent"],
         },
