@@ -194,13 +194,15 @@ public final class CharacterRegistry {
 
     public void unbindEntity(String id, String bodyKind, String entityUuid) {
         Character c = require(id);
+        String kind = requireText(bodyKind, "body kind").toLowerCase(Locale.ROOT);
+        if (entityUuid == null || entityUuid.isBlank()) return;
         Object raw = c.props.get("population.entity_bindings");
         if (!(raw instanceof Map<?, ?> map)) return;
-        Object current = map.get(bodyKind);
+        Object current = map.get(kind);
         if (!Objects.equals(current, entityUuid)) return;
         Map<String, Object> bindings = new LinkedHashMap<>();
         for (Map.Entry<?, ?> entry : map.entrySet())
-            if (entry.getKey() instanceof String key && !key.equals(bodyKind)) bindings.put(key, entry.getValue());
+            if (entry.getKey() instanceof String key && !key.equals(kind)) bindings.put(key, entry.getValue());
         if (!bindings.containsValue(entityUuid)) characterByEntityUuid.remove(entityUuid, c.id);
         if (bindings.isEmpty()) c.props.remove("population.entity_bindings");
         else c.props.put("population.entity_bindings", bindings);
