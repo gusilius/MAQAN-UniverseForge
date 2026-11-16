@@ -315,6 +315,7 @@ public final class CommandScreen extends Screen {
     }
 
     boolean overPanel(double px, double py) {
+        if (embeddedInMaqan && !inWorkspaceViewport(px, py)) return true;
         for (Btn button : buttons()) if (button.hit(px, py)) return true;
         if (onZoomSlider(px, py)) return true;
         return inBuildPanel(px, py) || inSelPanel(px, py);
@@ -548,7 +549,8 @@ public final class CommandScreen extends Screen {
     @Override
     public boolean mouseDragged(double x, double y, int button, double dx, double dy) {
         mx = x; my = y;
-        if (button == 2) CommandMode.RIG.rotate(dx * 0.35, dy * 0.25);
+        if (button == 2 && (!embeddedInMaqan || inWorkspaceViewport(x, y)))
+            CommandMode.RIG.rotate(dx * 0.35, dy * 0.25);
         if (button == 0 && zoomDragging) setZoomFromMouse(x);
         return true;
     }
