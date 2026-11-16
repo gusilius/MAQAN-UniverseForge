@@ -499,21 +499,47 @@ public final class PlatformShellScreen extends Screen {
         searchVisible = false;
     }
 
+    private int profileTabWidth() {
+        if (width < 560) return 28;
+        if (width < 840) return 40;
+        return 48;
+    }
+
+    private int profileTabStep() {
+        if (width < 560) return 32;
+        if (width < 840) return 44;
+        return 52;
+    }
+
+    private int profileTabsStart() {
+        int count = 0;
+        for (Profile candidate : Profile.values()) if (profileAvailable(candidate)) count++;
+        int tabWidth = profileTabWidth();
+        int step = profileTabStep();
+        int total = Math.max(0, count * step - (step - tabWidth));
+        int preferred = width >= 840 ? Math.max(178, width / 2 - 112)
+                : Math.max(46, (width - total) / 2);
+        int rightLimit = Math.max(46, width - 96 - total);
+        return Math.max(46, Math.min(preferred, rightLimit));
+    }
+
     private void drawTopBar(GuiGraphics g, int mx, int my) {
         g.fill(0, 0, width, 34, SURFACE_ALT);
         g.fill(0, 33, width, 35, EDGE);
         g.drawString(font, "M", 15, 12, CYAN, false);
         g.fill(34, 9, 35, 25, EDGE);
-        int x = Math.max(178, width / 2 - 112);
+        int x = profileTabsStart();
+        int tabWidth = profileTabWidth();
+        int tabStep = profileTabStep();
         for (Profile p : Profile.values()) {
             if (!profileAvailable(p)) continue;
             boolean active = p == profile;
-            g.fill(x, 5, x + 48, 29, active ? 0x553B9FB5 : 0x00101924);
-            if (active) g.fill(x, 28, x + 48, 30, CYAN);
-            g.drawCenteredString(font, p.icon, x + 24, 8, active ? CYAN : MUTED);
-            if (mx >= x && mx < x + 48 && my >= 5 && my < 30)
+            g.fill(x, 5, x + tabWidth, 29, active ? 0x553B9FB5 : 0x00101924);
+            if (active) g.fill(x, 28, x + tabWidth, 30, CYAN);
+            g.drawCenteredString(font, p.icon, x + tabWidth / 2, 8, active ? CYAN : MUTED);
+            if (mx >= x && mx < x + tabWidth && my >= 5 && my < 30)
                 g.renderTooltip(font, Component.literal(p.label), mx, my);
-            x += 52;
+            x += tabStep;
         }
         g.drawString(font, embeddedView != null && profile == Profile.COSMOS ? "ATLAS" : "WORKSPACE", 46, 13, MUTED, false);
         if (WorkspaceResponsiveLayout.isCompact(width, height)) {
@@ -961,11 +987,13 @@ public final class PlatformShellScreen extends Screen {
                 else onClose();
                 return true;
             }
-            int x=Math.max(178,width/2-112);
+            int x = profileTabsStart();
+            int tabWidth = profileTabWidth();
+            int tabStep = profileTabStep();
             for(Profile p:Profile.values()) {
                 if (!profileAvailable(p)) continue;
-                if(mx>=x&&mx<x+48) { setProfile(p); return true; }
-                x+=52;
+                if(mx>=x&&mx<x+tabWidth) { setProfile(p); return true; }
+                x+=tabStep;
             }
             return true;
         }
