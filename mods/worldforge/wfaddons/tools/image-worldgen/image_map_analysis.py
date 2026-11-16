@@ -126,7 +126,7 @@ def classify(rgb):
         "notes": [
             "Deterministic palette/context analysis; not general-purpose AI image understanding.",
             "Semantic masks are mutually exclusive; water and snow are protected from later land rules.",
-            "Land classes use source-palette color families; textured terrain and legend-specific calibration remain future improvements.",
+            "Land classes use source-palette color families; local texture cues and legend-specific calibration remain future improvements.",
             "Taiga uses a conservative latitude prior and should be validated against the source map legend.",
             "River/lake split is geometric and may need map-specific threshold calibration."
         ]
@@ -140,21 +140,33 @@ def make_heightfield(labels, seed, sea_level=63, min_y=-64, max_y=320):
         gh, gw = max(2, (h + cell - 1)//cell + 1), max(2, (w + cell - 1)//cell + 1)
         coarse = Image.fromarray(np.uint8(rng.random((gh, gw)) * 255), "L")
         return np.asarray(coarse.resize((w, h), Image.Resampling.BICUBIC), np.float32) / 255.0 - .5
-    continental, regional, detail = field(240), field(72), field(18)
-    anchors = {"ocean": sea_level-44, "lake": sea_level-2, "waterway": sea_level-1,
+    continental = ndimage.gaussian_filter(field(320), sigma=1.4, mode="wrap")
+    regional = ndimage.gaussian_filter(field(88), sigma=1.0, mode="reflect")
+    detail = ndimage.gaussian_filter(field(24), sigma=0.7, mode="reflect")
+    anchors = {"ocean": sea_level-30, "lake": sea_level-2, "waterway": sea_level-1,
         "grassland": sea_level+7, "forest": sea_level+10, "taiga": sea_level+13,
         "desert": sea_level+6, "mountains": sea_level+38, "snow": sea_level+22,
         "rock": sea_level+28, "unknown": sea_level+7}
-    # A palette lookup is one vectorized gather instead of one full-image
-    # boolean pass for every semantic class.
+    # Multi-scale coherent noise gives continents, rolling regions and local
+    # terrain variation without the harsh pixel-scale spikes of raw noise.
     anchor_lut = np.asarray([anchors[name] for name in CLASSES], dtype=np.float32)
     base = anchor_lut[labels]
-    relief = base + continental*64 + regional*28 + detail*9
+    relief = base + continental*54 + regional*24 + detail*8
     mountain = (labels == CLASSES.index("mountains")) | (labels == CLASSES.index("rock"))
-    ridge = 1.0 - np.abs(2.0 * (detail + .5) - 1.0)
-    relief += mountain * (ridge * 74 + np.maximum(0, regional) * 36)
-    water = (labels == CLASSES.index("ocean")) | (labels == CLASSES.index("lake"))
-    relief[water] = sea_level - 42 + continental[water] * 20
+    mountain_distance = ndimage.distance_transform_edt(~mountain)
+    mountain_influence = np.exp(-mountain_distance / 18.0).astype(np.float32)
+    ridge_noise = ndimage.gaussian_filter(field(34), sigma=1.0, mode="reflect")
+    ridge = 1.0 - np.abs(2.0 * (ridge_noise + .5) - 1.0)
+    relief += mountain_influence * (ridge * 48 + np.maximum(0, regional) * 30)
+    # Give coasts a shallow continental shelf and preserve lakes as inland
+    # basins instead of accidentally assigning them deep-ocean elevations.
+    ocean = labels == CLASSES.index("ocean")
+    if np.any(ocean):
+        ocean_depth = ndimage.distance_transform_edt(ocean)
+        shelf_depth = 5.0 + np.minimum(ocean_depth * 1.55, 39.0)
+        relief[ocean] = sea_level - shelf_depth[ocean] + continental[ocean] * 7.0
+    lake = labels == CLASSES.index("lake")
+    relief[lake] = sea_level - 2.5 + regional[lake] * 1.5
     relief[labels == CLASSES.index("waterway")] = sea_level - 1
     norm = np.clip((relief - min_y) / (max_y - min_y), 0, 1)
     return np.round(norm * 65535).astype(np.uint16)
