@@ -107,6 +107,10 @@ pub struct GeographicCell {
     /// Older snapshots omit it and remain readable through serde's default.
     #[serde(default)]
     pub owner_realm_id: String,
+    /// Elapsed world year when this terrain cell first became observable.
+    /// Image-map cells default to year zero; vanilla chunks persist their discovery year.
+    #[serde(default)]
+    pub discovered_year: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -533,9 +537,9 @@ mod tests {
                 blocks_per_pixel_milli: 16000, political_layers_present: true, sample_stride: 4,
                 cells: vec![
                     GeographicCell { x: 4, z: 8, biome: "plains".into(), elevation: 70,
-                        river: 0, land: true, suitability: 82, owner_realm_id: String::new() },
+                        river: 0, land: true, suitability: 82, owner_realm_id: String::new(), discovered_year: 0 },
                     GeographicCell { x: 8, z: 8, biome: "forest".into(), elevation: 72,
-                        river: 255, land: true, suitability: 90, owner_realm_id: String::new() },
+                        river: 255, land: true, suitability: 90, owner_realm_id: String::new(), discovered_year: 0 },
                 ],
             }],
         };
