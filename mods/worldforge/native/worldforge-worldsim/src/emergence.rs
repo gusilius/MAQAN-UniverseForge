@@ -136,14 +136,18 @@ fn bootstrap(map: &GeographicMap, seed: u64, bands: &mut Vec<EmergentBand>, even
         b.suitability.cmp(&a.suitability)
             .then_with(|| a.z.cmp(&b.z)).then_with(|| a.x.cmp(&b.x))
     });
-    let mut occupied = Vec::<(u32,u32)>::new();
+    // Existing communities reserve their geographic catchment. Re-running bootstrap
+    // against a growing chunk cache can therefore add newly discovered frontier sites
+    // without duplicating settlements that were already founded in earlier snapshots.
+    let mut occupied = bands.iter().filter(|band| band.map_id == map.map_id)
+        .map(|band| (band.x, band.z)).collect::<Vec<_>>();
     for cell in candidates {
-        // Site probability is an environmental score, not a requested settlement count.
         let chance = u64::from(cell.suitability.saturating_sub(42)) * 55;
         let key = format!("{}:{}:{}", map.map_id, cell.x, cell.z);
         if roll(seed, "founder-band", &key, &cell.biome, 0) % 10_000 >= chance { continue; }
         if occupied.iter().any(|p| distance_sq(*p, (cell.x,cell.z)) < spacing * spacing) { continue; }
         let id = format!("band_{:016x}", roll(seed, "band-id", &key, "", 0));
+        if bands.iter().any(|band| band.id == id) { continue; }
         let population = 2 + roll(seed, "founder-size", &key, "", 0) % 5;
         bands.push(EmergentBand { id: id.clone(), map_id: map.map_id.clone(), x: cell.x, z: cell.z,
             population, food_reserve: i64::from(cell.suitability) / 8, settled: false,
@@ -349,9 +353,10 @@ pub fn advance(request: EmergenceRequest) -> Result<EmergenceFrame, String> {
     // A map may be loaded after the world has already developed. Bootstrap each map
     // independently instead of treating the first non-empty map as the whole universe.
     for map in maps {
-        if !state.bands.iter().any(|band| band.map_id == map.map_id) {
-            bootstrap(map, state.seed, &mut state.bands, &mut events);
-        }
+        // Geography is a growing set of observed cells, not a one-shot map import.
+        // Reconcile on every immutable snapshot so newly generated vanilla chunks
+        // can found additional communities in the same persistent world partition.
+        bootstrap(map, state.seed, &mut state.bands, &mut events);
     }
     state.bands.sort_by(|a,b| a.id.cmp(&b.id));
     let mut years_advanced = 0u64;
