@@ -599,6 +599,16 @@ public class RealmsMod {
             // from race/culture-aware NameBank pools), then choose an actual data-pack
             // government immediately instead of leaving new map realms untyped for 30 days.
             syncPoliticalMapState();
+            // People, political state and settlements load from their canonical owners.
+            // Validate the cross-domain references only after all ServerStarted listeners ran.
+            if (net.minecraftforge.fml.ModList.get().isLoaded("wf_settle")) {
+                try {
+                    Class<?> settlements = Class.forName("dev.worldforge.settle.mc.SettleMod");
+                    settlements.getMethod("validateCanonicalResidentLinks").invoke(null);
+                } catch (ReflectiveOperationException | LinkageError ex) {
+                    LOGGER.error("wf_realms: could not validate loaded Colony -> Character references: {}", ex.toString(), ex);
+                }
+            }
             int initializedGovernments = 0;
             for (TitleData.Realm realm : realms()) {
                 Realms.State state = REALMS.state(realm.id);

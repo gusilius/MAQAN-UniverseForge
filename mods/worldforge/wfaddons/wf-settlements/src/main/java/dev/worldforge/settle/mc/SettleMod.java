@@ -1263,7 +1263,7 @@ public class SettleMod {
      * Audits persisted settlement resident UUIDs against the owning canonical wf-people registry.
      * This is a read-only integrity check: missing residents are reported, never cloned or silently rebound.
      */
-    private static void validateCanonicalResidentLinks() {
+    public static void validateCanonicalResidentLinks() {
         Map<String, dev.worldforge.mod.MapData> mapsByName = new HashMap<>();
         for (dev.worldforge.mod.MapData map : WorldForgeMod.loadedMaps().values())
             if (map != null && map.name != null) mapsByName.put(map.name, map);
