@@ -1128,7 +1128,8 @@ public final class PlatformShellScreen extends Screen {
         }
 
         List<WorkspaceRuntime.InspectorField> fields = WorkspaceRuntime.inspect(selected);
-        boolean hasLivePreview = selected.previewEntity() instanceof LivingEntity;
+        net.minecraft.world.entity.Entity resolvedPreview = PlatformSelectionContext.resolveLiveEntity(selected);
+        boolean hasLivePreview = resolvedPreview instanceof LivingEntity;
         int total = 4 + (hasLivePreview ? 116 : 0) + 17 + 18 + 16 + 9
                 + (selected.summary().isBlank() ? 0 : 19);
         for (WorkspaceRuntime.InspectorField field : fields)
@@ -1140,7 +1141,7 @@ public final class PlatformShellScreen extends Screen {
         g.enableScissor(p.x + 5, bodyTop, p.x + p.w - 5, bodyBottom);
         int y = bodyTop + 4 - inspectorScroll;
         if (hasLivePreview) {
-            LivingEntity liveEntity = (LivingEntity) selected.previewEntity();
+            LivingEntity liveEntity = (LivingEntity) resolvedPreview;
             int previewLeft = p.x + 12;
             int previewRight = Math.min(p.x + p.w - 12, previewLeft + 104);
             int previewTop = y;
