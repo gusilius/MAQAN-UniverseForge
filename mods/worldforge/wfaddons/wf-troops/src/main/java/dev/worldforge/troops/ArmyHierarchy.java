@@ -39,6 +39,30 @@ public final class ArmyHierarchy {
         return null;
     }
 
+    /** Strategic army owning a tactical squad, or null when the squad is not assigned to a corps. */
+    public ArmyNode armyForSquad(String squadId) {
+        Corps parent = corpsForSquad(squadId);
+        return parent == null ? null : armies.get(parent.armyId);
+    }
+
+    /** Stable read-only list of canonical squad IDs under a corps. */
+    public List<String> squadsForCorps(String corpsId) {
+        Corps value = corps.get(corpsId);
+        return value == null ? List.of() : List.copyOf(value.squadIds);
+    }
+
+    /** Stable read-only list of canonical squad IDs across all corps of an army. */
+    public List<String> squadsForArmy(int armyId) {
+        ArmyNode army = armies.get(armyId);
+        if (army == null) return List.of();
+        List<String> result = new ArrayList<>();
+        for (String corpsId : army.corpsIds) {
+            Corps child = corps.get(corpsId);
+            if (child != null) result.addAll(child.squadIds);
+        }
+        return List.copyOf(result);
+    }
+
     public ArmyNode ensureArmy(int strategicId, String name, String owner, String realm) {
         if (strategicId <= 0 || blank(owner)) throw new IllegalArgumentException("army id and owner are required");
         ArmyNode node = armies.get(strategicId);
