@@ -1530,8 +1530,12 @@ public class NavigatorScreen extends Screen {
 
         layoutPanels();
         if (embeddedInMaqan) mapT = Math.max(mapT, 84);
-        boolean useList = showList && width >= 620 && listR > listL;
-        boolean useInfo = showInfo && width >= 850 && infoR > infoL;
+        // In the shared MAQAN shell, the imported concept owns the side-window
+        // frames and compact drawers. Keep Atlas' own catalogue/dossier on desktop
+        // only; on compact or short viewports the shell's drawers take that space.
+        boolean embeddedDesktop = !embeddedInMaqan || (width >= 840 && height >= 560);
+        boolean useList = showList && width >= 620 && embeddedDesktop && listR > listL;
+        boolean useInfo = showInfo && width >= 850 && embeddedDesktop && infoR > infoL;
         int bodyTop = mapT;
         int bodyBottom = mapB;
         infoPreviewRect = infoResetRect = infoOrbitEditRect = null;
