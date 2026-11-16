@@ -284,8 +284,11 @@ public class PeopleTest {
         ok(!bodies.bindEntity(otherOwner.id, "worker", bodyB),
                 "устаревший unbind не освобождает UUID, который уже принадлежит другой привязке того же Character");
         bodies.unbindEntity(bodyOwner.id, "worker", bodyB);
+        ok(!bodies.bindEntity(otherOwner.id, "worker", bodyB),
+                "UUID остаётся занят, пока на него ссылается другая body kind того же Character");
+        bodies.unbindEntity(bodyOwner.id, "soldier", bodyB);
         ok(bodies.bindEntity(otherOwner.id, "worker", bodyB),
-                "точный unbind освобождает UUID для повторного использования");
+                "последний точный unbind освобождает UUID для повторного использования");
         bodies.bindEntity(bodyOwner.id, "soldier", bodyA);
         String bodySave = bodies.toJson();
         CharacterRegistry bodiesReload = new CharacterRegistry();
