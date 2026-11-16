@@ -290,23 +290,32 @@ public class RtsHud extends Screen {
         hits.clear();
         tipTitle = null;
         curX = mx; curY = my;
-        topBar(g, mx, my);
-        alertLine(g, mx, my);
-        bottomBar(g, mx, my);
+        if (embeddedInMaqan) {
+            embeddedPanels(g, mx, my);
+        } else {
+            topBar(g, mx, my);
+            alertLine(g, mx, my);
+            bottomBar(g, mx, my);
+        }
+        int[] viewport = workspaceViewport();
         if (pending != null) {
             Defs.Building d = s.defs.buildings.get(pending);
-            String t = "Размещение: " + (d == null ? pending : d.name) + " - ЛКМ по земле на миникарте, ПКМ или Esc отменяют";
-            int w = font.width(t) + 16, x = (width - w) / 2, y = height - BH - 38;
+            String t = "Размещение: " + (d == null ? pending : d.name)
+                    + " - ЛКМ по земле на миникарте, ПКМ или Esc отменяют";
+            int w = font.width(t) + 16, x = viewport[0] + (viewport[2] - w) / 2;
+            int y = viewport[1] + viewport[3] - 38;
             WFUi.bevel(g, x, y, w, 16, false);
             g.drawString(font, t, x + 8, y + 4, WFUi.GOLD);
         } else if (targetMode) {
             String t = "Укажите здание для назначения (ЛКМ по зданию), Esc отменяет";
-            int w = font.width(t) + 16, x = (width - w) / 2, y = height - BH - 38;
+            int w = font.width(t) + 16, x = viewport[0] + (viewport[2] - w) / 2;
+            int y = viewport[1] + viewport[3] - 38;
             WFUi.bevel(g, x, y, w, 16, false);
             g.drawString(font, t, x + 8, y + 4, WFUi.GOLD);
         }
         if (System.currentTimeMillis() < msgUntil && !msg.isEmpty()) {
-            int w = font.width(msg) + 16, x = (width - w) / 2, y = height - BH - 20;
+            int w = font.width(msg) + 16, x = viewport[0] + (viewport[2] - w) / 2;
+            int y = viewport[1] + viewport[3] - 20;
             WFUi.bevel(g, x, y, w, 15, true);
             g.drawString(font, msg, x + 8, y + 4, WFUi.TX);
         }
