@@ -390,10 +390,10 @@ public final class CommandScreen extends Screen {
     private int[] unitToolsBounds() {
         int[] console = skinRect("bot");
         int x = console == null ? width - 202 : console[0] + 10;
-        int y = console == null ? height - 76 : console[1] - 62;
+        int y = console == null ? height - 100 : console[1] - 86;
         if (x + 194 > width - 4) x = Math.max(4, width - 198);
         if (y < 4) y = 4;
-        return new int[]{x, y, 194, 58};
+        return new int[]{x, y, 194, 82};
     }
 
     private boolean inUnitToolsPanel(double px, double py) {
@@ -424,19 +424,37 @@ public final class CommandScreen extends Screen {
         List<TroopEntity> troops = selectedTroops();
         if (troops.isEmpty()) return;
         int[] r = unitToolsBounds();
-        int aura = 0, medic = 0, siege = 0, veterans = 0;
+        int aura = 0, medic = 0, siege = 0, veterans = 0, morale = 0;
+        Map<String, Integer> roles = new TreeMap<>();
         for (TroopEntity troop : troops) {
-            if (troop.def() == null) continue;
-            if (troop.def().aura() > 0) aura++;
-            if (troop.def().heal() > 0) medic++;
-            if (troop.def().siege() > 0) siege++;
+            if (troop.def() != null) {
+                if (troop.def().aura() > 0) aura++;
+                if (troop.def().heal() > 0) medic++;
+                if (troop.def().siege() > 0) siege++;
+                roles.merge(troop.def().role(), 1, Integer::sum);
+            }
             if (troop.veteranRank() >= 2) veterans++;
+            morale += troop.moralePct();
         }
         g.fill(r[0], r[1], r[0] + r[2], r[1] + r[3], 0xEE101820);
         g.fill(r[0], r[1], r[0] + r[2], r[1] + 1, 0xFF8A7040);
-        g.drawString(font, "ОТРЯД · " + troops.size(), r[0] + 6, r[1] + 4, 0xFFE6C875, false);
-        String traits = "Аура " + aura + " · Медики " + medic + " · Осадные " + siege + " · Ветераны " + veterans;
-        g.drawString(font, font.plainSubstrByWidth(traits, r[2] - 12), r[0] + 6, r[1] + 15, 0xFFB8C5D6, false);
+        g.drawString(font, (troops.size() == 1 ? "ЮНИТ" : "ГРУППА") + " · " + troops.size(), r[0] + 6, r[1] + 4, 0xFFE6C875, false);
+        String traits;
+        if (troops.size() == 1 && troops.get(0).def() != null) {
+            TroopEntity unit = troops.get(0);
+            var def = unit.def();
+            traits = "Ранг " + unit.veteranRank() + " · XP " + unit.combatXp() + " · Дальность " + def.range();
+            g.drawString(font, font.plainSubstrByWidth(traits, r[2] - 12), r[0] + 6, r[1] + 16, 0xFFB8C5D6, false);
+            String abilities = "Аура " + def.aura() + " · Лечение " + def.heal() + " · Осада " + def.siege();
+            g.drawString(font, font.plainSubstrByWidth(abilities, r[2] - 12), r[0] + 6, r[1] + 27, 0xFF9FC9E8, false);
+        } else {
+            String composition = roles.entrySet().stream()
+                    .map(e -> e.getKey() + " " + e.getValue()).collect(java.util.stream.Collectors.joining(" · "));
+            g.drawString(font, font.plainSubstrByWidth(composition, r[2] - 12), r[0] + 6, r[1] + 16, 0xFFB8C5D6, false);
+            String abilities = "Аура " + aura + " · Медики " + medic + " · Осадные " + siege + " · Ветераны " + veterans
+                    + " · Мораль " + (morale / Math.max(1, troops.size())) + "%";
+            g.drawString(font, font.plainSubstrByWidth(abilities, r[2] - 12), r[0] + 6, r[1] + 27, 0xFF9FC9E8, false);
+        }
     }
 
     private void sendWorkArea(Vec3 a, Vec3 b, int radius) {
@@ -603,11 +621,22 @@ public final class CommandScreen extends Screen {
 
     private void addUnitToolButtons(List<Btn> out) {
         int[] r = unitToolsBounds();
-        int y = r[1] + 34, x = r[0] + 6;
-        out.add(new Btn("Строй", x, y, 38, false, this::cycleFormation)); x += 40;
-        out.add(new Btn("Поза", x, y, 34, false, this::cycleStance)); x += 36;
-        out.add(new Btn("Лидер", x, y, 38, false, this::toggleCommander)); x += 40;
-        out.add(new Btn("Группа", x, y, 42, false, this::createSquadFromSelection));
+        int x = r[0] + 6;
+        int[] widths = {52, 52, 52, 52, 52, 52};
+        Runnable[] actions = {
+                this::cycleFormation, this::cycleStance, this::toggleCommander,
+                this::createSquadFromSelection,
+                () -> CommandMode.send(new OrderPacket(OrderPacket.ORDER, selectedTroopIds(),
+                        Squads.Kind.HOLD.ordinal(), 0, 0, "", false, 0)),
+                () -> CommandMode.send(new OrderPacket(OrderPacket.ORDER, selectedTroopIds(),
+                        Squads.Kind.STOP.ordinal(), 0, 0, "", false, 0))
+        };
+        String[] labels = {"Строй", "Поза", "Лидер", "Группа", "Удерж.", "Стоп"};
+        for (int i = 0; i < labels.length; i++) {
+            int col = i % 3, row = i / 3;
+            out.add(new Btn(labels[i], x + col * 60, r[1] + 44 + row * 18,
+                    widths[i], false, actions[i]));
+        }
     }
 
     private int panelX() { int[] r = skinRect("rp"); return r == null ? (compactSkin() ? width - panelW() - 12 : width - PANEL_W - 4) : r[0] + 12; }
