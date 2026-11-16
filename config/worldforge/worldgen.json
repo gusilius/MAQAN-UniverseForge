@@ -7,7 +7,7 @@
   "default_settlement_level": 4,
   "image_input_dir": "config/worldforge/images",
   "dimensions": {
-    "example_temperate_world": {
+    "example:temperate_world": {
       "seed": 424242,
       "settlement_level": 5,
       "width_px": 1024,
