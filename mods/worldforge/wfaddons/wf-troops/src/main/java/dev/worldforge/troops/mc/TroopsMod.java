@@ -1513,6 +1513,8 @@ public class TroopsMod {
         CommandDelegation.Policy policy = resolution.policy();
         String source = resolution.sourceType() == null ? "по умолчанию" :
                 resolution.sourceType().name().toLowerCase(Locale.ROOT) + " " + resolution.sourceId();
+        String origin = resolution.sourceType() == null ? " (без переопределения)" :
+                resolution.inherited() ? " (наследуется)" : " (собственная политика)";
         String mode = switch (policy.mode()) {
             case PLAYER_DIRECT -> "Личное управление";
             case DELEGATED -> "Делегированное";
@@ -1520,7 +1522,7 @@ public class TroopsMod {
         };
         String commander = policy.commanderCharacterId().isBlank() ? "не назначен" : policy.commanderCharacterId();
         src.sendSuccess(() -> Component.literal("«" + squad.name + "» · " + mode
-                + " · источник: " + source + (resolution.inherited() ? " (наследуется)" : " (собственная политика)")
+                + " · источник: " + source + origin
                 + " · командир: " + commander
                 + " · бой/преследование/отступление: " + policy.allowEngagement() + "/"
                 + policy.allowPursuit() + "/" + policy.allowRetreat()), false);
