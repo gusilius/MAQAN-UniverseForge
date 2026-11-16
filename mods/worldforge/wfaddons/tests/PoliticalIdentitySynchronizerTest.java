@@ -20,7 +20,7 @@ public final class PoliticalIdentitySynchronizerTest {
     public static void main(String[] args) throws Exception {
         MapData map = MapData.load("identity-sync-test", name -> {
             try (var zip = new java.util.zip.ZipFile(args[0])) {
-                var entry = zip.getEntry("data/planets/game_of_thrones/" + name);
+                var entry = zip.getEntry("data/planets/worldforge_maps/game_of_thrones/" + name);
                 return entry == null ? null : zip.getInputStream(entry).readAllBytes();
             }
         });
