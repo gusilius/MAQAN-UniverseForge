@@ -1211,7 +1211,10 @@ def validate_package(path: Path) -> dict:
         wilderness_values = np.asarray(wilderness_image, dtype=np.uint8).ravel() > 0
         if int(wilderness_values.sum()) != int(blueprint["generation_policy"]["wilderness_pixels"]):
             raise AssertionError("wilderness raster count differs from the blueprint")
-        if np.any(wilderness_values & (province_ids > 0)):
+        # Wilderness and biome layers are flat pixel streams; provinces.png
+        # is kept as a 2D image for coordinate/capital checks below.
+        province_flat = province_ids.ravel()
+        if np.any(wilderness_values & (province_flat > 0)):
             raise AssertionError("wilderness pixels overlap assigned political provinces")
         if np.any(wilderness_values & ~np.isin(biome_values, list(land_biomes))):
             raise AssertionError("wilderness raster includes water or non-land pixels")
