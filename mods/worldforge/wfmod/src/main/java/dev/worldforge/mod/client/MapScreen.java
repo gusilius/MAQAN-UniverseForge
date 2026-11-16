@@ -167,8 +167,8 @@ public class MapScreen extends Screen {
             java.util.List<String[]> rows = new java.util.ArrayList<>();
             rows.add(new String[]{"Identity", "Province", title.name});
             rows.add(new String[]{"Identity", "Province ID", Integer.toString(title.id)});
-            if (title.tier >= 0 && title.tier < data.tiers.size())
-                rows.add(new String[]{"Hierarchy", "Title tier", data.tiers.get(title.tier).name});
+            data.tiers.stream().filter(tier -> tier.index == title.tier).findFirst()
+                    .ifPresent(tier -> rows.add(new String[]{"Hierarchy", "Title tier", tier.name}));
             TitleData.Title parent = title.parent > 0 ? data.get(title.parent) : null;
             if (parent != null) rows.add(new String[]{"Hierarchy", "Parent title", parent.name});
             TitleData.Realm realm = data.realmOf(title);
