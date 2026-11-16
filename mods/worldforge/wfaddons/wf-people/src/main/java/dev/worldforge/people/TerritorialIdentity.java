@@ -31,9 +31,9 @@ public final class TerritorialIdentity {
 
         for (TitleData.Realm realm : data.realmList()) {
             String race = text(realm.props.get("race"));
-            String culture = names.culture(text(realm.props.get("culture")));
             if (race.isBlank()) race = dominantRace(realm.props.get("races"));
-            if (culture.isBlank()) culture = names.culture("");
+            String wantedCulture = text(realm.props.get("culture"));
+            String culture = names.culture(wantedCulture.isBlank() ? race : wantedCulture);
             if (!usable(realm.name, realm.id)) {
                 String generated = generate(names, race, culture, "realms", seed(worldSeed, mapId, "realm", realm.id));
                 editor.setRealmName(realm.id, unique(generated, "realm:" + realm.id, used));
@@ -73,9 +73,9 @@ public final class TerritorialIdentity {
             if (!race.isBlank() && !title.props.containsKey("identity.race")) { editor.setProp(title.id, "identity.race", race); titlesClassified++; }
 
             if (!usable(title.name, title.key)) {
-                String category = title.tier == 0 ? "provinces" : "regions";
-                String generated = generate(names, race, culture, category,
-                        seed(worldSeed, mapId, category, title.key));
+                String category = title.tier == 0 ? "provinces" : title.tier == 1 ? "regions" : "realms";
+                String generated = title.tier >= 2 && realm != null ? realm.name
+                        : generate(names, race, culture, category, seed(worldSeed, mapId, category, title.key));
                 String scope = realm == null ? "unclaimed" : realm.id;
                 editor.rename(title.id, unique(generated, "title:" + scope + ":" + title.key, used));
                 titlesNamed++;
