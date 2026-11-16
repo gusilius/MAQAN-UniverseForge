@@ -330,7 +330,7 @@ public class TroopsMod {
                 LOGGER.warn("wf-troops: squad {} contains units from multiple strategic armies; hierarchy link withheld", squad.id);
                 continue;
             }
-            ArmyLink.Found strategic = ArmyLink.find(troop.armyId);
+            ArmyLink.Found strategic = ArmyLink.find(troop.armyId, troop.realm);
             String name = strategic == null ? "Армия " + troop.armyId : strategic.army().name;
             String realm = strategic == null ? troop.realm : strategic.army().realm;
             try {
@@ -1424,7 +1424,7 @@ public class TroopsMod {
                 || !HIERARCHY.appointArmyCommander(armyId, characterId)) {
             src.sendFailure(Component.literal("Живой Character из государства армии не найден или нет прав")); return 0;
         }
-        ArmyLink.Found strategic = ArmyLink.find(armyId);
+        ArmyLink.Found strategic = ArmyLink.find(armyId, army.realm);
         if (strategic != null) strategic.army().commander = characterId;
         save();
         src.sendSuccess(() -> Component.literal("Командующий армией «" + army.name + "»: " + character.name), false);
@@ -1632,7 +1632,7 @@ public class TroopsMod {
         ServerPlayer player;
         try { player = src.getPlayerOrException(); }
         catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
-        ArmyLink.Found found = ArmyLink.find(armyId);
+        ArmyLink.Found found = ArmyLink.findUnique(armyId);
         if (found == null) { src.sendFailure(Component.literal("Нет армии " + armyId)); return 0; }
 
         Muster.Plan plan = Muster.plan(found.army().units, n, DEFS.armyTypes());
@@ -1736,7 +1736,7 @@ public class TroopsMod {
             if (!dev.worldforge.settle.mc.SettleMod.payRecruitment(sites.get(entry.getKey()), entry.getValue())) {
                 for (String paid : paidBuildings)
                     dev.worldforge.settle.mc.SettleMod.refundRecruitment(sites.get(paid), supplies.get(paid));
-                ArmyLink.give(armyId, plan.menTaken());
+                ArmyLink.give(armyId, found.army().realm, plan.menTaken());
                 discardPrepared(allPrepared);
                 src.sendFailure(Component.literal("Склад изменился во время призыва; люди возвращены в армию, отряд удалён."));
                 return 0;
@@ -1765,17 +1765,21 @@ public class TroopsMod {
             return 0;
         }
         if (!ModList.get().isLoaded("wf_army")) { src.sendFailure(Component.literal("Нужен мод wf_army")); return 0; }
-        Map<Integer, Map<String, Integer>> byArmy = new HashMap<>();
+        record ArmyReturnKey(int armyId, String realm) {}
+        Map<ArmyReturnKey, Map<String, Integer>> byArmy = new LinkedHashMap<>();
         List<TroopEntity> gone = new ArrayList<>();
         for (TroopEntity t : LIVE.values()) if (t.isAlive() && t.armyId > 0 && t.ownerId().equals(p.getUUID().toString())) {
-            byArmy.computeIfAbsent(t.armyId, k -> new HashMap<>()).merge(t.unitId(), 1, Integer::sum);
+            ArmyReturnKey key = new ArmyReturnKey(t.armyId, t.realm == null ? "" : t.realm);
+            byArmy.computeIfAbsent(key, k -> new HashMap<>()).merge(t.unitId(), 1, Integer::sum);
             gone.add(t);
         }
         int back = 0;
         for (var e : byArmy.entrySet()) {
             Map<String, Integer> men = Muster.back(e.getValue(), DEFS.armyTypes());
-            if (ArmyLink.give(e.getKey(), men)) back += men.values().stream().mapToInt(Integer::intValue).sum();
-            else gone.removeIf(t -> t.armyId == e.getKey());                                    // армии больше нет: солдаты остаются
+            if (ArmyLink.give(e.getKey().armyId(), e.getKey().realm(), men))
+                back += men.values().stream().mapToInt(Integer::intValue).sum();
+            else gone.removeIf(t -> t.armyId == e.getKey().armyId()
+                    && java.util.Objects.equals(t.realm == null ? "" : t.realm, e.getKey().realm()));
         }
         for (TroopEntity t : gone) { releaseBody(t); t.discard(); }
         int men = back;
