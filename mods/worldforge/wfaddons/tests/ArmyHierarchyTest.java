@@ -57,6 +57,36 @@ public final class ArmyHierarchyTest {
         check(crossRealmRebindRejected && "realm-north".equals(hierarchy.army(42).realm),
                 "strategic army ID cannot silently rebind to another realm");
 
+        CommandDelegation delegation = new CommandDelegation();
+        check(delegation.get(first.id).mode() == CommandDelegation.Mode.PLAYER_DIRECT,
+                "unconfigured squads remain under direct player control");
+        check(delegation.assign(first.id, CommandDelegation.Mode.DELEGATED, "c17",
+                        "hold-the-river", 80, true, false, true),
+                "player may explicitly delegate one squad to a canonical commander");
+        check(delegation.mayIssue(first.id, "c17", CommandDelegation.Action.REFORM)
+                        && delegation.mayIssue(first.id, "c17", CommandDelegation.Action.ENGAGE_VISIBLE_THREAT)
+                        && !delegation.mayIssue(first.id, "c17", CommandDelegation.Action.PURSUE)
+                        && delegation.mayIssue(first.id, "c17", CommandDelegation.Action.RETREAT)
+                        && !delegation.mayIssue(first.id, "c17", CommandDelegation.Action.CHANGE_OBJECTIVE),
+                "delegated commander obeys explicit engagement, pursuit, retreat and objective limits");
+        check(!delegation.mayIssue(first.id, "c99", CommandDelegation.Action.REFORM)
+                        && delegation.get(second.id).mode() == CommandDelegation.Mode.PLAYER_DIRECT,
+                "wrong commander cannot issue AI orders and sibling squads remain player-controlled");
+        check(delegation.assign(second.id, CommandDelegation.Mode.AUTONOMOUS, "c18",
+                        "north-border", 160, true, true, false)
+                        && delegation.mayIssue(second.id, "c18", CommandDelegation.Action.CHANGE_OBJECTIVE)
+                        && !delegation.mayIssue(second.id, "c18", CommandDelegation.Action.RETREAT),
+                "autonomous command remains bounded by its policy");
+        check(delegation.reclaim(first.id)
+                        && delegation.get(first.id).mode() == CommandDelegation.Mode.PLAYER_DIRECT
+                        && !delegation.mayIssue(first.id, "c17", CommandDelegation.Action.REFORM),
+                "player can instantly reclaim a delegated squad");
+        check(!delegation.assign(first.id, CommandDelegation.Mode.DELEGATED, "", "", 0, true, true, true),
+                "delegation without a commander is rejected");
+        delegation.prune(List.of(second.id));
+        check(delegation.all().size() == 1 && delegation.get(first.id).mode() == CommandDelegation.Mode.PLAYER_DIRECT,
+                "delegation policies for disbanded squads are pruned");
+
         if (failures > 0) throw new AssertionError(failures + " army hierarchy tests failed");
     }
 }
