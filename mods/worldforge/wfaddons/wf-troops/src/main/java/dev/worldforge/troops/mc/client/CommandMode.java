@@ -87,7 +87,8 @@ public final class CommandMode {
     @SubscribeEvent
     public static void setup(FMLClientSetupEvent e) {
         e.enqueueWork(() -> ClientViews.register(CommandScreen.BUILD_VIEW, payload -> {
-            if (Minecraft.getInstance().screen instanceof CommandScreen s) s.setBuilds(payload);
+            CommandScreen screen = CommandScreen.hostedView(Minecraft.getInstance());
+            if (screen != null) screen.setBuilds(payload);
         }));
     }
 
