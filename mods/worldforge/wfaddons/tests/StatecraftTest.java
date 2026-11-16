@@ -48,11 +48,11 @@ public final class StatecraftTest {
                 {"format":"worldforge-titles/1","blocks_per_pixel":1.0,
                  "tiers":[{"index":0,"key":"province","name":"Province"},{"index":1,"key":"region","name":"Region"},{"index":2,"key":"state","name":"State"}],
                  "titles":[
-                  {"id":1,"key":"p_north","name":"North Province","tier":0,"parent":3,"color":"#336699","capital":{"nx":0.2,"ny":0.2,"x":0,"z":0,"province":1},"props":{}},
-                  {"id":2,"key":"p_south","name":"South Province","tier":0,"parent":4,"color":"#336699","capital":{"nx":0.8,"ny":0.8,"x":1,"z":1,"province":2},"props":{}},
-                  {"id":3,"key":"r_north","name":"Northern Region","tier":1,"parent":5,"color":"#336699","capital":{"nx":0.2,"ny":0.2,"x":0,"z":0,"province":1},"props":{}},
-                  {"id":4,"key":"r_south","name":"Southern Region","tier":1,"parent":5,"color":"#336699","capital":{"nx":0.8,"ny":0.8,"x":1,"z":1,"province":2},"props":{}},
-                  {"id":5,"key":"state_north","name":"Northland","tier":2,"parent":0,"color":"#336699","capital":{"nx":0.5,"ny":0.5,"x":0,"z":0,"province":1},"props":{}}
+                  {"id":1,"key":"p_north","name":"North Province","tier":0,"parent":3,"color":"#336699","area_blocks":1,"area_pct_of_land":50.0,"capital":{"nx":0.2,"ny":0.2,"x":0,"z":0,"province":1},"props":{}},
+                  {"id":2,"key":"p_south","name":"South Province","tier":0,"parent":4,"color":"#336699","area_blocks":1,"area_pct_of_land":50.0,"capital":{"nx":0.8,"ny":0.8,"x":1,"z":1,"province":2},"props":{}},
+                  {"id":3,"key":"r_north","name":"Northern Region","tier":1,"parent":5,"color":"#336699","area_blocks":1,"area_pct_of_land":50.0,"capital":{"nx":0.2,"ny":0.2,"x":0,"z":0,"province":1},"props":{}},
+                  {"id":4,"key":"r_south","name":"Southern Region","tier":1,"parent":5,"color":"#336699","area_blocks":1,"area_pct_of_land":50.0,"capital":{"nx":0.8,"ny":0.8,"x":1,"z":1,"province":2},"props":{}},
+                  {"id":5,"key":"state_north","name":"Northland","tier":2,"parent":0,"color":"#336699","area_blocks":1,"area_pct_of_land":50.0,"capital":{"nx":0.5,"ny":0.5,"x":0,"z":0,"province":1},"props":{}}
                  ]}""";
         String realmsJson = """
                 {"format":"worldforge-realms/1","realms":[
