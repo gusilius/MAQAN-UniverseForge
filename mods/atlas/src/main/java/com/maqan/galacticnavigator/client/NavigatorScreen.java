@@ -1445,7 +1445,7 @@ public class NavigatorScreen extends Screen {
                 entityId -> {
                     Node node = entityId == null ? null : bodyNode(entityId);
                     if (node == null) node = findNode(entityId);
-                    if (node == null) return List.of(
+                    if (node == null) return java.util.Collections.singletonList(
                             new String[]{"Atlas", "Status", "Object is no longer in the active catalogue"});
                     List<String[]> rows = new ArrayList<>();
                     rows.add(new String[]{"Identity", "Name", node.label});
