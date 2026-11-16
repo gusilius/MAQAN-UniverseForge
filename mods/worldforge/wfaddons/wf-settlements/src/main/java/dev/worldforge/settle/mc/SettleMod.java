@@ -125,7 +125,22 @@ public class SettleMod {
                 // Resolve against the current client world on demand; never retain an entity across world changes.
                 dev.worldforge.mod.client.PlatformWorkspaceBridge.registerLiveEntityResolver(
                         "wf_rts", ClientEvents::resolveRtsWorkerBody);
+                // People selections may refer to a civilian resident rather than a troop.
+                // This resolver composes with wf-troops' resolver under the same canonical identity.
+                dev.worldforge.mod.client.PlatformWorkspaceBridge.registerLiveEntityResolver(
+                        "wf_people", ClientEvents::resolvePeopleWorkerBody);
             });
+        }
+
+        private static net.minecraft.world.entity.Entity resolvePeopleWorkerBody(String canonicalCharacterId) {
+            if (canonicalCharacterId == null || canonicalCharacterId.isBlank()) return null;
+            net.minecraft.client.Minecraft client = net.minecraft.client.Minecraft.getInstance();
+            if (client.level == null) return null;
+            for (net.minecraft.world.entity.Entity entity : client.level.entitiesForRendering()) {
+                if (entity instanceof WFWorker worker && worker.isAlive() && !worker.isRemoved()
+                        && canonicalCharacterId.equals(worker.characterId())) return worker;
+            }
+            return null;
         }
 
         private static net.minecraft.world.entity.Entity resolveRtsWorkerBody(String identity) {
