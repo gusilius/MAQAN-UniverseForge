@@ -12,6 +12,9 @@ pub mod tactical;
 /// Allocation-free formation geometry and role-aware slot assignment.
 pub mod formation;
 
+/// Bounded spatial hash for RTS proximity candidate queries.
+pub mod spatial;
+
 /// Fixed-point resource quantity. One unit is one hundredth of a game resource unit.
 pub type Amount = i64;
 
