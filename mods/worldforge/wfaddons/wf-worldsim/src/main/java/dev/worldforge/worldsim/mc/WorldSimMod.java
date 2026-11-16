@@ -1626,7 +1626,7 @@ public final class WorldSimMod {
     }
 
     private static dev.worldforge.people.Character createEmergentResident(
-            dev.worldforge.people.CharacterRegistry registry, MapData map, String bandId,
+            dev.worldforge.people.CharacterRegistry registry, EmergenceSource source, String bandId,
             int year, int ordinal, EmergentParents parents) {
         dev.worldforge.people.Character father = parents.father, mother = parents.mother;
         if (father != null && !father.spouse.isBlank() && (mother == null || !father.spouse.equals(mother.id)))
@@ -1635,7 +1635,7 @@ public final class WorldSimMod {
             parents.mother = mother = null;
         if (father == null || mother == null || !father.spouse.equals(mother.id) || !mother.spouse.equals(father.id)) {
             String gender = father == null ? "m" : (mother == null ? "f" : (ordinal % 2 == 0 ? "m" : "f"));
-            dev.worldforge.people.Character adult = createEmergentAdult(registry, map, bandId, gender, year, ordinal);
+            dev.worldforge.people.Character adult = createEmergentAdult(registry, source, bandId, gender, year, ordinal);
             if (adult == null) return null;
             if ("m".equals(gender)) parents.father = adult; else parents.mother = adult;
             father = parents.father; mother = parents.mother;
@@ -1645,19 +1645,19 @@ public final class WorldSimMod {
             return adult;
         }
         String gender = ordinal % 2 == 0 ? "m" : "f";
-        String name = emergentName(map, bandId, father.culture, gender, ordinal, year);
+        String name = emergentName(source, bandId, father.culture, gender, ordinal, year);
         dev.worldforge.people.Character child = registry.addChild(father, mother, name, gender, year);
         tagEmergentResident(child, bandId);
         return child;
     }
 
     private static dev.worldforge.people.Character createEmergentAdult(
-            dev.worldforge.people.CharacterRegistry registry, MapData map, String bandId,
+            dev.worldforge.people.CharacterRegistry registry, EmergenceSource source, String bandId,
             String gender, int year, int ordinal) {
         String culture = PeopleMod.NAMES.culture("");
-        String name = emergentName(map, bandId, culture, gender, ordinal, year);
+        String name = emergentName(source, bandId, culture, gender, ordinal, year);
         String house;
-        try { house = PeopleMod.NAMES.pickHouse("", culture, new Random(PeopleMod.seed(map) ^ bandId.hashCode() ^ ordinal)); }
+        try { house = PeopleMod.NAMES.pickHouse("", culture, new Random(source.seed ^ bandId.hashCode() ^ ordinal)); }
         catch (RuntimeException ignored) { house = "House " + bandId.substring(0, Math.min(8, bandId.length())); }
         dev.worldforge.people.Character person = registry.create(name, house, culture, gender,
                 year - (18 + Math.floorMod(bandId.hashCode() + ordinal * 13, 24)));
@@ -1667,13 +1667,13 @@ public final class WorldSimMod {
     }
 
     private static void ensureEmergentOrigin(dev.worldforge.people.Character person,
-            MapData map, int year, int ordinal) {
+            EmergenceSource source, int year, int ordinal) {
         if (person == null || person.globalId == null || person.globalId.isBlank()) return;
         String owner = "n:" + person.globalId;
         try {
             Origins.Build existing = OriginsMod.ORIGINS.peek(owner);
             if (existing == null) {
-                long seed = PeopleMod.seed(map) ^ person.globalId.hashCode();
+                long seed = source.seed ^ person.globalId.hashCode();
                 List<String> groups = OriginsMod.DEFS.professions.values().stream()
                         .map(profession -> profession.group()).filter(group -> group != null && !group.isBlank())
                         .distinct().sorted().toList();
@@ -1703,12 +1703,12 @@ public final class WorldSimMod {
         person.props.put("emergence.origin", "map-first");
     }
 
-    private static String emergentName(MapData map, String bandId, String culture, String gender, int ordinal, int year) {
+    private static String emergentName(EmergenceSource source, String bandId, String culture, String gender, int ordinal, int year) {
         try {
             return PeopleMod.NAMES.pickGivenName("", culture, gender,
-                    new Random(PeopleMod.seed(map) ^ ((long) bandId.hashCode() << 32) ^ ordinal ^ year));
+                    new Random(source.seed ^ ((long) bandId.hashCode() << 32) ^ ordinal ^ year));
         } catch (RuntimeException ignored) {
-            return "Settler-" + Integer.toUnsignedString(Objects.hash(map.name, bandId, ordinal), 36);
+            return "Settler-" + Integer.toUnsignedString(Objects.hash(source.id, bandId, ordinal), 36);
         }
     }
 
