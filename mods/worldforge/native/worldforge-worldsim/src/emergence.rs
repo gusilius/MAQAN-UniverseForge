@@ -542,6 +542,32 @@ mod tests {
     }
 
     #[test]
+    fn newly_observed_cells_in_existing_region_bootstrap_incrementally_without_duplicates() {
+        let mut partial = map();
+        partial.cells.truncate(64 * 128);
+        let first_snapshot = WorldSnapshot {
+            world_id: "incremental-vanilla".into(), seed: 8128, day: 0,
+            realms: vec![], borders: vec![], settlements: vec![], characters: vec![], workforce: vec![],
+            geography: vec![partial],
+        };
+        let first = advance(EmergenceRequest { snapshot: first_snapshot, state: None }).unwrap();
+        let initial_count = first.state.bands.len();
+
+        let expanded_snapshot = WorldSnapshot {
+            world_id: "incremental-vanilla".into(), seed: 8128, day: 0,
+            realms: vec![], borders: vec![], settlements: vec![], characters: vec![], workforce: vec![],
+            geography: vec![map()],
+        };
+        let expanded = advance(EmergenceRequest { snapshot: expanded_snapshot.clone(), state: Some(first.state) }).unwrap();
+        assert!(expanded.state.bands.len() >= initial_count);
+        let unique = expanded.state.bands.iter().map(|band| band.id.as_str()).collect::<BTreeSet<_>>();
+        assert_eq!(unique.len(), expanded.state.bands.len(), "incremental discovery must not duplicate band IDs");
+
+        let repeated = advance(EmergenceRequest { snapshot: expanded_snapshot, state: Some(expanded.state.clone()) }).unwrap();
+        assert_eq!(expanded.state, repeated.state, "replaying an unchanged geography snapshot must be idempotent");
+    }
+
+    #[test]
     fn maps_loaded_later_receive_their_own_population_bootstrap() {
         let mut first = advance(request(365 * 120, None)).unwrap().state;
         let second_map = GeographicMap { map_id:"late-map".into(), ..map() };
