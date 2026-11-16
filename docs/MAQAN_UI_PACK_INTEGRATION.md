@@ -33,6 +33,14 @@ The 1368×760 composition is the design reference, not a fixed pixel canvas.
 
 This branch adds a reusable responsive layout calculator and unit coverage, then wires compact drawers into `PlatformShellScreen`. The existing desktop dock tree and provider embedding contracts remain intact.
 
+After checking out this branch, import the original pack on Windows with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/import_maqan_ui_pack.ps1 -PackZip "C:\\path\\to\\maqan_ui_pack.zip" -RepoRoot .
+```
+
+The importer validates all 40 required texture files before copying and places `layout.json` beside the MAQAN GUI resources. It intentionally does not copy the HTML prototype.
+
 **Asset status:** the source ZIP has been inspected, but the GitHub connector available to this session accepts UTF-8 text blobs/files only and cannot upload the ZIP's binary PNGs. Therefore this branch does not yet contain the 40 PNG assets or the source `layout.json`; the manifest records their exact required names and placement. The visual skin is not considered integrated until those binaries are committed and the native renderer consumes them.
 
 ## Acceptance gates
