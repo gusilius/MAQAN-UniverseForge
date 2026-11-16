@@ -46,6 +46,8 @@ public final class CommandScreen extends Screen {
     private boolean buildOpen;
     // Профессиональные команды скрыты до явного открытия компактной палитры.
     private boolean professionalToolsOpen;
+    // Тактические способности и приказы доступны только по отдельной иконке.
+    private boolean unitToolsOpen;
     private boolean workAreaDrag;
     private int workMode = -1;
     private int workOverlay = 2;
@@ -358,11 +360,83 @@ public final class CommandScreen extends Screen {
     }
     private List<String> selectedWorkerIds() {
         List<String> ids = new ArrayList<>();
+        if (minecraft.level == null) return ids;
         Set<String> selected = new HashSet<>(CommandMode.selected());
         for (net.minecraft.world.entity.Entity entity : minecraft.level.entitiesForRendering())
             if (entity instanceof LivingEntity living && CommandMode.isWorkerEntity(living)
                     && selected.contains(entity.getUUID().toString())) ids.add(entity.getUUID().toString());
         return ids;
+    }
+
+    private List<String> selectedTroopIds() {
+        List<String> ids = new ArrayList<>();
+        if (minecraft.level == null) return ids;
+        Set<String> selected = new HashSet<>(CommandMode.selected());
+        for (net.minecraft.world.entity.Entity entity : minecraft.level.entitiesForRendering())
+            if (entity instanceof TroopEntity troop && troop.isAlive()
+                    && selected.contains(troop.getUUID().toString())) ids.add(troop.getUUID().toString());
+        return ids;
+    }
+
+    private List<TroopEntity> selectedTroops() {
+        List<TroopEntity> troops = new ArrayList<>();
+        if (minecraft.level == null) return troops;
+        Set<String> selected = new HashSet<>(selectedTroopIds());
+        for (net.minecraft.world.entity.Entity entity : minecraft.level.entitiesForRendering())
+            if (entity instanceof TroopEntity troop && selected.contains(troop.getUUID().toString())) troops.add(troop);
+        return troops;
+    }
+
+    private int[] unitToolsBounds() {
+        int[] console = skinRect("bot");
+        int x = console == null ? width - 202 : console[0] + 10;
+        int y = console == null ? height - 76 : console[1] - 62;
+        if (x + 194 > width - 4) x = Math.max(4, width - 198);
+        if (y < 4) y = 4;
+        return new int[]{x, y, 194, 58};
+    }
+
+    private boolean inUnitToolsPanel(double px, double py) {
+        if (!unitToolsOpen) return false;
+        int[] r = unitToolsBounds();
+        return px >= r[0] && px < r[0] + r[2] && py >= r[1] && py < r[1] + r[3];
+    }
+
+    private void cycleFormation() {
+        CommandMode.formation = (CommandMode.formation + 1) % Formations.Type.values().length;
+        CommandMode.send(new OrderPacket(OrderPacket.FORMATION, selectedTroopIds(), 0, 0, 0, "", false, CommandMode.formation));
+    }
+
+    private void cycleStance() {
+        CommandMode.stance = (CommandMode.stance + 1) % Squads.Stance.values().length;
+        CommandMode.send(new OrderPacket(OrderPacket.STANCE, selectedTroopIds(), 0, 0, 0, "", false, CommandMode.stance));
+    }
+
+    private void toggleCommander() {
+        CommandMode.send(new OrderPacket(OrderPacket.APPOINT, selectedTroopIds(), 0, 0, 0, "", false, hasControlDown() ? -1 : 1));
+    }
+
+    private void createSquadFromSelection() {
+        CommandMode.send(new OrderPacket(OrderPacket.GROUP, selectedTroopIds(), 0, 0, 0, "", false, 0));
+    }
+
+    private void drawUnitToolsPanel(GuiGraphics g) {
+        List<TroopEntity> troops = selectedTroops();
+        if (troops.isEmpty()) return;
+        int[] r = unitToolsBounds();
+        int aura = 0, medic = 0, siege = 0, veterans = 0;
+        for (TroopEntity troop : troops) {
+            if (troop.def() == null) continue;
+            if (troop.def().aura() > 0) aura++;
+            if (troop.def().heal() > 0) medic++;
+            if (troop.def().siege() > 0) siege++;
+            if (troop.veteranRank() >= 2) veterans++;
+        }
+        g.fill(r[0], r[1], r[0] + r[2], r[1] + r[3], 0xEE101820);
+        g.fill(r[0], r[1], r[0] + r[2], r[1] + 1, 0xFF8A7040);
+        g.drawString(font, "ОТРЯД · " + troops.size(), r[0] + 6, r[1] + 4, 0xFFE6C875, false);
+        String traits = "Аура " + aura + " · Медики " + medic + " · Осадные " + siege + " · Ветераны " + veterans;
+        g.drawString(font, font.plainSubstrByWidth(traits, r[2] - 12), r[0] + 6, r[1] + 15, 0xFFB8C5D6, false);
     }
 
     private void sendWorkArea(Vec3 a, Vec3 b, int radius) {
@@ -472,7 +546,10 @@ public final class CommandScreen extends Screen {
                 l.add(new Btn("Участки", x, y, w, workMode >= 0, this::cycleWorkMode));
                 if (!selectedWorkerIds().isEmpty())
                     l.add(new Btn("⚒", x + w + 4, y, 24, professionalToolsOpen, () -> professionalToolsOpen = !professionalToolsOpen));
+                if (!selectedTroopIds().isEmpty())
+                    l.add(new Btn("⚔", x + w + 32, y, 24, unitToolsOpen, () -> unitToolsOpen = !unitToolsOpen));
                 if (professionalToolsOpen) addProfessionalTaskButtons(l);
+                if (unitToolsOpen) addUnitToolButtons(l);
                 return l;
             }
             int x = console[0] + 12;
@@ -488,7 +565,11 @@ public final class CommandScreen extends Screen {
             if (!selectedWorkerIds().isEmpty())
                 l.add(new Btn("⚒", console[0] + console[2] - 34, y, 24, professionalToolsOpen,
                         () -> professionalToolsOpen = !professionalToolsOpen));
+            if (!selectedTroopIds().isEmpty())
+                l.add(new Btn("⚔", console[0] + console[2] - 62, y, 24, unitToolsOpen,
+                        () -> unitToolsOpen = !unitToolsOpen));
             if (professionalToolsOpen) addProfessionalTaskButtons(l);
+            if (unitToolsOpen) addUnitToolButtons(l);
             return l;
         }
         int x = width - 4 - BTN_W;
@@ -503,7 +584,10 @@ public final class CommandScreen extends Screen {
                 () -> CommandMode.setCameraView(CameraRig.View.FREE)));
         if (!selectedWorkerIds().isEmpty())
             l.add(new Btn("⚒", x - 28, 4, 24, professionalToolsOpen, () -> professionalToolsOpen = !professionalToolsOpen));
+        if (!selectedTroopIds().isEmpty())
+            l.add(new Btn("⚔", x - 56, 4, 24, unitToolsOpen, () -> unitToolsOpen = !unitToolsOpen));
         if (professionalToolsOpen) addProfessionalTaskButtons(l);
+        if (unitToolsOpen) addUnitToolButtons(l);
         return l;
     }
 
@@ -515,6 +599,15 @@ public final class CommandScreen extends Screen {
             out.add(new Btn(WORK_ICONS[i], r[0] + 6 + col * 32, r[1] + 17 + row * 18,
                     28, workMode == i, () -> activateWorkArea(kind)));
         }
+    }
+
+    private void addUnitToolButtons(List<Btn> out) {
+        int[] r = unitToolsBounds();
+        int y = r[1] + 34, x = r[0] + 6;
+        out.add(new Btn("Строй", x, y, 38, false, this::cycleFormation)); x += 40;
+        out.add(new Btn("Поза", x, y, 34, false, this::cycleStance)); x += 36;
+        out.add(new Btn("Лидер", x, y, 38, false, this::toggleCommander)); x += 40;
+        out.add(new Btn("Группа", x, y, 42, false, this::createSquadFromSelection));
     }
 
     private int panelX() { int[] r = skinRect("rp"); return r == null ? (compactSkin() ? width - panelW() - 12 : width - PANEL_W - 4) : r[0] + 12; }
@@ -539,7 +632,8 @@ public final class CommandScreen extends Screen {
         if (embeddedInMaqan && !inWorkspaceViewport(px, py)) return true;
         for (Btn button : buttons()) if (button.hit(px, py)) return true;
         if (onZoomSlider(px, py)) return true;
-        return inBuildPanel(px, py) || inSelPanel(px, py) || inProfessionalPanel(px, py);
+        return inBuildPanel(px, py) || inSelPanel(px, py)
+                || inProfessionalPanel(px, py) || inUnitToolsPanel(px, py);
     }
 
     private List<String> categories() {
@@ -757,7 +851,7 @@ public final class CommandScreen extends Screen {
         if (button == 0) {
             for (Btn b : buttons()) if (b.hit(x, y)) { b.run().run(); return true; }
             if (buildOpen && inBuildPanel(x, y)) { panelClick(x, y); return true; }
-            if (inProfessionalPanel(x, y)) return true;
+            if (inProfessionalPanel(x, y) || inUnitToolsPanel(x, y)) return true;
             if (inSelPanel(x, y)) return true;
             if (embeddedInMaqan && !inWorkspaceViewport(x, y)) return true;
             if (picked != null) { place(shift); return true; }
@@ -1090,6 +1184,8 @@ public final class CommandScreen extends Screen {
         drawSettlementMinimap(g);
         if (professionalToolsOpen && !selectedWorkerIds().isEmpty()) drawProfessionalPanel(g);
         else professionalToolsOpen = false;
+        if (unitToolsOpen && !selectedTroopIds().isEmpty()) drawUnitToolsPanel(g);
+        else unitToolsOpen = false;
         for (Btn b : buttons()) button(g, b, mxi, myi);
         drawSelection(g, h);
         if (settlementOpen) drawSettlementPanel(g);
