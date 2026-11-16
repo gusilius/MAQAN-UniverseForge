@@ -13,7 +13,7 @@ public final class NameBank {
     public static final class Pool {
         public final List<String> male = new ArrayList<>(), female = new ArrayList<>(),
                 surnames = new ArrayList<>(), houses = new ArrayList<>(), dynasties = new ArrayList<>(),
-                clans = new ArrayList<>(), settlements = new ArrayList<>(), realms = new ArrayList<>(),
+                clans = new ArrayList<>(), settlements = new ArrayList<>(), villages = new ArrayList<>(), cities = new ArrayList<>(), hamlets = new ArrayList<>(), camps = new ArrayList<>(), communities = new ArrayList<>(), outposts = new ArrayList<>(), colonies = new ArrayList<>(), stations = new ArrayList<>(), nomadCamps = new ArrayList<>(), tribalCamps = new ArrayList<>(), holds = new ArrayList<>(), ports = new ArrayList<>(), realms = new ArrayList<>(),
                 regions = new ArrayList<>(), provinces = new ArrayList<>(), rivers = new ArrayList<>(),
                 mountains = new ArrayList<>(), forests = new ArrayList<>(), taverns = new ArrayList<>(),
                 ships = new ArrayList<>(), orders = new ArrayList<>(), factions = new ArrayList<>(),
@@ -25,7 +25,7 @@ public final class NameBank {
         private void merge(Pool other) {
             mergeList(male, other.male); mergeList(female, other.female); mergeList(surnames, other.surnames);
             mergeList(houses, other.houses); mergeList(dynasties, other.dynasties); mergeList(clans, other.clans);
-            mergeList(settlements, other.settlements); mergeList(realms, other.realms); mergeList(regions, other.regions);
+            mergeList(settlements, other.settlements); mergeList(villages, other.villages); mergeList(cities, other.cities); mergeList(hamlets, other.hamlets); mergeList(camps, other.camps); mergeList(communities, other.communities); mergeList(outposts, other.outposts); mergeList(colonies, other.colonies); mergeList(stations, other.stations); mergeList(nomadCamps, other.nomadCamps); mergeList(tribalCamps, other.tribalCamps); mergeList(holds, other.holds); mergeList(ports, other.ports); mergeList(realms, other.realms); mergeList(regions, other.regions);
             mergeList(provinces, other.provinces); mergeList(rivers, other.rivers); mergeList(mountains, other.mountains);
             mergeList(forests, other.forests); mergeList(taverns, other.taverns); mergeList(ships, other.ships); mergeList(orders, other.orders);
             mergeList(factions, other.factions); mergeList(guilds, other.guilds); mergeList(companies, other.companies);
@@ -35,16 +35,23 @@ public final class NameBank {
             mergeList(religions, other.religions); mergeList(artifacts, other.artifacts); mergeList(monuments, other.monuments);
         }
         private static void mergeList(List<String> target, List<String> source) {
-            for (String value : source) if (!target.contains(value)) target.add(value);
+            if (source.isEmpty()) return;
+            Set<String> seen = new HashSet<>(target);
+            for (String value : source) if (seen.add(value)) target.add(value);
         }
     }
 
     private static final List<String> CATEGORIES = List.of("male","female","surnames","houses","dynasties","clans",
-            "settlements","realms","regions","provinces","rivers","mountains","forests","taverns","ships","orders",
+            "settlements","villages","cities","hamlets","camps","communities","outposts","colonies","stations","nomad_camps","tribal_camps","holds","ports","realms","regions","provinces","rivers","mountains","forests","taverns","ships","orders",
             "factions","guilds","companies","armies","regiments","castles","fortresses","districts","landmarks",
             "roads","markets","temples","religions","artifacts","monuments");
     private final Map<String, Pool> cultures = new LinkedHashMap<>(), races = new LinkedHashMap<>();
     private final Map<String, String> raceParents = new LinkedHashMap<>();
+    /** Resolved ancestry+culture pools are immutable after construction and reused across thousands of names. */
+    private final Map<String, Pool> resolvedPools = new HashMap<>();
+    private static final Set<String> FALLBACK_CATEGORIES = Set.of("realms","regions","provinces","settlements",
+            "villages","cities","hamlets","camps","communities","outposts","colonies","stations",
+            "nomad_camps","tribal_camps","holds","ports");
     private String def = "";
 
     @SuppressWarnings("unchecked")
@@ -53,12 +60,14 @@ public final class NameBank {
         if (!(parsed instanceof Map<?, ?> raw)) throw new IllegalArgumentException("Банк имён должен быть JSON-объектом");
         Map<String,Object> root = (Map<String,Object>) raw;
         if (root.get("default") != null) def = String.valueOf(root.get("default"));
+        resolvedPools.clear();
         readPools(root.get("cultures"), cultures, true, "cultures");
         readPools(root.get("races"), races, false, "races");
         if (root.get("race_parents") instanceof Map<?,?> parents)
             for (Map.Entry<?,?> entry : parents.entrySet()) {
                 String race = String.valueOf(entry.getKey()), parent = String.valueOf(entry.getValue());
                 if (!race.isBlank() && !parent.isBlank() && !race.equals(parent)) raceParents.put(race, parent);
+        resolvedPools.clear();
             }
     }
 
@@ -81,7 +90,7 @@ public final class NameBank {
         return switch (category) {
             case "male" -> p.male; case "female" -> p.female; case "surnames" -> p.surnames;
             case "houses" -> p.houses; case "dynasties" -> p.dynasties; case "clans" -> p.clans;
-            case "settlements" -> p.settlements; case "realms" -> p.realms; case "regions" -> p.regions;
+            case "settlements" -> p.settlements; case "villages" -> p.villages; case "cities" -> p.cities; case "hamlets" -> p.hamlets; case "camps" -> p.camps; case "communities" -> p.communities; case "outposts" -> p.outposts; case "colonies" -> p.colonies; case "stations" -> p.stations; case "nomad_camps" -> p.nomadCamps; case "tribal_camps" -> p.tribalCamps; case "holds" -> p.holds; case "ports" -> p.ports; case "realms" -> p.realms; case "regions" -> p.regions;
             case "provinces" -> p.provinces; case "rivers" -> p.rivers; case "mountains" -> p.mountains;
             case "forests" -> p.forests; case "taverns" -> p.taverns; case "ships" -> p.ships;
             case "orders" -> p.orders; case "factions" -> p.factions; case "guilds" -> p.guilds;
@@ -109,6 +118,9 @@ public final class NameBank {
 
     /** Собирает расовый пул от корневого народа к подрасе, затем дополняет его культурным пулом. */
     public Pool poolForRace(String race, String culture) {
+        String cacheKey = String.valueOf(race) + "\u0000" + String.valueOf(culture);
+        Pool cached = resolvedPools.get(cacheKey);
+        if (cached != null) return cached;
         Pool result = new Pool();
         if (race != null && !race.isBlank()) {
             List<String> chain = new ArrayList<>();
@@ -127,6 +139,7 @@ public final class NameBank {
         Pool cultural = pool(culture);
         result.merge(cultural);
         if (!validGivenNames(result)) throw new IllegalStateException("Нет имён для расы '" + race + "' и культуры '" + culture + "'");
+        resolvedPools.put(cacheKey, result);
         return result;
     }
 
@@ -183,16 +196,26 @@ public final class NameBank {
 
     /** Stable morphology fallback for minimal third-party packs that omit place-name data. */
     private static String generatedPlaceName(Pool pool, String category, Random random) {
-        if (!Set.of("realms", "regions", "provinces", "settlements").contains(category)) return null;
+        if (!FALLBACK_CATEGORIES.contains(category)) return null;
         List<String> anchors = !pool.houses.isEmpty() ? pool.houses
                 : !pool.surnames.isEmpty() ? pool.surnames
                 : !pool.male.isEmpty() ? pool.male : pool.female;
         if (anchors.isEmpty()) return null;
         String anchor = pick(anchors, random);
         String[] prefixes = switch (category) {
-            case "realms" -> new String[]{"Земли", "Предел", "Край", "Владения"};
-            case "regions" -> new String[]{"Долина", "Нагорье", "Берег", "Лес"};
-            case "provinces" -> new String[]{"Удел", "Округ", "Земля", "Владение"};
+            case "realms" -> new String[]{"Земли", "Предел", "Край", "Владения", "Звёздный Доминион", "Имперский Сектор"};
+            case "regions" -> new String[]{"Долина", "Нагорье", "Берег", "Лес", "Пограничье", "Пояс"};
+            case "provinces" -> new String[]{"Удел", "Округ", "Земля", "Владение", "Марка", "Княжество"};
+            case "villages" -> new String[]{"Деревня", "Селение", "Хутор", "Заимка"};
+            case "cities" -> new String[]{"Град", "Метрополия", "Цитадель", "Город"};
+            case "hamlets" -> new String[]{"Выселок", "Малый посад", "Застава"};
+            case "camps", "nomad_camps" -> new String[]{"Стоянка", "Кочевье", "Лагерь", "Круг"};
+            case "tribal_camps", "communities" -> new String[]{"Община", "Родовое гнездо", "Клановый круг"};
+            case "outposts" -> new String[]{"Форпост", "Аванпост", "Застава"};
+            case "colonies" -> new String[]{"Колония", "Поселение", "Экспедиционный узел"};
+            case "stations" -> new String[]{"Станция", "Орбитальный узел", "Фактория"};
+            case "holds" -> new String[]{"Оплот", "Чертог", "Крепь"};
+            case "ports" -> new String[]{"Порт", "Гавань", "Причал"};
             default -> new String[]{"Посад", "Слобода", "Старый", "Новый"};
         };
         return prefixes[random.nextInt(prefixes.length)] + " " + anchor;

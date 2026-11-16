@@ -92,6 +92,42 @@ public final class Colony {
 
     public int worldZ(Building b) { return cz + b.z; }
 
+    /** Stable map-blueprint key shared by runtime import and offline integration tests. */
+    public static String blueprintColonyId(String mapName, String seedId) {
+        String token = String.valueOf(mapName).toLowerCase(java.util.Locale.ROOT)
+                .replaceAll("[^a-z0-9_:-]", "_");
+        if (token.length() > 32) token = Integer.toUnsignedString(String.valueOf(mapName).hashCode(), 36);
+        if (token.isBlank()) token = "map";
+        if (seedId == null || !seedId.matches("[A-Za-z0-9_.:-]{1,96}"))
+            throw new IllegalArgumentException("Invalid blueprint settlement ID: " + seedId);
+        return "worldsim:settlement:" + token + ":" + seedId;
+    }
+
+    public static String blueprintOperationId(String mapName, String seedId) {
+        if (mapName == null || mapName.isBlank() || seedId == null || seedId.isBlank())
+            throw new IllegalArgumentException("Map and settlement seed IDs are required");
+        return "worldsim:settlement:" + mapName + ":" + seedId;
+    }
+
+    /** Applies immutable blueprint identity without creating a second population or political record. */
+    public void applyBlueprintIdentity(String mapId, dev.worldforge.mod.MapData.SettlementSeed seed,
+                                        String name, String race, String culture, String government) {
+        if (seed == null || mapId == null || mapId.isBlank()) throw new IllegalArgumentException("Blueprint identity is required");
+        if (!sourceMapId.isBlank() && !sourceMapId.equals(mapId))
+            throw new IllegalStateException("Colony already belongs to another source map: " + s.id);
+        if (!blueprintSettlementId.isBlank() && !blueprintSettlementId.equals(seed.id()))
+            throw new IllegalStateException("Colony blueprint identity changed: " + s.id);
+        sourceMapId = mapId;
+        blueprintSettlementId = seed.id();
+        settlementType = seed.type() == null ? "" : seed.type();
+        provinceId = Math.max(0, seed.provinceId());
+        realmId = seed.realmId() == null ? "" : seed.realmId();
+        identityRace = race == null ? "" : race;
+        identityCulture = culture == null ? "" : culture;
+        governmentId = government == null ? "" : government;
+        if (name != null && !name.isBlank()) s.name = name.trim();
+    }
+
     /** Здание, под которым лежит блок (x, z) в мировых координатах, или null. */
     public Building buildingAt(int x, int z) {
         for (Building b : s.buildings) {

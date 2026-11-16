@@ -1753,11 +1753,10 @@ public class SettleMod {
             if (IMPORTED_BLUEPRINTS.contains(importKey)) continue;
             try {
                 int staged = 0;
-                String mapToken = map.name.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9_:-]", "_");
-                if (mapToken.length() > 32) mapToken = Integer.toUnsignedString(map.name.hashCode(), 36);
+                
                 for (dev.worldforge.mod.MapData.SettlementSeed seed : map.settlementSeeds) {
-                    String id = "worldsim:settlement:" + mapToken + ":" + seed.id();
-                    String operationId = "worldsim:settlement:" + map.name + ":" + seed.id();
+                    String id = Colony.blueprintColonyId(map.name, seed.id());
+                    String operationId = Colony.blueprintOperationId(map.name, seed.id());
                     boolean existed = COLONIES.containsKey(id);
                     TitleData.Realm realm = map.titles == null ? null : map.titles.realms.get(seed.realmId());
                     String race = realm == null ? "" : String.valueOf(realm.props.getOrDefault("identity.race",
@@ -1775,16 +1774,8 @@ public class SettleMod {
                             seed.blockX(), seed.blockZ(), operationId);
                     // Preserve the blueprint's stable ID, type and exact political ownership
                     // on the canonical Colony record; name remains Settlement.s.name.
-                    colony.s.name = settlementName;
-                    colony.sourceMapId = map.name;
-                    colony.blueprintSettlementId = seed.id();
-                    colony.settlementType = seed.type();
-                    colony.provinceId = seed.provinceId();
-                    colony.realmId = seed.realmId();
-                    colony.identityRace = race;
-                    colony.identityCulture = culture;
-                    colony.governmentId = realm == null ? "" :
-                            String.valueOf(realm.props.getOrDefault("politics.government", ""));
+                    colony.applyBlueprintIdentity(map.name, seed, settlementName, race, culture,
+                            realm == null ? "" : String.valueOf(realm.props.getOrDefault("politics.government", "")));
                     if (!existed) staged++;
                 }
                 if (!saveDurably(server)) {
