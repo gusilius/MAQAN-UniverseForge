@@ -53,13 +53,13 @@ NAME_END = ("aria", "en", "oria", "gard", "mere", "hold", "wyn", "mark", "eth", 
 
 # Settlement density is independent from government form, technology and magic.
 SETTLEMENT_PROFILES = {
-    1: {"key": "wild_world", "realms": 4, "provinces": 2, "minimum_pixels": 8192, "wilderness_share": 0.92, "population_density": 0.02, "merge_fraction": 0.35, "realm_area_cap": 0.45},
-    2: {"key": "early_settlements", "realms": 8, "provinces": 4, "minimum_pixels": 4096, "wilderness_share": 0.82, "population_density": 0.08, "merge_fraction": 0.42, "realm_area_cap": 0.52},
-    3: {"key": "regional_civilizations", "realms": 16, "provinces": 6, "minimum_pixels": 2048, "wilderness_share": 0.68, "population_density": 0.20, "merge_fraction": 0.50, "realm_area_cap": 0.62},
-    4: {"key": "developed_states", "realms": 32, "provinces": 8, "minimum_pixels": 1024, "wilderness_share": 0.16, "population_density": 0.38, "merge_fraction": 0.62, "realm_area_cap": 0.70},
-    5: {"key": "dense_civilization", "realms": 48, "provinces": 12, "minimum_pixels": 768, "wilderness_share": 0.08, "population_density": 0.58, "merge_fraction": 0.72, "realm_area_cap": 0.78},
-    6: {"key": "highly_developed", "realms": 64, "provinces": 16, "minimum_pixels": 512, "wilderness_share": 0.00, "population_density": 0.78, "merge_fraction": 0.84, "realm_area_cap": 0.86},
-    7: {"key": "planetary_civilization", "realms": 96, "provinces": 24, "minimum_pixels": 256, "wilderness_share": 0.00, "population_density": 1.00, "merge_fraction": 0.92, "realm_area_cap": 0.92},
+    1: {"key": "wild_world", "wilderness_share": 0.92, "population_density": 0.02},
+    2: {"key": "early_settlements", "wilderness_share": 0.82, "population_density": 0.08},
+    3: {"key": "regional_civilizations", "wilderness_share": 0.68, "population_density": 0.20},
+    4: {"key": "developed_states", "wilderness_share": 0.16, "population_density": 0.38},
+    5: {"key": "dense_civilization", "wilderness_share": 0.08, "population_density": 0.58},
+    6: {"key": "highly_developed", "wilderness_share": 0.00, "population_density": 0.78},
+    7: {"key": "planetary_civilization", "wilderness_share": 0.00, "population_density": 1.00},
 }
 
 
@@ -564,6 +564,77 @@ def select_wilderness_mask(analysis_labels: np.ndarray, width: int, height: int,
     return wilderness
 
 
+def split_disconnected_provinces(province_labels: np.ndarray,
+                                  province_meta: dict[int, dict],
+                                  realm_provinces: dict[int, list[int]],
+                                  width: int, height: int) -> tuple[np.ndarray, dict, dict, dict]:
+    """Split provinces cut by wilderness into connected holdings of the same realm."""
+    from scipy import ndimage
+    flat = np.asarray(province_labels, dtype=np.uint32).reshape(-1)
+    valid = np.flatnonzero(flat > 0)
+    if not valid.size:
+        return flat, province_meta, realm_provinces, {rid: [] for rid in realm_provinces}
+    order = valid[np.argsort(flat[valid], kind="stable")]
+    ids, counts = np.unique(flat[valid], return_counts=True)
+    offsets = np.concatenate(([0], np.cumsum(counts)))
+    next_id = int(flat.max()) + 1
+    structure = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=np.uint8)
+    for index, raw_pid in enumerate(ids):
+        pid = int(raw_pid)
+        cells = order[offsets[index]:offsets[index + 1]]
+        z, x = cells // width, cells % width
+        x0, x1 = int(x.min()), int(x.max()) + 1
+        z0, z1 = int(z.min()), int(z.max()) + 1
+        local = np.zeros((z1 - z0, x1 - x0), dtype=bool)
+        local[z - z0, x - x0] = True
+        labels, component_count = ndimage.label(local, structure=structure)
+        meta = province_meta[pid]
+        if component_count <= 1:
+            meta["area"] = int(cells.size)
+            continue
+        seed = int(meta["seed"])
+        sx, sz = seed % width, seed // width
+        keep = int(labels[sz - z0, sx - x0]) if (
+            x0 <= sx < x1 and z0 <= sz < z1) else 0
+        if keep == 0:
+            sizes = np.bincount(labels.ravel(), minlength=component_count + 1)
+            keep = int(1 + np.argmax(sizes[1:]))
+        for component_id in range(1, component_count + 1):
+            lz, lx = np.nonzero(labels == component_id)
+            component_cells = (lz + z0) * width + (lx + x0)
+            if component_id == keep:
+                meta["area"] = int(component_cells.size)
+                if seed not in component_cells:
+                    cx, cz = float((lx + x0).mean()), float((lz + z0).mean())
+                    nearest = int(np.argmin((lx + x0 - cx) ** 2 + (lz + z0 - cz) ** 2))
+                    meta["seed"] = int(component_cells[nearest])
+                continue
+            new_id = next_id
+            next_id += 1
+            flat[component_cells] = new_id
+            new_meta = dict(meta)
+            new_meta["area"] = int(component_cells.size)
+            cx, cz = float((lx + x0).mean()), float((lz + z0).mean())
+            nearest = int(np.argmin((lx + x0 - cx) ** 2 + (lz + z0 - cz) ** 2))
+            new_meta["seed"] = int(component_cells[nearest])
+            new_meta["key"] = f"{meta['key']}_fragment_{component_id:02d}"
+            province_meta[new_id] = new_meta
+            realm_provinces.setdefault(int(meta["realm"]), []).append(new_id)
+
+    valid = np.flatnonzero(flat > 0)
+    order = valid[np.argsort(flat[valid], kind="stable")]
+    ids, counts = np.unique(flat[valid], return_counts=True)
+    offsets = np.concatenate(([0], np.cumsum(counts)))
+    cells_by_realm: dict[int, list[int]] = {rid: [] for rid in realm_provinces}
+    for index, raw_pid in enumerate(ids):
+        pid = int(raw_pid)
+        cells = order[offsets[index]:offsets[index + 1]]
+        meta = province_meta[pid]
+        meta["area"] = int(cells.size)
+        cells_by_realm.setdefault(int(meta["realm"]), []).extend(cells.tolist())
+    return flat, province_meta, realm_provinces, cells_by_realm
+
+
 def classify_realm_scale(area_pixels: int, total_land_pixels: int,
                          independent_island: bool = False) -> tuple[str, int]:
     """Neutral scale/tier metadata; political identity is assigned by another mod."""
@@ -610,8 +681,8 @@ def create_test_image(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     img.save(path, format="PNG", optimize=False)
 
-def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: int = 64,
-                  provinces_per_realm: int = 32, blocks_per_pixel: int = 16,
+def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: int | None = None,
+                  provinces_per_realm: int | None = None, blocks_per_pixel: int = 16,
                   settlement_level: int = 4, planet_id: str | None = None,
                   generation_mode: str = "image") -> dict:
     # Import before any coast/island processing. A later function-local import
@@ -621,9 +692,6 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     if settlement_level not in SETTLEMENT_PROFILES:
         raise ValueError("settlement_level must be between 1 and 7")
     settlement_profile = SETTLEMENT_PROFILES[settlement_level]
-    realm_count = min(realm_count, settlement_profile["realms"])
-    provinces_per_realm = min(provinces_per_realm, settlement_profile["provinces"])
-    minimum_territory_pixels = settlement_profile["minimum_pixels"]
     analysis_started = time.perf_counter()
     image = Image.open(input_path).convert("RGB")
     width, height, analysis_labels, analysis_report = png_pixels(image)
@@ -647,43 +715,32 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     land_codes = [i for i, name in enumerate(ANALYSIS_CLASSES)
                   if ANALYSIS_TO_WORLD[name] in LAND_CLASSES]
     full_land_mask = np.isin(analysis_grid, land_codes)
+    land_count = int(full_land_mask.sum())
+    # Realm scale is based only on explored land area, never on settlement density.
+    if realm_count is None:
+        realm_count = max(1, int(round(math.sqrt(max(1, land_count) / 900.0))))
+    else:
+        realm_count = max(1, int(realm_count))
+    minimum_territory_pixels = max(64, int(land_count / max(1, realm_count * 8)))
     wilderness_mask = select_wilderness_mask(
         analysis_grid, width, height, settlement_profile["wilderness_share"], seed)
     political_land_mask = full_land_mask & ~wilderness_mask
-    components = land_components(analysis_labels, width, height, political_land_mask)
+    # Political continents are identified from complete geography. Wilderness
+    # cannot fragment one continent into artificial independent countries.
+    components = land_components(analysis_labels, width, height, full_land_mask)
     analysis_seconds = time.perf_counter() - analysis_started
     political_started = time.perf_counter()
-    if not components or sum(map(len, components)) < 32:
-        # Small maps and very sparse early-world profiles must still retain a
-        # viable homeland. Promote the largest real landmass instead of failing
-        # or silently producing a world with no political entities.
-        full_components = land_components(analysis_labels, width, height, full_land_mask)
-        if not full_components or len(full_components[0]) < 32:
-            raise ValueError("The map has too little classified land for territory generation.")
-        fallback = np.asarray(full_components[0], dtype=np.int64)
-        wilderness_mask.ravel()[fallback] = False
-        political_land_mask.ravel()[fallback] = True
-        components = land_components(analysis_labels, width, height, political_land_mask)
+    if not components or land_count < 32:
+        raise ValueError("The map has too little classified land for territory generation.")
 
-    # Tiny disconnected map fragments are wilderness, not independent states.
-    # A political realm is only seeded from a landmass large enough to support
-    # at least one profile-sized territory. This prevents coast antialiasing,
-    # tiny islets and scattered pixels from becoming hundreds of micro-states.
+    # One world-area threshold for major landmasses, shared by all seven profiles.
+    minimum_major_landmass_pixels = max(2048, int(round(land_count * 0.001)))
     major_components = [component for component in components
-                        if len(component) >= minimum_territory_pixels]
+                        if len(component) >= minimum_major_landmass_pixels]
     if not major_components:
-        # Keep the largest island as the initial realm when the world has no
-        # profile-sized continent; it must not be counted again as a minor island.
         major_components = [components[0]]
     major_component_ids = {component[0] for component in major_components}
     major_land_pixels = sum(map(len, major_components))
-    land_count = int(full_land_mask.sum())
-    unclaimed_land_pixels = land_count
-    unclaimed_land_pixels -= major_land_pixels
-
-    # A fragmented world can have less aggregate capacity than
-    # floor(total_land / minimum_size), because every major landmass needs
-    # its own seed. Clamp to the sum of per-continent capacities.
     realm_capacity = sum(max(1, len(component) // minimum_territory_pixels)
                          for component in major_components)
     realm_total = max(
@@ -712,8 +769,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
 
     realm_labels, realm_seeds, aggregation_report = aggregate_realm_regions(
         realm_labels, realm_seeds, width, height, seed, minimum_territory_pixels,
-        settlement_profile["merge_fraction"], settlement_profile["realm_area_cap"],
-        analysis_grid=analysis_grid)
+        desired_fraction=0.58, max_area_share=0.30, analysis_grid=analysis_grid)
     realm_island_flags = {
         rid: seed_landmass_by_pixel.get(point, main_landmass_id) != main_landmass_id
         for rid, point in realm_seeds.items()
@@ -738,7 +794,9 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         realm_cells = realm_cells_by_id[realm_id]
         if not realm_cells:
             continue
-        count = min(provinces_per_realm, max(1, len(realm_cells) // minimum_territory_pixels))
+        natural_count = max(1, len(realm_cells) // minimum_territory_pixels)
+        count = natural_count if provinces_per_realm is None else min(
+            max(1, int(provinces_per_realm)), natural_count)
         seeds = farthest_seeds(realm_cells, count, width, seed ^ (realm_id * 7919))
         labels, _ = partition(realm_cells, seeds, width, height, next_province,
                               partition_scratch, boundary_cost)
@@ -833,6 +891,17 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
             unclaimed_land_pixels -= len(component)
             island_province_count += 1
             next_province += 1
+
+    # Keep each province seed as a settled core, then apply wilderness. If a
+    # reserve cuts a province, preserve each remaining connected piece as its
+    # own province under the same realm rather than emitting broken provinces.
+    for meta in province_meta.values():
+        wilderness_mask.ravel()[int(meta["seed"])] = False
+    province_labels[wilderness_mask.ravel()] = 0
+    province_labels, province_meta, realm_provinces, realm_cells_by_id = split_disconnected_provinces(
+        province_labels, province_meta, realm_provinces, width, height)
+    unclaimed_land_pixels = int(wilderness_mask.sum())
+    political_land_mask = full_land_mask & ~wilderness_mask
 
     province_neighbors = {pid: set() for pid in province_meta}
     realm_neighbors = {rid: set() for rid in realm_provinces}
@@ -1305,8 +1374,7 @@ def run_profile_suite(input_path: Path, output_dir: Path, seed: int,
         profile_dir.mkdir(parents=True, exist_ok=True)
         worldmap = profile_dir / f"map-level-{level}-seed-{seed}.worldmap"
         blueprint = convert_image(
-            input_path, worldmap, seed, realm_count=96,
-            provinces_per_realm=24, blocks_per_pixel=blocks_per_pixel,
+            input_path, worldmap, seed, blocks_per_pixel=blocks_per_pixel,
             settlement_level=level)
         validation = validate_package(worldmap)
         with zipfile.ZipFile(worldmap) as archive:
@@ -1336,8 +1404,13 @@ def run_profile_suite(input_path: Path, output_dir: Path, seed: int,
         }
         rows.append(row)
         print(json.dumps({"profile_progress": row}, sort_keys=True), flush=True)
+    realm_counts = {row["realm_count"] for row in rows}
+    if len(realm_counts) != 1:
+        raise AssertionError(
+            f"Political realm count changed with settlement density: {sorted(realm_counts)}")
     report = {
         "format": "maqan-image-profile-suite/1",
+        "realm_count_invariant_across_profiles": True,
         "generator": GENERATOR_VERSION,
         "source_image": str(input_path.name),
         "source_image_sha256": source_hash,
@@ -1371,8 +1444,8 @@ def main() -> int:
     convert.add_argument("--input", type=Path, required=True)
     convert.add_argument("--output", type=Path, required=True)
     convert.add_argument("--seed", type=int, required=True)
-    convert.add_argument("--realms", type=int, default=32)
-    convert.add_argument("--provinces-per-realm", type=int, default=16)
+    convert.add_argument("--realms", type=int, default=None)
+    convert.add_argument("--provinces-per-realm", type=int, default=None)
     convert.add_argument("--blocks-per-pixel", type=int, default=16)
     convert.add_argument("--settlement-level", type=int, choices=range(1, 8), default=4)
     convert.add_argument("--planet-id", type=str, default=None)

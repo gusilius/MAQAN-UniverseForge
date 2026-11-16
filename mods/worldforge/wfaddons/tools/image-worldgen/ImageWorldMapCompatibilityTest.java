@@ -11,7 +11,13 @@ public final class ImageWorldMapCompatibilityTest {
         MapData map = MapData.load(args[1], maps);
         if (map.w < 32 || map.h < 32) throw new AssertionError("Map dimensions are unexpectedly small");
         if (!map.hasPoliticalLayers() || map.titles == null) throw new AssertionError("Political title layers were not loaded");
-        if (map.titles.tiers.size() != 2) throw new AssertionError("Expected province and realm title tiers");
+        String[] expectedTiers = {"province", "small_realm", "kingdom", "empire"};
+        if (map.titles.tiers.size() != expectedTiers.length)
+            throw new AssertionError("Expected province, small realm, kingdom and empire title tiers");
+        for (int i = 0; i < expectedTiers.length; i++) {
+            if (!expectedTiers[i].equals(map.titles.tiers.get(i).key))
+                throw new AssertionError("Unexpected title tier at index " + i + ": " + map.titles.tiers.get(i).key);
+        }
         int provinceSamples = 0;
         for (int z = 0; z < map.h; z++) {
             for (int x = 0; x < map.w; x++) {

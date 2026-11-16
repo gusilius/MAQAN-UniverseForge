@@ -3,10 +3,31 @@ import unittest
 from image_worldgen import (
     allocate_counts, select_independent_islands, aggregate_realm_regions,
     classify_realm_scale, select_wilderness_mask, SETTLEMENT_PROFILES, partition,
+    create_test_image, convert_image,
 )
 
 
 class PoliticalDistributionTests(unittest.TestCase):
+    def test_settlement_profiles_do_not_define_political_budgets(self):
+        for profile in SETTLEMENT_PROFILES.values():
+            for key in ("realms", "provinces", "minimum_pixels", "merge_fraction", "realm_area_cap"):
+                self.assertNotIn(key, profile)
+
+    def test_realm_count_is_invariant_across_all_seven_density_profiles(self):
+        from pathlib import Path
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source.png"
+            create_test_image(source)
+            counts = []
+            for level in range(1, 8):
+                result = convert_image(
+                    source, root / f"level-{level}.worldmap",
+                    seed=424242, settlement_level=level)
+                counts.append(result["realm_count"])
+            self.assertEqual(len(set(counts)), 1, counts)
+
     def test_realm_counts_respect_each_landmass_capacity(self):
         components = [list(range(1000)), list(range(1000, 1500)),
                       list(range(1500, 1600))]
