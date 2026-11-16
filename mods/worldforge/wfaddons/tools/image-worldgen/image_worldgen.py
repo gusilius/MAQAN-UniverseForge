@@ -352,11 +352,15 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         labels, _ = partition(realm_cells, seeds, width, height, next_province, partition_scratch)
         ids = list(range(next_province, next_province + len(seeds)))
         realm_indices = np.asarray(realm_cells, dtype=np.int64)
+        # partition() returns a view of the reusable scratch buffer. Count the
+        # province labels before releasing this realm's cells back to the -2
+        # sentinel; otherwise every label is erased before np.bincount reads it.
+        label_counts = checked_bincount(
+            labels[realm_indices], "province_partition_labels",
+            minlength=next_province + len(seeds))
         province_labels[realm_indices] = labels[realm_indices]
-        partition_scratch[realm_indices] = -2
         realm_provinces[realm_id] = ids
-        label_counts = np.bincount(labels[realm_indices],
-                                   minlength=next_province + len(seeds))
+        partition_scratch[realm_indices] = -2
         for offset, province_id in enumerate(ids):
             province_meta[province_id] = {
                 "realm": realm_id, "seed": seeds[offset],
