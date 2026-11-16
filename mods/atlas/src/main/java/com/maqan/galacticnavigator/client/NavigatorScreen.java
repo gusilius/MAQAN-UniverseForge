@@ -1516,9 +1516,8 @@ public class NavigatorScreen extends Screen {
         com.maqan.galacticnavigator.navigation.MaqanAnimationClock.beginFrame();
         if (embeddedInMaqan) {
             // MAQAN paints the shared workspace background and concept frames
-            // before this provider view. Keep Atlas' own map/data content, but
-            // do not repaint the host chrome or opaque panel surfaces over it.
-            drawBreadcrumbs(g, mx, my);
+            // before this provider view. Atlas adds its starfield only inside
+            // its central map viewport after panel geometry has been resolved.
         } else {
             renderBackground(g);
             if (!com.maqan.galacticnavigator.navigation.NavigatorNativeBridge.renderChrome(g, font, width, height, partial, 0)) drawCosmicBackdrop(g);
@@ -1531,7 +1530,15 @@ public class NavigatorScreen extends Screen {
         }
 
         layoutPanels();
-        if (embeddedInMaqan) mapT = Math.max(mapT, 84);
+        if (embeddedInMaqan) {
+            mapT = Math.max(mapT, 84);
+            if (mapR > mapL && mapB > mapT) {
+                g.enableScissor(mapL + 3, mapT + 3, mapR - 3, mapB - 3);
+                drawCosmicBackdrop(g);
+                g.disableScissor();
+            }
+            drawBreadcrumbs(g, mx, my);
+        }
         // In the shared MAQAN shell, the imported concept owns the side-window
         // frames and compact drawers. Keep Atlas' own catalogue/dossier on desktop
         // only; on compact or short viewports the shell's drawers take that space.
