@@ -1020,7 +1020,8 @@ def validate_package(path: Path) -> dict:
         biome_values = np.asarray(biome_image, dtype=np.uint8).ravel()
         land_biomes = {1, 2, 3, 4, 6, 7, 9}
         actual_land_pixels = int(np.isin(biome_values, list(land_biomes)).sum())
-        actual_unclaimed = actual_land_pixels - len(actual)
+        actual_covered_land_pixels = int(np.count_nonzero(np.asarray(province_ids) > 0))
+        actual_unclaimed = actual_land_pixels - actual_covered_land_pixels
         if actual_land_pixels != int(blueprint["land_pixels"]):
             raise AssertionError("land pixel count differs between semantic and political rasters")
         if actual_unclaimed != int(blueprint["politically_unclaimed_land_pixels"]):
@@ -1072,6 +1073,7 @@ def validate_package(path: Path) -> dict:
             "land_pixels": blueprint["land_pixels"],
             "politically_unclaimed_land_pixels": blueprint["politically_unclaimed_land_pixels"],
             "actual_land_pixels": actual_land_pixels,
+            "actual_covered_land_pixels": actual_covered_land_pixels,
             "actual_unclaimed_land_pixels": actual_unclaimed,
             "wilderness_percent_of_land": blueprint["generation_policy"]["wilderness_percent_of_land"],
             "settlement_level": blueprint["settlement_level"],
