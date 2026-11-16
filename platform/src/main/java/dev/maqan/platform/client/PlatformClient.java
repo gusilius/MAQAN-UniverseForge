@@ -18,10 +18,18 @@ import org.lwjgl.glfw.GLFW;
 public final class PlatformClient {
     private static final KeyMapping OPEN = new KeyMapping(
             "key.maqan_platform.open", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_F10, "key.categories.maqan");
+    private static final KeyMapping CAMERA_MODE = new KeyMapping(
+            "key.maqan_platform.camera_mode", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_F8, "key.categories.maqan");
+    private static final KeyMapping MAP_MODE = new KeyMapping(
+            "key.maqan_platform.map_mode", InputConstants.Type.KEYSYM, GLFW.GLFW_KEY_F9, "key.categories.maqan");
     private PlatformClient() { }
 
     @SubscribeEvent
-    public static void registerKeys(RegisterKeyMappingsEvent event) { event.register(OPEN); }
+    public static void registerKeys(RegisterKeyMappingsEvent event) {
+        event.register(OPEN);
+        event.register(CAMERA_MODE);
+        event.register(MAP_MODE);
+    }
 
     @Mod.EventBusSubscriber(modid = MaqanPlatform.MOD_ID, value = Dist.CLIENT, bus = Mod.EventBusSubscriber.Bus.FORGE)
     public static final class Ticks {
@@ -55,6 +63,8 @@ public final class PlatformClient {
         public static void clientTick(TickEvent.ClientTickEvent event) {
             if (event.phase != TickEvent.Phase.END) return;
             Minecraft mc = Minecraft.getInstance();
+            while (CAMERA_MODE.consumeClick()) WorkspaceViewState.cycleCameraMode();
+            while (MAP_MODE.consumeClick()) WorkspaceViewState.cycleMapMode();
             while (OPEN.consumeClick()) {
                 if (mc.screen instanceof PlatformShellScreen) mc.setScreen(null);
                 else mc.setScreen(new PlatformShellScreen());
