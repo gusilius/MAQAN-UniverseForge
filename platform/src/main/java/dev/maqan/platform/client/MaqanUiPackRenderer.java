@@ -21,7 +21,7 @@ public final class MaqanUiPackRenderer {
     public static final int REFERENCE_HEIGHT = 760;
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final List<String> FRAME_LAYERS =
-            List.of("mm", "bot", "top", "cor", "lcol", "rcol");
+            List.of("mm", "bot", "top", "cor", "lcol", "rcol", "lp", "rp");
     private static final Map<String, String> TEXTURES = Map.of(
             "top", "top_bar.png",
             "lcol", "left_column.png",
