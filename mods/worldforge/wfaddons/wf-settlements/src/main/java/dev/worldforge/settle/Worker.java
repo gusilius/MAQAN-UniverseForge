@@ -17,6 +17,11 @@ public final class Worker {
     /** The exact task lease suspended by a military assignment; restored when that order ends. */
     public TaskOwner suspendedTaskOwner = TaskOwner.NONE;
     public String suspendedTaskId = "";
+    public String suspendedProfession = "";
+    public int suspendedBuilding;
+    public boolean suspendedManualHauler;
+    public String suspendedLifeAction = "";
+    public double suspendedLifeTargetX, suspendedLifeTargetZ, suspendedLifeActionUntil;
     public String militaryOrderId = "";
 
     public boolean claimTask(TaskOwner owner, String id, boolean replaceEqualPriority) {
