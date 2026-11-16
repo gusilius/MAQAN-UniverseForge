@@ -202,29 +202,65 @@ public final class Statecraft {
         Objects.requireNonNull(data, "title data");
         String namespace = (mapName == null ? "map" : mapName.trim()).replaceAll("[^A-Za-z0-9_.-]", "_");
         if (namespace.isEmpty()) namespace = "map";
-        Map<Integer, String> ids = new LinkedHashMap<>();
-        Map<String, TitleData.Title> sourceByKey = new HashMap<>();
-        for (TitleData.Title title : data.allTitles()) sourceByKey.put(title.key, title);
-        int imported = 0;
+
+        // A realm may list only its top-level title keys. Resolve ownership for every
+        // descendant title by walking the source parent chain; this is what keeps the
+        // province/region/state "honeycomb" intact instead of importing only the crown.
+        Map<String, String> realmByTitleKey = new HashMap<>();
         for (TitleData.Realm realm : data.realmList()) {
-            String realmId = clean(realm.id, "realm id");
+            clean(realm.id, "realm id");
             for (String key : realm.titleKeys) {
-                TitleData.Title source = sourceByKey.get(key);
-                if (source == null) continue;
-                String id = mapTitleId(namespace, key);
-                ids.put(source.id, id);
-                Title target = titles.get(id);
-                if (target == null) {
-                    int tier = Math.max(0, Math.min(Rank.values().length - 1, source.tier));
-                    target = createTitle(id, realmId, Rank.values()[tier], source.name);
-                    imported++;
-                }
-                Object holder = source.props.get("holderCharacterId");
-                if (holder instanceof String characterId && !characterId.isBlank())
-                    target.holderCharacterId = clean(characterId, "holder Character ID");
+                String previous = realmByTitleKey.putIfAbsent(key, realm.id);
+                if (previous != null && !previous.equals(realm.id))
+                    throw new IllegalArgumentException("title key belongs to multiple realms: " + key);
             }
         }
-        for (TitleData.Title source : data.allTitles()) {
+
+        List<TitleData.Title> sourceTitles = data.allTitles();
+        Map<Integer, TitleData.Title> sourceById = new HashMap<>();
+        Map<Integer, String> ownerBySourceId = new HashMap<>();
+        for (TitleData.Title source : sourceTitles) sourceById.put(source.id, source);
+        for (TitleData.Title source : sourceTitles) {
+            TitleData.Title cursor = source;
+            Set<Integer> visited = new HashSet<>();
+            String owner = null;
+            while (cursor != null && visited.add(cursor.id)) {
+                owner = realmByTitleKey.get(cursor.key);
+                if (owner != null) break;
+                cursor = cursor.parent > 0 ? sourceById.get(cursor.parent) : null;
+            }
+            if (cursor != null && !visited.add(cursor.id) && owner == null)
+                throw new IllegalArgumentException("cycle in source title hierarchy at " + source.key);
+            if (owner != null) ownerBySourceId.put(source.id, owner);
+        }
+
+        Map<Integer, String> ids = new LinkedHashMap<>();
+        int imported = 0;
+        for (TitleData.Title source : sourceTitles) {
+            String realmId = ownerBySourceId.get(source.id);
+            if (realmId == null) continue; // unclaimed/neutral titles are not assigned by proximity
+            String id = mapTitleId(namespace, source.key);
+            ids.put(source.id, id);
+            Title target = titles.get(id);
+            if (target == null) {
+                int tier = Math.max(0, Math.min(Rank.values().length - 1, source.tier));
+                target = createTitle(id, realmId, Rank.values()[tier], source.name);
+                imported++;
+            } else if (!target.realmId.equals(realmId)) {
+                throw new IllegalStateException("imported title ownership changed for " + source.key
+                        + "; explicit political transfer is required");
+            } else {
+                target.name = source.name == null || source.name.isBlank() ? id : source.name;
+            }
+            Object holder = source.props.get("holderCharacterId");
+            if (holder instanceof String characterId && !characterId.isBlank())
+                target.holderCharacterId = clean(characterId, "holder Character ID");
+        }
+
+        // Link only titles that were imported and remain inside the same sovereign realm.
+        // Cross-realm relations are represented by the realm contract below, never by a
+        // feudal title liege edge.
+        for (TitleData.Title source : sourceTitles) {
             String childId = ids.get(source.id), parentId = ids.get(source.parent);
             if (childId == null || parentId == null) continue;
             Title child = titles.get(childId), parent = titles.get(parentId);
@@ -232,13 +268,25 @@ public final class Statecraft {
                     && child.realmId.equals(parent.realmId) && child.rank.ordinal() < parent.rank.ordinal())
                 setTitleLiege(childId, parentId);
         }
+
         for (TitleData.Realm realm : data.realmList()) {
-            if (realm.overlordId == null || realm.overlordId.isBlank() || vassals.containsKey(realm.id)) continue;
-            if (data.realms.containsKey(realm.overlordId)) {
-                Object tax = realm.props.get("tax_share"), levy = realm.props.get("levy_share");
-                double taxShare = tax instanceof Number n ? Math.max(0, Math.min(1, n.doubleValue())) : 0.10;
-                double levyShare = levy instanceof Number n ? Math.max(0, Math.min(1, n.doubleValue())) : 0.10;
-                setVassalage(realm.id, realm.overlordId, taxShare, levyShare);
+            if (realm.overlordId == null || realm.overlordId.isBlank()) continue;
+            if (!data.realms.containsKey(realm.overlordId))
+                throw new IllegalArgumentException("unknown overlord realm " + realm.overlordId + " for " + realm.id);
+            Object tax = realm.props.get("tax_share"), levy = realm.props.get("levy_share");
+            double taxShare = tax instanceof Number n ? Math.max(0, Math.min(1, n.doubleValue())) : 0.10;
+            double levyShare = levy instanceof Number n ? Math.max(0, Math.min(1, n.doubleValue())) : 0.10;
+            if (!setVassalage(realm.id, realm.overlordId, taxShare, levyShare))
+                throw new IllegalStateException("could not import realm relationship " + realm.id + " -> "
+                        + realm.overlordId + ": " + lastError);
+            Object relation = realm.props.get("subject_type");
+            if (relation instanceof String value && !value.isBlank()) {
+                try {
+                    if (!setSubjectType(realm.id, SubjectType.valueOf(value.toUpperCase(Locale.ROOT))))
+                        throw new IllegalStateException(lastError);
+                } catch (IllegalArgumentException ex) {
+                    throw new IllegalArgumentException("unknown subject_type '" + value + "' for " + realm.id, ex);
+                }
             }
         }
         return imported;
