@@ -56,11 +56,15 @@ def classify(rgb):
         sizes = np.bincount(components.ravel())
         distance = ndimage.distance_transform_edt(inland)
         max_width = ndimage.maximum(distance, labels=components, index=np.arange(1, count + 1)) * 2
-        for component_id in range(1, count + 1):
-            mask = components == component_id
-            is_lake = sizes[component_id] >= 90 and max_width[component_id - 1] >= 7
-            labels[mask] = idx["lake"] if is_lake else idx["waterway"]
-            assigned |= mask
+        # Classify all inland-water components in O(N + C), not O(N * C).
+        # The previous per-component full-raster mask scan became pathological
+        # on detailed maps containing many narrow rivers and small pools.
+        lake_by_component = np.zeros(count + 1, dtype=bool)
+        lake_by_component[1:] = (sizes[1:] >= 90) & (max_width >= 7)
+        lake_mask = inland & lake_by_component[components]
+        labels[inland] = idx["waterway"]
+        labels[lake_mask] = idx["lake"]
+        assigned |= inland
 
     snow = (sat < .19) & (val > .70) & (b > 150) & (g > 150)
     labels[snow] = idx["snow"]; assigned |= snow
@@ -131,9 +135,10 @@ def make_heightfield(labels, seed, sea_level=63, min_y=-64, max_y=320):
         "grassland": sea_level+7, "forest": sea_level+10, "taiga": sea_level+13,
         "desert": sea_level+6, "mountains": sea_level+38, "snow": sea_level+22,
         "rock": sea_level+28, "unknown": sea_level+7}
-    base = np.zeros(labels.shape, np.float32)
-    for i, name in enumerate(CLASSES):
-        base[labels == i] = anchors[name]
+    # A palette lookup is one vectorized gather instead of one full-image
+    # boolean pass for every semantic class.
+    anchor_lut = np.asarray([anchors[name] for name in CLASSES], dtype=np.float32)
+    base = anchor_lut[labels]
     relief = base + continental*64 + regional*28 + detail*9
     mountain = (labels == CLASSES.index("mountains")) | (labels == CLASSES.index("rock"))
     ridge = 1.0 - np.abs(2.0 * (detail + .5) - 1.0)
@@ -145,10 +150,9 @@ def make_heightfield(labels, seed, sea_level=63, min_y=-64, max_y=320):
     return np.round(norm * 65535).astype(np.uint16)
 
 def render_labels(labels):
-    rgb = np.zeros((*labels.shape, 3), np.uint8)
-    for i, name in enumerate(CLASSES):
-        rgb[labels == i] = COLORS[name]
-    return Image.fromarray(rgb, "RGB")
+    # Direct indexed palette expansion: O(N), with no per-class image scans.
+    palette = np.asarray([COLORS[name] for name in CLASSES], dtype=np.uint8)
+    return Image.fromarray(palette[labels], "RGB")
 
 def analyze(input_path, output_dir, seed):
     image = Image.open(input_path).convert("RGB")
