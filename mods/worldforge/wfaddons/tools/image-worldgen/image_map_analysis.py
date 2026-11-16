@@ -83,7 +83,7 @@ def classify(rgb):
 
     # Sandy ochre and brown relief have their own palette family. Excluding
     # already assigned greens prevents yellow-green plains from being relabeled.
-    earth = (~assigned) & (hue >= 12) & (hue < 48) & (sat > .16) & (r > g * 1.01) & (g > b * 1.02)
+    earth = (~assigned) & (hue >= 12) & (hue < 60) & (sat > .16) & (r > g * 1.01) & (g > b * 1.02)
     desert = earth & (val > .55) & (sat > .22)
     mountains = earth & ~desert
     labels[mountains] = idx["mountains"]
