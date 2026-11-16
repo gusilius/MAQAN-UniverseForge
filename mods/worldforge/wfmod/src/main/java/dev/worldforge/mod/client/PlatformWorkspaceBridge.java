@@ -37,6 +37,20 @@ public final class PlatformWorkspaceBridge {
         }
     }
 
+
+    /** Register a provider-owned live body resolver without linking it to the optional Platform jar. */
+    public static void registerLiveEntityResolver(String providerId,
+                                                   java.util.function.Function<String, net.minecraft.world.entity.Entity> resolver) {
+        if (resolver == null) return;
+        try {
+            Class<?> context = Class.forName(CONTEXT);
+            context.getMethod("registerLiveEntityResolver", String.class, java.util.function.Function.class)
+                    .invoke(null, clean(providerId), resolver);
+        } catch (ReflectiveOperationException | LinkageError ignored) {
+            // Optional Platform is not installed.
+        }
+    }
+
     public static void clear(String providerId) {
         try {
             Class<?> context = Class.forName(CONTEXT);
