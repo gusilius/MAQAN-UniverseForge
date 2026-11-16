@@ -4,6 +4,7 @@ import com.mojang.logging.LogUtils;
 import dev.worldforge.mod.EditorManager;
 import dev.worldforge.mod.MapData;
 import dev.worldforge.mod.TitleData;
+import dev.worldforge.mod.TitleEditor;
 import dev.worldforge.mod.WorldForgeMod;
 import dev.worldforge.mod.api.WorldForgeApi;
 import dev.worldforge.people.Character;
@@ -281,7 +282,7 @@ public class PeopleMod {
                     : Courts.ensure(m.titles, identityEditor, reg, ROLES, NAMES, seed(m), YEAR);
             if (m.titles != null && !emptyCampaignBootstrap && identityEditor != null) {
                 TerritorialIdentity.Result identity = TerritorialIdentity.ensure(
-                        m.name, m.titles, identityEditor, reg, NAMES, seed(m), YEAR);
+                        m.name, m.titles, identityEditor, reg, NAMES, seed(m));
                 LOGGER.info("wf_people: identity map='{}' realmsNamed={} titlesNamed={} classifications={} rulerLinks={}",
                         m.name, identity.realmsNamed(), identity.titlesNamed(),
                         identity.titlesClassified(), identity.rulersLinked());
