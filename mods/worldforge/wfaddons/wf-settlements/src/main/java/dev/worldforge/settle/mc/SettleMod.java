@@ -1264,6 +1264,7 @@ public class SettleMod {
      * This is a read-only integrity check: missing residents are reported, never cloned or silently rebound.
      */
     public static void validateCanonicalResidentLinks() {
+        if (!net.minecraftforge.fml.ModList.get().isLoaded("wf_people")) return;
         Map<String, dev.worldforge.mod.MapData> mapsByName = new HashMap<>();
         for (dev.worldforge.mod.MapData map : WorldForgeMod.loadedMaps().values())
             if (map != null && map.name != null) mapsByName.put(map.name, map);
