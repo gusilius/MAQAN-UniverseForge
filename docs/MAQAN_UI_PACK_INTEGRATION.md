@@ -37,7 +37,7 @@ The 1368×760 composition is the design reference, not a fixed pixel canvas.
 - When all pack textures are present, the concept frame replaces the generic Platform chrome instead of drawing duplicate rails and panels over it.
 - The left/right frame positions use the canonical blank-window PNGs. Baked state/diplomacy sample artwork is not used as live window content.
 - The existing responsive layout calculator and compact drawers remain available as fallback when the manifest or texture pack is unavailable.
-- The four themes are switchable with F7 and the selected skin is persisted in the user's local workspace preferences. This changes artwork only; it does not replace the active provider or selection state.
+- The four themes are switchable with F7 or the native workspace settings pop-out; the selected skin is persisted in the user's local workspace preferences. Search, context, settings, workspace-profile and notification overlays remain rendered above the concept artwork. Skin changes affect artwork only; they do not replace the active provider or selection state.
 - Minimap data, real camera-mode switching, map-mode switching, live resource labels and provider-backed contextual content remain open integration tasks.
 
 The original concept is available as a self-contained HTML file with all 40 image layers embedded as WebP data URIs and the per-theme 1368×760 coordinates embedded in its `SK` and `MT` objects. It is an asset source only; it is not shipped or executed in Minecraft.
