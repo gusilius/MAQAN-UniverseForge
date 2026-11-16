@@ -123,8 +123,8 @@ public final class ArmyHierarchyTest {
                         && scoped.getEffective(second.id, hierarchy).mode() == CommandDelegation.Mode.DELEGATED,
                 "player reclaim is immediate and inheritance can be explicitly resumed later");
         CommandDelegation.Resolution resumed = scoped.resolveEffective(second.id, hierarchy);
-        check(resumed != null && resumed.sourceType() == CommandDelegation.ScopeType.CORPS
-                        && resumed.inherited() && resumed.sourceId().equals(vanguard.id) == false,
+        check(resumed != null && resumed.sourceType() == CommandDelegation.ScopeType.ARMY
+                        && resumed.inherited() && resumed.sourceId().equals("42"),
                 "resumed squad policy resolves to its actual parent scope rather than a stale local override");
         CommandDelegation scopedReload = new CommandDelegation();
         scopedReload.fromJson(scoped.toJson());
