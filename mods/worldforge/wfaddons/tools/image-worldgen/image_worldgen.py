@@ -49,21 +49,6 @@ LAND_CLASSES = {"plains", "forest", "taiga", "mountains", "desert", "snow", "roc
 WATER_CLASSES = {"deep_ocean", "lake", "river"}
 NAME_START = ("A", "Bel", "Cor", "Dor", "Eld", "Fen", "Gal", "Har", "Ith", "Kel", "Lor", "Mor", "Nor", "Or", "Pel", "Quel")
 
-GOVERNMENT_MODELS = [
-    {"government":"hereditary_monarchy","structure":"feudal_monarchy","ruler_title":"King","council":"royal_council","succession":"hereditary"},
-    {"government":"elective_monarchy","structure":"elective_crown","ruler_title":"High King","council":"electors_council","succession":"elective"},
-    {"government":"imperial_autocracy","structure":"composite_empire","ruler_title":"Emperor","council":"imperial_court","succession":"dynastic_or_conquest"},
-    {"government":"merchant_republic","structure":"oligarchic_republic","ruler_title":"First Doge","council":"merchant_senate","succession":"elected_by_houses"},
-    {"government":"civic_republic","structure":"federal_republic","ruler_title":"First Consul","council":"popular_assembly","succession":"elected"},
-    {"government":"theocracy","structure":"temple_state","ruler_title":"Hierophant","council":"synod","succession":"clerical_election"},
-    {"government":"tribal_confederation","structure":"clan_confederacy","ruler_title":"High Chieftain","council":"tribal moot","succession":"clan_acclamation"},
-    {"government":"military_dictatorship","structure":"military_junta","ruler_title":"Lord Marshal","council":"war_council","succession":"military_selection"},
-    {"government":"magocracy","structure":"magocratic_conclave","ruler_title":"Archmage","council":"arcane_conclave","succession":"magical_merit"},
-    {"government":"guild_oligarchy","structure":"chartered_city_league","ruler_title":"Guildmaster","council":"guild_congress","succession":"guild_vote"},
-    {"government":"sacred_order","structure":"order_state","ruler_title":"Grand Master","council":"chapter_council","succession":"order_election"},
-    {"government":"necromantic_dynasty","structure":"undying_dynasty","ruler_title":"Death Sovereign","council":"court_of_lichlords","succession":"ritual_designation"},
-]
-
 NAME_END = ("aria", "en", "oria", "gard", "mere", "hold", "wyn", "mark", "eth", "a", "or", "heim")
 
 # Settlement density is independent from government form, technology and magic.
