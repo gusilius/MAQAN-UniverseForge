@@ -1,5 +1,7 @@
 package dev.maqan.platform.client;
 
+import net.minecraft.world.entity.Entity;
+
 /**
  * Small, version-neutral selection contract shared by MAQAN workspaces.
  *
@@ -14,7 +16,8 @@ public final class PlatformSelectionContext {
             String displayName,
             String worldId,
             String summary,
-            long revision
+            long revision,
+            Entity previewEntity
     ) {}
 
     private static volatile Selection current;
@@ -29,6 +32,19 @@ public final class PlatformSelectionContext {
             String displayName,
             String worldId,
             String summary
+    ) {
+        publish(providerId, entityId, entityType, displayName, worldId, summary, null);
+    }
+
+    /** Publishes the actual live entity; the inspector renders it through its registered world renderer. */
+    public static synchronized void publish(
+            String providerId,
+            String entityId,
+            String entityType,
+            String displayName,
+            String worldId,
+            String summary,
+            Entity previewEntity
     ) {
         if (entityId == null || entityId.isBlank()) {
             clear(providerId);
@@ -47,10 +63,11 @@ public final class PlatformSelectionContext {
                 && current.entityType().equals(type)
                 && current.displayName().equals(name)
                 && current.worldId().equals(world)
-                && current.summary().equals(details)) return;
+                && current.summary().equals(details)
+                && current.previewEntity() == previewEntity) return;
         if (current != null)
             WorkspaceRuntime.removeIndexed(current.providerId(), current.entityId());
-        current = new Selection(provider, entityId, type, name, world, details, ++revision);
+        current = new Selection(provider, entityId, type, name, world, details, ++revision, previewEntity);
         WorkspaceRuntime.index(new WorkspaceRuntime.SearchEntry(
                 entityId, provider, type, name, world, details, java.util.List.of(type, provider)));
         WorkspaceRuntime.publish(WorkspaceRuntime.Severity.INFO, provider, "selection",
