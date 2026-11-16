@@ -84,6 +84,27 @@ public final class TerritorialIdentity {
         return Collections.unmodifiableMap(result);
     }
 
+    /** Chooses a direct, data-pack-defined child race for an individual while preserving the realm's parent-race mix. */
+    public static String chooseSubrace(String parentRace, List<RaceWeight> catalog, Random random) {
+        if (parentRace == null || parentRace.isBlank() || random == null) return parentRace == null ? "" : parentRace;
+        List<RaceWeight> children = catalog.stream()
+                .filter(r -> r != null && parentRace.equals(r.parent()) && r.weight() > 0)
+                .sorted(Comparator.comparing(RaceWeight::id)).toList();
+        if (children.isEmpty() || random.nextInt(3) == 0) return parentRace;
+        long total = children.stream().mapToLong(r -> Math.max(1, r.weight())).sum();
+        long roll = (long) (random.nextDouble() * total);
+        for (RaceWeight child : children) {
+            roll -= Math.max(1, child.weight());
+            if (roll < 0) return child.id();
+        }
+        return children.get(children.size() - 1).id();
+    }
+
+    /** Uses the optional wf-origins registry; absent addon means no guessed race variants. */
+    public static String chooseSubrace(String parentRace, Random random) {
+        return chooseSubrace(parentRace, originRaces(), random);
+    }
+
     private static List<RaceWeight> originRaces() {
         try {
             Class<?> mod = Class.forName("dev.worldforge.origins.mc.OriginsMod");
