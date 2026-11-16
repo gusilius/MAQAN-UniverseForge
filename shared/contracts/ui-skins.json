@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "referenceViewport": { "width": 1368, "height": 760 },
+  "sourceScale": 2,
+  "assetRoot": "assets/maqan/textures/gui",
+  "defaultTheme": "royal",
+  "requiredThemes": [
+    {
+      "id": "royal",
+      "label": "Royal",
+      "assetDirectory": "royal"
+    },
+    {
+      "id": "iron",
+      "label": "Iron",
+      "assetDirectory": "iron"
+    },
+    {
+      "id": "grim",
+      "label": "Grim",
+      "assetDirectory": "grim"
+    },
+    {
+      "id": "elf",
+      "label": "Elf",
+      "assetDirectory": "elf"
+    }
+  ],
+  "requiredTextures": [
+    "top_bar.png",
+    "left_column.png",
+    "right_column.png",
+    "corner.png",
+    "minimap.png",
+    "rts_console.png",
+    "window_state.png",
+    "window_diplomacy.png",
+    "window_left_blank.png",
+    "window_right_blank.png"
+  ],
+  "layerOrder": [
+    "world_scene",
+    "minimap",
+    "frame",
+    "rts_console",
+    "top_bar",
+    "corner",
+    "left_column",
+    "right_column",
+    "windows"
+  ],
+  "rules": {
+    "blankWindowsAreCanonical": true,
+    "bakedDemoValuesMustNeverBePresentedAsLiveData": true,
+    "allInteractiveRegionsUseReferenceViewportCoordinates": true,
+    "texturesMustPreserveAspectRatio": true,
+    "themeAssetsAreRequiredAndMustNotBeSilentlySubstituted": true
+  }
+}
