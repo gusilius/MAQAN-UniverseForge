@@ -3,7 +3,6 @@ package dev.worldforge.tests;
 import dev.worldforge.mod.MapData;
 import dev.worldforge.mod.TitleData;
 import dev.worldforge.mod.TitleEditor;
-import dev.worldforge.mod.EditorManager;
 import dev.worldforge.origins.OriginDefs;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
