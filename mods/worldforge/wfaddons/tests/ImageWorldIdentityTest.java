@@ -11,6 +11,8 @@ import dev.worldforge.people.NameBank;
 import dev.worldforge.people.RoleDefs;
 import dev.worldforge.people.TerritorialIdentity;
 import dev.worldforge.realms.Statecraft;
+import dev.worldforge.realms.RealmDefs;
+import dev.worldforge.realms.Realms;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -22,6 +24,17 @@ public final class ImageWorldIdentityTest {
     private static void check(boolean condition, String message) {
         System.out.println((condition ? "ok   " : "FAIL ") + message);
         if (!condition) failures++;
+    }
+
+    private static Map<String, Double> decimalShares(Object raw) {
+        Map<String, Double> result = new LinkedHashMap<>();
+        if (raw instanceof String text) for (String part : text.split(",")) {
+            String[] pair = part.trim().split(":", 2);
+            if (pair.length != 2) continue;
+            try { double value = Double.parseDouble(pair[1].trim()); if (Double.isFinite(value) && value > 0) result.put(pair[0].trim(), value); }
+            catch (NumberFormatException ignored) { }
+        }
+        return result;
     }
 
     private static Map<String, Integer> shares(Object raw) {
@@ -88,6 +101,47 @@ public final class ImageWorldIdentityTest {
                     "canonical ruler, race, named house and Character ID link: " + realm.id);
         }
 
+        // Run the same data-driven AI government selection used by wf-realms at world start.
+        RealmDefs realmDefs = new RealmDefs();
+        Path realmDefsDir = Path.of("wf-realms/src/main/resources/data/wf_realms/wf_realms");
+        try (var files = Files.list(realmDefsDir)) {
+            for (Path file : files.filter(p -> p.toString().endsWith(".json")).sorted().toList())
+                realmDefs.load(Files.readString(file));
+        }
+        check(realmDefs.validate().isEmpty() && realmDefs.govs.size() >= 10
+                        && realmDefs.terrains.size() >= 6,
+                "real government, terrain, level, doctrine and law definitions load");
+        Map<String, Map<String, Double>> realmRaces = new HashMap<>(), realmTerrain = new HashMap<>();
+        for (TitleData.Realm realm : titles.realmList()) {
+            realmRaces.put(realm.id, decimalShares(realm.props.get("races")));
+            realmTerrain.put(realm.id, decimalShares(realm.props.get("terrain")));
+            check(!realmTerrain.get(realm.id).isEmpty()
+                            && Math.abs(realmTerrain.get(realm.id).values().stream().mapToDouble(Double::doubleValue).sum() - 1.0) < 0.02,
+                    "real image-derived terrain mix reaches government suitability: " + realm.id);
+        }
+        Realms autonomousPolitics = new Realms(realmDefs);
+        autonomousPolitics.hooks = new Realms.Hooks() {
+            @Override public int provinces(String id) {
+                TitleData.Realm realm = titles.realms.get(id);
+                return realm == null ? 0 : realm.titleKeys.size();
+            }
+            @Override public int prestige(String id) { return 0; }
+            @Override public Map<String, Double> races(String id) { return realmRaces.getOrDefault(id, Map.of()); }
+            @Override public Map<String, Double> terrain(String id) { return realmTerrain.getOrDefault(id, Map.of()); }
+        };
+        Map<String, String> chosenGovernments = new TreeMap<>();
+        for (TitleData.Realm realm : titles.realmList()) {
+            autonomousPolitics.autoDevelop(realm.id, seed ^ realm.id.hashCode());
+            String government = autonomousPolitics.state(realm.id).gov;
+            check(!government.isBlank() && realmDefs.govs.containsKey(government)
+                            && autonomousPolitics.why(realm.id, realmDefs.govs.get(government)).isEmpty(),
+                    "AI chooses a compatible data-driven government: " + realm.id);
+            chosenGovernments.put(realm.id, government);
+            editor.setRealmProp(realm.id, "politics.government", government);
+            editor.setRealmProp(realm.id, "politics.government_name", realmDefs.govs.get(government).name());
+            editor.setRealmProp(realm.id, "politics.succession", realmDefs.govs.get(government).succession());
+        }
+
         int ownedTitles = 0;
         boolean allTerritoriesNamed = true, allOwnedTerritoriesClassified = true;
         for (TitleData.Title title : titles.allTitles()) {
@@ -145,6 +199,7 @@ public final class ImageWorldIdentityTest {
                 + ", territories=" + titles.allTitles().size() + ", owned=" + ownedTitles
                 + ", settlements=" + map.settlementSeeds.size() + ", characters=" + people.size()
                 + ", houses=" + houses.size() + ", dynasties=" + dynastyIds.size()
+                + ", governments=" + chosenGovernments.values().stream().distinct().count()
                 + ", namedTitles=" + identity.titlesNamed());
         System.out.println(failures == 0 ? "IMAGE WORLD IDENTITY: ALL OK" : "IMAGE WORLD IDENTITY FAILURES: " + failures);
         if (failures > 0) System.exit(1);

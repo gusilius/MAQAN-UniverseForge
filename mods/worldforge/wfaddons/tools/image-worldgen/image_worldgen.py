@@ -1236,6 +1236,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
                 "identity_status": "unassigned",
                 "identity_provider": "wf_people+wf_realms",
                 "territorial_model": "province_region_state_honeycomb",
+                "terrain": ",".join(f"{key}:{value}" for key, value in sorted(terrain_mix.items())),
             },
         })
 
@@ -1256,6 +1257,26 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
             add_settlement(("city", "town", "village")[(offset - 2) % 3],
                            province_meta[pid]["seed"], offset)
         realm_cells = realm_cells_by_id.get(rid, [])
+        # Feed actual land-cover composition to wf-realms using its canonical terrain IDs.
+        terrain_classes = {
+            "plains": {"grassland"}, "forest": {"forest", "taiga"},
+            "mountains": {"mountains", "rock"}, "desert": {"desert"}, "tundra": {"snow"},
+        }
+        terrain_counts = {key: 0 for key in (*terrain_classes.keys(), "coast")}
+        if realm_cells:
+            realm_indices = np.asarray(realm_cells, dtype=np.int64)
+            realm_labels = analysis_flat[realm_indices]
+            coastal = coast_mask[realm_indices]
+            for terrain_id, class_names in terrain_classes.items():
+                codes = [ANALYSIS_CLASSES.index(name) for name in class_names if name in ANALYSIS_CLASSES]
+                if codes:
+                    terrain_counts[terrain_id] = int((np.isin(realm_labels, codes) & ~coastal).sum())
+            terrain_counts["coast"] = int(coastal.sum())
+            terrain_total = sum(terrain_counts.values())
+            terrain_mix = {key: round(value / terrain_total, 4) for key, value in terrain_counts.items()
+                           if value > 0 and terrain_total > 0}
+        else:
+            terrain_mix = {}
         mountain_code = ANALYSIS_CLASSES.index("mountains")
         mountain_cells = [i for i in realm_cells if analysis_flat[i] == mountain_code]
         if mountain_cells:

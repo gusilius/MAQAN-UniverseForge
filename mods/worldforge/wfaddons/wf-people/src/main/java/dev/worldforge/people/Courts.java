@@ -62,7 +62,10 @@ public final class Courts {
             } else {
                 int tier = -1;
                 for (TitleData.Tier t : d.tiers) if (t.key.equals(role.per)) tier = t.index;
-                if (tier < 0) throw new IllegalArgumentException("Роль " + role.id + ": нет уровня титулов '" + role.per + "'");
+                // Shared role packs target different map schemas (historical county/barony
+                // versus image province/region/state). A role with no matching tier is dormant;
+                // it must not prevent the realm-level ruler, court and family from being created.
+                if (tier < 0) continue;
                 for (TitleData.Title t : d.allTitles())
                     if (t.tier == tier && realmOwnedTitles.contains(t.id))
                         places.add(new String[]{titlePlace(t.id), cultureOf(d, t), String.valueOf(t.id), raceOf(d, t)});
