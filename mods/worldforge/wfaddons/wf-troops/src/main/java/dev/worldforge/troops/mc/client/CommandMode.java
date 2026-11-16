@@ -433,6 +433,8 @@ public final class CommandMode {
                 else MaqanTroopsCameraBridge.publishFirstPerson();
                 firstPersonCommand = false;
                 camEntity = null;
+                rigInitialized = false;
+                SEL.clear();
                 return;
             }
             boolean radialHeld = RADIAL_COMMAND.isDown();
