@@ -6,6 +6,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.Pose;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraftforge.api.distmarker.Dist;
@@ -124,7 +125,7 @@ public final class MaqanCameraController {
         int groundY = minecraft.level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
                 new BlockPos(blockX, minecraft.player.blockPosition().getY(), blockZ));
         double[] position = rig.position(groundY);
-        proxy.setPos(position[0], position[1] - proxy.getEyeHeight(), position[2]);
+        proxy.setPos(position[0], position[1] - proxy.getEyeHeight(Pose.STANDING), position[2]);
         proxy.setYRot((float) rig.yaw());
         proxy.setXRot((float) rig.pitch());
         proxy.yRotO = proxy.getYRot();
