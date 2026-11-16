@@ -217,13 +217,19 @@ def partition(cells, seeds, width: int, height: int, first_label: int,
         xs, zs = cell_indices % width, cell_indices // width
         x0, x1 = int(xs.min()), int(xs.max()) + 1
         z0, z1 = int(zs.min()), int(zs.max()) + 1
-        markers = np.full((z1 - z0, x1 - x0), -1, dtype=np.int32)
+        # The exterior of this landmass crop is a fixed, high-cost dummy
+        # basin. Without it the watershed can cross ocean pixels and re-enter
+        # another coast, creating disconnected provinces.
+        exterior_label = first_label + len(seed_indices) + 1
+        markers = np.full((z1 - z0, x1 - x0), exterior_label, dtype=np.int32)
         local_x, local_z = xs - x0, zs - z0
         markers[local_z, local_x] = 0
         seed_x, seed_z = seed_indices % width - x0, seed_indices // width - z0
         for offset, (sx, sz) in enumerate(zip(seed_x, seed_z)):
             markers[int(sz), int(sx)] = first_label + offset + 1
-        cost = np.ascontiguousarray(boundary_cost[z0:z1, x0:x1], dtype=np.uint8)
+        cost = np.full((z1 - z0, x1 - x0), 255, dtype=np.uint8)
+        local_cost = boundary_cost[z0:z1, x0:x1]
+        cost[local_z, local_x] = np.minimum(local_cost[local_z, local_x], 254)
         result = ndimage.watershed_ift(cost, markers, structure=np.asarray(
             [[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=np.uint8))
         assigned = result[local_z, local_x].astype(np.int32) - 1
