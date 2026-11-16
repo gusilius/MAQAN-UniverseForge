@@ -237,7 +237,8 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     if sum(map(len, components)) < 32:
         raise ValueError("The map has too little land for meaningful territory generation.")
 
-    # Avoid creating politically meaningless micro-states on tiny islands/components.\n    realm_total = max(len(components), min(realm_count, max(1, sum(map(len, components)) // minimum_territory_pixels)))
+    # Avoid creating politically meaningless micro-states on tiny islands/components.
+    realm_total = max(len(components), min(realm_count, max(1, sum(map(len, components)) // minimum_territory_pixels)))
     realm_counts = allocate_counts(components, realm_total)
     realm_labels = [-1] * (width * height)
     realm_seeds: dict[int, int] = {}
@@ -265,7 +266,8 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         realm_cells = realm_cells_by_id[realm_id]
         if not realm_cells:
             continue
-        # At least 4,096 source pixels per smallest political territory (~1,048,576 blocks at 16 blocks/px).\n        count = min(provinces_per_realm, max(1, len(realm_cells) // minimum_territory_pixels))
+        # At least the profile-defined minimum pixels per smallest political territory.
+        count = min(provinces_per_realm, max(1, len(realm_cells) // minimum_territory_pixels))
         seeds = farthest_seeds(realm_cells, count, width, seed ^ (realm_id * 7919))
         labels, _ = partition(realm_cells, seeds, width, height, next_province)
         ids = list(range(next_province, next_province + len(seeds)))
@@ -303,7 +305,8 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
                         realm_neighbors[ra].add(rb)
                         realm_neighbors[rb].add(ra)
 
-    realm_names = {rid: stable_name(seed, rid + 1) for rid in realm_provinces}\n    government_by_realm = {rid: GOVERNMENT_MODELS[random.Random((seed & 0xFFFFFFFFFFFFFFFF) ^ (rid * 0xD1B54A32D192ED03)).randrange(len(GOVERNMENT_MODELS))] for rid in realm_provinces}
+    realm_names = {rid: stable_name(seed, rid + 1) for rid in realm_provinces}
+    government_by_realm = {rid: GOVERNMENT_MODELS[random.Random((seed & 0xFFFFFFFFFFFFFFFF) ^ (rid * 0xD1B54A32D192ED03)).randrange(len(GOVERNMENT_MODELS))] for rid in realm_provinces}
     county_id_for_realm = {rid: len(province_meta) + offset + 1 for offset, rid in enumerate(realm_provinces)}
     titles = []
     realms = []
@@ -397,7 +400,8 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         "relation_types": {"vassal": {"label": "Vassal", "tribute": 10, "levy": 10, "can_declare_war": False}},
         "realms": realms,
     }
-    province_rgb = province_labels.tolist()  # zero is reserved for sea; labels are 16-bit safe.\n    source_hash = hashlib.sha256(input_path.read_bytes()).hexdigest()
+    province_ids = province_labels.tolist()  # zero is reserved for sea; labels are 16-bit safe.
+    source_hash = hashlib.sha256(input_path.read_bytes()).hexdigest()
     blueprint = {
         "format": "maqan-world-blueprint/2", "generator": GENERATOR_VERSION,
         "planet_id": planet_id, "generation_mode": "image",
@@ -405,7 +409,8 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         "seed": seed, "source_image_sha256": source_hash, "size_px": [width, height],
         "blocks_per_pixel": blocks_per_pixel, "land_pixels": land_count,
         "realm_count": len(realms), "province_count": len(province_meta),
-        "settlement_count": len(settlements), "realms": realms,\n        "generation_seconds": round(time.perf_counter() - started_at, 4),
+        "settlement_count": len(settlements), "realms": realms,
+        "generation_seconds": round(time.perf_counter() - started_at, 4),
         "territories": [{"id": pid, "realm_id": f"realm_{meta['realm'] + 1:02d}",
                          "capital_pixel": [meta["seed"] % width, meta["seed"] // width],
                          "area_pixels": meta["area"], "neighbors": sorted(province_neighbors[pid])}
@@ -413,7 +418,8 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         "settlements": settlements,
         "generation_policy": {
             "chunk_materialization": "deferred", "territory_partition": "connected-land-multisource-bfs",
-            "political_seed": seed, "source_semantics": "maqan-image-analysis/2",\n            "minimum_territory_pixels": minimum_territory_pixels,
+            "political_seed": seed, "source_semantics": "maqan-image-analysis/2",
+            "minimum_territory_pixels": minimum_territory_pixels,
             "government_variety": sorted({r["props"]["government"] for r in realms}),
             "geography_classifier": analysis_report["classifier"],
             "unknown_percent": analysis_report["unknown_percent"],
@@ -425,7 +431,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         "biomes.png": image_bytes(width, height, biome_values, "L"),
         "height16.png": image_bytes(width, height, height_values, "I;16"),
         "rivers.png": image_bytes(width, height, river_values, "L"),
-        "provinces.png": image_bytes(width, height, province_rgb, "I;16"),
+        "provinces.png": image_bytes(width, height, province_ids, "I;16"),
         "titles.json": json.dumps(titles_doc, sort_keys=True, separators=(",", ":")).encode(),
         "realms.json": json.dumps(realms_doc, sort_keys=True, separators=(",", ":")).encode(),
         "world-blueprint.json": json.dumps(blueprint, sort_keys=True, separators=(",", ":")).encode(),
