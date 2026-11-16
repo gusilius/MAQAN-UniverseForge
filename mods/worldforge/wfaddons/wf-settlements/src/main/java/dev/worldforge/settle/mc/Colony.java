@@ -56,6 +56,10 @@ public final class Colony {
     public String owner = "";
     /** Autonomous polity ownership; empty for settlements still outside a realm. */
     public String realmId = "";
+    /** Stable map-blueprint identity and political/ethnic context for image-generated settlements. */
+    public String sourceMapId = "", blueprintSettlementId = "", settlementType = "";
+    public int provinceId;
+    public String identityRace = "", identityCulture = "", governmentId = "";
     /** Stable origin operation that created this colony; empty for ordinary settlements. */
     public String genesisOperationId = "";
     /** Provisioning is guarded across retries; an interrupted phase requires reconciliation, never replay. */
@@ -149,6 +153,13 @@ public final class Colony {
         m.put("cz", cz);
         m.put("owner", owner);
         m.put("realmId", realmId);
+        m.put("sourceMapId", sourceMapId);
+        m.put("blueprintSettlementId", blueprintSettlementId);
+        m.put("settlementType", settlementType);
+        m.put("provinceId", provinceId);
+        m.put("identityRace", identityRace);
+        m.put("identityCulture", identityCulture);
+        m.put("governmentId", governmentId);
         m.put("genesisOperationId", genesisOperationId);
         m.put("residentCharacterIds", new ArrayList<>(residentCharacterIds));
         m.put("genesisProvisioningStarted", genesisProvisioningStarted);
@@ -196,6 +207,13 @@ public final class Colony {
         if (m.get("map") instanceof Map<?, ?> mapData) c.map = SettlementMap.fromJson(Json.write(mapData));
         if (m.get("owner") instanceof String ow) c.owner = ow;
         if (m.get("realmId") instanceof String realm) c.realmId = realm;
+        if (m.get("sourceMapId") instanceof String value) c.sourceMapId = value;
+        if (m.get("blueprintSettlementId") instanceof String value) c.blueprintSettlementId = value;
+        if (m.get("settlementType") instanceof String value) c.settlementType = value;
+        if (m.get("provinceId") instanceof Number value) c.provinceId = Math.max(0, value.intValue());
+        if (m.get("identityRace") instanceof String value) c.identityRace = value;
+        if (m.get("identityCulture") instanceof String value) c.identityCulture = value;
+        if (m.get("governmentId") instanceof String value) c.governmentId = value;
         if (m.get("genesisOperationId") instanceof String operationId) c.genesisOperationId = operationId;
         if (m.get("residentCharacterIds") instanceof List<?> residents) for (Object id : residents)
             if (id instanceof String value && !value.isBlank()) c.residentCharacterIds.add(value);

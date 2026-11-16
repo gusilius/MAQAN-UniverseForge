@@ -1760,7 +1760,21 @@ public class SettleMod {
                     boolean existed = COLONIES.containsKey(id);
                     Colony colony = foundEmergentInMemory(server, dimension, id, seed.name(),
                             seed.blockX(), seed.blockZ(), operationId);
-                    if (colony.realmId == null || colony.realmId.isBlank()) colony.realmId = seed.realmId();
+                    // Preserve the blueprint's stable ID, type and exact political ownership
+                    // on the canonical Colony record; name remains Settlement.s.name.
+                    colony.sourceMapId = map.name;
+                    colony.blueprintSettlementId = seed.id();
+                    colony.settlementType = seed.type();
+                    colony.provinceId = seed.provinceId();
+                    colony.realmId = seed.realmId();
+                    TitleData.Realm realm = map.titles == null ? null : map.titles.realms.get(seed.realmId());
+                    if (realm != null) {
+                        colony.identityRace = String.valueOf(realm.props.getOrDefault("identity.race",
+                                realm.props.getOrDefault("race", "")));
+                        colony.identityCulture = String.valueOf(realm.props.getOrDefault("identity.culture",
+                                realm.props.getOrDefault("culture", "")));
+                        colony.governmentId = String.valueOf(realm.props.getOrDefault("politics.government", ""));
+                    }
                     if (!existed) staged++;
                 }
                 if (!saveDurably(server)) {
