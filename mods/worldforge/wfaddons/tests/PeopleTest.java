@@ -46,6 +46,23 @@ public class PeopleTest {
         ed.setRuler(preset, "Эйегон Завоеватель");
         CharacterRegistry reg = new CharacterRegistry();
         int created = Courts.ensure(d, ed, reg, defs, names, 42L, 300);
+        TerritorialIdentity.Result identity = TerritorialIdentity.ensure(nm, d, ed, reg, names, 42L);
+        boolean namedTerritories = d.allTitles().stream().allMatch(t -> t.name != null && !t.name.isBlank());
+        boolean classifiedTerritories = d.allTitles().stream().allMatch(t -> t.props.containsKey("identity.culture"));
+        boolean linkedRulers = d.realmList().stream().allMatch(r -> {
+            Character ruler = reg.holder("ruler", Courts.realmPlace(r.id));
+            return ruler != null && ruler.globalId.equals(r.props.get("rulerCharacterId"))
+                    && !String.valueOf(r.props.getOrDefault("identity.ruler_house", "")).isBlank();
+        });
+        ok(namedTerritories, "все провинции, регионы и государственные титулы имеют имя");
+        ok(classifiedTerritories, "культурная принадлежность записана для каждого территориального титула");
+        ok(linkedRulers, "правители государств связаны с каноническими Character ID и домами");
+        String identitySnapshot = d.titlesJson() + d.realmsJson();
+        TerritorialIdentity.Result identityAgain = TerritorialIdentity.ensure(nm, d, ed, reg, names, 42L);
+        ok(identityAgain.realmsNamed() == 0 && identityAgain.titlesNamed() == 0
+                        && identityAgain.titlesClassified() == 0 && identityAgain.rulersLinked() == 0
+                        && identitySnapshot.equals(d.titlesJson() + d.realmsJson()),
+                "повторная инициализация идентичности идемпотентна и не меняет сохранённые данные");
         int realms = d.realmList().size(), baronies = 0, counties = 0;
         for (TitleData.Title t : d.allTitles()) { if (t.tier == 0) baronies++; if (t.tier == 1) counties++; }
         ok(created >= realms * 5 + counties + baronies * 2, "создано " + created + " человек (государств " + realms + ", графств " + counties + ", баронств " + baronies + ")");
