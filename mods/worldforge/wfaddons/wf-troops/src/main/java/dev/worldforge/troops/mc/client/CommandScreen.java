@@ -78,9 +78,9 @@ public final class CommandScreen extends Screen {
             Class<?> renderer = Class.forName("dev.maqan.platform.client.MaqanUiPackRenderer");
             Object layout = renderer.getMethod("adaptiveLayout", int.class, int.class)
                     .invoke(null, width, height);
-            if (layout == null) return null;
+            if (layout == null) { cachedSkinRects.put(key, null); return null; }
             Object rect = layout.getClass().getMethod("get", String.class).invoke(layout, key);
-            if (rect == null) return null;
+            if (rect == null) { cachedSkinRects.put(key, null); return null; }
             Class<?> type = rect.getClass();
             int[] values = new int[]{(Integer) type.getMethod("x").invoke(rect),
                     (Integer) type.getMethod("y").invoke(rect),
@@ -89,6 +89,7 @@ public final class CommandScreen extends Screen {
             cachedSkinRects.put(key, values);
             return values;
         } catch (ReflectiveOperationException | LinkageError ignored) {
+            cachedSkinRects.put(key, null);
             return null;
         }
     }
