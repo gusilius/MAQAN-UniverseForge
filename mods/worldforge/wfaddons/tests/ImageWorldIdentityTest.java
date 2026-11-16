@@ -257,8 +257,13 @@ public final class ImageWorldIdentityTest {
         String politicsSnapshot = politics.toJson();
         Statecraft restoredPolitics = new Statecraft();
         restoredPolitics.fromJson(politicsSnapshot);
-        check(restoredPeople.size() == people.size(),
-                "canonical Character registry survives identity save/load");
+        Set<String> originalCharacterIds = new LinkedHashSet<>();
+        for (Character character : people.all()) originalCharacterIds.add(character.globalId);
+        Set<String> restoredCharacterIds = new LinkedHashSet<>();
+        for (Character character : restoredPeople.all()) restoredCharacterIds.add(character.globalId);
+        check(restoredPeople.size() == people.size() && originalCharacterIds.size() == people.size()
+                        && originalCharacterIds.equals(restoredCharacterIds),
+                "every canonical Character ID survives save/load exactly once without duplicates");
         check(restoredPolitics.toJson().equals(politicsSnapshot)
                         && dynastyIds.stream().allMatch(id -> restoredPolitics.dynasty(id) != null
                         && !restoredPolitics.dynasty(id).name.isBlank()),
@@ -266,6 +271,10 @@ public final class ImageWorldIdentityTest {
         check(politics.titles().stream().allMatch(title -> restoredPolitics.title(title.id) != null
                         && title.holderCharacterId.equals(restoredPolitics.title(title.id).holderCharacterId)),
                 "all Statecraft title-holder Character IDs survive the same political save/load");
+        check(restoredPolitics.titles().stream().filter(title -> title.holderCharacterId != null
+                        && !title.holderCharacterId.isBlank())
+                        .allMatch(title -> restoredCharacterIds.contains(title.holderCharacterId)),
+                "restored Statecraft holders resolve to the exact restored Character IDs");
 
         System.out.println("Image identity summary: realms=" + titles.realmList().size()
                 + ", territories=" + titles.allTitles().size() + ", owned=" + ownedTitles
