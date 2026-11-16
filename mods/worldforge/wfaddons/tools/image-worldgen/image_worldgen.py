@@ -519,9 +519,16 @@ def validate_package(path: Path) -> dict:
         if actual != expected:
             raise AssertionError(f"province raster mismatch: expected={expected}, actual={actual}")
         land_mask = [value != 0 for value in province_ids]
+        # Index the raster once. Re-scanning every pixel for every province
+        # made validation O(provinces * pixels) on realistic world maps.
+        cells_by_province = {pid: [] for pid in expected}
+        for pixel_index, value in enumerate(province_ids):
+            pid = int(value)
+            if pid:
+                cells_by_province[pid].append(pixel_index)
         for item in blueprint["territories"]:
             pid = item["id"]
-            cells = [i for i, value in enumerate(province_ids) if int(value) == pid]
+            cells = cells_by_province[pid]
             if not cells:
                 raise AssertionError(f"province {pid} has no land pixels")
             start = cells[0]
