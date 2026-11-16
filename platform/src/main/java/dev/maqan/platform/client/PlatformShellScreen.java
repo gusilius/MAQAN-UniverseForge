@@ -390,6 +390,13 @@ public final class PlatformShellScreen extends Screen {
             // Once the source artwork is installed, it replaces the generic
             // shell chrome instead of stacking a second set of panels on top.
             MaqanUiPackRenderer.render(g, width, height);
+            // Compact skin layouts collapse the decorative side windows; the
+            // active native workspace drawer occupies that space instead.
+            if (WorkspaceResponsiveLayout.isCompact(width, height)) {
+                for (Panel panel : panels.values()) {
+                    if (panel.visible && !panel.id.equals("content")) drawPanel(g, panel, mouseX, mouseY);
+                }
+            }
             // Keep native workspace overlays available above the imported artwork.
             if (settingsVisible) drawSettings(g, mouseX, mouseY);
             if (searchVisible) drawSearchOverlay(g, mouseX, mouseY);
