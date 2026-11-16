@@ -101,6 +101,26 @@ class MaqanUiPackAdaptiveLayoutTest {
     }
 
     @Test
+    void shortCompactViewportsScaleTheEntireBottomDockByAvailableHeight() {
+        for (int[] size : new int[][]{{1280, 180}, {800, 120}, {320, 80}}) {
+            var result = MaqanUiPackAdaptiveLayout.calculate(size[0], size[1], REFERENCE);
+            assertTrue(result.compact());
+            for (var rect : result.rectangles().values()) {
+                assertTrue(rect.x() >= 0 && rect.y() >= 0);
+                assertTrue(rect.right() <= size[0]);
+                assertTrue(rect.bottom() <= size[1]);
+            }
+            var minimap = result.get("mm");
+            var console = result.get("bot");
+            assertNotNull(minimap);
+            assertNotNull(console);
+            assertTrue(minimap.right() <= console.x() || console.width() == 0);
+            assertTrue(minimap.height() <= size[1] * 0.42 + 1);
+            assertTrue(console.height() <= size[1] * 0.42 + 1);
+        }
+    }
+
+    @Test
     void verySmallViewportDoesNotProduceNegativeOrOffscreenRectangles() {
         var result = MaqanUiPackAdaptiveLayout.calculate(320, 240, REFERENCE);
         for (var rect : result.rectangles().values()) {
