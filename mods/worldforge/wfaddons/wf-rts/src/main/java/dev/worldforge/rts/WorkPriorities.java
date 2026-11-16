@@ -8,9 +8,8 @@ import java.util.*;
 
 /**
  * Матрица приоритетов работ как в RimWorld: строка - рабочий, столбец - профессия, значение 0 (не делать), 1 (самое важное) .. 4 (в последнюю очередь).
- * Пока это ТОЛЬКО клиентская модель: сервер её не знает. Чтобы приоритеты что-то меняли, владельцу wf-settlements нужно добавить команду
- * {@code /wfsettle priority-work <worker> <prof> <n>} (n 0..4) и хранить значения у {@code Worker}; автоназначение должно брать для
- * свободного рабочего профессию с наименьшим ненулевым значением. Умолчание: своя профессия - 1, остальные - 0.
+ * Серверное состояние хранится в {@link Worker#jobPrio}; локальная карта содержит только оптимистичные значения до следующего
+ * подтверждённого снимка. Автоназначение и сохранение принадлежат {@code wf-settlements}, эта модель отвечает только за UI-цикл.
  */
 public final class WorkPriorities {
     public static final int MAX = 4;
@@ -20,6 +19,10 @@ public final class WorkPriorities {
     public int get(Worker w, String prof) {
         Map<String, Integer> m = values.get(w.id);
         if (m != null && m.containsKey(prof)) return m.get(prof);
+        if (w.jobPrio != null && w.jobPrio.containsKey(prof)) {
+            Integer saved = w.jobPrio.get(prof);
+            return saved == null ? 0 : Math.max(0, Math.min(MAX, saved));
+        }
         return w.canPerform(prof) ? 1 : 0;
     }
 
@@ -29,6 +32,9 @@ public final class WorkPriorities {
         values.computeIfAbsent(w.id, k -> new HashMap<>()).put(prof, n);
         return Orders.priorityWorkCmd(w.id, prof, n);
     }
+
+    /** Discard optimistic UI values after a fresh server snapshot has been applied. */
+    public void clearOptimisticOverrides() { values.clear(); }
 
     /** Щелчок по ячейке: 0->1->2->3->4->0, назад при back (ПКМ). Возвращает команду. */
     public String cycle(Worker w, String prof, boolean back) {
