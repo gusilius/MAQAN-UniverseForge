@@ -264,7 +264,7 @@ public final class CommandScreen extends Screen {
             if (compactSkin()) {
                 int w = Math.max(30, Math.min(60, (console[2] - 28) / 3));
                 int x = console[0] + 10;
-                l.add(new Btn("Выход", x, y, w, false, () -> CommandMode.exit(minecraft)));
+                l.add(new Btn("1-е лицо", x, y, w, false, CommandMode::exitFromMaqan));
                 x += w + 4;
                 l.add(new Btn("Стройка", x, y, w, buildOpen, this::toggleBuild));
                 x += w + 4;
@@ -272,7 +272,7 @@ public final class CommandScreen extends Screen {
                 return l;
             }
             int x = console[0] + 12;
-            l.add(new Btn("Выход (R)", x, y, BTN_W, false, () -> CommandMode.exit(minecraft))); x += BTN_W + 4;
+            l.add(new Btn("1-е лицо", x, y, BTN_W, false, CommandMode::exitFromMaqan)); x += BTN_W + 4;
             l.add(new Btn("Стройка (B)", x, y, BTN_W, buildOpen, this::toggleBuild)); x += BTN_W + 4;
             l.add(new Btn("Участки (Y)", x, y, BTN_W, workMode >= 0, this::cycleWorkMode)); x += BTN_W + 4;
             l.add(new Btn("Стратегия", x, y, BTN_W, CommandMode.RIG.view == CameraRig.View.SKY,
