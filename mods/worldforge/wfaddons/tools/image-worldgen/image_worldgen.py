@@ -623,6 +623,18 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     width, height, analysis_labels, analysis_report = png_pixels(image)
     analysis_labels, coast_report = refine_open_coastline(analysis_labels, seed)
     analysis_report["coastline_model"] = coast_report
+    refined_counts = np.bincount(analysis_labels.ravel(), minlength=len(ANALYSIS_CLASSES))
+    refined_total = int(width * height)
+    analysis_report["classes"] = {
+        name: int(refined_counts[i]) for i, name in enumerate(ANALYSIS_CLASSES)}
+    analysis_report["class_percent"] = {
+        name: round(100.0 * int(refined_counts[i]) / refined_total, 3)
+        for i, name in enumerate(ANALYSIS_CLASSES)}
+    analysis_report["unknown_pixels"] = int(refined_counts[ANALYSIS_CLASSES.index("unknown")])
+    analysis_report["unknown_percent"] = round(
+        100.0 * analysis_report["unknown_pixels"] / refined_total, 3)
+    analysis_report["classified_percent"] = round(
+        100.0 - analysis_report["unknown_percent"], 3)
     analysis_grid = analysis_labels.reshape((height, width))
     analysis_flat = analysis_labels.ravel()
     boundary_cost = make_boundary_cost(analysis_grid, seed)
