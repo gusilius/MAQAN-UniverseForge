@@ -338,19 +338,21 @@ public class MapScreen extends Screen {
             return;
         }
         if (!fitted) fit();
+        int[] viewport = workspaceViewport();
+        g.enableScissor(viewport[0], viewport[1], viewport[0] + viewport[2], viewport[1] + viewport[3]);
         int mxp = (int) camX, myp = (int) camY, mw = (int) (MapTextures.w * zoom), mh = (int) (MapTextures.h * zoom);
-        g.fill(mxp + 5, myp + 6, mxp + mw + 5, myp + mh + 6, 0x66000000);                 // тень под картой
+        g.fill(mxp + 5, myp + 6, mxp + mw + 5, myp + mh + 6, 0x66000000);
         g.pose().pushPose();
         g.pose().translate((float) camX, (float) camY, 0f);
         g.pose().scale((float) zoom, (float) zoom, 1f);
         g.blit(MapTextures.id, 0, 0, 0f, 0f, MapTextures.w, MapTextures.h, MapTextures.w, MapTextures.h);
         if (ovId != null) g.blit(ovId, ovX, ovY, 0f, 0f, ovW, ovH, ovW, ovH);
         g.pose().popPose();
-        g.renderOutline(mxp - 2, myp - 2, mw + 4, mh + 4, 0xFF000000);                    // рамка: чёрный кант и золотая линия
+        g.renderOutline(mxp - 2, myp - 2, mw + 4, mh + 4, 0xFF000000);
         g.renderOutline(mxp - 4, myp - 4, mw + 8, mh + 8, 0x8CF0C85A);
-
         drawLabels(g);
         drawMarkers(g, mx, my);
+        g.disableScissor();
 
         int prov = pixelProvince(mx, my);
         boolean overUi = overUi(mx, my);
