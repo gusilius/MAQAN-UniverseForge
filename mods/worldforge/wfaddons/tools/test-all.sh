@@ -19,6 +19,12 @@ mkdir -p "$OUT/classes"
 mapfile -t SRC < <(find wf-*/src/main/java -name '*.java' -not -path '*/mc/*')
 javac -proc:none -encoding UTF-8 -d "$OUT/classes" -sourcepath "$CP" "${SRC[@]}" tests/*.java tests/support/*.java
 
+if [ "${3:-}" = "--image-identity-only" ]; then
+  echo "== ImageWorldIdentityTest (actual map)"
+  java -Dstdout.encoding=UTF-8 -cp "$OUT/classes" dev.worldforge.tests.ImageWorldIdentityTest "$PACK"
+  exit $?
+fi
+
 passed=0
 failed=0
 for source in tests/*.java; do
