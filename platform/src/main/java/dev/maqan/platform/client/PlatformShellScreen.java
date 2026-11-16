@@ -612,9 +612,10 @@ public final class PlatformShellScreen extends Screen {
         g.drawString(font,ambientGrid?"✓":"—",x+w-26,y+42,ambientGrid?CYAN:MUTED,false);
         g.drawString(font,"Panel shadows",x+12,y+66,TEXT,false);
         g.drawString(font,panelShadows?"✓":"—",x+w-26,y+66,panelShadows?CYAN:MUTED,false);
-        g.fill(x+10,y+91,x+w-10,y+92,EDGE);
-        g.drawString(font,"Panels remain draggable and resizable",x+12,y+103,MUTED,false);
-        g.drawString(font,"MAQAN / UI CORE",x+12,y+126,CYAN,false);
+        g.drawString(font,"Visual skin",x+12,y+96,TEXT,false);
+        g.drawString(font,MaqanUiPackRenderer.activeTheme().toUpperCase(java.util.Locale.ROOT) + "  ·  F7",x+w-94,y+96,CYAN,false);
+        g.fill(x+10,y+112,x+w-10,y+113,EDGE);
+        g.drawString(font,"MAQAN / UI CORE",x+12,y+128,CYAN,false);
         if(mx>=x+w-28&&my>=y&&my<y+26) g.renderTooltip(font,Component.literal("Close settings"),mx,my);
     }
 
@@ -988,6 +989,7 @@ public final class PlatformShellScreen extends Screen {
             if(mx>=sx+196&&my>=sy&&my<sy+26) { settingsVisible=false; return true; }
             if(mx>=sx&&mx<=sx+224&&my>=sy+32&&my<sy+59) { ambientGrid=!ambientGrid; saveWorkspaceState(); return true; }
             if(mx>=sx&&mx<=sx+224&&my>=sy+59&&my<sy+86) { panelShadows=!panelShadows; saveWorkspaceState(); return true; }
+            if(mx>=sx&&mx<=sx+224&&my>=sy+86&&my<sy+112) { MaqanUiPackRenderer.cycleTheme(); return true; }
             if(mx>=sx&&mx<=sx+224&&my>=sy&&my<=sy+146) return true;
         }
         if(profile==Profile.COSMOS && embeddedView==null && my>=40&&my<68 && mx>=54&&mx<270) {
