@@ -36,6 +36,12 @@ def classify(rgb):
     h, w = rgb.shape[:2]
     hue, sat, val = _hsv(rgb)
     r, g, b = [rgb[..., i].astype(np.float32) for i in range(3)]
+    # Local luminance variance supplies a second cue when illustrated maps use
+    # similar hues for smooth plains, dense canopy and rugged relief.
+    luminance = 0.299 * r + 0.587 * g + 0.114 * b
+    local_mean = ndimage.uniform_filter(luminance, size=5, mode="nearest")
+    local_square = ndimage.uniform_filter(luminance * luminance, size=5, mode="nearest")
+    local_texture = np.sqrt(np.maximum(0.0, local_square - local_mean * local_mean))
     idx = {name: i for i, name in enumerate(CLASSES)}
     labels = np.full((h, w), idx["unknown"], np.uint8)
     assigned = np.zeros((h, w), bool)
@@ -73,11 +79,13 @@ def classify(rgb):
     # overwrote large areas of grassland as desert.
     green = (~assigned) & (hue >= 48) & (hue <= 158) & (g >= r * .94) & (g > b * 1.05) & (g > 32)
     dark_green = green & (val < .48) & (sat > .28)
+    textured_canopy = green & (val < .76) & (sat > .24) & (local_texture > 13.0)
+    forest = dark_green | textured_canopy
     labels[green] = idx["grassland"]
-    labels[dark_green] = idx["forest"]
+    labels[forest] = idx["forest"]
     latitude = np.abs(np.linspace(-1.0, 1.0, h, dtype=np.float32))[:, None]
     # Taiga is a narrower cool/dark canopy subset, not every dark pixel near a pole.
-    taiga = dark_green & (hue >= 82) & (latitude > .58)
+    taiga = forest & (hue >= 82) & (latitude > .58)
     labels[taiga] = idx["taiga"]
     assigned |= green
 
@@ -108,7 +116,7 @@ def classify(rgb):
     return labels, {
         "format": "maqan-image-analysis/2", "width": int(w), "height": int(h),
         "source_sha256": hashlib.sha256(rgb.tobytes()).hexdigest(),
-        "classifier": "palette-context-components-v3",
+        "classifier": "palette-texture-context-v4",
         "classes": {name: int(counts[i]) for i, name in enumerate(CLASSES)},
         "class_percent": {name: round(100.0 * int(counts[i]) / total, 3) for i, name in enumerate(CLASSES)},
         "unknown_pixels": unknown, "unknown_percent": round(100.0 * unknown / total, 3),
@@ -118,7 +126,7 @@ def classify(rgb):
                         "lake": "enclosed component >=90 px and estimated width >=7 px",
                         "waterway": "remaining enclosed blue components"},
         "land_model": {"grassland": "olive/yellow-green and green palette, excluding water and snow",
-                       "forest": "dark saturated green canopy",
+                       "forest": "dark saturated green or locally textured canopy",
                        "taiga": "cool dark-green canopy with a latitude context prior",
                        "desert": "bright saturated ochre/sand palette",
                        "mountains": "darker brown/ochre relief palette",
@@ -126,7 +134,7 @@ def classify(rgb):
         "notes": [
             "Deterministic palette/context analysis; not general-purpose AI image understanding.",
             "Semantic masks are mutually exclusive; water and snow are protected from later land rules.",
-            "Land classes use source-palette color families; local texture cues and legend-specific calibration remain future improvements.",
+            "Land classes combine source-palette color families with local luminance texture; legend-specific calibration remains future work.",
             "Taiga uses a conservative latitude prior and should be validated against the source map legend.",
             "River/lake split is geometric and may need map-specific threshold calibration."
         ]
