@@ -658,32 +658,31 @@ public final class Settlement {
 
     private void suspendCurrentTask(Worker w) {
         if (w.taskOwner == Worker.TaskOwner.MILITARY || w.taskOwner == Worker.TaskOwner.PLAYER) return;
-        w.suspendedTaskOwner = w.taskOwner;
-        w.suspendedTaskId = w.taskId;
-        w.suspendedProfession = w.assignedProfession;
-        w.suspendedBuilding = w.building;
-        w.suspendedManualHauler = w.manualHauler;
-        w.suspendedLifeAction = w.lifeAction;
-        w.suspendedLifeTargetX = w.lifeTargetX;
-        w.suspendedLifeTargetZ = w.lifeTargetZ;
-        w.suspendedLifeActionUntil = w.lifeActionUntil;
+        w.pushSuspendedTask();
     }
 
+    /** Restores the most recently suspended task; nested LIFE -> MILITARY -> PLAYER interruptions unwind LIFO. */
     private boolean restoreSuspendedTask(Worker w) {
-        Worker.TaskOwner resume = w.suspendedTaskOwner;
-        String resumeId = w.suspendedTaskId;
-        String resumeProfession = w.suspendedProfession;
-        int resumeBuilding = w.suspendedBuilding;
-        boolean resumeHauler = w.suspendedManualHauler;
-        String resumeLifeAction = w.suspendedLifeAction;
-        double resumeLifeX = w.suspendedLifeTargetX, resumeLifeZ = w.suspendedLifeTargetZ;
-        double resumeLifeUntil = w.suspendedLifeActionUntil;
-        w.suspendedTaskOwner = Worker.TaskOwner.NONE;
-        w.suspendedTaskId = "";
-        w.suspendedProfession = "";
-        w.suspendedBuilding = 0;
-        w.suspendedManualHauler = false;
-        w.suspendedLifeAction = "";
+        Worker.TaskSnapshot snapshot = w.popSuspendedTask();
+        if (snapshot == null) {
+            w.taskOwner = Worker.TaskOwner.NONE;
+            w.taskId = "";
+            w.taskRevision++;
+            w.building = 0;
+            w.assignedProfession = "";
+            w.manualHauler = false;
+            w.lifeAction = "";
+            w.status = "свободен";
+            return true;
+        }
+        Worker.TaskOwner resume = snapshot.owner();
+        String resumeId = snapshot.id();
+        String resumeProfession = snapshot.profession();
+        int resumeBuilding = snapshot.building();
+        boolean resumeHauler = snapshot.manualHauler();
+        String resumeLifeAction = snapshot.lifeAction();
+        double resumeLifeX = snapshot.lifeTargetX(), resumeLifeZ = snapshot.lifeTargetZ();
+        double resumeLifeUntil = snapshot.lifeActionUntil();
         w.lifeAction = "";
         w.lifeActionUntil = 0;
         if (resume == Worker.TaskOwner.SETTLEMENT && !resumeId.isBlank()) {
@@ -691,6 +690,7 @@ public final class Settlement {
             if (target != null && target.state != Building.State.PLANNED
                     && (resumeHauler ? target.state == Building.State.DONE
                     : !resumeProfession.isBlank() && target.def.jobs.containsKey(resumeProfession)
+                        && w.canPerform(resumeProfession)
                         && assignedWith(target.uid, resumeProfession) < target.def.jobs.get(resumeProfession))) {
                 w.claimTask(Worker.TaskOwner.SETTLEMENT, resumeId, true);
                 w.building = resumeBuilding;
