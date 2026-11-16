@@ -34,6 +34,43 @@ public final class NavigatorPlatformSelectionBridge {
         publish("", "", "", "", "");
     }
 
+    /** Register an Atlas action in the shared workspace context menu. */
+    public static void registerAction(String id, String label,
+                                      java.util.function.Predicate<String> visibleForEntity,
+                                      java.util.function.Consumer<String> action) {
+        if (visibleForEntity == null || action == null) return;
+        try {
+            Class<?> runtime = Class.forName("dev.maqan.platform.client.WorkspaceRuntime");
+            Class<?> actionType = Class.forName("dev.maqan.platform.client.WorkspaceRuntime$Action");
+            java.util.function.Predicate<Object> visible = selection -> {
+                try {
+                    String owner = (String) selection.getClass().getMethod("providerId").invoke(selection);
+                    String entityId = (String) selection.getClass().getMethod("entityId").invoke(selection);
+                    return PROVIDER_ID.equals(owner) && visibleForEntity.test(entityId);
+                } catch (ReflectiveOperationException | RuntimeException error) {
+                    return false;
+                }
+            };
+            java.util.function.Consumer<Object> execute = selection -> {
+                try {
+                    String owner = (String) selection.getClass().getMethod("providerId").invoke(selection);
+                    String entityId = (String) selection.getClass().getMethod("entityId").invoke(selection);
+                    if (!PROVIDER_ID.equals(owner) || !visibleForEntity.test(entityId))
+                        throw new IllegalStateException("Atlas selection is no longer valid");
+                    action.accept(entityId);
+                } catch (ReflectiveOperationException error) {
+                    throw new IllegalStateException("Unable to resolve Atlas selection", error);
+                }
+            };
+            Object descriptor = actionType.getConstructor(String.class, String.class, String.class,
+                    java.util.function.Predicate.class, java.util.function.Consumer.class)
+                    .newInstance(id, label, PROVIDER_ID, visible, execute);
+            runtime.getMethod("registerAction", actionType).invoke(null, descriptor);
+        } catch (ReflectiveOperationException | LinkageError ignored) {
+            // Atlas remains independently usable without MAQAN Platform.
+        }
+    }
+
     /**
      * Register an Atlas-owned inspector without introducing a compile-time
      * dependency on the optional Platform module. Rows are {section,label,value}.
