@@ -531,7 +531,23 @@ public class RealmsMod {
             int importedTitles = 0;
             for (var map : WorldForgeMod.loadedMaps().values())
                 if (map.titles != null) importedTitles += POLITICS.syncMapTitles(map.name, map.titles);
+            // Build canonical courts first (wf-people creates the ruler, family and offices
+            // from race/culture-aware NameBank pools), then choose an actual data-pack
+            // government immediately instead of leaving new map realms untyped for 30 days.
             syncPoliticalMapState();
+            int initializedGovernments = 0;
+            for (TitleData.Realm realm : realms()) {
+                Realms.State state = REALMS.state(realm.id);
+                if (state.gov == null || state.gov.isBlank()) {
+                    long seed = 0x5746474f5645524eL ^ realm.id.hashCode()
+                            ^ WorldForgeApi.clock().dayNumber();
+                    REALMS.autoDevelop(realm.id, seed);
+                    if (state.gov != null && !state.gov.isBlank()) initializedGovernments++;
+                }
+                syncDevelopmentProjection(realm);
+            }
+            if (initializedGovernments > 0)
+                LOGGER.info("wf_realms: initialized data-driven governments for {} realms", initializedGovernments);
             if (importedTitles > 0) LOGGER.info("wf_realms: imported {} political titles from world maps", importedTitles);
             int treasuryAccounts = 0;
             for (TitleData.Realm realm : realms()) {
