@@ -623,7 +623,10 @@ public class RtsHud extends Screen {
         List<String> profs = new ArrayList<>(WorkPriorities.professions(s.defs));
         int cw = 66, rowH = 15, nameW = 120;
         int w = nameW + profs.size() * cw + 24, rows = Math.min(s.workers.size(), 14);
-        int h = 62 + rows * rowH, x = (width - w) / 2, y = Math.max(TOP + 50, (height - BH - h) / 2);
+        int[] viewport = workspaceViewport();
+        int h = 62 + rows * rowH;
+        int x = viewport[0] + (viewport[2] - w) / 2;
+        int y = Math.max(viewport[1] + 8, viewport[1] + (viewport[3] - h) / 2);
         WFUi.panel(g, font, x, y, w, h, "Приоритеты работ");
         g.drawString(font, "1 - сначала, 4 - в последнюю очередь, 0 - не делать. ЛКМ +1, ПКМ -1, заголовок столбца - всем", x + 8, y + 24, WFUi.MUTED);
         int hy = y + 38;
