@@ -32,7 +32,9 @@ class WorkspaceViewStateTest {
     void cameraAndMapCyclesAreIndependent() {
         assertEquals(WorkspaceViewState.CameraMode.FREE, WorkspaceViewState.cycleCameraMode());
         assertEquals(WorkspaceViewState.MapMode.WORLD_MAP, WorkspaceViewState.cycleMapMode());
-        assertEquals(WorkspaceViewState.CameraMode.RTS, WorkspaceViewState.cameraMode());
+        assertEquals(WorkspaceViewState.CameraMode.FREE, WorkspaceViewState.cameraMode());
         assertEquals(WorkspaceViewState.MapMode.POLITICAL_MAP, WorkspaceViewState.mapMode());
+        assertEquals(WorkspaceViewState.CameraMode.ISOMETRIC, WorkspaceViewState.cycleCameraMode());
+        assertEquals(WorkspaceViewState.CameraMode.RTS, WorkspaceViewState.cycleCameraMode());
     }
 }
