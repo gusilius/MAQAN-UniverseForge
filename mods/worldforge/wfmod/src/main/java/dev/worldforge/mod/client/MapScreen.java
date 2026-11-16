@@ -246,6 +246,23 @@ public class MapScreen extends Screen {
             freeOverlay();
         }
         MapTextures.ensure(key);
+        publishMaqanMapMode(MapImages.TERRAIN.equals(key)
+                ? "WORLD_MAP" : "POLITICAL_MAP");
+    }
+
+    private void publishMaqanMapMode(String mode) {
+        if (!embeddedInMaqan) return;
+        try {
+            Class<?> state = Class.forName("dev.maqan.platform.client.WorkspaceViewState");
+            Class<?> mapMode = Class.forName("dev.maqan.platform.client.WorkspaceViewState$MapMode");
+            Object value = null;
+            for (Object candidate : mapMode.getEnumConstants()) {
+                if (((Enum<?>) candidate).name().equals(mode)) { value = candidate; break; }
+            }
+            if (value != null) state.getMethod("setMapMode", mapMode).invoke(null, value);
+        } catch (ReflectiveOperationException | LinkageError ignored) {
+            // WorldForge remains independently usable without the optional Platform.
+        }
     }
 
     /** Called by the MAQAN map-mode axis without discarding the selected realm/province. */
