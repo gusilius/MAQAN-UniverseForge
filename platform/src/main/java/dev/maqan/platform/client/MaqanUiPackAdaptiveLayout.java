@@ -107,14 +107,17 @@ public final class MaqanUiPackAdaptiveLayout {
         } else {
             // Keep both map and command console visible in a compact bottom
             // dock, preserving each theme's own artwork proportions.
+            double dockHeightLimit = Math.max(1.0, Math.min(142.0, h * 0.42));
             double miniWidthLimit = Math.min(260.0,
-                    Math.min(w * 0.36, 142.0 * minimapAspect));
-            double miniScale = miniWidthLimit / minimapRefW;
+                    Math.min(w * 0.36, dockHeightLimit * minimapAspect));
+            double miniScale = Math.min(miniWidthLimit / minimapRefW,
+                    dockHeightLimit / minimapRefH);
             int minimapW = Math.max(1, (int)Math.round(minimapRefW * miniScale));
             int minimapH = Math.max(1, (int)Math.round(minimapRefH * miniScale));
             int consoleX = Math.min(w, minimapW + gap);
             int consoleAvailableW = Math.max(0, w - consoleX);
-            double consoleScale = Math.min(consoleAvailableW / (double)consoleRefW, 142.0 / consoleRefH);
+            double consoleScale = Math.min(consoleAvailableW / (double)consoleRefW,
+                    dockHeightLimit / consoleRefH);
             int consoleW = Math.max(0, (int)Math.round(consoleRefW * consoleScale));
             int consoleH = Math.max(0, (int)Math.round(consoleRefH * consoleScale));
             out.put("mm", new Rect(0, h - minimapH, minimapW, minimapH));
