@@ -268,10 +268,35 @@ public final class CommandMode {
         else if (active && !(mc.screen instanceof CommandScreen)) mc.setScreen(new CommandScreen());
     }
 
+    /** MAQAN host entry point; ScreenEvent.Opening mounts CommandScreen into the existing shell. */
+    public static void enterFromMaqan() {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null || mc.level == null) return;
+        if (!active) enter(mc);
+        else if (!(mc.screen instanceof CommandScreen)) mc.setScreen(new CommandScreen());
+    }
+
+    /** Camera-only exit used by MAQAN's independent camera-mode selector; preserve unit selection. */
+    public static void exitFromMaqan() {
+        stop(Minecraft.getInstance(), false);
+    }
+
+    public static void setCameraView(CameraRig.View view) {
+        if (view == null) return;
+        RIG.setView(view);
+        lastView = view;
+        MaqanTroopsCameraBridge.publishMode(view);
+    }
+
+    public static void cycleCameraView() {
+        RIG.cycle();
+        lastView = RIG.view;
+        MaqanTroopsCameraBridge.publishMode(RIG.view);
+    }
+
     static void enter(Minecraft mc) {
         if (active || mc.level == null || mc.player == null) return;
         active = true;
-        SEL.clear();
         prevCamera = mc.options.getCameraType();
         mc.options.setCameraType(CameraType.FIRST_PERSON);
         RIG.start(mc.player.getX(), mc.player.getZ(), mc.player.getYRot(), lastView);
@@ -285,13 +310,17 @@ public final class CommandMode {
     }
 
     static void exit(Minecraft mc) {
+        stop(mc, true);
+    }
+
+    private static void stop(Minecraft mc, boolean clearSelection) {
         if (!active) return;
         active = false;
         lastView = RIG.view;
-        SEL.clear();
         camEntity = null;
-        mc.setCameraEntity(mc.player);
+        if (mc.player != null) mc.setCameraEntity(mc.player);
         mc.options.setCameraType(prevCamera);
+        if (clearSelection) SEL.clear();
         if (mc.screen instanceof CommandScreen) mc.setScreen(null);
     }
 
@@ -302,7 +331,9 @@ public final class CommandMode {
         double dt = Math.min(0.1, (now - lastFrame) / 1e9);
         lastFrame = now;
         long win = mc.getWindow().getWindow();
-        boolean ui = mc.screen instanceof CommandScreen;
+        boolean ui = mc.screen instanceof CommandScreen
+                || (mc.screen != null && mc.screen.getClass().getName()
+                .equals("dev.maqan.platform.client.PlatformShellScreen"));
         double fwd = 0, right = 0;
         if (ui) {
             if (InputConstants.isKeyDown(win, GLFW.GLFW_KEY_W)) fwd += 1;
@@ -315,9 +346,9 @@ public final class CommandMode {
             if (InputConstants.isKeyDown(win, GLFW.GLFW_KEY_UP)) pitch -= 45 * dt;
             if (InputConstants.isKeyDown(win, GLFW.GLFW_KEY_DOWN)) pitch += 45 * dt;
             if (yaw != 0 || pitch != 0) RIG.rotate(yaw, pitch);
-            CommandScreen cs = (CommandScreen) mc.screen;
-            if (mc.isWindowActive() && !cs.busyWithMouse()) {
-                double[] es = CameraRig.edgeScroll(cs.mouseX(), cs.mouseY(), mc.getWindow().getGuiScaledWidth(), mc.getWindow().getGuiScaledHeight());
+            if (mc.screen instanceof CommandScreen cs && mc.isWindowActive() && !cs.busyWithMouse()) {
+                double[] es = CameraRig.edgeScroll(cs.mouseX(), cs.mouseY(),
+                        mc.getWindow().getGuiScaledWidth(), mc.getWindow().getGuiScaledHeight());
                 right += es[0]; fwd += es[1];
             }
         }
