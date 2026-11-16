@@ -21,6 +21,7 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * Persistent resident tools. Character.props owns the item NBT; the Minecraft body only mirrors it.
@@ -206,12 +207,43 @@ public final class ResidentEquipment {
         } catch (Exception ignored) { person.props.remove(ITEM_KEY); return ItemStack.EMPTY; }
     }
 
+    /**
+     * Projects every canonical Character equipment slot onto the live NPC body.
+     * The entity never owns a second copy of the inventory; its slots are render/interaction projections.
+     */
     public static void sync(WFWorker body) {
         Character person = SettleMod.residentCharacter(body);
         if (person == null) return;
-        ItemStack stored = load(person);
-        if (!ItemStack.matches(body.getItemBySlot(EquipmentSlot.MAINHAND), stored))
-            body.setItemSlot(EquipmentSlot.MAINHAND, stored.copy());
+        Map<String, CharacterInventory.Item> equipment = CharacterInventory.equipment(person);
+        syncSlot(body, equipment, "mainhand", EquipmentSlot.MAINHAND);
+        syncSlot(body, equipment, "offhand", EquipmentSlot.OFFHAND);
+        syncSlot(body, equipment, "head", EquipmentSlot.HEAD);
+        syncSlot(body, equipment, "chest", EquipmentSlot.CHEST);
+        syncSlot(body, equipment, "legs", EquipmentSlot.LEGS);
+        syncSlot(body, equipment, "feet", EquipmentSlot.FEET);
+        // Migrate legacy ResidentEquipment-only tools before the generic projection is authoritative.
+        ItemStack mainhand = load(person);
+        if (!ItemStack.matches(body.getItemBySlot(EquipmentSlot.MAINHAND), mainhand))
+            body.setItemSlot(EquipmentSlot.MAINHAND, mainhand.copy());
+    }
+
+    private static void syncSlot(WFWorker body, Map<String, CharacterInventory.Item> equipment,
+                                 String key, EquipmentSlot slot) {
+        CharacterInventory.Item item = equipment.get(key);
+        ItemStack projected = ItemStack.EMPTY;
+        if (item != null) {
+            try {
+                if (!item.data().isBlank()) projected = ItemStack.of(TagParser.parseTag(item.data()));
+                else {
+                    Item registered = BuiltInRegistries.ITEM.get(new ResourceLocation(item.id()));
+                    if (registered != Items.AIR) projected = new ItemStack(registered, item.count());
+                }
+            } catch (Exception ignored) {
+                projected = ItemStack.EMPTY;
+            }
+        }
+        if (!ItemStack.matches(body.getItemBySlot(slot), projected))
+            body.setItemSlot(slot, projected.copy());
     }
 
     public static String summary(Character person, Colony colony, Worker worker) {
