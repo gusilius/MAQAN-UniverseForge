@@ -243,7 +243,7 @@ public final class CommandScreen extends Screen {
         if (console != null) {
             int y = console[1] + 10;
             if (compactSkin()) {
-                int w = Math.max(42, Math.min(64, (console[2] - 28) / 3));
+                int w = Math.max(30, Math.min(60, (console[2] - 28) / 3));
                 int x = console[0] + 10;
                 l.add(new Btn("Выход", x, y, w, false, () -> CommandMode.exit(minecraft)));
                 x += w + 4;
@@ -277,19 +277,19 @@ public final class CommandScreen extends Screen {
         return l;
     }
 
-    private int panelX() { int[] r = skinRect("rp"); return r == null ? width - PANEL_W - 4 : r[0] + 12; }
-    private int panelY() { int[] r = skinRect("rp"); return r == null ? 26 : r[1] + 34; }
-    private int panelW() { int[] r = skinRect("rp"); return r == null ? PANEL_W : Math.max(120, r[2] - 24); }
-    private int panelH() { int[] r = skinRect("rp"); return r == null ? Math.max(80, height - 26 - 90) : Math.max(80, r[3] - 48); }
+    private int panelX() { int[] r = skinRect("rp"); return r == null ? (compactSkin() ? width - 224 : width - PANEL_W - 4) : r[0] + 12; }
+    private int panelY() { int[] r = skinRect("rp"); if (r != null) return r[1] + 34; int[] top = skinRect("top"); return compactSkin() && top != null ? top[1] + top[3] + 8 : 26; }
+    private int panelW() { int[] r = skinRect("rp"); return r == null ? (compactSkin() ? Math.min(212, width - 64) : PANEL_W) : Math.max(120, r[2] - 24); }
+    private int panelH() { int[] r = skinRect("rp"); if (r != null) return Math.max(80, r[3] - 48); int[] console = skinRect("bot"); return compactSkin() && console != null ? Math.max(80, console[1] - panelY() - 8) : Math.max(80, height - 26 - 90); }
 
     private boolean inBuildPanel(double px, double py) {
         return buildOpen && px >= panelX() && px < panelX() + panelW()
                 && py >= panelY() && py < panelY() + panelH();
     }
 
-    private int selectionPanelX() { int[] r = skinRect("lp"); return r == null ? 4 : r[0] + 12; }
-    private int selectionPanelW() { int[] r = skinRect("lp"); return r == null ? 184 : Math.max(120, r[2] - 24); }
-    private int selectionPanelY() { int[] r = skinRect("lp"); return r == null ? height - 90 : r[1] + r[3] - 86; }
+    private int selectionPanelX() { int[] r = skinRect("lp"); return r == null ? (compactSkin() ? 52 : 4) : r[0] + 12; }
+    private int selectionPanelW() { int[] r = skinRect("lp"); return r == null ? (compactSkin() ? Math.min(180, width - 64) : 184) : Math.max(120, r[2] - 24); }
+    private int selectionPanelY() { int[] r = skinRect("lp"); if (r != null) return r[1] + r[3] - 86; int[] console = skinRect("bot"); return compactSkin() && console != null ? console[1] - 86 : height - 90; }
     private boolean inSelPanel(double px, double py) {
         return px >= selectionPanelX() && px < selectionPanelX() + selectionPanelW()
                 && py >= selectionPanelY() && py < selectionPanelY() + 82;
@@ -319,11 +319,13 @@ public final class CommandScreen extends Screen {
 
     // ---------- инспектор выбранных персонажей ----------
     private static final int INSPECT_ROW=19;
-    private int inspectX() { int[] r = skinRect("lp"); return r == null ? 4 : r[0] + 12; }
-    private int inspectW() { int[] r = skinRect("lp"); return r == null ? 250 : Math.max(130, r[2] - 24); }
+    private int inspectX() { int[] r = skinRect("lp"); return r == null ? (compactSkin() ? 52 : 4) : r[0] + 12; }
+    private int inspectW() { int[] r = skinRect("lp"); return r == null ? (compactSkin() ? Math.min(210, width - 64) : 250) : Math.max(130, r[2] - 24); }
     private int inspectY() {
         int[] r = skinRect("lp");
-        return r == null ? (settlementOpen ? 148 : 34) : r[1] + 34;
+        if (r != null) return r[1] + 34;
+        int[] top = skinRect("top");
+        return compactSkin() && top != null ? top[1] + top[3] + 8 : (settlementOpen ? 148 : 34);
     }
 
     private boolean inspectAt(double x,double y) {
@@ -345,9 +347,10 @@ public final class CommandScreen extends Screen {
     private void drawSettlementPanel(GuiGraphics g) {
         if (settlement == null || buildOpen) return;
         int[] frame = skinRect("rp");
-        int x = frame == null ? 4 : frame[0] + 12;
-        int y = frame == null ? 34 : frame[1] + 34;
-        int w = frame == null ? 250 : Math.max(120, frame[2] - 24);
+        int[] top = skinRect("top");
+        int x = frame == null ? (compactSkin() ? width - 216 : 4) : frame[0] + 12;
+        int y = frame == null ? (compactSkin() && top != null ? top[1] + top[3] + 8 : 34) : frame[1] + 34;
+        int w = frame == null ? (compactSkin() ? 204 : 250) : Math.max(120, frame[2] - 24);
         int h = frame == null ? 106 : Math.min(150, Math.max(88, frame[3] / 3));
         g.fill(x, y, x + w, y + h, 0xD910121A);
         g.fill(x, y, x + w, y + 1, 0xFF8A7040);
