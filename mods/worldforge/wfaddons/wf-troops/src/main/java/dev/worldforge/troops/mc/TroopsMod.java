@@ -51,6 +51,8 @@ import net.minecraftforge.event.server.ServerStoppingEvent;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.ModList;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.minecraftforge.network.NetworkRegistry;
@@ -103,6 +105,26 @@ public class TroopsMod {
                 NET.registerMessage(0, OrderPacket.class, OrderPacket::encode, OrderPacket::decode, OrderPacket::handle));
         MinecraftForge.EVENT_BUS.register(this);
         WorldForgeModSnapshotBridge.register();
+        DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> ClientLiveEntityResolver::register);
+    }
+
+    /** Client-only adapter resolving the exact troop body for a canonical wf-people UUID. */
+    private static final class ClientLiveEntityResolver {
+        private static void register() {
+            dev.worldforge.mod.client.PlatformWorkspaceBridge.registerLiveEntityResolver(
+                    "wf_people", ClientLiveEntityResolver::resolveCharacter);
+        }
+
+        private static Entity resolveCharacter(String canonicalCharacterId) {
+            if (canonicalCharacterId == null || canonicalCharacterId.isBlank()) return null;
+            net.minecraft.client.Minecraft client = net.minecraft.client.Minecraft.getInstance();
+            if (client.level == null) return null;
+            for (Entity entity : client.level.entitiesForRendering()) {
+                if (!(entity instanceof TroopEntity troop) || !troop.isAlive() || troop.isRemoved()) continue;
+                if (canonicalCharacterId.equals(troop.syncedCharacterId())) return troop;
+            }
+            return null;
+        }
     }
 
     private static final class WorldForgeModSnapshotBridge {
