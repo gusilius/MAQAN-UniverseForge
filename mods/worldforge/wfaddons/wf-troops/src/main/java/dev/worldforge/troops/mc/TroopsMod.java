@@ -1318,12 +1318,14 @@ public class TroopsMod {
             src.sendFailure(Component.literal("Армия не найдена или принадлежит другому игроку")); return 0;
         }
         try {
+            // Validate the order before changing authority; rejected input must not revoke delegation.
+            Squads.Order order = parseArmyOrder(kind, x, z);
             // This endpoint is an explicit player order: reclaim delegated descendants in this scope.
             for (String corpsId : army.corpsIds) {
                 ArmyHierarchy.Corps child = HIERARCHY.corps(corpsId);
                 if (child != null) for (String squadId : child.squadIds) DELEGATION.reclaim(squadId);
             }
-            int count = HIERARCHY.commandArmy(armyId, SQUADS, parseArmyOrder(kind, x, z), queue);
+            int count = HIERARCHY.commandArmy(armyId, SQUADS, order, queue);
             save();
             int issued = count;
             src.sendSuccess(() -> Component.literal("Приказ передан корпусам и отрядам: " + issued), false);
@@ -1348,9 +1350,10 @@ public class TroopsMod {
             src.sendFailure(Component.literal("Корпус не найден или принадлежит другому игроку")); return 0;
         }
         try {
+            Squads.Order order = parseArmyOrder(kind, x, z);
             // An explicit player order to a corps immediately returns its squads to direct control.
             for (String squadId : corps.squadIds) DELEGATION.reclaim(squadId);
-            int count = HIERARCHY.commandCorps(corpsId, SQUADS, parseArmyOrder(kind, x, z), queue);
+            int count = HIERARCHY.commandCorps(corpsId, SQUADS, order, queue);
             save();
             int issued = count;
             src.sendSuccess(() -> Component.literal("Приказ передан отрядам корпуса: " + issued), false);
