@@ -12,6 +12,7 @@ import dev.worldforge.people.PopulationSimulation;
 import dev.worldforge.people.LifeSimulation;
 import dev.worldforge.mod.WorldForgeMod;
 import dev.worldforge.mod.MapChunkGenerator;
+import dev.worldforge.mod.TitleData;
 import dev.worldforge.mod.api.SimulationLod;
 import dev.worldforge.mod.economy.TreasuryLedger;
 import dev.worldforge.mod.economy.TreasuryService;
