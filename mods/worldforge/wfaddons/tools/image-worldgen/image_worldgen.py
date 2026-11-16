@@ -298,6 +298,50 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
             }
         next_province += len(seeds)
 
+    # Political archipelagos: every minor land component is retained. Most
+    # become overseas provinces of the nearest mainland realm; a small,
+    # deterministic subset of viable islands can become city-state realms.
+    # Components below 8 pixels are treated as map speckle, not polities.
+    minor_components = [component for component in components
+                        if len(component) < minimum_territory_pixels and len(component) >= 8]
+    if minor_components and realm_seeds:
+        from scipy.spatial import cKDTree
+        seed_ids = np.asarray(sorted(realm_seeds), dtype=np.int32)
+        seed_pixels = np.asarray([realm_seeds[int(rid)] for rid in seed_ids], dtype=np.int64)
+        seed_xy = np.column_stack((seed_pixels % width, seed_pixels // width))
+        realm_tree = cKDTree(seed_xy)
+        independent_budget = max(1, realm_count // 16)
+        independent_candidates = sorted(
+            (c for c in minor_components if len(c) >= 16),
+            key=lambda c: (-len(c), c[0]))
+        independent_components = set()
+        for component in independent_candidates:
+            if len(independent_components) >= independent_budget:
+                break
+            # Stable hash-based selection avoids run-to-run randomness.
+            selector = (seed ^ (component[0] * 0x9E3779B97F4A7C15) ^ len(component)) & 0xFFFFFFFF
+            if selector % 11 == 0:
+                independent_components.add(component[0])
+
+        for component in minor_components:
+            center = component[len(component) // 2]
+            xy = (center % width, center // width)
+            _, nearest = realm_tree.query(xy, k=1)
+            owner_realm = int(seed_ids[int(nearest)])
+            if component[0] in independent_components:
+                owner_realm = next_realm
+                realm_provinces[owner_realm] = []
+                realm_seeds[owner_realm] = center
+                next_realm += 1
+            province_id = next_province
+            realm_provinces.setdefault(owner_realm, []).append(province_id)
+            province_labels[np.asarray(component, dtype=np.int64)] = province_id
+            province_meta[province_id] = {
+                "realm": owner_realm, "seed": center, "area": len(component),
+                "key": f"realm_{owner_realm + 1:03d}_island_{len(realm_provinces[owner_realm]):03d}",
+            }
+            next_province += 1
+
     province_neighbors = {pid: set() for pid in province_meta}
     realm_neighbors = {rid: set() for rid in realm_provinces}
     for z in range(height):
