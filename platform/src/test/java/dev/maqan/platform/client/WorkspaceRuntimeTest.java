@@ -29,9 +29,9 @@ class WorkspaceRuntimeTest {
 
     @Test
     void inspectorAndContextActionsAreProviderScoped() {
-        var selection = new PlatformSelectionContext.Selection(
-                "wf_people", "person-1", "CHARACTER", "Faramir",
-                "middle-earth", "Gondor", 1);
+        PlatformSelectionContext.publish("wf_people", "person-1", "CHARACTER",
+                "Faramir", "middle-earth", "Gondor");
+        var selection = PlatformSelectionContext.current();
         WorkspaceRuntime.registerInspector("wf_people", ignored ->
                 List.of(new WorkspaceRuntime.InspectorField("Identity", "Name", "Faramir")));
         AtomicInteger executions = new AtomicInteger();
