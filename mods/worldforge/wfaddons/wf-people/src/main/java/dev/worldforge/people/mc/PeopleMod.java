@@ -276,8 +276,16 @@ public class PeopleMod {
             // It must begin from geography only; ordinary Minecraft launches retain the
             // normal Courts.ensure bootstrap because this property is absent by default.
             boolean emptyCampaignBootstrap = Boolean.getBoolean("worldforge.campaign.empty-bootstrap");
+            TitleEditor identityEditor = m.titles == null ? null : EditorManager.editorFor(m);
             int created = m.titles == null || emptyCampaignBootstrap ? 0
-                    : Courts.ensure(m.titles, EditorManager.editorFor(m), reg, ROLES, NAMES, seed(m), YEAR);
+                    : Courts.ensure(m.titles, identityEditor, reg, ROLES, NAMES, seed(m), YEAR);
+            if (m.titles != null && !emptyCampaignBootstrap && identityEditor != null) {
+                TerritorialIdentity.Result identity = TerritorialIdentity.ensure(
+                        m.name, m.titles, identityEditor, reg, NAMES, seed(m), YEAR);
+                LOGGER.info("wf_people: identity map='{}' realmsNamed={} titlesNamed={} classifications={} rulerLinks={}",
+                        m.name, identity.realmsNamed(), identity.titlesNamed(),
+                        identity.titlesClassified(), identity.rulersLinked());
+            }
             if (emptyCampaignBootstrap && before == 0)
                 LOGGER.info("wf_people: campaign empty bootstrap enabled for map '{}'; authored court seeding skipped", m.name);
             LOGGER.info("wf_people: карта '{}': было {} людей, создано {}, теперь {}", m.name, before, created, reg.size());
