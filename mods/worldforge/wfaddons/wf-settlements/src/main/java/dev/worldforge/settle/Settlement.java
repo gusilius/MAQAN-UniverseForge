@@ -647,6 +647,92 @@ public final class Settlement {
         say((b.state == Building.State.DONE ? "Снесено: " : "Отменено: ") + b.def.name);
     }
 
+    /** Claims the resident for an external military order without replacing their permanent profession or Character. */
+    public boolean claimMilitaryTask(int workerId, String orderId) {
+        Worker w = worker(workerId);
+        if (w == null || orderId == null || orderId.isBlank()) return false;
+        if (w.taskOwner == Worker.TaskOwner.PLAYER) return false;
+        if (w.taskOwner != Worker.TaskOwner.MILITARY) {
+            w.suspendedTaskOwner = w.taskOwner;
+            w.suspendedTaskId = w.taskId;
+        }
+        if (!w.claimTask(Worker.TaskOwner.MILITARY, orderId, true)) return false;
+        w.militaryOrderId = orderId;
+        w.building = 0;
+        w.assignedProfession = "";
+        w.manualHauler = false;
+        w.manualOrder = false;
+        w.orderQueue.clear();
+        w.manualFollow = false;
+        w.manualFollowOwner = "";
+        w.lifeAction = "";
+        w.status = "военный приказ";
+        return true;
+    }
+
+    /** Releases only the matching military lease and restores the exact suspended task when still valid. */
+    public boolean releaseMilitaryTask(int workerId, String orderId) {
+        Worker w = worker(workerId);
+        if (w == null || !w.releaseTask(Worker.TaskOwner.MILITARY, orderId)) return false;
+        w.militaryOrderId = "";
+        Worker.TaskOwner resume = w.suspendedTaskOwner;
+        String resumeId = w.suspendedTaskId;
+        w.suspendedTaskOwner = Worker.TaskOwner.NONE;
+        w.suspendedTaskId = "";
+        if (resume == Worker.TaskOwner.SETTLEMENT && !resumeId.isBlank()) {
+            int buildingId;
+            try { buildingId = Integer.parseInt(resumeId.substring(resumeId.indexOf(':') + 1)); }
+            catch (RuntimeException ex) { buildingId = 0; }
+            Building target = building(buildingId);
+            if (target != null && target.state != Building.State.PLANNED) {
+                String role = availableRole(w, target);
+                if (!role.isEmpty()) {
+                    w.claimTask(Worker.TaskOwner.SETTLEMENT, resumeId, true);
+                    w.building = buildingId;
+                    w.assignedProfession = role;
+                    w.status = "";
+                    return true;
+                }
+            }
+        } else if (resume == Worker.TaskOwner.PLAYER && !resumeId.isBlank()) {
+            w.claimTask(Worker.TaskOwner.PLAYER, resumeId, true);
+            w.status = "приказ игрока";
+            return true;
+        } else if (resume == Worker.TaskOwner.LIFE) {
+            w.claimTask(Worker.TaskOwner.LIFE, resumeId.isBlank() ? "daily-life" : resumeId, true);
+            w.status = "повседневная жизнь";
+            return true;
+        }
+        w.taskOwner = Worker.TaskOwner.NONE;
+        w.taskId = "";
+        w.taskRevision++;
+        w.status = "свободен";
+        return true;
+    }
+
+    /** Daily-life actions suspend settlement work; the lease prevents auto-staffing from stealing the resident. */
+    public boolean claimLifeTask(int workerId, String actionId) {
+        Worker w = worker(workerId);
+        if (w == null || w.taskOwner == Worker.TaskOwner.PLAYER || w.taskOwner == Worker.TaskOwner.MILITARY) return false;
+        if (!w.claimTask(Worker.TaskOwner.LIFE, actionId == null || actionId.isBlank() ? "daily-life" : actionId, true)) return false;
+        w.status = "повседневная жизнь";
+        return true;
+    }
+
+    public boolean releaseLifeTask(int workerId, String actionId) {
+        Worker w = worker(workerId);
+        if (w == null || !w.releaseTask(Worker.TaskOwner.LIFE, actionId)) return false;
+        w.status = "свободен";
+        return true;
+    }
+
+    /** Allows other mods to inspect whether a resident can accept a task without mutating state. */
+    public boolean canClaimTask(int workerId, Worker.TaskOwner owner) {
+        Worker w = worker(workerId);
+        return w != null && owner != null && owner != Worker.TaskOwner.NONE
+                && w.taskOwner.priority <= owner.priority;
+    }
+
     public void assign(int workerId, int uid) { assign(workerId, uid, null); }
 
     /** Assigns a resident to one exact role when requested by a direct dialogue/RTS order. */
