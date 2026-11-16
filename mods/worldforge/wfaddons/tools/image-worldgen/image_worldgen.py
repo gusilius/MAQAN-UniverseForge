@@ -238,13 +238,27 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     if sum(map(len, components)) < 32:
         raise ValueError("The map has too little land for meaningful territory generation.")
 
-    # Avoid creating politically meaningless micro-states on tiny islands/components.
-    realm_total = max(len(components), min(realm_count, max(1, sum(map(len, components)) // minimum_territory_pixels)))
-    realm_counts = allocate_counts(components, realm_total)
+    # Tiny disconnected map fragments are wilderness, not independent states.
+    # A political realm is only seeded from a landmass large enough to support
+    # at least one profile-sized territory. This prevents coast antialiasing,
+    # tiny islets and scattered pixels from becoming hundreds of micro-states.
+    major_components = [component for component in components
+                        if len(component) >= minimum_territory_pixels]
+    if not major_components:
+        major_components = [components[0]]
+    major_land_pixels = sum(map(len, major_components))
+    unclaimed_land_pixels = land_count = sum(1 for kind in classes if kind in LAND_CLASSES)
+    unclaimed_land_pixels -= major_land_pixels
+
+    realm_total = max(
+        len(major_components),
+        min(realm_count, max(1, major_land_pixels // minimum_territory_pixels)),
+    )
+    realm_counts = allocate_counts(major_components, realm_total)
     realm_labels = [-1] * (width * height)
     realm_seeds: dict[int, int] = {}
     next_realm = 0
-    for component, count in zip(components, realm_counts):
+    for component, count in zip(major_components, realm_counts):
         seeds = farthest_seeds(component, count, width, seed ^ (next_realm + 1))
         labels, _ = partition(component, seeds, width, height, next_realm)
         for index, label in labels.items():
@@ -256,8 +270,8 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     province_labels = np.zeros(width * height, dtype=np.uint32)
     province_meta: dict[int, dict] = {}
     realm_provinces: dict[int, list[int]] = {}
-    # Build each realm's pixel list in one pass. Avoid O(realms * image_pixels)
-    # repeated full-raster scans, which dominate generation on large maps.
+    # Build each realm's pixel list in one pass. Unclaimed minor islands remain
+    # land in the biome/height layers but have no political province (ID 0).
     realm_cells_by_id = {rid: [] for rid in range(realm_total)}
     for pixel_index, realm_id in enumerate(realm_labels):
         if realm_id >= 0:
@@ -267,7 +281,6 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         realm_cells = realm_cells_by_id[realm_id]
         if not realm_cells:
             continue
-        # At least the profile-defined minimum pixels per smallest political territory.
         count = min(provinces_per_realm, max(1, len(realm_cells) // minimum_territory_pixels))
         seeds = farthest_seeds(realm_cells, count, width, seed ^ (realm_id * 7919))
         labels, _ = partition(realm_cells, seeds, width, height, next_province)
@@ -285,7 +298,6 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
             }
         next_province += len(seeds)
 
-    land_count = sum(1 for kind in classes if kind in LAND_CLASSES)
     province_neighbors = {pid: set() for pid in province_meta}
     realm_neighbors = {rid: set() for rid in realm_provinces}
     for z in range(height):
@@ -409,6 +421,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         "settlement_level": settlement_level, "settlement_profile": settlement_profile,
         "seed": seed, "source_image_sha256": source_hash, "size_px": [width, height],
         "blocks_per_pixel": blocks_per_pixel, "land_pixels": land_count,
+        "politically_unclaimed_land_pixels": unclaimed_land_pixels,
         "realm_count": len(realms), "province_count": len(province_meta),
         "settlement_count": len(settlements), "realms": realms,
         "generation_seconds": round(time.perf_counter() - started_at, 4),
@@ -518,7 +531,9 @@ def validate_package(path: Path) -> dict:
             "worldmap": path.name, "realm_count": blueprint["realm_count"],
             "province_count": blueprint["province_count"],
             "settlement_count": blueprint["settlement_count"],
-            "land_pixels": blueprint["land_pixels"], "seed": blueprint["seed"],
+            "land_pixels": blueprint["land_pixels"],
+            "politically_unclaimed_land_pixels": blueprint["politically_unclaimed_land_pixels"],
+            "seed": blueprint["seed"],
             "source_image_sha256": blueprint["source_image_sha256"],
             "chunk_materialization": blueprint["generation_policy"]["chunk_materialization"],
         }
