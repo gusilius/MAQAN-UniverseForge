@@ -70,3 +70,11 @@ The importer validates all four themes and all ten image layers per theme, decod
 - The concept top bar is decorative artwork with native shell controls layered over it. Profile tabs, workspace profiles, notifications and close actions remain visible and retain the same hit regions.
 - The compact navigation rail calculates how many drawer shortcuts fit above its settings control. Short viewports hide shortcuts that cannot fit rather than allowing them to overlap the settings button or bottom dock.
 - The top bar keeps a minimum usable control height on narrow screens; the original reference layout remains unchanged at the supplied 1368×760 geometry.
+
+### Provider content composition and desktop map viewport
+
+- Desktop skin geometry exposes one central content viewport between the imported left/right blank frames and above the minimap/RTS dock. The preview and registered map overlays use this viewport; the desktop provider view retains its full host dimensions so its own catalogue and dossier hit regions are not cropped by the generic dock tree.
+- The imported skin is drawn before provider content. Atlas' embedded renderer suppresses its standalone background and opaque panel surfaces, while retaining its catalogue, object dossier, map geometry, selection and input handling. This lets provider-owned content appear over the MAQAN concept frames without replacing provider data or hit-testing.
+- In compact mode, Atlas hides its own side columns and yields that space to MAQAN's native drawers. Its map is clipped to the workspace canvas above the top bar and persistent minimap/command dock.
+- Profile changes no longer clear the shared entity selection. Existing provider screen instances remain cached, preserving provider-owned camera/view state when switching away and back. Camera modes and map modes remain separate concepts; no fake RTS camera action is exposed until a real game-camera controller is connected.
+- Tests cover the desktop central viewport bounds and verify that compact layouts do not use desktop side-window geometry.
