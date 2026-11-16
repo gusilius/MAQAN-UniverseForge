@@ -68,6 +68,7 @@ public final class NameBank {
                 String race = String.valueOf(entry.getKey()), parent = String.valueOf(entry.getValue());
                 if (!race.isBlank() && !parent.isBlank() && !race.equals(parent)) raceParents.put(race, parent);
             }
+        validateRaceParents();
     }
 
     @SuppressWarnings("unchecked")
@@ -146,13 +147,33 @@ public final class NameBank {
         return p != null && !p.male.isEmpty() && !p.female.isEmpty() && !p.houses.isEmpty();
     }
 
+    /** Reject cyclic race ancestry before it can poison cached name resolution. */
+    private void validateRaceParents() {
+        for (String start : raceParents.keySet()) {
+            Set<String> seen = new HashSet<>();
+            String current = start;
+            while (current != null && !current.isBlank()) {
+                if (!seen.add(current))
+                    throw new IllegalArgumentException("Цикл наследования расовых имён: " + String.join(" -> ", seen) + " -> " + current);
+                current = raceParents.get(current);
+            }
+        }
+    }
+
     /** Merge the authoritative wf-origins race ancestry without deleting datapack overrides. */
     public void addRaceParents(Map<String, String> parents) {
         if (parents == null) return;
+        Map<String, String> previous = new LinkedHashMap<>(raceParents);
         for (Map.Entry<String, String> entry : parents.entrySet()) {
             String race = entry.getKey(), parent = entry.getValue();
             if (race != null && parent != null && !race.isBlank() && !parent.isBlank()
                     && !race.equals(parent)) raceParents.put(race, parent);
+        }
+        try { validateRaceParents(); }
+        catch (IllegalArgumentException invalid) {
+            raceParents.clear();
+            raceParents.putAll(previous);
+            throw invalid;
         }
         resolvedPools.clear();
     }

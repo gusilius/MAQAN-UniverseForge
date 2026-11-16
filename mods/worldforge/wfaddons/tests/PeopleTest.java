@@ -61,6 +61,12 @@ public class PeopleTest {
                 "race-specific lexicons contain substantial city and personal-name variants");
         NameBank minimalNames = new NameBank();
         minimalNames.add("{\"default\":\"basic\",\"cultures\":{\"basic\":{\"male\":[\"Aren\"],\"female\":[\"Mira\"],\"houses\":[\"Stone\"]}}}");
+        boolean cyclicRaceParentsRejected = false;
+        try {
+            NameBank cyclic = new NameBank();
+            cyclic.add("{\"default\":\"basic\",\"cultures\":{\"basic\":{\"male\":[\"A\"],\"female\":[\"B\"],\"houses\":[\"C\"]}},\"race_parents\":{\"race_a\":\"race_b\",\"race_b\":\"race_a\"}}");
+        } catch (IllegalArgumentException expected) { cyclicRaceParentsRejected = true; }
+        ok(cyclicRaceParentsRejected, "NameBank rejects cyclic race ancestry instead of caching an ambiguous inheritance chain");
         for (String category : List.of("realms", "regions", "provinces", "settlements")) {
             String generated = minimalNames.generate("unknown-race", "missing-culture", category, new Random(19L));
             ok(!generated.isBlank(), "minimal third-party NameBank safely generates " + category + " names");
