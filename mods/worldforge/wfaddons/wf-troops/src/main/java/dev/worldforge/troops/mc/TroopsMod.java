@@ -1194,6 +1194,18 @@ public class TroopsMod {
                                                                 StringArgumentType.getString(ctx, "squad"),
                                                                 StringArgumentType.getString(ctx, "mode"),
                                                                 StringArgumentType.getString(ctx, "commander"))))))))
+                        .then(Commands.literal("corps")
+                                .then(Commands.argument("corps", StringArgumentType.word())
+                                        .then(Commands.argument("mode", StringArgumentType.word())
+                                                .executes(ctx -> setCorpsCommandPolicy(ctx.getSource(),
+                                                        StringArgumentType.getString(ctx, "corps"),
+                                                        StringArgumentType.getString(ctx, "mode"))))))
+                        .then(Commands.literal("army")
+                                .then(Commands.argument("army", IntegerArgumentType.integer(1))
+                                        .then(Commands.argument("mode", StringArgumentType.word())
+                                                .executes(ctx -> setArmyCommandPolicy(ctx.getSource(),
+                                                        IntegerArgumentType.getInteger(ctx, "army"),
+                                                        StringArgumentType.getString(ctx, "mode"))))))
                 .then(Commands.literal("commander")
                         .then(Commands.literal("army")
                                 .then(Commands.argument("army", IntegerArgumentType.integer(1))
@@ -1399,6 +1411,72 @@ public class TroopsMod {
         } catch (RuntimeException ex) {
             src.sendFailure(Component.literal(ex.getMessage())); return 0;
         }
+    }
+
+    private static CommandDelegation.Mode parseCommandMode(String value) {
+        return switch (value == null ? "" : value.toLowerCase(Locale.ROOT)) {
+            case "direct" -> CommandDelegation.Mode.PLAYER_DIRECT;
+            case "delegated" -> CommandDelegation.Mode.DELEGATED;
+            case "autonomous" -> CommandDelegation.Mode.AUTONOMOUS;
+            default -> throw new IllegalArgumentException("Режим должен быть direct, delegated или autonomous");
+        };
+    }
+
+    private static int setArmyCommandPolicy(CommandSourceStack src, int armyId, String modeName) {
+        return executeMilitaryCommand(src, "military.command_policy.army", Integer.toString(armyId), modeName,
+                () -> setArmyCommandPolicyDirect(src, armyId, modeName));
+    }
+
+    private static int setArmyCommandPolicyDirect(CommandSourceStack src, int armyId, String modeName) {
+        ServerPlayer player;
+        try { player = src.getPlayerOrException(); }
+        catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
+        syncArmyHierarchy();
+        ArmyHierarchy.ArmyNode army = HIERARCHY.army(armyId);
+        if (army == null || !army.owner.equals(player.getUUID().toString())) {
+            src.sendFailure(Component.literal("Армия не найдена или принадлежит другому игроку")); return 0;
+        }
+        CommandDelegation.Mode mode;
+        try { mode = parseCommandMode(modeName); }
+        catch (IllegalArgumentException ex) { src.sendFailure(Component.literal(ex.getMessage())); return 0; }
+        String commander = mode == CommandDelegation.Mode.PLAYER_DIRECT ? "" : army.commanderCharacterId;
+        if (mode != CommandDelegation.Mode.PLAYER_DIRECT
+                && (commander.isBlank() || findArmyCharacter(army, commander) == null)) {
+            src.sendFailure(Component.literal("Сначала назначьте живого Character командующим этой армии")); return 0;
+        }
+        if (!COMMANDS.assignScope(CommandDelegation.ScopeType.ARMY, Integer.toString(armyId),
+                mode, commander, "", 256, true, false, false)) return 0;
+        src.sendSuccess(() -> Component.literal("Политика командования армии «" + army.name + "»: " + mode.name()), false);
+        return 1;
+    }
+
+    private static int setCorpsCommandPolicy(CommandSourceStack src, String corpsId, String modeName) {
+        return executeMilitaryCommand(src, "military.command_policy.corps", corpsId, modeName,
+                () -> setCorpsCommandPolicyDirect(src, corpsId, modeName));
+    }
+
+    private static int setCorpsCommandPolicyDirect(CommandSourceStack src, String corpsId, String modeName) {
+        ServerPlayer player;
+        try { player = src.getPlayerOrException(); }
+        catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
+        syncArmyHierarchy();
+        ArmyHierarchy.Corps corps = HIERARCHY.corps(corpsId);
+        ArmyHierarchy.ArmyNode army = corps == null ? null : HIERARCHY.army(corps.armyId);
+        if (corps == null || army == null || !army.owner.equals(player.getUUID().toString())) {
+            src.sendFailure(Component.literal("Корпус не найден или принадлежит другому игроку")); return 0;
+        }
+        CommandDelegation.Mode mode;
+        try { mode = parseCommandMode(modeName); }
+        catch (IllegalArgumentException ex) { src.sendFailure(Component.literal(ex.getMessage())); return 0; }
+        String commander = mode == CommandDelegation.Mode.PLAYER_DIRECT ? "" : corps.commanderCharacterId;
+        if (mode != CommandDelegation.Mode.PLAYER_DIRECT
+                && (commander.isBlank() || findArmyCharacter(army, commander) == null)) {
+            src.sendFailure(Component.literal("Сначала назначьте живого Character командиром этого корпуса")); return 0;
+        }
+        if (!COMMANDS.assignScope(CommandDelegation.ScopeType.CORPS, corpsId,
+                mode, commander, "", 160, true, false, false)) return 0;
+        src.sendSuccess(() -> Component.literal("Политика командования корпуса «" + corps.name + "»: " + mode.name()), false);
+        return 1;
     }
 
     /** Sets a squad's explicit command policy; the commander must be a living canonical Character in that squad. */
