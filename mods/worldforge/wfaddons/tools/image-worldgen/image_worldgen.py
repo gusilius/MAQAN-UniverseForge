@@ -769,8 +769,6 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     if tiny_components:
         tiny_pixels = np.concatenate(tiny_components).astype(np.int64, copy=False)
         wilderness_mask.ravel()[tiny_pixels] = True
-        # Account for these excluded pixels in the unclaimed-land ledger too.
-        unclaimed_land_pixels += int(tiny_pixels.size)
         minor_components = [component for component in minor_components if len(component) >= 8]
     island_province_count = 0
     independent_island_realm_count = 0
@@ -1350,7 +1348,7 @@ def run_profile_suite(input_path: Path, output_dir: Path, seed: int,
     if not all(report["checks"].values()):
         raise AssertionError(f"Seven-profile QA failed: {report['checks']}")
     (output_dir / "seven-profile-comparison.json").write_text(
-        json.dumps(report, indent=2, sort_keys=True) + "\\n", encoding="utf-8")
+        json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return report
 
 
