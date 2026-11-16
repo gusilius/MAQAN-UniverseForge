@@ -1,6 +1,7 @@
 package dev.worldforge.troops.mc;
 
 import net.minecraft.client.model.HumanoidModel;
+import net.minecraft.client.model.PlayerModel;
 import net.minecraft.client.model.geom.ModelLayers;
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.client.renderer.entity.HumanoidMobRenderer;
@@ -9,12 +10,12 @@ import net.minecraft.resources.ResourceLocation;
 import com.mojang.blaze3d.vertex.PoseStack;
 
 /** Солдат выглядит как игрок (модель Стива) с оружием и бронёй в руках и на теле. Только клиент. */
-public class TroopRenderer extends HumanoidMobRenderer<TroopEntity, HumanoidModel<TroopEntity>> {
+public class TroopRenderer extends HumanoidMobRenderer<TroopEntity, PlayerModel<TroopEntity>> {
     private static final ResourceLocation STEVE = new ResourceLocation("textures/entity/steve.png");
     private static final ResourceLocation ALEX = new ResourceLocation("textures/entity/alex.png");
 
     public TroopRenderer(EntityRendererProvider.Context ctx) {
-        super(ctx, new HumanoidModel<>(ctx.bakeLayer(ModelLayers.PLAYER)), 0.5f);
+        super(ctx, new PlayerModel<>(ctx.bakeLayer(ModelLayers.PLAYER), false), 0.5f);
         addLayer(new HumanoidArmorLayer<>(this, new HumanoidModel<>(ctx.bakeLayer(ModelLayers.PLAYER_INNER_ARMOR)),
                 new HumanoidModel<>(ctx.bakeLayer(ModelLayers.PLAYER_OUTER_ARMOR)), ctx.getModelManager()));
     }
