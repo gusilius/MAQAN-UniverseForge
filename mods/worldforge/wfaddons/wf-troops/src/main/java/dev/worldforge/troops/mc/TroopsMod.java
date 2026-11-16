@@ -85,6 +85,8 @@ public class TroopsMod {
     public static volatile TroopDefs DEFS = load(null);
     public static final Squads SQUADS = new Squads();
     public static final ArmyHierarchy HIERARCHY = new ArmyHierarchy();
+    /** Explicit army/corps/squad command authority; unconfigured forces remain player-controlled. */
+    public static final CommandDelegation COMMANDS = new CommandDelegation();
     public static final Forts FORTS = new Forts();
     public static final Map<String, TroopEntity> LIVE = new ConcurrentHashMap<>();
     /** Durable death outbox; a soldier body is retained until the canonical Character estate is committed. */
@@ -234,6 +236,8 @@ public class TroopsMod {
             if (Files.exists(f)) SQUADS.fromJson(Files.readString(f));
             Path hf = dir(server).resolve("wf_army_hierarchy.json");
             if (Files.exists(hf)) HIERARCHY.fromJson(Files.readString(hf));
+            Path cf = dir(server).resolve("wf_command_delegation.json");
+            if (Files.exists(cf)) COMMANDS.fromJson(Files.readString(cf));
             Path ff = dir(server).resolve("wf_forts.json");
             if (Files.exists(ff)) FORTS.fromJson(Files.readString(ff));
             Path df = dir(server).resolve("wf_military_deaths.json");
@@ -264,6 +268,7 @@ public class TroopsMod {
         Path root = dir(server);
         snapshots.put(root.resolve("wf_squads.json"), SQUADS.toJson());
         snapshots.put(root.resolve("wf_army_hierarchy.json"), HIERARCHY.toJson());
+        snapshots.put(root.resolve("wf_command_delegation.json"), COMMANDS.toJson());
         snapshots.put(root.resolve("wf_forts.json"), FORTS.toJson());
         snapshots.put(root.resolve("wf_military_deaths.json"), DEATHS.toJson());
         snapshots.put(root.resolve("wf_operational_supply.json"), SUPPLY.toJson());
@@ -347,6 +352,7 @@ public class TroopsMod {
             }
         }
         HIERARCHY.pruneSquads(SQUADS);
+        COMMANDS.prune(HIERARCHY, SQUADS);
     }
 
     @SubscribeEvent
