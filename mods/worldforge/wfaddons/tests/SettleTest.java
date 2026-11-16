@@ -281,8 +281,10 @@ public class SettleTest {
                         && restoredDaily.lifeTargetX == 7 && restoredDaily.lifeTargetZ == -4
                         && restoredDaily.lifeActionUntil == 900,
                 "военный приказ возвращает жителя к прерванному повседневному действию");
-        ok(lifeLeaseBack.moveTo(restoredDaily.id, 3, 3) == null,
-                "placeholder");
+        lifeLeaseBack.moveTo(restoredDaily.id, 3, 3);
+        ok(restoredDaily.taskOwner == Worker.TaskOwner.PLAYER && restoredDaily.manualOrder
+                        && restoredDaily.lifeAction.isBlank(),
+                "прямой приказ игрока прерывает повседневную задачу и получает высший приоритет");
 
         // зависимости и лимиты
         ok(throwsOrder(() -> s.place("granary", 30, 30)), "амбар требует лесопилку");
