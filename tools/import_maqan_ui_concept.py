@@ -52,8 +52,10 @@ def main() -> None:
         raise ValueError("Concept is missing required themes: " + ", ".join(missing))
 
     resource_root = args.repo_root / "platform/src/main/resources/assets/maqan"
+    texture_sizes: dict[str, dict[str, list[int]]] = {}
     for theme in THEME_KEYS:
         theme_data = skins[theme]
+        texture_sizes[theme] = {}
         if set(theme_data) != set(TEXTURE_NAMES):
             raise ValueError(f"{theme}: expected exactly {len(TEXTURE_NAMES)} image layers.")
         target = resource_root / "textures/gui" / theme
@@ -65,7 +67,9 @@ def main() -> None:
                 raise ValueError(f"{theme}/{key}: invalid embedded image data.")
             raw = base64.b64decode(encoded, validate=True)
             with Image.open(io.BytesIO(raw)) as image:
-                image.convert("RGBA").save(target / filename, format="PNG", optimize=True)
+                converted = image.convert("RGBA")
+                texture_sizes[theme][key] = [converted.width, converted.height]
+                converted.save(target / filename, format="PNG", optimize=True)
 
     manifest = {
         "schemaVersion": 2,
@@ -74,6 +78,7 @@ def main() -> None:
         "defaultTheme": "royal",
         "requiredThemes": list(THEME_KEYS),
         "textureNames": TEXTURE_NAMES,
+        "textureSizes": texture_sizes,
         "skins": {theme: layouts[theme] for theme in THEME_KEYS},
         "layerOrder": ["world_scene", "minimap", "frame", "rts_console",
                        "top_bar", "corner", "left_column", "right_column", "windows"],
