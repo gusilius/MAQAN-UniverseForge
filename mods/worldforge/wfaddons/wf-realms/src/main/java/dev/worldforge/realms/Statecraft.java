@@ -58,11 +58,13 @@ public final class Statecraft {
 
     public static final class Dynasty {
         public final String houseId;
+        /** Stable display label, distinct from the canonical house/dynasty key. */
+        public String name;
         public String founderCharacterId;
         public int prestige;
         public final Set<String> members = new LinkedHashSet<>();
         private Dynasty(String houseId, String founderCharacterId) {
-            this.houseId = houseId; this.founderCharacterId = founderCharacterId;
+            this.houseId = houseId; this.name = houseId; this.founderCharacterId = founderCharacterId;
             if (!founderCharacterId.isEmpty()) members.add(founderCharacterId);
         }
     }
@@ -466,11 +468,25 @@ public final class Statecraft {
     // ---------------- Dynasties ----------------
 
     public Dynasty registerDynasty(String houseId, String founderCharacterId) {
+        return registerDynasty(houseId, founderCharacterId, houseId);
+    }
+
+    public Dynasty registerDynasty(String houseId, String founderCharacterId, String displayName) {
         String house = clean(houseId, "house id");
         String founder = clean(founderCharacterId, "founder Character ID");
         Dynasty d = dynasties.computeIfAbsent(house, k -> new Dynasty(k, founder));
         d.members.add(founder);
+        setDynastyName(house, displayName);
         return d;
+    }
+
+    public boolean setDynastyName(String houseId, String displayName) {
+        Dynasty d = dynasties.get(houseId);
+        if (d == null) return fail("unknown dynasty");
+        if (displayName == null || displayName.isBlank() || displayName.trim().length() > 128)
+            return fail("invalid dynasty display name");
+        d.name = displayName.trim();
+        return true;
     }
     public boolean addDynastyMember(String houseId, String characterId) {
         Dynasty d = dynasties.get(houseId);
@@ -717,7 +733,7 @@ public final class Statecraft {
         for (VassalContract v:vassals.values()) { Map<String,Object> m=new LinkedHashMap<>();m.put("vassal",v.vassalRealm);m.put("liege",v.liegeRealm);m.put("tax",v.taxShare);m.put("levy",v.levyShare);m.put("loyalty",v.loyalty);m.put("protected",v.protectedByLiege);m.put("subjectType",v.subjectType.name());m.put("autonomy",v.autonomy);vs.add(m); }
         root.put("vassals",vs);
         List<Object> ds=new ArrayList<>();
-        for (Dynasty d:dynasties.values()) { Map<String,Object> m=new LinkedHashMap<>();m.put("house",d.houseId);m.put("founder",d.founderCharacterId);m.put("prestige",d.prestige);m.put("members",new ArrayList<>(d.members));ds.add(m); }
+        for (Dynasty d:dynasties.values()) { Map<String,Object> m=new LinkedHashMap<>();m.put("house",d.houseId);m.put("name",d.name);m.put("founder",d.founderCharacterId);m.put("prestige",d.prestige);m.put("members",new ArrayList<>(d.members));ds.add(m); }
         root.put("dynasties",ds);
         Map<String,Object> tr=new LinkedHashMap<>();
         for (var e:treasuries.entrySet()) { Treasury t=e.getValue();Map<String,Object> m=new LinkedHashMap<>();m.put("balance",t.balance);m.put("taxRate",t.taxRate);m.put("lastIncome",t.lastIncome);m.put("lastExpenses",t.lastExpenses);m.put("taxDays",t.taxDays);tr.put(e.getKey(),m); }
@@ -756,7 +772,8 @@ public final class Statecraft {
             VassalContract v=next.vassals.get(String.valueOf(m.get("vassal")));v.loyalty=((Number)value(m,"loyalty",50)).intValue();v.protectedByLiege=!Boolean.FALSE.equals(m.get("protected"));v.subjectType=SubjectType.valueOf(String.valueOf(value(m,"subjectType","FEUDAL_VASSAL")));v.autonomy=Math.max(0,Math.min(100,((Number)value(m,"autonomy",35)).intValue()));
         }
         if(root.get("dynasties") instanceof List<?> list) for(Object x:list) {
-            Map<?,?> m=(Map<?,?>)x; Dynasty d=next.registerDynasty(String.valueOf(m.get("house")),String.valueOf(m.get("founder")));
+            Map<?,?> m=(Map<?,?>)x; String house=String.valueOf(m.get("house"));
+            Dynasty d=next.registerDynasty(house,String.valueOf(m.get("founder")),String.valueOf(value(m,"name",house)));
             d.prestige=((Number)value(m,"prestige",0)).intValue();if(m.get("members") instanceof List<?> members)for(Object id:members)d.members.add(String.valueOf(id));
         }
         if(root.get("treasuries") instanceof Map<?,?> map) for(var e:map.entrySet()) {
