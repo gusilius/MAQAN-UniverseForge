@@ -72,7 +72,7 @@ public class CharacterScreen extends Screen {
     /** Attach the canonical CharacterRegistry to MAQAN without copying domain state. */
     private void registerMaqanWorkspaceProvider() {
         dev.worldforge.mod.client.PlatformWorkspaceBridge.registerInspector("wf_people", entityId -> {
-            Character character = ch(entityId);
+            Character character = chByIdentity(entityId);
             if (character == null) return java.util.Collections.singletonList(
                     new String[]{"People", "Status", "Character is no longer in this world registry"});
             List<String[]> rows = new ArrayList<>();
@@ -97,18 +97,21 @@ public class CharacterScreen extends Screen {
             return rows;
         });
         dev.worldforge.mod.client.PlatformWorkspaceBridge.registerEntityOpener("wf_people", entityId -> {
-            if (ch(entityId) == null) return;
-            if (!java.util.Objects.equals(focus, entityId)) history.add(focus);
-            focus = entityId;
+            Character character = chByIdentity(entityId);
+            if (character == null) return;
+            if (!java.util.Objects.equals(focus, character.id)) history.add(focus);
+            focus = character.id;
             famScroll = 0;
             appointOpen = false;
         });
         dev.worldforge.mod.client.PlatformWorkspaceBridge.registerAction(
                 "wf_people.focus", "Focus character", "wf_people",
-                entityId -> ch(entityId) != null,
+                entityId -> chByIdentity(entityId) != null,
                 entityId -> {
-                    if (!java.util.Objects.equals(focus, entityId)) history.add(focus);
-                    focus = entityId;
+                    Character character = chByIdentity(entityId);
+                    if (character == null) return;
+                    if (!java.util.Objects.equals(focus, character.id)) history.add(focus);
+                    focus = character.id;
                     famScroll = 0;
                     appointOpen = false;
                 });
@@ -153,6 +156,14 @@ public class CharacterScreen extends Screen {
     }
 
     private Character ch(String id) { return id == null || id.isEmpty() ? null : reg.get(id); }
+
+    private Character chByIdentity(String identity) {
+        Character character = ch(identity);
+        if (character != null || identity == null || identity.isBlank()) return character;
+        for (Character candidate : reg.all())
+            if (identity.equals(candidate.globalId)) return candidate;
+        return null;
+    }
 
     private List<Character> siblings(Character c) {
         List<Character> out = new ArrayList<>();
@@ -632,7 +643,7 @@ public class CharacterScreen extends Screen {
                     + (character.culture.isBlank() ? "" : " · culture " + character.culture);
             context.getMethod("publish", String.class, String.class, String.class,
                     String.class, String.class, String.class)
-                    .invoke(null, "wf_people", character.id, "character",
+                    .invoke(null, "wf_people", character.globalId, "character",
                             character.name, world, summary);
         } catch (ReflectiveOperationException | LinkageError ignored) {
             // Platform is optional; the standalone character screen remains fully functional.
