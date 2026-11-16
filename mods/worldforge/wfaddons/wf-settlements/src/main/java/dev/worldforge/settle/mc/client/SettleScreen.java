@@ -33,6 +33,90 @@ public class SettleScreen extends Screen {
         super(Component.literal(s.name));
         this.s = s;
         this.cmd = cmd;
+        registerMaqanWorkspaceProvider();
+    }
+
+    /** Expose live settlement entities through the shared MAQAN workspace. */
+    private void registerMaqanWorkspaceProvider() {
+        dev.worldforge.mod.client.PlatformWorkspaceBridge.registerInspector("wf_settlements", entityId -> {
+            Building building = buildingForEntity(entityId);
+            if (building != null) {
+                List<String[]> rows = new ArrayList<>();
+                rows.add(new String[]{"Identity", "Building", building.def.name});
+                rows.add(new String[]{"Identity", "Building ID", Integer.toString(building.uid)});
+                rows.add(new String[]{"Settlement", "Settlement", s.name});
+                rows.add(new String[]{"Construction", "State", building.state.toString()});
+                rows.add(new String[]{"Construction", "Coordinates", building.x + ", " + building.z});
+                rows.add(new String[]{"Production", "Priority", Integer.toString(building.priority)});
+                rows.add(new String[]{"Production", "Paused", Boolean.toString(building.paused)});
+                rows.add(new String[]{"Workforce", "Assigned workers", Integer.toString(s.assigned(building.uid).size())});
+                return rows;
+            }
+            Worker worker = workerForEntity(entityId);
+            if (worker != null) {
+                Building workplace = s.building(worker.building);
+                List<String[]> rows = new ArrayList<>();
+                rows.add(new String[]{"Identity", "Resident", worker.name});
+                rows.add(new String[]{"Identity", "Worker ID", Integer.toString(worker.id)});
+                if (worker.person != null && !worker.person.isBlank())
+                    rows.add(new String[]{"Identity", "Character ID", worker.person});
+                rows.add(new String[]{"Profession", "Role", s.defs.professionName(worker.profession)});
+                rows.add(new String[]{"Work", "Building", workplace == null ? "Unassigned" : workplace.def.name});
+                rows.add(new String[]{"Work", "Status", worker.status == null ? "" : worker.status});
+                rows.add(new String[]{"Work", "Position", Math.round(worker.x) + ", " + Math.round(worker.z)});
+                rows.add(new String[]{"Work", "Moving", Boolean.toString(worker.moving)});
+                return rows;
+            }
+            if (("settlement:" + s.id).equals(entityId))
+                return java.util.Collections.singletonList(new String[]{"Settlement", "Name", s.name});
+            return java.util.Collections.singletonList(
+                    new String[]{"Settlement", "Status", "Entity is no longer in this settlement"});
+        });
+        dev.worldforge.mod.client.PlatformWorkspaceBridge.registerEntityOpener("wf_settlements", entityId -> {
+            Building building = buildingForEntity(entityId);
+            if (building != null) {
+                selBuilding = building.uid;
+                selWorker = 0;
+                tab = 1;
+                scroll = Math.max(0, s.buildings.indexOf(building));
+                return;
+            }
+            Worker worker = workerForEntity(entityId);
+            if (worker != null) {
+                selWorker = worker.id;
+                selBuilding = 0;
+                tab = 2;
+                scroll = Math.max(0, s.workers.indexOf(worker));
+            }
+        });
+        dev.worldforge.mod.client.PlatformWorkspaceBridge.registerAction(
+                "wf_settlements.worker.unassign", "Release worker", "wf_settlements",
+                entityId -> {
+                    Worker worker = workerForEntity(entityId);
+                    return worker != null && worker.building != 0;
+                },
+                entityId -> {
+                    Worker worker = workerForEntity(entityId);
+                    if (worker != null && worker.building != 0)
+                        cmd.accept("wfsettle unassign " + worker.id);
+                });
+    }
+
+    private Building buildingForEntity(String entityId) {
+        String prefix = "settlement:" + s.id + ":building:";
+        if (entityId == null || !entityId.startsWith(prefix)) return null;
+        try { return s.building(Integer.parseInt(entityId.substring(prefix.length()))); }
+        catch (NumberFormatException ignored) { return null; }
+    }
+
+    private Worker workerForEntity(String entityId) {
+        if (entityId == null) return null;
+        for (Worker worker : s.workers) {
+            if (entityId.equals(worker.person)
+                    || entityId.equals("settlement:" + s.id + ":worker:" + worker.id))
+                return worker;
+        }
+        return null;
     }
 
     public void setModel(Settlement n) {
