@@ -380,6 +380,76 @@ public final class CommandScreen extends Screen {
         return true;
     }
 
+    private void drawSettlementMinimap(GuiGraphics g) {
+        int[] frame = skinRect("mm");
+        if (frame == null) return;
+        int x = frame[0] + 12, y = frame[1] + 14;
+        int w = Math.max(1, frame[2] - 24), h = Math.max(1, frame[3] - 28);
+        g.fill(x, y, x + w, y + h, 0xFF172019);
+        g.renderOutline(x, y, w, h, 0xFF080B0A);
+        if (settlement == null) {
+            g.drawCenteredString(font, "ПОСЕЛЕНИЕ", x + w / 2, y + h / 2 - 4, 0xFF9EA98D);
+            return;
+        }
+
+        double minX = -24, maxX = 24, minZ = -24, maxZ = 24;
+        for (var building : settlement.buildings) {
+            if (building == null || building.def == null) continue;
+            double hx = Math.max(1, building.def.sizeX) * 0.5;
+            double hz = Math.max(1, building.def.sizeZ) * 0.5;
+            minX = Math.min(minX, building.x - hx); maxX = Math.max(maxX, building.x + hx);
+            minZ = Math.min(minZ, building.z - hz); maxZ = Math.max(maxZ, building.z + hz);
+        }
+        for (var worker : settlement.workers) {
+            if (worker == null) continue;
+            minX = Math.min(minX, worker.x); maxX = Math.max(maxX, worker.x);
+            minZ = Math.min(minZ, worker.z); maxZ = Math.max(maxZ, worker.z);
+        }
+        minX -= 6; maxX += 6; minZ -= 6; maxZ += 6;
+        double spanX = Math.max(48, maxX - minX), spanZ = Math.max(48, maxZ - minZ);
+        double scale = Math.min(w / spanX, h / spanZ);
+        double drawW = spanX * scale, drawH = spanZ * scale;
+        double ox = x + (w - drawW) * 0.5, oy = y + (h - drawH) * 0.5;
+        java.util.function.DoubleUnaryOperator sx = value -> ox + (value - minX) * scale;
+        java.util.function.DoubleUnaryOperator sy = value -> oy + (value - minZ) * scale;
+
+        g.enableScissor(x, y, x + w, y + h);
+        for (var building : settlement.buildings) {
+            if (building == null || building.def == null) continue;
+            int bw = Math.max(3, (int) Math.round(building.def.sizeX * scale));
+            int bh = Math.max(3, (int) Math.round(building.def.sizeZ * scale));
+            int cx = (int) Math.round(sx.applyAsDouble(building.x));
+            int cz = (int) Math.round(sy.applyAsDouble(building.z));
+            int color = switch (building.state) {
+                case DONE -> 0xFF71945E;
+                case BUILDING -> 0xFFC49A54;
+                case PLANNED -> 0xFF687383;
+            };
+            g.fill(cx - bw / 2 - 1, cz - bh / 2 - 1, cx + bw / 2 + 2, cz + bh / 2 + 2, 0xFF080B0A);
+            g.fill(cx - bw / 2, cz - bh / 2, cx + bw / 2 + 1, cz + bh / 2 + 1, color);
+        }
+        for (var worker : settlement.workers) {
+            if (worker == null) continue;
+            int px = (int) Math.round(sx.applyAsDouble(worker.x));
+            int pz = (int) Math.round(sy.applyAsDouble(worker.z));
+            int color = "guard".equals(worker.profession) ? 0xFFE06A5C
+                    : "builder".equals(worker.profession) ? 0xFFE5B65E : 0xFFB6D4A0;
+            g.fill(px - 2, pz - 2, px + 3, pz + 3, 0xFF080B0A);
+            g.fill(px - 1, pz - 1, px + 2, pz + 2, color);
+        }
+        if (minecraft.player != null) {
+            double localX = minecraft.player.getX() - colX;
+            double localZ = minecraft.player.getZ() - colZ;
+            if (localX >= minX && localX <= maxX && localZ >= minZ && localZ <= maxZ) {
+                int px = (int) Math.round(sx.applyAsDouble(localX));
+                int pz = (int) Math.round(sy.applyAsDouble(localZ));
+                g.fill(px - 3, pz - 1, px + 4, pz + 2, 0xFFFFFFFF);
+                g.fill(px, pz - 4, px + 2, pz + 5, 0xFFFFFFFF);
+            }
+        }
+        g.disableScissor();
+    }
+
     private void drawSettlementPanel(GuiGraphics g) {
         if (settlement == null || buildOpen) return;
         int[] frame = skinRect("rp");
@@ -793,6 +863,7 @@ public final class CommandScreen extends Screen {
             g.fill(x1, y1, x2, y1 + 1, 0xFF66FF66); g.fill(x1, y2 - 1, x2, y2, 0xFF66FF66);
             g.fill(x1, y1, x1 + 1, y2, 0xFF66FF66); g.fill(x2 - 1, y1, x2, y2, 0xFF66FF66);
         }
+        drawSettlementMinimap(g);
         for (Btn b : buttons()) button(g, b, mxi, myi);
         drawSelection(g, h);
         if (settlementOpen) drawSettlementPanel(g);
