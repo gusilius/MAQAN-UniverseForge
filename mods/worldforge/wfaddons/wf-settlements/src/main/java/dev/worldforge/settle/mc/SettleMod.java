@@ -845,15 +845,21 @@ public class SettleMod {
             if (("sleeping".equals(worker.lifeAction) || "eating".equals(worker.lifeAction)
                     || "socializing".equals(worker.lifeAction)) && settlement.time >= worker.lifeActionUntil
                     || ("fleeing".equals(worker.lifeAction) || "defending".equals(worker.lifeAction)) && !settlement.raidIncoming) {
-                worker.lifeAction = "";
-                worker.lifeActionUntil = 0;
-                worker.status = worker.building == 0 ? "свободен" : "работает";
+                if (worker.taskOwner == Worker.TaskOwner.LIFE)
+                    settlement.releaseLifeTask(worker.id, worker.taskId);
+                else {
+                    worker.lifeAction = "";
+                    worker.lifeActionUntil = 0;
+                    worker.status = worker.building == 0 ? "свободен" : "работает";
+                }
             }
-            if (!worker.lifeAction.isBlank()) continue;
+            if (worker.taskOwner == Worker.TaskOwner.PLAYER || worker.taskOwner == Worker.TaskOwner.MILITARY
+                    || !worker.lifeAction.isBlank()) continue;
             boolean brave = PopulationSimulation.hasDuty(person, Duty.SOLDIER)
                     || person.traits.contains("brave") || person.traits.contains("courageous")
                     || person.traits.contains("protective");
             if (settlement.raidIncoming && brave) {
+                if (!settlement.claimLifeTask(worker.id, "life:defending")) continue;
                 worker.lifeAction = "defending";
                 worker.lifeTargetX = 0; worker.lifeTargetZ = 0;
                 worker.lifeActionUntil = 1.0e12;
@@ -879,7 +885,11 @@ public class SettleMod {
             LifeSimulation.tick(person, context, (character, action, ignored) -> {
                 switch (action) {
                     case EAT -> {
-                        if (!settlement.consumeResource("food", 1.0)) return LifeSimulation.Outcome.BLOCKED;
+                        if (!settlement.claimLifeTask(worker.id, "life:eating")) return LifeSimulation.Outcome.BLOCKED;
+                        if (!settlement.consumeResource("food", 1.0)) {
+                            settlement.releaseLifeTask(worker.id, "life:eating");
+                            return LifeSimulation.Outcome.BLOCKED;
+                        }
                         double[] meal = residentMealPlace(settlement, worker);
                         worker.lifeAction = "eating";
                         worker.lifeTargetX = meal[0]; worker.lifeTargetZ = meal[1];
@@ -888,6 +898,7 @@ public class SettleMod {
                         return LifeSimulation.Outcome.SUCCESS;
                     }
                     case SLEEP -> {
+                        if (!settlement.claimLifeTask(worker.id, "life:sleeping")) return LifeSimulation.Outcome.BLOCKED;
                         double[] home = residentShelter(settlement, worker);
                         worker.lifeAction = "sleeping";
                         worker.lifeTargetX = home[0]; worker.lifeTargetZ = home[1];
@@ -896,7 +907,8 @@ public class SettleMod {
                         return LifeSimulation.Outcome.SUCCESS;
                     }
                     case SEEK_SAFETY -> {
-                        if (!settlement.raidIncoming) return LifeSimulation.Outcome.BLOCKED;
+                        if (!settlement.raidIncoming || !settlement.claimLifeTask(worker.id, "life:fleeing"))
+                            return LifeSimulation.Outcome.BLOCKED;
                         double[] shelter = residentShelter(settlement, worker);
                         worker.lifeAction = "fleeing";
                         worker.lifeTargetX = shelter[0]; worker.lifeTargetZ = shelter[1];
@@ -919,7 +931,9 @@ public class SettleMod {
                                 }
                             }
                         }
-                        if (companion == null || companionPerson == null) return LifeSimulation.Outcome.BLOCKED;
+                        if (companion == null || companionPerson == null
+                                || !settlement.claimLifeTask(worker.id, "life:socializing"))
+                            return LifeSimulation.Outcome.BLOCKED;
                         int opinion = dev.worldforge.settle.ResidentSocial.interactionDelta(person, companionPerson);
                         dev.worldforge.settle.ResidentSocial.socialize(person, companionPerson, opinion);
                         worker.lifeAction = "socializing";
