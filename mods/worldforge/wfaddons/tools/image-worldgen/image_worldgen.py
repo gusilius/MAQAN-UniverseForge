@@ -261,7 +261,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         titles.append({
             "id": pid, "key": meta["key"], "name": stable_name(seed, pid, " Hold"),
             "tier": 0, "parent": county_id_for_realm[rid], "color": color_for(rid + 1),
-            "capital": {"x": x, "z": z, "nx": nx, "ny": ny, "province": pid},
+            "capital": {"x": round((x + 0.5 - width * 0.5) * blocks_per_pixel), "z": round((z + 0.5 - height * 0.5) * blocks_per_pixel), "nx": nx, "ny": ny, "province": pid},
             "area_blocks": meta["area"] * blocks_per_pixel * blocks_per_pixel,
             "area_pct_of_land": 100.0 * meta["area"] / land_count,
             "children": [], "neighbors": sorted(province_neighbors[pid]), "props": {},
@@ -280,7 +280,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         titles.append({
             "id": county_id, "key": county_key, "name": realm_names[rid] + " Realm",
             "tier": 1, "parent": 0, "color": color_for(rid + 1),
-            "capital": {"x": x, "z": z, "nx": (x + 0.5) / width, "ny": (z + 0.5) / height, "province": capital_pid},
+            "capital": {"x": round((x + 0.5 - width * 0.5) * blocks_per_pixel), "z": round((z + 0.5 - height * 0.5) * blocks_per_pixel), "nx": (x + 0.5) / width, "ny": (z + 0.5) / height, "province": capital_pid},
             "area_blocks": total_area * blocks_per_pixel * blocks_per_pixel,
             "area_pct_of_land": 100.0 * total_area / land_count,
             "children": pids, "neighbors": sorted(county_id_for_realm[n] for n in realm_neighbors[rid]),
@@ -329,7 +329,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
             elevation = max(0, min(65535, int(base_height[kind] + wave * (900 if kind in LAND_CLASSES else 180))))
             height_values.append(elevation)
             biome_values.append(BIOME_INDEX.get(kind, 0))
-            river_values.append(255 if kind == "river" else 160 if kind == "shallow_sea" else 0)
+            river_values.append(255 if kind == "river" else 0)
 
     spawn = province_meta[realm_provinces[0][0]]["seed"]
     spawn_x, spawn_z = spawn % width, spawn // width
