@@ -102,24 +102,30 @@ def land_components(classes: list[str], width: int, height: int) -> list[list[in
 
 
 def farthest_seeds(cells: list[int], count: int, width: int, seed: int) -> list[int]:
+    """Deterministic bounded-pool farthest sampling: O(N + 32*K^2), not O(N*K)."""
     if not cells:
         return []
     count = max(1, min(count, len(cells)))
-    cx = sum(i % width for i in cells) / len(cells)
-    cz = sum(i // width for i in cells) / len(cells)
-    first = min(cells, key=lambda i: ((i % width - cx) ** 2 + (i // width - cz) ** 2, i))
-    selected = [first]
-    min_dist = {i: (i % width - first % width) ** 2 + (i // width - first // width) ** 2 for i in cells}
+    if count == 1:
+        return [cells[len(cells) // 2]]
+    rng = random.Random((seed & 0xFFFFFFFFFFFFFFFF) ^ (len(cells) * 0x9E3779B97F4A7C15))
+    candidates = sorted(rng.sample(cells, min(len(cells), max(count * 32, 256))))
+    cx = sum(i % width for i in candidates) / len(candidates)
+    cz = sum(i // width for i in candidates) / len(candidates)
+    first = min(candidates, key=lambda i: ((i % width - cx) ** 2 + (i // width - cz) ** 2, i))
+    selected, used = [first], {first}
+    min_dist = [(i % width - first % width) ** 2 + (i // width - first // width) ** 2 for i in candidates]
     while len(selected) < count:
-        best = max(cells, key=lambda i: (min_dist[i], -((i * 1103515245 + seed) & 0x7FFFFFFF)))
-        if best in selected:
+        pos = max(range(len(candidates)), key=lambda j: (min_dist[j], -candidates[j]))
+        best = candidates[pos]
+        if best in used:
             break
-        selected.append(best)
+        selected.append(best); used.add(best)
         sx, sz = best % width, best // width
-        for i in cells:
+        for j, i in enumerate(candidates):
             d = (i % width - sx) ** 2 + (i // width - sz) ** 2
-            if d < min_dist[i]:
-                min_dist[i] = d
+            if d < min_dist[j]:
+                min_dist[j] = d
     return selected
 
 
@@ -208,7 +214,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
             realm_seeds[next_realm + offset] = point
         next_realm += count
 
-    province_labels = [0] * (width * height)
+    province_labels = np.zeros(width * height, dtype=np.uint32)
     province_meta: dict[int, dict] = {}
     realm_provinces: dict[int, list[int]] = {}
     next_province = 1
@@ -223,15 +229,19 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         for index, label in labels.items():
             province_labels[index] = label
         realm_provinces[realm_id] = ids
+        label_counts = np.bincount(np.fromiter(labels.values(), dtype=np.int32),
+                                   minlength=next_province + len(seeds))
         for offset, province_id in enumerate(ids):
             province_meta[province_id] = {
                 "realm": realm_id, "seed": seeds[offset],
-                "area": sum(1 for value in labels.values() if value == province_id),
-                "key": f"realm_{realm_id + 1:02d}_province_{offset + 1:02d}",
+                "area": int(label_counts[province_id]),
+                "key": f"realm_{realm_id + 1:03d}_province_{offset + 1:03d}",
             }
         next_province += len(seeds)
 
     land_count = sum(1 for kind in classes if kind in LAND_CLASSES)
+    realm_array = np.asarray(realm_labels, dtype=np.int32)
+    realm_cells_by_id = {rid: np.flatnonzero(realm_array == rid).tolist() for rid in realm_provinces}
     province_neighbors = {pid: set() for pid in province_meta}
     realm_neighbors = {rid: set() for rid in realm_provinces}
     for z in range(height):
@@ -257,7 +267,6 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     titles = []
     realms = []
     settlements = []
-    province_rgb = [0] * (width * height)
     for pid, meta in province_meta.items():
         rid = meta["realm"]
         x, z = meta["seed"] % width, meta["seed"] // width
@@ -270,9 +279,6 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
             "area_pct_of_land": 100.0 * meta["area"] / land_count,
             "children": [], "neighbors": sorted(province_neighbors[pid]), "props": {},
         })
-        for i, label in enumerate(province_labels):
-            if label == pid:
-                province_rgb[i] = pid
 
     for rid, pids in realm_provinces.items():
         county_id = county_id_for_realm[rid]
@@ -313,7 +319,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         for offset, pid in enumerate(pids[1:], 2):
             add_settlement(("city", "town", "village")[(offset - 2) % 3],
                            province_meta[pid]["seed"], offset)
-        realm_cells = [i for i, label in enumerate(realm_labels) if label == rid]
+        realm_cells = realm_cells_by_id[rid]
         mountain_cells = [i for i in realm_cells if classes[i] == "mountains"]
         if mountain_cells:
             add_settlement("fortress", mountain_cells[len(mountain_cells) // 2], 20 + rid)
@@ -323,11 +329,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
             add_settlement("port", coast_cells[0], 30 + rid)
 
     # Geographic layers come from the shared semantic classifier and seeded relief.
-    analysis_labels = np.asarray(
-        [ANALYSIS_CLASSES.index(next(key for key, value in ANALYSIS_TO_WORLD.items() if value == kind))
-         if kind != "unknown" else ANALYSIS_CLASSES.index("unknown") for kind in classes],
-        dtype=np.uint8
-    ).reshape((height, width))
+    analysis_labels, _ = classify(np.asarray(image.convert("RGB"), dtype=np.uint8))
     height_values = make_heightfield(analysis_labels, seed).ravel().astype(np.uint16).tolist()
     biome_values = [BIOME_INDEX.get(kind, 0) for kind in classes]
     river_values = [255 if kind == "river" else 0 for kind in classes]
@@ -495,8 +497,8 @@ def main() -> int:
     convert.add_argument("--input", type=Path, required=True)
     convert.add_argument("--output", type=Path, required=True)
     convert.add_argument("--seed", type=int, required=True)
-    convert.add_argument("--realms", type=int, default=4)
-    convert.add_argument("--provinces-per-realm", type=int, default=4)
+    convert.add_argument("--realms", type=int, default=32)
+    convert.add_argument("--provinces-per-realm", type=int, default=16)
     convert.add_argument("--blocks-per-pixel", type=int, default=16)
     args = parser.parse_args()
     try:
