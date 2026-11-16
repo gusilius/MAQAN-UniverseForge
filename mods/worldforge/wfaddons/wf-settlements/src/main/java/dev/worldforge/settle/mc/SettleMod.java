@@ -90,6 +90,8 @@ public class SettleMod {
         return rep;
     }
     public static final Map<String, Colony> COLONIES = new ConcurrentHashMap<>();
+    /** A map blueprint is imported once per dimension/map after the durable settlement snapshot succeeds. */
+    private static final Set<String> IMPORTED_BLUEPRINTS = ConcurrentHashMap.newKeySet();
     public static dev.worldforge.settle.TradeNetwork NETWORK = new dev.worldforge.settle.TradeNetwork();
     private static long ticks;
     /** Fail-closed gate when an army logistics transfer cannot persist its ledger/settlement checkpoint. */
@@ -1230,6 +1232,7 @@ public class SettleMod {
     @SubscribeEvent
     public void onStarting(ServerStartingEvent e) {
         ticks = 0;
+        IMPORTED_BLUEPRINTS.clear();
         Blueprints.clearCache();
         Bodies.LIVE.clear();
         DEFS = loadDefs(e.getServer());
@@ -1245,6 +1248,7 @@ public class SettleMod {
     @SubscribeEvent
     public void onStopped(ServerStoppedEvent e) {
         COLONIES.clear();
+        IMPORTED_BLUEPRINTS.clear();
         DEFS = null;
         Blueprints.clearCache();
     }
@@ -1727,11 +1731,60 @@ public class SettleMod {
         settlement.applyTreasuryProjection(remitted, ledger.balance(source));
     }
 
+    /**
+     * Materializes the image generator's named settlement anchors into the canonical Settlement/Colony
+     * registry. The blueprint is immutable input; the Colony is the durable runtime projection.
+     * Imports are batched and marked complete only after saveDurably succeeds, so retries are idempotent.
+     */
+    private static void importWorldBlueprintSettlements(MinecraftServer server) {
+        if (DEFS == null || server == null) return;
+        for (ServerLevel level : server.getAllLevels()) {
+            if (!(level.getChunkSource().getGenerator() instanceof MapChunkGenerator generator)) continue;
+            dev.worldforge.mod.MapData map;
+            try { map = generator.data(); }
+            catch (RuntimeException ex) {
+                LOGGER.error("wf_settle: could not read map blueprint for dimension {}: {}",
+                        level.dimension().location(), ex.toString());
+                continue;
+            }
+            String dimension = level.dimension().location().toString();
+            String importKey = dimension + "|" + map.name;
+            if (IMPORTED_BLUEPRINTS.contains(importKey)) continue;
+            try {
+                int staged = 0;
+                String mapToken = map.name.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9_:-]", "_");
+                if (mapToken.length() > 32) mapToken = Integer.toUnsignedString(map.name.hashCode(), 36);
+                for (dev.worldforge.mod.MapData.SettlementSeed seed : map.settlementSeeds) {
+                    String id = "worldsim:settlement:" + mapToken + ":" + seed.id();
+                    String operationId = "worldsim:settlement:" + map.name + ":" + seed.id();
+                    boolean existed = COLONIES.containsKey(id);
+                    Colony colony = foundEmergentInMemory(server, dimension, id, seed.name(),
+                            seed.blockX(), seed.blockZ(), operationId);
+                    if (colony.realmId == null || colony.realmId.isBlank()) colony.realmId = seed.realmId();
+                    if (!existed) staged++;
+                }
+                if (!saveDurably(server)) {
+                    LOGGER.error("wf_settle: blueprint import for map '{}' in {} remains pending; durable snapshot failed",
+                            map.name, dimension);
+                    continue;
+                }
+                IMPORTED_BLUEPRINTS.add(importKey);
+                if (staged > 0 || !map.settlementSeeds.isEmpty())
+                    LOGGER.info("wf_settle: imported map blueprint '{}' in {}: {} named settlement anchors, {} new Colony records",
+                            map.name, dimension, map.settlementSeeds.size(), staged);
+            } catch (RuntimeException ex) {
+                LOGGER.error("wf_settle: blueprint settlement import failed for map '{}' in {}: {}",
+                        map.name, dimension, ex.toString(), ex);
+            }
+        }
+    }
+
     @SubscribeEvent
     public void onTick(TickEvent.ServerTickEvent e) {
         if (e.phase != TickEvent.Phase.END || DEFS == null) return;
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server == null) return;
+        importWorldBlueprintSettlements(server);
         ticks++;
         if (ticks % (STEP_TICKS * 10) == 0) VanillaVillageAdapter.reconcile(server);
         if (actionsBlocked()) return;
