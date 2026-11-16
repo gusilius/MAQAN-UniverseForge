@@ -57,7 +57,134 @@ public final class CommandScreen extends Screen {
     private int[] ghostAt;
     private String ghostMsg = "";
 
-    public CommandScreen() { super(Component.literal("Командный режим")); }
+    public CommandScreen() {
+        super(Component.literal("Командный режим"));
+        registerMaqanWorkspaceProvider();
+    }
+
+    /** Publish RTS selection metadata; entity state and orders remain in wf-troops/wf-settlements. */
+    private void registerMaqanWorkspaceProvider() {
+        dev.worldforge.mod.client.PlatformWorkspaceBridge.registerInspector("wf_troops", entityId -> {
+            List<net.minecraft.world.entity.LivingEntity> selected = selectedEntities(entityId);
+            if (selected.isEmpty()) return java.util.Collections.singletonList(
+                    new String[]{"RTS", "Status", "Selected units are no longer loaded"});
+            List<String[]> rows = new ArrayList<>();
+            rows.add(new String[]{"Force", "Selected entities", Integer.toString(selected.size())});
+            double x = 0, z = 0;
+            int troops = 0, workers = 0, morale = 0, moraleCount = 0;
+            Map<String, Integer> composition = new TreeMap<>();
+            for (net.minecraft.world.entity.LivingEntity entity : selected) {
+                x += entity.getX();
+                z += entity.getZ();
+                if (entity instanceof TroopEntity troop) {
+                    troops++;
+                    composition.merge(troop.def() != null ? troop.def().name : troop.unitId(), 1, Integer::sum);
+                    morale += troop.moralePct();
+                    moraleCount++;
+                } else if (CommandMode.isWorkerEntity(entity)) {
+                    workers++;
+                    composition.merge("Worker", 1, Integer::sum);
+                } else {
+                    composition.merge(entity.getType().toString(), 1, Integer::sum);
+                }
+            }
+            rows.add(new String[]{"Force", "Soldiers", Integer.toString(troops)});
+            rows.add(new String[]{"Force", "Workers", Integer.toString(workers)});
+            rows.add(new String[]{"Force", "Average position", Math.round(x / selected.size()) + ", " + Math.round(z / selected.size())});
+            if (moraleCount > 0)
+                rows.add(new String[]{"Condition", "Average morale", Math.round((double) morale / moraleCount) + "%"});
+            for (var entry : composition.entrySet())
+                rows.add(new String[]{"Composition", entry.getKey(), Integer.toString(entry.getValue())});
+            net.minecraft.world.entity.LivingEntity lead = selected.get(0);
+            rows.add(new String[]{"Lead unit", "Name", lead.getName().getString()});
+            rows.add(new String[]{"Lead unit", "UUID", lead.getUUID().toString()});
+            rows.add(new String[]{"Lead unit", "Health", Math.round(lead.getHealth() * 10.0) / 10.0
+                    + " / " + Math.round(lead.getMaxHealth() * 10.0) / 10.0});
+            if (lead instanceof TroopEntity troop) {
+                rows.add(new String[]{"Lead unit", "Type", troop.def() == null ? troop.unitId() : troop.def().name});
+                rows.add(new String[]{"Lead unit", "Morale", troop.moralePct() + "%"});
+            } else if (CommandMode.isWorkerEntity(lead)) {
+                rows.add(new String[]{"Lead unit", "Profession", CommandMode.workerString(lead, "professionId")});
+                rows.add(new String[]{"Lead unit", "Status", CommandMode.workerString(lead, "statusLabel")});
+                rows.add(new String[]{"Lead unit", "Character ID", CommandMode.workerString(lead, "characterId")});
+            }
+            return rows;
+        });
+        dev.worldforge.mod.client.PlatformWorkspaceBridge.registerEntityOpener("wf_troops", entityId -> {
+            List<String> ids = selectedEntityIds(entityId);
+            if (ids.isEmpty()) return;
+            CommandMode.SEL.set(ids);
+            focusSelectedEntities();
+        });
+        dev.worldforge.mod.client.PlatformWorkspaceBridge.registerAction(
+                "wf_troops.focus", "Focus selected force", "wf_troops",
+                entityId -> !selectedEntityIds(entityId).isEmpty(),
+                entityId -> focusSelectedEntities());
+    }
+
+    private List<String> selectedEntityIds(String entityId) {
+        if (entityId == null || !entityId.startsWith("selection:")) return List.of();
+        List<String> result = new ArrayList<>();
+        for (String id : entityId.substring("selection:".length()).split(",")) {
+            try {
+                java.util.UUID uuid = java.util.UUID.fromString(id);
+                if (minecraft.level != null && minecraft.level.getEntity(uuid) instanceof net.minecraft.world.entity.LivingEntity living
+                        && living.isAlive()) result.add(id);
+            } catch (IllegalArgumentException ignored) { }
+        }
+        return result;
+    }
+
+    private List<net.minecraft.world.entity.LivingEntity> selectedEntities(String entityId) {
+        List<net.minecraft.world.entity.LivingEntity> result = new ArrayList<>();
+        if (minecraft.level == null) return result;
+        for (String id : selectedEntityIds(entityId)) {
+            try {
+                net.minecraft.world.entity.Entity entity = minecraft.level.getEntity(java.util.UUID.fromString(id));
+                if (entity instanceof net.minecraft.world.entity.LivingEntity living) result.add(living);
+            } catch (IllegalArgumentException ignored) { }
+        }
+        return result;
+    }
+
+    private void publishMaqanSelection() {
+        List<String> ids = CommandMode.selected();
+        if (minecraft.level == null || ids.isEmpty()) {
+            dev.worldforge.mod.client.PlatformWorkspaceBridge.clear("wf_troops");
+            return;
+        }
+        List<net.minecraft.world.entity.LivingEntity> selected = new ArrayList<>();
+        for (net.minecraft.world.entity.Entity entity : minecraft.level.entitiesForRendering())
+            if (entity instanceof net.minecraft.world.entity.LivingEntity living && living.isAlive()
+                    && ids.contains(entity.getUUID().toString())) selected.add(living);
+        if (selected.isEmpty()) {
+            dev.worldforge.mod.client.PlatformWorkspaceBridge.clear("wf_troops");
+            return;
+        }
+        String stableIds = selected.stream().map(entity -> entity.getUUID().toString())
+                .sorted().collect(java.util.stream.Collectors.joining(","));
+        String label = selected.size() == 1 ? selected.get(0).getName().getString()
+                : selected.size() + " selected units";
+        dev.worldforge.mod.client.PlatformWorkspaceBridge.publish("wf_troops",
+                "selection:" + stableIds, "RTS_FORCE", label,
+                selected.size() + " entities · " + selected.stream().filter(TroopEntity.class::isInstance).count()
+                        + " soldiers · " + selected.stream().filter(CommandMode::isWorkerEntity).count() + " workers");
+    }
+
+    private void focusSelectedEntities() {
+        if (minecraft.level == null) return;
+        double x = 0, z = 0;
+        int count = 0;
+        for (net.minecraft.world.entity.Entity entity : minecraft.level.entitiesForRendering()) {
+            if (entity instanceof net.minecraft.world.entity.LivingEntity living
+                    && living.isAlive() && CommandMode.SEL.isSelected(entity.getUUID().toString())) {
+                x += entity.getX();
+                z += entity.getZ();
+                count++;
+            }
+        }
+        if (count > 0) CommandMode.RIG.focusOn(x / count, z / count);
+    }
 
     /** Hosted command overlay uses the same responsive MAQAN texture frames as Atlas and WorldForge. */
     public void setEmbeddedInMaqan(boolean embedded) {
@@ -148,7 +275,10 @@ public final class CommandScreen extends Screen {
     /** MAQAN renders the live Minecraft world behind this command overlay. */
     public boolean isWorldOverlay() { return true; }
     @Override public boolean shouldCloseOnEsc() { return false; }
-    @Override public void removed() { CommandMode.exit(Minecraft.getInstance()); }
+    @Override public void removed() {
+        dev.worldforge.mod.client.PlatformWorkspaceBridge.clear("wf_troops");
+        CommandMode.exit(Minecraft.getInstance());
+    }
 
     double mouseX() { return mx; }
     double mouseY() { return my; }
@@ -832,6 +962,7 @@ public final class CommandScreen extends Screen {
 
     @Override
     public void render(GuiGraphics g, int mxi, int myi, float pt) {
+        publishMaqanSelection();
         mx = mxi; my = myi;
         Minecraft mc = minecraft;
         if (mc.level == null || mc.player == null) return;
