@@ -1787,8 +1787,12 @@ public class SettleMod {
             if (IMPORTED_BLUEPRINTS.contains(importKey)) continue;
             try {
                 int staged = 0;
-                
+                Set<String> blueprintIds = new HashSet<>();
+                Set<String> usedNames = new HashSet<>();
+
                 for (dev.worldforge.mod.MapData.SettlementSeed seed : map.settlementSeeds) {
+                    if (seed == null || seed.id() == null || !blueprintIds.add(seed.id()))
+                        throw new IllegalStateException("Null or duplicate SettlementSeed ID in map " + map.name);
                     String id = Colony.blueprintColonyId(map.name, seed.id());
                     String operationId = Colony.blueprintOperationId(map.name, seed.id());
                     boolean existed = COLONIES.containsKey(id);
