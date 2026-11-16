@@ -794,10 +794,7 @@ public final class Settlement {
                 + ") не подходит для роли " + (requestedRole == null ? "этого здания" : requestedRole)
                 + " или нет свободных мест в " + b.def.name);
         w.claimTask(Worker.TaskOwner.SETTLEMENT, "settlement:building:" + uid, true);
-        w.suspendedTaskOwner = Worker.TaskOwner.NONE;
-        w.suspendedTaskId = "";
-        w.suspendedProfession = ""; w.suspendedBuilding = 0; w.suspendedManualHauler = false;
-        w.suspendedLifeAction = "";
+        w.suspendedTasks.clear(); w.syncSuspendedTaskMirror();
         w.assignedProfession = role;
         w.manualHauler = false;
         w.lifeAction = "";
@@ -815,10 +812,7 @@ public final class Settlement {
         if (w.taskOwner == Worker.TaskOwner.MILITARY)
             throw new OrderException("Сначала необходимо отозвать военный приказ");
         w.releaseTask(w.taskOwner, w.taskId);
-        w.suspendedTaskOwner = Worker.TaskOwner.NONE;
-        w.suspendedTaskId = "";
-        w.suspendedProfession = ""; w.suspendedBuilding = 0; w.suspendedManualHauler = false;
-        w.suspendedLifeAction = "";
+        w.suspendedTasks.clear(); w.syncSuspendedTaskMirror();
         w.building = 0;
         w.assignedProfession = "";
         w.manualHauler = false;
@@ -880,10 +874,7 @@ public final class Settlement {
         if (w.taskOwner == Worker.TaskOwner.MILITARY || w.taskOwner == Worker.TaskOwner.PLAYER)
             throw new OrderException("Нельзя сменить профессию во время активного приказа");
         w.releaseTask(w.taskOwner, w.taskId);
-        w.suspendedTaskOwner = Worker.TaskOwner.NONE;
-        w.suspendedTaskId = "";
-        w.suspendedProfession = ""; w.suspendedBuilding = 0; w.suspendedManualHauler = false;
-        w.suspendedLifeAction = ""; w.suspendedLifeTargetX = 0; w.suspendedLifeTargetZ = 0; w.suspendedLifeActionUntil = 0;
+        w.suspendedTasks.clear(); w.syncSuspendedTaskMirror();
         w.profession = profession;
         w.assignedProfession = "";
         w.manualHauler = false;
