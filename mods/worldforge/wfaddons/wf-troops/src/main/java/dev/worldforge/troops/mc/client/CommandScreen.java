@@ -180,7 +180,8 @@ public final class CommandScreen extends Screen {
         dev.worldforge.mod.client.PlatformWorkspaceBridge.publish("wf_troops",
                 "selection:" + stableIds, "RTS_FORCE", label,
                 selected.size() + " entities · " + selected.stream().filter(TroopEntity.class::isInstance).count()
-                        + " soldiers · " + selected.stream().filter(CommandMode::isWorkerEntity).count() + " workers");
+                        + " soldiers · " + selected.stream().filter(CommandMode::isWorkerEntity).count() + " workers",
+                selected.get(0));
     }
 
     private void focusSelectedEntities() {
