@@ -784,7 +784,7 @@ public final class PlatformShellScreen extends Screen {
         g.fill(mapX, y, mapX + 24, y + 20, 0x443A9FB5);
         g.drawCenteredString(font, camera.icon(), cameraX + 12, y + 5,
                 camera == WorkspaceViewState.CameraMode.FIRST_PERSON ? TEXT : CYAN);
-        g.drawCenteredString(font, "▦", mapX + 12, y + 5, CYAN);
+        g.drawCenteredString(font, map.icon(), mapX + 12, y + 5, CYAN);
         if (mx >= cameraX && mx < cameraX + 24 && my >= y && my < y + 20)
             g.renderTooltip(font, Component.literal("Camera: " + camera.label() + " · F8"), mx, my);
         if (mx >= mapX && mx < mapX + 24 && my >= y && my < y + 20)
