@@ -462,8 +462,23 @@ public class MapScreen extends Screen {
 
     /** Обзор: уменьшенная карта текущего режима с рамкой видимой области; клик и перетаскивание двигают вид. */
     private void drawOverview(GuiGraphics g) {
-        int ow = Math.min(170, Math.max(100, width / 6)), oh = (int) Math.round(ow * (double) MapTextures.h / MapTextures.w);
-        ovwW = ow; ovwH = oh; ovwX = width - ow - 14; ovwY = height - oh - 44;
+        int[] frame = minimapFrame();
+        int[] viewport = workspaceViewport();
+        int ow, oh;
+        if (frame != null) {
+            int maxW = Math.max(1, frame[2] - 24), maxH = Math.max(1, frame[3] - 36);
+            double scale = Math.min(maxW / (double) MapTextures.w, maxH / (double) MapTextures.h);
+            ow = Math.max(1, (int) Math.round(MapTextures.w * scale));
+            oh = Math.max(1, (int) Math.round(MapTextures.h * scale));
+            ovwX = frame[0] + (frame[2] - ow) / 2;
+            ovwY = frame[1] + (frame[3] - oh) / 2;
+        } else {
+            ow = Math.min(170, Math.max(100, width / 6));
+            oh = (int) Math.round(ow * (double) MapTextures.h / MapTextures.w);
+            ovwX = width - ow - 14;
+            ovwY = height - oh - 44;
+        }
+        ovwW = ow; ovwH = oh;
         bevel(g, ovwX - 4, ovwY - 4, ow + 8, oh + 8, true);
         g.fill(ovwX, ovwY, ovwX + ow, ovwY + oh, 0xFF0A0C12);
         g.pose().pushPose();
@@ -472,8 +487,12 @@ public class MapScreen extends Screen {
         g.pose().scale(k, k, 1f);
         g.blit(MapTextures.id, 0, 0, 0f, 0f, MapTextures.w, MapTextures.h, MapTextures.w, MapTextures.h);
         g.pose().popPose();
-        double x0 = Math.max(0, -camX / zoom), y0 = Math.max(0, -camY / zoom), x1 = Math.min(MapTextures.w, (width - camX) / zoom), y1 = Math.min(MapTextures.h, (height - camY) / zoom);
-        int rx = ovwX + (int) (x0 * k), ry = ovwY + (int) (y0 * k), rw = Math.max(3, (int) ((x1 - x0) * k)), rh = Math.max(3, (int) ((y1 - y0) * k));
+        double x0 = Math.max(0, (viewport[0] - camX) / zoom);
+        double y0 = Math.max(0, (viewport[1] - camY) / zoom);
+        double x1 = Math.min(MapTextures.w, (viewport[0] + viewport[2] - camX) / zoom);
+        double y1 = Math.min(MapTextures.h, (viewport[1] + viewport[3] - camY) / zoom);
+        int rx = ovwX + (int) (x0 * k), ry = ovwY + (int) (y0 * k);
+        int rw = Math.max(3, (int) ((x1 - x0) * k)), rh = Math.max(3, (int) ((y1 - y0) * k));
         g.renderOutline(rx - 1, ry - 1, rw + 2, rh + 2, 0xFF000000);
         g.renderOutline(rx, ry, rw, rh, 0xFFF0F0F0);
     }
@@ -481,8 +500,9 @@ public class MapScreen extends Screen {
     private void overviewTo(double mx, double my) {
         double px = (mx - ovwX) / ovwW * MapTextures.w, py = (my - ovwY) / ovwH * MapTextures.h;
         px = Math.max(0, Math.min(MapTextures.w, px)); py = Math.max(0, Math.min(MapTextures.h, py));
-        camX = width / 2.0 - px * zoom;
-        camY = height / 2.0 - py * zoom;
+        int[] viewport = workspaceViewport();
+        camX = viewport[0] + viewport[2] / 2.0 - px * zoom;
+        camY = viewport[1] + viewport[3] / 2.0 - py * zoom;
     }
 
     private int legendRev = -2;
@@ -514,7 +534,9 @@ public class MapScreen extends Screen {
             }
         }
         if (legendNames.isEmpty()) return;
-        int w = 150, h = 22 + legendNames.size() * 12, x = 8, y = height - 34 - h;
+        int[] viewport = workspaceViewport();
+        int w = 150, h = 22 + legendNames.size() * 12;
+        int x = viewport[0] + 8, y = viewport[1] + viewport[3] - 34 - h;
         bevel(g, x, y, w, h, false);
         g.drawString(font, MapImages.REALMS.equals(m) ? "Державы" : modeName(m), x + 8, y + 7, 0xFFF0C85A);
         for (int i = 0; i < legendNames.size(); i++) {
