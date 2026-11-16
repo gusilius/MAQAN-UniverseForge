@@ -645,6 +645,7 @@ public final class PlatformShellScreen extends Screen {
             x += tabStep;
         }
         g.drawString(font, embeddedView != null && profile == Profile.COSMOS ? "ATLAS" : "WORKSPACE", 46, 13, MUTED, false);
+        drawViewModeControls(g, mx, my, 34);
         if (WorkspaceResponsiveLayout.isCompact(width, height)) {
             g.drawString(font, activeCompactDrawer == null ? "MAP" : activeCompactDrawer.toUpperCase(java.util.Locale.ROOT),
                     Math.min(width - 150, 54), 13, CYAN, false);
