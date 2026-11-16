@@ -94,13 +94,22 @@ public final class Colony {
 
     /** Stable map-blueprint key shared by runtime import and offline integration tests. */
     public static String blueprintColonyId(String mapName, String seedId) {
-        String token = String.valueOf(mapName).toLowerCase(java.util.Locale.ROOT)
-                .replaceAll("[^a-z0-9_:-]", "_");
-        if (token.length() > 32) token = Integer.toUnsignedString(String.valueOf(mapName).hashCode(), 36);
+        String rawMap = mapName == null ? "" : mapName.trim();
+        if (rawMap.isBlank()) throw new IllegalArgumentException("Map name is required");
+        String token = rawMap.toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9_:-]", "_");
+        if (token.length() > 24)
+            token = java.util.UUID.nameUUIDFromBytes(rawMap.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+                    .toString().replace("-", "").substring(0, 16);
         if (token.isBlank()) token = "map";
         if (seedId == null || !seedId.matches("[A-Za-z0-9_.:-]{1,96}"))
             throw new IllegalArgumentException("Invalid blueprint settlement ID: " + seedId);
-        return "worldsim:settlement:" + token + ":" + seedId;
+        String seedToken = seedId.toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9_:-]", "_");
+        if (seedToken.length() > 40)
+            seedToken = java.util.UUID.nameUUIDFromBytes((rawMap + "|" + seedId)
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString().replace("-", "").substring(0, 32);
+        String id = "worldsim:settlement:" + token + ":" + seedToken;
+        if (id.length() > 96) throw new IllegalArgumentException("Blueprint settlement ID exceeds storage limit: " + seedId);
+        return id;
     }
 
     public static String blueprintOperationId(String mapName, String seedId) {

@@ -98,6 +98,7 @@ public class SettleMod {
     private static long ticks;
     /** Fail-closed gate when an army logistics transfer cannot persist its ledger/settlement checkpoint. */
     private static volatile boolean logisticsPersistenceBlocked;
+    private static long lastResidentAuditTick = Long.MIN_VALUE;
 
     public SettleMod() {
         dev.worldforge.mod.WorldForgeSnapshotExporter.registerContributor(SettleMod::appendAtlasFeatures);
@@ -1235,6 +1236,7 @@ public class SettleMod {
     public void onStarting(ServerStartingEvent e) {
         ticks = 0;
         IMPORTED_BLUEPRINTS.clear();
+        lastResidentAuditTick = Long.MIN_VALUE;
         Blueprints.clearCache();
         Bodies.LIVE.clear();
         DEFS = loadDefs(e.getServer());
@@ -1253,6 +1255,31 @@ public class SettleMod {
         IMPORTED_BLUEPRINTS.clear();
         DEFS = null;
         Blueprints.clearCache();
+    }
+
+    /**
+     * Audits persisted settlement resident UUIDs against the owning canonical wf-people registry.
+     * This is a read-only integrity check: missing residents are reported, never cloned or silently rebound.
+     */
+    private static void validateCanonicalResidentLinks() {
+        Map<String, dev.worldforge.mod.MapData> mapsByName = new HashMap<>();
+        for (dev.worldforge.mod.MapData map : WorldForgeMod.loadedMaps().values())
+            if (map != null && map.name != null) mapsByName.put(map.name, map);
+        for (Colony colony : COLONIES.values()) {
+            if (colony == null || colony.sourceMapId == null || colony.sourceMapId.isBlank()
+                    || colony.residentCharacterIds.isEmpty()) continue;
+            dev.worldforge.mod.MapData map = mapsByName.get(colony.sourceMapId);
+            if (map == null) continue;
+            CharacterRegistry registry = PeopleMod.registry(map);
+            if (registry == null) continue;
+            Set<String> known = new HashSet<>();
+            for (Character character : registry.all())
+                if (character.globalId != null && !character.globalId.isBlank()) known.add(character.globalId);
+            for (String residentId : colony.residentCharacterIds)
+                if (!known.contains(residentId))
+                    LOGGER.error("wf_settle: orphan resident Character ID {} in colony {} (map {}); no duplicate Character was created",
+                            residentId, colony.s.id, colony.sourceMapId);
+        }
     }
 
     /**
@@ -1815,6 +1842,10 @@ public class SettleMod {
         if (server == null) return;
         importWorldBlueprintSettlements(server);
         ticks++;
+        if (ticks % 1200 == 0 && ticks != lastResidentAuditTick) {
+            lastResidentAuditTick = ticks;
+            validateCanonicalResidentLinks();
+        }
         if (ticks % (STEP_TICKS * 10) == 0) VanillaVillageAdapter.reconcile(server);
         if (actionsBlocked()) return;
         if (ticks % STEP_TICKS == 0) {
