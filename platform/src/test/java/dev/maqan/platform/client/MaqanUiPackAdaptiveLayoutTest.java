@@ -28,6 +28,10 @@ class MaqanUiPackAdaptiveLayoutTest {
         assertEquals(1920, result.get("top").width());
         assertEquals(1080, result.get("mm").bottom());
         assertEquals(1080, result.get("bot").bottom());
+        assertEquals(292.0 / 226.0,
+                result.get("mm").width() / (double) result.get("mm").height(), 0.02);
+        assertEquals(846.0 / 176.0,
+                result.get("bot").width() / (double) result.get("bot").height(), 0.03);
     }
 
     @Test
@@ -55,6 +59,8 @@ class MaqanUiPackAdaptiveLayoutTest {
         assertTrue(minimap.right() <= 390 && minimap.bottom() <= 844);
         assertTrue(console.x() >= minimap.right());
         assertTrue(console.right() <= 390 && console.bottom() <= 844);
+        assertEquals(292.0 / 226.0, minimap.width() / (double) minimap.height(), 0.02);
+        assertEquals(846.0 / 176.0, console.width() / (double) console.height(), 0.08);
     }
 
     @Test
