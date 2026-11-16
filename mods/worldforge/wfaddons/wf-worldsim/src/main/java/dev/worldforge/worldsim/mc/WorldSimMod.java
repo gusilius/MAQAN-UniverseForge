@@ -110,6 +110,64 @@ public final class WorldSimMod {
         }
     }
 
+    /** A thin adapter over either an authored image map or observed vanilla geography.
+     * Both sources feed the same emergence state, Character registry and settlement services. */
+    private static final class EmergenceSource {
+        final String id;
+        final MapData map;
+        final CharacterRegistry registry;
+        final int width, height;
+        final double blocksPerPixel;
+        final long seed;
+        final String dimension;
+
+        private EmergenceSource(String id, MapData map, CharacterRegistry registry,
+                                int width, int height, double blocksPerPixel, long seed, String dimension) {
+            this.id = id; this.map = map; this.registry = registry; this.width = width; this.height = height;
+            this.blocksPerPixel = blocksPerPixel; this.seed = seed; this.dimension = dimension;
+        }
+        static EmergenceSource authored(MapData map) {
+            return new EmergenceSource(map.name, map, PeopleMod.registry(map), map.w, map.h, map.bpp,
+                    PeopleMod.seed(map), "");
+        }
+        static EmergenceSource vanilla(String id, CharacterRegistry registry) {
+            String dimension = VanillaWorldGeography.dimensionFromMapId(id);
+            long seed = WorldForgeMod.worldId() == null ? id.hashCode()
+                    : WorldForgeMod.worldId().getMostSignificantBits() ^ WorldForgeMod.worldId().getLeastSignificantBits() ^ id.hashCode();
+            return new EmergenceSource(id, null, registry, 256, 256, 1.0, seed, dimension);
+        }
+        int[] blockPosition(int x, int z) {
+            if (map == null) return VanillaWorldGeography.blockPosition(id, x, z);
+            return new int[] {
+                    (int) Math.max(-29_999_000L, Math.min(29_999_000L, Math.round((x - map.w / 2.0) * Math.max(0.001, map.bpp)))),
+                    (int) Math.max(-29_999_000L, Math.min(29_999_000L, Math.round((z - map.h / 2.0) * Math.max(0.001, map.bpp))))
+            };
+        }
+        String settlementDimension(MinecraftServer server) {
+            return map == null ? dimension : mapDimension(server, map);
+        }
+    }
+
+    private static List<EmergenceSource> emergenceSources() {
+        List<EmergenceSource> sources = new ArrayList<>();
+        for (MapData map : WorldForgeMod.loadedMaps().values()) {
+            if (map == null) continue;
+            CharacterRegistry registry = PeopleMod.registry(map);
+            if (registry != null) sources.add(EmergenceSource.authored(map));
+        }
+        CharacterRegistry vanillaRegistry = PeopleMod.worldRegistry();
+        if (vanillaRegistry != null) {
+            for (var region : VanillaWorldGeography.snapshot()) {
+                if (region.isJsonObject() && region.getAsJsonObject().has("map_id")) {
+                    String id = region.getAsJsonObject().get("map_id").getAsString();
+                    sources.add(EmergenceSource.vanilla(id, vanillaRegistry));
+                }
+            }
+        }
+        sources.sort(Comparator.comparing(source -> source.id));
+        return sources;
+    }
+
     private static final class EmergentPeopleProgress {
         final JsonObject state;
         final int year;
