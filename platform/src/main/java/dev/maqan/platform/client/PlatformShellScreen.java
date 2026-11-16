@@ -1098,7 +1098,7 @@ public final class PlatformShellScreen extends Screen {
         int controlY = Math.max(2, (conceptBarHeight - 22) / 2);
         if (button == 0 && my >= controlY && my < controlY + 20) {
             if (mx >= cameraControlX() && mx < cameraControlX() + 24) {
-                WorkspaceViewState.cycleCameraMode();
+                MaqanCameraBridge.apply(WorkspaceViewState.cycleCameraMode());
                 return true;
             }
             if (mx >= mapControlX() && mx < mapControlX() + 24) {
@@ -1106,7 +1106,7 @@ public final class PlatformShellScreen extends Screen {
                 return true;
             }
         }
-        if (button == 2 && MaqanCameraController.active() && inCameraViewport(mx, my)) return true;
+        if (button == 2 && MaqanCameraBridge.active() && inCameraViewport(mx, my)) return true;
         if (button == 1) {
             PlatformSelectionContext.Selection selection = PlatformSelectionContext.current();
             contextActions = WorkspaceRuntime.actionsFor(selection);
@@ -1506,7 +1506,7 @@ public final class PlatformShellScreen extends Screen {
 
     @Override public boolean mouseDragged(double mx,double my,int button,double dx,double dy) {
         if (button == 2 && MaqanCameraController.active() && inCameraViewport(mx, my))
-            return MaqanCameraController.rotateByMouse(dx, dy);
+            return MaqanCameraBridge.rotateByMouse(dx, dy);
         if(button!=0) {
             boolean handled = super.mouseDragged(mx,my,button,dx,dy);
             if (activeView() != null)
@@ -1578,7 +1578,7 @@ public final class PlatformShellScreen extends Screen {
 
     @Override public boolean mouseScrolled(double mouseX,double mouseY,double delta) {
         if (MaqanCameraController.active() && inCameraViewport(mouseX, mouseY)
-                && MaqanCameraController.zoom(delta)) return true;
+                && MaqanCameraBridge.zoom(delta)) return true;
         Panel nav = panels.get("navigation");
         if (nav != null && nav.visible && !nav.minimized
                 && mouseX >= nav.x && mouseX <= nav.x + nav.w
