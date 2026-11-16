@@ -70,9 +70,12 @@ public final class ArmyHierarchyTest {
         check(compatibility.squadOf("legacy-2") == legacy,
                 "reverse index repairs legacy direct membership mutations");
         Squads restoredIndex = new Squads();
-        restoredIndex.fromJson(indexedA.toString()); // Invalid JSON must leave a valid empty index.
-        check(restoredIndex.squadOf("a1") == null,
-                "invalid persistence input does not leave stale reverse membership entries");
+        restoredIndex.fromJson(compatibility.toJson());
+        check(restoredIndex.squadOf("legacy-1") != null,
+                "save/load rebuilds the reverse membership index");
+        restoredIndex.fromJson("{broken");
+        check(restoredIndex.squadOf("legacy-1") == null,
+                "invalid persistence input clears stale reverse membership entries");
         if (failures > 0) throw new AssertionError(failures + " army hierarchy tests failed");
     }
 }
