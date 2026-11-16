@@ -438,7 +438,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         independent_budget = max(1, realm_count // 16)
         # A city-state needs enough land to support a minimal settlement.
         # The threshold scales with world development but never falls below 64 pixels.
-        island_city_state_minimum = max(64, minimum_territory_pixels // 4)
+        island_city_state_minimum = max(64, minimum_territory_pixels // 16)
         independent_components = select_independent_islands(
             minor_components, seed, independent_budget, island_city_state_minimum)
 
