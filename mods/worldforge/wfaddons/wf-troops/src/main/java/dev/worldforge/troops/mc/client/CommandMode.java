@@ -300,6 +300,7 @@ public final class CommandMode {
         prevCamera = mc.options.getCameraType();
         mc.options.setCameraType(CameraType.FIRST_PERSON);
         RIG.start(mc.player.getX(), mc.player.getZ(), mc.player.getYRot(), lastView);
+        MaqanTroopsCameraBridge.publishMode(lastView);
         groundY = mc.player.getY();
         camEntity = new Marker(EntityType.MARKER, mc.level);                  // камера смотрит из этой сущности; игрок остаётся на месте
         lastFrame = System.nanoTime();
@@ -322,6 +323,7 @@ public final class CommandMode {
         if (!active) return;
         active = false;
         lastView = RIG.view;
+        MaqanTroopsCameraBridge.publishFirstPerson();
         camEntity = null;
         if (mc.player != null) mc.setCameraEntity(mc.player);
         mc.options.setCameraType(prevCamera);
