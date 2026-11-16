@@ -6,6 +6,7 @@ import dev.worldforge.settle.Settlement;
 import dev.worldforge.troops.BuildGhost;
 import dev.worldforge.troops.CameraRig;
 import dev.worldforge.troops.Formations;
+import dev.worldforge.troops.TroopAbilities;
 import dev.worldforge.troops.Projection;
 import dev.worldforge.troops.Squads;
 import dev.worldforge.troops.UnitSelection;
@@ -552,8 +553,12 @@ public final class CommandScreen extends Screen {
             g.drawString(font, font.plainSubstrByWidth(traits, r[2] - 12), r[0] + 6, r[1] + 16, 0xFFB8C5D6, false);
             String combat = "Урон " + def.dmg() + " · Броня " + def.armor() + " · Скорость " + def.speed();
             g.drawString(font, font.plainSubstrByWidth(combat, r[2] - 12), r[0] + 6, r[1] + 27, 0xFFB8C5D6, false);
-            String abilities = "Дальн. " + def.range() + " · Аура " + def.aura() + " · Лечение " + def.heal() + " · Осада " + def.siege();
-            g.drawString(font, font.plainSubstrByWidth(abilities, r[2] - 12), r[0] + 6, r[1] + 38, 0xFF9FC9E8, false);
+            String stats = "Дальн. " + def.range() + " · Аура " + def.aura() + " · Лечение " + def.heal() + " · Осада " + def.siege();
+            g.drawString(font, font.plainSubstrByWidth(stats, r[2] - 12), r[0] + 6, r[1] + 38, 0xFF9FC9E8, false);
+            String skillNames = TroopAbilities.forUnit(def, unit.veteranRank(), false).stream()
+                    .map(TroopAbilities.Ability::title).limit(2).collect(java.util.stream.Collectors.joining(" · "));
+            g.drawString(font, font.plainSubstrByWidth("Умения: " + (skillNames.isBlank() ? "нет" : skillNames), r[2] - 12),
+                    r[0] + 6, r[1] + 49, 0xFFE6C875, false);
         } else {
             String composition = roles.entrySet().stream()
                     .map(e -> e.getKey() + " " + e.getValue()).collect(java.util.stream.Collectors.joining(" · "));
@@ -562,6 +567,10 @@ public final class CommandScreen extends Screen {
             g.drawString(font, font.plainSubstrByWidth(abilities, r[2] - 12), r[0] + 6, r[1] + 27, 0xFF9FC9E8, false);
             String condition = "Ветераны " + veterans + " · Мораль " + (morale / Math.max(1, troops.size())) + "%";
             g.drawString(font, font.plainSubstrByWidth(condition, r[2] - 12), r[0] + 6, r[1] + 38, 0xFFB8C5D6, false);
+            List<TroopDefs.Unit> groupDefs = troops.stream().map(TroopEntity::def).filter(Objects::nonNull).toList();
+            List<Integer> groupRanks = troops.stream().filter(t -> t.def() != null).map(TroopEntity::veteranRank).toList();
+            int offered = TroopAbilities.forGroup(groupDefs, groupRanks, false).size();
+            g.drawString(font, "Доступно умений: " + offered, r[0] + 6, r[1] + 49, 0xFFE6C875, false);
         }
     }
 
