@@ -57,6 +57,77 @@ public class ArmyScreen extends Screen {
         this.ar = armies;
         this.realm = realmId;
         this.cmd = cmd;
+        registerMaqanWorkspaceProvider();
+    }
+
+    private void registerMaqanWorkspaceProvider() {
+        dev.worldforge.mod.client.PlatformWorkspaceBridge.registerInspector("wf_army", entityId -> {
+            Army army = armyForEntity(entityId);
+            if (army == null) return java.util.Collections.singletonList(
+                    new String[]{"Army", "Status", "Army is no longer available"});
+            List<String[]> rows = new ArrayList<>();
+            rows.add(new String[]{"Identity", "Army", army.name});
+            rows.add(new String[]{"Identity", "Army ID", Integer.toString(army.id)});
+            rows.add(new String[]{"Sovereignty", "Realm", ar.realmName(army.realm)});
+            rows.add(new String[]{"Command", "Commander", army.commander == null ? "" : army.commander});
+            rows.add(new String[]{"Strength", "Personnel", Integer.toString(army.men())});
+            rows.add(new String[]{"Strength", "Combat power", Math.round(army.power(ar.types)) + ""});
+            rows.add(new String[]{"Condition", "Morale", Math.round(army.morale * 100) + "%"});
+            rows.add(new String[]{"Condition", "Supply", Math.round(army.supply * 100) + "%"});
+            rows.add(new String[]{"Movement", "Location", ar.title(army.location)});
+            rows.add(new String[]{"Movement", "Status", army.moving() ? "Moving · " + army.path.size() + " steps" : "Stationary"});
+            if (army.siegeTitle != 0)
+                rows.add(new String[]{"Combat", "Siege", ar.title(army.siegeTitle)});
+            rows.add(new String[]{"Composition", "Unit types", Integer.toString(army.units.size())});
+            for (var unit : army.units.entrySet()) {
+                if (rows.size() >= 24) break;
+                UnitType type = ar.types.get(unit.getKey());
+                rows.add(new String[]{"Composition", type == null ? unit.getKey() : type.name,
+                        Integer.toString(unit.getValue())});
+            }
+            return rows;
+        });
+        dev.worldforge.mod.client.PlatformWorkspaceBridge.registerEntityOpener("wf_army", entityId -> {
+            Army army = armyForEntity(entityId);
+            if (army != null) {
+                tab = 0;
+                selArmy = army.id;
+            }
+        });
+        dev.worldforge.mod.client.PlatformWorkspaceBridge.registerAction(
+                "wf_army.focus", "Focus army", "wf_army",
+                entityId -> armyForEntity(entityId) != null,
+                entityId -> {
+                    Army army = armyForEntity(entityId);
+                    if (army != null) { tab = 0; selArmy = army.id; }
+                });
+    }
+
+    private Army armyForEntity(String entityId) {
+        if (entityId == null || !entityId.startsWith("army:")) return null;
+        try {
+            Army army = ar.armies.get(Integer.parseInt(entityId.substring("army:".length())));
+            return army != null && (realm == null || realm.equals(army.realm)) ? army : null;
+        } catch (NumberFormatException ignored) { return null; }
+    }
+
+    private void publishArmySelection() {
+        if (ar == null || realm == null) {
+            dev.worldforge.mod.client.PlatformWorkspaceBridge.clear("wf_army");
+            return;
+        }
+        Army selected = ar.armies.get(selArmy);
+        if (selected == null || !realm.equals(selected.realm)) {
+            List<Army> available = ar.armiesOf(realm);
+            selected = available.isEmpty() ? null : available.get(0);
+        }
+        if (selected == null) {
+            dev.worldforge.mod.client.PlatformWorkspaceBridge.clear("wf_army");
+            return;
+        }
+        dev.worldforge.mod.client.PlatformWorkspaceBridge.publish("wf_army",
+                "army:" + selected.id, "ARMY", selected.name,
+                ar.realmName(realm) + " · " + selected.men() + " troops");
     }
 
     @Override
@@ -83,6 +154,7 @@ public class ArmyScreen extends Screen {
 
     @Override
     public void render(GuiGraphics g, int mx, int my, float pt) {
+        publishArmySelection();
         hits.clear();
         int x = (width - W) / 2, y = (height - H) / 2;
         WFUi.panel(g, font, x, y, W, H, "Армии и экономика  ·  " + (realm == null ? "все государства" : name(realm)) + "  ·  день " + e.day);
