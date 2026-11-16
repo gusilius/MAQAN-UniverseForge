@@ -1284,8 +1284,10 @@ public final class PlatformShellScreen extends Screen {
             int y = Math.max(38, Math.min(contextMenuY, height - contextActions.size() * rowHeight - 4));
             int index = (int) ((my - y - 4) / rowHeight);
             if (mx >= x && mx <= x + menuWidth && index >= 0 && index < contextActions.size())
-                WorkspaceRuntime.executeAction(contextActions.get(index).id(), PlatformSelectionContext.current());
+                WorkspaceRuntime.executeAction(contextActions.get(index).id(), contextSelection);
             contextMenuVisible = false;
+            contextSelection = null;
+            contextActions = List.of();
             return true;
         }
         if (!MaqanUiPackRenderer.assetsAvailable()) {
