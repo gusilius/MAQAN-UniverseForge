@@ -463,7 +463,11 @@ public final class CommandScreen extends Screen {
             dragging = true; dragX = x; dragY = y;
             return true;
         }
-        if (button == 2) { midDrag = true; return true; }
+        if (button == 2) {
+            if (embeddedInMaqan && !inWorkspaceViewport(x, y)) return true;
+            midDrag = true;
+            return true;
+        }
         if (button == 1) {
             if (picked != null) { picked = null; return true; }
             if (overPanel(x, y)) return true;
@@ -519,6 +523,10 @@ public final class CommandScreen extends Screen {
         if (button == 0) zoomDragging = false;
         if (button == 0 && dragging) {
             dragging = false;
+            if (embeddedInMaqan && !inWorkspaceViewport(x, y)) {
+                workAreaDrag = false;
+                return true;
+            }
             if (workAreaDrag) {
                 workAreaDrag = false;
                 boolean areaSelection = UnitSelection.isBox(dragX, dragY, x, y);
