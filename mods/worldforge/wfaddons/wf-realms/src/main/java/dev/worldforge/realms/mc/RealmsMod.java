@@ -255,6 +255,10 @@ public class RealmsMod {
         realm.props.put("races", normalizedRaces.entrySet().stream()
                 .map(entry -> entry.getKey() + ":" + entry.getValue())
                 .collect(java.util.stream.Collectors.joining(",")));
+        // Rust emergence supplies stable IDs and geography, never a parallel naming
+        // vocabulary. Replace its technical placeholder with the canonical race/culture
+        // NameBank entry; authored names remain untouched.
+        realm.name = resolveGeneratedRealmName(realm.name, id, normalizedRaces);
         realm.props.put("population", Math.max(0L, population));
         realm.props.put("stability", Math.max(0, Math.min(100, stability)));
         realm.props.put("prestige", (int) Math.min(100_000L, Math.max(0L, population / 10L)));
@@ -265,6 +269,30 @@ public class RealmsMod {
         REALMS.state(id);
         POLITICS.treasury(id);
         return realm;
+    }
+
+    private static String resolveGeneratedRealmName(String supplied, String stableId,
+            Map<String, Double> raceShares) {
+        String current = supplied == null ? "" : supplied.trim();
+        boolean generatedPlaceholder = current.isEmpty() || current.equals(stableId)
+                || current.endsWith(" Confederation") || current.startsWith("polity_");
+        if (!generatedPlaceholder) return current;
+        if (raceShares == null || raceShares.isEmpty()) return current.isEmpty() ? stableId : current;
+        String dominantRace = raceShares.entrySet().stream()
+                .max(Map.Entry.<String, Double>comparingByValue().thenComparing(Map.Entry::getKey))
+                .map(Map.Entry::getKey).orElse("");
+        if (dominantRace.isBlank()) return current.isEmpty() ? stableId : current;
+        try {
+            String culture = PeopleMod.NAMES.culture(dominantRace);
+            long seed = 0xcbf29ce484222325L;
+            for (int i = 0; i < stableId.length(); i++) {
+                seed ^= stableId.charAt(i);
+                seed *= 0x100000001b3L;
+            }
+            return PeopleMod.NAMES.generate(dominantRace, culture, "realms", new Random(seed));
+        } catch (RuntimeException missingPackData) {
+            return current.isEmpty() ? stableId : current;
+        }
     }
 
     /** Remove runtime market actors whose polities have genuinely dissolved. Their historical records remain in Statecraft. */
