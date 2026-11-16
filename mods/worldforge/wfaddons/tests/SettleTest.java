@@ -268,6 +268,15 @@ public class SettleTest {
                         && restoredLease.assignedProfession.equals("builder"),
                 "после отзыва военного приказа восстанавливается исходная стройка и роль");
 
+        militaryLeaseBack.moveTo(restoredLease.id, 18, 22);
+        ok(restoredLease.taskOwner == Worker.TaskOwner.PLAYER && restoredLease.building == 0,
+                "ручное управление игрока временно приостанавливает назначение поселения");
+        ok(!militaryLeaseBack.advanceManualOrder(restoredLease.id)
+                        && restoredLease.taskOwner == Worker.TaskOwner.SETTLEMENT
+                        && restoredLease.building == assignedSite.uid
+                        && restoredLease.assignedProfession.equals("builder"),
+                "после завершения ручного маршрута восстанавливается исходное рабочее назначение");
+
         Settlement lifeLease = fresh(d, 1);
         Worker daily = lifeLease.workers.get(0);
         ok(lifeLease.claimLifeTask(daily.id, "life:sleeping"), "повседневная жизнь получает временное владение задачей");
@@ -285,6 +294,11 @@ public class SettleTest {
         ok(restoredDaily.taskOwner == Worker.TaskOwner.PLAYER && restoredDaily.manualOrder
                         && restoredDaily.lifeAction.isBlank(),
                 "прямой приказ игрока прерывает повседневную задачу и получает высший приоритет");
+        ok(!lifeLeaseBack.advanceManualOrder(restoredDaily.id)
+                        && restoredDaily.taskOwner == Worker.TaskOwner.LIFE
+                        && restoredDaily.lifeAction.equals("sleeping")
+                        && restoredDaily.lifeActionUntil == 900,
+                "после завершения приказа игрока восстанавливается прерванный распорядок жителя");
 
         // зависимости и лимиты
         ok(throwsOrder(() -> s.place("granary", 30, 30)), "амбар требует лесопилку");
