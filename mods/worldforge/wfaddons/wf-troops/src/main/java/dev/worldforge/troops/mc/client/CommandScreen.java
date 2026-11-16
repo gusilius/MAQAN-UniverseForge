@@ -53,6 +53,8 @@ public final class CommandScreen extends Screen {
     private boolean professionalToolsOpen;
     // Тактические способности и приказы доступны только по отдельной иконке.
     private boolean unitToolsOpen;
+    // Optional hierarchy slice for the current tactical selection; never claims to be the full strategic roster.
+    private boolean commandStructureOpen;
     // Floating command panels are user-positionable; -1 keeps the adaptive default anchor.
     private static int professionalPanelX = -1, professionalPanelY = -1;
     private static int unitToolsPanelX = -1, unitToolsPanelY = -1;
@@ -449,10 +451,11 @@ public final class CommandScreen extends Screen {
         int[] view = embeddedInMaqan ? workspaceViewport() : new int[]{0, 0, width, height};
         int minX = view[0] + 4, minY = view[1] + 4;
         int maxX = Math.max(minX, view[0] + view[2] - 198);
-        int maxY = Math.max(minY, view[1] + view[3] - 136);
+        int panelHeight = unitToolsCollapsed ? 16 : commandStructureOpen ? 194 : 132;
+        int maxY = Math.max(minY, view[1] + view[3] - panelHeight - 4);
         x = Math.max(minX, Math.min(maxX, x));
         y = Math.max(minY, Math.min(maxY, y));
-        return new int[]{x, y, 194, unitToolsCollapsed ? 16 : 132};
+        return new int[]{x, y, 194, panelHeight};
     }
 
     private boolean beginFloatingPanelDrag(double px, double py) {
@@ -607,6 +610,34 @@ public final class CommandScreen extends Screen {
         g.drawString(font, (troops.size() == 1 ? "ЮНИТ" : "ГРУППА") + " · " + troops.size(), r[0] + 6, r[1] + 4, 0xFFE6C875, false);
         g.drawString(font, (unitToolsPinned ? "◆" : "◇") + (unitToolsCollapsed ? "+" : "−"), r[0] + r[2] - 25, r[1] + 4, 0xFFB8C5D6, false);
         if (unitToolsCollapsed) return;
+        if (commandStructureOpen) {
+            g.fill(r[0] + 4, r[1] + 130, r[0] + r[2] - 4, r[1] + r[3] - 4, 0xAA0A111A);
+            g.drawString(font, "ВЫБРАННЫЕ ПОДРАЗДЕЛЕНИЯ", r[0] + 7, r[1] + 134, 0xFF9FC9E8, false);
+            Map<Integer, Map<String, Integer>> hierarchy = new TreeMap<>();
+            for (TroopEntity troop : troops) {
+                String squad = troop.squadId();
+                if (squad == null || squad.isBlank()) squad = "Без отряда";
+                hierarchy.computeIfAbsent(troop.armyId, ignored -> new TreeMap<>())
+                        .merge(squad, 1, Integer::sum);
+            }
+            List<String> rows = new ArrayList<>();
+            for (var army : hierarchy.entrySet()) {
+                int total = army.getValue().values().stream().mapToInt(Integer::intValue).sum();
+                rows.add((army.getKey() > 0 ? "Армия #" + army.getKey() : "Без армии")
+                        + " · " + total + " выбрано");
+                for (var squad : army.getValue().entrySet())
+                    rows.add("  ↳ " + squad.getKey() + " · " + squad.getValue());
+            }
+            int visibleRows = Math.max(0, Math.min(4, (r[3] - 151) / 10));
+            for (int i = 0; i < Math.min(visibleRows, rows.size()); i++)
+                g.drawString(font, font.plainSubstrByWidth(rows.get(i), r[2] - 14),
+                        r[0] + 7, r[1] + 146 + i * 10, 0xFFCBD5E1, false);
+            if (rows.size() > visibleRows && visibleRows > 0) {
+                String more = "ещё " + (rows.size() - visibleRows) + " строк";
+                g.drawString(font, more, r[0] + r[2] - font.width(more) - 7,
+                        r[1] + r[3] - 15, 0xFF9EA4B5, false);
+            }
+        }
         g.drawString(font, "КОМАНДОВАНИЕ · назначьте лидера кнопкой выше", r[0] + 6, r[1] + 80,
                 0xFF9FC9E8, false);
         String traits;
@@ -834,6 +865,8 @@ public final class CommandScreen extends Screen {
         }
         out.add(new Btn("Насл.", x, r[1] + 108, 56, false, this::resumeSelectedSquadInheritance));
         out.add(new Btn("Статус", x + 60, r[1] + 108, 56, false, this::requestSelectedCommandStatus));
+        out.add(new Btn(commandStructureOpen ? "Скрыть" : "Состав", x + 120, r[1] + 108, 56,
+                commandStructureOpen, () -> commandStructureOpen = !commandStructureOpen));
     }
 
     private int panelX() { int[] r = skinRect("rp"); return r == null ? (compactSkin() ? width - panelW() - 12 : width - PANEL_W - 4) : r[0] + 12; }
