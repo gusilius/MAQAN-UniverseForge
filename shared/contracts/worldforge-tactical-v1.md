@@ -23,6 +23,14 @@ The Rust `worldforge-sim::formation` module may calculate local slot coordinates
 
 The current Java formation implementation remains authoritative until the native adapter has parity tests for every formation type. In particular, the Rust `LOOSE` formation is deterministic but does not currently reproduce Java's seeded `Random` sequence; do not switch existing saved squads silently.
 
+## Spatial query boundary
+
+The Rust `worldforge-sim::spatial` module builds an open-addressed X/Z spatial hash from primitive position slices and returns exact-radius candidate indices. It has no entity or team semantics. The Java host must filter dimension, team, visibility, line-of-sight, target validity and gameplay permissions before using a candidate.
+
+The troop runtime currently has a Java reusable spatial index for the active squad snapshot. It replaces all-pairs leader-aura and healer-neighbor scans while the Rust implementation remains a pure compute slice pending native transport. The Java index is rebuilt once per squad morale pass and reuses primitive arrays; queries are bounded to 4096 cells and apply exact circular distance checks.
+
+Spatial complexity is proportional to grid construction plus visited cells and returned candidates, not a guaranteed sublinear bound in dense clusters. A squad is currently capped at 40 physical members; if that cap changes, profile dense-cell worst cases and consider cell-level aggregates before raising it.
+
 ## Decisions and authority
 
 Rust returns one deterministic proposal per squad: maintain, reform, engage visible threat, pursue, retreat or reposition. It echoes the exact source revision. Player-direct mode is advisory only.
