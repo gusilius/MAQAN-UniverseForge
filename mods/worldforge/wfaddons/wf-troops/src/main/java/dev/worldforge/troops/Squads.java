@@ -36,6 +36,8 @@ public final class Squads {
 
     public static final int MAX_SIZE = 40;
     private final Map<String, Squad> squads = new LinkedHashMap<>();
+    /** O(1) reverse index for hot selection/command paths; repaired lazily if legacy callers mutate members directly. */
+    private final Map<String, String> memberToSquad = new HashMap<>();
     private int counter = 1;
 
     public Squad create(String owner, String name, Collection<String> members) {
@@ -48,6 +50,7 @@ public final class Squads {
             if (member == null || member.isBlank() || !unique.add(member) || s.members.size() >= MAX_SIZE) continue;
             remove(member);
             s.members.add(member);
+            memberToSquad.put(member, s.id);
         }
         s.initial = s.members.size();
         squads.put(s.id, s);
@@ -76,14 +79,29 @@ public final class Squads {
     public Collection<Squad> all() { return squads.values(); }
     public List<Squad> of(String owner) { List<Squad> l = new ArrayList<>(); for (Squad s : squads.values()) if (s.owner.equals(owner)) l.add(s); return l; }
 
-    public Squad squadOf(String unit) { for (Squad s : squads.values()) if (s.members.contains(unit)) return s; return null; }
+    public Squad squadOf(String unit) {
+        if (unit == null || unit.isBlank()) return null;
+        String indexedId = memberToSquad.get(unit);
+        Squad indexed = indexedId == null ? null : squads.get(indexedId);
+        if (indexed != null && indexed.members.contains(unit)) return indexed;
+        if (indexedId != null) memberToSquad.remove(unit, indexedId);
+        // Compatibility repair: older integrations may still mutate the public members list.
+        for (Squad squad : squads.values()) {
+            if (squad.members.contains(unit)) {
+                memberToSquad.put(unit, squad.id);
+                return squad;
+            }
+        }
+        return null;
+    }
 
     /** Убирает солдата из его отряда (смерть, роспуск). Пустой отряд исчезает. */
     public void remove(String unit) {
-        Squad s = squadOf(unit);
-        if (s == null) return;
-        s.members.remove(unit);
-        if (s.members.isEmpty()) squads.remove(s.id);
+        Squad squad = squadOf(unit);
+        if (squad == null) return;
+        squad.members.remove(unit);
+        memberToSquad.remove(unit, squad.id);
+        if (squad.members.isEmpty()) squads.remove(squad.id);
     }
 
     public void command(String squadId, Order o, boolean queue) {
@@ -151,6 +169,7 @@ public final class Squads {
             if (a.members.size() >= MAX_SIZE) break;
             b.members.remove(member);
             a.members.add(member);
+            memberToSquad.put(member, a.id);
             moved++;
         }
         if (moved == 0) return false;
@@ -162,7 +181,10 @@ public final class Squads {
         return true;
     }
 
-    public void disband(String id) { squads.remove(id); }
+    public void disband(String id) {
+        Squad removed = squads.remove(id);
+        if (removed != null) for (String member : removed.members) memberToSquad.remove(member, id);
+    }
 
     /** Шаг приказа: подтвердить выполнение (достигли точки / цель мертва) и перейти к следующему. */
     public void completeCurrent(String squadId) {
@@ -273,6 +295,7 @@ public final class Squads {
     @SuppressWarnings("unchecked")
     public void fromJson(String json) {
         squads.clear();
+        memberToSquad.clear();
         counter = 1;
         Object root;
         try {
@@ -338,6 +361,7 @@ public final class Squads {
                     ? Math.max(0, Math.min(1_000_000, n.intValue())) : s.members.size();
             s.initial = Math.max(s.members.size(), requestedInitial);
             squads.put(s.id, s);
+            for (String member : s.members) memberToSquad.put(member, s.id);
             if (id.matches("s[0-9]+")) {
                 try { counter = Math.max(counter, Math.addExact(Integer.parseInt(id.substring(1)), 1)); }
                 catch (RuntimeException ignored) {}
