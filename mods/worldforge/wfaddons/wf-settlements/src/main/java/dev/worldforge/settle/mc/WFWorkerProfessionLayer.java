@@ -30,17 +30,18 @@ final class WFWorkerProfessionLayer extends RenderLayer<WFWorker, VillagerModel<
     private static String professionTexture(String id) {
         if (id == null) return "";
         return switch (id) {
-            case "lumberjack", "sawyer", "hunter" -> "fletcher";
-            case "builder", "stonemason" -> "mason";
-            case "rancher", "shepherd", "weaver" -> "shepherd";
-            case "butcher", "baker", "innkeeper" -> "butcher";
-            case "fisher" -> "fisherman";
+            case "lumberjack", "sawyer", "hunter", "forester", "trainer" -> "fletcher";
+            case "builder", "stonemason", "potter", "miner" -> "mason";
+            case "rancher", "shepherd", "weaver", "stablehand" -> "shepherd";
+            case "butcher", "baker", "innkeeper", "cook", "brewer" -> "butcher";
+            case "fisher", "sailor", "shipwright" -> "fisherman";
             case "tanner", "porter" -> "leatherworker";
-            case "jeweler", "merchant" -> "cartographer";
-            case "armorer" -> "armorer";
-            case "weaponsmith" -> "weaponsmith";
+            case "jeweler", "merchant", "mint_worker" -> "cartographer";
+            case "armorer", "metallurgist" -> "armorer";
+            case "weaponsmith", "foundryman", "siege_engineer" -> "weaponsmith";
             case "alchemist", "herbalist", "mage", "priest", "healer" -> "cleric";
-            case "beekeeper", "gardener", "miller" -> "farmer";
+            case "beekeeper", "gardener", "miller", "salt_worker", "laborer" -> "farmer";
+            case "administrator", "scribe" -> "librarian";
             default -> "";
         };
     }
