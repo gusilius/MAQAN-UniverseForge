@@ -559,7 +559,7 @@ mod tests {
             geography: vec![map()],
         };
         let expanded = advance(EmergenceRequest { snapshot: expanded_snapshot.clone(), state: Some(first.state) }).unwrap();
-        assert!(expanded.state.bands.len() >= initial_count);
+        assert!(expanded.state.bands.len() > initial_count, "newly observed viable cells must create frontier communities");
         let unique = expanded.state.bands.iter().map(|band| band.id.as_str()).collect::<BTreeSet<_>>();
         assert_eq!(unique.len(), expanded.state.bands.len(), "incremental discovery must not duplicate band IDs");
 
