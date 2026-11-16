@@ -449,10 +449,10 @@ public final class CommandScreen extends Screen {
         int[] view = embeddedInMaqan ? workspaceViewport() : new int[]{0, 0, width, height};
         int minX = view[0] + 4, minY = view[1] + 4;
         int maxX = Math.max(minX, view[0] + view[2] - 198);
-        int maxY = Math.max(minY, view[1] + view[3] - 116);
+        int maxY = Math.max(minY, view[1] + view[3] - 136);
         x = Math.max(minX, Math.min(maxX, x));
         y = Math.max(minY, Math.min(maxY, y));
-        return new int[]{x, y, 194, unitToolsCollapsed ? 16 : 112};
+        return new int[]{x, y, 194, unitToolsCollapsed ? 16 : 132};
     }
 
     private boolean beginFloatingPanelDrag(double px, double py) {
@@ -532,6 +532,33 @@ public final class CommandScreen extends Screen {
         minecraft.player.displayClientMessage(Component.literal(sent == 0
                 ? "Для делегирования выберите назначенного командира с Character ID"
                 : "Командная политика отправлена: " + sent + " отряд(ов) · " + mode), true);
+    }
+
+    private Set<String> selectedSquadIds() {
+        Set<String> ids = new LinkedHashSet<>();
+        for (TroopEntity troop : selectedTroops()) {
+            String id = troop.squadId();
+            if (id != null && !id.isBlank()) ids.add(id);
+        }
+        return ids;
+    }
+
+    private void resumeSelectedSquadInheritance() {
+        if (minecraft.player == null) return;
+        Set<String> squads = selectedSquadIds();
+        for (String id : squads)
+            minecraft.player.connection.sendCommand("wftroops command squad " + id + " inherit -");
+        minecraft.player.displayClientMessage(Component.literal(
+                squads.isEmpty() ? "Выберите отряд" : "Запрошено восстановление наследования: " + squads.size() + " отряд(ов)"), true);
+    }
+
+    private void requestSelectedCommandStatus() {
+        if (minecraft.player == null) return;
+        Set<String> squads = selectedSquadIds();
+        for (String id : squads)
+            minecraft.player.connection.sendCommand("wftroops command status squad " + id);
+        if (squads.isEmpty()) minecraft.player.displayClientMessage(
+                Component.literal("Выберите отряд для проверки командования"), true);
     }
 
     private void cycleFormation() {
@@ -805,6 +832,8 @@ public final class CommandScreen extends Screen {
             out.add(new Btn(commandLabels[i], x + i * 60, r[1] + 90, 56,
                     false, () -> applyCommandPolicy(mode)));
         }
+        out.add(new Btn("Насл.", x, r[1] + 108, 56, false, this::resumeSelectedSquadInheritance));
+        out.add(new Btn("Статус", x + 60, r[1] + 108, 56, false, this::requestSelectedCommandStatus));
     }
 
     private int panelX() { int[] r = skinRect("rp"); return r == null ? (compactSkin() ? width - panelW() - 12 : width - PANEL_W - 4) : r[0] + 12; }
