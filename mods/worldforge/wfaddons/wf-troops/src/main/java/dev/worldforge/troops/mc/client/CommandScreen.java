@@ -85,6 +85,9 @@ public final class CommandScreen extends Screen {
     public void setSettlement(Settlement model) { settlement = model; }
 
     @Override public boolean isPauseScreen() { return false; }
+
+    /** MAQAN renders the live Minecraft world behind this command overlay. */
+    public boolean isWorldOverlay() { return true; }
     @Override public boolean shouldCloseOnEsc() { return false; }
     @Override public void removed() { CommandMode.exit(Minecraft.getInstance()); }
 
