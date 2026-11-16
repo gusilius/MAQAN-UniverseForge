@@ -414,6 +414,25 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         "realms": realms,
     }
     province_ids = province_labels.tolist()  # zero is reserved for sea; labels are 16-bit safe.
+
+    # Render a deterministic political QA layer: realm colors are shared by
+    # their provinces, while thin dark borders expose province boundaries.
+    political_rgb = np.zeros((height, width, 3), dtype=np.uint8)
+    realm_rgb = {
+        rid: tuple(int(color_for(rid + 1)[i:i + 2], 16) for i in (1, 3, 5))
+        for rid in realm_provinces
+    }
+    province_array = province_labels.reshape((height, width))
+    for province_id, meta in province_meta.items():
+        political_rgb[province_array == province_id] = realm_rgb[meta["realm"]]
+    vertical = (province_array[:, 1:] != province_array[:, :-1]) & (province_array[:, 1:] > 0) & (province_array[:, :-1] > 0)
+    horizontal = (province_array[1:, :] != province_array[:-1, :]) & (province_array[1:, :] > 0) & (province_array[:-1, :] > 0)
+    political_rgb[:, 1:][vertical] = (24, 24, 28)
+    political_rgb[:, :-1][vertical] = (24, 24, 28)
+    political_rgb[1:, :][horizontal] = (24, 24, 28)
+    political_rgb[:-1, :][horizontal] = (24, 24, 28)
+    political_preview = Image.fromarray(political_rgb, "RGB")
+
     source_hash = hashlib.sha256(input_path.read_bytes()).hexdigest() if generation_mode == "image" else None
     blueprint = {
         "format": "maqan-world-blueprint/2", "generator": GENERATOR_VERSION,
@@ -446,6 +465,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         "height16.png": image_bytes(width, height, height_values, "I;16"),
         "rivers.png": image_bytes(width, height, river_values, "L"),
         "provinces.png": image_bytes(width, height, province_ids, "I;16"),
+        "political-preview.png": image_bytes(width, height, list(political_rgb.reshape(-1, 3)), "RGB"),
         "titles.json": json.dumps(titles_doc, sort_keys=True, separators=(",", ":")).encode(),
         "realms.json": json.dumps(realms_doc, sort_keys=True, separators=(",", ":")).encode(),
         "world-blueprint.json": json.dumps(blueprint, sort_keys=True, separators=(",", ":")).encode(),
@@ -481,7 +501,7 @@ def validate_package(path: Path) -> dict:
     with zipfile.ZipFile(path) as archive:
         names = set(archive.namelist())
         required = {"meta.json", "biomes.png", "height16.png", "rivers.png",
-                    "provinces.png", "titles.json", "realms.json", "world-blueprint.json"}
+                    "provinces.png", "political-preview.png", "titles.json", "realms.json", "world-blueprint.json"}
         missing = required - names
         if missing:
             raise AssertionError(f"worldmap is missing layers: {sorted(missing)}")
