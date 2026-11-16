@@ -1284,6 +1284,76 @@ def self_test(output_dir: Path) -> dict:
     return report
 
 
+
+def run_profile_suite(input_path: Path, output_dir: Path, seed: int,
+                      blocks_per_pixel: int = 16) -> dict:
+    """Generate, validate and preview all seven settlement-density profiles."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    source_hash = hashlib.sha256(input_path.read_bytes()).hexdigest()
+    rows = []
+    for level in range(1, 8):
+        started = time.perf_counter()
+        profile_dir = output_dir / f"level-{level}"
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        worldmap = profile_dir / f"map-level-{level}-seed-{seed}.worldmap"
+        blueprint = convert_image(
+            input_path, worldmap, seed, realm_count=96,
+            provinces_per_realm=24, blocks_per_pixel=blocks_per_pixel,
+            settlement_level=level)
+        validation = validate_package(worldmap)
+        with zipfile.ZipFile(worldmap) as archive:
+            for name in ("political-preview.png", "terrain-preview.png",
+                         "world-blueprint.json", "image-analysis-report.json"):
+                (profile_dir / name).write_bytes(archive.read(name))
+        elapsed = time.perf_counter() - started
+        policy = blueprint["generation_policy"]
+        row = {
+            "settlement_level": level,
+            "profile": SETTLEMENT_PROFILES[level]["key"],
+            "realm_count": blueprint["realm_count"],
+            "province_count": blueprint["province_count"],
+            "settlement_count": blueprint["settlement_count"],
+            "land_pixels": blueprint["land_pixels"],
+            "unclaimed_land_pixels": blueprint["politically_unclaimed_land_pixels"],
+            "unclaimed_land_percent": policy["unclaimed_land_percent"],
+            "major_land_components": policy["major_land_components"],
+            "minor_land_components": policy["minor_land_components"],
+            "minor_island_provinces": policy["minor_island_provinces"],
+            "independent_island_realms": policy["independent_island_realms"],
+            "realm_area_pixels": policy["realm_area_pixels"],
+            "merge_report": policy["realm_aggregation"],
+            "validation": validation,
+            "elapsed_seconds": round(elapsed, 3),
+            "worldmap": worldmap.name,
+        }
+        rows.append(row)
+        print(json.dumps({"profile_progress": row}, sort_keys=True), flush=True)
+    report = {
+        "format": "maqan-image-profile-suite/1",
+        "generator": GENERATOR_VERSION,
+        "source_image": str(input_path.name),
+        "source_image_sha256": source_hash,
+        "seed": seed,
+        "size_px": list(Image.open(input_path).size),
+        "profiles": rows,
+        "total_elapsed_seconds": round(sum(row["elapsed_seconds"] for row in rows), 3),
+        "checks": {
+            "all_seven_profiles_generated": len(rows) == 7,
+            "levels_6_7_have_no_unclaimed_land": all(
+                row["unclaimed_land_pixels"] == 0 for row in rows if row["settlement_level"] >= 6),
+            "all_provinces_connected": all(
+                row["validation"]["connectivity"]["disconnected_provinces"] == 0 for row in rows),
+            "raster_area_matches_blueprint": all(
+                row["validation"]["actual_land_pixels"] == row["land_pixels"] for row in rows),
+        },
+    }
+    if not all(report["checks"].values()):
+        raise AssertionError(f"Seven-profile QA failed: {report['checks']}")
+    (output_dir / "seven-profile-comparison.json").write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\\n", encoding="utf-8")
+    return report
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1298,10 +1368,19 @@ def main() -> int:
     convert.add_argument("--blocks-per-pixel", type=int, default=16)
     convert.add_argument("--settlement-level", type=int, choices=range(1, 8), default=4)
     convert.add_argument("--planet-id", type=str, default=None)
+    suite_parser = sub.add_parser("profile-suite")
+    suite_parser.add_argument("--input", type=Path, required=True)
+    suite_parser.add_argument("--output-dir", type=Path, required=True)
+    suite_parser.add_argument("--seed", type=int, default=424242)
+    suite_parser.add_argument("--blocks-per-pixel", type=int, default=16)
     args = parser.parse_args()
     try:
         if args.command == "self-test":
             print(json.dumps(self_test(args.output_dir), indent=2, sort_keys=True))
+        elif args.command == "profile-suite":
+            print(json.dumps(run_profile_suite(args.input, args.output_dir,
+                                               args.seed, args.blocks_per_pixel),
+                             indent=2, sort_keys=True))
         else:
             blueprint = convert_image(args.input, args.output, args.seed, args.realms,
                                       args.provinces_per_realm, args.blocks_per_pixel,
