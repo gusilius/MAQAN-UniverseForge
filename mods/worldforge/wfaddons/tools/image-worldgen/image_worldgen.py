@@ -614,6 +614,9 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
                   provinces_per_realm: int = 32, blocks_per_pixel: int = 16,
                   settlement_level: int = 4, planet_id: str | None = None,
                   generation_mode: str = "image") -> dict:
+    # Import before any coast/island processing. A later function-local import
+    # otherwise makes ndimage a local variable and raises UnboundLocalError.
+    from scipy import ndimage
     started_at = time.perf_counter()
     if settlement_level not in SETTLEMENT_PROFILES:
         raise ValueError("settlement_level must be between 1 and 7")
