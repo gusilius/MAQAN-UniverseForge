@@ -355,9 +355,15 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     unclaimed_land_pixels = land_count
     unclaimed_land_pixels -= major_land_pixels
 
+    # A fragmented world can have less aggregate capacity than
+    # floor(total_land / minimum_size), because every major landmass needs
+    # its own seed. Clamp to the sum of per-continent capacities.
+    realm_capacity = sum(max(1, len(component) // minimum_territory_pixels)
+                         for component in major_components)
     realm_total = max(
         len(major_components),
-        min(realm_count, max(1, major_land_pixels // minimum_territory_pixels)),
+        min(realm_count, realm_capacity,
+            max(1, major_land_pixels // minimum_territory_pixels)),
     )
     realm_counts = allocate_counts(major_components, realm_total, minimum_territory_pixels)
     realm_labels = np.full(width * height, -2, dtype=np.int32)
