@@ -532,21 +532,30 @@ public final class PlatformShellScreen extends Screen {
         if (mx >= 8 && mx < 30 && my < 34) g.renderTooltip(font, Component.literal("MAQAN workspace"), mx, my);
     }
 
+    private int compactRailBottom() {
+        if (WorkspaceResponsiveLayout.isCompact(width, height) && MaqanUiPackRenderer.assetsAvailable())
+            return MaqanUiPackRenderer.compactDockTop(width, height);
+        return height;
+    }
+
     private void drawRail(GuiGraphics g, int mx, int my) {
-        g.fill(0, 35, 44, height, SURFACE_ALT);
-        g.fill(43, 35, 44, height, EDGE);
+        int railBottom = compactRailBottom();
+        g.fill(0, 35, 44, railBottom, SURFACE_ALT);
+        g.fill(43, 35, 44, railBottom, EDGE);
         String[] icons = {"☷", "◈", "⌕", "◷"};
         String[] tips = {"Module catalogue", "Object inspector", "Command palette", "Timeline"};
         boolean[] active = {panels.get("navigation").visible, panels.get("inspector").visible,
                 panels.get("tools").visible, panels.get("timeline").visible};
         for (int i=0;i<icons.length;i++) {
             int y=49+i*40;
+            if (y + 25 >= railBottom - 44) break;
             if (active[i]) g.fill(5,y-5,39,y+25,0x443A9FB5);
             g.drawCenteredString(font, icons[i], 22, y+3, active[i] ? CYAN : MUTED);
             if(mx<44 && my>=y-5 && my<y+25) g.renderTooltip(font, Component.literal(tips[i]), mx, my);
         }
-        g.drawCenteredString(font, "⚙", 22, height-25, settingsVisible ? CYAN : MUTED);
-        if(mx<44 && my>=height-42) g.renderTooltip(font, Component.literal("Workspace settings"), mx, my);
+        int settingsY = Math.max(35, railBottom - 42);
+        g.drawCenteredString(font, "⚙", 22, settingsY + 17, settingsVisible ? CYAN : MUTED);
+        if(mx<44 && my>=settingsY) g.renderTooltip(font, Component.literal("Workspace settings"), mx, my);
     }
 
     private void drawWorkspaceManager(GuiGraphics g, int mx, int my) {
@@ -961,7 +970,7 @@ public final class PlatformShellScreen extends Screen {
             return true;
         }
         if(mx<44) {
-            if(my>=height-44) { settingsVisible=!settingsVisible; activeCompactDrawer = null; layoutWorkspace(); return true; }
+            if(my>=compactRailBottom()-44) { settingsVisible=!settingsVisible; activeCompactDrawer = null; layoutWorkspace(); return true; }
             if (WorkspaceResponsiveLayout.isCompact(width, height)) {
                 int compactIndex = (int) ((my - 44) / 40);
                 String[] drawers = {"navigation", "inspector", "tools", "timeline"};
