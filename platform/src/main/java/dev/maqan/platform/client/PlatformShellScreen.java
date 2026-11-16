@@ -610,6 +610,15 @@ public final class PlatformShellScreen extends Screen {
         return height;
     }
 
+    private int compactSettingsTop() {
+        return Math.max(35, compactRailBottom() - 30);
+    }
+
+    private int compactNavigationCount() {
+        int available = compactSettingsTop() - 44;
+        return Math.max(0, Math.min(4, (available + 10) / 40));
+    }
+
     private void drawRail(GuiGraphics g, int mx, int my) {
         int railBottom = compactRailBottom();
         g.fill(0, 35, 44, railBottom, SURFACE_ALT);
@@ -618,16 +627,19 @@ public final class PlatformShellScreen extends Screen {
         String[] tips = {"Module catalogue", "Object inspector", "Command palette", "Timeline"};
         boolean[] active = {panels.get("navigation").visible, panels.get("inspector").visible,
                 panels.get("tools").visible, panels.get("timeline").visible};
-        for (int i=0;i<icons.length;i++) {
-            int y=49+i*40;
-            if (y + 25 >= railBottom - 44) break;
-            if (active[i]) g.fill(5,y-5,39,y+25,0x443A9FB5);
-            g.drawCenteredString(font, icons[i], 22, y+3, active[i] ? CYAN : MUTED);
-            if(mx<44 && my>=y-5 && my<y+25) g.renderTooltip(font, Component.literal(tips[i]), mx, my);
+        int visibleItems = WorkspaceResponsiveLayout.isCompact(width, height)
+                ? compactNavigationCount() : icons.length;
+        for (int i = 0; i < visibleItems; i++) {
+            int y = 44 + i * 40;
+            if (active[i]) g.fill(5, y, 39, y + 30, 0x443A9FB5);
+            g.drawCenteredString(font, icons[i], 22, y + 8, active[i] ? CYAN : MUTED);
+            if (mx < 44 && my >= y && my < y + 30)
+                g.renderTooltip(font, Component.literal(tips[i]), mx, my);
         }
-        int settingsY = Math.max(35, railBottom - 42);
-        g.drawCenteredString(font, "⚙", 22, settingsY + 17, settingsVisible ? CYAN : MUTED);
-        if(mx<44 && my>=settingsY) g.renderTooltip(font, Component.literal("Workspace settings"), mx, my);
+        int settingsY = compactSettingsTop();
+        g.drawCenteredString(font, "⚙", 22, settingsY + 8, settingsVisible ? CYAN : MUTED);
+        if (mx < 44 && my >= settingsY && my < railBottom)
+            g.renderTooltip(font, Component.literal("Workspace settings"), mx, my);
     }
 
     private void drawWorkspaceManager(GuiGraphics g, int mx, int my) {
@@ -1044,11 +1056,14 @@ public final class PlatformShellScreen extends Screen {
             return true;
         }
         if(mx<44) {
-            if(my>=compactRailBottom()-44) { settingsVisible=!settingsVisible; activeCompactDrawer = null; layoutWorkspace(); return true; }
+            if (WorkspaceResponsiveLayout.isCompact(width, height) && my >= compactSettingsTop()
+                    && my < compactRailBottom()) {
+                settingsVisible=!settingsVisible; activeCompactDrawer = null; layoutWorkspace(); return true;
+            }
             if (WorkspaceResponsiveLayout.isCompact(width, height)) {
                 int compactIndex = (int) ((my - 44) / 40);
                 String[] drawers = {"navigation", "inspector", "tools", "timeline"};
-                if (compactIndex >= 0 && compactIndex < drawers.length) {
+                if (compactIndex >= 0 && compactIndex < compactNavigationCount() && compactIndex < drawers.length) {
                     String requested = drawers[compactIndex];
                     activeCompactDrawer = requested.equals(activeCompactDrawer) ? null : requested;
                     if (activeCompactDrawer != null) hiddenPanels.remove(activeCompactDrawer);
