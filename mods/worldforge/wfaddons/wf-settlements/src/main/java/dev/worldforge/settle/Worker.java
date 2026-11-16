@@ -4,6 +4,41 @@ package dev.worldforge.settle;
 public final class Worker {
     public record ManualOrder(double x,double z) {}
     public static final int MAX_MANUAL_ORDERS=16;
+
+    /** One authoritative owner for the resident's currently executable task. */
+    public enum TaskOwner {
+        NONE(0), LIFE(10), SETTLEMENT(50), MILITARY(90), PLAYER(100);
+        public final int priority;
+        TaskOwner(int priority) { this.priority = priority; }
+    }
+    public TaskOwner taskOwner = TaskOwner.NONE;
+    public String taskId = "";
+    public long taskRevision;
+    /** The exact task lease suspended by a military assignment; restored when that order ends. */
+    public TaskOwner suspendedTaskOwner = TaskOwner.NONE;
+    public String suspendedTaskId = "";
+    public String militaryOrderId = "";
+
+    public boolean claimTask(TaskOwner owner, String id, boolean replaceEqualPriority) {
+        if (owner == null || owner == TaskOwner.NONE || id == null || id.isBlank()) return false;
+        if (taskOwner.priority > owner.priority
+                || (taskOwner.priority == owner.priority && !replaceEqualPriority
+                    && (!taskId.equals(id) || taskOwner != owner))) return false;
+        if (taskOwner != owner || !taskId.equals(id)) taskRevision++;
+        taskOwner = owner;
+        taskId = id;
+        return true;
+    }
+
+    public boolean releaseTask(TaskOwner owner, String id) {
+        if (owner == null || taskOwner != owner || (id != null && !id.isBlank() && !taskId.equals(id))) return false;
+        taskOwner = TaskOwner.NONE;
+        taskId = "";
+        taskRevision++;
+        return true;
+    }
+
+    public boolean taskOwnedBy(TaskOwner owner) { return taskOwner == owner; }
     public final java.util.ArrayDeque<ManualOrder> orderQueue=new java.util.ArrayDeque<>();
     public final int id;
     public String name, profession = "laborer", person = "";
