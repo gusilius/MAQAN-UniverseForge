@@ -154,9 +154,9 @@ final class TroopController {
                 int leaderIndex = SPATIAL.candidate(candidate);
                 if (!leaderByIndex[leaderIndex]) continue;
                 TroopEntity leader = alive.get(leaderIndex);
-                double dx = t.getX() - leader.getX(), dz = t.getZ() - leader.getZ();
+                double dx = t.getX() - leader.getX(), dy = t.getY() - leader.getY(), dz = t.getZ() - leader.getZ();
                 double aura = auraByIndex[leaderIndex];
-                if (dx * dx + dz * dz <= aura * aura) { led = true; break; }
+                if (dx * dx + dy * dy + dz * dz <= aura * aura) { led = true; break; }
             }
             t.setDamageMult(Morale.damage(s.morale, led));
             t.setMorale((int) Math.round(s.morale * 100));
