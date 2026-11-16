@@ -425,6 +425,15 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
             "children": [], "neighbors": sorted(province_neighbors[pid]), "props": {},
         })
 
+    water_codes = [ANALYSIS_CLASSES.index(name) for name in ("ocean", "lake", "waterway")]
+    water_mask = np.isin(analysis_grid, water_codes)
+    adjacent_water = np.zeros((height, width), dtype=bool)
+    adjacent_water[:, 1:] |= water_mask[:, :-1]
+    adjacent_water[:, :-1] |= water_mask[:, 1:]
+    adjacent_water[1:, :] |= water_mask[:-1, :]
+    adjacent_water[:-1, :] |= water_mask[1:, :]
+    coast_mask = adjacent_water.ravel()
+
     for rid, pids in realm_provinces.items():
         county_id = county_id_for_realm[rid]
         capital_pid = pids[0]
@@ -472,14 +481,6 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         mountain_cells = [i for i in realm_cells if analysis_flat[i] == mountain_code]
         if mountain_cells:
             add_settlement("fortress", mountain_cells[len(mountain_cells) // 2], 20 + rid)
-        water_codes = [ANALYSIS_CLASSES.index(name) for name in ("ocean", "lake", "waterway")]
-        water_mask = np.isin(analysis_grid, water_codes)
-        adjacent_water = np.zeros((height, width), dtype=bool)
-        adjacent_water[:, 1:] |= water_mask[:, :-1]
-        adjacent_water[:, :-1] |= water_mask[:, 1:]
-        adjacent_water[1:, :] |= water_mask[:-1, :]
-        adjacent_water[:-1, :] |= water_mask[1:, :]
-        coast_mask = adjacent_water.ravel()
         coast_cells = [i for i in realm_cells if coast_mask[i]]
         if coast_cells:
             coast_cells.sort(key=lambda i: (i * 2654435761 + seed) & 0xFFFFFFFF)
