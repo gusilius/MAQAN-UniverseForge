@@ -931,6 +931,8 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         "height16.png": image_bytes(width, height, height_values, "I;16"),
         "rivers.png": image_bytes(width, height, river_values, "L"),
         "provinces.png": image_bytes(width, height, province_ids, "I;16"),
+        "wilderness.png": image_bytes(
+            width, height, (wilderness_mask.ravel().astype(np.uint8) * 255).tolist(), "L"),
         "political-preview.png": political_buffer.getvalue(),
         "terrain-preview.png": terrain_buffer.getvalue(),
         "titles.json": json.dumps(titles_doc, sort_keys=True, separators=(",", ":")).encode(),
@@ -1001,7 +1003,7 @@ def validate_package(path: Path) -> dict:
     with zipfile.ZipFile(path) as archive:
         names = set(archive.namelist())
         required = {"meta.json", "biomes.png", "height16.png", "rivers.png",
-                    "provinces.png", "political-preview.png", "terrain-preview.png", "titles.json", "realms.json", "world-blueprint.json"}
+                    "provinces.png", "wilderness.png", "political-preview.png", "terrain-preview.png", "titles.json", "realms.json", "world-blueprint.json"}
         missing = required - names
         if missing:
             raise AssertionError(f"worldmap is missing layers: {sorted(missing)}")
@@ -1022,6 +1024,14 @@ def validate_package(path: Path) -> dict:
         actual_land_pixels = int(np.isin(biome_values, list(land_biomes)).sum())
         actual_covered_land_pixels = int(np.count_nonzero(np.asarray(province_ids) > 0))
         actual_unclaimed = actual_land_pixels - actual_covered_land_pixels
+        wilderness_image = Image.open(__import__("io").BytesIO(archive.read("wilderness.png")))
+        wilderness_values = np.asarray(wilderness_image, dtype=np.uint8).ravel() > 0
+        if int(wilderness_values.sum()) != int(blueprint["generation_policy"]["wilderness_pixels"]):
+            raise AssertionError("wilderness raster count differs from the blueprint")
+        if np.any(wilderness_values & (np.asarray(province_ids) > 0)):
+            raise AssertionError("wilderness pixels overlap assigned political provinces")
+        if np.any(wilderness_values & ~np.isin(biome_values, list(land_biomes))):
+            raise AssertionError("wilderness raster includes water or non-land pixels")
         if actual_land_pixels != int(blueprint["land_pixels"]):
             raise AssertionError("land pixel count differs between semantic and political rasters")
         if actual_unclaimed != int(blueprint["politically_unclaimed_land_pixels"]):
