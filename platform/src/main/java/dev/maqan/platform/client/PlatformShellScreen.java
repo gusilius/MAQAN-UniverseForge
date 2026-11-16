@@ -598,7 +598,7 @@ public final class PlatformShellScreen extends Screen {
             }
 
             drawConceptTopBar(g, mouseX, mouseY);
-            if (activeView() == null && !compact) drawConceptWindowContent(g);
+            if (activeView() == null && !compact) drawConceptWindowContent(g, mouseX, mouseY);
             if (compact) {
                 drawRail(g, mouseX, mouseY);
                 for (Panel panel : panels.values()) {
@@ -841,7 +841,7 @@ public final class PlatformShellScreen extends Screen {
      * When no provider screen is mounted, populate them from the live capability
      * catalogue and the shared provider-owned selection/inspector contracts.
      */
-    private void drawConceptWindowContent(GuiGraphics g) {
+    private void drawConceptWindowContent(GuiGraphics g, int mouseX, int mouseY) {
         Panel navigation = panels.get("navigation");
         Panel inspector = panels.get("inspector");
         if (navigation != null && navigation.visible) {
