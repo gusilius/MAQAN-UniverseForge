@@ -397,8 +397,12 @@ public final class CommandScreen extends Screen {
         int[] console = skinRect("bot");
         int x = unitToolsPanelX >= 0 ? unitToolsPanelX : console == null ? width - 202 : console[0] + 10;
         int y = unitToolsPanelY >= 0 ? unitToolsPanelY : console == null ? height - 112 : console[1] - 98;
-        x = Math.max(4, Math.min(width - 198, x));
-        y = Math.max(4, Math.min(height - 98, y));
+        int[] view = embeddedInMaqan ? workspaceViewport() : new int[]{0, 0, width, height};
+        int minX = view[0] + 4, minY = view[1] + 4;
+        int maxX = Math.max(minX, view[0] + view[2] - 198);
+        int maxY = Math.max(minY, view[1] + view[3] - 98);
+        x = Math.max(minX, Math.min(maxX, x));
+        y = Math.max(minY, Math.min(maxY, y));
         return new int[]{x, y, 194, 94};
     }
 
@@ -567,8 +571,12 @@ public final class CommandScreen extends Screen {
         int[] console = skinRect("bot");
         int x = professionalPanelX >= 0 ? professionalPanelX : console == null ? width - 148 : console[0] + console[2] - 148;
         int y = professionalPanelY >= 0 ? professionalPanelY : console == null ? height - 64 : console[1] + 30;
-        x = Math.max(4, Math.min(width - 144, x));
-        y = Math.max(4, Math.min(height - 50, y));
+        int[] view = embeddedInMaqan ? workspaceViewport() : new int[]{0, 0, width, height};
+        int minX = view[0] + 4, minY = view[1] + 4;
+        int maxX = Math.max(minX, view[0] + view[2] - 144);
+        int maxY = Math.max(minY, view[1] + view[3] - 50);
+        x = Math.max(minX, Math.min(maxX, x));
+        y = Math.max(minY, Math.min(maxY, y));
         return new int[]{x, y, 140, 46};
     }
 
