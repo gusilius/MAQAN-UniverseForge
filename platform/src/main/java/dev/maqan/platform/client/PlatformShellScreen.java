@@ -1637,14 +1637,6 @@ public final class PlatformShellScreen extends Screen {
             toggleWorkspacePanel("timeline");
             return true;
         }
-        if (keyCode == GLFW.GLFW_KEY_F8) {
-            WorkspaceViewState.cycleCameraMode();
-            return true;
-        }
-        if (keyCode == GLFW.GLFW_KEY_F9) {
-            WorkspaceViewState.cycleMapMode();
-            return true;
-        }
         // The imported concept pack keeps the same workspace and provider state;
         // F7 changes only the decorative skin.
         if (keyCode == GLFW.GLFW_KEY_F7 && MaqanUiPackRenderer.assetsAvailable()) {
