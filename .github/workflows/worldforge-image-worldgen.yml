@@ -69,6 +69,7 @@ jobs:
             mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/Noise.java `
             mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/RegionData.java `
             mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/TitleData.java `
+            mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/PlanetWorldProfile.java `
             mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/MapData.java `
             mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/TerrainSampler.java `
             mods/worldforge/wfmod/tools/SmokeTest.java `
