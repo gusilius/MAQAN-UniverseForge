@@ -52,22 +52,26 @@ public final class WorkspaceResponsiveLayout {
         switch (activeDrawer) {
             case "timeline" -> {
                 drawerHeight = Math.max(1, Math.min(164, availableHeight));
-                x = left + margin;
-                y = h - margin - drawerHeight;
-                drawerWidth = Math.max(1, w - left - margin * 2);
+                drawerWidth = Math.max(1, Math.min(w, w - left - margin * 2));
+                x = clamp(left + margin, 0, Math.max(0, w - drawerWidth));
+                y = clamp(h - margin - drawerHeight, 0, Math.max(0, h - drawerHeight));
             }
             case "inspector", "tools" -> {
                 drawerHeight = Math.max(1, Math.min(availableHeight, Math.max(210, (int) (availableHeight * 0.72))));
-                x = Math.max(left + margin, w - margin - drawerWidth);
-                y = top + margin;
+                x = clamp(Math.max(left + margin, w - margin - drawerWidth), 0, Math.max(0, w - drawerWidth));
+                y = clamp(top + margin, 0, Math.max(0, h - drawerHeight));
             }
             default -> {
                 drawerHeight = Math.max(1, Math.min(availableHeight, Math.max(210, (int) (availableHeight * 0.72))));
-                x = left + margin;
-                y = top + margin;
+                x = clamp(left + margin, 0, Math.max(0, w - drawerWidth));
+                y = clamp(top + margin, 0, Math.max(0, h - drawerHeight));
             }
         }
         result.put(activeDrawer, new WorkspaceDockTree.Rect(x, y, drawerWidth, drawerHeight));
         return new Result(true, result);
+    }
+
+    private static int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
     }
 }
