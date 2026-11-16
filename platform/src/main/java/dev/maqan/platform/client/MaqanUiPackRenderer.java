@@ -22,23 +22,6 @@ public final class MaqanUiPackRenderer {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final List<String> FRAME_LAYERS =
             List.of("mm", "bot", "top", "cor", "lcol", "rcol", "lp", "rp");
-    private static final Map<String, String> TEXTURES = Map.of(
-            "top", "top_bar.png",
-            "lcol", "left_column.png",
-            "lp", "window_left_blank.png",
-            "rp", "window_right_blank.png",
-            "rcol", "right_column.png",
-            "mm", "minimap.png",
-            "bot", "rts_console.png",
-            "cor", "corner.png",
-            "lw", "window_left_blank.png",
-            "rw", "window_right_blank.png"
-    );
-    private static final List<String> REQUIRED_TEXTURES = List.of(
-            "top_bar.png", "left_column.png", "right_column.png", "corner.png",
-            "minimap.png", "rts_console.png", "window_state.png", "window_diplomacy.png",
-            "window_left_blank.png", "window_right_blank.png"
-    );
     private static final Map<String, Map<String, int[]>> SOURCE_SIZES = Map.of(
             "royal", Map.of("top", new int[]{2188,99}, "lcol", new int[]{92,694},
                     "lp", new int[]{444,739}, "rp", new int[]{480,739}, "rcol", new int[]{67,764},
@@ -99,7 +82,7 @@ public final class MaqanUiPackRenderer {
         }
         if (!loadedLayout.hasTheme(activeTheme)) activeTheme = "royal";
         for (String theme : List.of("royal", "iron", "grim", "elf")) {
-            for (String filename : REQUIRED_TEXTURES) {
+            for (String filename : loadedLayout.textureNames().values().stream().distinct().toList()) {
                 ResourceLocation location = texture(theme, filename);
                 if (minecraft.getResourceManager().getResource(location).isEmpty()) {
                     if (!availabilityLogged) {
@@ -128,7 +111,7 @@ public final class MaqanUiPackRenderer {
             int y = transform.screenY(rect[1]);
             int width = transform.screenWidth(rect[2] - rect[0]);
             int height = transform.screenHeight(rect[3] - rect[1]);
-            ResourceLocation texture = texture(activeTheme, TEXTURES.get(key));
+            ResourceLocation texture = texture(activeTheme, loadedLayout.textureName(key));
             int[] sourceSize = SOURCE_SIZES.get(activeTheme).get(key);
             graphics.blit(texture, x, y, width, height,
                     0, 0, sourceSize[0], sourceSize[1], sourceSize[0], sourceSize[1]);
