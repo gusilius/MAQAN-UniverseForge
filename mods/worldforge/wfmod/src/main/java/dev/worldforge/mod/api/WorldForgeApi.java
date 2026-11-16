@@ -87,7 +87,7 @@ public final class WorldForgeApi {
             MapAction candidate = action(req.actionId());
             if (candidate == null) return "Действие больше не зарегистрировано: " + req.actionId();
             if (candidate.perm == MapAction.Perm.OP && !base.operator) return "Нужны права оператора";
-            ActionContext context = actionContext(base, candidate, req.targetId(), req.args());
+            ActionContext context = actionContext(base, candidate, req.targetId(), req.args(), req.requestId());
             for (Guard guard : GUARDS) {
                 String denied = guard.check(candidate, context);
                 if (denied != null) return denied;
@@ -96,21 +96,22 @@ public final class WorldForgeApi {
         }, (req, attempt) -> {
             MapAction candidate = action(req.actionId());
             if (candidate == null) return ActionResult.fail("Действие не найдено: " + req.actionId());
-            ActionContext context = actionContext(base, candidate, req.targetId(), req.args());
+            ActionContext context = actionContext(base, candidate, req.targetId(), req.args(), req.requestId());
             ActionResult result = candidate.handler.run(context);
             if (result.ok) fireChange(new MapChange(context.data(), "action", candidate.id));
             return result;
         }, replanner, worldMinute, journalFile);
     }
 
-    private static ActionContext actionContext(ActionContext base, MapAction action, String target, List<String> args) {
+    private static ActionContext actionContext(ActionContext base, MapAction action, String target,
+                                               List<String> args, String requestId) {
         String realmId = action.scope == MapAction.Scope.REALM ? target : null;
         int titleId = 0;
         if (action.scope == MapAction.Scope.TITLE) {
             try { titleId = Integer.parseInt(target); }
             catch (NumberFormatException ex) { throw new TitleEditor.EditException("Для действия нужен корректный ID титула"); }
         }
-        return new ActionContext(base.editor, base.actor, base.operator, realmId, titleId, args);
+        return new ActionContext(base.editor, base.actor, base.operator, realmId, titleId, args, requestId);
     }
 
     /** Общий журнал событий мира (аддоны пишут сюда войны, браки, стройки; клиент показывает всплывающие сообщения и окно журнала). */
