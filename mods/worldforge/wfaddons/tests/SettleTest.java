@@ -446,6 +446,12 @@ public class SettleTest {
                         && Math.abs(dev.worldforge.mod.economy.TreasuryService.current().balance(armyFoodAccount) - 20) < 1e-8,
                 "settlement food and army field rations reconcile after independent snapshot reloads");
 
+        String ledgerAfterReconcile = dev.worldforge.mod.economy.TreasuryService.current().toJson();
+        for (int i = 0; i < 100; i++) resupplySource.amount("food");
+        ok(Math.abs(resupplySource.amount("food") - 30) < 1e-8
+                        && ledgerAfterReconcile.equals(dev.worldforge.mod.economy.TreasuryService.current().toJson()),
+                "repeated stock reads do not replay legacy reconciliation or append duplicate ledger entries");
+
         System.out.println(fails == 0 ? "ALL OK" : fails + " FAILED");
         if (fails > 0) System.exit(1);
     }
