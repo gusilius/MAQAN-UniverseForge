@@ -647,41 +647,20 @@ public final class Settlement {
         say((b.state == Building.State.DONE ? "Снесено: " : "Отменено: ") + b.def.name);
     }
 
-    /** Claims the resident for an external military order without replacing their permanent profession or Character. */
-    public boolean claimMilitaryTask(int workerId, String orderId) {
-        Worker w = worker(workerId);
-        if (w == null || orderId == null || orderId.isBlank()) return false;
-        if (w.taskOwner == Worker.TaskOwner.PLAYER) return false;
-        if (w.taskOwner != Worker.TaskOwner.MILITARY) {
-            w.suspendedTaskOwner = w.taskOwner;
-            w.suspendedTaskId = w.taskId;
-            w.suspendedProfession = w.assignedProfession;
-            w.suspendedBuilding = w.building;
-            w.suspendedManualHauler = w.manualHauler;
-            w.suspendedLifeAction = w.lifeAction;
-            w.suspendedLifeTargetX = w.lifeTargetX;
-            w.suspendedLifeTargetZ = w.lifeTargetZ;
-            w.suspendedLifeActionUntil = w.lifeActionUntil;
-        }
-        if (!w.claimTask(Worker.TaskOwner.MILITARY, orderId, true)) return false;
-        w.militaryOrderId = orderId;
-        w.building = 0;
-        w.assignedProfession = "";
-        w.manualHauler = false;
-        w.manualOrder = false;
-        w.orderQueue.clear();
-        w.manualFollow = false;
-        w.manualFollowOwner = "";
-        w.lifeAction = "";
-        w.status = "военный приказ";
-        return true;
+    private void suspendCurrentTask(Worker w) {
+        if (w.taskOwner == Worker.TaskOwner.MILITARY || w.taskOwner == Worker.TaskOwner.PLAYER) return;
+        w.suspendedTaskOwner = w.taskOwner;
+        w.suspendedTaskId = w.taskId;
+        w.suspendedProfession = w.assignedProfession;
+        w.suspendedBuilding = w.building;
+        w.suspendedManualHauler = w.manualHauler;
+        w.suspendedLifeAction = w.lifeAction;
+        w.suspendedLifeTargetX = w.lifeTargetX;
+        w.suspendedLifeTargetZ = w.lifeTargetZ;
+        w.suspendedLifeActionUntil = w.lifeActionUntil;
     }
 
-    /** Releases only the matching military lease and restores the exact suspended task when still valid. */
-    public boolean releaseMilitaryTask(int workerId, String orderId) {
-        Worker w = worker(workerId);
-        if (w == null || !w.releaseTask(Worker.TaskOwner.MILITARY, orderId)) return false;
-        w.militaryOrderId = "";
+    private boolean restoreSuspendedTask(Worker w) {
         Worker.TaskOwner resume = w.suspendedTaskOwner;
         String resumeId = w.suspendedTaskId;
         String resumeProfession = w.suspendedProfession;
@@ -709,10 +688,6 @@ public final class Settlement {
                 w.status = resumeHauler ? "переносит ресурсы" : "";
                 return true;
             }
-        } else if (resume == Worker.TaskOwner.PLAYER && !resumeId.isBlank()) {
-            w.claimTask(Worker.TaskOwner.PLAYER, resumeId, true);
-            w.status = "приказ игрока";
-            return true;
         } else if (resume == Worker.TaskOwner.LIFE) {
             w.claimTask(Worker.TaskOwner.LIFE, resumeId.isBlank() ? "daily-life" : resumeId, true);
             w.lifeAction = resumeLifeAction;
@@ -725,15 +700,46 @@ public final class Settlement {
         w.taskOwner = Worker.TaskOwner.NONE;
         w.taskId = "";
         w.taskRevision++;
+        w.building = 0;
+        w.assignedProfession = "";
+        w.manualHauler = false;
+        w.lifeAction = "";
         w.status = "свободен";
         return true;
     }
 
-    /** Daily-life actions suspend settlement work; the lease prevents auto-staffing from stealing the resident. */
+    /** Claims a resident for a military order while preserving their civilian/daily-life task. */
+    public boolean claimMilitaryTask(int workerId, String orderId) {
+        Worker w = worker(workerId);
+        if (w == null || orderId == null || orderId.isBlank()
+                || w.taskOwner == Worker.TaskOwner.PLAYER) return false;
+        if (w.taskOwner != Worker.TaskOwner.MILITARY) suspendCurrentTask(w);
+        if (!w.claimTask(Worker.TaskOwner.MILITARY, orderId, true)) return false;
+        w.militaryOrderId = orderId;
+        w.building = 0; w.assignedProfession = ""; w.manualHauler = false;
+        w.manualOrder = false; w.orderQueue.clear();
+        w.manualFollow = false; w.manualFollowOwner = "";
+        w.lifeAction = "";
+        w.status = "военный приказ";
+        return true;
+    }
+
+    public boolean releaseMilitaryTask(int workerId, String orderId) {
+        Worker w = worker(workerId);
+        if (w == null || !w.releaseTask(Worker.TaskOwner.MILITARY, orderId)) return false;
+        w.militaryOrderId = "";
+        return restoreSuspendedTask(w);
+    }
+
+    /** Daily-life activity temporarily owns the resident and suspends settlement production/work. */
     public boolean claimLifeTask(int workerId, String actionId) {
         Worker w = worker(workerId);
         if (w == null || w.taskOwner == Worker.TaskOwner.PLAYER || w.taskOwner == Worker.TaskOwner.MILITARY) return false;
+        if (w.taskOwner != Worker.TaskOwner.LIFE) suspendCurrentTask(w);
         if (!w.claimTask(Worker.TaskOwner.LIFE, actionId == null || actionId.isBlank() ? "daily-life" : actionId, true)) return false;
+        w.building = 0;
+        w.assignedProfession = "";
+        w.manualHauler = false;
         w.status = "повседневная жизнь";
         return true;
     }
@@ -741,8 +747,17 @@ public final class Settlement {
     public boolean releaseLifeTask(int workerId, String actionId) {
         Worker w = worker(workerId);
         if (w == null || !w.releaseTask(Worker.TaskOwner.LIFE, actionId)) return false;
-        w.status = "свободен";
-        return true;
+        return restoreSuspendedTask(w);
+    }
+
+    public boolean releasePlayerTask(int workerId, String taskId) {
+        Worker w = worker(workerId);
+        if (w == null || !w.releaseTask(Worker.TaskOwner.PLAYER, taskId)) return false;
+        w.manualOrder = false;
+        w.orderQueue.clear();
+        w.manualFollow = false;
+        w.manualFollowOwner = "";
+        return restoreSuspendedTask(w);
     }
 
     /** Allows other mods to inspect whether a resident can accept a task without mutating state. */
