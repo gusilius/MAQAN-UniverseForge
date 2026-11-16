@@ -747,9 +747,12 @@ public final class CommandScreen extends Screen {
         if (buildOpen) drawBuildPanel(g, mxi, myi);
         String hint = workMode >= 0 ? "Участок: " + WORK_LABELS[workMode] + " · ЛКМ/рамка — назначить выделенным рабочим · O — видимость зоны · Y — сменить задачу" : picked != null ? "ЛКМ - поставить здание (Shift - ещё одно) · ПКМ/Esc - отмена · колесо - высота камеры"
                 : "ЛКМ выбор/рамка · ПКМ приказ · WASD и края экрана - камера · колесо - высота · СКМ - вращать · Q/E поворот · Tab вид · Space к выбранным · V командир / Ctrl+V снять · P патруль · B стройка · R выход";
-        g.drawString(font, hint, 6, 6, 0xFFC8C8C8, true);
-        g.drawString(font, "Вид: " + CommandMode.RIG.view.title + "   Строй: " + Formations.Type.values()[CommandMode.formation].title + "   Поза: " + Squads.Stance.values()[CommandMode.stance].title,
-                6, 18, 0xFF9CCCFF, true);
+        if (!embeddedInMaqan) {
+            g.drawString(font, hint, 6, 6, 0xFFC8C8C8, true);
+            g.drawString(font, "Вид: " + CommandMode.RIG.view.title + "   Строй: "
+                    + Formations.Type.values()[CommandMode.formation].title + "   Поза: "
+                    + Squads.Stance.values()[CommandMode.stance].title, 6, 18, 0xFF9CCCFF, true);
+        }
     }
 
     /** Занятые места поселения на земле: тонкие рамки, видно, где уже стоят здания, пока открыто меню стройки. */
@@ -781,8 +784,11 @@ public final class CommandScreen extends Screen {
         }
         if (visible > 0) {
             String label = "Чертёж · недостающих блоков: " + constructionGhosts.size() + " · в кадре: " + visible;
-            g.fill(6, height - 34, 6 + font.width(label) + 12, height - 19, 0xCC101018);
-            g.drawString(font, label, 12, height - 30, 0xFF9BE8FF, false);
+            int[] console = skinRect("bot");
+            int x = console == null ? 6 : console[0] + 12;
+            int y = console == null ? height - 34 : console[1] + console[3] - 36;
+            g.fill(x, y, x + font.width(label) + 12, y + 15, 0xCC101018);
+            g.drawString(font, label, x + 6, y + 4, 0xFF9BE8FF, false);
         }
     }
 
@@ -861,21 +867,29 @@ public final class CommandScreen extends Screen {
         int morSum = 0, morN = 0;
         for (net.minecraft.world.entity.Entity en : mc.level.entitiesForRendering()) if (en instanceof TroopEntity t && CommandMode.SEL.isSelected(t.getUUID().toString())) { morSum += t.moralePct(); morN++; }
         int rows = Math.min(5, Math.max(1, counts.size()));
-        int top = h - 14 - rows * 11 - 10;
-        g.fill(4, top, 190, h - 4, 0xAA101018);
-        g.drawString(font, "Выбрано: " + CommandMode.SEL.selected().size(), 10, top + 4, 0xFFE6C875, false);
+        int top = embeddedInMaqan ? selectionPanelY() : h - 14 - rows * 11 - 10;
+        int sx = embeddedInMaqan ? selectionPanelX() : 4;
+        int sw = embeddedInMaqan ? selectionPanelW() : 186;
+        int bottom = embeddedInMaqan ? top + 82 : h - 4;
+        g.fill(sx, top, sx + sw, bottom, 0xAA101018);
+        g.drawString(font, "Выбрано: " + CommandMode.SEL.selected().size(), sx + 6, top + 4, 0xFFE6C875, false);
         if (morN > 0) {
             int mor = morSum / morN;
             String ms = "Мораль " + mor + "%" + (mor < 20 ? " - бегут!" : "");
-            g.drawString(font, ms, 186 - font.width(ms), top + 4, mor < 20 ? 0xFFFF5555 : mor < 50 ? 0xFFFFDD55 : 0xFF88DD88, false);
+            g.drawString(font, ms, sx + sw - 6 - font.width(ms), top + 4, mor < 20 ? 0xFFFF5555 : mor < 50 ? 0xFFFFDD55 : 0xFF88DD88, false);
         }
         int yy = top + 15;
         int shown = 0;
-        for (var en : counts.entrySet()) { if (shown++ >= 5) break; g.drawString(font, en.getValue() + " × " + en.getKey(), 10, yy, 0xFFDDDDDD, false); yy += 11; }
+        for (var en : counts.entrySet()) {
+            if (shown++ >= 5) break;
+            g.drawString(font, font.plainSubstrByWidth(en.getValue() + " × " + en.getKey(), sw - 12),
+                    sx + 6, yy, 0xFFDDDDDD, false);
+            yy += 11;
+        }
     }
 
     private void drawBuildPanel(GuiGraphics g, int mxi, int myi) {
-        int x = panelX(), y = panelY(), pw = PANEL_W, ph = panelH();
+        int x = panelX(), y = panelY(), pw = panelW(), ph = panelH();
         g.fill(x, y, x + pw, y + ph, 0xDD101018);
         g.fill(x, y, x + pw, y + 1, 0xFF6A5A30);
         g.drawString(font, buildError.isEmpty() ? "Стройка: " + (colName.isEmpty() ? "…" : colName) : buildError, x + 6, y + 5, buildError.isEmpty() ? 0xFFE6C875 : 0xFFFF8888, false);
