@@ -81,22 +81,23 @@ def neighbors(index: int, width: int, height: int):
 
 
 def land_components(classes: list[str], width: int, height: int) -> list[list[int]]:
-    seen = bytearray(width * height)
+    """Connected landmasses via SciPy's native implementation, not Python pixel BFS."""
+    from scipy import ndimage
+    land = np.isin(np.asarray(classes, dtype=object).reshape((height, width)),
+                   tuple(LAND_CLASSES))
+    labels, count = ndimage.label(land, structure=np.array([[0, 1, 0],
+                                                            [1, 1, 1],
+                                                            [0, 1, 0]], dtype=np.uint8))
+    if count == 0:
+        return []
+    flat = labels.ravel()
+    sizes = np.bincount(flat, minlength=count + 1)
+    order = np.argsort(flat, kind="stable")
+    offsets = np.cumsum(sizes)
     result = []
-    for start, kind in enumerate(classes):
-        if seen[start] or kind not in LAND_CLASSES:
-            continue
-        seen[start] = 1
-        queue = deque([start])
-        component = []
-        while queue:
-            current = queue.popleft()
-            component.append(current)
-            for nxt in neighbors(current, width, height):
-                if not seen[nxt] and classes[nxt] in LAND_CLASSES:
-                    seen[nxt] = 1
-                    queue.append(nxt)
-        result.append(component)
+    for component_id in range(1, count + 1):
+        start, end = int(offsets[component_id - 1]), int(offsets[component_id])
+        result.append(order[start:end].astype(np.int64).tolist())
     result.sort(key=lambda cells: (-len(cells), cells[0]))
     return result
 
@@ -190,8 +191,8 @@ def create_test_image(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     img.save(path, format="PNG", optimize=False)
 
-def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: int = 4,
-                  provinces_per_realm: int = 4, blocks_per_pixel: int = 16) -> dict:
+def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: int = 64,
+                  provinces_per_realm: int = 32, blocks_per_pixel: int = 16) -> dict:
     image = Image.open(input_path).convert("RGB")
     width, height, classes, analysis_report = png_pixels(image)
     components = land_components(classes, width, height)
@@ -240,8 +241,10 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         next_province += len(seeds)
 
     land_count = sum(1 for kind in classes if kind in LAND_CLASSES)
-    realm_array = np.asarray(realm_labels, dtype=np.int32)
-    realm_cells_by_id = {rid: np.flatnonzero(realm_array == rid).tolist() for rid in realm_provinces}
+    realm_cells_by_id = {rid: [] for rid in realm_provinces}
+    for pixel_index, realm_id in enumerate(realm_labels):
+        if realm_id >= 0:
+            realm_cells_by_id[realm_id].append(pixel_index)
     province_neighbors = {pid: set() for pid in province_meta}
     realm_neighbors = {rid: set() for rid in realm_provinces}
     for z in range(height):
