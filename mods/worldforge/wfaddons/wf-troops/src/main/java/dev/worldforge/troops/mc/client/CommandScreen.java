@@ -9,6 +9,7 @@ import dev.worldforge.troops.Formations;
 import dev.worldforge.troops.Projection;
 import dev.worldforge.troops.Squads;
 import dev.worldforge.troops.UnitSelection;
+import dev.worldforge.troops.WorkArea;
 import dev.worldforge.troops.mc.OrderPacket;
 import dev.worldforge.troops.mc.TroopEntity;
 import net.minecraft.client.Minecraft;
@@ -345,7 +346,7 @@ public final class CommandScreen extends Screen {
         picked = null;
         if (buildOpen) requestBuilds();
     }
-    private static final String[] WORK_LABELS = {"целые деревья", "камень", "руда", "расчистка", "выравнивание", "урожай", "мёд", "лекарственные растения"};
+    private static final String[] WORK_LABELS = Arrays.stream(WorkArea.values()).map(area -> area.label).toArray(String[]::new);
     private void cycleWorkMode() {
         workMode = (workMode + 1) % (WORK_LABELS.length + 1);
         if (workMode == WORK_LABELS.length) workMode = -1;
