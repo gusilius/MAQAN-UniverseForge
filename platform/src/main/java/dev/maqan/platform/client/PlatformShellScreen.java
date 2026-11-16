@@ -74,6 +74,7 @@ public final class PlatformShellScreen extends Screen {
     private List<WorkspaceRuntime.SearchEntry> searchResults = List.of();
     private boolean contextMenuVisible;
     private int contextMenuX, contextMenuY;
+    private PlatformSelectionContext.Selection contextSelection;
     private List<WorkspaceRuntime.Action> contextActions = List.of();
     private boolean navRailVisible = true;
     /** Active slide-over panel on compact screens; null leaves the map unobstructed. */
