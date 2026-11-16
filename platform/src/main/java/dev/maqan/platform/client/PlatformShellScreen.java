@@ -381,10 +381,20 @@ public final class PlatformShellScreen extends Screen {
         g.fill(0, 0, width, height, BG);
         Panel content = panels.get("content");
         if (content != null && content.visible) {
-            g.enableScissor(content.x, content.y, content.x + content.w, content.y + content.h);
             Screen view = activeView();
-            if (view != null) view.render(g, mouseX, mouseY, partialTick);
-            else WorkspacePreviewRenderer.render(g, font, width, height, profile.name(), previewLayer, mouseX, mouseY, ambientGrid);
+            if (view != null) {
+                // Provider screens own their internal map/list/inspector geometry.
+                // Render them in the full host viewport; clipping them to the
+                // generic dock-tree content slot used to cut off their side panels.
+                view.render(g, mouseX, mouseY, partialTick);
+            } else {
+                g.enableScissor(content.x, content.y, content.x + content.w, content.y + content.h);
+                WorkspacePreviewRenderer.render(g, font, width, height, profile.name(), previewLayer, mouseX, mouseY, ambientGrid);
+                g.disableScissor();
+            }
+            // MAQAN overlays are deliberately constrained to the central content
+            // slot even when the provider's own view spans the full host viewport.
+            g.enableScissor(content.x, content.y, content.x + content.w, content.y + content.h);
             WorkspaceMapLayerRegistry.render(g, content.x, content.y, content.w, content.h);
             g.disableScissor();
         }
