@@ -45,6 +45,23 @@ public final class ImageWorldMapCompatibilityTest {
         }
         if (provinces == 0 || regions == 0 || states == 0 || regions < states)
             throw new AssertionError("Administrative honeycomb is incomplete: provinces=" + provinces + ", regions=" + regions + ", states=" + states);
+        if (map.settlementSeeds.isEmpty())
+            throw new AssertionError("Actual image blueprint has no named settlement anchors");
+        java.util.Set<String> settlementIds = new java.util.HashSet<>();
+        for (MapData.SettlementSeed settlement : map.settlementSeeds) {
+            if (settlement.id().isBlank() || !settlementIds.add(settlement.id()))
+                throw new AssertionError("Settlement IDs must be non-empty and unique: " + settlement.id());
+            if (settlement.name().isBlank() || settlement.type().isBlank())
+                throw new AssertionError("Settlement is missing its generated name or type: " + settlement.id());
+            TitleData.Title province = map.titles.byKey(settlement.provinceId());
+            if (province == null || province.tier != 0)
+                throw new AssertionError("Settlement is not linked to a real province: " + settlement.id());
+            TitleData.Realm realm = map.titles.realmOf(province);
+            if (realm == null || !realm.id.equals(settlement.realmId()))
+                throw new AssertionError("Settlement realm link disagrees with political geography: " + settlement.id());
+        }
+        System.out.println("Actual map named settlement anchors: " + map.settlementSeeds.size()
+                + ", unique IDs: " + settlementIds.size());
         TerrainSampler sampler = new TerrainSampler(map, 1.0f);
         int[] spawn = sampler.findSpawn();
         TerrainSampler.Col column = sampler.sample(spawn[0], spawn[2]);
