@@ -53,7 +53,11 @@ public final class ImageWorldMapCompatibilityTest {
                 throw new AssertionError("Settlement IDs must be non-empty and unique: " + settlement.id());
             if (settlement.name().isBlank() || settlement.type().isBlank())
                 throw new AssertionError("Settlement is missing its generated name or type: " + settlement.id());
-            TitleData.Title province = map.titles.byKey(settlement.provinceId());
+            TitleData.Title province;
+            try { province = map.titles.get(Integer.parseInt(settlement.provinceId())); }
+            catch (NumberFormatException invalidProvinceId) {
+                throw new AssertionError("Settlement province ID is not numeric: " + settlement.id());
+            }
             if (province == null || province.tier != 0)
                 throw new AssertionError("Settlement is not linked to a real province: " + settlement.id());
             TitleData.Realm realm = map.titles.realmOf(province);
