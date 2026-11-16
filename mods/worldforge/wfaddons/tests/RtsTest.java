@@ -276,6 +276,10 @@ public class RtsTest {
         catch (Settlement.OrderException expectedPriority) { incompatiblePriorityRejected = true; }
         ok(incompatiblePriorityRejected && specialistTown.workPriority(specialist, "farmer") == 0,
                 "сервер запрещает назначать ненулевой приоритет несовместимой профессии");
+        ok(restoredPriorities.get(specialist, "farmer") == 0
+                        && restoredPriorities.cycle(specialist, "farmer", false) == null
+                        && restoredPriorities.cycleColumn(specialistTown, "farmer").isEmpty(),
+                "RTS UI blocks incompatible profession cells and excludes them from column-wide updates");
 
         // ---- карта
         MapView collapsed = MapView.fit(g, 0, 0, 0, 0);
