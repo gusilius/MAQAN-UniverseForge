@@ -1184,6 +1184,15 @@ public class TroopsMod {
                 .then(Commands.literal("hierarchy")
                         .then(Commands.argument("army", IntegerArgumentType.integer(1))
                                 .executes(ctx -> showHierarchy(ctx.getSource(), IntegerArgumentType.getInteger(ctx, "army")))))
+                .then(Commands.literal("command")
+                        .then(Commands.literal("squad")
+                                .then(Commands.argument("squad", StringArgumentType.word())
+                                        .then(Commands.argument("mode", StringArgumentType.word())
+                                                .then(Commands.argument("commander", StringArgumentType.word())
+                                                        .executes(ctx -> setSquadCommandPolicy(ctx.getSource(),
+                                                                StringArgumentType.getString(ctx, "squad"),
+                                                                StringArgumentType.getString(ctx, "mode"),
+                                                                StringArgumentType.getString(ctx, "commander"))))))))
                 .then(Commands.literal("commander")
                         .then(Commands.literal("army")
                                 .then(Commands.argument("army", IntegerArgumentType.integer(1))
@@ -1389,6 +1398,70 @@ public class TroopsMod {
         } catch (RuntimeException ex) {
             src.sendFailure(Component.literal(ex.getMessage())); return 0;
         }
+    }
+
+    /** Sets a squad's explicit command policy; the commander must be a living canonical Character in that squad. */
+    private static int setSquadCommandPolicy(CommandSourceStack src, String squadId, String modeName, String commanderId) {
+        return executeMilitaryCommand(src, "military.command_policy.squad", squadId,
+                modeName + "|" + commanderId,
+                () -> setSquadCommandPolicyDirect(src, squadId, modeName, commanderId));
+    }
+
+    private static int setSquadCommandPolicyDirect(CommandSourceStack src, String squadId,
+                                                    String modeName, String commanderId) {
+        ServerPlayer player;
+        try { player = src.getPlayerOrException(); }
+        catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
+        Squads.Squad squad = SQUADS.get(squadId);
+        if (squad == null || !squad.owner.equals(player.getUUID().toString())) {
+            src.sendFailure(Component.literal("Отряд не найден или принадлежит другому игроку"));
+            return 0;
+        }
+        CommandDelegation.Mode mode;
+        try {
+            mode = switch (modeName.toLowerCase(Locale.ROOT)) {
+                case "direct" -> CommandDelegation.Mode.PLAYER_DIRECT;
+                case "delegated" -> CommandDelegation.Mode.DELEGATED;
+                case "autonomous" -> CommandDelegation.Mode.AUTONOMOUS;
+                default -> throw new IllegalArgumentException();
+            };
+        } catch (IllegalArgumentException ex) {
+            src.sendFailure(Component.literal("Режим должен быть direct, delegated или autonomous"));
+            return 0;
+        }
+        String commander = commanderId.equals("-") ? "" : commanderId;
+        if (mode != CommandDelegation.Mode.PLAYER_DIRECT) {
+            boolean belongs = false;
+            for (String member : squad.members) {
+                TroopEntity troop = LIVE.get(member);
+                if (troop != null && troop.isAlive() && commander.equals(troop.syncedCharacterId())) {
+                    belongs = true;
+                    break;
+                }
+            }
+            if (!belongs) {
+                src.sendFailure(Component.literal("Командир должен быть живым Character из выбранного отряда"));
+                return 0;
+            }
+        } else commander = "";
+        if (!COMMANDS.assignScope(CommandDelegation.ScopeType.SQUAD, squadId, mode, commander,
+                "", 96, true, false, false)) {
+            src.sendFailure(Component.literal("Не удалось изменить полномочия отряда"));
+            return 0;
+        }
+        if (!saveDurably()) {
+            actionPersistenceBlocked = true;
+            src.sendFailure(Component.literal("Политика изменена в памяти, но не сохранена; военные приказы заблокированы до сверки"));
+            return 0;
+        }
+        String label = switch (mode) {
+            case PLAYER_DIRECT -> "Личное управление";
+            case DELEGATED -> "Делегированное командование";
+            case AUTONOMOUS -> "Автономное командование";
+        };
+        src.sendSuccess(() -> Component.literal("«" + squad.name + "»: " + label
+                + (commander.isBlank() ? "" : " · Character " + commander)), false);
+        return 1;
     }
 
     private static int showHierarchy(CommandSourceStack src, int armyId) {
