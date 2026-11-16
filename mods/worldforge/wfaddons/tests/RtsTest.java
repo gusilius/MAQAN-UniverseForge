@@ -253,6 +253,26 @@ public class RtsTest {
         ok(wp.get(w1, "farmer") == 4, "ПКМ - назад");
         Dispatch.apply(g, wp, "wfsettle priority-work 1 smith 3");
         ok(wp.get(w1, "smith") == 3 && wp.best(g, w1).equals("builder"), "Dispatch и best");
+        ok(g.workPriority(w1, "smith") == 3 && w1.jobPrio != null && w1.jobPrio.get("smith") == 3,
+                "Dispatch сохраняет приоритет в каноническом состоянии Worker/Settlement");
+        Settlement priorityReload = Settlement.fromJson(g.toJson(), d);
+        WorkPriorities restoredPriorities = new WorkPriorities();
+        Worker restoredPriorityWorker = priorityReload.worker(w1.id);
+        ok(restoredPriorities.get(restoredPriorityWorker, "smith") == 3
+                        && priorityReload.workPriority(restoredPriorityWorker, "smith") == 3,
+                "приоритет работы переживает сохранение и читается UI-моделью после перезагрузки");
+        restoredPriorities.cycle(restoredPriorityWorker, "smith", false);
+        ok(restoredPriorities.get(restoredPriorityWorker, "smith") == 4
+                        && restoredPriorityWorker.jobPrio.get("smith") == 3,
+                "оптимистичное изменение UI не мутирует авторитетный снимок до серверного приказа");
+        restoredPriorities.clearOptimisticOverrides();
+        ok(restoredPriorities.get(restoredPriorityWorker, "smith") == 3,
+                "новый серверный снимок очищает локальный optimistic override");
+        boolean incompatiblePriorityRejected = false;
+        try { priorityReload.setWorkPriority(restoredPriorityWorker.id, "farmer", 2); }
+        catch (Settlement.OrderException expectedPriority) { incompatiblePriorityRejected = true; }
+        ok(incompatiblePriorityRejected && priorityReload.workPriority(restoredPriorityWorker, "farmer") == 0,
+                "сервер запрещает назначать ненулевой приоритет несовместимой профессии");
 
         // ---- карта
         MapView collapsed = MapView.fit(g, 0, 0, 0, 0);
