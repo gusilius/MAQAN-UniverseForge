@@ -1,5 +1,10 @@
 # WorldForge Simulation Core
 
-First pure-Rust domain slice for deterministic settlement simulation.
+Pure-Rust domain core for deterministic WorldForge simulation.
 
-Run locally with `cargo test --locked`. The crate is deliberately independent of Forge and JNI. See `docs/RUST_RUNTIME_STRATEGY.md` and `shared/contracts/worldforge-simulation-v1.md` for boundary rules.
+Current slices:
+- Settlement food ledger advancement with bounded integer arithmetic.
+- RTS tactical proposal evaluation from immutable aggregate squad snapshots.
+- Allocation-free tactical batch evaluation into caller-owned reusable buffers.
+
+Run locally with `cargo test --locked` from this directory. The crate is deliberately independent of Forge, Minecraft entities, JNI, filesystem, clocks and networking. Java remains authoritative for identity, command permissions, persistence and applying accepted orders. The tactical API is not yet wired to a Java/native adapter; do not describe its proposals as live in-game AI.
