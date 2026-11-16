@@ -134,7 +134,8 @@ final class TroopController {
         boolean was = s.routed;
         s.routed = Morale.routed(was, s.morale, near);
         if (s.routed != was) {
-            var p = server.getPlayerList().getPlayer(UUID.fromString(s.owner));
+            UUID ownerId = safeUuid(s.owner);
+            var p = ownerId == null ? null : server.getPlayerList().getPlayer(ownerId);
             if (p != null) p.displayClientMessage(net.minecraft.network.chat.Component.literal(s.routed ? "Отряд «" + s.name + "» бежит с поля боя!" : "Отряд «" + s.name + "» пришёл в себя"), false);
             if (s.routed) s.queue.clear();
         }
