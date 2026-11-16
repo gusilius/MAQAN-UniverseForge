@@ -67,7 +67,7 @@ public class MapScreen extends Screen {
             Object layout = renderer.getMethod("adaptiveLayout", int.class, int.class).invoke(null, width, height);
             if (layout != null) {
                 Class<?> layoutType = Class.forName("dev.maqan.platform.client.MaqanUiPackAdaptiveLayout");
-                Object rect = layoutType.getMethod("contentViewport", layoutType.getDeclaredClasses()[0], int.class)
+                Object rect = layoutType.getMethod("contentViewport", layout.getClass(), int.class)
                         .invoke(null, layout, 8);
                 if (rect != null) return rectValues(rect);
             }
