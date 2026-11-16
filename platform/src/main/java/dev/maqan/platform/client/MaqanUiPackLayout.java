@@ -1,7 +1,6 @@
 package dev.maqan.platform.client;
 
 import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.mojang.logging.LogUtils;
@@ -38,8 +37,10 @@ public final class MaqanUiPackLayout {
 
     public static Optional<MaqanUiPackLayout> load() {
         if (cached != null) return Optional.of(cached);
-        try (var resource = Minecraft.getInstance().getResourceManager().getResource(MANIFEST);
-             var reader = new InputStreamReader(resource.orElseThrow().open(), StandardCharsets.UTF_8)) {
+        try {
+            var resource = Minecraft.getInstance().getResourceManager().getResource(MANIFEST);
+            if (resource.isEmpty()) throw new IllegalStateException("Missing layout manifest: " + MANIFEST);
+            try (var reader = new InputStreamReader(resource.orElseThrow().open(), StandardCharsets.UTF_8)) {
             JsonObject root = JsonParser.parseReader(reader).getAsJsonObject();
             JsonObject viewport = root.getAsJsonObject("referenceViewport");
             int width = viewport.get("width").getAsInt();
@@ -69,6 +70,7 @@ public final class MaqanUiPackLayout {
             LOGGER.info("Loaded MAQAN UI layout manifest: {}x{}, {} themes",
                     width, height, parsedSkins.size());
             return Optional.of(cached);
+            }
         } catch (Exception error) {
             LOGGER.error("Could not load MAQAN UI layout manifest {}; using native shell fallback", MANIFEST, error);
             return Optional.empty();
