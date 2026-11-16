@@ -25,33 +25,34 @@ class PlatformSelectionContextTest {
     }
 
     @Test
-    void liveEntityResolversAreProviderScopedReplaceableAndRemovable() {
+    void liveEntityResolversComposeAcrossProvidersAndAreIdempotent() {
         String provider = "live-resolver-test";
-        AtomicInteger firstCalls = new AtomicInteger();
-        AtomicInteger replacementCalls = new AtomicInteger();
+        AtomicInteger troopCalls = new AtomicInteger();
+        AtomicInteger workerCalls = new AtomicInteger();
         PlatformSelectionContext.unregisterLiveEntityResolver(provider);
         PlatformSelectionContext.publish(provider, "canonical-character-id",
                 "CHARACTER", "Resolver Test", "test-world", "live body");
 
-        PlatformSelectionContext.registerLiveEntityResolver(provider, id -> {
+        java.util.function.Function<String, net.minecraft.world.entity.Entity> troopResolver = id -> {
             assertEquals("canonical-character-id", id);
-            firstCalls.incrementAndGet();
+            troopCalls.incrementAndGet();
             return null;
-        });
+        };
+        java.util.function.Function<String, net.minecraft.world.entity.Entity> workerResolver = id -> {
+            workerCalls.incrementAndGet();
+            return null;
+        };
+        PlatformSelectionContext.registerLiveEntityResolver(provider, troopResolver);
+        PlatformSelectionContext.registerLiveEntityResolver(provider, troopResolver);
+        PlatformSelectionContext.registerLiveEntityResolver(provider, workerResolver);
         assertTrue(PlatformSelectionContext.resolveLiveEntity(PlatformSelectionContext.current()) == null);
-        assertEquals(1, firstCalls.get());
-
-        PlatformSelectionContext.registerLiveEntityResolver(provider, id -> {
-            replacementCalls.incrementAndGet();
-            return null;
-        });
-        PlatformSelectionContext.resolveLiveEntity(PlatformSelectionContext.current());
-        assertEquals(1, replacementCalls.get());
-        assertEquals(1, firstCalls.get());
+        assertEquals(1, troopCalls.get(), "same provider resolver must not be registered twice");
+        assertEquals(1, workerCalls.get(), "a second module resolver must be tried");
 
         PlatformSelectionContext.unregisterLiveEntityResolver(provider);
         PlatformSelectionContext.resolveLiveEntity(PlatformSelectionContext.current());
-        assertEquals(1, replacementCalls.get());
+        assertEquals(1, troopCalls.get());
+        assertEquals(1, workerCalls.get());
         PlatformSelectionContext.clear(provider);
     }
 
