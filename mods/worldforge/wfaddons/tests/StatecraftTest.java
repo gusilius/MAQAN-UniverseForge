@@ -127,10 +127,11 @@ public final class StatecraftTest {
                 "high tax and levy obligations combined with hostile ruler relations reduce vassal loyalty");
 
         // Dynasty and canonical identity references
-        Statecraft.Dynasty dynasty = state.registerDynasty("house_stark", "c1");
+        Statecraft.Dynasty dynasty = state.registerDynasty("house_stark", "c1", "Династия Старков");
         check(state.addDynastyMember("house_stark", "c2") && state.addDynastyPrestige("house_stark", 40)
-                && dynasty.members.containsAll(List.of("c1", "c2")) && dynasty.prestige == 40,
-                "dynasty records members by canonical Character ID and prestige");
+                && dynasty.members.containsAll(List.of("c1", "c2")) && dynasty.prestige == 40
+                && dynasty.name.equals("Династия Старков"),
+                "dynasty keeps a human-readable name, canonical house key, Character members and prestige");
         Statecraft.Dynasty cyrillicDynasty = state.registerDynasty("Сервин", "character_servin");
         check(cyrillicDynasty.houseId.equals("Сервин")
                         && state.addDynastyMember("Сервин", "character_heir"),
@@ -216,6 +217,10 @@ public final class StatecraftTest {
         Statecraft restored = new Statecraft();
         restored.fromJson(snapshot);
         check(restored.toJson().equals(snapshot), "political state survives deterministic save/load");
+        check(restored.dynasty("house_stark") != null
+                        && restored.dynasty("house_stark").name.equals("Династия Старков")
+                        && restored.dynasty("house_stark").members.containsAll(List.of("c1", "c2")),
+                "named dynasty label and canonical family links survive save/load");
         check(restored.inheritanceLaw("north") == Statecraft.InheritanceLaw.COGNATIC
                 && restored.title("crown").holderCharacterId.equals("c3")
                 && restored.war(war.id).status == Statecraft.WarStatus.ATTACKER_VICTORY
