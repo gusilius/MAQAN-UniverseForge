@@ -73,6 +73,8 @@ public final class PlatformShellScreen extends Screen {
     private int contextMenuX, contextMenuY;
     private List<WorkspaceRuntime.Action> contextActions = List.of();
     private boolean navRailVisible = true;
+    /** Active slide-over panel on compact screens; null leaves the map unobstructed. */
+    private String activeCompactDrawer;
     private boolean inspectorVisible = true;
     private boolean timelineVisible = true;
     private Screen embeddedView;
@@ -197,6 +199,21 @@ public final class PlatformShellScreen extends Screen {
 
     private void layoutWorkspace() {
         if (workspaceRoot == null || panels.isEmpty()) return;
+        if (WorkspaceResponsiveLayout.isCompact(width, height)) {
+            Map<String, WorkspaceDockTree.Rect> compact = WorkspaceResponsiveLayout
+                    .calculate(width, height, activeCompactDrawer).rectangles();
+            for (Panel panel : panels.values()) {
+                WorkspaceDockTree.Rect rect = compact.get(panel.id);
+                panel.visible = rect != null && !hiddenPanels.contains(panel.id);
+                if (rect != null) {
+                    panel.x = rect.x();
+                    panel.y = rect.y();
+                    panel.w = rect.width();
+                    panel.h = rect.height();
+                }
+            }
+            return;
+        }
         Map<String, WorkspaceDockTree.Rect> layout = WorkspaceDockTree.layout(workspaceRoot,
                 workspaceBounds(), Map.of(
                         "navigation", new WorkspaceDockTree.MinimumSize(150, 120),
@@ -477,6 +494,10 @@ public final class PlatformShellScreen extends Screen {
             x += 52;
         }
         g.drawString(font, embeddedView != null && profile == Profile.COSMOS ? "ATLAS" : "WORKSPACE", 46, 13, MUTED, false);
+        if (WorkspaceResponsiveLayout.isCompact(width, height)) {
+            g.drawString(font, activeCompactDrawer == null ? "MAP" : activeCompactDrawer.toUpperCase(java.util.Locale.ROOT),
+                    Math.min(width - 150, 54), 13, CYAN, false);
+        }
         g.drawCenteredString(font, "▤", width - 76, 13, workspaceManagerVisible ? CYAN : MUTED);
         g.drawCenteredString(font, "◷", width - 48, 13, notificationCenterVisible ? CYAN : MUTED);
         g.drawCenteredString(font, "×", width - 18, 13, MUTED);
@@ -917,7 +938,19 @@ public final class PlatformShellScreen extends Screen {
             return true;
         }
         if(mx<44) {
-            if(my>=height-44) { settingsVisible=!settingsVisible; return true; }
+            if(my>=height-44) { settingsVisible=!settingsVisible; activeCompactDrawer = null; layoutWorkspace(); return true; }
+            if (WorkspaceResponsiveLayout.isCompact(width, height)) {
+                int compactIndex = (int) ((my - 44) / 40);
+                String[] drawers = {"navigation", "inspector", "tools", "timeline"};
+                if (compactIndex >= 0 && compactIndex < drawers.length) {
+                    String requested = drawers[compactIndex];
+                    activeCompactDrawer = requested.equals(activeCompactDrawer) ? null : requested;
+                    if (activeCompactDrawer != null) hiddenPanels.remove(activeCompactDrawer);
+                    layoutWorkspace();
+                    return true;
+                }
+                return true;
+            }
             int index=(int)((my-44)/40);
             if(index==0 && profile==Profile.COSMOS && embeddedView!=null) {
                 invokeAtlasRailAction("toggleListPanel"); return true;
@@ -1343,8 +1376,11 @@ public final class PlatformShellScreen extends Screen {
 
     @Override public void resize(Minecraft minecraft, int width, int height) {
         super.resize(minecraft, width, height);
+        if (!WorkspaceResponsiveLayout.isCompact(width, height)) activeCompactDrawer = null;
         resizeEmbeddedView();
         for (Screen view : providerViews.values()) view.init(minecraft, width, height);
+        layoutWorkspace();
+        if (!WorkspaceResponsiveLayout.isCompact(width, height)) clampPanels();
     }
 
 }
