@@ -65,6 +65,17 @@ GOVERNMENT_MODELS = [
 
 NAME_END = ("aria", "en", "oria", "gard", "mere", "hold", "wyn", "mark", "eth", "a", "or", "heim")
 
+# Settlement density is independent from government form, technology and magic.
+SETTLEMENT_PROFILES = {
+    1: {"key": "wild_world", "realms": 4, "provinces": 2, "minimum_pixels": 8192, "wilderness_share": 0.92, "population_density": 0.02},
+    2: {"key": "early_settlements", "realms": 8, "provinces": 4, "minimum_pixels": 4096, "wilderness_share": 0.82, "population_density": 0.08},
+    3: {"key": "regional_civilizations", "realms": 16, "provinces": 6, "minimum_pixels": 2048, "wilderness_share": 0.68, "population_density": 0.20},
+    4: {"key": "developed_states", "realms": 32, "provinces": 8, "minimum_pixels": 1024, "wilderness_share": 0.52, "population_density": 0.38},
+    5: {"key": "dense_civilization", "realms": 48, "provinces": 12, "minimum_pixels": 768, "wilderness_share": 0.38, "population_density": 0.58},
+    6: {"key": "highly_developed", "realms": 64, "provinces": 16, "minimum_pixels": 512, "wilderness_share": 0.24, "population_density": 0.78},
+    7: {"key": "planetary_civilization", "realms": 96, "provinces": 24, "minimum_pixels": 256, "wilderness_share": 0.12, "population_density": 1.00},
+}
+
 
 def stable_name(seed: int, index: int, suffix: str = "") -> str:
     rng = random.Random((seed & 0xFFFFFFFFFFFFFFFF) ^ (index * 0x9E3779B97F4A7C15))
@@ -209,8 +220,15 @@ def create_test_image(path: Path) -> None:
     img.save(path, format="PNG", optimize=False)
 
 def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: int = 64,
-                  provinces_per_realm: int = 32, blocks_per_pixel: int = 16) -> dict:
+                  provinces_per_realm: int = 32, blocks_per_pixel: int = 16,
+                  settlement_level: int = 4, planet_id: str | None = None) -> dict:
     started_at = time.perf_counter()
+    if settlement_level not in SETTLEMENT_PROFILES:
+        raise ValueError("settlement_level must be between 1 and 7")
+    settlement_profile = SETTLEMENT_PROFILES[settlement_level]
+    realm_count = min(realm_count, settlement_profile["realms"])
+    provinces_per_realm = min(provinces_per_realm, settlement_profile["provinces"])
+    minimum_territory_pixels = settlement_profile["minimum_pixels"]
     image = Image.open(input_path).convert("RGB")
     width, height, classes, analysis_report = png_pixels(image)
     components = land_components(classes, width, height)
@@ -219,7 +237,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     if sum(map(len, components)) < 32:
         raise ValueError("The map has too little land for meaningful territory generation.")
 
-    # Avoid creating politically meaningless micro-states on tiny islands/components.\n    realm_total = max(len(components), min(realm_count, max(1, sum(map(len, components)) // 4096)))
+    # Avoid creating politically meaningless micro-states on tiny islands/components.\n    realm_total = max(len(components), min(realm_count, max(1, sum(map(len, components)) // minimum_territory_pixels)))
     realm_counts = allocate_counts(components, realm_total)
     realm_labels = [-1] * (width * height)
     realm_seeds: dict[int, int] = {}
@@ -247,7 +265,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         realm_cells = realm_cells_by_id[realm_id]
         if not realm_cells:
             continue
-        # At least 4,096 source pixels per smallest political territory (~1,048,576 blocks at 16 blocks/px).\n        count = min(provinces_per_realm, max(1, len(realm_cells) // 4096))
+        # At least 4,096 source pixels per smallest political territory (~1,048,576 blocks at 16 blocks/px).\n        count = min(provinces_per_realm, max(1, len(realm_cells) // minimum_territory_pixels))
         seeds = farthest_seeds(realm_cells, count, width, seed ^ (realm_id * 7919))
         labels, _ = partition(realm_cells, seeds, width, height, next_province)
         ids = list(range(next_province, next_province + len(seeds)))
@@ -381,7 +399,9 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     }
     province_rgb = province_labels.tolist()  # zero is reserved for sea; labels are 16-bit safe.\n    source_hash = hashlib.sha256(input_path.read_bytes()).hexdigest()
     blueprint = {
-        "format": "maqan-world-blueprint/1", "generator": GENERATOR_VERSION,
+        "format": "maqan-world-blueprint/2", "generator": GENERATOR_VERSION,
+        "planet_id": planet_id, "generation_mode": "image",
+        "settlement_level": settlement_level, "settlement_profile": settlement_profile,
         "seed": seed, "source_image_sha256": source_hash, "size_px": [width, height],
         "blocks_per_pixel": blocks_per_pixel, "land_pixels": land_count,
         "realm_count": len(realms), "province_count": len(province_meta),
@@ -393,7 +413,8 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         "settlements": settlements,
         "generation_policy": {
             "chunk_materialization": "deferred", "territory_partition": "connected-land-multisource-bfs",
-            "political_seed": seed, "source_semantics": "maqan-image-analysis/2",\n            "minimum_territory_pixels": 4096, "government_variety": sorted({r["props"]["government"] for r in realms}),
+            "political_seed": seed, "source_semantics": "maqan-image-analysis/2",\n            "minimum_territory_pixels": minimum_territory_pixels,
+            "government_variety": sorted({r["props"]["government"] for r in realms}),
             "geography_classifier": analysis_report["classifier"],
             "unknown_percent": analysis_report["unknown_percent"],
         },
