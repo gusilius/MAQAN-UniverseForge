@@ -49,6 +49,7 @@ public class WFWorker extends PathfinderMob {
     private static final EntityDataAccessor<Integer> SYNC_BUILDING = SynchedEntityData.defineId(WFWorker.class, EntityDataSerializers.INT);
     private static final EntityDataAccessor<String> SYNC_STATUS = SynchedEntityData.defineId(WFWorker.class, EntityDataSerializers.STRING);
     private static final EntityDataAccessor<String> SYNC_WORK_AREA = SynchedEntityData.defineId(WFWorker.class, EntityDataSerializers.STRING);
+    private static final EntityDataAccessor<Integer> SYNC_APPEARANCE = SynchedEntityData.defineId(WFWorker.class, EntityDataSerializers.INT);
     public String colonyId = "";
     public int workerId;
     private int age;
@@ -92,6 +93,7 @@ public class WFWorker extends PathfinderMob {
         entityData.define(SYNC_BUILDING,0);
         entityData.define(SYNC_STATUS,"");
         entityData.define(SYNC_WORK_AREA,"");
+        entityData.define(SYNC_APPEARANCE, 0);
     }
 
     public String syncedColonyId() { return entityData.get(SYNC_COLONY); }
@@ -102,6 +104,8 @@ public class WFWorker extends PathfinderMob {
     public int assignedBuildingId() { return entityData.get(SYNC_BUILDING); }
     public String statusLabel() { return entityData.get(SYNC_STATUS); }
     public String workAreaLabel() { return entityData.get(SYNC_WORK_AREA); }
+    /** Stable visual archetype derived from the canonical Character ID, not a second identity. */
+    public int appearanceVariant() { return entityData.get(SYNC_APPEARANCE); }
 
     public Colony colony() { return SettleMod.colony(colonyId); }
 
@@ -126,6 +130,9 @@ public class WFWorker extends PathfinderMob {
             return;
         }
         entityData.set(SYNC_PERSON, w.person == null ? "" : w.person);
+        String visualIdentity = w.person == null || w.person.isBlank()
+                ? colonyId + "#" + workerId : w.person;
+        entityData.set(SYNC_APPEARANCE, Math.floorMod(visualIdentity.hashCode(), 7));
         entityData.set(SYNC_PROFESSION, w.profession == null ? "" : w.profession);
         entityData.set(SYNC_BUILDING,Math.max(0,w.building));
         entityData.set(SYNC_STATUS,w.status==null?"":w.status);
