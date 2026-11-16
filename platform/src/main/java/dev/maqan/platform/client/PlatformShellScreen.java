@@ -1147,12 +1147,21 @@ public final class PlatformShellScreen extends Screen {
             int previewBottom = previewTop + 108;
             g.fill(previewLeft, previewTop, previewRight, previewBottom, 0x332A6470);
             g.drawString(font, "LIVE WORLD MODEL", previewLeft + 5, previewTop + 5, CYAN, false);
-            if (liveEntity.isAlive() && liveEntity.level() == Minecraft.getInstance().level) {
+            Minecraft client = Minecraft.getInstance();
+            boolean liveInCurrentWorld = client.level != null
+                    && liveEntity.isAlive()
+                    && !liveEntity.isRemoved()
+                    && liveEntity.level() == client.level
+                    && client.level.getEntity(liveEntity.getId()) == liveEntity;
+            if (liveInCurrentWorld) {
+                // Render the exact selected world entity. Never substitute a preview clone:
+                // its renderer, skin, equipment and active layers come from the live entity.
                 InventoryScreen.renderEntityInInventoryFollowsMouse(g,
                         previewLeft + 2, previewTop + 18, previewRight - 2, previewBottom - 3,
                         42, 0.0625F, mouseX, mouseY, liveEntity);
             } else {
-                g.drawString(font, "Entity not in this world", previewLeft + 5, previewTop + 52, MUTED, false);
+                g.drawString(font, "Entity not loaded in current world",
+                        previewLeft + 5, previewTop + 52, MUTED, false);
             }
             y = previewBottom + 8;
         }
