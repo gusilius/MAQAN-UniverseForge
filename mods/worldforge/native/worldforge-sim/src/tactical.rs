@@ -29,6 +29,7 @@ pub enum DecisionReason {
     FavorableEngagement,
     EngagementTooRisky,
     PursuitNotAuthorized,
+    RetreatingThreat,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -116,7 +117,7 @@ pub fn evaluate_tactical(s: TacticalSnapshot) -> TacticalDecision {
     }
     if s.threat_retreating {
         return if s.allow_pursuit && within_leash {
-            decision(s, TacticalAction::Pursue, 62, 78, DecisionReason::PursuitNotAuthorized)
+            decision(s, TacticalAction::Pursue, 62, 78, DecisionReason::RetreatingThreat)
         } else {
             decision(s, TacticalAction::MaintainOrder, 24, 92, DecisionReason::PursuitNotAuthorized)
         };
