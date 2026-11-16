@@ -158,15 +158,15 @@ def farthest_seeds(cells: list[int], count: int, width: int, seed: int) -> list[
     return selected
 
 
-def _partition_kernel(allowed, seeds, width, height, first_label):
-    """Flat-array multi-source BFS. Numba compiles this hot loop when installed."""
-    labels = np.full(allowed.size, -1, dtype=np.int32)
-    queue = np.empty(allowed.size, dtype=np.int32)
+def _partition_kernel(labels, cells, seeds, width, height, first_label):
+    """Reusable flat-array BFS. -2=outside component, -1=unvisited component cell."""
+    for i in range(cells.size):
+        labels[cells[i]] = -1
+    queue = np.empty(cells.size, dtype=np.int32)
     head = tail = 0
     for offset in range(seeds.size):
         start = seeds[offset]
-        label = first_label + offset
-        labels[start] = label
+        labels[start] = first_label + offset
         queue[tail] = start
         tail += 1
     while head < tail:
@@ -176,19 +176,19 @@ def _partition_kernel(allowed, seeds, width, height, first_label):
         x = current % width
         if x > 0:
             nxt = current - 1
-            if allowed[nxt] and labels[nxt] < 0:
+            if labels[nxt] == -1:
                 labels[nxt] = label; queue[tail] = nxt; tail += 1
         if x + 1 < width:
             nxt = current + 1
-            if allowed[nxt] and labels[nxt] < 0:
+            if labels[nxt] == -1:
                 labels[nxt] = label; queue[tail] = nxt; tail += 1
         if current >= width:
             nxt = current - width
-            if allowed[nxt] and labels[nxt] < 0:
+            if labels[nxt] == -1:
                 labels[nxt] = label; queue[tail] = nxt; tail += 1
-        if current + width < allowed.size:
+        if current + width < labels.size:
             nxt = current + width
-            if allowed[nxt] and labels[nxt] < 0:
+            if labels[nxt] == -1:
                 labels[nxt] = label; queue[tail] = nxt; tail += 1
     return labels
 
@@ -202,12 +202,13 @@ except ImportError:
     pass
 
 
-def partition(cells: list[int], seeds: list[int], width: int, height: int, first_label: int):
-    allowed = np.zeros(width * height, dtype=np.bool_)
-    cell_indices = np.asarray(cells, dtype=np.int64)
-    seed_indices = np.asarray(seeds, dtype=np.int64)
-    allowed[cell_indices] = True
-    labels = _partition_kernel(allowed, seed_indices, width, height, first_label)
+def partition(cells, seeds, width: int, height: int, first_label: int, scratch: np.ndarray):
+    # Reuse one world-sized label buffer across every realm/province. Only the
+    # active component is reset; the BFS queue is sized to that component,
+    # not to the entire planet raster.
+    cell_indices = np.asarray(cells, dtype=np.int32)
+    seed_indices = np.asarray(seeds, dtype=np.int32)
+    labels = _partition_kernel(scratch, cell_indices, seed_indices, width, height, first_label)
     if np.count_nonzero(labels[cell_indices] >= 0) != cell_indices.size:
         raise ValueError("Territory partition left disconnected land unassigned.")
     return labels, seeds
@@ -301,14 +302,16 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         min(realm_count, max(1, major_land_pixels // minimum_territory_pixels)),
     )
     realm_counts = allocate_counts(major_components, realm_total)
-    realm_labels = np.full(width * height, -1, dtype=np.int32)
+    realm_labels = np.full(width * height, -2, dtype=np.int32)
+    partition_scratch = np.full(width * height, -2, dtype=np.int32)
     realm_seeds: dict[int, int] = {}
     next_realm = 0
     for component, count in zip(major_components, realm_counts):
         seeds = farthest_seeds(component, count, width, seed ^ (next_realm + 1))
-        labels, _ = partition(component, seeds, width, height, next_realm)
+        labels, _ = partition(component, seeds, width, height, next_realm, partition_scratch)
         component_indices = np.asarray(component, dtype=np.int64)
         realm_labels[component_indices] = labels[component_indices]
+        partition_scratch[component_indices] = -2
         for offset, point in enumerate(seeds):
             realm_seeds[next_realm + offset] = point
         next_realm += count
@@ -333,10 +336,11 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
             continue
         count = min(provinces_per_realm, max(1, len(realm_cells) // minimum_territory_pixels))
         seeds = farthest_seeds(realm_cells, count, width, seed ^ (realm_id * 7919))
-        labels, _ = partition(realm_cells, seeds, width, height, next_province)
+        labels, _ = partition(realm_cells, seeds, width, height, next_province, partition_scratch)
         ids = list(range(next_province, next_province + len(seeds)))
         realm_indices = np.asarray(realm_cells, dtype=np.int64)
         province_labels[realm_indices] = labels[realm_indices]
+        partition_scratch[realm_indices] = -2
         realm_provinces[realm_id] = ids
         label_counts = np.bincount(labels[realm_indices],
                                    minlength=next_province + len(seeds))
