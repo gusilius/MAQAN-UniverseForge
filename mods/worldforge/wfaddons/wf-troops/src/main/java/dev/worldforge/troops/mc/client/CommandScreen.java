@@ -429,7 +429,7 @@ public final class CommandScreen extends Screen {
 
     private int[] professionalPanelBounds() {
         int[] console = skinRect("bot");
-        int x = console == null ? width - 148 : console[0] + 12;
+        int x = console == null ? width - 148 : console[0] + console[2] - 148;
         int y = console == null ? height - 64 : console[1] + 30;
         if (x + 140 > width - 4) x = Math.max(4, width - 144);
         if (y + 46 > height - 4) y = Math.max(4, height - 50);
@@ -486,7 +486,8 @@ public final class CommandScreen extends Screen {
             l.add(new Btn("Свободная", x, y, BTN_W, CommandMode.RIG.view == CameraRig.View.FREE,
                     () -> CommandMode.setCameraView(CameraRig.View.FREE)));
             if (!selectedWorkerIds().isEmpty())
-                l.add(new Btn("⚒", x + BTN_W + 4, y, 24, professionalToolsOpen, () -> professionalToolsOpen = !professionalToolsOpen));
+                l.add(new Btn("⚒", console[0] + console[2] - 34, y, 24, professionalToolsOpen,
+                        () -> professionalToolsOpen = !professionalToolsOpen));
             if (professionalToolsOpen) addProfessionalTaskButtons(l);
             return l;
         }
