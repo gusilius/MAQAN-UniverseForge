@@ -85,3 +85,10 @@ The importer validates all four themes and all ten image layers per theme, decod
 - The political map fits to the adaptive central viewport instead of the entire desktop. Its map texture, labels and markers are clipped to that viewport; its scale, coordinate plate and map-mode hotbar are positioned relative to the same bounds.
 - The overview is rendered as live map imagery inside the imported minimap frame, including the visible-camera rectangle and click/drag recentering. The RTS command dock and shell navigation are excluded from map selection, panning and zoom.
 - In compact mode, the political map yields the side columns to the MAQAN drawers and keeps its map canvas above the persistent bottom dock.
+
+### RTS and settlement HUD in the shared skin
+
+- The embedded RTS HUD declares itself as a transparent world overlay, so the shared shell no longer paints an opaque background over the live Minecraft world.
+- Its settlement minimap is rendered from live buildings/workers into the imported minimap frame. The command card is hosted by the imported RTS console frame; selection/unit details occupy the left window and settlement resources, population, approval and alerts occupy the right window.
+- Existing RTS selection, command-card actions, placement, priority editing, worker/building orders and provider selection publication remain owned by the RTS HUD. The shell only supplies the shared visual surfaces and viewport boundaries.
+- Compact layouts keep the minimap and command card in the persistent bottom dock; the selection summary moves into the available map canvas rather than creating another side column.
