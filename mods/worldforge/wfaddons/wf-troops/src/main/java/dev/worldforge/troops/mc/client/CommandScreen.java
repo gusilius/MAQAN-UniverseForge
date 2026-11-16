@@ -296,9 +296,9 @@ public final class CommandScreen extends Screen {
         return l;
     }
 
-    private int panelX() { int[] r = skinRect("rp"); return r == null ? (compactSkin() ? width - 224 : width - PANEL_W - 4) : r[0] + 12; }
+    private int panelX() { int[] r = skinRect("rp"); return r == null ? (compactSkin() ? width - panelW() - 12 : width - PANEL_W - 4) : r[0] + 12; }
     private int panelY() { int[] r = skinRect("rp"); if (r != null) return r[1] + 34; int[] top = skinRect("top"); return compactSkin() && top != null ? top[1] + top[3] + 8 : 26; }
-    private int panelW() { int[] r = skinRect("rp"); return r == null ? (compactSkin() ? Math.min(212, width - 64) : PANEL_W) : Math.max(120, r[2] - 24); }
+    private int panelW() { int[] r = skinRect("rp"); return r == null ? (compactSkin() ? Math.max(112, Math.min(212, width / 2 - 24)) : PANEL_W) : Math.max(120, r[2] - 24); }
     private int panelH() { int[] r = skinRect("rp"); if (r != null) return Math.max(80, r[3] - 48); int[] console = skinRect("bot"); return compactSkin() && console != null ? Math.max(80, console[1] - panelY() - 8) : Math.max(80, height - 26 - 90); }
 
     private boolean inBuildPanel(double px, double py) {
@@ -307,7 +307,7 @@ public final class CommandScreen extends Screen {
     }
 
     private int selectionPanelX() { int[] r = skinRect("lp"); return r == null ? (compactSkin() ? 52 : 4) : r[0] + 12; }
-    private int selectionPanelW() { int[] r = skinRect("lp"); return r == null ? (compactSkin() ? Math.min(180, width - 64) : 184) : Math.max(120, r[2] - 24); }
+    private int selectionPanelW() { int[] r = skinRect("lp"); return r == null ? (compactSkin() ? Math.max(96, Math.min(180, width / 2 - 68)) : 184) : Math.max(120, r[2] - 24); }
     private int selectionPanelY() { int[] r = skinRect("lp"); if (r != null) return r[1] + r[3] - 86; int[] console = skinRect("bot"); return compactSkin() && console != null ? console[1] - 86 : height - 90; }
     private boolean inSelPanel(double px, double py) {
         return px >= selectionPanelX() && px < selectionPanelX() + selectionPanelW()
@@ -340,7 +340,7 @@ public final class CommandScreen extends Screen {
     // ---------- инспектор выбранных персонажей ----------
     private static final int INSPECT_ROW=19;
     private int inspectX() { int[] r = skinRect("lp"); return r == null ? (compactSkin() ? 52 : 4) : r[0] + 12; }
-    private int inspectW() { int[] r = skinRect("lp"); return r == null ? (compactSkin() ? Math.min(210, width - 64) : 250) : Math.max(130, r[2] - 24); }
+    private int inspectW() { int[] r = skinRect("lp"); return r == null ? (compactSkin() ? Math.max(96, width / 2 - 68) : 250) : Math.max(130, r[2] - 24); }
     private int inspectY() {
         int[] r = skinRect("lp");
         if (r != null) return r[1] + 34;
@@ -368,9 +368,9 @@ public final class CommandScreen extends Screen {
         if (settlement == null || buildOpen) return;
         int[] frame = skinRect("rp");
         int[] top = skinRect("top");
-        int x = frame == null ? (compactSkin() ? width - 216 : 4) : frame[0] + 12;
+        int x = frame == null ? (compactSkin() ? width - w - 12 : 4) : frame[0] + 12;
         int y = frame == null ? (compactSkin() && top != null ? top[1] + top[3] + 8 : 34) : frame[1] + 34;
-        int w = frame == null ? (compactSkin() ? 204 : 250) : Math.max(120, frame[2] - 24);
+        int w = frame == null ? (compactSkin() ? Math.max(112, Math.min(144, width / 2 - 24)) : 250) : Math.max(120, frame[2] - 24);
         int h = frame == null ? 106 : Math.min(150, Math.max(88, frame[3] / 3));
         g.fill(x, y, x + w, y + h, 0xD910121A);
         g.fill(x, y, x + w, y + 1, 0xFF8A7040);
@@ -394,14 +394,14 @@ public final class CommandScreen extends Screen {
         List<String> ids=CommandMode.selected();
         if(ids.isEmpty())return;
         int ix = inspectX(), iw = inspectW(), iy = inspectY();
-        int rows=Math.min(compactSkin() ? 5 : 8,ids.size());
+        int rows=Math.min(compactSkin() ? 3 : 8,ids.size());
         int h=24+rows*INSPECT_ROW;
         g.fill(ix,iy,ix+iw,iy+h,0xD910121A);
         g.fill(ix,iy,ix+iw,iy+1,0xFF8A7040);
         g.drawString(font,"ИНСПЕКТОР · "+ids.size()+" ВЫБРАНО",ix+6,iy+6,0xFFE6C875,false);
         int row=0;
         for(String id:ids){
-            if(row>=(compactSkin() ? 5 : 8))break;
+            if(row>=(compactSkin() ? 3 : 8))break;
             net.minecraft.world.entity.Entity entity=null;
             for(net.minecraft.world.entity.Entity candidate:minecraft.level.entitiesForRendering())
                 if(candidate.getUUID().toString().equals(id)){entity=candidate;break;}
@@ -888,6 +888,7 @@ public final class CommandScreen extends Screen {
     }
 
     private void drawSelection(GuiGraphics g, int h) {
+        if (compactSkin()) return;
         Minecraft mc = minecraft;
         Map<String, Integer> counts = new TreeMap<>();
         for (net.minecraft.world.entity.Entity en : mc.level.entitiesForRendering()) {
