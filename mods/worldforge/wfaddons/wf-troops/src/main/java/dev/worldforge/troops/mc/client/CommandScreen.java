@@ -410,8 +410,9 @@ public final class CommandScreen extends Screen {
         double scale = Math.min(w / spanX, h / spanZ);
         double drawW = spanX * scale, drawH = spanZ * scale;
         double ox = x + (w - drawW) * 0.5, oy = y + (h - drawH) * 0.5;
-        java.util.function.DoubleUnaryOperator sx = value -> ox + (value - minX) * scale;
-        java.util.function.DoubleUnaryOperator sy = value -> oy + (value - minZ) * scale;
+        double baseMinX = minX, baseMinZ = minZ;
+        java.util.function.DoubleUnaryOperator sx = value -> ox + (value - baseMinX) * scale;
+        java.util.function.DoubleUnaryOperator sy = value -> oy + (value - baseMinZ) * scale;
 
         g.enableScissor(x, y, x + w, y + h);
         for (var building : settlement.buildings) {
