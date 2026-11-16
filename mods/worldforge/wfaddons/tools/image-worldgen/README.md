@@ -51,3 +51,46 @@ microstates.
 The world package also includes `terrain-preview.png`: a shaded-relief view
 using the generated elevation and biome palette. It is a visual QA layer; the
 underlying `height16.png`, `biomes.png` and political raster remain authoritative.
+
+## Seven settlement-density profiles and wilderness
+
+The `--settlement-level` option selects one of seven world-development profiles.
+It controls the target wilderness reserve, minimum viable territorial footprint,
+realm/province budgets and the amount of adjacent realm aggregation. It does
+not prescribe a fixed number of states: geography, viable land components and
+shared borders determine the final count.
+
+| Level | Profile | Target unclaimed wilderness |
+|---:|---|---:|
+| 1 | Wild world | 92% |
+| 2 | Early settlements | 82% |
+| 3 | Regional civilizations | 68% |
+| 4 | Developed states | 16% |
+| 5 | Dense civilization | 8% |
+| 6 | Highly developed | 0% |
+| 7 | Planetary civilization | 0% |
+
+Wilderness is selected as broad, deterministic, terrain-biased reserves before
+political partitioning. It is not created by leaving random holes between
+neighboring borders. Levels 6 and 7 require every classified land pixel to
+belong to a province; the package validator checks this coverage. On levels
+1–5 the explicit `wilderness.png` layer marks the unclaimed land. Province ID
+zero remains the no-political-owner value, while `biomes.png` distinguishes
+land from sea.
+
+## Organic political borders
+
+Realm and province regions are partitioned with a deterministic, terrain-aware
+watershed surface. Coherent multi-scale noise avoids straight Voronoi-like
+slices; biome-transition cues influence the watershed while a landmass mask
+prevents the partition from crossing oceans. Province connectivity and capital
+membership are validated. Province borders are rendered thinner than realm
+borders, so the map reads as a hierarchy rather than a grid.
+
+The world package contains `wilderness.png`, `political-preview.png` and
+`terrain-preview.png` alongside the semantic rasters. The previews are QA
+outputs; the province, wilderness, biome and height rasters remain authoritative.
+
+The command-line converter accepts `--settlement-level 1..7` and optional
+`--planet-id`. The same image and seed with the same profile produce the same
+territorial result.
