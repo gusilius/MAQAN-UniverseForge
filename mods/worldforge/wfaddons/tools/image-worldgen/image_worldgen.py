@@ -1,0 +1,518 @@
+#!/usr/bin/env python3
+"""Deterministic image-to-WorldForge blueprint prototype.
+
+Input contract for this first proof: a PNG map painted with the documented
+semantic palette below. This is deliberately not advertised as arbitrary-image
+AI recognition. The output is a normal .worldmap package plus a MAQAN blueprint.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import math
+import random
+import sys
+import zipfile
+from collections import deque
+from pathlib import Path
+
+from PIL import Image, ImageDraw
+
+GENERATOR_VERSION = "maqan-image-blueprint/0.1.0"
+PALETTE = {
+    "deep_ocean": (18, 48, 82),
+    "shallow_sea": (42, 103, 145),
+    "plains": (218, 199, 143),
+    "forest": (48, 105, 66),
+    "mountains": (133, 132, 128),
+    "desert": (204, 160, 83),
+    "river": (47, 119, 190),
+}
+BIOMES = [
+    {"index": 0, "key": "deep_ocean", "color": "#315f85", "candidates": ["minecraft:deep_ocean", "minecraft:ocean"]},
+    {"index": 1, "key": "plains", "color": "#dac78f", "candidates": ["minecraft:plains"]},
+    {"index": 2, "key": "forest", "color": "#306942", "candidates": ["minecraft:forest", "minecraft:birch_forest"]},
+    {"index": 3, "key": "mountains", "color": "#858480", "candidates": ["minecraft:windswept_hills", "minecraft:stony_peaks"]},
+    {"index": 4, "key": "desert", "color": "#cca053", "candidates": ["minecraft:desert"]},
+    {"index": 5, "key": "river", "color": "#2f77be", "candidates": ["minecraft:river"]},
+]
+BIOME_INDEX = {name: i for i, name in enumerate(("deep_ocean", "plains", "forest", "mountains", "desert", "river"))}
+LAND_CLASSES = {"plains", "forest", "mountains", "desert", "river"}
+WATER_CLASSES = {"deep_ocean", "shallow_sea"}
+NAME_START = ("A", "Bel", "Cor", "Dor", "Eld", "Fen", "Gal", "Har", "Ith", "Kel", "Lor", "Mor", "Nor", "Or", "Pel", "Quel")
+NAME_END = ("aria", "en", "oria", "gard", "mere", "hold", "wyn", "mark", "eth", "a", "or", "heim")
+
+
+def stable_name(seed: int, index: int, suffix: str = "") -> str:
+    rng = random.Random((seed & 0xFFFFFFFFFFFFFFFF) ^ (index * 0x9E3779B97F4A7C15))
+    return rng.choice(NAME_START) + rng.choice(NAME_END) + suffix
+
+
+def png_pixels(image: Image.Image) -> tuple[int, int, list[str]]:
+    rgb = image.convert("RGB")
+    w, h = rgb.size
+    palette = list(PALETTE.items())
+    classes: list[str] = []
+    for pixel in rgb.getdata():
+        name, color = min(palette, key=lambda item: sum((pixel[i] - item[1][i]) ** 2 for i in range(3)))
+        distance = sum((pixel[i] - color[i]) ** 2 for i in range(3))
+        if distance > 3 * 72 * 72:
+            raise ValueError(
+                f"Unclassified pixel RGB={pixel}; use the WorldForge semantic palette "
+                "or provide a legend/segmentation layer before conversion."
+            )
+        classes.append(name)
+    return w, h, classes
+
+
+def neighbors(index: int, width: int, height: int):
+    x, z = index % width, index // width
+    if x > 0:
+        yield index - 1
+    if x + 1 < width:
+        yield index + 1
+    if z > 0:
+        yield index - width
+    if z + 1 < height:
+        yield index + width
+
+
+def land_components(classes: list[str], width: int, height: int) -> list[list[int]]:
+    seen = bytearray(width * height)
+    result = []
+    for start, kind in enumerate(classes):
+        if seen[start] or kind not in LAND_CLASSES:
+            continue
+        seen[start] = 1
+        queue = deque([start])
+        component = []
+        while queue:
+            current = queue.popleft()
+            component.append(current)
+            for nxt in neighbors(current, width, height):
+                if not seen[nxt] and classes[nxt] in LAND_CLASSES:
+                    seen[nxt] = 1
+                    queue.append(nxt)
+        result.append(component)
+    result.sort(key=lambda cells: (-len(cells), cells[0]))
+    return result
+
+
+def farthest_seeds(cells: list[int], count: int, width: int, seed: int) -> list[int]:
+    if not cells:
+        return []
+    count = max(1, min(count, len(cells)))
+    cx = sum(i % width for i in cells) / len(cells)
+    cz = sum(i // width for i in cells) / len(cells)
+    first = min(cells, key=lambda i: ((i % width - cx) ** 2 + (i // width - cz) ** 2, i))
+    selected = [first]
+    min_dist = {i: (i % width - first % width) ** 2 + (i // width - first // width) ** 2 for i in cells}
+    while len(selected) < count:
+        best = max(cells, key=lambda i: (min_dist[i], -((i * 1103515245 + seed) & 0x7FFFFFFF)))
+        if best in selected:
+            break
+        selected.append(best)
+        sx, sz = best % width, best // width
+        for i in cells:
+            d = (i % width - sx) ** 2 + (i // width - sz) ** 2
+            if d < min_dist[i]:
+                min_dist[i] = d
+    return selected
+
+
+def partition(cells: list[int], seeds: list[int], width: int, height: int, first_label: int) -> tuple[dict[int, int], list[int]]:
+    allowed = set(cells)
+    labels: dict[int, int] = {}
+    queue = deque()
+    for offset, start in enumerate(seeds):
+        label = first_label + offset
+        labels[start] = label
+        queue.append(start)
+    while queue:
+        current = queue.popleft()
+        label = labels[current]
+        for nxt in neighbors(current, width, height):
+            if nxt in allowed and nxt not in labels:
+                labels[nxt] = label
+                queue.append(nxt)
+    if len(labels) != len(allowed):
+        raise ValueError("Territory partition left disconnected land unassigned.")
+    return labels, seeds
+
+
+def allocate_counts(components: list[list[int]], total: int) -> list[int]:
+    counts = [1] * len(components)
+    while sum(counts) < total:
+        target = max(range(len(components)), key=lambda i: (len(components[i]) / counts[i], len(components[i]), -i))
+        counts[target] += 1
+    return counts
+
+
+def color_for(index: int) -> str:
+    hue = (index * 137.50776405 + 18.0) % 360.0
+    c = 0.72
+    x = c * (1 - abs((hue / 60.0) % 2 - 1))
+    if hue < 60: r, g, b = c, x, 0
+    elif hue < 120: r, g, b = x, c, 0
+    elif hue < 180: r, g, b = 0, c, x
+    elif hue < 240: r, g, b = 0, x, c
+    elif hue < 300: r, g, b = x, 0, c
+    else: r, g, b = c, 0, x
+    m = 0.16
+    return "#{:02x}{:02x}{:02x}".format(round((r + m) * 255), round((g + m) * 255), round((b + m) * 255))
+
+
+def create_test_image(path: Path) -> None:
+    w, h = 192, 128
+    img = Image.new("RGB", (w, h), PALETTE["deep_ocean"])
+    draw = ImageDraw.Draw(img)
+    # One large, connected landmass and a small island: all shapes are deliberate
+    # semantic pixels, not a prebuilt .worldmap or political package.
+    draw.ellipse((17, 12, 170, 116), fill=PALETTE["plains"])
+    draw.polygon([(34, 36), (66, 18), (102, 25), (121, 45), (96, 72), (58, 77), (29, 62)], fill=PALETTE["forest"])
+    draw.polygon([(84, 18), (111, 20), (139, 38), (131, 59), (111, 55), (95, 42)], fill=PALETTE["mountains"])
+    draw.polygon([(117, 75), (148, 69), (162, 90), (145, 107), (119, 101)], fill=PALETTE["desert"])
+    draw.line([(87, 30), (91, 48), (102, 62), (107, 82), (125, 98)], fill=PALETTE["river"], width=4)
+    draw.ellipse((151, 8, 180, 30), fill=PALETTE["plains"])
+    draw.line([(162, 13), (166, 19)], fill=PALETTE["river"], width=2)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    img.save(path, format="PNG", optimize=False)
+
+
+def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: int = 4,
+                  provinces_per_realm: int = 4, blocks_per_pixel: int = 16) -> dict:
+    image = Image.open(input_path).convert("RGB")
+    width, height, classes = png_pixels(image)
+    components = land_components(classes, width, height)
+    if not components:
+        raise ValueError("The image contains no classified land.")
+    if sum(map(len, components)) < 32:
+        raise ValueError("The map has too little land for meaningful territory generation.")
+
+    realm_total = max(realm_count, len(components))
+    realm_counts = allocate_counts(components, realm_total)
+    realm_labels = [-1] * (width * height)
+    realm_seeds: dict[int, int] = {}
+    next_realm = 0
+    for component, count in zip(components, realm_counts):
+        seeds = farthest_seeds(component, count, width, seed ^ (next_realm + 1))
+        labels, _ = partition(component, seeds, width, height, next_realm)
+        for index, label in labels.items():
+            realm_labels[index] = label
+        for offset, point in enumerate(seeds):
+            realm_seeds[next_realm + offset] = point
+        next_realm += count
+
+    province_labels = [0] * (width * height)
+    province_meta: dict[int, dict] = {}
+    realm_provinces: dict[int, list[int]] = {}
+    next_province = 1
+    for realm_id in range(realm_total):
+        realm_cells = [i for i, label in enumerate(realm_labels) if label == realm_id]
+        if not realm_cells:
+            continue
+        count = min(provinces_per_realm, max(1, len(realm_cells) // 24))
+        seeds = farthest_seeds(realm_cells, count, width, seed ^ (realm_id * 7919))
+        labels, _ = partition(realm_cells, seeds, width, height, next_province)
+        ids = list(range(next_province, next_province + len(seeds)))
+        for index, label in labels.items():
+            province_labels[index] = label
+        realm_provinces[realm_id] = ids
+        for offset, province_id in enumerate(ids):
+            province_meta[province_id] = {
+                "realm": realm_id, "seed": seeds[offset],
+                "area": sum(1 for value in labels.values() if value == province_id),
+                "key": f"realm_{realm_id + 1:02d}_province_{offset + 1:02d}",
+            }
+        next_province += len(seeds)
+
+    land_count = sum(1 for kind in classes if kind in LAND_CLASSES)
+    province_neighbors = {pid: set() for pid in province_meta}
+    realm_neighbors = {rid: set() for rid in realm_provinces}
+    for z in range(height):
+        for x in range(width):
+            i = z * width + x
+            a = province_labels[i]
+            if not a:
+                continue
+            for j in ((i + 1) if x + 1 < width else -1, (i + width) if z + 1 < height else -1):
+                if j < 0:
+                    continue
+                b = province_labels[j]
+                if b and b != a:
+                    province_neighbors[a].add(b)
+                    province_neighbors[b].add(a)
+                    ra, rb = province_meta[a]["realm"], province_meta[b]["realm"]
+                    if ra != rb:
+                        realm_neighbors[ra].add(rb)
+                        realm_neighbors[rb].add(ra)
+
+    realm_names = {rid: stable_name(seed, rid + 1) for rid in realm_provinces}
+    county_id_for_realm = {rid: len(province_meta) + offset + 1 for offset, rid in enumerate(realm_provinces)}
+    titles = []
+    realms = []
+    settlements = []
+    province_rgb = [0] * (width * height)
+    for pid, meta in province_meta.items():
+        rid = meta["realm"]
+        x, z = meta["seed"] % width, meta["seed"] // width
+        nx, ny = (x + 0.5) / width, (z + 0.5) / height
+        titles.append({
+            "id": pid, "key": meta["key"], "name": stable_name(seed, pid, " Hold"),
+            "tier": 0, "parent": county_id_for_realm[rid], "color": color_for(rid + 1),
+            "capital": {"x": x, "z": z, "nx": nx, "ny": ny, "province": pid},
+            "area_blocks": meta["area"] * blocks_per_pixel * blocks_per_pixel,
+            "area_pct_of_land": 100.0 * meta["area"] / land_count,
+            "children": [], "neighbors": sorted(province_neighbors[pid]), "props": {},
+        })
+        for i, label in enumerate(province_labels):
+            if label == pid:
+                province_rgb[i] = pid
+
+    for rid, pids in realm_provinces.items():
+        county_id = county_id_for_realm[rid]
+        capital_pid = pids[0]
+        capital = province_meta[capital_pid]["seed"]
+        x, z = capital % width, capital // width
+        total_area = sum(province_meta[pid]["area"] for pid in pids)
+        county_key = f"realm_{rid + 1:02d}_county"
+        titles.append({
+            "id": county_id, "key": county_key, "name": realm_names[rid] + " Realm",
+            "tier": 1, "parent": 0, "color": color_for(rid + 1),
+            "capital": {"x": x, "z": z, "nx": (x + 0.5) / width, "ny": (z + 0.5) / height, "province": capital_pid},
+            "area_blocks": total_area * blocks_per_pixel * blocks_per_pixel,
+            "area_pct_of_land": 100.0 * total_area / land_count,
+            "children": pids, "neighbors": sorted(county_id_for_realm[n] for n in realm_neighbors[rid]),
+            "props": {},
+        })
+        realms.append({
+            "id": f"realm_{rid + 1:02d}", "name": realm_names[rid], "ruler": "",
+            "color": color_for(rid + 1), "titles": [county_key], "overlord": None,
+            "relation": "independent", "subjects": [],
+            "area_blocks": total_area * blocks_per_pixel * blocks_per_pixel, "props": {},
+        })
+
+        def add_settlement(kind: str, point: int, serial: int) -> None:
+            sx, sz = point % width, point // width
+            settlements.append({
+                "id": f"{kind}_{rid + 1:02d}_{serial:02d}", "type": kind,
+                "name": stable_name(seed, rid * 100 + serial, " " + kind.title()),
+                "realm_id": f"realm_{rid + 1:02d}",
+                "province_id": province_labels[point],
+                "pixel": [sx, sz],
+                "block": [round((sx + 0.5 - width / 2) * blocks_per_pixel),
+                          round((sz + 0.5 - height / 2) * blocks_per_pixel)],
+            })
+
+        add_settlement("capital", capital, 1)
+        for offset, pid in enumerate(pids[1:], 2):
+            add_settlement(("city", "town", "village")[(offset - 2) % 3],
+                           province_meta[pid]["seed"], offset)
+        realm_cells = [i for i, label in enumerate(realm_labels) if label == rid]
+        mountain_cells = [i for i in realm_cells if classes[i] == "mountains"]
+        if mountain_cells:
+            add_settlement("fortress", mountain_cells[len(mountain_cells) // 2], 20 + rid)
+        coast_cells = [i for i in realm_cells if any(classes[n] in WATER_CLASSES for n in neighbors(i, width, height))]
+        if coast_cells:
+            coast_cells.sort(key=lambda i: (i * 2654435761 + seed) & 0xFFFFFFFF)
+            add_settlement("port", coast_cells[0], 30 + rid)
+
+    # Convert semantic classes into the exact layers consumed by MapData.
+    height_values, biome_values, river_values = [], [], []
+    base_height = {"deep_ocean": 6500, "shallow_sea": 17000, "plains": 25000,
+                   "forest": 28500, "mountains": 50500, "desert": 24500, "river": 23500}
+    for z in range(height):
+        for x in range(width):
+            kind = classes[z * width + x]
+            wave = math.sin((x + (seed % 97)) * 0.071) * math.cos((z - (seed % 61)) * 0.063)
+            elevation = max(0, min(65535, int(base_height[kind] + wave * (900 if kind in LAND_CLASSES else 180))))
+            height_values.append(elevation)
+            biome_values.append(BIOME_INDEX.get(kind, 0))
+            river_values.append(255 if kind == "river" else 160 if kind == "shallow_sea" else 0)
+
+    spawn = province_meta[realm_provinces[0][0]]["seed"]
+    spawn_x, spawn_z = spawn % width, spawn // width
+    meta_doc = {
+        "size_px": [width, height], "blocks_per_pixel": blocks_per_pixel,
+        "sea_level": 63, "min_y": -64, "max_y": 320,
+        "biomes": BIOMES, "spawn": [(spawn_x + 0.5) / width, (spawn_z + 0.5) / height],
+    }
+    titles_doc = {
+        "format": "worldforge-titles/1", "size_px": [width, height],
+        "blocks_per_pixel": blocks_per_pixel,
+        "tiers": [{"index": 0, "key": "barony", "name": "Province"},
+                  {"index": 1, "key": "county", "name": "Realm"}],
+        "titles": sorted(titles, key=lambda item: item["id"]),
+    }
+    realms_doc = {
+        "format": "worldforge-realms/1",
+        "relation_types": {"vassal": {"label": "Vassal", "tribute": 10, "levy": 10, "can_declare_war": False}},
+        "realms": realms,
+    }
+    source_hash = hashlib.sha256(input_path.read_bytes()).hexdigest()
+    blueprint = {
+        "format": "maqan-world-blueprint/1", "generator": GENERATOR_VERSION,
+        "seed": seed, "source_image_sha256": source_hash, "size_px": [width, height],
+        "blocks_per_pixel": blocks_per_pixel, "land_pixels": land_count,
+        "realm_count": len(realms), "province_count": len(province_meta),
+        "settlement_count": len(settlements), "realms": realms,
+        "territories": [{"id": pid, "realm_id": f"realm_{meta['realm'] + 1:02d}",
+                         "capital_pixel": [meta["seed"] % width, meta["seed"] // width],
+                         "area_pixels": meta["area"], "neighbors": sorted(province_neighbors[pid])}
+                        for pid, meta in sorted(province_meta.items())],
+        "settlements": settlements,
+        "generation_policy": {
+            "chunk_materialization": "deferred", "territory_partition": "connected-land-multisource-bfs",
+            "political_seed": seed, "source_semantics": "worldforge-color-palette",
+        },
+    }
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    files = {
+        "meta.json": json.dumps(meta_doc, sort_keys=True, separators=(",", ":")).encode(),
+        "biomes.png": image_bytes(width, height, biome_values, "L"),
+        "height16.png": image_bytes(width, height, height_values, "I;16"),
+        "rivers.png": image_bytes(width, height, river_values, "L"),
+        "provinces.png": image_bytes(width, height, province_rgb, "I;16"),
+        "titles.json": json.dumps(titles_doc, sort_keys=True, separators=(",", ":")).encode(),
+        "realms.json": json.dumps(realms_doc, sort_keys=True, separators=(",", ":")).encode(),
+        "world-blueprint.json": json.dumps(blueprint, sort_keys=True, separators=(",", ":")).encode(),
+        "source-image.sha256": (source_hash + "\n").encode(),
+    }
+    with zipfile.ZipFile(output_path, "w") as archive:
+        for name, data in sorted(files.items()):
+            info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.external_attr = 0o600 << 16
+            archive.writestr(info, data, compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
+    return blueprint
+
+
+def image_bytes(width: int, height: int, values: list[int], mode: str) -> bytes:
+    from io import BytesIO
+    image = Image.new(mode, (width, height))
+    image.putdata(values)
+    buffer = BytesIO()
+    image.save(buffer, format="PNG", optimize=False)
+    return buffer.getvalue()
+
+
+def validate_package(path: Path) -> dict:
+    with zipfile.ZipFile(path) as archive:
+        names = set(archive.namelist())
+        required = {"meta.json", "biomes.png", "height16.png", "rivers.png",
+                    "provinces.png", "titles.json", "realms.json", "world-blueprint.json"}
+        missing = required - names
+        if missing:
+            raise AssertionError(f"worldmap is missing layers: {sorted(missing)}")
+        blueprint = json.loads(archive.read("world-blueprint.json"))
+        titles = json.loads(archive.read("titles.json"))
+        realms = json.loads(archive.read("realms.json"))
+        province_image = Image.open(__import__("io").BytesIO(archive.read("provinces.png")))
+        province_ids = list(province_image.getdata())
+        width, height = province_image.size
+        expected = {item["id"] for item in blueprint["territories"]}
+        actual = {int(value) for value in province_ids if int(value) != 0}
+        if actual != expected:
+            raise AssertionError(f"province raster mismatch: expected={expected}, actual={actual}")
+        land_mask = [value != 0 for value in province_ids]
+        for item in blueprint["territories"]:
+            pid = item["id"]
+            cells = [i for i, value in enumerate(province_ids) if int(value) == pid]
+            if not cells:
+                raise AssertionError(f"province {pid} has no land pixels")
+            start = cells[0]
+            allowed = set(cells)
+            seen = {start}
+            queue = deque([start])
+            while queue:
+                current = queue.popleft()
+                for nxt in neighbors(current, width, height):
+                    if nxt in allowed and nxt not in seen:
+                        seen.add(nxt)
+                        queue.append(nxt)
+            if len(seen) != len(cells):
+                raise AssertionError(f"province {pid} is disconnected ({len(seen)}/{len(cells)})")
+            cap_x, cap_z = item["capital_pixel"]
+            if int(province_ids[cap_z * width + cap_x]) != pid:
+                raise AssertionError(f"province {pid} capital is outside its province")
+        realm_ids = {r["id"] for r in realms["realms"]}
+        for settlement in blueprint["settlements"]:
+            x, z = settlement["pixel"]
+            if not (0 <= x < width and 0 <= z < height and land_mask[z * width + x]):
+                raise AssertionError(f"settlement is not on land: {settlement}")
+            if settlement["realm_id"] not in realm_ids:
+                raise AssertionError(f"settlement references missing realm: {settlement}")
+        if len(titles["titles"]) != blueprint["province_count"] + blueprint["realm_count"]:
+            raise AssertionError("title hierarchy count does not match blueprint")
+        if len(blueprint["settlements"]) < blueprint["realm_count"] * 2:
+            raise AssertionError("not enough settlements were generated")
+        return {
+            "worldmap": path.name, "realm_count": blueprint["realm_count"],
+            "province_count": blueprint["province_count"],
+            "settlement_count": blueprint["settlement_count"],
+            "land_pixels": blueprint["land_pixels"], "seed": blueprint["seed"],
+            "source_image_sha256": blueprint["source_image_sha256"],
+            "chunk_materialization": blueprint["generation_policy"]["chunk_materialization"],
+        }
+
+
+def self_test(output_dir: Path) -> dict:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    source = output_dir / "synthetic-fantasy-map.png"
+    first = output_dir / "image-world-seed-424242.worldmap"
+    second = output_dir / "image-world-seed-424242-repeat.worldmap"
+    other_seed = output_dir / "image-world-seed-424243.worldmap"
+    create_test_image(source)
+    convert_image(source, first, 424242)
+    convert_image(source, second, 424242)
+    convert_image(source, other_seed, 424243)
+    if hashlib.sha256(first.read_bytes()).digest() != hashlib.sha256(second.read_bytes()).digest():
+        raise AssertionError("same image + seed did not produce byte-identical worldmaps")
+    if hashlib.sha256(first.read_bytes()).digest() == hashlib.sha256(other_seed.read_bytes()).digest():
+        raise AssertionError("different seeds unexpectedly produced identical worldmaps")
+    report = validate_package(first)
+    report["same_seed_byte_identical"] = True
+    report["different_seed_changes_output"] = True
+    report["source_image"] = source.name
+    (output_dir / "image-worldgen-test-report.json").write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    with zipfile.ZipFile(first) as archive:
+        (output_dir / "world-blueprint.json").write_bytes(archive.read("world-blueprint.json"))
+    return report
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest="command", required=True)
+    test = sub.add_parser("self-test")
+    test.add_argument("--output-dir", type=Path, required=True)
+    convert = sub.add_parser("convert")
+    convert.add_argument("--input", type=Path, required=True)
+    convert.add_argument("--output", type=Path, required=True)
+    convert.add_argument("--seed", type=int, required=True)
+    convert.add_argument("--realms", type=int, default=4)
+    convert.add_argument("--provinces-per-realm", type=int, default=4)
+    convert.add_argument("--blocks-per-pixel", type=int, default=16)
+    args = parser.parse_args()
+    try:
+        if args.command == "self-test":
+            print(json.dumps(self_test(args.output_dir), indent=2, sort_keys=True))
+        else:
+            blueprint = convert_image(args.input, args.output, args.seed, args.realms,
+                                      args.provinces_per_realm, args.blocks_per_pixel)
+            print(json.dumps({
+                "worldmap": str(args.output), "seed": args.seed,
+                "realm_count": blueprint["realm_count"],
+                "province_count": blueprint["province_count"],
+                "settlement_count": blueprint["settlement_count"],
+                "chunk_materialization": "deferred",
+            }, indent=2, sort_keys=True))
+        return 0
+    except Exception as exc:
+        print(f"IMAGE_WORLDGEN_FAILED: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
