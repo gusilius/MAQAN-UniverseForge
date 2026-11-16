@@ -202,9 +202,28 @@ public final class WorkspaceRuntime {
 
     public static boolean executeAction(String actionId, PlatformSelectionContext.Selection selection) {
         Action action = ACTIONS.get(actionId);
-        if (action == null || selection == null || !safeVisible(action, selection)) return false;
-        action.execute().accept(selection);
-        return true;
+        if (action == null || selection == null || !isCurrentSelection(selection)
+                || !safeVisible(action, selection)) return false;
+        try {
+            action.execute().accept(selection);
+            publish(Severity.SUCCESS, action.providerId(), "action",
+                    "Executed " + action.label(), selection.entityId(), selection.worldId());
+            return true;
+        } catch (RuntimeException error) {
+            publish(Severity.ERROR, action.providerId(), "action",
+                    "Action failed: " + action.label() + " (" + error.getClass().getSimpleName() + ")",
+                    selection.entityId(), selection.worldId());
+            return false;
+        }
+    }
+
+    private static boolean isCurrentSelection(PlatformSelectionContext.Selection selection) {
+        PlatformSelectionContext.Selection current = PlatformSelectionContext.current();
+        return current != null
+                && current.revision() == selection.revision()
+                && current.providerId().equals(selection.providerId())
+                && current.entityId().equals(selection.entityId())
+                && current.worldId().equals(selection.worldId());
     }
 
     private static boolean safeVisible(Action action, PlatformSelectionContext.Selection selection) {
