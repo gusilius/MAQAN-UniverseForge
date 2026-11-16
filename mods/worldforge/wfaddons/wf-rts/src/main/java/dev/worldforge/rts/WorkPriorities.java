@@ -17,6 +17,7 @@ public final class WorkPriorities {
     private final Map<Integer, Map<String, Integer>> values = new HashMap<>();
 
     public int get(Worker w, String prof) {
+        if (w == null || prof == null || !w.canPerform(prof)) return 0;
         Map<String, Integer> m = values.get(w.id);
         if (m != null && m.containsKey(prof)) return m.get(prof);
         if (w.jobPrio != null && w.jobPrio.containsKey(prof)) {
@@ -28,6 +29,7 @@ public final class WorkPriorities {
 
     /** Установить значение (0..4); возвращает команду для сервера. */
     public String set(Worker w, String prof, int n) {
+        if (w == null || prof == null || !w.canPerform(prof)) return null;
         n = Math.max(0, Math.min(MAX, n));
         values.computeIfAbsent(w.id, k -> new HashMap<>()).put(prof, n);
         return Orders.priorityWorkCmd(w.id, prof, n);
@@ -38,6 +40,7 @@ public final class WorkPriorities {
 
     /** Щелчок по ячейке: 0->1->2->3->4->0, назад при back (ПКМ). Возвращает команду. */
     public String cycle(Worker w, String prof, boolean back) {
+        if (w == null || !w.canPerform(prof)) return null;
         int v = get(w, prof);
         return set(w, prof, back ? (v + MAX) % (MAX + 1) : (v + 1) % (MAX + 1));
     }
@@ -46,8 +49,10 @@ public final class WorkPriorities {
     public List<String> cycleColumn(Settlement s, String prof) {
         List<String> out = new ArrayList<>();
         if (s.workers.isEmpty()) return out;
-        int next = (get(s.workers.get(0), prof) + 1) % (MAX + 1);
-        for (Worker w : s.workers) out.add(set(w, prof, next));
+        Worker firstCompatible = s.workers.stream().filter(w -> w.canPerform(prof)).findFirst().orElse(null);
+        if (firstCompatible == null) return out;
+        int next = (get(firstCompatible, prof) + 1) % (MAX + 1);
+        for (Worker w : s.workers) if (w.canPerform(prof)) out.add(set(w, prof, next));
         return out;
     }
 
