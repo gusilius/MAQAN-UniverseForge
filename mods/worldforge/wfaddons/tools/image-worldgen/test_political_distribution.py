@@ -1,6 +1,9 @@
 import unittest
 
-from image_worldgen import (allocate_counts, select_independent_islands,\n                            aggregate_realm_regions, classify_realm_scale)
+from image_worldgen import (
+    allocate_counts, select_independent_islands, aggregate_realm_regions,
+    classify_realm_scale, select_wilderness_mask, SETTLEMENT_PROFILES,
+)
 
 
 class PoliticalDistributionTests(unittest.TestCase):
