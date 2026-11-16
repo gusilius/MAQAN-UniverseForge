@@ -24,7 +24,7 @@ import numpy as np
 
 from image_map_analysis import CLASSES as ANALYSIS_CLASSES, classify, make_heightfield
 
-GENERATOR_VERSION = "maqan-image-blueprint/0.3.0"
+GENERATOR_VERSION = "maqan-image-blueprint/0.4.0"
 BIOMES = [
     {"index": 0, "key": "deep_ocean", "color": "#315f85", "candidates": ["minecraft:deep_ocean", "minecraft:ocean"]},
     {"index": 1, "key": "plains", "color": "#dac78f", "candidates": ["minecraft:plains"]},
@@ -227,12 +227,57 @@ def partition(cells, seeds, width: int, height: int, first_label: int, scratch: 
     return labels, seeds
 
 
-def allocate_counts(components: list[list[int]], total: int) -> list[int]:
+def allocate_counts(components: list[list[int]], total: int,
+                    minimum_pixels: int = 1) -> list[int]:
+    """Allocate realm seeds proportionally while respecting each landmass capacity."""
+    if not components:
+        return []
+    if total < len(components):
+        raise ValueError("Every major landmass must receive at least one realm seed.")
+    capacities = [max(1, len(component) // max(1, minimum_pixels))
+                  for component in components]
+    capacity_total = sum(capacities)
+    if total > capacity_total:
+        raise ValueError(
+            f"Requested {total} realms but landmasses support at most "
+            f"{capacity_total} at minimum size {minimum_pixels}."
+        )
     counts = [1] * len(components)
-    while sum(counts) < total:
-        target = max(range(len(components)), key=lambda i: (len(components[i]) / counts[i], len(components[i]), -i))
-        counts[target] += 1
+    remaining = total - len(components)
+    while remaining:
+        eligible = [i for i in range(len(components)) if counts[i] < capacities[i]]
+        if not eligible:
+            raise ValueError("Realm allocation exhausted all landmass capacities.")
+        weight_total = sum(len(components[i]) for i in eligible)
+        quotas = {i: remaining * len(components[i]) / weight_total for i in eligible}
+        assigned = 0
+        for i in eligible:
+            extra = min(capacities[i] - counts[i], int(math.floor(quotas[i])))
+            if extra:
+                counts[i] += extra
+                assigned += extra
+        remaining -= assigned
+        if remaining:
+            eligible = [i for i in eligible if counts[i] < capacities[i]]
+            if not eligible:
+                continue
+            target = max(eligible, key=lambda i: (
+                quotas.get(i, 0.0) - math.floor(quotas.get(i, 0.0)),
+                len(components[i]), -i))
+            counts[target] += 1
+            remaining -= 1
     return counts
+
+
+def select_independent_islands(components: list[list[int]], seed: int,
+                               budget: int, minimum_pixels: int) -> set[int]:
+    """Choose viable island city-states deterministically, without random dropouts."""
+    candidates = [c for c in components if len(c) >= minimum_pixels]
+    def stable_rank(component: list[int]) -> tuple[int, int, int]:
+        selector = (seed ^ (component[0] * 0x9E3779B97F4A7C15) ^ len(component)) & 0xFFFFFFFF
+        return (-len(component), selector, component[0])
+    candidates.sort(key=stable_rank)
+    return {component[0] for component in candidates[:max(0, budget)]}
 
 
 def color_for(index: int) -> str:
@@ -314,7 +359,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         len(major_components),
         min(realm_count, max(1, major_land_pixels // minimum_territory_pixels)),
     )
-    realm_counts = allocate_counts(major_components, realm_total)
+    realm_counts = allocate_counts(major_components, realm_total, minimum_territory_pixels)
     realm_labels = np.full(width * height, -2, dtype=np.int32)
     partition_scratch = np.full(width * height, -2, dtype=np.int32)
     realm_seeds: dict[int, int] = {}
@@ -385,21 +430,21 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         seed_xy = np.column_stack((seed_pixels % width, seed_pixels // width))
         realm_tree = cKDTree(seed_xy)
         independent_budget = max(1, realm_count // 16)
-        independent_candidates = sorted(
-            (c for c in minor_components if len(c) >= 16),
-            key=lambda c: (-len(c), c[0]))
-        independent_components = set()
-        for component in independent_candidates:
-            if len(independent_components) >= independent_budget:
-                break
-            # Stable hash-based selection avoids run-to-run randomness.
-            selector = (seed ^ (component[0] * 0x9E3779B97F4A7C15) ^ len(component)) & 0xFFFFFFFF
-            if selector % 11 == 0:
-                independent_components.add(component[0])
+        # A city-state needs enough land to support a minimal settlement.
+        # The threshold scales with world development but never falls below 64 pixels.
+        island_city_state_minimum = max(64, minimum_territory_pixels // 4)
+        independent_components = select_independent_islands(
+            minor_components, seed, independent_budget, island_city_state_minimum)
 
         for component in minor_components:
-            center = component[len(component) // 2]
-            xy = (center % width, center // width)
+            # Use the geometric centroid, not the middle item in row-major pixel order.
+            # This avoids bias toward the island's middle scanline on crescent/long islands.
+            xs = np.fromiter((pixel % width for pixel in component), dtype=np.float64, count=len(component))
+            zs = np.fromiter((pixel // width for pixel in component), dtype=np.float64, count=len(component))
+            cx, cz = float(xs.mean()), float(zs.mean())
+            center = min(component, key=lambda pixel: (
+                (pixel % width - cx) ** 2 + (pixel // width - cz) ** 2, pixel))
+            xy = (cx, cz)
             _, nearest = realm_tree.query(xy, k=1)
             owner_realm = int(seed_ids[int(nearest)])
             if component[0] in independent_components:
@@ -594,9 +639,18 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
             "chunk_materialization": "deferred",
             "territory_partition": "flat-array-multisource-bfs",
             "partition_numba_accelerated": NUMBA_ACCELERATED,
+            "major_land_components": len(major_components),
+            "minor_land_components": len(minor_components),
             "minor_island_provinces": island_province_count,
             "independent_island_realms": independent_island_realm_count,
+            "independent_island_minimum_pixels": max(64, minimum_territory_pixels // 4),
             "unclaimed_land_pixels": unclaimed_land_pixels,
+            "unclaimed_land_percent": round(100.0 * unclaimed_land_pixels / max(1, land_count), 4),
+            "realm_area_pixels": {
+                "min": min(sum(province_meta[pid]["area"] for pid in pids) for pids in realm_provinces.values()),
+                "max": max(sum(province_meta[pid]["area"] for pid in pids) for pids in realm_provinces.values()),
+                "mean": round(sum(sum(province_meta[pid]["area"] for pid in pids) for pids in realm_provinces.values()) / max(1, len(realm_provinces)), 2),
+            },
             "political_seed": seed, "source_semantics": "maqan-image-analysis/2",
             "minimum_territory_pixels": minimum_territory_pixels,
             "government_variety": sorted({r["props"]["government"] for r in realms}),
