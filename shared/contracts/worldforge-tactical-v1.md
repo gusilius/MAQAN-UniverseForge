@@ -24,6 +24,14 @@ Provide deterministic, scale-independent tactical recommendations for a selected
 - Hierarchy order is Army -> Corps -> Squad -> Character. A soldier without an assigned corps/army remains a valid squad/character and must not be silently dropped.
 - Optional addons remain optional. If `wf_people`, `wf_army`, or settlement integration is absent, the UI and command layer degrade explicitly; they must not fabricate records.
 
+## Batch evaluation
+
+- Rust exposes `evaluate_tactical_batch` as a deterministic ordered map over independent squad snapshots.
+- Batch input order is preserved; each decision echoes only its own source revision.
+- A batch is a transport/per-call optimization, not a combined force calculation. Never sum unrelated squads or merge their command policies.
+- Java must validate each result independently against the current squad revision, hierarchy, commander identity, permissions, objective and target before applying it.
+- The native adapter should cap batch size and split oversized requests without changing snapshot order. A batch must be captured from a coherent server-thread view and must not retain Minecraft objects.
+
 ## Snapshot v1
 
 Java constructs a bounded immutable snapshot on the server thread. A batch may contain one squad or several independent squad snapshots; never aggregate unrelated command scopes into one decision.
