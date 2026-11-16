@@ -1087,43 +1087,34 @@ public final class WorldSimMod {
 
         int budget = PEOPLE_MATERIALIZATION_BUDGET_PER_TICK;
         boolean complete = true;
-        for (MapData map : WorldForgeMod.loadedMaps().values()) {
-            if (map == null) continue;
-            CharacterRegistry registry = PeopleMod.registry(map);
-            if (registry == null) {
-                LOGGER.warn("wf_worldsim: canonical Character registry unavailable for map {}; materialization deferred", map.name);
-                complete = false;
-                continue;
-            }
-            EmergentMapProgress mapProgress = emergentPeopleProgress.maps.computeIfAbsent(
-                    map.name, ignored -> new EmergentMapProgress(registry));
+        for (EmergenceSource source : emergenceSources()) {
+            CharacterRegistry registry = source.registry;
+            if (registry == null) { complete = false; continue; }
+            EmergentMapProgress sourceProgress = emergentPeopleProgress.maps.computeIfAbsent(
+                    source.id, ignored -> new EmergentMapProgress(registry));
             boolean hasSettledBands = false;
             for (var element : state.getAsJsonArray("bands")) {
                 if (!element.isJsonObject()) continue;
                 JsonObject band = element.getAsJsonObject();
-                if (!band.has("map_id") || !map.name.equals(band.get("map_id").getAsString())) continue;
+                if (!band.has("map_id") || !source.id.equals(band.get("map_id").getAsString())) continue;
                 String bandId = band.get("id").getAsString();
                 int target = (int) Math.max(0L, Math.min(100_000L, band.get("population").getAsLong()));
-                EmergentBandProgress bandProgress = mapProgress.bands.computeIfAbsent(bandId,
-                        ignored -> new EmergentBandProgress(mapProgress.index.livingResidents(bandId), year));
+                EmergentBandProgress bandProgress = sourceProgress.bands.computeIfAbsent(bandId,
+                        ignored -> new EmergentBandProgress(sourceProgress.index.livingResidents(bandId), year));
                 List<dev.worldforge.people.Character> residents = bandProgress.residents;
 
-                // Reconcile existing Origins assignments in bounded slices. New Characters are
-                // assigned immediately below, so restart/retry resumes from canonical records.
                 while (bandProgress.originCursor < residents.size() && budget > 0) {
                     int ordinal = bandProgress.originCursor++;
-                    ensureEmergentOrigin(residents.get(ordinal), map, year, ordinal);
+                    ensureEmergentOrigin(residents.get(ordinal), source, year, ordinal);
                     budget--;
                 }
-                // Creation is bounded by the same per-server-tick budget. The target is never
-                // reduced; the remaining cohort is materialized on subsequent server ticks.
                 while (residents.size() < target && budget > 0) {
                     int ordinal = residents.size();
                     dev.worldforge.people.Character created = createEmergentResident(
-                            registry, map, bandId, year, ordinal, bandProgress.parents);
+                            registry, source, bandId, year, ordinal, bandProgress.parents);
                     if (created == null) break;
-                    mapProgress.index.add(created);
-                    ensureEmergentOrigin(created, map, year, ordinal);
+                    sourceProgress.index.add(created);
+                    ensureEmergentOrigin(created, source, year, ordinal);
                     bandProgress.originCursor = residents.size();
                     budget--;
                 }
@@ -1145,14 +1136,12 @@ public final class WorldSimMod {
 
                 String settlementId = "emg_" + bandId;
                 try {
-                    int x = (int) Math.max(-29_999_000L, Math.min(29_999_000L,
-                            Math.round((band.get("x").getAsDouble() - map.w / 2.0) * Math.max(0.001, map.bpp))));
-                    int z = (int) Math.max(-29_999_000L, Math.min(29_999_000L,
-                            Math.round((band.get("z").getAsDouble() - map.h / 2.0) * Math.max(0.001, map.bpp))));
-                    if (SettleMod.colony(settlementId) == null) {
-                        TitleData.Title province = map.provinceAt(x, z);
-                        TitleData.Realm owner = province == null || map.titles == null
-                                ? null : map.titles.realmOf(province);
+                    int[] position = source.blockPosition(band.get("x").getAsInt(), band.get("z").getAsInt());
+                    int x = position[0], z = position[1];
+                    if (SettleMod.colony(settlementId) == null && source.map != null) {
+                        TitleData.Title province = source.map.provinceAt(x, z);
+                        TitleData.Realm owner = province == null || source.map.titles == null
+                                ? null : source.map.titles.realmOf(province);
                         if (owner != null) {
                             band.addProperty("territory_blocked_by", owner.id);
                             LOGGER.info("wf_worldsim: deferred legacy settlement {} on territory owned by {}",
@@ -1162,14 +1151,12 @@ public final class WorldSimMod {
                         }
                     }
                     String display = "Settlement " + bandId.substring(0, Math.min(8, bandId.length()));
-                    String settlementDimension = mapDimension(server, map);
-                    if (settlementDimension == null)
-                        throw new IllegalStateException("No loaded physical dimension for map " + map.name);
+                    String settlementDimension = source.settlementDimension(server);
+                    if (settlementDimension == null || settlementDimension.isBlank())
+                        throw new IllegalStateException("No loaded physical dimension for emergence source " + source.id);
                     Colony colony = SettleMod.foundEmergentInMemory(server,
-                            settlementDimension, settlementId, display,
-                            x, z, "worldsim:settlement:" + bandId);
-                    List<String> residentIds = residents.stream()
-                            .filter(person -> person.alive)
+                            settlementDimension, settlementId, display, x, z, "worldsim:settlement:" + bandId);
+                    List<String> residentIds = residents.stream().filter(person -> person.alive)
                             .map(person -> person.globalId).toList();
                     if (!SettleMod.replaceCanonicalResidentsInMemory(colony.s.id, residentIds))
                         throw new IllegalStateException("Canonical residents could not be attached to settlement " + settlementId);
@@ -1182,7 +1169,7 @@ public final class WorldSimMod {
                         colony.s.removeWorkerByPerson(worker.person, reason);
                     }
                     for (String residentId : residentIds) {
-                        dev.worldforge.people.Character resident = mapProgress.index.byGlobalId(residentId);
+                        dev.worldforge.people.Character resident = sourceProgress.index.byGlobalId(residentId);
                         if (resident == null) continue;
                         boolean workingAge = PopulationSimulation.age(resident, year) >= 18
                                 && PopulationSimulation.canWork(resident, year);
@@ -1203,15 +1190,15 @@ public final class WorldSimMod {
                 if (budget == 0) break;
             }
 
-            List<dev.worldforge.people.Character> emergentResidents = mapProgress.index.emergentResidents();
+            List<dev.worldforge.people.Character> emergentResidents = sourceProgress.index.emergentResidents();
             boolean peopleDurable = emergentResidents.isEmpty()
                     || PeopleMod.persistCharacter(emergentResidents.get(0), server);
             if (!peopleDurable) {
-                LOGGER.error("wf_worldsim: canonical residents for map {} could not be durably saved; materialization remains pending", map.name);
+                LOGGER.error("wf_worldsim: canonical residents for source {} could not be durably saved; materialization remains pending", source.id);
                 return false;
             }
             if (hasSettledBands && !SettleMod.saveDurably(server)) {
-                LOGGER.error("wf_worldsim: settlement/Worker batch for map {} could not be durably saved; materialization remains pending", map.name);
+                LOGGER.error("wf_worldsim: settlement/Worker batch for source {} could not be durably saved; materialization remains pending", source.id);
                 return false;
             }
             if (budget == 0) complete = false;
