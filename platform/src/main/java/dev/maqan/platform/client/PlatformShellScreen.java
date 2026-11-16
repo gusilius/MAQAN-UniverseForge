@@ -674,26 +674,22 @@ public final class PlatformShellScreen extends Screen {
      * catalogue and the shared provider-owned selection/inspector contracts.
      */
     private void drawConceptWindowContent(GuiGraphics g) {
-        MaqanUiPackAdaptiveLayout.Result skin = MaqanUiPackRenderer.adaptiveLayout(width, height);
-        if (skin == null || skin.compact()) return;
-        MaqanUiPackAdaptiveLayout.Rect left = skin.get("lp");
-        MaqanUiPackAdaptiveLayout.Rect right = skin.get("rp");
-        if (left == null || right == null) return;
-
-        Panel navigation = new Panel("navigation", "MODULES", left.x(), left.y(),
-                left.width(), left.height());
-        Panel inspector = new Panel("inspector", "INSPECTOR", right.x(), right.y(),
-                right.width(), right.height());
-        g.drawString(font, profile == Profile.POLITICS ? "REALMS / MODULES"
-                : profile == Profile.RTS ? "ARMY / COMMAND"
-                : profile == Profile.SETTLEMENTS ? "SETTLEMENT / MODULES" : "COSMOS / MODULES",
-                left.x() + 12, left.y() + 12, CYAN, false);
-        drawNavigationPanel(g, navigation);
-        g.drawString(font, profile == Profile.POLITICS ? "REALM / DIPLOMACY"
-                : profile == Profile.RTS ? "UNIT / FORMATION"
-                : profile == Profile.SETTLEMENTS ? "BUILDING / HOUSEHOLD" : "OBJECT DOSSIER",
-                right.x() + 12, right.y() + 12, CYAN, false);
-        drawInspectorPanel(g, inspector);
+        Panel navigation = panels.get("navigation");
+        Panel inspector = panels.get("inspector");
+        if (navigation != null && navigation.visible) {
+            g.drawString(font, profile == Profile.POLITICS ? "REALMS / MODULES"
+                    : profile == Profile.RTS ? "ARMY / COMMAND"
+                    : profile == Profile.SETTLEMENTS ? "SETTLEMENT / MODULES" : "COSMOS / MODULES",
+                    navigation.x + 12, navigation.y + 12, CYAN, false);
+            drawNavigationPanel(g, navigation);
+        }
+        if (inspector != null && inspector.visible) {
+            g.drawString(font, profile == Profile.POLITICS ? "REALM / DIPLOMACY"
+                    : profile == Profile.RTS ? "UNIT / FORMATION"
+                    : profile == Profile.SETTLEMENTS ? "BUILDING / HOUSEHOLD" : "OBJECT DOSSIER",
+                    inspector.x + 12, inspector.y + 12, CYAN, false);
+            drawInspectorPanel(g, inspector);
+        }
     }
 
     private int compactRailBottom() {
