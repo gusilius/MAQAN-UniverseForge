@@ -422,6 +422,11 @@ public final class PlatformShellScreen extends Screen {
 
     private Screen activeView() {
         if (profile == Profile.COSMOS) return embeddedView;
+        if (profile == Profile.RTS
+                && WorkspaceViewState.cameraMode() != WorkspaceViewState.CameraMode.FIRST_PERSON) {
+            Screen troops = providerViews.get("worldforge.troops");
+            if (troops != null) return troops;
+        }
         Screen view = providerViews.get(selectedCapabilityId);
         if (view == null && profile == Profile.POLITICS)
             view = providerViews.get("worldforge.map");
