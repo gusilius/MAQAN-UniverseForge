@@ -393,6 +393,9 @@ public final class PlatformShellScreen extends Screen {
             // Compact skin layouts collapse the decorative side windows; the
             // active native workspace drawer occupies that space instead.
             if (WorkspaceResponsiveLayout.isCompact(width, height)) {
+                // The concept top bar and left rail are still real controls:
+                // retain native hit targets/drawers when the layout collapses.
+                drawRail(g, mouseX, mouseY);
                 for (Panel panel : panels.values()) {
                     if (panel.visible && !panel.id.equals("content")) drawPanel(g, panel, mouseX, mouseY);
                 }
@@ -932,7 +935,7 @@ public final class PlatformShellScreen extends Screen {
                     : Math.abs(my - splitter.position()) <= 4 && mx >= splitter.start() && mx <= splitter.end();
             if (hit) { resizingSplitterPath = splitter.path(); return true; }
         }
-        if (my<34) {
+        if (my < MaqanUiPackRenderer.topBarHeight(width, height)) {
             if (mx >= width - 88 && mx < width - 64) {
                 workspaceManagerVisible = !workspaceManagerVisible;
                 notificationCenterVisible = false;
