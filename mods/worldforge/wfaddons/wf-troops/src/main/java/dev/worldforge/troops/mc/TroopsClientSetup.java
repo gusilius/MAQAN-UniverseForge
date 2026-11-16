@@ -1,6 +1,6 @@
 package dev.worldforge.troops.mc;
 
-import dev.worldforge.troops.mc.client.TroopRenderer;
+import dev.worldforge.troops.mc.TroopRenderer;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.EntityRenderersEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
