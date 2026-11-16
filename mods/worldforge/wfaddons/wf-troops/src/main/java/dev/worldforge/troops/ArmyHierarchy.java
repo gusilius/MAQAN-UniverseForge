@@ -47,6 +47,8 @@ public final class ArmyHierarchy {
             armies.put(strategicId, node);
         } else {
             if (!node.owner.equals(owner)) throw new IllegalStateException("army belongs to another owner");
+            if (!blank(realm) && !blank(node.realm) && !node.realm.equals(realm))
+                throw new IllegalStateException("strategic army ID is already bound to another realm");
             if (!blank(name)) node.name = name;
             if (!blank(realm)) node.realm = realm;
         }
