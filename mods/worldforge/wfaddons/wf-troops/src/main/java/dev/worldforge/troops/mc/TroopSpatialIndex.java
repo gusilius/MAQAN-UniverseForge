@@ -10,7 +10,7 @@ import java.util.List;
 final class TroopSpatialIndex {
     private static final double CELL_SIZE = 8.0;
     private int[] cellX = new int[0], cellZ = new int[0], heads = new int[0], next = new int[0], candidates = new int[0];
-    private double[] aura = new double[0];
+    private double[] aura = new double[0], posX = new double[0], posZ = new double[0];
     private boolean[] leaders = new boolean[0];
     private int mask;
 
@@ -20,7 +20,8 @@ final class TroopSpatialIndex {
         java.util.Arrays.fill(heads, -1);
         for (int i = 0; i < count; i++) {
             TroopEntity troop = troops.get(i);
-            int x = floorCell(troop.getX()), z = floorCell(troop.getZ());
+            posX[i] = troop.getX(); posZ[i] = troop.getZ();
+            int x = floorCell(posX[i]), z = floorCell(posZ[i]);
             int slot = hash(x, z) & mask;
             while (heads[slot] != -1 && (cellX[slot] != x || cellZ[slot] != z)) slot = (slot + 1) & mask;
             if (heads[slot] == -1) { cellX[slot] = x; cellZ[slot] = z; }
@@ -42,8 +43,8 @@ final class TroopSpatialIndex {
                 int slot = find(cx, cz);
                 if (slot >= 0) for (int i = heads[slot]; i >= 0; i = next[i]) {
                     // Exact circle check excludes square-corner false positives.
-                    // The indexed entity coordinates are stable for this server-thread pass.
-                    candidates[found++] = i;
+                    double dx = posX[i] - x, dz = posZ[i] - z;
+                    if (dx * dx + dz * dz <= r2) candidates[found++] = i;
                 }
                 if (cx == maxX) break;
             }
@@ -76,6 +77,7 @@ final class TroopSpatialIndex {
         if (next.length < count) next = new int[count];
         if (candidates.length < count) candidates = new int[count];
         if (aura.length < count) aura = new double[count];
+        if (posX.length < count) { posX = new double[count]; posZ = new double[count]; }
         if (leaders.length < count) leaders = new boolean[count];
     }
 
