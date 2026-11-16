@@ -117,6 +117,12 @@ public final class CommandScreen extends Screen {
             if (lead instanceof TroopEntity troop) {
                 rows.add(new String[]{"Lead unit", "Type", troop.def() == null ? troop.unitId() : troop.def().name});
                 rows.add(new String[]{"Lead unit", "Morale", troop.moralePct() + "%"});
+                if (!troop.syncedCharacterId().isBlank())
+                    rows.add(new String[]{"Identity", "Character ID", troop.syncedCharacterId()});
+                if (troop.armyId > 0)
+                    rows.add(new String[]{"Command", "Army ID", Integer.toString(troop.armyId)});
+                if (!troop.squadId().isBlank())
+                    rows.add(new String[]{"Command", "Squad", troop.squadId()});
             } else if (CommandMode.isWorkerEntity(lead)) {
                 rows.add(new String[]{"Lead unit", "Profession", CommandMode.workerString(lead, "professionId")});
                 rows.add(new String[]{"Lead unit", "Status", CommandMode.workerString(lead, "statusLabel")});
@@ -173,6 +179,8 @@ public final class CommandScreen extends Screen {
             dev.worldforge.mod.client.PlatformWorkspaceBridge.clear("wf_troops");
             return;
         }
+        // Stable lead selection keeps the same real body in the inspector across entity iteration changes.
+        selected.sort(java.util.Comparator.comparing(entity -> entity.getUUID().toString()));
         String stableIds = selected.stream().map(entity -> entity.getUUID().toString())
                 .sorted().collect(java.util.stream.Collectors.joining(","));
         String label = selected.size() == 1 ? selected.get(0).getName().getString()
