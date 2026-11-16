@@ -1282,7 +1282,9 @@ public final class PlatformShellScreen extends Screen {
             int menuWidth = 190, rowHeight = 22;
             int x = Math.max(4, Math.min(contextMenuX, width - menuWidth - 4));
             int y = Math.max(38, Math.min(contextMenuY, height - contextActions.size() * rowHeight - 4));
-            int index = (int) ((my - y - 4) / rowHeight);
+            int menuBottom = y + 4 + contextActions.size() * rowHeight;
+            int index = my >= y + 4 && my < menuBottom
+                    ? (int) ((my - y - 4) / rowHeight) : -1;
             if (mx >= x && mx <= x + menuWidth && index >= 0 && index < contextActions.size())
                 WorkspaceRuntime.executeAction(contextActions.get(index).id(), contextSelection);
             contextMenuVisible = false;
