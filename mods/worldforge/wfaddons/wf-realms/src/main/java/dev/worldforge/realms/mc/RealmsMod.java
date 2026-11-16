@@ -114,9 +114,13 @@ public class RealmsMod {
                 int provinceCount = 0;
                 for (var map : WorldForgeMod.loadedMaps().values()) {
                     if (map.titles == null || !map.titles.realms.containsKey(realm)) continue;
-                    for (TitleData.Title title : map.titles.allTitles())
-                        if (title.tier == 0 && map.titles.realmOf(title) != null
-                                && realm.equals(map.titles.realmOf(title).id)) provinceCount++;
+                    for (TitleData.Title title : map.titles.allTitles()) {
+                        TitleData.Realm owner = title.tier == 0 ? map.titles.realmOf(title) : null;
+                        if (owner != null && realm.equals(owner.id)) provinceCount++;
+                    }
+                    // RealmsMod.realm(id) resolves the first matching map realm; mirror that
+                    // exact scope rather than merging same-named realms from other dimensions.
+                    break;
                 }
                 return Math.max(1, provinceCount);
             }
