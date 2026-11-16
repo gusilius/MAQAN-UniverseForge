@@ -4,10 +4,8 @@ import com.mojang.logging.LogUtils;
 import net.minecraft.client.CameraType;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
-import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
-import net.minecraft.world.entity.Pose;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraftforge.api.distmarker.Dist;
@@ -70,7 +68,12 @@ public final class MaqanCameraController {
 
         previousCamera = minecraft.getCameraEntity();
         previousCameraType = minecraft.options.getCameraType();
-        proxy = new CameraProxy(minecraft.level);
+        proxy = EntityType.ARMOR_STAND.create(minecraft.level);
+        if (proxy == null) {
+            LOGGER.warn("Unable to create client camera anchor; keeping the current camera");
+            return;
+        }
+        proxy.setNoGravity(true);
         rig = new MaqanCameraRig();
         rig.start(minecraft.player.getX(), minecraft.player.getZ(),
                 minecraft.player.getYRot(), preset(mode));
@@ -118,7 +121,7 @@ public final class MaqanCameraController {
         int groundY = minecraft.level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
                 new BlockPos(blockX, minecraft.player.blockPosition().getY(), blockZ));
         double[] position = rig.position(groundY);
-        proxy.setPos(position[0], position[1], position[2]);
+        proxy.setPos(position[0], position[1] - proxy.getEyeHeight(), position[2]);
         proxy.setYRot((float) rig.yaw());
         proxy.setXRot((float) rig.pitch());
         proxy.yRotO = proxy.getYRot();
@@ -144,16 +147,4 @@ public final class MaqanCameraController {
         return GLFW.glfwGetKey(window, key) == GLFW.GLFW_PRESS;
     }
 
-    /** Unregistered client-only camera anchor; it is never added to or saved in a world. */
-    private static final class CameraProxy extends Entity {
-        private CameraProxy(Level level) {
-            super(EntityType.ARMOR_STAND, level);
-            setNoGravity(true);
-        }
-
-        @Override protected void defineSynchedData() { }
-        @Override protected void readAdditionalSaveData(CompoundTag tag) { }
-        @Override protected void addAdditionalSaveData(CompoundTag tag) { }
-        @Override public float getEyeHeight(Pose pose) { return 0.0F; }
-    }
 }
