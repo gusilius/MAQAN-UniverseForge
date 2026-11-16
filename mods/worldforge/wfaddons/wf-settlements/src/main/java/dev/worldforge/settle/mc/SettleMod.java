@@ -1759,23 +1759,32 @@ public class SettleMod {
                     String id = "worldsim:settlement:" + mapToken + ":" + seed.id();
                     String operationId = "worldsim:settlement:" + map.name + ":" + seed.id();
                     boolean existed = COLONIES.containsKey(id);
-                    Colony colony = foundEmergentInMemory(server, dimension, id, seed.name(),
+                    TitleData.Realm realm = map.titles == null ? null : map.titles.realms.get(seed.realmId());
+                    String race = realm == null ? "" : String.valueOf(realm.props.getOrDefault("identity.race",
+                            realm.props.getOrDefault("race", "")));
+                    String culture = realm == null ? "" : String.valueOf(realm.props.getOrDefault("identity.culture",
+                            realm.props.getOrDefault("culture", "")));
+                    String settlementName = seed.name();
+                    // Use the canonical race/culture settlement pool when available; keep the
+                    // image generator's deterministic name as a safe fallback for partial packs.
+                    try {
+                        settlementName = PeopleMod.NAMES.generate(race, culture, "settlements",
+                                new java.util.Random(Objects.hash(map.name, seed.id())));
+                    } catch (RuntimeException missingSettlementPool) { /* blueprint name is already stable */ }
+                    Colony colony = foundEmergentInMemory(server, dimension, id, settlementName,
                             seed.blockX(), seed.blockZ(), operationId);
                     // Preserve the blueprint's stable ID, type and exact political ownership
                     // on the canonical Colony record; name remains Settlement.s.name.
+                    colony.s.name = settlementName;
                     colony.sourceMapId = map.name;
                     colony.blueprintSettlementId = seed.id();
                     colony.settlementType = seed.type();
                     colony.provinceId = seed.provinceId();
                     colony.realmId = seed.realmId();
-                    TitleData.Realm realm = map.titles == null ? null : map.titles.realms.get(seed.realmId());
-                    if (realm != null) {
-                        colony.identityRace = String.valueOf(realm.props.getOrDefault("identity.race",
-                                realm.props.getOrDefault("race", "")));
-                        colony.identityCulture = String.valueOf(realm.props.getOrDefault("identity.culture",
-                                realm.props.getOrDefault("culture", "")));
-                        colony.governmentId = String.valueOf(realm.props.getOrDefault("politics.government", ""));
-                    }
+                    colony.identityRace = race;
+                    colony.identityCulture = culture;
+                    colony.governmentId = realm == null ? "" :
+                            String.valueOf(realm.props.getOrDefault("politics.government", ""));
                     if (!existed) staged++;
                 }
                 if (!saveDurably(server)) {
