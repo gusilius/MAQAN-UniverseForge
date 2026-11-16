@@ -257,6 +257,16 @@ pub fn evaluate_tactical(snapshot: TacticalSnapshot) -> TacticalDecision {
     )
 }
 
+/// Evaluates independent squad snapshots in a stable input order.
+///
+/// The host should batch only snapshots captured for the same simulation tick and
+/// apply each result independently after checking its squad revision and authority.
+/// This keeps per-squad decisions deterministic while avoiding repeated FFI calls
+/// when the native adapter is added. The function does not merge squad strengths.
+pub fn evaluate_tactical_batch(snapshots: &[TacticalSnapshot]) -> Vec<TacticalDecision> {
+    snapshots.iter().copied().map(evaluate_tactical).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -282,6 +292,30 @@ mod tests {
             allow_reform: true,
             allow_reposition: true,
         }
+    }
+
+    #[test]
+    fn batch_matches_scalar_results_and_preserves_input_order() {
+        let mut first = sample();
+        first.revision = 7;
+        let mut second = sample();
+        second.revision = 11;
+        second.mode = CommandMode::Autonomous;
+        second.own_strength = 90;
+        let snapshots = [first, second];
+        let batch = evaluate_tactical_batch(&snapshots);
+        assert_eq!(batch.len(), snapshots.len());
+        for (actual, input) in batch.iter().zip(snapshots.iter()) {
+            assert_eq!(*actual, evaluate_tactical(*input));
+            assert_eq!(actual.source_revision, input.revision);
+        }
+        assert_eq!(batch[0].source_revision, 7);
+        assert_eq!(batch[1].source_revision, 11);
+    }
+
+    #[test]
+    fn empty_batch_returns_no_decisions() {
+        assert!(evaluate_tactical_batch(&[]).is_empty());
     }
 
     #[test]
