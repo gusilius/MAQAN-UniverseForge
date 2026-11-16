@@ -16,8 +16,9 @@ import java.util.Optional;
 
 /**
  * Validated runtime view of the imported MAQAN UI skin manifest.
- * All coordinates remain in the source reference viewport; rendering and
- * pointer hit-testing must use the same ViewportTransform.
+ * Coordinates remain in source reference space. The adaptive layout converts
+ * them into screen-space rectangles; rendering and future hit regions must
+ * consume those same calculated rectangles.
  */
 public final class MaqanUiPackLayout {
     private static final Logger LOGGER = LogUtils.getLogger();
