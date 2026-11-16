@@ -128,6 +128,14 @@ public final class MaqanCameraController {
         proxy.xRotO = proxy.getXRot();
     }
 
+    public static boolean rotateByMouse(double deltaX, double deltaY) {
+        if (rig == null || proxy == null) return false;
+        rig.rotate(deltaX * 0.28, deltaY * 0.22);
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.player != null && minecraft.level != null) updateRig(minecraft);
+        return true;
+    }
+
     public static boolean zoom(double wheelSteps) {
         if (rig == null || proxy == null) return false;
         rig.zoomBy(wheelSteps);
