@@ -259,6 +259,12 @@ public class MapScreen extends Screen {
     }
 
     @Override
+    public void onClose() {
+        if (embeddedInMaqan && PlatformWorkspaceBridge.closeEmbedded(this)) return;
+        super.onClose();
+    }
+
+    @Override
     public void removed() {
         freeOverlay();
         super.removed();
