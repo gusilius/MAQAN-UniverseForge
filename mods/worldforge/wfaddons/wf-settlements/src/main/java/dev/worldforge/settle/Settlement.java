@@ -655,6 +655,13 @@ public final class Settlement {
         if (w.taskOwner != Worker.TaskOwner.MILITARY) {
             w.suspendedTaskOwner = w.taskOwner;
             w.suspendedTaskId = w.taskId;
+            w.suspendedProfession = w.assignedProfession;
+            w.suspendedBuilding = w.building;
+            w.suspendedManualHauler = w.manualHauler;
+            w.suspendedLifeAction = w.lifeAction;
+            w.suspendedLifeTargetX = w.lifeTargetX;
+            w.suspendedLifeTargetZ = w.lifeTargetZ;
+            w.suspendedLifeActionUntil = w.lifeActionUntil;
         }
         if (!w.claimTask(Worker.TaskOwner.MILITARY, orderId, true)) return false;
         w.militaryOrderId = orderId;
@@ -677,22 +684,30 @@ public final class Settlement {
         w.militaryOrderId = "";
         Worker.TaskOwner resume = w.suspendedTaskOwner;
         String resumeId = w.suspendedTaskId;
+        String resumeProfession = w.suspendedProfession;
+        int resumeBuilding = w.suspendedBuilding;
+        boolean resumeHauler = w.suspendedManualHauler;
+        String resumeLifeAction = w.suspendedLifeAction;
+        double resumeLifeX = w.suspendedLifeTargetX, resumeLifeZ = w.suspendedLifeTargetZ;
+        double resumeLifeUntil = w.suspendedLifeActionUntil;
         w.suspendedTaskOwner = Worker.TaskOwner.NONE;
         w.suspendedTaskId = "";
+        w.suspendedProfession = "";
+        w.suspendedBuilding = 0;
+        w.suspendedManualHauler = false;
+        w.suspendedLifeAction = "";
         if (resume == Worker.TaskOwner.SETTLEMENT && !resumeId.isBlank()) {
-            int buildingId;
-            try { buildingId = Integer.parseInt(resumeId.substring(resumeId.lastIndexOf(':') + 1)); }
-            catch (RuntimeException ex) { buildingId = 0; }
-            Building target = building(buildingId);
-            if (target != null && target.state != Building.State.PLANNED) {
-                String role = availableRole(w, target);
-                if (!role.isEmpty()) {
-                    w.claimTask(Worker.TaskOwner.SETTLEMENT, resumeId, true);
-                    w.building = buildingId;
-                    w.assignedProfession = role;
-                    w.status = "";
-                    return true;
-                }
+            Building target = building(resumeBuilding);
+            if (target != null && target.state != Building.State.PLANNED
+                    && (resumeHauler ? target.state == Building.State.DONE
+                    : !resumeProfession.isBlank() && target.def.jobs.containsKey(resumeProfession)
+                        && assignedWith(target.uid, resumeProfession) < target.def.jobs.get(resumeProfession))) {
+                w.claimTask(Worker.TaskOwner.SETTLEMENT, resumeId, true);
+                w.building = resumeBuilding;
+                w.assignedProfession = resumeProfession;
+                w.manualHauler = resumeHauler;
+                w.status = resumeHauler ? "переносит ресурсы" : "";
+                return true;
             }
         } else if (resume == Worker.TaskOwner.PLAYER && !resumeId.isBlank()) {
             w.claimTask(Worker.TaskOwner.PLAYER, resumeId, true);
@@ -700,6 +715,10 @@ public final class Settlement {
             return true;
         } else if (resume == Worker.TaskOwner.LIFE) {
             w.claimTask(Worker.TaskOwner.LIFE, resumeId.isBlank() ? "daily-life" : resumeId, true);
+            w.lifeAction = resumeLifeAction;
+            w.lifeTargetX = resumeLifeX;
+            w.lifeTargetZ = resumeLifeZ;
+            w.lifeActionUntil = resumeLifeUntil;
             w.status = "повседневная жизнь";
             return true;
         }
@@ -1610,6 +1629,11 @@ public final class Settlement {
             m.put("id", w.id); m.put("name", w.name); m.put("profession", w.profession); m.put("assigned_profession", w.assignedProfession); m.put("person", w.person); m.put("building", w.building); m.put("status", w.status); m.put("x", w.x); m.put("z", w.z);
             m.put("task_owner", w.taskOwner.name()); m.put("task_id", w.taskId); m.put("task_revision", w.taskRevision);
             m.put("suspended_task_owner", w.suspendedTaskOwner.name()); m.put("suspended_task_id", w.suspendedTaskId);
+            m.put("suspended_profession", w.suspendedProfession); m.put("suspended_building", w.suspendedBuilding);
+            m.put("suspended_manual_hauler", w.suspendedManualHauler);
+            m.put("suspended_life_action", w.suspendedLifeAction);
+            m.put("suspended_life_target_x", w.suspendedLifeTargetX); m.put("suspended_life_target_z", w.suspendedLifeTargetZ);
+            m.put("suspended_life_action_until", w.suspendedLifeActionUntil);
             m.put("military_order_id", w.militaryOrderId);
             m.put("life_action", w.lifeAction); m.put("life_target_x", w.lifeTargetX); m.put("life_target_z", w.lifeTargetZ);
             m.put("life_action_until", w.lifeActionUntil); m.put("haul_progress", w.haulProgress);
@@ -1730,6 +1754,13 @@ public final class Settlement {
                 if (w.jobPrio.isEmpty()) w.jobPrio = null;
             }
             if (w.building != 0 && s.building(w.building) == null) w.building = 0;
+            if (m.get("suspended_profession") instanceof String profession) w.suspendedProfession = profession;
+            if (m.get("suspended_building") instanceof Number building) w.suspendedBuilding = Math.max(0, building.intValue());
+            w.suspendedManualHauler = Boolean.TRUE.equals(m.get("suspended_manual_hauler"));
+            if (m.get("suspended_life_action") instanceof String action) w.suspendedLifeAction = action;
+            if (m.get("suspended_life_target_x") instanceof Number x && Double.isFinite(x.doubleValue())) w.suspendedLifeTargetX = x.doubleValue();
+            if (m.get("suspended_life_target_z") instanceof Number z && Double.isFinite(z.doubleValue())) w.suspendedLifeTargetZ = z.doubleValue();
+            if (m.get("suspended_life_action_until") instanceof Number until && Double.isFinite(until.doubleValue())) w.suspendedLifeActionUntil = until.doubleValue();
             try {
                 w.taskOwner = Worker.TaskOwner.valueOf(m.get("task_owner") instanceof String owner ? owner : "NONE");
                 w.taskId = m.get("task_id") instanceof String task ? task : "";
