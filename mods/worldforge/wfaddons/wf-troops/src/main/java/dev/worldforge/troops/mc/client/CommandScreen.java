@@ -504,22 +504,25 @@ public final class CommandScreen extends Screen {
         return px >= r[0] && px < r[0] + r[2] && py >= r[1] && py < r[1] + r[3];
     }
 
-    /** Applies a command policy to every selected squad using a real member Character as its commander. */
+    /** Applies policy only when the selected member is unambiguous for each squad. */
     private void applyCommandPolicy(String mode) {
-        Map<String, TroopEntity> representatives = new LinkedHashMap<>();
+        Map<String, List<TroopEntity>> selectedBySquad = new LinkedHashMap<>();
         for (TroopEntity troop : selectedTroops()) {
             String squadId = troop.squadId();
-            if (squadId == null || squadId.isBlank()) continue;
-            TroopEntity current = representatives.get(squadId);
-            if (current == null || current.syncedCharacterId().isBlank()
-                    && !troop.syncedCharacterId().isBlank()) representatives.put(squadId, troop);
+            if (squadId != null && !squadId.isBlank())
+                selectedBySquad.computeIfAbsent(squadId, ignored -> new ArrayList<>()).add(troop);
         }
-        if (representatives.isEmpty() || minecraft.player == null) return;
+        if (selectedBySquad.isEmpty() || minecraft.player == null) return;
+        if (!mode.equals("direct") && selectedBySquad.values().stream().anyMatch(members -> members.size() != 1)) {
+            minecraft.player.displayClientMessage(Component.literal(
+                    "Для делегирования выберите по одному назначенному командиру из каждого отряда"), true);
+            return;
+        }
         int sent = 0;
-        for (Map.Entry<String, TroopEntity> entry : representatives.entrySet()) {
+        for (Map.Entry<String, List<TroopEntity>> entry : selectedBySquad.entrySet()) {
             String commander = "-";
             if (!mode.equals("direct")) {
-                commander = entry.getValue().syncedCharacterId();
+                commander = entry.getValue().get(0).syncedCharacterId();
                 if (commander == null || commander.isBlank()) continue;
             }
             minecraft.player.connection.sendCommand("wftroops command squad "
@@ -527,7 +530,7 @@ public final class CommandScreen extends Screen {
             sent++;
         }
         minecraft.player.displayClientMessage(Component.literal(sent == 0
-                ? "Для делегирования выберите бойца с Character ID"
+                ? "Для делегирования выберите назначенного командира с Character ID"
                 : "Командная политика отправлена: " + sent + " отряд(ов) · " + mode), true);
     }
 
@@ -542,7 +545,13 @@ public final class CommandScreen extends Screen {
     }
 
     private void toggleCommander() {
-        CommandMode.send(new OrderPacket(OrderPacket.APPOINT, selectedTroopIds(), 0, 0, 0, "", false, hasControlDown() ? -1 : 1));
+        List<String> selected = selectedTroopIds();
+        if (selected.size() != 1) {
+            if (minecraft.player != null) minecraft.player.displayClientMessage(
+                    Component.literal("Для назначения командира выберите одного бойца"), true);
+            return;
+        }
+        CommandMode.send(new OrderPacket(OrderPacket.APPOINT, selected, 0, 0, 0, "", false, hasControlDown() ? -1 : 1));
     }
 
     private void createSquadFromSelection() {
