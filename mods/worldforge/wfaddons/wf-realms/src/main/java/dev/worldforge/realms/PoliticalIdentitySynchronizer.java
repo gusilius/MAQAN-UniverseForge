@@ -72,6 +72,9 @@ public final class PoliticalIdentitySynchronizer {
                 already++;
             } else if (!byGlobalId.containsKey(title.holderCharacterId)) {
                 problems.add("Title " + titleId + " has orphan holder Character ID " + title.holderCharacterId);
+            } else {
+                problems.add("Title " + titleId + " holder " + title.holderCharacterId
+                        + " conflicts with map ruler " + rulerId + "; existing title holder preserved");
             }
             // A title stores exactly one holder. Existing holders are intentionally not overwritten:
             // inheritance, conquest and player grants must survive subsequent synchronization ticks.
