@@ -52,7 +52,11 @@ public final class Courts {
         for (Role role : defs.all()) {
             List<String[]> places = new ArrayList<>();             // {place, culture, label, race}
             if (role.per.equals("realm")) {
-                for (TitleData.Realm r : d.realmList()) places.add(new String[]{realmPlace(r.id), String.valueOf(r.props.getOrDefault("culture", "")), r.id, String.valueOf(r.props.getOrDefault("race", ""))});
+                for (TitleData.Realm r : d.realmList()) String realmRace = text(r.props.get("race"));
+                    if (realmRace.isBlank()) realmRace = dominantRace(r.props.get("races"));
+                    String realmCulture = text(r.props.get("culture"));
+                    if (realmCulture.isBlank()) realmCulture = names.culture(realmRace);
+                    places.add(new String[]{realmPlace(r.id), realmCulture, r.id, realmRace});
             } else {
                 int tier = -1;
                 for (TitleData.Tier t : d.tiers) if (t.key.equals(role.per)) tier = t.index;
@@ -98,18 +102,56 @@ public final class Courts {
 
     private static String cultureOf(TitleData d, TitleData.Title t) {
         for (TitleData.Title c = t; c != null; c = c.parent > 0 ? d.get(c.parent) : null) {
-            Object v = c.props.get("culture");
-            if (v != null) return String.valueOf(v);
+            String value = text(c.props.get("culture"));
+            if (!value.isBlank()) return value;
         }
-        return "";
+        TitleData.Title province = t;
+        while (province != null && province.tier > 0) province = province.parent > 0 ? d.get(province.parent) : null;
+        TitleData.Realm realm = province == null ? null : d.realmOf(province);
+        if (realm == null) return "";
+        String explicit = text(realm.props.get("culture"));
+        String race = text(realm.props.get("race"));
+        if (race.isBlank()) race = dominantRace(realm.props.get("races"));
+        return explicit.isBlank() ? race : explicit;
     }
 
     private static String raceOf(TitleData d, TitleData.Title t) {
         for (TitleData.Title current = t; current != null; current = current.parent > 0 ? d.get(current.parent) : null) {
-            Object value = current.props.get("race");
-            if (value != null && !String.valueOf(value).isBlank()) return String.valueOf(value);
+            String value = text(current.props.get("race"));
+            if (!value.isBlank()) return value;
+        }
+        TitleData.Title province = t;
+        while (province != null && province.tier > 0) province = province.parent > 0 ? d.get(province.parent) : null;
+        TitleData.Realm realm = province == null ? null : d.realmOf(province);
+        if (realm == null) return "";
+        String race = text(realm.props.get("race"));
+        return race.isBlank() ? dominantRace(realm.props.get("races")) : race;
+    }
+
+    private static String dominantRace(Object raw) {
+        if (raw instanceof Map<?, ?> shares) {
+            return shares.entrySet().stream()
+                    .filter(e -> e.getValue() instanceof Number n && Double.isFinite(n.doubleValue()) && n.doubleValue() > 0)
+                    .max(Comparator.comparingDouble(e -> ((Number) e.getValue()).doubleValue()))
+                    .map(e -> String.valueOf(e.getKey())).orElse("");
+        }
+        if (raw instanceof String value) {
+            String best = ""; double max = 0;
+            for (String item : value.split(",")) {
+                String[] pair = item.trim().split(":", 2);
+                if (pair.length != 2) continue;
+                try {
+                    double share = Double.parseDouble(pair[1].trim());
+                    if (Double.isFinite(share) && share > max) { max = share; best = pair[0].trim(); }
+                } catch (NumberFormatException ignored) { }
+            }
+            return best;
         }
         return "";
+    }
+
+    private static String text(Object value) {
+        return value == null ? "" : String.valueOf(value).trim();
     }
 
     private static String pick(List<String> l, Random r) { return l.get(r.nextInt(l.size())); }
