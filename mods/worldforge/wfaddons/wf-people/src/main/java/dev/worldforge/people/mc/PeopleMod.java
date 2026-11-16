@@ -82,6 +82,9 @@ public class PeopleMod {
     public static volatile java.util.List<String> ROLES_RAW = java.util.List.of();
     public static volatile NameBank NAMES = new NameBank();
     private static final Map<MapData, CharacterRegistry> REGS = new ConcurrentHashMap<>();
+    /** Canonical population partition for ordinary Minecraft dimensions without an image-map source. */
+    private static final CharacterRegistry WORLD_REGISTRY = new CharacterRegistry();
+    private static final String WORLD_PARTITION_ID = "__world__";
     private static final CharacterAuthority AUTHORITY = new CharacterAuthority();
     private static final CharacterRegistry PLAYER_REGISTRY = new CharacterRegistry();
     private static final Map<String, Character> PLAYER_CHARACTERS = new ConcurrentHashMap<>();
@@ -138,6 +141,7 @@ public class PeopleMod {
     public void onAboutToStart(ServerAboutToStartEvent e) {
         identityPartitionsReady = false;
         REGS.clear();
+        WORLD_REGISTRY.fromJson("{\"format\":\"wf-people/3\",\"schema_version\":3,\"next\":1,\"characters\":[]}");
         PLAYER_CHARACTERS.clear();
         INVALID_REGS.clear();
         if (WorldForgeMod.worldId() != null) AUTHORITY.beginWorld(WorldForgeMod.worldId());
@@ -196,6 +200,15 @@ public class PeopleMod {
         }
         playerRegistryAvailable = true;
         try {
+            Path worldFile = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
+                    .resolve("worldforge").resolve("wf_people_world.json");
+            if (Files.exists(worldFile)) {
+                WorldId world = WorldForgeMod.worldId();
+                if (world == null) throw new IllegalStateException("WorldId is unavailable for world Character identity migration");
+                WORLD_REGISTRY.fromJson(Files.readString(worldFile), world + "|" + WORLD_PARTITION_ID);
+            }
+            if (WorldForgeMod.worldId() == null) throw new IllegalStateException("WorldId is unavailable for world Character identity partition");
+            AUTHORITY.registerMap(WORLD_PARTITION_ID, WORLD_REGISTRY);
             Path playerFile = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
                     .resolve("worldforge").resolve("wf_players.json");
             if (Files.exists(playerFile)) {
@@ -217,7 +230,7 @@ public class PeopleMod {
 
     private static boolean allIdentityPartitionsLoaded() {
         if (!playerRegistryAvailable || AUTHORITY.registry("__players__") != PLAYER_REGISTRY) return false;
-        int expected = 1; // Dedicated player Character partition.
+        int expected = 2; // Dedicated player and ordinary-world Character partitions.
         for (MapData map : WorldForgeMod.loadedMaps().values())
             if (map != null) expected++;
         try {
@@ -365,13 +378,16 @@ public class PeopleMod {
     }
 
     public static CharacterRegistry registryFor(ServerLevel level) {
-        return registry(EditorManager.dataFor(level));
+        if (level == null) return null;
+        MapData map = EditorManager.dataFor(level);
+        return map == null ? WORLD_REGISTRY : registry(map);
     }
 
     /** Реестр без создания (для сущностей, которые тикают до загрузки карты). */
     public static CharacterRegistry peek(ServerLevel level) {
+        if (level == null) return null;
         MapData m = EditorManager.dataFor(level);
-        return m == null ? null : REGS.get(m);
+        return m == null ? WORLD_REGISTRY : REGS.get(m);
     }
 
     private static void writeAtomic(Path file, String content) throws java.io.IOException {
@@ -428,6 +444,17 @@ public class PeopleMod {
                 return false;
             }
         }
+        if (owner == WORLD_REGISTRY) {
+            try {
+                Path file = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
+                        .resolve("worldforge").resolve("wf_people_world.json");
+                writeAtomic(file, WORLD_REGISTRY.toJson());
+                return true;
+            } catch (Exception ex) {
+                LOGGER.error("wf_people: failed to persist ordinary-world Character {}: {}", character.globalId, ex.toString());
+                return false;
+            }
+        }
         for (Map.Entry<MapData, CharacterRegistry> entry : REGS.entrySet()) if (entry.getValue() == owner) {
             try {
                 Path file = EditorManager.overlayDir(server, entry.getKey()).resolve("wf_people.json");
@@ -448,6 +475,7 @@ public class PeopleMod {
 
         List<CharacterRegistry> registries = new ArrayList<>();
         registries.add(PLAYER_REGISTRY);
+        registries.add(WORLD_REGISTRY);
         java.util.IdentityHashMap<CharacterRegistry, MapData> mapOwners = new java.util.IdentityHashMap<>();
         for (Map.Entry<MapData, CharacterRegistry> entry : REGS.entrySet()) {
             registries.add(entry.getValue());
@@ -521,6 +549,10 @@ public class PeopleMod {
                     Path playerFile = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
                             .resolve("worldforge").resolve("wf_players.json");
                     writeAtomic(playerFile, PLAYER_REGISTRY.toJson());
+                } else if (registry == WORLD_REGISTRY) {
+                    Path worldFile = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
+                            .resolve("worldforge").resolve("wf_people_world.json");
+                    writeAtomic(worldFile, WORLD_REGISTRY.toJson());
                 } else {
                     MapData map = mapOwners.get(registry);
                     if (map == null) return false;
@@ -548,6 +580,7 @@ public class PeopleMod {
         saveAll(e.getServer());
         REGS.clear();
         PLAYER_CHARACTERS.clear();
+        WORLD_REGISTRY.fromJson("{\"format\":\"wf-people/3\",\"schema_version\":3,\"next\":1,\"characters\":[]}");
         PLAYER_REGISTRY.fromJson("{\"format\":\"wf-people/3\",\"schema_version\":3,\"next\":1,\"characters\":[]}");
         playerRegistryAvailable = true;
         AUTHORITY.clear();
@@ -568,6 +601,7 @@ public class PeopleMod {
                 long fallbackStartDay = populationBaselineDay == Long.MIN_VALUE ? currentWorldDay : populationBaselineDay;
                 for (CharacterRegistry registry : REGS.values())
                     PopulationSimulation.advanceToWorldDay(registry, currentWorldDay, fallbackStartDay, YEAR);
+                PopulationSimulation.advanceToWorldDay(WORLD_REGISTRY, currentWorldDay, fallbackStartDay, YEAR);
                 PopulationSimulation.advanceToWorldDay(PLAYER_REGISTRY, currentWorldDay, fallbackStartDay, YEAR);
                 populationProcessedDay = Math.max(populationProcessedDay, currentWorldDay);
                 populationFallbackGeneration = registryGeneration;
