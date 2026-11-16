@@ -1206,6 +1206,11 @@ public class TroopsMod {
                                                 .executes(ctx -> setArmyCommandPolicy(ctx.getSource(),
                                                         IntegerArgumentType.getInteger(ctx, "army"),
                                                         StringArgumentType.getString(ctx, "mode")))))))
+                        .then(Commands.literal("status")
+                                .then(Commands.literal("squad")
+                                        .then(Commands.argument("squad", StringArgumentType.word())
+                                                .executes(ctx -> showSquadCommandStatus(ctx.getSource(),
+                                                        StringArgumentType.getString(ctx, "squad"))))))
                 .then(Commands.literal("commander")
                         .then(Commands.literal("army")
                                 .then(Commands.argument("army", IntegerArgumentType.integer(1))
@@ -1479,6 +1484,34 @@ public class TroopsMod {
         return 1;
     }
 
+    private static int showSquadCommandStatus(CommandSourceStack src, String squadId) {
+        ServerPlayer player;
+        try { player = src.getPlayerOrException(); }
+        catch (Exception ex) { src.sendFailure(Component.literal("Только для игрока")); return 0; }
+        Squads.Squad squad = SQUADS.get(squadId);
+        if (squad == null || !squad.owner.equals(player.getUUID().toString())) {
+            src.sendFailure(Component.literal("Отряд не найден или принадлежит другому игроку"));
+            return 0;
+        }
+        CommandDelegation.Resolution resolution = COMMANDS.resolveEffective(squadId, HIERARCHY);
+        if (resolution == null) return 0;
+        CommandDelegation.Policy policy = resolution.policy();
+        String source = resolution.sourceType() == null ? "по умолчанию" :
+                resolution.sourceType().name().toLowerCase(Locale.ROOT) + " " + resolution.sourceId();
+        String mode = switch (policy.mode()) {
+            case PLAYER_DIRECT -> "Личное управление";
+            case DELEGATED -> "Делегированное";
+            case AUTONOMOUS -> "Автономное";
+        };
+        String commander = policy.commanderCharacterId().isBlank() ? "не назначен" : policy.commanderCharacterId();
+        src.sendSuccess(() -> Component.literal("«" + squad.name + "» · " + mode
+                + " · источник: " + source + (resolution.inherited() ? " (наследуется)" : " (собственная политика)")
+                + " · командир: " + commander
+                + " · бой/преследование/отступление: " + policy.allowEngagement() + "/"
+                + policy.allowPursuit() + "/" + policy.allowRetreat()), false);
+        return 1;
+    }
+
     /** Sets a squad's explicit command policy; the commander must be a living canonical Character in that squad. */
     private static int setSquadCommandPolicy(CommandSourceStack src, String squadId, String modeName, String commanderId) {
         return executeMilitaryCommand(src, "military.command_policy.squad", squadId,
@@ -1496,16 +1529,18 @@ public class TroopsMod {
             src.sendFailure(Component.literal("Отряд не найден или принадлежит другому игроку"));
             return 0;
         }
+        if ("inherit".equalsIgnoreCase(modeName)) {
+            if (!COMMANDS.resumeInheritance(squadId)) {
+                src.sendFailure(Component.literal("У отряда нет собственного переопределения; он уже наследует командование"));
+                return 0;
+            }
+            src.sendSuccess(() -> Component.literal("«" + squad.name + "»: наследование командования восстановлено"), false);
+            return 1;
+        }
         CommandDelegation.Mode mode;
-        try {
-            mode = switch (modeName.toLowerCase(Locale.ROOT)) {
-                case "direct" -> CommandDelegation.Mode.PLAYER_DIRECT;
-                case "delegated" -> CommandDelegation.Mode.DELEGATED;
-                case "autonomous" -> CommandDelegation.Mode.AUTONOMOUS;
-                default -> throw new IllegalArgumentException();
-            };
-        } catch (IllegalArgumentException ex) {
-            src.sendFailure(Component.literal("Режим должен быть direct, delegated или autonomous"));
+        try { mode = parseCommandMode(modeName); }
+        catch (IllegalArgumentException ex) {
+            src.sendFailure(Component.literal(ex.getMessage()));
             return 0;
         }
         String commander = commanderId.equals("-") ? "" : commanderId;
