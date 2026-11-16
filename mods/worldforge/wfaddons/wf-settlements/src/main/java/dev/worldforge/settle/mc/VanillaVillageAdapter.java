@@ -32,6 +32,8 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
+import java.util.Locale;
 import java.util.Set;
 import net.minecraft.world.level.ChunkPos;
 
@@ -118,6 +120,57 @@ public final class VanillaVillageAdapter {
         }
     }
 
+    /** Stable race-aware settlement name; existing authored colony names are never overwritten. */
+    private static String generatedVillageName(MapData map, TitleData.Realm realm, String id,
+                                               String dimension, int x, int z) {
+        String race = "human";
+        String culture = PeopleMod.NAMES.culture("northern");
+        if (realm != null) {
+            Object cultureValue = realm.props.get("culture");
+            if (cultureValue instanceof String value && !value.isBlank())
+                culture = PeopleMod.NAMES.culture(value.trim());
+            Object racesValue = realm.props.get("races");
+            if (racesValue instanceof String encoded) {
+                double best = -1;
+                for (String item : encoded.split(",")) {
+                    String[] pair = item.trim().split(":", 2);
+                    if (pair.length != 2) continue;
+                    try {
+                        double share = Double.parseDouble(pair[1].trim());
+                        if (Double.isFinite(share) && share > best) {
+                            best = share;
+                            race = pair[0].trim();
+                        }
+                    } catch (NumberFormatException ignored) { }
+                }
+            } else if (racesValue instanceof Map<?, ?> shares) {
+                double best = -1;
+                for (Map.Entry<?, ?> entry : shares.entrySet()) {
+                    if (!(entry.getValue() instanceof Number number)) continue;
+                    double share = number.doubleValue();
+                    if (Double.isFinite(share) && share > best) {
+                        best = share;
+                        race = String.valueOf(entry.getKey());
+                    }
+                }
+            }
+        }
+        long seed = 0x574656494c4c4147L;
+        seed = seed * 31 + (map == null ? 0 : map.name.hashCode());
+        seed = seed * 31 + dimension.hashCode();
+        seed = seed * 31 + x;
+        seed = seed * 31 + z;
+        try {
+            return PeopleMod.NAMES.generate(race, culture, "settlements", new Random(seed));
+        } catch (RuntimeException missingRacePool) {
+            try {
+                return PeopleMod.NAMES.generate("human", culture, "settlements", new Random(seed));
+            } catch (RuntimeException missingCulturePool) {
+                return "Поселение " + Integer.toUnsignedString(id.hashCode(), 36).toUpperCase(Locale.ROOT);
+            }
+        }
+    }
+
     private static void adopt(ServerLevel level, int x, int z, String structureType) {
         if (SettleMod.DEFS == null || !net.minecraftforge.fml.ModList.get().isLoaded("wf_people")) return;
         MapData map = EditorManager.dataFor(level);
@@ -129,18 +182,19 @@ public final class VanillaVillageAdapter {
         String id = "vanilla_village_" + Integer.toHexString(dimension.hashCode()) + "_" + x + "_" + z;
         String operation = "minecraft:village:" + dimension + ":" + x + ":" + z;
         boolean created = !SettleMod.COLONIES.containsKey(id);
+        TitleData.Title province = map.titles == null ? null : map.provinceAt(x, z);
+        TitleData.Realm realm = province == null || map.titles == null ? null : map.titles.realmOf(province);
+        String settlementName = generatedVillageName(map, realm, id, dimension, x, z);
         Colony colony;
         try {
             colony = SettleMod.foundEmergentInMemory(level.getServer(), dimension, id,
-                    "Village " + x + ", " + z, x, z, operation);
+                    settlementName, x, z, operation);
         } catch (RuntimeException failure) {
             SettleMod.LOGGER.warn("wf_settle: could not adopt vanilla village {} at {},{}: {}",
                     structureType, x, z, failure.getMessage());
             return;
         }
 
-        TitleData.Title province = map.titles == null ? null : map.provinceAt(x, z);
-        TitleData.Realm realm = province == null || map.titles == null ? null : map.titles.realmOf(province);
         if (realm != null) colony.realmId = realm.id;
         if (created) {
             WorldForgeApi.postEvent("settlement",
