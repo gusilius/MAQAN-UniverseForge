@@ -441,8 +441,11 @@ public class RealmsMod {
                     String rulerId = String.valueOf(realm.props.getOrDefault("rulerCharacterId", ""));
                     String house = characterHouses.get(rulerId);
                     String dynastyName = house == null ? "" : dynastyNames.getOrDefault(house, "");
-                    if (!dynastyName.isBlank())
-                        changed |= editor.setRealmProp(realm.id, "identity.dynasty_name", dynastyName);
+                    if (!dynastyName.isBlank()
+                            && !dynastyName.equals(String.valueOf(realm.props.getOrDefault("identity.dynasty_name", "")))) {
+                        editor.setRealmProp(realm.id, "identity.dynasty_name", dynastyName);
+                        changed = true;
+                    }
                 }
             }
             for (TitleData.Title title : map.titles.allTitles()) {
