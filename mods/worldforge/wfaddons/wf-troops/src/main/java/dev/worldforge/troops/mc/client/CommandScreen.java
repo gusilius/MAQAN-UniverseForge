@@ -739,10 +739,10 @@ public final class CommandScreen extends Screen {
         int[] view = embeddedInMaqan ? workspaceViewport() : new int[]{0, 0, width, height};
         int minX = view[0] + 4, minY = view[1] + 4;
         int maxX = Math.max(minX, view[0] + view[2] - 144);
-        int maxY = Math.max(minY, view[1] + view[3] - 50);
+        int maxY = Math.max(minY, view[1] + view[3] - 80);
         x = Math.max(minX, Math.min(maxX, x));
         y = Math.max(minY, Math.min(maxY, y));
-        return new int[]{x, y, 140, professionalCollapsed ? 16 : 46};
+        return new int[]{x, y, 140, professionalCollapsed ? 16 : 76};
     }
 
     private boolean inProfessionalPanel(double px, double py) {
@@ -767,6 +767,26 @@ public final class CommandScreen extends Screen {
         g.drawString(font, "РАБОЧИЕ ЗАДАЧИ", r[0] + 5, r[1] + 4, 0xFFE6C875, false);
         g.drawString(font, (professionalPinned ? "◆" : "◇") + (professionalCollapsed ? "+" : "−"), r[0] + r[2] - 25, r[1] + 4, 0xFFB8C5D6, false);
         if (professionalCollapsed) return;
+        Map<String, Integer> professions = new TreeMap<>();
+        int assigned = 0;
+        if (minecraft.level != null) {
+            Set<String> selected = new HashSet<>(selectedWorkerIds());
+            for (net.minecraft.world.entity.Entity entity : minecraft.level.entitiesForRendering()) {
+                if (entity instanceof LivingEntity living && selected.contains(entity.getUUID().toString())) {
+                    String profession = CommandMode.workerString(living, "professionId");
+                    professions.merge(profession.isBlank() ? "без профессии" : profession, 1, Integer::sum);
+                    assigned++;
+                }
+            }
+        }
+        String workforce = assigned + " рабочих · " + professions.entrySet().stream()
+                .map(e -> e.getKey() + " " + e.getValue()).collect(java.util.stream.Collectors.joining(", "));
+        g.drawString(font, font.plainSubstrByWidth(workforce, r[2] - 10),
+                r[0] + 5, r[1] + 16, 0xFFB8C5D6, false);
+        String task = workMode < 0 ? "Задача не выбрана · выберите ниже"
+                : "Назначение: " + WORK_LABELS[workMode] + " · O — видимость зон";
+        g.drawString(font, font.plainSubstrByWidth(task, r[2] - 10),
+                r[0] + 5, r[1] + 26, 0xFF9FC9E8, false);
     }
 
     private List<Btn> buttons() {
@@ -833,7 +853,7 @@ public final class CommandScreen extends Screen {
         for (int i = 0; i < WorkArea.values().length; i++) {
             final int kind = i;
             int col = i % 4, row = i / 4;
-            out.add(new Btn(WORK_ICONS[i], r[0] + 6 + col * 32, r[1] + 17 + row * 18,
+            out.add(new Btn(WORK_ICONS[i], r[0] + 6 + col * 32, r[1] + 38 + row * 18,
                     28, workMode == i, () -> activateWorkArea(kind)));
         }
     }
