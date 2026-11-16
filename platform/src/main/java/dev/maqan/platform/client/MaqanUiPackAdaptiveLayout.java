@@ -58,7 +58,6 @@ public final class MaqanUiPackAdaptiveLayout {
         if (rightRail > 0) out.put("rcol", new Rect(w - rightRail, topH, rightRail, Math.max(0, h - topH)));
 
         double minimapAspect = (minimapRef[2] - minimapRef[0]) / (double)(minimapRef[3] - minimapRef[1]);
-        double consoleAspect = (consoleRef[2] - consoleRef[0]) / (double)(consoleRef[3] - consoleRef[1]);
         int minimapRefW = minimapRef[2] - minimapRef[0];
         int minimapRefH = minimapRef[3] - minimapRef[1];
         int consoleRefW = consoleRef[2] - consoleRef[0];
@@ -75,7 +74,7 @@ public final class MaqanUiPackAdaptiveLayout {
                     Math.min(minimapMaxW / (double)minimapRefW, minimapMaxH / (double)minimapRefH));
             int minimapW = Math.max(1, (int)Math.round(minimapRefW * minimapScale));
             int minimapH = Math.max(1, (int)Math.round(minimapRefH * minimapScale));
-            int panelY = Math.max(topH, (int)Math.round(leftRef[1] * baseScale));
+            int panelY = Math.max(0, (int)Math.round(leftRef[1] * baseScale));
             int panelMaxH = Math.max(1, h - panelY - minimapH - gap);
             int panelMaxW = Math.min(390, Math.max(220, w / 3));
             double leftScale = Math.min(baseScale,
