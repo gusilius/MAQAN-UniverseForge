@@ -92,6 +92,43 @@ public final class ArmyHierarchyTest {
                         && restoredDelegation.mayIssue(second.id, "c18", CommandDelegation.Action.PURSUE),
                 "delegated command mode and permissions survive save/reload");
 
+
+        CommandDelegation scoped = new CommandDelegation();
+        check(scoped.assignScope(CommandDelegation.ScopeType.ARMY, "42",
+                        CommandDelegation.Mode.DELEGATED, "c17", "hold-the-front", 120, true, false, false)
+                        && scoped.getEffective(first.id, hierarchy).commanderCharacterId().equals("c17")
+                        && scoped.getEffective(second.id, hierarchy).commanderCharacterId().equals("c17"),
+                "army-level command authority is inherited by every subordinate squad");
+        check(scoped.assignScope(CommandDelegation.ScopeType.CORPS, vanguard.id,
+                        CommandDelegation.Mode.AUTONOMOUS, "c18", "secure-the-bridge", 80, true, true, true)
+                        && scoped.getEffective(first.id, hierarchy).mode() == CommandDelegation.Mode.AUTONOMOUS
+                        && scoped.getEffective(second.id, hierarchy).mode() == CommandDelegation.Mode.DELEGATED,
+                "corps policy overrides army policy without affecting sibling corps");
+        check(scoped.assignScope(CommandDelegation.ScopeType.SQUAD, first.id,
+                        CommandDelegation.Mode.PLAYER_DIRECT, "", "", 0, false, false, false)
+                        && scoped.getEffective(first.id, hierarchy).mode() == CommandDelegation.Mode.PLAYER_DIRECT
+                        && scoped.getEffective(second.id, hierarchy).mode() == CommandDelegation.Mode.DELEGATED,
+                "explicit squad direct-control override blocks inherited AI authority");
+        check(scoped.mayIssueForSquad(second.id, "c17", CommandDelegation.Action.ENGAGE_VISIBLE_THREAT, hierarchy)
+                        && !scoped.mayIssueForSquad(first.id, "c18", CommandDelegation.Action.REFORM, hierarchy),
+                "issuer permissions are resolved against the effective hierarchical policy");
+        check(scoped.reclaim(second.id)
+                        && scoped.getEffective(second.id, hierarchy).mode() == CommandDelegation.Mode.PLAYER_DIRECT
+                        && !scoped.mayIssueForSquad(second.id, "c17", CommandDelegation.Action.REFORM, hierarchy)
+                        && scoped.resumeInheritance(second.id)
+                        && scoped.getEffective(second.id, hierarchy).mode() == CommandDelegation.Mode.DELEGATED,
+                "player reclaim is immediate and inheritance can be explicitly resumed later");
+        CommandDelegation scopedReload = new CommandDelegation();
+        scopedReload.fromJson(scoped.toJson());
+        check(scopedReload.getEffective(first.id, hierarchy).mode() == CommandDelegation.Mode.PLAYER_DIRECT
+                        && scopedReload.getEffective(second.id, hierarchy).commanderCharacterId().equals("c18"),
+                "army, corps and squad overrides survive hierarchical save/reload");
+        CommandDelegation legacyReload = new CommandDelegation();
+        legacyReload.fromJson("{\\"format\\":\\"wf-command-delegation/1\\",\\"policies\\":[{\\"squad\\":\\"s9\\",\\"mode\\":\\"DELEGATED\\",\\"commander\\":\\"c9\\",\\"objective\\":\\"legacy\\",\\"leash\\":64,\\"engage\\":true,\\"pursue\\":false,\\"retreat\\":true}]}");
+        check(legacyReload.get("s9").mode() == CommandDelegation.Mode.DELEGATED
+                        && legacyReload.get("s9").commanderCharacterId().equals("c9"),
+                "legacy squad-only command delegation saves remain readable");
+
         if (failures > 0) throw new AssertionError(failures + " army hierarchy tests failed");
     }
 }
