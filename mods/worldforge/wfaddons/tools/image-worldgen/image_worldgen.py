@@ -567,7 +567,8 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         next_realm += count
 
     realm_labels, realm_seeds, aggregation_report = aggregate_realm_regions(
-        realm_labels, realm_seeds, width, height, seed, minimum_territory_pixels)
+        realm_labels, realm_seeds, width, height, seed, minimum_territory_pixels,
+        settlement_profile["merge_fraction"], settlement_profile["realm_area_cap"])
     realm_island_flags = {
         rid: seed_landmass_by_pixel.get(point, main_landmass_id) != main_landmass_id
         for rid, point in realm_seeds.items()
@@ -833,12 +834,22 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     for province_id, meta in province_meta.items():
         province_palette[province_id] = realm_rgb[meta["realm"]]
     political_rgb = province_palette[province_array]
-    vertical = (province_array[:, 1:] != province_array[:, :-1]) & (province_array[:, 1:] > 0) & (province_array[:, :-1] > 0)
-    horizontal = (province_array[1:, :] != province_array[:-1, :]) & (province_array[1:, :] > 0) & (province_array[:-1, :] > 0)
-    political_rgb[:, 1:][vertical] = (24, 24, 28)
-    political_rgb[:, :-1][vertical] = (24, 24, 28)
-    political_rgb[1:, :][horizontal] = (24, 24, 28)
-    political_rgb[:-1, :][horizontal] = (24, 24, 28)
+    # Show unclaimed land as a distinct wilderness reserve, not as a hole
+    # indistinguishable from ocean. Dense profiles have an empty wilderness mask.
+    political_rgb[wilderness_mask] = (104, 111, 83)
+    realm_grid = np.zeros((height, width), dtype=np.int32)
+    for province_id, meta in province_meta.items():
+        realm_grid[province_array == province_id] = meta["realm"] + 1
+    province_edge = np.zeros((height, width), dtype=bool)
+    province_edge[:, 1:] |= (province_array[:, 1:] != province_array[:, :-1]) & (province_array[:, 1:] > 0) & (province_array[:, :-1] > 0)
+    province_edge[1:, :] |= (province_array[1:, :] != province_array[:-1, :]) & (province_array[1:, :] > 0) & (province_array[:-1, :] > 0)
+    realm_edge = np.zeros((height, width), dtype=bool)
+    realm_edge[:, 1:] |= (realm_grid[:, 1:] != realm_grid[:, :-1]) & (realm_grid[:, 1:] > 0) & (realm_grid[:, :-1] > 0)
+    realm_edge[1:, :] |= (realm_grid[1:, :] != realm_grid[:-1, :]) & (realm_grid[1:, :] > 0) & (realm_grid[:-1, :] > 0)
+    from scipy import ndimage
+    realm_edge = ndimage.binary_dilation(realm_edge, iterations=2)
+    political_rgb[province_edge] = (63, 67, 72)
+    political_rgb[realm_edge] = (20, 22, 28)
     political_preview = Image.fromarray(political_rgb, "RGB")
     from io import BytesIO
     political_buffer = BytesIO()
@@ -863,8 +874,10 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         "settlements": settlements,
         "generation_policy": {
             "chunk_materialization": "deferred",
-            "territory_partition": "flat-array-multisource-bfs",
-            "partition_numba_accelerated": NUMBA_ACCELERATED,
+            "territory_partition": "terrain-aware-organic-watershed",
+            "partition_numba_accelerated": False,
+            "boundary_model": "coherent-noise-plus-biome-edge-watershed",
+            "wilderness_model": "coherent-terrain-biased-reserves",
             "major_land_components": len(major_components),
             "minor_land_components": len(minor_components),
             "initial_seeded_realms": aggregation_report["initial_regions"],
@@ -989,6 +1002,17 @@ def validate_package(path: Path) -> dict:
         if actual != expected:
             raise AssertionError(f"province raster mismatch: expected={expected}, actual={actual}")
         land_mask = [value != 0 for value in province_ids]
+        biome_image = Image.open(__import__("io").BytesIO(archive.read("biomes.png")))
+        biome_values = np.asarray(biome_image, dtype=np.uint8).ravel()
+        land_biomes = {1, 2, 3, 4, 6, 7, 9}
+        actual_land_pixels = int(np.isin(biome_values, list(land_biomes)).sum())
+        actual_unclaimed = actual_land_pixels - len(actual)
+        if actual_land_pixels != int(blueprint["land_pixels"]):
+            raise AssertionError("land pixel count differs between semantic and political rasters")
+        if actual_unclaimed != int(blueprint["politically_unclaimed_land_pixels"]):
+            raise AssertionError("politically unclaimed land count differs from the blueprint")
+        if int(blueprint["settlement_level"]) >= 6 and actual_unclaimed != 0:
+            raise AssertionError("settlement levels 6-7 must have no politically unclaimed land")
         # Index the raster once. Re-scanning every pixel for every province
         # made validation O(provinces * pixels) on realistic world maps.
         cells_by_province = {pid: [] for pid in expected}
@@ -1033,6 +1057,10 @@ def validate_package(path: Path) -> dict:
             "settlement_count": blueprint["settlement_count"],
             "land_pixels": blueprint["land_pixels"],
             "politically_unclaimed_land_pixels": blueprint["politically_unclaimed_land_pixels"],
+            "actual_land_pixels": actual_land_pixels,
+            "actual_unclaimed_land_pixels": actual_unclaimed,
+            "wilderness_percent_of_land": blueprint["generation_policy"]["wilderness_percent_of_land"],
+            "settlement_level": blueprint["settlement_level"],
             "seed": blueprint["seed"],
             "source_image_sha256": blueprint["source_image_sha256"],
             "chunk_materialization": blueprint["generation_policy"]["chunk_materialization"],
