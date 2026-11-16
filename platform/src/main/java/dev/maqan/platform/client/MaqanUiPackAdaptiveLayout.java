@@ -127,6 +127,28 @@ public final class MaqanUiPackAdaptiveLayout {
         return new Result(compact, out);
     }
 
+    /**
+     * Central playable/map viewport between the desktop side windows and above
+     * the persistent minimap/command dock. Null means the viewport is too small
+     * or the compact drawer layout is active.
+     */
+    public static Rect contentViewport(Result layout, int margin) {
+        if (layout == null || layout.compact()) return null;
+        Rect left = layout.get("lp");
+        Rect right = layout.get("rp");
+        Rect top = layout.get("top");
+        Rect minimap = layout.get("mm");
+        Rect console = layout.get("bot");
+        if (left == null || right == null || top == null || minimap == null || console == null) return null;
+        int inset = Math.max(0, margin);
+        int x = left.right() + inset;
+        int y = top.bottom() + inset;
+        int rightEdge = right.x() - inset;
+        int bottomEdge = Math.min(minimap.y(), console.y()) - inset;
+        return rightEdge > x && bottomEdge > y
+                ? new Rect(x, y, rightEdge - x, bottomEdge - y) : null;
+    }
+
     private static int clamp(int value, int min, int max) {
         return Math.max(min, Math.min(max, value));
     }
