@@ -193,9 +193,11 @@ def _partition_kernel(allowed, seeds, width, height, first_label):
     return labels
 
 
+NUMBA_ACCELERATED = False
 try:
     from numba import njit
     _partition_kernel = njit(cache=True)(_partition_kernel)
+    NUMBA_ACCELERATED = True
 except ImportError:
     pass
 
@@ -350,6 +352,8 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     minor_components = [component for component in components
                         if component[0] not in major_component_ids
                         and len(component) < minimum_territory_pixels and len(component) >= 8]
+    island_province_count = 0
+    independent_island_realm_count = 0
     if minor_components and realm_seeds:
         from scipy.spatial import cKDTree
         seed_ids = np.asarray(sorted(realm_seeds), dtype=np.int32)
@@ -379,6 +383,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
                 realm_provinces[owner_realm] = []
                 realm_seeds[owner_realm] = center
                 next_realm += 1
+                independent_island_realm_count += 1
             province_id = next_province
             realm_provinces.setdefault(owner_realm, []).append(province_id)
             province_labels[np.asarray(component, dtype=np.int64)] = province_id
@@ -388,6 +393,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
             }
             realm_cells_by_id.setdefault(owner_realm, []).extend(component)
             unclaimed_land_pixels -= len(component)
+            island_province_count += 1
             next_province += 1
 
     province_neighbors = {pid: set() for pid in province_meta}
@@ -460,7 +466,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
             "relation": "independent", "subjects": [],
             "area_blocks": total_area * blocks_per_pixel * blocks_per_pixel, "props": {
                 **government_by_realm[rid], "political_seed": seed ^ rid,
-                "territorial_model": "connected_land_partition",
+                "territorial_model": "connected_provinces_with_overseas_holdings",
             },
         })
 
@@ -557,7 +563,12 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
                         for pid, meta in sorted(province_meta.items())],
         "settlements": settlements,
         "generation_policy": {
-            "chunk_materialization": "deferred", "territory_partition": "connected-land-multisource-bfs",
+            "chunk_materialization": "deferred",
+            "territory_partition": "flat-array-multisource-bfs",
+            "partition_numba_accelerated": NUMBA_ACCELERATED,
+            "minor_island_provinces": island_province_count,
+            "independent_island_realms": independent_island_realm_count,
+            "unclaimed_land_pixels": unclaimed_land_pixels,
             "political_seed": seed, "source_semantics": "maqan-image-analysis/2",
             "minimum_territory_pixels": minimum_territory_pixels,
             "government_variety": sorted({r["props"]["government"] for r in realms}),
