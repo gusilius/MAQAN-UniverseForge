@@ -15,6 +15,106 @@ public final class TerritorialIdentity {
 
     public record Result(int realmsNamed, int titlesNamed, int titlesClassified, int rulersLinked) {}
 
+    public record RaceWeight(String id, String parent, int weight) {}
+    public record DemographicResult(int realmsClassified, int distinctRaces) {}
+
+    /**
+     * Seeds missing realm population mixes from the live wf-origins registry.
+     * Existing valid mixes are authoritative and never rerolled. This runs before Courts.ensure,
+     * so rulers, houses and their families are born from the same racial/cultural population.
+     */
+    public static DemographicResult ensureDemographics(String mapId, TitleData data, TitleEditor editor, long worldSeed) {
+        Objects.requireNonNull(data, "title data");
+        Objects.requireNonNull(editor, "title editor");
+        List<RaceWeight> roots = originRootRaces();
+        if (roots.isEmpty()) return new DemographicResult(0, 0);
+        int changed = 0;
+        Set<String> used = new HashSet<>();
+        for (TitleData.Realm realm : data.realmList()) {
+            Map<String, Integer> existing = parseShares(realm.props.get("races"));
+            if (!existing.isEmpty() && existing.keySet().stream().allMatch(id -> roots.stream().anyMatch(r -> r.id().equals(id)))) {
+                used.addAll(existing.keySet());
+                continue;
+            }
+            long seed = seed(worldSeed, mapId, "demography", realm.id);
+            Map<String, Integer> mix = weightedComposition(roots, seed);
+            if (mix.isEmpty()) continue;
+            String encoded = mix.entrySet().stream().map(e -> e.getKey() + ":" + e.getValue())
+                    .collect(java.util.stream.Collectors.joining(","));
+            editor.setRealmProp(realm.id, "races", encoded);
+            String dominant = mix.entrySet().stream().max(Map.Entry.comparingByValue()).orElseThrow().getKey();
+            editor.setRealmProp(realm.id, "race", dominant);
+            changed++;
+            used.addAll(mix.keySet());
+        }
+        return new DemographicResult(changed, used.size());
+    }
+
+    /** Pure deterministic weighted sampling; exposed for logic tests and tooling. */
+    public static Map<String, Integer> weightedComposition(List<RaceWeight> source, long seed) {
+        List<RaceWeight> candidates = source.stream()
+                .filter(r -> r != null && r.id() != null && !r.id().isBlank()
+                        && (r.parent() == null || r.parent().isBlank()) && r.weight() > 0)
+                .sorted(Comparator.comparing(RaceWeight::id)).toList();
+        if (candidates.isEmpty()) return Map.of();
+        Random random = new Random(seed);
+        int count = Math.min(candidates.size(), 2 + random.nextInt(Math.min(2, candidates.size()) - 1 + 1));
+        List<RaceWeight> selected = new ArrayList<>();
+        List<RaceWeight> pool = new ArrayList<>(candidates);
+        for (int n = 0; n < count && !pool.isEmpty(); n++) {
+            long total = pool.stream().mapToLong(r -> Math.max(1, r.weight())).sum();
+            long roll = (long) (random.nextDouble() * total);
+            RaceWeight pick = pool.get(pool.size() - 1);
+            for (RaceWeight candidate : pool) {
+                roll -= Math.max(1, candidate.weight());
+                if (roll < 0) { pick = candidate; break; }
+            }
+            selected.add(pick);
+            pool.remove(pick);
+        }
+        int[] shares = selected.size() == 1 ? new int[]{100}
+                : selected.size() == 2 ? new int[]{70, 30} : new int[]{60, 25, 15};
+        Map<String, Integer> result = new LinkedHashMap<>();
+        for (int i = 0; i < selected.size(); i++) result.put(selected.get(i).id(), shares[i]);
+        return Collections.unmodifiableMap(result);
+    }
+
+    private static List<RaceWeight> originRootRaces() {
+        try {
+            Class<?> mod = Class.forName("dev.worldforge.origins.mc.OriginsMod");
+            Object defs = mod.getField("DEFS").get(null);
+            Object snapshot = defs.getClass().getMethod("snapshot").invoke(defs);
+            Object raw = snapshot.getClass().getMethod("races").invoke(snapshot);
+            if (!(raw instanceof Map<?, ?> races)) return List.of();
+            List<RaceWeight> result = new ArrayList<>();
+            for (Object race : races.values()) {
+                Class<?> type = race.getClass();
+                String id = String.valueOf(type.getMethod("id").invoke(race));
+                String parent = String.valueOf(type.getMethod("parent").invoke(race));
+                int weight = ((Number) type.getMethod("weight").invoke(race)).intValue();
+                result.add(new RaceWeight(id, parent, weight));
+            }
+            return result;
+        } catch (ReflectiveOperationException | LinkageError unavailable) {
+            return List.of(); // wf-origins remains an optional addon; no duplicate race catalog is invented.
+        }
+    }
+
+    private static Map<String, Integer> parseShares(Object raw) {
+        Map<String, Integer> result = new LinkedHashMap<>();
+        if (raw instanceof Map<?, ?> map) {
+            map.forEach((key, value) -> { if (value instanceof Number n && n.intValue() > 0) result.put(String.valueOf(key), n.intValue()); });
+        } else if (raw instanceof String text) {
+            for (String part : text.split(",")) {
+                String[] pair = part.trim().split(":", 2);
+                if (pair.length != 2) continue;
+                try { int value = Integer.parseInt(pair[1].trim()); if (value > 0) result.put(pair[0].trim(), value); }
+                catch (NumberFormatException ignored) { }
+            }
+        }
+        return result;
+    }
+
     public static Result ensure(String mapId, TitleData data, TitleEditor editor,
                                 CharacterRegistry people, NameBank names, long worldSeed) {
         Objects.requireNonNull(data, "title data");
