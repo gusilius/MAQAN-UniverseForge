@@ -237,6 +237,53 @@ public class SettleTest {
                         && manualHaulerBack.worker(newHauler.id).workRole().equals("hauler"),
                 "ручное назначение носильщика сохраняется после перезапуска поселения");
 
+        // Unified task ownership: player, settlement, daily life and military cannot execute conflicting orders.
+        Settlement arbitration = fresh(d, 1);
+        arbitration.auto = false;
+        Building assignedSite = arbitration.place("house", 0, 0);
+        arbitration.tick(1);
+        Worker leased = arbitration.workers.get(0);
+        arbitration.setProfession(leased.id, "builder");
+        arbitration.assign(leased.id, assignedSite.uid, "builder");
+        ok(leased.taskOwner == Worker.TaskOwner.SETTLEMENT
+                        && leased.taskId.equals("settlement:building:" + assignedSite.uid),
+                "назначение на стройку получает единый settlement task lease");
+        ok(arbitration.claimMilitaryTask(leased.id, "campaign:raid-17")
+                        && leased.taskOwner == Worker.TaskOwner.MILITARY && leased.building == 0,
+                "военный приказ приостанавливает гражданскую работу без удаления профессии");
+        ok(throwsOrder(() -> arbitration.moveTo(leased.id, 20, 20))
+                        && throwsOrder(() -> arbitration.unassign(leased.id))
+                        && throwsOrder(() -> arbitration.setProfession(leased.id, "lumberjack")),
+                "ручные и кадровые команды не перехватывают персонажа под военным приказом");
+        Settlement militaryLeaseBack = Settlement.fromJson(arbitration.toJson(), d);
+        Worker restoredLease = militaryLeaseBack.worker(leased.id);
+        ok(restoredLease.taskOwner == Worker.TaskOwner.MILITARY
+                        && restoredLease.suspendedTaskOwner == Worker.TaskOwner.SETTLEMENT
+                        && restoredLease.suspendedProfession.equals("builder")
+                        && restoredLease.suspendedBuilding == assignedSite.uid,
+                "текущий и приостановленный task lease сохраняются вместе с точной ролью");
+        ok(militaryLeaseBack.releaseMilitaryTask(restoredLease.id, "campaign:raid-17")
+                        && restoredLease.taskOwner == Worker.TaskOwner.SETTLEMENT
+                        && restoredLease.building == assignedSite.uid
+                        && restoredLease.assignedProfession.equals("builder"),
+                "после отзыва военного приказа восстанавливается исходная стройка и роль");
+
+        Settlement lifeLease = fresh(d, 1);
+        Worker daily = lifeLease.workers.get(0);
+        ok(lifeLease.claimLifeTask(daily.id, "life:sleeping"), "повседневная жизнь получает временное владение задачей");
+        daily.lifeAction = "sleeping"; daily.lifeTargetX = 7; daily.lifeTargetZ = -4; daily.lifeActionUntil = 900;
+        ok(lifeLease.claimMilitaryTask(daily.id, "campaign:defend-2"), "военный приказ может прервать повседневное действие");
+        Settlement lifeLeaseBack = Settlement.fromJson(lifeLease.toJson(), d);
+        Worker restoredDaily = lifeLeaseBack.worker(daily.id);
+        ok(lifeLeaseBack.releaseMilitaryTask(restoredDaily.id, "campaign:defend-2")
+                        && restoredDaily.taskOwner == Worker.TaskOwner.LIFE
+                        && restoredDaily.lifeAction.equals("sleeping")
+                        && restoredDaily.lifeTargetX == 7 && restoredDaily.lifeTargetZ == -4
+                        && restoredDaily.lifeActionUntil == 900,
+                "военный приказ возвращает жителя к прерванному повседневному действию");
+        ok(lifeLeaseBack.moveTo(restoredDaily.id, 3, 3) == null,
+                "placeholder");
+
         // зависимости и лимиты
         ok(throwsOrder(() -> s.place("granary", 30, 30)), "амбар требует лесопилку");
         ok(throwsOrder(() -> s.place("house", 1, 1)), "нельзя строить поверх другого здания");
