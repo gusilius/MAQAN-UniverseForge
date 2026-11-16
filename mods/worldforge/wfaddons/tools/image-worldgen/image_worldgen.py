@@ -340,6 +340,8 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
                 "realm": owner_realm, "seed": center, "area": len(component),
                 "key": f"realm_{owner_realm + 1:03d}_island_{len(realm_provinces[owner_realm]):03d}",
             }
+            realm_cells_by_id.setdefault(owner_realm, []).extend(component)
+            unclaimed_land_pixels -= len(component)
             next_province += 1
 
     province_neighbors = {pid: set() for pid in province_meta}
@@ -423,7 +425,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         for offset, pid in enumerate(pids[1:], 2):
             add_settlement(("city", "town", "village")[(offset - 2) % 3],
                            province_meta[pid]["seed"], offset)
-        realm_cells = realm_cells_by_id[rid]
+        realm_cells = realm_cells_by_id.get(rid, [])
         mountain_cells = [i for i in realm_cells if classes[i] == "mountains"]
         if mountain_cells:
             add_settlement("fortress", mountain_cells[len(mountain_cells) // 2], 20 + rid)
