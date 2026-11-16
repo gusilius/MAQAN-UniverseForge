@@ -10,7 +10,7 @@ import java.util.List;
 final class TroopSpatialIndex {
     private static final double CELL_SIZE = 8.0;
     private int[] cellX = new int[0], cellZ = new int[0], heads = new int[0], next = new int[0], candidates = new int[0];
-    private double[] aura = new double[0], posX = new double[0], posZ = new double[0];
+    private double[] aura = new double[0], posX = new double[0], posY = new double[0], posZ = new double[0];
     private boolean[] leaders = new boolean[0];
     private final int[] healIndices = {-1, -1, -1};
     private final double[] healFractions = {Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY};
@@ -22,7 +22,7 @@ final class TroopSpatialIndex {
         java.util.Arrays.fill(heads, -1);
         for (int i = 0; i < count; i++) {
             TroopEntity troop = troops.get(i);
-            posX[i] = troop.getX(); posZ[i] = troop.getZ();
+            posX[i] = troop.getX(); posY[i] = troop.getY(); posZ[i] = troop.getZ();
             int x = floorCell(posX[i]), z = floorCell(posZ[i]);
             int slot = hash(x, z) & mask;
             while (heads[slot] != -1 && (cellX[slot] != x || cellZ[slot] != z)) slot = (slot + 1) & mask;
@@ -64,6 +64,8 @@ final class TroopSpatialIndex {
         for (int n = 0; n < found; n++) {
             int index = candidate(n);
             TroopEntity target = troops.get(index);
+            double dy = posY[index] - posY[healerIndex];
+            if (dxSquared(posX[index] - posX[healerIndex], dy, posZ[index] - posZ[healerIndex]) > radius * radius) continue;
             double maximum = target.getMaxHealth(), health = target.getHealth();
             double missing = maximum - health;
             if (missing <= 0.01 || maximum <= 0) continue;
@@ -113,9 +115,11 @@ final class TroopSpatialIndex {
         if (next.length < count) next = new int[count];
         if (candidates.length < count) candidates = new int[count];
         if (aura.length < count) aura = new double[count];
-        if (posX.length < count) { posX = new double[count]; posZ = new double[count]; }
+        if (posX.length < count) { posX = new double[count]; posY = new double[count]; posZ = new double[count]; }
         if (leaders.length < count) leaders = new boolean[count];
     }
+
+    private static double dxSquared(double dx, double dy, double dz) { return dx * dx + dy * dy + dz * dz; }
 
     private static int floorCell(double coordinate) {
         double value = Math.floor(coordinate / CELL_SIZE);
