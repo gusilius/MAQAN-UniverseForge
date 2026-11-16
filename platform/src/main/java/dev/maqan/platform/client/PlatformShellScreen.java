@@ -147,8 +147,17 @@ public final class PlatformShellScreen extends Screen {
             selectedDomain = capability.domain();
             selectedCapabilityId = capability.id();
         }
-        Screen previous = providerViews.put(capability.id(), view);
-        if (previous != null && previous != view) previous.removed();
+        Screen previous = providerViews.get(capability.id());
+        if (cameraOnlyMount && previous != null
+                && previous.getClass().getName().equals(view.getClass().getName())) {
+            // CommandMode re-enters by proposing a new Screen instance. Keep the
+            // cached one: removing it would call CommandMode.exit() and tear
+            // down the camera we just activated.
+            view = previous;
+        } else {
+            providerViews.put(capability.id(), view);
+            if (previous != null && previous != view) previous.removed();
+        }
         if (width > 0 && height > 0) view.init(Minecraft.getInstance(), width, height);
         return true;
     }
