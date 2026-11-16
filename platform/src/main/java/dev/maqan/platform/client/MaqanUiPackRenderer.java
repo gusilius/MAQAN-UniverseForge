@@ -59,6 +59,8 @@ public final class MaqanUiPackRenderer {
     private static final String[] LAYER_KEYS = {"top","lcol","lp","rp","rcol","mm","bot","cor"};
     private static String activeTheme = "royal";
     private static boolean availabilityLogged;
+    private static boolean availabilityChecked;
+    private static boolean assetsReady;
 
     private MaqanUiPackRenderer() {}
 
@@ -75,6 +77,7 @@ public final class MaqanUiPackRenderer {
      * half-rendered frame or accidental use of Minecraft's missing texture.
      */
     public static boolean assetsAvailable() {
+        if (availabilityChecked) return assetsReady;
         Minecraft minecraft = Minecraft.getInstance();
         for (String theme : LAYOUTS.keySet()) {
             for (String filename : TEXTURES.values()) {
@@ -84,10 +87,14 @@ public final class MaqanUiPackRenderer {
                         LOGGER.info("MAQAN UI Pack is not active yet: missing {}", location);
                         availabilityLogged = true;
                     }
+                    availabilityChecked = true;
+                    assetsReady = false;
                     return false;
                 }
             }
         }
+        availabilityChecked = true;
+        assetsReady = true;
         return true;
     }
 
