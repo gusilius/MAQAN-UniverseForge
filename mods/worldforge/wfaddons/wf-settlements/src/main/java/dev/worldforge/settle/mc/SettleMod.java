@@ -118,8 +118,37 @@ public class SettleMod {
     public static final class ClientEvents {
         @net.minecraftforge.eventbus.api.SubscribeEvent
         public static void clientSetup(net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent event) {
-            event.enqueueWork(() -> net.minecraft.client.gui.screens.MenuScreens.register(
-                    RESIDENT_DIALOGUE_MENU.get(), ResidentDialogueScreen::new));
+            event.enqueueWork(() -> {
+                net.minecraft.client.gui.screens.MenuScreens.register(
+                        RESIDENT_DIALOGUE_MENU.get(), ResidentDialogueScreen::new);
+                // RTS worker selections use canonical Character IDs (or a colony/worker fallback key).
+                // Resolve against the current client world on demand; never retain an entity across world changes.
+                dev.worldforge.mod.client.PlatformWorkspaceBridge.registerLiveEntityResolver(
+                        "wf_rts", ClientEvents::resolveRtsWorkerBody);
+            });
+        }
+
+        private static net.minecraft.world.entity.Entity resolveRtsWorkerBody(String identity) {
+            if (identity == null || identity.isBlank()) return null;
+            net.minecraft.client.Minecraft client = net.minecraft.client.Minecraft.getInstance();
+            if (client.level == null) return null;
+            String colonyId = null;
+            int workerId = -1;
+            if (identity.startsWith("settlement:")) {
+                int marker = identity.lastIndexOf(":worker:");
+                if (marker > "settlement:".length()) {
+                    colonyId = identity.substring("settlement:".length(), marker);
+                    try { workerId = Integer.parseInt(identity.substring(marker + ":worker:".length())); }
+                    catch (NumberFormatException ignored) { return null; }
+                }
+            }
+            for (net.minecraft.world.entity.Entity entity : client.level.entitiesForRendering()) {
+                if (!(entity instanceof WFWorker worker) || !worker.isAlive() || worker.isRemoved()) continue;
+                if (identity.equals(worker.characterId())) return worker;
+                if (colonyId != null && colonyId.equals(worker.syncedColonyId())
+                        && workerId == worker.syncedWorkerId()) return worker;
+            }
+            return null;
         }
     }
 
