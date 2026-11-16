@@ -564,6 +564,11 @@ public final class Settlement {
         if (personId == null || personId.isBlank() || reason == null || reason.isBlank()) return false;
         for (Worker worker : new ArrayList<>(workers)) {
             if (personId.equals(worker.person)) {
+                // Enlistment is a military task transition: it may suspend civilian work,
+                // but must never silently steal a resident from an active player command.
+                if ("transfer:military".equals(reason)
+                        && !claimMilitaryTask(worker.id, "military:enlist:" + personId)) return false;
+                if (worker.taskOwner == Worker.TaskOwner.PLAYER) return false;
                 removeWorker(worker, reason);
                 return true;
             }
