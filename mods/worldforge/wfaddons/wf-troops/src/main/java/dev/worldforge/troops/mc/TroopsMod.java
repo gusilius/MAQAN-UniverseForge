@@ -937,6 +937,8 @@ public class TroopsMod {
                 }
                 Squads.Squad squad = SQUADS.commandUnits(owner, selectedTroops, ord, o.queue());
                 if (squad != null) {
+                    // Direct selection is an explicit player takeover, including a newly split squad.
+                    DELEGATION.reclaim(squad.id);
                     String message = squad.name + " (" + squad.members.size() + "): " + ord.kind().title;
                     p.displayClientMessage(Component.literal(message), true);
                     return ActionResult.ok(workerResult != null && !workerResult.ok
@@ -1313,6 +1315,11 @@ public class TroopsMod {
             src.sendFailure(Component.literal("Армия не найдена или принадлежит другому игроку")); return 0;
         }
         try {
+            // This endpoint is an explicit player order: reclaim delegated descendants in this scope.
+            for (String corpsId : army.corpsIds) {
+                ArmyHierarchy.Corps child = HIERARCHY.corps(corpsId);
+                if (child != null) for (String squadId : child.squadIds) DELEGATION.reclaim(squadId);
+            }
             int count = HIERARCHY.commandArmy(armyId, SQUADS, parseArmyOrder(kind, x, z), queue);
             save();
             int issued = count;
@@ -1338,6 +1345,8 @@ public class TroopsMod {
             src.sendFailure(Component.literal("Корпус не найден или принадлежит другому игроку")); return 0;
         }
         try {
+            // An explicit player order to a corps immediately returns its squads to direct control.
+            for (String squadId : corps.squadIds) DELEGATION.reclaim(squadId);
             int count = HIERARCHY.commandCorps(corpsId, SQUADS, parseArmyOrder(kind, x, z), queue);
             save();
             int issued = count;
