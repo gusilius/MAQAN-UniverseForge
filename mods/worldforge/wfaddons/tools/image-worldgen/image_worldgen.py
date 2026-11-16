@@ -53,13 +53,13 @@ NAME_END = ("aria", "en", "oria", "gard", "mere", "hold", "wyn", "mark", "eth", 
 
 # Settlement density is independent from government form, technology and magic.
 SETTLEMENT_PROFILES = {
-    1: {"key": "wild_world", "realms": 4, "provinces": 2, "minimum_pixels": 8192, "wilderness_share": 0.92, "population_density": 0.02},
-    2: {"key": "early_settlements", "realms": 8, "provinces": 4, "minimum_pixels": 4096, "wilderness_share": 0.82, "population_density": 0.08},
-    3: {"key": "regional_civilizations", "realms": 16, "provinces": 6, "minimum_pixels": 2048, "wilderness_share": 0.68, "population_density": 0.20},
-    4: {"key": "developed_states", "realms": 32, "provinces": 8, "minimum_pixels": 1024, "wilderness_share": 0.52, "population_density": 0.38},
-    5: {"key": "dense_civilization", "realms": 48, "provinces": 12, "minimum_pixels": 768, "wilderness_share": 0.38, "population_density": 0.58},
-    6: {"key": "highly_developed", "realms": 64, "provinces": 16, "minimum_pixels": 512, "wilderness_share": 0.24, "population_density": 0.78},
-    7: {"key": "planetary_civilization", "realms": 96, "provinces": 24, "minimum_pixels": 256, "wilderness_share": 0.12, "population_density": 1.00},
+    1: {"key": "wild_world", "realms": 4, "provinces": 2, "minimum_pixels": 8192, "wilderness_share": 0.92, "population_density": 0.02, "merge_fraction": 0.35, "realm_area_cap": 0.45},
+    2: {"key": "early_settlements", "realms": 8, "provinces": 4, "minimum_pixels": 4096, "wilderness_share": 0.82, "population_density": 0.08, "merge_fraction": 0.42, "realm_area_cap": 0.52},
+    3: {"key": "regional_civilizations", "realms": 16, "provinces": 6, "minimum_pixels": 2048, "wilderness_share": 0.68, "population_density": 0.20, "merge_fraction": 0.50, "realm_area_cap": 0.62},
+    4: {"key": "developed_states", "realms": 32, "provinces": 8, "minimum_pixels": 1024, "wilderness_share": 0.16, "population_density": 0.38, "merge_fraction": 0.62, "realm_area_cap": 0.70},
+    5: {"key": "dense_civilization", "realms": 48, "provinces": 12, "minimum_pixels": 768, "wilderness_share": 0.08, "population_density": 0.58, "merge_fraction": 0.72, "realm_area_cap": 0.78},
+    6: {"key": "highly_developed", "realms": 64, "provinces": 16, "minimum_pixels": 512, "wilderness_share": 0.00, "population_density": 0.78, "merge_fraction": 0.84, "realm_area_cap": 0.86},
+    7: {"key": "planetary_civilization", "realms": 96, "provinces": 24, "minimum_pixels": 256, "wilderness_share": 0.00, "population_density": 1.00, "merge_fraction": 0.92, "realm_area_cap": 0.92},
 }
 
 
@@ -105,12 +105,16 @@ def checked_bincount(values: np.ndarray, context: str, minlength: int = 0) -> np
     return np.bincount(values, minlength=minlength)
 
 
-def land_components(analysis_labels: np.ndarray, width: int, height: int) -> list[list[int]]:
-    """Connected landmasses via SciPy's native implementation, not Python pixel BFS."""
+def land_components(analysis_labels: np.ndarray, width: int, height: int,
+                    land_mask: np.ndarray | None = None) -> list[list[int]]:
+    """Connected political landmasses via SciPy's native labeling implementation."""
     from scipy import ndimage
-    land_codes = [i for i, name in enumerate(ANALYSIS_CLASSES)
-                  if ANALYSIS_TO_WORLD[name] in LAND_CLASSES]
-    land = np.isin(analysis_labels.reshape((height, width)), land_codes)
+    if land_mask is None:
+        land_codes = [i for i, name in enumerate(ANALYSIS_CLASSES)
+                      if ANALYSIS_TO_WORLD[name] in LAND_CLASSES]
+        land = np.isin(analysis_labels.reshape((height, width)), land_codes)
+    else:
+        land = np.asarray(land_mask, dtype=bool).reshape((height, width))
     labels, count = ndimage.label(land, structure=np.array([[0, 1, 0],
                                                             [1, 1, 1],
                                                             [0, 1, 0]], dtype=np.uint8))
@@ -200,16 +204,59 @@ except ImportError:
     pass
 
 
-def partition(cells, seeds, width: int, height: int, first_label: int, scratch: np.ndarray):
-    # Reuse one world-sized label buffer across every realm/province. Only the
-    # active component is reset; the BFS queue is sized to that component,
-    # not to the entire planet raster.
-    cell_indices = np.asarray(cells, dtype=np.int32)
-    seed_indices = np.asarray(seeds, dtype=np.int32)
-    labels = _partition_kernel(scratch, cell_indices, seed_indices, width, height, first_label)
+def partition(cells, seeds, width: int, height: int, first_label: int,
+             scratch: np.ndarray, boundary_cost: np.ndarray | None = None):
+    """Partition a connected landmass using a masked, terrain-aware watershed."""
+    cell_indices = np.asarray(cells, dtype=np.int64)
+    seed_indices = np.asarray(seeds, dtype=np.int64)
+    if boundary_cost is None:
+        labels = _partition_kernel(scratch, cell_indices.astype(np.int32),
+                                   seed_indices.astype(np.int32), width, height, first_label)
+    else:
+        from scipy import ndimage
+        xs, zs = cell_indices % width, cell_indices // width
+        x0, x1 = int(xs.min()), int(xs.max()) + 1
+        z0, z1 = int(zs.min()), int(zs.max()) + 1
+        markers = np.full((z1 - z0, x1 - x0), -1, dtype=np.int32)
+        local_x, local_z = xs - x0, zs - z0
+        markers[local_z, local_x] = 0
+        seed_x, seed_z = seed_indices % width - x0, seed_indices // width - z0
+        for offset, (sx, sz) in enumerate(zip(seed_x, seed_z)):
+            markers[int(sz), int(sx)] = first_label + offset + 1
+        cost = np.ascontiguousarray(boundary_cost[z0:z1, x0:x1], dtype=np.uint8)
+        result = ndimage.watershed_ift(cost, markers, structure=np.asarray(
+            [[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=np.uint8))
+        assigned = result[local_z, local_x].astype(np.int32) - 1
+        if np.any(assigned < first_label):
+            raise ValueError("Organic watershed left part of a landmass unassigned.")
+        scratch[cell_indices] = assigned
+        labels = scratch
     if np.count_nonzero(labels[cell_indices] >= 0) != cell_indices.size:
         raise ValueError("Territory partition left disconnected land unassigned.")
     return labels, seeds
+
+
+def make_boundary_cost(analysis_grid: np.ndarray, seed: int) -> np.ndarray:
+    """Build a smooth, deterministic watershed surface with biome-edge guidance."""
+    from scipy import ndimage
+    h, w = analysis_grid.shape
+    rng = np.random.default_rng(seed ^ 0x424F554E44415259)
+    def field(cell: int) -> np.ndarray:
+        gh, gw = max(2, (h + cell - 1) // cell + 1), max(2, (w + cell - 1) // cell + 1)
+        coarse = Image.fromarray(rng.integers(0, 256, (gh, gw), dtype=np.uint8), "L")
+        return np.asarray(coarse.resize((w, h), Image.Resampling.BICUBIC), dtype=np.float32) / 255.0
+    broad = ndimage.gaussian_filter(field(72), sigma=1.2, mode="reflect")
+    detail = ndimage.gaussian_filter(field(28), sigma=0.8, mode="reflect")
+    edge = np.zeros((h, w), dtype=bool)
+    edge[:, 1:] |= analysis_grid[:, 1:] != analysis_grid[:, :-1]
+    edge[:, :-1] |= analysis_grid[:, 1:] != analysis_grid[:, :-1]
+    edge[1:, :] |= analysis_grid[1:, :] != analysis_grid[:-1, :]
+    edge[:-1, :] |= analysis_grid[1:, :] != analysis_grid[:-1, :]
+    edge_strength = ndimage.gaussian_filter(edge.astype(np.float32), sigma=1.4, mode="nearest")
+    surface = broad * 0.62 + detail * 0.20 + edge_strength * 0.18
+    return np.asarray(np.clip(surface * 255.0, 0, 255), dtype=np.uint8)
+
+
 
 
 def allocate_counts(components: list[list[int]], total: int,
@@ -268,7 +315,8 @@ def select_independent_islands(components: list[list[int]], seed: int,
 
 def aggregate_realm_regions(realm_labels: np.ndarray, realm_seeds: dict[int, int],
                             width: int, height: int, seed: int,
-                            minimum_pixels: int) -> tuple[np.ndarray, dict[int, int], dict]:
+                            minimum_pixels: int, desired_fraction: float = 0.58,
+                            max_area_share: float = 0.30) -> tuple[np.ndarray, dict[int, int], dict]:
     """Merge adjacent seed-regions into organically sized, connected polities."""
     active = np.flatnonzero(realm_labels >= 0)
     if not active.size:
@@ -302,8 +350,8 @@ def aggregate_realm_regions(realm_labels: np.ndarray, realm_seeds: dict[int, int
             value = parent[value]
         return value
 
-    desired_count = max(1, int(math.ceil(len(ids) * 0.58)))
-    world_cap = max(minimum_pixels * 18, int(active.size * 0.30))
+    desired_count = max(1, int(math.ceil(len(ids) * desired_fraction)))
+    world_cap = max(minimum_pixels * 4, int(active.size * max_area_share))
     edges = []
     for (a, b), border in zip(unique_pairs, border_lengths):
         a, b = int(a), int(b)
@@ -355,6 +403,45 @@ def aggregate_realm_regions(realm_labels: np.ndarray, realm_seeds: dict[int, int
         "realm_area_pixels": {"min": int(min(root_areas)), "max": int(max(root_areas)),
                               "mean": round(float(np.mean(root_areas)), 2)}
     }
+
+
+def select_wilderness_mask(analysis_labels: np.ndarray, width: int, height: int,
+                           share: float, seed: int) -> np.ndarray:
+    """Select coherent, terrain-biased wilderness reserves, never random border gaps."""
+    from scipy import ndimage
+    labels = np.asarray(analysis_labels, dtype=np.uint8).reshape((height, width))
+    land_codes = [i for i, name in enumerate(ANALYSIS_CLASSES)
+                  if ANALYSIS_TO_WORLD[name] in LAND_CLASSES]
+    land = np.isin(labels, land_codes)
+    target = float(np.clip(share, 0.0, 0.95))
+    if target <= 0.0 or not np.any(land):
+        return np.zeros((height, width), dtype=bool)
+
+    rng = np.random.default_rng(seed ^ 0x57494C4445524E45)
+    def coherent_noise(cell: int) -> np.ndarray:
+        gh = max(2, (height + cell - 1) // cell + 1)
+        gw = max(2, (width + cell - 1) // cell + 1)
+        coarse = Image.fromarray(rng.integers(0, 256, (gh, gw), dtype=np.uint8), "L")
+        return np.asarray(coarse.resize((width, height), Image.Resampling.BICUBIC),
+                          dtype=np.float32) / 255.0
+
+    broad = coherent_noise(112)
+    detail = coherent_noise(40)
+    rugged = np.isin(labels, [ANALYSIS_CLASSES.index(n)
+                              for n in ("mountains", "snow", "rock", "taiga")]).astype(np.float32)
+    desert = (labels == ANALYSIS_CLASSES.index("desert")).astype(np.float32)
+    score = np.clip(broad * 0.62 + detail * 0.16 + rugged * 0.17 + desert * 0.05, 0, 1)
+    hist, edges = np.histogram(score[land], bins=2048, range=(0.0, 1.0))
+    target_pixels = int(round(int(land.sum()) * target))
+    cumulative = np.cumsum(hist[::-1])
+    bin_from_high = min(len(hist) - 1, int(np.searchsorted(cumulative, target_pixels)))
+    threshold = float(edges[len(edges) - 2 - bin_from_high])
+    wilderness = land & (score >= threshold)
+    # Round reserve edges at map scale. This is a dedicated wilderness mask,
+    # not a post-hoc gap carved between political neighbors.
+    smooth = ndimage.gaussian_filter(wilderness.astype(np.float32), sigma=2.2, mode="nearest")
+    wilderness = (smooth >= 0.48) & land
+    return wilderness
 
 
 def classify_realm_scale(area_pixels: int, total_land_pixels: int,
@@ -419,7 +506,14 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     width, height, analysis_labels, analysis_report = png_pixels(image)
     analysis_grid = analysis_labels.reshape((height, width))
     analysis_flat = analysis_labels.ravel()
-    components = land_components(analysis_labels, width, height)
+    boundary_cost = make_boundary_cost(analysis_grid, seed)
+    land_codes = [i for i, name in enumerate(ANALYSIS_CLASSES)
+                  if ANALYSIS_TO_WORLD[name] in LAND_CLASSES]
+    full_land_mask = np.isin(analysis_grid, land_codes)
+    wilderness_mask = select_wilderness_mask(
+        analysis_grid, width, height, settlement_profile["wilderness_share"], seed)
+    political_land_mask = full_land_mask & ~wilderness_mask
+    components = land_components(analysis_labels, width, height, political_land_mask)
     analysis_seconds = time.perf_counter() - analysis_started
     political_started = time.perf_counter()
     if not components:
@@ -432,16 +526,14 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     # at least one profile-sized territory. This prevents coast antialiasing,
     # tiny islets and scattered pixels from becoming hundreds of micro-states.
     major_components = [component for component in components
-                        if len(component) >= minimum_territory_pixels]
+                        if len(component) >= minimum_territory_pixels][:settlement_profile["realms"]]
     if not major_components:
         # Keep the largest island as the initial realm when the world has no
         # profile-sized continent; it must not be counted again as a minor island.
         major_components = [components[0]]
     major_component_ids = {component[0] for component in major_components}
     major_land_pixels = sum(map(len, major_components))
-    land_codes = [i for i, name in enumerate(ANALYSIS_CLASSES)
-                  if ANALYSIS_TO_WORLD[name] in LAND_CLASSES]
-    land_count = int(np.isin(analysis_flat, land_codes).sum())
+    land_count = int(full_land_mask.sum())
     unclaimed_land_pixels = land_count
     unclaimed_land_pixels -= major_land_pixels
 
@@ -464,7 +556,8 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     next_realm = 0
     for component, count in zip(major_components, realm_counts):
         seeds = farthest_seeds(component, count, width, seed ^ (next_realm + 1))
-        labels, _ = partition(component, seeds, width, height, next_realm, partition_scratch)
+        labels, _ = partition(component, seeds, width, height, next_realm,
+                              partition_scratch, boundary_cost)
         component_indices = np.asarray(component, dtype=np.int64)
         realm_labels[component_indices] = labels[component_indices]
         partition_scratch[component_indices] = -2
@@ -501,7 +594,8 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
             continue
         count = min(provinces_per_realm, max(1, len(realm_cells) // minimum_territory_pixels))
         seeds = farthest_seeds(realm_cells, count, width, seed ^ (realm_id * 7919))
-        labels, _ = partition(realm_cells, seeds, width, height, next_province, partition_scratch)
+        labels, _ = partition(realm_cells, seeds, width, height, next_province,
+                              partition_scratch, boundary_cost)
         ids = list(range(next_province, next_province + len(seeds)))
         realm_indices = np.asarray(realm_cells, dtype=np.int64)
         # partition() returns a view of the reusable scratch buffer. Count the
@@ -527,8 +621,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     # deterministic subset of viable islands can become city-state realms.
     # Components below 8 pixels are treated as map speckle, not polities.
     minor_components = [component for component in components
-                        if component[0] not in major_component_ids
-                        and len(component) < minimum_territory_pixels and len(component) >= 8]
+                        if component[0] not in major_component_ids]
     island_province_count = 0
     independent_island_realm_count = 0
     if minor_components and realm_seeds:
@@ -790,7 +883,11 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
             },
             "political_seed": seed, "source_semantics": "maqan-image-analysis/2",
             "minimum_territory_pixels": minimum_territory_pixels,
-            "government_variety": sorted({r["props"]["government"] for r in realms}),
+            "wilderness_share_target": settlement_profile["wilderness_share"],
+            "wilderness_pixels": int(wilderness_mask.sum()),
+            "wilderness_percent_of_land": round(100.0 * int(wilderness_mask.sum()) / max(1, land_count), 4),
+            "political_land_pixels": int(political_land_mask.sum()),
+            "government_and_identity": "assigned_by_external_political_mod",
             "geography_classifier": analysis_report["classifier"],
             "unknown_percent": analysis_report["unknown_percent"],
         },
@@ -807,7 +904,8 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         "height16.png": image_bytes(width, height, height_values, "I;16"),
         "rivers.png": image_bytes(width, height, river_values, "L"),
         "provinces.png": image_bytes(width, height, province_ids, "I;16"),
-        "political-preview.png": political_buffer.getvalue(),\n        "terrain-preview.png": terrain_buffer.getvalue(),
+        "political-preview.png": political_buffer.getvalue(),
+        "terrain-preview.png": terrain_buffer.getvalue(),
         "titles.json": json.dumps(titles_doc, sort_keys=True, separators=(",", ":")).encode(),
         "realms.json": json.dumps(realms_doc, sort_keys=True, separators=(",", ":")).encode(),
         "world-blueprint.json": json.dumps(blueprint, sort_keys=True, separators=(",", ":"), default=lambda value: value.item() if isinstance(value, np.generic) else str(value)).encode(),
@@ -978,13 +1076,16 @@ def main() -> int:
     convert.add_argument("--realms", type=int, default=32)
     convert.add_argument("--provinces-per-realm", type=int, default=16)
     convert.add_argument("--blocks-per-pixel", type=int, default=16)
+    convert.add_argument("--settlement-level", type=int, choices=range(1, 8), default=4)
+    convert.add_argument("--planet-id", type=str, default=None)
     args = parser.parse_args()
     try:
         if args.command == "self-test":
             print(json.dumps(self_test(args.output_dir), indent=2, sort_keys=True))
         else:
             blueprint = convert_image(args.input, args.output, args.seed, args.realms,
-                                      args.provinces_per_realm, args.blocks_per_pixel)
+                                      args.provinces_per_realm, args.blocks_per_pixel,
+                                      args.settlement_level, args.planet_id)
             print(json.dumps({
                 "worldmap": str(args.output), "seed": args.seed,
                 "realm_count": blueprint["realm_count"],
