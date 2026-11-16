@@ -221,7 +221,9 @@ public final class PlatformShellScreen extends Screen {
         if (MaqanUiPackRenderer.assetsAvailable()) {
             MaqanUiPackAdaptiveLayout.Result skin = MaqanUiPackRenderer.adaptiveLayout(width, height);
             MaqanUiPackAdaptiveLayout.Rect viewport = MaqanUiPackAdaptiveLayout.contentViewport(skin, 8);
-            if (viewport != null) {
+            MaqanUiPackAdaptiveLayout.Rect leftWindow = skin == null ? null : skin.get("lp");
+            MaqanUiPackAdaptiveLayout.Rect rightWindow = skin == null ? null : skin.get("rp");
+            if (viewport != null && leftWindow != null && rightWindow != null) {
                 Panel content = panels.get("content");
                 if (content != null) {
                     content.x = viewport.x();
@@ -229,8 +231,22 @@ public final class PlatformShellScreen extends Screen {
                     content.w = viewport.width();
                     content.h = viewport.height();
                     content.visible = !hiddenPanels.contains("content");
-                    for (Panel panel : panels.values())
-                        if (!panel.id.equals("content")) panel.visible = false;
+                    Panel navigation = panels.get("navigation");
+                    if (navigation != null) {
+                        navigation.x = leftWindow.x(); navigation.y = leftWindow.y();
+                        navigation.w = leftWindow.width(); navigation.h = leftWindow.height();
+                        navigation.visible = !hiddenPanels.contains("navigation");
+                    }
+                    Panel inspector = panels.get("inspector");
+                    if (inspector != null) {
+                        inspector.x = rightWindow.x(); inspector.y = rightWindow.y();
+                        inspector.w = rightWindow.width(); inspector.h = rightWindow.height();
+                        inspector.visible = !hiddenPanels.contains("inspector");
+                    }
+                    for (String id : List.of("tools", "timeline")) {
+                        Panel panel = panels.get(id);
+                        if (panel != null) panel.visible = false;
+                    }
                     return;
                 }
             }
