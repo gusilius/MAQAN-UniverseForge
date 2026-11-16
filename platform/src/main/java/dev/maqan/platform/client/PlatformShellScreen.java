@@ -390,6 +390,12 @@ public final class PlatformShellScreen extends Screen {
             // Once the source artwork is installed, it replaces the generic
             // shell chrome instead of stacking a second set of panels on top.
             MaqanUiPackRenderer.render(g, width, height);
+            // Keep native workspace overlays available above the imported artwork.
+            if (settingsVisible) drawSettings(g, mouseX, mouseY);
+            if (searchVisible) drawSearchOverlay(g, mouseX, mouseY);
+            if (contextMenuVisible) drawContextMenu(g, mouseX, mouseY);
+            if (workspaceManagerVisible) drawWorkspaceManager(g, mouseX, mouseY);
+            if (notificationCenterVisible) drawNotificationCenter(g, mouseX, mouseY);
         } else {
             drawTopBar(g, mouseX, mouseY);
             drawRail(g, mouseX, mouseY);
