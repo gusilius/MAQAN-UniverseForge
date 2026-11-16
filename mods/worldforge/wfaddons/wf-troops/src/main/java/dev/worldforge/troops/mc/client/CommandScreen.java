@@ -628,7 +628,7 @@ public final class CommandScreen extends Screen {
                 for (var squad : army.getValue().entrySet())
                     rows.add("  ↳ " + squad.getKey() + " · " + squad.getValue());
             }
-            int visibleRows = Math.max(0, Math.min(4, (r[3] - 151) / 10));
+            int visibleRows = Math.max(0, Math.min(3, (r[3] - 151) / 10));
             for (int i = 0; i < Math.min(visibleRows, rows.size()); i++)
                 g.drawString(font, font.plainSubstrByWidth(rows.get(i), r[2] - 14),
                         r[0] + 7, r[1] + 146 + i * 10, 0xFFCBD5E1, false);
