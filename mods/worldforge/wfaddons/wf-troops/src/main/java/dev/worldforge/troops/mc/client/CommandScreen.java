@@ -1123,6 +1123,10 @@ public final class CommandScreen extends Screen {
     public boolean keyPressed(int key, int scan, int mods) {
         if (key == GLFW.GLFW_KEY_ESCAPE) {
             if (picked != null) picked = null;
+            else if (professionalToolsOpen && !professionalPinned) professionalToolsOpen = false;
+            else if (unitToolsOpen && !unitToolsPinned) unitToolsOpen = false;
+            else if (professionalToolsOpen) professionalToolsOpen = false;
+            else if (unitToolsOpen) unitToolsOpen = false;
             else if (buildOpen) buildOpen = false;
             else CommandMode.exit(minecraft);
             return true;
