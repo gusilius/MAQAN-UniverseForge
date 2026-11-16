@@ -1,5 +1,7 @@
 package dev.worldforge.realms.mc;
 
+import dev.worldforge.realms.PoliticalIdentitySynchronizer;
+
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.logging.LogUtils;
