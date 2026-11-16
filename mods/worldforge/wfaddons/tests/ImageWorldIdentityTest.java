@@ -123,7 +123,12 @@ public final class ImageWorldIdentityTest {
         autonomousPolitics.hooks = new Realms.Hooks() {
             @Override public int provinces(String id) {
                 TitleData.Realm realm = titles.realms.get(id);
-                return realm == null ? 0 : realm.titleKeys.size();
+                if (realm == null) return 0;
+                int count = 0;
+                for (TitleData.Title title : titles.allTitles())
+                    if (title.tier == 0 && titles.realmOf(title) != null
+                            && id.equals(titles.realmOf(title).id)) count++;
+                return count;
             }
             @Override public int prestige(String id) { return 0; }
             @Override public Map<String, Double> races(String id) { return realmRaces.getOrDefault(id, Map.of()); }
