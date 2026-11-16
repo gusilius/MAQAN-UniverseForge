@@ -318,11 +318,16 @@ public final class CommandScreen extends Screen {
     private int rowsFit() { return Math.max(3, (panelH() - 62) / ROW); }
 
     // ---------- инспектор выбранных персонажей ----------
-    private static final int INSPECT_X=4, INSPECT_W=250, INSPECT_ROW=19;
-    private int inspectY() { return settlementOpen ? 148 : 34; }
+    private static final int INSPECT_ROW=19;
+    private int inspectX() { int[] r = skinRect("lp"); return r == null ? 4 : r[0] + 12; }
+    private int inspectW() { int[] r = skinRect("lp"); return r == null ? 250 : Math.max(130, r[2] - 24); }
+    private int inspectY() {
+        int[] r = skinRect("lp");
+        return r == null ? (settlementOpen ? 148 : 34) : r[1] + 34;
+    }
 
     private boolean inspectAt(double x,double y) {
-        if(x<INSPECT_X||x>=INSPECT_X+INSPECT_W||y<inspectY()+22)return false;
+        if(x<inspectX()||x>=inspectX()+inspectW()||y<inspectY()+22)return false;
         int row=(int)((y-(inspectY()+22))/INSPECT_ROW);
         List<String> ids=CommandMode.selected();
         if(row<0||row>=Math.min(8,ids.size()))return false;
@@ -338,8 +343,12 @@ public final class CommandScreen extends Screen {
     }
 
     private void drawSettlementPanel(GuiGraphics g) {
-        if (settlement == null) return;
-        int x = 4, y = 34, w = 250, h = 106;
+        if (settlement == null || buildOpen) return;
+        int[] frame = skinRect("rp");
+        int x = frame == null ? 4 : frame[0] + 12;
+        int y = frame == null ? 34 : frame[1] + 34;
+        int w = frame == null ? 250 : Math.max(120, frame[2] - 24);
+        int h = frame == null ? 106 : Math.min(150, Math.max(88, frame[3] / 3));
         g.fill(x, y, x + w, y + h, 0xD910121A);
         g.fill(x, y, x + w, y + 1, 0xFF8A7040);
         g.drawString(font, "ПОСЕЛЕНИЕ · " + settlement.name, x + 6, y + 5, 0xFFE6C875, false);
@@ -361,19 +370,20 @@ public final class CommandScreen extends Screen {
     private void drawUnitInspector(GuiGraphics g) {
         List<String> ids=CommandMode.selected();
         if(ids.isEmpty())return;
+        int ix = inspectX(), iw = inspectW(), iy = inspectY();
         int rows=Math.min(8,ids.size());
         int h=24+rows*INSPECT_ROW;
-        g.fill(INSPECT_X,inspectY(),INSPECT_X+INSPECT_W,inspectY()+h,0xD910121A);
-        g.fill(INSPECT_X,inspectY(),INSPECT_X+INSPECT_W,inspectY()+1,0xFF8A7040);
-        g.drawString(font,"ИНСПЕКТОР · "+ids.size()+" ВЫБРАНО",INSPECT_X+6,inspectY()+6,0xFFE6C875,false);
+        g.fill(ix,iy,ix+iw,iy+h,0xD910121A);
+        g.fill(ix,iy,ix+iw,iy+1,0xFF8A7040);
+        g.drawString(font,"ИНСПЕКТОР · "+ids.size()+" ВЫБРАНО",ix+6,iy+6,0xFFE6C875,false);
         int row=0;
         for(String id:ids){
             if(row>=8)break;
             net.minecraft.world.entity.Entity entity=null;
             for(net.minecraft.world.entity.Entity candidate:minecraft.level.entitiesForRendering())
                 if(candidate.getUUID().toString().equals(id)){entity=candidate;break;}
-            int y=inspectY()+22+row*INSPECT_ROW;
-            if(entity==null){g.drawString(font,"Недоступен · "+id.substring(0,Math.min(8,id.length())),INSPECT_X+6,y+4,0xFF888888,false);row++;continue;}
+            int y=iy+22+row*INSPECT_ROW;
+            if(entity==null){g.drawString(font,"Недоступен · "+id.substring(0,Math.min(8,id.length())),ix+6,y+4,0xFF888888,false);row++;continue;}
             boolean troop=entity instanceof TroopEntity;
             String name=entity.getDisplayName().getString();
             String role,identity="";
@@ -393,23 +403,23 @@ public final class CommandScreen extends Screen {
                 int assigned=CommandMode.workerInt(worker,"assignedBuildingId");
                 if(assigned>0)state+=" · здание #"+assigned;
             }else role="Юнит";
-            g.fill(INSPECT_X+3,y,INSPECT_X+INSPECT_W-3,y+INSPECT_ROW-1,
+            g.fill(ix+3,y,ix+iw-3,y+INSPECT_ROW-1,
                     (row&1)==0?0x55333344:0x33222230);
             int health=entity instanceof LivingEntity living&&living.getMaxHealth()>0
                     ?Math.round(100*living.getHealth()/living.getMaxHealth()):0;
             String detail=role+" · HP "+health+"%"+(morale>=0?" · Мораль "+morale+"%":"")+(xp>=0?" · XP "+xp:"")+(state.isBlank()?"":" · "+state);
-            int nameWidth=identity.isBlank()?INSPECT_W-14:INSPECT_W-88;
-            g.drawString(font,font.plainSubstrByWidth(name,nameWidth),INSPECT_X+7,y+2,
+            int nameWidth=identity.isBlank()?iw-14:iw-88;
+            g.drawString(font,font.plainSubstrByWidth(name,nameWidth),ix+7,y+2,
                     troop?0xFFE6C875:0xFFB8D8A0,false);
-            g.drawString(font,font.plainSubstrByWidth(detail,INSPECT_W-14),INSPECT_X+7,y+11,0xFFB5B7C2,false);
+            g.drawString(font,font.plainSubstrByWidth(detail,iw-14),ix+7,y+11,0xFFB5B7C2,false);
             if(!identity.isBlank()){
                 String shortId=identity.length()>16?identity.substring(0,16)+"…":identity;
-                g.drawString(font,shortId,INSPECT_X+INSPECT_W-7-font.width(shortId),y+2,0xFF777F91,false);
+                g.drawString(font,shortId,ix+iw-7-font.width(shortId),y+2,0xFF777F91,false);
             }
             row++;
         }
         if(ids.size()>8)g.drawString(font,"Ещё "+(ids.size()-8)+" · выберите строку для фокуса",
-                INSPECT_X+6,inspectY()+h-10,0xFF9EA4B5,false);
+                ix+6,iy+h-10,0xFF9EA4B5,false);
     }
 
     // ---------- ввод ----------
@@ -466,7 +476,7 @@ public final class CommandScreen extends Screen {
         for (String c : chips) {
             String label = c.isEmpty() ? "Все" : catName(c);
             int w = font.width(label) + 8;
-            if (cx + w > panelX() + PANEL_W - 4) { cx = px; row++; }
+            if (cx + w > panelX() + panelW() - 4) { cx = px; row++; }
             int yy = cy + row * 12;
             if (x >= cx && x < cx + w && y >= yy && y < yy + 11) { cat = c; scroll = 0; picked = null; return; }
             cx += w + 3;
