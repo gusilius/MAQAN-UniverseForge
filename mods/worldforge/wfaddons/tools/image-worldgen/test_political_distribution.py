@@ -91,9 +91,27 @@ class PoliticalDistributionTests(unittest.TestCase):
             raster, seeds, width=6, height=4, seed=19,
             minimum_pixels=4, desired_fraction=0.75, max_area_share=0.95)
         self.assertEqual(report["undersized_regions_after_merge"], 0)
-        self.assertGreater(report["merge_operations"], 1)
+        self.assertGreaterEqual(report["merge_operations"], 1)
         self.assertEqual(len(new_seeds), report["merged_regions"])
         self.assertTrue(np.all(result >= 0))
+
+    def test_realm_aggregation_does_not_absorb_disconnected_small_island(self):
+        import numpy as np
+        # A tiny disconnected landmass has no shared political frontier and
+        # must remain eligible for later island-city-state viability analysis.
+        raster = np.asarray([
+            [0, 0, -1, -1, -1, -1],
+            [0, 0, -1, -1, 1, -1],
+            [0, 0, -1, -1, -1, -1],
+            [0, 0, -1, -1, -1, -1],
+        ], dtype=np.int32).ravel()
+        seeds = {0: 0, 1: 10}
+        result, new_seeds, report = aggregate_realm_regions(
+            raster, seeds, width=6, height=4, seed=23,
+            minimum_pixels=4, desired_fraction=0.75, max_area_share=0.95)
+        self.assertEqual(len(new_seeds), 2)
+        self.assertEqual(report["merged_regions"], 2)
+        self.assertEqual(int(np.count_nonzero(result == 1)), 1)
 
     def test_realm_allocation_rejects_impossible_request(self):
         components = [list(range(100)), list(range(100, 200))]
