@@ -15,11 +15,13 @@ watershed path.
 
 ## Political islands
 
-- Main landmasses receive profile-sized realm and province partitions.
-- Minor connected land components from 8 pixels upward become overseas
-  provinces of the nearest realm.
-- A deterministic, capped subset of islands above the profile-scaled minimum (at least 64 pixels) can become
-  independent island city-states.
+- Major landmasses are identified from the complete land mask with a
+  world-area threshold shared by all seven settlement profiles.
+- Realm count is derived from explored land area and geographic capacity;
+  settlement density does not change the realm budget or aggregation rules.
+- Minor connected land components become overseas provinces of the nearest
+  realm; a deterministic subset of viable islands can become independent
+  city-states using a profile-independent size threshold.
 - Smaller fragments remain unclaimed map detail rather than generating
   hundreds of meaningless one-pixel polities.
 - An overseas province can belong to a mainland realm without sharing a land
@@ -31,12 +33,13 @@ byte-for-byte determinism test; this does not replace testing a user's own map.
 
 ## Political geography (CK3-style territorial scale)
 
-The image generator now separates **territorial geometry** from political identity.
-It creates connected province groups and merges adjacent seed regions only across
-real shared land borders. A deterministic merge budget and area ceiling preserve
-a mixed political map: independent small realms can coexist with medium and large
-formations, while occasional very large connected realms can emerge on suitable
-continents. The generator does not force every landmass into an empire.
+The image generator separates **territorial geometry** from political identity.
+It builds a stable realm skeleton over the complete explored land mask, merges
+adjacent seed regions only across real shared land borders, and only then applies
+the profile's wilderness reserve. A reserve can split an occupied province into
+multiple connected provincial holdings, but those holdings retain the same
+realm identity. The realm registry and political scale are therefore stable
+across all seven settlement-density profiles for the same image and seed.
 
 Realm metadata exposes neutral fields such as `formation_scale`, `title_tier`,
 `area_pct_of_land`, `province_count`, and `identity_status`. Names, dynasties,
@@ -56,10 +59,11 @@ underlying `height16.png`, `biomes.png` and political raster remain authoritativ
 ## Seven settlement-density profiles and wilderness
 
 The `--settlement-level` option selects one of seven world-development profiles.
-It controls the target wilderness reserve, minimum viable territorial footprint,
-realm/province budgets and the amount of adjacent realm aggregation. It does
-not prescribe a fixed number of states: geography, viable land components and
-shared borders determine the final count.
+It controls the target wilderness reserve and population density only. Realm
+count, major-landmass classification, island city-state eligibility, minimum
+territorial scale and realm aggregation are derived from explored land area and
+geography, not settlement density. The profile-suite gate asserts that the
+realm count remains identical across all seven profiles.
 
 | Level | Profile | Target unclaimed wilderness |
 |---:|---|---:|
@@ -71,13 +75,14 @@ shared borders determine the final count.
 | 6 | Highly developed | 0% |
 | 7 | Planetary civilization | 0% |
 
-Wilderness is selected as broad, deterministic, terrain-biased reserves before
-political partitioning. It is not created by leaving random holes between
-neighboring borders. Levels 6 and 7 require every classified land pixel to
-belong to a province; the package validator checks this coverage. On levels
-1–5 the explicit `wilderness.png` layer marks the unclaimed land. Province ID
-zero remains the no-political-owner value, while `biomes.png` distinguishes
-land from sea.
+Wilderness is selected as broad, deterministic, terrain-biased reserves from
+the completed political geography. Political seed cells are protected as
+settled cores. If a reserve cuts through a province, the remaining connected
+pieces become separate provinces under the same realm. Levels 6 and 7 have no
+reserve and require every classified land pixel to have political ownership;
+the package validator checks this coverage. On levels 1–5, `wilderness.png`
+marks unclaimed land. Province ID zero remains the no-political-owner value,
+while `biomes.png` distinguishes land from sea.
 
 ## Organic political borders
 
@@ -92,6 +97,8 @@ The world package contains `wilderness.png`, `political-preview.png` and
 `terrain-preview.png` alongside the semantic rasters. The previews are QA
 outputs; the province, wilderness, biome and height rasters remain authoritative.
 
-The command-line converter accepts `--settlement-level 1..7` and optional
-`--planet-id`. The same image and seed with the same profile produce the same
-territorial result.
+The command-line converter accepts `--settlement-level 1..7`, optional
+`--realms` / `--provinces-per-realm` overrides, and optional `--planet-id`.
+By default the political budget is derived from explored land area. The same
+image and seed produce the same realm registry across all seven profiles;
+the same image, seed and profile produce byte-deterministic output.
