@@ -99,6 +99,7 @@ public class SettleMod {
     /** Fail-closed gate when an army logistics transfer cannot persist its ledger/settlement checkpoint. */
     private static volatile boolean logisticsPersistenceBlocked;
     private static long lastResidentAuditTick = Long.MIN_VALUE;
+    private static final Set<String> REPORTED_RESIDENT_LINK_ERRORS = ConcurrentHashMap.newKeySet();
 
     public SettleMod() {
         dev.worldforge.mod.WorldForgeSnapshotExporter.registerContributor(SettleMod::appendAtlasFeatures);
@@ -1237,6 +1238,7 @@ public class SettleMod {
         ticks = 0;
         IMPORTED_BLUEPRINTS.clear();
         lastResidentAuditTick = Long.MIN_VALUE;
+        REPORTED_RESIDENT_LINK_ERRORS.clear();
         Blueprints.clearCache();
         Bodies.LIVE.clear();
         DEFS = loadDefs(e.getServer());
@@ -1276,9 +1278,12 @@ public class SettleMod {
             for (Character character : registry.all())
                 if (character.globalId != null && !character.globalId.isBlank()) known.add(character.globalId);
             for (String residentId : colony.residentCharacterIds)
-                if (!known.contains(residentId))
-                    LOGGER.error("wf_settle: orphan resident Character ID {} in colony {} (map {}); no duplicate Character was created",
-                            residentId, colony.s.id, colony.sourceMapId);
+                if (!known.contains(residentId)) {
+                    String issue = colony.s.id + "|" + residentId;
+                    if (REPORTED_RESIDENT_LINK_ERRORS.add(issue))
+                        LOGGER.error("wf_settle: orphan resident Character ID {} in colony {} (map {}); no duplicate Character was created",
+                                residentId, colony.s.id, colony.sourceMapId);
+                }
         }
     }
 
