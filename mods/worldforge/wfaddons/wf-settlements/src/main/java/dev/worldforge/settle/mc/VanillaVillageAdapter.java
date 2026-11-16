@@ -178,7 +178,10 @@ public final class VanillaVillageAdapter {
         if (registry == null) return;
 
         String dimension = level.dimension().location().toString();
-        String id = "vanilla_village_" + Integer.toHexString(dimension.hashCode()) + "_" + x + "_" + z;
+        String stableLocationId = java.util.UUID.nameUUIDFromBytes(
+                (dimension + ":" + x + ":" + z).getBytes(java.nio.charset.StandardCharsets.UTF_8))
+                .toString().replace("-", "");
+        String id = "vanilla_village_" + stableLocationId;
         String operation = "minecraft:village:" + dimension + ":" + x + ":" + z;
         boolean created = !SettleMod.COLONIES.containsKey(id);
         TitleData.Title province = map == null || map.titles == null ? null : map.provinceAt(x, z);
