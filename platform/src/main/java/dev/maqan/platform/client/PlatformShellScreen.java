@@ -81,6 +81,11 @@ public final class PlatformShellScreen extends Screen {
     private String activeCompactDrawer;
     private boolean inspectorVisible = true;
     private boolean timelineVisible = true;
+    private int inspectorScroll;
+    private int inspectorContentHeight;
+    private int inspectorActionTop = -1;
+    private long inspectorRevision = -1;
+    private List<WorkspaceRuntime.Action> inspectorActions = List.of();
     private Screen embeddedView;
     private final Map<String, Screen> providerViews = new LinkedHashMap<>();
     private boolean embeddedViewReady;
@@ -1002,7 +1007,7 @@ public final class PlatformShellScreen extends Screen {
         if (p.minimized) return;
         switch (p.id) {
             case "navigation" -> drawNavigationPanel(g,p);
-            case "inspector" -> drawInspectorPanel(g,p);
+            case "inspector" -> drawInspectorPanel(g,p,mouseX,mouseY);
             case "timeline" -> drawTimelinePanel(g,p);
             case "tools" -> drawCommandPanel(g,p);
             default -> {}
@@ -1095,55 +1100,92 @@ public final class PlatformShellScreen extends Screen {
         };
     }
 
-    private void drawInspectorPanel(GuiGraphics g, Panel p) {
+    private void drawInspectorPanel(GuiGraphics g, Panel p, int mouseX, int mouseY) {
         PlatformSelectionContext.Selection selected = PlatformSelectionContext.current();
+        int left = p.x + 12;
+        int bodyTop = p.y + 29;
+        int bodyBottom = p.y + p.h - 8;
+        int bodyHeight = Math.max(0, bodyBottom - bodyTop);
+        inspectorActions = selected == null ? List.of() : WorkspaceRuntime.actionsFor(selected);
+        inspectorActionTop = -1;
         if (selected == null) {
-            g.drawString(font,"◇",p.x+12,p.y+40,CYAN,false);
-            g.drawString(font,"NO SELECTION",p.x+30,p.y+40,TEXT,false);
-            g.fill(p.x+10,p.y+59,p.x+p.w-10,p.y+60,EDGE);
-            g.drawString(font,"Select an object in a workspace",p.x+12,p.y+75,MUTED,false);
-            g.drawString(font,"Its identity and context appear here.",p.x+12,p.y+91,MUTED,false);
+            inspectorRevision = -1;
+            inspectorScroll = 0;
+            inspectorContentHeight = 72;
+            g.enableScissor(p.x + 5, bodyTop, p.x + p.w - 5, bodyBottom);
+            g.drawString(font, "◇", left, bodyTop + 12, CYAN, false);
+            g.drawString(font, "NO SELECTION", left + 18, bodyTop + 12, TEXT, false);
+            g.drawString(font, "Select an object in the workspace", left, bodyTop + 34, MUTED, false);
+            g.drawString(font, "Live data will appear here.", left, bodyTop + 49, MUTED, false);
+            g.disableScissor();
             return;
         }
-        int left = p.x + 12;
-        int right = p.x + p.w - 12;
+        if (inspectorRevision != selected.revision()) {
+            inspectorRevision = selected.revision();
+            inspectorScroll = 0;
+        }
+
+        List<WorkspaceRuntime.InspectorField> fields = WorkspaceRuntime.inspect(selected);
+        int total = 4 + 17 + 18 + 16 + (selected.summary().isBlank() ? 0 : 19);
+        for (WorkspaceRuntime.InspectorField field : fields)
+            total += (field.section().isBlank() ? 0 : 14) + 25;
+        if (!inspectorActions.isEmpty()) total += 11 + inspectorActions.size() * 23;
+        inspectorContentHeight = total;
+        inspectorScroll = Math.max(0, Math.min(inspectorScroll, Math.max(0, total - bodyHeight)));
+
+        g.enableScissor(p.x + 5, bodyTop, p.x + p.w - 5, bodyBottom);
+        int y = bodyTop + 4 - inspectorScroll;
         g.drawString(font, "◇ " + selected.entityType().toUpperCase(java.util.Locale.ROOT),
-                left, p.y + 40, CYAN, false);
+                left, y, CYAN, false);
+        y += 17;
         g.drawString(font, trimInspector(selected.displayName(), p.w - 24),
-                left, p.y + 59, TEXT, false);
-        g.fill(left, p.y + 75, right, p.y + 76, EDGE);
-        g.drawString(font, "SOURCE", left, p.y + 87, MUTED, false);
-        g.drawString(font, trimInspector(selected.providerId(), p.w - 24),
-                left, p.y + 99, TEXT, false);
-        g.drawString(font, "IDENTITY", left, p.y + 118, MUTED, false);
-        g.drawString(font, trimInspector(selected.entityId(), p.w - 24),
-                left, p.y + 130, TEXT, false);
-        if (!selected.worldId().isBlank()) {
-            g.drawString(font, "WORLD / SYSTEM", left, p.y + 149, MUTED, false);
-            g.drawString(font, trimInspector(selected.worldId(), p.w - 24),
-                    left, p.y + 161, TEXT, false);
-        }
+                left, y, TEXT, false);
+        y += 18;
+        g.drawString(font, selected.providerId().toUpperCase(java.util.Locale.ROOT),
+                left, y, MUTED, false);
+        y += 16;
         if (!selected.summary().isBlank()) {
-            g.drawString(font, "DIMENSION / CONTEXT", left, p.y + 180, MUTED, false);
-            g.drawString(font, trimInspector(selected.summary(), p.w - 24),
-                    left, p.y + 192, TEXT, false);
+            g.drawString(font, trimInspector(selected.summary(), p.w - 24), left, y, TEXT, false);
+            y += 19;
         }
-        int y = p.y + 210;
-        for (WorkspaceRuntime.InspectorField field : WorkspaceRuntime.inspect(selected)) {
-            if (y + 24 > p.y + p.h - 8) break;
+        g.fill(left, y, p.x + p.w - 12, y + 1, EDGE);
+        y += 8;
+        for (WorkspaceRuntime.InspectorField field : fields) {
             if (!field.section().isBlank()) {
                 g.drawString(font, trimInspector(field.section().toUpperCase(java.util.Locale.ROOT), p.w - 24),
                         left, y, CYAN, false);
-                y += 13;
+                y += 14;
             }
             g.drawString(font, trimInspector(field.label(), p.w - 24), left, y, MUTED, false);
-            y += 11;
+            y += 12;
             g.drawString(font, trimInspector(field.value(), p.w - 24), left, y, TEXT, false);
-            y += 16;
+            y += 13;
         }
-        List<WorkspaceRuntime.Action> actions = WorkspaceRuntime.actionsFor(selected);
-        if (!actions.isEmpty() && y + 12 < p.y + p.h)
-            g.drawString(font, actions.size() + " CONTEXT ACTIONS · RIGHT CLICK", left, y, CYAN, false);
+        if (!inspectorActions.isEmpty()) {
+            y += 3;
+            g.fill(left, y, p.x + p.w - 12, y + 1, EDGE);
+            y += 8;
+            inspectorActionTop = y;
+            for (WorkspaceRuntime.Action action : inspectorActions) {
+                boolean hover = mouseX >= left && mouseX < p.x + p.w - 12
+                        && mouseY >= y && mouseY < y + 20;
+                g.fill(left, y, p.x + p.w - 12, y + 20,
+                        hover ? 0x5541AFC0 : 0x332A6470);
+                g.drawString(font, trimInspector(action.label(), p.w - 42), left + 7, y + 6,
+                        hover ? TEXT : CYAN, false);
+                g.drawString(font, "›", p.x + p.w - 24, y + 6, MUTED, false);
+                y += 23;
+            }
+        }
+        g.disableScissor();
+        int maxScroll = Math.max(0, total - bodyHeight);
+        if (maxScroll > 0) {
+            int trackX = p.x + p.w - 5;
+            int thumbHeight = Math.max(18, bodyHeight * bodyHeight / Math.max(bodyHeight, total));
+            int thumbY = bodyTop + (bodyHeight - thumbHeight) * inspectorScroll / maxScroll;
+            g.fill(trackX, bodyTop, trackX + 2, bodyBottom, EDGE);
+            g.fill(trackX, thumbY, trackX + 2, thumbY + thumbHeight, CYAN);
+        }
     }
 
     private String trimInspector(String value, int maxWidth) {
@@ -1395,6 +1437,19 @@ public final class PlatformShellScreen extends Screen {
                 if(mx>=bx+38&&mx<bx+58) {
                     if (!p.pinned) hiddenPanels.add(p.id);
                     layoutWorkspace(); saveWorkspaceState(); return true;
+                }
+                return true;
+            }
+            if (p.id.equals("inspector")) {
+                PlatformSelectionContext.Selection selected = PlatformSelectionContext.current();
+                if (selected != null && inspectorActionTop >= 0
+                        && mx >= p.x + 12 && mx < p.x + p.w - 12
+                        && my >= p.y + 29 && my < p.y + p.h - 8
+                        && my >= inspectorActionTop
+                        && my < inspectorActionTop + inspectorActions.size() * 23) {
+                    int actionIndex = (int) ((my - inspectorActionTop) / 23);
+                    if (actionIndex >= 0 && actionIndex < inspectorActions.size())
+                        WorkspaceRuntime.executeAction(inspectorActions.get(actionIndex).id(), selected);
                 }
                 return true;
             }
@@ -1696,6 +1751,15 @@ public final class PlatformShellScreen extends Screen {
     }
 
     @Override public boolean mouseScrolled(double mouseX,double mouseY,double delta) {
+        Panel inspector = panels.get("inspector");
+        if (inspector != null && inspector.visible && !inspector.minimized
+                && mouseX >= inspector.x && mouseX <= inspector.x + inspector.w
+                && mouseY >= inspector.y + 26 && mouseY <= inspector.y + inspector.h) {
+            int viewport = Math.max(0, inspector.h - 37);
+            inspectorScroll = Math.max(0, Math.min(Math.max(0, inspectorContentHeight - viewport),
+                    inspectorScroll + (delta > 0 ? -36 : 36)));
+            return true;
+        }
         if (MaqanCameraBridge.active() && inCameraViewport(mouseX, mouseY)
                 && MaqanCameraBridge.zoom(delta)) return true;
         Panel nav = panels.get("navigation");
