@@ -1360,9 +1360,8 @@ public final class WorldSimMod {
         Set<String> activeRealmIds = new HashSet<>();
         for (var element : state.getAsJsonArray("polities")) if (element.isJsonObject())
             activeRealmIds.add("emergent-" + element.getAsJsonObject().get("id").getAsString());
-        for (MapData map : WorldForgeMod.loadedMaps().values()) {
-            if (map == null) continue;
-            var registry = PeopleMod.registry(map);
+        for (EmergenceSource source : emergenceSources()) {
+            var registry = source.registry;
             if (registry == null) continue;
             boolean changed = false;
             boolean settlementMapMarkersChanged = false;
@@ -1370,7 +1369,7 @@ public final class WorldSimMod {
             for (var element : state.getAsJsonArray("polities")) {
                 if (!element.isJsonObject()) continue;
                 JsonObject polity = element.getAsJsonObject();
-                if (!map.name.equals(polity.get("map_id").getAsString())) continue;
+                if (!source.id.equals(polity.get("map_id").getAsString())) continue;
                 String polityId = polity.get("id").getAsString();
                 String realmId = "emergent-" + polityId;
                 activeRealmIds.add(realmId);
@@ -1382,16 +1381,16 @@ public final class WorldSimMod {
                 List<dev.worldforge.people.Character> members = new ArrayList<>();
                 for (String bandId : bandIds) members.addAll(populationIndex.livingResidents(bandId));
                 Set<String> neighbors = emergentNeighbors(polity, state.getAsJsonArray("polities"),
-                        state.getAsJsonArray("bands"), map);
-                String biomes = emergentBiomeSummary(bandIds, state.getAsJsonArray("bands"), map);
+                        state.getAsJsonArray("bands"), source);
+                String biomes = emergentBiomeSummary(bandIds, state.getAsJsonArray("bands"), source);
                 String currentRuler = polity.has("ruler_global_id") && !polity.get("ruler_global_id").isJsonNull()
                         ? polity.get("ruler_global_id").getAsString() : "";
                 TitleData.Realm initialProjection = RealmsMod.registerEmergentRealm(realmId,
-                        polity.get("name").getAsString(), map.name, currentRuler,
+                        polity.get("name").getAsString(), source.id, currentRuler,
                         polity.get("population").getAsLong(), polity.get("stability").getAsInt(),
                         bandIds.size(), neighbors, biomes, emergentRaceShares(members));
                 initialProjection.props.put("emergence.province_count", emergentProvinceCount(
-                        bandIds, state.getAsJsonArray("bands"), map));
+                        bandIds, state.getAsJsonArray("bands"), source));
                 if (members.isEmpty()) continue;
                 if (polityName.equals(polityId + " Confederation") || polityName.startsWith("band_")) {
                     String generatedName = emergentRealmName(polityId, members, polityName);
@@ -1532,7 +1531,7 @@ public final class WorldSimMod {
                     RealmsMod.POLITICS.registerDynasty(dynastyId, ruler.globalId);
                 else RealmsMod.POLITICS.addDynastyMember(dynastyId, ruler.globalId);
                 TitleData.Realm politicalActor = RealmsMod.registerEmergentRealm(realmId,
-                        polityName, map.name, ruler.globalId,
+                        polityName, source.id, ruler.globalId,
                         polity.get("population").getAsLong(), polity.get("stability").getAsInt(),
                         bandIds.size(), neighbors, biomes, emergentRaceShares(members));
                 politicalActor.ruler = ruler.name + (ruler.house == null || ruler.house.isBlank() ? "" : " " + ruler.house);
@@ -1590,9 +1589,10 @@ public final class WorldSimMod {
             }
             // Fill the ordinary council, steward, marshal, chancellor and household offices
             // for newly emerged realms through the existing deterministic Courts.ensure pipeline.
-            int newCourtPositions = dev.worldforge.people.Courts.ensure(map.titles,
-                    EditorManager.editorFor(map), registry, PeopleMod.ROLES, PeopleMod.NAMES,
-                    PeopleMod.seed(map), year);
+            int newCourtPositions = source.map == null || source.map.titles == null ? 0
+                    : dev.worldforge.people.Courts.ensure(source.map.titles,
+                        EditorManager.editorFor(source.map), registry, PeopleMod.ROLES, PeopleMod.NAMES,
+                        source.seed, year);
             if (newCourtPositions > 0) changed = true;
             if (changed) {
                 dev.worldforge.people.Character durable = registry.all().stream()
@@ -1600,10 +1600,10 @@ public final class WorldSimMod {
                                 || person.posts.stream().anyMatch(post -> post.place.startsWith("realm:"))))
                         .findFirst().orElse(null);
                 if (durable != null && !PeopleMod.persistCharacter(durable, server))
-                    LOGGER.error("wf_worldsim: ruler/dynasty/court bindings for map {} could not be persisted", map.name);
+                    LOGGER.error("wf_worldsim: ruler/dynasty/court bindings for map {} could not be persisted", source.id);
             }
-            if (settlementMapMarkersChanged)
-                dev.worldforge.mod.PoliticalMapRenderer.regenerateAll(map);
+            if (settlementMapMarkersChanged && source.map != null)
+                dev.worldforge.mod.PoliticalMapRenderer.regenerateAll(source.map);
         }
         RealmsMod.reconcileEmergentRealms(activeRealmIds);
         if (!activeRealmIds.isEmpty() && !SettleMod.saveDurably(server))
