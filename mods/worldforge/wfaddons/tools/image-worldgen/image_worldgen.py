@@ -24,7 +24,7 @@ import numpy as np
 
 from image_map_analysis import CLASSES as ANALYSIS_CLASSES, classify, make_heightfield
 
-GENERATOR_VERSION = "maqan-image-blueprint/0.5.0"
+GENERATOR_VERSION = "maqan-image-blueprint/0.6.0"
 BIOMES = [
     {"index": 0, "key": "deep_ocean", "color": "#315f85", "candidates": ["minecraft:deep_ocean", "minecraft:ocean"]},
     {"index": 1, "key": "plains", "color": "#dac78f", "candidates": ["minecraft:plains"]},
@@ -66,6 +66,91 @@ SETTLEMENT_PROFILES = {
 def stable_name(seed: int, index: int, suffix: str = "") -> str:
     rng = random.Random((seed & 0xFFFFFFFFFFFFFFFF) ^ (index * 0x9E3779B97F4A7C15))
     return rng.choice(NAME_START) + rng.choice(NAME_END) + suffix
+
+
+
+def refine_open_coastline(labels: np.ndarray, seed: int) -> tuple[np.ndarray, dict]:
+    """Gently round and perturb open-ocean contours; inland water is untouched."""
+    from scipy import ndimage
+    labels = np.asarray(labels, dtype=np.uint8).copy()
+    ocean_code = ANALYSIS_CLASSES.index("ocean")
+    land_codes = [ANALYSIS_CLASSES.index(n) for n in
+                  ("grassland", "forest", "taiga", "desert", "mountains", "snow", "rock")]
+    ocean, land = labels == ocean_code, np.isin(labels, land_codes)
+    if not np.any(ocean) or not np.any(land):
+        return labels, {"changed_pixels": 0, "model": "signed-distance-coast-v1"}
+    signed = (ndimage.distance_transform_edt(land) -
+              ndimage.distance_transform_edt(ocean)).astype(np.float32)
+    band = (np.abs(signed) <= 3.25) & (ocean | land)
+    if not np.any(band):
+        return labels, {"changed_pixels": 0, "model": "signed-distance-coast-v1"}
+    rng = np.random.default_rng((int(seed) & 0xFFFFFFFFFFFFFFFF) ^ 0x434F4153544C494E)
+    def noise(cell):
+        gh = max(2, (labels.shape[0] + cell - 1) // cell + 1)
+        gw = max(2, (labels.shape[1] + cell - 1) // cell + 1)
+        coarse = Image.fromarray(rng.integers(0, 256, (gh, gw), dtype=np.uint8), "L")
+        return np.asarray(coarse.resize((labels.shape[1], labels.shape[0]),
+            Image.Resampling.BICUBIC), dtype=np.float32) / 255.0 - 0.5
+    smooth = ndimage.gaussian_filter(signed, sigma=0.8, mode="nearest")
+    displacement = noise(48) * 1.5 + noise(17) * 0.55
+    candidate_land = land.copy()
+    candidate_land[band] = smooth[band] + displacement[band] >= 0.0
+    # Protect tiny islands: they may be real map features, not anti-alias noise.
+    component_ids, component_count = ndimage.label(land, structure=np.ones((3, 3), dtype=np.uint8))
+    if component_count:
+        sizes = np.bincount(component_ids.ravel(), minlength=component_count + 1)
+        candidate_land[(component_ids > 0) & (sizes[component_ids] <= 8)] = True
+    candidate_ocean = ocean.copy()
+    candidate_ocean[band] = ~candidate_land[band]
+    edge = np.zeros(ocean.shape, dtype=bool)
+    edge[0] = candidate_ocean[0]; edge[-1] = candidate_ocean[-1]
+    edge[:, 0] = candidate_ocean[:, 0]; edge[:, -1] = candidate_ocean[:, -1]
+    connected = ndimage.binary_propagation(edge, mask=candidate_ocean,
+        structure=np.array([[0,1,0],[1,1,1],[0,1,0]], dtype=bool))
+    # Never close a source-map strait or disconnect an original ocean basin.
+    if np.any(ocean & ~connected):
+        return labels, {"changed_pixels": 0, "model": "signed-distance-coast-v1",
+                        "reverted_to_preserve_ocean_connectivity": True}
+    changed = land & connected
+    labels[changed] = ocean_code
+    return labels, {"changed_pixels": int(changed.sum()),
+                    "model": "signed-distance-coast-v1",
+                    "max_contour_displacement_pixels": 1.025,
+                    "small_island_preservation_pixels": 8}
+
+
+def geography_regression_tests() -> dict:
+    """Fast deterministic guards for coast connectivity and watershed label integrity."""
+    from scipy import ndimage
+    test = np.full((96, 128), ANALYSIS_CLASSES.index("ocean"), dtype=np.uint8)
+    test[18:78, 24:104] = ANALYSIS_CLASSES.index("grassland")
+    test[8:10, 60:63] = ANALYSIS_CLASSES.index("forest")
+    coast_a, report = refine_open_coastline(test, 424242)
+    coast_b, _ = refine_open_coastline(test, 424242)
+    if not np.array_equal(coast_a, coast_b):
+        raise AssertionError("Coast refinement is not deterministic.")
+    if not np.all(coast_a[8:10, 60:63] != ANALYSIS_CLASSES.index("ocean")):
+        raise AssertionError("Coast refinement erased a small island.")
+    ocean = coast_a == ANALYSIS_CLASSES.index("ocean")
+    edge = np.zeros(ocean.shape, dtype=bool)
+    edge[0] = ocean[0]; edge[-1] = ocean[-1]
+    edge[:, 0] = ocean[:, 0]; edge[:, -1] = ocean[:, -1]
+    connected = ndimage.binary_propagation(edge, mask=ocean,
+        structure=np.array([[0,1,0],[1,1,1],[0,1,0]], dtype=bool))
+    if not np.array_equal(ocean, connected):
+        raise AssertionError("Coast refinement disconnected open ocean.")
+    width, height = 14, 12
+    cells = np.asarray([z * width + x for z in range(1, 11)
+                        for x in range(1, 13)], dtype=np.int32)
+    scratch = np.full(width * height, -2, dtype=np.int32)
+    boundary = np.zeros((height, width), dtype=np.uint8)
+    boundary[:, 6] = 240
+    labels, _ = partition(cells, [3 * width + 3, 8 * width + 10],
+                          width, height, 7, scratch, boundary)
+    if not set(np.unique(labels[cells]).tolist()).issubset({7, 8}):
+        raise AssertionError("Watershed emitted an unregistered territory label.")
+    return {"coast_changed_pixels": report["changed_pixels"],
+            "ocean_connectivity": "PASS", "watershed_registered_labels": "PASS"}
 
 
 def png_pixels(image: Image.Image) -> tuple[int, int, np.ndarray, dict]:
@@ -217,13 +302,11 @@ def partition(cells, seeds, width: int, height: int, first_label: int,
         xs, zs = cell_indices % width, cell_indices // width
         x0, x1 = int(xs.min()), int(xs.max()) + 1
         z0, z1 = int(zs.min()), int(zs.max()) + 1
-        # The exterior of this landmass crop is a fixed, high-cost dummy
-        # basin. Without it the watershed can cross ocean pixels and re-enter
-        # another coast, creating disconnected provinces.
-        exterior_label = first_label + len(seed_indices) + 1
-        markers = np.full((z1 - z0, x1 - x0), exterior_label, dtype=np.int32)
+        # No synthetic exterior marker: it could leak a dummy ID into coastal
+        # cells. Territory pixels cost <=254; surrounding water costs 255, so
+        # the connected land basin is assigned before the flood reaches water.
+        markers = np.zeros((z1 - z0, x1 - x0), dtype=np.int32)
         local_x, local_z = xs - x0, zs - z0
-        markers[local_z, local_x] = 0
         seed_x, seed_z = seed_indices % width - x0, seed_indices // width - z0
         for offset, (sx, sz) in enumerate(zip(seed_x, seed_z)):
             markers[int(sz), int(sx)] = first_label + offset + 1
@@ -233,8 +316,9 @@ def partition(cells, seeds, width: int, height: int, first_label: int,
         result = ndimage.watershed_ift(cost, markers, structure=np.asarray(
             [[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=np.uint8))
         assigned = result[local_z, local_x].astype(np.int32) - 1
-        if np.any(assigned < first_label):
-            raise ValueError("Organic watershed left part of a landmass unassigned.")
+        if (np.any(assigned < first_label) or
+                np.any(assigned >= first_label + len(seed_indices))):
+            raise ValueError("Watershed produced an unregistered territory label.")
         scratch[cell_indices] = assigned
         labels = scratch
     if np.count_nonzero(labels[cell_indices] >= 0) != cell_indices.size:
@@ -259,7 +343,12 @@ def make_boundary_cost(analysis_grid: np.ndarray, seed: int) -> np.ndarray:
     edge[1:, :] |= analysis_grid[1:, :] != analysis_grid[:-1, :]
     edge[:-1, :] |= analysis_grid[1:, :] != analysis_grid[:-1, :]
     edge_strength = ndimage.gaussian_filter(edge.astype(np.float32), sigma=1.4, mode="nearest")
-    surface = broad * 0.62 + detail * 0.20 + edge_strength * 0.18
+    mountain = np.isin(analysis_grid, [ANALYSIS_CLASSES.index("mountains"),
+        ANALYSIS_CLASSES.index("rock"), ANALYSIS_CLASSES.index("snow")]).astype(np.float32)
+    ridge = ndimage.gaussian_filter(mountain, sigma=2.2, mode="nearest")
+    river = analysis_grid == ANALYSIS_CLASSES.index("waterway")
+    river_bank = ndimage.binary_dilation(river, iterations=1).astype(np.float32)
+    surface = broad * 0.49 + detail * 0.17 + edge_strength * 0.13 + ridge * 0.13 + river_bank * 0.08
     return np.asarray(np.clip(surface * 255.0, 0, 255), dtype=np.uint8)
 
 
@@ -322,7 +411,8 @@ def select_independent_islands(components: list[list[int]], seed: int,
 def aggregate_realm_regions(realm_labels: np.ndarray, realm_seeds: dict[int, int],
                             width: int, height: int, seed: int,
                             minimum_pixels: int, desired_fraction: float = 0.58,
-                            max_area_share: float = 0.30) -> tuple[np.ndarray, dict[int, int], dict]:
+                            max_area_share: float = 0.30,
+                            analysis_grid: np.ndarray | None = None) -> tuple[np.ndarray, dict[int, int], dict]:
     """Merge adjacent seed-regions into organically sized, connected polities."""
     active = np.flatnonzero(realm_labels >= 0)
     if not active.size:
@@ -338,17 +428,35 @@ def aggregate_realm_regions(realm_labels: np.ndarray, realm_seeds: dict[int, int
     v_top, v_bottom = grid[:-1, :], grid[1:, :]
     h_mask = (h_left >= 0) & (h_right >= 0) & (h_left != h_right)
     v_mask = (v_top >= 0) & (v_bottom >= 0) & (v_top != v_bottom)
-    pair_parts = []
+    pair_parts, affinity_parts = [], []
+    affinity_grid = None
+    if analysis_grid is not None:
+        lut = np.zeros(len(ANALYSIS_CLASSES), dtype=np.float32)
+        for name, value in {"grassland": 1.0, "forest": 0.55, "taiga": 0.25,
+                            "desert": 0.15, "mountains": -0.85, "rock": -0.70,
+                            "snow": -0.45, "waterway": -0.30}.items():
+            lut[ANALYSIS_CLASSES.index(name)] = value
+        affinity_grid = lut[np.asarray(analysis_grid, dtype=np.uint8)]
     if np.any(h_mask):
         pair_parts.append(np.column_stack((h_left[h_mask], h_right[h_mask])))
+        if affinity_grid is not None:
+            affinity_parts.append((affinity_grid[:, :-1][h_mask] + affinity_grid[:, 1:][h_mask]) * 0.5)
     if np.any(v_mask):
         pair_parts.append(np.column_stack((v_top[v_mask], v_bottom[v_mask])))
+        if affinity_grid is not None:
+            affinity_parts.append((affinity_grid[:-1, :][v_mask] + affinity_grid[1:, :][v_mask]) * 0.5)
     pairs = np.concatenate(pair_parts, axis=0) if pair_parts else np.empty((0, 2), dtype=np.int64)
     if not pairs.size or len(ids) < 2:
         return realm_labels, dict(realm_seeds), {
             "initial_regions": int(len(ids)), "merged_regions": int(len(ids)), "merge_operations": 0}
     pairs = np.sort(pairs.astype(np.int64), axis=1)
-    unique_pairs, border_lengths = np.unique(pairs, axis=0, return_counts=True)
+    unique_pairs, inverse, border_lengths = np.unique(pairs, axis=0, return_inverse=True, return_counts=True)
+    if affinity_parts:
+        edge_affinity = np.concatenate(affinity_parts)
+        pair_affinity = np.bincount(inverse, weights=edge_affinity,
+                                    minlength=len(unique_pairs)) / np.maximum(1, border_lengths)
+    else:
+        pair_affinity = np.zeros(len(unique_pairs), dtype=np.float64)
 
     def find(value: int) -> int:
         while parent[value] != value:
@@ -359,10 +467,13 @@ def aggregate_realm_regions(realm_labels: np.ndarray, realm_seeds: dict[int, int
     desired_count = max(1, int(math.ceil(len(ids) * desired_fraction)))
     world_cap = max(minimum_pixels * 4, int(active.size * max_area_share))
     edges = []
-    for (a, b), border in zip(unique_pairs, border_lengths):
+    for edge_index, ((a, b), border) in enumerate(zip(unique_pairs, border_lengths)):
         a, b = int(a), int(b)
         jitter = ((seed ^ (a * 0x9E3779B1) ^ (b * 0x85EBCA77)) & 0xFFFF) / 65535.0
-        score = (area[a] + area[b]) / max(1, world_cap) - min(1.0, int(border) / 64.0) * 0.10 + jitter * 0.025
+        terrain_barrier = -float(pair_affinity[edge_index]) * 0.11
+        score = ((area[a] + area[b]) / max(1, world_cap) -
+                 min(1.0, int(border) / 64.0) * 0.10 +
+                 terrain_barrier + jitter * 0.025)
         edges.append((score, a, b))
     edges.sort()
     merges, current_count = 0, len(ids)
@@ -510,6 +621,8 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     analysis_started = time.perf_counter()
     image = Image.open(input_path).convert("RGB")
     width, height, analysis_labels, analysis_report = png_pixels(image)
+    analysis_labels, coast_report = refine_open_coastline(analysis_labels, seed)
+    analysis_report["coastline_model"] = coast_report
     analysis_grid = analysis_labels.reshape((height, width))
     analysis_flat = analysis_labels.ravel()
     boundary_cost = make_boundary_cost(analysis_grid, seed)
@@ -581,7 +694,8 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
 
     realm_labels, realm_seeds, aggregation_report = aggregate_realm_regions(
         realm_labels, realm_seeds, width, height, seed, minimum_territory_pixels,
-        settlement_profile["merge_fraction"], settlement_profile["realm_area_cap"])
+        settlement_profile["merge_fraction"], settlement_profile["realm_area_cap"],
+        analysis_grid=analysis_grid)
     realm_island_flags = {
         rid: seed_landmass_by_pixel.get(point, main_landmass_id) != main_landmass_id
         for rid, point in realm_seeds.items()
@@ -636,10 +750,24 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     # Components below 8 pixels are treated as map speckle, not polities.
     minor_components = [component for component in components
                         if component[0] not in major_component_ids]
+    tiny_components = [component for component in minor_components if len(component) < 8]
+    if tiny_components:
+        tiny_pixels = np.concatenate(tiny_components).astype(np.int64, copy=False)
+        wilderness_mask.ravel()[tiny_pixels] = True
+        minor_components = [component for component in minor_components if len(component) >= 8]
     island_province_count = 0
     independent_island_realm_count = 0
     if minor_components and realm_seeds:
         from scipy.spatial import cKDTree
+        coast_water = np.isin(analysis_grid, [ANALYSIS_CLASSES.index("ocean"),
+                                               ANALYSIS_CLASSES.index("lake")])
+        coast_adjacent = ndimage.binary_dilation(coast_water, structure=np.array(
+            [[0,1,0],[1,1,1],[0,1,0]], dtype=bool))
+        realm_grid_coast = realm_labels.reshape((height, width))
+        coast_cells_all = np.flatnonzero((realm_grid_coast >= 0) & coast_adjacent)
+        coast_cells = coast_cells_all[::4]
+        coast_tree = cKDTree(np.column_stack((coast_cells % width, coast_cells // width))) if coast_cells.size else None
+        coast_owner = realm_grid_coast.ravel()[coast_cells] if coast_cells.size else None
         seed_ids = np.asarray(sorted(realm_seeds), dtype=np.int32)
         seed_pixels = np.asarray([realm_seeds[int(rid)] for rid in seed_ids], dtype=np.int64)
         seed_xy = np.column_stack((seed_pixels % width, seed_pixels // width))
@@ -659,9 +787,12 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
             cx, cz = float(xs.mean()), float(zs.mean())
             centroid_distance = (xs - cx) ** 2 + (zs - cz) ** 2
             center = int(pixels[int(np.argmin(centroid_distance))])
-            xy = (cx, cz)
-            _, nearest = realm_tree.query(xy, k=1)
-            owner_realm = int(seed_ids[int(nearest)])
+            if coast_tree is not None:
+                distances, nearest = coast_tree.query(np.column_stack((xs, zs)), k=1)
+                owner_realm = int(coast_owner[int(nearest[int(np.argmin(distances))])])
+            else:
+                _, nearest = realm_tree.query((cx, cz), k=1)
+                owner_realm = int(seed_ids[int(nearest)])
             if component[0] in independent_components:
                 owner_realm = next_realm
                 realm_provinces[owner_realm] = []
@@ -1097,6 +1228,7 @@ def validate_package(path: Path) -> dict:
 
 def self_test(output_dir: Path) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
+    geography_regression_tests()
     source = output_dir / "synthetic-fantasy-map.png"
     first = output_dir / "image-world-seed-424242.worldmap"
     second = output_dir / "image-world-seed-424242-repeat.worldmap"
