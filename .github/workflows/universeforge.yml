@@ -276,6 +276,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Install image world generation dependencies
+        run: python -m pip install -r mods/worldforge/wfaddons/tools/image-worldgen/requirements.txt
+      - name: Verify deterministic image-to-worldmap generation
+        working-directory: mods/worldforge/wfaddons/tools/image-worldgen
+        shell: bash
+        run: python image_worldgen.py self-test --output-dir "$RUNNER_TEMP/image-worldgen-self-test"
       - name: Compile and run WorldForge logic tests
         working-directory: mods/worldforge/wfaddons
         shell: bash
