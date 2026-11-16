@@ -13,7 +13,7 @@ public final class ImageWorldMapCompatibilityTest {
         if (!map.hasPoliticalLayers() || map.titles == null) throw new AssertionError("Political title layers were not loaded");
         String[] expectedTiers = {"province", "region", "state"};
         if (map.titles.tiers.size() != expectedTiers.length)
-            throw new AssertionError("Expected province, small realm, kingdom and empire title tiers");
+            throw new AssertionError("Expected administrative tiers: province, region and state");
         for (int i = 0; i < expectedTiers.length; i++) {
             if (!expectedTiers[i].equals(map.titles.tiers.get(i).key))
                 throw new AssertionError("Unexpected title tier at index " + i + ": " + map.titles.tiers.get(i).key);
