@@ -18,17 +18,11 @@ from collections import deque
 from pathlib import Path
 
 from PIL import Image, ImageDraw
+import numpy as np
 
-GENERATOR_VERSION = "maqan-image-blueprint/0.1.0"
-PALETTE = {
-    "deep_ocean": (18, 48, 82),
-    "shallow_sea": (42, 103, 145),
-    "plains": (218, 199, 143),
-    "forest": (48, 105, 66),
-    "mountains": (133, 132, 128),
-    "desert": (204, 160, 83),
-    "river": (47, 119, 190),
-}
+from image_map_analysis import CLASSES as ANALYSIS_CLASSES, classify, make_heightfield
+
+GENERATOR_VERSION = "maqan-image-blueprint/0.2.0"
 BIOMES = [
     {"index": 0, "key": "deep_ocean", "color": "#315f85", "candidates": ["minecraft:deep_ocean", "minecraft:ocean"]},
     {"index": 1, "key": "plains", "color": "#dac78f", "candidates": ["minecraft:plains"]},
@@ -36,10 +30,21 @@ BIOMES = [
     {"index": 3, "key": "mountains", "color": "#858480", "candidates": ["minecraft:windswept_hills", "minecraft:stony_peaks"]},
     {"index": 4, "key": "desert", "color": "#cca053", "candidates": ["minecraft:desert"]},
     {"index": 5, "key": "river", "color": "#2f77be", "candidates": ["minecraft:river"]},
+    {"index": 6, "key": "taiga", "color": "#14422b", "candidates": ["minecraft:taiga", "minecraft:old_growth_pine_taiga"]},
+    {"index": 7, "key": "snow", "color": "#e8f1f5", "candidates": ["minecraft:snowy_plains", "minecraft:snowy_slopes"]},
+    {"index": 8, "key": "lake", "color": "#2d82be", "candidates": ["minecraft:river", "minecraft:ocean"]},
+    {"index": 9, "key": "rock", "color": "#67635b", "candidates": ["minecraft:stony_peaks", "minecraft:windswept_hills"]},
 ]
-BIOME_INDEX = {name: i for i, name in enumerate(("deep_ocean", "plains", "forest", "mountains", "desert", "river"))}
-LAND_CLASSES = {"plains", "forest", "mountains", "desert", "river"}
-WATER_CLASSES = {"deep_ocean", "shallow_sea"}
+BIOME_INDEX = {name: i for i, name in enumerate(
+    ("deep_ocean", "plains", "forest", "mountains", "desert", "river", "taiga", "snow", "lake", "rock"))}
+ANALYSIS_TO_WORLD = {
+    "ocean": "deep_ocean", "lake": "lake", "waterway": "river",
+    "grassland": "plains", "forest": "forest", "taiga": "taiga",
+    "desert": "desert", "mountains": "mountains", "snow": "snow",
+    "rock": "rock", "unknown": "unknown",
+}
+LAND_CLASSES = {"plains", "forest", "taiga", "mountains", "desert", "snow", "rock"}
+WATER_CLASSES = {"deep_ocean", "lake", "river"}
 NAME_START = ("A", "Bel", "Cor", "Dor", "Eld", "Fen", "Gal", "Har", "Ith", "Kel", "Lor", "Mor", "Nor", "Or", "Pel", "Quel")
 NAME_END = ("aria", "en", "oria", "gard", "mere", "hold", "wyn", "mark", "eth", "a", "or", "heim")
 
@@ -49,21 +54,18 @@ def stable_name(seed: int, index: int, suffix: str = "") -> str:
     return rng.choice(NAME_START) + rng.choice(NAME_END) + suffix
 
 
-def png_pixels(image: Image.Image) -> tuple[int, int, list[str]]:
-    rgb = image.convert("RGB")
-    w, h = rgb.size
-    palette = list(PALETTE.items())
-    classes: list[str] = []
-    for pixel in rgb.getdata():
-        name, color = min(palette, key=lambda item: sum((pixel[i] - item[1][i]) ** 2 for i in range(3)))
-        distance = sum((pixel[i] - color[i]) ** 2 for i in range(3))
-        if distance > 3 * 72 * 72:
-            raise ValueError(
-                f"Unclassified pixel RGB={pixel}; use the WorldForge semantic palette "
-                "or provide a legend/segmentation layer before conversion."
-            )
-        classes.append(name)
-    return w, h, classes
+def png_pixels(image: Image.Image) -> tuple[int, int, list[str], dict]:
+    """Use the shared contextual analyzer; reject ambiguous maps instead of guessing."""
+    rgb = np.asarray(image.convert("RGB"), dtype=np.uint8)
+    h, w = rgb.shape[:2]
+    labels, report = classify(rgb)
+    classes = [ANALYSIS_TO_WORLD[ANALYSIS_CLASSES[int(value)]] for value in labels.ravel()]
+    if report["unknown_percent"] > 2.0:
+        raise ValueError(
+            f"Map contains {report['unknown_percent']:.3f}% unknown pixels; "
+            "calibrate its legend before world generation."
+        )
+    return w, h, classes, report
 
 
 def neighbors(index: int, width: int, height: int):
@@ -183,7 +185,7 @@ def create_test_image(path: Path) -> None:
 def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: int = 4,
                   provinces_per_realm: int = 4, blocks_per_pixel: int = 16) -> dict:
     image = Image.open(input_path).convert("RGB")
-    width, height, classes = png_pixels(image)
+    width, height, classes, analysis_report = png_pixels(image)
     components = land_components(classes, width, height)
     if not components:
         raise ValueError("The image contains no classified land.")
@@ -318,18 +320,15 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
             coast_cells.sort(key=lambda i: (i * 2654435761 + seed) & 0xFFFFFFFF)
             add_settlement("port", coast_cells[0], 30 + rid)
 
-    # Convert semantic classes into the exact layers consumed by MapData.
-    height_values, biome_values, river_values = [], [], []
-    base_height = {"deep_ocean": 6500, "shallow_sea": 17000, "plains": 25000,
-                   "forest": 28500, "mountains": 50500, "desert": 24500, "river": 23500}
-    for z in range(height):
-        for x in range(width):
-            kind = classes[z * width + x]
-            wave = math.sin((x + (seed % 97)) * 0.071) * math.cos((z - (seed % 61)) * 0.063)
-            elevation = max(0, min(65535, int(base_height[kind] + wave * (900 if kind in LAND_CLASSES else 180))))
-            height_values.append(elevation)
-            biome_values.append(BIOME_INDEX.get(kind, 0))
-            river_values.append(255 if kind == "river" else 0)
+    # Geographic layers come from the shared semantic classifier and seeded relief.
+    analysis_labels = np.asarray(
+        [ANALYSIS_CLASSES.index(next(key for key, value in ANALYSIS_TO_WORLD.items() if value == kind))
+         if kind != "unknown" else ANALYSIS_CLASSES.index("unknown") for kind in classes],
+        dtype=np.uint8
+    ).reshape((height, width))
+    height_values = make_heightfield(analysis_labels, seed).ravel().astype(np.uint16).tolist()
+    biome_values = [BIOME_INDEX.get(kind, 0) for kind in classes]
+    river_values = [255 if kind == "river" else 0 for kind in classes]
 
     spawn = province_meta[realm_provinces[0][0]]["seed"]
     spawn_x, spawn_z = spawn % width, spawn // width
@@ -364,7 +363,9 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         "settlements": settlements,
         "generation_policy": {
             "chunk_materialization": "deferred", "territory_partition": "connected-land-multisource-bfs",
-            "political_seed": seed, "source_semantics": "worldforge-color-palette",
+            "political_seed": seed, "source_semantics": "maqan-image-analysis/2",
+            "geography_classifier": analysis_report["classifier"],
+            "unknown_percent": analysis_report["unknown_percent"],
         },
     }
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -378,6 +379,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         "realms.json": json.dumps(realms_doc, sort_keys=True, separators=(",", ":")).encode(),
         "world-blueprint.json": json.dumps(blueprint, sort_keys=True, separators=(",", ":")).encode(),
         "source-image.sha256": (source_hash + "\n").encode(),
+        "image-analysis-report.json": json.dumps(analysis_report, sort_keys=True, separators=(",", ":")).encode(),
     }
     with zipfile.ZipFile(output_path, "w") as archive:
         for name, data in sorted(files.items()):
