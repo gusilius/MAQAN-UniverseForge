@@ -205,6 +205,29 @@ public final class ImageWorldIdentityTest {
             check(!dynasty.name.isBlank() && dynasty.members.size() == entry.getValue().size(),
                     "named dynasty links every canonical house member: " + entry.getKey());
         }
+        TitleData restoredTitles = titles.copy();
+        boolean mapIdentityRoundTrip = restoredTitles.realmList().size() == titles.realmList().size()
+                && restoredTitles.allTitles().size() == titles.allTitles().size();
+        for (TitleData.Realm realm : titles.realmList()) {
+            TitleData.Realm restored = restoredTitles.realms.get(realm.id);
+            mapIdentityRoundTrip &= restored != null && realm.name.equals(restored.name)
+                    && String.valueOf(realm.props.get("races")).equals(String.valueOf(restored.props.get("races")))
+                    && String.valueOf(realm.props.get("politics.government")).equals(
+                            String.valueOf(restored.props.get("politics.government")));
+        }
+        for (TitleData.Title title : titles.allTitles()) {
+            TitleData.Title restored = restoredTitles.get(title.id);
+            mapIdentityRoundTrip &= restored != null && title.name.equals(restored.name)
+                    && title.props.equals(restored.props) && title.parent == restored.parent;
+        }
+        check(mapIdentityRoundTrip,
+                "political map names, racial identity, government and hierarchy survive TitleData JSON round-trip");
+        Realms restoredGovernments = new Realms(realmDefs);
+        restoredGovernments.fromJson(autonomousPolitics.toJson());
+        check(chosenGovernments.entrySet().stream().allMatch(e ->
+                        e.getValue().equals(restoredGovernments.state(e.getKey()).gov)),
+                "AI government ranks, laws and doctrines survive wf-realms save/load");
+
         String peopleSnapshot = people.toJson();
         CharacterRegistry restoredPeople = new CharacterRegistry();
         restoredPeople.fromJson(peopleSnapshot, "image-world-identity-test");
