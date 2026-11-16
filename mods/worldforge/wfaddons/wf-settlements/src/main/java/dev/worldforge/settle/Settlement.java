@@ -1015,7 +1015,8 @@ public final class Settlement {
 
     private void autoAssign() {
         List<Worker> idle = new ArrayList<>();
-        for (Worker w : workers) if (w.building == 0 && !w.manualOrder && !w.manualFollow && w.lifeAction.isBlank()) idle.add(w);
+        for (Worker w : workers) if (w.taskOwner == Worker.TaskOwner.NONE && w.building == 0
+                && !w.manualOrder && !w.manualFollow && w.lifeAction.isBlank()) idle.add(w);
         idle.sort(Comparator.comparingInt(w -> w.id));
         for (Worker w : idle) {
             Building best = null;
@@ -1060,6 +1061,7 @@ public final class Settlement {
             if ((source == null || source.localStock.isEmpty()) && !worker.manualHauler) {
                 worker.building = 0;
                 worker.assignedProfession = "";
+                worker.releaseTask(Worker.TaskOwner.SETTLEMENT, "settlement:building:" + (source == null ? -1 : source.uid));
                 if (!worker.manualOrder && !worker.manualFollow && worker.lifeAction.isBlank())
                     worker.status = "свободен";
             }
@@ -1068,8 +1070,8 @@ public final class Settlement {
             if (assignedWith(source.uid, "hauler") > 0) continue;
             Worker pick = null;
             for (Worker worker : workers) {
-                if (worker.manualOrder || worker.manualFollow || !worker.lifeAction.isBlank()
-                        || worker.building != 0 || !worker.canPerform("hauler")) continue;
+                if (worker.taskOwner != Worker.TaskOwner.NONE || worker.manualOrder || worker.manualFollow
+                        || !worker.lifeAction.isBlank() || worker.building != 0 || !worker.canPerform("hauler")) continue;
                 if (pick == null || worker.id < pick.id) pick = worker;
             }
             if (pick == null) continue;
@@ -1088,6 +1090,9 @@ public final class Settlement {
         if (source.state != Building.State.DONE || (!source.def.produces() && source.localStock.isEmpty()))
             throw new OrderException("Носильщик назначается только на действующее производственное здание");
         if (!worker.canPerform("hauler")) throw new OrderException(worker.name + " не может переносить ресурсы");
+        if (worker.taskOwner == Worker.TaskOwner.MILITARY || worker.taskOwner == Worker.TaskOwner.PLAYER)
+            throw new OrderException("Рабочий занят приказом более высокого приоритета");
+        worker.claimTask(Worker.TaskOwner.SETTLEMENT, "settlement:building:" + buildingId, true);
         worker.building = buildingId;
         worker.assignedProfession = "hauler";
         worker.manualHauler = true;
@@ -1143,6 +1148,7 @@ public final class Settlement {
                 if (staff > bestStaff || staff == bestStaff && pick != null && w.id > pick.id) { pick = w; bestStaff = staff; }
             }
             if (pick != null) {
+                pick.claimTask(Worker.TaskOwner.SETTLEMENT, "settlement:building:" + site.uid, true);
                 pick.assignedProfession = "builder";
                 pick.lifeAction = "";
                 pick.building = site.uid;
