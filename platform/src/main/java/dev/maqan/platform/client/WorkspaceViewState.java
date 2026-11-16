@@ -8,6 +8,7 @@ public final class WorkspaceViewState {
     public enum CameraMode {
         FIRST_PERSON("First person", "◉"),
         FREE("Free camera", "◇"),
+        ISOMETRIC("Isometric camera", "◈"),
         RTS("RTS camera", "⌖");
 
         private final String label;
