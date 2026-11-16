@@ -831,6 +831,7 @@ public final class Settlement {
             w.orderQueue.addLast(new Worker.ManualOrder(x,z));
             return;
         }
+        if (w.taskOwner != Worker.TaskOwner.PLAYER) suspendCurrentTask(w);
         w.claimTask(Worker.TaskOwner.PLAYER, "player:move", true);
         w.orderQueue.clear();
         w.manualHauler = false;
@@ -845,7 +846,7 @@ public final class Settlement {
         Worker w=worker(workerId);
         if(w==null||!w.manualOrder)return false;
         Worker.ManualOrder next=w.orderQueue.pollFirst();
-        if(next==null){w.manualOrder=false;w.releaseTask(Worker.TaskOwner.PLAYER, "player:move");w.status="свободен";return false;}
+        if(next==null){releasePlayerTask(workerId, "player:move");return false;}
         w.orderX=next.x();w.orderZ=next.z();w.status="приказ: движение";
         return true;
     }
