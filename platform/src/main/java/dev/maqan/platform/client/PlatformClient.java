@@ -63,7 +63,8 @@ public final class PlatformClient {
         public static void clientTick(TickEvent.ClientTickEvent event) {
             if (event.phase != TickEvent.Phase.END) return;
             Minecraft mc = Minecraft.getInstance();
-            while (CAMERA_MODE.consumeClick()) WorkspaceViewState.cycleCameraMode();
+            while (CAMERA_MODE.consumeClick())
+                MaqanCameraBridge.apply(WorkspaceViewState.cycleCameraMode());
             while (MAP_MODE.consumeClick()) WorkspaceViewState.cycleMapMode();
             while (OPEN.consumeClick()) {
                 if (mc.screen instanceof PlatformShellScreen) mc.setScreen(null);
