@@ -23,7 +23,7 @@ import numpy as np
 
 from image_map_analysis import CLASSES as ANALYSIS_CLASSES, classify, make_heightfield
 
-GENERATOR_VERSION = "maqan-image-blueprint/0.2.0"
+GENERATOR_VERSION = "maqan-image-blueprint/0.3.0"
 BIOMES = [
     {"index": 0, "key": "deep_ocean", "color": "#315f85", "candidates": ["minecraft:deep_ocean", "minecraft:ocean"]},
     {"index": 1, "key": "plains", "color": "#dac78f", "candidates": ["minecraft:plains"]},
@@ -265,11 +265,14 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     realm_count = min(realm_count, settlement_profile["realms"])
     provinces_per_realm = min(provinces_per_realm, settlement_profile["provinces"])
     minimum_territory_pixels = settlement_profile["minimum_pixels"]
+    analysis_started = time.perf_counter()
     image = Image.open(input_path).convert("RGB")
     width, height, analysis_labels, analysis_report = png_pixels(image)
     analysis_grid = analysis_labels.reshape((height, width))
     analysis_flat = analysis_labels.ravel()
     components = land_components(analysis_labels, width, height)
+    analysis_seconds = time.perf_counter() - analysis_started
+    political_started = time.perf_counter()
     if not components:
         raise ValueError("The image contains no classified land.")
     if sum(map(len, components)) < 32:
@@ -416,6 +419,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
                 realm_neighbors[ra].add(rb)
                 realm_neighbors[rb].add(ra)
 
+    political_seconds = time.perf_counter() - political_started
     realm_names = {rid: stable_name(seed, rid + 1) for rid in realm_provinces}
     government_by_realm = {rid: GOVERNMENT_MODELS[random.Random((seed & 0xFFFFFFFFFFFFFFFF) ^ (rid * 0xD1B54A32D192ED03)).randrange(len(GOVERNMENT_MODELS))] for rid in realm_provinces}
     county_id_for_realm = {rid: len(province_meta) + offset + 1 for offset, rid in enumerate(realm_provinces)}
@@ -496,6 +500,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
             coast_cells.sort(key=lambda i: (i * 2654435761 + seed) & 0xFFFFFFFF)
             add_settlement("port", coast_cells[0], 30 + rid)
 
+    geography_started = time.perf_counter()
     # Geographic layers come from the shared semantic classifier and seeded relief.
     height_values = make_heightfield(analysis_grid, seed).ravel().astype(np.uint16).tolist()
     biome_lut = np.asarray([BIOME_INDEX.get(ANALYSIS_TO_WORLD[name], 0)
@@ -522,6 +527,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         "relation_types": {"vassal": {"label": "Vassal", "tribute": 10, "levy": 10, "can_declare_war": False}},
         "realms": realms,
     }
+    geography_seconds = time.perf_counter() - geography_started
     province_ids = province_labels.tolist()  # zero is reserved for sea; labels are 16-bit safe.
 
     # Render a deterministic political QA layer: realm colors are shared by
@@ -557,6 +563,11 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         "realm_count": len(realms), "province_count": len(province_meta),
         "settlement_count": len(settlements), "realms": realms,
         "generation_seconds": round(time.perf_counter() - started_at, 4),
+        "generation_phase_seconds": {
+            "image_analysis_and_components": round(analysis_seconds, 4),
+            "political_partition_and_settlements": round(political_seconds, 4),
+            "geography_and_preview": round(geography_seconds, 4),
+        },
         "territories": [{"id": pid, "realm_id": f"realm_{meta['realm'] + 1:02d}",
                          "capital_pixel": [meta["seed"] % width, meta["seed"] // width],
                          "area_pixels": meta["area"], "neighbors": sorted(province_neighbors[pid])}
