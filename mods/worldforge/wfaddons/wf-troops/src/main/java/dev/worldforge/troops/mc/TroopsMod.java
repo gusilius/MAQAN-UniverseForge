@@ -1210,7 +1210,7 @@ public class TroopsMod {
                                 .then(Commands.literal("squad")
                                         .then(Commands.argument("squad", StringArgumentType.word())
                                                 .executes(ctx -> showSquadCommandStatus(ctx.getSource(),
-                                                        StringArgumentType.getString(ctx, "squad"))))))
+                                                        StringArgumentType.getString(ctx, "squad")))))))
                 .then(Commands.literal("commander")
                         .then(Commands.literal("army")
                                 .then(Commands.argument("army", IntegerArgumentType.integer(1))
