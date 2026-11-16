@@ -94,6 +94,8 @@ public class PeopleMod {
     public static boolean identityPartitionsReady() { return identityPartitionsReady; }
     public static CharacterAuthority authority() { return AUTHORITY; }
     public static CharacterRegistry playerRegistry() { return PLAYER_REGISTRY; }
+    /** Canonical people partition for vanilla-generated dimensions without an image-map overlay. */
+    public static CharacterRegistry worldRegistry() { return WORLD_REGISTRY; }
     public static boolean playerRegistryAvailable() { return playerRegistryAvailable; }
     /** Corrupt saves fail closed: never regenerate courts over unreadable identity data. */
     private static final Set<MapData> INVALID_REGS = ConcurrentHashMap.newKeySet();
