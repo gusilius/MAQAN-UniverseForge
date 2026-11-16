@@ -106,6 +106,9 @@ public final class ArmyHierarchyTest {
                         && !delegation.mayIssue(first.id, "commander-18", CommandDelegation.Action.RETREAT)
                         && !delegation.mayIssue(first.id, "intruder", CommandDelegation.Action.REPOSITION),
                 "delegated commander authority enforces engagement, pursuit, retreat and identity permissions");
+        check(!delegation.assign(second.id, CommandDelegation.Mode.DELEGATED, "commander-19", "", 20,
+                        true, true, true),
+                "delegated command requires a concrete objective rather than an empty standing order");
         check(!delegation.assign(second.id, CommandDelegation.Mode.AUTONOMOUS, "", "advance", 20,
                         true, true, true),
                 "autonomous command cannot be enabled without an appointed Character commander");
