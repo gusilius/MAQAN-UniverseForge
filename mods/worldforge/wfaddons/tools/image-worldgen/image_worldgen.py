@@ -280,6 +280,106 @@ def select_independent_islands(components: list[list[int]], seed: int,
     return {component[0] for component in candidates[:max(0, budget)]}
 
 
+
+def aggregate_realm_regions(realm_labels: np.ndarray, realm_seeds: dict[int, int],
+                            width: int, height: int, seed: int,
+                            minimum_pixels: int) -> tuple[np.ndarray, dict[int, int], dict]:
+    """Merge adjacent seed-regions into organically sized, connected polities."""
+    active = np.flatnonzero(realm_labels >= 0)
+    if not active.size:
+        return realm_labels, {}, {"initial_regions": 0, "merged_regions": 0}
+    ids, counts = np.unique(realm_labels[active], return_counts=True)
+    ids = ids.astype(np.int64)
+    area = {int(r): int(n) for r, n in zip(ids, counts)}
+    parent = {int(r): int(r) for r in ids}
+    members = {int(r): [int(r)] for r in ids}
+    group_area = dict(area)
+    grid = realm_labels.reshape((height, width))
+    pairs = np.concatenate((
+        np.column_stack((grid[:, :-1].ravel(), grid[:, 1:].ravel())),
+        np.column_stack((grid[:-1, :].ravel(), grid[1:, :].ravel()))
+    ), axis=0)
+    pairs = pairs[(pairs[:, 0] >= 0) & (pairs[:, 1] >= 0) & (pairs[:, 0] != pairs[:, 1])]
+    if not pairs.size or len(ids) < 2:
+        return realm_labels, dict(realm_seeds), {
+            "initial_regions": int(len(ids)), "merged_regions": int(len(ids)), "merge_operations": 0}
+    pairs = np.sort(pairs.astype(np.int64), axis=1)
+    unique_pairs, border_lengths = np.unique(pairs, axis=0, return_counts=True)
+
+    def find(value: int) -> int:
+        while parent[value] != value:
+            parent[value] = parent[parent[value]]
+            value = parent[value]
+        return value
+
+    desired_count = max(1, int(math.ceil(len(ids) * 0.58)))
+    world_cap = max(minimum_pixels * 18, int(active.size * 0.30))
+    edges = []
+    for (a, b), border in zip(unique_pairs, border_lengths):
+        a, b = int(a), int(b)
+        jitter = ((seed ^ (a * 0x9E3779B1) ^ (b * 0x85EBCA77)) & 0xFFFF) / 65535.0
+        score = (area[a] + area[b]) / max(1, world_cap) - min(1.0, int(border) / 64.0) * 0.10 + jitter * 0.025
+        edges.append((score, a, b))
+    edges.sort()
+    merges, current_count = 0, len(ids)
+    for _, a, b in edges:
+        if current_count <= desired_count:
+            break
+        ra, rb = find(a), find(b)
+        if ra == rb:
+            continue
+        combined = group_area[ra] + group_area[rb]
+        if combined > world_cap:
+            continue
+        if (group_area[ra], -ra) < (group_area[rb], -rb):
+            ra, rb = rb, ra
+        parent[rb] = ra
+        group_area[ra] = combined
+        members[ra].extend(members.pop(rb))
+        del group_area[rb]
+        current_count -= 1
+        merges += 1
+
+    roots = sorted({find(int(r)) for r in ids}, key=lambda root: min(members[root]))
+    remap = np.full(int(ids.max()) + 1, -1, dtype=np.int32)
+    new_seeds, root_areas = {}, []
+    scales = {"tiny": 0, "small": 0, "medium": 0, "large": 0, "huge": 0}
+    for new_id, root in enumerate(roots):
+        old_ids = members[root]
+        for old_id in old_ids:
+            remap[old_id] = new_id
+        capital_source = max(old_ids, key=lambda old_id: (area[old_id], -old_id))
+        new_seeds[new_id] = int(realm_seeds[capital_source])
+        size = group_area[root]
+        root_areas.append(size)
+        share = 100.0 * size / max(1, active.size)
+        scale = ("tiny" if share < 0.6 else "small" if share < 2.5 else
+                 "medium" if share < 7.5 else "large" if share < 18.0 else "huge")
+        scales[scale] += 1
+    valid = realm_labels >= 0
+    realm_labels[valid] = remap[realm_labels[valid]]
+    return realm_labels, new_seeds, {
+        "initial_regions": int(len(ids)), "merged_regions": int(len(roots)),
+        "merge_operations": int(merges), "target_regions": int(desired_count),
+        "merge_area_cap_pixels": int(world_cap), "realm_scale_counts": scales,
+        "realm_area_pixels": {"min": int(min(root_areas)), "max": int(max(root_areas)),
+                              "mean": round(float(np.mean(root_areas)), 2)}
+    }
+
+
+def classify_realm_scale(area_pixels: int, total_land_pixels: int,
+                         independent_island: bool = False) -> tuple[str, int]:
+    """Neutral scale/tier metadata; political identity is assigned by another mod."""
+    share = 100.0 * area_pixels / max(1, total_land_pixels)
+    if independent_island and share < 2.5:
+        return "city_state", 1
+    if share < 0.6: return "tiny", 1
+    if share < 2.5: return "small", 1
+    if share < 7.5: return "medium", 2
+    if share < 18.0: return "large", 2
+    return "huge", 3
+
+
 def color_for(index: int) -> str:
     hue = (index * 137.50776405 + 18.0) % 360.0
     c = 0.72
@@ -379,6 +479,10 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         for offset, point in enumerate(seeds):
             realm_seeds[next_realm + offset] = point
         next_realm += count
+
+    realm_labels, realm_seeds, aggregation_report = aggregate_realm_regions(
+        realm_labels, realm_seeds, width, height, seed, minimum_territory_pixels)
+    realm_total = len(realm_seeds)
 
     province_labels = np.zeros(width * height, dtype=np.uint32)
     province_meta: dict[int, dict] = {}
@@ -492,8 +596,12 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
                 realm_neighbors[rb].add(ra)
 
     political_seconds = time.perf_counter() - political_started
-    realm_names = {rid: stable_name(seed, rid + 1) for rid in realm_provinces}
-    government_by_realm = {rid: GOVERNMENT_MODELS[random.Random((seed & 0xFFFFFFFFFFFFFFFF) ^ (rid * 0xD1B54A32D192ED03)).randrange(len(GOVERNMENT_MODELS))] for rid in realm_provinces}
+    realm_scale_metadata = {
+        rid: classify_realm_scale(
+            sum(province_meta[pid]["area"] for pid in pids), land_count,
+            any(province_meta[pid].get("island_realm", False) for pid in pids))
+        for rid, pids in realm_provinces.items()
+    }
     county_id_for_realm = {rid: len(province_meta) + offset + 1 for offset, rid in enumerate(realm_provinces)}
     titles = []
     realms = []
@@ -503,7 +611,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         x, z = meta["seed"] % width, meta["seed"] // width
         nx, ny = (x + 0.5) / width, (z + 0.5) / height
         titles.append({
-            "id": pid, "key": meta["key"], "name": stable_name(seed, pid, " Hold"),
+            "id": pid, "key": meta["key"], "name": "",
             "tier": 0, "parent": county_id_for_realm[rid], "color": color_for(rid + 1),
             "capital": {"x": round((x + 0.5 - width * 0.5) * blocks_per_pixel), "z": round((z + 0.5 - height * 0.5) * blocks_per_pixel), "nx": nx, "ny": ny, "province": pid},
             "area_blocks": meta["area"] * blocks_per_pixel * blocks_per_pixel,
@@ -528,20 +636,24 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         total_area = sum(province_meta[pid]["area"] for pid in pids)
         county_key = f"realm_{rid + 1:02d}_county"
         titles.append({
-            "id": county_id, "key": county_key, "name": realm_names[rid] + " Realm",
-            "tier": 1, "parent": 0, "color": color_for(rid + 1),
+            "id": county_id, "key": county_key, "name": "",
+            "tier": realm_scale_metadata[rid][1], "parent": 0, "color": color_for(rid + 1),
             "capital": {"x": round((x + 0.5 - width * 0.5) * blocks_per_pixel), "z": round((z + 0.5 - height * 0.5) * blocks_per_pixel), "nx": (x + 0.5) / width, "ny": (z + 0.5) / height, "province": capital_pid},
             "area_blocks": total_area * blocks_per_pixel * blocks_per_pixel,
             "area_pct_of_land": 100.0 * total_area / land_count,
             "children": pids, "neighbors": sorted(county_id_for_realm[n] for n in realm_neighbors[rid]),
-            "props": {},
+            "props": {"formation_scale": realm_scale_metadata[rid][0], "identity_status": "unassigned"},
         })
         realms.append({
-            "id": f"realm_{rid + 1:02d}", "name": realm_names[rid], "ruler": "",
+            "id": f"realm_{rid + 1:02d}", "name": "", "ruler": "",
             "color": color_for(rid + 1), "titles": [county_key], "overlord": None,
             "relation": "independent", "subjects": [],
             "area_blocks": total_area * blocks_per_pixel * blocks_per_pixel, "props": {
-                **government_by_realm[rid], "political_seed": seed ^ rid,
+                "formation_scale": realm_scale_metadata[rid][0],
+                "title_tier": realm_scale_metadata[rid][1],
+                "area_pct_of_land": round(100.0 * total_area / max(1, land_count), 4),
+                "province_count": len(pids), "identity_status": "unassigned",
+                "identity_provider": "external_political_mod",
                 "territorial_model": "connected_provinces_with_overseas_holdings",
             },
         })
@@ -590,8 +702,10 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     titles_doc = {
         "format": "worldforge-titles/1", "size_px": [width, height],
         "blocks_per_pixel": blocks_per_pixel,
-        "tiers": [{"index": 0, "key": "barony", "name": "Province"},
-                  {"index": 1, "key": "county", "name": "Realm"}],
+        "tiers": [{"index": 0, "key": "province", "name": "Province"},
+                  {"index": 1, "key": "small_realm", "name": "Small Realm"},
+                  {"index": 2, "key": "kingdom", "name": "Kingdom"},
+                  {"index": 3, "key": "empire", "name": "Empire"}],
         "titles": sorted(titles, key=lambda item: item["id"]),
     }
     realms_doc = {
@@ -649,7 +763,9 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
             "minor_land_components": len(minor_components),
             "minor_island_provinces": island_province_count,
             "independent_island_realms": independent_island_realm_count,
-            "independent_island_minimum_pixels": max(64, minimum_territory_pixels // 4),
+            "independent_island_minimum_pixels": max(64, minimum_territory_pixels // 16),
+            "realm_aggregation": aggregation_report,
+            "identity_assignment": "external_political_mod",
             "unclaimed_land_pixels": unclaimed_land_pixels,
             "unclaimed_land_percent": round(100.0 * unclaimed_land_pixels / max(1, land_count), 4),
             "realm_area_pixels": {
