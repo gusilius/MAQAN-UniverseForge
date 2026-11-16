@@ -6,12 +6,13 @@ import net.minecraft.client.renderer.entity.EntityRendererProvider;
 import net.minecraft.client.renderer.entity.MobRenderer;
 import net.minecraft.resources.ResourceLocation;
 
-/** Рабочий выглядит как обычный житель (без профессионального слоя). Загружается только на клиенте. */
+/** Villager body with a profession-specific vanilla overlay; equipment remains on the real worker entity. */
 public class WFWorkerRenderer extends MobRenderer<WFWorker, VillagerModel<WFWorker>> {
     private static final ResourceLocation TEXTURE = new ResourceLocation("textures/entity/villager/villager.png");
 
     public WFWorkerRenderer(EntityRendererProvider.Context ctx) {
         super(ctx, new VillagerModel<>(ctx.bakeLayer(ModelLayers.VILLAGER)), 0.5f);
+        addLayer(new WFWorkerProfessionLayer(this));
     }
 
     @Override
