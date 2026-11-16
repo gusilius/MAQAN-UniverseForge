@@ -136,12 +136,17 @@ public final class PlatformShellScreen extends Screen {
         } catch (ReflectiveOperationException ignored) {
             // Provider screens without an embedding hook still use the shared input/render host.
         }
-        // A profile/module switch changes the visible workspace, not the
-        // world selection. Providers replace it only when the user selects a
-        // different entity; this keeps the shared inspector context stable.
-        setProfile(profileForDomain(capability.domain()));
-        selectedDomain = capability.domain();
-        selectedCapabilityId = capability.id();
+        boolean cameraOnlyMount = "wf_troops".equals(providerModId)
+                && view.getClass().getName().equals("dev.worldforge.troops.mc.client.CommandScreen")
+                && WorkspaceViewState.cameraMode() != WorkspaceViewState.CameraMode.FIRST_PERSON;
+        // A camera-only mount must not hijack the currently selected map/profile.
+        // The command screen remains cached and becomes visible when the user
+        // explicitly opens the RTS/troops workspace.
+        if (!cameraOnlyMount) {
+            setProfile(profileForDomain(capability.domain()));
+            selectedDomain = capability.domain();
+            selectedCapabilityId = capability.id();
+        }
         Screen previous = providerViews.put(capability.id(), view);
         if (previous != null && previous != view) previous.removed();
         if (width > 0 && height > 0) view.init(Minecraft.getInstance(), width, height);
