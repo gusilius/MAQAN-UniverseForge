@@ -426,7 +426,9 @@ public final class PlatformShellScreen extends Screen {
             if (content != null && content.visible) {
                 Screen view = activeView();
                 if (view != null) {
-                    if (compact) {
+                    boolean ownsEmbeddedViewport = view.getClass().getName()
+                            .equals("dev.worldforge.mod.client.MapScreen");
+                    if (compact && !ownsEmbeddedViewport) {
                         int top = Math.max(content.y, MaqanUiPackRenderer.topBarHeight(width, height));
                         int bottom = Math.min(content.y + content.h,
                                 MaqanUiPackRenderer.compactDockTop(width, height));
@@ -436,8 +438,9 @@ public final class PlatformShellScreen extends Screen {
                             g.disableScissor();
                         }
                     } else {
-                        // Desktop provider screens own their side-panel geometry.
-                        // Atlas aligns its list and dossier to the concept windows.
+                        // Atlas and the embedded WorldForge political map calculate
+                        // their own map viewport; the latter also draws the live
+                        // overview into the skin minimap frame outside the map scissor.
                         view.render(g, mouseX, mouseY, partialTick);
                     }
                 } else {
