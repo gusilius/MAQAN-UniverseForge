@@ -184,8 +184,9 @@ public class RtsHud extends Screen {
             String value = (int) s.amount(entry.getKey()) + "  " + String.format("%+.1f", s.income(entry.getKey())) + "/мин";
             g.fill(x, y + 2, x + 5, y + 7, Look.resourceColor(entry.getKey()));
             g.drawString(font, label, x + 10, y, WFUi.MUTED);
-            g.drawString(font, font.plainSubstrByWidth(value, Math.max(16, max - x - 10 - font.width(label))),
-                    Math.min(max - font.width(value), x + 112), y, WFUi.TX);
+            int valueWidth = Math.max(16, max - x - 10 - font.width(label));
+            String shownValue = font.plainSubstrByWidth(value, valueWidth);
+            g.drawString(font, shownValue, Math.max(x + 10 + font.width(label), max - font.width(shownValue)), y, WFUi.TX);
             y += 14;
         }
         List<Settlement.Alert> alerts = s.alerts();
