@@ -27,3 +27,27 @@ island proximity, border extraction and preview colorization in native code.
 The generated map is deterministic for the same source image, seed, profile,
 and dependency versions. The Windows quality gate runs the synthetic
 byte-for-byte determinism test; this does not replace testing a user's own map.
+
+## Political geography (CK3-style territorial scale)
+
+The image generator now separates **territorial geometry** from political identity.
+It creates connected province groups and merges adjacent seed regions only across
+real shared land borders. A deterministic merge budget and area ceiling preserve
+a mixed political map: independent small realms can coexist with medium and large
+formations, while occasional very large connected realms can emerge on suitable
+continents. The generator does not force every landmass into an empire.
+
+Realm metadata exposes neutral fields such as `formation_scale`, `title_tier`,
+`area_pct_of_land`, `province_count`, and `identity_status`. Names, dynasties,
+government forms, laws, cultures and other political identity are intentionally
+left unassigned for the dedicated political/identity mod. The generated title
+tiers are province, small realm, kingdom and empire.
+
+Minor islands remain visible as political candidates. A viable subset can become
+independent island city-states; the rest become overseas provinces of a nearby
+realm. Tiny raster fragments remain unclaimed instead of creating meaningless
+microstates.
+
+The world package also includes `terrain-preview.png`: a shaded-relief view
+using the generated elevation and biome palette. It is a visual QA layer; the
+underlying `height16.png`, `biomes.png` and political raster remain authoritative.
