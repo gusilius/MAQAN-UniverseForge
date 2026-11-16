@@ -1434,7 +1434,8 @@ public class TroopsMod {
             boolean belongs = false;
             for (String member : squad.members) {
                 TroopEntity troop = LIVE.get(member);
-                if (troop != null && troop.isAlive() && commander.equals(troop.syncedCharacterId())) {
+                if (troop != null && troop.isAlive() && commander.equals(troop.syncedCharacterId())
+                        && commander.equals(squad.leaderCharacterId)) {
                     belongs = true;
                     break;
                 }
