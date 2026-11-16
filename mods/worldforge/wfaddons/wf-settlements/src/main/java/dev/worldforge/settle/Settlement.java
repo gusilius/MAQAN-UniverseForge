@@ -684,6 +684,8 @@ public final class Settlement {
         w.suspendedBuilding = 0;
         w.suspendedManualHauler = false;
         w.suspendedLifeAction = "";
+        w.lifeAction = "";
+        w.lifeActionUntil = 0;
         if (resume == Worker.TaskOwner.SETTLEMENT && !resumeId.isBlank()) {
             Building target = building(resumeBuilding);
             if (target != null && target.state != Building.State.PLANNED
