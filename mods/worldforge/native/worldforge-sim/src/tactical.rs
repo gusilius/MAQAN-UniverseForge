@@ -319,6 +319,28 @@ mod tests {
     }
 
     #[test]
+    fn large_batch_keeps_every_squad_revision_isolated() {
+        let snapshots: Vec<TacticalSnapshot> = (0..4096_u64)
+            .map(|revision| {
+                let mut state = sample();
+                state.revision = revision;
+                if revision % 3 == 0 { state.mode = CommandMode::PlayerDirect; }
+                if revision % 5 == 0 { state.allow_pursuit = true; }
+                state
+            })
+            .collect();
+        let decisions = evaluate_tactical_batch(&snapshots);
+        assert_eq!(decisions.len(), 4096);
+        for (snapshot, decision) in snapshots.iter().zip(decisions.iter()) {
+            assert_eq!(decision.source_revision, snapshot.revision);
+            if snapshot.mode == CommandMode::PlayerDirect {
+                assert!(decision.advisory_only);
+                assert_eq!(decision.action, TacticalAction::MaintainOrder);
+            }
+        }
+    }
+
+    #[test]
     fn direct_player_control_never_replaces_the_order() {
         let mut state = sample();
         state.mode = CommandMode::PlayerDirect;
