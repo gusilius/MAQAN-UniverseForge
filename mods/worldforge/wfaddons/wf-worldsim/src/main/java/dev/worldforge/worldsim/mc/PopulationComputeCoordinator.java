@@ -117,6 +117,7 @@ public final class PopulationComputeCoordinator {
 
     private static List<CharacterRegistry> registries(){
         List<CharacterRegistry> result=new ArrayList<>(PeopleMod.registries().values());
+        result.add(PeopleMod.worldRegistry());
         result.add(PeopleMod.playerRegistry());
         return result;
     }
