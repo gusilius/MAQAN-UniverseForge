@@ -38,6 +38,18 @@ public class PeopleTest {
         TitleData d = m.titles;
         RoleDefs defs = roles();
         NameBank names = names();
+        for (String category : List.of("realms", "regions", "provinces", "settlements")) {
+            String first = names.generate("elf", "elf", category, new Random(771L));
+            String repeated = names.generate("elf", "elf", category, new Random(771L));
+            ok(!first.isBlank() && first.equals(repeated),
+                    "NameBank supplies stable " + category + " names through race/culture/default inheritance");
+        }
+        NameBank minimalNames = new NameBank();
+        minimalNames.add("{\\"default\\":\\"basic\\",\\"cultures\\":{\\"basic\\":{\\"male\\":[\\"Aren\\"],\\"female\\":[\\"Mira\\"],\\"houses\\":[\\"Stone\"]}}}");
+        for (String category : List.of("realms", "regions", "provinces", "settlements")) {
+            String generated = minimalNames.generate("unknown-race", "missing-culture", category, new Random(19L));
+            ok(!generated.isBlank(), "minimal third-party NameBank safely generates " + category + " names");
+        }
         ok(defs.all().size() == 7 && defs.ruler().id.equals("ruler"), "роли загружены из файлов датапака: " + defs.all().size());
         List<TerritorialIdentity.RaceWeight> originRaces = List.of(
                 new TerritorialIdentity.RaceWeight("human", "", 50),

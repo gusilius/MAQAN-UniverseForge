@@ -159,16 +159,43 @@ public final class NameBank {
     public String generate(String race, String culture, String category, Random random) {
         Pool p = poolForRace(race, culture);
         List<String> values = list(p, category == null ? "" : category.toLowerCase(Locale.ROOT));
+        String key = category == null ? "" : category.toLowerCase(Locale.ROOT);
         if (values.isEmpty()) {
-            values = switch (category == null ? "" : category.toLowerCase(Locale.ROOT)) {
+            values = switch (key) {
                 case "surnames", "dynasties" -> !p.houses.isEmpty() ? p.houses : p.clans;
                 case "clans" -> !p.houses.isEmpty() ? p.houses : p.dynasties;
-                case "realms", "regions", "provinces" -> p.settlements;
                 default -> List.of();
             };
         }
-        if (values.isEmpty()) throw new IllegalStateException("Нет заполненного пула '" + category + "' для расы '" + race + "'");
+        // Datapacks may define only personal names. Inherit missing place-name categories
+        // from the configured default culture without replacing race/culture-specific pools.
+        if (values.isEmpty()) {
+            Pool fallback = cultures.get(def);
+            if (fallback != null) values = list(fallback, key);
+        }
+        if (values.isEmpty()) {
+            String generated = generatedPlaceName(p, key, random);
+            if (generated != null) return generated;
+            throw new IllegalStateException("Нет заполненного пула '" + category + "' для расы '" + race + "'");
+        }
         return pick(values, random);
+    }
+
+    /** Stable morphology fallback for minimal third-party packs that omit place-name data. */
+    private static String generatedPlaceName(Pool pool, String category, Random random) {
+        if (!Set.of("realms", "regions", "provinces", "settlements").contains(category)) return null;
+        List<String> anchors = !pool.houses.isEmpty() ? pool.houses
+                : !pool.surnames.isEmpty() ? pool.surnames
+                : !pool.male.isEmpty() ? pool.male : pool.female;
+        if (anchors.isEmpty()) return null;
+        String anchor = pick(anchors, random);
+        String[] prefixes = switch (category) {
+            case "realms" -> new String[]{"Земли", "Предел", "Край", "Владения"};
+            case "regions" -> new String[]{"Долина", "Нагорье", "Берег", "Лес"};
+            case "provinces" -> new String[]{"Удел", "Округ", "Земля", "Владение"};
+            default -> new String[]{"Посад", "Слобода", "Старый", "Новый"};
+        };
+        return prefixes[random.nextInt(prefixes.length)] + " " + anchor;
     }
 
     private static String pick(List<String> values, Random random) {
