@@ -148,6 +148,16 @@ public class TroopsTest {
         check(operation.complete("objective secured") && operation.terminal(),
                 "operation records a terminal outcome exactly once");
 
+        // Профессиональные участки: клиентский выбор и серверная валидация используют один каталог.
+        check(WorkArea.values().length == 8, "в каталоге восемь поддерживаемых типов рабочих участков");
+        check(WorkArea.validKind(0) && WorkArea.validKind(7)
+                        && !WorkArea.validKind(-1) && !WorkArea.validKind(8),
+                "границы типов рабочих участков проверяются");
+        check(WorkArea.byKind(5) == WorkArea.HARVEST
+                        && "farmer".equals(WorkArea.byKind(5).profession)
+                        && "herbalist".equals(WorkArea.byKind(7).profession),
+                "сбор урожая и трав назначаются профильным профессиям");
+
         // строи
         for (Formations.Type t : Formations.Type.values()) {
             for (int n : new int[]{1, 5, 17, 40}) {
