@@ -205,6 +205,28 @@ public final class ImageWorldIdentityTest {
             check(!dynasty.name.isBlank() && dynasty.members.size() == entry.getValue().size(),
                     "named dynasty links every canonical house member: " + entry.getKey());
         }
+        int importedPoliticalTitles = politics.syncMapTitles(map.name, titles);
+        PoliticalIdentitySynchronizer.Report rulerSync =
+                PoliticalIdentitySynchronizer.synchronizeRulers(map.name, titles, people, politics);
+        boolean allCrownHoldersLinked = true;
+        for (TitleData.Realm realm : titles.realmList()) {
+            TitleData.Title crown = null;
+            for (String key : realm.titleKeys) {
+                TitleData.Title candidate = titles.byKey(key);
+                if (candidate != null && (crown == null || candidate.tier > crown.tier
+                        || (candidate.tier == crown.tier && candidate.key.compareTo(crown.key) < 0)))
+                    crown = candidate;
+            }
+            String rulerId = String.valueOf(realm.props.getOrDefault("rulerCharacterId", ""));
+            Statecraft.Title politicalCrown = crown == null ? null
+                    : politics.title(Statecraft.mapTitleId(map.name, crown.key));
+            allCrownHoldersLinked &= politicalCrown != null
+                    && rulerId.equals(politicalCrown.holderCharacterId);
+        }
+        check(importedPoliticalTitles > 0 && rulerSync.linked() == titles.realmList().size()
+                        && rulerSync.problems().isEmpty() && allCrownHoldersLinked,
+                "real image map imports every sovereign title and binds each crown to its canonical court ruler");
+
         TitleData restoredTitles = titles.copy();
         boolean mapIdentityRoundTrip = restoredTitles.realmList().size() == titles.realmList().size()
                 && restoredTitles.allTitles().size() == titles.allTitles().size();
@@ -240,6 +262,9 @@ public final class ImageWorldIdentityTest {
                         && dynastyIds.stream().allMatch(id -> restoredPolitics.dynasty(id) != null
                         && !restoredPolitics.dynasty(id).name.isBlank()),
                 "named houses and dynasties survive political save/load");
+        check(politics.titles().stream().allMatch(title -> restoredPolitics.title(title.id) != null
+                        && title.holderCharacterId.equals(restoredPolitics.title(title.id).holderCharacterId)),
+                "all Statecraft title-holder Character IDs survive the same political save/load");
 
         System.out.println("Image identity summary: realms=" + titles.realmList().size()
                 + ", territories=" + titles.allTitles().size() + ", owned=" + ownedTitles
