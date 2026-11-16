@@ -190,11 +190,11 @@ public final class CommandScreen extends Screen {
         x -= BTN_W + 4;
         l.add(new Btn("Участки (Y)", x, 4, BTN_W, workMode >= 0, this::cycleWorkMode));
         x -= BTN_W + 4;
-        l.add(new Btn("Стратегия", x, 4, BTN_W, CommandMode.RIG.view == CameraRig.View.SKY, () -> CommandMode.RIG.setView(CameraRig.View.SKY)));
+        l.add(new Btn("Стратегия", x, 4, BTN_W, CommandMode.RIG.view == CameraRig.View.SKY, () -> CommandMode.setCameraView(CameraRig.View.SKY)));
         x -= BTN_W + 4;
-        l.add(new Btn("Изометрия", x, 4, BTN_W, CommandMode.RIG.view == CameraRig.View.TACTICS, () -> CommandMode.RIG.setView(CameraRig.View.TACTICS)));
+        l.add(new Btn("Изометрия", x, 4, BTN_W, CommandMode.RIG.view == CameraRig.View.TACTICS, () -> CommandMode.setCameraView(CameraRig.View.TACTICS)));
         x -= BTN_W + 4;
-        l.add(new Btn("Свободная", x, 4, BTN_W, CommandMode.RIG.view == CameraRig.View.FREE, () -> CommandMode.RIG.setView(CameraRig.View.FREE)));
+        l.add(new Btn("Свободная", x, 4, BTN_W, CommandMode.RIG.view == CameraRig.View.FREE, () -> CommandMode.setCameraView(CameraRig.View.FREE)));
         return l;
     }
 
@@ -453,7 +453,7 @@ public final class CommandScreen extends Screen {
         }
         if (CommandMode.TOGGLE.matches(key, scan)) { CommandMode.exit(minecraft); return true; }
         boolean ctrl = hasControlDown();
-        if (key == GLFW.GLFW_KEY_TAB) { CommandMode.RIG.cycle(); return true; }
+        if (key == GLFW.GLFW_KEY_TAB) { CommandMode.cycleCameraView(); return true; }
         if (key == GLFW.GLFW_KEY_B) { toggleBuild(); return true; }
         if (key == GLFW.GLFW_KEY_H) {
             settlementOpen = !settlementOpen;
@@ -607,7 +607,7 @@ public final class CommandScreen extends Screen {
         Minecraft mc = minecraft;
         if (mc.level == null || mc.player == null) return;
         int w = width, h = height;
-        if (CommandMode.vp != null) {
+        if (CommandMode.active && CommandMode.vp != null) {
             for (net.minecraft.world.entity.Entity en : mc.level.entitiesForRendering()) {
                 if (!(en instanceof LivingEntity le) || !le.isAlive() || !CommandMode.selectable(mc, le)) continue;
                 double[] p = Projection.project(CommandMode.vp, le.getX() - CommandMode.cam.x, le.getY() - CommandMode.cam.y, le.getZ() - CommandMode.cam.z, w, h);
