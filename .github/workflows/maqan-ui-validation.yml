@@ -32,3 +32,4 @@ jobs:
           gradle --no-daemon test
           --tests "dev.maqan.platform.client.MaqanUiPackAdaptiveLayoutTest"
           --tests "dev.maqan.platform.client.WorkspaceResponsiveLayoutTest"
+          --tests "dev.maqan.platform.client.WorkspaceRuntimeTest"
