@@ -391,8 +391,17 @@ public class PeopleMod {
     }
 
     static void saveAll(MinecraftServer server) {
+        persistAllNow(server);
+    }
+
+    /**
+     * Coordinated identity checkpoint entry point for wf-realms.
+     * Online player inventories are reconciled before every canonical Character partition is committed.
+     */
+    public static boolean persistAllNow(MinecraftServer server) {
+        if (server == null) return false;
         PlayerInventoryBridge.syncOnline(server);
-        persistAllRegistries(server);
+        return persistAllRegistries(server);
     }
 
     /** Persist only the registry that owns this Character; unrelated map failures must not block a safe death snapshot. */

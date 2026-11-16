@@ -617,14 +617,42 @@ public class RealmsMod {
         } catch (Exception ex) { LOGGER.error("wf_realms: не удалось прочитать состояние: {}", ex.toString()); }
     }
 
+    /**
+     * Coordinates the four canonical identity domains before publishing the political checkpoint.
+     * Each domain keeps its own atomic file format; the ordering prevents realms/titles from
+     * advancing on disk when people or settlement snapshots failed to commit.
+     */
+    private static boolean persistIdentityDomains(MinecraftServer server) {
+        if (net.minecraftforge.fml.ModList.get().isLoaded("wf_people")
+                && !PeopleMod.persistAllNow(server)) {
+            LOGGER.error("wf_realms: identity checkpoint aborted because canonical Character registries did not persist");
+            return false;
+        }
+        if (net.minecraftforge.fml.ModList.get().isLoaded("wf_settle")) {
+            try {
+                Class<?> settlements = Class.forName("dev.worldforge.settle.mc.SettleMod");
+                Object saved = settlements.getMethod("saveDurably", MinecraftServer.class).invoke(null, server);
+                if (!Boolean.TRUE.equals(saved)) {
+                    LOGGER.error("wf_realms: identity checkpoint aborted because Colony/Settlement snapshot did not persist");
+                    return false;
+                }
+            } catch (ReflectiveOperationException | LinkageError ex) {
+                LOGGER.error("wf_realms: settlement identity checkpoint could not be coordinated: {}", ex.toString(), ex);
+                return false;
+            }
+        }
+        return true;
+    }
+
     public static synchronized boolean persistNow(MinecraftServer server) {
-        if (server == null) return false;
+        if (server == null || !persistIdentityDomains(server)) return false;
         try {
             Path root = server.getWorldPath(LevelResource.ROOT).resolve("worldforge");
             Map<Path, byte[]> writes = new LinkedHashMap<>();
             writes.put(file(server), REALMS.toJson().getBytes(StandardCharsets.UTF_8));
             writes.put(politicsFile(server), POLITICS.toJson().getBytes(StandardCharsets.UTF_8));
             AtomicFileBatch.commit(root, writes);
+            LOGGER.info("wf_realms: coordinated identity checkpoint committed (Characters, Colonies, Realms, Statecraft)");
             return true;
         } catch (Exception ex) {
             LOGGER.error("wf_realms: atomic political checkpoint failed: {}", ex.toString(), ex);
