@@ -561,11 +561,10 @@ public final class CommandScreen extends Screen {
                 x += w + 4;
                 l.add(new Btn("Стройка", x, y, w, buildOpen, this::toggleBuild));
                 x += w + 4;
-                l.add(new Btn("Участки", x, y, w, workMode >= 0, this::cycleWorkMode));
                 if (!selectedWorkerIds().isEmpty())
-                    l.add(new Btn("⚒", x + w + 4, y, 24, professionalToolsOpen, () -> professionalToolsOpen = !professionalToolsOpen));
+                    l.add(new Btn("⚒", x, y, 24, professionalToolsOpen, () -> professionalToolsOpen = !professionalToolsOpen));
                 if (!selectedTroopIds().isEmpty())
-                    l.add(new Btn("⚔", x + w + 32, y, 24, unitToolsOpen, () -> unitToolsOpen = !unitToolsOpen));
+                    l.add(new Btn("⚔", x + 28, y, 24, unitToolsOpen, () -> unitToolsOpen = !unitToolsOpen));
                 if (professionalToolsOpen) addProfessionalTaskButtons(l);
                 if (unitToolsOpen) addUnitToolButtons(l);
                 return l;
