@@ -31,6 +31,7 @@ public final class Courts {
     }
 
     private static int ensureBatched(TitleData d, TitleEditor ed, CharacterRegistry reg, RoleDefs defs, NameBank names, long seed, int year) {
+        TerritorialIdentity.syncNameHierarchy(names);
         int created = 0;
         // Only title offices inside an actually owned realm belong to the living political
         // hierarchy. Geography-only maps still contain thousands of unowned barony/county

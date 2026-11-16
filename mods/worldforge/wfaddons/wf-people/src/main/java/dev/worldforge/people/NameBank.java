@@ -134,6 +134,16 @@ public final class NameBank {
         return p != null && !p.male.isEmpty() && !p.female.isEmpty() && !p.houses.isEmpty();
     }
 
+    /** Merge the authoritative wf-origins race ancestry without deleting datapack overrides. */
+    public void addRaceParents(Map<String, String> parents) {
+        if (parents == null) return;
+        for (Map.Entry<String, String> entry : parents.entrySet()) {
+            String race = entry.getKey(), parent = entry.getValue();
+            if (race != null && parent != null && !race.isBlank() && !parent.isBlank()
+                    && !race.equals(parent)) raceParents.put(race, parent);
+        }
+    }
+
     public String culture(String wanted) { return cultures.containsKey(wanted) ? wanted : def; }
 
     public String pickGivenName(String race, String culture, String gender, Random random) {

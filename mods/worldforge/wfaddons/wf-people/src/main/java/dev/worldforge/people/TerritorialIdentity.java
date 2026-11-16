@@ -111,6 +111,17 @@ public final class TerritorialIdentity {
         return chooseSubrace(parentRace, originRaces(), random);
     }
 
+    /** Synchronize NameBank ancestry from the canonical wf-origins registry. */
+    public static int syncNameHierarchy(NameBank names) {
+        Objects.requireNonNull(names, "name bank");
+        Map<String, String> parents = new LinkedHashMap<>();
+        for (RaceWeight race : originRaces())
+            if (race != null && race.parent() != null && !race.parent().isBlank())
+                parents.put(race.id(), race.parent());
+        names.addRaceParents(parents);
+        return parents.size();
+    }
+
     private static List<RaceWeight> originRaces() {
         try {
             Class<?> mod = Class.forName("dev.worldforge.origins.mc.OriginsMod");
