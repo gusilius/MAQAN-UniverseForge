@@ -1817,7 +1817,8 @@ public final class Settlement {
             }
             if (m.get("suspended_tasks") instanceof List<?> savedTasks) {
                 for (Object item : savedTasks) {
-                    if (w.suspendedTasks.size() >= 8 || !(item instanceof Map<?, ?> task)) break;
+                    if (w.suspendedTasks.size() >= 8) break;
+                    if (!(item instanceof Map<?, ?> task)) continue;
                     try {
                         Worker.TaskOwner owner = Worker.TaskOwner.valueOf(String.valueOf(task.get("owner")));
                         String taskId = task.get("id") instanceof String value ? value : "";
