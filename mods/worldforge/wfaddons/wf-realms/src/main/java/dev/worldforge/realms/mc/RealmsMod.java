@@ -108,7 +108,17 @@ public class RealmsMod {
                     Object settlements = r.props.get("emergence.settlement_count");
                     return Math.max(0, settlements instanceof Number n ? n.intValue() : 0);
                 }
-                return Math.max(1, r.titleKeys.size());
+                // Image-generated states have one top-level state title; their actual
+                // province count lives below region titles. Count canonical tier-0 land
+                // provinces, otherwise every generated state remains a one-province band.
+                int provinceCount = 0;
+                for (var map : WorldForgeMod.loadedMaps().values()) {
+                    if (map.titles == null || !map.titles.realms.containsKey(realm)) continue;
+                    for (TitleData.Title title : map.titles.allTitles())
+                        if (title.tier == 0 && map.titles.realmOf(title) != null
+                                && realm.equals(map.titles.realmOf(title).id)) provinceCount++;
+                }
+                return Math.max(1, provinceCount);
             }
             @Override public int prestige(String realm) { TitleData.Realm r = realm(realm); return r != null && r.props.get("prestige") instanceof Number n ? n.intValue() : 0; }
             @Override public boolean flag(String realm, String flag) { TitleData.Realm r = realm(realm); return r != null && Boolean.parseBoolean(String.valueOf(r.props.get("flag." + flag))); }
