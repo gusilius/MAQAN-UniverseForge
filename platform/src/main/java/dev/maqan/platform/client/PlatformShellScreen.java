@@ -539,7 +539,8 @@ public final class PlatformShellScreen extends Screen {
         if (view == null) return false;
         String name = view.getClass().getName();
         return name.equals("dev.worldforge.mod.client.MapScreen")
-                || name.equals("dev.worldforge.rts.mc.client.RtsHud");
+                || name.equals("dev.worldforge.rts.mc.client.RtsHud")
+                || name.equals("dev.worldforge.troops.mc.client.CommandScreen");
     }
 
     @Override public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
