@@ -53,6 +53,22 @@ class WorkspaceRuntimeTest {
     }
 
     @Test
+    void failedProviderActionIsReportedWithoutBreakingTheWorkspace() {
+        PlatformSelectionContext.publish("wf_people", "person-3", "CHARACTER",
+                "Eowyn", "middle-earth", "Rohan");
+        var selection = PlatformSelectionContext.current();
+        WorkspaceRuntime.registerAction(new WorkspaceRuntime.Action(
+                "wf_people.fail", "Failing action", "wf_people", ignored -> true,
+                ignored -> { throw new IllegalStateException("provider failure"); }));
+
+        assertFalse(WorkspaceRuntime.executeAction("wf_people.fail", selection));
+        var latest = WorkspaceRuntime.journal(1).get(0);
+        assertEquals(WorkspaceRuntime.Severity.ERROR, latest.severity());
+        assertEquals("action", latest.category());
+        assertTrue(latest.message().contains("Failing action"));
+    }
+
+    @Test
     void searchResultsCanOpenThroughTheirOwningProvider() {
         var entry = new WorkspaceRuntime.SearchEntry(
                 "planet-1", "maqan_atlas", "PLANET", "Arrakis", "dune-system",
