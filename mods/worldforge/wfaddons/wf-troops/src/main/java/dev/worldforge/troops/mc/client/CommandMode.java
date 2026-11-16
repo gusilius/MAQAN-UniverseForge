@@ -403,7 +403,14 @@ public final class CommandMode {
         }
 
         @SubscribeEvent
-        public void logout(ClientPlayerNetworkEvent.LoggingOut e) { active = false; firstPersonCommand = false; camEntity = null; SEL.clear(); }
+        public void logout(ClientPlayerNetworkEvent.LoggingOut e) {
+            Minecraft mc = Minecraft.getInstance();
+            if (active) stop(mc, false);
+            else MaqanTroopsCameraBridge.publishFirstPerson();
+            firstPersonCommand = false;
+            camEntity = null;
+            SEL.clear();
+        }
 
         @SubscribeEvent
         public void interaction(InputEvent.InteractionKeyMappingTriggered e) {
@@ -414,7 +421,13 @@ public final class CommandMode {
         public void tick(TickEvent.ClientTickEvent e) {
             if (e.phase != TickEvent.Phase.END) return;
             Minecraft mc = Minecraft.getInstance();
-            if (mc.player == null || mc.level == null) { active = false; firstPersonCommand = false; camEntity = null; return; }
+            if (mc.player == null || mc.level == null) {
+                if (active) stop(mc, false);
+                else MaqanTroopsCameraBridge.publishFirstPerson();
+                firstPersonCommand = false;
+                camEntity = null;
+                return;
+            }
             boolean radialHeld = RADIAL_COMMAND.isDown();
             if (!radialHeld) radialSuppressed = false;
             if (mc.screen instanceof RadialCommandScreen radial) {
