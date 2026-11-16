@@ -34,6 +34,40 @@ public final class NavigatorPlatformSelectionBridge {
         publish("", "", "", "", "");
     }
 
+    /**
+     * Register an Atlas-owned inspector without introducing a compile-time
+     * dependency on the optional Platform module. Rows are {section,label,value}.
+     */
+    public static void registerInspector(
+            java.util.function.Function<String, java.util.List<String[]>> fields) {
+        if (fields == null) return;
+        try {
+            Class<?> runtime = Class.forName("dev.maqan.platform.client.WorkspaceRuntime");
+            Class<?> providerType = Class.forName(
+                    "dev.maqan.platform.client.WorkspaceRuntime$InspectorProvider");
+            Class<?> fieldType = Class.forName(
+                    "dev.maqan.platform.client.WorkspaceRuntime$InspectorField");
+            Object provider = java.lang.reflect.Proxy.newProxyInstance(providerType.getClassLoader(),
+                    new Class<?>[]{providerType}, (proxy, method, args) -> {
+                        if (!method.getName().equals("inspect")) return null;
+                        Object selection = args[0];
+                        String entityId = (String) selection.getClass().getMethod("entityId").invoke(selection);
+                        java.util.List<String[]> rows = fields.apply(entityId);
+                        java.util.List<Object> result = new java.util.ArrayList<>();
+                        if (rows != null) for (String[] row : rows) {
+                            if (row == null || row.length < 3) continue;
+                            result.add(fieldType.getConstructor(String.class, String.class, String.class)
+                                    .newInstance(row[0], row[1], row[2]));
+                        }
+                        return result;
+                    });
+            runtime.getMethod("registerInspector", String.class, providerType)
+                    .invoke(null, PROVIDER_ID, provider);
+        } catch (ReflectiveOperationException | LinkageError ignored) {
+            // Atlas remains independent when MAQAN Platform is not installed.
+        }
+    }
+
     private static String clean(String value) {
         return value == null ? "" : value.trim();
     }
