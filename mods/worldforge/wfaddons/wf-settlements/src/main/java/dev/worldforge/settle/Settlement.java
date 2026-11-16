@@ -1670,6 +1670,17 @@ public final class Settlement {
             m.put("id", w.id); m.put("name", w.name); m.put("profession", w.profession); m.put("assigned_profession", w.assignedProfession); m.put("person", w.person); m.put("building", w.building); m.put("status", w.status); m.put("x", w.x); m.put("z", w.z);
             m.put("task_owner", w.taskOwner.name()); m.put("task_id", w.taskId); m.put("task_revision", w.taskRevision);
             m.put("suspended_task_owner", w.suspendedTaskOwner.name()); m.put("suspended_task_id", w.suspendedTaskId);
+            List<Object> suspendedTasks = new ArrayList<>();
+            for (Worker.TaskSnapshot task : w.suspendedTasks) {
+                Map<String, Object> savedTask = new LinkedHashMap<>();
+                savedTask.put("owner", task.owner().name()); savedTask.put("id", task.id());
+                savedTask.put("profession", task.profession()); savedTask.put("building", task.building());
+                savedTask.put("manual_hauler", task.manualHauler()); savedTask.put("life_action", task.lifeAction());
+                savedTask.put("life_x", task.lifeTargetX()); savedTask.put("life_z", task.lifeTargetZ());
+                savedTask.put("life_until", task.lifeActionUntil());
+                suspendedTasks.add(savedTask);
+            }
+            m.put("suspended_tasks", suspendedTasks);
             m.put("suspended_profession", w.suspendedProfession); m.put("suspended_building", w.suspendedBuilding);
             m.put("suspended_manual_hauler", w.suspendedManualHauler);
             m.put("suspended_life_action", w.suspendedLifeAction);
@@ -1812,6 +1823,34 @@ public final class Settlement {
             } catch (RuntimeException invalidTaskState) {
                 w.taskOwner = Worker.TaskOwner.NONE; w.taskId = "";
                 w.suspendedTaskOwner = Worker.TaskOwner.NONE; w.suspendedTaskId = ""; w.militaryOrderId = "";
+            }
+            if (m.get("suspended_tasks") instanceof List<?> savedTasks) {
+                for (Object item : savedTasks) {
+                    if (w.suspendedTasks.size() >= 8 || !(item instanceof Map<?, ?> task)) break;
+                    try {
+                        Worker.TaskOwner owner = Worker.TaskOwner.valueOf(String.valueOf(task.get("owner")));
+                        String taskId = task.get("id") instanceof String value ? value : "";
+                        String profession = task.get("profession") instanceof String value ? value : "";
+                        int building = task.get("building") instanceof Number value ? Math.max(0, value.intValue()) : 0;
+                        boolean hauler = Boolean.TRUE.equals(task.get("manual_hauler"));
+                        String action = task.get("life_action") instanceof String value ? value : "";
+                        double lifeX = task.get("life_x") instanceof Number value ? value.doubleValue() : 0;
+                        double lifeZ = task.get("life_z") instanceof Number value ? value.doubleValue() : 0;
+                        double lifeUntil = task.get("life_until") instanceof Number value ? value.doubleValue() : 0;
+                        if (!Double.isFinite(lifeX) || !Double.isFinite(lifeZ) || !Double.isFinite(lifeUntil)) continue;
+                        if (owner != Worker.TaskOwner.NONE && taskId.isBlank()) continue;
+                        w.suspendedTasks.addLast(new Worker.TaskSnapshot(owner, taskId, profession, building,
+                                hauler, action, lifeX, lifeZ, lifeUntil));
+                    } catch (RuntimeException ignored) { /* discard one malformed suspended task */ }
+                }
+                w.syncSuspendedTaskMirror();
+            } else if (w.suspendedTaskOwner != Worker.TaskOwner.NONE && !w.suspendedTaskId.isBlank()) {
+                // Backward compatibility with single-level task suspension saves.
+                w.suspendedTasks.addLast(new Worker.TaskSnapshot(w.suspendedTaskOwner, w.suspendedTaskId,
+                        w.suspendedProfession, w.suspendedBuilding, w.suspendedManualHauler,
+                        w.suspendedLifeAction, w.suspendedLifeTargetX, w.suspendedLifeTargetZ,
+                        w.suspendedLifeActionUntil));
+                w.syncSuspendedTaskMirror();
             }
             // Drop orphaned current leases instead of permanently excluding a resident from auto-staffing.
             if (w.taskOwner == Worker.TaskOwner.SETTLEMENT
