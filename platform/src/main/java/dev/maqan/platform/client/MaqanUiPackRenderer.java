@@ -102,18 +102,18 @@ public final class MaqanUiPackRenderer {
 
     public static void render(GuiGraphics graphics, int screenWidth, int screenHeight) {
         if (screenWidth <= 0 || screenHeight <= 0 || !assetsAvailable()) return;
-        MaqanUiPackLayout.ViewportTransform transform = loadedLayout.transform(screenWidth, screenHeight);
         Map<String, int[]> themeLayout = loadedLayout.skin(activeTheme);
+        MaqanUiPackAdaptiveLayout.Result adaptive =
+                MaqanUiPackAdaptiveLayout.calculate(screenWidth, screenHeight, themeLayout);
         for (String key : FRAME_LAYERS) {
-            int[] rect = themeLayout.get(key);
-            if (rect == null) continue;
-            int x = transform.screenX(rect[0]);
-            int y = transform.screenY(rect[1]);
-            int width = transform.screenWidth(rect[2] - rect[0]);
-            int height = transform.screenHeight(rect[3] - rect[1]);
+            // Compact layouts replace the side windows with the shell's drawer
+            // model; drawing their desktop frames here would cover the map.
+            if (adaptive.compact() && (key.equals("lp") || key.equals("rp") || key.equals("cor"))) continue;
+            MaqanUiPackAdaptiveLayout.Rect rect = adaptive.get(key);
+            if (rect == null || rect.width() <= 0 || rect.height() <= 0) continue;
             ResourceLocation texture = texture(activeTheme, loadedLayout.textureName(key));
             int[] sourceSize = SOURCE_SIZES.get(activeTheme).get(key);
-            graphics.blit(texture, x, y, width, height,
+            graphics.blit(texture, rect.x(), rect.y(), rect.width(), rect.height(),
                     0, 0, sourceSize[0], sourceSize[1], sourceSize[0], sourceSize[1]);
         }
     }
