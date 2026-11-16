@@ -23,6 +23,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.Optional;
+import java.util.ArrayDeque;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.TreeMap;
 
 /**
@@ -40,6 +43,9 @@ public final class VanillaWorldGeography {
     private static final int SAMPLE_STEP = 4;
     private static final int SCHEMA = 1;
     private static final Map<String, Region> REGIONS = new TreeMap<>();
+    private static final Map<String, ArrayDeque<ChunkPos>> PENDING = new TreeMap<>();
+    private static final Set<String> PENDING_KEYS = new HashSet<>();
+    private static final int MAX_CAPTURE_CHUNKS_PER_TICK = 8;
     private static boolean loaded;
     private static boolean dirty;
     private static long lastPersistGameTime = Long.MIN_VALUE;
@@ -55,13 +61,38 @@ public final class VanillaWorldGeography {
 
     @SubscribeEvent
     public void onChunkLoad(ChunkEvent.Load event) {
-        if (event.getLevel() instanceof ServerLevel level) capture(level, event.getChunk());
+        if (!(event.getLevel() instanceof ServerLevel level)) return;
+        enqueue(level, event.getChunk().getPos());
     }
 
     @SubscribeEvent
     public void onServerTick(TickEvent.ServerTickEvent event) {
-        if (event.phase == TickEvent.Phase.END)
-            flushIfDue(net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer());
+        if (event.phase != TickEvent.Phase.END) return;
+        MinecraftServer server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
+        if (server == null) return;
+        int processed = 0;
+        for (ServerLevel level : server.getAllLevels()) {
+            String dimension = level.dimension().location().toString();
+            ArrayDeque<ChunkPos> queue = PENDING.get(dimension);
+            if (queue == null) continue;
+            while (processed < MAX_CAPTURE_CHUNKS_PER_TICK && !queue.isEmpty()) {
+                ChunkPos position = queue.removeFirst();
+                PENDING_KEYS.remove(dimension + "|" + position.x + "|" + position.z);
+                ChunkAccess loadedChunk = level.getChunkSource().getChunkNow(position.x, position.z);
+                if (loadedChunk != null) capture(level, loadedChunk);
+                processed++;
+            }
+            if (queue.isEmpty()) PENDING.remove(dimension);
+            if (processed >= MAX_CAPTURE_CHUNKS_PER_TICK) break;
+        }
+        flushIfDue(server);
+    }
+
+    private static synchronized void enqueue(ServerLevel level, ChunkPos position) {
+        String dimension = level.dimension().location().toString();
+        String key = dimension + "|" + position.x + "|" + position.z;
+        if (!PENDING_KEYS.add(key)) return;
+        PENDING.computeIfAbsent(dimension, ignored -> new ArrayDeque<>()).addLast(position);
     }
 
     @SubscribeEvent
@@ -172,6 +203,7 @@ public final class VanillaWorldGeography {
         if (server == null) return;
         if (activeServer != server) {
             REGIONS.clear();
+            PENDING.clear(); PENDING_KEYS.clear();
             dirty = false;
             loaded = false;
             lastPersistGameTime = Long.MIN_VALUE;
