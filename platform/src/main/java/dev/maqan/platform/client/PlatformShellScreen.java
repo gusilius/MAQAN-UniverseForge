@@ -856,7 +856,7 @@ public final class PlatformShellScreen extends Screen {
                     : profile == Profile.RTS ? "UNIT / FORMATION"
                     : profile == Profile.SETTLEMENTS ? "BUILDING / HOUSEHOLD" : "OBJECT DOSSIER",
                     inspector.x + 12, inspector.y + 12, CYAN, false);
-            drawInspectorPanel(g, inspector);
+            drawInspectorPanel(g, inspector, mouseX, mouseY);
         }
     }
 
@@ -1126,10 +1126,10 @@ public final class PlatformShellScreen extends Screen {
         }
 
         List<WorkspaceRuntime.InspectorField> fields = WorkspaceRuntime.inspect(selected);
-        int total = 4 + 17 + 18 + 16 + (selected.summary().isBlank() ? 0 : 19);
+        int total = 4 + 17 + 18 + 16 + 9 + (selected.summary().isBlank() ? 0 : 19);
         for (WorkspaceRuntime.InspectorField field : fields)
             total += (field.section().isBlank() ? 0 : 14) + 25;
-        if (!inspectorActions.isEmpty()) total += 11 + inspectorActions.size() * 23;
+        if (!inspectorActions.isEmpty()) total += 12 + inspectorActions.size() * 23;
         inspectorContentHeight = total;
         inspectorScroll = Math.max(0, Math.min(inspectorScroll, Math.max(0, total - bodyHeight)));
 
