@@ -1451,11 +1451,6 @@ public class TroopsMod {
             src.sendFailure(Component.literal("Не удалось изменить полномочия отряда"));
             return 0;
         }
-        if (!saveDurably()) {
-            actionPersistenceBlocked = true;
-            src.sendFailure(Component.literal("Политика изменена в памяти, но не сохранена; военные приказы заблокированы до сверки"));
-            return 0;
-        }
         String label = switch (mode) {
             case PLAYER_DIRECT -> "Личное управление";
             case DELEGATED -> "Делегированное командование";
