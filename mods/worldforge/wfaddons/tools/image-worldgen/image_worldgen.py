@@ -695,6 +695,14 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         if coast_cells:
             coast_cells.sort(key=lambda i: (i * 2654435761 + seed) & 0xFFFFFFFF)
             add_settlement("port", coast_cells[0], 30 + rid)
+        # Every polity needs at least a capital and one additional settlement
+        # anchor, even when its territorial footprint is a single province.
+        realm_settlement_count = sum(
+            item["realm_id"] == f"realm_{rid + 1:02d}" for item in settlements)
+        if realm_settlement_count < 2:
+            fallback_point = next((point for point in reversed(realm_cells)
+                                   if point != capital), capital)
+            add_settlement("village", fallback_point, 90 + rid)
 
     geography_started = time.perf_counter()
     # Geographic layers come from the shared semantic classifier and seeded relief.
