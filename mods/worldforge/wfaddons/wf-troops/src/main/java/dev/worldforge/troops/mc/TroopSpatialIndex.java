@@ -36,8 +36,8 @@ final class TroopSpatialIndex {
         if (!Double.isFinite(x) || !Double.isFinite(z) || !Double.isFinite(radius) || radius < 0) return 0;
         int minX = floorCell(x - radius), maxX = floorCell(x + radius);
         int minZ = floorCell(z - radius), maxZ = floorCell(z + radius);
-        long cells = (long) (maxX - (long) minX + 1) * (maxZ - (long) minZ + 1);
-        if (cells > 4096) return 0; // fail closed on pathological query radii
+        long width = (long) maxX - minX + 1L, depth = (long) maxZ - minZ + 1L;
+        if (width > 4096 || depth > 4096 || width * depth > 4096) return 0; // fail closed on pathological query radii
         double r2 = radius * radius;
         int found = 0;
         for (int cz = minZ; ; cz++) {
@@ -119,7 +119,8 @@ final class TroopSpatialIndex {
 
     private static int floorCell(double coordinate) {
         double value = Math.floor(coordinate / CELL_SIZE);
-        if (value < Integer.MIN_VALUE || value > Integer.MAX_VALUE) return 0;
+        if (value <= Integer.MIN_VALUE) return Integer.MIN_VALUE;
+        if (value >= Integer.MAX_VALUE) return Integer.MAX_VALUE;
         return (int) value;
     }
 
