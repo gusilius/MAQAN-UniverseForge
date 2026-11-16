@@ -1809,6 +1809,15 @@ public final class Settlement {
                 w.taskOwner = Worker.TaskOwner.NONE; w.taskId = "";
                 w.suspendedTaskOwner = Worker.TaskOwner.NONE; w.suspendedTaskId = ""; w.militaryOrderId = "";
             }
+            // Drop orphaned current leases instead of permanently excluding a resident from auto-staffing.
+            if (w.taskOwner == Worker.TaskOwner.SETTLEMENT
+                    && (w.building == 0 || !w.taskId.equals("settlement:building:" + w.building))) {
+                w.taskOwner = Worker.TaskOwner.NONE; w.taskId = "";
+            } else if (w.taskOwner == Worker.TaskOwner.PLAYER && !w.manualOrder && !w.manualFollow) {
+                w.taskOwner = Worker.TaskOwner.NONE; w.taskId = "";
+            } else if (w.taskOwner == Worker.TaskOwner.LIFE && w.lifeAction.isBlank()) {
+                w.taskOwner = Worker.TaskOwner.NONE; w.taskId = "";
+            }
             // Upgrade old saves from the existing authoritative task flags, preferring explicit player control.
             if (w.taskOwner == Worker.TaskOwner.NONE || w.taskId.isBlank()) {
                 if (w.manualOrder || w.manualFollow) {
