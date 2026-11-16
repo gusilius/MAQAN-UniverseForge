@@ -1787,9 +1787,16 @@ public class SettleMod {
                     String operationId = Colony.blueprintOperationId(map.name, seed.id());
                     boolean existed = COLONIES.containsKey(id);
                     TitleData.Realm realm = map.titles == null ? null : map.titles.realms.get(seed.realmId());
-                    String race = realm == null ? "" : String.valueOf(realm.props.getOrDefault("identity.race",
+                    TitleData.Title province = map.titles == null ? null : map.titles.get(seed.provinceId());
+                    // Prefer the exact province's inherited demographic identity. Mixed-race realms
+                    // therefore produce different local naming traditions instead of one realm-wide label.
+                    String race = province == null ? "" : String.valueOf(province.props.getOrDefault("identity.race",
+                            province.props.getOrDefault("race", "")));
+                    String culture = province == null ? "" : String.valueOf(province.props.getOrDefault("identity.culture",
+                            province.props.getOrDefault("culture", "")));
+                    if (race.isBlank() && realm != null) race = String.valueOf(realm.props.getOrDefault("identity.race",
                             realm.props.getOrDefault("race", "")));
-                    String culture = realm == null ? "" : String.valueOf(realm.props.getOrDefault("identity.culture",
+                    if (culture.isBlank() && realm != null) culture = String.valueOf(realm.props.getOrDefault("identity.culture",
                             realm.props.getOrDefault("culture", "")));
                     String settlementName = seed.name();
                     // Use the canonical race/culture settlement pool when available; keep the
