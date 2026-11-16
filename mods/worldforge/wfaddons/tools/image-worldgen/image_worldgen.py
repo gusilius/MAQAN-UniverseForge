@@ -221,7 +221,8 @@ def create_test_image(path: Path) -> None:
 
 def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: int = 64,
                   provinces_per_realm: int = 32, blocks_per_pixel: int = 16,
-                  settlement_level: int = 4, planet_id: str | None = None) -> dict:
+                  settlement_level: int = 4, planet_id: str | None = None,
+                  generation_mode: str = "image") -> dict:
     started_at = time.perf_counter()
     if settlement_level not in SETTLEMENT_PROFILES:
         raise ValueError("settlement_level must be between 1 and 7")
@@ -401,10 +402,10 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         "realms": realms,
     }
     province_ids = province_labels.tolist()  # zero is reserved for sea; labels are 16-bit safe.
-    source_hash = hashlib.sha256(input_path.read_bytes()).hexdigest()
+    source_hash = hashlib.sha256(input_path.read_bytes()).hexdigest() if generation_mode == "image" else None
     blueprint = {
         "format": "maqan-world-blueprint/2", "generator": GENERATOR_VERSION,
-        "planet_id": planet_id, "generation_mode": "image",
+        "planet_id": planet_id, "generation_mode": generation_mode,
         "settlement_level": settlement_level, "settlement_profile": settlement_profile,
         "seed": seed, "source_image_sha256": source_hash, "size_px": [width, height],
         "blocks_per_pixel": blocks_per_pixel, "land_pixels": land_count,
@@ -435,7 +436,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         "titles.json": json.dumps(titles_doc, sort_keys=True, separators=(",", ":")).encode(),
         "realms.json": json.dumps(realms_doc, sort_keys=True, separators=(",", ":")).encode(),
         "world-blueprint.json": json.dumps(blueprint, sort_keys=True, separators=(",", ":")).encode(),
-        "source-image.sha256": (source_hash + "\n").encode(),
+        **({"source-image.sha256": (source_hash + "\n").encode()} if source_hash else {}),
         "image-analysis-report.json": json.dumps(analysis_report, sort_keys=True, separators=(",", ":")).encode(),
     }
     with zipfile.ZipFile(output_path, "w") as archive:
