@@ -433,6 +433,8 @@ public final class PlatformShellScreen extends Screen {
             // shell chrome instead of stacking a second set of panels on top.
             MaqanUiPackRenderer.render(g, width, height);
             drawConceptTopBar(g, mouseX, mouseY);
+            if (activeView() == null && !WorkspaceResponsiveLayout.isCompact(width, height))
+                drawConceptWindowContent(g);
             // Compact skin layouts collapse the decorative side windows; the
             // active native workspace drawer occupies that space instead.
             if (WorkspaceResponsiveLayout.isCompact(width, height)) {
@@ -642,6 +644,34 @@ public final class PlatformShellScreen extends Screen {
             g.renderTooltip(font, Component.literal("Notifications and event history"), mx, my);
         if (mx >= width - 30 && mx < width - 6 && my < barHeight)
             g.renderTooltip(font, Component.literal(activeView() == null ? "Close workspace" : "Close current module view"), mx, my);
+    }
+
+    /**
+     * The blank concept frames are content hosts, not static screenshots.
+     * When no provider screen is mounted, populate them from the live capability
+     * catalogue and the shared provider-owned selection/inspector contracts.
+     */
+    private void drawConceptWindowContent(GuiGraphics g) {
+        MaqanUiPackAdaptiveLayout.Result skin = MaqanUiPackRenderer.adaptiveLayout(width, height);
+        if (skin == null || skin.compact()) return;
+        MaqanUiPackAdaptiveLayout.Rect left = skin.get("lp");
+        MaqanUiPackAdaptiveLayout.Rect right = skin.get("rp");
+        if (left == null || right == null) return;
+
+        Panel navigation = new Panel("navigation", "MODULES", left.x(), left.y(),
+                left.width(), left.height());
+        Panel inspector = new Panel("inspector", "INSPECTOR", right.x(), right.y(),
+                right.width(), right.height());
+        g.drawString(font, profile == Profile.POLITICS ? "REALMS / MODULES"
+                : profile == Profile.RTS ? "ARMY / COMMAND"
+                : profile == Profile.SETTLEMENTS ? "SETTLEMENT / MODULES" : "COSMOS / MODULES",
+                left.x() + 12, left.y() + 12, CYAN, false);
+        drawNavigationPanel(g, navigation);
+        g.drawString(font, profile == Profile.POLITICS ? "REALM / DIPLOMACY"
+                : profile == Profile.RTS ? "UNIT / FORMATION"
+                : profile == Profile.SETTLEMENTS ? "BUILDING / HOUSEHOLD" : "OBJECT DOSSIER",
+                right.x() + 12, right.y() + 12, CYAN, false);
+        drawInspectorPanel(g, inspector);
     }
 
     private int compactRailBottom() {
