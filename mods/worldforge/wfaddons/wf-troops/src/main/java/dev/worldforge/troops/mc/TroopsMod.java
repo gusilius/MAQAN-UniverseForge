@@ -1441,6 +1441,13 @@ public class TroopsMod {
         if (army == null || !army.owner.equals(player.getUUID().toString())) {
             src.sendFailure(Component.literal("Армия не найдена или принадлежит другому игроку")); return 0;
         }
+        if ("inherit".equalsIgnoreCase(modeName)) {
+            if (!COMMANDS.reclaimScope(CommandDelegation.ScopeType.ARMY, Integer.toString(armyId))) {
+                src.sendFailure(Component.literal("У армии нет собственной политики командования")); return 0;
+            }
+            src.sendSuccess(() -> Component.literal("Армия «" + army.name + "»: политика удалена"), false);
+            return 1;
+        }
         CommandDelegation.Mode mode;
         try { mode = parseCommandMode(modeName); }
         catch (IllegalArgumentException ex) { src.sendFailure(Component.literal(ex.getMessage())); return 0; }
@@ -1469,6 +1476,13 @@ public class TroopsMod {
         ArmyHierarchy.ArmyNode army = corps == null ? null : HIERARCHY.army(corps.armyId);
         if (corps == null || army == null || !army.owner.equals(player.getUUID().toString())) {
             src.sendFailure(Component.literal("Корпус не найден или принадлежит другому игроку")); return 0;
+        }
+        if ("inherit".equalsIgnoreCase(modeName)) {
+            if (!COMMANDS.reclaimScope(CommandDelegation.ScopeType.CORPS, corpsId)) {
+                src.sendFailure(Component.literal("У корпуса нет собственной политики командования")); return 0;
+            }
+            src.sendSuccess(() -> Component.literal("Корпус «" + corps.name + "»: политика удалена"), false);
+            return 1;
         }
         CommandDelegation.Mode mode;
         try { mode = parseCommandMode(modeName); }
