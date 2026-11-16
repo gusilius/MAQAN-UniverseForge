@@ -66,6 +66,13 @@ public final class MaqanUiPackRenderer {
         return rect == null ? 34 : rect.height();
     }
 
+    public static int compactDockTop(int screenWidth, int screenHeight) {
+        if (!assetsAvailable()) return screenHeight;
+        MaqanUiPackAdaptiveLayout.Rect rect = MaqanUiPackAdaptiveLayout
+                .calculate(screenWidth, screenHeight, loadedLayout.skin(activeTheme)).get("mm");
+        return rect == null ? screenHeight : rect.y();
+    }
+
     public static String cycleTheme() {
         List<String> themes = List.of("royal", "iron", "grim", "elf");
         int index = themes.indexOf(activeTheme);
