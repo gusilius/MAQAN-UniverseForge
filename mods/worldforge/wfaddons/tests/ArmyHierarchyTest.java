@@ -51,6 +51,12 @@ public final class ArmyHierarchyTest {
         restored.pruneSquads(squads);
         check(restored.corps(reserve.id).squadIds.isEmpty(),
                 "destroyed/disbanded tactical squads are pruned from the strategic hierarchy");
+        boolean crossRealmRebindRejected = false;
+        try { hierarchy.ensureArmy(42, "Подмена", "player", "realm-south"); }
+        catch (IllegalStateException expected) { crossRealmRebindRejected = true; }
+        check(crossRealmRebindRejected && "realm-north".equals(hierarchy.army(42).realm),
+                "strategic army ID cannot silently rebind to another realm");
+
         if (failures > 0) throw new AssertionError(failures + " army hierarchy tests failed");
     }
 }
