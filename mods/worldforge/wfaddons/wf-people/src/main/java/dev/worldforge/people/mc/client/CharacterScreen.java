@@ -66,6 +66,52 @@ public class CharacterScreen extends Screen {
         this.year = year;
         this.opinion = opinion;
         this.cmd = cmd;
+        registerMaqanWorkspaceProvider();
+    }
+
+    /** Attach the canonical CharacterRegistry to MAQAN without copying domain state. */
+    private void registerMaqanWorkspaceProvider() {
+        dev.worldforge.mod.client.PlatformWorkspaceBridge.registerInspector("wf_people", entityId -> {
+            Character character = ch(entityId);
+            if (character == null) return java.util.Collections.singletonList(
+                    new String[]{"People", "Status", "Character is no longer in this world registry"});
+            List<String[]> rows = new ArrayList<>();
+            rows.add(new String[]{"Identity", "Name", character.name});
+            rows.add(new String[]{"Identity", "Character ID", character.id});
+            rows.add(new String[]{"Identity", "Global ID", character.globalId});
+            rows.add(new String[]{"Life", "Status", character.alive ? "Alive" : "Deceased"});
+            rows.add(new String[]{"Life", "Age", Integer.toString(CharacterStats.age(character, year))});
+            if (!character.house.isBlank()) rows.add(new String[]{"Identity", "House", character.house});
+            if (!character.culture.isBlank()) rows.add(new String[]{"Identity", "Culture", character.culture});
+            if (!character.gender.isBlank()) rows.add(new String[]{"Identity", "Gender", character.gender});
+            if (!character.father.isBlank()) rows.add(new String[]{"Family", "Father", character.father});
+            if (!character.mother.isBlank()) rows.add(new String[]{"Family", "Mother", character.mother});
+            if (!character.spouse.isBlank()) rows.add(new String[]{"Family", "Spouse", character.spouse});
+            rows.add(new String[]{"Family", "Children", Integer.toString(character.children.size())});
+            if (!character.traits.isEmpty())
+                rows.add(new String[]{"Character", "Traits", String.join(", ", character.traits)});
+            for (Character.Post post : character.posts) {
+                if (rows.size() >= 24) break;
+                rows.add(new String[]{"Titles & offices", post.role, placeName(post.place)});
+            }
+            return rows;
+        });
+        dev.worldforge.mod.client.PlatformWorkspaceBridge.registerEntityOpener("wf_people", entityId -> {
+            if (ch(entityId) == null) return;
+            if (!focus.equals(entityId)) history.add(focus);
+            focus = entityId;
+            famScroll = 0;
+            appointOpen = false;
+        });
+        dev.worldforge.mod.client.PlatformWorkspaceBridge.registerAction(
+                "wf_people.focus", "Focus character", "wf_people",
+                entityId -> ch(entityId) != null,
+                entityId -> {
+                    if (!focus.equals(entityId)) history.add(focus);
+                    focus = entityId;
+                    famScroll = 0;
+                    appointOpen = false;
+                });
     }
 
     @Override
