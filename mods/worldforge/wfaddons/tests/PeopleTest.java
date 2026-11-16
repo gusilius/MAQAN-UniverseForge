@@ -44,6 +44,21 @@ public class PeopleTest {
             ok(!first.isBlank() && first.equals(repeated),
                     "NameBank supplies stable " + category + " names through race/culture/default inheritance");
         }
+        for (String category : List.of("villages", "cities", "hamlets", "camps", "communities",
+                "outposts", "colonies", "stations", "nomad_camps", "tribal_camps", "holds", "ports", "houses", "dynasties", "clans")) {
+            String first = names.generate("clockwork", "human", category, new Random(991L));
+            String repeated = names.generate("clockwork", "human", category, new Random(991L));
+            ok(!first.isBlank() && first.equals(repeated),
+                    "expanded fantasy/sci-fi race bank supplies stable " + category + " names");
+        }
+        ok(NameBank.settlementCategory("nomad_camp").equals("nomad_camps")
+                        && NameBank.settlementCategory("city").equals("cities")
+                        && NameBank.settlementCategory("tribal_community").equals("tribal_camps"),
+                "settlement type IDs resolve to specialized naming pools");
+        ok(names.poolForRace("elf", "elf").cities.size() >= 18
+                        && names.poolForRace("dwarf", "dwarf").cities.size() >= 18
+                        && names.poolForRace("clockwork", "human").male.size() >= 18,
+                "race-specific lexicons contain substantial city and personal-name variants");
         NameBank minimalNames = new NameBank();
         minimalNames.add("{\"default\":\"basic\",\"cultures\":{\"basic\":{\"male\":[\"Aren\"],\"female\":[\"Mira\"],\"houses\":[\"Stone\"]}}}");
         for (String category : List.of("realms", "regions", "provinces", "settlements")) {
