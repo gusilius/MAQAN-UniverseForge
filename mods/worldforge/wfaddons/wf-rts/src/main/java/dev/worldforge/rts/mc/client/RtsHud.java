@@ -66,7 +66,12 @@ public class RtsHud extends Screen {
         this.cmd = cmd;
     }
 
-    public void setModel(Settlement n) { this.s = n; }
+    public void setModel(Settlement n) {
+        this.s = n;
+        // A fresh server snapshot is authoritative; discard optimistic cell values so
+        // remote edits and persisted jobPrio values become visible immediately.
+        this.prio.clearOptimisticOverrides();
+    }
 
     private int refresh;
 
