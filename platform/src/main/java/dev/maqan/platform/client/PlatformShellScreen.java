@@ -413,6 +413,8 @@ public final class PlatformShellScreen extends Screen {
             view = providerViews.get("worldforge.map");
         if (view == null && profile == Profile.POLITICS)
             view = providerViews.get("worldforge.realms.politics");
+        if (view == null && profile == Profile.RTS)
+            view = providerViews.get("worldforge.troops");
         return view;
     }
 
