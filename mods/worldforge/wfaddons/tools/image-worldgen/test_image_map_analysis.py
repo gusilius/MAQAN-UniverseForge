@@ -88,5 +88,15 @@ class ImageMapAnalysisTests(unittest.TestCase):
         self.assertIn("land_model", report)
 
 
+    def test_lakes_are_shallower_than_open_ocean(self):
+        labels = np.full((96, 128), CLASSES.index("grassland"), np.uint8)
+        labels[:, :24] = CLASSES.index("ocean")
+        labels[28:68, 58:98] = CLASSES.index("lake")
+        height = make_heightfield(labels, 424242)
+        ocean_median = int(np.median(height[:, 4:20]))
+        lake_median = int(np.median(height[36:60, 66:90]))
+        self.assertGreater(lake_median, ocean_median)
+
+
 if __name__ == "__main__":
     unittest.main()
