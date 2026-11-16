@@ -22,6 +22,11 @@ public final class MaqanUiPackRenderer {
     private static final Logger LOGGER = LogUtils.getLogger();
     private static final List<String> FRAME_LAYERS =
             List.of("mm", "bot", "top", "cor", "lcol", "rcol", "lp", "rp");
+    private static final List<String> REQUIRED_TEXTURES = List.of(
+            "top_bar.png", "left_column.png", "right_column.png", "corner.png",
+            "minimap.png", "rts_console.png", "window_state.png", "window_diplomacy.png",
+            "window_left_blank.png", "window_right_blank.png"
+    );
     private static final Map<String, Map<String, int[]>> SOURCE_SIZES = Map.of(
             "royal", Map.of("top", new int[]{2188,99}, "lcol", new int[]{92,694},
                     "lp", new int[]{444,739}, "rp", new int[]{480,739}, "rcol", new int[]{67,764},
@@ -96,7 +101,7 @@ public final class MaqanUiPackRenderer {
         }
         if (!loadedLayout.hasTheme(activeTheme)) activeTheme = "royal";
         for (String theme : List.of("royal", "iron", "grim", "elf")) {
-            for (String filename : loadedLayout.textureNames().values().stream().distinct().toList()) {
+            for (String filename : REQUIRED_TEXTURES) {
                 ResourceLocation location = texture(theme, filename);
                 if (minecraft.getResourceManager().getResource(location).isEmpty()) {
                     if (!availabilityLogged) {
