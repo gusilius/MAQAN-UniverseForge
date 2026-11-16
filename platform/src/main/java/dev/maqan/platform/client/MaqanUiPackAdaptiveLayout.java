@@ -46,7 +46,7 @@ public final class MaqanUiPackAdaptiveLayout {
         int[] rightRailRef = reference.get("rcol");
         int[] minimapRef = reference.get("mm");
         int[] consoleRef = reference.get("bot");
-        int topH = Math.min(h, Math.max(1, (int)Math.round((topRef[3] - topRef[1]) * baseScale)));
+        int topH = Math.min(h, Math.max(28, (int)Math.round((topRef[3] - topRef[1]) * baseScale)));
         int leftRail = compact ? (w < 560 ? 0 : 30)
                 : Math.min(w, Math.max(1, (int)Math.round((leftRailRef[2] - leftRailRef[0]) * baseScale)));
         int rightRail = compact ? (w < 720 ? 0 : 26)
