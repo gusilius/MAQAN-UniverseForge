@@ -42,6 +42,49 @@ public final class StatecraftTest {
         check(state.addClaim("crown", "c3") && state.inheritTitle("crown", "c1", "c3")
                 && kingdom.holderCharacterId.equals("c3"), "validated Character ID claim transfers a title on succession");
 
+        // Image-map import: the realm lists only its crown title, while its provinces
+        // are descendants several levels below. All cells must enter Statecraft.
+        String titlesJson = """
+                {"format":"worldforge-titles/1","blocks_per_pixel":1.0,
+                 "tiers":[{"index":0,"key":"province","name":"Province"},{"index":1,"key":"region","name":"Region"},{"index":2,"key":"state","name":"State"}],
+                 "titles":[
+                  {"id":1,"key":"p_north","name":"North Province","tier":0,"parent":3,"color":"#336699","capital":{"nx":0.2,"ny":0.2,"x":0,"z":0,"province":1},"props":{}},
+                  {"id":2,"key":"p_south","name":"South Province","tier":0,"parent":4,"color":"#336699","capital":{"nx":0.8,"ny":0.8,"x":1,"z":1,"province":2},"props":{}},
+                  {"id":3,"key":"r_north","name":"Northern Region","tier":1,"parent":5,"color":"#336699","capital":{"nx":0.2,"ny":0.2,"x":0,"z":0,"province":1},"props":{}},
+                  {"id":4,"key":"r_south","name":"Southern Region","tier":1,"parent":5,"color":"#336699","capital":{"nx":0.8,"ny":0.8,"x":1,"z":1,"province":2},"props":{}},
+                  {"id":5,"key":"state_north","name":"Northland","tier":2,"parent":0,"color":"#336699","capital":{"nx":0.5,"ny":0.5,"x":0,"z":0,"province":1},"props":{}}
+                 ]}""";
+        String realmsJson = """
+                {"format":"worldforge-realms/1","realms":[
+                 {"id":"northland","name":"Northland","ruler":"","color":"#336699",
+                  "titles":["state_north"],"subjects":[],"overlord":null,"relation":"","area_blocks":2,"props":{}}
+                ]}""";
+        dev.worldforge.mod.TitleData imageTitles = dev.worldforge.mod.TitleData.create(
+                titlesJson, realmsJson, new short[]{1, 2}, 2, 1);
+        Statecraft importedMap = new Statecraft();
+        check(importedMap.syncMapTitles("image-world", imageTitles) == 5
+                        && importedMap.title(Statecraft.mapTitleId("image-world", "p_north")) != null
+                        && importedMap.title(Statecraft.mapTitleId("image-world", "p_south")) != null
+                        && importedMap.title(Statecraft.mapTitleId("image-world", "r_north")) != null
+                        && importedMap.title(Statecraft.mapTitleId("image-world", "r_south")) != null
+                        && importedMap.title(Statecraft.mapTitleId("image-world", "state_north")) != null,
+                "map import traverses crown descendants and registers every province and region cell");
+        check(importedMap.title(Statecraft.mapTitleId("image-world", "r_north")).realmId.equals("northland")
+                        && importedMap.title(Statecraft.mapTitleId("image-world", "p_south")).realmId.equals("northland"),
+                "nested province and region ownership resolves to the sovereign realm");
+        check(importedMap.syncMapTitles("image-world", imageTitles) == 0
+                        && importedMap.titles().size() == 5,
+                "re-import of the same political map is idempotent");
+        boolean conflictingOwnershipRejected = false;
+        String conflictingRealmsJson = realmsJson.replace("\"northland\"", "\"southland\"")
+                .replace("\"Northland\"", "\"Southland\"");
+        dev.worldforge.mod.TitleData conflictingMap = dev.worldforge.mod.TitleData.create(
+                titlesJson, conflictingRealmsJson, new short[]{1, 2}, 2, 1);
+        try { importedMap.syncMapTitles("image-world", conflictingMap); }
+        catch (IllegalStateException expected) { conflictingOwnershipRejected = true; }
+        check(conflictingOwnershipRejected,
+                "an imported province cannot silently change sovereign ownership without a transfer event");
+
         // Vassalage and feudal obligations
         check(state.setVassalage("north_duchy_realm", "north", 0.2, 0.35)
                 && state.setVassalage("winter_county_realm", "north_duchy_realm", 0.1, 0.2),
