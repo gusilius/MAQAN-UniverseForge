@@ -23,6 +23,18 @@ public final class ArmyHierarchyTest {
         check(hierarchy.assignSquad(vanguard.id, first.id, squads)
                         && hierarchy.assignSquad(reserve.id, second.id, squads),
                 "army contains corps and corps contain canonical RTS squads");
+        check(hierarchy.corpsForSquad(first.id) == vanguard
+                        && hierarchy.corpsForSquad(second.id) == reserve,
+                "reverse command index resolves squad parent without scanning every corps");
+        check(hierarchy.assignSquad(reserve.id, first.id, squads)
+                        && hierarchy.corpsForSquad(first.id) == reserve
+                        && !vanguard.squadIds.contains(first.id),
+                "reassignment updates both forward and reverse corps membership");
+        hierarchy.assignSquad(vanguard.id, first.id, squads);
+        hierarchy.unassignSquad(first.id);
+        check(hierarchy.corpsForSquad(first.id) == null && !vanguard.squadIds.contains(first.id),
+                "unassign clears indexed and persisted squad membership");
+        hierarchy.assignSquad(vanguard.id, first.id, squads);
         check(hierarchy.appointArmyCommander(42, "c17")
                         && hierarchy.appointCorpsCommander(vanguard.id, "c18"),
                 "army and corps commanders use canonical Character IDs");
@@ -42,6 +54,8 @@ public final class ArmyHierarchyTest {
                         && restored.corps(reserve.id).squadIds.contains(second.id)
                         && restored.corpsForSquad(second.id).id.equals(reserve.id),
                 "army/corps hierarchy and custom squad membership survive save/reload");
+        check(restored.corpsForSquad(first.id) == restored.corps(vanguard.id),
+                "save/load rebuilds the reverse squad-to-corps index");
         Squads foreignSquads = new Squads();
         Squads.Squad foreignSquad = foreignSquads.create("another-player", "Чужой отряд", List.of("foreign-unit"));
         check(!restored.assignSquad(reserve.id, foreignSquad.id, foreignSquads)
@@ -73,6 +87,12 @@ public final class ArmyHierarchyTest {
         restoredIndex.fromJson(compatibility.toJson());
         check(restoredIndex.squadOf("legacy-1") != null,
                 "save/load rebuilds the reverse membership index");
+        ArmyHierarchy legacyHierarchy = new ArmyHierarchy();
+        legacyHierarchy.ensureArmy(7, "Legacy", "player", "");
+        ArmyHierarchy.Corps legacyCorps = legacyHierarchy.defaultCorps(7);
+        legacyCorps.squadIds.add(legacy.id);
+        check(legacyHierarchy.corpsForSquad(legacy.id) == legacyCorps,
+                "reverse corps index repairs legacy direct squad-list mutations");
         restoredIndex.fromJson("{broken");
         check(restoredIndex.squadOf("legacy-1") == null,
                 "invalid persistence input clears stale reverse membership entries");
