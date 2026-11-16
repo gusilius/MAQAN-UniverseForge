@@ -445,11 +445,11 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         for component in minor_components:
             # Use the geometric centroid, not the middle item in row-major pixel order.
             # This avoids bias toward the island's middle scanline on crescent/long islands.
-            xs = np.fromiter((pixel % width for pixel in component), dtype=np.float64, count=len(component))
-            zs = np.fromiter((pixel // width for pixel in component), dtype=np.float64, count=len(component))
+            pixels = np.asarray(component, dtype=np.int64)
+            xs, zs = pixels % width, pixels // width
             cx, cz = float(xs.mean()), float(zs.mean())
-            center = min(component, key=lambda pixel: (
-                (pixel % width - cx) ** 2 + (pixel // width - cz) ** 2, pixel))
+            centroid_distance = (xs - cx) ** 2 + (zs - cz) ** 2
+            center = int(pixels[int(np.argmin(centroid_distance))])
             xy = (cx, cz)
             _, nearest = realm_tree.query(xy, k=1)
             owner_realm = int(seed_ids[int(nearest)])
