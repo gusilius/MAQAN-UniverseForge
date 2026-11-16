@@ -157,12 +157,8 @@ public final class WorldSimMod {
         }
         CharacterRegistry vanillaRegistry = PeopleMod.worldRegistry();
         if (vanillaRegistry != null) {
-            for (var region : VanillaWorldGeography.snapshot()) {
-                if (region.isJsonObject() && region.getAsJsonObject().has("map_id")) {
-                    String id = region.getAsJsonObject().get("map_id").getAsString();
-                    sources.add(EmergenceSource.vanilla(id, vanillaRegistry));
-                }
-            }
+            for (String id : VanillaWorldGeography.regionIds())
+                sources.add(EmergenceSource.vanilla(id, vanillaRegistry));
         }
         sources.sort(Comparator.comparing(source -> source.id));
         return sources;
@@ -1265,22 +1261,13 @@ public final class WorldSimMod {
 
     private static String emergentBiomeSummary(Set<String> bandIds, JsonArray bands, EmergenceSource source) {
         if (source.map != null) return emergentBiomeSummary(bandIds, bands, source.map);
-        Map<Long, String> biomeByCell = new HashMap<>();
-        for (var region : VanillaWorldGeography.snapshot()) {
-            if (!region.isJsonObject() || !source.id.equals(region.getAsJsonObject().get("map_id").getAsString())) continue;
-            for (var cell : region.getAsJsonObject().getAsJsonArray("cells")) {
-                JsonObject value = cell.getAsJsonObject();
-                biomeByCell.put((long)value.get("z").getAsInt() * source.width + value.get("x").getAsInt(),
-                        value.get("biome").getAsString());
-            }
-        }
         Map<String, Integer> counts = new TreeMap<>();
         for (var item : bands) if (item.isJsonObject()) {
             JsonObject band = item.getAsJsonObject();
             if (!source.id.equals(band.get("map_id").getAsString()) || !bandIds.contains(band.get("id").getAsString())) continue;
-            long key = (long)band.get("z").getAsInt() * source.width + band.get("x").getAsInt();
-            String biome = biomeByCell.getOrDefault(key, "unknown");
-            counts.merge(biome, 1, Integer::sum);
+            String biome = VanillaWorldGeography.biomeAt(source.id,
+                    band.get("x").getAsInt(), band.get("z").getAsInt());
+            counts.merge(biome.isBlank() ? "unknown" : biome, 1, Integer::sum);
         }
         return counts.entrySet().stream().map(entry -> entry.getKey() + ":" + entry.getValue())
                 .collect(java.util.stream.Collectors.joining(","));
