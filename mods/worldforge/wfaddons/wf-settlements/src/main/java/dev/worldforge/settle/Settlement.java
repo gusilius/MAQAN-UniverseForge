@@ -681,7 +681,7 @@ public final class Settlement {
         w.suspendedTaskId = "";
         if (resume == Worker.TaskOwner.SETTLEMENT && !resumeId.isBlank()) {
             int buildingId;
-            try { buildingId = Integer.parseInt(resumeId.substring(resumeId.indexOf(':') + 1)); }
+            try { buildingId = Integer.parseInt(resumeId.substring(resumeId.lastIndexOf(':') + 1)); }
             catch (RuntimeException ex) { buildingId = 0; }
             Building target = building(buildingId);
             if (target != null && target.state != Building.State.PLANNED) {
@@ -743,9 +743,14 @@ public final class Settlement {
         if (b == null) throw new OrderException("Нет здания " + uid);
         String role = requestedRole == null || requestedRole.isBlank()
                 ? availableRole(w, b) : availableRole(w, b, requestedRole);
+        if (w.taskOwner == Worker.TaskOwner.MILITARY || w.taskOwner == Worker.TaskOwner.PLAYER)
+            throw new OrderException("Рабочий занят приказом более высокого приоритета");
         if (role.isEmpty()) throw new OrderException(w.name + " (" + defs.professionName(w.profession)
                 + ") не подходит для роли " + (requestedRole == null ? "этого здания" : requestedRole)
                 + " или нет свободных мест в " + b.def.name);
+        w.claimTask(Worker.TaskOwner.SETTLEMENT, "settlement:building:" + uid, true);
+        w.suspendedTaskOwner = Worker.TaskOwner.NONE;
+        w.suspendedTaskId = "";
         w.assignedProfession = role;
         w.manualHauler = false;
         w.lifeAction = "";
@@ -760,6 +765,9 @@ public final class Settlement {
     public void unassign(int workerId) {
         Worker w = worker(workerId);
         if (w == null) throw new OrderException("Нет рабочего " + workerId);
+        w.releaseTask(w.taskOwner, w.taskId);
+        w.suspendedTaskOwner = Worker.TaskOwner.NONE;
+        w.suspendedTaskId = "";
         w.building = 0;
         w.assignedProfession = "";
         w.manualHauler = false;
@@ -780,11 +788,14 @@ public final class Settlement {
         if(w==null)throw new OrderException("Нет рабочего "+workerId);
         if(!Double.isFinite(x)||!Double.isFinite(z)||Math.abs(x)>100000||Math.abs(z)>100000)
             throw new OrderException("Некорректная точка приказа");
+        if (w.taskOwner == Worker.TaskOwner.MILITARY)
+            throw new OrderException("Рабочий выполняет военный приказ");
         if(queue&&w.manualOrder){
             if(w.orderQueue.size()>=Worker.MAX_MANUAL_ORDERS)throw new OrderException("Очередь рабочего заполнена (максимум "+Worker.MAX_MANUAL_ORDERS+")");
             w.orderQueue.addLast(new Worker.ManualOrder(x,z));
             return;
         }
+        w.claimTask(Worker.TaskOwner.PLAYER, "player:move", true);
         w.orderQueue.clear();
         w.manualHauler = false;
         w.lifeAction = "";
@@ -814,6 +825,11 @@ public final class Settlement {
         Worker w = worker(workerId);
         if (w == null) throw new OrderException("Нет рабочего " + workerId);
         if (!defs.professions.containsKey(profession)) throw new OrderException("Нет профессии " + profession);
+        if (w.taskOwner == Worker.TaskOwner.MILITARY)
+            throw new OrderException("Нельзя сменить профессию во время военного приказа");
+        w.releaseTask(w.taskOwner, w.taskId);
+        w.suspendedTaskOwner = Worker.TaskOwner.NONE;
+        w.suspendedTaskId = "";
         w.profession = profession;
         w.assignedProfession = "";
         w.manualHauler = false;
