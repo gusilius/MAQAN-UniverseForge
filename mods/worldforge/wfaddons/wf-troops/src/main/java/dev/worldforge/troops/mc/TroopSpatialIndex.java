@@ -12,6 +12,8 @@ final class TroopSpatialIndex {
     private int[] cellX = new int[0], cellZ = new int[0], heads = new int[0], next = new int[0], candidates = new int[0];
     private double[] aura = new double[0], posX = new double[0], posZ = new double[0];
     private boolean[] leaders = new boolean[0];
+    private final int[] healIndices = {-1, -1, -1};
+    private final double[] healFractions = {Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY};
     private int mask;
 
     void rebuild(List<TroopEntity> troops) {
@@ -51,6 +53,40 @@ final class TroopSpatialIndex {
             if (cz == maxZ) break;
         }
         return found;
+    }
+
+    void healAround(List<TroopEntity> troops, int healerIndex, double radius, double amount, int maxTargets) {
+        if (maxTargets <= 0 || amount <= 0 || healerIndex < 0 || healerIndex >= troops.size()) return;
+        int found = query(posX[healerIndex], posZ[healerIndex], radius);
+        java.util.Arrays.fill(healIndices, -1);
+        java.util.Arrays.fill(healFractions, Double.POSITIVE_INFINITY);
+        int limit = Math.min(maxTargets, healIndices.length);
+        for (int n = 0; n < found; n++) {
+            int index = candidate(n);
+            TroopEntity target = troops.get(index);
+            double maximum = target.getMaxHealth(), health = target.getHealth();
+            double missing = maximum - health;
+            if (missing <= 0.01 || maximum <= 0) continue;
+            double fraction = health / maximum;
+            for (int slot = 0; slot < limit; slot++) {
+                if (fraction < healFractions[slot] || (fraction == healFractions[slot] && index < healIndices[slot])) {
+                    for (int move = limit - 1; move > slot; move--) {
+                        healFractions[move] = healFractions[move - 1];
+                        healIndices[move] = healIndices[move - 1];
+                    }
+                    healFractions[slot] = fraction;
+                    healIndices[slot] = index;
+                    break;
+                }
+            }
+        }
+        for (int slot = 0; slot < limit; slot++) {
+            int index = healIndices[slot];
+            if (index < 0) break;
+            TroopEntity target = troops.get(index);
+            float gain = (float) Math.min(target.getMaxHealth() - target.getHealth(), amount);
+            if (gain > 0) target.heal(gain);
+        }
     }
 
     int candidate(int index) { return candidates[index]; }
