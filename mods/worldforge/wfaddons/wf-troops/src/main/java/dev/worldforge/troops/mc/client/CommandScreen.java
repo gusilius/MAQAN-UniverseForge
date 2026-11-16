@@ -71,7 +71,8 @@ public final class CommandScreen extends Screen {
             List<String[]> rows = new ArrayList<>();
             rows.add(new String[]{"Force", "Selected entities", Integer.toString(selected.size())});
             double x = 0, z = 0;
-            int troops = 0, workers = 0, morale = 0, moraleCount = 0;
+            int troops = 0, workers = 0, morale = 0, moraleCount = 0, ordered = 0;
+            double orderX = 0, orderZ = 0;
             Map<String, Integer> composition = new TreeMap<>();
             for (net.minecraft.world.entity.LivingEntity entity : selected) {
                 x += entity.getX();
@@ -81,6 +82,11 @@ public final class CommandScreen extends Screen {
                     composition.merge(troop.def() != null ? troop.def().name : troop.unitId(), 1, Integer::sum);
                     morale += troop.moralePct();
                     moraleCount++;
+                    if (troop.hasDest) {
+                        ordered++;
+                        orderX += troop.destX;
+                        orderZ += troop.destZ;
+                    }
                 } else if (CommandMode.isWorkerEntity(entity)) {
                     workers++;
                     composition.merge("Worker", 1, Integer::sum);
@@ -93,6 +99,14 @@ public final class CommandScreen extends Screen {
             rows.add(new String[]{"Force", "Average position", Math.round(x / selected.size()) + ", " + Math.round(z / selected.size())});
             if (moraleCount > 0)
                 rows.add(new String[]{"Condition", "Average morale", Math.round((double) morale / moraleCount) + "%"});
+            rows.add(new String[]{"Orders", "Formation",
+                    Formations.Type.values()[Math.floorMod(CommandMode.formation, Formations.Type.values().length)].title});
+            rows.add(new String[]{"Orders", "Stance",
+                    Squads.Stance.values()[Math.floorMod(CommandMode.stance, Squads.Stance.values().length)].title});
+            rows.add(new String[]{"Orders", "Units with destination", ordered + " / " + troops});
+            if (ordered > 0)
+                rows.add(new String[]{"Orders", "Average destination",
+                        Math.round(orderX / ordered) + ", " + Math.round(orderZ / ordered)});
             for (var entry : composition.entrySet())
                 rows.add(new String[]{"Composition", entry.getKey(), Integer.toString(entry.getValue())});
             net.minecraft.world.entity.LivingEntity lead = selected.get(0);
