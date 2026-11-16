@@ -239,31 +239,64 @@ public final class CommandScreen extends Screen {
 
     private List<Btn> buttons() {
         List<Btn> l = new ArrayList<>();
+        int[] console = skinRect("bot");
+        if (console != null) {
+            int y = console[1] + 10;
+            if (compactSkin()) {
+                int w = Math.max(42, Math.min(64, (console[2] - 28) / 3));
+                int x = console[0] + 10;
+                l.add(new Btn("Выход", x, y, w, false, () -> CommandMode.exit(minecraft)));
+                x += w + 4;
+                l.add(new Btn("Стройка", x, y, w, buildOpen, this::toggleBuild));
+                x += w + 4;
+                l.add(new Btn("Участки", x, y, w, workMode >= 0, this::cycleWorkMode));
+                return l;
+            }
+            int x = console[0] + 12;
+            l.add(new Btn("Выход (R)", x, y, BTN_W, false, () -> CommandMode.exit(minecraft))); x += BTN_W + 4;
+            l.add(new Btn("Стройка (B)", x, y, BTN_W, buildOpen, this::toggleBuild)); x += BTN_W + 4;
+            l.add(new Btn("Участки (Y)", x, y, BTN_W, workMode >= 0, this::cycleWorkMode)); x += BTN_W + 4;
+            l.add(new Btn("Стратегия", x, y, BTN_W, CommandMode.RIG.view == CameraRig.View.SKY,
+                    () -> CommandMode.setCameraView(CameraRig.View.SKY))); x += BTN_W + 4;
+            l.add(new Btn("Изометрия", x, y, BTN_W, CommandMode.RIG.view == CameraRig.View.TACTICS,
+                    () -> CommandMode.setCameraView(CameraRig.View.TACTICS))); x += BTN_W + 4;
+            l.add(new Btn("Свободная", x, y, BTN_W, CommandMode.RIG.view == CameraRig.View.FREE,
+                    () -> CommandMode.setCameraView(CameraRig.View.FREE)));
+            return l;
+        }
         int x = width - 4 - BTN_W;
-        l.add(new Btn("Выход (R)", x, 4, BTN_W, false, () -> CommandMode.exit(minecraft)));
-        x -= BTN_W + 4;
-        l.add(new Btn("Стройка (B)", x, 4, BTN_W, buildOpen, this::toggleBuild));
-        x -= BTN_W + 4;
-        l.add(new Btn("Участки (Y)", x, 4, BTN_W, workMode >= 0, this::cycleWorkMode));
-        x -= BTN_W + 4;
-        l.add(new Btn("Стратегия", x, 4, BTN_W, CommandMode.RIG.view == CameraRig.View.SKY, () -> CommandMode.setCameraView(CameraRig.View.SKY)));
-        x -= BTN_W + 4;
-        l.add(new Btn("Изометрия", x, 4, BTN_W, CommandMode.RIG.view == CameraRig.View.TACTICS, () -> CommandMode.setCameraView(CameraRig.View.TACTICS)));
-        x -= BTN_W + 4;
-        l.add(new Btn("Свободная", x, 4, BTN_W, CommandMode.RIG.view == CameraRig.View.FREE, () -> CommandMode.setCameraView(CameraRig.View.FREE)));
+        l.add(new Btn("Выход (R)", x, 4, BTN_W, false, () -> CommandMode.exit(minecraft))); x -= BTN_W + 4;
+        l.add(new Btn("Стройка (B)", x, 4, BTN_W, buildOpen, this::toggleBuild)); x -= BTN_W + 4;
+        l.add(new Btn("Участки (Y)", x, 4, BTN_W, workMode >= 0, this::cycleWorkMode)); x -= BTN_W + 4;
+        l.add(new Btn("Стратегия", x, 4, BTN_W, CommandMode.RIG.view == CameraRig.View.SKY,
+                () -> CommandMode.setCameraView(CameraRig.View.SKY))); x -= BTN_W + 4;
+        l.add(new Btn("Изометрия", x, 4, BTN_W, CommandMode.RIG.view == CameraRig.View.TACTICS,
+                () -> CommandMode.setCameraView(CameraRig.View.TACTICS))); x -= BTN_W + 4;
+        l.add(new Btn("Свободная", x, 4, BTN_W, CommandMode.RIG.view == CameraRig.View.FREE,
+                () -> CommandMode.setCameraView(CameraRig.View.FREE)));
         return l;
     }
 
-    private int panelX() { return width - PANEL_W - 4; }
-    private int panelY() { return 26; }
-    private int panelH() { return Math.max(80, height - 26 - 90); }
+    private int panelX() { int[] r = skinRect("rp"); return r == null ? width - PANEL_W - 4 : r[0] + 12; }
+    private int panelY() { int[] r = skinRect("rp"); return r == null ? 26 : r[1] + 34; }
+    private int panelW() { int[] r = skinRect("rp"); return r == null ? PANEL_W : Math.max(120, r[2] - 24); }
+    private int panelH() { int[] r = skinRect("rp"); return r == null ? Math.max(80, height - 26 - 90) : Math.max(80, r[3] - 48); }
 
-    private boolean inBuildPanel(double px, double py) { return buildOpen && px >= panelX() && px < panelX() + PANEL_W && py >= panelY() && py < panelY() + panelH(); }
+    private boolean inBuildPanel(double px, double py) {
+        return buildOpen && px >= panelX() && px < panelX() + panelW()
+                && py >= panelY() && py < panelY() + panelH();
+    }
 
-    private boolean inSelPanel(double px, double py) { return px < 192 && py > height - 90; }
+    private int selectionPanelX() { int[] r = skinRect("lp"); return r == null ? 4 : r[0] + 12; }
+    private int selectionPanelW() { int[] r = skinRect("lp"); return r == null ? 184 : Math.max(120, r[2] - 24); }
+    private int selectionPanelY() { int[] r = skinRect("lp"); return r == null ? height - 90 : r[1] + r[3] - 86; }
+    private boolean inSelPanel(double px, double py) {
+        return px >= selectionPanelX() && px < selectionPanelX() + selectionPanelW()
+                && py >= selectionPanelY() && py < selectionPanelY() + 82;
+    }
 
     boolean overPanel(double px, double py) {
-        if (py < 4 + BTN_H + 2 && px > width - 6 * (BTN_W + 4) - 4) return true;
+        for (Btn button : buttons()) if (button.hit(px, py)) return true;
         if (onZoomSlider(px, py)) return true;
         return inBuildPanel(px, py) || inSelPanel(px, py);
     }
