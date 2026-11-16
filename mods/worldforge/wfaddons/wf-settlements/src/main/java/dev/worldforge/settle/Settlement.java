@@ -49,6 +49,8 @@ public final class Settlement {
     private long stockLedgerEntries = -1;
     private boolean stockReconciliationChecked;
     private boolean reconcileStockMirror;
+    /** Legacy mirror reconciliation is a one-time decision per resource, not a journal scan on every read. */
+    private final Set<String> stockMirrorCheckedResources = new HashSet<>();
     public final List<Building> buildings = new ArrayList<>();
     public final List<Worker> workers = new ArrayList<>();
     public final List<String> log = new ArrayList<>();
@@ -224,22 +226,26 @@ public final class Settlement {
         }
 
         TreasuryLedger.Account account = resourceAccount(resource);
-        Double legacyMirror = stock.get(resource);
-        boolean committedArmyFoodTransfer = ledger.journal().stream().anyMatch(entry ->
-                entry.accountId().equals(sourceAccountId) && !entry.credit()
-                        && entry.kind() == TreasuryLedger.Kind.LOGISTICS
-                        && entry.category().equals("army-field-rations"));
-        if (reconcileStockMirror && !committedArmyFoodTransfer
-                && legacyMirror != null && Double.isFinite(legacyMirror)
-                && Math.abs(legacyMirror - account.balance) > 1e-9) {
-            double delta = legacyMirror - account.balance;
-            if (delta > 0) ledger.deposit(sourceAccountId, delta, TreasuryLedger.Kind.IMPORT,
-                    "legacy-stock-mirror", "settlement:" + id + ":snapshot-reconcile",
-                    worldMinute(), "reconcile legacy settlement snapshot newer than treasury");
-            else ledger.withdraw(sourceAccountId, -delta, TreasuryLedger.Kind.WRITE_OFF,
-                    "legacy-stock-mirror", "settlement:" + id + ":snapshot-reconcile",
-                    worldMinute(), "reconcile legacy settlement snapshot newer than treasury");
-            account = resourceAccount(resource);
+        if (stockMirrorCheckedResources.add(resource) && reconcileStockMirror) {
+            // The journal is immutable for this migration decision after the first read of a
+            // resource. Re-scanning it on every amount() call made ordinary production/eating
+            // cost O(journal size) per resource lookup across every settlement tick.
+            Double legacyMirror = stock.get(resource);
+            boolean committedArmyFoodTransfer = ledger.journal().stream().anyMatch(entry ->
+                    entry.accountId().equals(sourceAccountId) && !entry.credit()
+                            && entry.kind() == TreasuryLedger.Kind.LOGISTICS
+                            && entry.category().equals("army-field-rations"));
+            if (!committedArmyFoodTransfer && legacyMirror != null && Double.isFinite(legacyMirror)
+                    && Math.abs(legacyMirror - account.balance) > 1e-9) {
+                double delta = legacyMirror - account.balance;
+                if (delta > 0) ledger.deposit(sourceAccountId, delta, TreasuryLedger.Kind.IMPORT,
+                        "legacy-stock-mirror", "settlement:" + id + ":snapshot-reconcile",
+                        worldMinute(), "reconcile legacy settlement snapshot newer than treasury");
+                else ledger.withdraw(sourceAccountId, -delta, TreasuryLedger.Kind.WRITE_OFF,
+                        "legacy-stock-mirror", "settlement:" + id + ":snapshot-reconcile",
+                        worldMinute(), "reconcile legacy settlement snapshot newer than treasury");
+                account = resourceAccount(resource);
+            }
         }
         stock.put(resource, account.balance);
         return account.balance;
