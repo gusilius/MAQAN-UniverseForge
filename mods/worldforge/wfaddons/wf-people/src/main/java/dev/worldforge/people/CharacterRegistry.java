@@ -23,6 +23,8 @@ public final class CharacterRegistry {
     }
 
     private final Map<String, Character> byId = new LinkedHashMap<>();
+    /** Reverse index for live Minecraft body UUIDs; avoids scanning every Character on each bind. */
+    private final Map<String, String> characterByEntityUuid = new HashMap<>();
     private final List<Listener> listeners = new ArrayList<>();
     private CharacterAuthority authority;
     private int next = 1;
@@ -172,11 +174,8 @@ public final class CharacterRegistry {
         if (!c.alive) return false;
         String kind = requireText(bodyKind, "body kind").toLowerCase(Locale.ROOT);
         String uuid = requireText(entityUuid, "entity UUID");
-        for (Character other : byId.values()) {
-            if (other == c) continue;
-            Object raw = other.props.get("population.entity_bindings");
-            if (raw instanceof Map<?, ?> bindings && bindings.containsValue(uuid)) return false;
-        }
+        String currentOwner = characterByEntityUuid.get(uuid);
+        if (currentOwner != null && !currentOwner.equals(c.id)) return false;
         Object raw = c.props.get("population.entity_bindings");
         Map<String, Object> bindings;
         if (raw instanceof Map<?, ?> map) {
@@ -184,8 +183,12 @@ public final class CharacterRegistry {
             for (Map.Entry<?, ?> entry : map.entrySet())
                 if (entry.getKey() instanceof String key) bindings.put(key, entry.getValue());
         } else bindings = new LinkedHashMap<>();
-        bindings.put(kind, uuid);
+        Object previous = bindings.put(kind, uuid);
+        if (previous instanceof String oldUuid && !oldUuid.equals(uuid)
+                && !bindings.containsValue(oldUuid)) characterByEntityUuid.remove(oldUuid, c.id);
         c.props.put("population.entity_bindings", bindings);
+        characterByEntityUuid.put(uuid, c.id);
+        revision++;
         return true;
     }
 
@@ -198,8 +201,10 @@ public final class CharacterRegistry {
         Map<String, Object> bindings = new LinkedHashMap<>();
         for (Map.Entry<?, ?> entry : map.entrySet())
             if (entry.getKey() instanceof String key && !key.equals(bodyKind)) bindings.put(key, entry.getValue());
+        if (!bindings.containsValue(entityUuid)) characterByEntityUuid.remove(entityUuid, c.id);
         if (bindings.isEmpty()) c.props.remove("population.entity_bindings");
         else c.props.put("population.entity_bindings", bindings);
+        revision++;
     }
 
     private static void addGlobalChild(Character parent, String childGlobalId) {
@@ -277,7 +282,11 @@ public final class CharacterRegistry {
         List<Character.Post> vacated = new ArrayList<>(c.posts);
         c.posts.clear();
         for (Character.Post p : vacated) for (Listener l : listeners) l.dismissed(c, p.role, p.place);
-        c.props.remove("population.entity_bindings");
+        Object rawBindings = c.props.remove("population.entity_bindings");
+        if (rawBindings instanceof Map<?, ?> bindings)
+            for (Object value : bindings.values())
+                if (value instanceof String uuid) characterByEntityUuid.remove(uuid, c.id);
+        revision++;
         int deathYear = c.props.get("population.death_year") instanceof Number n ? n.intValue() : 0;
         for (Listener l : listeners) l.died(c);
         publish(c, new LifecycleEvent(LifecycleKind.DIED, c.id, "", "", deathYear));
@@ -504,6 +513,8 @@ public final class CharacterRegistry {
         }
         byId.clear();
         byId.putAll(loaded);
+        characterByEntityUuid.clear();
+        characterByEntityUuid.putAll(entityOwners);
         next = safeNext;
         revision++;
         for (Character character : byId.values()) {
