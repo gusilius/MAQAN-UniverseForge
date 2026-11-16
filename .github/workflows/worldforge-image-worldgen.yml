@@ -37,7 +37,7 @@ jobs:
         shell: pwsh
         run: |
           $tool = "mods/worldforge/wfaddons/tools/image-worldgen"
-          python -m unittest discover -s $tool -p "test_image_map_analysis.py" -v
+          python -m unittest discover -s $tool -p "test_*.py" -v
           if ($LASTEXITCODE -ne 0) { throw "Semantic image analysis tests failed" }
           $fixture = Join-Path $env:RUNNER_TEMP "maqan-semantic-fixture.png"
           $out = Join-Path $env:RUNNER_TEMP "maqan-semantic-preview"
