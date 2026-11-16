@@ -409,7 +409,7 @@ mod tests {
             for x in 0..128 {
                 cells.push(GeographicCell { x, z, biome: if (x / 16 + z / 16) % 2 == 0 { "plains" } else { "forest" }.into(),
                     elevation: 70, river: if x % 19 == 0 { 255 } else { 0 }, land: true, suitability: 92,
-                    owner_realm_id: String::new() });
+                    owner_realm_id: String::new(), discovered_year: 0 });
             }
         }
         GeographicMap { map_id:"planetos".into(), width_px:128, height_px:128,
