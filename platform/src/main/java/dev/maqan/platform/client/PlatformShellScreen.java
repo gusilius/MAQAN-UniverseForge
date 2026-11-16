@@ -1147,7 +1147,9 @@ public final class PlatformShellScreen extends Screen {
             int previewTop = y;
             int previewBottom = previewTop + 108;
             g.fill(previewLeft, previewTop, previewRight, previewBottom, 0x332A6470);
-            g.drawString(font, "LIVE WORLD MODEL", previewLeft + 5, previewTop + 5, CYAN, false);
+            String previewLabel = "wf_army".equals(selected.providerId())
+                    ? "LIVE ARMY MEMBER" : "LIVE WORLD MODEL";
+            g.drawString(font, previewLabel, previewLeft + 5, previewTop + 5, CYAN, false);
             Minecraft client = Minecraft.getInstance();
             boolean liveInCurrentWorld = client.level != null
                     && liveEntity.isAlive()
