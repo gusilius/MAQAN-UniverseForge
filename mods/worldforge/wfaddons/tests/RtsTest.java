@@ -268,10 +268,13 @@ public class RtsTest {
         restoredPriorities.clearOptimisticOverrides();
         ok(restoredPriorities.get(restoredPriorityWorker, "smith") == 3,
                 "новый серверный снимок очищает локальный optimistic override");
+        Settlement specialistTown = new Settlement("specialist", "Specialist", d);
+        Worker specialist = specialistTown.addWorker(null);
+        specialistTown.setProfession(specialist.id, "smith");
         boolean incompatiblePriorityRejected = false;
-        try { priorityReload.setWorkPriority(restoredPriorityWorker.id, "farmer", 2); }
+        try { specialistTown.setWorkPriority(specialist.id, "farmer", 2); }
         catch (Settlement.OrderException expectedPriority) { incompatiblePriorityRejected = true; }
-        ok(incompatiblePriorityRejected && priorityReload.workPriority(restoredPriorityWorker, "farmer") == 0,
+        ok(incompatiblePriorityRejected && specialistTown.workPriority(specialist, "farmer") == 0,
                 "сервер запрещает назначать ненулевой приоритет несовместимой профессии");
 
         // ---- карта
