@@ -568,6 +568,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
             province_labels[np.asarray(component, dtype=np.int64)] = province_id
             province_meta[province_id] = {
                 "realm": owner_realm, "seed": center, "area": len(component),
+                "island_realm": component[0] in independent_components,
                 "key": f"realm_{owner_realm + 1:03d}_island_{len(realm_provinces[owner_realm]):03d}",
             }
             realm_cells_by_id.setdefault(owner_realm, []).extend(component)
@@ -761,6 +762,8 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
             "partition_numba_accelerated": NUMBA_ACCELERATED,
             "major_land_components": len(major_components),
             "minor_land_components": len(minor_components),
+            "initial_seeded_realms": aggregation_report["initial_regions"],
+            "final_connected_realms": aggregation_report["merged_regions"],
             "minor_island_provinces": island_province_count,
             "independent_island_realms": independent_island_realm_count,
             "independent_island_minimum_pixels": max(64, minimum_territory_pixels // 16),
