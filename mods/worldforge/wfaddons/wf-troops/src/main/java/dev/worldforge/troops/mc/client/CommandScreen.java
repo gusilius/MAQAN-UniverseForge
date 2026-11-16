@@ -447,6 +447,15 @@ public final class CommandScreen extends Screen {
                 g.fill(px - 3, pz - 1, px + 4, pz + 2, 0xFFFFFFFF);
                 g.fill(px, pz - 4, px + 2, pz + 5, 0xFFFFFFFF);
             }
+            double focusX = CommandMode.RIG.fx - colX;
+            double focusZ = CommandMode.RIG.fz - colZ;
+            if (focusX >= minX && focusX <= maxX && focusZ >= minZ && focusZ <= maxZ) {
+                int fx = (int) Math.round(sx.applyAsDouble(focusX));
+                int fz = (int) Math.round(sy.applyAsDouble(focusZ));
+                int radius = Math.max(4, (int) Math.round(CommandMode.RIG.zoom * scale * 0.65));
+                g.renderOutline(fx - radius, fz - radius, radius * 2, radius * 2, 0xFF69D6FF);
+                g.fill(fx - 2, fz - 2, fx + 3, fz + 3, 0xFF69D6FF);
+            }
         }
         g.disableScissor();
     }
