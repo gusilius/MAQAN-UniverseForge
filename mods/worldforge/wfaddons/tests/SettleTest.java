@@ -277,6 +277,29 @@ public class SettleTest {
                         && restoredLease.assignedProfession.equals("builder"),
                 "после завершения ручного маршрута восстанавливается исходное рабочее назначение");
 
+        Settlement enlistment = fresh(d, 1);
+        Worker enlistCandidate = enlistment.workers.get(0);
+        enlistCandidate.person = "character-global-77";
+        enlistment.moveTo(enlistCandidate.id, 5, 5);
+        ok(!enlistment.removeWorkerByPerson(enlistCandidate.person, "transfer:military")
+                        && enlistment.worker(enlistCandidate.id) == enlistCandidate,
+                "военный перевод не удаляет жителя, пока игрок управляет им напрямую");
+        enlistment.advanceManualOrder(enlistCandidate.id);
+        ok(enlistment.removeWorkerByPerson(enlistCandidate.person, "transfer:military")
+                        && enlistment.worker(enlistCandidate.id) == null,
+                "после завершения прямого приказа переход в армию принимает military task lease");
+
+        Settlement cancelledLease = fresh(d, 1);
+        cancelledLease.auto = false;
+        Building cancelledSite = cancelledLease.place("house", 0, 0);
+        cancelledLease.tick(1);
+        Worker cancelledWorker = cancelledLease.workers.get(0);
+        cancelledLease.setProfession(cancelledWorker.id, "builder");
+        cancelledLease.assign(cancelledWorker.id, cancelledSite.uid, "builder");
+        cancelledLease.cancel(cancelledSite.uid);
+        ok(cancelledWorker.taskOwner == Worker.TaskOwner.NONE && cancelledWorker.building == 0,
+                "отмена здания освобождает settlement task lease и не блокирует дальнейшее назначение");
+
         Settlement lifeLease = fresh(d, 1);
         Worker daily = lifeLease.workers.get(0);
         ok(lifeLease.claimLifeTask(daily.id, "life:sleeping"), "повседневная жизнь получает временное владение задачей");
