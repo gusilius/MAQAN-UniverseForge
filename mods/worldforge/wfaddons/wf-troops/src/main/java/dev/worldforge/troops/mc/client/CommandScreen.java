@@ -452,7 +452,7 @@ public final class CommandScreen extends Screen {
         int maxY = Math.max(minY, view[1] + view[3] - 98);
         x = Math.max(minX, Math.min(maxX, x));
         y = Math.max(minY, Math.min(maxY, y));
-        return new int[]{x, y, 194, unitToolsCollapsed ? 16 : 94};
+        return new int[]{x, y, 194, unitToolsCollapsed ? 16 : 112};
     }
 
     private boolean beginFloatingPanelDrag(double px, double py) {
@@ -502,6 +502,31 @@ public final class CommandScreen extends Screen {
         if (!unitToolsOpen) return false;
         int[] r = unitToolsBounds();
         return px >= r[0] && px < r[0] + r[2] && py >= r[1] && py < r[1] + r[3];
+    }
+
+    /** Applies a command policy to every selected squad using a real member Character as its commander. */
+    private void applyCommandPolicy(String mode) {
+        Map<String, TroopEntity> representatives = new LinkedHashMap<>();
+        for (TroopEntity troop : selectedTroops()) {
+            String squadId = troop.squadId();
+            if (squadId == null || squadId.isBlank()) continue;
+            representatives.putIfAbsent(squadId, troop);
+        }
+        if (representatives.isEmpty() || minecraft.player == null) return;
+        int sent = 0;
+        for (Map.Entry<String, TroopEntity> entry : representatives.entrySet()) {
+            String commander = "-";
+            if (!mode.equals("direct")) {
+                commander = entry.getValue().syncedCharacterId();
+                if (commander == null || commander.isBlank()) continue;
+            }
+            minecraft.player.connection.sendCommand("wftroops command squad "
+                    + entry.getKey() + " " + mode + " " + commander);
+            sent++;
+        }
+        minecraft.player.displayClientMessage(Component.literal(sent == 0
+                ? "Для делегирования выберите бойца с Character ID"
+                : "Командная политика отправлена: " + sent + " отряд(ов) · " + mode), true);
     }
 
     private void cycleFormation() {
@@ -759,6 +784,13 @@ public final class CommandScreen extends Screen {
             int col = i % 3, row = i / 3;
             out.add(new Btn(labels[i], x + col * 60, r[1] + 54 + row * 18,
                     widths[i], false, actions[i]));
+        }
+        String[] commandLabels = {"Лично", "Делег.", "Авто"};
+        String[] modes = {"direct", "delegated", "autonomous"};
+        for (int i = 0; i < modes.length; i++) {
+            final String mode = modes[i];
+            out.add(new Btn(commandLabels[i], x + i * 60, r[1] + 90, 56,
+                    false, () -> applyCommandPolicy(mode)));
         }
     }
 
