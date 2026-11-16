@@ -1,6 +1,7 @@
 package dev.worldforge.troops.mc;
 
 import dev.worldforge.mod.api.ActionResult;
+import dev.worldforge.troops.WorkArea;
 import dev.worldforge.settle.Building;
 import dev.worldforge.settle.Worker;
 import dev.worldforge.settle.mc.Colony;
@@ -34,9 +35,7 @@ final class WorkerControl {
     static ActionResult workArea(ServerPlayer p, OrderPacket o) {
         int accepted = 0;
         boolean denied = false;
-        String[] modes = {"wood", "stone", "ore", "clear", "level", "harvest", "honey", "herbs"};
-        String[] roles = {"lumberjack", "stonemason", "miner", "builder", "builder", "farmer", "beekeeper", "herbalist"};
-        String[] labels = {"вырубать целые деревья", "добывать камень", "добывать руду", "расчищать растительность", "выравнивать участок", "собирать зрелые культуры", "собирать мёд", "собирать лекарственные растения"};
+        WorkArea area = WorkArea.byKind(o.kind());
         String[] params = o.target().split(":", 4);
         int overlay = 2, level = 0;
         try { if (params.length > 0) overlay = Math.max(0, Math.min(2, Integer.parseInt(params[0]))); }
@@ -48,7 +47,7 @@ final class WorkerControl {
         catch (NumberFormatException ignored) {}
         try { if (params.length > 3) halfZ = Math.max(0, Math.min(64, Integer.parseInt(params[3]))); }
         catch (NumberFormatException ignored) {}
-        String mode = modes[o.kind()];
+        String mode = area.mode;
         for (String id : o.ids()) {
             Entity entity;
             try { entity = p.serverLevel().getEntity(UUID.fromString(id)); }
@@ -58,7 +57,7 @@ final class WorkerControl {
             Worker resident = body.worker();
             if (colony == null || resident == null) continue;
             if (!mayControl(p, colony)) { denied = true; continue; }
-            String role = roles[o.kind()];
+            String role = area.profession;
             if (o.arg() == -1) {
                 Colony.WorkOrder existing = colony.workOrders.get(resident.id);
                 if (existing != null) { existing.overlay = overlay; accepted++; }
@@ -84,7 +83,7 @@ final class WorkerControl {
             resident.building = 0;
             resident.assignedProfession = gardenerHarvest && !resident.canPerform(role) ? "gardener"
                     : forestry && !resident.canPerform(role) ? "forester" : role;
-            resident.status = "приказ: " + labels[o.kind()];
+            resident.status = "приказ: " + area.label;
             accepted++;
         }
         if (accepted == 0) return ActionResult.fail(denied ? "Нельзя отдавать приказы рабочим чужого поселения"
@@ -92,7 +91,7 @@ final class WorkerControl {
         String message = o.arg() == -1
                 ? "Видимость назначенных рабочих зон обновлена: " + (overlay == 0 ? "выкл." : overlay == 1 ? "слабая" : "яркая")
                     + " · рабочих: " + accepted
-                : "Участок назначен: " + labels[o.kind()] + " · рабочих: " + accepted
+                : "Участок назначен: " + area.label + " · рабочих: " + accepted
                     + " · радиус: " + o.arg() + " · отображение: " + (overlay == 0 ? "выкл." : overlay == 1 ? "слабое" : "яркое");
         return ActionResult.ok(message);
     }
