@@ -474,6 +474,8 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     realm_labels = np.full(width * height, -2, dtype=np.int32)
     partition_scratch = np.full(width * height, -2, dtype=np.int32)
     realm_seeds: dict[int, int] = {}
+    seed_landmass_by_pixel: dict[int, int] = {}
+    main_landmass_id = major_components[0][0]
     next_realm = 0
     for component, count in zip(major_components, realm_counts):
         seeds = farthest_seeds(component, count, width, seed ^ (next_realm + 1))
@@ -483,10 +485,15 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         partition_scratch[component_indices] = -2
         for offset, point in enumerate(seeds):
             realm_seeds[next_realm + offset] = point
+            seed_landmass_by_pixel[point] = component[0]
         next_realm += count
 
     realm_labels, realm_seeds, aggregation_report = aggregate_realm_regions(
         realm_labels, realm_seeds, width, height, seed, minimum_territory_pixels)
+    realm_island_flags = {
+        rid: seed_landmass_by_pixel.get(point, main_landmass_id) != main_landmass_id
+        for rid, point in realm_seeds.items()
+    }
     realm_total = len(realm_seeds)
 
     province_labels = np.zeros(width * height, dtype=np.uint32)
@@ -525,6 +532,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
             province_meta[province_id] = {
                 "realm": realm_id, "seed": seeds[offset],
                 "area": int(label_counts[province_id]),
+                "island_realm": realm_island_flags.get(realm_id, False),
                 "key": f"realm_{realm_id + 1:03d}_province_{offset + 1:03d}",
             }
         next_province += len(seeds)
