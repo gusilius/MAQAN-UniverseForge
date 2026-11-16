@@ -82,7 +82,7 @@ def stable_name(seed: int, index: int, suffix: str = "") -> str:
     return rng.choice(NAME_START) + rng.choice(NAME_END) + suffix
 
 
-def png_pixels(image: Image.Image) -> tuple[int, int, list[str], dict]:
+def png_pixels(image: Image.Image) -> tuple[int, int, np.ndarray, dict]:
     """Use the shared contextual analyzer; reject ambiguous maps instead of guessing."""
     rgb = np.asarray(image.convert("RGB"), dtype=np.uint8)
     h, w = rgb.shape[:2]
@@ -280,7 +280,10 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     major_components = [component for component in components
                         if len(component) >= minimum_territory_pixels]
     if not major_components:
+        # Keep the largest island as the initial realm when the world has no
+        # profile-sized continent; it must not be counted again as a minor island.
         major_components = [components[0]]
+    major_component_ids = {component[0] for component in major_components}
     major_land_pixels = sum(map(len, major_components))
     land_codes = [i for i, name in enumerate(ANALYSIS_CLASSES)
                   if ANALYSIS_TO_WORLD[name] in LAND_CLASSES]
@@ -345,7 +348,8 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     # deterministic subset of viable islands can become city-state realms.
     # Components below 8 pixels are treated as map speckle, not polities.
     minor_components = [component for component in components
-                        if len(component) < minimum_territory_pixels and len(component) >= 8]
+                        if component[0] not in major_component_ids
+                        and len(component) < minimum_territory_pixels and len(component) >= 8]
     if minor_components and realm_seeds:
         from scipy.spatial import cKDTree
         seed_ids = np.asarray(sorted(realm_seeds), dtype=np.int32)
@@ -491,8 +495,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     biome_lut = np.asarray([BIOME_INDEX.get(ANALYSIS_TO_WORLD[name], 0)
                             for name in ANALYSIS_CLASSES], dtype=np.uint8)
     biome_values = biome_lut[analysis_flat].tolist()
-    river_values = (analysis_flat == ANALYSIS_CLASSES.index("waterway")).astype(np.uint8).tolist()
-    river_values = [value * 255 for value in river_values]
+    river_values = ((analysis_flat == ANALYSIS_CLASSES.index("waterway")).astype(np.uint8) * 255).tolist()
 
     spawn = province_meta[realm_provinces[0][0]]["seed"]
     spawn_x, spawn_z = spawn % width, spawn // width
