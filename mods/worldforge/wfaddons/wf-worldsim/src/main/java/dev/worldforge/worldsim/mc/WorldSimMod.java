@@ -1107,8 +1107,9 @@ public final class WorldSimMod {
         for (EmergenceSource source : emergenceSources()) {
             CharacterRegistry registry = source.registry;
             if (registry == null) { complete = false; continue; }
+            String progressPartition = source.map == null ? "__vanilla_world__" : source.id;
             EmergentMapProgress sourceProgress = emergentPeopleProgress.maps.computeIfAbsent(
-                    source.id, ignored -> new EmergentMapProgress(registry));
+                    progressPartition, ignored -> new EmergentMapProgress(registry));
             boolean hasSettledBands = false;
             for (var element : state.getAsJsonArray("bands")) {
                 if (!element.isJsonObject()) continue;
@@ -1430,12 +1431,14 @@ public final class WorldSimMod {
         Set<String> activeRealmIds = new HashSet<>();
         for (var element : state.getAsJsonArray("polities")) if (element.isJsonObject())
             activeRealmIds.add("emergent-" + element.getAsJsonObject().get("id").getAsString());
+        Map<CharacterRegistry, EmergentPopulationIndex> populationIndexes = new IdentityHashMap<>();
         for (EmergenceSource source : emergenceSources()) {
             var registry = source.registry;
             if (registry == null) continue;
             boolean changed = false;
             boolean settlementMapMarkersChanged = false;
-            EmergentPopulationIndex populationIndex = new EmergentPopulationIndex(registry.all());
+            EmergentPopulationIndex populationIndex = populationIndexes.computeIfAbsent(
+                    registry, ignored -> new EmergentPopulationIndex(registry.all()));
             for (var element : state.getAsJsonArray("polities")) {
                 if (!element.isJsonObject()) continue;
                 JsonObject polity = element.getAsJsonObject();
