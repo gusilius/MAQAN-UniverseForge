@@ -465,12 +465,15 @@ def aggregate_realm_regions(realm_labels: np.ndarray, realm_seeds: dict[int, int
         return value
 
     desired_count = max(1, int(math.ceil(len(ids) * desired_fraction)))
-    world_cap = max(minimum_pixels * 4, int(active.size * max_area_share))
+    # A pair of viable seed-regions must be mergeable on small maps;
+    # large maps remain bounded by the configured world-area share.
+    world_cap = max(minimum_pixels * 8, int(active.size * max_area_share))
     edges = []
     for edge_index, ((a, b), border) in enumerate(zip(unique_pairs, border_lengths)):
         a, b = int(a), int(b)
         jitter = ((seed ^ (a * 0x9E3779B1) ^ (b * 0x85EBCA77)) & 0xFFFF) / 65535.0
-        terrain_barrier = -float(pair_affinity[edge_index]) * 0.11
+        # Terrain biases frontiers but must not prevent ordinary consolidation.
+        terrain_barrier = -float(pair_affinity[edge_index]) * 0.035
         score = ((area[a] + area[b]) / max(1, world_cap) -
                  min(1.0, int(border) / 64.0) * 0.10 +
                  terrain_barrier + jitter * 0.025)
@@ -766,6 +769,8 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     if tiny_components:
         tiny_pixels = np.concatenate(tiny_components).astype(np.int64, copy=False)
         wilderness_mask.ravel()[tiny_pixels] = True
+        # Account for these excluded pixels in the unclaimed-land ledger too.
+        unclaimed_land_pixels += int(tiny_pixels.size)
         minor_components = [component for component in minor_components if len(component) >= 8]
     island_province_count = 0
     independent_island_realm_count = 0
