@@ -4,6 +4,8 @@ import com.mojang.logging.LogUtils;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.inventory.InventoryScreen;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.network.chat.Component;
 import net.minecraftforge.fml.ModList;
 import org.lwjgl.glfw.GLFW;
@@ -1126,7 +1128,9 @@ public final class PlatformShellScreen extends Screen {
         }
 
         List<WorkspaceRuntime.InspectorField> fields = WorkspaceRuntime.inspect(selected);
-        int total = 4 + 17 + 18 + 16 + 9 + (selected.summary().isBlank() ? 0 : 19);
+        boolean hasLivePreview = selected.previewEntity() instanceof LivingEntity;
+        int total = 4 + (hasLivePreview ? 116 : 0) + 17 + 18 + 16 + 9
+                + (selected.summary().isBlank() ? 0 : 19);
         for (WorkspaceRuntime.InspectorField field : fields)
             total += (field.section().isBlank() ? 0 : 14) + 25;
         if (!inspectorActions.isEmpty()) total += 12 + inspectorActions.size() * 23;
@@ -1135,6 +1139,23 @@ public final class PlatformShellScreen extends Screen {
 
         g.enableScissor(p.x + 5, bodyTop, p.x + p.w - 5, bodyBottom);
         int y = bodyTop + 4 - inspectorScroll;
+        if (hasLivePreview) {
+            LivingEntity liveEntity = (LivingEntity) selected.previewEntity();
+            int previewLeft = p.x + 12;
+            int previewRight = Math.min(p.x + p.w - 12, previewLeft + 104);
+            int previewTop = y;
+            int previewBottom = previewTop + 108;
+            g.fill(previewLeft, previewTop, previewRight, previewBottom, 0x332A6470);
+            g.drawString(font, "LIVE WORLD MODEL", previewLeft + 5, previewTop + 5, CYAN, false);
+            if (liveEntity.isAlive() && liveEntity.level() == Minecraft.getInstance().level) {
+                InventoryScreen.renderEntityInInventoryFollowsMouse(g.pose(),
+                        previewLeft + 2, previewTop + 18, previewRight - 2, previewBottom - 3,
+                        42, 0.0625F, mouseX, mouseY, liveEntity);
+            } else {
+                g.drawString(font, "Entity not in this world", previewLeft + 5, previewTop + 52, MUTED, false);
+            }
+            y = previewBottom + 8;
+        }
         g.drawString(font, "◇ " + selected.entityType().toUpperCase(java.util.Locale.ROOT),
                 left, y, CYAN, false);
         y += 17;
