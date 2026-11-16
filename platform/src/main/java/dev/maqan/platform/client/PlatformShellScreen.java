@@ -1354,6 +1354,12 @@ public final class PlatformShellScreen extends Screen {
             toggleWorkspacePanel("timeline");
             return true;
         }
+        // The imported concept pack keeps the same workspace and provider state;
+        // F7 changes only the decorative skin.
+        if (keyCode == GLFW.GLFW_KEY_F7 && MaqanUiPackRenderer.assetsAvailable()) {
+            MaqanUiPackRenderer.cycleTheme();
+            return true;
+        }
         java.util.Optional<WorkspaceRuntime.Shortcut> registered =
                 WorkspaceRuntime.shortcutFor(keyCode, modifiers);
         if (registered.isPresent()) {
