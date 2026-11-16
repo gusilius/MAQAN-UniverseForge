@@ -56,6 +56,9 @@ public final class PlatformShellScreen extends Screen {
     private final Map<String, Panel> panels = new LinkedHashMap<>();
     private final java.util.Set<String> hiddenPanels = new java.util.LinkedHashSet<>();
     private Profile profile = Profile.COSMOS;
+    private static Profile mapReturnProfile;
+    private static String mapReturnCapability;
+    private static boolean mapModeTransition;
     private String selectedDomain = "COSMOS";
     private String selectedCapabilityId = "maqan.atlas.cosmos";
     private String draggingPanel;
@@ -399,7 +402,81 @@ public final class PlatformShellScreen extends Screen {
     }
 
     private Screen activeView() {
-        return profile == Profile.COSMOS ? embeddedView : providerViews.get(selectedCapabilityId);
+        if (profile == Profile.COSMOS) return embeddedView;
+        Screen view = providerViews.get(selectedCapabilityId);
+        if (view == null && profile == Profile.POLITICS)
+            view = providerViews.get("worldforge.map");
+        if (view == null && profile == Profile.POLITICS)
+            view = providerViews.get("worldforge.realms.politics");
+        return view;
+    }
+
+    private void ensurePoliticalMapView() {
+        if (providerViews.containsKey("worldforge.map")
+                || providerViews.containsKey("worldforge.realms.politics")) return;
+        if (!ModList.get().isLoaded("worldforge")) return;
+        try {
+            Class<?> type = Class.forName("dev.worldforge.mod.client.MapScreen");
+            Object instance = type.getDeclaredConstructor().newInstance();
+            if (!(instance instanceof Screen screen)) return;
+            type.getMethod("setEmbeddedInMaqan", boolean.class).invoke(instance, true);
+            providerViews.put(selectedCapabilityId, screen);
+            if (width > 0 && height > 0) screen.init(Minecraft.getInstance(), width, height);
+        } catch (ReflectiveOperationException | LinkageError error) {
+            LOGGER.warn("Unable to mount WorldForge map for the MAQAN map-mode selector", error);
+        }
+    }
+
+    private void applyMapModeToPoliticalView(WorkspaceViewState.MapMode mode) {
+        Screen view = providerViews.get("worldforge.realms.politics");
+        if (view == null) view = providerViews.get("worldforge.map");
+        if (view == null) view = activeView();
+        if (view == null) return;
+        try {
+            view.getClass().getMethod("setMaqanMapMode", String.class).invoke(view, mode.name());
+        } catch (ReflectiveOperationException ignored) {
+            LOGGER.debug("Active WorldForge map does not expose MAQAN map-mode integration");
+        }
+    }
+
+    private void cycleMapModeFromShell() {
+        WorkspaceViewState.MapMode current = WorkspaceViewState.mapMode();
+        if (current == WorkspaceViewState.MapMode.LOCAL_MINIMAP) {
+            mapReturnProfile = profile;
+            mapReturnCapability = selectedCapabilityId;
+        }
+        WorkspaceViewState.MapMode next = WorkspaceViewState.cycleMapMode();
+        mapModeTransition = true;
+        try {
+            if (next == WorkspaceViewState.MapMode.WORLD_MAP
+                    || next == WorkspaceViewState.MapMode.POLITICAL_MAP) {
+                setProfile(Profile.POLITICS);
+                selectedCapabilityId = next == WorkspaceViewState.MapMode.WORLD_MAP
+                        ? "worldforge.map" : "worldforge.realms.politics";
+                ensurePoliticalMapView();
+                applyMapModeToPoliticalView(next);
+            } else {
+                Profile restore = mapReturnProfile == null ? Profile.SETTLEMENTS : mapReturnProfile;
+                String capability = mapReturnCapability;
+                setProfile(restore);
+                if (capability != null && !capability.isBlank()) selectedCapabilityId = capability;
+                mapReturnProfile = null;
+                mapReturnCapability = null;
+            }
+        } finally {
+            mapModeTransition = false;
+        }
+    }
+
+    public static void cycleMapModeFromHotkey() {
+        Minecraft minecraft = Minecraft.getInstance();
+        PlatformShellScreen shell;
+        if (minecraft.screen instanceof PlatformShellScreen current) shell = current;
+        else {
+            shell = new PlatformShellScreen();
+            minecraft.setScreen(shell);
+        }
+        shell.cycleMapModeFromShell();
     }
 
     private void clampPanels() {
@@ -1102,7 +1179,7 @@ public final class PlatformShellScreen extends Screen {
                 return true;
             }
             if (mx >= mapControlX() && mx < mapControlX() + 24) {
-                WorkspaceViewState.cycleMapMode();
+                cycleMapModeFromShell();
                 return true;
             }
         }
@@ -1408,6 +1485,15 @@ public final class PlatformShellScreen extends Screen {
     }
 
     private void setProfile(Profile next) {
+        if (!mapModeTransition && WorkspaceViewState.mapMode() != WorkspaceViewState.MapMode.LOCAL_MINIMAP) {
+            mapReturnProfile = next;
+            mapReturnCapability = switch (next) {
+                case COSMOS -> "maqan.atlas.cosmos";
+                case POLITICS -> "worldforge.realms.politics";
+                case SETTLEMENTS -> "worldforge.settlements";
+                case RTS -> "worldforge.rts";
+            };
+        }
         // Keep the shared entity selection across map/profile changes. The
         // active provider owns camera state and remains cached in its view.
         profile=next;
