@@ -21,23 +21,24 @@ The uploaded pack defines a 1368×760 reference viewport. Its PNGs are authored 
 
 The 1368×760 composition is the design reference, not a fixed pixel canvas.
 
-- At desktop sizes, preserve the supplied composition and let the user's dock tree allocate panels.
-- At compact viewports, keep the world/map as the full underlying canvas and expose navigation, inspector, tools and timeline as one-at-a-time slide-over drawers.
-- Keep hit regions aligned with rendered elements using the same viewport transform.
-- Maintain aspect ratio for texture frames; do not stretch decorative artwork to arbitrary screen dimensions.
-- Clamp all windows and drawers to the available viewport. No panel may be positioned beyond the screen or overlap another docked panel.
+- At desktop sizes, preserve the original per-theme composition at the 1368×760 reference size; on larger and smaller windows, anchor the side columns and contextual windows to their corresponding screen edges.
+- The top bar fills the available width while retaining its source height ratio. Minimap, RTS console and side windows preserve their individual theme-specific proportions.
+- At compact viewports (the shared 840 px width / 560 px height breakpoint), omit the desktop side-window frames and retain the minimap plus RTS console in a responsive bottom dock. Navigation, inspector, tools and timeline use the existing one-at-a-time native drawers.
+- All computed frame rectangles are clamped to the scaled Minecraft GUI viewport. The compact map and command dock must not extend beyond the screen or overlap one another.
+- Keep hit regions aligned with rendered elements using the same geometry source when interaction hotspots are added.
 - Respect Minecraft GUI scale and actual scaled screen dimensions, not only physical framebuffer pixels.
 - Keyboard access, tooltips and focus state remain available for icon-only controls.
 
 ## Current implementation slice
 
 - `MaqanUiPackLayout` loads and validates `assets/maqan/gui/layout.json` at runtime; it checks the 1368×760 reference viewport, all four mandatory themes and all eight frame rectangles per theme.
-- `MaqanUiPackRenderer` consumes those runtime rectangles instead of maintaining a second hardcoded geometry table. Drawing and hit-testing share the same letterboxed viewport transform.
+- `MaqanUiPackRenderer` consumes runtime geometry and `MaqanUiPackAdaptiveLayout` computes responsive placements per theme. At the reference viewport the source composition is preserved; other aspect ratios reflow instead of uniformly shrinking the entire frame.
 - The renderer validates all ten unique texture files for each of the four themes before activating the concept frame.
 - When all pack textures are present, the concept frame replaces the generic Platform chrome instead of drawing duplicate rails and panels over it.
 - The left/right frame positions use the canonical blank-window PNGs. Baked state/diplomacy sample artwork is not used as live window content.
-- The existing responsive layout calculator and compact drawers remain available as fallback when the manifest or texture pack is unavailable.
+- The shared 840×560 compact breakpoint is used by both the skin renderer and workspace drawer layout. Compact mode keeps minimap and RTS console visible, while replacing the side windows with native drawers.
 - The four themes are switchable with F7 or the native workspace settings pop-out; the selected skin is persisted in the user's local workspace preferences. Search, context, settings, workspace-profile and notification overlays remain rendered above the concept artwork. Skin changes affect artwork only; they do not replace the active provider or selection state.
+- Adaptive layout unit tests cover desktop composition, compact and portrait layouts, tiny windows, screen bounds and artwork aspect ratios. Tests have been added but not executed yet.
 - Minimap data, real camera-mode switching, map-mode switching, live resource labels and provider-backed contextual content remain open integration tasks.
 
 The original concept is available as a self-contained HTML file with all 40 image layers embedded as WebP data URIs and the per-theme 1368×760 coordinates embedded in its `SK` and `MT` objects. It is an asset source only; it is not shipped or executed in Minecraft.
