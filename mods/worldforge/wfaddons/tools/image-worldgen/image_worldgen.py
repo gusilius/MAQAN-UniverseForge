@@ -618,7 +618,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         "political-preview.png": political_buffer.getvalue(),
         "titles.json": json.dumps(titles_doc, sort_keys=True, separators=(",", ":")).encode(),
         "realms.json": json.dumps(realms_doc, sort_keys=True, separators=(",", ":")).encode(),
-        "world-blueprint.json": json.dumps(blueprint, sort_keys=True, separators=(",", ":")).encode(),
+        "world-blueprint.json": json.dumps(blueprint, sort_keys=True, separators=(",", ":"), default=lambda value: value.item() if isinstance(value, np.generic) else str(value)).encode(),
         "generation-profile.json": json.dumps({
             "format": "maqan-planet-world-profile/1",
             "planet_id": planet_id, "seed": seed, "generation_mode": generation_mode,
