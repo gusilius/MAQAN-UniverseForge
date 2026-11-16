@@ -17,7 +17,7 @@ island proximity, border extraction and preview colorization in native code.
 - Main landmasses receive profile-sized realm and province partitions.
 - Minor connected land components from 8 pixels upward become overseas
   provinces of the nearest realm.
-- A deterministic, capped subset of islands from 16 pixels upward can become
+- A deterministic, capped subset of islands above the profile-scaled minimum (at least 64 pixels) can become
   independent island city-states.
 - Smaller fragments remain unclaimed map detail rather than generating
   hundreds of meaningless one-pixel polities.
