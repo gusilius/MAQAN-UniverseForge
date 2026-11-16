@@ -380,14 +380,18 @@ public class PeopleMod {
     public static CharacterRegistry registryFor(ServerLevel level) {
         if (level == null) return null;
         MapData map = EditorManager.dataFor(level);
-        return map == null ? WORLD_REGISTRY : registry(map);
+        if (level.getChunkSource().getGenerator() instanceof dev.worldforge.mod.MapChunkGenerator)
+            return map == null ? null : registry(map);
+        return WORLD_REGISTRY;
     }
 
     /** Реестр без создания (для сущностей, которые тикают до загрузки карты). */
     public static CharacterRegistry peek(ServerLevel level) {
         if (level == null) return null;
-        MapData m = EditorManager.dataFor(level);
-        return m == null ? WORLD_REGISTRY : REGS.get(m);
+        MapData map = EditorManager.dataFor(level);
+        if (level.getChunkSource().getGenerator() instanceof dev.worldforge.mod.MapChunkGenerator)
+            return map == null ? null : REGS.get(map);
+        return WORLD_REGISTRY;
     }
 
     private static void writeAtomic(Path file, String content) throws java.io.IOException {
