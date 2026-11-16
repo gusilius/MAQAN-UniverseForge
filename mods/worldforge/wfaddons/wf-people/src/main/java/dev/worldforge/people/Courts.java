@@ -52,11 +52,13 @@ public final class Courts {
         for (Role role : defs.all()) {
             List<String[]> places = new ArrayList<>();             // {place, culture, label, race}
             if (role.per.equals("realm")) {
-                for (TitleData.Realm r : d.realmList()) String realmRace = text(r.props.get("race"));
+                for (TitleData.Realm r : d.realmList()) {
+                    String realmRace = text(r.props.get("race"));
                     if (realmRace.isBlank()) realmRace = dominantRace(r.props.get("races"));
                     String realmCulture = text(r.props.get("culture"));
                     if (realmCulture.isBlank()) realmCulture = names.culture(realmRace);
                     places.add(new String[]{realmPlace(r.id), realmCulture, r.id, realmRace});
+                }
             } else {
                 int tier = -1;
                 for (TitleData.Tier t : d.tiers) if (t.key.equals(role.per)) tier = t.index;
