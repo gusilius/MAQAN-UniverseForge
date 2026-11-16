@@ -1236,6 +1236,8 @@ public class TroopsMod {
                     source.sendFailure(Component.literal("У вас нет солдат для расформирования."));
                     return 0;
                 }
+                DELEGATION.prune(SQUADS);
+                HIERARCHY.pruneSquads(SQUADS);
                 int count = n;
                 source.sendSuccess(() -> Component.literal("Распущено солдат: " + count), false);
                 return count;
@@ -1770,6 +1772,8 @@ public class TroopsMod {
         String id = troop.getUUID().toString();
         LIVE.remove(id);
         SQUADS.remove(id);
+        DELEGATION.prune(SQUADS);
+        HIERARCHY.pruneSquads(SQUADS);
     }
 
     private static void discardPrepared(List<TroopEntity> troops) {
