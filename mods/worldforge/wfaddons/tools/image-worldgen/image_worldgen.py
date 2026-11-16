@@ -566,7 +566,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         "generation_phase_seconds": {
             "image_analysis_and_components": round(analysis_seconds, 4),
             "political_partition_and_settlements": round(political_seconds, 4),
-            "geography_and_preview": round(geography_seconds, 4),
+            "geography_layers": round(geography_seconds, 4),
         },
         "territories": [{"id": pid, "realm_id": f"realm_{meta['realm'] + 1:02d}",
                          "capital_pixel": [meta["seed"] % width, meta["seed"] // width],
