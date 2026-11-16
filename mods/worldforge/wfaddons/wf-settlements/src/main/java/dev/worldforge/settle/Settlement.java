@@ -1240,8 +1240,11 @@ public final class Settlement {
 
     /** Приоритет профессии для рабочего: 0 - не делает, 1 - самое важное .. 4. Без записи: подёнщик берётся за всё (1), остальные - только своё (1). */
     public int workPriority(Worker w, String prof) {
-        if (!w.canPerform(prof)) return 0;
-        if (w.jobPrio != null && w.jobPrio.containsKey(prof)) return w.jobPrio.get(prof);
+        if (!w.canPerform(prof) || prof == null || !defs.professions.containsKey(prof)) return 0;
+        if (w.jobPrio != null && w.jobPrio.containsKey(prof)) {
+            Integer priority = w.jobPrio.get(prof);
+            return priority == null ? 0 : Math.max(0, Math.min(4, priority));
+        }
         return 1;
     }
 
@@ -1250,6 +1253,8 @@ public final class Settlement {
         if (w == null) throw new OrderException("Нет рабочего " + workerId);
         if (!defs.professions.containsKey(prof)) throw new OrderException("Нет профессии " + prof);
         if (n < 0 || n > 4) throw new OrderException("Приоритет 0..4");
+        if (!w.canPerform(prof) && n != 0)
+            throw new OrderException("Рабочий не может выполнять профессию " + prof);
         if (w.jobPrio == null) w.jobPrio = new TreeMap<>();
         w.jobPrio.put(prof, n);
     }
