@@ -137,12 +137,14 @@ public class MapScreen extends Screen {
             slots.add(new Slot(k, x, y, size));
             x += size + gap;
         }
-        nameBox = new EditBox(font, width / 2 - 100, height - 78, 200, 18, Component.literal("Название"));
+        nameBox = new EditBox(font, viewport[0] + viewport[2] / 2 - 100,
+                viewport[1] + viewport[3] - 38, 200, 18, Component.literal("Название"));
         nameBox.setMaxLength(32);
         nameBox.setVisible(false);
         nameBox.setHint(Component.literal("Название метки, Enter"));
         addRenderableWidget(nameBox);
-        argBox = new EditBox(font, width / 2 - 130, height - 78, 260, 18, Component.literal("Аргументы"));
+        argBox = new EditBox(font, viewport[0] + viewport[2] / 2 - 130,
+                viewport[1] + viewport[3] - 38, 260, 18, Component.literal("Аргументы"));
         argBox.setMaxLength(120);
         argBox.setVisible(false);
         addRenderableWidget(argBox);
