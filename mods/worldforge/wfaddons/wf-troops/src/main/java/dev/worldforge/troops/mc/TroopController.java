@@ -16,6 +16,7 @@ final class TroopController {
     private TroopController() {}
 
     static final double SPACING = 1.7;
+    private static final TroopSpatialIndex SPATIAL = new TroopSpatialIndex();
 
     private static UUID safeUuid(String value) {
         if (value == null || value.isBlank()) return null;
@@ -123,14 +124,20 @@ final class TroopController {
         if (s.lastAlive < 0) s.lastAlive = n;
         double lost = Math.max(0, s.lastAlive - n) / (double) Math.max(1, s.initial);
         s.lastAlive = n;
-        List<TroopEntity> leaders = new ArrayList<>();
-        for (TroopEntity t : alive) {
+        SPATIAL.rebuild(alive);
+        double[] auraByIndex = SPATIAL.auraBuffer();
+        boolean[] leaderByIndex = SPATIAL.leaderBuffer();
+        boolean hasLeader = false;
+        for (int i = 0; i < n; i++) {
+            TroopEntity t = alive.get(i);
             boolean appointed = !s.leaderCharacterId.isEmpty() && s.leaderCharacterId.equals(t.characterId);
             double aura = Leadership.aura(t.def() == null ? 0 : t.def().aura(),
                     appointed, appointed && s.leaderHero, appointed ? s.leadershipRank : 0);
-            if (aura > 0) leaders.add(t);
+            auraByIndex[i] = aura;
+            leaderByIndex[i] = aura > 0;
+            hasLeader |= leaderByIndex[i];
         }
-        s.morale = Morale.step(s.morale, n / (double) Math.max(1, s.initial), lost, near ? en[0] / n : 0, !leaders.isEmpty(), near, 0.5);
+        s.morale = Morale.step(s.morale, n / (double) Math.max(1, s.initial), lost, near ? en[0] / n : 0, hasLeader, near, 0.5);
         boolean was = s.routed;
         s.routed = Morale.routed(was, s.morale, near);
         if (s.routed != was) {
@@ -139,28 +146,27 @@ final class TroopController {
             if (p != null) p.displayClientMessage(net.minecraft.network.chat.Component.literal(s.routed ? "Отряд «" + s.name + "» бежит с поля боя!" : "Отряд «" + s.name + "» пришёл в себя"), false);
             if (s.routed) s.queue.clear();
         }
-        for (TroopEntity t : alive) {
+        for (int i = 0; i < n; i++) {
+            TroopEntity t = alive.get(i);
             boolean led = false;
-            for (TroopEntity l : leaders) {
-                boolean appointed = !s.leaderCharacterId.isEmpty() && s.leaderCharacterId.equals(l.characterId);
-                double aura = Leadership.aura(l.def() == null ? 0 : l.def().aura(),
-                        appointed, appointed && s.leaderHero, appointed ? s.leadershipRank : 0);
-                if (t.distanceToSqr(l) <= aura * aura) { led = true; break; }
+            int nearby = SPATIAL.query(t.getX(), t.getZ(), Leadership.MAX_AURA);
+            for (int candidate = 0; candidate < nearby; candidate++) {
+                int leaderIndex = SPATIAL.candidate(candidate);
+                if (!leaderByIndex[leaderIndex]) continue;
+                TroopEntity leader = alive.get(leaderIndex);
+                double dx = t.getX() - leader.getX(), dz = t.getZ() - leader.getZ();
+                double aura = auraByIndex[leaderIndex];
+                if (dx * dx + dz * dz <= aura * aura) { led = true; break; }
             }
             t.setDamageMult(Morale.damage(s.morale, led));
             t.setMorale((int) Math.round(s.morale * 100));
-            // Squad morale is gameplay state: keep the soldier's canonical Character in sync
-            // so personality, dialogue, leadership and future decisions observe the same value.
+            // Canonical Character remains the sole owner of military morale.
             TroopsMod.syncMilitaryMorale(t);
         }
-        for (TroopEntity h : alive) {                                               // лекари лечат раненых своего отряда рядом
-            if (h.def() == null || h.def().heal() <= 0) continue;
-            List<TroopEntity> near2 = new ArrayList<>();
-            for (TroopEntity t : alive) if (t.distanceToSqr(h) <= Morale.HEAL_RANGE * Morale.HEAL_RANGE) near2.add(t);
-            double[] hp = new double[near2.size()], mx = new double[near2.size()];
-            for (int i = 0; i < hp.length; i++) { hp[i] = near2.get(i).getHealth(); mx[i] = near2.get(i).getMaxHealth(); }
-            double[] plan = Morale.healPlan(hp, mx, Morale.HEAL_TARGETS, h.def().heal() * 0.5);
-            for (int i = 0; i < plan.length; i++) if (plan[i] > 0) near2.get(i).heal((float) plan[i]);
+        for (int i = 0; i < n; i++) {
+            TroopEntity healer = alive.get(i);
+            if (healer.def() == null || healer.def().heal() <= 0) continue;
+            SPATIAL.healAround(alive, i, Morale.HEAL_RANGE, healer.def().heal() * 0.5, Morale.HEAL_TARGETS);
         }
         if (!s.routed) return false;
         double[] f = near ? Morale.flee(cx, cz, en[1], en[2], 30) : new double[]{cx, cz};
