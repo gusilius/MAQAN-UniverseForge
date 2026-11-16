@@ -51,6 +51,28 @@ public final class ArmyHierarchyTest {
         restored.pruneSquads(squads);
         check(restored.corps(reserve.id).squadIds.isEmpty(),
                 "destroyed/disbanded tactical squads are pruned from the strategic hierarchy");
+        Squads indexed = new Squads();
+        Squads.Squad indexedA = indexed.create("player", "A", List.of("a1", "a2", "a3"));
+        check(indexed.squadOf("a2") == indexedA,
+                "reverse membership index resolves a soldier to its squad");
+        Squads.Squad split = indexed.split(indexedA, List.of("a2"));
+        check(split != null && indexed.squadOf("a2") == split
+                        && indexed.squadOf("a1") == indexedA,
+                "split moves membership index entries without changing character identity");
+        check(indexed.merge(indexedA.id, split.id) && indexed.squadOf("a2") == indexedA,
+                "merge reassigns reverse membership entries to the receiving squad");
+        indexed.disband(indexedA.id);
+        check(indexed.squadOf("a1") == null && indexed.squadOf("a2") == null,
+                "disband removes all reverse membership entries");
+        Squads compatibility = new Squads();
+        Squads.Squad legacy = compatibility.create("player", "Legacy", List.of("legacy-1"));
+        legacy.members.add("legacy-2"); // Compatibility with older addons that still mutate the public list.
+        check(compatibility.squadOf("legacy-2") == legacy,
+                "reverse index repairs legacy direct membership mutations");
+        Squads restoredIndex = new Squads();
+        restoredIndex.fromJson(indexedA.toString()); // Invalid JSON must leave a valid empty index.
+        check(restoredIndex.squadOf("a1") == null,
+                "invalid persistence input does not leave stale reverse membership entries");
         if (failures > 0) throw new AssertionError(failures + " army hierarchy tests failed");
     }
 }
