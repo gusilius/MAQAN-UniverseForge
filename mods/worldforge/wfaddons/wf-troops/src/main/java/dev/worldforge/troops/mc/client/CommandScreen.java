@@ -21,6 +21,10 @@ import net.minecraft.world.phys.Vec3;
 import org.lwjgl.glfw.GLFW;
 
 import java.util.*;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Properties;
 
 /**
  * Экран командного режима: прозрачный, не ставит игру на паузу. Выбор мышкой (клик, рамка, Shift, двойной клик, группы 1-9),
@@ -49,8 +53,12 @@ public final class CommandScreen extends Screen {
     // Тактические способности и приказы доступны только по отдельной иконке.
     private boolean unitToolsOpen;
     // Floating command panels are user-positionable; -1 keeps the adaptive default anchor.
-    private int professionalPanelX = -1, professionalPanelY = -1;
-    private int unitToolsPanelX = -1, unitToolsPanelY = -1;
+    private static int professionalPanelX = -1, professionalPanelY = -1;
+    private static int unitToolsPanelX = -1, unitToolsPanelY = -1;
+    private static boolean professionalCollapsed, unitToolsCollapsed;
+    private static boolean professionalPinned, unitToolsPinned;
+    private static boolean panelLayoutLoaded;
+    private static final String PANEL_CONFIG = "maqan_rts_panels.properties";
     private boolean floatingPanelDrag;
     private int floatingPanelKind = -1;
     private double floatingPanelOffsetX, floatingPanelOffsetY;
@@ -70,7 +78,47 @@ public final class CommandScreen extends Screen {
 
     public CommandScreen() {
         super(Component.literal("Командный режим"));
+        loadPanelLayout();
         registerMaqanWorkspaceProvider();
+    }
+
+    private static Path panelConfigPath() {
+        return Minecraft.getInstance().gameDirectory.toPath().resolve("config").resolve(PANEL_CONFIG);
+    }
+
+    private static void loadPanelLayout() {
+        if (panelLayoutLoaded) return;
+        panelLayoutLoaded = true;
+        Properties p = new Properties();
+        try {
+            Path path = panelConfigPath();
+            if (Files.isRegularFile(path)) try (var in = Files.newInputStream(path)) { p.load(in); }
+            professionalPanelX = Integer.parseInt(p.getProperty("professional.x", "-1"));
+            professionalPanelY = Integer.parseInt(p.getProperty("professional.y", "-1"));
+            unitToolsPanelX = Integer.parseInt(p.getProperty("unit.x", "-1"));
+            unitToolsPanelY = Integer.parseInt(p.getProperty("unit.y", "-1"));
+            professionalCollapsed = Boolean.parseBoolean(p.getProperty("professional.collapsed", "false"));
+            unitToolsCollapsed = Boolean.parseBoolean(p.getProperty("unit.collapsed", "false"));
+            professionalPinned = Boolean.parseBoolean(p.getProperty("professional.pinned", "false"));
+            unitToolsPinned = Boolean.parseBoolean(p.getProperty("unit.pinned", "false"));
+        } catch (Exception ignored) { /* Invalid client layout falls back to adaptive anchors. */ }
+    }
+
+    private static void savePanelLayout() {
+        Properties p = new Properties();
+        p.setProperty("professional.x", Integer.toString(professionalPanelX));
+        p.setProperty("professional.y", Integer.toString(professionalPanelY));
+        p.setProperty("unit.x", Integer.toString(unitToolsPanelX));
+        p.setProperty("unit.y", Integer.toString(unitToolsPanelY));
+        p.setProperty("professional.collapsed", Boolean.toString(professionalCollapsed));
+        p.setProperty("unit.collapsed", Boolean.toString(unitToolsCollapsed));
+        p.setProperty("professional.pinned", Boolean.toString(professionalPinned));
+        p.setProperty("unit.pinned", Boolean.toString(unitToolsPinned));
+        try {
+            Path path = panelConfigPath();
+            Files.createDirectories(path.getParent());
+            try (var out = Files.newOutputStream(path)) { p.store(out, "MAQAN RTS floating command panels"); }
+        } catch (IOException ignored) { /* UI remains usable if client config is read-only. */ }
     }
 
     /** Publish RTS selection metadata; entity state and orders remain in wf-troops/wf-settlements. */
@@ -403,13 +451,18 @@ public final class CommandScreen extends Screen {
         int maxY = Math.max(minY, view[1] + view[3] - 98);
         x = Math.max(minX, Math.min(maxX, x));
         y = Math.max(minY, Math.min(maxY, y));
-        return new int[]{x, y, 194, 94};
+        return new int[]{x, y, 194, unitToolsCollapsed ? 16 : 94};
     }
 
     private boolean beginFloatingPanelDrag(double px, double py) {
         if (unitToolsOpen) {
             int[] r = unitToolsBounds();
-            if (px >= r[0] && px < r[0] + r[2] && py >= r[1] && py < r[1] + 14) {
+            if (px >= r[0] + r[2] - 28 && px < r[0] + r[2] && py >= r[1] && py < r[1] + 14) {
+                if (px >= r[0] + r[2] - 14) unitToolsCollapsed = !unitToolsCollapsed;
+                else unitToolsPinned = !unitToolsPinned;
+                savePanelLayout(); return true;
+            }
+            if (px >= r[0] && px < r[0] + r[2] - 28 && py >= r[1] && py < r[1] + 14) {
                 floatingPanelDrag = true; floatingPanelKind = 1;
                 floatingPanelOffsetX = px - r[0]; floatingPanelOffsetY = py - r[1];
                 return true;
@@ -417,7 +470,12 @@ public final class CommandScreen extends Screen {
         }
         if (professionalToolsOpen) {
             int[] r = professionalPanelBounds();
-            if (px >= r[0] && px < r[0] + r[2] && py >= r[1] && py < r[1] + 14) {
+            if (px >= r[0] + r[2] - 28 && px < r[0] + r[2] && py >= r[1] && py < r[1] + 14) {
+                if (px >= r[0] + r[2] - 14) professionalCollapsed = !professionalCollapsed;
+                else professionalPinned = !professionalPinned;
+                savePanelLayout(); return true;
+            }
+            if (px >= r[0] && px < r[0] + r[2] - 28 && py >= r[1] && py < r[1] + 14) {
                 floatingPanelDrag = true; floatingPanelKind = 0;
                 floatingPanelOffsetX = px - r[0]; floatingPanelOffsetY = py - r[1];
                 return true;
@@ -431,11 +489,11 @@ public final class CommandScreen extends Screen {
         if (floatingPanelKind == 1) {
             unitToolsPanelX = (int) Math.round(px - floatingPanelOffsetX);
             unitToolsPanelY = (int) Math.round(py - floatingPanelOffsetY);
-            int[] r = unitToolsBounds(); unitToolsPanelX = r[0]; unitToolsPanelY = r[1];
+            int[] r = unitToolsBounds(); unitToolsPanelX = r[0]; unitToolsPanelY = r[1]; savePanelLayout();
         } else if (floatingPanelKind == 0) {
             professionalPanelX = (int) Math.round(px - floatingPanelOffsetX);
             professionalPanelY = (int) Math.round(py - floatingPanelOffsetY);
-            int[] r = professionalPanelBounds(); professionalPanelX = r[0]; professionalPanelY = r[1];
+            int[] r = professionalPanelBounds(); professionalPanelX = r[0]; professionalPanelY = r[1]; savePanelLayout();
         }
     }
 
@@ -482,7 +540,9 @@ public final class CommandScreen extends Screen {
         g.fill(r[0], r[1], r[0] + r[2], r[1] + r[3], 0xEE101820);
         g.fill(r[0], r[1], r[0] + r[2], r[1] + 1, 0xFF8A7040);
         g.fill(r[0], r[1], r[0] + r[2], r[1] + 14, 0xCC202B38);
-        g.drawString(font, (troops.size() == 1 ? "ЮНИТ" : "ГРУППА") + " · " + troops.size() + "   ⋮⋮", r[0] + 6, r[1] + 4, 0xFFE6C875, false);
+        g.drawString(font, (troops.size() == 1 ? "ЮНИТ" : "ГРУППА") + " · " + troops.size(), r[0] + 6, r[1] + 4, 0xFFE6C875, false);
+        g.drawString(font, (unitToolsPinned ? "◆" : "◇") + (unitToolsCollapsed ? "+" : "−"), r[0] + r[2] - 25, r[1] + 4, 0xFFB8C5D6, false);
+        if (unitToolsCollapsed) return;
         String traits;
         if (troops.size() == 1 && troops.get(0).def() != null) {
             TroopEntity unit = troops.get(0);
@@ -577,7 +637,7 @@ public final class CommandScreen extends Screen {
         int maxY = Math.max(minY, view[1] + view[3] - 50);
         x = Math.max(minX, Math.min(maxX, x));
         y = Math.max(minY, Math.min(maxY, y));
-        return new int[]{x, y, 140, 46};
+        return new int[]{x, y, 140, professionalCollapsed ? 16 : 46};
     }
 
     private boolean inProfessionalPanel(double px, double py) {
@@ -599,7 +659,9 @@ public final class CommandScreen extends Screen {
         g.fill(r[0], r[1], r[0] + r[2], r[1] + r[3], 0xEE101820);
         g.fill(r[0], r[1], r[0] + r[2], r[1] + 1, 0xFF8A7040);
         g.fill(r[0], r[1], r[0] + r[2], r[1] + 14, 0xCC202B38);
-        g.drawString(font, "РАБОЧИЕ ЗАДАЧИ   ⋮⋮", r[0] + 5, r[1] + 4, 0xFFE6C875, false);
+        g.drawString(font, "РАБОЧИЕ ЗАДАЧИ", r[0] + 5, r[1] + 4, 0xFFE6C875, false);
+        g.drawString(font, (professionalPinned ? "◆" : "◇") + (professionalCollapsed ? "+" : "−"), r[0] + r[2] - 25, r[1] + 4, 0xFFB8C5D6, false);
+        if (professionalCollapsed) return;
     }
 
     private List<Btn> buttons() {
@@ -618,8 +680,8 @@ public final class CommandScreen extends Screen {
                     l.add(new Btn("⚒", x, y, 24, professionalToolsOpen, () -> professionalToolsOpen = !professionalToolsOpen));
                 if (!selectedTroopIds().isEmpty())
                     l.add(new Btn("⚔", x + 28, y, 24, unitToolsOpen, () -> unitToolsOpen = !unitToolsOpen));
-                if (professionalToolsOpen) addProfessionalTaskButtons(l);
-                if (unitToolsOpen) addUnitToolButtons(l);
+                if (professionalToolsOpen && !professionalCollapsed) addProfessionalTaskButtons(l);
+                if (unitToolsOpen && !unitToolsCollapsed) addUnitToolButtons(l);
                 return l;
             }
             int x = console[0] + 12;
@@ -1266,9 +1328,9 @@ public final class CommandScreen extends Screen {
             }
         }
         drawSettlementMinimap(g);
-        if (professionalToolsOpen && !selectedWorkerIds().isEmpty()) drawProfessionalPanel(g);
+        if (professionalToolsOpen && (!selectedWorkerIds().isEmpty() || professionalPinned)) drawProfessionalPanel(g);
         else professionalToolsOpen = false;
-        if (unitToolsOpen && !selectedTroopIds().isEmpty()) drawUnitToolsPanel(g);
+        if (unitToolsOpen && (!selectedTroopIds().isEmpty() || unitToolsPinned)) drawUnitToolsPanel(g);
         else unitToolsOpen = false;
         for (Btn b : buttons()) button(g, b, mxi, myi);
         drawSelection(g, h);
