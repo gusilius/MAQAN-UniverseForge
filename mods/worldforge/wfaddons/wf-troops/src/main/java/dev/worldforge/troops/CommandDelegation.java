@@ -125,8 +125,16 @@ public final class CommandDelegation {
         return true;
     }
 
-    /** Reclaim only this squad's override; it may then inherit a parent command policy. */
+    /** Immediately return this squad to player control, even when a parent scope is delegated. */
     public boolean reclaim(String squadId) {
+        String scope = key(ScopeType.SQUAD, squadId);
+        if (scope.isEmpty()) return false;
+        policies.put(scope, direct(scope));
+        return true;
+    }
+
+    /** Remove the local override and resume inheritance from corps / army. */
+    public boolean resumeInheritance(String squadId) {
         String scope = key(ScopeType.SQUAD, squadId);
         return !scope.isEmpty() && policies.remove(scope) != null;
     }
