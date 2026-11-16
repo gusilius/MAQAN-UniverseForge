@@ -19,14 +19,19 @@ public final class MaqanCameraBridge {
     }
 
     public static void apply(WorkspaceViewState.CameraMode mode) {
-        if (mode == null || !available()) {
-            if (!warnedMissing && mode != null) {
-                warnedMissing = true;
-                LOGGER.info("RTS camera controls require the optional wf_troops module");
+        if (mode == null) return;
+        if (!available()) {
+            if (mode != WorkspaceViewState.CameraMode.FIRST_PERSON) {
+                if (!warnedMissing) {
+                    warnedMissing = true;
+                    LOGGER.info("RTS camera controls require the optional wf_troops module");
+                }
+                WorkspaceViewState.setCameraMode(WorkspaceViewState.CameraMode.FIRST_PERSON);
             }
             return;
         }
-        invokeBoolean("setMode", new Class<?>[]{String.class}, new Object[]{mode.name()});
+        boolean applied = invokeBoolean("setMode", new Class<?>[]{String.class}, new Object[]{mode.name()});
+        if (!applied) WorkspaceViewState.setCameraMode(WorkspaceViewState.CameraMode.FIRST_PERSON);
     }
 
     public static boolean active() {
