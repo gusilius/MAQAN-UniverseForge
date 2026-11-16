@@ -16,6 +16,10 @@ pub struct EmergentBand {
     pub settled: bool,
     pub founded_year: u64,
     pub hardship_years: u32,
+    /// Earliest elapsed world year in which this community may begin to develop.
+    /// Newly discovered vanilla terrain must not receive retroactive simulation.
+    #[serde(default)]
+    pub origin_year: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -151,7 +155,7 @@ fn bootstrap(map: &GeographicMap, seed: u64, bands: &mut Vec<EmergentBand>, even
         let population = 2 + roll(seed, "founder-size", &key, "", 0) % 5;
         bands.push(EmergentBand { id: id.clone(), map_id: map.map_id.clone(), x: cell.x, z: cell.z,
             population, food_reserve: i64::from(cell.suitability) / 8, settled: false,
-            founded_year: 0, hardship_years: 0 });
+            founded_year: 0, hardship_years: 0, origin_year: cell.discovered_year });
         occupied.push((cell.x,cell.z));
         events.push(EmergenceEvent { year: 0, kind: "population_origin".into(), subject_id: id,
             text: format!("A small kin group emerges near {} terrain", cell.biome) });
@@ -363,6 +367,7 @@ pub fn advance(request: EmergenceRequest) -> Result<EmergenceFrame, String> {
     while state.last_year < target_year {
         let year = state.last_year + 1;
         for band in &mut state.bands {
+            if year <= band.origin_year { continue; }
             if let (Some(_map), Some(cells)) = (maps_by_id.get(band.map_id.as_str()), cells_by_map.get(band.map_id.as_str())) {
                 if let Some(cell) = cell_at(cells, band.x, band.z) {
                     advance_band(band, cell, state.seed, year, &mut events);
@@ -430,7 +435,7 @@ mod tests {
         let make_band = |index: u32| EmergentBand {
             id: format!("legacy-settlement-{index}"), map_id: "planetos".into(),
             x: 10 + index * 4, z: 10, population: 30, food_reserve: 4,
-            settled: true, founded_year: 20, hardship_years: 0,
+            settled: true, founded_year: 20, hardship_years: 0, origin_year: 0,
         };
         let legacy_bands = vec![make_band(0), make_band(1), make_band(2), make_band(3)];
         let mut polities = Vec::new();
@@ -447,9 +452,9 @@ mod tests {
         occupied.owner_realm_id = "established-kingdom".into();
         let bands = vec![
             EmergentBand { id:"transferred".into(), map_id:"planetos".into(), x:10, z:10,
-                population:30, food_reserve:4, settled:true, founded_year:20, hardship_years:0 },
+                population:30, food_reserve:4, settled:true, founded_year:20, hardship_years: 0, origin_year: 0 },
             EmergentBand { id:"remaining".into(), map_id:"planetos".into(), x:20, z:10,
-                population:40, food_reserve:8, settled:true, founded_year:20, hardship_years:0 },
+                population:40, food_reserve:8, settled:true, founded_year:20, hardship_years: 0, origin_year: 0 },
         ];
         let mut polities = vec![EmergentPolity {
             id:"frontier-polity".into(), map_id:"planetos".into(), name:"Frontier".into(),
@@ -476,7 +481,7 @@ mod tests {
         let make_band = |index: u32, population: u64, food_reserve: i64| EmergentBand {
             id: format!("settlement-{index}"), map_id: "planetos".into(),
             x: 10 + index * 4, z: 10, population, food_reserve,
-            settled: true, founded_year: 20, hardship_years: 0,
+            settled: true, founded_year: 20, hardship_years: 0, origin_year: 0,
         };
         let mut events = Vec::new();
         let mut polities = Vec::new();
