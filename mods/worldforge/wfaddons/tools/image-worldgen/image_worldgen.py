@@ -583,12 +583,8 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         "politically_unclaimed_land_pixels": unclaimed_land_pixels,
         "realm_count": len(realms), "province_count": len(province_meta),
         "settlement_count": len(settlements), "realms": realms,
-        "generation_seconds": round(time.perf_counter() - started_at, 4),
-        "generation_phase_seconds": {
-            "image_analysis_and_components": round(analysis_seconds, 4),
-            "political_partition_and_settlements": round(political_seconds, 4),
-            "geography_layers": round(geography_seconds, 4),
-        },
+        # Runtime timings are deliberately excluded from the deterministic
+        # world artifact. They belong in CI telemetry, not seeded world data.
         "territories": [{"id": pid, "realm_id": f"realm_{meta['realm'] + 1:02d}",
                          "capital_pixel": [meta["seed"] % width, meta["seed"] // width],
                          "area_pixels": meta["area"], "neighbors": sorted(province_neighbors[pid])}
