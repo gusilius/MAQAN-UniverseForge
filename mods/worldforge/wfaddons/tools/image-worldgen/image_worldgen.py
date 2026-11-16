@@ -383,23 +383,23 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
 
     province_neighbors = {pid: set() for pid in province_meta}
     realm_neighbors = {rid: set() for rid in realm_provinces}
-    for z in range(height):
-        for x in range(width):
-            i = z * width + x
-            a = province_labels[i]
-            if not a:
-                continue
-            for j in ((i + 1) if x + 1 < width else -1, (i + width) if z + 1 < height else -1):
-                if j < 0:
-                    continue
-                b = province_labels[j]
-                if b and b != a:
-                    province_neighbors[a].add(b)
-                    province_neighbors[b].add(a)
-                    ra, rb = province_meta[a]["realm"], province_meta[b]["realm"]
-                    if ra != rb:
-                        realm_neighbors[ra].add(rb)
-                        realm_neighbors[rb].add(ra)
+    # Extract unique border pairs in vectorized NumPy passes. The old nested
+    # Python scan visited every pixel and allocated neighbor iterators.
+    province_grid = province_labels.reshape((height, width))
+    horizontal = np.column_stack((province_grid[:, :-1].ravel(), province_grid[:, 1:].ravel()))
+    vertical = np.column_stack((province_grid[:-1, :].ravel(), province_grid[1:, :].ravel()))
+    pairs = np.concatenate((horizontal, vertical), axis=0)
+    pairs = pairs[(pairs[:, 0] > 0) & (pairs[:, 1] > 0) & (pairs[:, 0] != pairs[:, 1])]
+    if pairs.size:
+        pairs = np.unique(np.sort(pairs, axis=1), axis=0)
+        for a_value, b_value in pairs:
+            a, b = int(a_value), int(b_value)
+            province_neighbors[a].add(b)
+            province_neighbors[b].add(a)
+            ra, rb = province_meta[a]["realm"], province_meta[b]["realm"]
+            if ra != rb:
+                realm_neighbors[ra].add(rb)
+                realm_neighbors[rb].add(ra)
 
     realm_names = {rid: stable_name(seed, rid + 1) for rid in realm_provinces}
     government_by_realm = {rid: GOVERNMENT_MODELS[random.Random((seed & 0xFFFFFFFFFFFFFFFF) ^ (rid * 0xD1B54A32D192ED03)).randrange(len(GOVERNMENT_MODELS))] for rid in realm_provinces}
@@ -500,14 +500,15 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
 
     # Render a deterministic political QA layer: realm colors are shared by
     # their provinces, while thin dark borders expose province boundaries.
-    political_rgb = np.zeros((height, width, 3), dtype=np.uint8)
     realm_rgb = {
         rid: tuple(int(color_for(rid + 1)[i:i + 2], 16) for i in (1, 3, 5))
         for rid in realm_provinces
     }
     province_array = province_labels.reshape((height, width))
+    province_palette = np.zeros((int(province_labels.max()) + 1, 3), dtype=np.uint8)
     for province_id, meta in province_meta.items():
-        political_rgb[province_array == province_id] = realm_rgb[meta["realm"]]
+        province_palette[province_id] = realm_rgb[meta["realm"]]
+    political_rgb = province_palette[province_array]
     vertical = (province_array[:, 1:] != province_array[:, :-1]) & (province_array[:, 1:] > 0) & (province_array[:, :-1] > 0)
     horizontal = (province_array[1:, :] != province_array[:-1, :]) & (province_array[1:, :] > 0) & (province_array[:-1, :] > 0)
     political_rgb[:, 1:][vertical] = (24, 24, 28)
