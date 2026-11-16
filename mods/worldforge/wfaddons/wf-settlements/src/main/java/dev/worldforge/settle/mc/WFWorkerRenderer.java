@@ -3,7 +3,7 @@ package dev.worldforge.settle.mc;
 import net.minecraft.client.model.HumanoidModel;
 import net.minecraft.client.model.geom.ModelLayers;
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
-import net.minecraft.client.renderer.entity.MobRenderer;
+import net.minecraft.client.renderer.entity.HumanoidMobRenderer;
 import net.minecraft.client.renderer.entity.layers.HumanoidArmorLayer;
 import net.minecraft.resources.ResourceLocation;
 
@@ -11,7 +11,7 @@ import net.minecraft.resources.ResourceLocation;
  * Full humanoid NPC body, not a villager head/body proxy.
  * Character equipment is projected onto this body from the canonical Character inventory.
  */
-public class WFWorkerRenderer extends MobRenderer<WFWorker, HumanoidModel<WFWorker>> {
+public class WFWorkerRenderer extends HumanoidMobRenderer<WFWorker, HumanoidModel<WFWorker>> {
     private static final ResourceLocation STEVE = new ResourceLocation("textures/entity/steve.png");
     private static final ResourceLocation ALEX = new ResourceLocation("textures/entity/alex.png");
 
