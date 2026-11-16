@@ -1151,26 +1151,31 @@ def image_bytes(width: int, height: int, values: list[int], mode: str) -> bytes:
 def validate_province_connectivity(province_ids: np.ndarray, width: int, height: int) -> dict:
     """Validate 4-connected province components with one raster pass per province bbox."""
     from scipy import ndimage
-    grid = np.asarray(province_ids, dtype=np.int32).reshape((height, width))
-    ids = np.unique(grid)
-    ids = ids[ids > 0]
-    # A connected-component pass on each province's tight bounding box avoids
-    # constructing millions of Python integer objects and per-province pixel sets.
+    grid = np.asarray(province_ids, dtype=np.uint32).reshape((height, width))
+    flat = grid.ravel()
+    valid = np.flatnonzero(flat)
+    if not valid.size:
+        return {"checked_provinces": 0, "disconnected_provinces": 0}
+    # Group pixel indices once. Avoid rescanning the 26M-pixel source raster
+    # separately for every province (the previous implementation was O(P*N)).
+    order = valid[np.argsort(flat[valid], kind="stable")]
+    ids, counts = np.unique(flat[valid], return_counts=True)
+    offsets = np.concatenate(([0], np.cumsum(counts)))
     checked = 0
     disconnected = []
-    for pid in ids:
-        z, x = np.nonzero(grid == pid)
-        if not x.size:
-            continue
+    structure = np.array([[0,1,0],[1,1,1],[0,1,0]], dtype=np.uint8)
+    for index, pid in enumerate(ids):
+        cells = order[offsets[index]:offsets[index + 1]]
+        z, x = cells // width, cells % width
         x0, x1 = int(x.min()), int(x.max()) + 1
         z0, z1 = int(z.min()), int(z.max()) + 1
-        mask = grid[z0:z1, x0:x1] == pid
-        _, count = ndimage.label(mask, structure=np.array(
-            [[0,1,0],[1,1,1],[0,1,0]], dtype=np.uint8))
+        mask = np.zeros((z1 - z0, x1 - x0), dtype=bool)
+        mask[z - z0, x - x0] = True
+        _, count = ndimage.label(mask, structure=structure)
         checked += 1
         if count != 1:
             disconnected.append({"province_id": int(pid), "components": int(count),
-                                 "pixels": int(mask.sum())})
+                                 "pixels": int(cells.size)})
     if disconnected:
         raise AssertionError(f"Disconnected provinces: {disconnected[:12]}")
     return {"checked_provinces": checked, "disconnected_provinces": 0}
@@ -1188,24 +1193,24 @@ def validate_package(path: Path) -> dict:
         titles = json.loads(archive.read("titles.json"))
         realms = json.loads(archive.read("realms.json"))
         province_image = Image.open(__import__("io").BytesIO(archive.read("provinces.png")))
-        province_ids = list(province_image.getdata())
+        province_ids = np.asarray(province_image, dtype=np.uint32)
         width, height = province_image.size
         expected = {item["id"] for item in blueprint["territories"]}
-        actual = {int(value) for value in province_ids if int(value) != 0}
+        actual = set(int(value) for value in np.unique(province_ids) if int(value) != 0)
         if actual != expected:
             raise AssertionError(f"province raster mismatch: expected={expected}, actual={actual}")
-        land_mask = [value != 0 for value in province_ids]
+        land_mask = province_ids > 0
         biome_image = Image.open(__import__("io").BytesIO(archive.read("biomes.png")))
         biome_values = np.asarray(biome_image, dtype=np.uint8).ravel()
         land_biomes = {1, 2, 3, 4, 6, 7, 9}
         actual_land_pixels = int(np.isin(biome_values, list(land_biomes)).sum())
-        actual_covered_land_pixels = int(np.count_nonzero(np.asarray(province_ids) > 0))
+        actual_covered_land_pixels = int(np.count_nonzero(province_ids > 0))
         actual_unclaimed = actual_land_pixels - actual_covered_land_pixels
         wilderness_image = Image.open(__import__("io").BytesIO(archive.read("wilderness.png")))
         wilderness_values = np.asarray(wilderness_image, dtype=np.uint8).ravel() > 0
         if int(wilderness_values.sum()) != int(blueprint["generation_policy"]["wilderness_pixels"]):
             raise AssertionError("wilderness raster count differs from the blueprint")
-        if np.any(wilderness_values & (np.asarray(province_ids) > 0)):
+        if np.any(wilderness_values & (province_ids > 0)):
             raise AssertionError("wilderness pixels overlap assigned political provinces")
         if np.any(wilderness_values & ~np.isin(biome_values, list(land_biomes))):
             raise AssertionError("wilderness raster includes water or non-land pixels")
@@ -1217,7 +1222,7 @@ def validate_package(path: Path) -> dict:
             raise AssertionError("politically unclaimed land count differs from the blueprint")
         if int(blueprint["settlement_level"]) >= 6 and actual_unclaimed != 0:
             raise AssertionError("settlement levels 6-7 must have no politically unclaimed land")
-        province_grid = np.asarray(province_ids, dtype=np.uint32).reshape((height, width))
+        province_grid = province_ids.reshape((height, width))
         connectivity_report = validate_province_connectivity(province_grid, width, height)
         for item in blueprint["territories"]:
             pid = item["id"]
@@ -1227,7 +1232,7 @@ def validate_package(path: Path) -> dict:
         realm_ids = {r["id"] for r in realms["realms"]}
         for settlement in blueprint["settlements"]:
             x, z = settlement["pixel"]
-            if not (0 <= x < width and 0 <= z < height and land_mask[z * width + x]):
+            if not (0 <= x < width and 0 <= z < height and land_mask[z, x]):
                 raise AssertionError(f"settlement is not on land: {settlement}")
             if settlement["realm_id"] not in realm_ids:
                 raise AssertionError(f"settlement references missing realm: {settlement}")
