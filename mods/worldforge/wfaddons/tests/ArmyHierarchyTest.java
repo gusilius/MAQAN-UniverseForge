@@ -61,6 +61,9 @@ public final class ArmyHierarchyTest {
         CommandDelegation delegation = new CommandDelegation();
         check(delegation.get(first.id).mode() == CommandDelegation.Mode.PLAYER_DIRECT,
                 "unconfigured squads remain under direct player control");
+        CommandDelegation.Resolution defaultResolution = delegation.resolveEffective(first.id, hierarchy);
+        check(defaultResolution != null && defaultResolution.sourceType() == null && !defaultResolution.inherited(),
+                "default direct control is distinguished from a policy inherited from a parent");
         check(delegation.assign(first.id, CommandDelegation.Mode.DELEGATED, "c17",
                         "hold-the-river", 80, true, false, true),
                 "player may explicitly delegate one squad to a canonical commander");
