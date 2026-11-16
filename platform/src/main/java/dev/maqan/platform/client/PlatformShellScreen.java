@@ -136,7 +136,7 @@ public final class PlatformShellScreen extends Screen {
         } catch (ReflectiveOperationException ignored) {
             // Provider screens without an embedding hook still use the shared input/render host.
         }
-        boolean cameraOnlyMount = "wf_troops".equals(providerModId)
+        boolean cameraOnlyMount = "wf_troops".equals(capability.providerModId())
                 && view.getClass().getName().equals("dev.worldforge.troops.mc.client.CommandScreen")
                 && WorkspaceViewState.cameraMode() != WorkspaceViewState.CameraMode.FIRST_PERSON;
         // A camera-only mount must not hijack the currently selected map/profile.
