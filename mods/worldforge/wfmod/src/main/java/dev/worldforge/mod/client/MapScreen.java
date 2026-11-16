@@ -185,8 +185,9 @@ public class MapScreen extends Screen {
         if (!MapTextures.ready()) return;
         zoom = Math.max(zoom, 1.5);
         double[] s = blockToScreen(bx, bz);
-        camX += (width - 250) / 2.0 - s[0];
-        camY += height / 2.0 - s[1];
+        int[] viewport = workspaceViewport();
+        camX += viewport[0] + viewport[2] / 2.0 - s[0];
+        camY += viewport[1] + viewport[3] / 2.0 - s[1];
     }
 
     /** Кнопка действия: без аргументов выполняется сразу, с аргументами открывает строку ввода (аргументы через |). */
