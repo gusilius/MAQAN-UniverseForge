@@ -127,13 +127,14 @@ public class TroopsMod {
             if (armyId <= 0) return null;
             net.minecraft.client.Minecraft client = net.minecraft.client.Minecraft.getInstance();
             if (client.level == null) return null;
-            return client.level.entitiesForRendering().stream()
-                    .filter(TroopEntity.class::isInstance)
-                    .map(TroopEntity.class::cast)
-                    .filter(troop -> troop.isAlive() && !troop.isRemoved()
-                            && troop.level() == client.level && troop.armyId == armyId)
-                    .min(java.util.Comparator.comparing(troop -> troop.getUUID().toString()))
-                    .orElse(null);
+            TroopEntity representative = null;
+            for (Entity entity : client.level.entitiesForRendering()) {
+                if (!(entity instanceof TroopEntity troop) || !troop.isAlive() || troop.isRemoved()
+                        || troop.level() != client.level || troop.armyId != armyId) continue;
+                if (representative == null || troop.getUUID().toString()
+                        .compareTo(representative.getUUID().toString()) < 0) representative = troop;
+            }
+            return representative;
         }
 
         private static Entity resolveCharacter(String canonicalCharacterId) {
