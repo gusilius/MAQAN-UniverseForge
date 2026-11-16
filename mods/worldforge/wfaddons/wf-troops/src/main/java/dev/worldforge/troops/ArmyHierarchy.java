@@ -27,6 +27,8 @@ public final class ArmyHierarchy {
 
     private final Map<Integer,ArmyNode> armies = new LinkedHashMap<>();
     private final Map<String,Corps> corps = new LinkedHashMap<>();
+    /** Reverse membership index; the squad remains owned by Squads, this only indexes its command parent. */
+    private final Map<String,String> corpsBySquad = new HashMap<>();
     private int nextCorps = 1;
 
     public Collection<ArmyNode> armies() { return Collections.unmodifiableCollection(armies.values()); }
@@ -35,7 +37,15 @@ public final class ArmyHierarchy {
     public Corps corps(String id) { return corps.get(id); }
     public Corps corpsForSquad(String squadId) {
         if (squadId == null) return null;
-        for (Corps value : corps.values()) if (value.squadIds.contains(squadId)) return value;
+        String indexedId = corpsBySquad.get(squadId);
+        Corps indexed = indexedId == null ? null : corps.get(indexedId);
+        if (indexed != null && indexed.squadIds.contains(squadId)) return indexed;
+        if (indexedId != null) corpsBySquad.remove(squadId);
+        // Compatibility repair for older addons that still mutate the public squadIds list.
+        for (Corps value : corps.values()) if (value.squadIds.contains(squadId)) {
+            corpsBySquad.put(squadId, value.id);
+            return value;
+        }
         return null;
     }
 
@@ -77,8 +87,13 @@ public final class ArmyHierarchy {
         if (target == null || squad == null) return false;
         ArmyNode army = armies.get(target.armyId);
         if (army == null || !army.owner.equals(squad.owner)) return false;
-        for (Corps value : corps.values()) value.squadIds.remove(squadId);
-        target.squadIds.add(squadId);
+        String previousId = corpsBySquad.remove(squadId);
+        Corps previous = previousId == null ? null : corps.get(previousId);
+        if (previous != null) previous.squadIds.remove(squadId);
+        // Keep legacy direct-list mutations from creating duplicate command parents.
+        for (Corps value : corps.values()) if (value != previous && value != target) value.squadIds.remove(squadId);
+        if (!target.squadIds.contains(squadId)) target.squadIds.add(squadId);
+        corpsBySquad.put(squadId, target.id);
         return true;
     }
 
@@ -102,12 +117,20 @@ public final class ArmyHierarchy {
 
     public void unassignSquad(String squadId) {
         if (squadId == null) return;
-        for (Corps value : corps.values()) value.squadIds.remove(squadId);
+        String indexedId = corpsBySquad.remove(squadId);
+        Corps indexed = indexedId == null ? null : corps.get(indexedId);
+        if (indexed != null) indexed.squadIds.remove(squadId);
+        // Also remove any legacy duplicate not represented by the index.
+        for (Corps value : corps.values()) if (value != indexed) value.squadIds.remove(squadId);
     }
 
     public void pruneSquads(Squads squads) {
         if (squads == null) return;
-        for (Corps value : corps.values()) value.squadIds.removeIf(id -> squads.get(id) == null);
+        for (Corps value : corps.values()) value.squadIds.removeIf(id -> {
+            if (squads.get(id) != null) return false;
+            corpsBySquad.remove(id);
+            return true;
+        });
     }
 
     public int commandArmy(int armyId, Squads squads, Squads.Order order, boolean queue) {
@@ -132,7 +155,7 @@ public final class ArmyHierarchy {
     private int commandSquads(Collection<String> ids, String owner, Squads squads,
                               Squads.Order order, boolean queue) {
         int sent = 0;
-        for (String id : new ArrayList<>(ids)) {
+        for (String id : ids) {
             Squads.Squad squad = squads.get(id);
             if (squad == null || !owner.equals(squad.owner)) continue;
             squads.command(id, order, queue);
@@ -173,7 +196,7 @@ public final class ArmyHierarchy {
         Object parsed = Json.parse(json == null ? "" : json);
         if (!(parsed instanceof Map<?,?> root) || !"wf-army-hierarchy/1".equals(root.get("format")))
             throw new IllegalArgumentException("Invalid army hierarchy save");
-        armies.clear(); corps.clear(); nextCorps = 1;
+        armies.clear(); corps.clear(); corpsBySquad.clear(); nextCorps = 1;
         if (root.get("armies") instanceof List<?> values) for (Object item : values) {
             if (!(item instanceof Map<?,?> m)) continue;
             int id = integer(m.get("id"), 0);
@@ -204,7 +227,10 @@ public final class ArmyHierarchy {
         if (root.get("nextCorps") instanceof Number n) nextCorps = Math.max(nextCorps, n.intValue());
         // Reconcile the reverse references; a squad may belong to exactly one corps.
         Set<String> seen = new HashSet<>();
-        for (Corps value : corps.values()) value.squadIds.removeIf(id -> !seen.add(id));
+        for (Corps value : corps.values()) {
+            value.squadIds.removeIf(id -> !seen.add(id));
+            for (String squadId : value.squadIds) corpsBySquad.put(squadId, value.id);
+        }
     }
 
     private ArmyNode requireArmy(int id) {
