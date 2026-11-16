@@ -769,7 +769,11 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     minor_components = [component for component in components
                         if component[0] not in major_component_ids]
     tiny_components = [component for component in minor_components if len(component) < 8]
-    if tiny_components:
+    if tiny_components and settlement_profile["wilderness_share"] > 0.0:
+        # On sparse worlds, sub-8-pixel fragments are treated as geographic
+        # speckle/wilderness. On the two fully settled profiles this is forbidden:
+        # retain even tiny real land components as overseas provinces so every
+        # classified land pixel has an owner.
         tiny_pixels = np.concatenate(tiny_components).astype(np.int64, copy=False)
         wilderness_mask.ravel()[tiny_pixels] = True
         minor_components = [component for component in minor_components if len(component) >= 8]
