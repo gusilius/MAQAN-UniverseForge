@@ -34,6 +34,8 @@ public final class CommandScreen extends Screen {
     private static final int BTN_W = 70, BTN_H = 16, PANEL_W = 184, ROW = 12;
 
     private boolean embeddedInMaqan;
+    private int cachedSkinWidth = -1, cachedSkinHeight = -1;
+    private final Map<String, int[]> cachedSkinRects = new HashMap<>();
     private boolean dragging, midDrag, zoomDragging;
     private double dragX, dragY, mx, my;
     // стройка
@@ -58,10 +60,20 @@ public final class CommandScreen extends Screen {
     public CommandScreen() { super(Component.literal("Командный режим")); }
 
     /** Hosted command overlay uses the same responsive MAQAN texture frames as Atlas and WorldForge. */
-    public void setEmbeddedInMaqan(boolean embedded) { embeddedInMaqan = embedded; }
+    public void setEmbeddedInMaqan(boolean embedded) {
+        embeddedInMaqan = embedded;
+        cachedSkinRects.clear();
+        cachedSkinWidth = cachedSkinHeight = -1;
+    }
 
     private int[] skinRect(String key) {
         if (!embeddedInMaqan) return null;
+        if (cachedSkinWidth != width || cachedSkinHeight != height) {
+            cachedSkinRects.clear();
+            cachedSkinWidth = width;
+            cachedSkinHeight = height;
+        }
+        if (cachedSkinRects.containsKey(key)) return cachedSkinRects.get(key);
         try {
             Class<?> renderer = Class.forName("dev.maqan.platform.client.MaqanUiPackRenderer");
             Object layout = renderer.getMethod("adaptiveLayout", int.class, int.class)
@@ -70,10 +82,12 @@ public final class CommandScreen extends Screen {
             Object rect = layout.getClass().getMethod("get", String.class).invoke(layout, key);
             if (rect == null) return null;
             Class<?> type = rect.getClass();
-            return new int[]{(Integer) type.getMethod("x").invoke(rect),
+            int[] values = new int[]{(Integer) type.getMethod("x").invoke(rect),
                     (Integer) type.getMethod("y").invoke(rect),
                     (Integer) type.getMethod("width").invoke(rect),
                     (Integer) type.getMethod("height").invoke(rect)};
+            cachedSkinRects.put(key, values);
+            return values;
         } catch (ReflectiveOperationException | LinkageError ignored) {
             return null;
         }
