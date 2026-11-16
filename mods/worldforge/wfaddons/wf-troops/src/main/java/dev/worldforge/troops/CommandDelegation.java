@@ -77,26 +77,37 @@ public final class CommandDelegation {
      * then army. Unassigned squads default to PLAYER_DIRECT.
      */
     public Policy getEffective(String squadId, ArmyHierarchy hierarchy) {
+        Resolution resolution = resolveEffective(squadId, hierarchy);
+        return resolution == null ? null : resolution.policy();
+    }
+
+    public Collection<Policy> all() { return Collections.unmodifiableCollection(policies.values()); }
+
+    /** Effective authority plus the exact scope that supplied it, for truthful UI/status reporting. */
+    public record Resolution(Policy policy, ScopeType sourceType, String sourceId, boolean inherited) { }
+
+    public Resolution resolveEffective(String squadId, ArmyHierarchy hierarchy) {
         String squadKey = key(ScopeType.SQUAD, squadId);
         if (squadKey.isEmpty()) return null;
         Policy own = policies.get(squadKey);
-        if (own != null) return own;
+        if (own != null) return new Resolution(own, ScopeType.SQUAD, squadId, false);
         if (hierarchy != null) {
             ArmyHierarchy.Corps corps = hierarchy.corpsForSquad(squadId);
             if (corps != null) {
                 Policy corpsPolicy = policies.get(key(ScopeType.CORPS, corps.id));
-                if (corpsPolicy != null) return corpsPolicy;
+                if (corpsPolicy != null)
+                    return new Resolution(corpsPolicy, ScopeType.CORPS, corps.id, true);
                 ArmyHierarchy.ArmyNode army = hierarchy.armyForSquad(squadId);
                 if (army != null) {
                     Policy armyPolicy = policies.get(key(ScopeType.ARMY, Integer.toString(army.strategicArmyId)));
-                    if (armyPolicy != null) return armyPolicy;
+                    if (armyPolicy != null)
+                        return new Resolution(armyPolicy, ScopeType.ARMY,
+                                Integer.toString(army.strategicArmyId), true);
                 }
             }
         }
-        return direct(squadKey);
+        return new Resolution(direct(squadKey), null, "", true);
     }
-
-    public Collection<Policy> all() { return Collections.unmodifiableCollection(policies.values()); }
 
     /** Legacy squad API: PLAYER_DIRECT removes a squad override and resumes parent inheritance. */
     public boolean assign(String squadId, Mode mode, String commanderCharacterId,
