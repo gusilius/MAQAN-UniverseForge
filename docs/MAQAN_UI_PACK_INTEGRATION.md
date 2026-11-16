@@ -78,3 +78,10 @@ The importer validates all four themes and all ten image layers per theme, decod
 - In compact mode, Atlas hides its own side columns and yields that space to MAQAN's native drawers. Its map is clipped to the workspace canvas above the top bar and persistent minimap/command dock.
 - Profile changes no longer clear the shared entity selection. Existing provider screen instances remain cached, preserving provider-owned camera/view state when switching away and back. Camera modes and map modes remain separate concepts; no fake RTS camera action is exposed until a real game-camera controller is connected.
 - Tests cover the desktop central viewport bounds and verify that compact layouts do not use desktop side-window geometry.
+
+### WorldForge political map in the shared skin
+
+- The existing WorldForge `MapScreen` now exposes the optional embedded-host hook used by Platform. It keeps its server-owned political map, province selection, map modes, editing actions and side panel; the shared shell supplies the background and frame composition.
+- The political map fits to the adaptive central viewport instead of the entire desktop. Its map texture, labels and markers are clipped to that viewport; its scale, coordinate plate and map-mode hotbar are positioned relative to the same bounds.
+- The overview is rendered as live map imagery inside the imported minimap frame, including the visible-camera rectangle and click/drag recentering. The RTS command dock and shell navigation are excluded from map selection, panning and zoom.
+- In compact mode, the political map yields the side columns to the MAQAN drawers and keeps its map canvas above the persistent bottom dock.
