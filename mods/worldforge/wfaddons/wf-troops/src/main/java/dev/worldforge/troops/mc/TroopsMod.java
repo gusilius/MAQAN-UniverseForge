@@ -1193,7 +1193,7 @@ public class TroopsMod {
                                                         .executes(ctx -> setSquadCommandPolicy(ctx.getSource(),
                                                                 StringArgumentType.getString(ctx, "squad"),
                                                                 StringArgumentType.getString(ctx, "mode"),
-                                                                StringArgumentType.getString(ctx, "commander"))))))))
+                                                                StringArgumentType.getString(ctx, "commander")))))))
                         .then(Commands.literal("corps")
                                 .then(Commands.argument("corps", StringArgumentType.word())
                                         .then(Commands.argument("mode", StringArgumentType.word())
@@ -1205,7 +1205,7 @@ public class TroopsMod {
                                         .then(Commands.argument("mode", StringArgumentType.word())
                                                 .executes(ctx -> setArmyCommandPolicy(ctx.getSource(),
                                                         IntegerArgumentType.getInteger(ctx, "army"),
-                                                        StringArgumentType.getString(ctx, "mode"))))))
+                                                        StringArgumentType.getString(ctx, "mode")))))))
                 .then(Commands.literal("commander")
                         .then(Commands.literal("army")
                                 .then(Commands.argument("army", IntegerArgumentType.integer(1))
