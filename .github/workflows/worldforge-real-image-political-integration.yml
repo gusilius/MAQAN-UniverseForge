@@ -58,6 +58,18 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Production map compatibility compile failed" }
           java -cp $classes dev.worldforge.mod.ImageWorldMapCompatibilityTest $out real-map
           if ($LASTEXITCODE -ne 0) { throw "Actual map failed production MapData integration" }
+      - name: Run real-map demographics, courts, dynasties and persistence integration
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP "maqan-real-map"
+          $worldmap = (Join-Path $out "real-map.worldmap") -replace '\\', '/'
+          Push-Location "mods/worldforge/wfaddons"
+          try {
+            bash tools/test-all.sh ../wfmod "$worldmap" --image-identity-only
+            if ($LASTEXITCODE -ne 0) { throw "Actual map identity pipeline failed" }
+          } finally {
+            Pop-Location
+          }
       - name: Upload generated actual-map package and diagnostics
         if: always()
         uses: actions/upload-artifact@v4
