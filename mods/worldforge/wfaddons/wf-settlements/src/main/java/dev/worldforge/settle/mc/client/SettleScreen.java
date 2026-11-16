@@ -7,6 +7,7 @@ import dev.worldforge.settle.Defs;
 import dev.worldforge.settle.Settlement;
 import dev.worldforge.settle.SettlementMap;
 import dev.worldforge.settle.Worker;
+import dev.worldforge.settle.mc.WFWorker;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
@@ -166,14 +167,34 @@ public class SettleScreen extends Screen {
             Worker w = s.worker(selWorker);
             if (w != null) {
                 String id = w.person == null || w.person.isBlank() ? "settlement:" + s.id + ":worker:" + w.id : w.person;
+                WFWorker liveBody = findLiveWorkerBody(w.id);
                 dev.worldforge.mod.client.PlatformWorkspaceBridge.publish("wf_settlements", id,
                         w.person == null || w.person.isBlank() ? "worker" : "character",
                         w.name, "Profession: " + s.defs.professionName(w.profession)
-                                + " · " + (w.status == null ? "" : w.status));
+                                + " · " + (w.status == null ? "" : w.status), liveBody);
                 return;
             }
         }
         dev.worldforge.mod.client.PlatformWorkspaceBridge.clear("wf_settlements");
+    }
+
+    /**
+     * Resolve the settlement worker to its one live Minecraft body. The inspector
+     * receives that exact entity instance, so the normal entity renderer and layers
+     * are reused instead of manufacturing a portrait or preview copy.
+     */
+    private WFWorker findLiveWorkerBody(int workerId) {
+        net.minecraft.client.Minecraft client = net.minecraft.client.Minecraft.getInstance();
+        if (client.level == null || s == null) return null;
+        for (net.minecraft.world.entity.Entity entity : client.level.entitiesForRendering()) {
+            if (entity instanceof WFWorker body
+                    && body.isAlive() && !body.isRemoved()
+                    && s.id.equals(body.syncedColonyId())
+                    && workerId == body.syncedWorkerId()) {
+                return body;
+            }
+        }
+        return null;
     }
 
     @Override
