@@ -43,6 +43,20 @@ class WorkspaceResponsiveLayoutTest {
     }
 
     @Test
+    void drawersRemainClampedEvenForPathologicalTinyDimensions() {
+        for (int[] size : new int[][]{{1, 1}, {32, 24}, {96, 64}}) {
+            for (String id : new String[]{"navigation", "inspector", "tools", "timeline"}) {
+                var result = WorkspaceResponsiveLayout.calculate(size[0], size[1], id);
+                var drawer = result.rectangles().get(id);
+                assertNotNull(drawer);
+                assertTrue(drawer.x() >= 0 && drawer.y() >= 0);
+                assertTrue(drawer.x() + drawer.width() <= size[0]);
+                assertTrue(drawer.y() + drawer.height() <= size[1]);
+            }
+        }
+    }
+
+    @Test
     void noDrawerLeavesOnlyTheUnobstructedCanvas() {
         var result = WorkspaceResponsiveLayout.calculate(640, 480, null);
         assertEquals(1, result.rectangles().size());
