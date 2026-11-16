@@ -57,8 +57,8 @@ class MaqanUiPackAdaptiveLayoutTest {
         assertNotNull(viewport);
         assertEquals(344, viewport.x());
         assertEquals(70, viewport.y());
-        assertEquals(668, viewport.width());
-        assertEquals(448, viewport.height());
+        assertEquals(676, viewport.width());
+        assertEquals(456, viewport.height());
         assertTrue(viewport.x() >= layout.get("lp").right());
         assertTrue(viewport.right() <= layout.get("rp").x());
         assertTrue(viewport.bottom() <= layout.get("mm").y());
