@@ -411,6 +411,22 @@ public final class PlatformShellScreen extends Screen {
         }
     }
 
+    private boolean inCameraViewport(double mouseX, double mouseY) {
+        if (MaqanUiPackRenderer.assetsAvailable()) {
+            MaqanUiPackAdaptiveLayout.Result layout =
+                    MaqanUiPackRenderer.adaptiveLayout(width, height);
+            MaqanUiPackAdaptiveLayout.Rect viewport =
+                    MaqanUiPackAdaptiveLayout.contentViewport(layout, 8);
+            if (viewport != null) return mouseX >= viewport.x() && mouseX < viewport.right()
+                    && mouseY >= viewport.y() && mouseY < viewport.bottom();
+            int top = MaqanUiPackRenderer.topBarHeight(width, height);
+            int bottom = MaqanUiPackRenderer.compactDockTop(width, height);
+            return mouseX >= 44 && mouseX < width && mouseY >= top && mouseY < bottom;
+        }
+        return mouseX >= 44 && mouseX < width - 252
+                && mouseY >= 35 && mouseY < height - 118;
+    }
+
     private boolean providerUsesWorldBackground(Screen view) {
         if (view == null) return false;
         try {
@@ -650,6 +666,26 @@ public final class PlatformShellScreen extends Screen {
      * decorative; profile, workspace, notification and close actions remain
      * the same shell controls at every resolution.
      */
+    private int cameraControlX() { return width - 136; }
+    private int mapControlX() { return width - 108; }
+
+    private void drawViewModeControls(GuiGraphics g, int mx, int my, int barHeight) {
+        int y = Math.max(2, (barHeight - 22) / 2);
+        int cameraX = cameraControlX(), mapX = mapControlX();
+        WorkspaceViewState.CameraMode camera = WorkspaceViewState.cameraMode();
+        WorkspaceViewState.MapMode map = WorkspaceViewState.mapMode();
+        g.fill(cameraX, y, cameraX + 24, y + 20,
+                camera == WorkspaceViewState.CameraMode.FIRST_PERSON ? 0x33202020 : 0x884A7E91);
+        g.fill(mapX, y, mapX + 24, y + 20, 0x443A9FB5);
+        g.drawCenteredString(font, camera.icon(), cameraX + 12, y + 5,
+                camera == WorkspaceViewState.CameraMode.FIRST_PERSON ? TEXT : CYAN);
+        g.drawCenteredString(font, "▦", mapX + 12, y + 5, CYAN);
+        if (mx >= cameraX && mx < cameraX + 24 && my >= y && my < y + 20)
+            g.renderTooltip(font, Component.literal("Camera: " + camera.label() + " · F8"), mx, my);
+        if (mx >= mapX && mx < mapX + 24 && my >= y && my < y + 20)
+            g.renderTooltip(font, Component.literal("Map: " + map.label() + " · F9"), mx, my);
+    }
+
     private void drawConceptTopBar(GuiGraphics g, int mx, int my) {
         boolean compact = WorkspaceResponsiveLayout.isCompact(width, height);
         int barHeight = MaqanUiPackRenderer.topBarHeight(width, height);
@@ -677,6 +713,7 @@ public final class PlatformShellScreen extends Screen {
                     Math.min(width - 150, Math.max(46, profileTabsStart() - 78)), centerY, MUTED, false);
 
         int controlsY = centerY;
+        drawViewModeControls(g, mx, my, barHeight);
         g.drawCenteredString(font, "▤", width - 76, controlsY, workspaceManagerVisible ? CYAN : TEXT);
         g.drawCenteredString(font, "◷", width - 48, controlsY, notificationCenterVisible ? CYAN : TEXT);
         g.drawCenteredString(font, "×", width - 18, controlsY, TEXT);
@@ -1055,6 +1092,19 @@ public final class PlatformShellScreen extends Screen {
     }
 
     @Override public boolean mouseClicked(double mx,double my,int button) {
+        int conceptBarHeight = MaqanUiPackRenderer.assetsAvailable()
+                ? MaqanUiPackRenderer.topBarHeight(width, height) : 34;
+        int controlY = Math.max(2, (conceptBarHeight - 22) / 2);
+        if (button == 0 && my >= controlY && my < controlY + 20) {
+            if (mx >= cameraControlX() && mx < cameraControlX() + 24) {
+                WorkspaceViewState.cycleCameraMode();
+                return true;
+            }
+            if (mx >= mapControlX() && mx < mapControlX() + 24) {
+                WorkspaceViewState.cycleMapMode();
+                return true;
+            }
+        }
         if (button == 1) {
             PlatformSelectionContext.Selection selection = PlatformSelectionContext.current();
             contextActions = WorkspaceRuntime.actionsFor(selection);
@@ -1523,6 +1573,8 @@ public final class PlatformShellScreen extends Screen {
     }
 
     @Override public boolean mouseScrolled(double mouseX,double mouseY,double delta) {
+        if (MaqanCameraController.active() && inCameraViewport(mouseX, mouseY)
+                && MaqanCameraController.zoom(delta)) return true;
         Panel nav = panels.get("navigation");
         if (nav != null && nav.visible && !nav.minimized
                 && mouseX >= nav.x && mouseX <= nav.x + nav.w
@@ -1579,6 +1631,14 @@ public final class PlatformShellScreen extends Screen {
         }
         if (keyCode == GLFW.GLFW_KEY_F6) {
             toggleWorkspacePanel("timeline");
+            return true;
+        }
+        if (keyCode == GLFW.GLFW_KEY_F8) {
+            WorkspaceViewState.cycleCameraMode();
+            return true;
+        }
+        if (keyCode == GLFW.GLFW_KEY_F9) {
+            WorkspaceViewState.cycleMapMode();
             return true;
         }
         // The imported concept pack keeps the same workspace and provider state;
