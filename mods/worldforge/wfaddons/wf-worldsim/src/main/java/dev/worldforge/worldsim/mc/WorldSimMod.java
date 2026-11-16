@@ -1207,6 +1207,68 @@ public final class WorldSimMod {
         return complete;
     }
 
+    private static Set<String> emergentNeighbors(JsonObject polity, JsonArray polities, JsonArray bands, EmergenceSource source) {
+        if (source.map != null)
+            return emergentNeighbors(polity, polities, bands, source.map);
+        Set<String> own = new HashSet<>();
+        for (var id : polity.getAsJsonArray("settlement_ids")) own.add(id.getAsString());
+        Map<String, JsonObject> samples = new HashMap<>();
+        for (var item : bands) if (item.isJsonObject()) {
+            JsonObject band = item.getAsJsonObject();
+            if (source.id.equals(band.get("map_id").getAsString())) samples.put(band.get("id").getAsString(), band);
+        }
+        Set<String> neighbors = new TreeSet<>();
+        double maxDistanceSq = 64.0 * 64.0;
+        for (var item : polities) {
+            if (!item.isJsonObject()) continue;
+            JsonObject other = item.getAsJsonObject();
+            if (other.get("id").getAsString().equals(polity.get("id").getAsString())
+                    || !source.id.equals(other.get("map_id").getAsString())) continue;
+            boolean adjacent = false;
+            for (String firstId : own) {
+                JsonObject first = samples.get(firstId);
+                if (first == null) continue;
+                for (var secondId : other.getAsJsonArray("settlement_ids")) {
+                    JsonObject second = samples.get(secondId.getAsString());
+                    if (second == null) continue;
+                    double dx = first.get("x").getAsDouble() - second.get("x").getAsDouble();
+                    double dz = first.get("z").getAsDouble() - second.get("z").getAsDouble();
+                    if (dx * dx + dz * dz <= maxDistanceSq) { adjacent = true; break; }
+                }
+                if (adjacent) break;
+            }
+            if (adjacent) neighbors.add("emergent-" + other.get("id").getAsString());
+        }
+        return neighbors;
+    }
+
+    private static String emergentBiomeSummary(Set<String> bandIds, JsonArray bands, EmergenceSource source) {
+        if (source.map != null) return emergentBiomeSummary(bandIds, bands, source.map);
+        Map<Long, String> biomeByCell = new HashMap<>();
+        for (var region : VanillaWorldGeography.snapshot()) {
+            if (!region.isJsonObject() || !source.id.equals(region.getAsJsonObject().get("map_id").getAsString())) continue;
+            for (var cell : region.getAsJsonObject().getAsJsonArray("cells")) {
+                JsonObject value = cell.getAsJsonObject();
+                biomeByCell.put((long)value.get("z").getAsInt() * source.width + value.get("x").getAsInt(),
+                        value.get("biome").getAsString());
+            }
+        }
+        Map<String, Integer> counts = new TreeMap<>();
+        for (var item : bands) if (item.isJsonObject()) {
+            JsonObject band = item.getAsJsonObject();
+            if (!source.id.equals(band.get("map_id").getAsString()) || !bandIds.contains(band.get("id").getAsString())) continue;
+            long key = (long)band.get("z").getAsInt() * source.width + band.get("x").getAsInt();
+            String biome = biomeByCell.getOrDefault(key, "unknown");
+            counts.merge(biome, 1, Integer::sum);
+        }
+        return counts.entrySet().stream().map(entry -> entry.getKey() + ":" + entry.getValue())
+                .collect(java.util.stream.Collectors.joining(","));
+    }
+
+    private static int emergentProvinceCount(Set<String> bandIds, JsonArray bands, EmergenceSource source) {
+        return source.map == null ? 0 : emergentProvinceCount(bandIds, bands, source.map);
+    }
+
     private static Set<String> emergentNeighbors(JsonObject polity, JsonArray polities, JsonArray bands, MapData map) {
         Set<String> own = new HashSet<>();
         if (polity.has("settlement_ids") && polity.get("settlement_ids").isJsonArray())
