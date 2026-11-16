@@ -1607,7 +1607,7 @@ public final class PlatformShellScreen extends Screen {
     }
 
     @Override public boolean mouseDragged(double mx,double my,int button,double dx,double dy) {
-        if (button == 2 && MaqanCameraController.active() && inCameraViewport(mx, my))
+        if (button == 2 && MaqanCameraBridge.active() && inCameraViewport(mx, my))
             return MaqanCameraBridge.rotateByMouse(dx, dy);
         if(button!=0) {
             boolean handled = super.mouseDragged(mx,my,button,dx,dy);
@@ -1679,7 +1679,7 @@ public final class PlatformShellScreen extends Screen {
     }
 
     @Override public boolean mouseScrolled(double mouseX,double mouseY,double delta) {
-        if (MaqanCameraController.active() && inCameraViewport(mouseX, mouseY)
+        if (MaqanCameraBridge.active() && inCameraViewport(mouseX, mouseY)
                 && MaqanCameraBridge.zoom(delta)) return true;
         Panel nav = panels.get("navigation");
         if (nav != null && nav.visible && !nav.minimized
