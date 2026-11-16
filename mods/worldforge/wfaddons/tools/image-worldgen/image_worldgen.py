@@ -888,7 +888,6 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
                 "key": f"realm_{owner_realm + 1:03d}_island_{len(realm_provinces[owner_realm]):03d}",
             }
             realm_cells_by_id.setdefault(owner_realm, []).extend(component)
-            unclaimed_land_pixels -= len(component)
             island_province_count += 1
             next_province += 1
 
