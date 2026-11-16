@@ -303,8 +303,15 @@ public class SettleTest {
                 "отмена здания освобождает settlement task lease и не блокирует дальнейшее назначение");
 
         Settlement lifeLease = fresh(d, 1);
+        lifeLease.auto = false;
+        Building lifeWorkSite = lifeLease.place("house", 0, 0);
+        lifeLease.tick(1);
         Worker daily = lifeLease.workers.get(0);
-        ok(lifeLease.claimLifeTask(daily.id, "life:sleeping"), "повседневная жизнь получает временное владение задачей");
+        lifeLease.setProfession(daily.id, "builder");
+        lifeLease.assign(daily.id, lifeWorkSite.uid, "builder");
+        ok(lifeLease.claimLifeTask(daily.id, "life:sleeping") && daily.building == 0
+                        && daily.suspendedTaskOwner == Worker.TaskOwner.SETTLEMENT,
+                "повседневная жизнь приостанавливает конкретную гражданскую работу");
         daily.lifeAction = "sleeping"; daily.lifeTargetX = 7; daily.lifeTargetZ = -4; daily.lifeActionUntil = 900;
         ok(lifeLease.claimMilitaryTask(daily.id, "campaign:defend-2"), "военный приказ может прервать повседневное действие");
         Settlement lifeLeaseBack = Settlement.fromJson(lifeLease.toJson(), d);
@@ -324,6 +331,11 @@ public class SettleTest {
                         && restoredDaily.lifeAction.equals("sleeping")
                         && restoredDaily.lifeActionUntil == 900,
                 "после завершения приказа игрока восстанавливается прерванный распорядок жителя");
+        ok(lifeLeaseBack.releaseLifeTask(restoredDaily.id, "life:sleeping")
+                        && restoredDaily.taskOwner == Worker.TaskOwner.SETTLEMENT
+                        && restoredDaily.building == lifeWorkSite.uid
+                        && restoredDaily.assignedProfession.equals("builder"),
+                "после окончания повседневного действия восстанавливается исходная работа строителя");
 
         // зависимости и лимиты
         ok(throwsOrder(() -> s.place("granary", 30, 30)), "амбар требует лесопилку");
