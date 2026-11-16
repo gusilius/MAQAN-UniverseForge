@@ -26,14 +26,19 @@ public final class TerritorialIdentity {
     public static DemographicResult ensureDemographics(String mapId, TitleData data, TitleEditor editor, long worldSeed) {
         Objects.requireNonNull(data, "title data");
         Objects.requireNonNull(editor, "title editor");
-        List<RaceWeight> roots = originRootRaces();
+        List<RaceWeight> raceCatalog = originRaces();
+        List<RaceWeight> roots = raceCatalog.stream().filter(r -> r.parent() == null || r.parent().isBlank()).toList();
         if (roots.isEmpty()) return new DemographicResult(0, 0);
         int changed = 0;
         Set<String> used = new HashSet<>();
         for (TitleData.Realm realm : data.realmList()) {
             Map<String, Integer> existing = parseShares(realm.props.get("races"));
-            if (!existing.isEmpty() && existing.keySet().stream().allMatch(id -> roots.stream().anyMatch(r -> r.id().equals(id)))) {
+            if (!existing.isEmpty() && existing.keySet().stream().allMatch(id -> raceCatalog.stream().anyMatch(r -> r.id().equals(id)))) {
                 used.addAll(existing.keySet());
+                if (text(realm.props.get("race")).isBlank()) {
+                    String dominant = existing.entrySet().stream().max(Map.Entry.comparingByValue()).orElseThrow().getKey();
+                    editor.setRealmProp(realm.id, "race", dominant);
+                }
                 continue;
             }
             long seed = seed(worldSeed, mapId, "demography", realm.id);
@@ -58,7 +63,7 @@ public final class TerritorialIdentity {
                 .sorted(Comparator.comparing(RaceWeight::id)).toList();
         if (candidates.isEmpty()) return Map.of();
         Random random = new Random(seed);
-        int count = Math.min(candidates.size(), 2 + random.nextInt(Math.min(2, candidates.size()) - 1 + 1));
+        int count = candidates.size() == 1 ? 1 : 2 + random.nextInt(Math.min(2, candidates.size() - 1));
         List<RaceWeight> selected = new ArrayList<>();
         List<RaceWeight> pool = new ArrayList<>(candidates);
         for (int n = 0; n < count && !pool.isEmpty(); n++) {
@@ -79,7 +84,7 @@ public final class TerritorialIdentity {
         return Collections.unmodifiableMap(result);
     }
 
-    private static List<RaceWeight> originRootRaces() {
+    private static List<RaceWeight> originRaces() {
         try {
             Class<?> mod = Class.forName("dev.worldforge.origins.mc.OriginsMod");
             Object defs = mod.getField("DEFS").get(null);
