@@ -133,7 +133,9 @@ public final class PlatformShellScreen extends Screen {
         } catch (ReflectiveOperationException ignored) {
             // Provider screens without an embedding hook still use the shared input/render host.
         }
-        if (!capability.id().equals(selectedCapabilityId)) PlatformSelectionContext.clear(null);
+        // A profile/module switch changes the visible workspace, not the
+        // world selection. Providers replace it only when the user selects a
+        // different entity; this keeps the shared inspector context stable.
         setProfile(profileForDomain(capability.domain()));
         selectedDomain = capability.domain();
         selectedCapabilityId = capability.id();
@@ -1256,7 +1258,8 @@ public final class PlatformShellScreen extends Screen {
     }
 
     private void setProfile(Profile next) {
-        if (profile != next) PlatformSelectionContext.clear(null);
+        // Keep the shared entity selection across map/profile changes. The
+        // active provider owns camera state and remains cached in its view.
         profile=next;
         navigationScroll = 0;
         selectedCapabilityId = switch (next) {
