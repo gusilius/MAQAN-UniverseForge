@@ -1105,6 +1105,7 @@ public final class PlatformShellScreen extends Screen {
                 return true;
             }
         }
+        if (button == 2 && MaqanCameraController.active() && inCameraViewport(mx, my)) return true;
         if (button == 1) {
             PlatformSelectionContext.Selection selection = PlatformSelectionContext.current();
             contextActions = WorkspaceRuntime.actionsFor(selection);
@@ -1503,6 +1504,8 @@ public final class PlatformShellScreen extends Screen {
     }
 
     @Override public boolean mouseDragged(double mx,double my,int button,double dx,double dy) {
+        if (button == 2 && MaqanCameraController.active() && inCameraViewport(mx, my))
+            return MaqanCameraController.rotateByMouse(dx, dy);
         if(button!=0) {
             boolean handled = super.mouseDragged(mx,my,button,dx,dy);
             if (activeView() != null)
