@@ -29,48 +29,50 @@ public final class TerritorialIdentity {
             String culture = names.culture(text(realm.props.get("culture")));
             if (race.isBlank()) race = dominantRace(realm.props.get("races"));
             if (culture.isBlank()) culture = names.culture("");
-            if (!realm.nameIsUsable()) {
+            if (!usable(realm.name, realm.id)) {
                 String generated = generate(names, race, culture, "realms", seed(worldSeed, mapId, "realm", realm.id));
                 editor.setRealmName(realm.id, unique(generated, "realm:" + realm.id, used));
                 realmsNamed++;
             }
-            realm.props.putIfAbsent("identity.culture", culture);
-            if (!race.isBlank()) realm.props.putIfAbsent("identity.race", race);
+            if (!realm.props.containsKey("identity.culture")) editor.setRealmProp(realm.id, "identity.culture", culture);
+            if (!race.isBlank() && !realm.props.containsKey("identity.race")) editor.setRealmProp(realm.id, "identity.race", race);
             String rulerPlace = Courts.realmPlace(realm.id);
             Character ruler = people.holder("ruler", rulerPlace);
             if (ruler != null && ruler.alive) {
                 String globalId = ruler.globalId == null || ruler.globalId.isBlank() ? ruler.id : ruler.globalId;
                 if (!globalId.equals(String.valueOf(realm.props.getOrDefault("rulerCharacterId", "")))) {
-                    realm.props.put("rulerCharacterId", globalId);
+                    editor.setRealmProp(realm.id, "rulerCharacterId", globalId);
                     rulersLinked++;
                 }
-                realm.props.putIfAbsent("identity.ruler_house", ruler.house);
-                if (!ruler.house.isBlank()) realm.props.putIfAbsent("identity.dynasty_house", ruler.house);
-                if (!ruler.culture.isBlank()) realm.props.putIfAbsent("identity.ruler_culture", ruler.culture);
+                if (!ruler.house.isBlank() && !realm.props.containsKey("identity.ruler_house")) editor.setRealmProp(realm.id, "identity.ruler_house", ruler.house);
+                if (!ruler.house.isBlank() && !realm.props.containsKey("identity.dynasty_house")) editor.setRealmProp(realm.id, "identity.dynasty_house", ruler.house);
+                if (!ruler.culture.isBlank() && !realm.props.containsKey("identity.ruler_culture")) editor.setRealmProp(realm.id, "identity.ruler_culture", ruler.culture);
                 Object originRace = ruler.props.get("origin.race");
-                if (originRace != null && !String.valueOf(originRace).isBlank())
-                    realm.props.putIfAbsent("identity.ruler_race", String.valueOf(originRace));
+                if (originRace != null && !String.valueOf(originRace).isBlank() && !realm.props.containsKey("identity.ruler_race"))
+                    editor.setRealmProp(realm.id, "identity.ruler_race", String.valueOf(originRace));
             }
         }
 
         List<TitleData.Title> ordered = new ArrayList<>(data.allTitles());
         ordered.sort(Comparator.comparingInt((TitleData.Title t) -> t.tier).thenComparing(t -> t.key));
         for (TitleData.Title title : ordered) {
-            TitleData.Realm realm = data.realmOf(title);
+            TitleData.Title province = title;
+            while (province != null && province.tier > 0) province = province.parent > 0 ? data.get(province.parent) : null;
+            TitleData.Realm realm = province == null ? null : data.realmOf(province);
             String race = inherited(title, data, "race");
             String culture = inherited(title, data, "culture");
             if (race.isBlank() && realm != null) race = text(realm.props.getOrDefault("identity.race", realm.props.get("race")));
             if (culture.isBlank() && realm != null) culture = text(realm.props.getOrDefault("identity.culture", realm.props.get("culture")));
             culture = names.culture(culture);
-            if (title.props.putIfAbsent("identity.culture", culture) == null) titlesClassified++;
-            if (!race.isBlank() && title.props.putIfAbsent("identity.race", race) == null) titlesClassified++;
+            if (!title.props.containsKey("identity.culture")) { editor.setProp(title.id, "identity.culture", culture); titlesClassified++; }
+            if (!race.isBlank() && !title.props.containsKey("identity.race")) { editor.setProp(title.id, "identity.race", race); titlesClassified++; }
 
             if (!usable(title.name, title.key)) {
                 String category = title.tier == 0 ? "provinces" : "regions";
                 String generated = generate(names, race, culture, category,
                         seed(worldSeed, mapId, category, title.key));
                 String scope = realm == null ? "unclaimed" : realm.id;
-                title.name = unique(generated, scope + ":" + title.key, used);
+                editor.rename(title.id, unique(generated, "title:" + scope + ":" + title.key, used));
                 titlesNamed++;
             }
         }
@@ -117,7 +119,8 @@ public final class TerritorialIdentity {
 
     private static String unique(String candidate, String identity, Map<String, Set<String>> used) {
         String value = candidate == null || candidate.isBlank() ? "Безымянное место" : candidate.trim();
-        String key = identity.substring(0, identity.indexOf(':'));
+        String[] parts = identity.split(":", 3);
+        String key = parts.length >= 2 && parts[0].equals("title") ? "title:" + parts[1] : "realm";
         Set<String> names = used.computeIfAbsent(key, ignored -> new HashSet<>());
         if (names.add(value.toLowerCase(Locale.ROOT))) return value;
         String suffix = UUID.nameUUIDFromBytes(identity.getBytes(StandardCharsets.UTF_8)).toString().substring(0, 4);
