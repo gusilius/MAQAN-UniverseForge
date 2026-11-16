@@ -1032,6 +1032,8 @@ def validate_package(path: Path) -> dict:
             raise AssertionError("wilderness pixels overlap assigned political provinces")
         if np.any(wilderness_values & ~np.isin(biome_values, list(land_biomes))):
             raise AssertionError("wilderness raster includes water or non-land pixels")
+        if actual_unclaimed != int(wilderness_values.sum()):
+            raise AssertionError("unclaimed land must be exactly the explicit wilderness reserve")
         if actual_land_pixels != int(blueprint["land_pixels"]):
             raise AssertionError("land pixel count differs between semantic and political rasters")
         if actual_unclaimed != int(blueprint["politically_unclaimed_land_pixels"]):
