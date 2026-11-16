@@ -25,8 +25,8 @@ public final class MaqanUiPackRenderer {
     private static final Map<String, String> TEXTURES = Map.of(
             "top", "top_bar.png",
             "lcol", "left_column.png",
-            "lp", "window_state.png",
-            "rp", "window_diplomacy.png",
+            "lp", "window_left_blank.png",
+            "rp", "window_right_blank.png",
             "rcol", "right_column.png",
             "mm", "minimap.png",
             "bot", "rts_console.png",
