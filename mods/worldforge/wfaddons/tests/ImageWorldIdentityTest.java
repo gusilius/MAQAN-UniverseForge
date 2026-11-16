@@ -75,6 +75,21 @@ public final class ImageWorldIdentityTest {
                 roles.add(Files.readString(file));
         }
 
+        Set<String> settlementIds = new HashSet<>();
+        boolean settlementsValid = !map.settlementSeeds.isEmpty();
+        for (MapData.SettlementSeed settlement : map.settlementSeeds) {
+            TitleData.Title province = titles.get(settlement.provinceId());
+            TitleData.Realm owner = province == null ? null : titles.realmOf(province);
+            settlementsValid &= settlement.id() != null && !settlement.id().isBlank()
+                    && settlementIds.add(settlement.id())
+                    && settlement.name() != null && !settlement.name().isBlank()
+                    && settlement.type() != null && !settlement.type().isBlank()
+                    && owner != null && owner.id.equals(settlement.realmId())
+                    && province.tier == 0;
+        }
+        check(settlementsValid,
+                "image blueprint settlements have stable unique IDs, names, types and province/state ownership");
+
         TitleEditor editor = new TitleEditor(titles);
         long seed = 424242L;
         TerritorialIdentity.DemographicResult demographics =
