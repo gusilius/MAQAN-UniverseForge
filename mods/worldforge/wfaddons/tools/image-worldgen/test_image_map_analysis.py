@@ -59,5 +59,34 @@ class ImageMapAnalysisTests(unittest.TestCase):
         self.assertGreater(int(first.max()) - int(first.min()), 1000)
 
 
+    def test_olive_grassland_is_not_overwritten_as_desert(self):
+        image = np.zeros((32, 32, 3), dtype=np.uint8)
+        image[:] = (0, 74, 119)
+        image[4:28, 4:28] = (160, 160, 64)
+        labels, _ = classify(image)
+        center = labels[16, 16]
+        self.assertEqual(CLASSES[int(center)], "grassland")
+
+    def test_neutral_snow_is_not_overwritten_as_rock(self):
+        image = np.zeros((32, 32, 3), dtype=np.uint8)
+        image[:] = (0, 74, 119)
+        image[4:28, 4:28] = (208, 208, 208)
+        labels, _ = classify(image)
+        self.assertEqual(CLASSES[int(labels[16, 16])], "snow")
+
+    def test_land_masks_are_mutually_exclusive_and_reported(self):
+        image = np.zeros((48, 64, 3), dtype=np.uint8)
+        image[:] = (0, 74, 119)
+        image[4:20, 4:20] = (154, 172, 58)
+        image[4:20, 22:38] = (32, 64, 16)
+        image[4:20, 40:60] = (208, 192, 112)
+        labels, report = classify(image)
+        self.assertEqual(CLASSES[int(labels[10, 10])], "grassland")
+        self.assertEqual(CLASSES[int(labels[10, 28])], "forest")
+        self.assertEqual(CLASSES[int(labels[10, 48])], "desert")
+        self.assertEqual(report["classifier"], "palette-context-components-v3")
+        self.assertIn("land_model", report)
+
+
 if __name__ == "__main__":
     unittest.main()
