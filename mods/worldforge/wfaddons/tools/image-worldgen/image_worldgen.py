@@ -480,6 +480,30 @@ def aggregate_realm_regions(realm_labels: np.ndarray, realm_seeds: dict[int, int
         edges.append((score, a, b))
     edges.sort()
     merges, current_count = 0, len(ids)
+    # First absorb undersized seed territories. Without this pass a perfectly
+    # connected continent can retain one-pixel "states" when the global merge
+    # target is reached, even though those fragments have an obvious neighbor.
+    # The cap is relaxed only for the tiny side of such a merge; the resulting
+    # polity grows by at most the undersized fragment's area.
+    for _, a, b in edges:
+        ra, rb = find(a), find(b)
+        if ra == rb:
+            continue
+        area_a, area_b = group_area[ra], group_area[rb]
+        if area_a >= minimum_pixels and area_b >= minimum_pixels:
+            continue
+        combined = area_a + area_b
+        if combined > world_cap and min(area_a, area_b) >= minimum_pixels:
+            continue
+        if (area_a, -ra) < (area_b, -rb):
+            ra, rb = rb, ra
+        parent[rb] = ra
+        group_area[ra] = combined
+        members[ra].extend(members.pop(rb))
+        del group_area[rb]
+        current_count -= 1
+        merges += 1
+
     for _, a, b in edges:
         if current_count <= desired_count:
             break
@@ -519,7 +543,10 @@ def aggregate_realm_regions(realm_labels: np.ndarray, realm_seeds: dict[int, int
     return realm_labels, new_seeds, {
         "initial_regions": int(len(ids)), "merged_regions": int(len(roots)),
         "merge_operations": int(merges), "target_regions": int(desired_count),
-        "merge_area_cap_pixels": int(world_cap), "realm_scale_counts": scales,
+        "merge_area_cap_pixels": int(world_cap),
+        "minimum_seed_region_pixels": int(minimum_pixels),
+        "undersized_regions_after_merge": int(sum(area < minimum_pixels for area in root_areas)),
+        "realm_scale_counts": scales,
         "realm_area_pixels": {"min": int(min(root_areas)), "max": int(max(root_areas)),
                               "mean": round(float(np.mean(root_areas)), 2)}
     }
