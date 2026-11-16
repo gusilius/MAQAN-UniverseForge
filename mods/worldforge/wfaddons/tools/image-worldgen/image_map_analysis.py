@@ -140,7 +140,7 @@ def make_heightfield(labels, seed, sea_level=63, min_y=-64, max_y=320):
         gh, gw = max(2, (h + cell - 1)//cell + 1), max(2, (w + cell - 1)//cell + 1)
         coarse = Image.fromarray(np.uint8(rng.random((gh, gw)) * 255), "L")
         return np.asarray(coarse.resize((w, h), Image.Resampling.BICUBIC), np.float32) / 255.0 - .5
-    continental = ndimage.gaussian_filter(field(320), sigma=1.4, mode="wrap")
+    continental = ndimage.gaussian_filter(field(320), sigma=1.4, mode="reflect")
     regional = ndimage.gaussian_filter(field(88), sigma=1.0, mode="reflect")
     detail = ndimage.gaussian_filter(field(24), sigma=0.7, mode="reflect")
     anchors = {"ocean": sea_level-30, "lake": sea_level-2, "waterway": sea_level-1,
