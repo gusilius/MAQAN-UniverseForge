@@ -17,6 +17,12 @@ A snapshot is one squad's aggregate state captured coherently on the server thre
 
 Do not send Minecraft object references, entity lists, mutable collections, or a second copy of Character records to Rust. Use canonical Character global IDs in Java for commander resolution; Rust needs only sanitized numeric leadership modifiers in a later schema.
 
+## Formation compute boundary
+
+The Rust `worldforge-sim::formation` module may calculate local slot coordinates, rotate/translate them into world X/Z coordinates, and assign roles to slots. It accepts primitive slices and caller-owned output/scratch buffers only. Java remains responsible for entity-to-role snapshots, terrain/collision/path validation, chunk availability and issuing movement targets.
+
+The current Java formation implementation remains authoritative until the native adapter has parity tests for every formation type. In particular, the Rust `LOOSE` formation is deterministic but does not currently reproduce Java's seeded `Random` sequence; do not switch existing saved squads silently.
+
 ## Decisions and authority
 
 Rust returns one deterministic proposal per squad: maintain, reform, engage visible threat, pursue, retreat or reposition. It echoes the exact source revision. Player-direct mode is advisory only.
