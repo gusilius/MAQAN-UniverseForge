@@ -39,6 +39,20 @@ public class PeopleTest {
         RoleDefs defs = roles();
         NameBank names = names();
         ok(defs.all().size() == 7 && defs.ruler().id.equals("ruler"), "роли загружены из файлов датапака: " + defs.all().size());
+        List<TerritorialIdentity.RaceWeight> originRaces = List.of(
+                new TerritorialIdentity.RaceWeight("human", "", 50),
+                new TerritorialIdentity.RaceWeight("northman", "", 18),
+                new TerritorialIdentity.RaceWeight("elf", "", 8),
+                new TerritorialIdentity.RaceWeight("wood_elf", "elf", 4),
+                new TerritorialIdentity.RaceWeight("dwarf", "", 8));
+        Map<String, Integer> raceMix = TerritorialIdentity.weightedComposition(originRaces, 424242L);
+        ok(raceMix.equals(TerritorialIdentity.weightedComposition(originRaces, 424242L)),
+                "origin race mix is deterministic for the same world and realm seed");
+        ok(raceMix.size() >= 2 && raceMix.size() <= 3
+                        && raceMix.values().stream().mapToInt(Integer::intValue).sum() == 100
+                        && !raceMix.containsKey("wood_elf"),
+                "realm population uses weighted root races only, excludes child races from root sampling, and totals 100%");
+
 
         TitleEditor ed = new TitleEditor(d);
         // один правитель задан вручную: он должен сохраниться
