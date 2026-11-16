@@ -149,6 +149,68 @@ public class MapScreen extends Screen {
         argBox.setVisible(false);
         addRenderableWidget(argBox);
         MapTextures.ensure(ClientState.mode);
+        registerMaqanWorkspaceProvider();
+    }
+
+    /**
+     * Publish the live province/realm selection to the shared MAQAN workspace.
+     * The inspector resolves TitleData on demand so the Platform never owns a
+     * second copy of WorldForge political state.
+     */
+    private void registerMaqanWorkspaceProvider() {
+        PlatformWorkspaceBridge.registerInspector("worldforge", entityId -> {
+            int province = provinceId(entityId);
+            TitleData data = MapTextures.titles;
+            if (province <= 0 || data == null) return java.util.List.of();
+            TitleData.Title title = data.get(province);
+            if (title == null) return java.util.List.of();
+            java.util.List<String[]> rows = new java.util.ArrayList<>();
+            rows.add(new String[]{"Identity", "Province", title.name});
+            rows.add(new String[]{"Identity", "Province ID", Integer.toString(title.id)});
+            if (title.tier >= 0 && title.tier < data.tiers.size())
+                rows.add(new String[]{"Hierarchy", "Title tier", data.tiers.get(title.tier).name});
+            TitleData.Title parent = title.parent > 0 ? data.get(title.parent) : null;
+            if (parent != null) rows.add(new String[]{"Hierarchy", "Parent title", parent.name});
+            TitleData.Realm realm = data.realmOf(title);
+            if (realm != null) {
+                rows.add(new String[]{"Sovereignty", "Realm", realm.name});
+                if (realm.ruler != null && !realm.ruler.isBlank())
+                    rows.add(new String[]{"Sovereignty", "Ruler", realm.ruler});
+                if (realm.overlord != null)
+                    rows.add(new String[]{"Diplomacy", "Overlord", realm.overlord.name});
+                if (realm.relation != null && !realm.relation.isBlank())
+                    rows.add(new String[]{"Diplomacy", "Relation", realm.relation});
+            }
+            rows.add(new String[]{"Geography", "Area", Long.toString(title.areaBlocks) + " blocks"});
+            rows.add(new String[]{"Geography", "Neighbours", Integer.toString(title.neighbors.length)});
+            return rows;
+        });
+        PlatformWorkspaceBridge.registerEntityOpener("worldforge", entityId -> {
+            int province = provinceId(entityId);
+            if (province > 0) selectProvince(province);
+        });
+        PlatformWorkspaceBridge.registerAction("worldforge.map.focus", "Focus province",
+                "worldforge", entityId -> provinceId(entityId) > 0,
+                entityId -> selectProvince(provinceId(entityId)));
+    }
+
+    private static int provinceId(String entityId) {
+        if (entityId == null || !entityId.startsWith("province:")) return -1;
+        try { return Integer.parseInt(entityId.substring("province:".length())); }
+        catch (NumberFormatException ignored) { return -1; }
+    }
+
+    private void publishProvinceSelection(int province) {
+        TitleData data = MapTextures.titles;
+        TitleData.Title title = data == null ? null : data.get(province);
+        if (title == null) {
+            PlatformWorkspaceBridge.clear("worldforge");
+            return;
+        }
+        TitleData.Realm realm = data.realmOf(title);
+        String summary = realm == null ? title.key : realm.name;
+        PlatformWorkspaceBridge.publish("worldforge", "province:" + province,
+                "PROVINCE", title.name, summary);
     }
 
     // ---- доступ для боковой панели
@@ -172,6 +234,7 @@ public class MapScreen extends Screen {
         setOverlay(selLabel);
         TitleData.Realm r = MapTextures.titles.realmOf(MapTextures.titles.get(prov));
         if (MapImages.isDip(ClientState.mode) && r != null && !ClientState.mode.equals(MapImages.DIP + r.id)) setMode(MapImages.DIP + r.id, true);
+        publishProvinceSelection(prov);
         panel.onSelected(prov);
         centerOnProvince(prov);
     }
@@ -711,17 +774,12 @@ public class MapScreen extends Screen {
         if (button == 0) {
             int prov = pixelProvince((int) mx, (int) my);
             if (prov > 0) {
-                selected = prov;
-                selLabel = labelOfProvince(prov);
-                setOverlay(selLabel);
-                TitleData.Realm r = MapTextures.titles.realmOf(MapTextures.titles.get(prov));
-                if (MapImages.isDip(ClientState.mode) && r != null && !ClientState.mode.equals(MapImages.DIP + r.id)) setMode(MapImages.DIP + r.id, true);
-                panel.onSelected(prov);
-                centerOnProvince(prov);
+                selectProvince(prov);
             } else {
                 selected = 0;
                 selLabel = -1;
                 freeOverlay();
+                PlatformWorkspaceBridge.clear("worldforge");
             }
             return true;
         }
