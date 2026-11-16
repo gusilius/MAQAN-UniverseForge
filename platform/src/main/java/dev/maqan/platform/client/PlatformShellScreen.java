@@ -1214,6 +1214,7 @@ public final class PlatformShellScreen extends Screen {
         if (button == 2 && MaqanCameraBridge.active() && inCameraViewport(mx, my)) return true;
         if (button == 1) {
             PlatformSelectionContext.Selection selection = PlatformSelectionContext.current();
+            contextSelection = selection;
             contextActions = WorkspaceRuntime.actionsFor(selection);
             if (!contextActions.isEmpty()) {
                 contextMenuX = (int) mx; contextMenuY = (int) my;
