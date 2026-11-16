@@ -1,0 +1,50 @@
+# RTS: производительность и устранение слабых мест
+
+Дата прохода: 16 ноября 2026 года. База: `main` на момент создания `feature/rts-performance-hardening`.
+
+## Обнаруженные узкие места
+
+1. `Squads.squadOf(unit)` ранее сканировал каждый отряд и его список участников. Этот путь используется при выборе, разделении, слиянии и командах; его стоимость росла вместе с числом отрядов.
+2. `TroopController.morale()` разбирал `s.owner` через `UUID.fromString` без защиты. Повреждённое/устаревшее значение владельца могло прервать военный шаг при смене состояния морали.
+3. Тактические вычисления не должны выполняться отдельным JNI-вызовом на каждого бойца. Вход Rust должен быть агрегированным снимком отряда, а batch — набором независимых отрядов.
+4. Нельзя переносить поиск Minecraft entities, работу с чанками, реестрами Character, сетью, сохранениями или права командования в Rust.
+5. На проверенной mainline Rust crate существует как `mods/worldforge/native/worldforge-sim`, но в проверенных исходниках main не обнаружен готовый Java bridge для именно этого tactical contract. Не выдавать наличие чистой Rust-функции за работающий native runtime.
+
+## Что исправлено в этой ветке
+
+- В `Squads` добавлен reverse index `memberToSquad` для быстрого разрешения участника к отряду.
+- Индекс обновляется при создании, удалении, разделении, слиянии, расформировании и загрузке.
+- Для совместимости с прежними addon-вызовами, напрямую изменяющими публичный `members`, добавлен lazy repair path.
+- Добавлены проверки жизненного цикла индекса, merge/split/disband, legacy mutation и persistence rebuild.
+- В `TroopController` owner UUID теперь разбирается безопасно; неверный UUID не должен обрушить обработку морали/уведомления.
+- В Rust `worldforge-sim::tactical` добавлен чистый детерминированный вычислитель предложений.
+- Добавлен allocation-free batch API `evaluate_tactical_batch_into`: вызывающая сторона переиспользует output buffer; слишком маленький буфер отклоняется до записи результатов.
+- Добавлены Rust unit tests на player-direct authority, пороги риска, retreat/pursuit permissions, batch из 4096 снимков, порядок/ревизии, малый буфер и пустой batch.
+
+## Архитектура межмодульной интеграции
+
+- `wf-people`: единственная каноническая личность и lifecycle.
+- `wf-troops`: физические тела, squad membership, formation, orders и применение приказов.
+- `wf-army`: стратегический roster, армейские операции и снабжение.
+- `wf-settlements`: recruitment sites, workforce, stock и строительные данные.
+- `wf-orders` / `wf-war` / social addons: собственные доменные эффекты и durable receipts.
+- Rust: чистая численная обработка агрегированных immutable snapshots.
+- MAQAN UI: запрос/отображение, без второго roster и второго источника прав.
+
+## Что ещё нельзя считать закрытым
+
+- Java snapshot builder и native adapter отсутствуют для нового tactical API.
+- Нет подтверждённой интеграции с общим simulation scheduler.
+- Rust proposal пока не применяется через `TroopController`.
+- Корпусная координация, поиск пути по рельефу, threat spatial index и масштабная materialization strategy требуют следующих этапов.
+- В текущем проходе не запускались Gradle, Cargo, Minecraft, dedicated server или in-game stress tests. Добавленные тесты — исходный код, а не подтверждённые прогоны.
+
+## Следующие инженерные этапы
+
+1. Найти и подключить существующий общий scheduler только после проверки фактической mainline реализации; не переносить scheduler из исторических веток.
+2. Создать bounded server-thread snapshot builder и Java-side revision/authority validator.
+3. Спроектировать безопасный native transport с fallback на текущий Java order executor; FFI отдельно ревьюить, не смешивать с чистым Rust доменом.
+4. Уменьшить allocation pressure в `TroopController`: переиспользуемые буферы/планы, частоты обновления по dirty revisions и threat changes, без пропуска критических combat events.
+5. Перенести в Rust чистую математику морали, снабжения, формационных оценок и групповых боевых прогнозов только после профилирования и contract tests против текущей Java реализации.
+6. Проверить cross-addon сценарии найма/призыва/возврата/смерти/разделения/слияния, сохраняя Character UUID и стратегический roster.
+
