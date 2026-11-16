@@ -390,6 +390,7 @@ public class MapScreen extends Screen {
             if (mx >= f.x - 6 && mx <= l.x + l.size + 6 && my >= f.y - 6) return true;
         }
         if (mx >= ovwX - 6 && my >= ovwY - 6 && ovwW > 0) return true;
+        if (inEmbeddedCommandDock(mx, my)) return true;
         return panel.contains(mx, my);
     }
 
@@ -665,6 +666,8 @@ public class MapScreen extends Screen {
             overviewTo(mx, my);
             return true;
         }
+        if (embeddedInMaqan && inEmbeddedCommandDock(mx, my)) return true;
+        if (embeddedInMaqan && !inWorkspaceViewport(mx, my)) return true;
         if (overUi((int) mx, (int) my)) return false;
         int[] p = screenToPixel(mx, my);
         if (button == 0 && panel.editing()) {                      // редактор: клик = правка на сервере, Shift+клик = выбрать провинцию
@@ -716,6 +719,7 @@ public class MapScreen extends Screen {
     public boolean mouseDragged(double mx, double my, int button, double dx, double dy) {
         if (super.mouseDragged(mx, my, button, dx, dy)) return true;
         if (dragOverview) { overviewTo(mx, my); return true; }
+        if (embeddedInMaqan && !inWorkspaceViewport(mx, my)) return false;
         if (button == 0 && panel.editing() && !overUi((int) mx, (int) my)) {                // ведём кистью, не чаще 8 раз в секунду
             long now = System.currentTimeMillis();
             if (now - lastEditApply > 125 && !hasShiftDown()) {
@@ -740,6 +744,7 @@ public class MapScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mx, double my, double delta) {
+        if (embeddedInMaqan && !inWorkspaceViewport(mx, my)) return false;
         if (panel.scrolled(mx, my, delta)) return true;
         if (!MapTextures.ready()) return false;
         double nz = Math.max(0.2, Math.min(24, zoom * Math.exp(delta * 0.25)));
