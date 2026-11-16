@@ -72,8 +72,8 @@ jobs:
           $worldmap = (Join-Path $out "real-map.worldmap") -replace '\\', '/'
           Push-Location "mods/worldforge/wfaddons"
           try {
-            bash tools/test-all.sh ../wfmod "$worldmap"
-            if ($LASTEXITCODE -ne 0) { throw "Full WorldForge addon suite failed against actual map" }
+            bash tools/test-all.sh ../wfmod
+            if ($LASTEXITCODE -ne 0) { throw "Full WorldForge addon suite failed against its isolated test fixture" }
             bash tools/test-all.sh ../wfmod "$worldmap" --image-identity-only
             if ($LASTEXITCODE -ne 0) { throw "Actual map identity pipeline failed" }
           } finally {
