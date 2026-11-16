@@ -409,53 +409,70 @@ public final class PlatformShellScreen extends Screen {
     @Override public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         layoutWorkspace();
         g.fill(0, 0, width, height, BG);
+        boolean conceptSkin = MaqanUiPackRenderer.assetsAvailable();
+        boolean compact = WorkspaceResponsiveLayout.isCompact(width, height);
         Panel content = panels.get("content");
-        if (content != null && content.visible) {
-            Screen view = activeView();
-            if (view != null) {
-                // Provider screens own their internal map/list/inspector geometry.
-                // Render them in the full host viewport; clipping them to the
-                // generic dock-tree content slot used to cut off their side panels.
-                view.render(g, mouseX, mouseY, partialTick);
-            } else {
+
+        if (conceptSkin) {
+            // Skin frames are the host surfaces. Provider-owned content is drawn
+            // afterwards so its catalogue/dossier text remains visible inside
+            // the blank frames instead of being covered by their textures.
+            MaqanUiPackRenderer.render(g, width, height);
+            if (content != null && content.visible) {
+                Screen view = activeView();
+                if (view != null) {
+                    if (compact) {
+                        int top = Math.max(content.y, MaqanUiPackRenderer.topBarHeight(width, height));
+                        int bottom = Math.min(content.y + content.h,
+                                MaqanUiPackRenderer.compactDockTop(width, height));
+                        if (bottom > top) {
+                            g.enableScissor(content.x, top, content.x + content.w, bottom);
+                            view.render(g, mouseX, mouseY, partialTick);
+                            g.disableScissor();
+                        }
+                    } else {
+                        // Desktop provider screens own their side-panel geometry.
+                        // Atlas aligns its list and dossier to the concept windows.
+                        view.render(g, mouseX, mouseY, partialTick);
+                    }
+                } else {
+                    g.enableScissor(content.x, content.y, content.x + content.w, content.y + content.h);
+                    WorkspacePreviewRenderer.render(g, font, width, height, profile.name(),
+                            previewLayer, mouseX, mouseY, ambientGrid);
+                    g.disableScissor();
+                }
                 g.enableScissor(content.x, content.y, content.x + content.w, content.y + content.h);
-                WorkspacePreviewRenderer.render(g, font, width, height, profile.name(), previewLayer, mouseX, mouseY, ambientGrid);
+                WorkspaceMapLayerRegistry.render(g, content.x, content.y, content.w, content.h);
                 g.disableScissor();
             }
-            // MAQAN overlays are deliberately constrained to the central content
-            // slot even when the provider's own view spans the full host viewport.
-            g.enableScissor(content.x, content.y, content.x + content.w, content.y + content.h);
-            WorkspaceMapLayerRegistry.render(g, content.x, content.y, content.w, content.h);
-            g.disableScissor();
-        }
-        if (MaqanUiPackRenderer.assetsAvailable()) {
-            // Once the source artwork is installed, it replaces the generic
-            // shell chrome instead of stacking a second set of panels on top.
-            MaqanUiPackRenderer.render(g, width, height);
+
             drawConceptTopBar(g, mouseX, mouseY);
-            if (activeView() == null && !WorkspaceResponsiveLayout.isCompact(width, height))
-                drawConceptWindowContent(g);
-            // Compact skin layouts collapse the decorative side windows; the
-            // active native workspace drawer occupies that space instead.
-            if (WorkspaceResponsiveLayout.isCompact(width, height)) {
-                // The concept top bar and left rail are still real controls:
-                // retain native hit targets/drawers when the layout collapses.
+            if (activeView() == null && !compact) drawConceptWindowContent(g);
+            if (compact) {
                 drawRail(g, mouseX, mouseY);
                 for (Panel panel : panels.values()) {
                     if (panel.visible && !panel.id.equals("content")) drawPanel(g, panel, mouseX, mouseY);
                 }
             }
-            // Keep native workspace overlays available above the imported artwork.
             if (settingsVisible) drawSettings(g, mouseX, mouseY);
             if (searchVisible) drawSearchOverlay(g, mouseX, mouseY);
             if (contextMenuVisible) drawContextMenu(g, mouseX, mouseY);
             if (workspaceManagerVisible) drawWorkspaceManager(g, mouseX, mouseY);
             if (notificationCenterVisible) drawNotificationCenter(g, mouseX, mouseY);
         } else {
+            if (content != null && content.visible) {
+                g.enableScissor(content.x, content.y, content.x + content.w, content.y + content.h);
+                Screen view = activeView();
+                if (view != null) view.render(g, mouseX, mouseY, partialTick);
+                else WorkspacePreviewRenderer.render(g, font, width, height, profile.name(),
+                        previewLayer, mouseX, mouseY, ambientGrid);
+                WorkspaceMapLayerRegistry.render(g, content.x, content.y, content.w, content.h);
+                g.disableScissor();
+            }
             drawTopBar(g, mouseX, mouseY);
             drawRail(g, mouseX, mouseY);
-            for (Panel p : panels.values())
-                if (p.visible && !p.id.equals("content")) drawPanel(g, p, mouseX, mouseY);
+            for (Panel panel : panels.values())
+                if (panel.visible && !panel.id.equals("content")) drawPanel(g, panel, mouseX, mouseY);
             if (settingsVisible) drawSettings(g, mouseX, mouseY);
             drawDockSplitters(g, mouseX, mouseY);
             if (searchVisible) drawSearchOverlay(g, mouseX, mouseY);
