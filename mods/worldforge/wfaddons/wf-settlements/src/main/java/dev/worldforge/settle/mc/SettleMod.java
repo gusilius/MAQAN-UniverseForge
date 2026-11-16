@@ -8,6 +8,7 @@ import dev.worldforge.settle.Settlement;
 import dev.worldforge.settle.Worker;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
+import dev.worldforge.people.NameBank;
 import dev.worldforge.people.PopulationSimulation;
 import dev.worldforge.people.LifeSimulation;
 import dev.worldforge.mod.WorldForgeMod;
@@ -1767,15 +1768,28 @@ public class SettleMod {
                     // Use the canonical race/culture settlement pool when available; keep the
                     // image generator's deterministic name as a safe fallback for partial packs.
                     try {
-                        settlementName = PeopleMod.NAMES.generate(race, culture, "settlements",
+                        settlementName = PeopleMod.NAMES.generate(race, culture, NameBank.settlementCategory(seed.type()),
                                 new java.util.Random(Objects.hash(map.name, seed.id())));
                     } catch (RuntimeException missingSettlementPool) { /* blueprint name is already stable */ }
-                    Colony colony = foundEmergentInMemory(server, dimension, id, settlementName,
+                    String uniqueName = settlementName;
+                    if (!usedNames.add(uniqueName.toLowerCase(Locale.ROOT))) {
+                        String suffix = Integer.toUnsignedString(Objects.hash(map.name, seed.id()), 36);
+                        uniqueName = settlementName + " · " + suffix.substring(0, Math.min(5, suffix.length()));
+                        usedNames.add(uniqueName.toLowerCase(Locale.ROOT));
+                    }
+                    Colony colony = foundEmergentInMemory(server, dimension, id, uniqueName,
                             seed.blockX(), seed.blockZ(), operationId);
                     // Preserve the blueprint's stable ID, type and exact political ownership
                     // on the canonical Colony record; name remains Settlement.s.name.
-                    colony.applyBlueprintIdentity(map.name, seed, settlementName, race, culture,
+                    colony.applyBlueprintIdentity(map.name, seed, uniqueName, race, culture,
                             realm == null ? "" : String.valueOf(realm.props.getOrDefault("politics.government", "")));
+                    // Verify that every seed became a real Colony and that its persisted form can be restored.
+                    Colony restored = Colony.fromMap(colony.toMap(), DEFS);
+                    if (!id.equals(restored.s.id) || !operationId.equals(restored.genesisOperationId)
+                            || !map.name.equals(restored.sourceMapId)
+                            || !seed.id().equals(restored.blueprintSettlementId)
+                            || !uniqueName.equals(restored.s.name))
+                        throw new IllegalStateException("Colony identity round-trip failed for SettlementSeed " + seed.id());
                     if (!existed) staged++;
                 }
                 if (!saveDurably(server)) {

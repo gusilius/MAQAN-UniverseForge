@@ -157,6 +157,24 @@ public final class NameBank {
         resolvedPools.clear();
     }
 
+    /** Maps data-driven settlement type IDs to specialized race-aware naming pools. */
+    public static String settlementCategory(String type) {
+        String key = type == null ? "" : type.toLowerCase(Locale.ROOT);
+        if (key.contains("nomad") || key.contains("caravan")) return "nomad_camps";
+        if (key.contains("tribal") || key.contains("clan")) return "tribal_camps";
+        if (key.contains("camp") || key.contains("encamp")) return "camps";
+        if (key.contains("city") || key.contains("capital") || key.contains("metropol")) return "cities";
+        if (key.contains("village") || key.contains("rural")) return "villages";
+        if (key.contains("hamlet") || key.contains("farmstead")) return "hamlets";
+        if (key.contains("community") || key.contains("commune")) return "communities";
+        if (key.contains("outpost") || key.contains("frontier")) return "outposts";
+        if (key.contains("colony") || key.contains("expedition")) return "colonies";
+        if (key.contains("station") || key.contains("orbital")) return "stations";
+        if (key.contains("hold") || key.contains("fortress")) return "holds";
+        if (key.contains("port") || key.contains("harbor") || key.contains("harbour")) return "ports";
+        return "settlements";
+    }
+
     public String culture(String wanted) { return cultures.containsKey(wanted) ? wanted : def; }
 
     public String pickGivenName(String race, String culture, String gender, Random random) {
