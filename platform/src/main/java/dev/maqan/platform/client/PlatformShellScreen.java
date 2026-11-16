@@ -667,8 +667,8 @@ public final class PlatformShellScreen extends Screen {
      * decorative; profile, workspace, notification and close actions remain
      * the same shell controls at every resolution.
      */
-    private int cameraControlX() { return width - 136; }
-    private int mapControlX() { return width - 108; }
+    private int cameraControlX() { return width - 144; }
+    private int mapControlX() { return width - 116; }
 
     private void drawViewModeControls(GuiGraphics g, int mx, int my, int barHeight) {
         int y = Math.max(2, (barHeight - 22) / 2);
