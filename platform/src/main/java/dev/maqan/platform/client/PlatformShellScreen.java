@@ -415,6 +415,11 @@ public final class PlatformShellScreen extends Screen {
         return true;
     }
 
+    /** Optional provider lookup used by reflection-only module bridges. */
+    public Screen providerView(String capabilityId) {
+        return providerViews.get(capabilityId);
+    }
+
     private Screen activeView() {
         if (profile == Profile.COSMOS) return embeddedView;
         Screen view = providerViews.get(selectedCapabilityId);
