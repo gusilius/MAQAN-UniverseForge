@@ -181,6 +181,19 @@ public final class VanillaWorldGeography {
         return Math.max(0, Math.min(100, score));
     }
 
+    /** Stable lightweight index used by Java materialization; avoids cloning terrain cells every server tick. */
+    public static synchronized java.util.List<String> regionIds() {
+        return REGIONS.values().stream().filter(region -> !region.cells.isEmpty())
+                .map(region -> region.id).toList();
+    }
+
+    public static synchronized String biomeAt(String mapId, int x, int z) {
+        Region region = REGIONS.get(mapId);
+        if (region == null || x < 0 || z < 0 || x >= REGION_BLOCKS || z >= REGION_BLOCKS) return "";
+        JsonObject cell = region.cells.get((long) z * REGION_BLOCKS + x);
+        return cell == null || !cell.has("biome") ? "" : cell.get("biome").getAsString();
+    }
+
     public static synchronized JsonArray snapshot() {
         JsonArray result = new JsonArray();
         for (Region region : REGIONS.values()) {
