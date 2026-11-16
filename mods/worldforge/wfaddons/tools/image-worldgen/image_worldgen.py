@@ -432,6 +432,9 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     political_rgb[1:, :][horizontal] = (24, 24, 28)
     political_rgb[:-1, :][horizontal] = (24, 24, 28)
     political_preview = Image.fromarray(political_rgb, "RGB")
+    from io import BytesIO
+    political_buffer = BytesIO()
+    political_preview.save(political_buffer, format="PNG", optimize=False)
 
     source_hash = hashlib.sha256(input_path.read_bytes()).hexdigest() if generation_mode == "image" else None
     blueprint = {
@@ -465,7 +468,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         "height16.png": image_bytes(width, height, height_values, "I;16"),
         "rivers.png": image_bytes(width, height, river_values, "L"),
         "provinces.png": image_bytes(width, height, province_ids, "I;16"),
-        "political-preview.png": image_bytes(width, height, list(political_rgb.reshape(-1, 3)), "RGB"),
+        "political-preview.png": political_buffer.getvalue(),
         "titles.json": json.dumps(titles_doc, sort_keys=True, separators=(",", ":")).encode(),
         "realms.json": json.dumps(realms_doc, sort_keys=True, separators=(",", ":")).encode(),
         "world-blueprint.json": json.dumps(blueprint, sort_keys=True, separators=(",", ":")).encode(),
