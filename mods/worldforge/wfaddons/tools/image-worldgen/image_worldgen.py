@@ -14,6 +14,7 @@ import math
 import random
 import sys
 import time
+import traceback
 import zipfile
 from collections import deque
 from pathlib import Path
@@ -107,6 +108,18 @@ def neighbors(index: int, width: int, height: int):
         yield index + width
 
 
+def checked_bincount(values: np.ndarray, context: str, minlength: int = 0) -> np.ndarray:
+    """Fail at the source with useful diagnostics instead of NumPy's opaque error."""
+    values = np.asarray(values)
+    if values.size and int(values.min()) < 0:
+        negative = values[values < 0]
+        raise ValueError(
+            f"{context}: bincount received {negative.size} negative labels "
+            f"(min={int(negative.min())}, max={int(values.max())})"
+        )
+    return np.bincount(values, minlength=minlength)
+
+
 def land_components(analysis_labels: np.ndarray, width: int, height: int) -> list[list[int]]:
     """Connected landmasses via SciPy's native implementation, not Python pixel BFS."""
     from scipy import ndimage
@@ -119,7 +132,7 @@ def land_components(analysis_labels: np.ndarray, width: int, height: int) -> lis
     if count == 0:
         return []
     flat = labels.ravel()
-    sizes = np.bincount(flat, minlength=count + 1)
+    sizes = checked_bincount(flat, "land_components.component_labels", minlength=count + 1)
     order = np.argsort(flat, kind="stable")
     offsets = np.cumsum(sizes)
     result = []
@@ -323,7 +336,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     # land in the biome/height layers but have no political province (ID 0).
     valid_realm_pixels = np.flatnonzero(realm_labels >= 0)
     realm_pixel_order = valid_realm_pixels[np.argsort(realm_labels[valid_realm_pixels], kind="stable")]
-    realm_pixel_counts = np.bincount(realm_labels[valid_realm_pixels], minlength=realm_total)
+    realm_pixel_counts = checked_bincount(realm_labels[valid_realm_pixels], "realm_pixel_counts", minlength=realm_total)
     realm_pixel_offsets = np.concatenate(([0], np.cumsum(realm_pixel_counts)))
     realm_cells_by_id = {
         rid: realm_pixel_order[realm_pixel_offsets[rid]:realm_pixel_offsets[rid + 1]].tolist()
@@ -753,6 +766,7 @@ def main() -> int:
         return 0
     except Exception as exc:
         print(f"IMAGE_WORLDGEN_FAILED: {exc}", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
         return 1
 
 
