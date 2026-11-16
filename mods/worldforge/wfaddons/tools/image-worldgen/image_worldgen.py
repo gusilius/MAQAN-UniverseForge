@@ -234,9 +234,15 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     province_labels = np.zeros(width * height, dtype=np.uint32)
     province_meta: dict[int, dict] = {}
     realm_provinces: dict[int, list[int]] = {}
+    # Build each realm's pixel list in one pass. Avoid O(realms * image_pixels)
+    # repeated full-raster scans, which dominate generation on large maps.
+    realm_cells_by_id = {rid: [] for rid in range(realm_total)}
+    for pixel_index, realm_id in enumerate(realm_labels):
+        if realm_id >= 0:
+            realm_cells_by_id[realm_id].append(pixel_index)
     next_province = 1
     for realm_id in range(realm_total):
-        realm_cells = [i for i, label in enumerate(realm_labels) if label == realm_id]
+        realm_cells = realm_cells_by_id[realm_id]
         if not realm_cells:
             continue
         # At least 4,096 source pixels per smallest political territory (~1,048,576 blocks at 16 blocks/px).\n        count = min(provinces_per_realm, max(1, len(realm_cells) // 4096))
@@ -257,10 +263,6 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         next_province += len(seeds)
 
     land_count = sum(1 for kind in classes if kind in LAND_CLASSES)
-    realm_cells_by_id = {rid: [] for rid in realm_provinces}
-    for pixel_index, realm_id in enumerate(realm_labels):
-        if realm_id >= 0:
-            realm_cells_by_id[realm_id].append(pixel_index)
     province_neighbors = {pid: set() for pid in province_meta}
     realm_neighbors = {rid: set() for rid in realm_provinces}
     for z in range(height):
