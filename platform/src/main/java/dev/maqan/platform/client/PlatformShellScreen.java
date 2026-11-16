@@ -411,9 +411,27 @@ public final class PlatformShellScreen extends Screen {
         }
     }
 
+    private boolean providerUsesWorldBackground(Screen view) {
+        if (view == null) return false;
+        try {
+            Object result = view.getClass().getMethod("isWorldOverlay").invoke(view);
+            return Boolean.TRUE.equals(result);
+        } catch (ReflectiveOperationException | LinkageError ignored) {
+            return false;
+        }
+    }
+
+    private boolean providerOwnsSkinViewport(Screen view) {
+        if (view == null) return false;
+        String name = view.getClass().getName();
+        return name.equals("dev.worldforge.mod.client.MapScreen")
+                || name.equals("dev.worldforge.rts.mc.client.RtsHud");
+    }
+
     @Override public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         layoutWorkspace();
-        g.fill(0, 0, width, height, BG);
+        Screen currentProviderView = activeView();
+        if (!providerUsesWorldBackground(currentProviderView)) g.fill(0, 0, width, height, BG);
         boolean conceptSkin = MaqanUiPackRenderer.assetsAvailable();
         boolean compact = WorkspaceResponsiveLayout.isCompact(width, height);
         Panel content = panels.get("content");
@@ -426,8 +444,7 @@ public final class PlatformShellScreen extends Screen {
             if (content != null && content.visible) {
                 Screen view = activeView();
                 if (view != null) {
-                    boolean ownsEmbeddedViewport = view.getClass().getName()
-                            .equals("dev.worldforge.mod.client.MapScreen");
+                    boolean ownsEmbeddedViewport = providerOwnsSkinViewport(view);
                     if (compact && !ownsEmbeddedViewport) {
                         int top = Math.max(content.y, MaqanUiPackRenderer.topBarHeight(width, height));
                         int bottom = Math.min(content.y + content.h,
