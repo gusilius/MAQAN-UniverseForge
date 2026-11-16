@@ -868,10 +868,16 @@ public final class CommandScreen extends Screen {
             if (embeddedInMaqan) g.disableScissor();
         }
         if (dragging) {
-            int x1 = (int) Math.min(dragX, mx), x2 = (int) Math.max(dragX, mx), y1 = (int) Math.min(dragY, my), y2 = (int) Math.max(dragY, my);
-            g.fill(x1, y1, x2, y2, 0x2266FF66);
-            g.fill(x1, y1, x2, y1 + 1, 0xFF66FF66); g.fill(x1, y2 - 1, x2, y2, 0xFF66FF66);
-            g.fill(x1, y1, x1 + 1, y2, 0xFF66FF66); g.fill(x2 - 1, y1, x2, y2, 0xFF66FF66);
+            int[] viewport = embeddedInMaqan ? workspaceViewport() : new int[]{0, 0, width, height};
+            int x1 = Math.max(viewport[0], (int) Math.min(dragX, mx));
+            int x2 = Math.min(viewport[0] + viewport[2], (int) Math.max(dragX, mx));
+            int y1 = Math.max(viewport[1], (int) Math.min(dragY, my));
+            int y2 = Math.min(viewport[1] + viewport[3], (int) Math.max(dragY, my));
+            if (x2 > x1 && y2 > y1) {
+                g.fill(x1, y1, x2, y2, 0x2266FF66);
+                g.fill(x1, y1, x2, y1 + 1, 0xFF66FF66); g.fill(x1, y2 - 1, x2, y2, 0xFF66FF66);
+                g.fill(x1, y1, x1 + 1, y2, 0xFF66FF66); g.fill(x2 - 1, y1, x2, y2, 0xFF66FF66);
+            }
         }
         drawSettlementMinimap(g);
         for (Btn b : buttons()) button(g, b, mxi, myi);
