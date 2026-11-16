@@ -48,7 +48,8 @@ def resolve_image(config: dict, dimension_id: str, explicit: Path | None) -> Pat
     if dimension.get("image"):
         paths.append(Path(dimension["image"]))
     image_dir = Path(config.get("image_input_dir", "config/worldforge/images"))
-    paths.extend(image_dir / (dimension_id + ext) for ext in (".png",".jpg",".jpeg",".webp"))
+    safe_id = dimension_id.replace(":", "_").replace("/", "_")
+    paths.extend(image_dir / (safe_id + ext) for ext in (".png",".jpg",".jpeg",".webp"))
     return next((p for p in paths if p.is_file()), None)
 
 def main() -> int:
