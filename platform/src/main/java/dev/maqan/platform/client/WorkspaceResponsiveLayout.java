@@ -38,7 +38,9 @@ public final class WorkspaceResponsiveLayout {
     public static Result calculate(int width, int height, String activeDrawer, int reservedBottom) {
         int w = Math.max(1, width);
         int h = Math.max(1, height);
-        int usableBottom = Math.max(35, h - Math.max(0, Math.min(reservedBottom, h - 36)));
+        int maxReserved = Math.max(0, h - 36);
+        int effectiveReserved = Math.max(0, Math.min(reservedBottom, maxReserved));
+        int usableBottom = Math.min(h, Math.max(Math.min(35, h), h - effectiveReserved));
         boolean compact = isCompact(w, h);
         Map<String, WorkspaceDockTree.Rect> result = new LinkedHashMap<>();
         if (!compact) return new Result(false, result);
