@@ -133,7 +133,7 @@ public final class WorldSimMod {
         static EmergenceSource vanilla(String id, CharacterRegistry registry) {
             String dimension = VanillaWorldGeography.dimensionFromMapId(id);
             long seed = WorldForgeMod.worldId() == null ? id.hashCode()
-                    : WorldForgeMod.worldId().getMostSignificantBits() ^ WorldForgeMod.worldId().getLeastSignificantBits() ^ id.hashCode();
+                    : WorldForgeMod.worldId().toString().hashCode() ^ id.hashCode();
             return new EmergenceSource(id, null, registry, 256, 256, 1.0, seed, dimension);
         }
         int[] blockPosition(int x, int z) {
@@ -1783,7 +1783,7 @@ public final class WorldSimMod {
         person.props.put("emergence.band_id", bandId);
         person.props.put("emergence.household_id", bandId);
         person.props.put("population.location", bandId);
-        person.props.put("emergence.origin", "map-first");
+        person.props.put("emergence.origin", "shared-world-simulation");
     }
 
     private static String emergentName(EmergenceSource source, String bandId, String culture, String gender, int ordinal, int year) {
