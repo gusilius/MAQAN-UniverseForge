@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 2,
+  "referenceViewport": { "width": 1368, "height": 760 },
+  "sourceScale": 2,
+  "defaultTheme": "royal",
+  "requiredThemes": ["royal", "iron", "grim", "elf"],
+  "textureNames": {
+    "top": "top_bar.png",
+    "lcol": "left_column.png",
+    "lp": "window_state.png",
+    "rp": "window_diplomacy.png",
+    "rcol": "right_column.png",
+    "mm": "minimap.png",
+    "bot": "rts_console.png",
+    "cor": "corner.png",
+    "lw": "window_left_blank.png",
+    "rw": "window_right_blank.png"
+  },
+  "skins": {
+    "royal": {
+      "top": [0,0,1368,62], "lcol": [0,46,58,480], "lp": [58,60,336,522],
+      "rp": [1028,60,1328,522], "rcol": [1326,46,1368,524],
+      "mm": [0,534,292,760], "bot": [304,584,1150,760], "cor": [0,0,136,94]
+    },
+    "iron": {
+      "top": [0,0,1368,62], "lcol": [0,48,63,470], "lp": [63,110,290,532],
+      "rp": [1132,114,1334,530], "rcol": [1332,48,1368,526],
+      "mm": [0,544,306,760], "bot": [312,586,1152,760], "cor": [0,0,136,94]
+    },
+    "grim": {
+      "top": [0,0,1368,62], "lcol": [0,48,64,462], "lp": [62,82,358,540],
+      "rp": [1006,82,1320,545], "rcol": [1316,48,1368,528],
+      "mm": [0,538,294,760], "bot": [308,570,1192,760], "cor": [0,0,136,82]
+    },
+    "elf": {
+      "top": [0,0,1368,62], "lcol": [0,50,62,525], "lp": [62,60,330,556],
+      "rp": [1046,60,1334,566], "rcol": [1330,50,1368,532],
+      "mm": [0,544,290,760], "bot": [308,590,1142,760], "cor": [0,0,136,94]
+    }
+  },
+  "layerOrder": ["world_scene","minimap","frame","rts_console","top_bar","corner","left_column","right_column","windows"],
+  "rules": {
+    "blankWindowsAreCanonical": true,
+    "bakedDemoValuesMustNeverBePresentedAsLiveData": true,
+    "allInteractiveRegionsUseReferenceViewportCoordinates": true,
+    "texturesMustPreserveAspectRatio": true,
+    "themeAssetsAreRequiredAndMustNotBeSilentlySubstituted": true
+  }
+}
