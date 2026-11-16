@@ -133,14 +133,17 @@ public final class CommandScreen extends Screen {
             List<String[]> rows = new ArrayList<>();
             rows.add(new String[]{"Force", "Selected entities", Integer.toString(selected.size())});
             double x = 0, z = 0;
-            int troops = 0, workers = 0, morale = 0, moraleCount = 0, ordered = 0;
+            int troops = 0, workers = 0, morale = 0, moraleCount = 0, ordered = 0, unboundBodies = 0;
             double orderX = 0, orderZ = 0;
+            Set<String> characterIds = new TreeSet<>();
             Map<String, Integer> composition = new TreeMap<>();
             for (net.minecraft.world.entity.LivingEntity entity : selected) {
                 x += entity.getX();
                 z += entity.getZ();
                 if (entity instanceof TroopEntity troop) {
                     troops++;
+                    if (!troop.syncedCharacterId().isBlank()) characterIds.add(troop.syncedCharacterId());
+                    else unboundBodies++;
                     composition.merge(troop.def() != null ? troop.def().name : troop.unitId(), 1, Integer::sum);
                     morale += troop.moralePct();
                     moraleCount++;
@@ -151,6 +154,9 @@ public final class CommandScreen extends Screen {
                     }
                 } else if (CommandMode.isWorkerEntity(entity)) {
                     workers++;
+                    String characterId = CommandMode.workerString(entity, "characterId");
+                    if (!characterId.isBlank()) characterIds.add(characterId);
+                    else unboundBodies++;
                     composition.merge("Worker", 1, Integer::sum);
                 } else {
                     composition.merge(entity.getType().toString(), 1, Integer::sum);
@@ -158,6 +164,9 @@ public final class CommandScreen extends Screen {
             }
             rows.add(new String[]{"Force", "Soldiers", Integer.toString(troops)});
             rows.add(new String[]{"Force", "Workers", Integer.toString(workers)});
+            rows.add(new String[]{"Identity", "Unique Characters", Integer.toString(characterIds.size())});
+            if (unboundBodies > 0)
+                rows.add(new String[]{"Identity", "Bodies without Character", Integer.toString(unboundBodies)});
             rows.add(new String[]{"Force", "Average position", Math.round(x / selected.size()) + ", " + Math.round(z / selected.size())});
             if (moraleCount > 0)
                 rows.add(new String[]{"Condition", "Average morale", Math.round((double) morale / moraleCount) + "%"});
@@ -173,14 +182,14 @@ public final class CommandScreen extends Screen {
                 rows.add(new String[]{"Composition", entry.getKey(), Integer.toString(entry.getValue())});
             net.minecraft.world.entity.LivingEntity lead = selected.get(0);
             rows.add(new String[]{"Lead unit", "Name", lead.getName().getString()});
-            rows.add(new String[]{"Lead unit", "UUID", lead.getUUID().toString()});
+            rows.add(new String[]{"Lead unit", "Body UUID", lead.getUUID().toString()});
             rows.add(new String[]{"Lead unit", "Health", Math.round(lead.getHealth() * 10.0) / 10.0
                     + " / " + Math.round(lead.getMaxHealth() * 10.0) / 10.0});
             if (lead instanceof TroopEntity troop) {
                 rows.add(new String[]{"Lead unit", "Type", troop.def() == null ? troop.unitId() : troop.def().name});
                 rows.add(new String[]{"Lead unit", "Morale", troop.moralePct() + "%"});
                 if (!troop.syncedCharacterId().isBlank())
-                    rows.add(new String[]{"Identity", "Character ID", troop.syncedCharacterId()});
+                    rows.add(new String[]{"Identity", "Global Character UUID", troop.syncedCharacterId()});
                 if (troop.armyId > 0)
                     rows.add(new String[]{"Command", "Army ID", Integer.toString(troop.armyId)});
                 if (!troop.squadId().isBlank())
@@ -188,7 +197,7 @@ public final class CommandScreen extends Screen {
             } else if (CommandMode.isWorkerEntity(lead)) {
                 rows.add(new String[]{"Lead unit", "Profession", CommandMode.workerString(lead, "professionId")});
                 rows.add(new String[]{"Lead unit", "Status", CommandMode.workerString(lead, "statusLabel")});
-                rows.add(new String[]{"Lead unit", "Character ID", CommandMode.workerString(lead, "characterId")});
+                rows.add(new String[]{"Identity", "Global Character UUID", CommandMode.workerString(lead, "characterId")});
             }
             return rows;
         });
