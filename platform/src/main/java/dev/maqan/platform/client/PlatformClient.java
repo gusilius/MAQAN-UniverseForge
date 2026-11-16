@@ -65,7 +65,7 @@ public final class PlatformClient {
             Minecraft mc = Minecraft.getInstance();
             while (CAMERA_MODE.consumeClick())
                 MaqanCameraBridge.apply(WorkspaceViewState.cycleCameraMode());
-            while (MAP_MODE.consumeClick()) WorkspaceViewState.cycleMapMode();
+            while (MAP_MODE.consumeClick()) PlatformShellScreen.cycleMapModeFromHotkey();
             while (OPEN.consumeClick()) {
                 if (mc.screen instanceof PlatformShellScreen) mc.setScreen(null);
                 else mc.setScreen(new PlatformShellScreen());
