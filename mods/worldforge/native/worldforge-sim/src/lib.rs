@@ -6,6 +6,9 @@
 
 #![forbid(unsafe_code)]
 
+/// Deterministic tactical decision proposals for RTS command snapshots.
+pub mod tactical;
+
 /// Fixed-point resource quantity. One unit is one hundredth of a game resource unit.
 pub type Amount = i64;
 
