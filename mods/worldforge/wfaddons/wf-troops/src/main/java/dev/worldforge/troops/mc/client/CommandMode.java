@@ -309,6 +309,11 @@ public final class CommandMode {
         if (ModList.get().isLoaded("wf_settle")) mc.player.connection.sendCommand("wfsettle view hud");
     }
 
+    private static boolean hostedByMaqan(Minecraft mc) {
+        return mc.screen != null && mc.screen.getClass().getName()
+                .equals("dev.maqan.platform.client.PlatformShellScreen");
+    }
+
     static void exit(Minecraft mc) {
         stop(mc, true);
     }
@@ -432,7 +437,8 @@ public final class CommandMode {
                 firstPersonCommand = false;
                 enter(mc);
             }
-            if (active && !(mc.screen instanceof CommandScreen)) exit(mc);                     // открылось другое окно (смерть, меню): выходим
+            if (active && !(mc.screen instanceof CommandScreen) && !hostedByMaqan(mc))
+                exit(mc); // A MAQAN host is a valid owner; other screens still terminate command mode.
             if (active) {
                 java.util.Set<String> alive = new java.util.HashSet<>();
                 for (net.minecraft.world.entity.Entity en : mc.level.entitiesForRendering()) if (en.isAlive()) alive.add(en.getUUID().toString());
