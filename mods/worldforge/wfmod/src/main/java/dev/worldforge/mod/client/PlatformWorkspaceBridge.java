@@ -44,14 +44,40 @@ public final class PlatformWorkspaceBridge {
         return mc.level == null ? "" : mc.level.dimension().location().toString();
     }
 
-    /** Register an action that is shown in MAQAN's context menu for this provider's selection. */
-    public static void registerAction(String id, String label, String providerId, Runnable action) {
-        if (action == null) return;
+    /**
+     * Register an entity-scoped action in MAQAN's context menu.
+     *
+     * The predicate and callback receive the selected provider entity ID. The
+     * provider must still revalidate permissions, world identity and domain
+     * preconditions when its authoritative command/service executes.
+     */
+    public static void registerAction(String id, String label, String providerId,
+                                      java.util.function.Predicate<String> visibleForEntity,
+                                      java.util.function.Consumer<String> action) {
+        if (visibleForEntity == null || action == null) return;
         try {
             Class<?> runtime = Class.forName("dev.maqan.platform.client.WorkspaceRuntime");
             Class<?> actionType = Class.forName("dev.maqan.platform.client.WorkspaceRuntime$Action");
-            java.util.function.Predicate<Object> visible = selection -> true;
-            java.util.function.Consumer<Object> execute = selection -> action.run();
+            java.util.function.Predicate<Object> visible = selection -> {
+                try {
+                    String owner = (String) selection.getClass().getMethod("providerId").invoke(selection);
+                    String entityId = (String) selection.getClass().getMethod("entityId").invoke(selection);
+                    return providerId.equals(owner) && visibleForEntity.test(entityId);
+                } catch (ReflectiveOperationException | RuntimeException error) {
+                    return false;
+                }
+            };
+            java.util.function.Consumer<Object> execute = selection -> {
+                try {
+                    String owner = (String) selection.getClass().getMethod("providerId").invoke(selection);
+                    String entityId = (String) selection.getClass().getMethod("entityId").invoke(selection);
+                    if (!providerId.equals(owner) || !visibleForEntity.test(entityId))
+                        throw new IllegalStateException("Selection no longer satisfies provider action");
+                    action.accept(entityId);
+                } catch (ReflectiveOperationException error) {
+                    throw new IllegalStateException("Unable to resolve selected provider entity", error);
+                }
+            };
             Object descriptor = actionType.getConstructor(String.class, String.class, String.class,
                     java.util.function.Predicate.class, java.util.function.Consumer.class)
                     .newInstance(id, label, providerId, visible, execute);
@@ -59,6 +85,16 @@ public final class PlatformWorkspaceBridge {
         } catch (ReflectiveOperationException | LinkageError ignored) {
             // Optional host not installed; provider's own controls remain available.
         }
+    }
+
+    /**
+     * Compatibility adapter for non-entity actions only. Domain mutations
+     * should use the entity-scoped overload and revalidate on the server.
+     */
+    @Deprecated
+    public static void registerAction(String id, String label, String providerId, Runnable action) {
+        if (action == null) return;
+        registerAction(id, label, providerId, ignored -> true, ignored -> action.run());
     }
 
     /** Route a selected global-search result back to the provider's entity focus/navigation logic. */
