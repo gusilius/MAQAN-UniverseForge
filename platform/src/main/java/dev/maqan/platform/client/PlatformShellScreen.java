@@ -218,6 +218,34 @@ public final class PlatformShellScreen extends Screen {
             }
             return;
         }
+        if (MaqanUiPackRenderer.assetsAvailable()) {
+            MaqanUiPackAdaptiveLayout.Result skin = MaqanUiPackRenderer.adaptiveLayout(width, height);
+            if (skin != null && !skin.compact()) {
+                MaqanUiPackAdaptiveLayout.Rect left = skin.get("lp");
+                MaqanUiPackAdaptiveLayout.Rect right = skin.get("rp");
+                MaqanUiPackAdaptiveLayout.Rect top = skin.get("top");
+                MaqanUiPackAdaptiveLayout.Rect minimap = skin.get("mm");
+                MaqanUiPackAdaptiveLayout.Rect console = skin.get("bot");
+                if (left != null && right != null && top != null && minimap != null && console != null) {
+                    int margin = 8;
+                    int contentX = left.right() + margin;
+                    int contentY = top.bottom() + margin;
+                    int contentRight = right.x() - margin;
+                    int contentBottom = Math.min(minimap.y(), console.y()) - margin;
+                    Panel content = panels.get("content");
+                    if (content != null && contentRight > contentX && contentBottom > contentY) {
+                        content.x = contentX;
+                        content.y = contentY;
+                        content.w = contentRight - contentX;
+                        content.h = contentBottom - contentY;
+                        content.visible = !hiddenPanels.contains("content");
+                        for (Panel panel : panels.values())
+                            if (!panel.id.equals("content")) panel.visible = false;
+                        return;
+                    }
+                }
+            }
+        }
         Map<String, WorkspaceDockTree.Rect> layout = WorkspaceDockTree.layout(workspaceRoot,
                 workspaceBounds(), Map.of(
                         "navigation", new WorkspaceDockTree.MinimumSize(150, 120),
