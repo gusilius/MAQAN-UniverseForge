@@ -436,6 +436,13 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         "titles.json": json.dumps(titles_doc, sort_keys=True, separators=(",", ":")).encode(),
         "realms.json": json.dumps(realms_doc, sort_keys=True, separators=(",", ":")).encode(),
         "world-blueprint.json": json.dumps(blueprint, sort_keys=True, separators=(",", ":")).encode(),
+        "generation-profile.json": json.dumps({
+            "format": "maqan-planet-world-profile/1",
+            "planet_id": planet_id, "seed": seed, "generation_mode": generation_mode,
+            "source_image_sha256": source_hash, "settlement_level": settlement_level,
+            "settlement_profile": settlement_profile, "size_px": [width, height],
+            "blocks_per_pixel": blocks_per_pixel,
+        }, sort_keys=True, separators=(",", ":")).encode(),
         **({"source-image.sha256": (source_hash + "\n").encode()} if source_hash else {}),
         "image-analysis-report.json": json.dumps(analysis_report, sort_keys=True, separators=(",", ":")).encode(),
     }
