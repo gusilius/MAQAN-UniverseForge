@@ -882,6 +882,8 @@ public final class Settlement {
         w.releaseTask(w.taskOwner, w.taskId);
         w.suspendedTaskOwner = Worker.TaskOwner.NONE;
         w.suspendedTaskId = "";
+        w.suspendedProfession = ""; w.suspendedBuilding = 0; w.suspendedManualHauler = false;
+        w.suspendedLifeAction = ""; w.suspendedLifeTargetX = 0; w.suspendedLifeTargetZ = 0; w.suspendedLifeActionUntil = 0;
         w.profession = profession;
         w.assignedProfession = "";
         w.manualHauler = false;
