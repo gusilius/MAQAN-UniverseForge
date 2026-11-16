@@ -59,6 +59,13 @@ public final class MaqanUiPackRenderer {
         return activeTheme;
     }
 
+    public static int topBarHeight(int screenWidth, int screenHeight) {
+        if (!assetsAvailable()) return 34;
+        MaqanUiPackAdaptiveLayout.Rect rect = MaqanUiPackAdaptiveLayout
+                .calculate(screenWidth, screenHeight, loadedLayout.skin(activeTheme)).get("top");
+        return rect == null ? 34 : rect.height();
+    }
+
     public static String cycleTheme() {
         List<String> themes = List.of("royal", "iron", "grim", "elf");
         int index = themes.indexOf(activeTheme);
