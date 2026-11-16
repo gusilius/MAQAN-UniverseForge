@@ -13,7 +13,8 @@ import java.util.Map;
  * Native Minecraft renderer for the supplied MAQAN concept frame.
  *
  * The game/provider view is rendered first by PlatformShellScreen. This class
- * then draws the concept's decorative layers in reference-viewport space.
+ * then draws the concept's decorative layers using responsive screen-space
+ * rectangles derived from the imported per-theme reference geometry.
  * It deliberately does not own world data, camera state, map state or actions.
  */
 public final class MaqanUiPackRenderer {
