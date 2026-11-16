@@ -316,7 +316,12 @@ public class SettleTest {
         ok(lifeLease.claimMilitaryTask(daily.id, "campaign:defend-2"), "военный приказ может прервать повседневное действие");
         Settlement lifeLeaseBack = Settlement.fromJson(lifeLease.toJson(), d);
         Worker restoredDaily = lifeLeaseBack.worker(daily.id);
+        ok(restoredDaily.suspendedTasks.size() == 2
+                        && restoredDaily.suspendedTasks.peekFirst().owner() == Worker.TaskOwner.SETTLEMENT
+                        && restoredDaily.suspendedTasks.peekLast().owner() == Worker.TaskOwner.LIFE,
+                "снимок мира сохраняет оба уровня вложенного прерывания в правильном порядке");
         ok(lifeLeaseBack.releaseMilitaryTask(restoredDaily.id, "campaign:defend-2")
+                        && restoredDaily.suspendedTasks.size() == 1
                         && restoredDaily.taskOwner == Worker.TaskOwner.LIFE
                         && restoredDaily.lifeAction.equals("sleeping")
                         && restoredDaily.lifeTargetX == 7 && restoredDaily.lifeTargetZ == -4
@@ -327,11 +332,13 @@ public class SettleTest {
                         && restoredDaily.lifeAction.isBlank(),
                 "прямой приказ игрока прерывает повседневную задачу и получает высший приоритет");
         ok(!lifeLeaseBack.advanceManualOrder(restoredDaily.id)
+                        && restoredDaily.suspendedTasks.size() == 1
                         && restoredDaily.taskOwner == Worker.TaskOwner.LIFE
                         && restoredDaily.lifeAction.equals("sleeping")
                         && restoredDaily.lifeActionUntil == 900,
                 "после завершения приказа игрока восстанавливается прерванный распорядок жителя");
         ok(lifeLeaseBack.releaseLifeTask(restoredDaily.id, "life:sleeping")
+                        && restoredDaily.suspendedTasks.isEmpty()
                         && restoredDaily.taskOwner == Worker.TaskOwner.SETTLEMENT
                         && restoredDaily.building == lifeWorkSite.uid
                         && restoredDaily.assignedProfession.equals("builder"),
