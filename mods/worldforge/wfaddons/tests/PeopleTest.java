@@ -268,6 +268,34 @@ public class PeopleTest {
         ok(!CharacterInventory.claimEstate(solitary,heir),
                 "estate cannot be claimed again after inheritance has been settled");
 
+        // Entity body bindings are indexed independently from Character identity.
+        CharacterRegistry bodies = new CharacterRegistry();
+        Character bodyOwner = bodies.create("Боец", "", "", "m", 1);
+        Character otherOwner = bodies.create("Другой боец", "", "", "m", 1);
+        String bodyA = UUID.randomUUID().toString(), bodyB = UUID.randomUUID().toString();
+        ok(bodies.bindEntity(bodyOwner.id, "soldier", bodyA)
+                        && !bodies.bindEntity(otherOwner.id, "worker", bodyA),
+                "один Minecraft Entity UUID нельзя привязать к двум Characters");
+        ok(bodies.bindEntity(bodyOwner.id, "worker", bodyB)
+                        && bodies.bindEntity(bodyOwner.id, "soldier", bodyB)
+                        && !bodies.bindEntity(otherOwner.id, "worker", bodyB),
+                "перепривязка body kind освобождает старый UUID, а повторное использование того же UUID тем же Character безопасно");
+        bodies.unbindEntity(bodyOwner.id, "soldier", bodyA);
+        ok(!bodies.bindEntity(otherOwner.id, "worker", bodyB),
+                "устаревший unbind не освобождает UUID, который уже принадлежит другой привязке того же Character");
+        bodies.unbindEntity(bodyOwner.id, "worker", bodyB);
+        ok(bodies.bindEntity(otherOwner.id, "worker", bodyB),
+                "точный unbind освобождает UUID для повторного использования");
+        bodies.bindEntity(bodyOwner.id, "soldier", bodyA);
+        String bodySave = bodies.toJson();
+        CharacterRegistry bodiesReload = new CharacterRegistry();
+        bodiesReload.fromJson(bodySave);
+        ok(!bodiesReload.bindEntity(otherOwner.id, "worker", bodyA),
+                "обратный индекс Entity UUID восстанавливается из сохранения");
+        bodiesReload.kill(bodyOwner.id);
+        ok(bodiesReload.bindEntity(otherOwner.id, "worker", bodyA),
+                "смерть Character освобождает его Minecraft body UUID");
+
         // диалог с персонажем
         DialogueBridge.register();
         Character chancellor = reg.holder("chancellor", Courts.realmPlace(d.realmList().get(3).id));
