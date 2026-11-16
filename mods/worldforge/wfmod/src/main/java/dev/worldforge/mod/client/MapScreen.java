@@ -43,6 +43,7 @@ public class MapScreen extends Screen {
     private long lastEditApply;
     private boolean dragOverview;
     private int ovwX, ovwY, ovwW, ovwH;
+    private boolean embeddedInMaqan;
 
     private static final class Slot {
         final String key; final int x, y, size;
@@ -51,6 +52,69 @@ public class MapScreen extends Screen {
     }
     public MapScreen() {
         super(Component.literal("Карта"));
+    }
+
+    /** Hosted by the common MAQAN shell; map data/actions remain WorldForge-owned. */
+    public void setEmbeddedInMaqan(boolean embedded) {
+        embeddedInMaqan = embedded;
+        fitted = false;
+    }
+
+    private int[] workspaceViewport() {
+        if (!embeddedInMaqan) return new int[]{0, BAR, width, Math.max(BAR + 1, height - BOTTOM)};
+        try {
+            Class<?> renderer = Class.forName("dev.maqan.platform.client.MaqanUiPackRenderer");
+            Object layout = renderer.getMethod("adaptiveLayout", int.class, int.class).invoke(null, width, height);
+            if (layout != null) {
+                Class<?> layoutType = Class.forName("dev.maqan.platform.client.MaqanUiPackAdaptiveLayout");
+                Object rect = layoutType.getMethod("contentViewport", layoutType.getDeclaredClasses()[0], int.class)
+                        .invoke(null, layout, 8);
+                if (rect != null) return rectValues(rect);
+            }
+            int top = (Integer) renderer.getMethod("topBarHeight", int.class, int.class).invoke(null, width, height);
+            int bottom = (Integer) renderer.getMethod("compactDockTop", int.class, int.class).invoke(null, width, height);
+            return new int[]{44, top, Math.max(1, width - 44), Math.max(1, bottom - top)};
+        } catch (ReflectiveOperationException | LinkageError ignored) {
+            return new int[]{44, 62, Math.max(1, width - 44), Math.max(1, height - 150)};
+        }
+    }
+
+    private int[] minimapFrame() {
+        if (!embeddedInMaqan) return null;
+        try {
+            Class<?> renderer = Class.forName("dev.maqan.platform.client.MaqanUiPackRenderer");
+            Object layout = renderer.getMethod("adaptiveLayout", int.class, int.class).invoke(null, width, height);
+            if (layout == null) return null;
+            Object rect = layout.getClass().getMethod("get", String.class).invoke(layout, "mm");
+            return rect == null ? null : rectValues(rect);
+        } catch (ReflectiveOperationException | LinkageError ignored) {
+            return null;
+        }
+    }
+
+    private static int[] rectValues(Object rect) throws ReflectiveOperationException {
+        Class<?> type = rect.getClass();
+        return new int[]{(Integer) type.getMethod("x").invoke(rect),
+                (Integer) type.getMethod("y").invoke(rect),
+                (Integer) type.getMethod("width").invoke(rect),
+                (Integer) type.getMethod("height").invoke(rect)};
+    }
+
+    private boolean inWorkspaceViewport(double x, double y) {
+        int[] r = workspaceViewport();
+        return x >= r[0] && y >= r[1] && x < r[0] + r[2] && y < r[1] + r[3];
+    }
+
+    private boolean inEmbeddedCommandDock(double x, double y) {
+        if (!embeddedInMaqan) return false;
+        try {
+            Class<?> renderer = Class.forName("dev.maqan.platform.client.MaqanUiPackRenderer");
+            int top = (Integer) renderer.getMethod("compactDockTop", int.class, int.class).invoke(null, width, height);
+            int bar = (Integer) renderer.getMethod("topBarHeight", int.class, int.class).invoke(null, width, height);
+            return y >= top && y < height || y < bar || x < 44;
+        } catch (ReflectiveOperationException | LinkageError ignored) {
+            return y >= height - 140 || y < 62 || x < 44;
+        }
     }
 
     // ------------------------------------------------------------------ инициализация
@@ -62,7 +126,9 @@ public class MapScreen extends Screen {
         int size = 28, gap = 3, sep = 8;
         int total = 0, prevG = -1;
         for (String k : modes) { int g = group(k); total += size + gap + (prevG >= 0 && g != prevG ? sep : 0); prevG = g; }
-        int x = (width - total) / 2, y = height - size - 10;
+        int[] viewport = workspaceViewport();
+        int x = viewport[0] + (viewport[2] - total) / 2;
+        int y = viewport[1] + viewport[3] - size - 10;
         prevG = -1;
         for (String k : modes) {
             int g = group(k);
@@ -210,10 +276,12 @@ public class MapScreen extends Screen {
     }
 
     private void fit() {
-        double zx = (width - 24) / (double) MapTextures.w, zy = (height - BAR - BOTTOM - 14) / (double) MapTextures.h;
+        int[] viewport = workspaceViewport();
+        double zx = Math.max(1, viewport[2] - 24) / (double) MapTextures.w;
+        double zy = Math.max(1, viewport[3] - 14) / (double) MapTextures.h;
         zoom = Math.min(zx, zy);
-        camX = (width - MapTextures.w * zoom) / 2;
-        camY = BAR + (height - BAR - BOTTOM - MapTextures.h * zoom) / 2;
+        camX = viewport[0] + (viewport[2] - MapTextures.w * zoom) / 2;
+        camY = viewport[1] + (viewport[3] - MapTextures.h * zoom) / 2;
         fitted = true;
     }
 
