@@ -479,6 +479,35 @@ public class TroopsTest {
         check(!Wars.atWar("red", "red", "red", "red") && !Wars.atWar("", "red", "red", "") && !Wars.atWar("red", null, "blue", null), "не воюют: одно государство, без государства, пустые списки");
         check(Wars.listed(" a , b ", "b") && !Wars.listed("ab", "b"), "разбор списка");
 
+        // Role-aware tactical abilities: offers are derived from actual unit archetypes and veteran ranks.
+        TroopDefs.Unit footman = d.units.get("footman");
+        TroopDefs.Unit archer = d.units.get("archer");
+        TroopDefs.Unit medic = d.units.get("field_medic");
+        TroopDefs.Unit trebuchet = d.units.get("trebuchet");
+        check(TroopAbilities.forUnit(footman, 0, false).stream().anyMatch(x -> x.id().equals("shield_wall"))
+                        && TroopAbilities.forUnit(footman, 0, false).stream().noneMatch(x -> x.id().equals("charge")),
+                "пехотные способности доступны по роли и ветеранскому рангу");
+        check(TroopAbilities.forUnit(archer, 0, false).stream().noneMatch(x -> x.id().equals("volley"))
+                        && TroopAbilities.forUnit(archer, 1, false).stream().anyMatch(x -> x.id().equals("volley")),
+                "залп стрелков открывается после требуемой выучки");
+        check(TroopAbilities.forUnit(medic, 0, false).stream().anyMatch(x -> x.id().equals("field_treatment"))
+                        && TroopAbilities.forUnit(trebuchet, 0, false).stream().anyMatch(x -> x.id().equals("bombard")),
+                "медицинские и осадные умения принадлежат профильным ролям");
+        check(TroopAbilities.forUnit(footman, 0, false).stream().noneMatch(x -> x.commanderOnly())
+                        && TroopAbilities.forUnit(footman, 0, true).stream().anyMatch(x -> x.id().equals("command_rally")),
+                "командирские способности доступны только назначенному командиру");
+        List<TroopAbilities.Offer> mixedOffers = TroopAbilities.forGroup(
+                List.of(footman, archer, medic), List.of(0, 1, 0), true);
+        check(mixedOffers.stream().anyMatch(x -> x.ability().id().equals("field_treatment")
+                        && x.eligibleCount() == 1 && x.selectedCount() == 3 && !x.availableForWholeSelection())
+                        && mixedOffers.stream().anyMatch(x -> x.ability().id().equals("command_rally")
+                        && x.eligibleCount() == 1),
+                "смешанная группа показывает число специалистов и не раздаёт умения командира всем бойцам");
+        boolean invalidAbilityRejected = false;
+        try { new TroopAbilities.Ability("bad", "Bad", "", TroopAbilities.Target.SELF, "melee", 5, false); }
+        catch (IllegalArgumentException expected) { invalidAbilityRejected = true; }
+        check(invalidAbilityRejected, "описания способностей отклоняют недопустимый ранг");
+
         System.out.println(fails == 0 ? "ALL OK" : fails + " FAIL");
         if (fails > 0) System.exit(1);
     }
