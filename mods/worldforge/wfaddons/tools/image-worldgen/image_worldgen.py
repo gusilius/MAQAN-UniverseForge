@@ -1147,6 +1147,35 @@ def image_bytes(width: int, height: int, values: list[int], mode: str) -> bytes:
     return buffer.getvalue()
 
 
+
+def validate_province_connectivity(province_ids: np.ndarray, width: int, height: int) -> dict:
+    """Validate 4-connected province components with one raster pass per province bbox."""
+    from scipy import ndimage
+    grid = np.asarray(province_ids, dtype=np.int32).reshape((height, width))
+    ids = np.unique(grid)
+    ids = ids[ids > 0]
+    # A connected-component pass on each province's tight bounding box avoids
+    # constructing millions of Python integer objects and per-province pixel sets.
+    checked = 0
+    disconnected = []
+    for pid in ids:
+        z, x = np.nonzero(grid == pid)
+        if not x.size:
+            continue
+        x0, x1 = int(x.min()), int(x.max()) + 1
+        z0, z1 = int(z.min()), int(z.max()) + 1
+        mask = grid[z0:z1, x0:x1] == pid
+        _, count = ndimage.label(mask, structure=np.array(
+            [[0,1,0],[1,1,1],[0,1,0]], dtype=np.uint8))
+        checked += 1
+        if count != 1:
+            disconnected.append({"province_id": int(pid), "components": int(count),
+                                 "pixels": int(mask.sum())})
+    if disconnected:
+        raise AssertionError(f"Disconnected provinces: {disconnected[:12]}")
+    return {"checked_provinces": checked, "disconnected_provinces": 0}
+
+
 def validate_package(path: Path) -> dict:
     with zipfile.ZipFile(path) as archive:
         names = set(archive.namelist())
@@ -1188,32 +1217,12 @@ def validate_package(path: Path) -> dict:
             raise AssertionError("politically unclaimed land count differs from the blueprint")
         if int(blueprint["settlement_level"]) >= 6 and actual_unclaimed != 0:
             raise AssertionError("settlement levels 6-7 must have no politically unclaimed land")
-        # Index the raster once. Re-scanning every pixel for every province
-        # made validation O(provinces * pixels) on realistic world maps.
-        cells_by_province = {pid: [] for pid in expected}
-        for pixel_index, value in enumerate(province_ids):
-            pid = int(value)
-            if pid:
-                cells_by_province[pid].append(pixel_index)
+        province_grid = np.asarray(province_ids, dtype=np.uint32).reshape((height, width))
+        connectivity_report = validate_province_connectivity(province_grid, width, height)
         for item in blueprint["territories"]:
             pid = item["id"]
-            cells = cells_by_province[pid]
-            if not cells:
-                raise AssertionError(f"province {pid} has no land pixels")
-            start = cells[0]
-            allowed = set(cells)
-            seen = {start}
-            queue = deque([start])
-            while queue:
-                current = queue.popleft()
-                for nxt in neighbors(current, width, height):
-                    if nxt in allowed and nxt not in seen:
-                        seen.add(nxt)
-                        queue.append(nxt)
-            if len(seen) != len(cells):
-                raise AssertionError(f"province {pid} is disconnected ({len(seen)}/{len(cells)})")
             cap_x, cap_z = item["capital_pixel"]
-            if int(province_ids[cap_z * width + cap_x]) != pid:
+            if int(province_grid[cap_z, cap_x]) != pid:
                 raise AssertionError(f"province {pid} capital is outside its province")
         realm_ids = {r["id"] for r in realms["realms"]}
         for settlement in blueprint["settlements"]:
@@ -1240,6 +1249,7 @@ def validate_package(path: Path) -> dict:
             "seed": blueprint["seed"],
             "source_image_sha256": blueprint["source_image_sha256"],
             "chunk_materialization": blueprint["generation_policy"]["chunk_materialization"],
+            "connectivity": connectivity_report,
         }
 
 
