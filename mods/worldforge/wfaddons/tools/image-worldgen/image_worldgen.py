@@ -1145,8 +1145,13 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         rid: sorted(region_id for region_id, item in region_meta.items() if item["realm"] == rid)
         for rid in realm_provinces
     }
+    # Province IDs are not guaranteed to be dense: disconnected fragments are
+    # appended to the original ID range. Allocate state IDs after the actual
+    # maximum province ID and all generated region IDs, never from collection
+    # lengths (which can collide with sparse IDs).
+    first_state_id = max([*province_meta.keys(), *region_meta.keys()], default=0) + 1
     state_id_for_realm = {
-        rid: len(province_meta) + len(region_meta) + offset + 1
+        rid: first_state_id + offset
         for offset, rid in enumerate(sorted(realm_provinces))
     }
     titles = []
@@ -1291,6 +1296,10 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
                   {"index": 2, "key": "state", "name": "State"}],
         "titles": sorted(titles, key=lambda item: item["id"]),
     }
+    titles_by_id = {int(item["id"]): item for item in titles}
+    if len(titles_by_id) != len(titles):
+        raise AssertionError("administrative title IDs must be globally unique")
+
     realms_doc = {
         "format": "worldforge-realms/1",
         "relation_types": {"vassal": {"label": "Vassal", "tribute": 10, "levy": 10, "can_declare_war": False}},
