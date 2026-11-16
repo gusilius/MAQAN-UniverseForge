@@ -48,7 +48,18 @@ public final class MaqanCameraBridge {
     }
 
     public static void focus(double x, double z) {
-        invokeBoolean("focus", new Class<?>[]{double.class, double.class}, new Object[]{x, z});
+        invokeVoid("focus", new Class<?>[]{double.class, double.class}, new Object[]{x, z});
+    }
+
+    private static void invokeVoid(String method, Class<?>[] parameterTypes, Object[] arguments) {
+        if (!available()) return;
+        try {
+            Class<?> bridge = Class.forName(
+                    "dev.worldforge.troops.mc.client.MaqanTroopsCameraBridge");
+            bridge.getMethod(method, parameterTypes).invoke(null, arguments);
+        } catch (ReflectiveOperationException | LinkageError error) {
+            LOGGER.debug("Optional wf_troops camera bridge method {} is unavailable", method, error);
+        }
     }
 
     private static boolean invokeBoolean(String method, Class<?>[] parameterTypes, Object[] arguments) {
