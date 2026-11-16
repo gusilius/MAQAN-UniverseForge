@@ -86,6 +86,11 @@ public final class ArmyHierarchyTest {
         delegation.prune(List.of(second.id));
         check(delegation.all().size() == 1 && delegation.get(first.id).mode() == CommandDelegation.Mode.PLAYER_DIRECT,
                 "delegation policies for disbanded squads are pruned");
+        CommandDelegation restoredDelegation = new CommandDelegation();
+        restoredDelegation.fromJson(delegation.toJson());
+        check(restoredDelegation.get(second.id).mode() == CommandDelegation.Mode.AUTONOMOUS
+                        && restoredDelegation.mayIssue(second.id, "c18", CommandDelegation.Action.PURSUE),
+                "delegated command mode and permissions survive save/reload");
 
         if (failures > 0) throw new AssertionError(failures + " army hierarchy tests failed");
     }
