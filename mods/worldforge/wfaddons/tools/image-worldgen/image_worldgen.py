@@ -295,11 +295,16 @@ def aggregate_realm_regions(realm_labels: np.ndarray, realm_seeds: dict[int, int
     members = {int(r): [int(r)] for r in ids}
     group_area = dict(area)
     grid = realm_labels.reshape((height, width))
-    pairs = np.concatenate((
-        np.column_stack((grid[:, :-1].ravel(), grid[:, 1:].ravel())),
-        np.column_stack((grid[:-1, :].ravel(), grid[1:, :].ravel()))
-    ), axis=0)
-    pairs = pairs[(pairs[:, 0] >= 0) & (pairs[:, 1] >= 0) & (pairs[:, 0] != pairs[:, 1])]
+    h_left, h_right = grid[:, :-1], grid[:, 1:]
+    v_top, v_bottom = grid[:-1, :], grid[1:, :]
+    h_mask = (h_left >= 0) & (h_right >= 0) & (h_left != h_right)
+    v_mask = (v_top >= 0) & (v_bottom >= 0) & (v_top != v_bottom)
+    pair_parts = []
+    if np.any(h_mask):
+        pair_parts.append(np.column_stack((h_left[h_mask], h_right[h_mask])))
+    if np.any(v_mask):
+        pair_parts.append(np.column_stack((v_top[v_mask], v_bottom[v_mask])))
+    pairs = np.concatenate(pair_parts, axis=0) if pair_parts else np.empty((0, 2), dtype=np.int64)
     if not pairs.size or len(ids) < 2:
         return realm_labels, dict(realm_seeds), {
             "initial_regions": int(len(ids)), "merged_regions": int(len(ids)), "merge_operations": 0}
@@ -581,10 +586,16 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     # Extract unique border pairs in vectorized NumPy passes. The old nested
     # Python scan visited every pixel and allocated neighbor iterators.
     province_grid = province_labels.reshape((height, width))
-    horizontal = np.column_stack((province_grid[:, :-1].ravel(), province_grid[:, 1:].ravel()))
-    vertical = np.column_stack((province_grid[:-1, :].ravel(), province_grid[1:, :].ravel()))
-    pairs = np.concatenate((horizontal, vertical), axis=0)
-    pairs = pairs[(pairs[:, 0] > 0) & (pairs[:, 1] > 0) & (pairs[:, 0] != pairs[:, 1])]
+    left, right = province_grid[:, :-1], province_grid[:, 1:]
+    top, bottom = province_grid[:-1, :], province_grid[1:, :]
+    h_mask = (left > 0) & (right > 0) & (left != right)
+    v_mask = (top > 0) & (bottom > 0) & (top != bottom)
+    pair_parts = []
+    if np.any(h_mask):
+        pair_parts.append(np.column_stack((left[h_mask], right[h_mask])))
+    if np.any(v_mask):
+        pair_parts.append(np.column_stack((top[v_mask], bottom[v_mask])))
+    pairs = np.concatenate(pair_parts, axis=0) if pair_parts else np.empty((0, 2), dtype=np.uint32)
     if pairs.size:
         pairs = np.unique(np.sort(pairs, axis=1), axis=0)
         for a_value, b_value in pairs:
