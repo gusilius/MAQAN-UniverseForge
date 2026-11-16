@@ -21,6 +21,11 @@ public final class TerritorialIdentity {
         Objects.requireNonNull(editor, "title editor");
         Objects.requireNonNull(people, "character registry");
         Objects.requireNonNull(names, "name bank");
+        return editor.group(() -> ensureBatch(mapId, data, editor, people, names, worldSeed));
+    }
+
+    private static Result ensureBatch(String mapId, TitleData data, TitleEditor editor,
+                                       CharacterRegistry people, NameBank names, long worldSeed) {
         int realmsNamed = 0, titlesNamed = 0, titlesClassified = 0, rulersLinked = 0;
         Map<String, Set<String>> used = new HashMap<>();
 
