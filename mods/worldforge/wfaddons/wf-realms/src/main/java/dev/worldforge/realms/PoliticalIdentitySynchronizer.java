@@ -70,11 +70,19 @@ public final class PoliticalIdentitySynchronizer {
                 else problems.add("Could not assign ruler " + rulerId + " to " + titleId + ": " + politics.lastError);
             } else if (title.holderCharacterId.equals(rulerId)) {
                 already++;
-            } else if (!byGlobalId.containsKey(title.holderCharacterId)) {
-                problems.add("Title " + titleId + " has orphan holder Character ID " + title.holderCharacterId);
             } else {
-                problems.add("Title " + titleId + " holder " + title.holderCharacterId
-                        + " conflicts with map ruler " + rulerId + "; existing title holder preserved");
+                Character previousHolder = byGlobalId.get(title.holderCharacterId);
+                if (previousHolder == null) {
+                    problems.add("Title " + titleId + " has orphan holder Character ID " + title.holderCharacterId);
+                } else if (!previousHolder.alive && ruler.alive) {
+                    // A canonical court succession has already replaced the ruler on the map.
+                    // Retire the deceased holder rather than leaving the crown permanently stale.
+                    if (politics.grantTitle(titleId, rulerId)) linked++;
+                    else problems.add("Could not reconcile succession for " + titleId + ": " + politics.lastError);
+                } else {
+                    problems.add("Title " + titleId + " holder " + title.holderCharacterId
+                            + " conflicts with map ruler " + rulerId + "; living title holder preserved");
+                }
             }
             // A title stores exactly one holder. Existing holders are intentionally not overwritten:
             // inheritance, conquest and player grants must survive subsequent synchronization ticks.

@@ -54,6 +54,14 @@ public final class PoliticalIdentitySynchronizerTest {
         check(repeated.linked() == 0 && repeated.alreadyLinked() == 1,
                 "repeated ruler synchronization does not create or replace title holders");
 
+        people.kill(ruler.id);
+        Character successor = people.create("Ruler Successor", "House Test", "human", "m", 275);
+        realm.props.put("rulerCharacterId", successor.globalId);
+        PoliticalIdentitySynchronizer.Report succession =
+                PoliticalIdentitySynchronizer.synchronizeRulers(map.name, titles, people, politics);
+        check(succession.linked() == 1 && politics.title(titleId).holderCharacterId.equals(successor.globalId),
+                "canonical court succession replaces a deceased crown holder with the living heir");
+
         Character rival = people.create("Rival", "House Rival", "human", "m", 248);
         politics.grantTitle(titleId, rival.globalId);
         PoliticalIdentitySynchronizer.Report conflict =
