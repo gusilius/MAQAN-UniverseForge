@@ -44,6 +44,8 @@ public final class CommandScreen extends Screen {
     private Settlement settlement = incomingSettlement;
     private boolean settlementOpen = true;
     private boolean buildOpen;
+    // Профессиональные команды скрыты до явного открытия компактной палитры.
+    private boolean professionalToolsOpen;
     private boolean workAreaDrag;
     private int workMode = -1;
     private int workOverlay = 2;
@@ -423,6 +425,38 @@ public final class CommandScreen extends Screen {
         boolean hit(double px, double py) { return px >= x && px < x + w && py >= y && py < y + BTN_H; }
     }
 
+    private static final String[] WORK_ICONS = {"♣", "◆", "⛏", "⌁", "▦", "✿", "✧", "✚"};
+
+    private int[] professionalPanelBounds() {
+        int[] console = skinRect("bot");
+        int x = console == null ? width - 148 : console[0] + 12;
+        int y = console == null ? height - 64 : console[1] + 30;
+        if (x + 140 > width - 4) x = Math.max(4, width - 144);
+        if (y + 46 > height - 4) y = Math.max(4, height - 50);
+        return new int[]{x, y, 140, 46};
+    }
+
+    private boolean inProfessionalPanel(double px, double py) {
+        if (!professionalToolsOpen) return false;
+        int[] r = professionalPanelBounds();
+        return px >= r[0] && px < r[0] + r[2] && py >= r[1] && py < r[1] + r[3];
+    }
+
+    private void activateWorkArea(int kind) {
+        workMode = kind;
+        professionalToolsOpen = false;
+        if (minecraft.player != null)
+            minecraft.player.displayClientMessage(Component.literal(
+                    "Задача: " + WORK_LABELS[kind] + " · выделите точку или участок"), true);
+    }
+
+    private void drawProfessionalPanel(GuiGraphics g) {
+        int[] r = professionalPanelBounds();
+        g.fill(r[0], r[1], r[0] + r[2], r[1] + r[3], 0xEE101820);
+        g.fill(r[0], r[1], r[0] + r[2], r[1] + 1, 0xFF8A7040);
+        g.drawString(font, "ПРОФЕССИОНАЛЬНЫЕ ЗАДАЧИ", r[0] + 5, r[1] + 4, 0xFFE6C875, false);
+    }
+
     private List<Btn> buttons() {
         List<Btn> l = new ArrayList<>();
         int[] console = skinRect("bot");
@@ -436,6 +470,9 @@ public final class CommandScreen extends Screen {
                 l.add(new Btn("Стройка", x, y, w, buildOpen, this::toggleBuild));
                 x += w + 4;
                 l.add(new Btn("Участки", x, y, w, workMode >= 0, this::cycleWorkMode));
+                if (!selectedWorkerIds().isEmpty())
+                    l.add(new Btn("⚒", x + w + 4, y, 24, professionalToolsOpen, () -> professionalToolsOpen = !professionalToolsOpen));
+                if (professionalToolsOpen) addProfessionalTaskButtons(l);
                 return l;
             }
             int x = console[0] + 12;
@@ -448,6 +485,9 @@ public final class CommandScreen extends Screen {
                     () -> CommandMode.setCameraView(CameraRig.View.TACTICS))); x += BTN_W + 4;
             l.add(new Btn("Свободная", x, y, BTN_W, CommandMode.RIG.view == CameraRig.View.FREE,
                     () -> CommandMode.setCameraView(CameraRig.View.FREE)));
+            if (!selectedWorkerIds().isEmpty())
+                l.add(new Btn("⚒", x + BTN_W + 4, y, 24, professionalToolsOpen, () -> professionalToolsOpen = !professionalToolsOpen));
+            if (professionalToolsOpen) addProfessionalTaskButtons(l);
             return l;
         }
         int x = width - 4 - BTN_W;
@@ -460,7 +500,20 @@ public final class CommandScreen extends Screen {
                 () -> CommandMode.setCameraView(CameraRig.View.TACTICS))); x -= BTN_W + 4;
         l.add(new Btn("Свободная", x, 4, BTN_W, CommandMode.RIG.view == CameraRig.View.FREE,
                 () -> CommandMode.setCameraView(CameraRig.View.FREE)));
+        if (!selectedWorkerIds().isEmpty())
+            l.add(new Btn("⚒", x - 28, 4, 24, professionalToolsOpen, () -> professionalToolsOpen = !professionalToolsOpen));
+        if (professionalToolsOpen) addProfessionalTaskButtons(l);
         return l;
+    }
+
+    private void addProfessionalTaskButtons(List<Btn> out) {
+        int[] r = professionalPanelBounds();
+        for (int i = 0; i < WorkArea.values().length; i++) {
+            final int kind = i;
+            int col = i % 4, row = i / 4;
+            out.add(new Btn(WORK_ICONS[i], r[0] + 6 + col * 32, r[1] + 17 + row * 18,
+                    28, workMode == i, () -> activateWorkArea(kind)));
+        }
     }
 
     private int panelX() { int[] r = skinRect("rp"); return r == null ? (compactSkin() ? width - panelW() - 12 : width - PANEL_W - 4) : r[0] + 12; }
@@ -485,7 +538,7 @@ public final class CommandScreen extends Screen {
         if (embeddedInMaqan && !inWorkspaceViewport(px, py)) return true;
         for (Btn button : buttons()) if (button.hit(px, py)) return true;
         if (onZoomSlider(px, py)) return true;
-        return inBuildPanel(px, py) || inSelPanel(px, py);
+        return inBuildPanel(px, py) || inSelPanel(px, py) || inProfessionalPanel(px, py);
     }
 
     private List<String> categories() {
@@ -703,6 +756,7 @@ public final class CommandScreen extends Screen {
         if (button == 0) {
             for (Btn b : buttons()) if (b.hit(x, y)) { b.run().run(); return true; }
             if (buildOpen && inBuildPanel(x, y)) { panelClick(x, y); return true; }
+            if (inProfessionalPanel(x, y)) return true;
             if (inSelPanel(x, y)) return true;
             if (embeddedInMaqan && !inWorkspaceViewport(x, y)) return true;
             if (picked != null) { place(shift); return true; }
@@ -1033,6 +1087,8 @@ public final class CommandScreen extends Screen {
             }
         }
         drawSettlementMinimap(g);
+        if (professionalToolsOpen && !selectedWorkerIds().isEmpty()) drawProfessionalPanel(g);
+        else professionalToolsOpen = false;
         for (Btn b : buttons()) button(g, b, mxi, myi);
         drawSelection(g, h);
         if (settlementOpen) drawSettlementPanel(g);
