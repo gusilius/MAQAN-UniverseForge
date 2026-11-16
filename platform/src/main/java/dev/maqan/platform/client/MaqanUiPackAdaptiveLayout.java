@@ -110,13 +110,12 @@ public final class MaqanUiPackAdaptiveLayout {
             // dock, preserving each theme's own artwork proportions.
             double miniWidthLimit = Math.min(260.0,
                     Math.min(w * 0.36, 142.0 * minimapAspect));
-            double miniScale = Math.min(baseScale, miniWidthLimit / minimapRefW);
+            double miniScale = miniWidthLimit / minimapRefW;
             int minimapW = Math.max(1, (int)Math.round(minimapRefW * miniScale));
             int minimapH = Math.max(1, (int)Math.round(minimapRefH * miniScale));
             int consoleX = Math.min(w, minimapW + gap);
             int consoleAvailableW = Math.max(0, w - consoleX);
-            double consoleScale = Math.min(baseScale,
-                    Math.min(consoleAvailableW / (double)consoleRefW, 142.0 / consoleRefH));
+            double consoleScale = Math.min(consoleAvailableW / (double)consoleRefW, 142.0 / consoleRefH);
             int consoleW = Math.max(0, (int)Math.round(consoleRefW * consoleScale));
             int consoleH = Math.max(0, (int)Math.round(consoleRefH * consoleScale));
             out.put("mm", new Rect(0, h - minimapH, minimapW, minimapH));
