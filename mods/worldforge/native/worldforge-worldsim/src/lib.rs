@@ -102,6 +102,9 @@ pub struct GeographicCell {
     pub elevation: i32,
     pub river: u8,
     pub land: bool,
+    /// Explicit player-authorized water expansion; generated borders never claim water by default.
+    #[serde(default)]
+    pub water_claimed_by_player: bool,
     pub suitability: u8,
     /// Empty for unclaimed land; otherwise the canonical map realm that owns this sample.
     /// Older snapshots omit it and remain readable through serde's default.
@@ -201,7 +204,8 @@ impl WorldSnapshot {
             let mut cells = BTreeSet::new();
             for cell in &map.cells {
                 if cell.x >= map.width_px || cell.z >= map.height_px || cell.biome.trim().is_empty()
-                    || cell.suitability > 100 || !cells.insert((cell.x, cell.z)) {
+                    || cell.suitability > 100 || (!cell.land && !cell.water_claimed_by_player && !cell.owner_realm_id.trim().is_empty())
+                    || !cells.insert((cell.x, cell.z)) {
                     return Err(SimError::InvalidSnapshot(format!("invalid-geographic-cell:{}", map.map_id)));
                 }
             }
@@ -533,9 +537,9 @@ mod tests {
                 blocks_per_pixel_milli: 16000, political_layers_present: true, sample_stride: 4,
                 cells: vec![
                     GeographicCell { x: 4, z: 8, biome: "plains".into(), elevation: 70,
-                        river: 0, land: true, suitability: 82, owner_realm_id: String::new() },
+                        river: 0, land: true, water_claimed_by_player: false, suitability: 82, owner_realm_id: String::new() },
                     GeographicCell { x: 8, z: 8, biome: "forest".into(), elevation: 72,
-                        river: 255, land: true, suitability: 90, owner_realm_id: String::new() },
+                        river: 255, land: true, water_claimed_by_player: false, suitability: 90, owner_realm_id: String::new() },
                 ],
             }],
         };
@@ -547,6 +551,31 @@ mod tests {
             "geography alone must not synthesize political or population entities");
         snapshot.geography[0].cells[0].suitability = 101;
         assert!(snapshot.validate().is_err());
+    }
+
+    #[test]
+    fn generated_political_ownership_never_claims_water_without_player_authorization() {
+        let mut snapshot = WorldSnapshot {
+            world_id: "water-border-invariant".into(), seed: 77, day: 0,
+            realms: vec![], borders: vec![], settlements: vec![], characters: vec![], workforce: vec![],
+            geography: vec![GeographicMap {
+                map_id: "overworld".into(), width_px: 2, height_px: 1,
+                blocks_per_pixel_milli: 16000, political_layers_present: false, sample_stride: 1,
+                cells: vec![
+                    GeographicCell { x: 0, z: 0, biome: "plains".into(), elevation: 70, river: 0,
+                        land: true, water_claimed_by_player: false, suitability: 80, owner_realm_id: "realm-a".into() },
+                    GeographicCell { x: 1, z: 0, biome: "ocean".into(), elevation: 40, river: 0,
+                        land: false, water_claimed_by_player: false, suitability: 0, owner_realm_id: "realm-a".into() },
+                ],
+            }],
+        };
+        assert!(snapshot.validate().is_err(), "an automatically generated realm cannot own ocean cells");
+        snapshot.geography[0].cells[1].owner_realm_id.clear();
+        assert!(snapshot.validate().is_ok(), "unclaimed water remains valid");
+        snapshot.geography[0].cells[1].owner_realm_id = "realm-a".into();
+        snapshot.geography[0].cells[1].water_claimed_by_player = true;
+        assert!(snapshot.validate().is_ok(), "only an explicit player-authorized water expansion may claim water");
+    }
     }
 
     #[test] fn duplicate_realms_are_rejected() {
