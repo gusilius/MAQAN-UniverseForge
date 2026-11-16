@@ -454,7 +454,7 @@ public final class CommandScreen extends Screen {
         int[] r = professionalPanelBounds();
         g.fill(r[0], r[1], r[0] + r[2], r[1] + r[3], 0xEE101820);
         g.fill(r[0], r[1], r[0] + r[2], r[1] + 1, 0xFF8A7040);
-        g.drawString(font, "ПРОФЕССИОНАЛЬНЫЕ ЗАДАЧИ", r[0] + 5, r[1] + 4, 0xFFE6C875, false);
+        g.drawString(font, "РАБОЧИЕ ЗАДАЧИ", r[0] + 5, r[1] + 4, 0xFFE6C875, false);
     }
 
     private List<Btn> buttons() {
