@@ -32,7 +32,7 @@ class MaqanUiPackAdaptiveLayoutTest {
 
     @Test
     void compactLayoutReplacesSideWindowsWithDrawerSpace() {
-        var result = MaqanUiPackAdaptiveLayout.calculate(900, 700, REFERENCE);
+        var result = MaqanUiPackAdaptiveLayout.calculate(800, 700, REFERENCE);
         assertTrue(result.compact());
         assertNull(result.get("lp"));
         assertNull(result.get("rp"));
@@ -40,7 +40,7 @@ class MaqanUiPackAdaptiveLayoutTest {
         assertNotNull(result.get("mm"));
         assertNotNull(result.get("bot"));
         assertTrue(result.get("mm").right() <= result.get("bot").x());
-        assertEquals(900, result.get("bot").right());
+        assertEquals(800, result.get("bot").right());
     }
 
     @Test
