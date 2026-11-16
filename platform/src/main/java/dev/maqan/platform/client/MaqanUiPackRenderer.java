@@ -56,7 +56,20 @@ public final class MaqanUiPackRenderer {
                     {308,590,1142,760}, {0,0,136,94}
             }
     );
-    private static final String[] LAYER_KEYS = {"top","lcol","lp","rp","rcol","mm","bot","cor"};
+    private static final Map<String, Map<String, int[]>> SOURCE_SIZES = Map.of(
+            "royal", Map.of("top", new int[]{2188,99}, "lcol", new int[]{92,694},
+                    "lp", new int[]{444,739}, "rp", new int[]{480,739}, "rcol", new int[]{67,764},
+                    "mm", new int[]{467,361}, "bot", new int[]{1353,281}, "cor", new int[]{217,150}),
+            "iron", Map.of("top", new int[]{2188,99}, "lcol", new int[]{100,675},
+                    "lp", new int[]{363,675}, "rp", new int[]{323,665}, "rcol", new int[]{57,764},
+                    "mm", new int[]{489,345}, "bot", new int[]{1344,278}, "cor", new int[]{217,150}),
+            "grim", Map.of("top", new int[]{2188,99}, "lcol", new int[]{102,662},
+                    "lp", new int[]{473,732}, "rp", new int[]{502,740}, "rcol", new int[]{83,768},
+                    "mm", new int[]{470,355}, "bot", new int[]{1414,304}, "cor", new int[]{217,131}),
+            "elf", Map.of("top", new int[]{2188,99}, "lcol", new int[]{99,760},
+                    "lp", new int[]{428,793}, "rp", new int[]{460,809}, "rcol", new int[]{60,771},
+                    "mm", new int[]{464,345}, "bot", new int[]{1334,272}, "cor", new int[]{217,150})
+    );
     private static String activeTheme = "royal";
     private static boolean availabilityLogged;
     private static boolean availabilityChecked;
@@ -124,10 +137,9 @@ public final class MaqanUiPackRenderer {
             int width = Math.max(1, (int) Math.round((rect[2] - rect[0]) * scale));
             int height = Math.max(1, (int) Math.round((rect[3] - rect[1]) * scale));
             ResourceLocation texture = texture(activeTheme, TEXTURES.get(key));
-            int sourceWidth = (rect[2] - rect[0]) * 2;
-            int sourceHeight = (rect[3] - rect[1]) * 2;
+            int[] sourceSize = SOURCE_SIZES.get(activeTheme).get(key);
             graphics.blit(texture, x, y, width, height,
-                    0, 0, sourceWidth, sourceHeight, sourceWidth, sourceHeight);
+                    0, 0, sourceSize[0], sourceSize[1], sourceSize[0], sourceSize[1]);
         }
     }
 
