@@ -43,7 +43,7 @@ pub fn fill_slots(
                 FormationKind::Block => ((count as f64 * 1.4).sqrt().ceil() as usize).max(1),
                 _ => unreachable!(),
             };
-            let rows = count.div_ceil(per_row);
+            let rows = count / per_row + usize::from(count % per_row != 0);
             for i in 0..count {
                 let row = i / per_row;
                 let col = i % per_row;
