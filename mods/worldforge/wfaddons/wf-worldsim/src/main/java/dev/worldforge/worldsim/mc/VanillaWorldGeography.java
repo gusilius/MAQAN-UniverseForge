@@ -12,6 +12,10 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraftforge.event.world.ChunkEvent;
+import net.minecraftforge.event.TickEvent;
+import net.minecraftforge.event.server.ServerStartedEvent;
+import net.minecraftforge.event.server.ServerStoppingEvent;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -39,6 +43,7 @@ public final class VanillaWorldGeography {
     private static boolean loaded;
     private static boolean dirty;
     private static long lastPersistGameTime = Long.MIN_VALUE;
+    private static MinecraftServer activeServer;
 
     private static final class Region {
         final String id;
@@ -47,6 +52,23 @@ public final class VanillaWorldGeography {
     }
 
     private VanillaWorldGeography() { }
+
+    @SubscribeEvent
+    public void onChunkLoad(ChunkEvent.Load event) {
+        if (event.getLevel() instanceof ServerLevel level) capture(level, event.getChunk());
+    }
+
+    @SubscribeEvent
+    public void onServerTick(TickEvent.ServerTickEvent event) {
+        if (event.phase == TickEvent.Phase.END)
+            flushIfDue(net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer());
+    }
+
+    @SubscribeEvent
+    public void onServerStarted(ServerStartedEvent event) { load(event.getServer()); }
+
+    @SubscribeEvent
+    public void onServerStopping(ServerStoppingEvent event) { persist(event.getServer()); }
 
     /** Called from ChunkEvent.Load; never asks the server for an unloaded chunk. */
     public static synchronized void capture(ServerLevel level, ChunkAccess chunk) {
@@ -146,7 +168,15 @@ public final class VanillaWorldGeography {
     }
 
     public static synchronized void load(MinecraftServer server) {
-        if (loaded || server == null) return;
+        if (server == null) return;
+        if (activeServer != server) {
+            REGIONS.clear();
+            dirty = false;
+            loaded = false;
+            lastPersistGameTime = Long.MIN_VALUE;
+            activeServer = server;
+        }
+        if (loaded) return;
         loaded = true;
         Path file = dataFile(server);
         if (!Files.isRegularFile(file)) return;
@@ -218,15 +248,19 @@ public final class VanillaWorldGeography {
     }
 
     public static String dimensionFromMapId(String mapId) {
-        if (mapId == null) return "";
-        String[] parts = mapId.split(":", 4);
-        return parts.length == 4 && "vanilla".equals(parts[0]) ? parts[1] : "";
+        if (mapId == null || !mapId.startsWith("vanilla:")) return "";
+        int last = mapId.lastIndexOf(':');
+        int previous = last < 0 ? -1 : mapId.lastIndexOf(':', last - 1);
+        return previous > 7 ? mapId.substring(8, previous) : "";
     }
 
     public static int[] blockPosition(String mapId, int localX, int localZ) {
-        String[] parts = mapId == null ? new String[0] : mapId.split(":", 4);
-        if (parts.length != 4 || !"vanilla".equals(parts[0])) return new int[]{0, 0};
-        int regionX = Integer.parseInt(parts[2]), regionZ = Integer.parseInt(parts[3]);
+        if (mapId == null || !mapId.startsWith("vanilla:")) return new int[]{0, 0};
+        int last = mapId.lastIndexOf(':');
+        int previous = last < 0 ? -1 : mapId.lastIndexOf(':', last - 1);
+        if (previous < 8 || last <= previous) return new int[]{0, 0};
+        int regionX = Integer.parseInt(mapId.substring(previous + 1, last));
+        int regionZ = Integer.parseInt(mapId.substring(last + 1));
         return new int[]{regionX * REGION_BLOCKS + localX - REGION_BLOCKS / 2,
                 regionZ * REGION_BLOCKS + localZ - REGION_BLOCKS / 2};
     }
