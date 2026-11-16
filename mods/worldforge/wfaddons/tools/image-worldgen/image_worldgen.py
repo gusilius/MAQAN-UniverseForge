@@ -87,13 +87,12 @@ def png_pixels(image: Image.Image) -> tuple[int, int, list[str], dict]:
     rgb = np.asarray(image.convert("RGB"), dtype=np.uint8)
     h, w = rgb.shape[:2]
     labels, report = classify(rgb)
-    classes = [ANALYSIS_TO_WORLD[ANALYSIS_CLASSES[int(value)]] for value in labels.ravel()]
     if report["unknown_percent"] > 2.0:
         raise ValueError(
             f"Map contains {report['unknown_percent']:.3f}% unknown pixels; "
             "calibrate its legend before world generation."
         )
-    return w, h, classes, report
+    return w, h, labels, report
 
 
 def neighbors(index: int, width: int, height: int):
@@ -108,11 +107,12 @@ def neighbors(index: int, width: int, height: int):
         yield index + width
 
 
-def land_components(classes: list[str], width: int, height: int) -> list[list[int]]:
+def land_components(analysis_labels: np.ndarray, width: int, height: int) -> list[list[int]]:
     """Connected landmasses via SciPy's native implementation, not Python pixel BFS."""
     from scipy import ndimage
-    land = np.isin(np.asarray(classes, dtype=object).reshape((height, width)),
-                   tuple(LAND_CLASSES))
+    land_codes = [i for i, name in enumerate(ANALYSIS_CLASSES)
+                  if ANALYSIS_TO_WORLD[name] in LAND_CLASSES]
+    land = np.isin(analysis_labels.reshape((height, width)), land_codes)
     labels, count = ndimage.label(land, structure=np.array([[0, 1, 0],
                                                             [1, 1, 1],
                                                             [0, 1, 0]], dtype=np.uint8))
@@ -264,8 +264,10 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     provinces_per_realm = min(provinces_per_realm, settlement_profile["provinces"])
     minimum_territory_pixels = settlement_profile["minimum_pixels"]
     image = Image.open(input_path).convert("RGB")
-    width, height, classes, analysis_report = png_pixels(image)
-    components = land_components(classes, width, height)
+    width, height, analysis_labels, analysis_report = png_pixels(image)
+    analysis_grid = analysis_labels.reshape((height, width))
+    analysis_flat = analysis_labels.ravel()
+    components = land_components(analysis_labels, width, height)
     if not components:
         raise ValueError("The image contains no classified land.")
     if sum(map(len, components)) < 32:
@@ -280,7 +282,10 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     if not major_components:
         major_components = [components[0]]
     major_land_pixels = sum(map(len, major_components))
-    unclaimed_land_pixels = land_count = sum(1 for kind in classes if kind in LAND_CLASSES)
+    land_codes = [i for i, name in enumerate(ANALYSIS_CLASSES)
+                  if ANALYSIS_TO_WORLD[name] in LAND_CLASSES]
+    land_count = int(np.isin(analysis_flat, land_codes).sum())
+    unclaimed_land_pixels = land_count
     unclaimed_land_pixels -= major_land_pixels
 
     realm_total = max(
@@ -463,19 +468,30 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
             add_settlement(("city", "town", "village")[(offset - 2) % 3],
                            province_meta[pid]["seed"], offset)
         realm_cells = realm_cells_by_id.get(rid, [])
-        mountain_cells = [i for i in realm_cells if classes[i] == "mountains"]
+        mountain_code = ANALYSIS_CLASSES.index("mountains")
+        mountain_cells = [i for i in realm_cells if analysis_flat[i] == mountain_code]
         if mountain_cells:
             add_settlement("fortress", mountain_cells[len(mountain_cells) // 2], 20 + rid)
-        coast_cells = [i for i in realm_cells if any(classes[n] in WATER_CLASSES for n in neighbors(i, width, height))]
+        water_codes = [ANALYSIS_CLASSES.index(name) for name in ("ocean", "lake", "waterway")]
+        water_mask = np.isin(analysis_grid, water_codes)
+        adjacent_water = np.zeros((height, width), dtype=bool)
+        adjacent_water[:, 1:] |= water_mask[:, :-1]
+        adjacent_water[:, :-1] |= water_mask[:, 1:]
+        adjacent_water[1:, :] |= water_mask[:-1, :]
+        adjacent_water[:-1, :] |= water_mask[1:, :]
+        coast_mask = adjacent_water.ravel()
+        coast_cells = [i for i in realm_cells if coast_mask[i]]
         if coast_cells:
             coast_cells.sort(key=lambda i: (i * 2654435761 + seed) & 0xFFFFFFFF)
             add_settlement("port", coast_cells[0], 30 + rid)
 
     # Geographic layers come from the shared semantic classifier and seeded relief.
-    analysis_labels, _ = classify(np.asarray(image.convert("RGB"), dtype=np.uint8))
-    height_values = make_heightfield(analysis_labels, seed).ravel().astype(np.uint16).tolist()
-    biome_values = [BIOME_INDEX.get(kind, 0) for kind in classes]
-    river_values = [255 if kind == "river" else 0 for kind in classes]
+    height_values = make_heightfield(analysis_grid, seed).ravel().astype(np.uint16).tolist()
+    biome_lut = np.asarray([BIOME_INDEX.get(ANALYSIS_TO_WORLD[name], 0)
+                            for name in ANALYSIS_CLASSES], dtype=np.uint8)
+    biome_values = biome_lut[analysis_flat].tolist()
+    river_values = (analysis_flat == ANALYSIS_CLASSES.index("waterway")).astype(np.uint8).tolist()
+    river_values = [value * 255 for value in river_values]
 
     spawn = province_meta[realm_provinces[0][0]]["seed"]
     spawn_x, spawn_z = spawn % width, spawn // width
