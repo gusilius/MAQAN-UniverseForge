@@ -1,0 +1,83 @@
+name: WorldForge image-to-world blueprint proof
+
+on:
+  push:
+    branches: [test/worldforge-image-blueprint]
+    paths:
+      - "mods/worldforge/wfaddons/tools/image-worldgen/**"
+      - "mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/**"
+      - "mods/worldforge/wfmod/tools/SmokeTest.java"
+      - ".github/workflows/worldforge-image-worldgen.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: worldforge-image-worldgen-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image-blueprint:
+    name: PNG image -> deterministic World Blueprint -> WorldForge package (Windows x64)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install image decoder dependency
+        run: python -m pip install --disable-pip-version-check Pillow==11.3.0
+
+      - name: Generate image-based world twice with the same seed and once with a different seed
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP "maqan-image-worldgen"
+          python mods/worldforge/wfaddons/tools/image-worldgen/image_worldgen.py self-test --output-dir $out
+          if ($LASTEXITCODE -ne 0) { throw "Image-to-world deterministic proof failed" }
+          if (!(Test-Path (Join-Path $out "image-world-seed-424242.worldmap"))) { throw "WorldForge package was not created" }
+          if (!(Test-Path (Join-Path $out "world-blueprint.json"))) { throw "World Blueprint was not created" }
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Compile existing WorldForge map loader and terrain sampler
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP "maqan-image-worldgen"
+          $classes = Join-Path $out "classes"
+          New-Item -ItemType Directory -Force -Path $classes | Out-Null
+          javac -encoding UTF-8 -d $classes `
+            mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/Json.java `
+            mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/Noise.java `
+            mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/RegionData.java `
+            mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/TitleData.java `
+            mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/MapData.java `
+            mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/TerrainSampler.java `
+            mods/worldforge/wfmod/tools/SmokeTest.java `
+            mods/worldforge/wfaddons/tools/image-worldgen/ImageWorldMapCompatibilityTest.java
+          if ($LASTEXITCODE -ne 0) { throw "WorldForge map compatibility compile failed" }
+
+      - name: Load generated package with production MapData and sample terrain
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP "maqan-image-worldgen"
+          $classes = Join-Path $out "classes"
+          java -cp $classes dev.worldforge.mod.ImageWorldMapCompatibilityTest $out image-world-seed-424242
+          if ($LASTEXITCODE -ne 0) { throw "Generated package is incompatible with production MapData" }
+          java -cp $classes SmokeTest $out image-world-seed-424242 (Join-Path $out "terrain-preview.png")
+          if ($LASTEXITCODE -ne 0) { throw "Terrain sampling failed" }
+
+      - name: Upload blueprint, worldmap, source image, report and terrain preview
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: maqan-image-worldgen-proof
+          path: ${{ runner.temp }}/maqan-image-worldgen/
+          if-no-files-found: error
+          retention-days: 30
