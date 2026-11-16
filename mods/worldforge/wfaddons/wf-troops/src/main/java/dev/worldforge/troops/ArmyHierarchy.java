@@ -133,35 +133,51 @@ public final class ArmyHierarchy {
         });
     }
 
+    public record DispatchStats(int issued, int delegated, int missing) { }
+
     public int commandArmy(int armyId, Squads squads, Squads.Order order, boolean queue) {
+        return commandArmy(armyId, squads, order, queue, null).issued();
+    }
+
+    /** Direct/inherited parent orders are not allowed to overwrite delegated child squads. */
+    public DispatchStats commandArmy(int armyId, Squads squads, Squads.Order order, boolean queue,
+                                     CommandDelegation delegation) {
         ArmyNode army = armies.get(armyId);
-        if (army == null || squads == null || order == null) return 0;
-        int sent = 0;
+        if (army == null || squads == null || order == null) return new DispatchStats(0, 0, 0);
+        int sent = 0, delegated = 0, missing = 0;
         for (String corpsId : army.corpsIds) {
-            Corps corps = this.corps.get(corpsId);
-            if (corps == null) continue;
-            sent += commandSquads(corps.squadIds, army.owner, squads, order, queue);
+            Corps child = this.corps.get(corpsId);
+            if (child == null) continue;
+            DispatchStats stats = commandSquads(child.squadIds, army.owner, squads, order, queue, delegation);
+            sent += stats.issued(); delegated += stats.delegated(); missing += stats.missing();
         }
-        return sent;
+        return new DispatchStats(sent, delegated, missing);
     }
 
     public int commandCorps(String corpsId, Squads squads, Squads.Order order, boolean queue) {
-        Corps corps = this.corps.get(corpsId);
-        if (corps == null || squads == null || order == null) return 0;
-        ArmyNode army = armies.get(corps.armyId);
-        return army == null ? 0 : commandSquads(corps.squadIds, army.owner, squads, order, queue);
+        return commandCorps(corpsId, squads, order, queue, null).issued();
     }
 
-    private int commandSquads(Collection<String> ids, String owner, Squads squads,
-                              Squads.Order order, boolean queue) {
-        int sent = 0;
+    public DispatchStats commandCorps(String corpsId, Squads squads, Squads.Order order, boolean queue,
+                                      CommandDelegation delegation) {
+        Corps child = this.corps.get(corpsId);
+        if (child == null || squads == null || order == null) return new DispatchStats(0, 0, 0);
+        ArmyNode army = armies.get(child.armyId);
+        return army == null ? new DispatchStats(0, 0, 0)
+                : commandSquads(child.squadIds, army.owner, squads, order, queue, delegation);
+    }
+
+    private DispatchStats commandSquads(Collection<String> ids, String owner, Squads squads,
+                                        Squads.Order order, boolean queue, CommandDelegation delegation) {
+        int sent = 0, delegated = 0, missing = 0;
         for (String id : ids) {
             Squads.Squad squad = squads.get(id);
-            if (squad == null || !owner.equals(squad.owner)) continue;
+            if (squad == null || !owner.equals(squad.owner)) { missing++; continue; }
+            if (delegation != null && !delegation.acceptsInheritedOrder(id)) { delegated++; continue; }
             squads.command(id, order, queue);
             sent++;
         }
-        return sent;
+        return new DispatchStats(sent, delegated, missing);
     }
 
     public String viewJson(int armyId) {
