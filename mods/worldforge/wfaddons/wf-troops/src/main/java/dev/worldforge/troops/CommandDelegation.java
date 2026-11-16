@@ -37,7 +37,8 @@ public final class CommandDelegation {
                 || objective != null && objective.length() > 256) return false;
         String commander = commanderCharacterId == null ? "" : commanderCharacterId.trim();
         if (mode != Mode.PLAYER_DIRECT && (commander.isBlank() || commander.length() > 64
-                || !commander.matches("[A-Za-z0-9_.:-]+"))) return false;
+                || !commander.matches("[A-Za-z0-9_.:-]+")
+                || objective == null || objective.isBlank())) return false;
         if (mode == Mode.PLAYER_DIRECT) { policies.remove(squadId); return true; }
         policies.put(squadId, new Policy(squadId, mode, commander,
                 objective == null ? "" : objective.trim(), leashBlocks,
@@ -101,7 +102,7 @@ public final class CommandDelegation {
             if (squad.isBlank() || loaded.containsKey(squad) || !Double.isFinite(leash)
                     || leash < 0 || leash > 100000) continue;
             if (mode == Mode.PLAYER_DIRECT || commander.isBlank() || commander.length() > 64
-                    || !commander.matches("[A-Za-z0-9_.:-]+") || objective.length() > 256) continue;
+                    || !commander.matches("[A-Za-z0-9_.:-]+") || objective.isBlank() || objective.length() > 256) continue;
             loaded.put(squad, new Policy(squad, mode, commander, objective, leash,
                     bool(m.get("engage")), bool(m.get("pursue")), bool(m.get("retreat"))));
         }
