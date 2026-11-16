@@ -9,6 +9,11 @@ on:
       - "mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/MapData.java"
       - "mods/worldforge/wfaddons/tests/**"
       - "mods/worldforge/wfaddons/tools/test-all.sh"
+      - "mods/worldforge/wfaddons/wf-people/**"
+      - "mods/worldforge/wfaddons/wf-origins/**"
+      - "mods/worldforge/wfaddons/wf-realms/**"
+      - "mods/worldforge/wfaddons/wf-settlements/**"
+      - "mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/TitleData.java"
       - ".github/workflows/worldforge-real-image-political-integration.yml"
   workflow_dispatch:
 
