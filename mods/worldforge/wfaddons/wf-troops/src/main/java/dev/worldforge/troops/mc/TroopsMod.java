@@ -113,6 +113,27 @@ public class TroopsMod {
         private static void register() {
             dev.worldforge.mod.client.PlatformWorkspaceBridge.registerLiveEntityResolver(
                     "wf_people", ClientLiveEntityResolver::resolveCharacter);
+            // A strategic army selection resolves to one real member as its representative model.
+            // The army itself remains an aggregate in the wf-army inspector.
+            dev.worldforge.mod.client.PlatformWorkspaceBridge.registerLiveEntityResolver(
+                    "wf_army", ClientLiveEntityResolver::resolveArmyRepresentative);
+        }
+
+        private static Entity resolveArmyRepresentative(String armyEntityId) {
+            if (armyEntityId == null || !armyEntityId.startsWith("army:")) return null;
+            final int armyId;
+            try { armyId = Integer.parseInt(armyEntityId.substring("army:".length())); }
+            catch (NumberFormatException ignored) { return null; }
+            if (armyId <= 0) return null;
+            net.minecraft.client.Minecraft client = net.minecraft.client.Minecraft.getInstance();
+            if (client.level == null) return null;
+            return client.level.entitiesForRendering().stream()
+                    .filter(TroopEntity.class::isInstance)
+                    .map(TroopEntity.class::cast)
+                    .filter(troop -> troop.isAlive() && !troop.isRemoved()
+                            && troop.level() == client.level && troop.armyId == armyId)
+                    .min(java.util.Comparator.comparing(troop -> troop.getUUID().toString()))
+                    .orElse(null);
         }
 
         private static Entity resolveCharacter(String canonicalCharacterId) {
