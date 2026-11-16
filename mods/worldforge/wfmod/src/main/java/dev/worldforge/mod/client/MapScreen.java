@@ -190,8 +190,10 @@ public class MapScreen extends Screen {
             if (province > 0) selectProvince(province);
         });
         PlatformWorkspaceBridge.registerAction("worldforge.map.focus", "Focus province",
-                "worldforge", entityId -> provinceId(entityId) > 0,
-                entityId -> selectProvince(provinceId(entityId)));
+                "worldforge", entityId -> {
+                    int province = provinceId(entityId);
+                    return province > 0 && MapTextures.ready() && MapTextures.titles.get(province) != null;
+                }, entityId -> selectProvince(provinceId(entityId)));
     }
 
     private static int provinceId(String entityId) {
