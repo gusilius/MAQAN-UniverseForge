@@ -33,6 +33,7 @@ public final class CommandScreen extends Screen {
     private static final Map<String, String> RES = Map.of("wood", "дерево", "stone", "камень", "food", "еда", "iron", "железо", "gold", "золото", "planks", "доски", "bread", "хлеб", "tools", "инструменты");
     private static final int BTN_W = 70, BTN_H = 16, PANEL_W = 184, ROW = 12;
 
+    private boolean embeddedInMaqan;
     private boolean dragging, midDrag, zoomDragging;
     private double dragX, dragY, mx, my;
     // стройка
@@ -55,6 +56,30 @@ public final class CommandScreen extends Screen {
     private String ghostMsg = "";
 
     public CommandScreen() { super(Component.literal("Командный режим")); }
+
+    /** Hosted command overlay uses the same responsive MAQAN texture frames as Atlas and WorldForge. */
+    public void setEmbeddedInMaqan(boolean embedded) { embeddedInMaqan = embedded; }
+
+    private int[] skinRect(String key) {
+        if (!embeddedInMaqan) return null;
+        try {
+            Class<?> renderer = Class.forName("dev.maqan.platform.client.MaqanUiPackRenderer");
+            Object layout = renderer.getMethod("adaptiveLayout", int.class, int.class)
+                    .invoke(null, width, height);
+            if (layout == null) return null;
+            Object rect = layout.getClass().getMethod("get", String.class).invoke(layout, key);
+            if (rect == null) return null;
+            Class<?> type = rect.getClass();
+            return new int[]{(Integer) type.getMethod("x").invoke(rect),
+                    (Integer) type.getMethod("y").invoke(rect),
+                    (Integer) type.getMethod("width").invoke(rect),
+                    (Integer) type.getMethod("height").invoke(rect)};
+        } catch (ReflectiveOperationException | LinkageError ignored) {
+            return null;
+        }
+    }
+
+    private boolean compactSkin() { return embeddedInMaqan && (width < 840 || height < 560); }
 
     @SuppressWarnings("unchecked")
     public static void setSettlementPayload(String payload) {
@@ -169,28 +194,42 @@ public final class CommandScreen extends Screen {
         CommandMode.markerUntil = System.currentTimeMillis() + 1800;
     }
 
-    private int zoomSliderX() { return width / 2 - 100; }
-    private int zoomSliderY() { return height - 25; }
+    private int zoomSliderWidth() {
+        int[] console = skinRect("bot");
+        if (console == null) return ZOOM_SLIDER_W;
+        return Math.max(80, Math.min(ZOOM_SLIDER_W, console[2] - 72));
+    }
+    private int zoomSliderX() {
+        int[] console = skinRect("bot");
+        int sliderWidth = zoomSliderWidth();
+        return console == null ? width / 2 - sliderWidth / 2 : console[0] + (console[2] - sliderWidth) / 2;
+    }
+    private int zoomSliderY() {
+        int[] console = skinRect("bot");
+        return console == null ? height - 25 : console[1] + console[3] - 19;
+    }
     private static final int ZOOM_SLIDER_W = 200;
     private void setZoomFromMouse(double x) {
-        double t = Math.max(0, Math.min(1, (x - zoomSliderX()) / ZOOM_SLIDER_W));
+        int sliderWidth = zoomSliderWidth();
+        double t = Math.max(0, Math.min(1, (x - zoomSliderX()) / sliderWidth));
         CommandMode.RIG.setZoom(CameraRig.MIN_ZOOM + t * (CameraRig.MAX_ZOOM - CameraRig.MIN_ZOOM));
     }
     private boolean onZoomSlider(double x, double y) {
-        return x >= zoomSliderX() - 8 && x <= zoomSliderX() + ZOOM_SLIDER_W + 8
+        int sliderWidth = zoomSliderWidth();
+        return x >= zoomSliderX() - 8 && x <= zoomSliderX() + sliderWidth + 8
                 && y >= zoomSliderY() - 8 && y <= zoomSliderY() + 8;
     }
     private void drawZoomSlider(GuiGraphics g) {
-        int x = zoomSliderX(), y = zoomSliderY();
+        int x = zoomSliderX(), y = zoomSliderY(), sliderWidth = zoomSliderWidth();
         double t = (CommandMode.RIG.zoom - CameraRig.MIN_ZOOM) / (CameraRig.MAX_ZOOM - CameraRig.MIN_ZOOM);
-        int knob = x + (int) Math.round(t * ZOOM_SLIDER_W);
-        g.fill(x - 8, y - 10, x + ZOOM_SLIDER_W + 8, y + 11, 0xB910121A);
+        int knob = x + (int) Math.round(t * sliderWidth);
+        g.fill(x - 8, y - 10, x + sliderWidth + 8, y + 11, 0xB910121A);
         g.drawString(font, "КАМЕРА", x - 7, y - 8, 0xFF9CCCFF, false);
-        g.fill(x, y + 3, x + ZOOM_SLIDER_W, y + 6, 0xFF596273);
+        g.fill(x, y + 3, x + sliderWidth, y + 6, 0xFF596273);
         g.fill(x, y + 3, knob, y + 6, 0xFF72C7FF);
         g.fill(knob - 4, y, knob + 5, y + 10, 0xFFFFFFFF);
         String value = String.format(java.util.Locale.ROOT, "%.0f бл.", CommandMode.RIG.zoom);
-        g.drawString(font, value, x + ZOOM_SLIDER_W + 12, y - 8, 0xFFE6E8EE, false);
+        g.drawString(font, value, x + sliderWidth + 12, y - 8, 0xFFE6E8EE, false);
     }
 
     // ---------- раскладка ----------
