@@ -34,8 +34,12 @@ public final class MapData {
     public final byte[] regionMap;           // 128x128 байт для карты-предмета (может быть null)
     public final TitleData titles;           // иерархия титулов и государства (может быть null)
     public final Map<String, byte[]> mapItems; // карты-предметы по уровням и "realms"
+    /** Named settlement anchors authored by image-worldgen in world-blueprint.json. */
+    public record SettlementSeed(String id, String type, String name, String realmId, String provinceId,
+                                 int pixelX, int pixelZ, int blockX, int blockZ) {}
+    public final List<SettlementSeed> settlementSeeds;
 
-    private static final String[] FILES = {"meta.json", "biomes.png", "height16.png", "rivers.png", "regions.png", "regions.json", "regionmap.bin", "provinces.png", "titles.json", "realms.json"};
+    private static final String[] FILES = {"meta.json", "biomes.png", "height16.png", "rivers.png", "regions.png", "regions.json", "regionmap.bin", "provinces.png", "titles.json", "realms.json", "world-blueprint.json"};
 
     private final short[] height;
     private final byte[] biome;
@@ -45,7 +49,8 @@ public final class MapData {
 
     private MapData(String name, int w, int h, double bpp, int sea, int minY, int maxY, String[] keys, int[] biomeRgb,
                     String[][] cand, double[] spawn, short[] height, byte[] biome, byte[] river, short[] riverLevel,
-                    RegionData regions, byte[] regionMap, TitleData titles, Map<String, byte[]> mapItems) {
+                    RegionData regions, byte[] regionMap, TitleData titles, Map<String, byte[]> mapItems,
+                    List<SettlementSeed> settlementSeeds) {
         this.name = name;
         this.w = w;
         this.h = h;
@@ -65,6 +70,7 @@ public final class MapData {
         this.regionMap = regionMap;
         this.titles = titles;
         this.mapItems = mapItems;
+        this.settlementSeeds = List.copyOf(settlementSeeds);
     }
 
     // ------------------------------------------------------------------ загрузка
@@ -224,7 +230,32 @@ public final class MapData {
                 if (b != null && b.length == 16384) mapItems.put(n, b);
             }
         }
-        return new MapData(name, w, h, bpp, sea, minY, maxY, keys, rgb, cand, spawn, height, biome, river, rl, regions, regionMap, titles, mapItems);
+        List<SettlementSeed> settlementSeeds = new java.util.ArrayList<>();
+        byte[] blueprintBytes = files.get("world-blueprint.json");
+        if (blueprintBytes != null) {
+            Object parsedBlueprint = Json.parse(new String(blueprintBytes, StandardCharsets.UTF_8));
+            if (!(parsedBlueprint instanceof Map<?, ?> blueprint)
+                    || !"maqan-world-blueprint/2".equals(String.valueOf(blueprint.get("format"))))
+                throw new IOException("Некорректный world-blueprint.json в карте '" + name + "'");
+            if (blueprint.get("settlements") instanceof List<?> rows) {
+                java.util.Set<String> ids = new java.util.HashSet<>();
+                for (Object row : rows) {
+                    if (!(row instanceof Map<?, ?> item) || !(item.get("block") instanceof List<?> block)
+                            || block.size() < 2 || !(item.get("pixel") instanceof List<?> pixel) || pixel.size() < 2
+                            || !(block.get(0) instanceof Number) || !(block.get(1) instanceof Number)
+                            || !(pixel.get(0) instanceof Number) || !(pixel.get(1) instanceof Number))
+                        throw new IOException("Некорректная запись поселения в world-blueprint.json карты '" + name + "'");
+                    String id = String.valueOf(item.get("id"));
+                    if (id.isBlank() || !ids.add(id)) throw new IOException("Пустой или повторяющийся ID поселения: " + id);
+                    settlementSeeds.add(new SettlementSeed(id, String.valueOf(item.get("type")),
+                            String.valueOf(item.get("name")), String.valueOf(item.get("realm_id")),
+                            String.valueOf(item.get("province_id")),
+                            ((Number) pixel.get(0)).intValue(), ((Number) pixel.get(1)).intValue(),
+                            ((Number) block.get(0)).intValue(), ((Number) block.get(1)).intValue()));
+                }
+            }
+        }
+        return new MapData(name, w, h, bpp, sea, minY, maxY, keys, rgb, cand, spawn, height, biome, river, rl, regions, regionMap, titles, mapItems, settlementSeeds);
     }
 
     private static Raster decode(byte[] png, int w, int h, String what) throws IOException {
