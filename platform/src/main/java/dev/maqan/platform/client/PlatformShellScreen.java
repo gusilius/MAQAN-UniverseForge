@@ -386,19 +386,22 @@ public final class PlatformShellScreen extends Screen {
             WorkspaceMapLayerRegistry.render(g, content.x, content.y, content.w, content.h);
             g.disableScissor();
         }
-        drawTopBar(g, mouseX, mouseY);
-        drawRail(g, mouseX, mouseY);
-        for (Panel p : panels.values())
-            if (p.visible && !p.id.equals("content")) drawPanel(g, p, mouseX, mouseY);
-        if (settingsVisible) drawSettings(g, mouseX, mouseY);
-        drawDockSplitters(g, mouseX, mouseY);
-        if (searchVisible) drawSearchOverlay(g, mouseX, mouseY);
-        if (contextMenuVisible) drawContextMenu(g, mouseX, mouseY);
-        if (workspaceManagerVisible) drawWorkspaceManager(g, mouseX, mouseY);
-        if (notificationCenterVisible) drawNotificationCenter(g, mouseX, mouseY);
-        // The concept frame is a native texture overlay. The active provider
-        // view remains the world/map canvas beneath it.
-        MaqanUiPackRenderer.render(g, width, height);
+        if (MaqanUiPackRenderer.assetsAvailable()) {
+            // Once the source artwork is installed, it replaces the generic
+            // shell chrome instead of stacking a second set of panels on top.
+            MaqanUiPackRenderer.render(g, width, height);
+        } else {
+            drawTopBar(g, mouseX, mouseY);
+            drawRail(g, mouseX, mouseY);
+            for (Panel p : panels.values())
+                if (p.visible && !p.id.equals("content")) drawPanel(g, p, mouseX, mouseY);
+            if (settingsVisible) drawSettings(g, mouseX, mouseY);
+            drawDockSplitters(g, mouseX, mouseY);
+            if (searchVisible) drawSearchOverlay(g, mouseX, mouseY);
+            if (contextMenuVisible) drawContextMenu(g, mouseX, mouseY);
+            if (workspaceManagerVisible) drawWorkspaceManager(g, mouseX, mouseY);
+            if (notificationCenterVisible) drawNotificationCenter(g, mouseX, mouseY);
+        }
         super.render(g, mouseX, mouseY, partialTick);
     }
 
