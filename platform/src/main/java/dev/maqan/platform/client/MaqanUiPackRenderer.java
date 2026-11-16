@@ -34,6 +34,11 @@ public final class MaqanUiPackRenderer {
             "lw", "window_left_blank.png",
             "rw", "window_right_blank.png"
     );
+    private static final List<String> REQUIRED_TEXTURES = List.of(
+            "top_bar.png", "left_column.png", "right_column.png", "corner.png",
+            "minimap.png", "rts_console.png", "window_state.png", "window_diplomacy.png",
+            "window_left_blank.png", "window_right_blank.png"
+    );
     private static final Map<String, int[][]> LAYOUTS = Map.of(
             "royal", new int[][]{
                     {0,0,1368,62}, {0,46,58,480}, {58,60,336,522},
@@ -93,7 +98,7 @@ public final class MaqanUiPackRenderer {
         if (availabilityChecked) return assetsReady;
         Minecraft minecraft = Minecraft.getInstance();
         for (String theme : LAYOUTS.keySet()) {
-            for (String filename : TEXTURES.values()) {
+            for (String filename : REQUIRED_TEXTURES) {
                 ResourceLocation location = texture(theme, filename);
                 if (minecraft.getResourceManager().getResource(location).isEmpty()) {
                     if (!availabilityLogged) {
