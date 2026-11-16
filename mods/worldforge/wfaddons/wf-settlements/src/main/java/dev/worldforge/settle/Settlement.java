@@ -784,6 +784,8 @@ public final class Settlement {
     public void unassign(int workerId) {
         Worker w = worker(workerId);
         if (w == null) throw new OrderException("Нет рабочего " + workerId);
+        if (w.taskOwner == Worker.TaskOwner.MILITARY)
+            throw new OrderException("Сначала необходимо отозвать военный приказ");
         w.releaseTask(w.taskOwner, w.taskId);
         w.suspendedTaskOwner = Worker.TaskOwner.NONE;
         w.suspendedTaskId = "";
@@ -828,7 +830,7 @@ public final class Settlement {
         Worker w=worker(workerId);
         if(w==null||!w.manualOrder)return false;
         Worker.ManualOrder next=w.orderQueue.pollFirst();
-        if(next==null){w.manualOrder=false;w.status="свободен";return false;}
+        if(next==null){w.manualOrder=false;w.releaseTask(Worker.TaskOwner.PLAYER, "player:move");w.status="свободен";return false;}
         w.orderX=next.x();w.orderZ=next.z();w.status="приказ: движение";
         return true;
     }
@@ -1061,7 +1063,7 @@ public final class Settlement {
             if ((source == null || source.localStock.isEmpty()) && !worker.manualHauler) {
                 worker.building = 0;
                 worker.assignedProfession = "";
-                worker.releaseTask(Worker.TaskOwner.SETTLEMENT, "settlement:building:" + (source == null ? -1 : source.uid));
+                worker.releaseTask(Worker.TaskOwner.SETTLEMENT, null);
                 if (!worker.manualOrder && !worker.manualFollow && worker.lifeAction.isBlank())
                     worker.status = "свободен";
             }
