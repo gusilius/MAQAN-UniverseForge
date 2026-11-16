@@ -62,6 +62,7 @@ public final class VanillaWorldGeography {
     @SubscribeEvent
     public void onChunkLoad(ChunkEvent.Load event) {
         if (!(event.getLevel() instanceof ServerLevel level)) return;
+        load(level.getServer());
         enqueue(level, event.getChunk().getPos());
     }
 
