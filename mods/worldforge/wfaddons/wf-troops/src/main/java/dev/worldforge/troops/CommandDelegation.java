@@ -1,5 +1,6 @@
 package dev.worldforge.troops;
 
+import dev.worldforge.mod.Json;
 import java.util.*;
 
 /**
@@ -60,6 +61,40 @@ public final class CommandDelegation {
         Set<String> existing = existingSquadIds == null ? Set.of() : new HashSet<>(existingSquadIds);
         policies.keySet().removeIf(id -> !existing.contains(id));
     }
+
+    public String toJson() {
+        List<Object> saved = new ArrayList<>();
+        for (Policy p : policies.values()) saved.add(Map.of(
+                "squad", p.squadId(), "mode", p.mode().name(), "commander", p.commanderCharacterId(),
+                "objective", p.objective(), "leash", p.leashBlocks(), "engage", p.allowEngagement(),
+                "pursue", p.allowPursuit(), "retreat", p.allowRetreat()));
+        return Json.write(Map.of("format", "wf-command-delegation/1", "policies", saved));
+    }
+
+    public void fromJson(String json) {
+        Object parsed = Json.parse(json == null ? "" : json);
+        if (!(parsed instanceof Map<?, ?> root)
+                || !"wf-command-delegation/1".equals(root.get("format")))
+            throw new IllegalArgumentException("Invalid command delegation save");
+        Map<String, Policy> restored = new LinkedHashMap<>();
+        if (root.get("policies") instanceof List<?> list) for (Object item : list) {
+            if (!(item instanceof Map<?, ?> m)) continue;
+            String squad = string(m.get("squad")), commander = string(m.get("commander"));
+            Mode mode;
+            try { mode = Mode.valueOf(string(m.get("mode"))); }
+            catch (RuntimeException ignored) { continue; }
+            if (squad.isBlank() || mode == Mode.PLAYER_DIRECT || commander.isBlank()
+                    || !commander.matches("[A-Za-z0-9_.:-]{1,64}") || restored.containsKey(squad)) continue;
+            restored.put(squad, new Policy(squad, mode, commander, string(m.get("objective")),
+                    integer(m.get("leash"), 0), bool(m.get("engage")), bool(m.get("pursue")), bool(m.get("retreat"))));
+        }
+        policies.clear();
+        policies.putAll(restored);
+    }
+
+    private static String string(Object value) { return value instanceof String s ? s : ""; }
+    private static int integer(Object value, int fallback) { return value instanceof Number n ? n.intValue() : fallback; }
+    private static boolean bool(Object value) { return value instanceof Boolean b && b; }
 
     public boolean mayIssue(String squadId, String issuerCharacterId, Action action) {
         Policy p = get(squadId);
