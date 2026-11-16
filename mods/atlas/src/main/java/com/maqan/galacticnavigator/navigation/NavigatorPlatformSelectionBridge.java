@@ -34,6 +34,27 @@ public final class NavigatorPlatformSelectionBridge {
         publish("", "", "", "", "");
     }
 
+    /** Route a global MAQAN search result back to the active Atlas screen. */
+    public static void registerEntityOpener(java.util.function.Consumer<String> opener) {
+        if (opener == null) return;
+        try {
+            Class<?> runtime = Class.forName("dev.maqan.platform.client.WorkspaceRuntime");
+            java.util.function.Consumer<Object> callback = entry -> {
+                try {
+                    String provider = (String) entry.getClass().getMethod("providerId").invoke(entry);
+                    String entityId = (String) entry.getClass().getMethod("id").invoke(entry);
+                    if (PROVIDER_ID.equals(provider)) opener.accept(entityId);
+                } catch (ReflectiveOperationException ignored) {
+                    // Invalid search payload; ignore without breaking Atlas.
+                }
+            };
+            runtime.getMethod("registerEntityOpener", String.class, java.util.function.Consumer.class)
+                    .invoke(null, PROVIDER_ID, callback);
+        } catch (ReflectiveOperationException | LinkageError ignored) {
+            // Atlas remains independently usable without MAQAN Platform.
+        }
+    }
+
     /** Register an Atlas action in the shared workspace context menu. */
     public static void registerAction(String id, String label,
                                       java.util.function.Predicate<String> visibleForEntity,
