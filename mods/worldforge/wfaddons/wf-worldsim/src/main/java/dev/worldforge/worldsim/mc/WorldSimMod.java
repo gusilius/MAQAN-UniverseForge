@@ -1061,6 +1061,27 @@ public final class WorldSimMod {
                 characters.add(c);
             }
         }
+        // Ordinary-world residents are the same canonical Characters used by settlements,
+        // Origins, inventories and succession. Include only people already bound to a realm.
+        for (dev.worldforge.people.Character person : PeopleMod.worldRegistry().all()) {
+            if (person == null || !person.alive || person.globalId == null || person.globalId.isBlank()) continue;
+            Object rawPolity = person.props.get("emergence.polity_id");
+            if (rawPolity == null || String.valueOf(rawPolity).isBlank()) continue;
+            String realmId = "emergent-" + rawPolity;
+            if (RealmsMod.realm(realmId) == null) continue;
+            JsonObject item = new JsonObject();
+            item.addProperty("id", person.globalId);
+            item.addProperty("realm_id", realmId);
+            item.addProperty("age", Math.max(0, WorldForgeApi.clock().year() - person.birthYear));
+            item.addProperty("alive", person.alive);
+            item.addProperty("married", person.spouse != null && !person.spouse.isBlank());
+            item.addProperty("gender", "m".equals(person.gender) ? 0 : 1);
+            item.addProperty("fertility", (int) number(person.props.get("fertility"), 50));
+            item.addProperty("prestige", (int) number(person.props.get("prestige"), 0));
+            item.addProperty("opinion", (int) number(person.props.get("opinion"), 0));
+            item.addProperty("house_id", person.house == null ? "" : person.house);
+            characters.add(item);
+        }
         // Canonical JSON ordering is part of the native simulation contract:
         // identical authoritative state must yield identical Rust input bytes.
         sortObjects(realms, Comparator.comparing(item -> item.get("id").getAsString()));
