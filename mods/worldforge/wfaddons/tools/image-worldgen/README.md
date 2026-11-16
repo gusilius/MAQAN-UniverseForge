@@ -6,11 +6,12 @@ Install the native numerical stack once:
 python -m pip install -r requirements.txt
 ```
 
-The generator keeps a pure-Python fallback, but Numba compiles the flat-array
-multi-source territory flood-fill and caches the compiled kernel. The first
-run pays the JIT compilation cost; later runs with the same environment reuse
-the cache. NumPy/SciPy handle semantic masks, connected-component extraction,
-island proximity, border extraction and preview colorization in native code.
+The generator uses NumPy/SciPy for semantic masks, connected components,
+coherent reserve selection, terrain-aware watershed partitioning, island
+proximity, border extraction and preview rendering. The older flat-array
+multi-source flood-fill remains only as a fallback for callers that do not
+supply a boundary-cost surface; normal image conversion uses the organic
+watershed path.
 
 ## Political islands
 
