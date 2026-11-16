@@ -24,9 +24,15 @@ public final class TerritorialIdentity {
      * so rulers, houses and their families are born from the same racial/cultural population.
      */
     public static DemographicResult ensureDemographics(String mapId, TitleData data, TitleEditor editor, long worldSeed) {
+        return ensureDemographics(mapId, data, editor, worldSeed, originRaces());
+    }
+
+    /** Explicit registry overload used by offline world-generation integration tests and tools. */
+    public static DemographicResult ensureDemographics(String mapId, TitleData data, TitleEditor editor,
+                                                        long worldSeed, List<RaceWeight> raceCatalog) {
         Objects.requireNonNull(data, "title data");
         Objects.requireNonNull(editor, "title editor");
-        List<RaceWeight> raceCatalog = originRaces();
+        Objects.requireNonNull(raceCatalog, "origin race catalog");
         List<RaceWeight> roots = raceCatalog.stream().filter(r -> r.parent() == null || r.parent().isBlank()).toList();
         if (roots.isEmpty()) return new DemographicResult(0, 0);
         int changed = 0;
