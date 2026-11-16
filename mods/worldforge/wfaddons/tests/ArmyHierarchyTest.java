@@ -99,6 +99,10 @@ public final class ArmyHierarchyTest {
                         && scoped.getEffective(first.id, hierarchy).commanderCharacterId().equals("c17")
                         && scoped.getEffective(second.id, hierarchy).commanderCharacterId().equals("c17"),
                 "army-level command authority is inherited by every subordinate squad");
+        CommandDelegation.Resolution armyResolution = scoped.resolveEffective(first.id, hierarchy);
+        check(armyResolution != null && armyResolution.sourceType() == CommandDelegation.ScopeType.ARMY
+                        && armyResolution.inherited() && armyResolution.sourceId().equals("42"),
+                "effective policy reports its true inherited army source for the command UI");
         check(scoped.assignScope(CommandDelegation.ScopeType.CORPS, vanguard.id,
                         CommandDelegation.Mode.AUTONOMOUS, "c18", "secure-the-bridge", 80, true, true, true)
                         && scoped.getEffective(first.id, hierarchy).mode() == CommandDelegation.Mode.AUTONOMOUS
@@ -118,6 +122,10 @@ public final class ArmyHierarchyTest {
                         && scoped.resumeInheritance(second.id)
                         && scoped.getEffective(second.id, hierarchy).mode() == CommandDelegation.Mode.DELEGATED,
                 "player reclaim is immediate and inheritance can be explicitly resumed later");
+        CommandDelegation.Resolution resumed = scoped.resolveEffective(second.id, hierarchy);
+        check(resumed != null && resumed.sourceType() == CommandDelegation.ScopeType.CORPS
+                        && resumed.inherited() && resumed.sourceId().equals(vanguard.id) == false,
+                "resumed squad policy resolves to its actual parent scope rather than a stale local override");
         CommandDelegation scopedReload = new CommandDelegation();
         scopedReload.fromJson(scoped.toJson());
         check(scopedReload.getEffective(first.id, hierarchy).mode() == CommandDelegation.Mode.PLAYER_DIRECT
