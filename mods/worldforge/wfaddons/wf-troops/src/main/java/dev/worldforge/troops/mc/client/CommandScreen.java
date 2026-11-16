@@ -81,6 +81,25 @@ public final class CommandScreen extends Screen {
 
     private boolean compactSkin() { return embeddedInMaqan && (width < 840 || height < 560); }
 
+    private int[] workspaceViewport() {
+        int[] left = skinRect("lp"), right = skinRect("rp"), top = skinRect("top");
+        int[] minimap = skinRect("mm"), console = skinRect("bot");
+        int x = left == null ? 44 : left[0] + left[2] + 8;
+        int y = top == null ? 62 : top[1] + top[3] + 8;
+        int r = right == null ? width - 12 : right[0] - 8;
+        int b = Math.min(minimap == null ? height - 120 : minimap[1],
+                console == null ? height - 120 : console[1]) - 8;
+        if (r <= x) r = width - 12;
+        if (b <= y) b = height - 120;
+        return new int[]{x, y, Math.max(1, r - x), Math.max(1, b - y)};
+    }
+
+    private boolean inWorkspaceViewport(double x, double y) {
+        if (!embeddedInMaqan) return true;
+        int[] r = workspaceViewport();
+        return x >= r[0] && x < r[0] + r[2] && y >= r[1] && y < r[1] + r[3];
+    }
+
     @SuppressWarnings("unchecked")
     public static void setSettlementPayload(String payload) {
         try {
@@ -374,14 +393,14 @@ public final class CommandScreen extends Screen {
         List<String> ids=CommandMode.selected();
         if(ids.isEmpty())return;
         int ix = inspectX(), iw = inspectW(), iy = inspectY();
-        int rows=Math.min(8,ids.size());
+        int rows=Math.min(compactSkin() ? 5 : 8,ids.size());
         int h=24+rows*INSPECT_ROW;
         g.fill(ix,iy,ix+iw,iy+h,0xD910121A);
         g.fill(ix,iy,ix+iw,iy+1,0xFF8A7040);
         g.drawString(font,"ИНСПЕКТОР · "+ids.size()+" ВЫБРАНО",ix+6,iy+6,0xFFE6C875,false);
         int row=0;
         for(String id:ids){
-            if(row>=8)break;
+            if(row>=(compactSkin() ? 5 : 8))break;
             net.minecraft.world.entity.Entity entity=null;
             for(net.minecraft.world.entity.Entity candidate:minecraft.level.entitiesForRendering())
                 if(candidate.getUUID().toString().equals(id)){entity=candidate;break;}
@@ -436,6 +455,7 @@ public final class CommandScreen extends Screen {
             for (Btn b : buttons()) if (b.hit(x, y)) { b.run().run(); return true; }
             if (buildOpen && inBuildPanel(x, y)) { panelClick(x, y); return true; }
             if (inSelPanel(x, y)) return true;
+            if (embeddedInMaqan && !inWorkspaceViewport(x, y)) return true;
             if (picked != null) { place(shift); return true; }
             if (workMode >= 0) { workAreaDrag = true; dragging = true; dragX = x; dragY = y; return true; }
             dragging = true; dragX = x; dragY = y;
@@ -538,6 +558,7 @@ public final class CommandScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double x, double y, double delta) {
+        if (embeddedInMaqan && !inWorkspaceViewport(x, y) && !inBuildPanel(x, y)) return false;
         if (buildOpen && inBuildPanel(x, y)) {
             int max = Math.max(0, visibleDefs().size() - rowsFit());
             scroll = Math.max(0, Math.min(max, scroll + (delta < 0 ? 1 : -1)));
@@ -710,6 +731,9 @@ public final class CommandScreen extends Screen {
         if (mc.level == null || mc.player == null) return;
         int w = width, h = height;
         if (CommandMode.active && CommandMode.vp != null) {
+            int[] viewport = workspaceViewport();
+            if (embeddedInMaqan) g.enableScissor(viewport[0], viewport[1],
+                    viewport[0] + viewport[2], viewport[1] + viewport[3]);
             for (net.minecraft.world.entity.Entity en : mc.level.entitiesForRendering()) {
                 if (!(en instanceof LivingEntity le) || !le.isAlive() || !CommandMode.selectable(mc, le)) continue;
                 double[] p = Projection.project(CommandMode.vp, le.getX() - CommandMode.cam.x, le.getY() - CommandMode.cam.y, le.getZ() - CommandMode.cam.z, w, h);
@@ -735,6 +759,7 @@ public final class CommandScreen extends Screen {
             drawTaken(g, w, h);
             drawWorkAreas(g, w, h);
             drawConstructionGhosts(g, w, h, mxi, myi);
+            if (embeddedInMaqan) g.disableScissor();
         }
         if (dragging) {
             int x1 = (int) Math.min(dragX, mx), x2 = (int) Math.max(dragX, mx), y1 = (int) Math.min(dragY, my), y2 = (int) Math.max(dragY, my);
