@@ -3,7 +3,7 @@ import unittest
 from image_worldgen import (
     allocate_counts, select_independent_islands, aggregate_realm_regions,
     classify_realm_scale, select_wilderness_mask, SETTLEMENT_PROFILES, partition,
-    create_test_image, convert_image,
+    create_test_image, convert_image, apply_province_aligned_wilderness,
 )
 
 
@@ -21,12 +21,45 @@ class PoliticalDistributionTests(unittest.TestCase):
             source = root / "source.png"
             create_test_image(source)
             counts = []
+            province_counts = []
             for level in range(1, 8):
                 result = convert_image(
                     source, root / f"level-{level}.worldmap",
                     seed=424242, settlement_level=level)
                 counts.append(result["realm_count"])
+                province_counts.append(result["province_count"])
             self.assertEqual(len(set(counts)), 1, counts)
+            self.assertEqual(province_counts, sorted(province_counts), province_counts)
+
+    def test_wilderness_reserves_whole_provinces_and_protects_realm_cores(self):
+        import numpy as np
+        labels = np.asarray([
+            [1, 1, 2, 2, 3, 3],
+            [1, 1, 2, 2, 3, 3],
+            [1, 1, 2, 2, 3, 3],
+            [1, 1, 2, 2, 3, 3],
+        ], dtype=np.uint32)
+        meta = {
+            1: {"realm": 0, "seed": 0, "area": 8},
+            2: {"realm": 0, "seed": 2, "area": 8},
+            3: {"realm": 1, "seed": 4, "area": 8},
+        }
+        realms = {0: [1, 2], 1: [3]}
+        cells = {0: list(range(16)), 1: list(range(4, 24))}
+        candidates = np.zeros((4, 6), dtype=bool)
+        candidates[:, 2:4] = True
+        (result, result_meta, result_realms, cells_by_realm,
+         wilderness, report) = apply_province_aligned_wilderness(
+            labels.ravel(), meta, realms, candidates, 6, 4)
+        self.assertTrue(np.all(result.reshape(4, 6)[:, 2:4] == 0))
+        self.assertTrue(np.all(wilderness[:, 2:4]))
+        self.assertEqual(set(result_meta), {1, 3})
+        self.assertEqual(result_realms, {0: [1], 1: [3]})
+        self.assertTrue(cells_by_realm[0])
+        self.assertTrue(cells_by_realm[1])
+        self.assertEqual(report["selected_provinces"], 1)
+        self.assertEqual(report["protected_capital_provinces"], 2)
+        self.assertEqual(int(np.count_nonzero(result)), 16)
 
     def test_realm_counts_respect_each_landmass_capacity(self):
         components = [list(range(1000)), list(range(1000, 1500)),
