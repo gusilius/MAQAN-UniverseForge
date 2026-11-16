@@ -84,8 +84,10 @@ def main() -> int:
         source = temporary
     profile = SETTLEMENT_PROFILES[level]
     try:
-        result = convert_image(source, a.output, seed, profile["realms"], profile["provinces"],
-                               bpp, level, a.dimension_id, mode)
+        result = convert_image(
+            source, a.output, seed, realm_count=None, provinces_per_realm=None,
+            blocks_per_pixel=bpp, settlement_level=level,
+            planet_id=a.dimension_id, generation_mode=mode)
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
