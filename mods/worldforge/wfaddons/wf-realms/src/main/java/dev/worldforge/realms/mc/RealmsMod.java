@@ -363,6 +363,19 @@ public class RealmsMod {
         return Statecraft.stableDynastyId(mapId, characterText(character, "culture"), house);
     }
 
+    private static String dynastyDisplayName(Object founder, String mapId, String dynastyId) {
+        if (founder == null) return "Дом " + dynastyId;
+        String race = characterPropText(founder, "origin.race");
+        String culture = characterText(founder, "culture");
+        long seed = 0x44594E415354594CL ^ ((long) mapId.hashCode() << 32) ^ dynastyId.hashCode();
+        try {
+            return PeopleMod.NAMES.generate(race, culture, "dynasties", new Random(seed));
+        } catch (RuntimeException missingPool) {
+            String house = characterText(founder, "house");
+            return house.isBlank() ? "Дом " + dynastyId : "Дом " + house;
+        }
+    }
+
     private static int characterNumber(Object character, String field) {
         try {
             Object value = character.getClass().getField(field).get(character);
@@ -391,24 +404,45 @@ public class RealmsMod {
                 // lag the source module in the addon build order. Read optional dynasty metadata
                 // reflectively so this bridge remains binary-compatible without copying Character.
                 Map<String, String> founders = new LinkedHashMap<>();
+                Map<String, Object> founderCharacters = new LinkedHashMap<>();
                 Map<String, Integer> founderYears = new LinkedHashMap<>();
+                Map<String, String> dynastyNames = new LinkedHashMap<>();
+                Map<String, String> characterHouses = new LinkedHashMap<>();
                 for (Object character : people.all()) {
                     String house = characterDynastyId(character, map.name);
                     if (house.isBlank()) continue;
                     int birthYear = characterNumber(character, "birthYear");
                     if (!founders.containsKey(house) || birthYear < founderYears.getOrDefault(house, Integer.MAX_VALUE)) {
                         founders.put(house, characterText(character, "globalId"));
+                        founderCharacters.put(house, character);
                         founderYears.put(house, birthYear);
                     }
+                    String globalId = characterText(character, "globalId");
+                    if (!globalId.isBlank()) characterHouses.put(globalId, house);
+                }
+                for (Map.Entry<String, String> entry : founders.entrySet()) {
+                    String house = entry.getKey();
+                    Object founder = founderCharacters.get(house);
+                    String displayName = dynastyDisplayName(founder, map.name, house);
+                    dynastyNames.put(house, displayName);
+                    Statecraft.Dynasty dynasty = POLITICS.dynasty(house);
+                    if (dynasty == null) POLITICS.registerDynasty(house, entry.getValue(), displayName);
+                    else if (dynasty.name == null || dynasty.name.isBlank() || dynasty.name.equals(house))
+                        POLITICS.setDynastyName(house, displayName);
                 }
                 for (Object character : people.all()) {
                     String house = characterDynastyId(character, map.name);
                     String globalId = characterText(character, "globalId");
                     if (house.isBlank() || globalId.isBlank()) continue;
-                    String founderId = founders.get(house);
-                    if (founderId != null && POLITICS.dynasty(house) == null)
-                        POLITICS.registerDynasty(house, founderId);
                     POLITICS.addDynastyMember(house, globalId);
+                }
+                // Keep the ruler's dynasty label on the realm projection as well as in Statecraft.
+                for (TitleData.Realm realm : map.titles.realmList()) {
+                    String rulerId = String.valueOf(realm.props.getOrDefault("rulerCharacterId", ""));
+                    String house = characterHouses.get(rulerId);
+                    String dynastyName = house == null ? "" : dynastyNames.getOrDefault(house, "");
+                    if (!dynastyName.isBlank())
+                        changed |= editor.setRealmProp(realm.id, "identity.dynasty_name", dynastyName);
                 }
             }
             for (TitleData.Title title : map.titles.allTitles()) {
