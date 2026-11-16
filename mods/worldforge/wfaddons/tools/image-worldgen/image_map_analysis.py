@@ -42,6 +42,7 @@ def classify(rgb):
     local_mean = ndimage.uniform_filter(luminance, size=5, mode="nearest")
     local_square = ndimage.uniform_filter(luminance * luminance, size=5, mode="nearest")
     local_texture = np.sqrt(np.maximum(0.0, local_square - local_mean * local_mean))
+    del luminance, local_mean, local_square
     idx = {name: i for i, name in enumerate(CLASSES)}
     labels = np.full((h, w), idx["unknown"], np.uint8)
     assigned = np.zeros((h, w), bool)
