@@ -1841,9 +1841,39 @@ public class SettleMod {
                             map.name, dimension);
                     continue;
                 }
+
+                // Run the same canonical create-or-get operation a second time against the
+                // just-imported seeds. Existing Colony objects must be returned, never cloned.
+                int colonyCountAfterFirstImport = COLONIES.size();
+                CharacterRegistry people = net.minecraftforge.fml.ModList.get().isLoaded("wf_people")
+                        ? PeopleMod.registry(map) : null;
+                int characterCount = people == null ? -1 : people.all().size();
+                Set<String> houseNames = new HashSet<>();
+                if (people != null) for (Character character : people.all())
+                    if (character.house != null && !character.house.isBlank()) houseNames.add(character.house);
+                int houseCount = houseNames.size();
+                int titleCount = map.titles == null ? 0 : map.titles.allTitles().size();
+                for (dev.worldforge.mod.MapData.SettlementSeed seed : map.settlementSeeds) {
+                    String id = Colony.blueprintColonyId(map.name, seed.id());
+                    String operationId = Colony.blueprintOperationId(map.name, seed.id());
+                    Colony existing = COLONIES.get(id);
+                    if (existing == null) throw new IllegalStateException("Imported Colony disappeared before idempotence audit: " + id);
+                    Colony repeated = foundEmergentInMemory(server, dimension, id, existing.s.name,
+                            seed.blockX(), seed.blockZ(), operationId);
+                    if (repeated != existing)
+                        throw new IllegalStateException("Repeated blueprint import allocated a second Colony: " + id);
+                }
+                Set<String> housesAfter = new HashSet<>();
+                if (people != null) for (Character character : people.all())
+                    if (character.house != null && !character.house.isBlank()) housesAfter.add(character.house);
+                if (COLONIES.size() != colonyCountAfterFirstImport
+                        || (people != null && (people.all().size() != characterCount || !housesAfter.equals(houseNames)))
+                        || (map.titles != null && map.titles.allTitles().size() != titleCount))
+                    throw new IllegalStateException("Repeated map import changed Colony/Character/House/Title counts");
+
                 IMPORTED_BLUEPRINTS.add(importKey);
                 if (staged > 0 || !map.settlementSeeds.isEmpty())
-                    LOGGER.info("wf_settle: imported map blueprint '{}' in {}: {} named settlement anchors, {} new Colony records",
+                    LOGGER.info("wf_settle: imported map blueprint '{}' in {}: {} named settlement anchors, {} new Colony records; re-import idempotence verified",
                             map.name, dimension, map.settlementSeeds.size(), staged);
             } catch (RuntimeException ex) {
                 LOGGER.error("wf_settle: blueprint settlement import failed for map '{}' in {}: {}",
