@@ -1,6 +1,9 @@
 package dev.maqan.platform.client;
 
 import net.minecraft.world.entity.Entity;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
 
 /**
  * Small, version-neutral selection contract shared by MAQAN workspaces.
@@ -21,6 +24,7 @@ public final class PlatformSelectionContext {
     ) {}
 
     private static volatile Selection current;
+    private static final Map<String, Function<String, Entity>> LIVE_ENTITY_RESOLVERS = new ConcurrentHashMap<>();
     private static long revision;
 
     private PlatformSelectionContext() {}
@@ -82,6 +86,28 @@ public final class PlatformSelectionContext {
             current = null;
             revision++;
         }
+    }
+
+
+    /** Register a provider-owned resolver for canonical IDs. */
+    public static void registerLiveEntityResolver(String providerId, Function<String, Entity> resolver) {
+        String provider = clean(providerId);
+        if (provider.isBlank() || resolver == null) return;
+        LIVE_ENTITY_RESOLVERS.put(provider, resolver);
+    }
+
+    public static void unregisterLiveEntityResolver(String providerId) {
+        if (providerId != null) LIVE_ENTITY_RESOLVERS.remove(providerId.trim());
+    }
+
+    /** Resolve on demand so a selection never retains an entity from an unloaded world. */
+    public static Entity resolveLiveEntity(Selection selection) {
+        if (selection == null) return null;
+        if (selection.previewEntity() != null) return selection.previewEntity();
+        Function<String, Entity> resolver = LIVE_ENTITY_RESOLVERS.get(selection.providerId());
+        if (resolver == null) return null;
+        try { return resolver.apply(selection.entityId()); }
+        catch (RuntimeException ignored) { return null; }
     }
 
     public static Selection current() {
