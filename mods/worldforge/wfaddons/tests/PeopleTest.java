@@ -52,6 +52,15 @@ public class PeopleTest {
                         && raceMix.values().stream().mapToInt(Integer::intValue).sum() == 100
                         && !raceMix.containsKey("wood_elf"),
                 "realm population uses weighted root races only, excludes child races from root sampling, and totals 100%");
+        TerritorialIdentity.RaceWeight childRace =
+                new TerritorialIdentity.RaceWeight("wood_elf", "elf", 4);
+        List<TerritorialIdentity.RaceWeight> hierarchy = new ArrayList<>(originRaces);
+        hierarchy.add(childRace);
+        String subraceA = TerritorialIdentity.chooseSubrace("elf", hierarchy, new Random(7L));
+        String subraceB = TerritorialIdentity.chooseSubrace("elf", hierarchy, new Random(7L));
+        ok(subraceA.equals(subraceB) && (subraceA.equals("elf") || subraceA.equals("wood_elf")),
+                "individual race selection follows the wf-origins parent hierarchy deterministically");
+
 
 
         TitleEditor ed = new TitleEditor(d);
