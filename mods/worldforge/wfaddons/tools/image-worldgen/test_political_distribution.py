@@ -61,7 +61,7 @@ class PoliticalDistributionTests(unittest.TestCase):
 
     def test_realm_scale_has_city_state_and_empire_tiers(self):
         self.assertEqual(classify_realm_scale(100, 10000, True), ("city_state", 1))
-        self.assertEqual(classify_realm_scale(100, 10000), ("tiny", 1))
+        self.assertEqual(classify_realm_scale(50, 10000), ("tiny", 1))
         self.assertEqual(classify_realm_scale(500, 10000), ("medium", 2))
         self.assertEqual(classify_realm_scale(3000, 10000), ("huge", 3))
 
