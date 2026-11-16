@@ -59,6 +59,13 @@ public class PeopleTest {
                         && names.poolForRace("dwarf", "dwarf").cities.size() >= 18
                         && names.poolForRace("clockwork", "human").male.size() >= 18,
                 "race-specific lexicons contain substantial city and personal-name variants");
+        for (String category : List.of("settlements", "realms", "regions", "provinces", "rivers", "mountains",
+                "forests", "taverns", "ships", "orders", "factions", "guilds", "companies", "armies",
+                "regiments", "castles", "fortresses", "districts", "landmarks", "roads", "markets",
+                "temples", "religions", "artifacts", "monuments")) {
+            String generated = names.generate("clockwork", "human", category, new Random(20261117L));
+            ok(!generated.isBlank(), "expanded race-aware bank generates " + category + " names");
+        }
         NameBank minimalNames = new NameBank();
         minimalNames.add("{\"default\":\"basic\",\"cultures\":{\"basic\":{\"male\":[\"Aren\"],\"female\":[\"Mira\"],\"houses\":[\"Stone\"]}}}");
         boolean cyclicRaceParentsRejected = false;
