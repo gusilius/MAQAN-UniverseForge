@@ -29,14 +29,17 @@ public final class MaqanUiPackLayout {
     private final int referenceHeight;
     private final Map<String, Map<String, int[]>> skins;
     private final Map<String, String> textureNames;
+    private final Map<String, Map<String, int[]>> textureSizes;
 
     private MaqanUiPackLayout(int referenceWidth, int referenceHeight,
                               Map<String, Map<String, int[]>> skins,
-                              Map<String, String> textureNames) {
+                              Map<String, String> textureNames,
+                              Map<String, Map<String, int[]>> textureSizes) {
         this.referenceWidth = referenceWidth;
         this.referenceHeight = referenceHeight;
         this.skins = Map.copyOf(skins);
         this.textureNames = Map.copyOf(textureNames);
+        this.textureSizes = Map.copyOf(textureSizes);
     }
 
     public static Optional<MaqanUiPackLayout> load() {
@@ -61,6 +64,24 @@ public final class MaqanUiPackLayout {
             if (parsedTextures.values().stream().anyMatch(name -> name == null || name.isBlank()))
                 throw new IllegalStateException("Texture names must not be blank");
 
+            JsonObject sizeObjects = root.getAsJsonObject("textureSizes");
+            if (sizeObjects == null) throw new IllegalStateException("Missing textureSizes metadata");
+            Map<String, Map<String, int[]>> parsedSizes = new LinkedHashMap<>();
+            for (String theme : new String[]{"royal", "iron", "grim", "elf"}) {
+                JsonObject themeSizes = sizeObjects.getAsJsonObject(theme);
+                if (themeSizes == null) throw new IllegalStateException("Missing texture sizes for " + theme);
+                Map<String, int[]> sizes = new LinkedHashMap<>();
+                for (String layer : new String[]{"top", "lcol", "lp", "rp", "rcol", "mm", "bot", "cor"}) {
+                    JsonArray values = themeSizes.getAsJsonArray(layer);
+                    if (values == null || values.size() != 2) throw new IllegalStateException("Invalid texture size: " + theme + "/" + layer);
+                    int sourceWidth = values.get(0).getAsInt();
+                    int sourceHeight = values.get(1).getAsInt();
+                    if (sourceWidth <= 0 || sourceHeight <= 0) throw new IllegalStateException("Non-positive texture size: " + theme + "/" + layer);
+                    sizes.put(layer, new int[]{sourceWidth, sourceHeight});
+                }
+                parsedSizes.put(theme, Map.copyOf(sizes));
+            }
+
             JsonObject skinObjects = root.getAsJsonObject("skins");
             Map<String, Map<String, int[]>> parsedSkins = new LinkedHashMap<>();
             for (String theme : new String[]{"royal", "iron", "grim", "elf"}) {
@@ -80,7 +101,7 @@ public final class MaqanUiPackLayout {
                 }
                 parsedSkins.put(theme, Map.copyOf(rectangles));
             }
-            cached = new MaqanUiPackLayout(width, height, parsedSkins, parsedTextures);
+            cached = new MaqanUiPackLayout(width, height, parsedSkins, parsedTextures, parsedSizes);
             LOGGER.info("Loaded MAQAN UI layout manifest: {}x{}, {} themes",
                     width, height, parsedSkins.size());
             return Optional.of(cached);
@@ -97,6 +118,11 @@ public final class MaqanUiPackLayout {
     public Map<String, int[]> skin(String theme) { return skins.get(theme); }
     public Map<String, String> textureNames() { return textureNames; }
     public String textureName(String layer) { return textureNames.get(layer); }
+    public int[] textureSize(String theme, String layer) {
+        Map<String, int[]> sizes = textureSizes.get(theme);
+        int[] size = sizes == null ? null : sizes.get(layer);
+        return size == null ? null : size.clone();
+    }
 
     public ViewportTransform transform(int screenWidth, int screenHeight) {
         double scale = Math.min(screenWidth / (double) referenceWidth,
