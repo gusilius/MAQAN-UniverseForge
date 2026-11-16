@@ -73,6 +73,7 @@ public final class CommandMode {
     private static Marker camEntity;
     private static double groundY;
     private static long lastFrame;
+    private static boolean rigInitialized;
     private static CameraRig.View lastView = CameraRig.View.SKY;
 
     @SubscribeEvent
@@ -299,7 +300,12 @@ public final class CommandMode {
         active = true;
         prevCamera = mc.options.getCameraType();
         mc.options.setCameraType(CameraType.FIRST_PERSON);
-        RIG.start(mc.player.getX(), mc.player.getZ(), mc.player.getYRot(), lastView);
+        if (!rigInitialized) {
+            RIG.start(mc.player.getX(), mc.player.getZ(), mc.player.getYRot(), lastView);
+            rigInitialized = true;
+        } else {
+            RIG.setView(lastView);
+        }
         MaqanTroopsCameraBridge.publishMode(lastView);
         groundY = mc.player.getY();
         camEntity = new Marker(EntityType.MARKER, mc.level);                  // камера смотрит из этой сущности; игрок остаётся на месте
@@ -409,6 +415,7 @@ public final class CommandMode {
             else MaqanTroopsCameraBridge.publishFirstPerson();
             firstPersonCommand = false;
             camEntity = null;
+            rigInitialized = false;
             SEL.clear();
         }
 
