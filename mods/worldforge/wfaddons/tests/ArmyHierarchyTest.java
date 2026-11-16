@@ -124,8 +124,9 @@ public final class ArmyHierarchyTest {
                 new Squads.Order(Squads.Kind.MOVE, 300, 200, ""), false, restoredDelegation);
         check(dispatch.issued() == 1 && dispatch.delegated() == 1
                         && first.current().kind() == Squads.Kind.MOVE
-                        && second.current().kind() == Squads.Kind.MOVE,
+                        && second.current().kind() == Squads.Kind.HOLD,
                 "army fan-out counts and skips delegated squads without overwriting their local orders");
+        squads.disband(second.id);
         restoredDelegation.prune(squads);
         check(restoredDelegation.get(second.id).mode() == CommandDelegation.Mode.PLAYER_DIRECT,
                 "disbanded squad delegation policy is pruned");
