@@ -31,7 +31,12 @@ The 1368×760 composition is the design reference, not a fixed pixel canvas.
 
 ## Current implementation slice
 
-This branch adds a reusable responsive layout calculator and unit coverage, then wires compact drawers into `PlatformShellScreen`. The existing desktop dock tree and provider embedding contracts remain intact.
+- A native `MaqanUiPackRenderer` draws the supplied concept frame over the existing provider/world canvas. It uses the original 1368×760 reference geometry, preserves aspect ratio, and caches texture availability rather than probing resources every frame.
+- When all pack textures are present, the concept frame replaces the generic Platform chrome instead of drawing a duplicate set of rails and panels over it.
+- The left/right frame positions use the canonical blank-window PNGs. The baked state/diplomacy sample artwork is not used as live window content.
+- `layout.json` contains the original per-theme coordinates for all four skins.
+- The existing responsive layout calculator and compact drawers remain available as the fallback while the binary pack is not installed.
+- The native frame is a visual integration slice only. Click hotspots, live resource labels, theme persistence, minimap data, camera actions and political-map switching are not yet wired; those are explicit next integration tasks, not claimed as complete.
 
 The original concept is available as a self-contained HTML file with all 40 image layers embedded as WebP data URIs and the per-theme 1368×760 coordinates embedded in its `SK` and `MT` objects. It is an asset source only; it is not shipped or executed in Minecraft.
 
@@ -44,7 +49,7 @@ python tools/import_maqan_ui_concept.py --concept-html "C:\\path\\to\\MAQAN — 
 
 The importer validates all four themes and all ten image layers per theme, decodes the embedded WebP images to optimized RGBA PNGs, and writes `assets/maqan/gui/layout.json` with the original per-theme geometry. It does not copy or embed the HTML prototype.
 
-**Asset status:** the importer is committed, but binary PNGs are generated into the local checkout from the Library source file and are not yet committed to this branch. The visual skin is not considered integrated until all 40 generated PNGs are present and the native renderer consumes the generated layout metadata.
+**Asset status:** the importer and native renderer are committed, and the original 40 embedded images have been decoded successfully during this work (40 PNGs, approximately 8.9 MB total). The generated PNG binaries are not yet committed to this branch because the GitHub file-writing interface accepts text content, not binary image payloads. Run the importer above in the Windows checkout, then add the generated `platform/src/main/resources/assets/maqan/textures/gui/` directory. Until then the native renderer intentionally falls back to the existing shell.
 
 ## Acceptance gates
 
