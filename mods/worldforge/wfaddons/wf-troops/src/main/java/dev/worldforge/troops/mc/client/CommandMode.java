@@ -285,12 +285,16 @@ public final class CommandMode {
 
     public static void setCameraView(CameraRig.View view) {
         if (view == null) return;
+        if (!active) enterFromMaqan();
+        if (!active) return;
         RIG.setView(view);
         lastView = view;
         MaqanTroopsCameraBridge.publishMode(view);
     }
 
     public static void cycleCameraView() {
+        if (!active) enterFromMaqan();
+        if (!active) return;
         RIG.cycle();
         lastView = RIG.view;
         MaqanTroopsCameraBridge.publishMode(RIG.view);
