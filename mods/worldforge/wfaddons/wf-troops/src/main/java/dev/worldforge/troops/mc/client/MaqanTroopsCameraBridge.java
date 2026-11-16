@@ -58,6 +58,10 @@ public final class MaqanTroopsCameraBridge {
         CommandMode.frame(Minecraft.getInstance());
     }
 
+    static void publishFirstPerson() {
+        publishPlatformMode("FIRST_PERSON");
+    }
+
     /** Keep MAQAN's camera badge synchronized with the legacy command-screen presets. */
     static void publishMode(CameraRig.View view) {
         String mode = switch (view) {
@@ -65,13 +69,19 @@ public final class MaqanTroopsCameraBridge {
             case TACTICS -> "ISOMETRIC";
             case SKY -> "RTS";
         };
+        publishPlatformMode(mode);
+    }
+
+    private static void publishPlatformMode(String mode) {
         try {
             Class<?> state = Class.forName("dev.maqan.platform.client.WorkspaceViewState");
             Class<?> cameraMode = Class.forName(
                     "dev.maqan.platform.client.WorkspaceViewState$CameraMode");
-            @SuppressWarnings({"unchecked", "rawtypes"})
-            Object value = Enum.valueOf((Class<? extends Enum>) cameraMode.asSubclass(Enum.class), mode);
-            state.getMethod("setCameraMode", cameraMode).invoke(null, value);
+            Object value = null;
+            for (Object candidate : cameraMode.getEnumConstants()) {
+                if (((Enum<?>) candidate).name().equals(mode)) { value = candidate; break; }
+            }
+            if (value != null) state.getMethod("setCameraMode", cameraMode).invoke(null, value);
         } catch (ReflectiveOperationException | LinkageError ignored) {
             // Platform is optional; wf_troops continues to run standalone.
         }
