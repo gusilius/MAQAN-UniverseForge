@@ -1024,6 +1024,7 @@ public final class Settlement {
                 }
             }
             if (best != null) {
+                w.claimTask(Worker.TaskOwner.SETTLEMENT, "settlement:building:" + best.uid, true);
                 w.assignedProfession = role;
                 w.building = best.uid;
                 w.status = "";
@@ -1053,6 +1054,7 @@ public final class Settlement {
                 if (pick == null || worker.id < pick.id) pick = worker;
             }
             if (pick == null) continue;
+            pick.claimTask(Worker.TaskOwner.SETTLEMENT, "settlement:building:" + source.uid, true);
             pick.building = source.uid;
             pick.assignedProfession = "hauler";
             pick.status = "переносит ресурсы";
@@ -1606,6 +1608,9 @@ public final class Settlement {
         for (Worker w : workers) {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", w.id); m.put("name", w.name); m.put("profession", w.profession); m.put("assigned_profession", w.assignedProfession); m.put("person", w.person); m.put("building", w.building); m.put("status", w.status); m.put("x", w.x); m.put("z", w.z);
+            m.put("task_owner", w.taskOwner.name()); m.put("task_id", w.taskId); m.put("task_revision", w.taskRevision);
+            m.put("suspended_task_owner", w.suspendedTaskOwner.name()); m.put("suspended_task_id", w.suspendedTaskId);
+            m.put("military_order_id", w.militaryOrderId);
             m.put("life_action", w.lifeAction); m.put("life_target_x", w.lifeTargetX); m.put("life_target_z", w.lifeTargetZ);
             m.put("life_action_until", w.lifeActionUntil); m.put("haul_progress", w.haulProgress);
             m.put("manual_hauler", w.manualHauler);
@@ -1725,6 +1730,27 @@ public final class Settlement {
                 if (w.jobPrio.isEmpty()) w.jobPrio = null;
             }
             if (w.building != 0 && s.building(w.building) == null) w.building = 0;
+            try {
+                w.taskOwner = Worker.TaskOwner.valueOf(m.get("task_owner") instanceof String owner ? owner : "NONE");
+                w.taskId = m.get("task_id") instanceof String task ? task : "";
+                w.taskRevision = m.get("task_revision") instanceof Number revision ? Math.max(0, revision.longValue()) : 0;
+                w.suspendedTaskOwner = Worker.TaskOwner.valueOf(m.get("suspended_task_owner") instanceof String owner ? owner : "NONE");
+                w.suspendedTaskId = m.get("suspended_task_id") instanceof String task ? task : "";
+                w.militaryOrderId = m.get("military_order_id") instanceof String order ? order : "";
+            } catch (RuntimeException invalidTaskState) {
+                w.taskOwner = Worker.TaskOwner.NONE; w.taskId = "";
+                w.suspendedTaskOwner = Worker.TaskOwner.NONE; w.suspendedTaskId = ""; w.militaryOrderId = "";
+            }
+            // Upgrade old saves from the existing authoritative task flags, preferring explicit player control.
+            if (w.taskOwner == Worker.TaskOwner.NONE || w.taskId.isBlank()) {
+                if (w.manualOrder || w.manualFollow) {
+                    w.taskOwner = Worker.TaskOwner.PLAYER; w.taskId = w.manualFollow ? "player:follow" : "player:move";
+                } else if (!w.lifeAction.isBlank()) {
+                    w.taskOwner = Worker.TaskOwner.LIFE; w.taskId = "life:" + w.lifeAction;
+                } else if (w.building != 0) {
+                    w.taskOwner = Worker.TaskOwner.SETTLEMENT; w.taskId = "settlement:building:" + w.building;
+                } else { w.taskOwner = Worker.TaskOwner.NONE; w.taskId = ""; }
+            }
             s.workers.add(w);
         }
         if (root.get("departures") instanceof List<?> ds) for (Object o : ds) {
