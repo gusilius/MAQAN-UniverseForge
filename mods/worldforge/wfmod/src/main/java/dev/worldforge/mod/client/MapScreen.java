@@ -248,6 +248,12 @@ public class MapScreen extends Screen {
         MapTextures.ensure(key);
     }
 
+    /** Called by the MAQAN map-mode axis without discarding the selected realm/province. */
+    public void setMaqanMapMode(String mode) {
+        if ("WORLD_MAP".equals(mode)) setMode(MapImages.TERRAIN, true);
+        else if ("POLITICAL_MAP".equals(mode)) setMode(MapImages.REALMS, true);
+    }
+
     private static boolean isCurrent(String slotKey) {
         String m = ClientState.mode;
         return slotKey.equals(m) || (MapImages.isDip(slotKey) && MapImages.isDip(m));
