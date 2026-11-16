@@ -1148,7 +1148,7 @@ public final class PlatformShellScreen extends Screen {
             g.fill(previewLeft, previewTop, previewRight, previewBottom, 0x332A6470);
             g.drawString(font, "LIVE WORLD MODEL", previewLeft + 5, previewTop + 5, CYAN, false);
             if (liveEntity.isAlive() && liveEntity.level() == Minecraft.getInstance().level) {
-                InventoryScreen.renderEntityInInventoryFollowsMouse(g.pose(),
+                InventoryScreen.renderEntityInInventoryFollowsMouse(g,
                         previewLeft + 2, previewTop + 18, previewRight - 2, previewBottom - 3,
                         42, 0.0625F, mouseX, mouseY, liveEntity);
             } else {
