@@ -392,6 +392,7 @@ public final class PlatformShellScreen extends Screen {
             // Once the source artwork is installed, it replaces the generic
             // shell chrome instead of stacking a second set of panels on top.
             MaqanUiPackRenderer.render(g, width, height);
+            drawConceptTopBar(g, mouseX, mouseY);
             // Compact skin layouts collapse the decorative side windows; the
             // active native workspace drawer occupies that space instead.
             if (WorkspaceResponsiveLayout.isCompact(width, height)) {
@@ -558,6 +559,49 @@ public final class PlatformShellScreen extends Screen {
         if (mx >= width - 30 && mx < width - 6 && my < 34)
             g.renderTooltip(font, Component.literal(activeView() == null ? "Close workspace" : "Close current module view"), mx, my);
         if (mx >= 8 && mx < 30 && my < 34) g.renderTooltip(font, Component.literal("MAQAN workspace"), mx, my);
+    }
+
+    /**
+     * Native controls layered over the concept top-bar artwork. The skin is
+     * decorative; profile, workspace, notification and close actions remain
+     * the same shell controls at every resolution.
+     */
+    private void drawConceptTopBar(GuiGraphics g, int mx, int my) {
+        boolean compact = WorkspaceResponsiveLayout.isCompact(width, height);
+        int barHeight = MaqanUiPackRenderer.topBarHeight(width, height);
+        int centerY = Math.max(7, (barHeight - 9) / 2);
+        g.drawString(font, "M", 10, centerY, CYAN, false);
+
+        int x = profileTabsStart();
+        int tabWidth = profileTabWidth();
+        int tabStep = profileTabStep();
+        for (Profile candidate : Profile.values()) {
+            if (!profileAvailable(candidate)) continue;
+            boolean active = candidate == profile;
+            int top = Math.max(2, (barHeight - 22) / 2);
+            int bottom = Math.min(barHeight - 2, top + 20);
+            g.fill(x, top, x + tabWidth, bottom, active ? 0x553B9FB5 : 0x00101924);
+            if (active) g.fill(x, Math.max(top, bottom - 2), x + tabWidth, bottom, CYAN);
+            g.drawCenteredString(font, candidate.icon, x + tabWidth / 2, top + 5, active ? CYAN : TEXT);
+            if (mx >= x && mx < x + tabWidth && my >= top && my < bottom)
+                g.renderTooltip(font, Component.literal(candidate.label), mx, my);
+            x += tabStep;
+        }
+
+        if (!compact && width >= 840)
+            g.drawString(font, embeddedView != null && profile == Profile.COSMOS ? "ATLAS" : "WORKSPACE",
+                    Math.min(width - 150, Math.max(46, profileTabsStart() - 78)), centerY, MUTED, false);
+
+        int controlsY = centerY;
+        g.drawCenteredString(font, "▤", width - 76, controlsY, workspaceManagerVisible ? CYAN : TEXT);
+        g.drawCenteredString(font, "◷", width - 48, controlsY, notificationCenterVisible ? CYAN : TEXT);
+        g.drawCenteredString(font, "×", width - 18, controlsY, TEXT);
+        if (mx >= width - 88 && mx < width - 64 && my < barHeight)
+            g.renderTooltip(font, Component.literal("Workspace profiles"), mx, my);
+        if (mx >= width - 58 && mx < width - 38 && my < barHeight)
+            g.renderTooltip(font, Component.literal("Notifications and event history"), mx, my);
+        if (mx >= width - 30 && mx < width - 6 && my < barHeight)
+            g.renderTooltip(font, Component.literal(activeView() == null ? "Close workspace" : "Close current module view"), mx, my);
     }
 
     private int compactRailBottom() {
