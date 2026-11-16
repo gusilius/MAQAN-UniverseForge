@@ -1,6 +1,7 @@
 package dev.worldforge.tests;
 
 import dev.worldforge.troops.ArmyHierarchy;
+import dev.worldforge.troops.CommandDelegation;
 import dev.worldforge.troops.Squads;
 
 import java.util.List;
