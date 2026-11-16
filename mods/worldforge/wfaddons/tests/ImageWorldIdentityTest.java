@@ -11,6 +11,7 @@ import dev.worldforge.people.NameBank;
 import dev.worldforge.people.RoleDefs;
 import dev.worldforge.people.TerritorialIdentity;
 import dev.worldforge.realms.Statecraft;
+import dev.worldforge.realms.PoliticalIdentitySynchronizer;
 import dev.worldforge.realms.RealmDefs;
 import dev.worldforge.realms.Realms;
 
