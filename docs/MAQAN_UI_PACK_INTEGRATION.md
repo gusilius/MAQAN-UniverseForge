@@ -33,15 +33,18 @@ The 1368×760 composition is the design reference, not a fixed pixel canvas.
 
 This branch adds a reusable responsive layout calculator and unit coverage, then wires compact drawers into `PlatformShellScreen`. The existing desktop dock tree and provider embedding contracts remain intact.
 
-After checking out this branch, import the original pack on Windows with:
+The original concept is available as a self-contained HTML file with all 40 image layers embedded as WebP data URIs and the per-theme 1368×760 coordinates embedded in its `SK` and `MT` objects. It is an asset source only; it is not shipped or executed in Minecraft.
+
+Import the source file into native PNG resources on Windows:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools/import_maqan_ui_pack.ps1 -PackZip "C:\\path\\to\\maqan_ui_pack.zip" -RepoRoot .
+python -m pip install Pillow
+python tools/import_maqan_ui_concept.py --concept-html "C:\\path\\to\\MAQAN — интерфейс из концептов.html" --repo-root .
 ```
 
-The importer validates all 40 required texture files before copying and places `layout.json` beside the MAQAN GUI resources. It intentionally does not copy the HTML prototype.
+The importer validates all four themes and all ten image layers per theme, decodes the embedded WebP images to optimized RGBA PNGs, and writes `assets/maqan/gui/layout.json` with the original per-theme geometry. It does not copy or embed the HTML prototype.
 
-**Asset status:** the source ZIP has been inspected, but the GitHub connector available to this session accepts UTF-8 text blobs/files only and cannot upload the ZIP's binary PNGs. Therefore this branch does not yet contain the 40 PNG assets or the source `layout.json`; the manifest records their exact required names and placement. The visual skin is not considered integrated until those binaries are committed and the native renderer consumes them.
+**Asset status:** the importer is committed, but binary PNGs are generated into the local checkout from the Library source file and are not yet committed to this branch. The visual skin is not considered integrated until all 40 generated PNGs are present and the native renderer consumes the generated layout metadata.
 
 ## Acceptance gates
 
