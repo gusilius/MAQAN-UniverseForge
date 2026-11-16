@@ -1205,7 +1205,7 @@ public class TroopsMod {
                                         .then(Commands.argument("mode", StringArgumentType.word())
                                                 .executes(ctx -> setArmyCommandPolicy(ctx.getSource(),
                                                         IntegerArgumentType.getInteger(ctx, "army"),
-                                                        StringArgumentType.getString(ctx, "mode")))))))
+                                                        StringArgumentType.getString(ctx, "mode"))))))
                         .then(Commands.literal("status")
                                 .then(Commands.literal("squad")
                                         .then(Commands.argument("squad", StringArgumentType.word())
