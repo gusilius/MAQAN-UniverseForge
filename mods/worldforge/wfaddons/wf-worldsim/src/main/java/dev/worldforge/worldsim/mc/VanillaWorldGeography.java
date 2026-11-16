@@ -73,6 +73,7 @@ public final class VanillaWorldGeography {
     /** Called from ChunkEvent.Load; never asks the server for an unloaded chunk. */
     public static synchronized void capture(ServerLevel level, ChunkAccess chunk) {
         if (level == null || chunk == null) return;
+        load(level.getServer());
         String dimension = level.dimension().location().toString();
         ChunkPos pos = chunk.getPos();
         int regionX = Math.floorDiv(pos.x, REGION_CHUNKS);
@@ -261,8 +262,8 @@ public final class VanillaWorldGeography {
         if (previous < 8 || last <= previous) return new int[]{0, 0};
         int regionX = Integer.parseInt(mapId.substring(previous + 1, last));
         int regionZ = Integer.parseInt(mapId.substring(last + 1));
-        return new int[]{regionX * REGION_BLOCKS + localX - REGION_BLOCKS / 2,
-                regionZ * REGION_BLOCKS + localZ - REGION_BLOCKS / 2};
+        return new int[]{regionX * REGION_BLOCKS + localX,
+                regionZ * REGION_BLOCKS + localZ};
     }
 
     private static String mapId(String dimension, int regionX, int regionZ) {
