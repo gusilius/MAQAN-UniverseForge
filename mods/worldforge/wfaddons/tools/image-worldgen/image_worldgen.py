@@ -843,7 +843,7 @@ def partition_provinces_into_regions(realm_provinces: dict[int, list[int]],
             region_count = max(1, math.ceil(len(component) / max(1, target_provinces)))
             seed_pixels = farthest_seeds(
                 [province_meta[pid]["seed"] for pid in component],
-                min(region_count, len(component)), width, height,
+                min(region_count, len(component)), width,
                 seed ^ (realm_id * 0x45D9F3B) ^ (component_index * 0x119DE1F3))
             pid_by_seed = {province_meta[pid]["seed"]: pid for pid in component}
             queue = []
