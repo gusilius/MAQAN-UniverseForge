@@ -1,6 +1,6 @@
 import unittest
 
-from image_worldgen import allocate_counts, select_independent_islands
+from image_worldgen import (allocate_counts, select_independent_islands,\n                            aggregate_realm_regions, classify_realm_scale)
 
 
 class PoliticalDistributionTests(unittest.TestCase):
@@ -39,6 +39,31 @@ class PoliticalDistributionTests(unittest.TestCase):
         selected = select_independent_islands(components, seed=7,
                                               budget=5, minimum_pixels=64)
         self.assertEqual(selected, set())
+
+
+    def test_adjacent_regions_merge_into_connected_larger_realms(self):
+        import numpy as np
+        raster = np.asarray([
+            [0, 0, 1, 1, 2, 2],
+            [0, 0, 1, 1, 2, 2],
+            [0, 0, 1, 1, 2, 2],
+            [0, 0, 1, 1, 2, 2],
+            [3, 3, 3, 3, 2, 2],
+            [3, 3, 3, 3, 2, 2],
+        ], dtype=np.int32).ravel()
+        seeds = {0: 0, 1: 2, 2: 4, 3: 24}
+        result, new_seeds, report = aggregate_realm_regions(
+            raster, seeds, width=6, height=6, seed=424242, minimum_pixels=2)
+        self.assertEqual(len(new_seeds), report["merged_regions"])
+        self.assertLess(report["merged_regions"], report["initial_regions"])
+        self.assertTrue(np.all(result[result >= 0] >= 0))
+        self.assertEqual(set(np.unique(result[result >= 0])), set(new_seeds))
+
+    def test_realm_scale_has_city_state_and_empire_tiers(self):
+        self.assertEqual(classify_realm_scale(100, 10000, True), ("city_state", 1))
+        self.assertEqual(classify_realm_scale(100, 10000), ("tiny", 1))
+        self.assertEqual(classify_realm_scale(1000, 10000), ("medium", 2))
+        self.assertEqual(classify_realm_scale(3000, 10000), ("huge", 3))
 
 
 if __name__ == "__main__":
