@@ -27,6 +27,8 @@ public final class CommandDelegation {
 
     public Collection<Policy> all() { return Collections.unmodifiableCollection(policies.values()); }
 
+    public void clear() { policies.clear(); }
+
     public boolean assign(String squadId, Mode mode, String commanderCharacterId, String objective,
                           double leashBlocks, boolean allowEngagement, boolean allowPursuit,
                           boolean allowRetreat) {
