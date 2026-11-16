@@ -19,6 +19,16 @@ class MaqanUiPackAdaptiveLayoutTest {
     );
 
     @Test
+    void referenceViewportPreservesTheImportedComposition() {
+        var result = MaqanUiPackAdaptiveLayout.calculate(1368, 760, REFERENCE);
+        assertEquals(new MaqanUiPackAdaptiveLayout.Rect(0, 0, 1368, 62), result.get("top"));
+        assertEquals(new MaqanUiPackAdaptiveLayout.Rect(58, 60, 278, 462), result.get("lp"));
+        assertEquals(new MaqanUiPackAdaptiveLayout.Rect(1028, 60, 300, 462), result.get("rp"));
+        assertEquals(new MaqanUiPackAdaptiveLayout.Rect(0, 534, 292, 226), result.get("mm"));
+        assertEquals(new MaqanUiPackAdaptiveLayout.Rect(304, 584, 846, 176), result.get("bot"));
+    }
+
+    @Test
     void desktopKeepsBothSideWindowsAndAnchorsTopAndBottom() {
         var result = MaqanUiPackAdaptiveLayout.calculate(1920, 1080, REFERENCE);
         assertFalse(result.compact());
