@@ -522,10 +522,17 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     components = land_components(analysis_labels, width, height, political_land_mask)
     analysis_seconds = time.perf_counter() - analysis_started
     political_started = time.perf_counter()
-    if not components:
-        raise ValueError("The image contains no classified land.")
-    if sum(map(len, components)) < 32:
-        raise ValueError("The map has too little land for meaningful territory generation.")
+    if not components or sum(map(len, components)) < 32:
+        # Small maps and very sparse early-world profiles must still retain a
+        # viable homeland. Promote the largest real landmass instead of failing
+        # or silently producing a world with no political entities.
+        full_components = land_components(analysis_labels, width, height, full_land_mask)
+        if not full_components or len(full_components[0]) < 32:
+            raise ValueError("The map has too little classified land for territory generation.")
+        fallback = np.asarray(full_components[0], dtype=np.int64)
+        wilderness_mask.ravel()[fallback] = False
+        political_land_mask.ravel()[fallback] = True
+        components = land_components(analysis_labels, width, height, political_land_mask)
 
     # Tiny disconnected map fragments are wilderness, not independent states.
     # A political realm is only seeded from a landmass large enough to support
@@ -843,9 +850,10 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     # Show unclaimed land as a distinct wilderness reserve, not as a hole
     # indistinguishable from ocean. Dense profiles have an empty wilderness mask.
     political_rgb[wilderness_mask] = (104, 111, 83)
-    realm_grid = np.zeros((height, width), dtype=np.int32)
+    realm_lut = np.zeros(int(province_array.max()) + 1, dtype=np.int32)
     for province_id, meta in province_meta.items():
-        realm_grid[province_array == province_id] = meta["realm"] + 1
+        realm_lut[province_id] = meta["realm"] + 1
+    realm_grid = realm_lut[province_array]
     province_edge = np.zeros((height, width), dtype=bool)
     province_edge[:, 1:] |= (province_array[:, 1:] != province_array[:, :-1]) & (province_array[:, 1:] > 0) & (province_array[:, :-1] > 0)
     province_edge[1:, :] |= (province_array[1:, :] != province_array[:-1, :]) & (province_array[1:, :] > 0) & (province_array[:-1, :] > 0)
