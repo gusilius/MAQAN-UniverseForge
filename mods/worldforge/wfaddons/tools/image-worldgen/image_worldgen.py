@@ -13,6 +13,7 @@ import json
 import math
 import random
 import sys
+import time
 import zipfile
 from collections import deque
 from pathlib import Path
@@ -209,6 +210,7 @@ def create_test_image(path: Path) -> None:
 
 def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: int = 64,
                   provinces_per_realm: int = 32, blocks_per_pixel: int = 16) -> dict:
+    started_at = time.perf_counter()
     image = Image.open(input_path).convert("RGB")
     width, height, classes, analysis_report = png_pixels(image)
     components = land_components(classes, width, height)
@@ -321,7 +323,10 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
             "id": f"realm_{rid + 1:02d}", "name": realm_names[rid], "ruler": "",
             "color": color_for(rid + 1), "titles": [county_key], "overlord": None,
             "relation": "independent", "subjects": [],
-            "area_blocks": total_area * blocks_per_pixel * blocks_per_pixel, "props": {},
+            "area_blocks": total_area * blocks_per_pixel * blocks_per_pixel, "props": {
+                **government_by_realm[rid], "political_seed": seed ^ rid,
+                "territorial_model": "connected_land_partition",
+            },
         })
 
         def add_settlement(kind: str, point: int, serial: int) -> None:
