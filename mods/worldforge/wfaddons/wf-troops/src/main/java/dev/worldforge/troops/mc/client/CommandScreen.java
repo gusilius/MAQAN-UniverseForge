@@ -48,6 +48,12 @@ public final class CommandScreen extends Screen {
     private boolean professionalToolsOpen;
     // Тактические способности и приказы доступны только по отдельной иконке.
     private boolean unitToolsOpen;
+    // Floating command panels are user-positionable; -1 keeps the adaptive default anchor.
+    private int professionalPanelX = -1, professionalPanelY = -1;
+    private int unitToolsPanelX = -1, unitToolsPanelY = -1;
+    private boolean floatingPanelDrag;
+    private int floatingPanelKind = -1;
+    private double floatingPanelOffsetX, floatingPanelOffsetY;
     private boolean workAreaDrag;
     private int workMode = -1;
     private int workOverlay = 2;
@@ -389,11 +395,44 @@ public final class CommandScreen extends Screen {
 
     private int[] unitToolsBounds() {
         int[] console = skinRect("bot");
-        int x = console == null ? width - 202 : console[0] + 10;
-        int y = console == null ? height - 112 : console[1] - 98;
-        if (x + 194 > width - 4) x = Math.max(4, width - 198);
-        if (y < 4) y = 4;
+        int x = unitToolsPanelX >= 0 ? unitToolsPanelX : console == null ? width - 202 : console[0] + 10;
+        int y = unitToolsPanelY >= 0 ? unitToolsPanelY : console == null ? height - 112 : console[1] - 98;
+        x = Math.max(4, Math.min(width - 198, x));
+        y = Math.max(4, Math.min(height - 98, y));
         return new int[]{x, y, 194, 94};
+    }
+
+    private boolean beginFloatingPanelDrag(double px, double py) {
+        if (unitToolsOpen) {
+            int[] r = unitToolsBounds();
+            if (px >= r[0] && px < r[0] + r[2] && py >= r[1] && py < r[1] + 14) {
+                floatingPanelDrag = true; floatingPanelKind = 1;
+                floatingPanelOffsetX = px - r[0]; floatingPanelOffsetY = py - r[1];
+                return true;
+            }
+        }
+        if (professionalToolsOpen) {
+            int[] r = professionalPanelBounds();
+            if (px >= r[0] && px < r[0] + r[2] && py >= r[1] && py < r[1] + 14) {
+                floatingPanelDrag = true; floatingPanelKind = 0;
+                floatingPanelOffsetX = px - r[0]; floatingPanelOffsetY = py - r[1];
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void moveFloatingPanel(double px, double py) {
+        if (!floatingPanelDrag) return;
+        if (floatingPanelKind == 1) {
+            unitToolsPanelX = (int) Math.round(px - floatingPanelOffsetX);
+            unitToolsPanelY = (int) Math.round(py - floatingPanelOffsetY);
+            int[] r = unitToolsBounds(); unitToolsPanelX = r[0]; unitToolsPanelY = r[1];
+        } else if (floatingPanelKind == 0) {
+            professionalPanelX = (int) Math.round(px - floatingPanelOffsetX);
+            professionalPanelY = (int) Math.round(py - floatingPanelOffsetY);
+            int[] r = professionalPanelBounds(); professionalPanelX = r[0]; professionalPanelY = r[1];
+        }
     }
 
     private boolean inUnitToolsPanel(double px, double py) {
@@ -438,7 +477,8 @@ public final class CommandScreen extends Screen {
         }
         g.fill(r[0], r[1], r[0] + r[2], r[1] + r[3], 0xEE101820);
         g.fill(r[0], r[1], r[0] + r[2], r[1] + 1, 0xFF8A7040);
-        g.drawString(font, (troops.size() == 1 ? "ЮНИТ" : "ГРУППА") + " · " + troops.size(), r[0] + 6, r[1] + 4, 0xFFE6C875, false);
+        g.fill(r[0], r[1], r[0] + r[2], r[1] + 14, 0xCC202B38);
+        g.drawString(font, (troops.size() == 1 ? "ЮНИТ" : "ГРУППА") + " · " + troops.size() + "   ⋮⋮", r[0] + 6, r[1] + 4, 0xFFE6C875, false);
         String traits;
         if (troops.size() == 1 && troops.get(0).def() != null) {
             TroopEntity unit = troops.get(0);
@@ -525,10 +565,10 @@ public final class CommandScreen extends Screen {
 
     private int[] professionalPanelBounds() {
         int[] console = skinRect("bot");
-        int x = console == null ? width - 148 : console[0] + console[2] - 148;
-        int y = console == null ? height - 64 : console[1] + 30;
-        if (x + 140 > width - 4) x = Math.max(4, width - 144);
-        if (y + 46 > height - 4) y = Math.max(4, height - 50);
+        int x = professionalPanelX >= 0 ? professionalPanelX : console == null ? width - 148 : console[0] + console[2] - 148;
+        int y = professionalPanelY >= 0 ? professionalPanelY : console == null ? height - 64 : console[1] + 30;
+        x = Math.max(4, Math.min(width - 144, x));
+        y = Math.max(4, Math.min(height - 50, y));
         return new int[]{x, y, 140, 46};
     }
 
@@ -550,7 +590,8 @@ public final class CommandScreen extends Screen {
         int[] r = professionalPanelBounds();
         g.fill(r[0], r[1], r[0] + r[2], r[1] + r[3], 0xEE101820);
         g.fill(r[0], r[1], r[0] + r[2], r[1] + 1, 0xFF8A7040);
-        g.drawString(font, "РАБОЧИЕ ЗАДАЧИ", r[0] + 5, r[1] + 4, 0xFFE6C875, false);
+        g.fill(r[0], r[1], r[0] + r[2], r[1] + 14, 0xCC202B38);
+        g.drawString(font, "РАБОЧИЕ ЗАДАЧИ   ⋮⋮", r[0] + 5, r[1] + 4, 0xFFE6C875, false);
     }
 
     private List<Btn> buttons() {
@@ -883,6 +924,7 @@ public final class CommandScreen extends Screen {
         if (button == 0) {
             for (Btn b : buttons()) if (b.hit(x, y)) { b.run().run(); return true; }
             if (buildOpen && inBuildPanel(x, y)) { panelClick(x, y); return true; }
+            if (beginFloatingPanelDrag(x, y)) return true;
             if (inProfessionalPanel(x, y) || inUnitToolsPanel(x, y)) return true;
             if (inSelPanel(x, y)) return true;
             if (embeddedInMaqan && !inWorkspaceViewport(x, y)) return true;
@@ -947,6 +989,7 @@ public final class CommandScreen extends Screen {
     @Override
     public boolean mouseReleased(double x, double y, int button) {
         mx = x; my = y;
+        if (button == 0 && floatingPanelDrag) { moveFloatingPanel(x, y); floatingPanelDrag = false; floatingPanelKind = -1; return true; }
         if (button == 2) midDrag = false;
         if (button == 0) zoomDragging = false;
         if (button == 0 && dragging) {
@@ -986,6 +1029,7 @@ public final class CommandScreen extends Screen {
     @Override
     public boolean mouseDragged(double x, double y, int button, double dx, double dy) {
         mx = x; my = y;
+        if (button == 0 && floatingPanelDrag) { moveFloatingPanel(x, y); return true; }
         if (button == 2 && (!embeddedInMaqan || inWorkspaceViewport(x, y)))
             CommandMode.RIG.rotate(dx * 0.35, dy * 0.25);
         if (button == 0 && zoomDragging) setZoomFromMouse(x);
