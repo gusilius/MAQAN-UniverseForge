@@ -14,6 +14,7 @@ import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.CharacterAuthority;
 import dev.worldforge.mod.identity.WorldId;
 import dev.worldforge.people.Courts;
+import dev.worldforge.people.TerritorialIdentity;
 import dev.worldforge.people.NameBank;
 import dev.worldforge.people.PopulationSimulation;
 import dev.worldforge.people.PopulationWorldBaseline;
