@@ -123,14 +123,14 @@ public final class CommandScreen extends Screen {
     }
 
     private List<String> selectedEntityIds(String entityId) {
-        if (entityId == null || !entityId.startsWith("selection:")) return List.of();
+        if (minecraft.level == null || entityId == null || !entityId.startsWith("selection:")) return List.of();
+        Set<String> requested = new HashSet<>(List.of(entityId.substring("selection:".length()).split(",")));
         List<String> result = new ArrayList<>();
-        for (String id : entityId.substring("selection:".length()).split(",")) {
-            try {
-                java.util.UUID uuid = java.util.UUID.fromString(id);
-                if (minecraft.level != null && minecraft.level.getEntity(uuid) instanceof net.minecraft.world.entity.LivingEntity living
-                        && living.isAlive()) result.add(id);
-            } catch (IllegalArgumentException ignored) { }
+        for (net.minecraft.world.entity.Entity entity : minecraft.level.entitiesForRendering()) {
+            if (entity instanceof net.minecraft.world.entity.LivingEntity living && living.isAlive()) {
+                String id = entity.getUUID().toString();
+                if (requested.contains(id)) result.add(id);
+            }
         }
         return result;
     }
@@ -138,12 +138,10 @@ public final class CommandScreen extends Screen {
     private List<net.minecraft.world.entity.LivingEntity> selectedEntities(String entityId) {
         List<net.minecraft.world.entity.LivingEntity> result = new ArrayList<>();
         if (minecraft.level == null) return result;
-        for (String id : selectedEntityIds(entityId)) {
-            try {
-                net.minecraft.world.entity.Entity entity = minecraft.level.getEntity(java.util.UUID.fromString(id));
-                if (entity instanceof net.minecraft.world.entity.LivingEntity living) result.add(living);
-            } catch (IllegalArgumentException ignored) { }
-        }
+        Set<String> selected = new HashSet<>(selectedEntityIds(entityId));
+        for (net.minecraft.world.entity.Entity entity : minecraft.level.entitiesForRendering())
+            if (entity instanceof net.minecraft.world.entity.LivingEntity living
+                    && living.isAlive() && selected.contains(entity.getUUID().toString())) result.add(living);
         return result;
     }
 
