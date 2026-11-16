@@ -24,7 +24,7 @@ import numpy as np
 
 from image_map_analysis import CLASSES as ANALYSIS_CLASSES, classify, make_heightfield
 
-GENERATOR_VERSION = "maqan-image-blueprint/0.6.0"
+GENERATOR_VERSION = "maqan-image-blueprint/0.7.0"
 BIOMES = [
     {"index": 0, "key": "deep_ocean", "color": "#315f85", "candidates": ["minecraft:deep_ocean", "minecraft:ocean"]},
     {"index": 1, "key": "plains", "color": "#dac78f", "candidates": ["minecraft:plains"]},
@@ -635,6 +635,109 @@ def split_disconnected_provinces(province_labels: np.ndarray,
     return flat, province_meta, realm_provinces, cells_by_realm
 
 
+def apply_province_aligned_wilderness(province_labels: np.ndarray,
+                                        province_meta: dict[int, dict],
+                                        realm_provinces: dict[int, list[int]],
+                                        wilderness_candidates: np.ndarray,
+                                        width: int, height: int) -> tuple[np.ndarray, dict, dict, dict, np.ndarray, dict]:
+    """Reserve whole provinces as wilderness; never fracture a political holding.
+
+    The coherent pixel-level reserve is reduced to a province priority map. A
+    realm's first province is its protected capital core, so every generated
+    polity retains a meaningful connected territory at every settlement level.
+    """
+    flat = np.asarray(province_labels, dtype=np.uint32).reshape(-1).copy()
+    candidates = np.asarray(wilderness_candidates, dtype=bool).reshape((height, width))
+    valid = np.flatnonzero(flat > 0)
+    if not valid.size:
+        return flat, province_meta, realm_provinces, {}, candidates, {
+            "selected_provinces": 0, "protected_capital_provinces": 0,
+            "target_pixels": int(candidates.sum()), "actual_pixels": int(candidates.sum()),
+            "model": "province-aligned-coherent-reserves-v1",
+        }
+
+    order = valid[np.argsort(flat[valid], kind="stable")]
+    ids, counts = np.unique(flat[valid], return_counts=True)
+    offsets = np.concatenate(([0], np.cumsum(counts)))
+    protected = {int(pids[0]) for pids in realm_provinces.values() if pids}
+    target_pixels = int(candidates.sum())
+    unassigned_reserve = candidates.ravel().copy()
+    unassigned_reserve[valid] = False
+    target_from_provinces = max(0, target_pixels - int(unassigned_reserve.sum()))
+
+    ranked = []
+    cells_by_id = {}
+    for index, raw_pid in enumerate(ids):
+        pid = int(raw_pid)
+        cells = order[offsets[index]:offsets[index + 1]]
+        cells_by_id[pid] = cells
+        if pid in protected:
+            continue
+        priority = float(candidates.ravel()[cells].mean())
+        if priority > 0.0:
+            ranked.append((-priority, -int(counts[index]), pid, cells))
+    ranked.sort(key=lambda item: (item[0], item[1], item[2]))
+
+    selected: set[int] = set()
+    selected_pixels = 0
+    remaining = target_from_provinces
+    skipped = []
+    for negative_priority, negative_area, pid, cells in ranked:
+        area = int(cells.size)
+        if area <= remaining:
+            selected.add(pid)
+            selected_pixels += area
+            remaining -= area
+        else:
+            skipped.append((area, negative_priority, pid, cells))
+    # If the remaining gap is smaller than every available province, take one
+    # only when it reduces the absolute target error rather than overshooting
+    # by an entire additional target-sized reserve.
+    if remaining > 0 and skipped:
+        area, negative_priority, pid, cells = min(
+            skipped, key=lambda item: (abs(item[0] - remaining), item[1], item[2]))
+        if area < 2 * remaining:
+            selected.add(pid)
+            selected_pixels += area
+            remaining -= area
+
+    final_wilderness = candidates.copy()
+    final_wilderness.ravel()[valid] = False
+    for pid in selected:
+        cells = cells_by_id[pid]
+        flat[cells] = 0
+        final_wilderness.ravel()[cells] = True
+        province_meta.pop(pid, None)
+
+    filtered_realms = {
+        int(rid): [int(pid) for pid in pids if int(pid) not in selected]
+        for rid, pids in realm_provinces.items()
+    }
+    filtered_realms = {rid: pids for rid, pids in filtered_realms.items() if pids}
+    cells_by_realm: dict[int, list[int]] = {rid: [] for rid in filtered_realms}
+    for index, raw_pid in enumerate(ids):
+        pid = int(raw_pid)
+        if pid in selected:
+            continue
+        cells = cells_by_id[pid]
+        meta = province_meta[pid]
+        meta["area"] = int(cells.size)
+        cells_by_realm.setdefault(int(meta["realm"]), []).extend(cells.tolist())
+
+    actual_pixels = int(final_wilderness.sum())
+    return flat, province_meta, filtered_realms, cells_by_realm, final_wilderness, {
+        "model": "province-aligned-coherent-reserves-v1",
+        "target_pixels": target_pixels,
+        "target_from_provinces": target_from_provinces,
+        "actual_pixels": actual_pixels,
+        "selected_provinces": len(selected),
+        "protected_capital_provinces": len(protected),
+        "target_error_pixels": actual_pixels - target_pixels,
+        "target_error_percent_of_land": round(
+            100.0 * (actual_pixels - target_pixels) / max(1, int(np.count_nonzero(flat >= 0))), 4),
+    }
+
+
 def classify_realm_scale(area_pixels: int, total_land_pixels: int,
                          independent_island: bool = False) -> tuple[str, int]:
     """Neutral scale/tier metadata; political identity is assigned by another mod."""
@@ -891,14 +994,19 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
             island_province_count += 1
             next_province += 1
 
-    # Keep each province seed as a settled core, then apply wilderness. If a
-    # reserve cuts a province, preserve each remaining connected piece as its
-    # own province under the same realm rather than emitting broken provinces.
-    for meta in province_meta.values():
-        wilderness_mask.ravel()[int(meta["seed"])] = False
-    province_labels[wilderness_mask.ravel()] = 0
-    province_labels, province_meta, realm_provinces, realm_cells_by_id = split_disconnected_provinces(
-        province_labels, province_meta, realm_provinces, width, height)
+    # Formation scale is measured from the complete political skeleton,
+    # before settlement reserves can hide any province from the map.
+    realm_formation_area_pixels = {
+        rid: sum(province_meta[pid]["area"] for pid in pids)
+        for rid, pids in realm_provinces.items()
+    }
+    # Snap coherent terrain-biased wilderness candidates to whole province
+    # boundaries. This protects capital cores and prevents thousands of tiny
+    # disconnected province fragments on sparse settlement profiles.
+    (province_labels, province_meta, realm_provinces, realm_cells_by_id,
+     wilderness_mask, wilderness_report) = apply_province_aligned_wilderness(
+        province_labels, province_meta, realm_provinces, wilderness_mask,
+        width, height)
     unclaimed_land_pixels = int(wilderness_mask.sum())
     political_land_mask = full_land_mask & ~wilderness_mask
 
@@ -931,7 +1039,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     political_seconds = time.perf_counter() - political_started
     realm_scale_metadata = {
         rid: classify_realm_scale(
-            sum(province_meta[pid]["area"] for pid in pids), land_count,
+            realm_formation_area_pixels.get(rid, 0), land_count,
             any(province_meta[pid].get("island_realm", False) for pid in pids))
         for rid, pids in realm_provinces.items()
     }
@@ -975,7 +1083,10 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
             "area_blocks": total_area * blocks_per_pixel * blocks_per_pixel,
             "area_pct_of_land": 100.0 * total_area / land_count,
             "children": pids, "neighbors": sorted(county_id_for_realm[n] for n in realm_neighbors[rid]),
-            "props": {"formation_scale": realm_scale_metadata[rid][0], "identity_status": "unassigned"},
+            "props": {"formation_scale": realm_scale_metadata[rid][0],
+                      "formation_area_pixels": realm_formation_area_pixels.get(rid, 0),
+                      "formation_area_pct_of_land": round(100.0 * realm_formation_area_pixels.get(rid, 0) / max(1, land_count), 4),
+                      "identity_status": "unassigned"},
         })
         realms.append({
             "id": f"realm_{rid + 1:02d}", "name": "", "ruler": "",
@@ -983,6 +1094,8 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
             "relation": "independent", "subjects": [],
             "area_blocks": total_area * blocks_per_pixel * blocks_per_pixel, "props": {
                 "formation_scale": realm_scale_metadata[rid][0],
+                "formation_area_pixels": realm_formation_area_pixels.get(rid, 0),
+                "formation_area_pct_of_land": round(100.0 * realm_formation_area_pixels.get(rid, 0) / max(1, land_count), 4),
                 "title_tier": realm_scale_metadata[rid][1],
                 "area_pct_of_land": round(100.0 * total_area / max(1, land_count), 4),
                 "province_count": len(pids), "identity_status": "unassigned",
@@ -1110,9 +1223,10 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         "generation_policy": {
             "chunk_materialization": "deferred",
             "territory_partition": "terrain-aware-organic-watershed",
-            "partition_numba_accelerated": False,
+            "partition_numba_accelerated": NUMBA_ACCELERATED,
             "boundary_model": "coherent-noise-plus-biome-edge-watershed",
-            "wilderness_model": "coherent-terrain-biased-reserves",
+            "wilderness_model": wilderness_report["model"],
+            "wilderness_alignment": wilderness_report,
             "major_land_components": len(major_components),
             "minor_land_components": len(minor_components),
             "initial_seeded_realms": aggregation_report["initial_regions"],
