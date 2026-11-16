@@ -10,7 +10,8 @@ import com.mojang.blaze3d.vertex.PoseStack;
 
 /** Солдат выглядит как игрок (модель Стива) с оружием и бронёй в руках и на теле. Только клиент. */
 public class TroopRenderer extends HumanoidMobRenderer<TroopEntity, HumanoidModel<TroopEntity>> {
-    private static final ResourceLocation TEXTURE = new ResourceLocation("textures/entity/steve.png");
+    private static final ResourceLocation STEVE = new ResourceLocation("textures/entity/steve.png");
+    private static final ResourceLocation ALEX = new ResourceLocation("textures/entity/alex.png");
 
     public TroopRenderer(EntityRendererProvider.Context ctx) {
         super(ctx, new HumanoidModel<>(ctx.bakeLayer(ModelLayers.PLAYER)), 0.5f);
@@ -33,5 +34,9 @@ public class TroopRenderer extends HumanoidMobRenderer<TroopEntity, HumanoidMode
     }
 
     @Override
-    public ResourceLocation getTextureLocation(TroopEntity e) { return TEXTURE; }
+    public ResourceLocation getTextureLocation(TroopEntity e) {
+        String identity = e.syncedCharacterId();
+        if (identity == null || identity.isBlank()) identity = e.getUUID().toString();
+        return (identity.hashCode() & 1) == 0 ? STEVE : ALEX;
+    }
 }
