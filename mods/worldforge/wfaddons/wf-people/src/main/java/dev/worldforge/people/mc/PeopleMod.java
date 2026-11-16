@@ -279,6 +279,13 @@ public class PeopleMod {
             // normal Courts.ensure bootstrap because this property is absent by default.
             boolean emptyCampaignBootstrap = Boolean.getBoolean("worldforge.campaign.empty-bootstrap");
             TitleEditor identityEditor = m.titles == null ? null : EditorManager.editorFor(m);
+            if (m.titles != null && !emptyCampaignBootstrap && identityEditor != null) {
+                TerritorialIdentity.DemographicResult demographics =
+                        TerritorialIdentity.ensureDemographics(m.name, m.titles, identityEditor, seed(m));
+                if (demographics.realmsClassified() > 0)
+                    LOGGER.info("wf_people: origin-backed demographics map='{}' realms={} rootRaces={}",
+                            m.name, demographics.realmsClassified(), demographics.distinctRaces());
+            }
             int created = m.titles == null || emptyCampaignBootstrap ? 0
                     : Courts.ensure(m.titles, identityEditor, reg, ROLES, NAMES, seed(m), YEAR);
             if (m.titles != null && !emptyCampaignBootstrap && identityEditor != null) {
