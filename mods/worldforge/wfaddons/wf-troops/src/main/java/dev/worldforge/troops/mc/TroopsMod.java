@@ -23,6 +23,7 @@ import dev.worldforge.troops.MixedOrders;
 import dev.worldforge.troops.Wars;
 import dev.worldforge.troops.Squads;
 import dev.worldforge.troops.ArmyHierarchy;
+import dev.worldforge.troops.CommandDelegation;
 import dev.worldforge.troops.MilitaryDeathLedger;
 import dev.worldforge.troops.OperationalSupply;
 import dev.worldforge.troops.TroopDefs;
