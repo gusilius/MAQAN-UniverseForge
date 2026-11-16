@@ -44,6 +44,12 @@ class WorkspaceRuntimeTest {
         assertTrue(WorkspaceRuntime.executeAction("wf_people.inspect", selection));
         assertEquals(1, executions.get());
         assertFalse(WorkspaceRuntime.executeAction("wf_people.inspect", null));
+
+        PlatformSelectionContext.publish("wf_people", "person-2", "CHARACTER",
+                "Boromir", "middle-earth", "Captain of Gondor");
+        assertFalse(WorkspaceRuntime.executeAction("wf_people.inspect", selection),
+                "An action opened for an old selection must not execute against stale state");
+        assertEquals(1, executions.get());
     }
 
     @Test
