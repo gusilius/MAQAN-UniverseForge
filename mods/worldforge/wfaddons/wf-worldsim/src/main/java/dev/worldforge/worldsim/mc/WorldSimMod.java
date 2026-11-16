@@ -143,6 +143,7 @@ public final class WorldSimMod {
 
     public WorldSimMod() {
         MinecraftForge.EVENT_BUS.register(this);
+        MinecraftForge.EVENT_BUS.register(new VanillaWorldGeography());
         WorldForgeApi.events().addListener(item -> {
             recordChronicleEvent(item);
             publishPlatformTimelineEvent(item);
@@ -183,6 +184,7 @@ public final class WorldSimMod {
         HISTORICAL_CHRONICLE.setStartingYear(WorldForgeApi.clock().startYear);
         publishObservers(event.getServer());
         loadState(event.getServer());
+        VanillaWorldGeography.load(event.getServer());
         // Backfill the book from the persisted canonical journal. This also migrates
         // worlds saved before the chronicle projection existed; seq-based identities
         // make replay safe when the saved book already contains some of these events.
@@ -202,7 +204,10 @@ public final class WorldSimMod {
         emergentPeopleProgress = null;
         PROFILER.setGauge("worldsim.compute.busy", 0);
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
-        if (server != null) saveState(server);
+        if (server != null) {
+            VanillaWorldGeography.persist(server);
+            saveState(server);
+        }
         campaignRunning = false;
         WorldForgeApi.clock().setSimulationTickMultiplier(1);
         releaseCampaignChunks(server);
@@ -836,6 +841,10 @@ public final class WorldSimMod {
         // is still a valid source of terrain, biome and river evidence for a future map-first world.
         for (MapData map : WorldForgeMod.loadedMaps().values())
             geography.add(GSON.toJsonTree(MapGeography.describe(map)));
+        // Ordinary Minecraft worldgen contributes only already-observed chunks.
+        // These samples share the exact GeographicMap contract consumed by Rust.
+        for (var vanillaRegion : VanillaWorldGeography.snapshot())
+            geography.add(vanillaRegion);
         Set<String> threatenedRealms = new HashSet<>();
         for (MapData map : WorldForgeMod.loadedMaps().values()) {
             if (map.titles == null) continue;
