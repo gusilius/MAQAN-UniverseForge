@@ -3,6 +3,7 @@ package dev.maqan.platform.client;
 import net.minecraft.world.entity.Entity;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Function;
 
 /**
@@ -24,7 +25,7 @@ public final class PlatformSelectionContext {
     ) {}
 
     private static volatile Selection current;
-    private static final Map<String, Function<String, Entity>> LIVE_ENTITY_RESOLVERS = new ConcurrentHashMap<>();
+    private static final Map<String, CopyOnWriteArrayList<Function<String, Entity>>> LIVE_ENTITY_RESOLVERS = new ConcurrentHashMap<>();
     private static long revision;
 
     private PlatformSelectionContext() {}
@@ -93,7 +94,8 @@ public final class PlatformSelectionContext {
     public static void registerLiveEntityResolver(String providerId, Function<String, Entity> resolver) {
         String provider = clean(providerId);
         if (provider.isBlank() || resolver == null) return;
-        LIVE_ENTITY_RESOLVERS.put(provider, resolver);
+        LIVE_ENTITY_RESOLVERS.computeIfAbsent(provider, ignored -> new CopyOnWriteArrayList<>())
+                .addIfAbsent(resolver);
     }
 
     public static void unregisterLiveEntityResolver(String providerId) {
@@ -104,10 +106,18 @@ public final class PlatformSelectionContext {
     public static Entity resolveLiveEntity(Selection selection) {
         if (selection == null) return null;
         if (selection.previewEntity() != null) return selection.previewEntity();
-        Function<String, Entity> resolver = LIVE_ENTITY_RESOLVERS.get(selection.providerId());
-        if (resolver == null) return null;
-        try { return resolver.apply(selection.entityId()); }
-        catch (RuntimeException ignored) { return null; }
+        CopyOnWriteArrayList<Function<String, Entity>> resolvers =
+                LIVE_ENTITY_RESOLVERS.get(selection.providerId());
+        if (resolvers == null) return null;
+        for (Function<String, Entity> resolver : resolvers) {
+            try {
+                Entity resolved = resolver.apply(selection.entityId());
+                if (resolved != null) return resolved;
+            } catch (RuntimeException ignored) {
+                // A provider may be unloading; continue to the next independent resolver.
+            }
+        }
+        return null;
     }
 
     public static Selection current() {
