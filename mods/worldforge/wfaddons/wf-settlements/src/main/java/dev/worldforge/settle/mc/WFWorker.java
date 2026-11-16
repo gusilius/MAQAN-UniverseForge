@@ -701,7 +701,10 @@ public class WFWorker extends PathfinderMob {
             if (resource == null || !colony.s.defs.resourceNames.containsKey(resource)) resource = "stone";
             if (colony.s.amount(resource) + 1 > colony.s.capacity(resource)) {
                 Worker resident = colony.s.worker(worker.workerId);
-                if (resident != null) colony.s.updateWorker(resident, current -> current.status = "склад заполнен: " + resource);
+                final String resourceName = resource;
+                if (resident != null) {
+                    colony.s.updateWorker(resident, current -> current.status = "склад заполнен: " + resourceName);
+                }
                 return false;
             }
             if (!level.destroyBlock(pos, false, worker)) return false;
