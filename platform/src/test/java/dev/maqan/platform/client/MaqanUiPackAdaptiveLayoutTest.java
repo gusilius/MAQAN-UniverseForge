@@ -51,6 +51,27 @@ class MaqanUiPackAdaptiveLayoutTest {
     }
 
     @Test
+    void desktopContentViewportFitsBetweenSideWindowsAndAboveBottomDock() {
+        var layout = MaqanUiPackAdaptiveLayout.calculate(1368, 760, REFERENCE);
+        var viewport = MaqanUiPackAdaptiveLayout.contentViewport(layout, 8);
+        assertNotNull(viewport);
+        assertEquals(344, viewport.x());
+        assertEquals(70, viewport.y());
+        assertEquals(668, viewport.width());
+        assertEquals(448, viewport.height());
+        assertTrue(viewport.x() >= layout.get("lp").right());
+        assertTrue(viewport.right() <= layout.get("rp").x());
+        assertTrue(viewport.bottom() <= layout.get("mm").y());
+        assertTrue(viewport.bottom() <= layout.get("bot").y());
+    }
+
+    @Test
+    void compactLayoutHasNoDesktopContentViewport() {
+        var layout = MaqanUiPackAdaptiveLayout.calculate(800, 700, REFERENCE);
+        assertNull(MaqanUiPackAdaptiveLayout.contentViewport(layout, 8));
+    }
+
+    @Test
     void compactLayoutReplacesSideWindowsWithDrawerSpace() {
         var result = MaqanUiPackAdaptiveLayout.calculate(800, 700, REFERENCE);
         assertTrue(result.compact());
