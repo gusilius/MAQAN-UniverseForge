@@ -15,6 +15,13 @@ public final class PlatformWorkspaceBridge {
 
     public static void publish(String providerId, String entityId, String entityType,
                                String displayName, String summary) {
+        publish(providerId, entityId, entityType, displayName, summary, null);
+    }
+
+    /** Optional live-entity preview; the Platform uses the entity's own renderer and layers. */
+    public static void publish(String providerId, String entityId, String entityType,
+                               String displayName, String summary,
+                               net.minecraft.world.entity.Entity previewEntity) {
         if (entityId == null || entityId.isBlank()) {
             clear(providerId);
             return;
@@ -22,9 +29,9 @@ public final class PlatformWorkspaceBridge {
         try {
             Class<?> context = Class.forName(CONTEXT);
             context.getMethod("publish", String.class, String.class, String.class,
-                    String.class, String.class, String.class).invoke(null,
+                    String.class, String.class, String.class, net.minecraft.world.entity.Entity.class).invoke(null,
                     clean(providerId), entityId, clean(entityType), clean(displayName),
-                    worldId(), clean(summary));
+                    worldId(), clean(summary), previewEntity);
         } catch (ReflectiveOperationException | LinkageError ignored) {
             // The Platform is optional; domain screens must keep working without it.
         }
