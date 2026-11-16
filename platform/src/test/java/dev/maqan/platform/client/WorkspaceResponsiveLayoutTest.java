@@ -33,6 +33,24 @@ class WorkspaceResponsiveLayoutTest {
     }
 
     @Test
+    void compactWorkspaceReservesPersistentBottomDock() {
+        int width = 720, height = 900, reservedBottom = 176;
+        int dockTop = height - reservedBottom;
+        var canvasOnly = WorkspaceResponsiveLayout.calculate(width, height, null, reservedBottom);
+        var canvas = canvasOnly.rectangles().get("content");
+        assertEquals(dockTop, canvas.y() + canvas.height());
+
+        for (String id : new String[]{"navigation", "inspector", "tools", "timeline"}) {
+            var result = WorkspaceResponsiveLayout.calculate(width, height, id, reservedBottom);
+            var drawer = result.rectangles().get(id);
+            assertNotNull(drawer);
+            assertTrue(drawer.y() + drawer.height() <= dockTop,
+                    id + " drawer must not overlap the persistent bottom dock");
+            assertTrue(drawer.x() + drawer.width() <= width);
+        }
+    }
+
+    @Test
     void timelineDrawerStaysInsideVeryShortViewports() {
         var result = WorkspaceResponsiveLayout.calculate(480, 320, "timeline");
         var drawer = result.rectangles().get("timeline");
