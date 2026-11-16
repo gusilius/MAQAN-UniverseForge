@@ -1,0 +1,73 @@
+package dev.maqan.platform.client;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+/**
+ * Resolution-aware fallback layout for the shared MAQAN workspace.
+ *
+ * <p>At desktop sizes the user's dock tree remains authoritative. On compact
+ * viewports the map becomes the full canvas and one selected panel is shown
+ * as a drawer, preventing minimum-size constraints from crushing the map or
+ * allowing panels to overlap one another.</p>
+ */
+public final class WorkspaceResponsiveLayout {
+    public static final int COMPACT_WIDTH = 840;
+    public static final int COMPACT_HEIGHT = 560;
+
+    public record Result(boolean compact, Map<String, WorkspaceDockTree.Rect> rectangles) {
+        public Result {
+            rectangles = Map.copyOf(rectangles);
+        }
+    }
+
+    private WorkspaceResponsiveLayout() {}
+
+    public static boolean isCompact(int width, int height) {
+        return width < COMPACT_WIDTH || height < COMPACT_HEIGHT;
+    }
+
+    public static Result calculate(int width, int height, String activeDrawer) {
+        int w = Math.max(1, width);
+        int h = Math.max(1, height);
+        boolean compact = isCompact(w, h);
+        Map<String, WorkspaceDockTree.Rect> result = new LinkedHashMap<>();
+        if (!compact) return new Result(false, result);
+
+        int left = Math.min(44, Math.max(0, w - 1));
+        int top = Math.min(35, Math.max(0, h - 1));
+        int canvasWidth = Math.max(1, w - left);
+        int canvasHeight = Math.max(1, h - top);
+        result.put("content", new WorkspaceDockTree.Rect(left, top, canvasWidth, canvasHeight));
+
+        if (activeDrawer == null || activeDrawer.isBlank()
+                || activeDrawer.equals("content")) return new Result(true, result);
+
+        int margin = Math.min(8, Math.max(2, w / 32));
+        int drawerWidth = Math.max(1, Math.min(272, w - left - margin * 2));
+        int availableHeight = Math.max(1, h - top - margin * 2);
+        int drawerHeight;
+        int x;
+        int y;
+        switch (activeDrawer) {
+            case "timeline" -> {
+                drawerHeight = Math.max(1, Math.min(164, availableHeight));
+                x = left + margin;
+                y = h - margin - drawerHeight;
+                drawerWidth = Math.max(1, w - left - margin * 2);
+            }
+            case "inspector", "tools" -> {
+                drawerHeight = Math.max(1, Math.min(availableHeight, Math.max(210, (int) (availableHeight * 0.72))));
+                x = Math.max(left + margin, w - margin - drawerWidth);
+                y = top + margin;
+            }
+            default -> {
+                drawerHeight = Math.max(1, Math.min(availableHeight, Math.max(210, (int) (availableHeight * 0.72))));
+                x = left + margin;
+                y = top + margin;
+            }
+        }
+        result.put(activeDrawer, new WorkspaceDockTree.Rect(x, y, drawerWidth, drawerHeight));
+        return new Result(true, result);
+    }
+}
