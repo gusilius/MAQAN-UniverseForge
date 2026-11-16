@@ -131,9 +131,9 @@ public final class ArmyHierarchyTest {
         check(restoredDelegation.get(second.id).mode() == CommandDelegation.Mode.PLAYER_DIRECT,
                 "disbanded squad delegation policy is pruned");
         CommandDelegation invalidDelegation = new CommandDelegation();
-        invalidDelegation.fromJson("{\\"format\\":\\"wf-command-delegation/1\\",\\"policies\\":["
-                + "{\\"squad\\":\\"bad\\",\\"mode\\":\\"DELEGATED\\",\\"commander\\":\\"\\","
-                + "\\"objective\\":\\"\\",\\"leash\\":-1,\\"engage\\":true}]}" );
+        invalidDelegation.fromJson("{\"format\":\"wf-command-delegation/1\",\"policies\":["
+                + "{\"squad\":\"bad\",\"mode\":\"DELEGATED\",\"commander\":\"\","
+                + "\"objective\":\"\",\"leash\":-1,\"engage\":true}]}");
         check(invalidDelegation.all().isEmpty(),
                 "invalid persisted command policies are rejected instead of granting authority");
 
