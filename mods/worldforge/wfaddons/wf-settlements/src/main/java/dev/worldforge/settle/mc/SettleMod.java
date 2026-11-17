@@ -1074,7 +1074,8 @@ public class SettleMod {
                     c.s.tick(speed * simulationInterval / (double) STEP_TICKS); // preserve elapsed simulation time when interval changes
                     remitCrownTaxes(c);
                     syncPeople(c);
-                    if ((ticks / simulationInterval) % dev.worldforge.mod.MaqanPerformanceConfig.lifeAiIntervalSteps() == 0)
+                    if (c.s.raidIncoming
+                            || (ticks / simulationInterval) % dev.worldforge.mod.MaqanPerformanceConfig.lifeAiIntervalSteps() == 0)
                         runLifeAI(server, c);
                     c.map.tick(c.s, speed);                             // глобальная логистика не зависит от загруженности чанков
                     if (ticks % (simulationInterval * 10L) == 0) { c.s.types = TYPES; String rid = realmOf(c); c.s.refreshType(c.s.workers.size(), rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.terrain(rid), rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.races(rid)); }
