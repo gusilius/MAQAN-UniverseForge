@@ -828,6 +828,17 @@ public final class WorldSimMod {
                     familyHouseOwners.values().stream().filter(owners -> owners.size() > 1).count());
             report.addProperty("duplicate_statecraft_title_names", duplicateNameCount(
                     RealmsMod.POLITICS.titles().stream().map(title -> title.name).toList()));
+            report.addProperty("unnamed_emergent_realms", RealmsMod.emergentRealms().stream()
+                    .filter(realm -> realm.name == null || realm.name.isBlank()
+                            || realm.name.equals(realm.id) || realm.name.startsWith("emergent-")).count());
+            report.addProperty("unnamed_settlements", SettleMod.COLONIES.values().stream()
+                    .filter(colony -> colony == null || colony.s == null || colony.s.name == null
+                            || colony.s.name.isBlank() || colony.s.name.equals(colony.s.id)).count());
+            report.addProperty("unnamed_dynasties", RealmsMod.POLITICS.dynasties().stream()
+                    .filter(dynasty -> dynasty.name == null || dynasty.name.isBlank()
+                            || dynasty.name.equals(dynasty.houseId) || dynasty.name.startsWith("house_")).count());
+            report.addProperty("unnamed_statecraft_titles", RealmsMod.POLITICS.titles().stream()
+                    .filter(title -> title.name == null || title.name.isBlank() || title.name.equals(title.id)).count());
             report.addProperty("political_ownership_samples", campaignMap == null
                     ? VanillaWorldGeography.politicallyOwnedCellCount()
                     : campaignMap.titles == null ? 0 : campaignMap.titles.allTitles().stream()
