@@ -63,6 +63,12 @@ public final class NameBankTest {
         String secondHouse = bank.generateUnique("deep_dwarf", "dwarf", "houses", new Random(1), houseNames);
         check(!firstHouse.equals(secondHouse) && houseNames.size() == 2,
                 "house allocation reserves names across successive generated houses");
+        Set<String> exhaustedLiteralHouses = new HashSet<>(deep.houses);
+        String compoundHouse = bank.generateUnique("deep_dwarf", "dwarf", "houses",
+                new Random(3), exhaustedLiteralHouses);
+        check(compoundHouse.contains(" ") && !compoundHouse.matches(".*\\\\d.*")
+                        && exhaustedLiteralHouses.contains(compoundHouse),
+                "large-world house names expand only through unique combinations of mod-provided fragments");
         if (failures > 0) throw new AssertionError(failures + " name bank tests failed");
         System.out.println("NameBankTest: OK");
     }
