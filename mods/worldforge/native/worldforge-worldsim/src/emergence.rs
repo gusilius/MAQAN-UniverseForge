@@ -573,6 +573,24 @@ mod tests {
     }
 
     #[test]
+    fn newly_discovered_terrain_does_not_receive_retroactive_simulation() {
+        let mut snapshot = request(365 * 100, None);
+        for cell in &mut snapshot.snapshot.geography[0].cells {
+            cell.discovered_year = 100;
+        }
+        let frame = advance(snapshot).unwrap();
+        assert!(!frame.state.bands.is_empty());
+        assert!(frame.state.bands.iter().all(|band| band.origin_year == 100));
+        let before = frame.state.bands.iter().map(|band| (band.id.clone(), band.food_reserve)).collect::<HashMap<_, _>>();
+        assert!(frame.state.bands.iter().all(|band| band.founded_year == 0),
+            "newly discovered communities cannot have historical settlement ages");
+
+        let next = advance(request(365 * 101, Some(frame.state))).unwrap();
+        assert!(next.state.bands.iter().any(|band| before.get(&band.id).is_some_and(|food| *food != band.food_reserve)),
+            "communities begin their normal simulation after discovery");
+    }
+
+    #[test]
     fn maps_loaded_later_receive_their_own_population_bootstrap() {
         let mut first = advance(request(365 * 120, None)).unwrap().state;
         let second_map = GeographicMap { map_id:"late-map".into(), ..map() };
