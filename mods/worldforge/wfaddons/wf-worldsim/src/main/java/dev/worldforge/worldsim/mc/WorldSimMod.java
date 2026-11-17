@@ -767,6 +767,16 @@ public final class WorldSimMod {
                     polities.asList().stream().filter(item -> item.isJsonObject()
                             && canonicalGenerationCount(item.getAsJsonObject()) >= campaignTargetGenerations()).count());
             MapData campaignMap = WorldForgeMod.loadedMaps().get(campaignMapId);
+            report.addProperty("image_map_count", WorldForgeMod.loadedMaps().size());
+            report.addProperty("preauthored_map_realms", WorldForgeMod.loadedMaps().values().stream()
+                    .filter(map -> map != null && map.titles != null)
+                    .mapToLong(map -> map.titles.realms.size()).sum());
+            report.addProperty("preauthored_state_titles", WorldForgeMod.loadedMaps().values().stream()
+                    .filter(map -> map != null && map.titles != null)
+                    .flatMap(map -> map.titles.allTitles().stream())
+                    .filter(title -> title != null && title.tier >= 2).count());
+            report.addProperty("map_geography_only", WorldForgeMod.loadedMaps().values().stream()
+                    .allMatch(map -> map != null && !map.hasPoliticalLayers()));
             String physicalDimension = campaignMap == null
                     ? (VanillaWorldGeography.regionIds().isEmpty() ? "" :
                         VanillaWorldGeography.dimensionFromMapId(VanillaWorldGeography.regionIds().get(0)))
