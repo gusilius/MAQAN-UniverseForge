@@ -187,6 +187,7 @@ public final class VanillaVillageAdapter {
         // Prefer the exact stable village ID on repeat discovery; only then reconcile
         // an independently emerged colony at this physical location.
         Colony colony = SettleMod.colony(id);
+        if (colony == null) colony = SettleMod.colonyByGenesisOperation(operation);
         if (colony == null) colony = SettleMod.nearbyEmergentSettlement(dimension, x, z, 64);
         boolean created = colony == null;
         boolean identityChanged = colony != null && !operation.equals(colony.genesisOperationId);

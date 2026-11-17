@@ -388,6 +388,15 @@ public class SettleMod {
 
     public static Colony colony(String id) { return COLONIES.get(id); }
 
+    /** Exact, durable identity for a vanilla structure even when its colony keeps an emergent ID. */
+    public static Colony colonyByGenesisOperation(String operationId) {
+        if (operationId == null || operationId.isBlank()) return null;
+        return COLONIES.values().stream()
+                .filter(colony -> colony != null && operationId.equals(colony.genesisOperationId))
+                .min(java.util.Comparator.comparing(colony -> colony.s.id))
+                .orElse(null);
+    }
+
     /** Finds an already-adopted vanilla village near a generated founding site. */
     public static Colony nearbyVanillaVillage(String dimension, int x, int z, int radius) {
         return nearbyVanillaVillage(dimension, x, z, radius, java.util.Set.of());
