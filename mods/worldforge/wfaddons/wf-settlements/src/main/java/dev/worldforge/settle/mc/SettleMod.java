@@ -1800,7 +1800,7 @@ public class SettleMod {
                     String uniqueName;
                     if (existingColony != null && map.name.equals(existingColony.sourceMapId)
                             && seed.id().equals(existingColony.blueprintSettlementId)
-                            && existingColony.s != null && !existingColony.s.name.isBlank()) {
+                            && existingColony.s != null && existingColony.s.name != null && !existingColony.s.name.isBlank()) {
                         uniqueName = existingColony.s.name;
                         usedNames.add(uniqueName);
                     } else {
