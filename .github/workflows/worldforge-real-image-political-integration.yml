@@ -13,6 +13,9 @@ on:
       - "mods/worldforge/wfaddons/wf-origins/**"
       - "mods/worldforge/wfaddons/wf-realms/**"
       - "mods/worldforge/wfaddons/wf-settlements/**"
+      - "mods/worldforge/wfaddons/wf-worldsim/**"
+      - "mods/worldforge/wfaddons/wf-realms/src/main/java/**"
+      - "mods/worldforge/native/worldforge-worldsim/**"
       - "mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/TitleData.java"
       - ".github/workflows/worldforge-real-image-political-integration.yml"
   workflow_dispatch:
@@ -74,6 +77,8 @@ jobs:
           try {
             bash tools/test-all.sh ../wfmod
             if ($LASTEXITCODE -ne 0) { throw "Full WorldForge addon suite failed against its isolated test fixture" }
+            bash tools/test-all.sh ../wfmod "$worldmap"
+            if ($LASTEXITCODE -ne 0) { throw "Full addon suite failed against the actual image-generated worldmap" }
             bash tools/test-all.sh ../wfmod "$worldmap" --image-identity-only
             if ($LASTEXITCODE -ne 0) { throw "Actual map identity pipeline failed" }
           } finally {
