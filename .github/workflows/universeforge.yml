@@ -35,7 +35,7 @@ jobs:
   two-world-acceptance:
     name: Build once; test vanilla and image-map servers sequentially
     runs-on: windows-latest
-    timeout-minutes: 180
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
