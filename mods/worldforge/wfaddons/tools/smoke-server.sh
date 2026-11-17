@@ -30,7 +30,7 @@ mkdir -p mods
 cp "$JARS"/*.jar mods/
 cat > server.properties <<'P'
 online-mode=false
-level-type=minecraft\:flat
+level-type=minecraft\:normal
 generate-structures=false
 view-distance=4
 simulation-distance=4
@@ -65,9 +65,9 @@ if ! grep -aqE 'Vanilla geography: regions=[1-9][0-9]*, samples=[1-9][0-9]*' ser
   tail -120 server.log
   exit 5
 fi
-printf '%s\\n' "save-all flush" >> in.txt
+printf '%s\n' "save-all flush" >> in.txt
 sleep 3
-printf '%s\\n' "stop" >> in.txt
+printf '%s\n' "stop" >> in.txt
 for _ in $(seq 1 60); do
   kill -0 "$SERVER_PID" 2>/dev/null || break
   sleep 1
