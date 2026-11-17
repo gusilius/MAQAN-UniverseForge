@@ -41,6 +41,23 @@ public final class NameBankTest {
         try { bank.generate("deep_dwarf", "dwarf", "unknown_category", new Random(1)); }
         catch (IllegalArgumentException expected) { missingRejected = true; }
         check(missingRejected, "unknown name categories fail clearly instead of inventing unrelated names");
+        Set<String> reserved = new HashSet<>(List.of("Подгорная Корона"));
+        check("Подгорная Корона".equals(bank.generateUnique("deep_dwarf", "dwarf", "realms",
+                        new Random(1), new HashSet<>())),
+                "unique name allocation returns an available authoritative pool entry");
+        boolean exhausted = false;
+        try { bank.generateUnique("deep_dwarf", "dwarf", "realms",
+                new Random(1), reserved); }
+        catch (IllegalStateException expected) { exhausted = true; }
+        check(exhausted, "unique realm names fail closed when every configured name is already reserved");
+        Set<String> houseNames = new HashSet<>();
+        String firstHouse = bank.generateUnique("deep_dwarf", "dwarf", "houses", new Random(1), houseNames);
+        boolean secondHouseUnique = false;
+        try { bank.generateUnique("deep_dwarf", "dwarf", "houses", new Random(1), houseNames); }
+        catch (IllegalStateException expected) { secondHouseUnique = true; }
+        check(secondHouseUnique || !firstHouse.equals(bank.generateUnique("deep_dwarf", "dwarf", "houses",
+                        new Random(2), new HashSet<>())),
+                "house allocation is guarded by a world-level reservation set");
         if (failures > 0) throw new AssertionError(failures + " name bank tests failed");
         System.out.println("NameBankTest: OK");
     }
