@@ -182,14 +182,20 @@ public final class VanillaVillageAdapter {
                 .toString().replace("-", "");
         String id = "vanilla_village_" + stableLocationId;
         String operation = "minecraft:village:" + dimension + ":" + x + ":" + z;
-        boolean created = !SettleMod.COLONIES.containsKey(id);
+        // If autonomous emergence already materialized this location, adopt that exact
+        // canonical colony instead of registering a second settlement for the structure.
+        Colony colony = SettleMod.nearbyEmergentSettlement(dimension, x, z, 64);
+        boolean created = colony == null && !SettleMod.COLONIES.containsKey(id);
         // A physical village is a geographic observation, not evidence of pre-authored
         // sovereignty. Political ownership is assigned only by the shared emergence pass.
         String settlementName = generatedVillageName(null, null, id, dimension, x, z);
-        Colony colony;
         try {
-            colony = SettleMod.foundEmergentInMemory(level.getServer(), dimension, id,
-                    settlementName, x, z, operation);
+            if (colony == null) {
+                colony = SettleMod.foundEmergentInMemory(level.getServer(), dimension, id,
+                        settlementName, x, z, operation);
+            } else {
+                colony.genesisOperationId = operation;
+            }
         } catch (RuntimeException failure) {
             SettleMod.LOGGER.warn("wf_settle: could not adopt vanilla village {} at {},{}: {}",
                     structureType, x, z, failure.getMessage());

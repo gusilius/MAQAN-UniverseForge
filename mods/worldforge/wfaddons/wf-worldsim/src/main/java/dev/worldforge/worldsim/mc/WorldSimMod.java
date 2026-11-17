@@ -1104,6 +1104,7 @@ public final class WorldSimMod {
 
         int budget = PEOPLE_MATERIALIZATION_BUDGET_PER_TICK;
         boolean complete = true;
+        boolean settlementBindingsChanged = false;
         for (EmergenceSource source : emergenceSources()) {
             CharacterRegistry registry = source.registry;
             if (registry == null) { complete = false; continue; }
@@ -1163,10 +1164,12 @@ public final class WorldSimMod {
                     Colony colony = SettleMod.colony(settlementId);
                     if (colony == null) {
                         // Adopt an existing vanilla village instead of materializing a duplicate.
-                        colony = SettleMod.nearbyVanillaVillage(settlementDimension, x, z, 64);
+                        colony = SettleMod.nearbyVanillaVillage(settlementDimension, x, z, 64,
+                                emergenceBoundSettlementIds());
                         if (colony != null) {
                             settlementId = colony.s.id;
                             bindPhysicalSettlement(bandId, settlementId);
+                            settlementBindingsChanged = true;
                         } else {
                             settlementId = "emg_" + bandId;
                             colony = SettleMod.foundEmergentInMemory(server,
@@ -1219,6 +1222,10 @@ public final class WorldSimMod {
                 LOGGER.error("wf_worldsim: settlement/Worker batch for source {} could not be durably saved; materialization remains pending", source.id);
                 return false;
             }
+            if (settlementBindingsChanged && !saveState(server)) {
+                LOGGER.error("wf_worldsim: physical settlement identity bindings for source {} could not be durably saved", source.id);
+                return false;
+            }
             if (budget == 0) complete = false;
         }
         if (complete) emergentPeopleProgress = null;
@@ -1235,6 +1242,16 @@ public final class WorldSimMod {
             if (!bound.isBlank()) return bound;
         }
         return "emg_" + bandId;
+    }
+
+    private static Set<String> emergenceBoundSettlementIds() {
+        Set<String> result = new HashSet<>();
+        for (var entry : emergenceBindings.entrySet()) {
+            if (!entry.getKey().startsWith("settlement:") || !entry.getValue().isJsonPrimitive()) continue;
+            String id = entry.getValue().getAsString();
+            if (!id.isBlank()) result.add(id);
+        }
+        return result;
     }
 
     private static void bindPhysicalSettlement(String bandId, String settlementId) {

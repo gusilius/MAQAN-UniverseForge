@@ -406,12 +406,40 @@ public class SettleMod {
 
     /** Finds an already-adopted vanilla village near a generated founding site. */
     public static Colony nearbyVanillaVillage(String dimension, int x, int z, int radius) {
+        return nearbyVanillaVillage(dimension, x, z, radius, java.util.Set.of());
+    }
+
+    public static Colony nearbyVanillaVillage(String dimension, int x, int z, int radius,
+                                               java.util.Set<String> excludedSettlementIds) {
+        if (dimension == null || dimension.isBlank() || radius < 0) return null;
+        java.util.Set<String> excluded = excludedSettlementIds == null ? java.util.Set.of() : excludedSettlementIds;
+        long limit = (long) radius * radius;
+        return COLONIES.values().stream()
+                .filter(colony -> colony != null && dimension.equals(colony.dim)
+                        && !excluded.contains(colony.s.id)
+                        && colony.genesisOperationId != null
+                        && colony.genesisOperationId.startsWith("minecraft:village:"))
+                .filter(colony -> {
+                    long dx = (long) colony.cx - x, dz = (long) colony.cz - z;
+                    return dx * dx + dz * dz <= limit;
+                })
+                .min(java.util.Comparator
+                        .comparingLong((Colony colony) -> {
+                            long dx = (long) colony.cx - x, dz = (long) colony.cz - z;
+                            return dx * dx + dz * dz;
+                        })
+                        .thenComparing(colony -> colony.s.id))
+                .orElse(null);
+    }
+
+    /** Finds an emergent colony when vanilla structure discovery arrives after emergence. */
+    public static Colony nearbyEmergentSettlement(String dimension, int x, int z, int radius) {
         if (dimension == null || dimension.isBlank() || radius < 0) return null;
         long limit = (long) radius * radius;
         return COLONIES.values().stream()
                 .filter(colony -> colony != null && dimension.equals(colony.dim)
                         && colony.genesisOperationId != null
-                        && colony.genesisOperationId.startsWith("minecraft:village:"))
+                        && colony.genesisOperationId.startsWith("worldsim:settlement:"))
                 .filter(colony -> {
                     long dx = (long) colony.cx - x, dz = (long) colony.cz - z;
                     return dx * dx + dz * dz <= limit;
