@@ -435,7 +435,7 @@ PY
 CURRENT_STAGE="save_reload_validation"
 : > in.txt
 : > server-reload.log
-java -Xms1G -Xmx4G -Dworldforge.campaign.acceptance=true \
+java -Xms2G -Xmx8G \
   -XX:+HeapDumpOnOutOfMemoryError \
   -XX:HeapDumpPath="$JAVA_WORK/reload_java_pid%p.hprof" \
   @user_jvm_args.txt @libraries/net/minecraftforge/forge/$FORGE/win_args.txt nogui \
