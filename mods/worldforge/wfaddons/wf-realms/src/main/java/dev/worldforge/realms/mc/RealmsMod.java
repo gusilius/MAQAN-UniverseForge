@@ -683,6 +683,11 @@ public class RealmsMod {
         return true;
     }
 
+    /** Persist Statecraft titles, dynasties and vassal contracts after world simulation reconciliation. */
+    public static synchronized boolean persistPoliticalState(MinecraftServer server) {
+        return server != null && persistPoliticalOnly(server);
+    }
+
     private static void save(MinecraftServer s) {
         if (!persistNow(s)) LOGGER.error("wf_realms: coordinated identity checkpoint remains dirty");
     }

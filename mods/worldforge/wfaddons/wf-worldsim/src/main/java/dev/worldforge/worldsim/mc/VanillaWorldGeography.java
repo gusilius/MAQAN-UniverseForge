@@ -289,20 +289,25 @@ public final class VanillaWorldGeography {
             List<PoliticalSeed> seeds = seedsByWorld == null ? List.of()
                     : seedsByWorld.getOrDefault("vanilla-world:" + address.dimension, List.of());
             for (JsonObject cell : region.cells.values()) {
-                String owner = "";
-                if (!seeds.isEmpty() && cell.has("land") && cell.get("land").getAsBoolean()) {
-                    int x = address.x * REGION_BLOCKS + cell.get("x").getAsInt();
-                    int z = address.z * REGION_BLOCKS + cell.get("z").getAsInt();
-                    long bestDistance = Long.MAX_VALUE;
-                    for (PoliticalSeed seed : seeds) {
-                        if (seed.realmId.isBlank()) continue;
-                        long dx = (long) x - seed.x, dz = (long) z - seed.z;
-                        long distance = dx * dx + dz * dz;
-                        if (distance < bestDistance) { bestDistance = distance; owner = seed.realmId; }
-                    }
-                    if (bestDistance > maxDistanceSquared) owner = "";
-                }
                 String previous = cell.has("owner_realm_id") ? cell.get("owner_realm_id").getAsString() : "";
+                // A temporarily empty simulation frame must not erase the last durable
+                // ownership raster. Recompute borders only when this dimension has seeds.
+                String owner = previous;
+                if (!seeds.isEmpty()) {
+                    owner = "";
+                    if (cell.has("land") && cell.get("land").getAsBoolean()) {
+                        int x = address.x * REGION_BLOCKS + cell.get("x").getAsInt();
+                        int z = address.z * REGION_BLOCKS + cell.get("z").getAsInt();
+                        long bestDistance = Long.MAX_VALUE;
+                        for (PoliticalSeed seed : seeds) {
+                            if (seed.realmId.isBlank()) continue;
+                            long dx = (long) x - seed.x, dz = (long) z - seed.z;
+                            long distance = dx * dx + dz * dz;
+                            if (distance < bestDistance) { bestDistance = distance; owner = seed.realmId; }
+                        }
+                        if (bestDistance > maxDistanceSquared) owner = "";
+                    }
+                }
                 if (!previous.equals(owner)) { cell.addProperty("owner_realm_id", owner); changed = true; }
                 if (!owner.isBlank()) owned++;
             }
