@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Full Forge runtime campaign on the real Planetos geography package.
+# Full Forge runtime campaign on either observed vanilla geography or one image-derived map.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MAP_SOURCE="${1:?usage: autonomous-campaign.sh <vanilla|worldmap> <addon-jar-dir> <output-dir>}"
 JARS="${2:?addon jar directory required}"
 OUTPUT="${3:?output directory required}"
-MAP_ID="${WF_CAMPAIGN_MAP_ID:-planetos}"
+MAP_ID="${WF_CAMPAIGN_MAP_ID:-maqan-world}"
 FORGE="1.20.1-47.3.0"
 VANILLA_CAMPAIGN=0
 if [ "$MAP_SOURCE" = "vanilla" ]; then
@@ -65,6 +65,7 @@ CURRENT_STAGE="world_preparation"
 mkdir -p mods
 cp "$JARS"/*.jar mods/
 if [ "$VANILLA_CAMPAIGN" -eq 0 ]; then
+  [[ "$MAP_ID" =~ ^[a-z0-9._-]+$ ]] || { echo "ERROR: invalid image map id '$MAP_ID'"; exit 2; }
   mkdir -p config/worldforge/maps
   python3 - "$MAP_SOURCE" "config/worldforge/maps/$MAP_ID.worldmap" <<'PY'
 import json, pathlib, sys, zipfile
@@ -93,8 +94,31 @@ print("IMAGE_MAP_PREPARED=1")
 print(f"AUTHORED_REALMS_REMOVED={authored_realms}")
 print(f"GEOGRAPHY_FILES_RETAINED={len(files)}")
 PY
+  # The map dimension belongs to this save, not to the mod's global built-in datapack.
+  # This keeps ordinary vanilla worlds free of phantom/default image maps.
+  mkdir -p "world/datapacks/maqan_worldforge/data/worldforge/dimension"
+  cat > "world/datapacks/maqan_worldforge/pack.mcmeta" <<'PACK'
+{"pack":{"pack_format":15,"description":"MAQAN WorldForge image-derived world dimension"}}
+PACK
+  python3 - "$MAP_ID" <<'PY'
+import json, pathlib, re, sys
+map_id = sys.argv[1]
+if not re.fullmatch(r"[a-z0-9._-]+", map_id):
+    raise SystemExit(f"Invalid WorldForge map resource id: {map_id}")
+dimension = {
+    "type": "worldforge:mapworld",
+    "generator": {"type": "worldforge:image", "map": map_id}
+}
+target = pathlib.Path("world/datapacks/maqan_worldforge/data/worldforge/dimension") / f"{map_id}.json"
+target.write_text(json.dumps(dimension, separators=(",", ":")), encoding="utf-8")
+print(f"IMAGE_WORLD_DIMENSION=worldforge:{map_id}")
+print("IMAGE_WORLD_DATAPACK_COUNT=1")
+PY
 else
+  # Vanilla means the ordinary overworld only: no image-map dimension or map package.
+  rm -rf world/datapacks/maqan_worldforge
   echo "VANILLA_WORLD_SELECTED=1"
+  echo "IMAGE_WORLD_DIMENSION_COUNT=0"
 fi
 echo "eula=true" > eula.txt
 cat > server.properties <<P
