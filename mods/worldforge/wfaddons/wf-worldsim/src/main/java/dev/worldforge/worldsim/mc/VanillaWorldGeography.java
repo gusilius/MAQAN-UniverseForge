@@ -206,6 +206,10 @@ public final class VanillaWorldGeography {
         return (int) REGIONS.values().stream().filter(region -> !region.cells.isEmpty()).count();
     }
 
+    public static synchronized int pendingChunkCount() {
+        return PENDING.values().stream().mapToInt(java.util.ArrayDeque::size).sum();
+    }
+
     public static synchronized String biomeAt(String mapId, int x, int z) {
         Region region = REGIONS.get(mapId);
         if (region == null || x < 0 || z < 0 || x >= REGION_BLOCKS || z >= REGION_BLOCKS) return "";
