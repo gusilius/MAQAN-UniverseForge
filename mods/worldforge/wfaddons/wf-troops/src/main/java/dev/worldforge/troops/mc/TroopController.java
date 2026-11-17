@@ -17,6 +17,8 @@ final class TroopController {
 
     static final double SPACING = 1.7;
     private static final TroopSpatialIndex SPATIAL = new TroopSpatialIndex();
+    /** Reused on the authoritative server thread; step() is non-reentrant. */
+    private static final ArrayList<TroopEntity> ALIVE_BUFFER = new ArrayList<>(64);
 
     private static UUID safeUuid(String value) {
         if (value == null || value.isBlank()) return null;
@@ -25,8 +27,11 @@ final class TroopController {
     }
 
     static void step(MinecraftServer server) {
-        for (Squads.Squad s : new ArrayList<>(TroopsMod.SQUADS.all())) {
-            List<TroopEntity> alive = new ArrayList<>();
+        // completeCurrent() mutates only a squad queue, never the squad registry;
+        // iterating the live values avoids a full registry copy every half-second.
+        for (Squads.Squad s : TroopsMod.SQUADS.all()) {
+            ArrayList<TroopEntity> alive = ALIVE_BUFFER;
+            alive.clear();
             for (String id : s.members) { TroopEntity t = TroopsMod.LIVE.get(id); if (t != null && t.isAlive()) alive.add(t); }
             if (alive.isEmpty()) continue;                                         // отряд выгружен вместе с чанками: ждёт
             double cx = 0, cz = 0;
