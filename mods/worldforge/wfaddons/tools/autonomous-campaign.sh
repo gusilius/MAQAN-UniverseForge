@@ -275,7 +275,8 @@ if [ "$VANILLA_CAMPAIGN" -eq 1 ]; then
     exit 3
   fi
   echo "VANILLA_TEST_SURVEY_CAPTURED=1 SAMPLES=$samples REGIONS=$regions"
-fiCURRENT_STAGE="campaign_preflight"
+fi
+CURRENT_STAGE="campaign_preflight"
 preflight_log_lines=$(wc -l < server.log)
 printf '%s\n' "wfworldsim campaign start $MAP_ID" >> in.txt
 echo "WAITING_FOR_CAMPAIGN_PREFLIGHT=1"
