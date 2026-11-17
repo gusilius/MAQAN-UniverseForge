@@ -13,23 +13,25 @@ class PoliticalDistributionTests(unittest.TestCase):
             for key in ("realms", "provinces", "minimum_pixels", "merge_fraction", "realm_area_cap"):
                 self.assertNotIn(key, profile)
 
-    def test_realm_count_is_invariant_across_all_seven_density_profiles(self):
+    def test_all_density_profiles_emit_geography_without_canonical_polities(self):
         from pathlib import Path
         import tempfile
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             source = root / "source.png"
             create_test_image(source)
-            counts = []
-            province_counts = []
             for level in range(1, 8):
                 result = convert_image(
                     source, root / f"level-{level}.worldmap",
                     seed=424242, settlement_level=level)
-                counts.append(result["realm_count"])
-                province_counts.append(result["province_count"])
-            self.assertEqual(len(set(counts)), 1, counts)
-            self.assertEqual(province_counts, sorted(province_counts), province_counts)
+                self.assertNotIn("realm_count", result)
+                self.assertNotIn("realms", result)
+                self.assertEqual(result["province_count"], len(result["provinces"]))
+                self.assertEqual(result["region_count"], len(result["regions"]))
+                self.assertTrue(all(not row["name"] for row in result["settlements"]))
+                self.assertTrue(all(not row["realm_id"] and row["type"] == "site"
+                                    for row in result["settlements"]))
+                self.assertEqual(validate_package(root / f"level-{level}.worldmap")["realm_count"], 0)
 
     def test_wilderness_reserves_whole_provinces_and_protects_realm_cores(self):
         import numpy as np
