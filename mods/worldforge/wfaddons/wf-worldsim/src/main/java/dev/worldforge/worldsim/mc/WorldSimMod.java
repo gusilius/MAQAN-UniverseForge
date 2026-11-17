@@ -1929,13 +1929,22 @@ public final class WorldSimMod {
                         RealmsMod.POLITICS.grantTitle(titleId, ruler.globalId);
                     }
                 }
-                if (RealmsMod.POLITICS.dynasty(dynastyId) == null) {
-                    RealmsMod.POLITICS.registerDynasty(dynastyId, ruler.globalId, "House of " + ruler.name);
+                var canonicalDynasty = RealmsMod.POLITICS.dynasty(dynastyId);
+                if (canonicalDynasty == null || canonicalDynasty.name.equals(dynastyId)) {
+                    Set<String> reservedHouseNames = RealmsMod.POLITICS.dynasties().stream()
+                            .filter(existing -> !existing.houseId.equals(dynastyId))
+                            .map(existing -> existing.name).filter(Objects::nonNull)
+                            .collect(java.util.stream.Collectors.toCollection(HashSet::new));
+                    String race = String.valueOf(ruler.props.getOrDefault("origin.race", ""));
+                    String houseName = PeopleMod.NAMES.generateUnique(race, ruler.culture, "houses",
+                            new Random(Objects.hash(polityId, dynastyId)), reservedHouseNames);
+                    if (canonicalDynasty == null)
+                        RealmsMod.POLITICS.registerDynasty(dynastyId, ruler.globalId, houseName);
+                    else if (!RealmsMod.POLITICS.setDynastyName(dynastyId, houseName))
+                        throw new IllegalStateException("Could not allocate unique dynasty name for "
+                                + dynastyId + ": " + RealmsMod.POLITICS.lastError);
                 } else {
                     RealmsMod.POLITICS.addDynastyMember(dynastyId, ruler.globalId);
-                    var house = RealmsMod.POLITICS.dynasty(dynastyId);
-                    if (house != null && house.name.equals(dynastyId))
-                        RealmsMod.POLITICS.setDynastyName(dynastyId, "House of " + ruler.name);
                 }
                 for (dev.worldforge.people.Character member : members) {
                     if (member.house != null && member.house.equals(dynastyId))
