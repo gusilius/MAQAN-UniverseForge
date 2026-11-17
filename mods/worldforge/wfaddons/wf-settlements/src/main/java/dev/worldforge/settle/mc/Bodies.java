@@ -16,20 +16,21 @@ import java.util.UUID;
 public final class Bodies {
     private Bodies() {}
 
-    public static final double SPAWN = 64, DESPAWN = 80;
     /** "поселение#рабочий" -> UUID живого тела. Тело, которого здесь нет, само исчезает (см. WFWorker.tick). */
     public static final Map<String, UUID> LIVE = new HashMap<>();
 
     public static String key(String colony, int worker) { return colony + "#" + worker; }
 
     public static void tick(MinecraftServer server) {
+        int spawnBudget = dev.worldforge.mod.MaqanPerformanceConfig.maxWorkerSpawnsPerTick();
+        if (spawnBudget <= 0) return;
         int spawned = 0;
         for (Colony c : SettleMod.COLONIES.values()) {
             ServerLevel lv = c.level(server);
             if (lv == null) continue;
             String prefix = c.s.id + "#";
-            boolean keep = BuildingSite.playerNear(lv, c.cx, c.cz, DESPAWN);
-            boolean spawn = BuildingSite.playerNear(lv, c.cx, c.cz, SPAWN);
+            boolean keep = BuildingSite.playerNear(lv, c.cx, c.cz, dev.worldforge.mod.MaqanPerformanceConfig.workerDespawnRadius());
+            boolean spawn = BuildingSite.playerNear(lv, c.cx, c.cz, dev.worldforge.mod.MaqanPerformanceConfig.workerSpawnRadius());
             Iterator<Map.Entry<String, UUID>> it = LIVE.entrySet().iterator();
             while (it.hasNext()) {                                                 // убрать лишние тела: игроков нет рядом или рабочего больше нет
                 Map.Entry<String, UUID> e = it.next();
@@ -47,7 +48,9 @@ public final class Bodies {
             }
             if (!spawn) continue;
             for (Worker w : c.s.workers) {
-                if (spawned >= 4) return;                                          // не больше нескольких за проход
+                if (spawned >= spawnBudget) return;
+                if (LIVE.entrySet().stream().filter(entry -> entry.getKey().startsWith(prefix)).count()
+                        >= dev.worldforge.mod.MaqanPerformanceConfig.maxActiveWorkerBodiesPerColony()) continue;                                          // не больше нескольких за проход
                 String k = key(c.s.id, w.id);
                 UUID u = LIVE.get(k);
                 Entity body = u == null ? null : lv.getEntity(u);
