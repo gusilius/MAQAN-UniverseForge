@@ -12,7 +12,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.levelgen.Heightmap;
 import dev.worldforge.mod.api.WorldForgeApi;
-import net.minecraftforge.event.world.ChunkEvent;
+import net.minecraftforge.event.level.ChunkEvent;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.server.ServerStartedEvent;
 import net.minecraftforge.event.server.ServerStoppingEvent;
@@ -58,7 +58,7 @@ public final class VanillaWorldGeography {
         Region(String id) { this.id = id; }
     }
 
-    private VanillaWorldGeography() { }
+    public VanillaWorldGeography() { }
 
     @SubscribeEvent
     public void onChunkLoad(ChunkEvent.Load event) {
