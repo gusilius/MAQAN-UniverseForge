@@ -19,6 +19,9 @@ public final class ResidentTaskGraph {
     private final List<Receipt> receipts = new ArrayList<>();
     private final Map<String, Deque<Lot>> localLots = new TreeMap<>();
     private final Map<String, Deque<Lot>> storedLots = new TreeMap<>();
+    /** O(1) receipt statistics and latest processed input receipt per building. */
+    private final EnumMap<Stage, Long> stageCounts = new EnumMap<>(Stage.class);
+    private final Map<Integer, Long> latestProcessedByBuilding = new HashMap<>();
 
     public List<Receipt> receipts() { return Collections.unmodifiableList(receipts); }
     public long nextId() { return nextId; }
@@ -34,14 +37,7 @@ public final class ResidentTaskGraph {
     /** Records a processed output lot and links it to the input-processing receipt. */
     public Receipt produce(int buildingId, int workerId, String resource, double quantity, double time) {
         validate(resource, quantity, time);
-        long parent = 0;
-        for (int i = receipts.size() - 1; i >= 0; i--) {
-            Receipt receipt = receipts.get(i);
-            if (receipt.stage() == Stage.PROCESSED && receipt.buildingId() == buildingId) {
-                parent = receipt.id();
-                break;
-            }
-        }
+        long parent = latestProcessedByBuilding.getOrDefault(buildingId, 0L);
         Receipt receipt = record(Stage.PRODUCED, buildingId, workerId, resource, quantity, parent, time);
         localLots.computeIfAbsent(localKey(buildingId, resource), ignored -> new ArrayDeque<>())
                 .addLast(new Lot(receipt.id(), quantity));
@@ -114,11 +110,34 @@ public final class ResidentTaskGraph {
                            double quantity, long parent, double time) {
         Receipt receipt = new Receipt(nextId++, stage, buildingId, workerId, resource, quantity, parent, time);
         receipts.add(receipt);
-        if (receipts.size() > MAX_RECEIPTS) receipts.subList(0, receipts.size() - MAX_RECEIPTS).clear();
+        stageCounts.merge(stage, 1L, Long::sum);
+        if (stage == Stage.PROCESSED) latestProcessedByBuilding.put(buildingId, receipt.id());
+        if (receipts.size() > MAX_RECEIPTS) {
+            int remove = receipts.size() - MAX_RECEIPTS;
+            for (int i = 0; i < remove; i++) {
+                Receipt dropped = receipts.get(i);
+                stageCounts.compute(dropped.stage(), (key, count) -> count == null || count <= 1 ? null : count - 1);
+                if (dropped.stage() == Stage.PROCESSED
+                        && latestProcessedByBuilding.getOrDefault(dropped.buildingId(), 0L) == dropped.id()) {
+                    long replacement = 0;
+                    for (int j = receipts.size() - 1; j >= remove; j--) {
+                        Receipt candidate = receipts.get(j);
+                        if (candidate.stage() == Stage.PROCESSED && candidate.buildingId() == dropped.buildingId()) {
+                            replacement = candidate.id();
+                            break;
+                        }
+                    }
+                    if (replacement == 0) latestProcessedByBuilding.remove(dropped.buildingId());
+                    else latestProcessedByBuilding.put(dropped.buildingId(), replacement);
+                }
+            }
+            receipts.subList(0, remove).clear();
+        }
         return receipt;
     }
 
-    public long count(Stage stage) { return receipts.stream().filter(r -> r.stage() == stage).count(); }
+    /** Constant-time stage count; callers should not scan the bounded receipt history. */
+    public long count(Stage stage) { return stageCounts.getOrDefault(stage, 0L); }
 
     public String toJson() {
         List<Object> savedReceipts = new ArrayList<>();
@@ -194,6 +213,17 @@ public final class ResidentTaskGraph {
         storedLots.clear();
         storedLots.putAll(loadedStored);
         nextId = restoredNext;
+        rebuildIndexes();
+    }
+
+    private void rebuildIndexes() {
+        stageCounts.clear();
+        latestProcessedByBuilding.clear();
+        for (Receipt receipt : receipts) {
+            stageCounts.merge(receipt.stage(), 1L, Long::sum);
+            if (receipt.stage() == Stage.PROCESSED)
+                latestProcessedByBuilding.put(receipt.buildingId(), receipt.id());
+        }
     }
 
     private static Number requiredNumber(Object value, String field) {
