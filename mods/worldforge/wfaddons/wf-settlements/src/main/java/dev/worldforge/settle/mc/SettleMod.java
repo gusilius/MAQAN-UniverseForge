@@ -392,7 +392,8 @@ public class SettleMod {
     public static Colony colonyByGenesisOperation(String operationId) {
         if (operationId == null || operationId.isBlank()) return null;
         return COLONIES.values().stream()
-                .filter(colony -> colony != null && operationId.equals(colony.genesisOperationId))
+                .filter(colony -> colony != null && (operationId.equals(colony.genesisOperationId)
+                        || ("minecraft:village:pending:" + operationId).equals(colony.genesisOperationId)))
                 .min(java.util.Comparator.comparing(colony -> colony.s.id))
                 .orElse(null);
     }

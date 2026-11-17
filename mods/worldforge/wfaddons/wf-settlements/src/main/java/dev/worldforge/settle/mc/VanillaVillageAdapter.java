@@ -216,8 +216,14 @@ public final class VanillaVillageAdapter {
         // Infrastructure scans are queued by ChunkEvent.Load and drained on later ticks;
         // never inspect the chunk currently being integrated by ServerChunkCache.
         // Future chunks are adopted incrementally by the deferred chunk queue.
-        if ((created || identityChanged) && !SettleMod.saveDurably(level.getServer()))
-            SettleMod.LOGGER.error("wf_settle: discovered/reconciled vanilla village {} could not be durably saved", id);
+        if (created || identityChanged) {
+            if (!SettleMod.saveDurably(level.getServer())) {
+                // Preserve a retry marker in memory. A later chunk rediscovery resolves this
+                // exact operation and retries the durable write instead of creating a duplicate.
+                colony.genesisOperationId = "minecraft:village:pending:" + operation;
+                SettleMod.LOGGER.error("wf_settle: discovered/reconciled vanilla village {} could not be durably saved; retry is pending", id);
+            }
+        }
     }
 
     private static void reconcileResidents(ServerLevel level, Colony colony) {
