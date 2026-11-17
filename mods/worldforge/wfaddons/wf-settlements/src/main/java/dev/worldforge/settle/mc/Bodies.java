@@ -47,10 +47,13 @@ public final class Bodies {
                 }
             }
             if (!spawn) continue;
+            int colonyBodyCount = 0;
+            for (String liveKey : LIVE.keySet()) if (liveKey.startsWith(prefix)) colonyBodyCount++;
+            int colonyBodyLimit = dev.worldforge.mod.MaqanPerformanceConfig.maxActiveWorkerBodiesPerColony();
+            if (colonyBodyCount >= colonyBodyLimit) continue;
             for (Worker w : c.s.workers) {
                 if (spawned >= spawnBudget) return;
-                if (LIVE.entrySet().stream().filter(entry -> entry.getKey().startsWith(prefix)).count()
-                        >= dev.worldforge.mod.MaqanPerformanceConfig.maxActiveWorkerBodiesPerColony()) continue;                                          // не больше нескольких за проход
+                if (colonyBodyCount >= colonyBodyLimit) break;                                          // не больше нескольких за проход
                 String k = key(c.s.id, w.id);
                 UUID u = LIVE.get(k);
                 Entity body = u == null ? null : lv.getEntity(u);
@@ -67,6 +70,7 @@ public final class Bodies {
                 e.refreshName();
                 lv.addFreshEntity(e);
                 spawned++;
+                colonyBodyCount++;
             }
         }
     }
