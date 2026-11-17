@@ -53,6 +53,8 @@ public final class Settlement {
     private final Set<String> stockMirrorCheckedResources = new HashSet<>();
     public final List<Building> buildings = new ArrayList<>();
     public final List<Worker> workers = new ArrayList<>();
+    /** Stable-ID lookup for entity ticks, orders and cross-system Character reconciliation. */
+    private final Map<Integer, Worker> workersById = new HashMap<>();
     public final List<String> log = new ArrayList<>();
     public boolean auto = true;
     /** Уровень налога 0..3, правила автоторговли (ресурс -> порог: продавать всё выше / докупать до), запас торговых операций. */
@@ -483,9 +485,9 @@ public final class Settlement {
         return null;
     }
 
+    /** O(1) lookup by stable settlement worker ID. The ordered list remains the iteration/save authority. */
     public Worker worker(int id) {
-        for (Worker w : workers) if (w.id == id) return w;
-        return null;
+        return workersById.get(id);
     }
 
     public int count(String defId, boolean doneOnly) {
@@ -550,11 +552,13 @@ public final class Settlement {
         int id = nextWorker++;
         Worker w = new Worker(id, name == null ? "Поселенец " + id : name);
         workers.add(w);
+        workersById.putIfAbsent(w.id, w);
         return w;
     }
 
     private void removeWorker(Worker worker, String reason) {
         if (worker == null || !workers.remove(worker)) return;
+        if (workersById.get(worker.id) == worker) workersById.remove(worker.id);
         departures.add(new WorkerDeparture(worker.person == null ? "" : worker.person,
                 worker.name == null ? "" : worker.name, reason));
     }
@@ -1864,6 +1868,7 @@ public final class Settlement {
                 } else { w.taskOwner = Worker.TaskOwner.NONE; w.taskId = ""; }
             }
             s.workers.add(w);
+            s.workersById.putIfAbsent(w.id, w);
         }
         if (root.get("departures") instanceof List<?> ds) for (Object o : ds) {
             if (!(o instanceof Map<?, ?> m)) continue;
