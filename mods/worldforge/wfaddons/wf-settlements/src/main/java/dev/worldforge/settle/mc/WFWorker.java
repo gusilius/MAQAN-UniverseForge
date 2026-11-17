@@ -638,6 +638,7 @@ public class WFWorker extends PathfinderMob {
                         && state.getValue(net.minecraft.world.level.block.BeehiveBlock.HONEY_LEVEL) >= 5;
                 case "herbs" -> state.is(BlockTags.FLOWERS) || state.is(Blocks.BROWN_MUSHROOM)
                         || state.is(Blocks.RED_MUSHROOM) || state.is(Blocks.CRIMSON_FUNGUS) || state.is(Blocks.WARPED_FUNGUS);
+                case "demolish" -> !state.isAir();
                 default -> false;
             };
         }
@@ -654,6 +655,15 @@ public class WFWorker extends PathfinderMob {
             if (!isWorkTarget(state, order.mode)) return false;
             if (!ResidentEquipment.readyForWork(worker, order.mode)) return false;
             if (worker.distanceToSqr(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5) > 9.0) return false;
+            if ("demolish".equals(order.mode)) {
+                // Explicit single-block demolition only: never silently destroy inventories,
+                // machines or other block-entity state that the worker cannot safely migrate.
+                if (level.getBlockEntity(pos) != null || state.getDestroySpeed(level, pos) < 0.0F
+                        || state.isAir() || order.halfX != 0 || order.halfZ != 0) return false;
+                boolean removed = level.destroyBlock(pos, true, worker);
+                if (removed) order.complete = true;
+                return removed;
+            }
             if ("clear".equals(order.mode)) {
                 return level.destroyBlock(pos, false, worker);
             }
