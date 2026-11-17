@@ -225,6 +225,9 @@ if int(report.get("canonical_rulers", 0)) < int(report.get("stable_states", 0)):
 for key in ("duplicate_emergent_realm_names", "duplicate_settlement_names", "duplicate_dynasty_names", "duplicate_family_house_names", "duplicate_statecraft_title_names"):
     if int(report.get(key, -1)) != 0:
         raise SystemExit(f"World identity uniqueness check failed: {key}={report.get(key)}")
+for key in ("unnamed_emergent_realms", "unnamed_settlements", "unnamed_dynasties", "unnamed_statecraft_titles"):
+    if int(report.get(key, -1)) != 0:
+        raise SystemExit(f"World identity naming check failed: {key}={report.get(key)}")
 race_distribution = report.get("living_population_by_race")
 if not isinstance(race_distribution, dict) or not race_distribution:
     raise SystemExit("Campaign report has no living population breakdown by race")
@@ -251,7 +254,7 @@ inventory_path.write_text(json.dumps({
     "runtime": "Forge server campaign; see campaign-report.json and server.log"
 }, ensure_ascii=False, indent=2), encoding="utf-8")
 print("AUTONOMOUS_CAMPAIGN_STATUS=PASS")
-for key in ("map", "physical_world_dimension", "elapsed_years", "stable_states", "characters", "settlements", "materialized_settlements", "completed_buildings", "canonical_ruler_generations_verified", "origin_race_characters", "origin_distinct_races", "origin_class_characters", "origin_profession_characters", "living_population_with_race_stats", "unclassified_living_characters", "duplicate_emergent_realm_names", "duplicate_settlement_names", "duplicate_dynasty_names", "duplicate_family_house_names", "duplicate_statecraft_title_names", "world_events", "chronicle_entries"):
+for key in ("map", "physical_world_dimension", "elapsed_years", "stable_states", "characters", "settlements", "materialized_settlements", "completed_buildings", "canonical_ruler_generations_verified", "origin_race_characters", "origin_distinct_races", "origin_class_characters", "origin_profession_characters", "living_population_with_race_stats", "unclassified_living_characters", "duplicate_emergent_realm_names", "duplicate_settlement_names", "duplicate_dynasty_names", "duplicate_family_house_names", "duplicate_statecraft_title_names", "unnamed_emergent_realms", "unnamed_settlements", "unnamed_dynasties", "unnamed_statecraft_titles", "world_events", "chronicle_entries"):
     print(f"AUTONOMOUS_CAMPAIGN_{key.upper()}={report.get(key)}")
 print(f"AUTONOMOUS_CAMPAIGN_ADDON_JARS={len(inventory)}")
 for race, values in sorted(race_distribution.items()):
