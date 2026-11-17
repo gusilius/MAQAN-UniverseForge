@@ -19,6 +19,7 @@ final class TroopController {
     private static final TroopSpatialIndex SPATIAL = new TroopSpatialIndex();
     /** Reused on the authoritative server thread; step() is non-reentrant. */
     private static final ArrayList<TroopEntity> ALIVE_BUFFER = new ArrayList<>(64);
+    private static final Formations.Workspace FORMATION_WORKSPACE = new Formations.Workspace();
 
     private static UUID safeUuid(String value) {
         if (value == null || value.isBlank()) return null;
@@ -55,23 +56,31 @@ final class TroopController {
                     double yaw = Formations.yawTo(cx, cz, o.x(), o.z());
                     boolean far = Math.hypot(o.x() - cx, o.z() - cz) > 2;
                     if (!far) yaw = s.yaw; else s.yaw = yaw;
-                    List<Formations.Slot> slots = Formations.slots(s.formation, alive.size(), SPACING);
-                    List<double[]> world = Formations.place(slots, o.x(), o.z(), yaw);
-                    List<String> roles = new ArrayList<>();
-                    List<double[]> local = new ArrayList<>();
+                    int count = alive.size();
+                    Formations.Workspace workspace = FORMATION_WORKSPACE;
+                    Formations.slotsInto(s.formation, count, SPACING, workspace);
                     double rad = Math.toRadians(yaw), rx = Math.cos(rad), rz = Math.sin(rad);
-                    for (TroopEntity t : alive) {
-                        roles.add(t.def() == null ? "melee" : t.def().role());
-                        local.add(new double[]{-(t.getX() - cx) * rx - (t.getZ() - cz) * rz, 0});            // боковое положение относительно курса
+                    for (int i = 0; i < count; i++) {
+                        TroopEntity t = alive.get(i);
+                        String role = t.def() == null ? "melee" : t.def().role();
+                        workspace.roleRank[i] = switch (role) {
+                            case "melee" -> 0;
+                            case "cavalry" -> 1;
+                            case "ranged" -> 2;
+                            default -> 3;
+                        };
+                        workspace.localX[i] = -(t.getX() - cx) * rx - (t.getZ() - cz) * rz;
                     }
-                    int[] as = Formations.assign(roles, slots, local);
+                    Formations.assignInto(workspace, count);
+                    Formations.placeInto(workspace, count, o.x(), o.z(), yaw);
                     double sum = 0;
                     TroopEntity.Engage eng = o.kind() == Squads.Kind.ATTACK_MOVE ? (s.stance == Squads.Stance.PASSIVE ? TroopEntity.Engage.NONE : TroopEntity.Engage.FULL) : TroopEntity.Engage.NONE;
                     for (int i = 0; i < alive.size(); i++) {
                         TroopEntity t = alive.get(i);
-                        double[] w = world.get(as[i]);
-                        t.hasDest = true; t.destX = w[0]; t.destZ = w[1]; t.destYaw = yaw; t.forced = null; t.engage = eng;
-                        sum += Math.hypot(w[0] - t.getX(), w[1] - t.getZ());
+                        int slot = workspace.assignment[i];
+                        double wx = workspace.worldX[slot], wz = workspace.worldZ[slot];
+                        t.hasDest = true; t.destX = wx; t.destZ = wz; t.destYaw = yaw; t.forced = null; t.engage = eng;
+                        sum += Math.hypot(wx - t.getX(), wz - t.getZ());
                     }
                     if (sum / alive.size() < 3.0 && far == false || sum / alive.size() < 2.2) TroopsMod.SQUADS.completeCurrent(s.id);
                 }
