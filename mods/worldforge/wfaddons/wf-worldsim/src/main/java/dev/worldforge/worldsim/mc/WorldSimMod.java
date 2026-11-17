@@ -1022,15 +1022,28 @@ public final class WorldSimMod {
             if (registry == null || !snapshotRegistries.add(registry)) continue;
             for (dev.worldforge.people.Character person : registry.all()) {
                 if (person == null || !person.alive || person.globalId == null || person.globalId.isBlank()) continue;
-                Object rawPolity = person.props.get("emergence.polity_id");
-                String polityId = rawPolity == null ? "" : String.valueOf(rawPolity).trim();
-                if (polityId.isBlank()) {
-                    Object rawBand = person.props.get("emergence.band_id");
-                    if (rawBand != null) polityId = polityByBand.getOrDefault(String.valueOf(rawBand), "");
+                String realmId = "";
+                // Realm office holders (rulers, stewards, marshals, councillors) are canonical
+                // Characters too; include them without admitting authored map-court characters.
+                for (dev.worldforge.people.Character.Post post : person.posts) {
+                    if (post.place == null || !post.place.startsWith("realm:")) continue;
+                    String candidate = post.place.substring("realm:".length());
+                    if (candidate.startsWith("emergent-") && RealmsMod.realm(candidate) != null) {
+                        realmId = candidate;
+                        break;
+                    }
                 }
-                if (polityId.isBlank()) continue;
-                String realmId = "emergent-" + polityId;
-                if (RealmsMod.realm(realmId) == null || !emittedCharacterIds.add(person.globalId)) continue;
+                if (realmId.isBlank()) {
+                    Object rawPolity = person.props.get("emergence.polity_id");
+                    String polityId = rawPolity == null ? "" : String.valueOf(rawPolity).trim();
+                    if (polityId.isBlank()) {
+                        Object rawBand = person.props.get("emergence.band_id");
+                        if (rawBand != null) polityId = polityByBand.getOrDefault(String.valueOf(rawBand), "");
+                    }
+                    if (!polityId.isBlank()) realmId = "emergent-" + polityId;
+                }
+                if (!realmId.startsWith("emergent-") || RealmsMod.realm(realmId) == null
+                        || !emittedCharacterIds.add(person.globalId)) continue;
                 JsonObject item = new JsonObject();
                 item.addProperty("id", person.globalId);
                 item.addProperty("realm_id", realmId);
@@ -1234,6 +1247,44 @@ public final class WorldSimMod {
             if (bandId.equals(band.has("id") ? band.get("id").getAsString() : "")) return settlementIdForBand(band);
         }
         return "emg_" + bandId;
+    }
+
+    private static String emergentBiomeSummary(Set<String> bandIds, JsonArray bands, EmergenceSource source) {
+        if (source.map != null) return emergentBiomeSummary(bandIds, bands, source.map);
+        Map<String, Integer> counts = new TreeMap<>();
+        for (var item : bands) if (item.isJsonObject()) {
+            JsonObject band = item.getAsJsonObject();
+            if (!source.id.equals(band.get("map_id").getAsString()) || !bandIds.contains(band.get("id").getAsString())) continue;
+            String biome = VanillaWorldGeography.biomeAt(source.id,
+                    band.get("x").getAsInt(), band.get("z").getAsInt());
+            counts.merge(biome.isBlank() ? "unknown" : biome, 1, Integer::sum);
+        }
+        return counts.entrySet().stream().map(entry -> entry.getKey() + ":" + entry.getValue())
+                .collect(java.util.stream.Collectors.joining(","));
+    }
+
+    private static int emergentProvinceCount(Set<String> bandIds, JsonArray bands, EmergenceSource source) {
+        if (bandIds == null || bandIds.isEmpty() || bands == null) return 0;
+        Set<String> cells = new HashSet<>();
+        for (var item : bands) if (item.isJsonObject()) {
+            JsonObject band = item.getAsJsonObject();
+            if (!source.id.equals(band.get("map_id").getAsString()) || !bandIds.contains(band.get("id").getAsString())) continue;
+            int[] p = source.blockPosition(band.get("x").getAsInt(), band.get("z").getAsInt());
+            cells.add(Math.floorDiv(p[0], 512) + ":" + Math.floorDiv(p[1], 512));
+        }
+        return cells.size();
+    }
+
+    private static int emergentRegionCount(Set<String> bandIds, JsonArray bands, EmergenceSource source) {
+        if (bandIds == null || bandIds.isEmpty() || bands == null) return 0;
+        Set<String> cells = new HashSet<>();
+        for (var item : bands) if (item.isJsonObject()) {
+            JsonObject band = item.getAsJsonObject();
+            if (!source.id.equals(band.get("map_id").getAsString()) || !bandIds.contains(band.get("id").getAsString())) continue;
+            int[] p = source.blockPosition(band.get("x").getAsInt(), band.get("z").getAsInt());
+            cells.add(Math.floorDiv(p[0], 2048) + ":" + Math.floorDiv(p[1], 2048));
+        }
+        return cells.size();
     }
 
     /** Neighbours come from physical proximity, never imported political borders. */
@@ -1587,15 +1638,15 @@ public final class WorldSimMod {
                 binding.addProperty("ruler_global_id", ruler.globalId);
                 binding.addProperty("dynasty_id", dynastyId);
                 emergenceBindings.add(polityId, binding);
+                int newCourtPositions = dev.worldforge.people.Courts.ensureRealm(
+                        politicalActor, registry, PeopleMod.ROLES, PeopleMod.NAMES, source.seed, year);
+                if (newCourtPositions > 0) changed = true;
                 changed = true;
             }
             // Fill the ordinary council, steward, marshal, chancellor and household offices
             // for newly emerged realms through the existing deterministic Courts.ensure pipeline.
             // The same realm-level court materializer runs for image and vanilla worlds.
             // Do not backfill offices from pre-authored political overlays on an image map.
-            int newCourtPositions = dev.worldforge.people.Courts.ensureRealm(
-                    initialProjection, registry, PeopleMod.ROLES, PeopleMod.NAMES, source.seed, year);
-            if (newCourtPositions > 0) changed = true;
             if (changed) {
                 dev.worldforge.people.Character durable = registry.all().stream()
                         .filter(person -> person.alive && (person.props.containsKey("emergence.polity_id")
