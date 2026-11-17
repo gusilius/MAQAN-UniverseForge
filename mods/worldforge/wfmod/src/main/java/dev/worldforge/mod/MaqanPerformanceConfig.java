@@ -16,7 +16,7 @@ public final class MaqanPerformanceConfig {
 
     public static final ForgeConfigSpec.IntValue WORKER_SPAWN_RADIUS;
     public static final ForgeConfigSpec.IntValue WORKER_DESPAWN_RADIUS;
-    public static final ForgeConfigSpec.IntValue MAX_WORKER_SPAWNS_PER_TICK;
+    public static final ForgeConfigSpec.IntValue MAX_WORKER_SPAWNS_PER_PASS;
     public static final ForgeConfigSpec.IntValue SETTLEMENT_SIMULATION_INTERVAL_TICKS;
     public static final ForgeConfigSpec.IntValue LIFE_AI_INTERVAL_STEPS;
     public static final ForgeConfigSpec.IntValue MAX_ACTIVE_WORKER_BODIES_PER_COLONY;
@@ -43,7 +43,7 @@ public final class MaqanPerformanceConfig {
 
     public static int workerSpawnRadius() { return WORKER_SPAWN_RADIUS.get(); }
     public static int workerDespawnRadius() { return Math.max(WORKER_SPAWN_RADIUS.get() + 8, WORKER_DESPAWN_RADIUS.get()); }
-    public static int maxWorkerSpawnsPerTick() { return MAX_WORKER_SPAWNS_PER_TICK.get(); }
+    public static int maxWorkerSpawnsPerPass() { return MAX_WORKER_SPAWNS_PER_TICK.get(); }
     public static int maxActiveWorkerBodiesPerColony() { return MAX_ACTIVE_WORKER_BODIES_PER_COLONY.get(); }
     public static int settlementSimulationIntervalTicks() { return SETTLEMENT_SIMULATION_INTERVAL_TICKS.get(); }
     public static int lifeAiIntervalSteps() { return LIFE_AI_INTERVAL_STEPS.get(); }
