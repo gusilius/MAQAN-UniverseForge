@@ -230,8 +230,9 @@ public class WorldForgeMod {
                 LOGGER.info("WorldForge: загружена карта '{}' {}x{} px, {} блоков/px", n, d.w, d.h, d.bpp);
                 return d;
             } catch (IOException | RuntimeException e) {
-                LOGGER.warn("WorldForge: карта '{}' недоступна ({}), использую запасную плоскую карту. Положите файл в {}", n, e.toString(), mapsDir());
-                return MapData.fallback(n.contains(":") ? n.substring(n.indexOf(':') + 1) : n);
+                LOGGER.error("WorldForge: explicit map '{}' is unavailable; refusing to substitute synthetic terrain from a fallback map. Expected source under {}",
+                        n, mapsDir(), e);
+                throw new IllegalStateException("Required WorldForge map '" + n + "' could not be loaded", e);
             }
         });
     }
