@@ -63,6 +63,11 @@ final class BuildControl {
             Colony.Site site = c.sites.get(building.uid);
             if (site == null) continue;
             Blueprints.Plan plan = Blueprints.get(p.serverLevel(), building.def);
+            if (!plan.valid() || plan.blocks().isEmpty()) {
+                m.put("constructionError", plan.error() == null || plan.error().isBlank()
+                        ? "Чертёж не содержит доступных блоков" : plan.error());
+                continue;
+            }
             for (int i = Math.max(0, site.placed); i < plan.blocks().size(); i++) {
                 Blueprints.Entry entry = plan.blocks().get(i);
                 BlockPos pos = new BlockPos(site.x + entry.x(), site.y + entry.y(), site.z + entry.z());
