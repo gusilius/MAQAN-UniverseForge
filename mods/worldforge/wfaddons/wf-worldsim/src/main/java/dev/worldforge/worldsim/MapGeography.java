@@ -1,7 +1,6 @@
 package dev.worldforge.worldsim;
 
 import dev.worldforge.mod.MapData;
-import dev.worldforge.mod.TitleData;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -24,7 +23,7 @@ public final class MapGeography {
         int area = Math.multiplyExact(map.w, map.h);
         int stride = Math.max(1, (int) Math.ceil(Math.sqrt(area / (double) MAX_SAMPLES)));
         List<Map<String, Object>> cells = new ArrayList<>();
-        int land = 0, rivers = 0, viable = 0, politicalOwners = 0;
+        int land = 0, rivers = 0, viable = 0;
 
         for (int z = 0; z < map.h; z += stride) {
             for (int x = 0; x < map.w; x += stride) {
@@ -48,15 +47,8 @@ public final class MapGeography {
                 cell.put("river", river);
                 cell.put("land", isLand);
                 cell.put("suitability", suitability);
-                // Only generated autonomous ownership is fed back into the engine.
-                // Authored political overlays remain excluded from natural geography.
-                int provinceId = map.titles == null ? 0 : map.titles.provinceIdAtPixel(x, z);
-                TitleData.Title province = map.titles == null ? null : map.titles.get(provinceId);
-                TitleData.Realm owner = map.titles == null ? null : map.titles.realmOf(province);
-                String ownerId = owner != null && Boolean.TRUE.equals(owner.props.get("emergence.virtual"))
-                        ? owner.id : "";
-                if (!ownerId.isBlank()) politicalOwners++;
-                cell.put("owner_realm_id", ownerId);
+                // Keep the legacy schema field empty: sovereignty is generated downstream.
+                cell.put("owner_realm_id", "");
                 cell.put("climate_proxy", climateProxy(biome));
                 cells.add(cell);
             }
@@ -69,10 +61,9 @@ public final class MapGeography {
         result.put("width_px", map.w);
         result.put("height_px", map.h);
         result.put("blocks_per_pixel_milli", Math.max(1L, Math.round(map.bpp * 1000.0)));
-        result.put("political_layers_present", politicalOwners > 0);
+        result.put("political_layers_present", map.hasPoliticalLayers());
         result.put("political_layers_ignored", true);
-        result.put("political_ownership_included", politicalOwners > 0);
-        result.put("political_owner_samples", politicalOwners);
+        result.put("political_ownership_included", false);
         result.put("sample_stride", stride);
         result.put("sampled_cells", cells.size());
         result.put("land_samples", land);

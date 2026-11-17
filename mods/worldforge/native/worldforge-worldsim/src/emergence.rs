@@ -134,8 +134,7 @@ fn bootstrap(map: &GeographicMap, seed: u64, bands: &mut Vec<EmergentBand>, even
     if map.cells.is_empty() { return; }
     let spacing = map_scale(map);
     let mut candidates = map.cells.iter()
-        .filter(|c| c.land && c.suitability >= 48
-            && (!map.political_layers_present || c.owner_realm_id.is_empty()))
+        .filter(|c| c.land && c.suitability >= 48)
         .collect::<Vec<_>>();
     candidates.sort_by(|a,b| {
         b.suitability.cmp(&a.suitability)
@@ -206,8 +205,7 @@ fn maybe_form_polity(map: &GeographicMap, cells: &CellIndex<'_>, seed: u64, year
     // Sovereignty is generated downstream; geographic viability alone gates settlement.
     let mut settled = bands.iter().filter(|b| {
         b.map_id == map.map_id && b.settled
-            && cell_at(cells, b.x, b.z).is_some_and(|cell| cell.land
-                && (!map.political_layers_present || cell.owner_realm_id.is_empty()))
+            && cell_at(cells, b.x, b.z).is_some_and(|cell| cell.land)
     }).collect::<Vec<_>>();
     settled.sort_by(|a,b| a.id.cmp(&b.id));
     for anchor in &settled {
@@ -453,29 +451,6 @@ mod tests {
         assert_eq!(polities[0].settlement_ids, vec!["transferred".to_string(), "remaining".to_string()]);
         assert_eq!(polities[0].population, 70);
         assert!(!events.iter().any(|event| event.kind == "settlement_absorbed"));
-    }
-
-    #[test]
-    fn generated_political_ownership_reserves_claimed_land() {
-        let mut geography = map();
-        geography.political_layers_present = true;
-        for cell in &mut geography.cells {
-            cell.owner_realm_id = "emergent-existing-realm".into();
-        }
-        let mut bands = Vec::new();
-        bootstrap(&geography, 8128, &mut bands, &mut Vec::new());
-        assert!(bands.is_empty(), "claimed land must not seed duplicate frontier settlements");
-
-        let make_band = |index: u32| EmergentBand {
-            id: format!("frontier-{index}"), map_id: "planetos".into(),
-            x: 10 + index * 4, z: 10, population: 30, food_reserve: 4,
-            settled: true, founded_year: 20, hardship_years: 0, origin_year: 0,
-        };
-        let frontier = vec![make_band(0), make_band(1), make_band(2), make_band(3)];
-        let mut polities = Vec::new();
-        maybe_form_polity(&geography, &index_cells(&geography), 8128, 41,
-            &frontier, &mut polities, &mut Vec::new());
-        assert!(polities.is_empty(), "communities inside an owned political raster cannot found a duplicate sovereign");
     }
 
     #[test]

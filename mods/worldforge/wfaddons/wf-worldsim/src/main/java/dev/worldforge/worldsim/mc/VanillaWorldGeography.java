@@ -26,6 +26,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.ArrayDeque;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.TreeMap;
 
@@ -257,6 +258,14 @@ public final class VanillaWorldGeography {
 
     public static synchronized int capturedRegionCount() {
         return (int) REGIONS.values().stream().filter(region -> !region.cells.isEmpty()).count();
+    }
+
+    public static synchronized int politicallyOwnedCellCount() {
+        return (int) REGIONS.values().stream()
+                .flatMap(region -> region.cells.values().stream())
+                .filter(cell -> cell.has("owner_realm_id")
+                        && !cell.get("owner_realm_id").getAsString().isBlank())
+                .count();
     }
 
     public static synchronized int pendingChunkCount() {
