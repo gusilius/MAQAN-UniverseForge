@@ -1534,7 +1534,7 @@ public final class WorldSimMod {
                 .thenComparing(Map.Entry::getKey, Comparator.reverseOrder()))
                 .map(Map.Entry::getKey).orElse("");
         Set<String> reserved = SettleMod.COLONIES.values().stream()
-                .filter(colony -> colony != null && colony.s != null && !colony.s.name.isBlank())
+                .filter(colony -> colony != null && colony.s != null && colony.s.name != null && !colony.s.name.isBlank())
                 .map(colony -> colony.s.name)
                 .collect(java.util.stream.Collectors.toCollection(HashSet::new));
         return PeopleMod.NAMES.generateUnique(race, culture, "settlements",
