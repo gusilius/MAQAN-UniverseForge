@@ -59,6 +59,22 @@ public final class WorldForgeApi {
     /** Общие часы мира: пауза, скорость, календарь; все симуляции берут дни отсюда (GameClock.pull). */
     public static GameClock clock() { return CLOCK; }
 
+    /**
+     * Canonical entry point for player-issued military, settlement and construction intents.
+     * Transport adapters (RTS, first-person, radial wheel, dialogue) submit the same immutable
+     * intent; domain owners still perform their own live authorization and mutation checks.
+     */
+    public static ActionExecutionService.Task executeCommandIntent(CommandIntent intent, Path journalFile,
+            long worldMinute, ActionExecutionService.Authorizer authorizer,
+            ActionExecutionService.Executor executor) {
+        java.util.Objects.requireNonNull(intent, "intent");
+        java.util.Objects.requireNonNull(authorizer, "authorizer");
+        java.util.Objects.requireNonNull(executor, "executor");
+        ActionExecutionService.Request request = intent.toActionRequest(worldMinute);
+        ActionExecutionService service = ACTION_EXECUTION;
+        return service.execute(request, authorizer, executor, null, worldMinute, journalFile);
+    }
+
     /** Shared durable action queue. WorldForgeMod loads/saves it with the active world. */
     public static ActionExecutionService actionExecution() { return ACTION_EXECUTION; }
     public static synchronized void resetActionExecution() { ACTION_EXECUTION = new ActionExecutionService(); }
