@@ -559,6 +559,27 @@ public class SettleTest {
                         && ledgerAfterReconcile.equals(dev.worldforge.mod.economy.TreasuryService.current().toJson()),
                 "repeated stock reads do not replay legacy reconciliation or append duplicate ledger entries");
 
+        Settlement indexedResidents = fresh(d, 2_000);
+        boolean stableIdLookup = true;
+        for (Worker resident : indexedResidents.workers)
+            stableIdLookup &= indexedResidents.worker(resident.id) == resident;
+        ok(stableIdLookup && indexedResidents.worker(-1) == null
+                        && indexedResidents.worker(2_001) == null,
+                "large settlement resolves every resident by stable ID without list scans");
+        Worker removedResident = indexedResidents.workers.get(999);
+        removedResident.person = "character:index-test";
+        int removedResidentId = removedResident.id;
+        ok(indexedResidents.removeWorkerByPerson(removedResident.person, "migration:test")
+                        && indexedResidents.worker(removedResidentId) == null
+                        && indexedResidents.workers.size() == 1_999,
+                "resident removal invalidates the ID index immediately");
+        String indexedResidentsJson = indexedResidents.toJson();
+        Settlement indexedResidentsReload = Settlement.fromJson(indexedResidentsJson, d);
+        boolean restoredIdLookup = true;
+        for (Worker resident : indexedResidentsReload.workers)
+            restoredIdLookup &= indexedResidentsReload.worker(resident.id) == resident;
+        ok(restoredIdLookup && indexedResidentsReload.worker(removedResidentId) == null,
+                "resident ID index rebuilds from saved population without stale entries");
         System.out.println(fails == 0 ? "ALL OK" : fails + " FAILED");
         if (fails > 0) System.exit(1);
     }
