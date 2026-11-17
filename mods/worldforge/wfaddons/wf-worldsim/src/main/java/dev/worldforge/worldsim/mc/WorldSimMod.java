@@ -1742,11 +1742,13 @@ public final class WorldSimMod {
                 .thenComparing(Map.Entry::getKey, Comparator.reverseOrder())).map(Map.Entry::getKey).orElse("");
         String culture = cultures.entrySet().stream().max(Map.Entry.<String, Long>comparingByValue()
                 .thenComparing(Map.Entry::getKey, Comparator.reverseOrder())).map(Map.Entry::getKey).orElse("");
-        try {
-            return PeopleMod.NAMES.generate(race, culture, "realms", new Random(polityId.hashCode()));
-        } catch (RuntimeException unavailableNamePool) {
-            return fallback;
-        }
+        Set<String> reservedNames = RealmsMod.realms().stream()
+                .filter(realm -> realm != null && !("emergent-" + polityId).equals(realm.id))
+                .map(realm -> realm.name).filter(name -> name != null && !name.isBlank())
+                .filter(name -> !name.startsWith("band_") && !name.endsWith(" Confederation"))
+                .collect(java.util.stream.Collectors.toCollection(HashSet::new));
+        return PeopleMod.NAMES.generateUnique(race, culture, "realms",
+                new Random(polityId.hashCode()), reservedNames);
     }
 
     /** Binds emergent polities to canonical rulers; succession follows actual Character identity. */
@@ -2405,8 +2407,9 @@ public final class WorldSimMod {
         try {
             return PeopleMod.NAMES.pickGivenName("", culture, gender,
                     new Random(source.seed ^ ((long) bandId.hashCode() << 32) ^ ordinal ^ year));
-        } catch (RuntimeException ignored) {
-            return "Settler-" + Integer.toUnsignedString(Objects.hash(source.id, bandId, ordinal), 36);
+        } catch (RuntimeException missingNamePool) {
+            throw new IllegalStateException("No authoritative personal-name pool for "
+                    + source.id + "/" + bandId + " (culture=" + culture + ")", missingNamePool);
         }
     }
 
