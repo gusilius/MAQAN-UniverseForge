@@ -2051,17 +2051,14 @@ public final class WorldSimMod {
                 }
                 var canonicalDynasty = RealmsMod.POLITICS.dynasty(dynastyId);
                 if (canonicalDynasty == null || canonicalDynasty.name.equals(dynastyId)) {
-                    Set<String> reservedHouseNames = RealmsMod.POLITICS.dynasties().stream()
-                            .filter(existing -> !existing.houseId.equals(dynastyId))
-                            .map(existing -> existing.name).filter(Objects::nonNull)
-                            .collect(java.util.stream.Collectors.toCollection(HashSet::new));
-                    String race = String.valueOf(ruler.props.getOrDefault("origin.race", ""));
-                    String houseName = PeopleMod.NAMES.generateUnique(race, ruler.culture, "houses",
-                            new Random(Objects.hash(polityId, dynastyId)), reservedHouseNames);
+                    String houseName = ruler.house;
+                    if (houseName == null || houseName.isBlank())
+                        throw new IllegalStateException("Ruling Character has no canonical family name: "
+                                + ruler.globalId);
                     if (canonicalDynasty == null)
                         RealmsMod.POLITICS.registerDynasty(dynastyId, ruler.globalId, houseName);
                     else if (!RealmsMod.POLITICS.setDynastyName(dynastyId, houseName))
-                        throw new IllegalStateException("Could not allocate unique dynasty name for "
+                        throw new IllegalStateException("Could not bind unique family name to dynasty "
                                 + dynastyId + ": " + RealmsMod.POLITICS.lastError);
                 } else {
                     RealmsMod.POLITICS.addDynastyMember(dynastyId, ruler.globalId);
