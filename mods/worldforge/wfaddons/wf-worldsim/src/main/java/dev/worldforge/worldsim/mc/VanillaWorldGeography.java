@@ -153,8 +153,8 @@ public final class VanillaWorldGeography {
         String biome = biomeKey.map(ResourceLocation::toString).orElse("minecraft:plains");
         String biomePath = biome.toLowerCase(java.util.Locale.ROOT);
         boolean riverBiome = biomePath.endsWith(":river") || biomePath.endsWith(":frozen_river");
-        boolean waterBiome = biomePath.contains("ocean") || biomePath.contains("deep_")
-                || biomePath.contains("river") || biomePath.contains("beach");
+        boolean waterBiome = biomePath.contains("ocean") || biomePath.endsWith(":river")
+                || biomePath.endsWith(":frozen_river");
         boolean land = surface.getFluidState().isEmpty() && !waterBiome;
         int eastY = chunk.getHeight(Heightmap.Types.WORLD_SURFACE, Math.min(15, localX + SAMPLE_STEP), localZ);
         int southY = chunk.getHeight(Heightmap.Types.WORLD_SURFACE, localX, Math.min(15, localZ + SAMPLE_STEP));
