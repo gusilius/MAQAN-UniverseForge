@@ -550,6 +550,15 @@ public final class WorldSimMod {
                                     + ", day=" + WorldForgeApi.clock().dayNumber()), false);
                     return 1;
                 }))
+                .then(Commands.literal("geography").executes(context -> {
+                    int regions = VanillaWorldGeography.capturedRegionCount();
+                    int samples = VanillaWorldGeography.sampledCellCount();
+                    context.getSource().sendSuccess(() -> Component.literal(
+                            "Vanilla geography: regions=" + regions + ", samples=" + samples
+                                    + ", pending_chunks=" + VanillaWorldGeography.pendingChunkCount()
+                                    + ", cache=worldforge/wf_world_geography.json"), false);
+                    return regions > 0 && samples > 0 ? 1 : 0;
+                }))
                 .then(Commands.literal("history")
                         .then(Commands.argument("count", IntegerArgumentType.integer(1, 20)).executes(context -> {
                                 int count = Math.min(IntegerArgumentType.getInteger(context, "count"), WorldForgeApi.events().size());
