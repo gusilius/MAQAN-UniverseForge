@@ -358,7 +358,15 @@ public final class VanillaWorldGeography {
                 throw new IllegalStateException("Political transfer cannot claim water cell " + key);
             targets.add(cell);
         }
-        if (allAlreadyApplied) return 0;
+        if (allAlreadyApplied) {
+            if (dirty) {
+                MinecraftServer server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
+                if (server == null)
+                    throw new IllegalStateException("Cannot finish durable political transfer without an active server");
+                persist(server);
+            }
+            return 0;
+        }
         for (JsonObject cell : targets) {
             cell.addProperty("owner_realm_id", newOwner);
             cell.addProperty("ownership_event_id", eventId);
