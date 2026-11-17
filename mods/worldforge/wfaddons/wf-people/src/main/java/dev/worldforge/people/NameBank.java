@@ -193,6 +193,22 @@ public final class NameBank {
         return "settlements";
     }
 
+    /** Fail server startup if the authoritative mod/datapack has no usable identity pools. */
+    public void validate() {
+        if (def == null || def.isBlank() || !cultures.containsKey(def))
+            throw new IllegalStateException("wf-people has no configured default name culture");
+        Pool base = cultures.get(def);
+        if (!validGivenNames(base))
+            throw new IllegalStateException("wf-people default culture '" + def
+                    + "' must define male, female and house name pools");
+        for (String category : List.of("settlements", "realms", "regions", "provinces")) {
+            if (list(base, category).isEmpty())
+                throw new IllegalStateException("wf-people default culture '" + def
+                        + "' has no '" + category + "' name pool");
+        }
+        for (String race : races.keySet()) poolForRace(race, def);
+    }
+
     public String culture(String wanted) { return cultures.containsKey(wanted) ? wanted : def; }
 
     public String pickGivenName(String race, String culture, String gender, Random random) {
