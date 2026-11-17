@@ -770,7 +770,9 @@ public final class WorldSimMod {
             report.addProperty("image_map_count", WorldForgeMod.loadedMaps().size());
             report.addProperty("preauthored_map_realms", WorldForgeMod.loadedMaps().values().stream()
                     .filter(map -> map != null && map.titles != null)
-                    .mapToLong(map -> map.titles.realms.size()).sum());
+                    .flatMap(map -> map.titles.realms.values().stream())
+                    .filter(realm -> realm != null && realm.id != null && !realm.id.startsWith("emergent-"))
+                    .count());
             report.addProperty("preauthored_state_titles", WorldForgeMod.loadedMaps().values().stream()
                     .filter(map -> map != null && map.titles != null)
                     .flatMap(map -> map.titles.allTitles().stream())
