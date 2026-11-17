@@ -808,6 +808,15 @@ public final class WorldSimMod {
                     .map(RealmsMod.POLITICS::dynasty)
                     .filter(house -> house != null && house.name != null && !house.name.isBlank()
                             && !house.name.startsWith("house_")).count());
+            report.addProperty("duplicate_emergent_realm_names", duplicateNameCount(
+                    RealmsMod.emergentRealms().stream().map(realm -> realm.name).toList()));
+            report.addProperty("duplicate_settlement_names", duplicateNameCount(
+                    SettleMod.COLONIES.values().stream().filter(colony -> colony != null && colony.s != null)
+                            .map(colony -> colony.s.name).toList()));
+            report.addProperty("duplicate_dynasty_names", duplicateNameCount(
+                    RealmsMod.POLITICS.dynasties().stream().map(dynasty -> dynasty.name).toList()));
+            report.addProperty("duplicate_statecraft_title_names", duplicateNameCount(
+                    RealmsMod.POLITICS.titles().stream().map(title -> title.name).toList()));
             report.addProperty("political_ownership_samples", campaignMap == null
                     ? VanillaWorldGeography.politicallyOwnedCellCount()
                     : campaignMap.titles == null ? 0 : campaignMap.titles.allTitles().stream()
@@ -913,6 +922,17 @@ public final class WorldSimMod {
                 return level.dimension().location().toString();
         }
         return null;
+    }
+
+    private static long duplicateNameCount(Collection<String> names) {
+        Set<String> seen = new HashSet<>();
+        long duplicates = 0;
+        for (String name : names) {
+            if (name == null || name.isBlank()) continue;
+            String normalized = name.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
+            if (!seen.add(normalized)) duplicates++;
+        }
+        return duplicates;
     }
 
     private static int canonicalGenerationCount(JsonObject polity) {
