@@ -47,7 +47,7 @@ campaign_exit() {
     if wait "$SERVER_PID"; then SERVER_EXIT_CODE=0; else SERVER_EXIT_CODE=$?; fi
     echo "CAMPAIGN_JVM_EXIT_CODE=$SERVER_EXIT_CODE"
   fi
-  python3 "$SCRIPT_DIR/campaign-diagnostics.py" --work "$WORK" --output "$OUTPUT" --exit-code "$exit_code" --stage "$CURRENT_STAGE" --run-id "${GITHUB_RUN_ID:-local}" --commit "${GITHUB_SHA:-unknown}" --seed "$MAP_SEED" || true
+  python3 "$SCRIPT_DIR/campaign-diagnostics.py" --work "$WORK" --output "$OUTPUT" --exit-code "$exit_code" --stage "$CURRENT_STAGE" --run-id "${GITHUB_RUN_ID:-local}" --commit "${GITHUB_SHA:-unknown}" --seed "$MAP_SEED" --map "$MAP_ID" || true
   rm -rf "$WORK"
   exit "$exit_code"
 }
@@ -224,19 +224,58 @@ for command in "list" "wftroops types" "wftroops fort list" "wftroops list" "wfs
 done
 CURRENT_STAGE="geography_preflight"
 if [ "$VANILLA_CAMPAIGN" -eq 1 ]; then
-  # Capture a bounded, real 256-chunk region around spawn; no synthetic geography fixture.
-  printf '%s\n' "forceload add -128 -128 127 127" >> in.txt
-  sleep 8
-  geography_ready=0
-  for _ in $(seq 1 90); do
-    printf '%s\n' "wfworldsim geography" >> in.txt
-    if grep -aqE 'Vanilla geography: regions=[1-9][0-9]*, samples=[1-9][0-9]*, pending_chunks=0' server.log; then geography_ready=1; break; fi
-    kill -0 "$SERVER_PID" 2>/dev/null || { tail -160 server.log; echo "ERROR: vanilla server stopped during geography capture"; exit 3; }
-    sleep 2
+  # Acceptance-only survey: generate a bounded ~1000x1000 block square from real
+  # Minecraft chunks, without a player and without changing normal mod exploration.
+  # Chunks are loaded in small tiles so the /forceload 256-chunk cap is never approached.
+  TEST_CHUNKS="${WF_VANILLA_TEST_CHUNKS:-63}"
+  [[ "$TEST_CHUNKS" =~ ^[0-9]+$ ]] && [ "$TEST_CHUNKS" -ge 16 ] && [ "$TEST_CHUNKS" -le 127 ] || {
+    echo "ERROR: WF_VANILLA_TEST_CHUNKS must be between 16 and 127"; exit 3;
+  }
+  MIN_CHUNK=$(( -(TEST_CHUNKS / 2) ))
+  MAX_CHUNK=$(( MIN_CHUNK + TEST_CHUNKS - 1 ))
+  TILE_CHUNKS=8
+  echo "VANILLA_TEST_SURVEY_BLOCKS_APPROX=$((TEST_CHUNKS * 16))x$((TEST_CHUNKS * 16))"
+  echo "VANILLA_TEST_SURVEY_CHUNKS=$((TEST_CHUNKS * TEST_CHUNKS))"
+  echo "VANILLA_TEST_SURVEY_MODE=server-side chunk generation; no player required"
+  for ((cz=MIN_CHUNK; cz<=MAX_CHUNK; cz+=TILE_CHUNKS)); do
+    cz_end=$((cz + TILE_CHUNKS - 1)); [ "$cz_end" -le "$MAX_CHUNK" ] || cz_end="$MAX_CHUNK"
+    for ((cx=MIN_CHUNK; cx<=MAX_CHUNK; cx+=TILE_CHUNKS)); do
+      cx_end=$((cx + TILE_CHUNKS - 1)); [ "$cx_end" -le "$MAX_CHUNK" ] || cx_end="$MAX_CHUNK"
+      x0=$((cx * 16)); z0=$((cz * 16))
+      x1=$(((cx_end + 1) * 16 - 1)); z1=$(((cz_end + 1) * 16 - 1))
+      printf 'forceload add %s %s %s %s\n' "$x0" "$z0" "$x1" "$z1" >> in.txt
+      stable=0; captured=0
+      for _ in $(seq 1 60); do
+        printf '%s\n' "wfworldsim geography" >> in.txt
+        sleep 1
+        geography_line="$(grep -a 'Vanilla geography:' server.log | tail -1 || true)"
+        pending="$(printf '%s' "$geography_line" | sed -nE 's/.*pending_chunks=([0-9]+).*/\1/p')"
+        samples="$(printf '%s' "$geography_line" | sed -nE 's/.*samples=([0-9]+).*/\1/p')"
+        if [ -n "$pending" ] && [ "$pending" -eq 0 ] && [ -n "$samples" ] && [ "$samples" -gt 0 ]; then
+          stable=$((stable + 1))
+          if [ "$stable" -ge 2 ]; then captured=1; break; fi
+        else
+          stable=0
+        fi
+        kill -0 "$SERVER_PID" 2>/dev/null || { tail -160 server.log; echo "ERROR: vanilla server stopped during bounded geography survey"; exit 3; }
+      done
+      printf 'forceload remove %s %s %s %s\n' "$x0" "$z0" "$x1" "$z1" >> in.txt
+      [ "$captured" = 1 ] || { tail -160 server.log; echo "ERROR: vanilla chunk tile did not finish capture at chunk $cx,$cz"; exit 3; }
+    done
   done
-  [ "$geography_ready" = 1 ] || { tail -160 server.log; echo "ERROR: vanilla geography cache did not capture the bounded spawn region"; exit 3; }
-fi
-CURRENT_STAGE="campaign_preflight"
+  expected_samples=$((TEST_CHUNKS * TEST_CHUNKS * 16))
+  printf '%s\n' "wfworldsim geography" >> in.txt
+  sleep 2
+  geography_line="$(grep -a 'Vanilla geography:' server.log | tail -1 || true)"
+  samples="$(printf '%s' "$geography_line" | sed -nE 's/.*samples=([0-9]+).*/\1/p')"
+  regions="$(printf '%s' "$geography_line" | sed -nE 's/.*regions=([0-9]+).*/\1/p')"
+  if [ -z "$samples" ] || [ "$samples" -lt "$expected_samples" ] || [ -z "$regions" ] || [ "$regions" -lt 9 ]; then
+    tail -160 server.log
+    echo "ERROR: bounded vanilla survey incomplete; expected_samples=$expected_samples actual_samples=${samples:-0} regions=${regions:-0}"
+    exit 3
+  fi
+  echo "VANILLA_TEST_SURVEY_CAPTURED=1 SAMPLES=$samples REGIONS=$regions"
+fiCURRENT_STAGE="campaign_preflight"
 preflight_log_lines=$(wc -l < server.log)
 printf '%s\n' "wfworldsim campaign start $MAP_ID" >> in.txt
 echo "WAITING_FOR_CAMPAIGN_PREFLIGHT=1"
