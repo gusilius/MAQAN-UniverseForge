@@ -1562,7 +1562,8 @@ def validate_package(path: Path) -> dict:
     with zipfile.ZipFile(path) as archive:
         names = set(archive.namelist())
         required = {"meta.json", "biomes.png", "height16.png", "rivers.png",
-                    "provinces.png", "wilderness.png", "political-preview.png", "terrain-preview.png", "titles.json", "realms.json", "world-blueprint.json"}
+                    "provinces.png", "wilderness.png", "province-preview.png",
+                    "terrain-preview.png", "titles.json", "realms.json", "world-blueprint.json"}
         missing = required - names
         if missing:
             raise AssertionError(f"worldmap is missing layers: {sorted(missing)}")
@@ -1572,7 +1573,7 @@ def validate_package(path: Path) -> dict:
         province_image = Image.open(__import__("io").BytesIO(archive.read("provinces.png")))
         province_ids = np.asarray(province_image, dtype=np.uint32)
         width, height = province_image.size
-        expected = {item["id"] for item in blueprint["territories"]}
+        expected = {int(item["id"]) for item in blueprint["provinces"]}
         actual = set(int(value) for value in np.unique(province_ids) if int(value) != 0)
         if actual != expected:
             raise AssertionError(f"province raster mismatch: expected={expected}, actual={actual}")
@@ -1585,70 +1586,75 @@ def validate_package(path: Path) -> dict:
         actual_unclaimed = actual_land_pixels - actual_covered_land_pixels
         wilderness_image = Image.open(__import__("io").BytesIO(archive.read("wilderness.png")))
         wilderness_values = np.asarray(wilderness_image, dtype=np.uint8).ravel() > 0
-        if int(wilderness_values.sum()) != int(blueprint["generation_policy"]["wilderness_pixels"]):
+        policy = blueprint["generation_policy"]
+        if int(wilderness_values.sum()) != int(policy["wilderness_pixels"]):
             raise AssertionError("wilderness raster count differs from the blueprint")
-        # Wilderness and biome layers are flat pixel streams; provinces.png
-        # is kept as a 2D image for coordinate/capital checks below.
         province_flat = province_ids.ravel()
         if np.any(wilderness_values & (province_flat > 0)):
-            raise AssertionError("wilderness pixels overlap assigned political provinces")
+            raise AssertionError("wilderness pixels overlap assigned geographic provinces")
         if np.any(wilderness_values & ~np.isin(biome_values, list(land_biomes))):
             raise AssertionError("wilderness raster includes water or non-land pixels")
         if actual_unclaimed != int(wilderness_values.sum()):
-            raise AssertionError("unclaimed land must be exactly the explicit wilderness reserve")
+            raise AssertionError("unclaimed land must equal the explicit wilderness reserve")
         if actual_land_pixels != int(blueprint["land_pixels"]):
-            raise AssertionError("land pixel count differs between semantic and political rasters")
-        if actual_unclaimed != int(blueprint["politically_unclaimed_land_pixels"]):
-            raise AssertionError("politically unclaimed land count differs from the blueprint")
+            raise AssertionError("land pixel count differs between semantic and geographic rasters")
+        if actual_unclaimed != int(blueprint["wilderness_land_pixels"]):
+            raise AssertionError("wilderness land count differs from the blueprint")
         if int(blueprint["settlement_level"]) >= 6 and actual_unclaimed != 0:
-            raise AssertionError("settlement levels 6-7 must have no politically unclaimed land")
+            raise AssertionError("settlement levels 6-7 must have no unclaimed wilderness")
         province_grid = province_ids.reshape((height, width))
         connectivity_report = validate_province_connectivity(province_grid, width, height)
-        for item in blueprint["territories"]:
-            pid = item["id"]
+        for item in blueprint["provinces"]:
+            pid = int(item["id"])
             cap_x, cap_z = item["capital_pixel"]
             if int(province_grid[cap_z, cap_x]) != pid:
-                raise AssertionError(f"province {pid} capital is outside its province")
-        realm_ids = {r["id"] for r in realms["realms"]}
-        for settlement in blueprint["settlements"]:
-            x, z = settlement["pixel"]
-            if not (0 <= x < width and 0 <= z < height and land_mask[z, x]):
-                raise AssertionError(f"settlement is not on land: {settlement}")
-            if settlement["realm_id"] not in realm_ids:
-                raise AssertionError(f"settlement references missing realm: {settlement}")
-        if len(titles["titles"]) != blueprint["province_count"] + blueprint["region_count"] + blueprint["realm_count"]:
-            raise AssertionError("title hierarchy count does not match province/region/state blueprint")
+                raise AssertionError(f"province {pid} geographic anchor is outside its province")
+        if realms.get("realms") != []:
+            raise AssertionError("image-derived worldmap must not contain pre-authored realms")
+        if "realms" in blueprint or "realm_count" in blueprint:
+            raise AssertionError("world blueprint must not serialize canonical realm data")
+        if len(titles["tiers"]) != 2 or [int(t["index"]) for t in titles["tiers"]] != [0, 1]:
+            raise AssertionError("image worldmap must expose only province and region geography tiers")
+        if len(titles["titles"]) != blueprint["province_count"] + blueprint["region_count"]:
+            raise AssertionError("geographic title count does not match province/region blueprint")
         by_id = {int(item["id"]): item for item in titles["titles"]}
-        state_keys = {key for realm in realms["realms"] for key in realm["titles"]}
+        if len(by_id) != len(titles["titles"]):
+            raise AssertionError("geographic title IDs are not globally unique")
+        if any(str(item.get("name", "")).strip() for item in titles["titles"]):
+            raise AssertionError("image-derived geography must not contain pre-authored display names")
         for item in titles["titles"]:
             tier, parent = int(item["tier"]), int(item["parent"])
             if tier == 0 and (parent not in by_id or int(by_id[parent]["tier"]) != 1):
-                raise AssertionError(f"province is not nested in a region: {item['key']}")
-            if tier == 1 and (parent not in by_id or int(by_id[parent]["tier"]) != 2):
-                raise AssertionError(f"region is not nested in a state: {item['key']}")
-            if tier == 2 and (parent != 0 or item["key"] not in state_keys):
-                raise AssertionError(f"invalid sovereign state root: {item['key']}")
-        if any(not any(int(item["tier"]) == 1 and int(item["parent"]) == int(root["id"])
-                       for item in titles["titles"])
-               for root in titles["titles"] if int(root["tier"]) == 2):
-            raise AssertionError("every state must contain at least one region")
-        if len(blueprint["settlements"]) < blueprint["realm_count"] * 2:
-            raise AssertionError("not enough settlements were generated")
+                raise AssertionError(f"province is not nested in a geographic region: {item['key']}")
+            if tier == 1 and parent != 0:
+                raise AssertionError(f"geographic region must not be nested in a sovereign state: {item['key']}")
+            if tier not in (0, 1):
+                raise AssertionError(f"unsupported pre-authored political title tier: {tier}")
+        province_ids_set = {int(item["id"]) for item in blueprint["provinces"]}
+        for settlement in blueprint["settlements"]:
+            x, z = settlement["pixel"]
+            if not (0 <= x < width and 0 <= z < height and land_mask[z, x]):
+                raise AssertionError(f"settlement candidate is not on land: {settlement}")
+            if int(settlement["province_id"]) not in province_ids_set:
+                raise AssertionError(f"settlement candidate references missing province: {settlement}")
+            if settlement.get("realm_id", "") or settlement.get("name", "") or settlement.get("type") != "site":
+                raise AssertionError("settlement candidates must be unnamed and politically unassigned")
+        if len(blueprint["settlements"]) != blueprint["settlement_count"]:
+            raise AssertionError("settlement candidate count differs from the blueprint")
         return {
-            "worldmap": path.name, "realm_count": blueprint["realm_count"],
+            "worldmap": path.name, "realm_count": 0,
             "province_count": blueprint["province_count"],
             "region_count": blueprint["region_count"],
             "settlement_count": blueprint["settlement_count"],
             "land_pixels": blueprint["land_pixels"],
-            "politically_unclaimed_land_pixels": blueprint["politically_unclaimed_land_pixels"],
+            "wilderness_land_pixels": blueprint["wilderness_land_pixels"],
             "actual_land_pixels": actual_land_pixels,
             "actual_covered_land_pixels": actual_covered_land_pixels,
             "actual_unclaimed_land_pixels": actual_unclaimed,
-            "wilderness_percent_of_land": blueprint["generation_policy"]["wilderness_percent_of_land"],
+            "wilderness_percent_of_land": policy["wilderness_percent_of_land"],
             "settlement_level": blueprint["settlement_level"],
             "seed": blueprint["seed"],
             "source_image_sha256": blueprint["source_image_sha256"],
-            "chunk_materialization": blueprint["generation_policy"]["chunk_materialization"],
             "connectivity": connectivity_report,
         }
 
