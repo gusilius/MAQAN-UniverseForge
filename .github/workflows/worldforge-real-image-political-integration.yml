@@ -1,23 +1,6 @@
 name: WorldForge real image political integration
 
 on:
-  push:
-    branches: [feature/autonomous-world-simulation-engine]
-    paths:
-      - "map.png"
-      - "mods/worldforge/wfaddons/tools/image-worldgen/**"
-      - "mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/MapData.java"
-      - "mods/worldforge/wfaddons/tests/**"
-      - "mods/worldforge/wfaddons/tools/test-all.sh"
-      - "mods/worldforge/wfaddons/wf-people/**"
-      - "mods/worldforge/wfaddons/wf-origins/**"
-      - "mods/worldforge/wfaddons/wf-realms/**"
-      - "mods/worldforge/wfaddons/wf-settlements/**"
-      - "mods/worldforge/wfaddons/wf-worldsim/**"
-      - "mods/worldforge/wfaddons/wf-realms/src/main/java/**"
-      - "mods/worldforge/native/worldforge-worldsim/**"
-      - "mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/TitleData.java"
-      - ".github/workflows/worldforge-real-image-political-integration.yml"
   workflow_dispatch:
 
 permissions:
