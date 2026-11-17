@@ -745,7 +745,6 @@ public class SettleMod {
             person.props.put("population.employer", place);
             person.props.put("population.location", colony.s.id);
             if (person.culture == null || person.culture.isBlank()) person.culture = culture;
-            if (person.culture == null || person.culture.isBlank()) person.culture = culture;
             String profession = worker.profession == null || worker.profession.isBlank() ? "laborer" : worker.profession;
             if (!profession.equals(PopulationSimulation.profession(person))) personRegistry.changeProfession(person.id, profession, PeopleMod.YEAR);
             personRegistry.setDuty(person.id, Duty.WORKER, true, PeopleMod.YEAR);
@@ -838,6 +837,15 @@ public class SettleMod {
         if (registry == null) return;
         Settlement settlement = colony.s;
         long worldMinute = settlement.worldMinute();
+
+        // These facts are settlement-wide, not worker-specific. Computing them inside the
+        // resident loop made one simulation step O(workers * buildings + workers^2).
+        // Snapshot once so the common life-AI pass stays linear in residents + buildings.
+        boolean hasLeisure = settlement.buildings.stream().anyMatch(b -> b.state == Building.State.DONE
+                && !b.paused && b.def.category != null
+                && (b.def.category.equalsIgnoreCase("leisure") || b.def.id.contains("tavern") || b.def.id.contains("inn")));
+        boolean hasCompanion = settlement.workers.size() > 1;
+
         for (dev.worldforge.settle.Worker worker : new ArrayList<>(settlement.workers)) {
             if (worker.person == null || worker.person.isBlank()) continue;
             Character person = resolvePerson(registry, worker.person);
@@ -867,10 +875,6 @@ public class SettleMod {
                 continue;
             }
             boolean hasTraining = !worker.generalist() && !PopulationSimulation.trainingTarget(person).isBlank();
-            boolean hasLeisure = settlement.buildings.stream().anyMatch(b -> b.state == Building.State.DONE
-                    && !b.paused && b.def.category != null
-                    && (b.def.category.equalsIgnoreCase("leisure") || b.def.id.contains("tavern") || b.def.id.contains("inn")));
-            boolean hasCompanion = settlement.workers.stream().anyMatch(other -> other != worker);
             LifeSimulation.Context context = new LifeSimulation.Context(
                     worldMinute,
                     settlement.amount("food") >= 1.0,
