@@ -257,7 +257,48 @@ public final class NameBank {
                 return candidate;
             }
         }
-        throw new IllegalStateException("Пул имён '" + category + "' исчерпан: все варианты уже заняты");
+
+        // Large worlds can exhaust the literal list. Extend it only by composing
+        // fragments that the same authoritative mod/datapack supplied; never add
+        // generic labels, random digits or a fabricated fallback.
+        List<String> fragments = new ArrayList<>();
+        Set<String> fragmentKeys = new HashSet<>();
+        for (String value : values) {
+            if (value == null || value.isBlank()) continue;
+            String fragment = value.trim();
+            if (fragmentKeys.add(normalizeName(fragment))) fragments.add(fragment);
+        }
+        int fragmentCount = fragments.size();
+        for (int firstOffset = 0; firstOffset < fragmentCount; firstOffset++) {
+            String first = fragments.get((start + firstOffset) % fragmentCount);
+            for (int secondOffset = 0; secondOffset < fragmentCount; secondOffset++) {
+                if (secondOffset == firstOffset) continue;
+                String second = fragments.get((start + secondOffset) % fragmentCount);
+                String candidate = first + " " + second;
+                if (normalized.add(normalizeName(candidate))) {
+                    reservedNames.add(candidate);
+                    return candidate;
+                }
+            }
+        }
+        for (int firstOffset = 0; firstOffset < fragmentCount; firstOffset++) {
+            String first = fragments.get((start + firstOffset) % fragmentCount);
+            for (int secondOffset = 0; secondOffset < fragmentCount; secondOffset++) {
+                if (secondOffset == firstOffset) continue;
+                String second = fragments.get((start + secondOffset) % fragmentCount);
+                for (int thirdOffset = 0; thirdOffset < fragmentCount; thirdOffset++) {
+                    if (thirdOffset == firstOffset || thirdOffset == secondOffset) continue;
+                    String third = fragments.get((start + thirdOffset) % fragmentCount);
+                    String candidate = first + " " + second + " " + third;
+                    if (normalized.add(normalizeName(candidate))) {
+                        reservedNames.add(candidate);
+                        return candidate;
+                    }
+                }
+            }
+        }
+        throw new IllegalStateException("Пул имён '" + category
+                + "' исчерпан: нет свободных одиночных или составных вариантов из данных мода");
     }
 
     private static String normalizeName(String value) {
