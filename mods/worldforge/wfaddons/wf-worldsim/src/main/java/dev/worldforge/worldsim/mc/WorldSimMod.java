@@ -1874,6 +1874,7 @@ public final class WorldSimMod {
         Set<String> reservedRealmNames = RealmsMod.realms().stream()
                 .filter(realm -> realm != null && !Boolean.TRUE.equals(realm.props.get("emergence.virtual")))
                 .map(realm -> realm.name).filter(name -> name != null && !name.isBlank())
+                .map(name -> name.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT))
                 .collect(java.util.stream.Collectors.toCollection(HashSet::new));
         Map<CharacterRegistry, EmergentPopulationIndex> populationIndexes = new IdentityHashMap<>();
         for (EmergenceSource source : emergenceSources()) {
@@ -2177,11 +2178,13 @@ public final class WorldSimMod {
         Set<String> reserved = RealmsMod.POLITICS.titles().stream()
                 .filter(title -> !thisMapTitleIds.contains(title.id))
                 .map(title -> title.name).filter(name -> name != null && !name.isBlank())
+                .map(name -> name.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT))
                 .collect(java.util.stream.Collectors.toCollection(HashSet::new));
         SettleMod.COLONIES.values().stream()
                 .filter(colony -> colony != null && colony.s != null && colony.s.name != null
                         && !colony.s.name.isBlank())
-                .map(colony -> colony.s.name).forEach(reserved::add);
+                .map(colony -> colony.s.name.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT))
+                .forEach(reserved::add);
         boolean changed = false;
         for (TitleData.Title title : ordered) {
             String category = title.tier <= 0 ? "provinces" : title.tier == 1 ? "regions" : "realms";
