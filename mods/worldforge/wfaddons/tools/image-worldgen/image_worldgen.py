@@ -880,8 +880,8 @@ def partition_provinces_into_regions(realm_provinces: dict[int, list[int]],
     return regions, region_for_province
 
 
-def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: int | None = None,
-                  provinces_per_realm: int | None = None, blocks_per_pixel: int = 16,
+def convert_image(input_path: Path, output_path: Path, seed: int, region_count: int | None = None,
+                  provinces_per_region: int | None = None, blocks_per_pixel: int = 16,
                   settlement_level: int = 4, planet_id: str | None = None,
                   generation_mode: str = "image") -> dict:
     # Import before any coast/island processing. A later function-local import
@@ -916,11 +916,11 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     full_land_mask = np.isin(analysis_grid, land_codes)
     land_count = int(full_land_mask.sum())
     # Realm scale is based only on explored land area, never on settlement density.
-    if realm_count is None:
-        realm_count = max(1, int(round(math.sqrt(max(1, land_count) / 900.0))))
+    if region_count is None:
+        region_count = max(1, int(round(math.sqrt(max(1, land_count) / 900.0))))
     else:
-        realm_count = max(1, int(realm_count))
-    minimum_territory_pixels = max(64, int(land_count / max(1, realm_count * 8)))
+        region_count = max(1, int(region_count))
+    minimum_territory_pixels = max(64, int(land_count / max(1, region_count * 8)))
     wilderness_mask = select_wilderness_mask(
         analysis_grid, width, height, settlement_profile["wilderness_share"], seed)
     political_land_mask = full_land_mask & ~wilderness_mask
@@ -944,17 +944,17 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
                          for component in major_components)
     realm_total = max(
         len(major_components),
-        min(realm_count, realm_capacity,
+        min(region_count, realm_capacity,
             max(1, major_land_pixels // minimum_territory_pixels)),
     )
-    realm_counts = allocate_counts(major_components, realm_total, minimum_territory_pixels)
+    region_counts = allocate_counts(major_components, realm_total, minimum_territory_pixels)
     realm_labels = np.full(width * height, -2, dtype=np.int32)
     partition_scratch = np.full(width * height, -2, dtype=np.int32)
     realm_seeds: dict[int, int] = {}
     seed_landmass_by_pixel: dict[int, int] = {}
     main_landmass_id = major_components[0][0]
     next_realm = 0
-    for component, count in zip(major_components, realm_counts):
+    for component, count in zip(major_components, region_counts):
         seeds = farthest_seeds(component, count, width, seed ^ (next_realm + 1))
         labels, _ = partition(component, seeds, width, height, next_realm,
                               partition_scratch, boundary_cost)
@@ -994,8 +994,8 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         if not realm_cells:
             continue
         natural_count = max(1, len(realm_cells) // minimum_territory_pixels)
-        count = natural_count if provinces_per_realm is None else min(
-            max(1, int(provinces_per_realm)), natural_count)
+        count = natural_count if provinces_per_region is None else min(
+            max(1, int(provinces_per_region)), natural_count)
         seeds = farthest_seeds(realm_cells, count, width, seed ^ (realm_id * 7919))
         labels, _ = partition(realm_cells, seeds, width, height, next_province,
                               partition_scratch, boundary_cost)
@@ -1035,7 +1035,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         wilderness_mask.ravel()[tiny_pixels] = True
         minor_components = [component for component in minor_components if len(component) >= 8]
     island_province_count = 0
-    independent_island_realm_count = 0
+    independent_island_region_count = 0
     if minor_components and realm_seeds:
         from scipy.spatial import cKDTree
         coast_water = np.isin(analysis_grid, [ANALYSIS_CLASSES.index("ocean"),
@@ -1051,7 +1051,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         seed_pixels = np.asarray([realm_seeds[int(rid)] for rid in seed_ids], dtype=np.int64)
         seed_xy = np.column_stack((seed_pixels % width, seed_pixels // width))
         realm_tree = cKDTree(seed_xy)
-        independent_budget = max(1, realm_count // 16)
+        independent_budget = max(1, region_count // 16)
         # A city-state needs enough land to support a minimal settlement.
         # The threshold scales with world development but never falls below 64 pixels.
         island_city_state_minimum = max(64, minimum_territory_pixels // 16)
@@ -1077,7 +1077,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
                 realm_provinces[owner_realm] = []
                 realm_seeds[owner_realm] = center
                 next_realm += 1
-                independent_island_realm_count += 1
+                independent_island_region_count += 1
             province_id = next_province
             realm_provinces.setdefault(owner_realm, []).append(province_id)
             province_labels[np.asarray(component, dtype=np.int64)] = province_id
@@ -1424,7 +1424,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
             "initial_geographic_regions": region_aggregation["initial_regions"],
             "final_geographic_regions": len(region_meta),
             "minor_island_provinces": island_province_count,
-            "isolated_island_regions": independent_island_realm_count,
+            "isolated_island_regions": independent_island_region_count,
             "isolated_island_minimum_pixels": max(64, minimum_territory_pixels // 16),
             "geographic_region_aggregation": region_aggregation,
             "unclaimed_land_pixels": unclaimed_land_pixels,
