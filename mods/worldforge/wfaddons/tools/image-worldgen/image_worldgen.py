@@ -1315,58 +1315,73 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         "sea_level": 63, "min_y": -64, "max_y": 320,
         "biomes": BIOMES, "spawn": [(spawn_x + 0.5) / width, (spawn_z + 0.5) / height],
     }
+    # Image analysis supplies geography only. Province and region polygons are
+    # neutral administrative geography; states, rulers, dynasties and sovereignty
+    # are created later by the installed WorldForge mods in the running save.
+    titles = [item for item in titles if int(item["tier"]) in (0, 1)]
+    for item in titles:
+        item["name"] = ""
+        item["key"] = ("province_" if int(item["tier"]) == 0 else "region_") + str(int(item["id"]))
+        if int(item["tier"]) == 1:
+            item["parent"] = 0
+    realms = []
+    # Candidate points are geography hints, not instantiated/named settlements.
+    # wf-settlements chooses their actual type, name, residents and ownership.
+    settlements = []
+    for province_id, meta in sorted(province_meta.items()):
+        point = int(meta["seed"])
+        sx, sz = point % width, point // width
+        settlements.append({
+            "id": f"site_{province_id:06d}", "type": "site", "name": "",
+            "realm_id": "", "province_id": province_id,
+            "pixel": [sx, sz],
+            "block": [round((sx + 0.5 - width / 2) * blocks_per_pixel),
+                      round((sz + 0.5 - height / 2) * blocks_per_pixel)],
+        })
     titles_doc = {
         "format": "worldforge-titles/1", "size_px": [width, height],
         "blocks_per_pixel": blocks_per_pixel,
         "tiers": [{"index": 0, "key": "province", "name": "Province"},
-                  {"index": 1, "key": "region", "name": "Region"},
-                  {"index": 2, "key": "state", "name": "State"}],
+                  {"index": 1, "key": "region", "name": "Region"}],
         "titles": sorted(titles, key=lambda item: item["id"]),
     }
     titles_by_id = {int(item["id"]): item for item in titles}
     if len(titles_by_id) != len(titles):
-        raise AssertionError("administrative title IDs must be globally unique")
+        raise AssertionError("geographic title IDs must be globally unique")
 
-    realms_doc = {
-        "format": "worldforge-realms/1",
-        "relation_types": {"vassal": {"label": "Vassal", "tribute": 10, "levy": 10, "can_declare_war": False}},
-        "realms": realms,
-    }
+    realms_doc = {"format": "worldforge-realms/1", "relation_types": {}, "realms": []}
     geography_seconds = time.perf_counter() - geography_started
     province_ids = province_labels.tolist()  # zero is reserved for sea; labels are 16-bit safe.
 
-    # Render a deterministic political QA layer: realm colors are shared by
-    # their provinces, while thin dark borders expose province boundaries.
-    realm_rgb = {
-        rid: tuple(int(color_for(rid + 1)[i:i + 2], 16) for i in (1, 3, 5))
-        for rid in realm_provinces
+    # Render neutral geographic QA: region colors and province boundaries only.
+    region_rgb = {
+        region_id: tuple(int(color_for(region_id + 1)[i:i + 2], 16) for i in (1, 3, 5))
+        for region_id in region_meta
     }
     province_array = province_labels.reshape((height, width))
     province_palette = np.zeros((int(province_labels.max()) + 1, 3), dtype=np.uint8)
-    for province_id, meta in province_meta.items():
-        province_palette[province_id] = realm_rgb[meta["realm"]]
-    political_rgb = province_palette[province_array]
-    # Show unclaimed land as a distinct wilderness reserve, not as a hole
-    # indistinguishable from ocean. Dense profiles have an empty wilderness mask.
-    political_rgb[wilderness_mask] = (104, 111, 83)
-    realm_lut = np.zeros(int(province_array.max()) + 1, dtype=np.int32)
-    for province_id, meta in province_meta.items():
-        realm_lut[province_id] = meta["realm"] + 1
-    realm_grid = realm_lut[province_array]
+    region_lut = np.zeros(int(province_array.max()) + 1, dtype=np.int32)
+    for province_id in province_meta:
+        region_id = region_for_province[province_id]
+        province_palette[province_id] = region_rgb[region_id]
+        region_lut[province_id] = region_id
+    geography_rgb = province_palette[province_array]
+    geography_rgb[wilderness_mask] = (104, 111, 83)
+    region_grid = region_lut[province_array]
     province_edge = np.zeros((height, width), dtype=bool)
     province_edge[:, 1:] |= (province_array[:, 1:] != province_array[:, :-1]) & (province_array[:, 1:] > 0) & (province_array[:, :-1] > 0)
     province_edge[1:, :] |= (province_array[1:, :] != province_array[:-1, :]) & (province_array[1:, :] > 0) & (province_array[:-1, :] > 0)
-    realm_edge = np.zeros((height, width), dtype=bool)
-    realm_edge[:, 1:] |= (realm_grid[:, 1:] != realm_grid[:, :-1]) & (realm_grid[:, 1:] > 0) & (realm_grid[:, :-1] > 0)
-    realm_edge[1:, :] |= (realm_grid[1:, :] != realm_grid[:-1, :]) & (realm_grid[1:, :] > 0) & (realm_grid[:-1, :] > 0)
+    region_edge = np.zeros((height, width), dtype=bool)
+    region_edge[:, 1:] |= (region_grid[:, 1:] != region_grid[:, :-1]) & (region_grid[:, 1:] > 0) & (region_grid[:, :-1] > 0)
+    region_edge[1:, :] |= (region_grid[1:, :] != region_grid[:-1, :]) & (region_grid[1:, :] > 0) & (region_grid[:-1, :] > 0)
     from scipy import ndimage
-    realm_edge = ndimage.binary_dilation(realm_edge, iterations=2)
-    political_rgb[province_edge] = (63, 67, 72)
-    political_rgb[realm_edge] = (20, 22, 28)
-    political_preview = Image.fromarray(political_rgb, "RGB")
+    region_edge = ndimage.binary_dilation(region_edge, iterations=2)
+    geography_rgb[province_edge] = (63, 67, 72)
+    geography_rgb[region_edge] = (20, 22, 28)
+    geography_preview = Image.fromarray(geography_rgb, "RGB")
     from io import BytesIO
-    political_buffer = BytesIO()
-    political_preview.save(political_buffer, format="PNG", optimize=False)
+    geography_buffer = BytesIO()
+    geography_preview.save(geography_buffer, format="PNG", optimize=False)
 
     source_hash = hashlib.sha256(input_path.read_bytes()).hexdigest() if generation_mode == "image" else None
     blueprint = {
