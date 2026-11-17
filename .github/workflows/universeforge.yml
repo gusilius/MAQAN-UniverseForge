@@ -113,6 +113,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Actual map package validation failed" }
 
       - name: Run the complete modpack on a real vanilla Minecraft world
+        id: vanilla_campaign
+        continue-on-error: true
         working-directory: mods/worldforge/wfaddons
         shell: bash
         env:
@@ -124,6 +126,8 @@ jobs:
           bash tools/autonomous-campaign.sh vanilla dist "$RUNNER_TEMP/maqan-vanilla-acceptance"
 
       - name: Run the same complete modpack on the real map.png world
+        id: image_map_campaign
+        continue-on-error: true
         working-directory: mods/worldforge/wfaddons
         shell: bash
         env:
@@ -131,6 +135,19 @@ jobs:
           WF_CAMPAIGN_MAP_ID: "real-map"
         run: |
           bash tools/autonomous-campaign.sh "$RUNNER_TEMP/maqan-two-world-map/real-map.worldmap" dist "$RUNNER_TEMP/maqan-image-map-acceptance"
+
+      - name: Aggregate independent world acceptance results
+        if: always()
+        shell: pwsh
+        env:
+          VANILLA_OUTCOME: ${{ steps.vanilla_campaign.outcome }}
+          IMAGE_MAP_OUTCOME: ${{ steps.image_map_campaign.outcome }}
+        run: |
+          "VANILLA_CAMPAIGN_OUTCOME=$env:VANILLA_OUTCOME" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "IMAGE_MAP_CAMPAIGN_OUTCOME=$env:IMAGE_MAP_OUTCOME" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          if ($env:VANILLA_OUTCOME -ne "success" -or $env:IMAGE_MAP_OUTCOME -ne "success") {
+            throw "One or both independent world acceptance campaigns failed; inspect each campaign diagnostics artifact."
+          }
 
       - name: Upload both server worlds and acceptance diagnostics
         if: always()
