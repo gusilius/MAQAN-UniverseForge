@@ -52,12 +52,9 @@ public final class NameBankTest {
         check(exhausted, "unique realm names fail closed when every configured name is already reserved");
         Set<String> houseNames = new HashSet<>();
         String firstHouse = bank.generateUnique("deep_dwarf", "dwarf", "houses", new Random(1), houseNames);
-        boolean secondHouseUnique = false;
-        try { bank.generateUnique("deep_dwarf", "dwarf", "houses", new Random(1), houseNames); }
-        catch (IllegalStateException expected) { secondHouseUnique = true; }
-        check(secondHouseUnique || !firstHouse.equals(bank.generateUnique("deep_dwarf", "dwarf", "houses",
-                        new Random(2), new HashSet<>())),
-                "house allocation is guarded by a world-level reservation set");
+        String secondHouse = bank.generateUnique("deep_dwarf", "dwarf", "houses", new Random(1), houseNames);
+        check(!firstHouse.equals(secondHouse) && houseNames.size() == 2,
+                "house allocation reserves names across successive generated houses");
         if (failures > 0) throw new AssertionError(failures + " name bank tests failed");
         System.out.println("NameBankTest: OK");
     }
