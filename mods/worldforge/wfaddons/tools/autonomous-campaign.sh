@@ -202,7 +202,7 @@ server-port=25565
 P
 : > in.txt
 CURRENT_STAGE="forge_startup"
-java -Xms1G -Xmx4G -Dworldforge.campaign.acceptance=true \
+java -Xms2G -Xmx8G \
   -XX:+HeapDumpOnOutOfMemoryError \
   -XX:HeapDumpPath="$JAVA_WORK/java_pid%p.hprof" \
   -XX:ErrorFile="$JAVA_WORK/hs_err_pid%p.log" \
@@ -237,7 +237,7 @@ if [ "$VANILLA_CAMPAIGN" -eq 1 ]; then
   }
   STEP_CHUNKS=16
   VIEW_RADIUS=8
-  GRID_COUNT=$(((TEST_CHUNKS + STEP_CHUNKS - 1) / STEP_CHUNKS + 1))
+  GRID_COUNT=$(((TEST_CHUNKS - 1) / STEP_CHUNKS + 1))
   MIN_CHUNK=$(( -(TEST_CHUNKS / 2) ))
   MAX_CHUNK=$(( MIN_CHUNK + TEST_CHUNKS - 1 ))
   echo "VANILLA_TEST_SURVEY_CHUNKS=${TEST_CHUNKS}x${TEST_CHUNKS}"
@@ -280,7 +280,7 @@ if [ "$VANILLA_CAMPAIGN" -eq 1 ]; then
         geography_line="$(grep -a 'Vanilla geography:' server.log | tail -1 || true)"
         pending="$(printf '%s' "$geography_line" | sed -nE 's/.*pending_chunks=([0-9]+).*/\1/p')"
         samples="$(printf '%s' "$geography_line" | sed -nE 's/.*samples=([0-9]+).*/\1/p')"
-        if [ -n "$pending" ] && [ "$pending" -eq 0 ] && [ -n "$samples" ] && [ "$samples" -gt "$previous_samples" ] && [ "$polls" -ge 3 ]; then
+        if [ -n "$pending" ] && [ "$pending" -eq 0 ] && [ -n "$samples" ] && [ "$samples" -ge $((previous_samples + 512)) ] && [ "$polls" -ge 3 ]; then
           stable=$((stable + 1))
           if [ "$stable" -ge 3 ]; then captured=1; previous_samples="$samples"; break; fi
         else
@@ -299,7 +299,7 @@ if [ "$VANILLA_CAMPAIGN" -eq 1 ]; then
   samples="$(printf '%s' "$geography_line" | sed -nE 's/.*samples=([0-9]+).*/\1/p')"
   regions="$(printf '%s' "$geography_line" | sed -nE 's/.*regions=([0-9]+).*/\1/p')"
   expected_samples=$((TEST_CHUNKS * TEST_CHUNKS * 16))
-  if [ -z "$samples" ] || [ "$samples" -lt "$expected_samples" ] || [ -z "$regions" ] || [ "$regions" -lt 400 ]; then
+  if [ -z "$samples" ] || [ "$samples" -lt "$expected_samples" ] || [ -z "$regions" ] || [ "$regions" -lt 700 ]; then
     tail -160 server.log
     echo "ERROR: natural player survey incomplete; expected_samples=$expected_samples actual_samples=${samples:-0} regions=${regions:-0}"
     exit 3
