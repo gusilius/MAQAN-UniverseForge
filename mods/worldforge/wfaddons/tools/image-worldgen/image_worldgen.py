@@ -1198,7 +1198,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, region_count: 
             "area_blocks": meta["area"] * blocks_per_pixel * blocks_per_pixel,
             "area_pct_of_land": 100.0 * meta["area"] / land_count,
             "children": province_ids, "neighbors": sorted(region_neighbors[region_id]),
-            "props": {"administrative_level": "region", "formation_scale": realm_scale_metadata[rid][0]},
+            "props": {"administrative_level": "region"},
         })
 
     for rid, pids in realm_provinces.items():
@@ -1427,8 +1427,8 @@ def convert_image(input_path: Path, output_path: Path, seed: int, region_count: 
             "isolated_island_regions": independent_island_region_count,
             "isolated_island_minimum_pixels": max(64, minimum_territory_pixels // 16),
             "geographic_region_aggregation": region_aggregation,
-            "unclaimed_land_pixels": unclaimed_land_pixels,
-            "unclaimed_land_percent": round(100.0 * unclaimed_land_pixels / max(1, land_count), 4),
+            "wilderness_land_pixels": unclaimed_land_pixels,
+            "wilderness_percent_of_land": round(100.0 * unclaimed_land_pixels / max(1, land_count), 4),
             "region_area_pixels": {
                 "min": min(region_areas) if region_areas else 0,
                 "max": max(region_areas) if region_areas else 0,
@@ -1715,7 +1715,7 @@ def run_profile_suite(input_path: Path, output_dir: Path, seed: int,
             "settlement_site_count": blueprint["settlement_count"],
             "land_pixels": blueprint["land_pixels"],
             "wilderness_land_pixels": blueprint["wilderness_land_pixels"],
-            "wilderness_percent": policy["unclaimed_land_percent"],
+            "wilderness_percent": policy["wilderness_percent_of_land"],
             "major_land_components": policy["major_land_components"],
             "minor_land_components": policy["minor_land_components"],
             "minor_island_provinces": policy["minor_island_provinces"],
