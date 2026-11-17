@@ -88,9 +88,10 @@ pub fn generate_world(request: &WorldGenRequest) -> Result<GeneratedWorld, World
         || u64::from(request.region_count) > u64::from(request.width) * u64::from(request.height) {
         return Err(WorldGenError::InvalidRegionCount);
     }
+    let required_points = u64::from(request.region_count)
+        .saturating_mul(u64::from(request.provinces_per_region).saturating_add(1));
     if request.provinces_per_region == 0 || request.provinces_per_region > 64
-        || u64::from(request.region_count) * u64::from(request.provinces_per_region)
-            > u64::from(request.width) * u64::from(request.height) {
+        || required_points > u64::from(request.width) * u64::from(request.height) {
         return Err(WorldGenError::InvalidProvinceCount);
     }
 
