@@ -1617,6 +1617,47 @@ public final class WorldSimMod {
         return title;
     }
 
+    /** Allocates stable, world-unique territorial names from wf-people datapacks. */
+    private static String uniqueTerritorialName(String titleId, String category, String bandId,
+            EmergentPopulationIndex populationIndex, String identity) {
+        var existing = RealmsMod.POLITICS.title(titleId);
+        Set<String> reserved = new HashSet<>();
+        RealmsMod.POLITICS.titles().stream()
+                .filter(title -> title != null && !title.id.equals(titleId))
+                .map(title -> title.name).filter(name -> name != null && !name.isBlank())
+                .forEach(reserved::add);
+        SettleMod.COLONIES.values().stream()
+                .filter(colony -> colony != null && colony.s != null && colony.s.name != null
+                        && !colony.s.name.isBlank())
+                .map(colony -> colony.s.name).forEach(reserved::add);
+        if (existing != null && existing.name != null && !existing.name.isBlank()) {
+            String normalized = existing.name.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
+            boolean available = reserved.stream().noneMatch(value -> value.trim()
+                    .replaceAll("\\s+", " ").equalsIgnoreCase(normalized));
+            if (available) return existing.name;
+        }
+        List<dev.worldforge.people.Character> residents = bandId == null || bandId.isBlank()
+                ? List.of() : populationIndex.livingResidents(bandId);
+        Map<String, Long> races = residents.stream()
+                .map(person -> String.valueOf(person.props.getOrDefault("origin.race", "")))
+                .filter(value -> !value.isBlank())
+                .collect(java.util.stream.Collectors.groupingBy(value -> value, TreeMap::new,
+                        java.util.stream.Collectors.counting()));
+        Map<String, Long> cultures = residents.stream()
+                .map(person -> person.culture == null ? "" : person.culture)
+                .filter(value -> !value.isBlank())
+                .collect(java.util.stream.Collectors.groupingBy(value -> value, TreeMap::new,
+                        java.util.stream.Collectors.counting()));
+        String race = races.entrySet().stream().max(Map.Entry.<String, Long>comparingByValue()
+                .thenComparing(Map.Entry::getKey, Comparator.reverseOrder()))
+                .map(Map.Entry::getKey).orElse("");
+        String culture = cultures.entrySet().stream().max(Map.Entry.<String, Long>comparingByValue()
+                .thenComparing(Map.Entry::getKey, Comparator.reverseOrder()))
+                .map(Map.Entry::getKey).orElse("");
+        return PeopleMod.NAMES.generateUnique(race, culture, category,
+                new Random(Objects.hash(identity, titleId, category)), reserved);
+    }
+
     private static void linkEmergentTerritoryTitle(String childId, String liegeId) {
         var child = RealmsMod.POLITICS.title(childId);
         if (child == null || childId.equals(liegeId)) return;
@@ -1703,8 +1744,10 @@ public final class WorldSimMod {
             members.sort(Comparator.comparing(site -> site.name));
             EmergentTerritorySite capital = members.get(0);
             String countyId = emergentTerritoryTitleId("county", polityId, entry.getKey());
+            String countyName = uniqueTerritorialName(countyId, "provinces", capital.bandId,
+                    populationIndex, polityId);
             ensureEmergentTerritoryTitle(countyId, realmId,
-                    dev.worldforge.realms.Statecraft.Rank.COUNTY, "County of " + capital.name);
+                    dev.worldforge.realms.Statecraft.Rank.COUNTY, countyName);
             grantEmergentTerritoryHolder(countyId, capital.bandId, populationIndex, year, rulerGlobalId);
             countyByProvince.put(entry.getKey(), capital);
             titleIds.add(countyId);
@@ -1754,8 +1797,10 @@ public final class WorldSimMod {
                         return entry.getKey().equals(Math.floorDiv(x, regionBlocks) + ":"
                                 + Math.floorDiv(z, regionBlocks));
                     }).findFirst().orElse(provinceGroups.keySet().iterator().next()));
+            String duchyName = uniqueTerritorialName(duchyId, "regions", capital.bandId,
+                    populationIndex, polityId);
             ensureEmergentTerritoryTitle(duchyId, realmId,
-                    dev.worldforge.realms.Statecraft.Rank.DUCHY, "Duchy of " + capital.name);
+                    dev.worldforge.realms.Statecraft.Rank.DUCHY, duchyName);
             grantEmergentTerritoryHolder(duchyId, capital.bandId, populationIndex, year, rulerGlobalId);
             duchyCapitalBandById.put(duchyId, capital.bandId);
             for (String countyId : entry.getValue()) linkEmergentTerritoryTitle(countyId, duchyId);
@@ -1782,12 +1827,12 @@ public final class WorldSimMod {
         // duchies unattached to the sovereign title.
         for (var entry : duchiesByKingdom.entrySet()) {
             String kingdomId = emergentTerritoryTitleId("kingdom", polityId, entry.getKey());
-            var firstDuchy = RealmsMod.POLITICS.title(entry.getValue().get(0));
-            String kingdomName = "Kingdom of " + (firstDuchy == null ? polityName : firstDuchy.name);
-            ensureEmergentTerritoryTitle(kingdomId, realmId,
-                    dev.worldforge.realms.Statecraft.Rank.KINGDOM, kingdomName);
             String kingdomBand = entry.getValue().stream()
                     .map(duchyCapitalBandById::get).filter(Objects::nonNull).findFirst().orElse("");
+            String kingdomName = uniqueTerritorialName(kingdomId, "realms", kingdomBand,
+                    populationIndex, polityId);
+            ensureEmergentTerritoryTitle(kingdomId, realmId,
+                    dev.worldforge.realms.Statecraft.Rank.KINGDOM, kingdomName);
             if (!kingdomBand.isBlank())
                 grantEmergentTerritoryHolder(kingdomId, kingdomBand, populationIndex, year, rulerGlobalId);
             for (String duchyId : entry.getValue()) linkEmergentTerritoryTitle(duchyId, kingdomId);
