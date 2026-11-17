@@ -815,6 +815,17 @@ public final class WorldSimMod {
                             .map(colony -> colony.s.name).toList()));
             report.addProperty("duplicate_dynasty_names", duplicateNameCount(
                     RealmsMod.POLITICS.dynasties().stream().map(dynasty -> dynasty.name).toList()));
+            Map<String, Set<String>> familyHouseOwners = new HashMap<>();
+            for (var dynasty : RealmsMod.POLITICS.dynasties()) {
+                for (String memberId : dynasty.members) {
+                    dev.worldforge.people.Character familyMember = PeopleMod.authority().getGlobal(memberId);
+                    if (familyMember == null || familyMember.house == null || familyMember.house.isBlank()) continue;
+                    String familyName = familyMember.house.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
+                    familyHouseOwners.computeIfAbsent(familyName, ignored -> new HashSet<>()).add(dynasty.houseId);
+                }
+            }
+            report.addProperty("duplicate_family_house_names",
+                    familyHouseOwners.values().stream().filter(owners -> owners.size() > 1).count());
             report.addProperty("duplicate_statecraft_title_names", duplicateNameCount(
                     RealmsMod.POLITICS.titles().stream().map(title -> title.name).toList()));
             report.addProperty("political_ownership_samples", campaignMap == null
