@@ -576,7 +576,6 @@ mod tests {
         snapshot.geography[0].cells[1].water_claimed_by_player = true;
         assert!(snapshot.validate().is_ok(), "only an explicit player-authorized water expansion may claim water");
     }
-    }
 
     #[test] fn duplicate_realms_are_rejected() {
         let mut s=base(); s.realms.push(s.realms[0].clone());
