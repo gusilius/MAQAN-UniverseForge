@@ -1255,7 +1255,7 @@ public final class WorldSimMod {
                 try {
                     int[] position = source.blockPosition(band.get("x").getAsInt(), band.get("z").getAsInt());
                     int x = position[0], z = position[1];
-                    String display = "Settlement " + bandId.substring(0, Math.min(8, bandId.length()));
+                    String display = "";
                     String settlementDimension = source.settlementDimension(server);
                     if (settlementDimension == null || settlementDimension.isBlank())
                         throw new IllegalStateException("No loaded physical dimension for emergence source " + source.id);
@@ -1270,11 +1270,17 @@ public final class WorldSimMod {
                             settlementBindingsChanged = true;
                         } else {
                             settlementId = "emg_" + bandId;
+                            display = emergentSettlementName(source, bandId, residents);
                             colony = SettleMod.foundEmergentInMemory(server,
                                     settlementDimension, settlementId, display, x, z, "worldsim:settlement:" + bandId);
                             bindPhysicalSettlement(bandId, settlementId);
                             settlementBindingsChanged = true;
                         }
+                    }
+                    if (colony != null && colony.sourceMapId.isBlank()
+                            && colony.s != null && (colony.s.name == null || colony.s.name.isBlank()
+                                || colony.s.name.equals(colony.s.id))) {
+                        colony.s.name = emergentSettlementName(source, bandId, residents);
                     }
                     List<String> residentIds = residents.stream().filter(person -> person.alive)
                             .map(person -> person.globalId).toList();
@@ -1466,6 +1472,33 @@ public final class WorldSimMod {
         }
         return counts.entrySet().stream().map(entry -> entry.getKey() + ":" + entry.getValue())
                 .collect(java.util.stream.Collectors.joining(","));
+    }
+
+    /** Unique settlement naming uses only race/culture pools supplied by wf-people datapacks. */
+    private static String emergentSettlementName(EmergenceSource source, String bandId,
+            List<dev.worldforge.people.Character> residents) {
+        Map<String, Long> races = residents.stream()
+                .map(person -> String.valueOf(person.props.getOrDefault("origin.race", "")))
+                .filter(value -> !value.isBlank())
+                .collect(java.util.stream.Collectors.groupingBy(value -> value, TreeMap::new,
+                        java.util.stream.Collectors.counting()));
+        Map<String, Long> cultures = residents.stream()
+                .map(person -> person.culture == null ? "" : person.culture)
+                .filter(value -> !value.isBlank())
+                .collect(java.util.stream.Collectors.groupingBy(value -> value, TreeMap::new,
+                        java.util.stream.Collectors.counting()));
+        String race = races.entrySet().stream().max(Map.Entry.<String, Long>comparingByValue()
+                .thenComparing(Map.Entry::getKey, Comparator.reverseOrder()))
+                .map(Map.Entry::getKey).orElse("");
+        String culture = cultures.entrySet().stream().max(Map.Entry.<String, Long>comparingByValue()
+                .thenComparing(Map.Entry::getKey, Comparator.reverseOrder()))
+                .map(Map.Entry::getKey).orElse("");
+        Set<String> reserved = SettleMod.COLONIES.values().stream()
+                .filter(colony -> colony != null && colony.s != null && !colony.s.name.isBlank())
+                .map(colony -> colony.s.name)
+                .collect(java.util.stream.Collectors.toCollection(HashSet::new));
+        return PeopleMod.NAMES.generateUnique(race, culture, "settlements",
+                new Random(source.seed ^ bandId.hashCode()), reserved);
     }
 
     /** Race composition is sampled from the polity's canonical living Characters, not copied into a second population registry. */
