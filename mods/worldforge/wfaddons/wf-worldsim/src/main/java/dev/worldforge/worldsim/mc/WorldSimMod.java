@@ -641,9 +641,32 @@ public final class WorldSimMod {
             }
             registry = PeopleMod.registry(map);
         }
-        if (registry == null || registry.size() != 0 || !SettleMod.COLONIES.isEmpty()
+        if (registry == null) {
+            source.sendFailure(Component.literal("Campaign Character registry is unavailable"));
+            return 0;
+        }
+        if (vanillaCampaign) {
+            // In a real vanilla world, generated village structures and their villagers are
+            // legitimate observations made by the world adapter, not authored campaign seeds.
+            // Accept only those provenance-tagged records; arbitrary Characters, hand-placed
+            // settlements and pre-existing emergent realms still block a clean bootstrap.
+            long nonVillageCharacters = registry.all().stream()
+                    .filter(person -> !person.props.containsKey("minecraft.villager_uuid")).count();
+            long nonVillageSettlements = SettleMod.COLONIES.values().stream()
+                    .filter(colony -> colony == null || colony.genesisOperationId == null
+                            || !colony.genesisOperationId.startsWith("minecraft:village:")).count();
+            long emergentRealms = RealmsMod.emergentRealms().size();
+            if (nonVillageCharacters > 0 || nonVillageSettlements > 0 || emergentRealms > 0) {
+                source.sendFailure(Component.literal("Vanilla campaign rejected non-native bootstrap data: characters="
+                        + registry.size() + ", non_village_characters=" + nonVillageCharacters
+                        + ", settlements=" + SettleMod.COLONIES.size()
+                        + ", non_village_settlements=" + nonVillageSettlements
+                        + ", emergent_realms=" + emergentRealms));
+                return 0;
+            }
+        } else if (registry.size() != 0 || !SettleMod.COLONIES.isEmpty()
                 || !RealmsMod.emergentRealms().isEmpty()) {
-            source.sendFailure(Component.literal("Campaign requires an empty isolated world: no pre-seeded Characters, settlements or emergent realms"));
+            source.sendFailure(Component.literal("Image campaign requires an empty isolated world: no pre-seeded Characters, settlements or emergent realms"));
             return 0;
         }
         campaignMapId = vanillaCampaign ? "vanilla" : map.name;
