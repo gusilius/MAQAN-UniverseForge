@@ -12,7 +12,7 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.UUID;
 
-/** Тела рабочих: по одному WFWorker на Worker, пока рядом (64 блока) есть игрок; когда игроки ушли (80 блоков) - тела убираются. */
+/** Materializes nearby worker bodies within configured distance and per-pass/per-colony budgets. */
 public final class Bodies {
     private Bodies() {}
 
@@ -23,7 +23,6 @@ public final class Bodies {
 
     public static void tick(MinecraftServer server) {
         int spawnBudget = dev.worldforge.mod.MaqanPerformanceConfig.maxWorkerSpawnsPerTick();
-        if (spawnBudget <= 0) return;
         int spawned = 0;
         for (Colony c : SettleMod.COLONIES.values()) {
             ServerLevel lv = c.level(server);
@@ -46,13 +45,13 @@ public final class Bodies {
                     it.remove();
                 }
             }
-            if (!spawn) continue;
+            if (!spawn || spawned >= spawnBudget) continue;
             int colonyBodyCount = 0;
             for (String liveKey : LIVE.keySet()) if (liveKey.startsWith(prefix)) colonyBodyCount++;
             int colonyBodyLimit = dev.worldforge.mod.MaqanPerformanceConfig.maxActiveWorkerBodiesPerColony();
             if (colonyBodyCount >= colonyBodyLimit) continue;
             for (Worker w : c.s.workers) {
-                if (spawned >= spawnBudget) return;
+                if (spawned >= spawnBudget) break;
                 if (colonyBodyCount >= colonyBodyLimit) break;                                          // не больше нескольких за проход
                 String k = key(c.s.id, w.id);
                 UUID u = LIVE.get(k);
