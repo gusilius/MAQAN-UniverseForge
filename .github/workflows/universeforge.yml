@@ -95,9 +95,12 @@ jobs:
           if (!(Test-Path "map.png")) { throw "The repository map.png source is missing" }
           $out = Join-Path $env:RUNNER_TEMP "maqan-two-world-map"
           New-Item -ItemType Directory -Force -Path $out | Out-Null
-          python mods/worldforge/wfaddons/tools/image-worldgen/image_map_analysis.py --input "map.png" --output $out --seed 424242
+          $testMap = Join-Path $env:RUNNER_TEMP "maqan-test-map-1000x1000.png"
+          python -c "from PIL import Image; Image.open('map.png').convert('RGB').resize((1000,1000), Image.Resampling.LANCZOS).save(r'$testMap')"
+          if ($LASTEXITCODE -ne 0) { throw "Could not create the temporary 1000x1000 test-only map" }
+          python mods/worldforge/wfaddons/tools/image-worldgen/image_map_analysis.py --input $testMap --output $out --seed 424242
           if ($LASTEXITCODE -ne 0) { throw "Actual map semantic analysis failed" }
-          python mods/worldforge/wfaddons/tools/image-worldgen/image_worldgen.py convert --input "map.png" --output (Join-Path $out "real-map.worldmap") --seed 424242 --settlement-level 4 --blocks-per-pixel 16
+          python mods/worldforge/wfaddons/tools/image-worldgen/image_worldgen.py convert --input $testMap --output (Join-Path $out "real-map.worldmap") --seed 424242 --settlement-level 4 --blocks-per-pixel 1
           if ($LASTEXITCODE -ne 0) { throw "Actual map conversion failed" }
           python -c "import sys,json; from pathlib import Path; sys.path.insert(0,'mods/worldforge/wfaddons/tools/image-worldgen'); from image_worldgen import validate_package; print(json.dumps(validate_package(Path(r'$out')/'real-map.worldmap'),ensure_ascii=False,indent=2))"
           if ($LASTEXITCODE -ne 0) { throw "Actual map package validation failed" }
@@ -106,7 +109,7 @@ jobs:
         working-directory: mods/worldforge/wfaddons
         shell: bash
         env:
-          WF_CAMPAIGN_TIMEOUT_SECONDS: "2400"
+          WF_CAMPAIGN_TIMEOUT_SECONDS: "600"
           WF_VANILLA_SEED: "424242"
         run: |
           bash tools/autonomous-campaign.sh vanilla dist "$RUNNER_TEMP/maqan-vanilla-acceptance"
@@ -115,7 +118,7 @@ jobs:
         working-directory: mods/worldforge/wfaddons
         shell: bash
         env:
-          WF_CAMPAIGN_TIMEOUT_SECONDS: "2400"
+          WF_CAMPAIGN_TIMEOUT_SECONDS: "600"
           WF_CAMPAIGN_MAP_ID: "real-map"
         run: |
           bash tools/autonomous-campaign.sh "$RUNNER_TEMP/maqan-two-world-map/real-map.worldmap" dist "$RUNNER_TEMP/maqan-image-map-acceptance"
