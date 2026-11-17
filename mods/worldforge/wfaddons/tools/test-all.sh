@@ -6,13 +6,15 @@ CORE="${1:-../wfmod}"
 OUT="$(mktemp -d)"
 trap 'rm -rf "$OUT"' EXIT
 
-if [ -n "${2:-}" ]; then
-  PACK="$2"
-  [ -f "$PACK" ] || { echo "ERROR: supplied worldmap fixture not found: $PACK"; exit 2; }
-else
-  PACK="$OUT/worldforge-test.worldmap"
-  python3 tests/create_world_fixture.py "$PACK"
+ACTUAL_PACK="${2:-}"
+if [ -n "$ACTUAL_PACK" ] && [ ! -f "$ACTUAL_PACK" ]; then
+  echo "ERROR: supplied actual worldmap not found: $ACTUAL_PACK"
+  exit 2
 fi
+# General addon tests use a deterministic fixture. A supplied real map is reserved
+# for ImageWorldIdentityTest, which must inspect the actual image-derived package.
+PACK="$OUT/worldforge-test.worldmap"
+python3 tests/create_world_fixture.py "$PACK"
 
 CP="$CORE/src/main/java"
 mkdir -p "$OUT/classes"
@@ -20,8 +22,9 @@ mapfile -t SRC < <(find wf-*/src/main/java -name '*.java' -not -path '*/mc/*')
 javac -proc:none -encoding UTF-8 -d "$OUT/classes" -sourcepath "$CP" "${SRC[@]}" tests/*.java tests/support/*.java
 
 if [ "${3:-}" = "--image-identity-only" ]; then
+  [ -n "$ACTUAL_PACK" ] || { echo "ERROR: --image-identity-only requires an actual .worldmap argument"; exit 2; }
   echo "== ImageWorldIdentityTest (actual map)"
-  java -Dstdout.encoding=UTF-8 -cp "$OUT/classes" dev.worldforge.tests.ImageWorldIdentityTest "$PACK"
+  java -Dstdout.encoding=UTF-8 -cp "$OUT/classes" dev.worldforge.tests.ImageWorldIdentityTest "$ACTUAL_PACK"
   exit $?
 fi
 
@@ -45,6 +48,15 @@ for source in tests/*.java; do
     failed=$((failed + 1))
   fi
 done
+
+if [ -n "$ACTUAL_PACK" ]; then
+  echo "== ImageWorldIdentityTest (actual image-generated map)"
+  if java -Dstdout.encoding=UTF-8 -cp "$OUT/classes" dev.worldforge.tests.ImageWorldIdentityTest "$ACTUAL_PACK"; then
+    passed=$((passed + 1))
+  else
+    failed=$((failed + 1))
+  fi
+fi
 
 echo "WorldForge logic tests: passed=$passed skipped=$skipped failed=$failed"
 [ "$failed" -eq 0 ] || exit 1

@@ -15,6 +15,8 @@ args = parser.parse_args()
 root = Path(args.addons_root).resolve()
 jars_dir = Path(args.jars).resolve()
 modules = {}
+declared_dependencies = {}
+compile_dependencies = {}
 for folder in sorted(root.glob("wf-*")):
     if not folder.is_dir():
         continue
@@ -37,6 +39,26 @@ for folder in sorted(root.glob("wf-*")):
             if dep.group(1) not in ("minecraft", "forge", "worldforge"):
                 dependencies.append(dep.group(1))
     modules[mod_id] = sorted(set(dependencies))
+    declared_dependencies[mod_id] = set(re.findall(
+        r'^\s*modId\s*=\s*"([^"]+)"', text, re.M
+    ))
+    build_gradle = folder / "build.gradle"
+    gradle_text = build_gradle.read_text(encoding="utf-8") if build_gradle.is_file() else ""
+    compile_dependencies[mod_id] = set(re.findall(
+        r"""['"](wf_[A-Za-z0-9_]+)-\*\.jar['"]""", gradle_text
+    ))
+
+# A compileOnly jar is a real runtime integration edge: it must be represented
+# in mods.toml as mandatory or optional so Forge can order both mods correctly.
+for mod_id, references in compile_dependencies.items():
+    missing_modules = sorted(references - modules.keys())
+    if missing_modules:
+        raise SystemExit(f"{mod_id} compileOnly references missing addon modules: {missing_modules}")
+    undeclared = sorted(references - declared_dependencies[mod_id])
+    if undeclared:
+        raise SystemExit(
+            f"{mod_id} compileOnly addon dependencies lack mods.toml declarations: {undeclared}"
+        )
 
 def jar_for(mod_id):
     matches = sorted(p for p in jars_dir.glob(f"{mod_id}-*.jar")
