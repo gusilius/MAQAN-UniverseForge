@@ -1839,8 +1839,8 @@ public final class WorldSimMod {
                         polity.addProperty("dynasty_id", dynastyId);
                         foundedNewDynasty = true;
                     }
-                    // The Character's house is authoritative: descendants inherit it through addChild().
-                    ruler.house = dynastyId;
+                    // Character.house is the unique family display name; dynastyId is stored separately.
+                    // Descendants inherit the family name through CharacterRegistry.addChild().
                     ruler.props.put("emergence.polity_id", polityId);
                     ruler.props.put("emergence.dynasty_id", dynastyId);
                     ruler.props.put("emergence.polity_role", "ruler");
@@ -1885,13 +1885,6 @@ public final class WorldSimMod {
                     ruler.props.put("emergence.polity_id", polityId);
                     ruler.props.put("emergence.dynasty_id", dynastyId);
                     ruler.props.put("emergence.polity_role", "ruler");
-                    if (!Objects.equals(ruler.house, dynastyId)) {
-                        ruler.house = dynastyId;
-                        if (!PeopleMod.persistCharacter(ruler, server)) {
-                            LOGGER.error("wf_worldsim: canonical house for ruler {} could not be persisted", ruler.globalId);
-                            continue;
-                        }
-                    }
                     var canonicalRulerRole = PeopleMod.ROLES.ruler();
                     if (canonicalRulerRole == null) continue;
                     boolean missingEmergenceOffice = !ruler.has("emergent_ruler", polityId);
@@ -2356,9 +2349,13 @@ public final class WorldSimMod {
             String gender, int year, int ordinal) {
         String culture = PeopleMod.NAMES.culture("");
         String name = emergentName(source, bandId, culture, gender, ordinal, year);
-        String house;
-        try { house = PeopleMod.NAMES.pickHouse("", culture, new Random(source.seed ^ bandId.hashCode() ^ ordinal)); }
-        catch (RuntimeException ignored) { house = "House " + bandId.substring(0, Math.min(8, bandId.length())); }
+        Set<String> reservedHouseNames = registry.all().stream()
+                .map(person -> person.house).filter(value -> value != null && !value.isBlank())
+                .collect(java.util.stream.Collectors.toCollection(HashSet::new));
+        RealmsMod.POLITICS.dynasties().stream().map(dynasty -> dynasty.name)
+                .filter(value -> value != null && !value.isBlank()).forEach(reservedHouseNames::add);
+        String house = PeopleMod.NAMES.generateUnique("", culture, "houses",
+                new Random(source.seed ^ bandId.hashCode() ^ ordinal), reservedHouseNames);
         dev.worldforge.people.Character person = registry.create(name, house, culture, gender,
                 year - (18 + Math.floorMod(bandId.hashCode() + ordinal * 13, 24)));
         tagEmergentResident(person, bandId);
@@ -2383,8 +2380,14 @@ public final class WorldSimMod {
                 int level = adult ? Math.max(5, Math.min(60, PopulationSimulation.age(person, year) / 2)) : 1;
                 existing = OriginsMod.ORIGINS.assign(owner, seed, hint, level);
             }
-            if (existing.race != null && !existing.race.isBlank())
+            if (existing.race != null && !existing.race.isBlank()) {
                 person.props.put("origin.race", existing.race);
+                if (!person.props.containsKey("emergence.race_name_assigned")) {
+                    person.name = PeopleMod.NAMES.pickGivenName(existing.race, person.culture,
+                            person.gender, new Random(source.seed ^ person.globalId.hashCode()));
+                    person.props.put("emergence.race_name_assigned", "1");
+                }
+            }
             if (existing.cls != null && !existing.cls.isBlank())
                 person.props.put("origin.class", existing.cls);
             if (!existing.prof.isEmpty())
