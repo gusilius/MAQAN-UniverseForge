@@ -11,6 +11,7 @@ import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.levelgen.Heightmap;
+import dev.worldforge.mod.api.WorldForgeApi;
 import net.minecraftforge.event.world.ChunkEvent;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.server.ServerStartedEvent;
@@ -123,6 +124,15 @@ public final class VanillaWorldGeography {
                 long key = (long) z * REGION_BLOCKS + x;
                 JsonObject sample = sample(level, chunk, localX, localZ, x, z);
                 JsonObject previous = region.cells.get(key);
+                // Discovery time is immutable: revisiting or regenerating an already
+                // observed cell may refresh terrain evidence but never rewinds/ages it.
+                if (previous != null) {
+                    sample.add("discovered_year", previous.has("discovered_year")
+                            ? previous.get("discovered_year").deepCopy()
+                            : new com.google.gson.JsonPrimitive(0));
+                } else {
+                    sample.addProperty("discovered_year", Math.max(0L, WorldForgeApi.clock().dayNumber() / 365L));
+                }
                 if (previous == null || !previous.equals(sample)) {
                     region.cells.put(key, sample);
                     changed = true;
