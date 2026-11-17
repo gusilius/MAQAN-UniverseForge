@@ -10,6 +10,8 @@ p.add_argument("--run-id",default="local"); p.add_argument("--commit",default="u
 a=p.parse_args(); work=Path(a.work); out=Path(a.output); out.mkdir(parents=True,exist_ok=True)
 src=work/"server.log"; log=out/"server.log"
 if src.is_file(): log.write_bytes(src.read_bytes())
+survey_log=out/"survey-bot.log"
+survey_content=survey_log.read_text(encoding="utf-8",errors="replace") if survey_log.is_file() else ""
 installer=work/"install.log"
 if installer.is_file(): (out/"forge-install.log").write_bytes(installer.read_bytes())
 crash_dir=work/"crash-reports"
@@ -24,7 +26,11 @@ if profile_src.is_file() and profile_src.resolve() != (out/"performance-profile.
 content=log.read_text(encoding="utf-8",errors="replace") if log.exists() else ""
 rules=[("watchdog",r"Watchdog|A single server tick took|Considering it to be crashed"),("out_of_memory",r"OutOfMemoryError|Java heap space|GC overhead limit exceeded"),("native_failure",r"UnsatisfiedLinkError|EXCEPTION_ACCESS_VIOLATION|worldforge_worldsim"),("timeout",r"wall-clock timeout|did not reach stable four-generation acceptance"),("startup_failure",r"Mod loading has failed|Failed to start|Exception in thread \"main\""),("preflight_failure",r"Campaign map must retain|Campaign requires|Native WorldSim engine is unavailable|Unknown or incomplete command"),("exception",r"Caused by:|Exception")]
 detected=[n for n,pat in rules if re.search(pat,content,re.I)]
+client_incompatible=bool(re.search(r"requires Forge to be installed on the client|Forge.*installed on the client",survey_content,re.I))
+client_failed=bool(re.search(r"SURVEY_BOT_(?:ERROR|KICKED|DISCONNECTED)|survey player client exited before joining",survey_content,re.I))
 if a.exit_code==0: outcome="passed"
+elif client_incompatible: outcome="failed_client_incompatible"
+elif client_failed: outcome="failed_client_connection"
 elif "watchdog" in detected: outcome="failed_watchdog"
 elif "out_of_memory" in detected: outcome="failed_out_of_memory"
 elif "native_failure" in detected: outcome="failed_native"
@@ -42,9 +48,9 @@ for i,line in enumerate(lines):
     if re.search(r"Watchdog|A single server tick took|Considering it to be crashed|OutOfMemoryError|Exception|Caused by:|UnsatisfiedLinkError|ERROR|FATAL",line,re.I):
         for item in lines[max(0,i-3):min(len(lines),i+36)]:
             if item not in seen: seen.add(item); excerpt.append(item)
-data={"schema_version":1,"recorded_at_utc":datetime.now(timezone.utc).isoformat(),"run_id":a.run_id,"commit":a.commit,"map":a.map,"map_seed":a.seed,"forge_version":"1.20.1-47.3.0","stage_at_exit":a.stage,"exit_code":a.exit_code,"outcome":outcome,"detected_signatures":detected,"server_log":"server.log" if log.exists() else None,"install_log":"forge-install.log" if (out/"forge-install.log").exists() else None,"crash_reports":[str(x.relative_to(out)) for x in (out/"crash-reports").glob("*.txt")] if (out/"crash-reports").exists() else [],"thread_dump_count":len(list(out.glob("thread-dump-*.txt"))),"jvm_crash_logs":[x.name for x in out.glob("hs_err_pid*.log")],"heap_dumps":[x.name for x in out.glob("java_pid*.hprof")],"gc_logs":[x.name for x in out.glob("gc-*.log")],"rejected_proposals_total":len(rejected_matches),"rejected_proposal_reasons":dict(sorted(rejected_reasons.items(),key=lambda item:(-item[1],item[0]))),"performance_profile":"performance-profile.json" if (out/"performance-profile.json").is_file() else None,"diagnostic_excerpt":excerpt[-600:],"server_log_line_count":len(lines)}
+data={"schema_version":2,"survey_client_log":"survey-bot.log" if survey_log.is_file() else None,"survey_client_incompatible":client_incompatible,"recorded_at_utc":datetime.now(timezone.utc).isoformat(),"run_id":a.run_id,"commit":a.commit,"map":a.map,"map_seed":a.seed,"forge_version":"1.20.1-47.3.0","stage_at_exit":a.stage,"exit_code":a.exit_code,"outcome":outcome,"detected_signatures":detected,"server_log":"server.log" if log.exists() else None,"install_log":"forge-install.log" if (out/"forge-install.log").exists() else None,"crash_reports":[str(x.relative_to(out)) for x in (out/"crash-reports").glob("*.txt")] if (out/"crash-reports").exists() else [],"thread_dump_count":len(list(out.glob("thread-dump-*.txt"))),"jvm_crash_logs":[x.name for x in out.glob("hs_err_pid*.log")],"heap_dumps":[x.name for x in out.glob("java_pid*.hprof")],"gc_logs":[x.name for x in out.glob("gc-*.log")],"rejected_proposals_total":len(rejected_matches),"rejected_proposal_reasons":dict(sorted(rejected_reasons.items(),key=lambda item:(-item[1],item[0]))),"performance_profile":"performance-profile.json" if (out/"performance-profile.json").is_file() else None,"diagnostic_excerpt":excerpt[-600:],"server_log_line_count":len(lines),"survey_client_excerpt":survey_content.splitlines()[-80:]}
 (out/"diagnostics.json").write_text(json.dumps(data,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
-md=["# Campaign diagnostics","",f"Outcome: {outcome}",f"Run: {a.run_id}",f"Commit: {a.commit}",f"Map: {a.map}",f"Map seed: {a.seed}",f"Stage: {a.stage}",f"Exit code: {a.exit_code}",f"Signatures: {', '.join(detected) if detected else 'none'}","","## Evidence","- diagnostics.json: structured result and extracted error context.","- server.log: complete server log when available.","- forge-install.log: installer output when available.","- crash-reports/: Forge crash reports, including the server-thread stack when available.","- thread-dump-*.txt: periodic JVM thread snapshots collected while the campaign was running.",
+md=["# Campaign diagnostics","",f"Outcome: {outcome}",f"Run: {a.run_id}",f"Commit: {a.commit}",f"Map: {a.map}",f"Map seed: {a.seed}",f"Stage: {a.stage}",f"Exit code: {a.exit_code}",f"Signatures: {', '.join(detected) if detected else 'none'}","","## Evidence","- diagnostics.json: structured result and extracted error context.","- server.log: complete server log when available.","- survey-bot.log: virtual-client protocol and join diagnostics.","- forge-install.log: installer output when available.","- crash-reports/: Forge crash reports, including the server-thread stack when available.","- thread-dump-*.txt: periodic JVM thread snapshots collected while the campaign was running.",
 "- hs_err_pid*.log: fatal JVM/native crash reports.",
 "- java_pid*.hprof: heap dumps captured on OutOfMemoryError.",
 "- gc-*.log: JVM garbage-collection timeline.",
