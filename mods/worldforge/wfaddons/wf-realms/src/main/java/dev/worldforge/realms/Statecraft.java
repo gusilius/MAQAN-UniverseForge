@@ -485,8 +485,22 @@ public final class Statecraft {
         if (d == null) return fail("unknown dynasty");
         if (displayName == null || displayName.isBlank() || displayName.trim().length() > 128)
             return fail("invalid dynasty display name");
+        String normalized = normalizeIdentityName(displayName);
+        for (Dynasty other : dynasties.values()) {
+            if (other != d && normalizeIdentityName(other.name).equals(normalized))
+                return fail("dynasty name is already reserved by " + other.houseId);
+        }
         d.name = displayName.trim();
         return true;
+    }
+
+    /** Read-only canonical dynasty collection for unique naming and diagnostics. */
+    public Collection<Dynasty> dynasties() {
+        return Collections.unmodifiableCollection(dynasties.values());
+    }
+
+    private static String normalizeIdentityName(String value) {
+        return value == null ? "" : value.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
     }
     public boolean addDynastyMember(String houseId, String characterId) {
         Dynasty d = dynasties.get(houseId);
