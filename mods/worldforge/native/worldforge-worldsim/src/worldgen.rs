@@ -1,21 +1,22 @@
-//! Seeded macro-world generator. Produces geographic and settlement proposals;
-//! the Minecraft host materializes the resulting terrain and political data.
+//! Seeded macro-geography generator. It emits only geographic regions, provinces
+//! and unassigned settlement-site candidates. Sovereignty, states, rulers, names
+//! and dynasties are exclusively created by the installed WorldForge mods.
 use serde::{Deserialize, Serialize};
 use crate::stable_hash;
+use std::collections::BTreeSet;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorldGenRequest {
     pub seed: u64,
     pub width: u32,
     pub height: u32,
-    pub realm_count: u32,
-    pub provinces_per_realm: u32,
+    pub region_count: u32,
+    pub provinces_per_region: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RealmSeed {
+pub struct RegionSeed {
     pub id: String,
-    pub capital_province: String,
     pub x: u32,
     pub z: u32,
 }
@@ -23,7 +24,7 @@ pub struct RealmSeed {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProvinceSeed {
     pub id: String,
-    pub realm_id: String,
+    pub region_id: String,
     pub x: u32,
     pub z: u32,
     pub elevation: i16,
@@ -40,10 +41,11 @@ pub struct ProvinceSeed {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SettlementSeed {
     pub id: String,
-    pub realm_id: String,
     pub province_id: String,
     pub x: u32,
     pub z: u32,
+    /// Generic geographic site hint. The settlement mod chooses the actual
+    /// settlement class, name, population, culture and ownership at runtime.
     pub kind: String,
 }
 
@@ -52,46 +54,67 @@ pub struct GeneratedWorld {
     pub seed: u64,
     pub width: u32,
     pub height: u32,
-    pub realms: Vec<RealmSeed>,
+    pub regions: Vec<RegionSeed>,
     pub provinces: Vec<ProvinceSeed>,
     pub settlements: Vec<SettlementSeed>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum WorldGenError { InvalidDimensions, InvalidRealmCount, InvalidProvinceCount }
+pub enum WorldGenError { InvalidDimensions, InvalidRegionCount, InvalidProvinceCount }
 
 fn roll(seed: u64, domain: &str, index: u64, max: u64) -> u64 {
     if max == 0 { return 0; }
-    stable_hash(seed, domain, &index.to_string(), "worldgen", 0) % max
+    stable_hash(seed, domain, &index.to_string(), "geography", 0) % max
+}
+
+fn unique_point(seed: u64, domain: &str, index: u64, width: u32, height: u32,
+                used: &mut BTreeSet<(u32, u32)>) -> (u32, u32) {
+    let area = u64::from(width) * u64::from(height);
+    let start = roll(seed, domain, index, area);
+    for offset in 0..area {
+        let point = (start + offset) % area;
+        let x = (point % u64::from(width)) as u32;
+        let z = (point / u64::from(width)) as u32;
+        if used.insert((x, z)) { return (x, z); }
+    }
+    unreachable!("validated geography dimensions provide enough unique points")
 }
 
 pub fn generate_world(request: &WorldGenRequest) -> Result<GeneratedWorld, WorldGenError> {
     if request.width < 64 || request.height < 64 || request.width > 8192 || request.height > 8192 {
         return Err(WorldGenError::InvalidDimensions);
     }
-    if request.realm_count == 0 || request.realm_count > 128 { return Err(WorldGenError::InvalidRealmCount); }
-    if request.provinces_per_realm == 0 || request.provinces_per_realm > 64 { return Err(WorldGenError::InvalidProvinceCount); }
+    if request.region_count == 0 || request.region_count > 128
+        || u64::from(request.region_count) > u64::from(request.width) * u64::from(request.height) {
+        return Err(WorldGenError::InvalidRegionCount);
+    }
+    if request.provinces_per_region == 0 || request.provinces_per_region > 64
+        || u64::from(request.region_count) * u64::from(request.provinces_per_region)
+            > u64::from(request.width) * u64::from(request.height) {
+        return Err(WorldGenError::InvalidProvinceCount);
+    }
 
-    let mut realms = Vec::new();
-    for index in 0..request.realm_count {
-        let x = roll(request.seed, "realm-x", index as u64, request.width as u64) as u32;
-        let z = roll(request.seed, "realm-z", index as u64, request.height as u64) as u32;
-        realms.push(RealmSeed { id: format!("realm_{:03}", index + 1),
-            capital_province: format!("province_{:04}", index * request.provinces_per_realm + 1), x, z });
+    let mut used_points = BTreeSet::new();
+    let mut regions = Vec::new();
+    for index in 0..request.region_count {
+        let (x, z) = unique_point(request.seed, "region-point", index as u64,
+                                  request.width, request.height, &mut used_points);
+        regions.push(RegionSeed { id: format!("region_{:04}", index + 1), x, z });
     }
 
     let mut provinces = Vec::new();
-    for index in 0..(request.realm_count * request.provinces_per_realm) {
-        let x = roll(request.seed, "province-x", index as u64, request.width as u64) as u32;
-        let z = roll(request.seed, "province-z", index as u64, request.height as u64) as u32;
-        let nearest = realms.iter().min_by_key(|r| {
-            let dx = i64::from(r.x) - i64::from(x);
-            let dz = i64::from(r.z) - i64::from(z);
+    for index in 0..(request.region_count * request.provinces_per_region) {
+        let (x, z) = unique_point(request.seed, "province-point", index as u64,
+                                  request.width, request.height, &mut used_points);
+        let nearest = regions.iter().min_by_key(|region| {
+            let dx = i64::from(region.x) - i64::from(x);
+            let dz = i64::from(region.z) - i64::from(z);
             dx * dx + dz * dz
-        }).expect("realm count is validated");
-        // The first province in each realm's group is its guaranteed capital province.
-        let owner = if index % request.provinces_per_realm == 0 {
-            &realms[(index / request.provinces_per_realm) as usize]
+        }).expect("region count is validated");
+        // Preserve a geographic seed in every region; all remaining provinces
+        // are assigned by nearest terrain-space region center, never to a polity.
+        let region = if index % request.provinces_per_region == 0 {
+            &regions[(index / request.provinces_per_region) as usize]
         } else { nearest };
         let elevation = (roll(request.seed, "elevation", index as u64, 201) as i16) - 80;
         let moisture = roll(request.seed, "moisture", index as u64, 101) as u8;
@@ -103,7 +126,7 @@ pub fn generate_world(request: &WorldGenRequest) -> Result<GeneratedWorld, World
             else if moisture > 75 { "forest" }
             else { "plains" };
         provinces.push(ProvinceSeed {
-            id: format!("province_{:04}", index + 1), realm_id: owner.id.clone(), x, z,
+            id: format!("province_{:06}", index + 1), region_id: region.id.clone(), x, z,
             elevation, moisture, temperature, biome: biome.into(),
             food: (moisture / 2).saturating_add(if biome == "plains" { 35 } else { 0 }),
             wood: if biome == "forest" { 90 } else { moisture / 3 },
@@ -114,40 +137,52 @@ pub fn generate_world(request: &WorldGenRequest) -> Result<GeneratedWorld, World
     }
 
     let mut settlements = Vec::new();
-    for realm in &realms {
-        if let Some(capital) = provinces.iter().find(|p| p.id == realm.capital_province) {
-            settlements.push(SettlementSeed { id: format!("settlement_{}_capital", realm.id), realm_id: realm.id.clone(),
-                province_id: capital.id.clone(), x: capital.x, z: capital.z, kind: "capital".into() });
-        }
-    }
     for province in &provinces {
         if province.biome != "ocean" && province.food >= 45
-            && roll(request.seed, "settlement-site", province.id.bytes().fold(0_u64, |a,b| a.wrapping_mul(31).wrapping_add(b as u64)), 100) < 18 {
-            settlements.push(SettlementSeed { id: format!("settlement_{}", province.id), realm_id: province.realm_id.clone(),
-                province_id: province.id.clone(), x: province.x, z: province.z, kind: "village_site".into() });
+            && roll(request.seed, "settlement-site", province.id.bytes()
+                .fold(0_u64, |a,b| a.wrapping_mul(31).wrapping_add(b as u64)), 100) < 18 {
+            settlements.push(SettlementSeed {
+                id: format!("site_{}", province.id), province_id: province.id.clone(),
+                x: province.x, z: province.z, kind: "site".into(),
+            });
         }
     }
     settlements.sort_by(|a,b| a.id.cmp(&b.id));
-    Ok(GeneratedWorld { seed: request.seed, width: request.width, height: request.height, realms, provinces, settlements })
+    Ok(GeneratedWorld {
+        seed: request.seed, width: request.width, height: request.height,
+        regions, provinces, settlements,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test] fn same_seed_generates_identical_world() {
-        let request=WorldGenRequest{seed:77,width:512,height:512,realm_count:8,provinces_per_realm:6};
-        assert_eq!(generate_world(&request).unwrap(),generate_world(&request).unwrap());
+
+    #[test]
+    fn same_seed_generates_identical_geography() {
+        let request = WorldGenRequest { seed: 77, width: 512, height: 512,
+            region_count: 8, provinces_per_region: 6 };
+        assert_eq!(generate_world(&request).unwrap(), generate_world(&request).unwrap());
     }
-    #[test] fn generated_provinces_belong_to_existing_realms() {
-        let request=WorldGenRequest{seed:11,width:256,height:256,realm_count:5,provinces_per_realm:8};
-        let world=generate_world(&request).unwrap();
-        let ids:std::collections::BTreeSet<_>=world.realms.iter().map(|r|r.id.as_str()).collect();
-        assert_eq!(world.provinces.len(),40);
-        assert!(world.provinces.iter().all(|p|ids.contains(p.realm_id.as_str())));
-        assert!(world.settlements.iter().all(|s|ids.contains(s.realm_id.as_str())));
+
+    #[test]
+    fn generated_provinces_belong_to_geographic_regions_only() {
+        let request = WorldGenRequest { seed: 11, width: 256, height: 256,
+            region_count: 5, provinces_per_region: 8 };
+        let world = generate_world(&request).unwrap();
+        let ids: BTreeSet<_> = world.regions.iter().map(|r| r.id.as_str()).collect();
+        let province_ids: BTreeSet<_> = world.provinces.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(world.provinces.len(), 40);
+        assert!(world.provinces.iter().all(|p| ids.contains(p.region_id.as_str())));
+        assert!(world.settlements.iter().all(|s| province_ids.contains(s.province_id.as_str())));
+        assert!(world.settlements.iter().all(|s| s.kind == "site"));
+        assert!(world.regions.iter().all(|r| !r.id.contains("realm")));
     }
-    #[test] fn rejects_unsafe_generation_sizes() {
-        let request=WorldGenRequest{seed:1,width:16,height:16,realm_count:3,provinces_per_realm:4};
-        assert_eq!(generate_world(&request),Err(WorldGenError::InvalidDimensions));
+
+    #[test]
+    fn rejects_unsafe_generation_sizes() {
+        let request = WorldGenRequest { seed: 1, width: 16, height: 16,
+            region_count: 3, provinces_per_region: 4 };
+        assert_eq!(generate_world(&request), Err(WorldGenError::InvalidDimensions));
     }
 }
