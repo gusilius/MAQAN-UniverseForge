@@ -1688,7 +1688,7 @@ def self_test(output_dir: Path) -> dict:
 
 def run_profile_suite(input_path: Path, output_dir: Path, seed: int,
                       blocks_per_pixel: int = 16) -> dict:
-    """Generate, validate and preview all seven settlement-density profiles."""
+    """Generate and validate all seven settlement-density profiles as geography-only maps."""
     output_dir.mkdir(parents=True, exist_ok=True)
     source_hash = hashlib.sha256(input_path.read_bytes()).hexdigest()
     rows = []
@@ -1702,7 +1702,7 @@ def run_profile_suite(input_path: Path, output_dir: Path, seed: int,
             settlement_level=level)
         validation = validate_package(worldmap)
         with zipfile.ZipFile(worldmap) as archive:
-            for name in ("political-preview.png", "terrain-preview.png",
+            for name in ("province-preview.png", "terrain-preview.png",
                          "world-blueprint.json", "image-analysis-report.json"):
                 (profile_dir / name).write_bytes(archive.read(name))
         elapsed = time.perf_counter() - started
@@ -1710,31 +1710,27 @@ def run_profile_suite(input_path: Path, output_dir: Path, seed: int,
         row = {
             "settlement_level": level,
             "profile": SETTLEMENT_PROFILES[level]["key"],
-            "realm_count": blueprint["realm_count"],
             "province_count": blueprint["province_count"],
-            "settlement_count": blueprint["settlement_count"],
+            "region_count": blueprint["region_count"],
+            "settlement_site_count": blueprint["settlement_count"],
             "land_pixels": blueprint["land_pixels"],
-            "unclaimed_land_pixels": blueprint["politically_unclaimed_land_pixels"],
-            "unclaimed_land_percent": policy["unclaimed_land_percent"],
+            "wilderness_land_pixels": blueprint["wilderness_land_pixels"],
+            "wilderness_percent": policy["unclaimed_land_percent"],
             "major_land_components": policy["major_land_components"],
             "minor_land_components": policy["minor_land_components"],
             "minor_island_provinces": policy["minor_island_provinces"],
-            "independent_island_realms": policy["independent_island_realms"],
-            "realm_area_pixels": policy["realm_area_pixels"],
-            "merge_report": policy["realm_aggregation"],
+            "isolated_island_regions": policy["isolated_island_regions"],
+            "region_area_pixels": policy["region_area_pixels"],
+            "region_merge_report": policy["geographic_region_aggregation"],
             "validation": validation,
             "elapsed_seconds": round(elapsed, 3),
             "worldmap": worldmap.name,
         }
         rows.append(row)
         print(json.dumps({"profile_progress": row}, sort_keys=True), flush=True)
-    realm_counts = {row["realm_count"] for row in rows}
-    if len(realm_counts) != 1:
-        raise AssertionError(
-            f"Political realm count changed with settlement density: {sorted(realm_counts)}")
     report = {
-        "format": "maqan-image-profile-suite/1",
-        "realm_count_invariant_across_profiles": True,
+        "format": "maqan-image-profile-suite/2",
+        "geography_only": True,
         "generator": GENERATOR_VERSION,
         "source_image": str(input_path.name),
         "source_image_sha256": source_hash,
@@ -1744,8 +1740,9 @@ def run_profile_suite(input_path: Path, output_dir: Path, seed: int,
         "total_elapsed_seconds": round(sum(row["elapsed_seconds"] for row in rows), 3),
         "checks": {
             "all_seven_profiles_generated": len(rows) == 7,
+            "no_pre_authored_realms": all(row["validation"]["realm_count"] == 0 for row in rows),
             "levels_6_7_have_no_unclaimed_land": all(
-                row["unclaimed_land_pixels"] == 0 for row in rows if row["settlement_level"] >= 6),
+                row["wilderness_land_pixels"] == 0 for row in rows if row["settlement_level"] >= 6),
             "all_provinces_connected": all(
                 row["validation"]["connectivity"]["disconnected_provinces"] == 0 for row in rows),
             "raster_area_matches_blueprint": all(
@@ -1753,7 +1750,7 @@ def run_profile_suite(input_path: Path, output_dir: Path, seed: int,
         },
     }
     if not all(report["checks"].values()):
-        raise AssertionError(f"Seven-profile QA failed: {report['checks']}")
+        raise AssertionError(f"Seven-profile geography QA failed: {report['checks']}")
     (output_dir / "seven-profile-comparison.json").write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return report
@@ -1768,8 +1765,8 @@ def main() -> int:
     convert.add_argument("--input", type=Path, required=True)
     convert.add_argument("--output", type=Path, required=True)
     convert.add_argument("--seed", type=int, required=True)
-    convert.add_argument("--realms", type=int, default=None)
-    convert.add_argument("--provinces-per-realm", type=int, default=None)
+    convert.add_argument("--regions", "--realms", dest="regions", type=int, default=None)
+    convert.add_argument("--provinces-per-region", "--provinces-per-realm", dest="provinces_per_region", type=int, default=None)
     convert.add_argument("--blocks-per-pixel", type=int, default=16)
     convert.add_argument("--settlement-level", type=int, choices=range(1, 8), default=4)
     convert.add_argument("--planet-id", type=str, default=None)
@@ -1787,12 +1784,12 @@ def main() -> int:
                                                args.seed, args.blocks_per_pixel),
                              indent=2, sort_keys=True))
         else:
-            blueprint = convert_image(args.input, args.output, args.seed, args.realms,
-                                      args.provinces_per_realm, args.blocks_per_pixel,
+            blueprint = convert_image(args.input, args.output, args.seed, args.regions,
+                                      args.provinces_per_region, args.blocks_per_pixel,
                                       args.settlement_level, args.planet_id)
             print(json.dumps({
                 "worldmap": str(args.output), "seed": args.seed,
-                "realm_count": blueprint["realm_count"],
+                "region_count": blueprint["region_count"],
                 "province_count": blueprint["province_count"],
                 "settlement_count": blueprint["settlement_count"],
                 "chunk_materialization": "deferred",
