@@ -303,8 +303,11 @@ public final class MapData {
     /** True only when the source package actually supplied rivers.png. */
     public boolean hasRiverLayer() { return river != null; }
 
-    /** Political/administrative overlays are metadata, never geographic input to a map-first campaign. */
-    public boolean hasPoliticalLayers() { return titles != null || regions != null; }
+    /** True only when the package contains actual sovereignty, not neutral province/region geography. */
+    public boolean hasPoliticalLayers() {
+        return titles != null && (!titles.realms.isEmpty()
+                || titles.allTitles().stream().anyMatch(title -> title != null && title.tier >= 2));
+    }
 
     /** Индекс биома в точке мира; границы слегка «дрожат», чтобы не было квадратов по пикселям. */
     public int biomeIndexAt(double bx, double bz) {
