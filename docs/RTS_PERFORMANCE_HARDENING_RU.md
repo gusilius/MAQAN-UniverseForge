@@ -208,3 +208,21 @@ This is a structural complexity improvement, not a measured FPS/RAM claim. No be
 - Army strategic records must remain aggregate and must not require a Minecraft entity per soldier. Materialize only nearby/engaged/selected units within explicit budgets; selection, command groups and command authority remain valid for abstract units.
 
 Not yet implemented: complete LOD scheduler, per-player visibility sets, off-screen work progression, strategic Character batch scheduler, army entity materialization budgets, adaptive low-memory settings, and benchmark suite. This section records target architecture and verified code observations, not a claim that these stages are already complete.
+
+## Configurable performance controls
+
+Добавлен общий Forge COMMON config `config/maqan-performance.toml`, зарегистрированный ядром `wfmod` и доступный через стандартную страницу конфигурации WorldForge в меню Mods. Это первая общая точка настроек производительности; она не создаёт отдельные конфиги для каждого addon.
+
+Текущие действующие параметры:
+- `workerSpawnRadius` — радиус материализации рабочих (16–256, default 48 blocks).
+- `workerDespawnRadius` — радиус дематериализации с hysteresis (24–384, default 72; runtime гарантирует минимум spawn + 8).
+- `maxWorkerSpawnsPerPass` — общий лимит создания тел рабочих за один проход Bodies (0–32, default 2).
+- `maxActiveWorkerBodiesPerColony` — верхняя граница materialized worker bodies на поселение (0–512, default 24).
+- `settlementSimulationIntervalTicks` — интервал стратегического шага поселения (5–200, default 20). При изменении интервала скорость шага масштабируется относительно базовых 20 тиков, чтобы не менять скорость игрового времени.
+- `lifeAiIntervalSteps` — частота обычной обработки потребностей/жизненных AI (1–20 settlement steps, default 1). Реакция на incoming raid обходит этот интервал и выполняется срочно.
+
+`Bodies` теперь использует конфигурируемые spawn/despawn радиусы и лимиты. Подсчёт уже живых тел поселения делается один раз перед проходом рабочих, а не повторно для каждого кандидата, чтобы не добавлять O(workers × liveBodies) при введении лимита.
+
+Важно: пока это Forge config screen в меню Mods, а не полноценная вкладка настроек внутри единой MAQAN PlatformShell. Следующий UI этап — отобразить эти же значения через единый MAQAN Settings provider без второго источника конфигурации. Параметры off-screen progression и chunk pausing намеренно не выставлены: их поведение ещё не реализовано и нельзя показывать пользователю неработающие переключатели.
+
+Текущая конфигурация относится к worker materialization и settlement cadence. Отдельные лимиты армии, Rust batch sizes, spatial query budgets, memory presets и visibility hysteresis будут добавляться после реализации соответствующих механизмов. Нельзя обещать, что настройка радиуса сама по себе включает полноценный LOD.
