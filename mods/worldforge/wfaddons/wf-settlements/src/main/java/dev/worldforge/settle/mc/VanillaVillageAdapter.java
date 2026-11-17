@@ -265,6 +265,19 @@ public final class VanillaVillageAdapter {
                 changed.add(person);
                 byEntity.put(uuid, person);
             }
+            // Vanilla villagers are native human inhabitants, not unclassified placeholders.
+            // Keep their identity in the same origin/culture schema used by emergent Characters.
+            boolean identityChanged = false;
+            if (!(person.props.get("origin.race") instanceof String race) || race.isBlank()) {
+                person.props.put("origin.race", "human");
+                person.props.put("origin.source", "minecraft-village");
+                identityChanged = true;
+            }
+            if (person.culture == null || person.culture.isBlank()) {
+                person.culture = PeopleMod.NAMES.culture("northern");
+                identityChanged = true;
+            }
+            if (identityChanged) CharacterRegistry.recordCharacterMutation();
             person.props.put("population.location", colony.s.id);
             person.props.put("population.employer", "settlement:" + colony.s.id);
             residentIds.add(person.globalId);
