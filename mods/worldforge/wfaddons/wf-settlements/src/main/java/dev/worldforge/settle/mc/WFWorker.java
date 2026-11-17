@@ -164,8 +164,8 @@ public class WFWorker extends PathfinderMob {
         private final WFWorker w;
         private int repath, swing, idleTimer, workScan;
         /** Keep only the eight nearest resource candidates; never allocate/sort thousands of BlockPos objects per scan. */
-        private final long[] nearestWorkPositions = new long[8];
-        private final double[] nearestWorkDistances = new double[8];
+        private final long[] nearestWorkPositions = new long[32];
+        private final double[] nearestWorkDistances = new double[32];
         private BlockPos cachedWorkTarget;
         private BlockPos idle;
         private BlockPos lastPosition;
@@ -562,15 +562,17 @@ public class WFWorker extends PathfinderMob {
                 }
             }
             if (candidateCount == 0) return null;
-            // Preserve the old nearest-first policy and eight-candidate reachability budget,
-            // but retain only those eight coordinates in primitive scratch arrays.
+            // Keep a wider nearest window so several logs from one tree do not hide
+            // the next distinct tree; preserve the old eight-unique-target reachability budget.
             Set<Long> evaluated = new HashSet<>(candidateCount * 2);
-            for (int i = 0; i < candidateCount; i++) {
+            int reachableCandidates = 0;
+            for (int i = 0; i < candidateCount && reachableCandidates < 8; i++) {
                 BlockPos candidate = BlockPos.of(nearestWorkPositions[i]);
                 BlockPos selected = "wood".equals(order.mode) ? treeBaseTarget(worker, candidate) : candidate;
                 if (!evaluated.add(selected.asLong())) continue;
                 if (workApproachTarget(worker, selected) != null) return selected;
                 if (canPlaceTemporaryStep(worker, colony, selected)) return selected;
+                reachableCandidates++;
             }
             return null;
         }
@@ -590,7 +592,6 @@ public class WFWorker extends PathfinderMob {
             nearestWorkDistances[insert] = distance;
             nearestWorkPositions[insert] = BlockPos.asLong(x, y, z);
             return nextCount;
-        }
         }
 
         /** Resolve a clicked upper log to the lowest reachable trunk block so workers do not try to climb the canopy. */
