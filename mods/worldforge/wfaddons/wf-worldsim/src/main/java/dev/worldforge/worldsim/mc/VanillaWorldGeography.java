@@ -197,6 +197,15 @@ public final class VanillaWorldGeography {
                 .map(region -> region.id).toList();
     }
 
+    /** Diagnostic counters used by runtime acceptance tests and the in-game status command. */
+    public static synchronized int sampledCellCount() {
+        return REGIONS.values().stream().mapToInt(region -> region.cells.size()).sum();
+    }
+
+    public static synchronized int capturedRegionCount() {
+        return (int) REGIONS.values().stream().filter(region -> !region.cells.isEmpty()).count();
+    }
+
     public static synchronized String biomeAt(String mapId, int x, int z) {
         Region region = REGIONS.get(mapId);
         if (region == null || x < 0 || z < 0 || x >= REGION_BLOCKS || z >= REGION_BLOCKS) return "";
