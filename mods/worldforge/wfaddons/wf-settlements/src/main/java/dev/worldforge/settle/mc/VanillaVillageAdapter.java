@@ -184,8 +184,11 @@ public final class VanillaVillageAdapter {
         String operation = "minecraft:village:" + dimension + ":" + x + ":" + z;
         // If autonomous emergence already materialized this location, adopt that exact
         // canonical colony instead of registering a second settlement for the structure.
-        Colony colony = SettleMod.nearbyEmergentSettlement(dimension, x, z, 64);
-        boolean created = colony == null && !SettleMod.COLONIES.containsKey(id);
+        // Prefer the exact stable village ID on repeat discovery; only then reconcile
+        // an independently emerged colony at this physical location.
+        Colony colony = SettleMod.colony(id);
+        if (colony == null) colony = SettleMod.nearbyEmergentSettlement(dimension, x, z, 64);
+        boolean created = colony == null;
         boolean identityChanged = colony != null && !operation.equals(colony.genesisOperationId);
         // A physical village is a geographic observation, not evidence of pre-authored
         // sovereignty. Political ownership is assigned only by the shared emergence pass.
