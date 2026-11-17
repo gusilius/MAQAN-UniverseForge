@@ -54,6 +54,11 @@ public final class BuildingSite {
             if (!done && !playerNear(lv, wx, wz, NEAR)) continue;
             Colony.Site site = c.sites.get(b.uid);
             Blueprints.Plan plan = Blueprints.get(lv, b.def);
+            if (!plan.valid() || plan.blocks().isEmpty()) {
+                b.status = plan.error() == null || plan.error().isBlank()
+                        ? "ошибка чертежа: нет блоков для строительства" : plan.error();
+                continue;
+            }
             if (site == null) {
                 if (!lv.hasChunkAt(new BlockPos(wx, 64, wz))) continue;
                 site = new Colony.Site();
