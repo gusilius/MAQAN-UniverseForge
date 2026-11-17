@@ -15,6 +15,25 @@ public final class ActionExecutionTest {
     }
 
     public static void main(String[] args) throws Exception {
+        String subjectA = "00000000-0000-0000-0000-000000000001";
+        String subjectB = "00000000-0000-0000-0000-000000000002";
+        dev.worldforge.mod.api.CommandIntent intent = new dev.worldforge.mod.api.CommandIntent(
+                "request-intent", "player-1", dev.worldforge.mod.api.CommandIntent.Source.FIRST_PERSON,
+                dev.worldforge.mod.api.CommandIntent.Domain.MIXED, "command.issue",
+                List.of(subjectA, subjectB, subjectA), "target", 12.5, -8.25, true, List.of("kind=move"));
+        ActionExecutionService.Request canonical = intent.toActionRequest(10);
+        check(intent.subjectIds().size() == 2, "canonical command intent removes duplicate selected subjects");
+        check(canonical.actionId().equals("world.command") && canonical.args().stream().anyMatch(a -> a.contains(subjectA)),
+                "canonical intent maps to a bounded durable world command request");
+        boolean invalidSubjectRejected = false;
+        try {
+            new dev.worldforge.mod.api.CommandIntent("bad-subject", "player-1",
+                    dev.worldforge.mod.api.CommandIntent.Source.RTS,
+                    dev.worldforge.mod.api.CommandIntent.Domain.MILITARY, "command.issue",
+                    List.of("not-a-uuid"), "", 0, 0, false, List.of());
+        } catch (IllegalArgumentException expected) { invalidSubjectRejected = true; }
+        check(invalidSubjectRejected, "canonical intent rejects malformed subject identifiers");
+
         Path dir = Files.createTempDirectory("wf-action-test");
         Path file = dir.resolve("actions.json");
         ActionExecutionService service = new ActionExecutionService();
