@@ -350,31 +350,15 @@ public class SettleMod {
 
     // ------------------------------------------------------------------ доступ
 
-    /** Государство, на чьей земле стоит поселение (по провинции под центром), или "". */
-    /** Resolve a settlement's realm only against the map generator in its actual dimension. */
+    /** Realm ownership is explicit canonical state; raster title overlays are never ownership authority. */
     private static String realmOf(Colony colony, ServerLevel level) {
         if (colony == null || level == null
                 || !colony.dim.equals(level.dimension().location().toString())) return "";
-        if (!(level.getChunkSource().getGenerator() instanceof MapChunkGenerator generator)) return "";
-        dev.worldforge.mod.MapData map = generator.data();
-        if (map == null || map.titles == null) return "";
-        dev.worldforge.mod.TitleData.Title province = map.provinceAt(colony.cx, colony.cz);
-        dev.worldforge.mod.TitleData.Realm realm = province == null ? null : map.titles.realmOf(province);
-        return realm == null || realm.id == null ? "" : realm.id;
+        return colony.realmId == null ? "" : colony.realmId;
     }
 
-    public static String realmOf(Colony c) {
-        if (c != null && c.realmId != null && !c.realmId.isBlank()) return c.realmId;
-        try {
-            for (dev.worldforge.mod.MapData m : dev.worldforge.mod.WorldForgeMod.loadedMaps().values()) {
-                if (m.titles == null) continue;
-                dev.worldforge.mod.TitleData.Title t = m.provinceAt(c.cx, c.cz);
-                if (t == null) continue;
-                dev.worldforge.mod.TitleData.Realm r = m.titles.realmOf(t);
-                if (r != null) return r.id;
-            }
-        } catch (RuntimeException ex) { /* карта ещё не загружена */ }
-        return "";
+    public static String realmOf(Colony colony) {
+        return colony == null || colony.realmId == null ? "" : colony.realmId;
     }
 
     /** Optional bridge to wf-trade's existing province-graph caravan planner; no duplicate route graph. */
@@ -632,16 +616,8 @@ public class SettleMod {
         for (var entry : cost.entrySet()) site.colony().s.add(entry.getKey(), entry.getValue());
     }
 
-    /** Resolve the canonical realm owning the exact map pixel under a proposed founding site. */
-    private static String politicalOwnerAt(ServerLevel level, int x, int z) {
-        if (level == null || !(level.getChunkSource().getGenerator() instanceof MapChunkGenerator generator))
-            return "";
-        dev.worldforge.mod.MapData map = generator.data();
-        if (map == null || map.titles == null) return "";
-        dev.worldforge.mod.TitleData.Title province = map.provinceAt(x, z);
-        dev.worldforge.mod.TitleData.Realm owner = province == null ? null : map.titles.realmOf(province);
-        return owner == null || owner.id == null ? "" : owner.id;
-    }
+    /** Map pixels are geography, not sovereignty; founding checks wait for canonical territorial ownership. */
+    private static String politicalOwnerAt(ServerLevel level, int x, int z) { return ""; }
 
     /**
      * A player cannot establish a new colony inside another realm by simply placing
@@ -1058,51 +1034,7 @@ public class SettleMod {
         }
     }
 
-    /**
-     * A title transfer is authoritative for settlements located inside that province.
-     * Reconcile persisted colony ownership against the map's canonical province graph;
-     * never keep a stale realmId that would make physical settlements ignore conquest,
-     * independence or a later border edit.
-     */
-    private static void reconcilePoliticalOwnership(dev.worldforge.mod.api.MapChange change) {
-        if (change == null || change.data == null || COLONIES.isEmpty()) return;
-        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
-        if (server == null) return;
-        Map<String, String> before = new LinkedHashMap<>();
-        for (ServerLevel level : server.getAllLevels()) {
-            if (!(level.getChunkSource().getGenerator() instanceof MapChunkGenerator generator)) continue;
-            dev.worldforge.mod.MapData map = generator.data();
-            if (map == null || map.titles != change.data) continue;
-            String dimension = level.dimension().location().toString();
-            for (Colony colony : COLONIES.values()) {
-                if (colony == null || colony.s == null || !dimension.equals(colony.dim)) continue;
-                dev.worldforge.mod.TitleData.Title province = map.provinceAt(colony.cx, colony.cz);
-                dev.worldforge.mod.TitleData.Realm owner = province == null ? null : map.titles.realmOf(province);
-                String currentRealm = colony.realmId == null ? "" : colony.realmId;
-                // Emergent polities have no authored raster title yet; do not erase their
-                // explicit canonical owner merely because a nearby map edit was made.
-                if (owner == null && !currentRealm.isBlank()) {
-                    dev.worldforge.mod.TitleData.Realm current = map.titles.realms.get(currentRealm);
-                    if (current != null && Boolean.TRUE.equals(current.props.get("emergence.virtual"))) continue;
-                }
-                String nextRealm = owner == null ? "" : owner.id;
-                if (Objects.equals(currentRealm, nextRealm)) continue;
-                before.put(colony.s.id, currentRealm);
-                colony.realmId = nextRealm;
-            }
-        }
-        if (before.isEmpty()) return;
-        if (saveDurably(server)) {
-            LOGGER.info("wf_settle: reconciled political ownership for {} physical settlements after map change",
-                    before.size());
-            return;
-        }
-        for (Map.Entry<String, String> entry : before.entrySet()) {
-            Colony colony = COLONIES.get(entry.getKey());
-            if (colony != null) colony.realmId = entry.getValue();
-        }
-        LOGGER.error("wf_settle: political ownership reconciliation rolled back; settlement persistence failed");
-    }
+    /** Map title changes do not mutate settlement sovereignty; only canonical realm grants may do that. */
 
     /** In-memory owner binding used by WorldSim's per-map batch commit. */
     public static boolean bindEmergentRealmInMemory(String settlementId, String realmId) {
@@ -1344,19 +1276,12 @@ public class SettleMod {
      */
     private static void syncPeople(Colony colony, MinecraftServer server) {
         if (!net.minecraftforge.fml.ModList.get().isLoaded("wf_people") || colony == null || colony.s == null) return;
-        dev.worldforge.mod.MapData ownerMap = null;
-        dev.worldforge.mod.TitleData.Title province = null;
-        for (dev.worldforge.mod.MapData map : dev.worldforge.mod.WorldForgeMod.loadedMaps().values()) {
-            if (map.titles == null) continue;
-            dev.worldforge.mod.TitleData.Title candidate = map.provinceAt(colony.cx, colony.cz);
-            if (candidate != null) { ownerMap = map; province = candidate; break; }
-        }
-        if (ownerMap == null) return;
-        CharacterRegistry registry = PeopleMod.registry(ownerMap);
+        // Use the exact dimension's canonical registry: map-backed and vanilla settlements
+        // follow the same Character lifecycle and never infer identity from map sovereignty.
+        CharacterRegistry registry = registryForColony(colony);
         if (registry == null) return;
-        dev.worldforge.mod.TitleData.Realm realm = ownerMap.titles.realmOf(province);
-        String race = realm == null ? "" : propertyString(realm.props, "race");
-        String culture = realm == null ? "" : propertyString(realm.props, "culture");
+        String race = "";
+        String culture = "";
         String place = "settlement:" + colony.s.id;
         List<Character> pendingProfessionTransitions = new ArrayList<>();
 
@@ -1463,15 +1388,12 @@ public class SettleMod {
         }
     }
 
-    /** Resolve the Character registry which owns this settlement's province. */
+    /** Resolve the canonical Character registry for the settlement's actual physical dimension. */
     private static CharacterRegistry registryForColony(Colony colony) {
         if (colony == null || colony.s == null) return null;
-        for (dev.worldforge.mod.MapData map : dev.worldforge.mod.WorldForgeMod.loadedMaps().values()) {
-            if (map.titles == null || map.provinceAt(colony.cx, colony.cz) == null) continue;
-            CharacterRegistry registry = PeopleMod.registry(map);
-            if (registry != null) return registry;
-        }
-        return null;
+        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+        ServerLevel level = server == null ? null : colony.level(server);
+        return level == null ? null : PeopleMod.registryFor(level);
     }
 
     /** World-space proximity determines simulation detail; no player is required for remote progress. */
