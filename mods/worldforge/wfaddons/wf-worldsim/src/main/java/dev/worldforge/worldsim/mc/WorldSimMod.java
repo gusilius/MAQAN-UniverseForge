@@ -2161,6 +2161,53 @@ public final class WorldSimMod {
             LOGGER.error("wf_worldsim: emergent settlement realm bindings could not be durably saved");
     }
 
+    /**
+     * Image-derived title trees provide geography and hierarchy only. Every displayed
+     * province/region/state name is allocated from wf-people pools, with a world-wide
+     * reservation set so map-source labels cannot leak into the political simulation.
+     */
+    private static boolean ensureImagePoliticalNames(MapData map) {
+        if (map == null || map.titles == null) return false;
+        List<TitleData.Title> ordered = new ArrayList<>(map.titles.allTitles());
+        ordered.sort(Comparator.comparingInt((TitleData.Title title) -> title.tier)
+                .thenComparing(title -> title.key));
+        Set<String> thisMapTitleIds = ordered.stream()
+                .map(title -> dev.worldforge.realms.Statecraft.mapTitleId(map.name, title.key))
+                .collect(java.util.stream.Collectors.toSet());
+        Set<String> reserved = RealmsMod.POLITICS.titles().stream()
+                .filter(title -> !thisMapTitleIds.contains(title.id))
+                .map(title -> title.name).filter(name -> name != null && !name.isBlank())
+                .collect(java.util.stream.Collectors.toCollection(HashSet::new));
+        SettleMod.COLONIES.values().stream()
+                .filter(colony -> colony != null && colony.s != null && colony.s.name != null
+                        && !colony.s.name.isBlank())
+                .map(colony -> colony.s.name).forEach(reserved::add);
+        boolean changed = false;
+        for (TitleData.Title title : ordered) {
+            String category = title.tier <= 0 ? "provinces" : title.tier == 1 ? "regions" : "realms";
+            TitleData.Realm owner = map.titles.realmOf(title);
+            Object raceValue = title.props.getOrDefault("identity.race", title.props.getOrDefault("race", ""));
+            Object cultureValue = title.props.getOrDefault("identity.culture", title.props.getOrDefault("culture", ""));
+            if ((raceValue == null || String.valueOf(raceValue).isBlank()) && owner != null)
+                raceValue = owner.props.getOrDefault("identity.race", owner.props.getOrDefault("race", ""));
+            if ((cultureValue == null || String.valueOf(cultureValue).isBlank()) && owner != null)
+                cultureValue = owner.props.getOrDefault("identity.culture", owner.props.getOrDefault("culture", ""));
+            String race = raceValue == null ? "" : String.valueOf(raceValue);
+            String culture = cultureValue == null ? "" : String.valueOf(cultureValue);
+            String currentName = title.name == null ? "" : title.name.trim();
+            boolean managed = "wf-people".equals(String.valueOf(title.props.getOrDefault("wf.name.source", "")));
+            String normalized = currentName.replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
+            if (managed && !normalized.isBlank() && reserved.add(normalized)) continue;
+            String generated = PeopleMod.NAMES.generateUnique(race, culture, category,
+                    new Random(Objects.hash(map.name, title.key, title.tier)), reserved);
+            title.name = generated;
+            title.props.put("wf.name.source", "wf-people");
+            reserved.add(generated.replaceAll("\\s+", " ").toLowerCase(Locale.ROOT));
+            changed = true;
+        }
+        return changed;
+    }
+
     /** Persist the vanilla world's real land/sea political border raster from canonical settlement ownership. */
     private static void syncVanillaPoliticalOwnership(JsonObject state) {
         Map<String, JsonObject> bands = new HashMap<>();
@@ -2200,6 +2247,7 @@ public final class WorldSimMod {
         }
         for (MapData map : WorldForgeMod.loadedMaps().values()) {
             if (map == null || map.titles == null) continue;
+            boolean namesChanged = ensureImagePoliticalNames(map);
             Map<String, List<int[]>> seedsByRealm = new TreeMap<>();
             Map<String, List<String>> bandsByRealm = new TreeMap<>();
             for (var item : state.getAsJsonArray("polities")) if (item.isJsonObject()) {
@@ -2218,7 +2266,7 @@ public final class WorldSimMod {
             }
             if (seedsByRealm.isEmpty()) continue;
             Map<String, TitleData.Realm> realms = new TreeMap<>();
-            boolean changed = false;
+            boolean changed = namesChanged;
             for (String realmId : seedsByRealm.keySet()) {
                 TitleData.Realm realm = map.titles.realms.get(realmId);
                 if (realm != null) {
