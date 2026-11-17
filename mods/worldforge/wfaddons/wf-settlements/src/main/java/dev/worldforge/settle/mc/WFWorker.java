@@ -163,6 +163,9 @@ public class WFWorker extends PathfinderMob {
     static final class WorkGoal extends Goal {
         private final WFWorker w;
         private int repath, swing, idleTimer, workScan;
+        /** Keep only the eight nearest resource candidates; never allocate/sort thousands of BlockPos objects per scan. */
+        private final long[] nearestWorkPositions = new long[8];
+        private final double[] nearestWorkDistances = new double[8];
         private BlockPos cachedWorkTarget;
         private BlockPos idle;
         private BlockPos lastPosition;
@@ -176,6 +179,9 @@ public class WFWorker extends PathfinderMob {
 
         WorkGoal(WFWorker w) {
             this.w = w;
+            // Spread expensive terrain scans across the 30-tick refresh window instead of
+            // letting every resident scan the world on the same server tick.
+            this.workScan = Math.floorMod(w.workerId, 30);
             setFlags(EnumSet.of(Flag.MOVE));
         }
 
@@ -519,7 +525,7 @@ public class WFWorker extends PathfinderMob {
         }
 
         /** Search a small local window, then sweep the larger selected area by persistent waypoints. */
-        private static BlockPos findWorkTarget(WFWorker worker, Colony colony, Colony.WorkOrder order) {
+        private BlockPos findWorkTarget(WFWorker worker, Colony colony, Colony.WorkOrder order) {
             if (order.complete) return null;
             int halfX = Math.max(0, Math.min(64, order.halfX < 0 ? order.radius : order.halfX));
             int halfZ = Math.max(0, Math.min(64, order.halfZ < 0 ? order.radius : order.halfZ));
@@ -535,38 +541,56 @@ public class WFWorker extends PathfinderMob {
             int yRange = exactBlock ? 0 : "ore".equals(order.mode) ? 32 : "stone".equals(order.mode) ? 20 : 10;
             int fromY = exactBlock ? yCenter : Math.max(worker.level().getMinBuildHeight(), yCenter - yRange);
             int toY = exactBlock ? yCenter : Math.min(worker.level().getMaxBuildHeight() - 1, yCenter + yRange);
-            List<BlockPos> candidates = new ArrayList<>();
+            java.util.Arrays.fill(nearestWorkDistances, Double.POSITIVE_INFINITY);
+            int candidateCount = 0;
+            int workerY = worker.getBlockY();
             for (int x = minX; x <= maxX; x++) for (int z = minZ; z <= maxZ; z++) {
-                BlockPos probe = new BlockPos(x, worker.getBlockY(), z);
+                BlockPos probe = new BlockPos(x, workerY, z);
                 if (!worker.level().hasChunkAt(probe)) continue;
                 if ("level".equals(order.mode)) {
                     int surface = worker.level().getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z) - 1;
-                    BlockPos candidate = surface > order.level ? new BlockPos(x, surface, z)
-                            : surface < order.level && order.soil > 0 ? new BlockPos(x, surface + 1, z) : null;
-                    if (candidate != null) candidates.add(candidate);
+                    int candidateY = surface > order.level ? surface
+                            : surface < order.level && order.soil > 0 ? surface + 1 : Integer.MIN_VALUE;
+                    if (candidateY != Integer.MIN_VALUE)
+                        candidateCount = retainNearest(x, candidateY, z, worker, candidateCount);
                     continue;
                 }
                 for (int y = fromY; y <= toY; y++) {
                     BlockPos pos = new BlockPos(x, y, z);
-                    if (!isWorkTarget(worker.level().getBlockState(pos), order.mode)) continue;
-                    candidates.add(pos);
+                    if (isWorkTarget(worker.level().getBlockState(pos), order.mode))
+                        candidateCount = retainNearest(x, y, z, worker, candidateCount);
                 }
             }
-            if (candidates.isEmpty()) return null;
-            // Do not give up because the closest block is behind a wall or over a gap.
-            // Try nearby candidates in distance order and choose the first with a real safe approach.
-            candidates.sort(java.util.Comparator.comparingDouble(pos ->
-                    worker.distanceToSqr(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5)));
-            Set<BlockPos> evaluated = new HashSet<>();
-            int checked = 0;
-            for (BlockPos candidate : candidates) {
+            if (candidateCount == 0) return null;
+            // Preserve the old nearest-first policy and eight-candidate reachability budget,
+            // but retain only those eight coordinates in primitive scratch arrays.
+            Set<Long> evaluated = new HashSet<>(candidateCount * 2);
+            for (int i = 0; i < candidateCount; i++) {
+                BlockPos candidate = BlockPos.of(nearestWorkPositions[i]);
                 BlockPos selected = "wood".equals(order.mode) ? treeBaseTarget(worker, candidate) : candidate;
-                if (!evaluated.add(selected.immutable())) continue;
+                if (!evaluated.add(selected.asLong())) continue;
                 if (workApproachTarget(worker, selected) != null) return selected;
                 if (canPlaceTemporaryStep(worker, colony, selected)) return selected;
-                if (++checked >= 8) break;
             }
             return null;
+        }
+
+        private int retainNearest(int x, int y, int z, WFWorker worker, int count) {
+            double distance = worker.distanceToSqr(x + 0.5, y + 0.5, z + 0.5);
+            int insert = count;
+            for (int i = 0; i < count; i++) {
+                if (distance < nearestWorkDistances[i]) { insert = i; break; }
+            }
+            if (insert >= nearestWorkPositions.length) return count;
+            int nextCount = Math.min(count + 1, nearestWorkPositions.length);
+            for (int i = nextCount - 1; i > insert; i--) {
+                nearestWorkDistances[i] = nearestWorkDistances[i - 1];
+                nearestWorkPositions[i] = nearestWorkPositions[i - 1];
+            }
+            nearestWorkDistances[insert] = distance;
+            nearestWorkPositions[insert] = BlockPos.asLong(x, y, z);
+            return nextCount;
+        }
         }
 
         /** Resolve a clicked upper log to the lowest reachable trunk block so workers do not try to climb the canopy. */
