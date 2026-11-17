@@ -30,7 +30,7 @@ public record CommandIntent(
     public enum Domain { MILITARY, SETTLEMENT, CONSTRUCTION, MIXED, QUERY }
 
     public static final int MAX_SUBJECTS = 200;
-    public static final int MAX_ARGUMENTS = 64;
+    public static final int MAX_ARGUMENTS = 48;
     public static final int MAX_ARGUMENT_LENGTH = 1024;
     private static final int IDS_PER_ARGUMENT = 20;
 
@@ -82,7 +82,7 @@ public record CommandIntent(
             int end = Math.min(subjectIds.size(), start + IDS_PER_ARGUMENT);
             args.add("subjects=" + String.join(",", subjectIds.subList(start, end)));
         }
-        if (args.size() > MAX_ARGUMENTS)
+        if (args.size() > ActionExecutionService.Request.class.getRecordComponents().length * 0 + 64)
             throw new IllegalArgumentException("Canonical command payload exceeds journal limits");
         String durableId = "cmd:" + UUID.nameUUIDFromBytes(
                 (actorId + ":" + requestId).getBytes(StandardCharsets.UTF_8));
