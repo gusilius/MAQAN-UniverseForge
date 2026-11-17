@@ -80,6 +80,8 @@ with zipfile.ZipFile(source, "r") as src:
         matches = [n for n in src.namelist() if pathlib.PurePosixPath(n).name == name]
         if len(matches) != 1: raise SystemExit(f"Ambiguous map package entry: {name}")
         files[name] = src.read(matches[0])
+# Geography is the only imported authority. Do not carry image-classified
+# realm/state partitions, names, rulers or sovereignty into the running world.
 realms = json.loads(files["realms.json"].decode("utf-8"))
 if not isinstance(realms, dict) or not isinstance(realms.get("realms"), list):
     raise SystemExit("Map realms.json has an unsupported schema")
@@ -88,6 +90,68 @@ realms["realms"] = []
 realms["relations"] = []
 files["realms.json"] = json.dumps(realms, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
 files.pop("mapitem_realms.bin", None)
+
+titles = json.loads(files["titles.json"].decode("utf-8"))
+if not isinstance(titles, dict) or not isinstance(titles.get("tiers"), list) or not isinstance(titles.get("titles"), list):
+    raise SystemExit("Map titles.json has an unsupported schema")
+source_titles = titles["titles"]
+geographic_titles = [row for row in source_titles if isinstance(row, dict) and int(row.get("tier", 99)) in (0, 1)]
+if not geographic_titles or not any(int(row.get("tier", 99)) == 0 for row in geographic_titles):
+    raise SystemExit("Image map contains no usable province geography")
+if not any(int(row.get("tier", 99)) == 1 for row in geographic_titles):
+    raise SystemExit("Image map contains no usable region geography")
+kept_ids = {int(row["id"]) for row in geographic_titles}
+province_count = sum(1 for row in geographic_titles if int(row["tier"]) == 0)
+region_count = sum(1 for row in geographic_titles if int(row["tier"]) == 1)
+for row in geographic_titles:
+    tier = int(row["tier"])
+    row["name"] = ""
+    row["key"] = ("province_" if tier == 0 else "region_") + str(int(row["id"]))
+    if tier == 1:
+        row["parent"] = 0
+    elif int(row.get("parent", 0)) not in kept_ids:
+        raise SystemExit(f"Province {row.get('id')} has no retained geographic region parent")
+    row["children"] = []
+    row["neighbors"] = [int(value) for value in row.get("neighbors", []) if int(value) in kept_ids]
+    props = row.get("props") if isinstance(row.get("props"), dict) else {}
+    for key in ("realm", "realm_id", "state", "state_id", "polity", "polity_id", "owner", "owner_id",
+                "identity.race", "identity.culture", "race", "culture"):
+        props.pop(key, None)
+    props["geography_level"] = "province" if tier == 0 else "region"
+    row["props"] = props
+by_id = {int(row["id"]): row for row in geographic_titles}
+for row in geographic_titles:
+    parent = int(row.get("parent", 0))
+    if parent in by_id:
+        by_id[parent]["children"].append(int(row["id"]))
+titles["tiers"] = [
+    {"index": 0, "key": "province", "name": "Province"},
+    {"index": 1, "key": "region", "name": "Region"}
+]
+titles["titles"] = geographic_titles
+files["titles.json"] = json.dumps(titles, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+for name in list(files):
+    if name.startswith("mapitem_") and name not in ("mapitem_province.bin", "mapitem_region.bin"):
+        files.pop(name, None)
+
+blueprint = json.loads(files["world-blueprint.json"].decode("utf-8")) if "world-blueprint.json" in files else None
+if isinstance(blueprint, dict):
+    # Keep only geographic candidate sites; the settlement mod chooses actual
+    # settlement class, race, culture, government and ownership at runtime.
+    blueprint.pop("realms", None)
+    blueprint.pop("realm_count", None)
+    blueprint.pop("politically_unclaimed_land_pixels", None)
+    blueprint.pop("political_land_pixels", None)
+    blueprint.pop("generation_policy", None)
+    blueprint["province_count"] = province_count
+    blueprint["region_count"] = region_count
+    for seed in blueprint.get("settlements", []):
+        if not isinstance(seed, dict):
+            continue
+        seed["name"] = ""
+        seed["realm_id"] = ""
+        seed["type"] = "site"
+    files["world-blueprint.json"] = json.dumps(blueprint, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
 with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as dst:
     for name, data in sorted(files.items()): dst.writestr(name, data)
 print("IMAGE_MAP_PREPARED=1")
