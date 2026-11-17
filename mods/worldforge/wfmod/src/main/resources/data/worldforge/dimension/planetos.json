@@ -1,7 +1,0 @@
-{
-  "type": "worldforge:mapworld",
-  "generator": {
-    "type": "worldforge:image",
-    "map": "planetos"
-  }
-}
