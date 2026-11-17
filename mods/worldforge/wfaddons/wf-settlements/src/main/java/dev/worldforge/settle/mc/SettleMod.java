@@ -1063,19 +1063,21 @@ public class SettleMod {
         if (server == null) return;
         ticks++;
         if (actionsBlocked()) return;
-        if (ticks % STEP_TICKS == 0) {
+        int simulationInterval = dev.worldforge.mod.MaqanPerformanceConfig.settlementSimulationIntervalTicks();
+        if (ticks % simulationInterval == 0) {
             double speed = dev.worldforge.mod.api.WorldForgeApi.clock().multiplier();
             for (Colony c : COLONIES.values()) {
                 if (speed <= 0) break;
                 try {
                     c.s.setWorldCalendar(dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute(),
                             dev.worldforge.mod.api.WorldForgeApi.clock().year());
-                    c.s.tick(speed);                                   // 1 симуляционная секунда = 20 тиков, 24 мировые минуты
+                    c.s.tick(speed * simulationInterval / (double) STEP_TICKS); // preserve elapsed simulation time when interval changes
                     remitCrownTaxes(c);
                     syncPeople(c);
-                    runLifeAI(server, c);
+                    if ((ticks / simulationInterval) % dev.worldforge.mod.MaqanPerformanceConfig.lifeAiIntervalSteps() == 0)
+                        runLifeAI(server, c);
                     c.map.tick(c.s, speed);                             // глобальная логистика не зависит от загруженности чанков
-                    if (ticks % (STEP_TICKS * 10) == 0) { c.s.types = TYPES; String rid = realmOf(c); c.s.refreshType(c.s.workers.size(), rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.terrain(rid), rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.races(rid)); }
+                    if (ticks % (simulationInterval * 10L) == 0) { c.s.types = TYPES; String rid = realmOf(c); c.s.refreshType(c.s.workers.size(), rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.terrain(rid), rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.races(rid)); }
                 } catch (RuntimeException ex) {
                     LOGGER.error("wf_settle: ошибка симуляции поселения {}: {}", c.s.id, ex.toString());
                 }
@@ -1100,7 +1102,7 @@ public class SettleMod {
                 }
             }
         }
-        if (ticks % STEP_TICKS == 5) Bodies.tick(server);
+        if (ticks % simulationInterval == Math.min(5, simulationInterval - 1)) Bodies.tick(server);
         if (ticks % SAVE_EVERY == 0) save(server);
     }
 
