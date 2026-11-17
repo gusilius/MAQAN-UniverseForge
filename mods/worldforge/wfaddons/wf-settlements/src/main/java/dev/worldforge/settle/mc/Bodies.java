@@ -42,6 +42,7 @@ public final class Bodies {
                 if (!keep || !alive) {
                     Entity body = lv.getEntity(e.getValue());
                     if (body != null) body.discard();
+                    dev.worldforge.mod.MaqanPerformanceTelemetry.workerDespawned();
                     it.remove();
                 }
             }
@@ -68,6 +69,7 @@ public final class Bodies {
                 LIVE.put(k, e.getUUID());                                          // сначала запись, потом добавление: проверка тела пройдёт
                 e.refreshName();
                 lv.addFreshEntity(e);
+                dev.worldforge.mod.MaqanPerformanceTelemetry.workerSpawned();
                 spawned++;
                 colonyBodyCount++;
             }
