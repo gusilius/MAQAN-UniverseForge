@@ -899,44 +899,10 @@ public final class WorldSimMod {
         // These samples share the exact GeographicMap contract consumed by Rust.
         for (var vanillaRegion : VanillaWorldGeography.snapshot())
             geography.add(vanillaRegion);
+        // WorldSim must never consume sovereignty or political borders from an image map.
+        // Both image and vanilla sources contribute only canonical emergent realms created
+        // by the shared geography pipeline; this also prevents map realms being counted twice.
         Set<String> threatenedRealms = new HashSet<>();
-        for (MapData map : WorldForgeMod.loadedMaps().values()) {
-            if (map.titles == null) continue;
-            for (var realm : map.titles.realmList()) {
-                JsonObject r = new JsonObject();
-                r.addProperty("id", realm.id);
-                r.addProperty("population", number(realm.props.get("population"), 100));
-                ArmyEngine armyEngine = ArmyMod.armies(map);
-                double armyPower = armyEngine.armiesOf(realm.id).stream().mapToDouble(a -> a.power(armyEngine.types)).sum();
-                r.addProperty("treasury", fixed(armyEngine.gold(realm.id)));
-                r.addProperty("army_strength", Math.max(0L, Math.round(armyPower)));
-                r.addProperty("stability", (int) number(realm.props.get("stability"), 50));
-                r.addProperty("prestige", (int) number(realm.props.get("prestige"), 0));
-                r.addProperty("expansion_pressure", (int) number(realm.props.get("expansion_pressure"), 35));
-                String war = String.valueOf(realm.props.getOrDefault("war.state", "peace"));
-                r.addProperty("at_war", !war.isBlank() && !"peace".equalsIgnoreCase(war));
-                r.addProperty("last_war_day", (long) number(realm.props.get("war.last_day"), 0));
-                realms.add(r);
-            }
-            Map<String, Set<String>> adjacency = Diplomacy.adjacency(map.titles);
-            Set<String> emitted = new TreeSet<>();
-            for (var entry : adjacency.entrySet()) for (String other : entry.getValue()) {
-                String a = entry.getKey().compareTo(other) < 0 ? entry.getKey() : other;
-                String b = entry.getKey().compareTo(other) < 0 ? other : entry.getKey();
-                if (!emitted.add(a + "|" + b)) continue;
-                JsonObject border = new JsonObject();
-                border.addProperty("a", a); border.addProperty("b", b);
-                var realmA = map.titles.realms.get(a);
-                var realmB = map.titles.realms.get(b);
-                boolean contested = realmA != null && dev.worldforge.mod.api.Diplomacy.ids(realmA, "claims").contains(b)
-                        || realmB != null && dev.worldforge.mod.api.Diplomacy.ids(realmB, "claims").contains(a);
-                border.addProperty("contested_claim", contested);
-                border.addProperty("strategic_value", 80);
-                if (contested) { threatenedRealms.add(a); threatenedRealms.add(b); }
-                border.addProperty("distance_cost", 0);
-                borders.add(border);
-            }
-        }
         for (TitleData.Realm realm : RealmsMod.emergentRealms()) {
             JsonObject item = new JsonObject();
             item.addProperty("id", realm.id);
@@ -953,7 +919,10 @@ public final class WorldSimMod {
             for (var war : RealmsMod.POLITICS.wars()) {
                 if (!war.attackerRealm.equals(realm.id) && !war.defenderRealm.equals(realm.id)) continue;
                 lastWarDay = Math.max(lastWarDay, war.startDay);
-                if (war.status == dev.worldforge.realms.Statecraft.WarStatus.ACTIVE) atWar = true;
+                if (war.status == dev.worldforge.realms.Statecraft.WarStatus.ACTIVE) {
+                    atWar = true;
+                    threatenedRealms.add(realm.id);
+                }
             }
             item.addProperty("at_war", atWar);
             item.addProperty("last_war_day", lastWarDay);
@@ -1033,50 +1002,48 @@ public final class WorldSimMod {
             w.addProperty("stone_output", fixed(s.flow.perMinute(s.time, "stone", true)));
             workforce.add(w);
         }
-        for (MapData map : WorldForgeMod.loadedMaps().values()) {
-            if (map.titles == null) continue;
-            CourtSim court = CourtMod.court(map);
-            if (court == null) continue;
-            for (dev.worldforge.people.Character person : court.reg.all()) {
-                if (!person.alive) continue;
-                String realm = Marriages.family(court, person);
-                if (realm.isBlank()) continue;
-                JsonObject c = new JsonObject();
-                if (person.globalId == null || person.globalId.isBlank()) {
-                    LOGGER.warn("wf_worldsim: skipping Character {} without canonical global UUID", person.id);
-                    continue;
-                }
-                c.addProperty("id", person.globalId); c.addProperty("realm_id", realm);
-                c.addProperty("age", Math.max(0, court.year() - person.birthYear));
-                c.addProperty("alive", person.alive); c.addProperty("married", !person.spouse.isBlank());
-                c.addProperty("gender", "m".equals(person.gender) ? 0 : 1);
-                c.addProperty("fertility", (int) number(person.props.get("fertility"), 50));
-                c.addProperty("prestige", (int) number(person.props.get("prestige"), 0));
-                c.addProperty("opinion", (int) number(person.props.get("opinion"), 0));
-                c.addProperty("house_id", person.house);
-                characters.add(c);
+        // Resolve band -> polity from the last committed emergence frame. Residents from
+        // either geography source then enter the same Character snapshot by canonical UUID.
+        Map<String, String> polityByBand = new HashMap<>();
+        if (emergenceState != null && emergenceState.has("polities") && emergenceState.get("polities").isJsonArray()) {
+            for (var polityElement : emergenceState.getAsJsonArray("polities")) {
+                if (!polityElement.isJsonObject()) continue;
+                JsonObject polity = polityElement.getAsJsonObject();
+                if (!polity.has("id") || !polity.has("settlement_ids") || !polity.get("settlement_ids").isJsonArray()) continue;
+                String polityId = polity.get("id").getAsString();
+                for (var bandElement : polity.getAsJsonArray("settlement_ids"))
+                    if (bandElement.isJsonPrimitive()) polityByBand.put(bandElement.getAsString(), polityId);
             }
         }
-        // Ordinary-world residents are the same canonical Characters used by settlements,
-        // Origins, inventories and succession. Include only people already bound to a realm.
-        for (dev.worldforge.people.Character person : PeopleMod.worldRegistry().all()) {
-            if (person == null || !person.alive || person.globalId == null || person.globalId.isBlank()) continue;
-            Object rawPolity = person.props.get("emergence.polity_id");
-            if (rawPolity == null || String.valueOf(rawPolity).isBlank()) continue;
-            String realmId = "emergent-" + rawPolity;
-            if (RealmsMod.realm(realmId) == null) continue;
-            JsonObject item = new JsonObject();
-            item.addProperty("id", person.globalId);
-            item.addProperty("realm_id", realmId);
-            item.addProperty("age", Math.max(0, WorldForgeApi.clock().year() - person.birthYear));
-            item.addProperty("alive", person.alive);
-            item.addProperty("married", person.spouse != null && !person.spouse.isBlank());
-            item.addProperty("gender", "m".equals(person.gender) ? 0 : 1);
-            item.addProperty("fertility", (int) number(person.props.get("fertility"), 50));
-            item.addProperty("prestige", (int) number(person.props.get("prestige"), 0));
-            item.addProperty("opinion", (int) number(person.props.get("opinion"), 0));
-            item.addProperty("house_id", person.house == null ? "" : person.house);
-            characters.add(item);
+        Set<String> emittedCharacterIds = new HashSet<>();
+        Set<CharacterRegistry> snapshotRegistries = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (EmergenceSource source : emergenceSources()) {
+            CharacterRegistry registry = source.registry;
+            if (registry == null || !snapshotRegistries.add(registry)) continue;
+            for (dev.worldforge.people.Character person : registry.all()) {
+                if (person == null || !person.alive || person.globalId == null || person.globalId.isBlank()) continue;
+                Object rawPolity = person.props.get("emergence.polity_id");
+                String polityId = rawPolity == null ? "" : String.valueOf(rawPolity).trim();
+                if (polityId.isBlank()) {
+                    Object rawBand = person.props.get("emergence.band_id");
+                    if (rawBand != null) polityId = polityByBand.getOrDefault(String.valueOf(rawBand), "");
+                }
+                if (polityId.isBlank()) continue;
+                String realmId = "emergent-" + polityId;
+                if (RealmsMod.realm(realmId) == null || !emittedCharacterIds.add(person.globalId)) continue;
+                JsonObject item = new JsonObject();
+                item.addProperty("id", person.globalId);
+                item.addProperty("realm_id", realmId);
+                item.addProperty("age", Math.max(0, WorldForgeApi.clock().year() - person.birthYear));
+                item.addProperty("alive", person.alive);
+                item.addProperty("married", person.spouse != null && !person.spouse.isBlank());
+                item.addProperty("gender", "m".equals(person.gender) ? 0 : 1);
+                item.addProperty("fertility", (int) number(person.props.get("fertility"), 50));
+                item.addProperty("prestige", (int) number(person.props.get("prestige"), 0));
+                item.addProperty("opinion", (int) number(person.props.get("opinion"), 0));
+                item.addProperty("house_id", person.house == null ? "" : person.house);
+                characters.add(item);
+            }
         }
         // Canonical JSON ordering is part of the native simulation contract:
         // identical authoritative state must yield identical Rust input bytes.
