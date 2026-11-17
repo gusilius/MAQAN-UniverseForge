@@ -49,9 +49,6 @@ public final class NameBank {
     private final Map<String, String> raceParents = new LinkedHashMap<>();
     /** Resolved ancestry+culture pools are immutable after construction and reused across thousands of names. */
     private final Map<String, Pool> resolvedPools = new java.util.concurrent.ConcurrentHashMap<>();
-    private static final Set<String> FALLBACK_CATEGORIES = Set.of("realms","regions","provinces","settlements",
-            "villages","cities","hamlets","camps","communities","outposts","colonies","stations",
-            "nomad_camps","tribal_camps","holds","ports");
     private String def = "";
 
     @SuppressWarnings("unchecked")
@@ -225,39 +222,46 @@ public final class NameBank {
             Pool fallback = cultures.get(def);
             if (fallback != null) values = list(fallback, key);
         }
-        if (values.isEmpty()) {
-            String generated = generatedPlaceName(p, key, random);
-            if (generated != null) return generated;
+        if (values.isEmpty())
             throw new IllegalStateException("Нет заполненного пула '" + category + "' для расы '" + race + "'");
-        }
         return pick(values, random);
     }
 
-    /** Stable morphology fallback for minimal third-party packs that omit place-name data. */
-    private static String generatedPlaceName(Pool pool, String category, Random random) {
-        if (!FALLBACK_CATEGORIES.contains(category)) return null;
-        List<String> anchors = !pool.houses.isEmpty() ? pool.houses
-                : !pool.surnames.isEmpty() ? pool.surnames
-                : !pool.male.isEmpty() ? pool.male : pool.female;
-        if (anchors.isEmpty()) return null;
-        String anchor = pick(anchors, random);
-        String[] prefixes = switch (category) {
-            case "realms" -> new String[]{"Земли", "Предел", "Край", "Владения", "Звёздный Доминион", "Имперский Сектор"};
-            case "regions" -> new String[]{"Долина", "Нагорье", "Берег", "Лес", "Пограничье", "Пояс"};
-            case "provinces" -> new String[]{"Удел", "Округ", "Земля", "Владение", "Марка", "Княжество"};
-            case "villages" -> new String[]{"Деревня", "Селение", "Хутор", "Заимка"};
-            case "cities" -> new String[]{"Град", "Метрополия", "Цитадель", "Город"};
-            case "hamlets" -> new String[]{"Выселок", "Малый посад", "Застава"};
-            case "camps", "nomad_camps" -> new String[]{"Стоянка", "Кочевье", "Лагерь", "Круг"};
-            case "tribal_camps", "communities" -> new String[]{"Община", "Родовое гнездо", "Клановый круг"};
-            case "outposts" -> new String[]{"Форпост", "Аванпост", "Застава"};
-            case "colonies" -> new String[]{"Колония", "Поселение", "Экспедиционный узел"};
-            case "stations" -> new String[]{"Станция", "Орбитальный узел", "Фактория"};
-            case "holds" -> new String[]{"Оплот", "Чертог", "Крепь"};
-            case "ports" -> new String[]{"Порт", "Гавань", "Причал"};
-            default -> new String[]{"Посад", "Слобода", "Старый", "Новый"};
-        };
-        return prefixes[random.nextInt(prefixes.length)] + " " + anchor;
+    /**
+     * Allocates a world-unique name from authoritative mod/datapack pools.
+     * It never fabricates suffixes or morphology when a pool is exhausted.
+     */
+    public String generateUnique(String race, String culture, String category,
+                                 Random random, Set<String> reservedNames) {
+        Objects.requireNonNull(random, "random");
+        Objects.requireNonNull(reservedNames, "reservedNames");
+        String key = category == null ? "" : category.toLowerCase(Locale.ROOT);
+        Pool pool = poolForRace(race, culture);
+        List<String> values = list(pool, key);
+        if (values.isEmpty()) {
+            Pool fallback = cultures.get(def);
+            if (fallback != null) values = list(fallback, key);
+        }
+        if (values.isEmpty())
+            throw new IllegalStateException("Нет пула уникальных имён '" + category
+                    + "' для расы '" + race + "' и культуры '" + culture + "'");
+        Set<String> normalized = new HashSet<>();
+        for (String value : reservedNames) if (value != null && !value.isBlank())
+            normalized.add(normalizeName(value));
+        int start = random.nextInt(values.size());
+        for (int offset = 0; offset < values.size(); offset++) {
+            String candidate = values.get((start + offset) % values.size()).trim();
+            String keyName = normalizeName(candidate);
+            if (!candidate.isBlank() && normalized.add(keyName)) {
+                reservedNames.add(candidate);
+                return candidate;
+            }
+        }
+        throw new IllegalStateException("Пул имён '" + category + "' исчерпан: все варианты уже заняты");
+    }
+
+    private static String normalizeName(String value) {
+        return value.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
     }
 
     private static String pick(List<String> values, Random random) {
