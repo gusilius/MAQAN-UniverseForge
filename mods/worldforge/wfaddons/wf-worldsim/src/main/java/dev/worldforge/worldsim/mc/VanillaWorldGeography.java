@@ -290,23 +290,25 @@ public final class VanillaWorldGeography {
                     : seedsByWorld.getOrDefault("vanilla-world:" + address.dimension, List.of());
             for (JsonObject cell : region.cells.values()) {
                 String previous = cell.has("owner_realm_id") ? cell.get("owner_realm_id").getAsString() : "";
-                // A temporarily empty simulation frame must not erase the last durable
-                // ownership raster. Recompute borders only when this dimension has seeds.
+                // Existing sovereignty is immutable during ordinary simulation ticks.
+                // Newly observed land can be claimed once; an existing border is never
+                // recomputed from moving settlement centres or a changing seed list.
                 String owner = previous;
-                if (!seeds.isEmpty()) {
+                boolean land = cell.has("land") && cell.get("land").getAsBoolean();
+                if (!seeds.isEmpty() && !land) {
+                    // One-time sanitation of legacy invalid water ownership.
                     owner = "";
-                    if (cell.has("land") && cell.get("land").getAsBoolean()) {
-                        int x = address.x * REGION_BLOCKS + cell.get("x").getAsInt();
-                        int z = address.z * REGION_BLOCKS + cell.get("z").getAsInt();
-                        long bestDistance = Long.MAX_VALUE;
-                        for (PoliticalSeed seed : seeds) {
-                            if (seed.realmId.isBlank()) continue;
-                            long dx = (long) x - seed.x, dz = (long) z - seed.z;
-                            long distance = dx * dx + dz * dz;
-                            if (distance < bestDistance) { bestDistance = distance; owner = seed.realmId; }
-                        }
-                        if (bestDistance > maxDistanceSquared) owner = "";
+                } else if (land && previous.isBlank() && !seeds.isEmpty()) {
+                    int x = address.x * REGION_BLOCKS + cell.get("x").getAsInt();
+                    int z = address.z * REGION_BLOCKS + cell.get("z").getAsInt();
+                    long bestDistance = Long.MAX_VALUE;
+                    for (PoliticalSeed seed : seeds) {
+                        if (seed.realmId.isBlank()) continue;
+                        long dx = (long) x - seed.x, dz = (long) z - seed.z;
+                        long distance = dx * dx + dz * dz;
+                        if (distance < bestDistance) { bestDistance = distance; owner = seed.realmId; }
                     }
+                    if (bestDistance > maxDistanceSquared) owner = "";
                 }
                 if (!previous.equals(owner)) { cell.addProperty("owner_realm_id", owner); changed = true; }
                 if (!owner.isBlank()) owned++;
