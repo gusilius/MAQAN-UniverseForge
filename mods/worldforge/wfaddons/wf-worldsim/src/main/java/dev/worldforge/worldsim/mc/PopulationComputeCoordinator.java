@@ -86,7 +86,12 @@ public final class PopulationComputeCoordinator {
         long registryGeneration=PeopleMod.populationRegistryGeneration();
         // The process cursor is not durable proof that every Character partition was saved.
         // Inspect receipts once per world day and canonical registry generation, not every tick.
-        if(currentWorldDay<=fallbackStartDay&&currentWorldDay==lastScannedWorldDay
+        // A completed scan is valid for this exact world day and registry generation,
+        // regardless of whether the day is before or after the durable baseline. The old
+        // baseline-only guard rescanned every living Character on every server tick after
+        // the first simulated day, repeatedly rebuilding the same empty/already-acknowledged
+        // request and starving the authoritative WorldSim tick under large registries.
+        if(currentWorldDay==lastScannedWorldDay
                 &&registryGeneration==lastScannedRegistryGeneration) return true;
         String worldId=WorldForgeMod.worldId()==null
                 ?server.overworld().dimension().location().toString()
