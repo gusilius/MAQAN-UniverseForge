@@ -840,6 +840,46 @@ public final class WorldSimMod {
             report.addProperty("living_population_with_race_stats", livingPopulation);
             report.add("living_population_by_race", racePopulation);
             report.addProperty("unclassified_living_characters", livingRaceCounts.getOrDefault("unclassified", 0L));
+
+            Map<String, String> polityByBand = new HashMap<>();
+            if (emergenceState != null && emergenceState.has("polities")
+                    && emergenceState.get("polities").isJsonArray()) {
+                for (var item : emergenceState.getAsJsonArray("polities")) {
+                    if (!item.isJsonObject()) continue;
+                    JsonObject polity = item.getAsJsonObject();
+                    String polityId = polity.get("id").getAsString();
+                    if (!polity.has("settlement_ids") || !polity.get("settlement_ids").isJsonArray()) continue;
+                    for (var band : polity.getAsJsonArray("settlement_ids"))
+                        polityByBand.put(band.getAsString(), polityId);
+                }
+            }
+            Map<String, Map<String, Long>> raceCountsByPolity = new TreeMap<>();
+            for (dev.worldforge.people.Character person : campaignPeople.all()) {
+                if (!person.alive) continue;
+                Object rawBand = person.props.get("emergence.band_id");
+                if (!(rawBand instanceof String bandId) || bandId.isBlank()) continue;
+                String polityId = polityByBand.get(bandId);
+                if (polityId == null) continue;
+                Object rawRace = person.props.get("origin.race");
+                String race = rawRace == null || String.valueOf(rawRace).isBlank()
+                        ? "unclassified" : String.valueOf(rawRace);
+                raceCountsByPolity.computeIfAbsent(polityId, ignored -> new TreeMap<>())
+                        .merge(race, 1L, Long::sum);
+            }
+            JsonObject racePopulationByPolity = new JsonObject();
+            for (Map.Entry<String, Map<String, Long>> polityEntry : raceCountsByPolity.entrySet()) {
+                long polityPopulation = polityEntry.getValue().values().stream().mapToLong(Long::longValue).sum();
+                JsonObject distribution = new JsonObject();
+                for (Map.Entry<String, Long> raceEntry : polityEntry.getValue().entrySet()) {
+                    JsonObject race = new JsonObject();
+                    race.addProperty("count", raceEntry.getValue());
+                    race.addProperty("share", polityPopulation == 0 ? 0.0
+                            : raceEntry.getValue() / (double) polityPopulation);
+                    distribution.add(raceEntry.getKey(), race);
+                }
+                racePopulationByPolity.add(polityEntry.getKey(), distribution);
+            }
+            report.add("living_population_by_polity_and_race", racePopulationByPolity);
             report.addProperty("origin_class_characters", campaignPeople.all().stream()
                     .filter(person -> person.props.containsKey("origin.class")).count());
             report.addProperty("origin_profession_characters", campaignPeople.all().stream()
