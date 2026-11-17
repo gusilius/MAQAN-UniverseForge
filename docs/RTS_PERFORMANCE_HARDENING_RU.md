@@ -175,3 +175,36 @@ First-person Alt radial wheel уже существует для боевых п
 - Rust compute не затрагивался: переносить в Rust нужно поиск целей/планирование/оценку областей и массовые вычисления, не сетевую авторизацию, Character registry или фактические Minecraft mutations.
 
 Добавлены unit checks для дедупликации субъектов, канонического durable mapping и отклонения некорректных subject IDs. Сборка и тесты в этой сессии не запускались; наличие CI check-runs не подтверждено.
+
+## Simulation LOD / low-memory scalability policy and first hot-path optimization
+
+Целевой принцип производительности MAQAN: детализация симуляции зависит от наблюдаемости, актуальной задачи и стратегической важности, а не от общего числа Character. Один Character UUID и его состояние сохраняются при переходах между уровнями детализации; LOD никогда не создаёт второго NPC/солдата и не меняет владельца инвентаря/профессии.
+
+Целевые уровни:
+1. **Materialized / near-player** — настоящее Minecraft entity, pathfinding, combat, animation and interactions only for bodies that must be physically visible/interactive.
+2. **Active off-screen task** — worker/build/squad continues in domain state; task progress, reservations, resources and coarse movement advance without per-tick entity AI/pathfinding.
+3. **Strategic aggregate** — distant population, production, supply, army readiness and travel advance in deterministic batches/events; individual Character records remain canonical, but no per-character Minecraft entity or continuous full AI.
+4. **Dormant/event-driven** — unchanged entities receive no periodic expensive evaluation; wake on relevant event, player proximity, task deadline, raid, migration, supply threshold or other explicit dependency.
+
+LOD transitions must preserve Character UUID, role/duty, inventory/equipment, family/social state, orders, worksite reservations, progress and deterministic simulation time. Materialization requires loaded chunks and a per-server budget; dematerialization must never cancel an authoritative task or lose work progress. Critical player-issued orders and active construction continue off-screen at abstract/task level.
+
+**Low-memory target (4–8 GB system RAM):** bounded entity materialization, bounded batch sizes, reusable snapshot/scratch buffers, no unbounded per-NPC queues, no per-tick object graph copies, no loading chunks just to simulate remote residents, no forced entity for every strategic soldier. The system must degrade visual entity density / update frequency before degrading game-system correctness. Quality means continuity and correct outcomes, not keeping thousands of Minecraft entities alive.
+
+### Confirmed hot-path issue found in current Java settlement simulation
+
+In `SettleMod.runLifeAI`, every resident previously rescanned all settlement buildings to determine whether leisure facilities exist and rescanned all residents to determine whether a companion exists. For N residents, this added O(N × buildings + N²) work to each life-AI pass. These are settlement-wide facts, not resident-specific facts.
+
+The pass now computes both facts once before iterating residents, reducing this portion to O(buildings + residents) while preserving the prior semantics (a companion means another worker record; leisure means a completed, unpaused leisure/tavern/inn building). Also removed a duplicate culture fallback assignment in `syncPeople`.
+
+This is a structural complexity improvement, not a measured FPS/RAM claim. No benchmark or in-game profile has yet been run.
+
+### Audit observations requiring the next implementation stages
+
+- `Bodies.tick` already limits creation to four worker entities per pass and uses player proximity, but it scans colony workers and live-body entries and currently uses settlement-centre proximity. It needs a budgeted proximity index/chunk-aware policy and hysteresis without spawning workers into unloaded chunks.
+- `WFWorker.tick` runs the entity superclass tick (AI/navigation) every game tick while materialized; per-body work scans and route selection must be profiled and throttled by task state, not blindly invoked for every resident.
+- `SettleMod.onTick` runs settlement tick, `syncPeople`, `runLifeAI` and map logistics every STEP_TICKS; construction sites are separate. The active/off-screen split is not yet implemented.
+- `runLifeAI` still resolves Characters and evaluates individual needs for every worker on each settlement step. The next pass should introduce a deterministic dirty/event scheduler and batched due-resident processing, preserving deadlines and player-owned/military tasks.
+- The Rust crate `worldforge-sim` already contains deterministic tactical batch evaluation and bounded allocation-free spatial queries. It does not yet implement population LOD, work scheduling or resident life batches. Extend this existing crate rather than introducing another native engine.
+- Army strategic records must remain aggregate and must not require a Minecraft entity per soldier. Materialize only nearby/engaged/selected units within explicit budgets; selection, command groups and command authority remain valid for abstract units.
+
+Not yet implemented: complete LOD scheduler, per-player visibility sets, off-screen work progression, strategic Character batch scheduler, army entity materialization budgets, adaptive low-memory settings, and benchmark suite. This section records target architecture and verified code observations, not a claim that these stages are already complete.
