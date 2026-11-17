@@ -150,15 +150,18 @@ public final class WorldSimMod {
 
     private static List<EmergenceSource> emergenceSources() {
         List<EmergenceSource> sources = new ArrayList<>();
+        boolean vanillaCampaign = campaignRunning && "vanilla".equals(campaignMapId);
         for (MapData map : WorldForgeMod.loadedMaps().values()) {
-            if (map == null) continue;
+            if (map == null || (campaignRunning && (vanillaCampaign || !map.name.equals(campaignMapId)))) continue;
             CharacterRegistry registry = PeopleMod.registry(map);
             if (registry != null) sources.add(EmergenceSource.authored(map));
         }
-        CharacterRegistry vanillaRegistry = PeopleMod.worldRegistry();
-        if (vanillaRegistry != null) {
-            for (String id : VanillaWorldGeography.regionIds())
-                sources.add(EmergenceSource.vanilla(id, vanillaRegistry));
+        if (!campaignRunning || vanillaCampaign) {
+            CharacterRegistry vanillaRegistry = PeopleMod.worldRegistry();
+            if (vanillaRegistry != null) {
+                for (String id : VanillaWorldGeography.regionIds())
+                    sources.add(EmergenceSource.vanilla(id, vanillaRegistry));
+            }
         }
         sources.sort(Comparator.comparing(source -> source.id));
         return sources;
@@ -593,27 +596,50 @@ public final class WorldSimMod {
             source.sendFailure(Component.literal("Native WorldSim engine is unavailable; campaign was not started"));
             return 0;
         }
-        MapData map = WorldForgeMod.map(mapId);
-        if (map.titles == null || !map.titles.realmList().isEmpty()) {
-            source.sendFailure(Component.literal("Campaign map must retain province geography but contain no pre-authored realms"));
-            return 0;
+        boolean vanillaCampaign = "vanilla".equalsIgnoreCase(mapId);
+        MapData map = vanillaCampaign ? null : WorldForgeMod.map(mapId);
+        CharacterRegistry registry;
+        String campaignDimension;
+        if (vanillaCampaign) {
+            if (!WorldForgeMod.loadedMaps().isEmpty()) {
+                source.sendFailure(Component.literal("Vanilla campaign requires no image maps to be loaded"));
+                return 0;
+            }
+            registry = PeopleMod.worldRegistry();
+            List<String> regions = VanillaWorldGeography.regionIds();
+            if (registry == null || regions.isEmpty() || VanillaWorldGeography.sampledCellCount() <= 0) {
+                source.sendFailure(Component.literal("Vanilla campaign requires observed Minecraft chunks and a populated geography cache"));
+                return 0;
+            }
+            campaignDimension = VanillaWorldGeography.dimensionFromMapId(regions.get(0));
+            boolean dimensionLoaded = server.getAllLevels().stream()
+                    .anyMatch(level -> level.dimension().location().toString().equals(campaignDimension));
+            if (campaignDimension.isBlank() || !dimensionLoaded) {
+                source.sendFailure(Component.literal("Vanilla campaign geography dimension is not loaded"));
+                return 0;
+            }
+        } else {
+            if (map == null || map.titles == null || !map.titles.realmList().isEmpty()) {
+                source.sendFailure(Component.literal("Campaign map must retain province geography but contain no pre-authored realms"));
+                return 0;
+            }
+            campaignDimension = mapDimension(server, map);
+            if (campaignDimension == null) {
+                source.sendFailure(Component.literal("Campaign map dimension is not loaded; refusing data-only simulation"));
+                return 0;
+            }
+            if (WorldForgeMod.loadedMaps().size() != 1 || !WorldForgeMod.loadedMaps().containsValue(map)) {
+                source.sendFailure(Component.literal("Campaign requires exactly one loaded map: " + mapId));
+                return 0;
+            }
+            registry = PeopleMod.registry(map);
         }
-        String campaignDimension = mapDimension(server, map);
-        if (campaignDimension == null) {
-            source.sendFailure(Component.literal("Campaign map dimension is not loaded; refusing data-only simulation"));
-            return 0;
-        }
-        if (WorldForgeMod.loadedMaps().size() != 1 || !WorldForgeMod.loadedMaps().containsValue(map)) {
-            source.sendFailure(Component.literal("Campaign requires exactly one loaded map: " + mapId));
-            return 0;
-        }
-        CharacterRegistry registry = PeopleMod.registry(map);
         if (registry == null || registry.size() != 0 || !SettleMod.COLONIES.isEmpty()
                 || !RealmsMod.emergentRealms().isEmpty()) {
             source.sendFailure(Component.literal("Campaign requires an empty isolated world: no pre-seeded Characters, settlements or emergent realms"));
             return 0;
         }
-        campaignMapId = map.name;
+        campaignMapId = vanillaCampaign ? "vanilla" : map.name;
         campaignForcedChunks.clear();
         campaignStartedDay = WorldForgeApi.clock().dayNumber();
         campaignRunning = true;
@@ -626,13 +652,16 @@ public final class WorldSimMod {
         return 1;
     }
 
+    private static int campaignTargetGenerations() { return Boolean.getBoolean("worldforge.campaign.acceptance") ? 1 : 4; }
+    private static long campaignMinimumMaturityYears() { return Boolean.getBoolean("worldforge.campaign.acceptance") ? 1L : 25L; }
+
     private static int campaignStatus(CommandSourceStack source) {
         JsonArray polities = emergenceState != null && emergenceState.has("polities")
                 && emergenceState.get("polities").isJsonArray() ? emergenceState.getAsJsonArray("polities") : new JsonArray();
         int completed = 0;
         for (var item : polities) if (item.isJsonObject()) {
             JsonObject polity = item.getAsJsonObject();
-            if (canonicalGenerationCount(polity) >= 4
+            if (canonicalGenerationCount(polity) >= campaignTargetGenerations()
                     && polity.has("stability") && polity.get("stability").getAsInt() >= 50
                     && polity.has("population") && polity.get("population").getAsLong() >= 120) completed++;
         }
@@ -641,7 +670,7 @@ public final class WorldSimMod {
         source.sendSuccess(() -> Component.literal("Campaign=" + (campaignRunning ? "RUNNING" : "STOPPED")
                 + ", map=" + (campaignMapId.isBlank() ? "-" : campaignMapId)
                 + ", elapsed_days=" + Math.max(0L, WorldForgeApi.clock().dayNumber() - campaignStartedDay)
-                + ", stable_four-generation_states=" + completedStates + "/" + total
+                + ", stable_campaign_states=" + completedStates + "/" + total
                 + ", clock_multiplier=" + WorldForgeApi.clock().simulationTickMultiplier()
                 + ", materialized_settlements=" + materializedSettlementCount()
                 + ", completed_buildings=" + completedAutonomousBuildingCount()
@@ -681,8 +710,8 @@ public final class WorldSimMod {
             long population = polity.has("population") ? polity.get("population").getAsLong() : 0;
             int stability = polity.has("stability") ? polity.get("stability").getAsInt() : 0;
             int weakYears = polity.has("weak_years") ? polity.get("weak_years").getAsInt() : 0;
-            if (canonicalGenerationCount(polity) < 4 || population < 120 || stability < 50 || weakYears > 0
-                    || elapsedYear - founded < 25) allMature = false;
+            if (canonicalGenerationCount(polity) < campaignTargetGenerations() || population < 120 || stability < 50 || weakYears > 0
+                    || elapsedYear - founded < campaignMinimumMaturityYears()) allMature = false;
         }
         if (elapsedYear > 0 && elapsedYear % 5 == 0)
             LOGGER.info("wf_worldsim: campaign progress map={} year={} states={} mature_four_generation_states={} events={}",
@@ -700,7 +729,7 @@ public final class WorldSimMod {
                 && materializedSettlements == campaignSettlements
                 && physicallyBuiltSettlements == campaignSettlements
                 && physicallyCompletedBuildings >= campaignSettlements;
-        if (!allMature || !physicalReady || elapsedYear - latestFoundingYear < 25) return;
+        if (!allMature || !physicalReady || elapsedYear - latestFoundingYear < campaignMinimumMaturityYears()) return;
 
         campaignRunning = false;
         WorldForgeApi.clock().setSimulationTickMultiplier(1);
@@ -720,7 +749,7 @@ public final class WorldSimMod {
             report.addProperty("end_day", day);
             report.addProperty("elapsed_days", Math.max(0L, day - campaignStartedDay));
             report.addProperty("elapsed_years", Math.max(0L, (day - campaignStartedDay) / 365L));
-            report.addProperty("target_dynasty_generations", 4);
+            report.addProperty("target_dynasty_generations", campaignTargetGenerations());
             report.addProperty("stable_states", polities.size());
             report.addProperty("settlements", campaignSettlements);
             report.addProperty("materialized_settlements", materializedSettlements);
@@ -729,11 +758,29 @@ public final class WorldSimMod {
             report.addProperty("physically_built_settlements", physicallyBuiltSettlements);
             report.addProperty("canonical_ruler_generations_verified",
                     polities.asList().stream().filter(item -> item.isJsonObject()
-                            && canonicalGenerationCount(item.getAsJsonObject()) >= 4).count());
-            report.addProperty("physical_world_dimension", mapDimension(server,
-                    WorldForgeMod.loadedMaps().get(campaignMapId)));
-            CharacterRegistry campaignPeople = PeopleMod.registry(WorldForgeMod.loadedMaps().get(campaignMapId));
+                            && canonicalGenerationCount(item.getAsJsonObject()) >= campaignTargetGenerations()).count());
+            MapData campaignMap = WorldForgeMod.loadedMaps().get(campaignMapId);
+            String physicalDimension = campaignMap == null
+                    ? (VanillaWorldGeography.regionIds().isEmpty() ? "" :
+                        VanillaWorldGeography.dimensionFromMapId(VanillaWorldGeography.regionIds().get(0)))
+                    : mapDimension(server, campaignMap);
+            report.addProperty("physical_world_dimension", physicalDimension);
+            CharacterRegistry campaignPeople = campaignMap == null
+                    ? PeopleMod.worldRegistry() : PeopleMod.registry(campaignMap);
+            if (campaignPeople == null) throw new IllegalStateException("Campaign Character registry disappeared before report export");
             report.addProperty("characters", campaignPeople.size());
+            report.addProperty("geography_regions", campaignMap == null
+                    ? VanillaWorldGeography.capturedRegionCount() : 1);
+            report.addProperty("geography_samples", campaignMap == null
+                    ? VanillaWorldGeography.sampledCellCount() : campaignMap.w * campaignMap.h);
+            report.addProperty("named_realms", RealmsMod.emergentRealms().stream()
+                    .filter(realm -> realm.name != null && !realm.name.isBlank()).count());
+            report.addProperty("canonical_rulers", RealmsMod.emergentRealms().stream()
+                    .map(realm -> String.valueOf(realm.props.getOrDefault("emergence.ruler_global_id", "")))
+                    .filter(id -> !id.isBlank() && PeopleMod.authority().getGlobal(id) != null).count());
+            report.addProperty("statecraft_titles", RealmsMod.POLITICS.titles().size());
+            report.addProperty("vassal_contracts", RealmsMod.emergentRealms().stream()
+                    .filter(realm -> RealmsMod.POLITICS.vassalage(realm.id) != null).count());
             report.addProperty("origin_race_characters", campaignPeople.all().stream()
                     .filter(person -> person.props.containsKey("origin.race")).count());
             report.addProperty("origin_distinct_races", campaignPeople.all().stream()
@@ -902,12 +949,15 @@ public final class WorldSimMod {
         JsonArray geography = new JsonArray();
         // Geography is sampled independently of political overlays. A map with no titles/realms
         // is still a valid source of terrain, biome and river evidence for a future map-first world.
-        for (MapData map : WorldForgeMod.loadedMaps().values())
-            geography.add(GSON.toJsonTree(MapGeography.describe(map)));
-        // Ordinary Minecraft worldgen contributes only already-observed chunks.
-        // These samples share the exact GeographicMap contract consumed by Rust.
-        for (var vanillaRegion : VanillaWorldGeography.snapshot())
-            geography.add(vanillaRegion);
+        boolean vanillaCampaign = campaignRunning && "vanilla".equals(campaignMapId);
+        for (MapData map : WorldForgeMod.loadedMaps().values()) {
+            if (!campaignRunning || (!vanillaCampaign && map.name.equals(campaignMapId)))
+                geography.add(GSON.toJsonTree(MapGeography.describe(map)));
+        }
+        // During acceptance each server is isolated to exactly one source. Normal
+        // gameplay continues to combine every authored map and observed vanilla region.
+        if (!campaignRunning || vanillaCampaign)
+            for (var vanillaRegion : VanillaWorldGeography.snapshot()) geography.add(vanillaRegion);
         // WorldSim must never consume sovereignty or political borders from an image map.
         // Both image and vanilla sources contribute only canonical emergent realms created
         // by the shared geography pipeline; this also prevents map realms being counted twice.

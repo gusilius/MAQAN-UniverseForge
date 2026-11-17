@@ -1,297 +1,99 @@
-name: MAQAN UniverseForge — Windows x64
+name: MAQAN UniverseForge — two-world acceptance (Windows x64)
 
 on:
   push:
-    branches: [main, integration/maqan-unified, codex/blocker3-action-execution-audit, codex/blocker4-ownership-inventory, feature/autonomous-world-simulation-engine]
+    branches: [main, feature/autonomous-world-simulation-engine]
     paths:
-      - "mods/**"
+      - "mods/worldforge/**"
       - "map.png"
       - "shared/**"
-      - "platform/**"
       - "build.gradle"
       - "settings.gradle"
       - "gradle.properties"
       - "gradle/**"
-      - "mods/worldforge/wfaddons/tools/**"
-      - ".github/workflows/**"
+      - ".github/workflows/universeforge.yml"
   pull_request:
     branches: [main]
     paths:
-      - "mods/**"
+      - "mods/worldforge/**"
+      - "map.png"
       - "shared/**"
-      - "platform/**"
       - "build.gradle"
       - "settings.gradle"
       - "gradle.properties"
       - "gradle/**"
-      - "mods/worldforge/wfaddons/tools/**"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: universeforge-windows-quality-gate-${{ github.ref }}
-  # Keep only the newest validation for each ref. Feature branches are validated as PRs to main or by explicit workflow_dispatch,
-  # so intermediate commits do not enqueue a full Windows/Forge/Rust matrix for every small change.
+  group: universeforge-two-world-acceptance-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  atlas:
-    name: Atlas — Forge 47.4.28 + Rust (Windows x64)
+  two-world-acceptance:
+    name: Build once; test vanilla and image-map servers sequentially
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc
-      - name: Test Atlas native core
-        working-directory: mods/atlas/native/maqan-core
-        run: cargo test --locked --target x86_64-pc-windows-msvc
-      - name: Build Atlas native core
-        working-directory: mods/atlas/native/maqan-core
-        run: cargo build --release --locked --target x86_64-pc-windows-msvc
-      - name: Stage Windows native library
-        shell: pwsh
-        run: |
-          $nativeDir = "mods/atlas/src/main/resources/maqan-native-windows-x86_64"
-          New-Item -ItemType Directory -Force -Path $nativeDir | Out-Null
-          Copy-Item "mods/atlas/native/maqan-core/target/x86_64-pc-windows-msvc/release/maqan_core.dll" "$nativeDir/maqan_core.dll" -Force
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: "8.8"
-      - name: Build Atlas Forge mod
-        working-directory: mods/atlas
-        run: gradle --no-daemon clean build
-      - uses: actions/upload-artifact@v4
-        with:
-          name: maqan-atlas-windows-x64
-          path: mods/atlas/build/libs/*.jar
-          if-no-files-found: error
-          retention-days: 30
 
-  atlas-native-linux:
-    name: Atlas native core (Linux x64)
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Test Atlas native core
-        working-directory: mods/atlas/native/maqan-core
-        run: cargo test --locked
-      - name: Build Atlas native core
-        working-directory: mods/atlas/native/maqan-core
-        run: cargo build --release --locked
-
-  worldforge-core:
-    name: WorldForge core — Forge 47.3.0 (Windows x64)
-    runs-on: windows-latest
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: "8.1.1"
-      - name: Build WorldForge core
-        working-directory: mods/worldforge/wfmod
-        run: gradle --no-daemon clean build
-      - uses: actions/upload-artifact@v4
-        with:
-          name: maqan-worldforge-core-windows-x64
-          path: mods/worldforge/wfmod/build/libs/*.jar
-          if-no-files-found: error
-          retention-days: 30
-
-  worldforge-addons:
-    name: WorldForge addons (Windows x64)
-    runs-on: windows-latest
-    needs: [worldforge-core, worldforge-native, worldforge-native-linux]
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v4
-      - name: Download native WorldForge simulation core
-        uses: actions/download-artifact@v4
-        with:
-          name: worldforge-worldsim-windows-x64
-          path: mods/worldforge/wfaddons/wf-worldsim/src/main/resources/maqan-native-windows-x86_64
-      - name: Download Linux native WorldForge simulation core
-        uses: actions/download-artifact@v4
-        with:
-          name: worldforge-worldsim-linux-x64
-          path: mods/worldforge/wfaddons/wf-worldsim/src/main/resources/maqan-native-linux-x86_64
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: "8.1.1"
-      - name: Build core and all addons in dependency order
-        working-directory: mods/worldforge/wfaddons
-        shell: bash
-        run: bash tools/build-all.sh ../wfmod
-      - name: Stage complete addon distribution for server smoke test
-        working-directory: mods/worldforge/wfaddons
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p dist
-          rm -f dist/*.jar
-          expected=$(find . -mindepth 1 -maxdepth 1 -type d -name 'wf-*' | wc -l)
-          mapfile -t addon_jars < <(find wf-* -type f -path '*/build/libs/wf_*.jar' ! -name '*-sources.jar' | sort)
-          if [ "${#addon_jars[@]}" -lt "$expected" ]; then
-            echo "ERROR: expected at least $expected addon jars, found ${#addon_jars[@]}"
-            printf '%s\n' "${addon_jars[@]}"
-            exit 1
-          fi
-          for jar in "${addon_jars[@]}"; do cp "$jar" dist/; done
-          mapfile -t core_jars < <(find ../wfmod/build/libs -maxdepth 1 -type f -name 'worldforge-*.jar' ! -name '*-sources.jar' | sort)
-          if [ "${#core_jars[@]}" -eq 0 ]; then
-            echo "ERROR: WorldForge core jar is missing"
-            exit 1
-          fi
-          for jar in "${core_jars[@]}"; do cp "$jar" dist/; done
-          echo "Staged $(find dist -maxdepth 1 -type f -name '*.jar' | wc -l) jars:"
-          ls -lh dist
-      - uses: actions/upload-artifact@v4
-        with:
-          name: maqan-worldforge-addons-windows-x64
-          path: mods/worldforge/wfaddons/dist/*.jar
-          if-no-files-found: error
-          retention-days: 30
 
-  worldforge-runtime-smoke:
-    name: WorldForge — combined Forge server boot (Windows x64)
-    runs-on: windows-latest
-    needs: worldforge-addons
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-      - uses: actions/download-artifact@v4
-        with:
-          name: maqan-worldforge-addons-windows-x64
-          path: mods/worldforge/wfaddons/dist
-      - name: Boot server with the complete addon set and run smoke commands
-        shell: bash
-        run: bash mods/worldforge/wfaddons/tools/smoke-server.sh mods/worldforge/wfaddons/dist
-
-  worldforge-addon-isolation:
-    name: WorldForge — per-addon minimal dependency server profiles (Windows x64)
-    runs-on: windows-latest
-    needs: worldforge-addons
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - uses: actions/download-artifact@v4
-        with:
-          name: maqan-worldforge-addons-windows-x64
-          path: mods/worldforge/wfaddons/dist
-      - name: Boot core-only and every addon with its mandatory runtime dependency closure
-        working-directory: mods/worldforge/wfaddons
-        shell: bash
-        run: bash tools/addon-isolation-server.sh dist "$RUNNER_TEMP/maqan-addon-isolation"
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: maqan-addon-isolation-server-profiles
-          path: ${{ runner.temp }}/maqan-addon-isolation/
-          if-no-files-found: warn
-          retention-days: 30
-
-  worldforge-autonomous-campaign:
-    name: WorldForge — Planetos autonomous four-generation campaign (Windows x64)
-    runs-on: windows-latest
-    needs: [worldforge-addons, worldforge-runtime-smoke, worldforge-addon-isolation]
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - uses: actions/download-artifact@v4
-        with:
-          name: maqan-worldforge-addons-windows-x64
-          path: mods/worldforge/wfaddons/dist
-      - name: Run autonomous campaign on geography-only Planetos
-        working-directory: mods/worldforge/wfaddons
-        shell: bash
-        env:
-          WF_CAMPAIGN_TIMEOUT_SECONDS: "3300"
-        run: bash tools/autonomous-campaign.sh ../wfmod/examples/maps/planetos.worldmap dist "$RUNNER_TEMP/maqan-planetos-campaign"
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: maqan-planetos-autonomous-campaign
-          path: ${{ runner.temp }}/maqan-planetos-campaign/
-          if-no-files-found: warn
-          retention-days: 30
-
-  worldforge-tests:
-    name: WorldForge logic tests (Windows x64)
-    runs-on: windows-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Compile and run WorldForge logic tests
-        working-directory: mods/worldforge/wfaddons
-        shell: bash
-        run: bash tools/test-all.sh ../wfmod
-
-  worldforge-real-map-integration:
-    name: WorldForge — real image map identity and political integration (Windows x64)
-    runs-on: windows-latest
-    needs: [worldforge-addons]
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Install image generation dependencies
+      - name: Install image-to-worldmap dependencies
         shell: pwsh
         run: |
           python -m pip install --disable-pip-version-check -r mods/worldforge/wfaddons/tools/image-worldgen/requirements.txt
           if ($LASTEXITCODE -ne 0) { throw "Image generation dependencies failed" }
-      - name: Generate and validate the repository map
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Test and build the shared native WorldSim engine
+        working-directory: mods/worldforge/native/worldforge-worldsim
         shell: pwsh
         run: |
-          if (!(Test-Path "map.png")) { throw "The actual map.png source is missing" }
-          $out = Join-Path $env:RUNNER_TEMP "maqan-real-map"
+          cargo test --target x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { throw "WorldSim native tests failed" }
+          cargo build --release --target x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { throw "WorldSim native build failed" }
+
+      - name: Stage native engine into the WorldSim mod
+        shell: pwsh
+        run: |
+          $nativeDir = "mods/worldforge/wfaddons/wf-worldsim/src/main/resources/maqan-native-windows-x86_64"
+          New-Item -ItemType Directory -Force -Path $nativeDir | Out-Null
+          Copy-Item "mods/worldforge/native/worldforge-worldsim/target/x86_64-pc-windows-msvc/release/worldforge_worldsim.dll" "$nativeDir/worldforge_worldsim.dll" -Force
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.1.1"
+
+      - name: Build WorldForge core and every addon once in dependency order
+        working-directory: mods/worldforge/wfaddons
+        shell: bash
+        run: |
+          bash tools/build-all.sh ../wfmod
+          test -f dist/worldforge-0.1.jar || find dist -maxdepth 1 -type f -name 'worldforge-*.jar' -print -quit | grep -q .
+          addon_count=$(find dist -maxdepth 1 -type f -name 'wf_*.jar' ! -name '*-sources.jar' | wc -l)
+          expected_count=$(find . -mindepth 1 -maxdepth 1 -type d -name 'wf-*' | wc -l)
+          echo "ADDON_JARS=$addon_count EXPECTED_ADDONS=$expected_count"
+          test "$addon_count" -eq "$expected_count"
+
+      - name: Generate the actual image-derived worldmap from map.png
+        shell: pwsh
+        run: |
+          if (!(Test-Path "map.png")) { throw "The repository map.png source is missing" }
+          $out = Join-Path $env:RUNNER_TEMP "maqan-two-world-map"
           New-Item -ItemType Directory -Force -Path $out | Out-Null
           python mods/worldforge/wfaddons/tools/image-worldgen/image_map_analysis.py --input "map.png" --output $out --seed 424242
           if ($LASTEXITCODE -ne 0) { throw "Actual map semantic analysis failed" }
@@ -299,103 +101,33 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Actual map conversion failed" }
           python -c "import sys,json; from pathlib import Path; sys.path.insert(0,'mods/worldforge/wfaddons/tools/image-worldgen'); from image_worldgen import validate_package; print(json.dumps(validate_package(Path(r'$out')/'real-map.worldmap'),ensure_ascii=False,indent=2))"
           if ($LASTEXITCODE -ne 0) { throw "Actual map package validation failed" }
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-      - name: Compile production WorldForge map loader and compatibility test
-        shell: pwsh
-        run: |
-          $out = Join-Path $env:RUNNER_TEMP "maqan-real-map"
-          $classes = Join-Path $out "classes"
-          New-Item -ItemType Directory -Force -Path $classes | Out-Null
-          javac -encoding UTF-8 -d $classes mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/Json.java mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/Noise.java mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/RegionData.java mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/TitleData.java mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/MapData.java mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/TerrainSampler.java mods/worldforge/wfaddons/tools/image-worldgen/ImageWorldMapCompatibilityTest.java
-          if ($LASTEXITCODE -ne 0) { throw "Production map compatibility compile failed" }
-          java -cp $classes dev.worldforge.mod.ImageWorldMapCompatibilityTest $out real-map
-          if ($LASTEXITCODE -ne 0) { throw "Actual map failed production MapData integration" }
-      - name: Run complete addon regression suite plus actual image-map identity and persistence tests
+
+      - name: Run the complete modpack on a real vanilla Minecraft world
         working-directory: mods/worldforge/wfaddons
-        shell: pwsh
+        shell: bash
+        env:
+          WF_CAMPAIGN_TIMEOUT_SECONDS: "2400"
+          WF_VANILLA_SEED: "424242"
         run: |
-          $out = Join-Path $env:RUNNER_TEMP "maqan-real-map"
-          $worldmap = (Join-Path $out "real-map.worldmap") -replace '\\', '/'
-          bash tools/test-all.sh ../wfmod "$worldmap"
-          if ($LASTEXITCODE -ne 0) { throw "Full addon regression plus actual image-map acceptance failed" }
-      - name: Upload actual-map package and diagnostics
+          bash tools/autonomous-campaign.sh vanilla dist "$RUNNER_TEMP/maqan-vanilla-acceptance"
+
+      - name: Run the same complete modpack on the real map.png world
+        working-directory: mods/worldforge/wfaddons
+        shell: bash
+        env:
+          WF_CAMPAIGN_TIMEOUT_SECONDS: "2400"
+          WF_CAMPAIGN_MAP_ID: "real-map"
+        run: |
+          bash tools/autonomous-campaign.sh "$RUNNER_TEMP/maqan-two-world-map/real-map.worldmap" dist "$RUNNER_TEMP/maqan-image-map-acceptance"
+
+      - name: Upload both server worlds and acceptance diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: maqan-real-image-political-proof
-          path: ${{ runner.temp }}/maqan-real-map/
-          if-no-files-found: error
-          retention-days: 30
-  worldforge-native:
-    name: WorldForge simulation native core (Windows x64)
-    runs-on: windows-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc
-      - name: Test WorldForge native core
-        working-directory: mods/worldforge/native/worldforge-sim
-        run: cargo test --target x86_64-pc-windows-msvc
-      - name: Build WorldForge native core
-        working-directory: mods/worldforge/native/worldforge-sim
-        run: cargo build --release --target x86_64-pc-windows-msvc
-      - name: Test autonomous WorldForge decision engine
-        working-directory: mods/worldforge/native/worldforge-worldsim
-        run: cargo test --target x86_64-pc-windows-msvc
-      - name: Build autonomous WorldForge decision engine
-        working-directory: mods/worldforge/native/worldforge-worldsim
-        run: cargo build --release --target x86_64-pc-windows-msvc
-      - uses: actions/upload-artifact@v4
-        with:
-          name: worldforge-worldsim-windows-x64
-          path: mods/worldforge/native/worldforge-worldsim/target/x86_64-pc-windows-msvc/release/worldforge_worldsim.dll
-          if-no-files-found: error
-          retention-days: 30
-
-  worldforge-native-linux:
-    name: WorldForge simulation native core (Linux x64)
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Test autonomous WorldForge decision engine
-        working-directory: mods/worldforge/native/worldforge-worldsim
-        run: cargo test
-      - name: Build Linux native library
-        working-directory: mods/worldforge/native/worldforge-worldsim
-        run: cargo build --release
-      - uses: actions/upload-artifact@v4
-        with:
-          name: worldforge-worldsim-linux-x64
-          path: mods/worldforge/native/worldforge-worldsim/target/release/libworldforge_worldsim.so
-          if-no-files-found: error
-          retention-days: 30
-
-  platform:
-    name: MAQAN Platform shell (Windows x64)
-    runs-on: windows-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: "8.8"
-      - name: Build Platform shell
-        working-directory: platform
-        run: gradle --no-daemon clean build
-      - uses: actions/upload-artifact@v4
-        with:
-          name: maqan-platform-windows-x64
-          path: platform/build/libs/*.jar
-          if-no-files-found: error
+          name: maqan-two-world-server-acceptance
+          path: |
+            ${{ runner.temp }}/maqan-vanilla-acceptance/
+            ${{ runner.temp }}/maqan-image-map-acceptance/
+            ${{ runner.temp }}/maqan-two-world-map/
+          if-no-files-found: warn
           retention-days: 30

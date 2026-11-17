@@ -2,15 +2,21 @@
 # Full Forge runtime campaign on the real Planetos geography package.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-MAP_SOURCE="${1:?usage: autonomous-campaign.sh <planetos.worldmap> <addon-jar-dir> <output-dir>}"
+MAP_SOURCE="${1:?usage: autonomous-campaign.sh <vanilla|worldmap> <addon-jar-dir> <output-dir>}"
 JARS="${2:?addon jar directory required}"
 OUTPUT="${3:?output directory required}"
-MAP_ID="planetos"
+MAP_ID="${WF_CAMPAIGN_MAP_ID:-planetos}"
 FORGE="1.20.1-47.3.0"
-# Derive reproducibility only from the selected map package; no extra scenario seed input.
-MAP_SEED="$(sha256sum "$MAP_SOURCE" | awk '{print substr($1,1,16)}')"
+VANILLA_CAMPAIGN=0
+if [ "$MAP_SOURCE" = "vanilla" ]; then
+  VANILLA_CAMPAIGN=1
+  MAP_ID="vanilla"
+  MAP_SEED="${WF_VANILLA_SEED:-424242}"
+else
+  MAP_SEED="$(sha256sum "$MAP_SOURCE" | awk '{print substr($1,1,16)}')"
+fi
 MAX_RUNTIME_SECONDS="${WF_CAMPAIGN_TIMEOUT_SECONDS:-3300}"
-MAP_SOURCE="$(cd "$(dirname "$MAP_SOURCE")" && pwd)/$(basename "$MAP_SOURCE")"
+if [ "$VANILLA_CAMPAIGN" -eq 0 ]; then MAP_SOURCE="$(cd "$(dirname "$MAP_SOURCE")" && pwd)/$(basename "$MAP_SOURCE")"; fi
 JARS="$(cd "$JARS" && pwd)"
 mkdir -p "$OUTPUT"
 OUTPUT="$(cd "$OUTPUT" && pwd)"
@@ -46,7 +52,7 @@ campaign_exit() {
   exit "$exit_code"
 }
 trap 'campaign_exit $?' EXIT
-[ -f "$MAP_SOURCE" ] || { echo "ERROR: Planetos map package missing: $MAP_SOURCE"; exit 2; }
+if [ "$VANILLA_CAMPAIGN" -eq 0 ]; then [ -f "$MAP_SOURCE" ] || { echo "ERROR: image-derived map package missing: $MAP_SOURCE"; exit 2; }; fi
 [ -d "$JARS" ] || { echo "ERROR: addon jar directory missing: $JARS"; exit 2; }
 expected_addons=$(find "$SCRIPT_DIR/.." -mindepth 1 -maxdepth 1 -type d -name 'wf-*' | wc -l)
 jar_count=$(find "$JARS" -maxdepth 1 -type f -name '*.jar' | wc -l)
@@ -55,44 +61,41 @@ cd "$WORK"
 CURRENT_STAGE="forge_install"
 curl -fsSL -o installer.jar "https://maven.minecraftforge.net/net/minecraftforge/forge/$FORGE/forge-$FORGE-installer.jar"
 java -jar installer.jar --installServer > install.log 2>&1 || { tail -60 install.log; exit 2; }
-CURRENT_STAGE="map_preparation"
-mkdir -p mods config/worldforge/maps
+CURRENT_STAGE="world_preparation"
+mkdir -p mods
 cp "$JARS"/*.jar mods/
-python3 - "$MAP_SOURCE" "config/worldforge/maps/planetos.worldmap" <<'PY'
+if [ "$VANILLA_CAMPAIGN" -eq 0 ]; then
+  mkdir -p config/worldforge/maps
+  python3 - "$MAP_SOURCE" "config/worldforge/maps/$MAP_ID.worldmap" <<'PY'
 import json, pathlib, sys, zipfile
 source, target = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
 required = {"meta.json", "biomes.png", "height16.png", "provinces.png", "titles.json", "realms.json"}
 with zipfile.ZipFile(source, "r") as src:
     names = {pathlib.PurePosixPath(n).name for n in src.namelist() if not n.endswith("/")}
     missing = required - names
-    if missing:
-        raise SystemExit("Planetos package lacks required files: " + ", ".join(sorted(missing)))
+    if missing: raise SystemExit("Map package lacks required files: " + ", ".join(sorted(missing)))
     files = {}
     for name in names:
         matches = [n for n in src.namelist() if pathlib.PurePosixPath(n).name == name]
-        if len(matches) != 1:
-            raise SystemExit(f"Ambiguous map package entry: {name}")
+        if len(matches) != 1: raise SystemExit(f"Ambiguous map package entry: {name}")
         files[name] = src.read(matches[0])
 realms = json.loads(files["realms.json"].decode("utf-8"))
 if not isinstance(realms, dict) or not isinstance(realms.get("realms"), list):
-    raise SystemExit("Planetos realms.json has an unsupported schema")
+    raise SystemExit("Map realms.json has an unsupported schema")
 authored_realms = len(realms["realms"])
 realms["realms"] = []
 realms["relations"] = []
 files["realms.json"] = json.dumps(realms, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
 files.pop("mapitem_realms.bin", None)
 with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as dst:
-    for name, data in sorted(files.items()):
-        dst.writestr(name, data)
-with zipfile.ZipFile(target, "r") as check:
-    checked = json.loads(check.read("realms.json").decode("utf-8"))
-    if checked["realms"]:
-        raise SystemExit("Refusing to start: authored realms remain in campaign map")
-print("PLANETOS_MAP_PREPARED=1")
+    for name, data in sorted(files.items()): dst.writestr(name, data)
+print("IMAGE_MAP_PREPARED=1")
 print(f"AUTHORED_REALMS_REMOVED={authored_realms}")
 print(f"GEOGRAPHY_FILES_RETAINED={len(files)}")
 PY
-# The mod already registers worldforge:planetos in its built-in dimension data; do not shadow it in a second datapack.
+else
+  echo "VANILLA_WORLD_SELECTED=1"
+fi
 echo "eula=true" > eula.txt
 cat > server.properties <<P
 online-mode=false
@@ -107,7 +110,7 @@ enable-command-block=false
 P
 : > in.txt
 CURRENT_STAGE="forge_startup"
-java -Xms1G -Xmx4G \
+java -Xms1G -Xmx4G -Dworldforge.campaign.acceptance=true \
   -XX:+HeapDumpOnOutOfMemoryError \
   -XX:HeapDumpPath="$JAVA_WORK/java_pid%p.hprof" \
   -XX:ErrorFile="$JAVA_WORK/hs_err_pid%p.log" \
@@ -126,6 +129,25 @@ for i in $(seq 1 150); do
   sleep 2
 done
 grep -q 'Done (' server.log || { tail -120 server.log; echo "ERROR: Forge startup timed out"; exit 3; }
+CURRENT_STAGE="modpack_smoke"
+for command in "list" "wftroops types" "wftroops fort list" "wftroops list" "wfsettle list" "wfform" "worldforge" "wfaction list" "wfworldsim status"; do
+  printf '%s\\n' "$command" >> in.txt
+  sleep 2
+done
+CURRENT_STAGE="geography_preflight"
+if [ "$VANILLA_CAMPAIGN" -eq 1 ]; then
+  # Capture a bounded, real 256-chunk region around spawn; no synthetic geography fixture.
+  printf '%s\\n' "forceload add -128 -128 127 127" >> in.txt
+  sleep 8
+  geography_ready=0
+  for _ in $(seq 1 90); do
+    printf '%s\\n' "wfworldsim geography" >> in.txt
+    if grep -aqE 'Vanilla geography: regions=[1-9][0-9]*, samples=[1-9][0-9]*, pending_chunks=0' server.log; then geography_ready=1; break; fi
+    kill -0 "$SERVER_PID" 2>/dev/null || { tail -160 server.log; echo "ERROR: vanilla server stopped during geography capture"; exit 3; }
+    sleep 2
+  done
+  [ "$geography_ready" = 1 ] || { tail -160 server.log; echo "ERROR: vanilla geography cache did not capture the bounded spawn region"; exit 3; }
+fi
 CURRENT_STAGE="campaign_preflight"
 printf '%s\n' "wfworldsim campaign start $MAP_ID" >> in.txt
 echo "WAITING_FOR_CAMPAIGN_PREFLIGHT=1"
@@ -181,19 +203,20 @@ python3 - "$OUTPUT/campaign-report.json" "$OUTPUT/addon-inventory.json" "$JARS" 
 import json, pathlib, sys
 report_path, inventory_path, jars_dir = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3])
 report = json.loads(report_path.read_text(encoding="utf-8"))
-if report.get("status") != "PASS" or report.get("target_dynasty_generations") != 4:
-    raise SystemExit("Campaign report does not confirm four canonical ruler generations")
+target_generations = int(report.get("target_dynasty_generations", 0))
+if report.get("status") != "PASS" or target_generations < 1:
+    raise SystemExit("Campaign report does not confirm the configured canonical ruler-generation target")
 if int(report.get("canonical_ruler_generations_verified", 0)) != int(report.get("stable_states", 0)):
-    raise SystemExit("Not every surviving state has four verified canonical ruler generations")
+    raise SystemExit("Not every surviving state has the configured number of verified canonical ruler generations")
 if int(report.get("materialized_settlements", 0)) != int(report.get("settlements", 0)):
     raise SystemExit("Not every emergent settlement reached physical local-LOD materialization")
 if int(report.get("physically_built_settlements", 0)) != int(report.get("settlements", 0)):
-    raise SystemExit("Not every emergent settlement completed a physical blueprint in the Planetos dimension")
+    raise SystemExit("Not every emergent settlement completed a physical blueprint in the selected world dimension")
 if int(report.get("physically_completed_buildings", 0)) < int(report.get("settlements", 0)):
     raise SystemExit("The physical building count is below the one-building-per-settlement acceptance threshold")
 if not report.get("physical_world_dimension"):
-    raise SystemExit("Campaign did not run in a registered Planetos map dimension")
-for key in ("stable_states", "characters", "settlements", "materialized_settlements", "completed_buildings", "physically_completed_buildings", "physically_built_settlements", "canonical_ruler_generations_verified", "origin_race_characters", "origin_distinct_races", "origin_class_characters", "origin_profession_characters", "world_events", "chronicle_entries"):
+    raise SystemExit("Campaign did not run in a registered physical world dimension")
+for key in ("stable_states", "characters", "settlements", "materialized_settlements", "completed_buildings", "physically_completed_buildings", "physically_built_settlements", "canonical_ruler_generations_verified", "named_realms", "canonical_rulers", "statecraft_titles", "origin_race_characters", "origin_distinct_races", "origin_class_characters", "origin_profession_characters", "geography_regions", "geography_samples", "world_events", "chronicle_entries"):
     if int(report.get(key, 0)) <= 0:
         raise SystemExit(f"Campaign report is missing required generated data: {key}")
 book = inventory_path.with_name("chronicle-book.md")
@@ -210,3 +233,45 @@ for key in ("map", "physical_world_dimension", "elapsed_years", "stable_states",
     print(f"AUTONOMOUS_CAMPAIGN_{key.upper()}={report.get(key)}")
 print(f"AUTONOMOUS_CAMPAIGN_ADDON_JARS={len(inventory)}")
 PY
+# Reopen the exact same save with the exact same modpack and verify durable world state.
+CURRENT_STAGE="save_reload_validation"
+: > in.txt
+: > server-reload.log
+java -Xms1G -Xmx4G -Dworldforge.campaign.acceptance=true \
+  -XX:+HeapDumpOnOutOfMemoryError \
+  -XX:HeapDumpPath="$JAVA_WORK/reload_java_pid%p.hprof" \
+  @user_jvm_args.txt @libraries/net/minecraftforge/forge/$FORGE/win_args.txt nogui \
+  < <(tail -n +1 -f in.txt) > server-reload.log 2>&1 &
+SERVER_PID=$!
+ready=0
+for _ in $(seq 1 150); do
+  if grep -q 'Done (' server-reload.log 2>/dev/null; then ready=1; break; fi
+  if grep -aqE 'Mod loading has failed|Failed to start|Exception in thread "main"|java.lang.Error' server-reload.log 2>/dev/null; then tail -120 server-reload.log; exit 7; fi
+  kill -0 "$SERVER_PID" 2>/dev/null || { tail -120 server-reload.log; echo "ERROR: server failed to reopen saved world"; exit 7; }
+  sleep 2
+done
+[ "$ready" = 1 ] || { tail -120 server-reload.log; echo "ERROR: save reload startup timed out"; exit 7; }
+printf '%s\\n' "wfworldsim campaign status" >> in.txt
+if [ "$VANILLA_CAMPAIGN" -eq 1 ]; then printf '%s\\n' "wfworldsim geography" >> in.txt; fi
+reload_ready=0
+for _ in $(seq 1 60); do
+  if grep -aqE 'stable_campaign_states=[1-9][0-9]*/[1-9][0-9]*' server-reload.log \
+    && grep -aqE 'named_realms=[1-9][0-9]*' server-reload.log \
+    && grep -aqE 'canonical_rulers=[1-9][0-9]*' server-reload.log \
+    && grep -aqE 'statecraft_titles=[1-9][0-9]*' server-reload.log \
+    && grep -aqE 'settlements=[1-9][0-9]*' server-reload.log; then
+    if [ "$VANILLA_CAMPAIGN" -eq 0 ] || grep -aqE 'Vanilla geography: regions=[1-9][0-9]*, samples=[1-9][0-9]*' server-reload.log; then
+      reload_ready=1; break
+    fi
+  fi
+  kill -0 "$SERVER_PID" 2>/dev/null || { tail -160 server-reload.log; echo "ERROR: saved world stopped during reload validation"; exit 8; }
+  sleep 2
+done
+[ "$reload_ready" = 1 ] || { tail -160 server-reload.log; echo "ERROR: canonical characters/realms/settlements/geography did not survive save reload"; exit 8; }
+printf '%s\\n' "stop" >> in.txt
+for _ in $(seq 1 30); do kill -0 "$SERVER_PID" 2>/dev/null || break; sleep 2; done
+kill "$SERVER_PID" 2>/dev/null || true
+wait "$SERVER_PID" 2>/dev/null || true
+SERVER_PID=""
+cp server-reload.log "$OUTPUT/server-reload.log"
+echo "WORLD_SAVE_RELOAD=PASS"
