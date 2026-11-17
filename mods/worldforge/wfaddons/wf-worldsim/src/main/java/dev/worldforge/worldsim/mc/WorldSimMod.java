@@ -1175,6 +1175,7 @@ public final class WorldSimMod {
                             colony = SettleMod.foundEmergentInMemory(server,
                                     settlementDimension, settlementId, display, x, z, "worldsim:settlement:" + bandId);
                             bindPhysicalSettlement(bandId, settlementId);
+                            settlementBindingsChanged = true;
                         }
                     }
                     List<String> residentIds = residents.stream().filter(person -> person.alive)

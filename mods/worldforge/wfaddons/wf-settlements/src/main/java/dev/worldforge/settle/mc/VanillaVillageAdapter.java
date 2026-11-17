@@ -186,6 +186,7 @@ public final class VanillaVillageAdapter {
         // canonical colony instead of registering a second settlement for the structure.
         Colony colony = SettleMod.nearbyEmergentSettlement(dimension, x, z, 64);
         boolean created = colony == null && !SettleMod.COLONIES.containsKey(id);
+        boolean identityChanged = colony != null && !operation.equals(colony.genesisOperationId);
         // A physical village is a geographic observation, not evidence of pre-authored
         // sovereignty. Political ownership is assigned only by the shared emergence pass.
         String settlementName = generatedVillageName(null, null, id, dimension, x, z);
@@ -211,8 +212,8 @@ public final class VanillaVillageAdapter {
         // Infrastructure scans are queued by ChunkEvent.Load and drained on later ticks;
         // never inspect the chunk currently being integrated by ServerChunkCache.
         // Future chunks are adopted incrementally by the deferred chunk queue.
-        if (created && !SettleMod.saveDurably(level.getServer()))
-            SettleMod.LOGGER.error("wf_settle: discovered vanilla village {} could not be durably saved", id);
+        if ((created || identityChanged) && !SettleMod.saveDurably(level.getServer()))
+            SettleMod.LOGGER.error("wf_settle: discovered/reconciled vanilla village {} could not be durably saved", id);
     }
 
     private static void reconcileResidents(ServerLevel level, Colony colony) {
