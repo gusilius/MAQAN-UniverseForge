@@ -1269,77 +1269,6 @@ public final class WorldSimMod {
         return "emg_" + bandId;
     }
 
-    private static Set<String> emergentNeighbors(JsonObject polity, JsonArray polities, JsonArray bands, EmergenceSource source) {
-        Set<String> own = new HashSet<>();
-        for (var id : polity.getAsJsonArray("settlement_ids")) own.add(id.getAsString());
-        Map<String, JsonObject> samples = new HashMap<>();
-        for (var item : bands) if (item.isJsonObject()) {
-            JsonObject band = item.getAsJsonObject();
-            if (source.id.equals(band.get("map_id").getAsString())) samples.put(band.get("id").getAsString(), band);
-        }
-        Set<String> neighbors = new TreeSet<>();
-        double maxDistanceSq = 64.0 * 64.0;
-        for (var item : polities) {
-            if (!item.isJsonObject()) continue;
-            JsonObject other = item.getAsJsonObject();
-            if (other.get("id").getAsString().equals(polity.get("id").getAsString())
-                    || !source.id.equals(other.get("map_id").getAsString())) continue;
-            boolean adjacent = false;
-            for (String firstId : own) {
-                JsonObject first = samples.get(firstId);
-                if (first == null) continue;
-                for (var secondId : other.getAsJsonArray("settlement_ids")) {
-                    JsonObject second = samples.get(secondId.getAsString());
-                    if (second == null) continue;
-                    double dx = first.get("x").getAsDouble() - second.get("x").getAsDouble();
-                    double dz = first.get("z").getAsDouble() - second.get("z").getAsDouble();
-                    if (dx * dx + dz * dz <= maxDistanceSq) { adjacent = true; break; }
-                }
-                if (adjacent) break;
-            }
-            if (adjacent) neighbors.add("emergent-" + other.get("id").getAsString());
-        }
-        return neighbors;
-    }
-
-    private static String emergentBiomeSummary(Set<String> bandIds, JsonArray bands, EmergenceSource source) {
-        if (source.map != null) return emergentBiomeSummary(bandIds, bands, source.map);
-        Map<String, Integer> counts = new TreeMap<>();
-        for (var item : bands) if (item.isJsonObject()) {
-            JsonObject band = item.getAsJsonObject();
-            if (!source.id.equals(band.get("map_id").getAsString()) || !bandIds.contains(band.get("id").getAsString())) continue;
-            String biome = VanillaWorldGeography.biomeAt(source.id,
-                    band.get("x").getAsInt(), band.get("z").getAsInt());
-            counts.merge(biome.isBlank() ? "unknown" : biome, 1, Integer::sum);
-        }
-        return counts.entrySet().stream().map(entry -> entry.getKey() + ":" + entry.getValue())
-                .collect(java.util.stream.Collectors.joining(","));
-    }
-
-    private static int emergentProvinceCount(Set<String> bandIds, JsonArray bands, EmergenceSource source) {
-        if (bandIds == null || bandIds.isEmpty() || bands == null) return 0;
-        Set<String> cells = new HashSet<>();
-        for (var item : bands) if (item.isJsonObject()) {
-            JsonObject band = item.getAsJsonObject();
-            if (!source.id.equals(band.get("map_id").getAsString()) || !bandIds.contains(band.get("id").getAsString())) continue;
-            int[] p = source.blockPosition(band.get("x").getAsInt(), band.get("z").getAsInt());
-            cells.add(Math.floorDiv(p[0], 512) + ":" + Math.floorDiv(p[1], 512));
-        }
-        return cells.size();
-    }
-
-    private static int emergentRegionCount(Set<String> bandIds, JsonArray bands, EmergenceSource source) {
-        if (bandIds == null || bandIds.isEmpty() || bands == null) return 0;
-        Set<String> cells = new HashSet<>();
-        for (var item : bands) if (item.isJsonObject()) {
-            JsonObject band = item.getAsJsonObject();
-            if (!source.id.equals(band.get("map_id").getAsString()) || !bandIds.contains(band.get("id").getAsString())) continue;
-            int[] p = source.blockPosition(band.get("x").getAsInt(), band.get("z").getAsInt());
-            cells.add(Math.floorDiv(p[0], 2048) + ":" + Math.floorDiv(p[1], 2048));
-        }
-        return cells.size();
-    }
-
     /** Neighbours come from physical proximity, never imported political borders. */
     private static Set<String> emergentNeighbors(JsonObject polity, JsonArray polities, JsonArray bands, EmergenceSource source) {
         Set<String> own = new HashSet<>();
@@ -1698,7 +1627,7 @@ public final class WorldSimMod {
             // The same realm-level court materializer runs for image and vanilla worlds.
             // Do not backfill offices from pre-authored political overlays on an image map.
             int newCourtPositions = dev.worldforge.people.Courts.ensureRealm(
-                    politicalActor, registry, PeopleMod.ROLES, PeopleMod.NAMES, source.seed, year);
+                    initialProjection, registry, PeopleMod.ROLES, PeopleMod.NAMES, source.seed, year);
             if (newCourtPositions > 0) changed = true;
             if (changed) {
                 dev.worldforge.people.Character durable = registry.all().stream()
