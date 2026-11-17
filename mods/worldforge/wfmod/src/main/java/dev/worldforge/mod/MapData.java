@@ -305,7 +305,8 @@ public final class MapData {
 
     /** True only when the package contains actual sovereignty, not neutral province/region geography. */
     public boolean hasPoliticalLayers() {
-        return titles != null && (!titles.realms.isEmpty()
+        return titles != null && (titles.realms.values().stream()
+                .anyMatch(realm -> realm != null && realm.id != null && !realm.id.startsWith("emergent-"))
                 || titles.allTitles().stream().anyMatch(title -> title != null && title.tier >= 2));
     }
 
