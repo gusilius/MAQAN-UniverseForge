@@ -535,7 +535,7 @@ public class WFWorker extends PathfinderMob {
             int minZ = Math.max(order.z - halfZ, worker.getBlockZ() - scan);
             int maxZ = Math.min(order.z + halfZ, worker.getBlockZ() + scan);
             if (halfX == 0 && halfZ == 0) { minX = maxX = order.x; minZ = maxZ = order.z; }
-            int yCenter = order.level > worker.level().getMinBuildHeight() && order.level < worker.level().getMaxBuildHeight()
+            int yCenter = order.level >= worker.level().getMinBuildHeight() && order.level < worker.level().getMaxBuildHeight()
                     ? order.level : worker.getBlockY();
             boolean exactBlock = halfX == 0 && halfZ == 0;
             int yRange = exactBlock ? 0 : "ore".equals(order.mode) ? 32 : "stone".equals(order.mode) ? 20 : 10;
@@ -557,8 +557,16 @@ public class WFWorker extends PathfinderMob {
                 }
                 for (int y = fromY; y <= toY; y++) {
                     BlockPos pos = new BlockPos(x, y, z);
-                    if (isWorkTarget(worker.level().getBlockState(pos), order.mode))
-                        candidateCount = retainNearest(x, y, z, worker, candidateCount);
+                    BlockState candidateState = worker.level().getBlockState(pos);
+                    if (isWorkTarget(candidateState, order.mode)) {
+                        // Do not route workers to protected inventories/machines or unbreakable blocks.
+                        // Filtering here prevents a rejected target from being selected forever.
+                        boolean safeDemolitionTarget = !"demolish".equals(order.mode)
+                                || (worker.level().getBlockEntity(pos) == null
+                                    && candidateState.getDestroySpeed(worker.level(), pos) >= 0.0F);
+                        if (safeDemolitionTarget)
+                            candidateCount = retainNearest(x, y, z, worker, candidateCount);
+                    }
                 }
             }
             if (candidateCount == 0) return null;
