@@ -1321,8 +1321,9 @@ public final class WorldSimMod {
                         String currentSettlementName = colony.s.name == null ? "" : colony.s.name.trim();
                         String normalizedSettlementName = currentSettlementName.replaceAll("\\s+", " ")
                                 .toLowerCase(Locale.ROOT);
+                        Colony adoptedColony = colony;
                         boolean duplicateSettlementName = SettleMod.COLONIES.values().stream()
-                                .anyMatch(other -> other != null && other != colony && other.s != null
+                                .anyMatch(other -> other != null && other != adoptedColony && other.s != null
                                         && other.s.name != null
                                         && other.s.name.trim().replaceAll("\\s+", " ")
                                                 .equalsIgnoreCase(normalizedSettlementName));
