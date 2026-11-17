@@ -612,8 +612,13 @@ public final class WorldSimMod {
                 return 0;
             }
             campaignDimension = VanillaWorldGeography.dimensionFromMapId(regions.get(0));
-            boolean dimensionLoaded = server.getAllLevels().stream()
-                    .anyMatch(level -> level.dimension().location().toString().equals(campaignDimension));
+            boolean dimensionLoaded = false;
+            for (ServerLevel level : server.getAllLevels()) {
+                if (level.dimension().location().toString().equals(campaignDimension)) {
+                    dimensionLoaded = true;
+                    break;
+                }
+            }
             if (campaignDimension.isBlank() || !dimensionLoaded) {
                 source.sendFailure(Component.literal("Vanilla campaign geography dimension is not loaded"));
                 return 0;
