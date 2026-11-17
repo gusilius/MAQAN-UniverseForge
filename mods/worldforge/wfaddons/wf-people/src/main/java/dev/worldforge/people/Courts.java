@@ -197,29 +197,14 @@ public final class Courts {
 
     private static String pick(List<String> l, Random r) { return l.get(r.nextInt(l.size())); }
 
-    private static String unusedHouse(NameBank.Pool pool, Random r, Set<String> used) {
-        List<String> free = new ArrayList<>();
-        for (String house : pool.houses) if (!used.contains(house)) free.add(house);
-        if (!free.isEmpty()) {
-            String selected = pick(free, r);
-            used.add(selected);
-            return selected;
-        }
-        String base = pick(pool.houses, r);
-        for (int n = 2; ; n++) {
-            String candidate = base + " (ветвь " + n + ")";
-            if (used.add(candidate)) return candidate;
-        }
-    }
-
     private static void create(TitleData d, TitleEditor ed, CharacterRegistry reg, RoleDefs defs, NameBank names, Role role, String place, String wantedCulture, String label, String race, Random r, int year, Set<String> usedHouses) {
         String culture = names.culture(wantedCulture);
         String characterRace = TerritorialIdentity.chooseSubrace(race, r);
         NameBank.Pool pool = names.poolForRace(characterRace, culture);
         boolean male = r.nextInt(100) < (role.ruler ? 75 : 50);
         String first = pick(male ? pool.male : pool.female, r);
-        String house = role.ruler ? unusedHouse(pool, r, usedHouses) : role.noble ? pick(pool.houses, r) : "";
-        if (!house.isEmpty()) usedHouses.add(house);
+        String house = role.ruler || role.noble
+                ? names.generateUnique(characterRace, culture, "houses", r, usedHouses) : "";
         int age = role.ruler ? 25 + r.nextInt(31) : 20 + r.nextInt(41);
         TitleData.Realm realm = d != null && place.startsWith("realm:") ? d.realms.get(place.substring(6)) : null;
         String preset = realm != null && role.ruler && realm.ruler != null && !realm.ruler.isBlank() ? realm.ruler : null;   // правитель, заданный вручную, остаётся
@@ -228,14 +213,13 @@ public final class Courts {
         if (house.isEmpty() && !pool.surnames.isEmpty()) c.props.put("identity.surname", pick(pool.surnames, r));
         reg.appoint(c.id, role.id, place);
         if (role.ruler && realm != null && preset == null && ed != null) ed.setRuler(realm.id, c.name + (house.isEmpty() ? "" : " " + house));
-        if (role.family) makeFamily(reg, pool, c, year, r, characterRace, usedHouses);
+        if (role.family) makeFamily(reg, names, pool, c, year, r, characterRace, usedHouses);
     }
 
-    private static void makeFamily(CharacterRegistry reg, NameBank.Pool pool, Character head, int year, Random r, String race, Set<String> usedHouses) {
+    private static void makeFamily(CharacterRegistry reg, NameBank names, NameBank.Pool pool,
+            Character head, int year, Random r, String race, Set<String> usedHouses) {
         boolean headMale = head.gender.equals("m");
-        String spouseHouse;
-        do { spouseHouse = pick(pool.houses, r); } while (spouseHouse.equals(head.house) && pool.houses.size() > 1);
-        usedHouses.add(spouseHouse);
+        String spouseHouse = names.generateUnique(race, head.culture, "houses", r, usedHouses);
         Character sp = reg.create(pick(headMale ? pool.female : pool.male, r), spouseHouse, head.culture, headMale ? "f" : "m", head.birthYear + r.nextInt(9) - 4);
         if (!race.isBlank()) sp.props.put("origin.race", race);
         if (spouseHouse.isEmpty() && !pool.surnames.isEmpty()) sp.props.put("identity.surname", pick(pool.surnames, r));
