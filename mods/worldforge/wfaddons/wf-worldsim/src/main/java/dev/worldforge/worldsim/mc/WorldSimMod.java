@@ -134,7 +134,9 @@ public final class WorldSimMod {
             String dimension = VanillaWorldGeography.dimensionFromMapId(id);
             long seed = WorldForgeMod.worldId() == null ? id.hashCode()
                     : WorldForgeMod.worldId().toString().hashCode() ^ id.hashCode();
-            return new EmergenceSource(id, null, registry, 256, 256, 1.0, seed, dimension);
+            return new EmergenceSource(id, null, registry,
+                    VanillaWorldGeography.widthForMapId(id),
+                    VanillaWorldGeography.heightForMapId(id), 1.0, seed, dimension);
         }
         int[] blockPosition(int x, int z) {
             if (map == null) return VanillaWorldGeography.blockPosition(id, x, z);
@@ -159,7 +161,7 @@ public final class WorldSimMod {
         if (!campaignRunning || vanillaCampaign) {
             CharacterRegistry vanillaRegistry = PeopleMod.worldRegistry();
             if (vanillaRegistry != null) {
-                for (String id : VanillaWorldGeography.regionIds())
+                for (String id : VanillaWorldGeography.simulationMapIds())
                     sources.add(EmergenceSource.vanilla(id, vanillaRegistry));
             }
         }
@@ -784,6 +786,32 @@ public final class WorldSimMod {
                     .map(realm -> String.valueOf(realm.props.getOrDefault("emergence.ruler_global_id", "")))
                     .filter(id -> !id.isBlank() && PeopleMod.authority().getGlobal(id) != null).count());
             report.addProperty("statecraft_titles", RealmsMod.POLITICS.titles().size());
+            report.addProperty("territorial_titles", RealmsMod.POLITICS.titles().stream()
+                    .filter(title -> title.id.startsWith("emg-")).count());
+            report.addProperty("title_hierarchy_links", RealmsMod.POLITICS.titles().stream()
+                    .filter(title -> title.id.startsWith("emg-") && !title.liegeTitleId.isBlank()).count());
+            report.addProperty("barony_titles", RealmsMod.POLITICS.titles().stream()
+                    .filter(title -> title.id.startsWith("emg-barony-")).count());
+            report.addProperty("county_titles", RealmsMod.POLITICS.titles().stream()
+                    .filter(title -> title.id.startsWith("emg-county-")).count());
+            report.addProperty("duchy_titles", RealmsMod.POLITICS.titles().stream()
+                    .filter(title -> title.id.startsWith("emg-duchy-")).count());
+            report.addProperty("kingdom_titles", RealmsMod.POLITICS.titles().stream()
+                    .filter(title -> title.id.startsWith("emg-kingdom-")).count());
+            report.addProperty("named_dynasties", java.util.stream.StreamSupport.stream(emergenceState.getAsJsonArray("polities").spliterator(), false)
+                    .filter(item -> item.isJsonObject())
+                    .map(item -> item.getAsJsonObject().get("dynasty_id").getAsString())
+                    .map(RealmsMod.POLITICS::dynasty)
+                    .filter(house -> house != null && house.name != null && !house.name.isBlank()
+                            && !house.name.startsWith("house_")).count());
+            report.addProperty("political_ownership_samples", campaignMap == null
+                    ? VanillaWorldGeography.politicallyOwnedCellCount()
+                    : campaignMap.titles == null ? 0 : campaignMap.titles.allTitles().stream()
+                        .filter(title -> title.tier == 0)
+                        .filter(title -> {
+                            TitleData.Realm owner = campaignMap.titles.realmOf(title);
+                            return owner != null && Boolean.TRUE.equals(owner.props.get("emergence.virtual"));
+                        }).count());
             report.addProperty("vassal_contracts", RealmsMod.emergentRealms().stream()
                     .filter(realm -> RealmsMod.POLITICS.vassalage(realm.id) != null).count());
             report.addProperty("origin_race_characters", campaignPeople.all().stream()
@@ -1319,12 +1347,21 @@ public final class WorldSimMod {
         for (var item : bands) if (item.isJsonObject()) {
             JsonObject band = item.getAsJsonObject();
             if (!source.id.equals(band.get("map_id").getAsString()) || !bandIds.contains(band.get("id").getAsString())) continue;
-            String biome = VanillaWorldGeography.biomeAt(source.id,
+            int[] worldPosition = source.blockPosition(
                     band.get("x").getAsInt(), band.get("z").getAsInt());
+            String biome = VanillaWorldGeography.biomeAtWorldPosition(source.id,
+                    worldPosition[0], worldPosition[1]);
             counts.merge(biome.isBlank() ? "unknown" : biome, 1, Integer::sum);
         }
         return counts.entrySet().stream().map(entry -> entry.getKey() + ":" + entry.getValue())
                 .collect(java.util.stream.Collectors.joining(","));
+    }
+
+    /** Keep a comparable number of CK3-scale territorial tiers as the observed map grows. */
+    private static int emergentProvinceScale(EmergenceSource source) {
+        int span = Math.max(128, Math.min(source.width, source.height));
+        int quarter = Math.max(128, span / 4);
+        return Math.max(128, Math.min(512, Integer.highestOneBit(quarter)));
     }
 
     private static int emergentProvinceCount(Set<String> bandIds, JsonArray bands, EmergenceSource source) {
@@ -1334,7 +1371,8 @@ public final class WorldSimMod {
             JsonObject band = item.getAsJsonObject();
             if (!source.id.equals(band.get("map_id").getAsString()) || !bandIds.contains(band.get("id").getAsString())) continue;
             int[] p = source.blockPosition(band.get("x").getAsInt(), band.get("z").getAsInt());
-            cells.add(Math.floorDiv(p[0], 512) + ":" + Math.floorDiv(p[1], 512));
+            int provinceBlocks = emergentProvinceScale(source);
+            cells.add(Math.floorDiv(p[0], provinceBlocks) + ":" + Math.floorDiv(p[1], provinceBlocks));
         }
         return cells.size();
     }
@@ -1346,7 +1384,8 @@ public final class WorldSimMod {
             JsonObject band = item.getAsJsonObject();
             if (!source.id.equals(band.get("map_id").getAsString()) || !bandIds.contains(band.get("id").getAsString())) continue;
             int[] p = source.blockPosition(band.get("x").getAsInt(), band.get("z").getAsInt());
-            cells.add(Math.floorDiv(p[0], 2048) + ":" + Math.floorDiv(p[1], 2048));
+            int regionBlocks = emergentProvinceScale(source) * 2;
+            cells.add(Math.floorDiv(p[0], regionBlocks) + ":" + Math.floorDiv(p[1], regionBlocks));
         }
         return cells.size();
     }
@@ -1447,6 +1486,215 @@ public final class WorldSimMod {
         };
     }
 
+    private static final class EmergentTerritorySite {
+        final String bandId, settlementId, name;
+        final int x, z;
+        EmergentTerritorySite(String bandId, String settlementId, String name, int x, int z) {
+            this.bandId = bandId; this.settlementId = settlementId; this.name = name;
+            this.x = x; this.z = z;
+        }
+    }
+
+    private static String emergentTerritoryTitleId(String tier, String polityId, String key) {
+        String identity = polityId + "|" + tier + "|" + key;
+        String hash = UUID.nameUUIDFromBytes(identity.getBytes(StandardCharsets.UTF_8))
+                .toString().replace("-", "");
+        return "emg-" + tier + "-" + hash;
+    }
+
+    private static dev.worldforge.realms.Statecraft.Title ensureEmergentTerritoryTitle(
+            String id, String realmId, dev.worldforge.realms.Statecraft.Rank rank, String name) {
+        var title = RealmsMod.POLITICS.title(id);
+        if (title == null) {
+            title = RealmsMod.POLITICS.createTitle(id, realmId, rank, name);
+        } else {
+            if (!realmId.equals(title.realmId))
+                throw new IllegalStateException("territorial title " + id + " is already owned by " + title.realmId);
+            title.name = name;
+            if (title.rank != rank && !RealmsMod.POLITICS.setTitleRank(id, rank))
+                LOGGER.warn("wf_worldsim: deferred territorial title rank update for {}: {}", id,
+                        RealmsMod.POLITICS.lastError);
+        }
+        return title;
+    }
+
+    private static void linkEmergentTerritoryTitle(String childId, String liegeId) {
+        var child = RealmsMod.POLITICS.title(childId);
+        if (child == null || childId.equals(liegeId)) return;
+        if (!liegeId.equals(child.liegeTitleId)
+                && !RealmsMod.POLITICS.setTitleLiege(childId, liegeId))
+            LOGGER.warn("wf_worldsim: could not link territorial title {} -> {}: {}",
+                    childId, liegeId, RealmsMod.POLITICS.lastError);
+    }
+
+    private static void grantEmergentTerritoryHolder(String titleId, String bandId,
+            EmergentPopulationIndex populationIndex, int year, String fallbackHolder) {
+        var residents = populationIndex.livingResidents(bandId).stream()
+                .filter(person -> person.alive && PopulationSimulation.age(person, year) >= 18)
+                .sorted(Comparator.comparingInt((dev.worldforge.people.Character person) -> person.birthYear)
+                        .thenComparing(person -> person.globalId)).toList();
+        String holder = residents.isEmpty() ? fallbackHolder : residents.get(0).globalId;
+        if (holder != null && !holder.isBlank()
+                && !RealmsMod.POLITICS.grantTitle(titleId, holder))
+            LOGGER.warn("wf_worldsim: could not grant territorial title {} to Character {}: {}",
+                    titleId, holder, RealmsMod.POLITICS.lastError);
+    }
+
+    /**
+     * Materializes the settlement-derived barony/county/duchy/kingdom hierarchy
+     * in the existing Statecraft registry. Coordinates are taken from real
+     * geography and physical settlements; IDs are stable and reconciliation is
+     * idempotent across every simulation tick and save reload.
+     */
+    private static Set<String> reconcileEmergentTerritorialTitles(
+            String polityId, String realmId, String crownTitleId, String polityName,
+            Set<String> bandIds, JsonArray bands, EmergenceSource source,
+            EmergentPopulationIndex populationIndex, int year, String rulerGlobalId) {
+        Set<String> titleIds = new TreeSet<>();
+        titleIds.add(crownTitleId);
+        Map<String, JsonObject> bandById = new HashMap<>();
+        for (var item : bands) if (item.isJsonObject()) {
+            JsonObject band = item.getAsJsonObject();
+            if (source.id.equals(band.get("map_id").getAsString()))
+                bandById.put(band.get("id").getAsString(), band);
+        }
+        List<EmergentTerritorySite> sites = new ArrayList<>();
+        for (String bandId : new TreeSet<>(bandIds)) {
+            JsonObject band = bandById.get(bandId);
+            if (band == null) continue;
+            String settlementId = settlementIdForBand(bands, bandId);
+            Colony colony = SettleMod.colony(settlementId);
+            if (colony == null || colony.s == null) continue;
+            int[] position = source.blockPosition(band.get("x").getAsInt(), band.get("z").getAsInt());
+            String name = colony.s.name == null || colony.s.name.isBlank()
+                    ? settlementId : colony.s.name.trim();
+            sites.add(new EmergentTerritorySite(bandId, settlementId, name, position[0], position[1]));
+        }
+        if (sites.size() <= 1) {
+            var crown = RealmsMod.POLITICS.title(crownTitleId);
+            if (crown != null) {
+                var base = emergentTitleRank(realmId);
+                if (crown.rank.ordinal() < base.ordinal())
+                    RealmsMod.POLITICS.setTitleRank(crownTitleId, base);
+            }
+            return titleIds;
+        }
+
+        int provinceBlocks = emergentProvinceScale(source);
+        int regionBlocks = provinceBlocks * 2;
+        int kingdomBlocks = regionBlocks * 4;
+        Map<String, List<EmergentTerritorySite>> provinceGroups = new TreeMap<>();
+        for (EmergentTerritorySite site : sites) {
+            String provinceKey = Math.floorDiv(site.x, provinceBlocks) + ":" + Math.floorDiv(site.z, provinceBlocks);
+            provinceGroups.computeIfAbsent(provinceKey, ignored -> new ArrayList<>()).add(site);
+        }
+
+        Map<String, EmergentTerritorySite> countyByProvince = new TreeMap<>();
+        for (var entry : provinceGroups.entrySet()) {
+            List<EmergentTerritorySite> members = entry.getValue();
+            members.sort(Comparator.comparing(site -> site.name));
+            EmergentTerritorySite capital = members.get(0);
+            String countyId = emergentTerritoryTitleId("county", polityId, entry.getKey());
+            ensureEmergentTerritoryTitle(countyId, realmId,
+                    dev.worldforge.realms.Statecraft.Rank.COUNTY, "County of " + capital.name);
+            grantEmergentTerritoryHolder(countyId, capital.bandId, populationIndex, year, rulerGlobalId);
+            countyByProvince.put(entry.getKey(), capital);
+            titleIds.add(countyId);
+            for (EmergentTerritorySite site : members) {
+                String baronyId = emergentTerritoryTitleId("barony", polityId, site.bandId);
+                ensureEmergentTerritoryTitle(baronyId, realmId,
+                        dev.worldforge.realms.Statecraft.Rank.BARONY, site.name);
+                grantEmergentTerritoryHolder(baronyId, site.bandId, populationIndex, year, rulerGlobalId);
+                linkEmergentTerritoryTitle(baronyId, countyId);
+                titleIds.add(baronyId);
+            }
+        }
+
+        var crown = RealmsMod.POLITICS.title(crownTitleId);
+        if (crown == null) return titleIds;
+        if (provinceGroups.size() == 1) {
+            var required = dev.worldforge.realms.Statecraft.Rank.DUCHY;
+            var base = emergentTitleRank(realmId);
+            RealmsMod.POLITICS.setTitleRank(crownTitleId,
+                    base.ordinal() > required.ordinal() ? base : required);
+            linkEmergentTerritoryTitle(emergentTerritoryTitleId("county", polityId,
+                    provinceGroups.keySet().iterator().next()), crownTitleId);
+            return titleIds;
+        }
+
+        Map<String, List<String>> countiesByRegion = new TreeMap<>();
+        for (String provinceKey : provinceGroups.keySet()) {
+            String[] coordinates = provinceKey.split(":", 2);
+            int provinceX = Integer.parseInt(coordinates[0]);
+            int provinceZ = Integer.parseInt(coordinates[1]);
+            int centerX = provinceX * provinceBlocks + provinceBlocks / 2;
+            int centerZ = provinceZ * provinceBlocks + provinceBlocks / 2;
+            String regionKey = Math.floorDiv(centerX, regionBlocks) + ":" + Math.floorDiv(centerZ, regionBlocks);
+            countiesByRegion.computeIfAbsent(regionKey, ignored -> new ArrayList<>())
+                    .add(emergentTerritoryTitleId("county", polityId, provinceKey));
+        }
+
+        Map<String, List<String>> duchiesByKingdom = new TreeMap<>();
+        Map<String, String> duchyCapitalBandById = new HashMap<>();
+        for (var entry : countiesByRegion.entrySet()) {
+            String duchyId = emergentTerritoryTitleId("duchy", polityId, entry.getKey());
+            EmergentTerritorySite capital = countyByProvince.get(
+                    provinceGroups.keySet().stream().filter(key -> {
+                        String[] coordinates = key.split(":", 2);
+                        int x = Integer.parseInt(coordinates[0]) * provinceBlocks + provinceBlocks / 2;
+                        int z = Integer.parseInt(coordinates[1]) * provinceBlocks + provinceBlocks / 2;
+                        return entry.getKey().equals(Math.floorDiv(x, regionBlocks) + ":"
+                                + Math.floorDiv(z, regionBlocks));
+                    }).findFirst().orElse(provinceGroups.keySet().iterator().next()));
+            ensureEmergentTerritoryTitle(duchyId, realmId,
+                    dev.worldforge.realms.Statecraft.Rank.DUCHY, "Duchy of " + capital.name);
+            grantEmergentTerritoryHolder(duchyId, capital.bandId, populationIndex, year, rulerGlobalId);
+            duchyCapitalBandById.put(duchyId, capital.bandId);
+            for (String countyId : entry.getValue()) linkEmergentTerritoryTitle(countyId, duchyId);
+            titleIds.add(duchyId);
+            String[] region = entry.getKey().split(":", 2);
+            int regionX = Integer.parseInt(region[0]), regionZ = Integer.parseInt(region[1]);
+            int centerX = regionX * regionBlocks + regionBlocks / 2;
+            int centerZ = regionZ * regionBlocks + regionBlocks / 2;
+            String kingdomKey = Math.floorDiv(centerX, kingdomBlocks) + ":" + Math.floorDiv(centerZ, kingdomBlocks);
+            duchiesByKingdom.computeIfAbsent(kingdomKey, ignored -> new ArrayList<>()).add(duchyId);
+        }
+
+        if (countiesByRegion.size() == 1) {
+            var required = dev.worldforge.realms.Statecraft.Rank.KINGDOM;
+            var base = emergentTitleRank(realmId);
+            RealmsMod.POLITICS.setTitleRank(crownTitleId,
+                    base.ordinal() > required.ordinal() ? base : required);
+            linkEmergentTerritoryTitle(duchiesByKingdom.values().iterator().next().get(0), crownTitleId);
+            return titleIds;
+        }
+
+        // More than one duchy requires an intermediate kingdom tier, even when
+        // every duchy belongs to the same macro-region. Never leave sibling
+        // duchies unattached to the sovereign title.
+        for (var entry : duchiesByKingdom.entrySet()) {
+            String kingdomId = emergentTerritoryTitleId("kingdom", polityId, entry.getKey());
+            var firstDuchy = RealmsMod.POLITICS.title(entry.getValue().get(0));
+            String kingdomName = "Kingdom of " + (firstDuchy == null ? polityName : firstDuchy.name);
+            ensureEmergentTerritoryTitle(kingdomId, realmId,
+                    dev.worldforge.realms.Statecraft.Rank.KINGDOM, kingdomName);
+            String kingdomBand = entry.getValue().stream()
+                    .map(duchyCapitalBandById::get).filter(Objects::nonNull).findFirst().orElse("");
+            if (!kingdomBand.isBlank())
+                grantEmergentTerritoryHolder(kingdomId, kingdomBand, populationIndex, year, rulerGlobalId);
+            for (String duchyId : entry.getValue()) linkEmergentTerritoryTitle(duchyId, kingdomId);
+            titleIds.add(kingdomId);
+        }
+        var required = dev.worldforge.realms.Statecraft.Rank.EMPIRE;
+        var base = emergentTitleRank(realmId);
+        RealmsMod.POLITICS.setTitleRank(crownTitleId,
+                base.ordinal() > required.ordinal() ? base : required);
+        for (String kingdomId : titleIds) {
+            if (kingdomId.startsWith("emg-kingdom-")) linkEmergentTerritoryTitle(kingdomId, crownTitleId);
+        }
+        return titleIds;
+    }
+
     /** A deterministic culture/race-aware name is stored in the canonical emergence state once. */
     private static String emergentRealmName(String polityId, List<dev.worldforge.people.Character> members,
             String fallback) {
@@ -1507,7 +1755,9 @@ public final class WorldSimMod {
                         bandIds, state.getAsJsonArray("bands"), source));
                 initialProjection.props.put("emergence.region_count", emergentRegionCount(
                         bandIds, state.getAsJsonArray("bands"), source));
-                initialProjection.props.put("emergence.territory_grid", "512-block-provinces/2048-block-regions");
+                int territoryProvinceScale = emergentProvinceScale(source);
+                initialProjection.props.put("emergence.territory_grid", territoryProvinceScale
+                        + "-block-provinces/" + (territoryProvinceScale * 2) + "-block-regions");
                 if (members.isEmpty()) continue;
                 if (polityName.equals(polityId + " Confederation") || polityName.startsWith("band_")) {
                     String generatedName = emergentRealmName(polityId, members, polityName);
@@ -1644,14 +1894,29 @@ public final class WorldSimMod {
                         RealmsMod.POLITICS.grantTitle(titleId, ruler.globalId);
                     }
                 }
-                if (RealmsMod.POLITICS.dynasty(dynastyId) == null)
-                    RealmsMod.POLITICS.registerDynasty(dynastyId, ruler.globalId);
-                else RealmsMod.POLITICS.addDynastyMember(dynastyId, ruler.globalId);
+                if (RealmsMod.POLITICS.dynasty(dynastyId) == null) {
+                    RealmsMod.POLITICS.registerDynasty(dynastyId, ruler.globalId, "House of " + ruler.name);
+                } else {
+                    RealmsMod.POLITICS.addDynastyMember(dynastyId, ruler.globalId);
+                    var house = RealmsMod.POLITICS.dynasty(dynastyId);
+                    if (house != null && house.name.equals(dynastyId))
+                        RealmsMod.POLITICS.setDynastyName(dynastyId, "House of " + ruler.name);
+                }
+                for (dev.worldforge.people.Character member : members) {
+                    if (member.house != null && member.house.equals(dynastyId))
+                        RealmsMod.POLITICS.addDynastyMember(dynastyId, member.globalId);
+                }
                 TitleData.Realm politicalActor = RealmsMod.registerEmergentRealm(realmId,
                         polityName, source.id, ruler.globalId,
                         polity.get("population").getAsLong(), polity.get("stability").getAsInt(),
                         bandIds.size(), neighbors, biomes, emergentRaceShares(members));
                 politicalActor.ruler = ruler.name + (ruler.house == null || ruler.house.isBlank() ? "" : " " + ruler.house);
+                Set<String> territorialTitleIds = reconcileEmergentTerritorialTitles(
+                        polityId, realmId, titleId, polityName, bandIds,
+                        state.getAsJsonArray("bands"), source, populationIndex, year, ruler.globalId);
+                politicalActor.props.put("emergence.statecraft_title_ids",
+                        String.join(",", territorialTitleIds));
+                politicalActor.props.put("emergence.title_count", territorialTitleIds.size());
                 int politicalLevel = RealmsMod.REALMS.level(realmId);
                 politicalActor.props.put("emergence.form_stage", RealmsMod.DEFS.levels.isEmpty()
                         ? "band" : RealmsMod.DEFS.levels.get(politicalLevel).id());
@@ -1687,6 +1952,7 @@ public final class WorldSimMod {
                 politicalActor.props.put("emergence.settlement_names", settlementNamesProjection);
                 politicalActor.props.put("emergence.settlement_centers", settlementCentersProjection);
                 politicalActor.props.put("emergence.ruler_global_id", ruler.globalId);
+                politicalActor.props.put("emergence.dynasty_id", dynastyId);
                 for (String bandId : bandIds) {
                     String settlementId = settlementIdForBand(state.getAsJsonArray("bands"), bandId);
                     if (SettleMod.colony(settlementId) != null
@@ -1722,9 +1988,150 @@ public final class WorldSimMod {
             if (settlementMapMarkersChanged && source.map != null)
                 dev.worldforge.mod.PoliticalMapRenderer.regenerateAll(source.map);
         }
+        syncVanillaPoliticalOwnership(state);
+        syncImagePoliticalOwnership(state);
+        reconcileEmergentVassalage(state);
         RealmsMod.reconcileEmergentRealms(activeRealmIds);
+        if (!activeRealmIds.isEmpty() && !RealmsMod.persistPoliticalState(server))
+            LOGGER.error("wf_worldsim: generated titles, vassal contracts and dynasties could not be durably saved");
         if (!activeRealmIds.isEmpty() && !SettleMod.saveDurably(server))
             LOGGER.error("wf_worldsim: emergent settlement realm bindings could not be durably saved");
+    }
+
+    /** Persist the vanilla world's real land/sea political border raster from canonical settlement ownership. */
+    private static void syncVanillaPoliticalOwnership(JsonObject state) {
+        Map<String, JsonObject> bands = new HashMap<>();
+        for (var item : state.getAsJsonArray("bands")) if (item.isJsonObject()) {
+            JsonObject band = item.getAsJsonObject();
+            bands.put(band.get("id").getAsString(), band);
+        }
+        Map<String, List<VanillaWorldGeography.PoliticalSeed>> seeds = new HashMap<>();
+        for (var item : state.getAsJsonArray("polities")) if (item.isJsonObject()) {
+            JsonObject polity = item.getAsJsonObject();
+            String mapId = polity.get("map_id").getAsString();
+            if (!mapId.startsWith("vanilla-world:")) continue;
+            String realmId = "emergent-" + polity.get("id").getAsString();
+            for (var settlement : polity.getAsJsonArray("settlement_ids")) {
+                JsonObject band = bands.get(settlement.getAsString());
+                if (band == null || !band.get("settled").getAsBoolean()) continue;
+                seeds.computeIfAbsent(mapId, ignored -> new ArrayList<>()).add(
+                        new VanillaWorldGeography.PoliticalSeed(
+                                band.get("x").getAsInt(), band.get("z").getAsInt(), realmId));
+            }
+        }
+        int ownedCells = VanillaWorldGeography.applyPoliticalOwnership(seeds);
+        if (ownedCells > 0)
+            LOGGER.info("wf_worldsim: persisted vanilla political borders across {} observed land samples", ownedCells);
+    }
+
+    /**
+     * Assigns each real image-map province to the nearest emergent polity settlement.
+     * The original image-derived province raster and parent hierarchy are preserved;
+     * only the sovereign ownership of each province is reconciled.
+     */
+    private static void syncImagePoliticalOwnership(JsonObject state) {
+        Map<String, JsonObject> bands = new HashMap<>();
+        for (var item : state.getAsJsonArray("bands")) if (item.isJsonObject()) {
+            JsonObject band = item.getAsJsonObject();
+            bands.put(band.get("id").getAsString(), band);
+        }
+        for (MapData map : WorldForgeMod.loadedMaps().values()) {
+            if (map == null || map.titles == null) continue;
+            Map<String, List<int[]>> seedsByRealm = new TreeMap<>();
+            for (var item : state.getAsJsonArray("polities")) if (item.isJsonObject()) {
+                JsonObject polity = item.getAsJsonObject();
+                if (!map.name.equals(polity.get("map_id").getAsString())) continue;
+                String realmId = "emergent-" + polity.get("id").getAsString();
+                EmergenceSource source = EmergenceSource.authored(map);
+                for (var settlement : polity.getAsJsonArray("settlement_ids")) {
+                    JsonObject band = bands.get(settlement.getAsString());
+                    if (band == null || !band.get("settled").getAsBoolean()) continue;
+                    seedsByRealm.computeIfAbsent(realmId, ignored -> new ArrayList<>()).add(
+                            source.blockPosition(band.get("x").getAsInt(), band.get("z").getAsInt()));
+                }
+            }
+            if (seedsByRealm.isEmpty()) continue;
+            Map<String, TitleData.Realm> realms = new TreeMap<>();
+            for (String realmId : seedsByRealm.keySet()) {
+                TitleData.Realm realm = map.titles.realms.get(realmId);
+                if (realm != null) realms.put(realmId, realm);
+            }
+            Map<String, Set<String>> desiredKeys = new TreeMap<>();
+            realms.keySet().forEach(id -> desiredKeys.put(id, new TreeSet<>()));
+            double radius = Math.max(512.0, Math.min(map.w, map.h) * map.bpp * 0.25);
+            double radiusSquared = radius * radius;
+            for (TitleData.Title province : map.titles.allTitles()) {
+                if (province == null || province.tier != 0) continue;
+                String nearestRealm = "";
+                double nearestDistance = Double.MAX_VALUE;
+                for (var entry : seedsByRealm.entrySet()) {
+                    if (!realms.containsKey(entry.getKey())) continue;
+                    for (int[] seed : entry.getValue()) {
+                        double dx = province.capX - seed[0], dz = province.capZ - seed[1];
+                        double distance = dx * dx + dz * dz;
+                        if (distance < nearestDistance) {
+                            nearestDistance = distance;
+                            nearestRealm = entry.getKey();
+                        }
+                    }
+                }
+                if (nearestDistance <= radiusSquared && desiredKeys.containsKey(nearestRealm))
+                    desiredKeys.get(nearestRealm).add(province.key);
+            }
+            boolean changed = false;
+            for (var entry : desiredKeys.entrySet()) {
+                TitleData.Realm realm = realms.get(entry.getKey());
+                Set<String> current = new TreeSet<>(realm.titleKeys);
+                if (current.equals(entry.getValue())) continue;
+                realm.titleKeys.clear();
+                realm.titleKeys.addAll(entry.getValue());
+                changed = true;
+            }
+            if (changed) {
+                map.titles.recompute();
+                int assigned = desiredKeys.values().stream().mapToInt(Set::size).sum();
+                LOGGER.info("wf_worldsim: reconciled {} real image-map provinces across {} emergent polities on {}",
+                        assigned, realms.size(), map.name);
+                dev.worldforge.mod.PoliticalMapRenderer.regenerateAll(map);
+            }
+        }
+    }
+
+    /** Small neighbouring polities may become dependent on a stable, materially stronger realm. */
+    private static void reconcileEmergentVassalage(JsonObject state) {
+        Map<String, JsonObject> polities = new HashMap<>();
+        for (var item : state.getAsJsonArray("polities")) if (item.isJsonObject()) {
+            JsonObject polity = item.getAsJsonObject();
+            polities.put(polity.get("id").getAsString(), polity);
+        }
+        List<JsonObject> ordered = new ArrayList<>(polities.values());
+        ordered.sort(Comparator.comparingLong(p -> p.get("population").getAsLong()));
+        for (JsonObject vassal : ordered) {
+            String vassalId = "emergent-" + vassal.get("id").getAsString();
+            if (RealmsMod.POLITICS.vassalage(vassalId) != null
+                    || !vassal.has("settlement_ids") || vassal.getAsJsonArray("settlement_ids").size() == 0) continue;
+            String mapId = vassal.get("map_id").getAsString();
+            JsonObject strongest = null;
+            Object neighborRaw = RealmsMod.emergentRealms().stream()
+                    .filter(realm -> realm.id.equals(vassalId))
+                    .map(realm -> realm.props.get("emergence.neighbors")).findFirst().orElse("");
+            for (String neighborRealmId : String.valueOf(neighborRaw).split(",")) {
+                if (!neighborRealmId.startsWith("emergent-")) continue;
+                JsonObject candidate = polities.get(neighborRealmId.substring("emergent-".length()));
+                if (candidate == null || !mapId.equals(candidate.get("map_id").getAsString())) continue;
+                long ownPopulation = Math.max(1L, vassal.get("population").getAsLong());
+                long candidatePopulation = candidate.get("population").getAsLong();
+                if (candidatePopulation < ownPopulation * 3L
+                        || candidate.get("stability").getAsInt() < 60) continue;
+                if (strongest == null || candidatePopulation > strongest.get("population").getAsLong())
+                    strongest = candidate;
+            }
+            if (strongest == null) continue;
+            String liegeId = "emergent-" + strongest.get("id").getAsString();
+            if (RealmsMod.POLITICS.setVassalage(vassalId, liegeId, 0.10, 0.12))
+                LOGGER.info("wf_worldsim: {} entered a feudal vassal contract with {}",
+                        vassalId, liegeId);
+        }
     }
 
     private static final class EmergentParents {

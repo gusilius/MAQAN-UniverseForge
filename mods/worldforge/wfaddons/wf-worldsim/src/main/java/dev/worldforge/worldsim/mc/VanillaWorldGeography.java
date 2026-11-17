@@ -58,6 +58,42 @@ public final class VanillaWorldGeography {
         Region(String id) { this.id = id; }
     }
 
+    private record RegionAddress(String dimension, int x, int z) { }
+    private record WorldBounds(int minRegionX, int minRegionZ, int maxRegionX, int maxRegionZ) {
+        int width() { return (maxRegionX - minRegionX + 1) * REGION_BLOCKS; }
+        int height() { return (maxRegionZ - minRegionZ + 1) * REGION_BLOCKS; }
+    }
+    private static RegionAddress regionAddress(String id) {
+        if (id == null || !id.startsWith("vanilla:")) return null;
+        int last = id.lastIndexOf(':'), previous = last < 0 ? -1 : id.lastIndexOf(':', last - 1);
+        if (previous <= 7 || last <= previous) return null;
+        try {
+            return new RegionAddress(id.substring(8, previous),
+                    Integer.parseInt(id.substring(previous + 1, last)),
+                    Integer.parseInt(id.substring(last + 1)));
+        } catch (NumberFormatException invalid) { return null; }
+    }
+    private static WorldBounds bounds(String dimension) {
+        int minX = Integer.MAX_VALUE, minZ = Integer.MAX_VALUE;
+        int maxX = Integer.MIN_VALUE, maxZ = Integer.MIN_VALUE;
+        for (Region region : REGIONS.values()) {
+            RegionAddress address = regionAddress(region.id);
+            if (address == null || !dimension.equals(address.dimension) || region.cells.isEmpty()) continue;
+            minX = Math.min(minX, address.x); minZ = Math.min(minZ, address.z);
+            maxX = Math.max(maxX, address.x); maxZ = Math.max(maxZ, address.z);
+        }
+        return minX == Integer.MAX_VALUE ? null : new WorldBounds(minX, minZ, maxX, maxZ);
+    }
+
+    /** A canonical settled community used to construct persistent political borders. */
+    public static final class PoliticalSeed {
+        public final int x, z;
+        public final String realmId;
+        public PoliticalSeed(int x, int z, String realmId) {
+            this.x = x; this.z = z; this.realmId = realmId == null ? "" : realmId;
+        }
+    }
+
     public VanillaWorldGeography() { }
 
     @SubscribeEvent
@@ -197,6 +233,23 @@ public final class VanillaWorldGeography {
                 .map(region -> region.id).toList();
     }
 
+    public static synchronized java.util.List<String> simulationMapIds() {
+        return REGIONS.values().stream().filter(region -> !region.cells.isEmpty())
+                .map(region -> regionAddress(region.id)).filter(java.util.Objects::nonNull)
+                .map(RegionAddress::dimension).distinct().sorted()
+                .map(dimension -> "vanilla-world:" + dimension).toList();
+    }
+    public static synchronized int widthForMapId(String mapId) {
+        WorldBounds world = mapId != null && mapId.startsWith("vanilla-world:")
+                ? bounds(mapId.substring("vanilla-world:".length())) : null;
+        return world == null ? REGION_BLOCKS : world.width();
+    }
+    public static synchronized int heightForMapId(String mapId) {
+        WorldBounds world = mapId != null && mapId.startsWith("vanilla-world:")
+                ? bounds(mapId.substring("vanilla-world:".length())) : null;
+        return world == null ? REGION_BLOCKS : world.height();
+    }
+
     /** Diagnostic counters used by runtime acceptance tests and the in-game status command. */
     public static synchronized int sampledCellCount() {
         return REGIONS.values().stream().mapToInt(region -> region.cells.size()).sum();
@@ -210,6 +263,45 @@ public final class VanillaWorldGeography {
         return PENDING.values().stream().mapToInt(java.util.ArrayDeque::size).sum();
     }
 
+    /**
+     * Builds a durable Voronoi-style political raster from real settled communities.
+     * Every land sample is assigned to its nearest canonical polity seed; water and
+     * remote frontier cells remain neutral. The same owner IDs feed Rust snapshots,
+     * save data and later map/UI projections.
+     */
+    public static synchronized int applyPoliticalOwnership(
+            Map<String, List<PoliticalSeed>> seedsByWorld) {
+        int owned = 0;
+        boolean changed = false;
+        long maxDistanceSquared = 512L * 512L;
+        for (Region region : REGIONS.values()) {
+            RegionAddress address = regionAddress(region.id);
+            if (address == null) continue;
+            List<PoliticalSeed> seeds = seedsByWorld == null ? List.of()
+                    : seedsByWorld.getOrDefault("vanilla-world:" + address.dimension, List.of());
+            for (JsonObject cell : region.cells.values()) {
+                String owner = "";
+                if (!seeds.isEmpty() && cell.has("land") && cell.get("land").getAsBoolean()) {
+                    int x = address.x * REGION_BLOCKS + cell.get("x").getAsInt();
+                    int z = address.z * REGION_BLOCKS + cell.get("z").getAsInt();
+                    long bestDistance = Long.MAX_VALUE;
+                    for (PoliticalSeed seed : seeds) {
+                        if (seed.realmId.isBlank()) continue;
+                        long dx = (long) x - seed.x, dz = (long) z - seed.z;
+                        long distance = dx * dx + dz * dz;
+                        if (distance < bestDistance) { bestDistance = distance; owner = seed.realmId; }
+                    }
+                    if (bestDistance > maxDistanceSquared) owner = "";
+                }
+                String previous = cell.has("owner_realm_id") ? cell.get("owner_realm_id").getAsString() : "";
+                if (!previous.equals(owner)) { cell.addProperty("owner_realm_id", owner); changed = true; }
+                if (!owner.isBlank()) owned++;
+            }
+        }
+        if (changed) dirty = true;
+        return owned;
+    }
+
     public static synchronized String biomeAt(String mapId, int x, int z) {
         Region region = REGIONS.get(mapId);
         if (region == null || x < 0 || z < 0 || x >= REGION_BLOCKS || z >= REGION_BLOCKS) return "";
@@ -219,17 +311,30 @@ public final class VanillaWorldGeography {
 
     public static synchronized JsonArray snapshot() {
         JsonArray result = new JsonArray();
-        for (Region region : REGIONS.values()) {
-            if (region.cells.isEmpty()) continue;
+        for (String mapId : simulationMapIds()) {
+            String dimension = dimensionFromMapId(mapId);
+            WorldBounds world = bounds(dimension);
+            if (world == null) continue;
             JsonObject map = new JsonObject();
-            map.addProperty("map_id", region.id);
-            map.addProperty("width_px", REGION_BLOCKS);
-            map.addProperty("height_px", REGION_BLOCKS);
+            map.addProperty("map_id", mapId);
+            map.addProperty("width_px", world.width());
+            map.addProperty("height_px", world.height());
             map.addProperty("blocks_per_pixel_milli", 1000);
-            map.addProperty("political_layers_present", false);
             map.addProperty("sample_stride", SAMPLE_STEP);
             JsonArray cells = new JsonArray();
-            region.cells.values().forEach(cells::add);
+            boolean political = false;
+            for (Region region : REGIONS.values()) {
+                RegionAddress address = regionAddress(region.id);
+                if (address == null || !dimension.equals(address.dimension)) continue;
+                for (JsonObject original : region.cells.values()) {
+                    JsonObject cell = original.deepCopy();
+                    cell.addProperty("x", (address.x - world.minRegionX) * REGION_BLOCKS + original.get("x").getAsInt());
+                    cell.addProperty("z", (address.z - world.minRegionZ) * REGION_BLOCKS + original.get("z").getAsInt());
+                    if (cell.has("owner_realm_id") && !cell.get("owner_realm_id").getAsString().isBlank()) political = true;
+                    cells.add(cell);
+                }
+            }
+            map.addProperty("political_layers_present", political);
             map.add("cells", cells);
             result.add(map);
         }
@@ -318,21 +423,34 @@ public final class VanillaWorldGeography {
     }
 
     public static String dimensionFromMapId(String mapId) {
-        if (mapId == null || !mapId.startsWith("vanilla:")) return "";
-        int last = mapId.lastIndexOf(':');
-        int previous = last < 0 ? -1 : mapId.lastIndexOf(':', last - 1);
-        return previous > 7 ? mapId.substring(8, previous) : "";
+        if (mapId == null) return "";
+        if (mapId.startsWith("vanilla-world:")) return mapId.substring("vanilla-world:".length());
+        RegionAddress address = regionAddress(mapId);
+        return address == null ? "" : address.dimension;
     }
 
-    public static int[] blockPosition(String mapId, int localX, int localZ) {
-        if (mapId == null || !mapId.startsWith("vanilla:")) return new int[]{0, 0};
-        int last = mapId.lastIndexOf(':');
-        int previous = last < 0 ? -1 : mapId.lastIndexOf(':', last - 1);
-        if (previous < 8 || last <= previous) return new int[]{0, 0};
-        int regionX = Integer.parseInt(mapId.substring(previous + 1, last));
-        int regionZ = Integer.parseInt(mapId.substring(last + 1));
-        return new int[]{regionX * REGION_BLOCKS + localX,
-                regionZ * REGION_BLOCKS + localZ};
+    public static synchronized int[] blockPosition(String mapId, int localX, int localZ) {
+        if (mapId == null) return new int[]{0, 0};
+        if (mapId.startsWith("vanilla-world:")) {
+            WorldBounds world = bounds(dimensionFromMapId(mapId));
+            return world == null ? new int[]{localX, localZ}
+                    : new int[]{world.minRegionX * REGION_BLOCKS + localX,
+                        world.minRegionZ * REGION_BLOCKS + localZ};
+        }
+        RegionAddress address = regionAddress(mapId);
+        return address == null ? new int[]{0, 0}
+                : new int[]{address.x * REGION_BLOCKS + localX, address.z * REGION_BLOCKS + localZ};
+    }
+
+    public static synchronized String biomeAtWorldPosition(String mapId, int worldX, int worldZ) {
+        String dimension = dimensionFromMapId(mapId);
+        if (dimension.isBlank()) return "";
+        int regionX = Math.floorDiv(worldX, REGION_BLOCKS), regionZ = Math.floorDiv(worldZ, REGION_BLOCKS);
+        Region region = REGIONS.get(mapId(dimension, regionX, regionZ));
+        if (region == null) return "";
+        int localX = Math.floorMod(worldX, REGION_BLOCKS), localZ = Math.floorMod(worldZ, REGION_BLOCKS);
+        JsonObject cell = region.cells.get((long) localZ * REGION_BLOCKS + localX);
+        return cell == null || !cell.has("biome") ? "" : cell.get("biome").getAsString();
     }
 
     private static String mapId(String dimension, int regionX, int regionZ) {

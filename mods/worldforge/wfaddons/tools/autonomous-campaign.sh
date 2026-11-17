@@ -131,18 +131,18 @@ done
 grep -q 'Done (' server.log || { tail -120 server.log; echo "ERROR: Forge startup timed out"; exit 3; }
 CURRENT_STAGE="modpack_smoke"
 for command in "list" "wftroops types" "wftroops fort list" "wftroops list" "wfsettle list" "wfform" "worldforge" "wfaction list" "wfworldsim status"; do
-  printf '%s\\n' "$command" >> in.txt
+  printf '%s\n' "$command" >> in.txt
   sleep 2
 done
 CURRENT_STAGE="geography_preflight"
 if [ "$VANILLA_CAMPAIGN" -eq 1 ]; then
   # Capture a bounded, real 256-chunk region around spawn; no synthetic geography fixture.
-  printf '%s\\n' "forceload add -128 -128 127 127" >> in.txt
+  printf '%s\n' "forceload add -256 -256 255 255" >> in.txt
   sleep 8
   geography_ready=0
   for _ in $(seq 1 90); do
-    printf '%s\\n' "wfworldsim geography" >> in.txt
-    if grep -aqE 'Vanilla geography: regions=[1-9][0-9]*, samples=[1-9][0-9]*, pending_chunks=0' server.log; then geography_ready=1; break; fi
+    printf '%s\n' "wfworldsim geography" >> in.txt
+    if grep -aqE 'Vanilla geography: regions=[1-9][0-9]*, world_maps=1, samples=([2-9][0-9]{3}|[1-9][0-9]{4,}), pending_chunks=0' server.log; then geography_ready=1; break; fi
     kill -0 "$SERVER_PID" 2>/dev/null || { tail -160 server.log; echo "ERROR: vanilla server stopped during geography capture"; exit 3; }
     sleep 2
   done
@@ -216,9 +216,11 @@ if int(report.get("physically_completed_buildings", 0)) < int(report.get("settle
     raise SystemExit("The physical building count is below the one-building-per-settlement acceptance threshold")
 if not report.get("physical_world_dimension"):
     raise SystemExit("Campaign did not run in a registered physical world dimension")
-for key in ("stable_states", "characters", "settlements", "materialized_settlements", "completed_buildings", "physically_completed_buildings", "physically_built_settlements", "canonical_ruler_generations_verified", "named_realms", "canonical_rulers", "statecraft_titles", "origin_race_characters", "origin_distinct_races", "origin_class_characters", "origin_profession_characters", "geography_regions", "geography_samples", "world_events", "chronicle_entries"):
+for key in ("stable_states", "characters", "settlements", "materialized_settlements", "completed_buildings", "physically_completed_buildings", "physically_built_settlements", "canonical_ruler_generations_verified", "named_realms", "canonical_rulers", "statecraft_titles", "territorial_titles", "title_hierarchy_links", "named_dynasties", "political_ownership_samples", "origin_race_characters", "origin_distinct_races", "origin_class_characters", "origin_profession_characters", "geography_regions", "geography_samples", "world_events", "chronicle_entries"):
     if int(report.get(key, 0)) <= 0:
         raise SystemExit(f"Campaign report is missing required generated data: {key}")
+if int(report.get("barony_titles", 0)) <= 0 or int(report.get("county_titles", 0)) <= 0:
+    raise SystemExit("Political hierarchy lacks materialized barony and county titles")
 book = inventory_path.with_name("chronicle-book.md")
 if not book.is_file() or book.stat().st_size < 100:
     raise SystemExit("Historical book is missing or empty")
@@ -229,7 +231,7 @@ inventory_path.write_text(json.dumps({
     "runtime": "Forge server campaign; see campaign-report.json and server.log"
 }, ensure_ascii=False, indent=2), encoding="utf-8")
 print("AUTONOMOUS_CAMPAIGN_STATUS=PASS")
-for key in ("map", "physical_world_dimension", "elapsed_years", "stable_states", "characters", "settlements", "materialized_settlements", "completed_buildings", "canonical_ruler_generations_verified", "origin_race_characters", "origin_distinct_races", "origin_class_characters", "origin_profession_characters", "world_events", "chronicle_entries"):
+for key in ("map", "physical_world_dimension", "elapsed_years", "stable_states", "characters", "settlements", "materialized_settlements", "completed_buildings", "canonical_ruler_generations_verified", "territorial_titles", "title_hierarchy_links", "named_dynasties", "political_ownership_samples", "origin_race_characters", "origin_distinct_races", "origin_class_characters", "origin_profession_characters", "world_events", "chronicle_entries"):
     print(f"AUTONOMOUS_CAMPAIGN_{key.upper()}={report.get(key)}")
 print(f"AUTONOMOUS_CAMPAIGN_ADDON_JARS={len(inventory)}")
 PY
@@ -251,8 +253,8 @@ for _ in $(seq 1 150); do
   sleep 2
 done
 [ "$ready" = 1 ] || { tail -120 server-reload.log; echo "ERROR: save reload startup timed out"; exit 7; }
-printf '%s\\n' "wfworldsim campaign status" >> in.txt
-if [ "$VANILLA_CAMPAIGN" -eq 1 ]; then printf '%s\\n' "wfworldsim geography" >> in.txt; fi
+printf '%s\n' "wfworldsim campaign status" >> in.txt
+if [ "$VANILLA_CAMPAIGN" -eq 1 ]; then printf '%s\n' "wfworldsim geography" >> in.txt; fi
 reload_ready=0
 for _ in $(seq 1 60); do
   if grep -aqE 'stable_campaign_states=[1-9][0-9]*/[1-9][0-9]*' server-reload.log \
@@ -260,7 +262,7 @@ for _ in $(seq 1 60); do
     && grep -aqE 'canonical_rulers=[1-9][0-9]*' server-reload.log \
     && grep -aqE 'statecraft_titles=[1-9][0-9]*' server-reload.log \
     && grep -aqE 'settlements=[1-9][0-9]*' server-reload.log; then
-    if [ "$VANILLA_CAMPAIGN" -eq 0 ] || grep -aqE 'Vanilla geography: regions=[1-9][0-9]*, samples=[1-9][0-9]*' server-reload.log; then
+    if [ "$VANILLA_CAMPAIGN" -eq 0 ] || grep -aqE 'Vanilla geography: regions=[1-9][0-9]*, world_maps=1, samples=[1-9][0-9]*' server-reload.log; then
       reload_ready=1; break
     fi
   fi
@@ -268,7 +270,7 @@ for _ in $(seq 1 60); do
   sleep 2
 done
 [ "$reload_ready" = 1 ] || { tail -160 server-reload.log; echo "ERROR: canonical characters/realms/settlements/geography did not survive save reload"; exit 8; }
-printf '%s\\n' "stop" >> in.txt
+printf '%s\n' "stop" >> in.txt
 for _ in $(seq 1 30); do kill -0 "$SERVER_PID" 2>/dev/null || break; sleep 2; done
 kill "$SERVER_PID" 2>/dev/null || true
 wait "$SERVER_PID" 2>/dev/null || true
