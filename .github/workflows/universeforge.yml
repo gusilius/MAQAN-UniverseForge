@@ -5,6 +5,7 @@ on:
     branches: [main, integration/maqan-unified, codex/blocker3-action-execution-audit, codex/blocker4-ownership-inventory, feature/autonomous-world-simulation-engine]
     paths:
       - "mods/**"
+      - "map.png"
       - "shared/**"
       - "platform/**"
       - "build.gradle"
@@ -13,11 +14,6 @@ on:
       - "gradle/**"
       - "mods/worldforge/wfaddons/tools/**"
       - ".github/workflows/**"
-      - "!mods/worldforge/wfaddons/wf-army/**"
-      - "!mods/worldforge/wfaddons/wf-troops/**"
-      - "!mods/worldforge/wfaddons/wf-war/**"
-      - "!mods/worldforge/wfaddons/tools/build-selected-addons.sh"
-      - "!mods/worldforge/wfaddons/tools/build_order.py"
   pull_request:
     branches: [main]
     paths:
@@ -276,6 +272,63 @@ jobs:
         shell: bash
         run: bash tools/test-all.sh ../wfmod
 
+  worldforge-real-map-integration:
+    name: WorldForge — real image map identity and political integration (Windows x64)
+    runs-on: windows-latest
+    needs: [worldforge-addons]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install image generation dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check -r mods/worldforge/wfaddons/tools/image-worldgen/requirements.txt
+          if ($LASTEXITCODE -ne 0) { throw "Image generation dependencies failed" }
+      - name: Generate and validate the repository map
+        shell: pwsh
+        run: |
+          if (!(Test-Path "map.png")) { throw "The actual map.png source is missing" }
+          $out = Join-Path $env:RUNNER_TEMP "maqan-real-map"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          python mods/worldforge/wfaddons/tools/image-worldgen/image_map_analysis.py --input "map.png" --output $out --seed 424242
+          if ($LASTEXITCODE -ne 0) { throw "Actual map semantic analysis failed" }
+          python mods/worldforge/wfaddons/tools/image-worldgen/image_worldgen.py convert --input "map.png" --output (Join-Path $out "real-map.worldmap") --seed 424242 --settlement-level 4 --blocks-per-pixel 16
+          if ($LASTEXITCODE -ne 0) { throw "Actual map conversion failed" }
+          python -c "import sys,json; from pathlib import Path; sys.path.insert(0,'mods/worldforge/wfaddons/tools/image-worldgen'); from image_worldgen import validate_package; print(json.dumps(validate_package(Path(r'$out')/'real-map.worldmap'),ensure_ascii=False,indent=2))"
+          if ($LASTEXITCODE -ne 0) { throw "Actual map package validation failed" }
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Compile production WorldForge map loader and compatibility test
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP "maqan-real-map"
+          $classes = Join-Path $out "classes"
+          New-Item -ItemType Directory -Force -Path $classes | Out-Null
+          javac -encoding UTF-8 -d $classes mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/Json.java mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/Noise.java mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/RegionData.java mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/TitleData.java mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/MapData.java mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/TerrainSampler.java mods/worldforge/wfaddons/tools/image-worldgen/ImageWorldMapCompatibilityTest.java
+          if ($LASTEXITCODE -ne 0) { throw "Production map compatibility compile failed" }
+          java -cp $classes dev.worldforge.mod.ImageWorldMapCompatibilityTest $out real-map
+          if ($LASTEXITCODE -ne 0) { throw "Actual map failed production MapData integration" }
+      - name: Run full image-derived identity, race, government, title and save/load acceptance test
+        working-directory: mods/worldforge/wfaddons
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP "maqan-real-map"
+          $worldmap = (Join-Path $out "real-map.worldmap") -replace '\\', '/'
+          bash tools/test-all.sh ../wfmod "$worldmap" --image-identity-only
+          if ($LASTEXITCODE -ne 0) { throw "Image-derived political identity and persistence acceptance test failed" }
+      - name: Upload actual-map package and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: maqan-real-image-political-proof
+          path: ${{ runner.temp }}/maqan-real-map/
+          if-no-files-found: error
+          retention-days: 30
   worldforge-native:
     name: WorldForge simulation native core (Windows x64)
     runs-on: windows-latest
