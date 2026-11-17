@@ -2,6 +2,8 @@ package dev.worldforge.people;
 
 import dev.worldforge.mod.TitleData;
 import dev.worldforge.mod.TitleEditor;
+import dev.worldforge.mod.api.DomainMutationRevisions;
+import dev.worldforge.mod.api.WorldForgeApi;
 
 import java.util.*;
 
@@ -18,6 +20,12 @@ public final class Succession {
     private Succession() {}
 
     public static List<Result> onDeath(CharacterRegistry reg, RoleDefs defs, TitleData d, TitleEditor ed, NameBank names, long seed, String id, int year, String law) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            return onDeathBatched(reg, defs, d, ed, names, seed, id, year, law);
+        }
+    }
+
+    private static List<Result> onDeathBatched(CharacterRegistry reg, RoleDefs defs, TitleData d, TitleEditor ed, NameBank names, long seed, String id, int year, String law) {
         Character dead = reg.get(id);
         if (dead == null) throw new IllegalArgumentException("Нет персонажа " + id);
         List<Character.Post> posts = PopulationSimulation.die(reg, id, year, "unspecified");
@@ -32,20 +40,77 @@ public final class Succession {
                 NameBank.Pool pool = names.pool(names.culture(dead.culture));
                 boolean male = r.nextBoolean();
                 heir = reg.create(pool.male.isEmpty() ? "?" : (male ? pool.male : pool.female).get(r.nextInt((male ? pool.male : pool.female).size())), pool.houses.get(r.nextInt(pool.houses.size())), dead.culture, male ? "m" : "f", year - 30);
-                heir.traits.add("usurper");
+                CharacterStats.addTrait(heir, "usurper");
                 usurper = true;
             }
             reg.appoint(heir.id, role.id, p.place);
-            if (ed != null && p.place.startsWith("realm:")) ed.setRuler(p.place.substring(6), heir.name + (heir.house.isEmpty() ? "" : " " + heir.house));
+            final Character successor = heir;
+            if (p.place.startsWith("realm:")) {
+                String realmId = p.place.substring(6);
+                // Character ownership/posts are covered by the outer Character batch.
+                // TitleEditor.group is the single canonical REALMS_POLITICS writer boundary:
+                // include ruler and holder metadata in that same group so the lane advances once.
+                Runnable updatePoliticalState = () -> {
+                    String rulerName = successor.name + (successor.house.isEmpty() ? "" : " " + successor.house);
+                    if (ed != null) ed.setRuler(realmId, rulerName);
+                    String deceasedGlobalId = dead.globalId;
+                    String heirGlobalId = successor.globalId;
+                    for (TitleData.Title title : d.allTitles()) {
+                        Object holder = title.props.get("holderCharacterId");
+                        if (holder instanceof String holderId
+                                && (holderId.equals(deceasedGlobalId) || holderId.equals(dead.id))) {
+                            title.props.put("holderCharacterId", heirGlobalId);
+                            title.props.put("succession.last_deceased", deceasedGlobalId);
+                            title.props.put("succession.last_heir", heirGlobalId);
+                            title.props.put("succession.last_year", year);
+                        }
+                    }
+                };
+                if (ed != null) {
+                    ed.group(updatePoliticalState);
+                } else {
+                    // Fallback for headless callers without a TitleEditor: preserve the
+                    // same single lane owner and revision semantics.
+                    try (DomainMutationRevisions.Mutation realmMutation =
+                                 WorldForgeApi.revisions().begin(DomainMutationRevisions.Domain.REALMS_POLITICS)) {
+                        TitleData.Realm realm = d.realms.get(realmId);
+                        String rulerName = heir.name + (heir.house.isEmpty() ? "" : " " + heir.house);
+                        boolean changed = realm != null && !Objects.equals(realm.ruler, rulerName);
+                        for (TitleData.Title title : d.allTitles()) {
+                            Object holder = title.props.get("holderCharacterId");
+                            if (holder instanceof String holderId
+                                    && (holderId.equals(dead.globalId) || holderId.equals(dead.id))) {
+                                changed |= !Objects.equals(holder, heir.globalId)
+                                        || !Objects.equals(title.props.get("succession.last_deceased"), dead.globalId)
+                                        || !Objects.equals(title.props.get("succession.last_heir"), heir.globalId)
+                                        || !Objects.equals(title.props.get("succession.last_year"), year);
+                            }
+                        }
+                        updatePoliticalState.run();
+                        if (changed) realmMutation.commit();
+                    }
+                }
+            }
             out.add(new Result(dead, heir, usurper, p.place));
         }
         return out;
     }
 
     private static Character chooseHeir(CharacterRegistry reg, Character dead, String law, String place) {
-        List<Character> kids = living(reg, dead.children);
+        // Preserve a deceased elder child's branch through its living descendants.
+        // Keep deceased children in the ordered branch list: their descendants may inherit
+        // by representation. Filtering to living children here would erase the entire branch.
+        List<Character> kids = new ArrayList<>();
+        for (String childId : dead.children) {
+            Character child = reg.get(childId);
+            if (child != null) kids.add(child);
+        }
         sort(kids, law);
-        if (!kids.isEmpty()) return kids.get(0);
+        Set<String> visited = new HashSet<>();
+        for (Character child : kids) {
+            Character branchHeir = heirBranch(reg, child, law, visited);
+            if (branchHeir != null) return branchHeir;
+        }
         List<Character> sibs = new ArrayList<>();
         for (Character c : reg.all()) if (c.alive && c != dead && !dead.father.isEmpty() && dead.father.equals(c.father)) sibs.add(c);
         sort(sibs, law);
@@ -56,13 +121,22 @@ public final class Succession {
         return nobles.isEmpty() ? null : nobles.get(0);
     }
 
-    private static List<Character> living(CharacterRegistry reg, List<String> ids) {
-        List<Character> l = new ArrayList<>();
-        for (String id : ids) {
-            Character c = reg.get(id);
-            if (c != null && c.alive) l.add(c);
+    private static Character heirBranch(CharacterRegistry reg, Character branch, String law, Set<String> visited) {
+        if (branch == null || !visited.add(branch.id)) return null;
+        if (branch.alive) return branch;
+        // Representation applies recursively, not only to the first deceased child.
+        // A dead grandchild must not erase a great-grandchild's place in the same branch.
+        List<Character> descendants = new ArrayList<>();
+        for (String childId : branch.children) {
+            Character child = reg.get(childId);
+            if (child != null) descendants.add(child);
         }
-        return l;
+        sort(descendants, law);
+        for (Character descendant : descendants) {
+            Character heir = heirBranch(reg, descendant, law, visited);
+            if (heir != null) return heir;
+        }
+        return null;
     }
 
     private static void sort(List<Character> l, String law) {

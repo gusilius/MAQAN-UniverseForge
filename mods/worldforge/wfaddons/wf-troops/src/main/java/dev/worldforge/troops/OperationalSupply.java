@@ -45,16 +45,24 @@ public final class OperationalSupply {
                     || !Double.isFinite(consumed) || consumed < 0 || consumed > needed + 1e-8
                     || consumed > availableRations + 1e-8)
                 throw new IllegalArgumentException("invalid persisted ration settlement");
-            state.rations = Math.max(0, availableRations - consumed);
-            state.consumed += consumed;
+            TroopCompute.SupplyResult computed = TroopCompute.supply(soldiers, days, availableRations, consumed,
+                    state.readiness, state.daysWithoutFullRations, state.consumed, true);
             double shortage = Math.max(0, needed - consumed);
-            if (needed > 0 && shortage > 1e-9) {
-                double fraction = shortage / needed;
-                state.daysWithoutFullRations += days * fraction;
-                state.readiness = clamp(state.readiness - days * fraction * STARVATION_LOSS_PER_DAY, 0, 1);
+            state.rations = Math.max(0, availableRations - consumed);
+            if (computed == null) {
+                state.consumed += consumed;
+                if (needed > 0 && shortage > 1e-9) {
+                    double fraction = shortage / needed;
+                    state.daysWithoutFullRations += days * fraction;
+                    state.readiness = clamp(state.readiness - days * fraction * STARVATION_LOSS_PER_DAY, 0, 1);
+                } else {
+                    state.daysWithoutFullRations = Math.max(0, state.daysWithoutFullRations - days);
+                    state.readiness = clamp(state.readiness + days * RECOVERY_PER_DAY, 0, 1);
+                }
             } else {
-                state.daysWithoutFullRations = Math.max(0, state.daysWithoutFullRations - days);
-                state.readiness = clamp(state.readiness + days * RECOVERY_PER_DAY, 0, 1);
+                state.consumed = computed.totalConsumed();
+                state.daysWithoutFullRations = computed.daysWithoutFullRations();
+                state.readiness = computed.readiness();
             }
             state.lastProcessedWorldDay = worldDay;
             Status status = shortage <= 1e-9 ? Status.SUPPLIED
@@ -138,17 +146,23 @@ public final class OperationalSupply {
         if (soldiers < 0 || !Double.isFinite(days) || days < 0 || days > 365)
             throw new IllegalArgumentException("invalid supply simulation step");
         double needed = demand(soldiers, days);
-        double consumed = Math.min(state.rations, needed);
-        state.rations -= consumed;
-        state.consumed += consumed;
+        TroopCompute.SupplyResult computed = TroopCompute.supply(soldiers, days, state.rations,
+                Math.min(state.rations, needed), state.readiness, state.daysWithoutFullRations, state.consumed, false);
+        double consumed = computed == null ? Math.min(state.rations, needed) : computed.consumed();
         double shortage = Math.max(0, needed - consumed);
-        if (needed > 0 && shortage > 1e-9) {
-            double fraction = shortage / needed;
-            state.daysWithoutFullRations += days * fraction;
-            state.readiness = clamp(state.readiness - days * fraction * STARVATION_LOSS_PER_DAY, 0, 1);
+        if (computed == null) {
+            state.rations -= consumed; state.consumed += consumed;
+            if (needed > 0 && shortage > 1e-9) {
+                double fraction = shortage / needed;
+                state.daysWithoutFullRations += days * fraction;
+                state.readiness = clamp(state.readiness - days * fraction * STARVATION_LOSS_PER_DAY, 0, 1);
+            } else {
+                state.daysWithoutFullRations = Math.max(0, state.daysWithoutFullRations - days);
+                state.readiness = clamp(state.readiness + days * RECOVERY_PER_DAY, 0, 1);
+            }
         } else {
-            state.daysWithoutFullRations = Math.max(0, state.daysWithoutFullRations - days);
-            state.readiness = clamp(state.readiness + days * RECOVERY_PER_DAY, 0, 1);
+            state.rations = computed.remainingRations(); state.consumed = computed.totalConsumed();
+            state.daysWithoutFullRations = computed.daysWithoutFullRations(); state.readiness = computed.readiness();
         }
         Status status = shortage <= 1e-9 ? Status.SUPPLIED
                 : state.readiness < 0.35 ? Status.STARVING : Status.LOW;

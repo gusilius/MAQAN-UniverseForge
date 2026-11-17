@@ -2,7 +2,7 @@ name: MAQAN UniverseForge — Windows x64
 
 on:
   push:
-    branches: [main, integration/maqan-unified, codex/blocker3-action-execution-audit, codex/blocker4-ownership-inventory]
+    branches: [main, integration/maqan-unified, codex/blocker3-action-execution-audit, codex/blocker4-ownership-inventory, feature/autonomous-world-simulation-engine]
     paths:
       - "mods/**"
       - "shared/**"
@@ -13,6 +13,16 @@ on:
       - "gradle/**"
       - "mods/worldforge/wfaddons/tools/**"
       - ".github/workflows/**"
+      - "!mods/worldforge/wfaddons/wf-army/**"
+      - "!mods/worldforge/wfaddons/wf-troops/**"
+      - "!mods/worldforge/wfaddons/wf-settlements/**"
+      - "!mods/worldforge/wfaddons/wf-war/**"
+      - "!mods/worldforge/wfaddons/wf-worldsim/**"
+      - "!mods/worldforge/wfaddons/tests/**"
+      - "!mods/worldforge/native/worldforge-worldsim/**"
+      - "!mods/worldforge/wfaddons/tools/build-selected-addons.sh"
+      - "!mods/worldforge/wfaddons/tools/build_order.py"
+      - "!.github/workflows/**"
   pull_request:
     branches: [main]
     paths:
@@ -24,7 +34,6 @@ on:
       - "gradle.properties"
       - "gradle/**"
       - "mods/worldforge/wfaddons/tools/**"
-      - ".github/workflows/**"
   workflow_dispatch:
 
 permissions:
@@ -32,7 +41,8 @@ permissions:
 
 concurrency:
   group: universeforge-windows-quality-gate-${{ github.ref }}
-  # Keep only the newest validation for each ref; one gate validates the unified resident task graph and army integration.
+  # Keep only the newest validation for each ref. Feature branches are validated as PRs to main or by explicit workflow_dispatch,
+  # so intermediate commits do not enqueue a full Windows/Forge/Rust matrix for every small change.
   cancel-in-progress: true
 
 jobs:
@@ -74,6 +84,20 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  atlas-native-linux:
+    name: Atlas native core (Linux x64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test Atlas native core
+        working-directory: mods/atlas/native/maqan-core
+        run: cargo test --locked
+      - name: Build Atlas native core
+        working-directory: mods/atlas/native/maqan-core
+        run: cargo build --release --locked
+
   worldforge-core:
     name: WorldForge core — Forge 47.3.0 (Windows x64)
     runs-on: windows-latest
@@ -100,10 +124,20 @@ jobs:
   worldforge-addons:
     name: WorldForge addons (Windows x64)
     runs-on: windows-latest
-    needs: worldforge-core
+    needs: [worldforge-core, worldforge-native, worldforge-native-linux]
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+      - name: Download native WorldForge simulation core
+        uses: actions/download-artifact@v4
+        with:
+          name: worldforge-worldsim-windows-x64
+          path: mods/worldforge/wfaddons/wf-worldsim/src/main/resources/maqan-native-windows-x86_64
+      - name: Download Linux native WorldForge simulation core
+        uses: actions/download-artifact@v4
+        with:
+          name: worldforge-worldsim-linux-x64
+          path: mods/worldforge/wfaddons/wf-worldsim/src/main/resources/maqan-native-linux-x86_64
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -118,6 +152,29 @@ jobs:
         working-directory: mods/worldforge/wfaddons
         shell: bash
         run: bash tools/build-all.sh ../wfmod
+      - name: Stage complete addon distribution for server smoke test
+        working-directory: mods/worldforge/wfaddons
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          rm -f dist/*.jar
+          expected=$(find . -mindepth 1 -maxdepth 1 -type d -name 'wf-*' | wc -l)
+          mapfile -t addon_jars < <(find wf-* -type f -path '*/build/libs/wf_*.jar' ! -name '*-sources.jar' | sort)
+          if [ "${#addon_jars[@]}" -lt "$expected" ]; then
+            echo "ERROR: expected at least $expected addon jars, found ${#addon_jars[@]}"
+            printf '%s\n' "${addon_jars[@]}"
+            exit 1
+          fi
+          for jar in "${addon_jars[@]}"; do cp "$jar" dist/; done
+          mapfile -t core_jars < <(find ../wfmod/build/libs -maxdepth 1 -type f -name 'worldforge-*.jar' ! -name '*-sources.jar' | sort)
+          if [ "${#core_jars[@]}" -eq 0 ]; then
+            echo "ERROR: WorldForge core jar is missing"
+            exit 1
+          fi
+          for jar in "${core_jars[@]}"; do cp "$jar" dist/; done
+          echo "Staged $(find dist -maxdepth 1 -type f -name '*.jar' | wc -l) jars:"
+          ls -lh dist
       - uses: actions/upload-artifact@v4
         with:
           name: maqan-worldforge-addons-windows-x64
@@ -126,8 +183,8 @@ jobs:
           retention-days: 30
 
   worldforge-runtime-smoke:
-    name: WorldForge — combined Forge server boot (Linux)
-    runs-on: ubuntu-latest
+    name: WorldForge — combined Forge server boot (Windows x64)
+    runs-on: windows-latest
     needs: worldforge-addons
     timeout-minutes: 30
     steps:
@@ -144,6 +201,68 @@ jobs:
         shell: bash
         run: bash mods/worldforge/wfaddons/tools/smoke-server.sh mods/worldforge/wfaddons/dist
 
+  worldforge-addon-isolation:
+    name: WorldForge — per-addon minimal dependency server profiles (Windows x64)
+    runs-on: windows-latest
+    needs: worldforge-addons
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: maqan-worldforge-addons-windows-x64
+          path: mods/worldforge/wfaddons/dist
+      - name: Boot core-only and every addon with its mandatory runtime dependency closure
+        working-directory: mods/worldforge/wfaddons
+        shell: bash
+        run: bash tools/addon-isolation-server.sh dist "$RUNNER_TEMP/maqan-addon-isolation"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: maqan-addon-isolation-server-profiles
+          path: ${{ runner.temp }}/maqan-addon-isolation/
+          if-no-files-found: warn
+          retention-days: 30
+
+  worldforge-autonomous-campaign:
+    name: WorldForge — Planetos autonomous four-generation campaign (Windows x64)
+    runs-on: windows-latest
+    needs: [worldforge-addons, worldforge-runtime-smoke, worldforge-addon-isolation]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: maqan-worldforge-addons-windows-x64
+          path: mods/worldforge/wfaddons/dist
+      - name: Run autonomous campaign on geography-only Planetos
+        working-directory: mods/worldforge/wfaddons
+        shell: bash
+        env:
+          WF_CAMPAIGN_TIMEOUT_SECONDS: "3300"
+        run: bash tools/autonomous-campaign.sh ../wfmod/examples/maps/planetos.worldmap dist "$RUNNER_TEMP/maqan-planetos-campaign"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: maqan-planetos-autonomous-campaign
+          path: ${{ runner.temp }}/maqan-planetos-campaign/
+          if-no-files-found: warn
+          retention-days: 30
+
   worldforge-tests:
     name: WorldForge logic tests (Windows x64)
     runs-on: windows-latest
@@ -157,6 +276,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Install image world generation dependencies
+        run: python -m pip install -r mods/worldforge/wfaddons/tools/image-worldgen/requirements.txt
+      - name: Verify deterministic image-to-worldmap generation
+        working-directory: mods/worldforge/wfaddons/tools/image-worldgen
+        shell: bash
+        run: python image_worldgen.py self-test --output-dir "$RUNNER_TEMP/image-worldgen-self-test"
       - name: Compile and run WorldForge logic tests
         working-directory: mods/worldforge/wfaddons
         shell: bash
@@ -177,6 +302,38 @@ jobs:
       - name: Build WorldForge native core
         working-directory: mods/worldforge/native/worldforge-sim
         run: cargo build --release --target x86_64-pc-windows-msvc
+      - name: Test autonomous WorldForge decision engine
+        working-directory: mods/worldforge/native/worldforge-worldsim
+        run: cargo test --target x86_64-pc-windows-msvc
+      - name: Build autonomous WorldForge decision engine
+        working-directory: mods/worldforge/native/worldforge-worldsim
+        run: cargo build --release --target x86_64-pc-windows-msvc
+      - uses: actions/upload-artifact@v4
+        with:
+          name: worldforge-worldsim-windows-x64
+          path: mods/worldforge/native/worldforge-worldsim/target/x86_64-pc-windows-msvc/release/worldforge_worldsim.dll
+          if-no-files-found: error
+          retention-days: 30
+
+  worldforge-native-linux:
+    name: WorldForge simulation native core (Linux x64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test autonomous WorldForge decision engine
+        working-directory: mods/worldforge/native/worldforge-worldsim
+        run: cargo test
+      - name: Build Linux native library
+        working-directory: mods/worldforge/native/worldforge-worldsim
+        run: cargo build --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: worldforge-worldsim-linux-x64
+          path: mods/worldforge/native/worldforge-worldsim/target/release/libworldforge_worldsim.so
+          if-no-files-found: error
+          retention-days: 30
 
   platform:
     name: MAQAN Platform shell (Windows x64)

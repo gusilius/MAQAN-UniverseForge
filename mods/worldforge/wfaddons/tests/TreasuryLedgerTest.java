@@ -5,6 +5,7 @@ import dev.worldforge.mod.economy.TreasuryService;
 import dev.worldforge.mod.api.TreasuryApi;
 import dev.worldforge.mod.Json;
 import java.util.*;
+import java.io.StringWriter;
 
 public final class TreasuryLedgerTest {
     private static int failures;
@@ -15,6 +16,82 @@ public final class TreasuryLedgerTest {
     private static boolean close(double a,double b) { return Math.abs(a-b)<1e-8; }
 
     public static void main(String[] args) {
+        dev.worldforge.mod.api.DomainMutationRevisions revisions = dev.worldforge.mod.api.WorldForgeApi.revisions();
+        revisions.resetForTests();
+        TreasuryLedger revisionLedger = new TreasuryLedger();
+        long economyBefore = revisions.snapshot().orElseThrow().revision(
+                dev.worldforge.mod.api.DomainMutationRevisions.Domain.ECONOMY_TRADE);
+        revisionLedger.open("revision:account", "revision:account", "silver", 100);
+        long afterOpen = revisions.snapshot().orElseThrow().revision(
+                dev.worldforge.mod.api.DomainMutationRevisions.Domain.ECONOMY_TRADE);
+        ok(afterOpen == economyBefore + 1, "opening account publishes one economy revision");
+        long versionBeforeLimit = revisionLedger.mutationVersion();
+        revisionLedger.setCreditLimit("revision:account", 50);
+        long versionAfterLimit = revisionLedger.mutationVersion();
+        long afterLimit = revisions.snapshot().orElseThrow().revision(
+                dev.worldforge.mod.api.DomainMutationRevisions.Domain.ECONOMY_TRADE);
+        revisionLedger.setCreditLimit("revision:account", 50);
+        ok(afterLimit == afterOpen + 1 && revisions.snapshot().orElseThrow().revision(
+                dev.worldforge.mod.api.DomainMutationRevisions.Domain.ECONOMY_TRADE) == afterLimit
+                && versionAfterLimit > versionBeforeLimit && revisionLedger.mutationVersion() == versionAfterLimit,
+                "credit limit publishes once; mutation version advances only for canonical changes");
+        StringWriter versionedSnapshot = new StringWriter();
+        try {
+            long writtenVersion = revisionLedger.writeJsonVersioned(versionedSnapshot);
+            ok(writtenVersion == versionAfterLimit
+                    && TreasuryLedger.fromJson(versionedSnapshot.toString()).accountCount() == 1,
+                    "versioned streaming snapshot returns the exact revision represented by its bytes");
+        } catch (java.io.IOException ex) { ok(false, "versioned streaming snapshot completes"); }
+        StringWriter escapedString = new StringWriter();
+        try {
+            String fixture = "quote=\" slash=\\ line=\n tab=\t control=" + (char) 1;
+            Json.writeString(escapedString, fixture);
+            ok(escapedString.toString().equals(Json.write(fixture)), "direct JSON string writer preserves canonical escaping");
+        } catch (java.io.IOException ex) { ok(false, "direct JSON string writer completes"); }
+        revisionLedger.open("revision:target", "revision:target", "silver", 0);
+        long beforeTransfer = revisions.snapshot().orElseThrow().revision(
+                dev.worldforge.mod.api.DomainMutationRevisions.Domain.ECONOMY_TRADE);
+        revisionLedger.transferOnce("revision:account", "revision:target", 10,
+                TreasuryLedger.Kind.GRANT, "revision-test", "revision-transfer", 1, "revision test");
+        long afterTransfer = revisions.snapshot().orElseThrow().revision(
+                dev.worldforge.mod.api.DomainMutationRevisions.Domain.ECONOMY_TRADE);
+        ok(afterTransfer == beforeTransfer + 1, "nested transferOnce and transfer publish one economy revision");
+        TreasuryLedger.fromJson(revisionLedger.toJson());
+        ok(revisions.snapshot().orElseThrow().revision(
+                dev.worldforge.mod.api.DomainMutationRevisions.Domain.ECONOMY_TRADE) == afterTransfer,
+                "ledger restore rebuilds state without publishing a live economy mutation");
+
+        TreasuryLedger concurrent = new TreasuryLedger();
+        concurrent.open("concurrent:source", "concurrent:source", "silver", 1000);
+        concurrent.open("concurrent:target", "concurrent:target", "silver", 0);
+        long concurrentBefore = revisions.snapshot().orElseThrow().revision(
+                dev.worldforge.mod.api.DomainMutationRevisions.Domain.ECONOMY_TRADE);
+        java.util.concurrent.atomic.AtomicInteger concurrentSuccess = new java.util.concurrent.atomic.AtomicInteger();
+        java.util.List<Thread> writers = new java.util.ArrayList<>();
+        for (int worker = 0; worker < 4; worker++) {
+            final int workerId = worker;
+            Thread writer = new Thread(() -> {
+                for (int i = 0; i < 25; i++) {
+                    if (concurrent.transfer("concurrent:source", "concurrent:target", 1,
+                            TreasuryLedger.Kind.TRADE, "concurrency", "worker:" + workerId + ":" + i,
+                            i, "concurrent transfer")) concurrentSuccess.incrementAndGet();
+                }
+            });
+            writers.add(writer);
+            writer.start();
+        }
+        for (Thread writer : writers) {
+            try { writer.join(); }
+            catch (InterruptedException ex) { Thread.currentThread().interrupt(); throw new AssertionError(ex); }
+        }
+        long concurrentAfter = revisions.snapshot().orElseThrow().revision(
+                dev.worldforge.mod.api.DomainMutationRevisions.Domain.ECONOMY_TRADE);
+        ok(concurrentSuccess.get() == 100 && close(concurrent.balance("concurrent:source"), 900)
+                        && close(concurrent.balance("concurrent:target"), 100),
+                "concurrent treasury writers serialize without lost transfers or balance corruption");
+        ok(concurrentAfter == concurrentBefore + 100,
+                "each concurrent logical transfer publishes exactly one economy revision");
+
         TreasuryLedger ledger=new TreasuryLedger();
         ledger.open("realm:kingdom","realm:kingdom","silver",1000);
         ledger.open("settlement:capital","settlement:capital","silver",100);
@@ -72,6 +149,79 @@ public final class TreasuryLedgerTest {
                         && close(ledger.account("realm:debt-test").debt,50)
                         && !ledger.account("realm:debt-test").bankrupt,
                 "repayment restores solvency at the credit limit");
+
+        TreasuryLedger rationIndex = new TreasuryLedger();
+        rationIndex.open("stock:settlement:one:food", "settlement:one", "food", 50);
+        rationIndex.open("army:field", "army:field", "food", 0);
+        ok(!rationIndex.hasArmyFieldRationDebit("stock:settlement:one:food"),
+                "army-ration journal index starts empty");
+        ok(rationIndex.withdraw("stock:settlement:one:food", 3, TreasuryLedger.Kind.LOGISTICS,
+                        "army-field-rations", "ration:one", 60, "field rations")
+                        && rationIndex.hasArmyFieldRationDebit("stock:settlement:one:food"),
+                "army field-ration debit is indexed immediately without scanning journal");
+        ok(!rationIndex.hasArmyFieldRationDebit("army:field"),
+                "army ration index only marks the source debit account");
+        TreasuryLedger rationRestored = TreasuryLedger.fromJson(rationIndex.toJson());
+        ok(rationRestored.hasArmyFieldRationDebit("stock:settlement:one:food")
+                        && !rationRestored.hasArmyFieldRationDebit("army:field"),
+                "army field-ration debit index is rebuilt from durable journal on load");
+
+        TreasuryLedger streaming = new TreasuryLedger();
+        streaming.open("streaming:account", "streaming:account", "silver", 1_000_000);
+        boolean streamingEntriesAccepted = true;
+        for (int i = 0; i < 12000; i++) {
+            streamingEntriesAccepted &= streaming.deposit("streaming:account", 1, TreasuryLedger.Kind.PRODUCTION,
+                    "streaming-stress", "streaming:" + i, i, "streamed journal entry");
+        }
+        ok(streamingEntriesAccepted, "large treasury journal stress fixture records every entry");
+        StringWriter streamingWriter = new StringWriter();
+        try {
+            streaming.writeJson(streamingWriter);
+            TreasuryLedger streamingRestored = TreasuryLedger.fromJson(streamingWriter.toString());
+            ok(streamingRestored.journal().size() == streaming.journal().size()
+                            && close(streamingRestored.balance("streaming:account"), 1_012_000),
+                    "large treasury journals stream to JSON and restore without changing balances or receipts");
+        } catch (java.io.IOException ex) {
+            ok(false, "large treasury journal streaming serialization completes");
+        }
+
+        TreasuryLedger scale = new TreasuryLedger();
+        scale.open("scale:account", "scale:account", "silver", 1_000_000);
+        for (int i = 0; i < 100_000; i++)
+            scale.deposit("scale:account", 1, TreasuryLedger.Kind.PRODUCTION, "scale-stress",
+                    "scale:" + i, i, "large campaign ledger");
+        final long[] streamedChars = {0};
+        java.io.Writer countingWriter = new java.io.Writer() {
+            @Override public void write(char[] chars, int off, int len) { streamedChars[0] += len; }
+            @Override public void write(int c) { streamedChars[0]++; }
+            @Override public void write(String value, int off, int len) { streamedChars[0] += len; }
+            @Override public void flush() { }
+            @Override public void close() { }
+        };
+        long benchmarkStarted = System.nanoTime();
+        try {
+            long version = scale.writeJsonVersioned(countingWriter);
+            long elapsedMillis = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - benchmarkStarted);
+            ok(version == scale.mutationVersion() && streamedChars[0] > 10_000_000,
+                    "100k-entry treasury journal streams directly without a giant JSON string");
+            System.out.println("TREASURY_STREAM_BENCHMARK entries=100000 chars=" + streamedChars[0] + " elapsedMs=" + elapsedMillis);
+        } catch (java.io.IOException ex) { ok(false, "100k-entry treasury streaming stress completes"); }
+
+        ok(rationIndex.entriesForAccount("stock:settlement:one:food").size() == 2
+                        && rationIndex.entriesForAccount("stock:settlement:one:food").get(0).kind() == TreasuryLedger.Kind.OPENING
+                        && rationIndex.entriesForAccount("stock:settlement:one:food").get(1).reference().equals("ration:one")
+                        && rationIndex.entriesForReference("stock:settlement:one:food", TreasuryLedger.Kind.LOGISTICS, "ration:one").size() == 1
+                        && rationIndex.hasEntries("stock:settlement:one:food"),
+                "account and reference journal indexes are populated on append");
+        ok(rationRestored.entriesForAccount("stock:settlement:one:food").size() == 2
+                        && rationRestored.entriesForAccount("stock:settlement:one:food").get(0).kind() == TreasuryLedger.Kind.OPENING
+                        && rationRestored.entriesForAccount("stock:settlement:one:food").get(1).reference().equals("ration:one")
+                        && rationRestored.entriesForReference("stock:settlement:one:food", TreasuryLedger.Kind.LOGISTICS, "ration:one").size() == 1
+                        && rationRestored.accountIdsWithPrefix("stock:").contains("stock:settlement:one:food"),
+                "account/reference indexes and account enumeration are rebuilt on restore");
+        ok(close(rationRestored.totalDebits("stock:settlement:one:food", TreasuryLedger.Kind.LOGISTICS,
+                        "army-field-rations"), 3),
+                "debit category aggregates are rebuilt from the durable journal");
 
         TreasuryLedger restored=TreasuryLedger.fromJson(ledger.toJson());
         ok(close(restored.balance("realm:kingdom"),875)&&close(restored.balance("settlement:capital"),225)

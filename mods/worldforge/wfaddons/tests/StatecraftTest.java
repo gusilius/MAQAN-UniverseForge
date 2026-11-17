@@ -32,6 +32,13 @@ public final class StatecraftTest {
                 "titles have holders and a ranked liege hierarchy");
         check(!state.setTitleLiege("crown", "winter_county"), "lower-rank liege is rejected");
         check(!state.setTitleLiege("crown", "crown"), "self-liege is rejected");
+        check(!state.setTitleRank("north_duchy", Statecraft.Rank.KINGDOM)
+                        && !state.setTitleRank("winter_county", Statecraft.Rank.KINGDOM),
+                "realm rank promotion cannot invalidate an existing liege hierarchy");
+        Statecraft.Title frontier = state.createTitle("frontier_rank", "frontier", Statecraft.Rank.COUNTY, "Frontier");
+        check(state.setTitleRank(frontier.id, Statecraft.Rank.KINGDOM)
+                        && frontier.rank == Statecraft.Rank.KINGDOM,
+                "an independent realm title can evolve its canonical rank");
         check(state.addClaim("crown", "c3") && state.inheritTitle("crown", "c1", "c3")
                 && kingdom.holderCharacterId.equals("c3"), "validated Character ID claim transfers a title on succession");
 
@@ -41,16 +48,50 @@ public final class StatecraftTest {
                 "nested vassal contracts are accepted");
         check(!state.setVassalage("north", "winter_county_realm", 0.1, 0.1),
                 "nested vassalage cycle is rejected");
+        check(!state.concedeVassalDemands("north", List.of("north_duchy_realm", "not-a-vassal"))
+                        && state.vassalage("north_duchy_realm").taxShare == 0.2,
+                "liberty demands validate every member before changing any feudal contract");
+        check(state.concedeVassalDemands("north", List.of("north_duchy_realm"))
+                        && Math.abs(state.vassalage("north_duchy_realm").taxShare - 0.15) < 1e-9
+                        && Math.abs(state.vassalage("north_duchy_realm").levyShare - 0.25) < 1e-9
+                        && state.vassalage("north_duchy_realm").loyalty == 65,
+                "accepted liberty demands reduce canonical tribute and levy obligations and restore loyalty");
         check(state.changeLoyalty("north_duchy_realm", -70) == 0
                 && state.changeLoyalty("north_duchy_realm", 25) == 25,
                 "vassal loyalty is clamped and mutable");
         check(state.vassalsOf("north").size() == 1, "liege can enumerate direct vassals");
+        check(state.setSubjectType("north_duchy_realm", Statecraft.SubjectType.TRIBUTARY)
+                        && state.vassalage("north_duchy_realm").autonomy == 82
+                        && state.setSubjectAutonomy("north_duchy_realm", 74)
+                        && !state.setSubjectAutonomy("north_duchy_realm", 101),
+                "tributary status grants broad autonomy and custom autonomy is range-checked");
+        check(state.setSubjectType("north_duchy_realm", Statecraft.SubjectType.PERSONAL_UNION)
+                        && state.vassalage("north_duchy_realm").autonomy == 48,
+                "a personal union is distinct from ordinary feudal vassalage");
+
+        state.vassalage("north_duchy_realm").loyalty = 50;
+        check(state.advanceVassalPolitics(1000, Map.of("north_duchy_realm", 60)) == 0
+                        && state.vassalage("north_duchy_realm").loyalty == 50,
+                "monthly vassal politics establishes its first review baseline without retroactive drift");
+        check(state.advanceVassalPolitics(1030, Map.of("north_duchy_realm", 60)) == 1
+                        && state.vassalage("north_duchy_realm").loyalty == 53,
+                "vassal loyalty rises from ruler relations and protection, with contract burden applied");
+        check(state.advanceVassalPolitics(1030, Map.of("north_duchy_realm", 60)) == 0
+                        && state.vassalage("north_duchy_realm").loyalty == 53,
+                "repeated realm ticks on the same day cannot duplicate a monthly political review");
+        check(state.advanceVassalPolitics(1060, Map.of("north_duchy_realm", -80)) == 1
+                        && state.vassalage("north_duchy_realm").loyalty == 51,
+                "high tax and levy obligations combined with hostile ruler relations reduce vassal loyalty");
 
         // Dynasty and canonical identity references
         Statecraft.Dynasty dynasty = state.registerDynasty("house_stark", "c1");
         check(state.addDynastyMember("house_stark", "c2") && state.addDynastyPrestige("house_stark", 40)
                 && dynasty.members.containsAll(List.of("c1", "c2")) && dynasty.prestige == 40,
                 "dynasty records members by canonical Character ID and prestige");
+        Statecraft.Dynasty cyrillicDynasty = state.registerDynasty("Сервин", "character_servin");
+        check(cyrillicDynasty.houseId.equals("Сервин")
+                        && state.addDynastyMember("Сервин", "character_heir"),
+                "Unicode dynasty names remain valid identifiers and preserve canonical Character references");
 
         // Treasury, tax laws and tribute
         RealmDefs defs = definitions();
@@ -101,9 +142,12 @@ public final class StatecraftTest {
                 "non-aggression treaty blocks a war in either realm ordering");
         state.setTreaty("north", "dorne", Statecraft.Treaty.NON_AGGRESSION, false);
         Statecraft.War war = state.declareWar("north", "dorne", "claim", "c1", 1001);
+        check(state.activeWarBetween("dorne", "north") == war,
+                "active war lookup is symmetric for trade and diplomacy consumers");
         check(state.changeWarScore(war.id, 65) && war.warScore == 65, "war records its casus belli and war score");
         check(state.concludeWar(war.id, Statecraft.WarStatus.ATTACKER_VICTORY, "crown claim recognized", 1100)
-                && war.status == Statecraft.WarStatus.ATTACKER_VICTORY,
+                && war.status == Statecraft.WarStatus.ATTACKER_VICTORY
+                && state.activeWarBetween("north", "dorne") == null,
                 "peace outcome and truce are recorded");
         boolean truceBlocksWar = false;
         try { state.declareWar("north", "dorne", "new_claim", "c1", 1050); }
@@ -132,8 +176,10 @@ public final class StatecraftTest {
         check(restored.inheritanceLaw("north") == Statecraft.InheritanceLaw.COGNATIC
                 && restored.title("crown").holderCharacterId.equals("c3")
                 && restored.war(war.id).status == Statecraft.WarStatus.ATTACKER_VICTORY
-                && restored.plot(plot.id).status == Statecraft.PlotStatus.EXPOSED,
-                "succession, title, war and intrigue state are restored");
+                && restored.plot(plot.id).status == Statecraft.PlotStatus.EXPOSED
+                && restored.lastVassalReviewDay() == 1060
+                && restored.vassalage("north_duchy_realm").loyalty == 51,
+                "succession, title, war, intrigue and monthly vassal politics survive save/load");
         boolean badRateRejected = false;
         try { restored.setTaxRate("north", 2); } catch (IllegalArgumentException expected) { badRateRejected = true; }
         check(badRateRejected, "invalid tax rates are rejected");

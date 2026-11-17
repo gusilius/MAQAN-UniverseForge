@@ -49,6 +49,7 @@ final class CourtCommands {
         String[] v = sim.viewJson(realm, sp.getGameProfile().getName());
         java.util.Map<String, Object> p = new java.util.LinkedHashMap<>();
         p.put("realm", realm); p.put("start", sim.startYear);
+        p.put("realm_projections", dev.worldforge.mod.RealmProjectionCodec.encode(m.titles));
         p.put("roles", new java.util.ArrayList<Object>(dev.worldforge.people.mc.PeopleMod.ROLES_RAW));
         p.put("events", new java.util.ArrayList<Object>(sim.eventSources()));
         p.put("reg", v[0]); p.put("sim", v[1]);

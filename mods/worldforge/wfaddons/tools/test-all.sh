@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Pure Java addon tests. A deterministic synthetic world is generated when no
-# external .worldmap is supplied; no tests are silently skipped for missing data.
+# Pure Java addon logic tests. A synthetic map fixture is supplied only to
+# tests that explicitly need map data; it is not an autonomous world scenario.
 set -euo pipefail
 CORE="${1:-../wfmod}"
 OUT="$(mktemp -d)"
@@ -17,7 +17,7 @@ fi
 CP="$CORE/src/main/java"
 mkdir -p "$OUT/classes"
 mapfile -t SRC < <(find wf-*/src/main/java -name '*.java' -not -path '*/mc/*')
-javac -proc:none -encoding UTF-8 -d "$OUT/classes" -sourcepath "$CP" "${SRC[@]}" tests/*.java
+javac -proc:none -encoding UTF-8 -d "$OUT/classes" -sourcepath "$CP" "${SRC[@]}" tests/*.java tests/support/*.java
 
 passed=0
 failed=0
@@ -31,5 +31,5 @@ for source in tests/*.java; do
   fi
 done
 
-echo "WorldForge tests: passed=$passed skipped=0 failed=$failed"
-[ "$failed" -eq 0 ]
+echo "WorldForge logic tests: passed=$passed skipped=0 failed=$failed"
+[ "$failed" -eq 0 ] || exit 1

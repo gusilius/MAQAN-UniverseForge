@@ -4,6 +4,8 @@ import dev.worldforge.mod.*;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.*;
 import dev.worldforge.court.*;
+import dev.worldforge.settle.ResidentLifeEvents;
+import dev.worldforge.realms.Statecraft;
 
 import java.nio.file.*;
 import java.util.*;
@@ -33,7 +35,85 @@ public class CourtTest {
 
     public static void main(String[] a) throws Exception {
         CourtSim s = build(a[0], 7);
+        int courtPopulationBeforeRepeat = s.reg.size();
+        int repeatCourtCreations = Courts.ensure(s.d, s.ed, s.reg, s.defs, s.names, 7, 300);
+        ok(repeatCourtCreations == 0 && s.reg.size() == courtPopulationBeforeRepeat,
+                "repeated court reconciliation is idempotent and does not duplicate canonical people");
         ok(s.events.size() >= 10, "события загружены из файлов: " + s.events.size());
+
+        // Autonomous polities must enter the same map realm registry and ordinary court office,
+        // not remain invisible to diplomacy/council consumers behind a parallel runtime list.
+        TitleData.Realm emergent = new TitleData.Realm();
+        emergent.id = "emergent-court-test";
+        emergent.name = "Тестовое автономное княжество";
+        emergent.props.put("emergence.virtual", true);
+        s.d.registerRealmProjection(emergent);
+        Character emergentRuler = s.reg.create("Автономный правитель", "Дом Теста", "north", "m", 270);
+        s.reg.appoint(emergentRuler.id, s.defs.ruler().id, Courts.realmPlace(emergent.id));
+        ok(s.d.realmList().contains(emergent) && s.d.realms.get(emergent.id) == emergent
+                        && s.ruler(emergent.id) == emergentRuler,
+                "emergent polity and canonical ruler are visible to the existing CourtSim realm office");
+        List<Object> clientRealmSnapshot = dev.worldforge.mod.RealmProjectionCodec.encode(s.d);
+        ok(s.d.removeRealmProjection(emergent.id) && !s.d.realms.containsKey(emergent.id)
+                        && !s.d.realmList().contains(emergent),
+                "runtime polity projection can be reconciled without leaving a stale realm in the map registry");
+        dev.worldforge.mod.RealmProjectionCodec.apply(s.d, clientRealmSnapshot);
+        TitleData.Realm restoredEmergent = s.d.realms.get(emergent.id);
+        ok(restoredEmergent != null && Boolean.TRUE.equals(restoredEmergent.props.get("emergence.virtual"))
+                        && s.d.realmList().contains(restoredEmergent),
+                "server realm projection payload restores autonomous countries into the client political map registry");
+        s.d.removeRealmProjection(emergent.id);
+
+        // Statecraft mirrors the map's feudal hierarchy, and must release contracts when
+        // the authoritative visible map relationship is removed.
+        Statecraft political = new Statecraft();
+        political.syncMapTitles("court-test", s.d);
+        TitleData.Realm mapVassal = s.d.realmList().stream()
+                .filter(r -> r.overlordId != null && !r.overlordId.isBlank()).findFirst().orElse(null);
+        if (mapVassal == null) {
+            List<TitleData.Realm> freeForContract = s.d.realmList().stream()
+                    .filter(r -> r.overlordId == null && !r.titleKeys.isEmpty()).toList();
+            if (freeForContract.size() >= 2) {
+                s.ed.setOverlord(freeForContract.get(1).id, freeForContract.get(0).id, "vassal");
+                mapVassal = freeForContract.get(1);
+            }
+        }
+        // Re-import after creating a synthetic test relationship above.
+        political.syncMapTitles("court-test", s.d);
+        boolean vassalContractImported = mapVassal != null
+                && political.vassalage(mapVassal.id) != null
+                && political.vassalage(mapVassal.id).liegeRealm.equals(mapVassal.overlordId);
+        ok(vassalContractImported, "map vassal hierarchy imports into the canonical Statecraft contract");
+        if (mapVassal != null) {
+            ok(political.releaseVassal(mapVassal.id) && political.vassalage(mapVassal.id) == null,
+                    "releasing a canonical feudal contract removes its tribute obligation");
+            s.ed.setOverlord(mapVassal.id, null, null);
+            political.syncMapTitles("court-test", s.d);
+            ok(political.vassalage(mapVassal.id) == null,
+                    "a released map relationship does not recreate a stale tribute contract");
+        }
+
+        // Court and settlement clocks share one CharacterRegistry. A birth resolved by either
+        // subsystem must be visible to the other so the same mother cannot give birth twice.
+        boolean sharedBirthGuard = false;
+        for (long seed = 1; seed <= 100 && !sharedBirthGuard; seed++) {
+            CharacterRegistry family = new CharacterRegistry();
+            Character mother = family.create("Мать", "Дом", "north", "f", 270);
+            Character father = family.create("Отец", "Дом", "north", "m", 270);
+            family.marry(mother.id, father.id, 300);
+            CourtSim familyCourt = new CourtSim(s.d, null, family, s.defs, s.names, seed, 300);
+            familyCourt.day = 364;
+            familyCourt.tick(1);
+            if (mother.children.isEmpty()) continue; // choose a deterministic seed that produces the annual birth
+            int childrenAfterCourt = mother.children.size();
+            ok(((Number) mother.props.get("family.last_birth_year")).intValue() == 301,
+                    "court birth publishes the shared family-year marker");
+            ResidentLifeEvents.yearly(family, 301);
+            ok(mother.children.size() == childrenAfterCourt,
+                    "settlement family pass does not duplicate a birth already resolved by court simulation");
+            sharedBirthGuard = true;
+        }
+        ok(sharedBirthGuard, "shared court/settlement family lifecycle produces a reproducible annual birth for integration testing");
 
         // совет
         String realm = null;
@@ -49,6 +129,17 @@ public class CourtTest {
         ok(s.council(realm).get("income_pct") > before, "лучший управляющий даёт больший доход");
         s.syncProps();
         ok(s.d.realms.get(realm).props.get("council.income_pct") instanceof Number, "эффекты записаны в свойства государства");
+        Character rulerForPolicy = s.ruler(realm);
+        ok(rulerForPolicy != null
+                        && s.d.realms.get(realm).props.get("politics.ruler_martial") instanceof Number
+                        && ((Number) s.d.realms.get(realm).props.get("politics.ruler_martial")).doubleValue()
+                        == CharacterStats.value(rulerForPolicy, "martial") / 20.0,
+                "CourtSim publishes ruler attributes from the canonical Character Registry for realm policy decisions");
+        ok(s.d.realms.get(realm).props.get("politics.ruler_trait_greedy") instanceof Number,
+                "ruler personality traits are projected onto the shared realm property bus");
+        ok(s.d.realms.get(realm).props.get("politics.ruler_drive_power") instanceof Number
+                        && s.d.realms.get(realm).props.get("politics.ruler_temperament_ambition") instanceof Number,
+                "ruler motivations and temperament are projected for strategic policy systems");
 
         // мнения
         Character a1 = s.ruler(realm), b1 = steward;
@@ -77,6 +168,104 @@ public class CourtTest {
         t.die(old, "умер");
         Character neu = t.ruler(r2);
         ok(neu != null && neu != old && neu.alive, "у государства новый правитель после смерти");
+        // A child heir receives an automatically selected adult regent from the same court.
+        CourtSim minorCourt = build(a[0], 111);
+        String minorRealm = minorCourt.d.realmList().get(0).id;
+        Character formerRuler = minorCourt.ruler(minorRealm);
+        Character childHeir = minorCourt.reg.create("Малолетний наследник", "Тест", "north", "m", minorCourt.year() - 8);
+        Character adultRegent = minorCourt.reg.holder("chancellor", Courts.realmPlace(minorRealm));
+        formerRuler.children.add(childHeir.id); childHeir.father = formerRuler.id;
+        var politicalRevisionBeforeSuccession = dev.worldforge.mod.api.WorldForgeApi.revisions()
+                .snapshot().orElseThrow()
+                .revision(dev.worldforge.mod.api.DomainMutationRevisions.Domain.REALMS_POLITICS);
+        Succession.onDeath(minorCourt.reg, minorCourt.defs, minorCourt.d, minorCourt.ed, minorCourt.names,
+                112L, formerRuler.id, minorCourt.year(), "primogeniture");
+        var politicalRevisionAfterSuccession = dev.worldforge.mod.api.WorldForgeApi.revisions()
+                .snapshot().orElseThrow()
+                .revision(dev.worldforge.mod.api.DomainMutationRevisions.Domain.REALMS_POLITICS);
+        ok(politicalRevisionAfterSuccession == politicalRevisionBeforeSuccession + 1,
+                "one canonical succession operation advances REALMS_POLITICS exactly once");
+        // Replace every existing ruler post before appointing the fixture heir; appoint() is
+        // additive by design and must not leave two sovereigns in the same court.
+        String rulerRole = minorCourt.defs.ruler().id;
+        String rulerPlace = Courts.realmPlace(minorRealm);
+        for (Character existingRuler : new ArrayList<>(minorCourt.reg.holders(rulerRole, rulerPlace)))
+            minorCourt.reg.dismiss(existingRuler.id, rulerRole, rulerPlace);
+        minorCourt.reg.appoint(childHeir.id, rulerRole, rulerPlace);
+        minorCourt.d.realms.get(minorRealm).ruler = childHeir.name;
+        minorCourt.regencies.clear();
+        List<Character> expectedRegents = minorCourt.regencyCandidates(minorRealm);
+        ok(!expectedRegents.isEmpty(), "the test court has at least one eligible adult regent");
+        adultRegent = expectedRegents.isEmpty() ? adultRegent : expectedRegents.get(0);
+        minorCourt.tick(30);
+        ok(minorCourt.regency(minorRealm) != null
+                        && minorCourt.regency(minorRealm).heir.equals(childHeir.id)
+                        && minorCourt.regency(minorRealm).regent.equals(adultRegent.id),
+                "underage sovereign receives a regent from the existing adult court");
+        String regencySave = minorCourt.toJson();
+        CourtSim minorReload = build(a[0], 112);
+        minorReload.fromJson(regencySave);
+        ok(minorReload.regency(minorRealm) != null
+                        && minorReload.regency(minorRealm).regent.equals(adultRegent.id)
+                        && minorReload.toJson().equals(regencySave),
+                "regency appointment survives deterministic court save/load");
+        String[] regencyView = minorCourt.viewJson(minorRealm);
+        CourtSim clientCourt = new CourtSim(minorCourt.d, null, minorCourt.reg, minorCourt.defs,
+                minorCourt.names, minorCourt.seed, minorCourt.startYear);
+        clientCourt.fromJson(regencyView[1]);
+        ok(clientCourt.regency(minorRealm) != null
+                        && clientCourt.regency(minorRealm).crisis == minorCourt.regency(minorRealm).crisis
+                        && clientCourt.regency(minorRealm).crisisStage == minorCourt.regency(minorRealm).crisisStage,
+                "court client snapshot retains regency crisis pressure and stage");
+        boolean rejectedRegent = false;
+        try { minorCourt.appointRegent(minorRealm, childHeir.id); }
+        catch (TitleEditor.EditException expected) { rejectedRegent = true; }
+        ok(rejectedRegent, "underage ruler cannot appoint themself as regent");
+        Object regencyProjection = minorCourt.d.realms.get(minorRealm).props.get("politics.regency.active");
+        Object regentProjection = minorCourt.d.realms.get(minorRealm).props.get("politics.regency.regent");
+        ok(regencyProjection instanceof Number active && active.intValue() == 1
+                        && adultRegent.globalId.equals(regentProjection),
+                "active regency and its canonical regent UUID are published to the shared realm projection");
+        Object supportProjection = minorCourt.d.realms.get(minorRealm).props.get("politics.regency.council_support");
+        ok(supportProjection instanceof Number votes && votes.intValue() >= 0 && votes.intValue() <= 4
+                        && minorCourt.regencyCouncilSupport(minorRealm, adultRegent) == votes.intValue(),
+                "regent council backing is derived from the existing four canonical council seats");
+        for (Council.Seat seat : Council.seats(minorCourt.reg, minorCourt.defs, minorRealm))
+            if (seat.holder != null && seat.holder != adultRegent)
+                minorCourt.opinions.add(seat.holder.id, adultRegent.id, "Противостояние регенту", -100, minorCourt.year() + 10);
+        minorCourt.tick(30);
+        ok(minorCourt.regency(minorRealm).crisis >= 8
+                        && minorCourt.regency(minorRealm).crisisStage == 0,
+                "divided council gradually increases regency crisis pressure without an instant coup");
+        String crisisSave = minorCourt.toJson();
+        CourtSim crisisReload = build(a[0], 113);
+        crisisReload.fromJson(crisisSave);
+        ok(crisisReload.regency(minorRealm).crisis == minorCourt.regency(minorRealm).crisis,
+                "regency crisis pressure persists through save/load");
+        for (int i = 0; i < 20 && minorCourt.regency(minorRealm).crisisStage < 1; i++) minorCourt.tick(30);
+        ok(minorCourt.regency(minorRealm).crisisStage >= 1,
+                "sustained opposition from the existing royal council escalates into a visible regency crisis");
+        int crisisBeforeCompromise = minorCourt.regency(minorRealm).crisis;
+        for (Council.Seat seat : Council.seats(minorCourt.reg, minorCourt.defs, minorRealm))
+            if (seat.holder != null && seat.holder != adultRegent)
+                minorCourt.opinions.add(seat.holder.id, adultRegent.id, "Поддержка компромисса", 100, minorCourt.year() + 10);
+        ok(minorCourt.negotiateRegencyCrisis(minorRealm)
+                        && minorCourt.regency(minorRealm).crisis < crisisBeforeCompromise,
+                "a council-backed compromise reduces regency crisis pressure through the canonical court");
+        childHeir.birthYear = minorCourt.year() - 17;
+        minorCourt.tick(30);
+        ok(minorCourt.regency(minorRealm) == null
+                        && ((Number) minorCourt.d.realms.get(minorRealm).props.get("politics.regency.active")).intValue() == 0,
+                "regency ends automatically when the sovereign reaches adulthood");
+        TitleData.Title highestRealmTitle = null;
+        for (String key : t.d.realms.get(r2).titleKeys) {
+            TitleData.Title candidate = t.d.findTitle(key);
+            if (candidate != null && (highestRealmTitle == null || candidate.tier > highestRealmTitle.tier))
+                highestRealmTitle = candidate;
+        }
+        Object holderId = highestRealmTitle == null ? null : highestRealmTitle.props.get("holderCharacterId");
+        ok(highestRealmTitle != null && neu.globalId.equals(holderId),
+                "succession publishes the heir's canonical Character UUID to the realm's highest political title");
         ok(t.news.stream().anyMatch(x -> x.contains("Наследует")), "сообщение о наследовании");
 
         // события для игрока
@@ -98,11 +287,53 @@ public class CourtTest {
         fz.ed.setOverlord(v1, liege, "vassal"); fz.ed.setOverlord(v2, liege, "vassal");
         List<String> rebels = new ArrayList<>();
         fz.hooks = new CourtSim.Hooks() { @Override public void independence(String r, String l) { rebels.add(r); } };
-        for (String vv : List.of(v1, v2)) fz.opinions.add(fz.ruler(vv).id, fz.ruler(liege).id, "Обида", -60, 0);
+        for (String vv : List.of(v1, v2)) fz.opinions.add(fz.ruler(vv).id, fz.ruler(liege).id, "Обида", -100, 0);
         fz.tick(30);
         ok(fz.factions.size() == 1 && fz.factions.values().iterator().next().members.size() == 2, "недовольные вассалы собрались во фракцию");
+        fz.syncProps();
+        Object publishedFactionPressure = fz.d.realms.get(liege).props.get("politics.faction_pressure");
+        Object publishedFactionCount = fz.d.realms.get(liege).props.get("politics.faction_count");
+        ok(publishedFactionPressure instanceof Number pressure && pressure.doubleValue() > 0
+                        && publishedFactionCount instanceof Number count && count.intValue() == 1,
+                "CourtSim publishes its actual faction pressure to the shared realm property bus");
         double pw = fz.factions.values().iterator().next().power;
         ok(pw > 0 && pw < 1, "мощь фракции " + Math.round(pw * 100) + "%");
+
+        CourtSim contractLow = build(a[0], 51);
+        contractLow.ed.setOverlord(v1, liege, "vassal");
+        contractLow.opinions.add(contractLow.ruler(v1).id, contractLow.ruler(liege).id, "Обида", -30, 0);
+        contractLow.d.realms.get(v1).props.put("politics.vassal_loyalty", 0);
+        contractLow.tick(30);
+        ok(contractLow.factions.size() == 1,
+                "low feudal contract loyalty can organize a faction before ruler opinion becomes deeply hostile");
+
+        CourtSim contractHigh = build(a[0], 52);
+        contractHigh.ed.setOverlord(v1, liege, "vassal");
+        contractHigh.opinions.add(contractHigh.ruler(v1).id, contractHigh.ruler(liege).id, "Обида", -30, 0);
+        contractHigh.d.realms.get(v1).props.put("politics.vassal_loyalty", 100);
+        contractHigh.tick(30);
+        ok(contractHigh.factions.isEmpty(),
+                "high contractual loyalty moderates faction recruitment under the same ruler opinion");
+
+        CourtSim liberty = build(a[0], 53);
+        liberty.ed.setOverlord(v1, liege, "vassal"); liberty.ed.setOverlord(v2, liege, "vassal");
+        liberty.opinions.add(liberty.ruler(v1).id, liberty.ruler(liege).id, "Налоговые злоупотребления", -35, 0);
+        liberty.opinions.add(liberty.ruler(v2).id, liberty.ruler(liege).id, "Налоговые злоупотребления", -35, 0);
+        List<String> conceded = new ArrayList<>();
+        liberty.hooks = new CourtSim.Hooks() {
+            @Override public boolean vassalDemands(String l, List<String> members) {
+                if (!l.equals(liege)) return false;
+                conceded.addAll(members);
+                return true;
+            }
+        };
+        liberty.tick(30);
+        ok(liberty.factions.size() == 1 && "demands".equals(liberty.factions.values().iterator().next().type),
+                "moderately dissatisfied vassals form a liberty faction before demanding independence");
+        for (int i = 0; i < 200 && conceded.isEmpty(); i++) liberty.tick(30);
+        ok(conceded.size() == 2 && liberty.factions.isEmpty(),
+                "successful liberty ultimatum is resolved by the political-domain adapter, not converted into secession");
+
         int fid = fz.factions.values().iterator().next().id;
         for (int i = 0; i < 200 && rebels.isEmpty(); i++) fz.tick(30);
         ok(rebels.size() == 2, "фракция предъявила ультиматум: " + rebels.size() + " мятежников");
@@ -110,7 +341,7 @@ public class CourtTest {
         // умиротворение и подавление
         CourtSim fy = build(a[0], 5);
         fy.ed.setOverlord(v1, liege, "vassal"); fy.ed.setOverlord(v2, liege, "vassal");
-        fy.opinions.add(fy.ruler(v1).id, fy.ruler(liege).id, "Обида", -60, 0);
+        fy.opinions.add(fy.ruler(v1).id, fy.ruler(liege).id, "Обида", -100, 0);
         fy.tick(30);
         ok(fy.factions.size() == 1, "одна фракция у одного вассала");
         int before1 = fy.opinion(fy.ruler(v1).id, fy.ruler(liege).id);
@@ -155,6 +386,22 @@ public class CourtTest {
         CourtSim x = build(a[0], 33);
         x.fromJson(js);
         ok(x.toJson().equals(js), "сохранение и загрузка двора совпадают");
+        // A geography-only map may have thousands of unowned titles. They must not
+        // receive castellan/villager offices until a realm actually owns their provinces.
+        CourtSim unownedMap = build(a[0], 47);
+        for (TitleData.Realm unownedRealm : unownedMap.d.realmList()) unownedRealm.titleKeys.clear();
+        unownedMap.d.recompute();
+        CharacterRegistry unownedRegistry = new CharacterRegistry();
+        int unownedCreated = Courts.ensure(unownedMap.d, unownedMap.ed, unownedRegistry,
+                unownedMap.defs, unownedMap.names, 47, 300);
+        boolean phantomTitleOffice = unownedRegistry.all().stream()
+                .flatMap(person -> person.posts.stream())
+                .anyMatch(post -> post.place.startsWith("title:"));
+        boolean realmCouncilPresent = unownedMap.d.realmList().stream().allMatch(realmEntry ->
+                !unownedRegistry.holders(unownedMap.defs.ruler().id, Courts.realmPlace(realmEntry.id)).isEmpty());
+        ok(unownedCreated > 0 && !phantomTitleOffice && realmCouncilPresent,
+                "unowned map titles do not generate phantom county/barony people while sovereign realm offices remain active");
+
         System.out.println(fails == 0 ? "ALL OK" : fails + " FAILED");
         if (fails > 0) System.exit(1);
     }

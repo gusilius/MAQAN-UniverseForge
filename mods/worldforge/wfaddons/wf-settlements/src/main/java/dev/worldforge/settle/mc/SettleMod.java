@@ -12,6 +12,7 @@ import dev.worldforge.people.PopulationSimulation;
 import dev.worldforge.people.LifeSimulation;
 import dev.worldforge.mod.WorldForgeMod;
 import dev.worldforge.mod.MapChunkGenerator;
+import dev.worldforge.mod.api.SimulationLod;
 import dev.worldforge.mod.economy.TreasuryLedger;
 import dev.worldforge.mod.economy.TreasuryService;
 import dev.worldforge.people.PopulationSimulation.Duty;
@@ -48,10 +49,7 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -110,6 +108,10 @@ public class SettleMod {
         MinecraftForge.EVENT_BUS.register(new BuildingSite.Events());
         MinecraftForge.EVENT_BUS.register(new ResidentInteraction());
         MinecraftForge.EVENT_BUS.register(new TaxService());
+        MinecraftForge.EVENT_BUS.register(new VanillaVillageAdapter());
+        MinecraftForge.EVENT_BUS.register(new SettlementCaravans());
+        // Political title transfers must update the same physical settlement records.
+        dev.worldforge.mod.api.WorldForgeApi.addChangeListener(SettleMod::reconcilePoliticalOwnership);
     }
 
     @net.minecraftforge.fml.common.Mod.EventBusSubscriber(modid = MOD_ID,
@@ -142,7 +144,8 @@ public class SettleMod {
             dev.worldforge.mod.TitleData.Title province = map.provinceAt(colony.cx, colony.cz);
             dev.worldforge.mod.TitleData.Realm realm = province == null || map.titles == null
                     ? null : map.titles.realmOf(province);
-            String realmId = realm == null ? "" : realm.id;
+            String realmId = colony.realmId != null && !colony.realmId.isBlank()
+                    ? colony.realmId : realm == null ? "" : realm.id;
             String raceId = realm == null ? "" : propertyString(realm.props, "race");
             String cultureId = realm == null ? "" : propertyString(realm.props, "culture");
             String provinceFeatureId = province == null ? "" :
@@ -150,7 +153,8 @@ public class SettleMod {
             int y = level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
                     colony.cx, colony.cz);
             Map<String, String> attrs = new java.util.LinkedHashMap<>();
-            attrs.put("population", Integer.toString(colony.s.workers.size()));
+            attrs.put("population", Integer.toString(colony.s.population()));
+            attrs.put("workforce", Integer.toString(colony.s.workers.size()));
             attrs.put("housing", Integer.toString(colony.s.housing()));
             attrs.put("settlement_type", colony.s.typeId == null ? "" : colony.s.typeId);
             attrs.put("owner_assigned", Boolean.toString(colony.owner != null && !colony.owner.isBlank()));
@@ -270,6 +274,42 @@ public class SettleMod {
                 features.add(roadFeature);
             }
         }
+
+        // Active settlement consignments are projected onto the same Atlas world snapshot as roads and settlements.
+        for (dev.worldforge.settle.TradeNetwork.Shipment shipment : NETWORK.shipments.values()) {
+            if (!shipment.physical() || !dimension.equals(shipment.fromDimension)
+                    || !(shipment.status.equals("в пути") || shipment.status.equals("ожидает места")
+                    || shipment.status.equals("ожидает расчёта"))) continue;
+            double[][] route = shipment.path();
+            if (route.length < 2) route = new double[][]{{shipment.fromX,shipment.fromZ},{shipment.toX,shipment.toZ}};
+            List<Object> path = new ArrayList<>();
+            for (double[] point : route) {
+                int px=(int)Math.floor(point[0]), pz=(int)Math.floor(point[1]);
+                int py=level.hasChunkAt(new net.minecraft.core.BlockPos(px,level.getMinBuildHeight(),pz))
+                        ? level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,px,pz) : 64;
+                path.add(atlasVertex(point[0],py+0.15,point[1]));
+            }
+            double[] head = SettlementCaravans.routePositionForSnapshot(route, shipment.progress(),
+                    shipment.fromX, shipment.fromZ, shipment.toX, shipment.toZ);
+            int hx=(int)Math.floor(head[0]), hz=(int)Math.floor(head[1]);
+            int hy=level.hasChunkAt(new net.minecraft.core.BlockPos(hx,level.getMinBuildHeight(),hz))
+                    ? level.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,hx,hz) : 64;
+            Map<String,String> attrs=new LinkedHashMap<>();
+            attrs.put("shipment_id",Long.toString(shipment.id));
+            attrs.put("route_id",Integer.toString(shipment.routeId));
+            attrs.put("from_settlement",shipment.from);
+            attrs.put("to_settlement",shipment.to);
+            attrs.put("resource",shipment.res);
+            attrs.put("quantity",Double.toString(shipment.quantity));
+            attrs.put("progress",Double.toString(shipment.progress()));
+            attrs.put("remaining_seconds",Double.toString(shipment.remainingSeconds()));
+            attrs.put("status",shipment.status);
+            Map<String,Object> feature=atlasFeature("worldforge:shipment:"+shipment.id,
+                    "trade_caravan","Caravan "+shipment.id,dimension,head[0],hy,head[1],
+                    "",shipment.res,attrs);
+            feature.put("path",path);
+            features.add(feature);
+        }
     }
 
     private static Map<String,Object> atlasVertex(double x,double y,double z) {
@@ -318,6 +358,7 @@ public class SettleMod {
     }
 
     public static String realmOf(Colony c) {
+        if (c != null && c.realmId != null && !c.realmId.isBlank()) return c.realmId;
         try {
             for (dev.worldforge.mod.MapData m : dev.worldforge.mod.WorldForgeMod.loadedMaps().values()) {
                 if (m.titles == null) continue;
@@ -328,6 +369,31 @@ public class SettleMod {
             }
         } catch (RuntimeException ex) { /* карта ещё не загружена */ }
         return "";
+    }
+
+    /** Optional bridge to wf-trade's existing province-graph caravan planner; no duplicate route graph. */
+    private static double[][] planShipmentPath(String from, String to,
+            dev.worldforge.settle.TradeNetwork.Location origin,
+            dev.worldforge.settle.TradeNetwork.Location destination) {
+        if (origin == null || destination == null || !origin.dimension().equals(destination.dimension()))
+            return new double[0][];
+        Colony a = COLONIES.get(from), b = COLONIES.get(to);
+        if (a == null || b == null) return new double[][]{{origin.x(), origin.z()}, {destination.x(), destination.z()}};
+        try {
+            Class<?> worldLayer = Class.forName("dev.worldforge.trade.mc.WorldLayer");
+            MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+            ServerLevel sourceLevel = server == null ? null : a.level(server);
+            ServerLevel destinationLevel = server == null ? null : b.level(server);
+            String sourceRealm = sourceLevel == null ? realmOf(a) : realmOf(a, sourceLevel);
+            String destinationRealm = destinationLevel == null ? realmOf(b) : realmOf(b, destinationLevel);
+            Object result = worldLayer.getMethod("settlementRoute", String.class, String.class,
+                    double.class, double.class, double.class, double.class)
+                    .invoke(null, sourceRealm, destinationRealm, origin.x(), origin.z(), destination.x(), destination.z());
+            if (result instanceof double[][] path && path.length >= 2) return path;
+        } catch (ReflectiveOperationException | LinkageError ignored) {
+            // wf-trade is optional. Keep the shipment functional with a direct strategic route.
+        }
+        return new double[][]{{origin.x(), origin.z()}, {destination.x(), destination.z()}};
     }
 
     public static Colony colony(String id) { return COLONIES.get(id); }
@@ -400,8 +466,8 @@ public class SettleMod {
             if (amount <= 1e-9) continue;
             String referenceStem = referencePrefix + ":" + colony.s.id;
             String sourceAccount = colony.s.ledgerAccountId("food");
-            long previousLegs = TreasuryService.current().journal().stream()
-                    .filter(entry -> entry.accountId().equals(sourceAccount) && !entry.credit()
+            long previousLegs = TreasuryService.current().entriesForAccount(sourceAccount).stream()
+                    .filter(entry -> !entry.credit()
                             && entry.kind() == TreasuryLedger.Kind.LOGISTICS
                             && entry.category().equals("army-field-rations")
                             && entry.reference().startsWith(referenceStem + ":"))
@@ -482,19 +548,75 @@ public class SettleMod {
         return site != null && site.colony().s.spend(cost);
     }
 
+    /** Crash-replay-safe recruitment debit. Treasury journal is committed before the settlement projection. */
+    public static boolean payRecruitmentOnce(String colonyId, java.util.Map<String, Integer> cost,
+                                             String operationId, MinecraftServer server) {
+        if (server == null || colonyId == null || colonyId.isBlank()
+                || operationId == null || operationId.isBlank() || actionsBlocked()) return false;
+        Colony colony = COLONIES.get(colonyId);
+        if (colony == null || colony.s == null) return false;
+        if (!colony.s.spendOnce(cost, operationId)) return false;
+        if (!WorldForgeMod.saveTreasuryNow(server)) {
+            colony.actionPersistenceBlocked = true;
+            LOGGER.error("wf_settle: recruitment debit {} is in memory but treasury persistence failed; settlement actions paused",
+                    operationId);
+            return false;
+        }
+        if (!saveDurably(server)) {
+            colony.actionPersistenceBlocked = true;
+            LOGGER.error("wf_settle: recruitment debit {} is in treasury but settlement snapshot failed; settlement actions paused",
+                    operationId);
+            return false;
+        }
+        return true;
+    }
+
     /** Rolls back a just-paid recruitment batch if its second payment leg fails. */
     public static void refundRecruitment(RecruitmentSite site, java.util.Map<String, Integer> cost) {
         if (site == null || cost == null) return;
         for (var entry : cost.entrySet()) site.colony().s.add(entry.getKey(), entry.getValue());
     }
 
+    /** Resolve the canonical realm owning the exact map pixel under a proposed founding site. */
+    private static String politicalOwnerAt(ServerLevel level, int x, int z) {
+        if (level == null || !(level.getChunkSource().getGenerator() instanceof MapChunkGenerator generator))
+            return "";
+        dev.worldforge.mod.MapData map = generator.data();
+        if (map == null || map.titles == null) return "";
+        dev.worldforge.mod.TitleData.Title province = map.provinceAt(x, z);
+        dev.worldforge.mod.TitleData.Realm owner = province == null ? null : map.titles.realmOf(province);
+        return owner == null || owner.id == null ? "" : owner.id;
+    }
+
+    /**
+     * A player cannot establish a new colony inside another realm by simply placing
+     * a settlement marker. Legal grants must be wired to a canonical political
+     * permission/charter before any bypass can be exposed.
+     */
+    private static void requireFoundingTerritoryPermission(ServerLevel level, String name, BlockPos position) {
+        String owner = politicalOwnerAt(level, position.getX(), position.getZ());
+        if (owner.isBlank()) return;
+        String settlementName = name == null || name.isBlank() ? "новое поселение" : name.trim();
+        dev.worldforge.mod.api.WorldForgeApi.postEvent("diplomacy",
+                "Попытка основания поселения «" + settlementName + "» на территории государства "
+                        + owner + " пресечена пограничной властью",
+                List.of(owner), dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute());
+        throw new IllegalStateException("Эта земля принадлежит государству " + owner
+                + ". Основание поселения требует разрешения владельца или законного изменения границы.");
+    }
+
     /** Закладывает поселение: 4 рабочих, склад дерево 60 / еда 40 / камень 10. */
     public static Colony found(ServerLevel lv, String name, BlockPos p) {
-        return found(lv, name, p, "");
+        return foundInternal(lv, name, p, "");
     }
 
     /** Idempotent Genesis-aware variant. The same operation always resolves to the same colony. */
     public static Colony found(ServerLevel lv, String name, BlockPos p, String genesisOperationId) {
+        return foundInternal(lv, name, p, genesisOperationId);
+    }
+
+    private static Colony foundInternal(ServerLevel lv, String name, BlockPos p,
+                                        String genesisOperationId) {
         String dimension = lv.dimension().location().toString();
         if (genesisOperationId != null && !genesisOperationId.isBlank()) {
             for (Colony existing : COLONIES.values()) {
@@ -504,6 +626,9 @@ public class SettleMod {
                         + " is already bound to dimension " + existing.dim + " and cannot create a second colony in " + dimension);
             }
         }
+        // Check only after idempotent replay has been resolved: a committed founding
+        // remains recoverable even if borders changed after the original operation.
+        requireFoundingTerritoryPermission(lv, name, p);
         String base = name.toLowerCase(Locale.ROOT).replaceAll("[^\\p{L}\\p{N}]+", "_").replaceAll("^_+|_+$", "");
         if (base.isEmpty()) base = "settlement";
         String id = base;
@@ -520,6 +645,458 @@ public class SettleMod {
         c.captureTerrain(lv);
         COLONIES.put(id, c);
         return c;
+    }
+
+    /** Creates a map-first settlement without fabricated workers, stock or buildings. */
+    public static Colony foundEmergent(MinecraftServer server, String dimension, String id, String name,
+                                       int x, int z, String operationId) {
+        Colony existing = COLONIES.get(id);
+        Colony colony = foundEmergentInMemory(server, dimension, id, name, x, z, operationId);
+        if (existing == null && !saveDurably(server)) {
+            COLONIES.remove(id, colony);
+            throw new IllegalStateException("Could not durably persist emergent settlement " + id);
+        }
+        return colony;
+    }
+
+    /** Creates a deterministic settlement projection in memory; caller batches one durable snapshot per map. */
+    public static Colony foundEmergentInMemory(MinecraftServer server, String dimension, String id, String name,
+                                                int x, int z, String operationId) {
+        if (server == null || DEFS == null) throw new IllegalStateException("Settlement definitions are not ready");
+        if (id == null || !id.matches("[a-z0-9_:-]{3,96}")) throw new IllegalArgumentException("Invalid emergent settlement id");
+        String dim = dimension == null || dimension.isBlank() ? server.overworld().dimension().location().toString() : dimension;
+        Colony existing = COLONIES.get(id);
+        if (existing != null) {
+            if (!Objects.equals(existing.genesisOperationId, operationId) || !Objects.equals(existing.dim, dim))
+                throw new IllegalStateException("Emergent settlement identity collision: " + id);
+            return existing;
+        }
+        Settlement settlement = new Settlement(id, name == null || name.isBlank() ? id : name, DEFS);
+        settlement.setLedgerScope(dim);
+        settlement.types = TYPES;
+        Colony colony = new Colony(settlement, dim, x, z);
+        colony.genesisOperationId = operationId == null ? "" : operationId;
+        COLONIES.put(id, colony);
+        LOGGER.info("wf_settle: map-first settlement staged id={} dim={} x={} z={} (no synthetic workers or stock)",
+                id, dim, x, z);
+        return colony;
+    }
+
+
+    /**
+     * Turns a map-first emergent settlement into a real, economically-backed village
+     * when it enters the local physical LOD. The normal Settlement, BuildingSite and
+     * WFWorker systems perform construction; this method only submits idempotent
+     * founding stock and building orders. It never creates a parallel population.
+     */
+    private static boolean ensureFoundingStock(Colony colony, String resource, double amount, String operationId,
+                                                TreasuryLedger.Kind kind, Set<String> newlyPosted) {
+        String reference = "worldgen:" + colony.s.id + ":" + operationId + ":" + resource;
+        TreasuryLedger ledger = TreasuryService.current();
+        boolean alreadyPosted = ledger.hasTransaction(colony.s.ledgerAccountId(resource), kind, reference);
+        boolean accepted = colony.s.addOnce(resource, amount, operationId);
+        if (accepted && !alreadyPosted) newlyPosted.add(reference);
+        return accepted;
+    }
+
+    /** Select a deterministic sampled buildable site; the search never loads chunks. */
+    private static int[] findAutonomousBuildSite(Colony colony, String definitionId,
+                                                  int preferredX, int preferredZ, int radius,
+                                                  boolean preferFertile, boolean preferForest) {
+        Defs.Building definition = colony.s.defs.buildings.get(definitionId);
+        if (definition == null) return null;
+        int[] best = null;
+        double bestScore = Double.POSITIVE_INFINITY;
+        for (dev.worldforge.settle.SettlementMap.Cell cell : colony.map.cells()) {
+            int x = cell.x(), z = cell.z();
+            int dx = x - preferredX, dz = z - preferredZ;
+            int distance = dx * dx + dz * dz;
+            if (distance > radius * radius || cell.water) continue;
+            try {
+                colony.map.validatePlacement(definition.category, x, z, definition.sizeX, definition.sizeZ);
+            } catch (IllegalArgumentException unsuitable) {
+                continue;
+            }
+            if (colony.s.placeError(definitionId, x, z) != null) continue;
+            double score = distance + cell.slope * 96.0;
+            if (preferFertile) score -= cell.fertility * 180.0;
+            if (preferForest) {
+                String biome = cell.biome == null ? "" : cell.biome.toLowerCase(Locale.ROOT);
+                score += biome.contains("forest") || biome.contains("wood") ? -220.0 : 140.0;
+            }
+            if (score < bestScore || (score == bestScore && (best == null || x < best[0]
+                    || (x == best[0] && z < best[1])))) {
+                bestScore = score;
+                best = new int[]{x, z};
+            }
+        }
+        return best;
+    }
+
+    /**
+     * Adds one residential building only when canonical demographic pressure, food security,
+     * public approval and the shared stock ledger all support expansion. Pending houses are
+     * counted so repeated local ticks cannot queue an unbounded housing backlog.
+     */
+    private static boolean ensureAutonomousHousingGrowth(Colony colony) {
+        if (colony == null || colony.s == null) return false;
+        Settlement settlement = colony.s;
+        if (!settlement.hasCanonicalPopulation() || !settlement.defs.buildings.containsKey("house")) return false;
+        int completed = settlement.count("house", true);
+        int planned = Math.max(0, settlement.count("house", false) - completed);
+        int projectedHousing = settlement.housing() + planned * settlement.defs.buildings.get("house").housing;
+        int population = settlement.population();
+        if (population < Math.max(1, projectedHousing - 2)) return false;
+        if (settlement.approval() < Settlement.APPROVAL_GROWTH_MIN) return false;
+        double food = settlement.amount("food");
+        double foodNet = settlement.producedPerMin("food") - settlement.consumedPerMin("food");
+        if (food < Math.max(40, population * 1.5) || foodNet < -1e-6) return false;
+        if (settlement.amount("wood") < settlement.defs.buildings.get("house").cost.getOrDefault("wood", 0)) return false;
+
+        int ordinal = settlement.count("house", false);
+        String request = "wfworldgen.expansion.house." + ordinal;
+        if (settlement.placement(request) != null) return false;
+        int ring = 28 + (ordinal / 8) * 16;
+        int[][] anchors = {{-ring, -ring / 2}, {-ring / 2, -ring}, {ring / 2, -ring},
+                {ring, -ring / 2}, {ring, ring / 2}, {ring / 2, ring},
+                {-ring / 2, ring}, {-ring, ring / 2}};
+        int[] anchor = anchors[ordinal % anchors.length];
+        int[] site = findAutonomousBuildSite(colony, "house", anchor[0], anchor[1],
+                Math.max(36, ring + 20), false, false);
+        if (site == null) return false;
+        int before = settlement.count("house", false);
+        settlement.placeOnce(request, "house", site[0], site[1]);
+        return settlement.count("house", false) > before;
+    }
+
+    /**
+     * Adds at most one production building per reconciliation pass when the settlement's
+     * actual stock and consumption show a persistent bottleneck. Recipes, staffing, storage,
+     * prices and upkeep remain owned by the existing Defs/Settlement economy.
+     */
+    private static boolean ensureEconomicSpecialization(Colony colony) {
+        if (colony == null || colony.s == null || !colony.s.hasCanonicalPopulation()) return false;
+        Settlement settlement = colony.s;
+        int population = settlement.population();
+        if (population < 8 || settlement.approval() < Settlement.APPROVAL_GROWTH_MIN) return false;
+
+        String candidate = null;
+        int preferredX = 0, preferredZ = 0;
+        boolean preferForest = false;
+
+        // Stone is a common construction bottleneck; do not add extraction while reserves recover.
+        if (settlement.defs.buildings.containsKey("stone_quarry")
+                && settlement.count("stone_quarry", false) == 0
+                && settlement.amount("stone") < Math.max(24, population * 0.8)
+                && settlement.producedPerMin("stone") <= settlement.consumedPerMin("stone") + 0.05) {
+            candidate = "stone_quarry";
+            preferredX = 34;
+            preferredZ = -24;
+        }
+
+        // Convert surplus timber into planks only when raw wood remains safely above reserve.
+        if (candidate == null && settlement.defs.buildings.containsKey("sawmill")
+                && settlement.count("sawmill", false) == 0
+                && settlement.amount("planks") < Math.max(18, population * 0.45)
+                && settlement.amount("wood") >= Math.max(60, population * 2.0)
+                && settlement.producedPerMin("planks") <= settlement.consumedPerMin("planks") + 0.05) {
+            candidate = "sawmill";
+            preferredX = -36;
+            preferredZ = -24;
+            preferForest = true;
+        }
+
+        if (candidate == null) return false;
+        String requestId = "wfworldgen.specialization." + candidate;
+        if (settlement.placement(requestId) != null) return false;
+        int[] site = findAutonomousBuildSite(colony, candidate, preferredX, preferredZ,
+                64, false, preferForest);
+        if (site == null) return false;
+        int before = settlement.count(candidate, false);
+        settlement.placeOnce(requestId, candidate, site[0], site[1]);
+        return settlement.count(candidate, false) > before;
+    }
+
+    /** Connects every autonomous building to the civic hub using the existing A* road graph. */
+    private static boolean ensureAutonomousRoads(Colony colony) {
+        if (colony == null || colony.s == null || colony.s.buildings.isEmpty()) return false;
+        Building hub = colony.s.buildings.stream()
+                .filter(b -> b != null && b.def != null && b.def.id.equals("village_hall"))
+                .min(java.util.Comparator.comparingInt(b -> b.uid)).orElse(null);
+        if (hub == null) return false;
+        int hubX = hub.x;
+        int hubZ = hub.z + Math.max(4, hub.def.sizeZ / 2 + 4);
+        boolean changed = false;
+        List<Building> buildings = new ArrayList<>(colony.s.buildings);
+        buildings.sort(java.util.Comparator.comparingInt(b -> b.uid));
+        for (Building building : buildings) {
+            if (building == null || building.def == null || building.uid == hub.uid) continue;
+            int accessX = building.x;
+            int accessZ = building.z + Math.max(4, building.def.sizeZ / 2 + 4);
+            if (colony.map.hasRoadBetween(hubX, hubZ, accessX, accessZ)) continue;
+            try {
+                colony.map.addInfrastructureRoad(hubX, hubZ, accessX, accessZ);
+                changed = true;
+            } catch (IllegalArgumentException terrainNotReady) {
+                // Incomplete terrain samples are normal during streaming generation; retry next local tick.
+            }
+        }
+        return changed;
+    }
+
+    /**
+     * Turns a map-first emergent settlement into a physically grounded village when it enters
+     * local LOD. The layout is chosen from real sampled Minecraft terrain; canonical domain
+     * systems remain the only owners of stock, buildings and people.
+     */
+    public static boolean ensureAutonomousInfrastructure(MinecraftServer server, String settlementId) {
+        Colony colony = COLONIES.get(settlementId);
+        if (server == null || colony == null || colony.s == null
+                || colony.genesisOperationId == null
+                || !colony.genesisOperationId.startsWith("worldsim:settlement:")) return false;
+        if (!SimulationLod.shouldMaterializeSettlement(colony.dim, colony.cx, colony.cz)) return false;
+        ServerLevel level = colony.level(server);
+        if (level == null) return false;
+        BlockPos probe = new BlockPos(colony.cx, level.getMinBuildHeight(), colony.cz);
+        if (!level.hasChunkAt(probe)) return false;
+
+        Settlement settlement = colony.s;
+        if (colony.autonomousFoundingPopulation <= 0) {
+            colony.autonomousFoundingPopulation = Math.max(1, settlement.population());
+            if (!saveDurably(server)) {
+                colony.autonomousFoundingPopulation = 0;
+                colony.actionPersistenceBlocked = true;
+                LOGGER.error("wf_settle: founding population snapshot for {} could not be persisted; settlement frozen for recovery",
+                        settlementId);
+                return false;
+            }
+        }
+        int foundingPopulation = colony.autonomousFoundingPopulation;
+        int households = Math.max(1, Math.min(12, (foundingPopulation + 3) / 4));
+        Set<String> newlyPostedStock = new LinkedHashSet<>();
+        try {
+            // Capture only loaded terrain. Missing cells are not guessed and are retried later.
+            colony.captureTerrain(level, -48, -48, 48, 48);
+            boolean validStock = true;
+            validStock &= ensureFoundingStock(colony, "wood", 35, "founding-core",
+                    TreasuryLedger.Kind.IMPORT, newlyPostedStock);
+            validStock &= ensureFoundingStock(colony, "food",
+                    Math.max(80, Math.min(500, foundingPopulation * 4.0)), "founding-food",
+                    TreasuryLedger.Kind.IMPORT, newlyPostedStock);
+            validStock &= ensureFoundingStock(colony, "stone", 20, "founding-stone",
+                    TreasuryLedger.Kind.IMPORT, newlyPostedStock);
+            if (!validStock) {
+                // Earlier resource postings may already have succeeded; persist them before
+                // returning so a later retry cannot leave an in-memory-only ledger mutation.
+                if (!newlyPostedStock.isEmpty() && !WorldForgeMod.saveTreasuryNow(server)) {
+                    colony.actionPersistenceBlocked = true;
+                    LOGGER.error("wf_settle: partial founding stock for {} could not be persisted; settlement frozen for recovery",
+                            settlementId);
+                }
+                return false;
+            }
+
+            int[][] preferredHouses = {
+                    {-12, -8}, {-4, -12}, {4, -12}, {12, -8},
+                    {-12, 4}, {-4, 12}, {4, 12}, {12, 4},
+                    {-20, -8}, {20, -8}, {-20, 8}, {20, 8}
+            };
+            boolean changed = false;
+            // Establish the civic/storage spine first: dependent village facilities can
+            // only be placed after the hall has a durable domain building record.
+            if (settlement.defs.buildings.containsKey("village_hall")
+                    && settlement.placement("wfworldgen.village-hall") == null) {
+                int[] site = findAutonomousBuildSite(colony, "village_hall", 0, 0, 20, false, false);
+                if (site != null) {
+                    int before = settlement.count("village_hall", false);
+                    settlement.placeOnce("wfworldgen.village-hall", "village_hall", site[0], site[1]);
+                    changed |= settlement.count("village_hall", false) > before;
+                }
+            }
+            if (settlement.defs.buildings.containsKey("village_granary")
+                    && settlement.placement("wfworldgen.village-granary") == null) {
+                int[] site = findAutonomousBuildSite(colony, "village_granary", 12, 8, 30, false, false);
+                if (site != null) {
+                    int before = settlement.count("village_granary", false);
+                    settlement.placeOnce("wfworldgen.village-granary", "village_granary", site[0], site[1]);
+                    changed |= settlement.count("village_granary", false) > before;
+                }
+            }
+            if (settlement.defs.buildings.containsKey("farm_district")
+                    && settlement.placement("wfworldgen.farm-district") == null) {
+                int[] site = findAutonomousBuildSite(colony, "farm_district", 30, 16, 44, true, false);
+                if (site != null) {
+                    int before = settlement.count("farm_district", false);
+                    settlement.placeOnce("wfworldgen.farm-district", "farm_district", site[0], site[1]);
+                    changed |= settlement.count("farm_district", false) > before;
+                }
+            }
+            if (settlement.defs.buildings.containsKey("house")) {
+                for (int i = 0; i < households; i++) {
+                    String request = "wfworldgen.house." + i;
+                    if (settlement.placement(request) != null) continue;
+                    int[] site = findAutonomousBuildSite(colony, "house",
+                            preferredHouses[i][0], preferredHouses[i][1], 24, false, false);
+                    if (site == null) continue;
+                    if (!ensureFoundingStock(colony, "wood", 20, "house-stock-" + i,
+                            TreasuryLedger.Kind.IMPORT, newlyPostedStock)) continue;
+                    int before = settlement.count("house", false);
+                    settlement.placeOnce(request, "house", site[0], site[1]);
+                    changed |= settlement.count("house", false) > before;
+                }
+            }
+            if (settlement.defs.buildings.containsKey("farm")
+                    && settlement.placement("wfworldgen.farm") == null) {
+                int[] site = findAutonomousBuildSite(colony, "farm", 24, 0, 44, true, false);
+                if (site != null) {
+                    int before = settlement.count("farm", false);
+                    settlement.placeOnce("wfworldgen.farm", "farm", site[0], site[1]);
+                    changed |= settlement.count("farm", false) > before;
+                }
+            }
+            if (settlement.defs.buildings.containsKey("lumber_camp")
+                    && settlement.placement("wfworldgen.lumber") == null) {
+                int[] site = findAutonomousBuildSite(colony, "lumber_camp", -24, 0, 44, false, true);
+                if (site != null) {
+                    int before = settlement.count("lumber_camp", false);
+                    settlement.placeOnce("wfworldgen.lumber", "lumber_camp", site[0], site[1]);
+                    changed |= settlement.count("lumber_camp", false) > before;
+                }
+            }
+
+            // Demographic expansion uses canonical population and existing economy/housing definitions.
+            changed |= ensureAutonomousHousingGrowth(colony);
+
+            // Economic specialization responds to real stock pressure, not a fixed town template.
+            changed |= ensureEconomicSpecialization(colony);
+
+            // The A* road graph is authoritative; RoadSite materializes these routes only in local LOD.
+            changed |= ensureAutonomousRoads(colony);
+
+            if (!newlyPostedStock.isEmpty() && !WorldForgeMod.saveTreasuryNow(server)) {
+                colony.actionPersistenceBlocked = true;
+                LOGGER.error("wf_settle: autonomous founding stock for {} could not be persisted; settlement frozen for recovery",
+                        settlementId);
+                return false;
+            }
+            if (changed) {
+                if (!saveDurably(server)) {
+                    colony.actionPersistenceBlocked = true;
+                    LOGGER.error("wf_settle: autonomous building plan for {} could not be persisted; settlement frozen for recovery",
+                            settlementId);
+                    return false;
+                }
+                List<String> realms = colony.realmId == null || colony.realmId.isBlank()
+                        ? List.of() : List.of(colony.realmId);
+                dev.worldforge.mod.api.WorldForgeApi.postEvent("settlement",
+                        settlement.name + " begins terrain-adapted physical founding: housing, food production and timber work",
+                        realms, dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute());
+                LOGGER.info("wf_settle: terrain-adapted founding orders committed id={} population={} households={} houses={} farm={} timber={}",
+                        settlementId, foundingPopulation, households, settlement.count("house", false),
+                        settlement.count("farm", false), settlement.count("lumber_camp", false));
+            }
+            return changed || !newlyPostedStock.isEmpty();
+        } catch (Settlement.OrderException | IllegalStateException failure) {
+            LOGGER.debug("wf_settle: autonomous site {} is not ready for physical founding yet: {}",
+                    settlementId, failure.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * A title transfer is authoritative for settlements located inside that province.
+     * Reconcile persisted colony ownership against the map's canonical province graph;
+     * never keep a stale realmId that would make physical settlements ignore conquest,
+     * independence or a later border edit.
+     */
+    private static void reconcilePoliticalOwnership(dev.worldforge.mod.api.MapChange change) {
+        if (change == null || change.data == null || COLONIES.isEmpty()) return;
+        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+        if (server == null) return;
+        Map<String, String> before = new LinkedHashMap<>();
+        for (ServerLevel level : server.getAllLevels()) {
+            if (!(level.getChunkSource().getGenerator() instanceof MapChunkGenerator generator)) continue;
+            dev.worldforge.mod.MapData map = generator.data();
+            if (map == null || map.titles != change.data) continue;
+            String dimension = level.dimension().location().toString();
+            for (Colony colony : COLONIES.values()) {
+                if (colony == null || colony.s == null || !dimension.equals(colony.dim)) continue;
+                dev.worldforge.mod.TitleData.Title province = map.provinceAt(colony.cx, colony.cz);
+                dev.worldforge.mod.TitleData.Realm owner = province == null ? null : map.titles.realmOf(province);
+                String currentRealm = colony.realmId == null ? "" : colony.realmId;
+                // Emergent polities have no authored raster title yet; do not erase their
+                // explicit canonical owner merely because a nearby map edit was made.
+                if (owner == null && !currentRealm.isBlank()) {
+                    dev.worldforge.mod.TitleData.Realm current = map.titles.realms.get(currentRealm);
+                    if (current != null && Boolean.TRUE.equals(current.props.get("emergence.virtual"))) continue;
+                }
+                String nextRealm = owner == null ? "" : owner.id;
+                if (Objects.equals(currentRealm, nextRealm)) continue;
+                before.put(colony.s.id, currentRealm);
+                colony.realmId = nextRealm;
+            }
+        }
+        if (before.isEmpty()) return;
+        if (saveDurably(server)) {
+            LOGGER.info("wf_settle: reconciled political ownership for {} physical settlements after map change",
+                    before.size());
+            return;
+        }
+        for (Map.Entry<String, String> entry : before.entrySet()) {
+            Colony colony = COLONIES.get(entry.getKey());
+            if (colony != null) colony.realmId = entry.getValue();
+        }
+        LOGGER.error("wf_settle: political ownership reconciliation rolled back; settlement persistence failed");
+    }
+
+    /** In-memory owner binding used by WorldSim's per-map batch commit. */
+    public static boolean bindEmergentRealmInMemory(String settlementId, String realmId) {
+        Colony colony = COLONIES.get(settlementId);
+        if (colony == null || realmId == null || realmId.isBlank()) return false;
+        colony.realmId = realmId;
+        return true;
+    }
+
+    public static boolean bindEmergentRealm(MinecraftServer server, String settlementId, String realmId) {
+        Colony colony = COLONIES.get(settlementId);
+        if (server == null || colony == null || realmId == null || realmId.isBlank()) return false;
+        String before = colony.realmId;
+        if (realmId.equals(before)) return true;
+        if (!bindEmergentRealmInMemory(settlementId, realmId)) return false;
+        if (saveDurably(server)) return true;
+        colony.realmId = before;
+        return false;
+    }
+
+    /** In-memory canonical resident binding; caller persists the complete settlement batch. */
+    public static boolean linkCanonicalResidentsInMemory(String settlementId, Collection<String> globalCharacterIds) {
+        Colony colony = COLONIES.get(settlementId);
+        if (colony == null || globalCharacterIds == null) return false;
+        for (String id : globalCharacterIds) if (id != null && !id.isBlank())
+            colony.residentCharacterIds.add(id);
+        return true;
+    }
+
+    /** Reconciles the complete living population projection, removing departed/deceased UUIDs. */
+    public static boolean replaceCanonicalResidentsInMemory(String settlementId, Collection<String> globalCharacterIds) {
+        Colony colony = COLONIES.get(settlementId);
+        if (colony == null || globalCharacterIds == null) return false;
+        colony.residentCharacterIds.clear();
+        for (String id : globalCharacterIds) if (id != null && !id.isBlank())
+            colony.residentCharacterIds.add(id);
+        return true;
+    }
+
+    public static boolean linkCanonicalResidents(MinecraftServer server, String settlementId,
+                                                   Collection<String> globalCharacterIds) {
+        Colony colony = COLONIES.get(settlementId);
+        if (server == null || colony == null || globalCharacterIds == null) return false;
+        Set<String> before = new LinkedHashSet<>(colony.residentCharacterIds);
+        if (!linkCanonicalResidentsInMemory(settlementId, globalCharacterIds)) return false;
+        if (saveDurably(server)) return true;
+        colony.residentCharacterIds.clear();
+        colony.residentCharacterIds.addAll(before);
+        return false;
     }
 
     /** Atomic settlement snapshot used when a domain action must persist before returning success. */
@@ -677,7 +1254,7 @@ public class SettleMod {
      * Worker.person is the durable foreign key; profession/building remain settlement-owned state.
      * The optional wf_people addon remains optional and no duplicate character registry is created here.
      */
-    private static void syncPeople(Colony colony) {
+    private static void syncPeople(Colony colony, MinecraftServer server) {
         if (!net.minecraftforge.fml.ModList.get().isLoaded("wf_people") || colony == null || colony.s == null) return;
         dev.worldforge.mod.MapData ownerMap = null;
         dev.worldforge.mod.TitleData.Title province = null;
@@ -693,6 +1270,7 @@ public class SettleMod {
         String race = realm == null ? "" : propertyString(realm.props, "race");
         String culture = realm == null ? "" : propertyString(realm.props, "culture");
         String place = "settlement:" + colony.s.id;
+        List<Character> pendingProfessionTransitions = new ArrayList<>();
 
         // Consume persisted departures before reconciling current workers. A crash/reload cannot erase a death or migration.
         for (Settlement.WorkerDeparture departure : new ArrayList<>(colony.s.pendingDepartures())) {
@@ -732,21 +1310,35 @@ public class SettleMod {
                 continue;
             }
             if (person != null && !person.alive) {
-                colony.s.workers.remove(worker);
+                colony.s.removeWorkerProjectionByPerson(person.globalId);
                 continue;
             }
             if (person == null) {
                 person = registry.create(worker.name, "", culture, "m", PeopleMod.YEAR - 20);
                 personRegistry = registry;
-                worker.person = person.globalId;
             }
-            worker.person = person.globalId; // migrate legacy local cN reference to canonical global UUID
+            String canonicalPersonId = person.globalId; // migrate legacy local cN reference to canonical global UUID
+            colony.s.updateWorker(worker, current -> current.person = canonicalPersonId);
             if (!person.has("settlement_worker", place)) personRegistry.appoint(person.id, "settlement_worker", place, PeopleMod.YEAR);
             person.props.put("population.employer", place);
             person.props.put("population.location", colony.s.id);
             if (person.culture == null || person.culture.isBlank()) person.culture = culture;
             if (person.culture == null || person.culture.isBlank()) person.culture = culture;
             String profession = worker.profession == null || worker.profession.isBlank() ? "laborer" : worker.profession;
+            // A cross-domain profession change writes the canonical Character first. If the
+            // server stopped before the settlement projection was durable, this marker makes
+            // the Character's committed target win over the stale Worker snapshot on reload.
+            Object pendingRaw = person.props.get("population.pending_settlement_profession");
+            if (pendingRaw instanceof Map<?, ?> pending
+                    && colony.s.id.equals(pending.get("settlement"))
+                    && worker.id == (pending.get("worker_id") instanceof Number n ? n.intValue() : -1)
+                    && person.globalId.equals(pending.get("character_id"))
+                    && pending.get("profession") instanceof String target
+                    && colony.s.defs.professions.containsKey(target)) {
+                if (!target.equals(worker.profession)) colony.s.setProfession(worker.id, target);
+                profession = target;
+                if (!pendingProfessionTransitions.contains(person)) pendingProfessionTransitions.add(person);
+            }
             if (!profession.equals(PopulationSimulation.profession(person))) personRegistry.changeProfession(person.id, profession, PeopleMod.YEAR);
             personRegistry.setDuty(person.id, Duty.WORKER, true, PeopleMod.YEAR);
             boolean settlementSoldier = java.util.Set.of("guard", "soldier", "archer", "knight").contains(profession);
@@ -773,6 +1365,13 @@ public class SettleMod {
             person.props.put("wf_building_uid", worker.building);
             person.props.put("wf_race_id", race);
             person.props.put("wf_culture_id", culture);
+        }
+        if (!pendingProfessionTransitions.isEmpty() && saveDurably(server)) {
+            for (Character person : pendingProfessionTransitions) {
+                Object marker = person.props.remove("population.pending_settlement_profession");
+                if (!PeopleMod.persistCharacter(person, server) && marker != null)
+                    person.props.put("population.pending_settlement_profession", marker);
+            }
         }
     }
 
@@ -842,22 +1441,32 @@ public class SettleMod {
             if (worker.person == null || worker.person.isBlank()) continue;
             Character person = resolvePerson(registry, worker.person);
             if (person == null || !person.alive) continue;
-            if (("sleeping".equals(worker.lifeAction) || "eating".equals(worker.lifeAction)
-                    || "socializing".equals(worker.lifeAction)) && settlement.time >= worker.lifeActionUntil
-                    || ("fleeing".equals(worker.lifeAction) || "defending".equals(worker.lifeAction)) && !settlement.raidIncoming) {
-                worker.lifeAction = "";
-                worker.lifeActionUntil = 0;
-                worker.status = worker.building == 0 ? "свободен" : "работает";
+
+            // Explicit player/RTS orders always preempt autonomous life goals without granting their effects.
+            if (worker.manualOrder || worker.manualFollow) {
+                LifeSimulation.cancelPending(person, "preempted-by-player-order");
+                settlement.updateWorker(worker, SettleMod::clearLifeAction);
+                continue;
             }
-            if (!worker.lifeAction.isBlank()) continue;
+            if ("fleeing".equals(worker.lifeAction) || "defending".equals(worker.lifeAction)) {
+                if (settlement.raidIncoming) continue;
+                settlement.updateWorker(worker, SettleMod::clearLifeAction);
+            }
+            if (!worker.lifeAction.isBlank()
+                    && !("travelling".equals(worker.lifeActionStage) || "performing".equals(worker.lifeActionStage))) {
+                continue;
+            }
+
             boolean brave = PopulationSimulation.hasDuty(person, Duty.SOLDIER)
                     || person.traits.contains("brave") || person.traits.contains("courageous")
                     || person.traits.contains("protective");
-            if (settlement.raidIncoming && brave) {
-                worker.lifeAction = "defending";
-                worker.lifeTargetX = 0; worker.lifeTargetZ = 0;
-                worker.lifeActionUntil = 1.0e12;
-                worker.status = "спешит на помощь поселению";
+            if (worker.lifeAction.isBlank() && settlement.raidIncoming && brave) {
+                settlement.updateWorker(worker, current -> {
+                    current.lifeAction = "defending";
+                    current.lifeTargetX = 0; current.lifeTargetZ = 0;
+                    current.lifeActionUntil = 1.0e12;
+                    current.status = "спешит на помощь поселению";
+                });
                 continue;
             }
             boolean hasTraining = !worker.generalist() && !PopulationSimulation.trainingTarget(person).isBlank();
@@ -877,73 +1486,126 @@ public class SettleMod {
                     settlement.raidIncoming,
                     lifeLod(server, colony, worker));
             LifeSimulation.tick(person, context, (character, action, ignored) -> {
+                // An existing pending action is polled here until its physical/abstract execution finishes.
+                if (!worker.lifeAction.isBlank()) {
+                    // Character and settlement snapshots are persisted independently. After a
+                    // crash they can disagree; do not let an old sleep/eat/social animation
+                    // complete a different pending Character action and grant the wrong effects.
+                    if (!LifeSimulation.matchesPhysicalAction(action, worker.lifeAction)) {
+                        LOGGER.warn("wf_settle: cancelling mismatched life action for Character {} (AI={}, worker={})",
+                                character.globalId, action, worker.lifeAction);
+                        settlement.updateWorker(worker, SettleMod::clearLifeAction);
+                        return LifeSimulation.Outcome.BLOCKED;
+                    }
+                    if (!"performing".equals(worker.lifeActionStage)) return LifeSimulation.Outcome.IN_PROGRESS;
+                    if (worldMinute < worker.lifeActionUntil) return LifeSimulation.Outcome.IN_PROGRESS;
+                    // Settlement.eat(dt) is the authoritative ration ledger for every resident.
+                    // Do not debit a second meal here; only ensure the stock has not collapsed to zero.
+                    if (action == LifeSimulation.Action.EAT && settlement.amount("food") <= 0) {
+                        settlement.updateWorker(worker, SettleMod::clearLifeAction);
+                        return LifeSimulation.Outcome.BLOCKED;
+                    }
+                    if (action == LifeSimulation.Action.SOCIALIZE) {
+                        dev.worldforge.settle.Worker companion = settlement.workers.stream()
+                                .filter(other -> other.person != null && other.person.equals(worker.lifeSocialTarget))
+                                .findFirst().orElse(null);
+                        Character companionPerson = companion == null ? null : resolvePerson(registry, companion.person);
+                        if (companion == null || companionPerson == null || !companionPerson.alive) {
+                            settlement.updateWorker(worker, SettleMod::clearLifeAction);
+                            return LifeSimulation.Outcome.BLOCKED;
+                        }
+                        if (ignored.lod() == LifeSimulation.LOD.ACTIVE) {
+                            double dx = worker.x - companion.x, dz = worker.z - companion.z;
+                            if (dx * dx + dz * dz > 16.0) {
+                                settlement.updateWorker(worker, SettleMod::clearLifeAction);
+                                return LifeSimulation.Outcome.BLOCKED;
+                            }
+                        }
+                        Object tokenRaw = character.props.get("population.ai.pending_token");
+                        if (!(tokenRaw instanceof String operationId) || operationId.isBlank()) {
+                            settlement.updateWorker(worker, SettleMod::clearLifeAction);
+                            return LifeSimulation.Outcome.BLOCKED;
+                        }
+                        int opinion = dev.worldforge.settle.ResidentSocial.interactionDelta(character, companionPerson);
+                        dev.worldforge.settle.ResidentSocial.socializeOnce(character, companionPerson, opinion, operationId);
+                        // Persist both canonical Character partitions before completing the
+                        // physical action. If the second write fails, keep the same pending
+                        // token: the first participant's receipt makes the retry idempotent.
+                        if (!PeopleMod.persistCharacter(character, server)
+                                || !PeopleMod.persistCharacter(companionPerson, server))
+                            return LifeSimulation.Outcome.IN_PROGRESS;
+                        settlement.updateWorker(companion, current -> current.status = "общался: " + character.name);
+                    }
+                    settlement.updateWorker(worker, current -> {
+                        clearLifeAction(current);
+                        current.status = current.building == 0 ? "свободен" : "работает";
+                    });
+                    return LifeSimulation.Outcome.SUCCESS;
+                }
+
+                // Start a local action. Its needs, food stock and social relations are not changed yet.
                 switch (action) {
                     case EAT -> {
-                        if (!settlement.consumeResource("food", 1.0)) return LifeSimulation.Outcome.BLOCKED;
+                        if (settlement.amount("food") < 1.0) return LifeSimulation.Outcome.BLOCKED;
                         double[] meal = residentMealPlace(settlement, worker);
-                        worker.lifeAction = "eating";
-                        worker.lifeTargetX = meal[0]; worker.lifeTargetZ = meal[1];
-                        worker.lifeActionUntil = settlement.time + 30;
-                        worker.status = "ест";
-                        return LifeSimulation.Outcome.SUCCESS;
+                        settlement.updateWorker(worker, current -> {
+                            beginLifeAction(current, "eating", meal[0], meal[1], 30, worldMinute, context.lod());
+                            current.status = "идёт принимать пищу";
+                        });
+                        return LifeSimulation.Outcome.IN_PROGRESS;
                     }
                     case SLEEP -> {
                         double[] home = residentShelter(settlement, worker);
-                        worker.lifeAction = "sleeping";
-                        worker.lifeTargetX = home[0]; worker.lifeTargetZ = home[1];
-                        worker.lifeActionUntil = settlement.time + 8 * 60;
-                        worker.status = "спит";
-                        return LifeSimulation.Outcome.SUCCESS;
+                        settlement.updateWorker(worker, current -> {
+                            beginLifeAction(current, "sleeping", home[0], home[1], 8 * 60, worldMinute, context.lod());
+                            current.status = "идёт отдыхать";
+                        });
+                        return LifeSimulation.Outcome.IN_PROGRESS;
                     }
                     case SEEK_SAFETY -> {
                         if (!settlement.raidIncoming) return LifeSimulation.Outcome.BLOCKED;
                         double[] shelter = residentShelter(settlement, worker);
-                        worker.lifeAction = "fleeing";
-                        worker.lifeTargetX = shelter[0]; worker.lifeTargetZ = shelter[1];
-                        worker.lifeActionUntil = 1.0e12;
-                        worker.status = "бежит в укрытие";
+                        settlement.updateWorker(worker, current -> {
+                            current.lifeAction = "fleeing";
+                            current.lifeTargetX = shelter[0]; current.lifeTargetZ = shelter[1];
+                            current.lifeActionUntil = 1.0e12;
+                            current.status = "бежит в укрытие";
+                        });
                         return LifeSimulation.Outcome.SUCCESS;
                     }
                     case SOCIALIZE -> {
                         dev.worldforge.settle.Worker companion = null;
-                        Character companionPerson = null;
                         double nearest = 32 * 32;
                         for (dev.worldforge.settle.Worker other : settlement.workers) {
-                            if (other == worker) continue;
+                            if (other == worker || other.person == null || other.person.isBlank()) continue;
                             double dx = worker.x - other.x, dz = worker.z - other.z;
                             double distance = dx * dx + dz * dz;
-                            if (distance < nearest && other.person != null && !other.person.isBlank()) {
-                                Character candidate = resolvePerson(registry, other.person);
-                                if (candidate != null && candidate.alive) {
-                                    nearest = distance; companion = other; companionPerson = candidate;
-                                }
+                            if (distance < nearest && resolvePerson(registry, other.person) != null) {
+                                nearest = distance; companion = other;
                             }
                         }
-                        if (companion == null || companionPerson == null) return LifeSimulation.Outcome.BLOCKED;
-                        int opinion = dev.worldforge.settle.ResidentSocial.interactionDelta(person, companionPerson);
-                        dev.worldforge.settle.ResidentSocial.socialize(person, companionPerson, opinion);
-                        worker.lifeAction = "socializing";
-                        worker.lifeTargetX = companion.x; worker.lifeTargetZ = companion.z;
-                        worker.lifeActionUntil = settlement.time + 3 * 60;
-                        worker.status = "общается: " + companionPerson.name;
-                        companion.status = "общается: " + person.name;
-                        return LifeSimulation.Outcome.SUCCESS;
+                        if (companion == null) return LifeSimulation.Outcome.BLOCKED;
+                        String companionId = companion.person;
+                        double companionX = companion.x, companionZ = companion.z;
+                        settlement.updateWorker(worker, current -> {
+                            current.lifeSocialTarget = companionId;
+                            beginLifeAction(current, "socializing", companionX, companionZ, 3 * 60, worldMinute, context.lod());
+                            current.status = "идёт на встречу";
+                        });
+                        return LifeSimulation.Outcome.IN_PROGRESS;
                     }
                     case WORK -> {
-                        return worker.building != 0
-                                ? LifeSimulation.Outcome.SUCCESS : LifeSimulation.Outcome.RETRY;
+                        return worker.building != 0 ? LifeSimulation.Outcome.SUCCESS : LifeSimulation.Outcome.RETRY;
                     }
                     case TRAIN -> {
-                        if (worker.generalist()) return LifeSimulation.Outcome.BLOCKED;
-                        String skill = PopulationSimulation.trainingTarget(character);
-                        if (skill.isBlank()) return LifeSimulation.Outcome.BLOCKED;
-                        PopulationSimulation.train(character, skill, 5);
-                        worker.status = "обучается";
-                        return LifeSimulation.Outcome.SUCCESS;
+                        if (worker.generalist() || PopulationSimulation.trainingTarget(character).isBlank())
+                            return LifeSimulation.Outcome.BLOCKED;
+                        settlement.updateWorker(worker, current -> current.status = "обучается");
+                        return LifeSimulation.Outcome.SUCCESS; // skill XP is granted once by LifeSimulation.applyEffects
                     }
                     case RECREATE -> {
                         if (!hasLeisure) return LifeSimulation.Outcome.BLOCKED;
-                        worker.status = "досуг";
+                        settlement.updateWorker(worker, current -> current.status = "досуг");
                         return LifeSimulation.Outcome.SUCCESS;
                     }
                     case IDLE -> { return LifeSimulation.Outcome.SUCCESS; }
@@ -951,7 +1613,26 @@ public class SettleMod {
                 return LifeSimulation.Outcome.BLOCKED;
             });
         }
-        dev.worldforge.settle.ResidentLifeEvents.yearly(registry, settlement.year());
+        dev.worldforge.settle.ResidentLifeEvents.yearly(registry, settlement.year(), PeopleMod.NAMES);
+    }
+
+    private static void beginLifeAction(dev.worldforge.settle.Worker worker, String action,
+                                        double targetX, double targetZ, double durationMinutes, double worldMinute,
+                                        LifeSimulation.LOD lod) {
+        worker.lifeAction = action;
+        worker.lifeTargetX = targetX;
+        worker.lifeTargetZ = targetZ;
+        worker.lifeActionDuration = Math.max(1, Math.min(1440, durationMinutes));
+        worker.lifeActionStage = lod == LifeSimulation.LOD.ACTIVE ? "travelling" : "performing";
+        worker.lifeActionUntil = lod == LifeSimulation.LOD.ACTIVE ? 0 : worldMinute + worker.lifeActionDuration;
+    }
+
+    private static void clearLifeAction(dev.worldforge.settle.Worker worker) {
+        worker.lifeAction = "";
+        worker.lifeActionStage = "";
+        worker.lifeSocialTarget = "";
+        worker.lifeActionDuration = 0;
+        worker.lifeActionUntil = 0;
     }
 
     /** Removes the existing worker projection for a person entering military service; the departure is persisted. */
@@ -969,10 +1650,14 @@ public class SettleMod {
         Colony colony = COLONIES.get(colonyId);
         if (colony == null || colony.s == null || characterId == null || characterId.isBlank()
                 || !net.minecraftforge.fml.ModList.get().isLoaded("wf_people")) return false;
+        // Recovery may replay a transition after the destination settlement was already saved.
+        // Treat the exact existing assignment as success; never create a duplicate worker.
         for (Colony other : COLONIES.values()) {
             if (other == null || other.s == null) continue;
-            for (dev.worldforge.settle.Worker worker : other.s.workers)
-                if (characterId.equals(worker.person)) return false;
+            for (dev.worldforge.settle.Worker worker : other.s.workers) {
+                if (!characterId.equals(worker.person)) continue;
+                return other == colony;
+            }
         }
         CharacterRegistry registry = null;
         Character person = PeopleMod.authority().getGlobal(characterId);
@@ -989,8 +1674,12 @@ public class SettleMod {
         if (profession == null || profession.isBlank() || DEFS == null || !DEFS.professions.containsKey(profession))
             profession = "laborer";
         dev.worldforge.settle.Worker worker = colony.s.addWorker(person.name);
-        worker.person = person.globalId;
-        worker.profession = profession;
+        String restoredPersonId = person.globalId;
+        String restoredProfession = profession;
+        colony.s.updateWorker(worker, current -> {
+            current.person = restoredPersonId;
+            current.profession = restoredProfession;
+        });
         // Keep the canonical Character's active profession in sync with the restored worker assignment.
         // This records the military service interval in the normal profession history.
         if (!profession.equals(PopulationSimulation.profession(person)))
@@ -1024,18 +1713,18 @@ public class SettleMod {
         ledger.open(target, realmId, Defs.SILVER, 0);
         // The financial journal is authoritative: recover remittances even if the settlement snapshot
         // was not saved after the ledger transfer (crash between the two world files).
-        settlement.remittedSilver = ledger.totalDebits(source, TreasuryLedger.Kind.TAX, "crown-remittance");
+        double remitted = ledger.totalDebits(source, TreasuryLedger.Kind.TAX, "crown-remittance");
         double due = Math.max(0, settlement.taxCollected * Math.max(0, Math.min(100, settlement.crownShare)) / 100.0
-                - settlement.remittedSilver);
+                - remitted);
         double payment = Math.min(due, ledger.balance(source));
         if (payment <= 1e-9) return;
         boolean transferred = ledger.transfer(source, target, payment, TreasuryLedger.Kind.TAX,
                 "crown-remittance", settlement.id + ":" + Double.toHexString(settlement.remittedSilver),
                 settlement.worldMinute(), "settlement tax remitted to realm treasury");
         if (transferred) {
-            settlement.remittedSilver = ledger.totalDebits(source, TreasuryLedger.Kind.TAX, "crown-remittance");
-            settlement.stock.put(Defs.SILVER, ledger.balance(source));
+            remitted = ledger.totalDebits(source, TreasuryLedger.Kind.TAX, "crown-remittance");
         }
+        settlement.applyTreasuryProjection(remitted, ledger.balance(source));
     }
 
     @SubscribeEvent
@@ -1044,6 +1733,7 @@ public class SettleMod {
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server == null) return;
         ticks++;
+        if (ticks % (STEP_TICKS * 10) == 0) VanillaVillageAdapter.reconcile(server);
         if (actionsBlocked()) return;
         if (ticks % STEP_TICKS == 0) {
             double speed = dev.worldforge.mod.api.WorldForgeApi.clock().multiplier();
@@ -1054,10 +1744,12 @@ public class SettleMod {
                             dev.worldforge.mod.api.WorldForgeApi.clock().year());
                     c.s.tick(speed);                                   // 1 симуляционная секунда = 20 тиков, 24 мировые минуты
                     remitCrownTaxes(c);
-                    syncPeople(c);
+                    syncPeople(c, server);
+                    if (c.genesisOperationId != null && c.genesisOperationId.startsWith("worldsim:settlement:"))
+                        ensureAutonomousInfrastructure(server, c.s.id);
                     runLifeAI(server, c);
                     c.map.tick(c.s, speed);                             // глобальная логистика не зависит от загруженности чанков
-                    if (ticks % (STEP_TICKS * 10) == 0) { c.s.types = TYPES; String rid = realmOf(c); c.s.refreshType(c.s.workers.size(), rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.terrain(rid), rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.races(rid)); }
+                    if (ticks % (STEP_TICKS * 10) == 0) { c.s.types = TYPES; String rid = realmOf(c); c.s.refreshType(c.s.population(), rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.terrain(rid), rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.races(rid)); }
                 } catch (RuntimeException ex) {
                     LOGGER.error("wf_settle: ошибка симуляции поселения {}: {}", c.s.id, ex.toString());
                 }
@@ -1065,7 +1757,53 @@ public class SettleMod {
             try {
                 Map<String, dev.worldforge.settle.Settlement> all = new java.util.LinkedHashMap<>();
                 for (Colony c : COLONIES.values()) all.put(c.s.id, c.s);
-                if (speed > 0) NETWORK.tick(all, speed);
+                if (speed > 0) {
+                    Map<String, dev.worldforge.settle.TradeNetwork.Location> anchors = new LinkedHashMap<>();
+                    for (Colony colony : COLONIES.values())
+                        anchors.put(colony.s.id, new dev.worldforge.settle.TradeNetwork.Location(colony.dim, colony.cx, colony.cz));
+                    int pendingTradeEvents = NETWORK.events.size();
+                    NETWORK.tick(all, speed, anchors, SettleMod::planShipmentPath);
+                    if (NETWORK.events.size() > pendingTradeEvents) {
+                        // The ledger is authoritative. Persist it before the shipment projection; fail closed
+                        // if either side cannot be checkpointed so a dispatched consignment is never replayed.
+                        if (!WorldForgeMod.saveTreasuryNow(server) || !saveDurably(server)) {
+                            logisticsPersistenceBlocked = true;
+                            LOGGER.error("wf_settle: shipment checkpoint failed; trade simulation frozen for recovery");
+                            return;
+                        }
+                        for (String event : new ArrayList<>(NETWORK.events))
+                            dev.worldforge.mod.api.WorldForgeApi.postEvent("trade", event, List.of(),
+                                    dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute());
+                        NETWORK.events.clear();
+                    }
+                    // Checkpoint in-flight progress every 30 seconds of server ticks; cargo remains escrowed.
+                    if (NETWORK.events.isEmpty() && ticks % (STEP_TICKS * 30) == 0
+                            && NETWORK.shipments.values().stream().anyMatch(shipment ->
+                            shipment.status.equals("в пути") || shipment.status.equals("ожидает места")
+                                    || shipment.status.equals("ожидает расчёта"))) {
+                        if (!saveDurably(server)) {
+                            logisticsPersistenceBlocked = true;
+                            LOGGER.error("wf_settle: in-flight shipment progress checkpoint failed; trade simulation frozen");
+                            return;
+                        }
+                    }
+                    SettlementCaravans.tick(server, NETWORK.shipments.values());
+                    if (ticks % (STEP_TICKS * 10) == 0) {
+                        Set<Integer> routeIds = new LinkedHashSet<>(NETWORK.routes.keySet());
+                        int created = NETWORK.ensureAutonomousRoutes(all, 2, Math.max(1, all.size() / 3), 2.0);
+                        if (created > 0) {
+                            if (!saveDurably(server)) {
+                                NETWORK.routes.keySet().removeIf(id -> !routeIds.contains(id));
+                                LOGGER.error("wf_settle: autonomous trade links could not be persisted; review deferred");
+                            } else {
+                                dev.worldforge.mod.api.WorldForgeApi.postEvent("trade",
+                                        "Autonomous settlement supply network established " + created + " new route(s)",
+                                        List.of(), dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute());
+                                LOGGER.info("wf_settle: autonomous supply links created={} settlements={}", created, all.size());
+                            }
+                        }
+                    }
+                }
             } catch (RuntimeException ex) {
                 LOGGER.error("wf_settle: ошибка торговых маршрутов: {}", ex.toString());
             }

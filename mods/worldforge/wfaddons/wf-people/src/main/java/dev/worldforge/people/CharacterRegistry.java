@@ -1,6 +1,8 @@
 package dev.worldforge.people;
 
 import dev.worldforge.mod.Json;
+import dev.worldforge.mod.api.DomainMutationRevisions;
+import dev.worldforge.mod.api.WorldForgeApi;
 
 import java.util.*;
 
@@ -9,7 +11,7 @@ import java.util.*;
  * и спрашивают, что разрешает должность ({@link #unlocked}), не зная ничего о ролях друг друга.
  */
 public final class CharacterRegistry {
-    public enum LifecycleKind { BORN, CHILD_BORN, MARRIED, LIFE_STAGE_CHANGED, POST_APPOINTED, POST_DISMISSED, PROFESSION_CHANGED,
+    public enum LifecycleKind { BORN, CHILD_BORN, MARRIED, MARRIAGE_DISSOLVED, LIFE_STAGE_CHANGED, POST_APPOINTED, POST_DISMISSED, PROFESSION_CHANGED,
         HIRED, FIRED, MIGRATED, DUTY_ASSIGNED, DUTY_REMOVED, DIED, RESTORED }
 
     public record LifecycleEvent(LifecycleKind kind, String characterId, String from, String to, int year) { }
@@ -40,6 +42,50 @@ public final class CharacterRegistry {
     }
     private long revision;
 
+    private static final ThreadLocal<MutationBatchState> MUTATION_BATCH = new ThreadLocal<>();
+
+    private static final class MutationBatchState {
+        int depth;
+        boolean dirty;
+        final DomainMutationRevisions.Mutation mutation =
+                WorldForgeApi.revisions().begin(DomainMutationRevisions.Domain.CHARACTERS);
+    }
+
+    /**
+     * Coalesces nested canonical Character writes into one shared revision.
+     * This is transaction metadata only; it does not own or duplicate Character state.
+     */
+    public static final class MutationBatch implements AutoCloseable {
+        private final MutationBatchState state;
+        private boolean closed;
+        private MutationBatch(MutationBatchState state) { this.state = state; }
+        @Override public void close() {
+            if (closed) return;
+            closed = true;
+            if (--state.depth == 0) {
+                MUTATION_BATCH.remove();
+                try {
+                    if (state.dirty) state.mutation.commit();
+                } finally {
+                    state.mutation.close();
+                }
+            }
+        }
+    }
+
+    public static MutationBatch beginMutationBatch() {
+        MutationBatchState state = MUTATION_BATCH.get();
+        if (state == null) {
+            state = new MutationBatchState();
+            MUTATION_BATCH.set(state);
+        }
+        state.depth++;
+        return new MutationBatch(state);
+    }
+
+    /** Records one authoritative Character write, coalescing it inside an owning operation. */
+    public static void recordCharacterMutation() { recordDomainMutation(); }
+
     /** Changes only when registry membership or identity records are replaced. */
     public long revision() { return revision; }
 
@@ -53,6 +99,12 @@ public final class CharacterRegistry {
     public int size() { return byId.size(); }
 
     public Character create(String name, String house, String culture, String gender, int birthYear) {
+        try (MutationBatch ignored = beginMutationBatch()) {
+            return createBatched(name, house, culture, gender, birthYear);
+        }
+    }
+
+    private Character createBatched(String name, String house, String culture, String gender, int birthYear) {
         while (byId.containsKey("c" + next)) {
             if (next == Integer.MAX_VALUE) throw new IllegalStateException("Исчерпаны ID персонажей");
             next++;
@@ -63,6 +115,8 @@ public final class CharacterRegistry {
         c.culture = culture == null ? "" : culture;
         c.gender = gender;
         c.birthYear = birthYear;
+        // New Characters start at their creation day; they must not catch up before they existed.
+        c.props.put("population.last_simulated_world_day", Long.toString(WorldForgeApi.clock().dayNumber()));
         byId.put(c.id, c);
         revision++;
         for (Listener l : listeners) l.born(c);
@@ -73,6 +127,12 @@ public final class CharacterRegistry {
     public void appoint(String id, String role, String place) { appoint(id, role, place, 0); }
 
     public void appoint(String id, String role, String place, int year) {
+        try (MutationBatch ignored = beginMutationBatch()) {
+            appointBatched(id, role, place, year);
+        }
+    }
+
+    private void appointBatched(String id, String role, String place, int year) {
         Character c = require(id);
         if (!c.alive) throw new IllegalStateException(c.name + " мёртв и не может занять должность");
         if (c.has(role, place)) return;
@@ -84,6 +144,12 @@ public final class CharacterRegistry {
     public void dismiss(String id, String role, String place) { dismiss(id, role, place, 0); }
 
     public void dismiss(String id, String role, String place, int year) {
+        try (MutationBatch ignored = beginMutationBatch()) {
+            dismissBatched(id, role, place, year);
+        }
+    }
+
+    private void dismissBatched(String id, String role, String place, int year) {
         Character c = require(id);
         if (c.posts.removeIf(p -> p.role.equals(role) && p.place.equals(place))) {
             for (Listener l : listeners) l.dismissed(c, role, place);
@@ -91,19 +157,59 @@ public final class CharacterRegistry {
         }
     }
 
+    /** Applies a precomputed stage while retaining canonical lifecycle publication semantics. */
+    public void applyLifeStageResult(Character character, int age, String stage, int year) {
+        Objects.requireNonNull(character, "character");
+        String next = Objects.requireNonNull(stage, "stage").toLowerCase(Locale.ROOT);
+        if (!Set.of("infant", "child", "adolescent", "adult", "elder").contains(next))
+            throw new IllegalArgumentException("Invalid life stage: " + stage);
+        try (MutationBatch ignored = beginMutationBatch()) {
+            if (byId.get(character.id) != character || !character.alive)
+                throw new IllegalStateException("Character is no longer a living member of this registry");
+            boolean changed = false, lifecyclePublished = false;
+            Object previous = character.props.put("population.life_stage", next);
+            if (!Objects.equals(previous, next)) changed = true;
+            if (previous instanceof String old && !old.equals(next)) {
+                emit(character, LifecycleKind.LIFE_STAGE_CHANGED, old, next, year);
+                lifecyclePublished = true;
+            }
+            Object previousAge = character.props.put("population.age_years", age);
+            if (!Objects.equals(previousAge, age)) changed = true;
+            if (changed && !lifecyclePublished) recordDomainMutation();
+        }
+    }
+
     /** Updates calendar-derived life stages and emits only real stage transitions. */
     public void refreshLifeStages(int year) {
+        try (MutationBatch ignored = beginMutationBatch()) { refreshLifeStagesBatched(year); }
+    }
+
+    private void refreshLifeStagesBatched(int year) {
+        boolean changed = false;
+        boolean lifecyclePublished = false;
         for (Character character : byId.values()) {
             if (!character.alive) continue;
             String current = PopulationSimulation.lifeStage(character, year).name().toLowerCase(Locale.ROOT);
             Object previous = character.props.put("population.life_stage", current);
-            if (previous instanceof String old && !old.equals(current))
+            if (!Objects.equals(previous, current)) changed = true;
+            if (previous instanceof String old && !old.equals(current)) {
                 emit(character, LifecycleKind.LIFE_STAGE_CHANGED, old, current, year);
-            character.props.put("population.age_years", PopulationSimulation.age(character, year));
+                lifecyclePublished = true;
+            }
+            Object age = PopulationSimulation.age(character, year);
+            Object previousAge = character.props.put("population.age_years", age);
+            if (!Objects.equals(previousAge, age)) changed = true;
         }
+        // publish() already advanced the lane for lifecycle changes; age-only refreshes
+        // still invalidate snapshots without counting the same character transition twice.
+        if (changed && !lifecyclePublished) recordDomainMutation();
     }
 
     public void changeProfession(String id, String professionId, int year) {
+        try (MutationBatch ignored = beginMutationBatch()) { changeProfessionBatched(id, professionId, year); }
+    }
+
+    private void changeProfessionBatched(String id, String professionId, int year) {
         Character c = require(id);
         String previous = PopulationSimulation.profession(c);
         PopulationSimulation.assignProfession(c, professionId, year);
@@ -114,6 +220,10 @@ public final class CharacterRegistry {
 
     /** Employment is an assignment on the existing person, never a new population record. */
     public void hire(String id, String employerId, String professionId, int year) {
+        try (MutationBatch ignored = beginMutationBatch()) { hireBatched(id, employerId, professionId, year); }
+    }
+
+    private void hireBatched(String id, String employerId, String professionId, int year) {
         Character c = require(id);
         if (!c.alive) throw new IllegalStateException(c.name + " is dead");
         String employer = requireText(employerId, "employer");
@@ -133,6 +243,10 @@ public final class CharacterRegistry {
 
     /** Releases employment without deleting the Character or any skills/family/history. */
     public void fire(String id, String employerId, int year) {
+        try (MutationBatch ignored = beginMutationBatch()) { fireBatched(id, employerId, year); }
+    }
+
+    private void fireBatched(String id, String employerId, int year) {
         Character c = require(id);
         String employer = employerId == null || employerId.isBlank()
                 ? String.valueOf(c.props.getOrDefault("population.employer", "")) : employerId.trim();
@@ -145,10 +259,15 @@ public final class CharacterRegistry {
 
     /** Moves the same person to another population scope and releases the old settlement post. */
     public void migrate(String id, String destinationId, int year) {
+        try (MutationBatch ignored = beginMutationBatch()) { migrateBatched(id, destinationId, year); }
+    }
+
+    private void migrateBatched(String id, String destinationId, int year) {
         Character c = require(id);
         if (!c.alive) throw new IllegalStateException(c.name + " is dead");
         String destination = requireText(destinationId, "destination");
         String previous = String.valueOf(c.props.getOrDefault("population.location", ""));
+        if (destination.equals(previous)) return;
         String employer = String.valueOf(c.props.getOrDefault("population.employer", ""));
         if (!employer.isEmpty()) fire(id, employer, year);
         c.props.put("population.location", destination);
@@ -156,6 +275,10 @@ public final class CharacterRegistry {
     }
 
     public void setDuty(String id, PopulationSimulation.Duty duty, boolean assigned, int year) {
+        try (MutationBatch ignored = beginMutationBatch()) { setDutyBatched(id, duty, assigned, year); }
+    }
+
+    private void setDutyBatched(String id, PopulationSimulation.Duty duty, boolean assigned, int year) {
         Character c = require(id);
         if (!c.alive && assigned) throw new IllegalStateException(c.name + " is dead");
         boolean before = PopulationSimulation.hasDuty(c, duty);
@@ -168,6 +291,12 @@ public final class CharacterRegistry {
 
     /** Entity UUID is a replaceable body reference, scoped by body kind; Character.id remains authoritative. */
     public boolean bindEntity(String id, String bodyKind, String entityUuid) {
+        try (MutationBatch ignored = beginMutationBatch()) {
+            return bindEntityBatched(id, bodyKind, entityUuid);
+        }
+    }
+
+    private boolean bindEntityBatched(String id, String bodyKind, String entityUuid) {
         Character c = require(id);
         if (!c.alive) return false;
         String kind = requireText(bodyKind, "body kind").toLowerCase(Locale.ROOT);
@@ -184,22 +313,33 @@ public final class CharacterRegistry {
             for (Map.Entry<?, ?> entry : map.entrySet())
                 if (entry.getKey() instanceof String key) bindings.put(key, entry.getValue());
         } else bindings = new LinkedHashMap<>();
+        if (Objects.equals(bindings.get(kind), uuid)) return true;
         bindings.put(kind, uuid);
         c.props.put("population.entity_bindings", bindings);
+        recordDomainMutation();
         return true;
     }
 
     public void unbindEntity(String id, String bodyKind, String entityUuid) {
+        try (MutationBatch ignored = beginMutationBatch()) {
+            unbindEntityBatched(id, bodyKind, entityUuid);
+        }
+    }
+
+    private void unbindEntityBatched(String id, String bodyKind, String entityUuid) {
         Character c = require(id);
+        String kind = requireText(bodyKind, "body kind").toLowerCase(Locale.ROOT);
+        String uuid = requireText(entityUuid, "entity UUID");
         Object raw = c.props.get("population.entity_bindings");
         if (!(raw instanceof Map<?, ?> map)) return;
-        Object current = map.get(bodyKind);
-        if (!Objects.equals(current, entityUuid)) return;
+        Object current = map.get(kind);
+        if (!Objects.equals(current, uuid)) return;
         Map<String, Object> bindings = new LinkedHashMap<>();
         for (Map.Entry<?, ?> entry : map.entrySet())
-            if (entry.getKey() instanceof String key && !key.equals(bodyKind)) bindings.put(key, entry.getValue());
+            if (entry.getKey() instanceof String key && !key.equals(kind)) bindings.put(key, entry.getValue());
         if (bindings.isEmpty()) c.props.remove("population.entity_bindings");
         else c.props.put("population.entity_bindings", bindings);
+        recordDomainMutation();
     }
 
     private static void addGlobalChild(Character parent, String childGlobalId) {
@@ -238,7 +378,25 @@ public final class CharacterRegistry {
         while (history.size() > 64) history.remove(0);
         character.props.put("character.lifecycle.sequence", sequence);
         character.props.put("character.lifecycle.events", history);
+        recordDomainMutation();
         for (Listener listener : listeners) listener.lifecycle(character, event);
+    }
+
+    /** Advances the shared lane after a canonical Character write has completed. */
+    private static void recordDomainMutation() {
+        MutationBatchState batch = MUTATION_BATCH.get();
+        if (batch != null) {
+            batch.dirty = true;
+            return;
+        }
+        commitDomainMutation();
+    }
+
+    private static void commitDomainMutation() {
+        try (DomainMutationRevisions.Mutation mutation =
+                     WorldForgeApi.revisions().begin(DomainMutationRevisions.Domain.CHARACTERS)) {
+            mutation.commit();
+        }
     }
 
     public List<Map<String, Object>> recentLifecycle(String characterId, int limit) {
@@ -264,6 +422,12 @@ public final class CharacterRegistry {
 
     /** Смерть освобождает все должности. Возвращает их список (чтобы назначить преемников). */
     public List<Character.Post> kill(String id) {
+        try (MutationBatch ignored = beginMutationBatch()) {
+            return killBatched(id);
+        }
+    }
+
+    private List<Character.Post> killBatched(String id) {
         Character c = require(id);
         if (c.alive) c.alive = false;
         // A pending cross-registry transfer marker must be reconciled even when the estate
@@ -279,10 +443,49 @@ public final class CharacterRegistry {
         for (Character.Post p : vacated) for (Listener l : listeners) l.dismissed(c, p.role, p.place);
         c.props.remove("population.entity_bindings");
         int deathYear = c.props.get("population.death_year") instanceof Number n ? n.intValue() : 0;
+        recordBereavement(c, deathYear);
         for (Listener l : listeners) l.died(c);
         publish(c, new LifecycleEvent(LifecycleKind.DIED, c.id, "", "", deathYear));
         c.props.put("death.lifecycle.completed", true);
         return vacated;
+    }
+
+    /** Family and trusted friends remember a death on their own canonical Character records. */
+    private void recordBereavement(Character deceased,int deathYear) {
+        if(Boolean.TRUE.equals(deceased.props.get("death.bereavement.completed"))) return;
+        long minute=Math.max(0L,(long)deathYear*525600L);
+        for(Character survivor:byId.values()) {
+            if(survivor==deceased||!survivor.alive) continue;
+            int intensity=0;
+            if(deceased.spouse.equals(survivor.id)||survivor.spouse.equals(deceased.id)
+                    ||deceased.father.equals(survivor.id)||deceased.mother.equals(survivor.id)
+                    ||survivor.father.equals(deceased.id)||survivor.mother.equals(deceased.id)
+                    ||deceased.children.contains(survivor.id)||survivor.children.contains(deceased.id)) intensity=4;
+            else {
+                boolean sibling=(!deceased.father.isBlank()&&deceased.father.equals(survivor.father))
+                        ||(!deceased.mother.isBlank()&&deceased.mother.equals(survivor.mother));
+                if(sibling) intensity=3;
+                else {
+                    int relationship=relationshipScore(survivor,deceased.globalId);
+                    if(relationship>=70) intensity=3;
+                    else if(relationship>=35) intensity=2;
+                }
+            }
+            if(intensity==0) continue;
+            String eventId="death:bereavement:"+deceased.globalId+":"+survivor.globalId;
+            CharacterDevelopment.recordExperience(survivor,CharacterDevelopment.Experience.BEREAVEMENT,
+                    eventId,"lost "+deceased.name,minute,intensity);
+            CharacterDevelopment.remember(survivor,eventId+":memory","bereavement",deceased.globalId,
+                    "death of "+deceased.name,-intensity*15,minute);
+        }
+        deceased.props.put("death.bereavement.completed",true);
+    }
+
+    private static int relationshipScore(Character observer,String subjectGlobalId) {
+        Object raw=observer.props.get("social.relationships");
+        if(!(raw instanceof Map<?,?> relationships)) return 0;
+        Object value=relationships.get(subjectGlobalId);
+        return value instanceof Number n?Math.max(-100,Math.min(100,n.intValue())):0;
     }
 
     public List<Character> holders(String role, String place) {
@@ -308,6 +511,12 @@ public final class CharacterRegistry {
     public void marry(String a, String b) { marry(a, b, 0); }
 
     public void marry(String a, String b, int year) {
+        try (MutationBatch ignored = beginMutationBatch()) {
+            marryBatched(a, b, year);
+        }
+    }
+
+    private void marryBatched(String a, String b, int year) {
         Character x = require(a), y = require(b);
         if (x == y) throw new IllegalArgumentException("Персонаж не может вступить в брак с самим собой");
         if (!x.alive || !y.alive) throw new IllegalStateException("Умерший персонаж не может вступить в брак");
@@ -336,8 +545,40 @@ public final class CharacterRegistry {
         character.props.remove("family.spouse_global_id");
     }
 
+    /** Ends a reciprocal marriage while preserving both Character identities and family links. */
+    public boolean divorce(String firstId, String secondId, int year) {
+        try (MutationBatch ignored = beginMutationBatch()) {
+            return divorceBatched(firstId, secondId, year);
+        }
+    }
+
+    private boolean divorceBatched(String firstId, String secondId, int year) {
+        Character first = require(firstId), second = require(secondId);
+        if (first == second || !first.id.equals(second.spouse) || !second.id.equals(first.spouse)) return false;
+        first.spouse = "";
+        second.spouse = "";
+        first.props.remove("family.spouse_global_id");
+        second.props.remove("family.spouse_global_id");
+        first.props.remove("family.spouse_name");
+        second.props.remove("family.spouse_name");
+        emit(first, LifecycleKind.MARRIAGE_DISSOLVED, second.id, "", year);
+        emit(second, LifecycleKind.MARRIAGE_DISSOLVED, first.id, "", year);
+        return true;
+    }
+
     public Character addChild(Character father, Character mother, String name, String gender, int year) {
+        try (MutationBatch ignored = beginMutationBatch()) {
+            return addChildBatched(father, mother, name, gender, year);
+        }
+    }
+
+    private Character addChildBatched(Character father, Character mother, String name, String gender, int year) {
         Character c = create(name, father.house, father.culture, gender, year);
+        if (c.house.isEmpty()) {
+            Object inheritedSurname = father.props.get("identity.surname");
+            if (inheritedSurname instanceof String surname && !surname.isBlank())
+                c.props.put("identity.surname", surname);
+        }
         c.father = father.id;
         c.mother = mother.id;
         father.children.add(c.id);
@@ -346,6 +587,7 @@ public final class CharacterRegistry {
         c.props.put("family.mother_global_id", mother.globalId);
         addGlobalChild(father, c.globalId);
         addGlobalChild(mother, c.globalId);
+        CharacterDevelopment.inheritPsychology(c, father, mother, Math.max(0L, year * 525600L));
         emit(c, LifecycleKind.CHILD_BORN, father.id, mother.id, year);
         return c;
     }
@@ -389,6 +631,12 @@ public final class CharacterRegistry {
 
     /** Loads old map-local saves and deterministically assigns stable IDs within the supplied world/map namespace. */
     public void fromJson(String json, String identityNamespace) {
+        try (MutationBatch ignored = beginMutationBatch()) {
+            fromJsonBatched(json, identityNamespace);
+        }
+    }
+
+    private void fromJsonBatched(String json, String identityNamespace) {
         if (identityNamespace == null || identityNamespace.isBlank()) throw new IllegalArgumentException("identityNamespace is required");
         // Parse and validate into an isolated snapshot. Never destroy the live registry
         // until the entire save has been accepted.
@@ -506,6 +754,7 @@ public final class CharacterRegistry {
         byId.putAll(loaded);
         next = safeNext;
         revision++;
+        recordDomainMutation();
         for (Character character : byId.values()) {
             LifecycleEvent restored = new LifecycleEvent(LifecycleKind.RESTORED, character.id, "", "", 0);
             for (Listener listener : listeners) listener.lifecycle(character, restored);

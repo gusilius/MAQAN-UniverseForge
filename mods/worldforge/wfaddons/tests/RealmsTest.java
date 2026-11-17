@@ -17,16 +17,27 @@ public class RealmsTest {
         List<String> bad = d.validate();
         ok(bad.isEmpty(), "данные корректны " + bad);
         ok(d.govs.size() >= 10 && d.levels.size() == 5 && d.terrains.size() == 7 && d.branches.size() == 4 && d.laws.size() == 4, "объём данных");
+        String displayHouseId = Statecraft.stableDynastyId("planetos", "human", "House of the Northern Coast");
+        ok(displayHouseId.matches("[A-Za-z0-9_.:-]{3,96}")
+                        && displayHouseId.equals(Statecraft.stableDynastyId("planetos", "human", "House of the Northern Coast")),
+                "human-readable family names map to deterministic valid dynasty IDs");
+        ok(!displayHouseId.equals(Statecraft.stableDynastyId("planetos", "dwarf", "House of the Northern Coast"))
+                        && !displayHouseId.equals(Statecraft.stableDynastyId("other-map", "human", "House of the Northern Coast")),
+                "canonical dynasty IDs are isolated by map and culture");
+        ok(Statecraft.stableDynastyId("planetos", "human", "house_0123456789abcdef")
+                        .equals("house_0123456789abcdef"),
+                "existing generated canonical house IDs remain unchanged");
 
         StatApi.resetForTests();
         Realms r = new Realms(d);
         final int[] prov = {1}, pres = {0};
-        final Map<String, Double> races = new HashMap<>(), terr = new HashMap<>();
+        final Map<String, Double> races = new HashMap<>(), terr = new HashMap<>(), policySignals = new HashMap<>();
         r.hooks = new Realms.Hooks() {
             @Override public int provinces(String x) { return prov[0]; }
             @Override public int prestige(String x) { return pres[0]; }
             @Override public Map<String, Double> races(String x) { return races; }
             @Override public Map<String, Double> terrain(String x) { return terr; }
+            @Override public Map<String, Double> policySignals(String x) { return policySignals; }
             @Override public int today() { return day; }
         };
         r.publish();
@@ -80,6 +91,60 @@ public class RealmsTest {
         ok(g1.equals(g2) && !g1.isEmpty(), "ИИ выбирает строй детерминированно: " + g1);
         r.autoDevelop("b", 5);
         ok(!r.state("b").gov.isEmpty(), "автоустановка строя: " + r.state("b").gov);
+
+        // Политический ИИ использует реальные сигналы войны, казны, торговли и состава населения.
+        races.clear(); races.put("human", 0.5); races.put("elf", 0.5);
+        terr.clear(); terr.put("coast", 1.0);
+        policySignals.clear();
+        policySignals.put("war", 1.0); policySignals.put("fiscal_stress", 1.0);
+        policySignals.put("trade_access", 1.0); policySignals.put("cultural_diversity", 1.0);
+        policySignals.put("ruler_martial", 1.0); policySignals.put("ruler_stewardship", 1.0);
+        policySignals.put("ruler_diplomacy", 0.8); policySignals.put("ruler_learning", 0.9);
+        policySignals.put("ruler_trait_brave", 1.0); policySignals.put("ruler_trait_scholar", 1.0);
+        r.state("policy-war").gov = "holdfast";
+        r.state("policy-war").points = 1000;
+        r.autoDevelop("policy-war", 24);
+        ok("conscript".equals(r.state("policy-war").laws.get("conscription")),
+                "war pressure drives the AI toward a stronger conscription policy");
+        ok("heavy".equals(r.state("policy-war").laws.get("taxation")),
+                "fiscal stress drives the AI toward higher revenue when stability is intact");
+        ok("free".equals(r.state("policy-war").laws.get("trade_policy")),
+                "coastal trade access drives the AI toward open trade");
+        ok("tolerant".equals(r.state("policy-war").laws.get("faith")),
+                "cultural plurality drives the AI toward religious tolerance");
+        ok(r.state("policy-war").nodes.contains("martial:drill"),
+                "wartime doctrine priorities are reflected in the existing doctrine tree");
+
+        policySignals.clear(); policySignals.put("vassal_discontent", 1.0); policySignals.put("unrest", 1.0);
+        r.state("policy-stability").gov = "holdfast";
+        r.autoDevelop("policy-stability", 25);
+        ok("low".equals(r.state("policy-stability").laws.get("taxation")),
+                "vassal discontent and unrest make the AI reduce taxation to stabilize the realm");
+
+        // Existing laws are reconsidered only after their own cooldown expires.
+        day += 100;
+        policySignals.clear(); policySignals.put("war", 0.0);
+        r.autoDevelop("policy-war", 26);
+        ok("volunteers".equals(r.state("policy-war").laws.get("conscription")),
+                "the AI abandons emergency conscription after wartime pressure ends and the law cooldown expires");
+
+        // The policy engine learns from the observed result after a law was adopted.
+        policySignals.clear();
+        r.state("policy-memory").gov = "holdfast";
+        r.state("policy-memory").points = 1000;
+        ok(r.setLaw("policy-memory", "taxation", "heavy"),
+                "policy-memory realm adopts the initial heavy-tax law");
+        ok(r.state("policy-memory").lawSignalBaselines.containsKey("taxation"),
+                "law adoption stores the actual pressure baseline");
+        policySignals.put("unrest", 1.0); policySignals.put("faction_pressure", 1.0);
+        day += 100;
+        r.autoDevelop("policy-memory", 27);
+        ok("low".equals(r.state("policy-memory").laws.get("taxation")),
+                "worsening unrest and faction pressure make the AI reconsider a previously adopted heavy-tax policy");
+        Realms memoryReload = new Realms(d); memoryReload.hooks = r.hooks;
+        memoryReload.fromJson(r.toJson());
+        ok(memoryReload.state("policy-memory").lawSignalBaselines.equals(r.state("policy-memory").lawSignalBaselines),
+                "policy outcome baselines survive save/load");
         races.clear(); races.put("orc", 1.0); r.state("c").gov = "";
         ok(d.govs.get(r.suggest("c", 3)).reqRaces().isEmpty() || d.govs.get(r.suggest("c", 3)).reqRaces().contains("orc"), "ИИ не берёт чужую расу");
 

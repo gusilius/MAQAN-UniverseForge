@@ -1,6 +1,8 @@
 package dev.worldforge.mod.economy;
 
 import dev.worldforge.mod.Json;
+import dev.worldforge.mod.api.DomainMutationRevisions;
+import dev.worldforge.mod.api.WorldForgeApi;
 import java.util.*;
 
 /**
@@ -28,8 +30,74 @@ public final class TreasuryLedger {
     private final Set<String> postedReferences = new HashSet<>();
     private final Set<String> postedDebits = new HashSet<>();
     private final Set<String> postedCredits = new HashSet<>();
+    /** Indexed once on append/load; avoids rescanning the ever-growing journal in settlement hot paths. */
+    private final Set<String> armyFieldRationDebitAccounts = new HashSet<>();
+    /** Append-only secondary indexes keep journal queries proportional to the selected account/reference. */
+    private final Map<String, List<Entry>> entriesByAccount = new HashMap<>();
+    private final Map<String, List<Entry>> entriesByReference = new HashMap<>();
+    private final Map<String, Double> debitTotals = new HashMap<>();
+    private final Set<String> accountsWithEntries = new HashSet<>();
     private long sequence=1, transactionSequence=1;
+    private long mutationVersion;
     private String lastError="";
+
+    private boolean restoring;
+
+    private static final ThreadLocal<LedgerMutationState> ACTIVE_MUTATION = new ThreadLocal<>();
+
+    private static final class LedgerMutationState {
+        final TreasuryLedger owner;
+        final DomainMutationRevisions.Mutation revision;
+        int depth = 1;
+        boolean dirty;
+        LedgerMutationState(TreasuryLedger owner) {
+            this.owner = owner;
+            this.revision = WorldForgeApi.revisions().begin(DomainMutationRevisions.Domain.ECONOMY_TRADE);
+        }
+    }
+
+    /** Nested ledger calls (for example transferOnce -> transfer) publish one economy revision. */
+    private final class MutationBatch implements AutoCloseable {
+        private final LedgerMutationState state;
+        private boolean closed;
+        MutationBatch(LedgerMutationState state) { this.state = state; }
+        @Override public void close() {
+            if (closed) return;
+            closed = true;
+            if (state == null) return;
+            if (--state.depth == 0) {
+                ACTIVE_MUTATION.remove();
+                try {
+                    if (state.dirty) state.revision.commit();
+                } finally {
+                    state.revision.close();
+                }
+            }
+        }
+    }
+
+    private MutationBatch beginMutationBatch() {
+        if (restoring) return new MutationBatch(null);
+        LedgerMutationState state = ACTIVE_MUTATION.get();
+        if (state == null) {
+            state = new LedgerMutationState(this);
+            ACTIVE_MUTATION.set(state);
+        } else if (state.owner != this) {
+            throw new IllegalStateException("Cannot nest mutations across different TreasuryLedger instances");
+        } else {
+            state.depth++;
+        }
+        return new MutationBatch(state);
+    }
+
+    private void markMutation() {
+        if (restoring) return;
+        LedgerMutationState state = ACTIVE_MUTATION.get();
+        if (state == null || state.owner != this)
+            throw new IllegalStateException("TreasuryLedger mutation escaped its canonical writer scope");
+        state.dirty = true;
+        mutationVersion++;
+    }
 
     private static String required(String v,String field) {
         if(v==null || v.isBlank() || v.length()>128) throw new IllegalArgumentException(field+" is required");
@@ -40,21 +108,52 @@ public final class TreasuryLedger {
         return v;
     }
     private static long minute(long v) { if(v<0) throw new IllegalArgumentException("worldMinute cannot be negative"); return v; }
-    public String lastError() { return lastError; }
-    public Collection<Account> accounts() { return Collections.unmodifiableCollection(accounts.values()); }
-    public List<Entry> journal() { return Collections.unmodifiableList(journal); }
-    public Account account(String id) { return accounts.get(id); }
-    public boolean hasAccount(String id) { return accounts.containsKey(id); }
-    public double balance(String id) { Account a=accounts.get(id); return a==null?0:a.balance; }
+    public synchronized String lastError() { return lastError; }
+    public synchronized long mutationVersion() { return mutationVersion; }
+    public synchronized int accountCount() { return accounts.size(); }
+    public synchronized int journalSize() { return journal.size(); }
+    public synchronized Collection<Account> accounts() { return Collections.unmodifiableCollection(accounts.values()); }
+    public synchronized List<Entry> journal() { return Collections.unmodifiableList(journal); }
+    public synchronized Account account(String id) { return accounts.get(id); }
+    public synchronized boolean hasAccount(String id) { return accounts.containsKey(id); }
+    public synchronized double balance(String id) { Account a=accounts.get(id); return a==null?0:a.balance; }
+
+    /** Account-scoped immutable journal view in original append order. */
+    public synchronized List<Entry> entriesForAccount(String accountId) {
+        return Collections.unmodifiableList(entriesByAccount.getOrDefault(accountId, List.of()));
+    }
+
+    /** O(1) lookup of the postings sharing one account/kind/reference idempotency key. */
+    public synchronized List<Entry> entriesForReference(String accountId, Kind kind, String reference) {
+        return Collections.unmodifiableList(entriesByReference.getOrDefault(
+                referenceKey(accountId, kind, reference), List.of()));
+    }
+
+    public synchronized boolean hasEntries(String accountId) { return accountsWithEntries.contains(accountId); }
+
+    /** Enumerates canonical account IDs; unlike journal-derived discovery this scales with accounts. */
+    public synchronized Set<String> accountIdsWithPrefix(String prefix) {
+        Set<String> result = new TreeSet<>();
+        for (String id : accounts.keySet()) if (id.startsWith(prefix)) result.add(id);
+        return Collections.unmodifiableSet(result);
+    }
 
     /** Total successfully posted debit value for an account/category, rebuilt from the durable journal. */
-    public double totalDebits(String accountId, Kind kind, String category) {
-        double total = 0;
-        for (Entry entry : journal) {
-            if (entry.accountId().equals(accountId) && !entry.credit() && entry.kind() == kind
-                    && entry.category().equals(clean(category))) total += entry.amount();
-        }
-        return total;
+    public synchronized double totalDebits(String accountId, Kind kind, String category) {
+        return debitTotals.getOrDefault(debitTotalKey(accountId, kind, category), 0.0);
+    }
+
+    private static String debitTotalKey(String accountId, Kind kind, String category) {
+        return String.valueOf(accountId) + "\\u0000" + String.valueOf(kind) + "\\u0000" + clean(category);
+    }
+
+    private void indexEntry(Entry entry) {
+        entriesByAccount.computeIfAbsent(entry.accountId(), ignored -> new ArrayList<>()).add(entry);
+        entriesByReference.computeIfAbsent(referenceKey(entry.accountId(), entry.kind(), entry.reference()),
+                ignored -> new ArrayList<>()).add(entry);
+        accountsWithEntries.add(entry.accountId());
+        if (!entry.credit()) debitTotals.merge(
+                debitTotalKey(entry.accountId(), entry.kind(), entry.category()), entry.amount(), Double::sum);
     }
 
     private static String referenceKey(String accountId, Kind kind, String reference) {
@@ -62,17 +161,22 @@ public final class TreasuryLedger {
     }
 
     /** True when this account already posted the same economic event; used for crash-safe retries. */
-    public boolean hasTransaction(String accountId, Kind kind, String reference) {
+    public synchronized boolean hasTransaction(String accountId, Kind kind, String reference) {
         return postedReferences.contains(referenceKey(accountId, kind, reference));
     }
-    public boolean hasDebit(String accountId, Kind kind, String reference) {
+    public synchronized boolean hasDebit(String accountId, Kind kind, String reference) {
         return postedDebits.contains(referenceKey(accountId, kind, reference));
     }
-    public boolean hasCredit(String accountId, Kind kind, String reference) {
+    public synchronized boolean hasCredit(String accountId, Kind kind, String reference) {
         return postedCredits.contains(referenceKey(accountId, kind, reference));
     }
+    /** O(1) query for the legacy stock-reconciliation guard used by settlement resource reads. */
+    public synchronized boolean hasArmyFieldRationDebit(String accountId) {
+        return armyFieldRationDebitAccounts.contains(accountId);
+    }
 
-    public Account open(String id,String ownerId,String currency,double openingBalance) {
+    public synchronized Account open(String id,String ownerId,String currency,double openingBalance) {
+        try (MutationBatch ignored = beginMutationBatch()) {
         id=required(id,"account id"); ownerId=required(ownerId,"owner id"); currency=required(currency,"currency");
         double opening=amount(openingBalance);
         Account existing=accounts.get(id);
@@ -80,32 +184,29 @@ public final class TreasuryLedger {
             if(!existing.ownerId.equals(ownerId) || !existing.currency.equals(currency)) throw new IllegalArgumentException("account identity mismatch: "+id);
             return existing;
         }
-        Account a=new Account(id,ownerId,currency,opening); accounts.put(id,a);
+        Account a=new Account(id,ownerId,currency,opening); accounts.put(id,a); markMutation();
         if(opening>0) append("opening:"+transactionSequence++,id,"",currency,opening,true,Kind.OPENING,"opening",id,0,a.balance,"opening balance");
         return a;
-    }
-    public boolean setCreditLimit(String accountId,double limit) {
+    
+        }}
+    public synchronized boolean setCreditLimit(String accountId,double limit) {
+        try (MutationBatch ignored = beginMutationBatch()) {
         Account a=accounts.get(accountId); if(a==null) return fail("unknown account");
-        a.creditLimit=amount(limit); updateBankruptcy(a); return true;
-    }
-    public boolean deposit(String accountId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
+        double normalized = amount(limit);
+        if (Double.compare(a.creditLimit, normalized) == 0) return true;
+        a.creditLimit=normalized; updateBankruptcy(a); markMutation(); return true;
+    
+        }}
+    public synchronized boolean deposit(String accountId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
+        try (MutationBatch ignored = beginMutationBatch()) {
         Account a=accounts.get(accountId); if(a==null) return fail("unknown account");
         value=amount(value); minute(worldMinute); if(value==0) return true;
         double offset=Math.min(a.debt,value); a.debt-=offset; a.balance+=value-offset; append("tx:"+transactionSequence++,a.id,"external",a.currency,value,true,kind,clean(category),clean(reference),worldMinute,a.balance,clean(memo));
         updateBankruptcy(a); return true;
-    }
+    
+        }}
     private static boolean sameAmount(double left, double right) {
         return Double.isFinite(left) && Double.isFinite(right) && Math.abs(left - right) <= 1e-8;
-    }
-
-    private List<Entry> entriesForReference(String accountId, Kind kind, String reference) {
-        String cleanReference = clean(reference);
-        List<Entry> matches = new ArrayList<>();
-        for (Entry entry : journal) {
-            if (entry.accountId().equals(accountId) && entry.kind() == kind
-                    && entry.reference().equals(cleanReference)) matches.add(entry);
-        }
-        return matches;
     }
 
     private boolean matchesExternalPosting(String accountId, double value, Kind kind,
@@ -120,14 +221,17 @@ public final class TreasuryLedger {
         return true;
     }
 
-    public boolean depositOnce(String accountId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
+    public synchronized boolean depositOnce(String accountId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
+        try (MutationBatch ignored = beginMutationBatch()) {
         if (hasTransaction(accountId, kind, reference)) {
             if (matchesExternalPosting(accountId, value, kind, category, reference, true)) return true;
             return false;
         }
         return deposit(accountId,value,kind,category,reference,worldMinute,memo);
-    }
-    public boolean withdraw(String accountId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
+    
+        }}
+    public synchronized boolean withdraw(String accountId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
+        try (MutationBatch ignored = beginMutationBatch()) {
         Account a=accounts.get(accountId); if(a==null) return fail("unknown account");
         value=amount(value); minute(worldMinute);
         if(a.available()+1e-9<value) return fail("insufficient funds");
@@ -137,16 +241,20 @@ public final class TreasuryLedger {
         a.debt+=value-cash;
         append("tx:"+transactionSequence++,a.id,"external",a.currency,value,false,kind,clean(category),clean(reference),worldMinute,a.balance,clean(memo));
         updateBankruptcy(a); return true;
-    }
-    public boolean withdrawOnce(String accountId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
+    
+        }}
+    public synchronized boolean withdrawOnce(String accountId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
+        try (MutationBatch ignored = beginMutationBatch()) {
         if (hasTransaction(accountId, kind, reference)) {
             if (matchesExternalPosting(accountId, value, kind, category, reference, false)) return true;
             return false;
         }
         return withdraw(accountId,value,kind,category,reference,worldMinute,memo);
-    }
+    
+        }}
     /** Atomic transfer: no balance changes occur unless both accounts and currency match and payer can cover it. */
-    public boolean transfer(String fromId,String toId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
+    public synchronized boolean transfer(String fromId,String toId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
+        try (MutationBatch ignored = beginMutationBatch()) {
         Account from=accounts.get(fromId), to=accounts.get(toId);
         if(from==null || to==null) return fail("unknown transfer account");
         if(from==to || from.id.equals(to.id)) return fail("self transfer is not allowed");
@@ -164,7 +272,8 @@ public final class TreasuryLedger {
         append(tx,from.id,to.id,from.currency,value,false,kind,clean(category),clean(reference),worldMinute,from.balance,clean(memo));
         append(tx,to.id,from.id,to.currency,value,true,kind,clean(category),clean(reference),worldMinute,to.balance,clean(memo));
         updateBankruptcy(from); updateBankruptcy(to); return true;
-    }
+    
+        }}
     private boolean matchesExistingTransfer(String fromId, String toId, double value,
                                             Kind kind, String category, String reference) {
         List<Entry> debits = entriesForReference(fromId, kind, reference).stream()
@@ -186,16 +295,19 @@ public final class TreasuryLedger {
         return true;
     }
 
-    public boolean transferOnce(String fromId,String toId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
+    public synchronized boolean transferOnce(String fromId,String toId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
+        try (MutationBatch ignored = beginMutationBatch()) {
         if (hasTransaction(fromId, kind, reference)) {
             return matchesExistingTransfer(fromId,toId,value,kind,category,reference);
         }
         if (hasTransaction(toId, kind, reference))
             return fail("idempotency key collision: destination already has a posting for this reference");
         return transfer(fromId,toId,value,kind,category,reference,worldMinute,memo);
-    }
+    
+        }}
     /** Creates matched cash and debt; unlike a deposit, loan proceeds do not repay existing liabilities. */
-    public boolean borrow(String accountId,double value,long worldMinute,String reference) {
+    public synchronized boolean borrow(String accountId,double value,long worldMinute,String reference) {
+        try (MutationBatch ignored = beginMutationBatch()) {
         Account a=accounts.get(accountId); if(a==null) return fail("unknown account");
         value=amount(value); minute(worldMinute);
         if(a.debt+value>a.creditLimit+1e-9) return fail("credit limit exceeded");
@@ -203,8 +315,10 @@ public final class TreasuryLedger {
         a.balance+=value; a.debt+=value;
         append("tx:"+transactionSequence++,a.id,"lender",a.currency,value,true,Kind.LOAN,"finance",clean(reference),worldMinute,a.balance,"loan proceeds");
         updateBankruptcy(a); return true;
-    }
-    public boolean accrueInterest(String accountId,double rate,long worldMinute,String reference) {
+    
+        }}
+    public synchronized boolean accrueInterest(String accountId,double rate,long worldMinute,String reference) {
+        try (MutationBatch ignored = beginMutationBatch()) {
         Account a=accounts.get(accountId); if(a==null) return fail("unknown account");
         if(!Double.isFinite(rate)||rate<0||rate>1) throw new IllegalArgumentException("interest rate must be 0..1");
         if(a.debt<=0 || rate==0) return true;
@@ -212,33 +326,97 @@ public final class TreasuryLedger {
         a.debt+=interest;
         append("tx:"+transactionSequence++,a.id,"external",a.currency,interest,false,Kind.INTEREST,"finance",clean(reference),minute(worldMinute),a.balance,"debt interest");
         updateBankruptcy(a); return true;
-    }
-    public boolean repayDebt(String accountId,double value,long worldMinute,String reference) {
+    
+        }}
+    public synchronized boolean repayDebt(String accountId,double value,long worldMinute,String reference) {
+        try (MutationBatch ignored = beginMutationBatch()) {
         Account a=accounts.get(accountId); if(a==null) return fail("unknown account");
         value=Math.min(amount(value),Math.min(a.debt,Math.max(0,a.balance)));
         if(value<=0) return true;
         a.balance-=value; a.debt-=value;
         append("tx:"+transactionSequence++,a.id,"debt",a.currency,value,false,Kind.REPAYMENT,"finance",clean(reference),minute(worldMinute),a.balance,"debt repayment");
         updateBankruptcy(a); return true;
-    }
+    
+        }}
     private void updateBankruptcy(Account a) { a.bankrupt=a.debt>a.creditLimit+1e-9; }
     private boolean fail(String s) { lastError=s; return false; }
     private static String clean(String s) { return s==null?"":s.trim(); }
     private void append(String tx,String account,String other,String currency,double value,boolean credit,Kind kind,String category,String reference,long minute,double balance,String memo) {
-        journal.add(new Entry(sequence++,tx,account,other,currency,value,credit,kind,category,reference,minute,balance,memo));
+        markMutation();
+        Entry entry = new Entry(sequence++,tx,account,other,currency,value,credit,kind,category,reference,minute,balance,memo);
+        journal.add(entry);
+        indexEntry(entry);
         String key = referenceKey(account, kind, reference);
         postedReferences.add(key);
         (credit ? postedCredits : postedDebits).add(key);
+        if (!credit && kind == Kind.LOGISTICS && "army-field-rations".equals(category))
+            armyFieldRationDebitAccounts.add(account);
     }
 
-    public String toJson() {
-        Map<String,Object> root=new LinkedHashMap<>(); root.put("format","wf-treasury-ledger/1"); root.put("sequence",sequence); root.put("transactionSequence",transactionSequence);
-        List<Object> aa=new ArrayList<>();
-        for(Account a:accounts.values()) aa.add(Map.of("id",a.id,"owner",a.ownerId,"currency",a.currency,"balance",a.balance,"creditLimit",a.creditLimit,"debt",a.debt,"bankrupt",a.bankrupt));
-        root.put("accounts",aa);
-        List<Object> jj=new ArrayList<>();
-        for(Entry e:journal) { Map<String,Object> m=new LinkedHashMap<>();m.put("seq",e.sequence());m.put("tx",e.transactionId());m.put("account",e.accountId());m.put("other",e.counterpartyId());m.put("currency",e.currency());m.put("amount",e.amount());m.put("credit",e.credit());m.put("kind",e.kind().name());m.put("category",e.category());m.put("reference",e.reference());m.put("minute",e.worldMinute());m.put("balance",e.balanceAfter());m.put("memo",e.memo());jj.add(m); }
-        root.put("journal",jj); return Json.write(root);
+    /**
+     * Writes the durable ledger incrementally. The journal is intentionally append-only,
+     * so building a second object graph and one giant JSON String for every autosave can
+     * temporarily require several times the ledger's retained heap.
+     */
+    public synchronized void writeJson(java.io.Writer writer) throws java.io.IOException {
+        writeJsonContents(writer);
+    }
+
+    public synchronized long writeJsonVersioned(java.io.Writer writer) throws java.io.IOException {
+        writeJsonContents(writer);
+        return mutationVersion;
+    }
+
+    private void writeJsonContents(java.io.Writer writer) throws java.io.IOException {
+        writer.write("{\"format\":\"wf-treasury-ledger/1\",\"sequence\":");
+        writer.write(Long.toString(sequence));
+        writer.write(",\"transactionSequence\":");
+        writer.write(Long.toString(transactionSequence));
+        writer.write(",\"accounts\":[");
+        boolean first = true;
+        for (Account account : accounts.values()) {
+            if (!first) writer.write(',');
+            first = false;
+            writer.write("{\"id\":"); Json.writeString(writer, account.id);
+            writer.write(",\"owner\":"); Json.writeString(writer, account.ownerId);
+            writer.write(",\"currency\":"); Json.writeString(writer, account.currency);
+            writer.write(",\"balance\":"); Json.writeNumber(writer, account.balance);
+            writer.write(",\"creditLimit\":"); Json.writeNumber(writer, account.creditLimit);
+            writer.write(",\"debt\":"); Json.writeNumber(writer, account.debt);
+            writer.write(",\"bankrupt\":"); writer.write(Boolean.toString(account.bankrupt));
+            writer.write('}');
+        }
+        writer.write("],\"journal\":[");
+        first = true;
+        for (Entry entry : journal) {
+            if (!first) writer.write(',');
+            first = false;
+            writer.write("{\"seq\":"); Json.writeNumber(writer, entry.sequence());
+            writer.write(",\"tx\":"); Json.writeString(writer, entry.transactionId());
+            writer.write(",\"account\":"); Json.writeString(writer, entry.accountId());
+            writer.write(",\"other\":"); Json.writeString(writer, entry.counterpartyId());
+            writer.write(",\"currency\":"); Json.writeString(writer, entry.currency());
+            writer.write(",\"amount\":"); Json.writeNumber(writer, entry.amount());
+            writer.write(",\"credit\":"); writer.write(Boolean.toString(entry.credit()));
+            writer.write(",\"kind\":"); Json.writeString(writer, entry.kind().name());
+            writer.write(",\"category\":"); Json.writeString(writer, entry.category());
+            writer.write(",\"reference\":"); Json.writeString(writer, entry.reference());
+            writer.write(",\"minute\":"); Json.writeNumber(writer, entry.worldMinute());
+            writer.write(",\"balance\":"); Json.writeNumber(writer, entry.balanceAfter());
+            writer.write(",\"memo\":"); Json.writeString(writer, entry.memo());
+            writer.write('}');
+        }
+        writer.write("]}");
+    }
+
+    public synchronized String toJson() {
+        java.io.StringWriter writer = new java.io.StringWriter();
+        try {
+            writeJson(writer);
+        } catch (java.io.IOException impossible) {
+            throw new IllegalStateException("Unexpected in-memory treasury serialization failure", impossible);
+        }
+        return writer.toString();
     }
     @SuppressWarnings("unchecked")
     public static TreasuryLedger fromJson(String json) {
@@ -249,6 +427,7 @@ public final class TreasuryLedger {
             throw new IllegalArgumentException("Treasury ledger requires accounts and journal arrays");
 
         TreasuryLedger ledger = new TreasuryLedger();
+        ledger.restoring = true;
         for (Object row : accountRows) {
             if (!(row instanceof Map<?, ?> m)) throw new IllegalArgumentException("Invalid treasury account row");
             String id = requiredString(m.get("id"), "account id");
@@ -294,9 +473,12 @@ public final class TreasuryLedger {
             Entry entry = new Entry(seq, tx, accountId, other, currency, value, credit, kind,
                     category, reference, worldMinute, balanceAfter, memo);
             ledger.journal.add(entry);
+            ledger.indexEntry(entry);
             String referenceKey = referenceKey(accountId, kind, reference);
             ledger.postedReferences.add(referenceKey);
             (credit ? ledger.postedCredits : ledger.postedDebits).add(referenceKey);
+            if (!credit && kind == Kind.LOGISTICS && "army-field-rations".equals(category))
+                ledger.armyFieldRationDebitAccounts.add(accountId);
             transactions.computeIfAbsent(tx, ignored -> new ArrayList<>()).add(entry);
             previousSequence = seq;
         }
@@ -320,6 +502,7 @@ public final class TreasuryLedger {
         ledger.sequence = Math.max(1, requiredLong(root.get("sequence"), "journal next sequence"));
         ledger.transactionSequence = Math.max(1, requiredLong(root.get("transactionSequence"), "transaction next sequence"));
         if (ledger.sequence <= previousSequence) throw new IllegalArgumentException("Treasury journal sequence is not ahead of the journal");
+        ledger.restoring = false;
         return ledger;
     }
 

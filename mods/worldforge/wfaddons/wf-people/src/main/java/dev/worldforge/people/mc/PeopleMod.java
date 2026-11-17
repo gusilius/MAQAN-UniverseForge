@@ -15,6 +15,7 @@ import dev.worldforge.mod.identity.WorldId;
 import dev.worldforge.people.Courts;
 import dev.worldforge.people.NameBank;
 import dev.worldforge.people.PopulationSimulation;
+import dev.worldforge.people.PopulationWorldBaseline;
 import dev.worldforge.people.Role;
 import dev.worldforge.people.RoleDefs;
 import dev.worldforge.people.bridge.DialogueBridge;
@@ -94,6 +95,10 @@ public class PeopleMod {
     public static final int TICKS_PER_DAY = 1200;
     private static final Map<UUID, Set<String>> FLAGS = new ConcurrentHashMap<>();
     private static long ticks;
+    private static volatile long populationProcessedDay = Long.MIN_VALUE;
+    private static volatile long populationBaselineDay = Long.MIN_VALUE;
+    private static volatile long populationRegistryGeneration;
+    private static volatile long populationFallbackGeneration = Long.MIN_VALUE;
 
     public PeopleMod() {
         IEventBus bus = FMLJavaModLoadingContext.get().getModEventBus();
@@ -137,6 +142,10 @@ public class PeopleMod {
         else AUTHORITY.clear();
         FLAGS.clear();
         ticks = 0;
+        populationProcessedDay = Long.MIN_VALUE;
+        populationBaselineDay = Long.MIN_VALUE;
+        populationRegistryGeneration = 0L;
+        populationFallbackGeneration = Long.MIN_VALUE;
         RoleDefs roles = new RoleDefs();
         dev.worldforge.people.ProfessionDefs professions = new dev.worldforge.people.ProfessionDefs();
         NameBank names = new NameBank();
@@ -171,6 +180,18 @@ public class PeopleMod {
         YEAR = WorldForgeApi.clock().year();
         if (WorldForgeMod.worldId() != null) AUTHORITY.beginWorld(WorldForgeMod.worldId());
         MinecraftServer server = e.getServer();
+        try {
+            String worldKey = WorldForgeMod.worldId() == null
+                    ? server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT).toAbsolutePath().normalize().toString()
+                    : WorldForgeMod.worldId().toString();
+            Path baselineFile = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
+                    .resolve("worldforge").resolve("wf_population_baseline.json");
+            populationBaselineDay = PopulationWorldBaseline.loadOrInitialize(
+                    baselineFile, worldKey, WorldForgeApi.clock().dayNumber());
+            populationProcessedDay = populationBaselineDay;
+        } catch (Exception ex) {
+            throw new IllegalStateException("wf_people cannot start: durable Population baseline is unreadable", ex);
+        }
         playerRegistryAvailable = true;
         try {
             Path playerFile = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
@@ -188,13 +209,15 @@ public class PeopleMod {
         }
         for (MapData m : WorldForgeMod.loadedMaps().values()) registry(m);
         reconcileIdentityPartitions(server);
+        populationProcessedDay = WorldForgeApi.clock().dayNumber();
+        populationRegistryGeneration = Math.incrementExact(populationRegistryGeneration);
     }
 
     private static boolean allIdentityPartitionsLoaded() {
         if (!playerRegistryAvailable || AUTHORITY.registry("__players__") != PLAYER_REGISTRY) return false;
         int expected = 1; // Dedicated player Character partition.
         for (MapData map : WorldForgeMod.loadedMaps().values())
-            if (map != null && map.titles != null) expected++;
+            if (map != null) expected++;
         try {
             return AUTHORITY.mapCount() == expected;
         } catch (RuntimeException ex) {
@@ -227,7 +250,7 @@ public class PeopleMod {
 
     /** Реестр людей карты: читается из папки мира, при первом обращении достраивается дворами (Courts.ensure). Null, если у карты нет титулов. */
     public static CharacterRegistry registry(MapData m) {
-        if (m == null || m.titles == null || INVALID_REGS.contains(m)) return null;
+        if (m == null || INVALID_REGS.contains(m)) return null;
         CharacterRegistry have = REGS.get(m);
         if (have != null) return have;
         MinecraftServer server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
@@ -249,13 +272,21 @@ public class PeopleMod {
         }
         int before = reg.size();
         try {
-            int created = Courts.ensure(m.titles, EditorManager.editorFor(m), reg, ROLES, NAMES, seed(m), YEAR);
+            // The autonomous campaign runs in a dedicated, disposable server process.
+            // It must begin from geography only; ordinary Minecraft launches retain the
+            // normal Courts.ensure bootstrap because this property is absent by default.
+            boolean emptyCampaignBootstrap = Boolean.getBoolean("worldforge.campaign.empty-bootstrap");
+            int created = m.titles == null || emptyCampaignBootstrap ? 0
+                    : Courts.ensure(m.titles, EditorManager.editorFor(m), reg, ROLES, NAMES, seed(m), YEAR);
+            if (emptyCampaignBootstrap && before == 0)
+                LOGGER.info("wf_people: campaign empty bootstrap enabled for map '{}'; authored court seeding skipped", m.name);
             LOGGER.info("wf_people: карта '{}': было {} людей, создано {}, теперь {}", m.name, before, created, reg.size());
         } catch (Exception ex) {
             LOGGER.error("wf_people: Courts.ensure для карты '{}' не удался: {}", m.name, ex.toString());
         }
         CharacterRegistry prev = REGS.putIfAbsent(m, reg);
         CharacterRegistry selected = prev != null ? prev : reg;
+        if (prev == null) populationRegistryGeneration = Math.incrementExact(populationRegistryGeneration);
         if (WorldForgeMod.worldId() != null) {
             try {
                 AUTHORITY.registerMap(m.name, selected);
@@ -502,11 +533,18 @@ public class PeopleMod {
         if (e.phase != TickEvent.Phase.END) return;
         ticks++;
         try {
-            int elapsedDays = WorldForgeApi.clock().pull("wf-people");
+            long currentWorldDay = WorldForgeApi.clock().dayNumber();
             YEAR = WorldForgeApi.clock().year();
-            if (elapsedDays > 0) {
-                for (CharacterRegistry registry : REGS.values()) PopulationSimulation.advance(registry, elapsedDays, YEAR);
-                PopulationSimulation.advance(PLAYER_REGISTRY, elapsedDays, YEAR);
+            boolean rustOwnsPopulation = tryRustPopulationCompute(e.getServer(), currentWorldDay, YEAR);
+            long registryGeneration = populationRegistryGeneration;
+            if (!rustOwnsPopulation && (currentWorldDay > populationProcessedDay
+                    || populationFallbackGeneration != registryGeneration)) {
+                long fallbackStartDay = populationBaselineDay == Long.MIN_VALUE ? currentWorldDay : populationBaselineDay;
+                for (CharacterRegistry registry : REGS.values())
+                    PopulationSimulation.advanceToWorldDay(registry, currentWorldDay, fallbackStartDay, YEAR);
+                PopulationSimulation.advanceToWorldDay(PLAYER_REGISTRY, currentWorldDay, fallbackStartDay, YEAR);
+                populationProcessedDay = Math.max(populationProcessedDay, currentWorldDay);
+                populationFallbackGeneration = registryGeneration;
             }
             if (ticks % SPAWN_EVERY == 0) NpcSpawner.pass(e.getServer());
             if (ticks % 20 == 0) socialInitiatives(e.getServer());
@@ -514,6 +552,28 @@ public class PeopleMod {
         } catch (Exception ex) {
             LOGGER.error("wf_people: ошибка тика: {}", ex.toString());
         }
+    }
+
+    private static boolean tryRustPopulationCompute(MinecraftServer server,long worldDay,int year) {
+        if (!ModList.get().isLoaded("wf_worldsim")) return false;
+        try {
+            Class<?> coordinator = Class.forName("dev.worldforge.worldsim.mc.PopulationComputeCoordinator");
+            Object result = coordinator.getMethod("tick", MinecraftServer.class, long.class, int.class)
+                    .invoke(null, server, worldDay, year);
+            return Boolean.TRUE.equals(result);
+        } catch (ReflectiveOperationException | LinkageError failure) {
+            // Fail closed: never run Java while an optional native pipeline may still own this interval.
+            LOGGER.error("wf_people: optional WorldSim population coordinator failed; Java population fallback is held to prevent double execution", failure);
+            return true;
+        }
+    }
+
+    public static long populationProcessedDay() { return populationProcessedDay; }
+    /** Stable world-save baseline for legacy Characters without per-Character receipts. */
+    public static long populationBaselineDay() { return populationBaselineDay; }
+    public static long populationRegistryGeneration() { return populationRegistryGeneration; }
+    public static void markPopulationProcessed(long worldDay) {
+        if (worldDay > populationProcessedDay) populationProcessedDay = worldDay;
     }
 
     /**
@@ -596,6 +656,8 @@ public class PeopleMod {
     public static String label(Character c) {
         StringBuilder sb = new StringBuilder(c.name);
         if (!c.house.isEmpty()) sb.append(' ').append(c.house);
+        else if (c.props.get("identity.surname") instanceof String surname && !surname.isBlank())
+            sb.append(' ').append(surname);
         String role = roleName(c);
         if (!role.isEmpty()) sb.append(", ").append(role);
         return sb.toString();

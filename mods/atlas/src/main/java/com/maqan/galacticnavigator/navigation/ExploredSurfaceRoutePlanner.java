@@ -23,19 +23,45 @@ public final class ExploredSurfaceRoutePlanner {
     public static Result find(List<NavigatorExplorationStore.ExploredChunk> explored,
                               int startX,int startZ,int goalX,int goalZ,Mode mode){
         Objects.requireNonNull(mode,"mode");
+        if(explored==null||explored.isEmpty())return failure("No explored surface is available for routing.",0);
         Map<Node,NavigatorExplorationStore.ExploredChunk> known=new HashMap<>();
-        for(var chunk:explored)known.put(new Node(chunk.chunkX(),chunk.chunkZ()),chunk);
+        for(var chunk:explored)if(chunk!=null)known.put(new Node(chunk.chunkX(),chunk.chunkZ()),chunk);
         Node start=new Node(startX,startZ),goal=new Node(goalX,goalZ);
-        if(!known.containsKey(start))
-            return failure("Your current chunk has not been recorded yet.",0);
-        if(!known.containsKey(goal))
-            return failure("Destination is outside explored territory. Explore it before routing.",0);
+        if(!known.containsKey(start))return failure("Your current chunk has not been recorded yet.",0);
+        if(!known.containsKey(goal))return failure("Destination is outside explored territory. Explore it before routing.",0);
         if(start.equals(goal)){
             var c=known.get(start);
             return new Result(true,"You are already in the destination chunk.",
                     List.of(new Point(c.chunkX(),c.chunkZ(),c.surfaceY())),0,0);
         }
-
+        if(NavigatorNativeBridge.nativeAvailable()){
+            int[] packed=new int[explored.size()*4];int offset=0;
+            for(var chunk:explored){
+                packed[offset++]=chunk.chunkX();packed[offset++]=chunk.chunkZ();packed[offset++]=chunk.surfaceY();
+                packed[offset++]=biomeCode(chunk.biome());
+            }
+            int[] nativeRoute=NavigatorNativeBridge.routeExploredSurface(packed,startX,startZ,goalX,goalZ,
+                    mode.ordinal(),Math.min(250_000,Math.max(2_000,known.size()*4)));
+            if(nativeRoute!=null){
+                int expanded=nativeRoute[1];
+                double nativeCost=Double.longBitsToDouble((Integer.toUnsignedLong(nativeRoute[3])<<32)
+                        |Integer.toUnsignedLong(nativeRoute[2]));
+                if(!Double.isFinite(nativeCost)||nativeCost<0)return failure("Native route returned an invalid cost.",expanded);
+                if(nativeRoute[0]==0)return failure(expanded>=Math.min(250_000,Math.max(2_000,known.size()*4))
+                        ?"Search limit reached; zoom in or explore a smaller corridor."
+                        :"No continuous explored corridor connects these points.",expanded);
+                List<Point> points=new ArrayList<>((nativeRoute.length-4)/2);
+                for(int i=4;i<nativeRoute.length;i+=2){
+                    var cell=known.get(new Node(nativeRoute[i],nativeRoute[i+1]));
+                    if(cell==null)return failure("Native route referenced a chunk outside the captured explored snapshot.",expanded);
+                    points.add(new Point(cell.chunkX(),cell.chunkZ(),cell.surfaceY()));
+                }
+                if(points.isEmpty()||points.get(0).chunkX()!=startX||points.get(0).chunkZ()!=startZ
+                        ||points.get(points.size()-1).chunkX()!=goalX||points.get(points.size()-1).chunkZ()!=goalZ)
+                    return failure("Native route failed endpoint validation.",expanded);
+                return new Result(true,"Route found through explored terrain.",points,nativeCost,expanded);
+            }
+        }
         Map<Node,Double> gScore=new HashMap<>();
         Map<Node,Node> cameFrom=new HashMap<>();
         PriorityQueue<QueueNode> open=new PriorityQueue<>(Comparator.comparingDouble(QueueNode::score));
@@ -89,6 +115,13 @@ public final class ExploredSurfaceRoutePlanner {
                 :"No continuous explored corridor connects these points.",expanded);
     }
 
+    private static int biomeCode(String biome){
+        String id=biome==null?"":biome.toLowerCase(Locale.ROOT);
+        if(id.contains("lava")||id.contains("basalt_deltas")||id.contains("fire"))return 1;
+        if(id.contains("ocean")||id.contains("river")||id.contains("beach"))return 2;
+        if(id.contains("mountain")||id.contains("peaks")||id.contains("cliff"))return 3;
+        return 0;
+    }
     private static double heightCost(int delta,Mode mode){
         return switch(mode){
             case WALK -> delta*0.035;

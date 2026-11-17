@@ -50,6 +50,10 @@ dependencies {
     // Мягкая зависимость: мост к диалогам компилируется против jar wf_dialogue (libs/ или соседний проект, собранный раньше: tools/build-all.sh идёт по алфавиту).
     compileOnly fileTree(dir: 'libs', include: ['wf_dialogue-*.jar'])
     compileOnly fileTree(dir: '../wf-dialogue/build/libs', include: ['wf_dialogue-*.jar'])
+    // Dynasty synchronization reads the canonical CharacterRegistry; build-order tooling
+    // derives the wf-people dependency from this compileOnly artifact declaration.
+    compileOnly fileTree(dir: 'libs', include: ['wf_people-*.jar'])
+    compileOnly fileTree(dir: '../wf-people/build/libs', include: ['wf_people-*.jar'])
 }
 
 tasks.named('processResources', ProcessResources).configure {

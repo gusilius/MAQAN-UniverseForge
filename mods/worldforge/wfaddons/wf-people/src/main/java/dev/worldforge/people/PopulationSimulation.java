@@ -14,10 +14,20 @@ public final class PopulationSimulation {
     public static final int SKILL_XP_PER_RANK = 100;
     public static final int MAX_SKILL_RANK = 20;
 
-    public enum Need { HUNGER, REST, SAFETY, SOCIAL, PURPOSE, LEISURE }
+    public enum Need {
+        HUNGER("hunger"), REST("rest"), SAFETY("safety"),
+        SOCIAL("social"), PURPOSE("purpose"), LEISURE("leisure");
+        private final String key;
+        Need(String key) { this.key = key; }
+    }
     public enum Duty { WORKER, SPECIALIST, SOLDIER, HERO }
     public enum LifeStage { INFANT, CHILD, ADOLESCENT, ADULT, ELDER }
-    public enum Intent { EAT, REST, SEEK_SAFETY, SOCIALIZE, WORK, TRAIN, PATROL, FOLLOW_COMMAND, IDLE }
+    public enum Intent {
+        EAT("eat"), REST("rest"), SEEK_SAFETY("seek_safety"), SOCIALIZE("socialize"),
+        WORK("work"), TRAIN("train"), PATROL("patrol"), FOLLOW_COMMAND("follow_command"), IDLE("idle");
+        private final String key;
+        Intent(String key) { this.key = key; }
+    }
 
     private static final String PROFESSION = "population.profession";
     private static final String PROFESSION_HISTORY = "population.profession_history";
@@ -57,7 +67,7 @@ public final class PopulationSimulation {
     /** Immutable copy used by the shared RPG progression adapter. */
     public static Map<String, Integer> skillRanksSnapshot(Character character) {
         Map<String, Integer> copy = new TreeMap<>();
-        for (var entry : mapProp(character, SKILLS).entrySet()) {
+        for (var entry : readMapProp(character, SKILLS).entrySet()) {
             if (entry.getValue() instanceof Number n) copy.put(entry.getKey(), clamp(n.intValue(), 0, MAX_SKILL_RANK));
         }
         return Collections.unmodifiableMap(copy);
@@ -65,13 +75,23 @@ public final class PopulationSimulation {
 
     /** Imports ranks from the shared RPG progression profile into this Character's canonical skill store. */
     public static void syncSkillRanks(Character character, Map<String, Integer> ranks) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            syncSkillRanksBatched(character, ranks);
+        }
+    }
+
+    private static void syncSkillRanksBatched(Character character, Map<String, Integer> ranks) {
         Objects.requireNonNull(character, "character");
-        Map<String, Object> target = mapProp(character, SKILLS);
-        target.clear();
+        Map<String, Object> next = new TreeMap<>();
         for (var entry : ranks.entrySet()) {
             String id = normalizeId(entry.getKey(), "skill");
-            target.put(id, clamp(entry.getValue(), 0, MAX_SKILL_RANK));
+            next.put(id, clamp(entry.getValue(), 0, MAX_SKILL_RANK));
         }
+        Map<String, Object> target = mapProp(character, SKILLS);
+        if (target.equals(next)) return;
+        target.clear();
+        target.putAll(next);
+        CharacterRegistry.recordCharacterMutation();
     }
 
     public static int age(Character character, int year) {
@@ -110,14 +130,22 @@ public final class PopulationSimulation {
             if (skillRank(character, requirement.getKey()) < requirement.getValue())
                 throw new IllegalStateException("Requires skill " + requirement.getKey() + " rank " + requirement.getValue());
         }
-        assignProfession(character, definition.id, year);
-        removeDuty(character, Duty.WORKER);
-        removeDuty(character, Duty.SPECIALIST);
-        addDuty(character, definition.duty);
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            assignProfession(character, definition.id, year);
+            removeDuty(character, Duty.WORKER);
+            removeDuty(character, Duty.SPECIALIST);
+            addDuty(character, definition.duty);
+        }
     }
 
     /** Low-level migration/admin path; prefer the catalog-validated overload. */
     public static void assignProfession(Character character, String professionId, int year) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            assignProfessionBatched(character, professionId, year);
+        }
+    }
+
+    private static void assignProfessionBatched(Character character, String professionId, int year) {
         requireAlive(character);
         String next = normalizeId(professionId, "profession");
         String previous = profession(character);
@@ -129,8 +157,10 @@ public final class PopulationSimulation {
             entry.put("ended_year", year);
             history.add(entry);
         }
+        if (previous.equals(next) && Objects.equals(character.props.get("population.profession_started_year"), year)) return;
         character.props.put(PROFESSION, next);
         character.props.put("population.profession_started_year", year);
+        CharacterRegistry.recordCharacterMutation();
     }
 
     public static List<String> professionHistory(Character character) {
@@ -144,13 +174,29 @@ public final class PopulationSimulation {
 
     /** Duties are orthogonal tags: one person may be a specialist and a soldier in reserve. */
     public static void addDuty(Character character, Duty duty) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            addDutyBatched(character, duty);
+        }
+    }
+
+    private static void addDutyBatched(Character character, Duty duty) {
         requireAlive(character);
         List<Object> duties = listProp(character, DUTIES);
-        if (!duties.contains(duty.name().toLowerCase(Locale.ROOT))) duties.add(duty.name().toLowerCase(Locale.ROOT));
+        if (!duties.contains(duty.name().toLowerCase(Locale.ROOT))) {
+            duties.add(duty.name().toLowerCase(Locale.ROOT));
+            CharacterRegistry.recordCharacterMutation();
+        }
     }
 
     public static void removeDuty(Character character, Duty duty) {
-        listProp(character, DUTIES).remove(duty.name().toLowerCase(Locale.ROOT));
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            removeDutyBatched(character, duty);
+        }
+    }
+
+    private static void removeDutyBatched(Character character, Duty duty) {
+        if (listProp(character, DUTIES).remove(duty.name().toLowerCase(Locale.ROOT)))
+            CharacterRegistry.recordCharacterMutation();
     }
 
     public static boolean hasDuty(Character character, Duty duty) {
@@ -161,9 +207,23 @@ public final class PopulationSimulation {
     public static void promoteToHero(Character character) { addDuty(character, Duty.HERO); }
 
     public static void setCommand(Character character, String commandId) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            setCommandBatched(character, commandId);
+        }
+    }
+
+    private static void setCommandBatched(Character character, String commandId) {
         requireAlive(character);
-        if (commandId == null || commandId.isBlank()) character.props.remove("population.command");
-        else character.props.put("population.command", normalizeId(commandId, "command"));
+        Object previous = character.props.get("population.command");
+        if (commandId == null || commandId.isBlank()) {
+            if (character.props.remove("population.command") != null) CharacterRegistry.recordCharacterMutation();
+        } else {
+            String next = normalizeId(commandId, "command");
+            if (!Objects.equals(previous, next)) {
+                character.props.put("population.command", next);
+                CharacterRegistry.recordCharacterMutation();
+            }
+        }
     }
 
     public static Set<String> duties(Character character) {
@@ -175,44 +235,106 @@ public final class PopulationSimulation {
 
     /** Needs are shared by civilian, specialist, soldier and hero AI; values are deficits (0=met, 100=critical). */
     public static int need(Character character, Need need) {
-        Object value = mapProp(character, NEEDS).get(need.name().toLowerCase(Locale.ROOT));
-        return value instanceof Number n ? clamp(n.intValue(), 0, MAX_NEED) : 0;
+        return need(readMapProp(character, NEEDS), need);
     }
 
     public static void setNeed(Character character, Need need, int deficit) {
-        mapProp(character, NEEDS).put(need.name().toLowerCase(Locale.ROOT), clamp(deficit, 0, MAX_NEED));
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            setNeedBatched(character, need, deficit);
+        }
+    }
+
+    private static void setNeedBatched(Character character, Need need, int deficit) {
+        Objects.requireNonNull(need, "need");
+        Map<String, Object> needs = mapProp(character, NEEDS);
+        int next = clamp(deficit, 0, MAX_NEED);
+        if (need(needs, need) != next) {
+            setNeed(needs, need, next);
+            CharacterRegistry.recordCharacterMutation();
+        }
     }
 
     public static void changeNeed(Character character, Need need, int delta) {
-        setNeed(character, need, need(character, need) + delta);
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            changeNeedBatched(character, need, delta);
+        }
+    }
+
+    private static void changeNeedBatched(Character character, Need need, int delta) {
+        Objects.requireNonNull(character, "character");
+        Objects.requireNonNull(need, "need");
+        Map<String, Object> needs = mapProp(character, NEEDS);
+        int previous = need(needs, need);
+        int next = clamp(previous + delta, 0, MAX_NEED);
+        if (previous == next) return;
+        setNeed(needs, need, next);
+        CharacterRegistry.recordCharacterMutation();
+    }
+
+    private static int need(Map<String, Object> needs, Need need) {
+        Object value = needs.get(need.key);
+        return value instanceof Number n ? clamp(n.intValue(), 0, MAX_NEED) : 0;
+    }
+
+    private static void setNeed(Map<String, Object> needs, Need need, int deficit) {
+        needs.put(need.key, clamp(deficit, 0, MAX_NEED));
     }
 
     /** Skill history is retained across profession changes; training never creates another Character. */
     public static int skillRank(Character character, String skillId) {
         String id = normalizeId(skillId, "skill");
-        Object value = mapProp(character, SKILLS).get(id);
+        Object value = readMapProp(character, SKILLS).get(id);
         return value instanceof Number n ? clamp(n.intValue(), 0, MAX_SKILL_RANK) : 0;
     }
 
     public static long trainingXp(Character character, String skillId) {
         String id = normalizeId(skillId, "skill");
-        Object value = mapProp(character, TRAINING).get(id);
+        Object value = readMapProp(character, TRAINING).get(id);
         return value instanceof Number n ? Math.max(0, n.longValue()) : 0;
     }
 
     public static void setTrainingXp(Character character, String skillId, long xp) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            setTrainingXpBatched(character, skillId, xp);
+        }
+    }
+
+    private static void setTrainingXpBatched(Character character, String skillId, long xp) {
         requireAlive(character);
         if (xp < 0) throw new IllegalArgumentException("Training XP cannot be negative");
-        mapProp(character, TRAINING).put(normalizeId(skillId, "skill"), xp);
+        Map<String, Object> training = mapProp(character, TRAINING);
+        String id = normalizeId(skillId, "skill");
+        if (!Objects.equals(training.get(id), xp)) {
+            training.put(id, xp);
+            CharacterRegistry.recordCharacterMutation();
+        }
     }
 
     public static void setSkillRank(Character character, String skillId, int rank) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            setSkillRankBatched(character, skillId, rank);
+        }
+    }
+
+    private static void setSkillRankBatched(Character character, String skillId, int rank) {
         requireAlive(character);
-        mapProp(character, SKILLS).put(normalizeId(skillId, "skill"), clamp(rank, 0, MAX_SKILL_RANK));
+        Map<String, Object> skills = mapProp(character, SKILLS);
+        String id = normalizeId(skillId, "skill");
+        int next = clamp(rank, 0, MAX_SKILL_RANK);
+        if (!Objects.equals(skills.get(id), next)) {
+            skills.put(id, next);
+            CharacterRegistry.recordCharacterMutation();
+        }
     }
 
     /** Adds training XP and returns the number of ranks gained. */
     public static int train(Character character, String skillId, long xp) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            return trainBatched(character, skillId, xp);
+        }
+    }
+
+    private static int trainBatched(Character character, String skillId, long xp) {
         requireAlive(character);
         String profession = profession(character);
         if ("laborer".equals(profession) || "general_worker".equals(profession))
@@ -226,14 +348,30 @@ public final class PopulationSimulation {
         long total = Math.min((long) (MAX_SKILL_RANK - rank) * SKILL_XP_PER_RANK, sum);
         int gained = (int) (total / SKILL_XP_PER_RANK);
         int nextRank = Math.min(MAX_SKILL_RANK, rank + gained);
-        mapProp(character, SKILLS).put(id, nextRank);
-        mapProp(character, TRAINING).put(id, nextRank >= MAX_SKILL_RANK ? 0L : total % SKILL_XP_PER_RANK);
+        long remaining = nextRank >= MAX_SKILL_RANK ? 0L : total % SKILL_XP_PER_RANK;
+        Map<String, Object> skills = mapProp(character, SKILLS);
+        Map<String, Object> training = mapProp(character, TRAINING);
+        if (nextRank != rank || !Objects.equals(training.get(id), remaining)) {
+            skills.put(id, nextRank);
+            training.put(id, remaining);
+            CharacterRegistry.recordCharacterMutation();
+        }
         return nextRank - rank;
     }
 
     public static void setTrainingTarget(Character character, String skillId) {
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            setTrainingTargetBatched(character, skillId);
+        }
+    }
+
+    private static void setTrainingTargetBatched(Character character, String skillId) {
         requireAlive(character);
-        character.props.put(TRAINING_TARGET, normalizeId(skillId, "skill"));
+        String next = normalizeId(skillId, "skill");
+        if (!Objects.equals(character.props.get(TRAINING_TARGET), next)) {
+            character.props.put(TRAINING_TARGET, next);
+            CharacterRegistry.recordCharacterMutation();
+        }
     }
 
     public static String trainingTarget(Character character) {
@@ -247,16 +385,20 @@ public final class PopulationSimulation {
      */
     public static Intent decide(Character character, int year) {
         if (character == null || !character.alive) return Intent.IDLE;
-        if (need(character, Need.HUNGER) >= 70) return Intent.EAT;
-        if (need(character, Need.REST) >= 70) return Intent.REST;
-        if (need(character, Need.SAFETY) >= 70) return Intent.SEEK_SAFETY;
-        if (need(character, Need.SOCIAL) >= 70) return Intent.SOCIALIZE;
+        return decide(character, year, readMapProp(character, NEEDS));
+    }
+
+    private static Intent decide(Character character, int year, Map<String, Object> needs) {
+        if (need(needs, Need.HUNGER) >= 70) return Intent.EAT;
+        if (need(needs, Need.REST) >= 70) return Intent.REST;
+        if (need(needs, Need.SAFETY) >= 70) return Intent.SEEK_SAFETY;
+        if (need(needs, Need.SOCIAL) >= 70) return Intent.SOCIALIZE;
 
         LifeStage stage = lifeStage(character, year);
         if (stage == LifeStage.INFANT || stage == LifeStage.CHILD) return Intent.IDLE;
-        if (stage == LifeStage.ADOLESCENT && need(character, Need.PURPOSE) >= 45) return Intent.TRAIN;
+        if (stage == LifeStage.ADOLESCENT && need(needs, Need.PURPOSE) >= 45) return Intent.TRAIN;
 
-        if (need(character, Need.PURPOSE) >= 65) {
+        if (need(needs, Need.PURPOSE) >= 65) {
             return trainingTarget(character).isEmpty() ? Intent.WORK : Intent.TRAIN;
         }
         if (hasDuty(character, Duty.HERO) && !String.valueOf(character.props.getOrDefault("population.command", "")).isBlank()) return Intent.FOLLOW_COMMAND;
@@ -268,12 +410,60 @@ public final class PopulationSimulation {
         return Intent.IDLE;
     }
 
+    static Intent intentFromKey(String key) {
+        for (Intent intent : Intent.values()) if (intent.key.equals(key)) return intent;
+        throw new IllegalArgumentException("Unknown population intent: " + key);
+    }
+
+    /** Applies a validated Rust proposal inside the caller's single Character mutation batch. */
+    static void applyComputedResult(Character character, Map<String, Integer> nextNeeds, String intentKey,
+                                    long simulatedDays, int lastSimulatedYear,long lastWorldDay) {
+        requireAlive(character);
+        Intent intent = intentFromKey(intentKey);
+        Map<String, Object> needs = mapProp(character, NEEDS);
+        Map<String, Object> replacement = new LinkedHashMap<>(nextNeeds);
+        boolean changed = false;
+        if (!needs.equals(replacement)) { needs.clear(); needs.putAll(replacement); changed = true; }
+        if (!Objects.equals(character.props.get(LAST_INTENT), intent.key)) {
+            character.props.put(LAST_INTENT, intent.key); changed = true;
+        }
+        Object rawDays = character.props.get("population.simulated_days");
+        long currentDays = persistedNonNegativeLong(rawDays);
+        if (currentDays != simulatedDays || !(rawDays instanceof String)) {
+            character.props.put("population.simulated_days", Long.toString(simulatedDays)); changed = true;
+        }
+        if (!Objects.equals(character.props.get("population.last_simulated_year"), lastSimulatedYear)) {
+            character.props.put("population.last_simulated_year", lastSimulatedYear); changed = true;
+        }
+        Object rawWorldDay = character.props.get("population.last_simulated_world_day");
+        if (persistedNonNegativeLong(rawWorldDay) != lastWorldDay || !(rawWorldDay instanceof String)) {
+            character.props.put("population.last_simulated_world_day", Long.toString(lastWorldDay)); changed = true;
+        }
+        if (changed) CharacterRegistry.recordCharacterMutation();
+    }
+
     /** Records the chosen intent for UI/other addons; it does not spend food or move entities. */
     public static Intent updateIntent(Character character, int year) {
-        Intent intent = decide(character, year);
-        character.props.put(LAST_INTENT, intent.name().toLowerCase(Locale.ROOT));
-        character.props.put("population.age_years", age(character, year));
-        character.props.put("population.life_stage", lifeStage(character, year).name().toLowerCase(Locale.ROOT));
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            return updateIntentBatched(character, year);
+        }
+    }
+
+    private static Intent updateIntentBatched(Character character, int year) {
+        Map<String, Object> needs = mapProp(character, NEEDS);
+        Intent intent = character == null || !character.alive ? Intent.IDLE : decide(character, year, needs);
+        LifeStage stage = character == null ? LifeStage.INFANT : lifeStage(character, year);
+        if (character != null) {
+            String nextStage = stage.name().toLowerCase(Locale.ROOT);
+            int nextAge = age(character, year);
+            boolean changed = !Objects.equals(character.props.get(LAST_INTENT), intent.key)
+                    || !Objects.equals(character.props.get("population.age_years"), nextAge)
+                    || !Objects.equals(character.props.get("population.life_stage"), nextStage);
+            character.props.put(LAST_INTENT, intent.key);
+            character.props.put("population.age_years", nextAge);
+            character.props.put("population.life_stage", nextStage);
+            if (changed) CharacterRegistry.recordCharacterMutation();
+        }
         return intent;
     }
 
@@ -287,6 +477,7 @@ public final class PopulationSimulation {
     /** Applies the need changes of a completed action. Call only after the owning system confirms success. */
     public static void completeIntent(Character character, Intent intent) {
         requireAlive(character);
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
         switch (Objects.requireNonNull(intent, "intent")) {
             case EAT -> changeNeed(character, Need.HUNGER, -70);
             case REST -> changeNeed(character, Need.REST, -70);
@@ -298,6 +489,7 @@ public final class PopulationSimulation {
             case FOLLOW_COMMAND -> { changeNeed(character, Need.PURPOSE, -20); changeNeed(character, Need.REST, 8); }
             case IDLE -> { }
         }
+        }
     }
 
     /** Stores a death cause and year while preserving the Character and family graph. */
@@ -305,29 +497,87 @@ public final class PopulationSimulation {
         Character character = registry.get(characterId);
         if (character == null) throw new IllegalArgumentException("No character " + characterId);
         if (!character.alive) return List.of();
-        character.props.put("population.death_year", year);
-        character.props.put("population.death_cause", cause == null || cause.isBlank() ? "unknown" : cause);
-        return registry.kill(characterId);
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            character.props.put("population.death_year", year);
+            character.props.put("population.death_cause", cause == null || cause.isBlank() ? "unknown" : cause);
+            CharacterRegistry.recordCharacterMutation();
+            return registry.kill(characterId);
+        }
     }
 
     /** Daily hook used by PeopleMod. Aging is calendar-derived; AI intents are refreshed, but actions remain externally owned. */
     public static void advance(CharacterRegistry registry, long elapsedDays, int year) {
-        if (elapsedDays < 0) throw new IllegalArgumentException("elapsedDays cannot be negative");
-        if (elapsedDays == 0) return;
-        registry.refreshLifeStages(year);
-        for (Character character : registry.all()) {
-            if (!character.alive) continue;
-            changeNeed(character, Need.HUNGER, drift(10, elapsedDays));
-            changeNeed(character, Need.REST, drift(6, elapsedDays));
-            changeNeed(character, Need.SOCIAL, drift(2, elapsedDays));
-            changeNeed(character, Need.PURPOSE, drift(1, elapsedDays));
-            changeNeed(character, Need.LEISURE, drift(3, elapsedDays));
-            updateIntent(character, year);
-            Object previous = character.props.get("population.simulated_days");
-            long simulated = previous instanceof Number n ? Math.max(0, n.longValue()) : 0;
-            character.props.put("population.simulated_days", simulated + elapsedDays);
-            character.props.put("population.last_simulated_year", year);
+        Objects.requireNonNull(registry, "registry");
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            advanceBatched(registry, elapsedDays, year, -1L);
         }
+    }
+
+    /** Exclusive Java fallback with per-Character durable world-day receipts. */
+    public static void advanceToWorldDay(CharacterRegistry registry,long targetWorldDay,long fallbackStartDay,int year) {
+        Objects.requireNonNull(registry,"registry");
+        if(targetWorldDay<0||fallbackStartDay<0)throw new IllegalArgumentException("world days cannot be negative");
+        if(targetWorldDay<fallbackStartDay)throw new IllegalArgumentException("targetWorldDay cannot precede fallbackStartDay");
+        try(CharacterRegistry.MutationBatch ignored=CharacterRegistry.beginMutationBatch()){
+            registry.refreshLifeStages(year);
+            for(Character character:registry.all()){
+                if(!character.alive)continue;
+                Object raw=character.props.get("population.last_simulated_world_day");
+                long previous=raw==null?fallbackStartDay:persistedNonNegativeLong(raw);
+                if(previous>=targetWorldDay)continue;
+                advanceCharacterBatched(character,targetWorldDay-previous,year,targetWorldDay);
+            }
+        }
+    }
+
+    private static void advanceBatched(CharacterRegistry registry,long elapsedDays,int year,long worldDay) {
+        if(elapsedDays<0)throw new IllegalArgumentException("elapsedDays cannot be negative");
+        if(elapsedDays==0)return;
+        registry.refreshLifeStages(year);
+        for(Character character:registry.all())if(character.alive)
+            advanceCharacterBatched(character,elapsedDays,year,worldDay);
+    }
+
+    private static void advanceCharacterBatched(Character character,long elapsedDays,int year,long worldDay){
+        if(elapsedDays<=0)return;
+        int hungerDrift=drift(10,elapsedDays),restDrift=drift(6,elapsedDays),socialDrift=drift(2,elapsedDays);
+        int purposeDrift=drift(1,elapsedDays),leisureDrift=drift(3,elapsedDays);
+        Map<String,Object> needs=mapProp(character,NEEDS);
+        setNeed(needs,Need.HUNGER,need(needs,Need.HUNGER)+hungerDrift);
+        setNeed(needs,Need.REST,need(needs,Need.REST)+restDrift);
+        setNeed(needs,Need.SOCIAL,need(needs,Need.SOCIAL)+socialDrift);
+        setNeed(needs,Need.PURPOSE,need(needs,Need.PURPOSE)+purposeDrift);
+        setNeed(needs,Need.LEISURE,need(needs,Need.LEISURE)+leisureDrift);
+        Intent intent=decide(character,year,needs);
+        LifeStage stage=lifeStage(character,year);
+        character.props.put(LAST_INTENT,intent.key);
+        character.props.put("population.age_years",age(character,year));
+        character.props.put("population.life_stage",stage.name().toLowerCase(Locale.ROOT));
+        Object previous=character.props.get("population.simulated_days");
+        long simulated=persistedNonNegativeLong(previous);
+        long nextSimulated=elapsedDays>Long.MAX_VALUE-simulated?Long.MAX_VALUE:simulated+elapsedDays;
+        character.props.put("population.simulated_days",Long.toString(nextSimulated));
+        character.props.put("population.last_simulated_year",year);
+        if(worldDay>=0)character.props.put("population.last_simulated_world_day",Long.toString(worldDay));
+        CharacterRegistry.recordCharacterMutation();
+    }
+
+    /** Exact non-negative long reader for durable decimal-string counters; accepts legacy JSON numbers. */
+    static long persistedNonNegativeLong(Object raw) {
+        if (raw instanceof String text) {
+            try { return Math.max(0L, Long.parseLong(text)); }
+            catch (NumberFormatException ignored) { return 0L; }
+        }
+        if (raw instanceof Number number) {
+            if (number instanceof Double || number instanceof Float) {
+                double value = number.doubleValue();
+                if (!Double.isFinite(value) || value < 0 || value != Math.rint(value)) return 0L;
+                if (value >= 0x1.0p63) return Long.MAX_VALUE;
+                return (long) value;
+            }
+            return Math.max(0L, number.longValue());
+        }
+        return 0L;
     }
 
     private static void requireAlive(Character character) {
@@ -340,6 +590,13 @@ public final class PopulationSimulation {
         String id = value.trim().toLowerCase(Locale.ROOT);
         if (!id.matches("[a-z0-9_.:-]{1,64}")) throw new IllegalArgumentException("Invalid " + label + " id: " + value);
         return id;
+    }
+
+    /** Read-only property access. Missing maps stay absent; queries must never mutate Character state. */
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> readMapProp(Character character, String key) {
+        Object raw = character.props.get(key);
+        return raw instanceof Map<?, ?> map ? (Map<String, Object>) map : Map.of();
     }
 
     @SuppressWarnings("unchecked")

@@ -3,6 +3,7 @@ package dev.worldforge.court;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.CharacterStats;
+import dev.worldforge.people.CharacterDevelopment;
 import dev.worldforge.people.Courts;
 import dev.worldforge.people.NameBank;
 import dev.worldforge.people.Role;
@@ -29,6 +30,9 @@ public final class CourtSim {
 
         /** Фракция выдвинула ультиматум: члены хотят независимости. */
         default void independence(String realm, String liege) { }
+
+        /** Фракция требует пересмотра феодальных обязательств; true только после доменного подтверждения. */
+        default boolean vassalDemands(String liege, List<String> vassals) { return false; }
 
         default void news(String text) { }
 
@@ -57,6 +61,19 @@ public final class CourtSim {
     public final NameBank names;
     public final Opinions opinions = new Opinions();
     public final Map<Integer, Faction> factions = new LinkedHashMap<>();
+    /** Temporary stewardship of an underage sovereign; both references point to canonical Characters. */
+    public static final class Regency {
+        public final String realm, heir;
+        public String regent;
+        public final long startedDay;
+        /** 0..100 pressure from a divided court; stage 1 is a regency crisis, stage 2 an open power struggle. */
+        public int crisis;
+        public int crisisStage;
+        Regency(String realm, String heir, String regent, long startedDay) {
+            this.realm = realm; this.heir = heir; this.regent = regent; this.startedDay = startedDay;
+        }
+    }
+    public final Map<String, Regency> regencies = new LinkedHashMap<>();
     public final Map<Integer, Scheme> schemes = new LinkedHashMap<>();
     public final Map<String, EventDef> events = new LinkedHashMap<>();
     public final List<Pending> pending = new ArrayList<>();
@@ -182,6 +199,7 @@ public final class CourtSim {
 
     private void monthly() {
         opinions.expire(year());
+        updateRegencies();
         updateFactions();
         rollEvents();
         syncProps();
@@ -201,6 +219,9 @@ public final class CourtSim {
         for (Character c : all) {
             if (!c.alive) continue;
             int age = y - c.birthYear;
+            if (age <= 16) CharacterDevelopment.upbringingTick(c,
+                    c.father.isEmpty() ? null : reg.get(c.father),
+                    c.mother.isEmpty() ? null : reg.get(c.mother), y);
             double p = age < 50 ? 0.003 : Math.min(0.55, 0.01 + Math.pow(age - 50, 2) * 0.0007);
             if (c.traits.contains("craven") || CharacterStats.traits(c).contains("lazy")) p *= 1.05;
             if (rnd("death", c.id.hashCode() + day).nextDouble() < p) die(c, "умер от старости или болезни");
@@ -210,6 +231,12 @@ public final class CourtSim {
             Character f = reg.get(c.spouse);
             int age = y - c.birthYear;
             if (f == null || !f.alive || age < 18 || age > 40 || c.children.size() >= 6) continue;
+            // ResidentLifeEvents also advances local families on the shared CharacterRegistry.
+            // Both owners consult the same persisted marker so one calendar year cannot create
+            // two births for the same mother when settlement and court ticks run in either order.
+            Object lastBirthValue = c.props.get("family.last_birth_year");
+            int lastBirthYear = lastBirthValue instanceof Number n ? n.intValue() : 0;
+            if (lastBirthYear > 0 && y - lastBirthYear < 2) continue;
             if (rnd("birth", c.id.hashCode() + day).nextDouble() < 0.24) bear(f, c);
         }
     }
@@ -221,6 +248,12 @@ public final class CourtSim {
         List<String> l = m ? pool.male : pool.female;
         if (l.isEmpty()) return;
         Character kid = reg.addChild(father, mother, l.get(r.nextInt(l.size())), m ? "m" : "f", year());
+        // Shared with wf-settlements' ResidentLifeEvents pass: birth is one canonical
+        // Character lifecycle event, regardless of which domain clock reaches the year first.
+        mother.props.put("family.last_birth_year", year());
+        father.props.put("family.last_birth_year", year());
+        mother.props.put("family.last_event", "child-born:" + kid.id);
+        father.props.put("family.last_event", "child-born:" + kid.id);
         String realm = realmOf(father);
         if (!realm.isEmpty() && ruler(realm) == father) say("В доме " + realmName(realm) + " родился " + (m ? "наследник " : "ребёнок ") + kid.name);
     }
@@ -230,10 +263,16 @@ public final class CourtSim {
         if (!c.alive) return;
         String realm = realmOf(c);
         boolean wasRuler = !realm.isEmpty() && ruler(realm) == c;
-        String law = realm.isEmpty() ? "primogeniture" : String.valueOf(d.realms.get(realm) == null ? "primogeniture" : d.realms.get(realm).props.getOrDefault("succession", "primogeniture"));
+        TitleData.Realm politicalRealm = realm.isEmpty() ? null : d.realms.get(realm);
+        String law = politicalRealm == null ? "primogeniture" : String.valueOf(
+                politicalRealm.props.getOrDefault("politics.succession_law",
+                        politicalRealm.props.getOrDefault("succession", "primogeniture")));
         if (wasRuler) {
             List<Succession.Result> res = Succession.onDeath(reg, defs, d, ed, names, seed + day, c.id, year(), law);
-            for (Succession.Result s : res) say(c.name + " (" + realmName(realm) + ") " + cause + ". Наследует " + s.heir.name + (s.usurper ? " (узурпатор)" : ""));
+            for (Succession.Result result : res) {
+                say(c.name + " (" + realmName(realm) + ") " + cause + ". Наследует " + result.heir.name + (result.usurper ? " (узурпатор)" : ""));
+                if (result.place.startsWith("realm:")) ensureRegency(result.place.substring(6));
+            }
         } else {
             reg.kill(c.id);
             if (!realm.isEmpty()) say(c.name + " (" + realmName(realm) + ") " + cause);
@@ -246,6 +285,155 @@ public final class CourtSim {
             if (heir == null) heir = heirOf(c);
             handOver(pl, c, heir);
         }
+        if (wasRuler && ed != null) syncProps();
+    }
+
+    // ------------------------------------------------------------------ регентство
+
+    public Regency regency(String realm) { return regencies.get(realm); }
+
+    /** Adult members of the realm court who can legally serve as regent. */
+    public List<Character> regencyCandidates(String realm) {
+        String place = Courts.realmPlace(realm);
+        Character sovereign = ruler(realm);
+        List<Character> candidates = new ArrayList<>();
+        for (Character candidate : reg.all()) {
+            if (!candidate.alive || candidate == sovereign || year() - candidate.birthYear < 16
+                    || candidate.posts.stream().noneMatch(post -> post.place.equals(place))) continue;
+            candidates.add(candidate);
+        }
+        candidates.sort(Comparator.comparingInt((Character candidate) -> regentScore(realm, candidate, sovereign)).reversed()
+                .thenComparing(candidate -> candidate.id));
+        return candidates;
+    }
+
+    /** Number of existing council seats that support a regency candidate (no parallel faction registry). */
+    public int regencyCouncilSupport(String realm, Character candidate) {
+        if (candidate == null) return 0;
+        int support = 0;
+        for (Council.Seat seat : Council.seats(reg, defs, realm)) {
+            Character councillor = seat.holder;
+            if (councillor != null && councillor != candidate && opinion(councillor.id, candidate.id) >= -10)
+                support++;
+        }
+        return support;
+    }
+
+    private int regentScore(String realm, Character candidate, Character heir) {
+        int councilSupport = regencyCouncilSupport(realm, candidate);
+        int score = CharacterStats.value(candidate, "diplomacy") * 2
+                + CharacterStats.value(candidate, "stewardship") * 2
+                + CharacterStats.value(candidate, "intrigue")
+                + councilSupport * 12;
+        if (heir != null) score += Math.max(-20, Math.min(20, opinion(candidate.id, heir.id) / 3));
+        Set<String> traits = new HashSet<>(CharacterStats.traits(candidate));
+        if (traits.contains("just")) score += 5;
+        if (traits.contains("honorable") || traits.contains("loyal")) score += 4;
+        if (traits.contains("ambitious_schemer") || traits.contains("cruel")) score -= 5;
+        return score;
+    }
+
+    private void ensureRegency(String realm) {
+        Character heir = ruler(realm);
+        if (heir == null || !heir.alive || year() - heir.birthYear >= 16) {
+            regencies.remove(realm);
+            return;
+        }
+        Regency current = regencies.get(realm);
+        if (current != null && current.heir.equals(heir.id)) {
+            Character regent = reg.get(current.regent);
+            if (regent != null && regent.alive && year() - regent.birthYear >= 16) return;
+        }
+        List<Character> candidates = regencyCandidates(realm);
+        if (current != null && current.heir.equals(heir.id) && current.regent.isEmpty() && candidates.isEmpty()) return;
+        String regentId = candidates.isEmpty() ? "" : candidates.get(0).id;
+        regencies.put(realm, new Regency(realm, heir.id, regentId, current == null ? day : current.startedDay));
+        Character regent = regentId.isEmpty() ? null : reg.get(regentId);
+        say(regent == null
+                ? "В " + realmName(realm) + " началось малолетнее правление " + heir.name + ": двор должен назначить регента"
+                : regent.name + " становится регентом при малолетнем правителе " + heir.name + " (" + realmName(realm) + ")");
+    }
+
+    /** Explicit appointment is limited to adult members of this realm's existing court. */
+    public void appointRegent(String realm, String candidateId) {
+        Character heir = ruler(realm), candidate = reg.get(candidateId);
+        if (heir == null || !heir.alive || year() - heir.birthYear >= 16)
+            throw new TitleEditor.EditException("Регентство сейчас не требуется");
+        if (candidate == null || !candidate.alive || candidate == heir || year() - candidate.birthYear < 16
+                || candidate.posts.stream().noneMatch(post -> post.place.equals(Courts.realmPlace(realm))))
+            throw new TitleEditor.EditException("Регентом может стать только совершеннолетний член этого двора");
+        Regency current = regencies.get(realm);
+        long started = current == null ? day : current.startedDay;
+        regencies.put(realm, new Regency(realm, heir.id, candidate.id, started));
+        say(candidate.name + " назначен регентом " + realmName(realm) + " при " + heir.name);
+    }
+
+    /**
+     * Resolve a regency crisis through the existing council: a supported candidate may replace
+     * the incumbent, or the council can renew confidence in the incumbent and lower pressure.
+     * No new political entity is created; all participants remain canonical court Characters.
+     */
+    public boolean negotiateRegencyCrisis(String realm) {
+        Regency current = regencies.get(realm);
+        if (current == null || current.crisisStage < 1) return false;
+        List<Character> candidates = regencyCandidates(realm);
+        if (candidates.isEmpty()) return false;
+        Character incumbent = reg.get(current.regent);
+        Character successor = candidates.stream()
+                .filter(candidate -> regencyCouncilSupport(realm, candidate) >= 2)
+                .max(Comparator.comparingInt((Character candidate) -> regencyCouncilSupport(realm, candidate))
+                        .thenComparingInt(candidate -> regentScore(realm, candidate, ruler(realm)))
+                        .thenComparing(candidate -> candidate.id, Comparator.reverseOrder()))
+                .orElse(null);
+        if (successor == null) return false;
+        int oldPressure = current.crisis;
+        if (incumbent != successor) {
+            Regency settled = new Regency(realm, current.heir, successor.id, current.startedDay);
+            settled.crisis = Math.max(0, oldPressure - 45);
+            settled.crisisStage = settled.crisis >= 60 ? 1 : 0;
+            regencies.put(realm, settled);
+            say("Совет добился компромисса в " + realmName(realm) + ": регентом вместо " 
+                    + (incumbent == null ? "вакантного места" : incumbent.name) + " становится " + successor.name);
+        } else {
+            current.crisis = Math.max(0, oldPressure - 35);
+            current.crisisStage = current.crisis >= 100 ? 2 : current.crisis >= 60 ? 1 : 0;
+            say("Королевский совет подтвердил полномочия регента " + successor.name + " в " + realmName(realm));
+        }
+        syncProps();
+        return true;
+    }
+
+    private void updateRegencies() {
+        for (String realm : new ArrayList<>(regencies.keySet())) ensureRegency(realm);
+        for (TitleData.Realm realm : d.realmList()) {
+            Character sovereign = ruler(realm.id);
+            if (sovereign != null && sovereign.alive && year() - sovereign.birthYear < 16
+                    && !regencies.containsKey(realm.id)) ensureRegency(realm.id);
+        }
+        updateRegencyCrises();
+    }
+
+    /** A regency crisis grows from actual council opposition and recedes when the court reunites. */
+    private void updateRegencyCrises() {
+        for (Regency regency : regencies.values()) {
+            Character regent = reg.get(regency.regent);
+            int support = regent == null || !regent.alive ? 0 : regencyCouncilSupport(regency.realm, regent);
+            int change = regent == null || !regent.alive ? 15 : support <= 1 ? 8 : support >= 3 ? -12 : -2;
+            if (regent != null && regent.alive
+                    && CharacterStats.traits(regent).stream().anyMatch(t -> t.equals("ambitious") || t.equals("ambitious_schemer")))
+                change += 2;
+            int previousStage = regency.crisisStage;
+            regency.crisis = Math.max(0, Math.min(100, regency.crisis + change));
+            int nextStage = regency.crisis >= 100 ? 2 : regency.crisis >= 60 ? 1 : 0;
+            if (nextStage != previousStage) {
+                Character heir = reg.get(regency.heir);
+                String subject = heir == null ? realmName(regency.realm) : heir.name + " в " + realmName(regency.realm);
+                if (nextStage == 1) say("Придворный совет расколот: регентство при " + subject + " переживает кризис");
+                else if (nextStage == 2) say("Открытая борьба за власть вокруг регентства при " + subject);
+                else say("Придворный кризис регентства в " + realmName(regency.realm) + " пошёл на спад");
+                regency.crisisStage = nextStage;
+            }
+        }
     }
 
     // ------------------------------------------------------------------ фракции
@@ -253,48 +441,127 @@ public final class CourtSim {
     private double weight(String realm) { TitleData.Realm r = d.realms.get(realm); return r == null ? 0 : Math.max(1, r.areaBlocks); }
 
     private Faction factionOf(String liege, String member) {
-        for (Faction f : factions.values()) if (f.liege.equals(liege) && f.members.contains(member)) return f;
+        for (Faction faction : factions.values())
+            if (faction.liege.equals(liege) && faction.members.contains(member)) return faction;
         return null;
     }
 
-    private void updateFactions() {
-        for (TitleData.Realm L : d.realmList()) {
-            Character lr = ruler(L.id);
-            if (lr == null) continue;
-            double bonus = council(L.id).getOrDefault("vassal_opinion", 0.0);
-            List<String> subs = new ArrayList<>(L.subjectIds);
-            Faction f = null;
-            for (Faction x : factions.values()) if (x.liege.equals(L.id)) f = x;
-            for (String s : subs) {
-                Character sr = ruler(s);
-                if (sr == null) continue;
-                double op = opinion(sr.id, lr.id) + bonus;
-                Faction cur = factionOf(L.id, s);
-                if (cur == null && op < -25 && cooldown.getOrDefault("faction|" + L.id + "|" + s, 0) <= year()) {
-                    if (f == null) { f = new Faction(nextId++, "independence", L.id, (int) day); f.leader = s; factions.put(f.id, f); say(realmName(s) + " затевает заговор против " + realmName(L.id)); }
-                    f.members.add(s);
-                } else if (cur != null && op > -10) {
-                    cur.members.remove(s);
-                    if (cur.leader.equals(s) && !cur.members.isEmpty()) cur.leader = cur.members.get(0);
-                }
-            }
-            if (f == null) continue;
-            f.members.removeIf(m -> !subs.contains(m));
-            if (f.members.isEmpty()) { factions.remove(f.id); continue; }
-            double mine = 0, total = weight(L.id);
-            for (String s : subs) { total += weight(s); if (f.members.contains(s)) mine += weight(s); }
-            f.power = total <= 0 ? 0 : mine / total;
-            f.progress = Math.min(100, f.progress + 2 + f.power * 25 + (f.members.size() >= 2 ? 2 : 0));
-            if (f.progress >= 100 && f.power >= 0.2) strike(f);
-        }
-        factions.values().removeIf(x -> x.members.isEmpty());
+    private Faction factionFor(String liege, String type) {
+        for (Faction faction : factions.values())
+            if (faction.liege.equals(liege) && faction.type.equals(type)) return faction;
+        return null;
     }
 
-    private void strike(Faction f) {
-        factions.remove(f.id);
-        for (String m : f.members) cooldown.put("faction|" + f.liege + "|" + m, year() + 10);
-        say("Вассалы " + realmName(f.liege) + " поднимают восстание: " + f.members.size() + " государств");
-        for (String m : f.members) hooks.independence(m, f.liege);
+    private static double realmShare(TitleData.Realm realm, String key) {
+        if (realm == null) return 0;
+        Object raw = realm.props.get(key);
+        if (!(raw instanceof Number number) || !Double.isFinite(number.doubleValue())) return 0;
+        return Math.max(0, Math.min(1, number.doubleValue()));
+    }
+
+    private void updateFactions() {
+        for (TitleData.Realm liege : d.realmList()) {
+            Character liegeRuler = ruler(liege.id);
+            if (liegeRuler == null) continue;
+            double councilBonus = council(liege.id).getOrDefault("vassal_opinion", 0.0);
+            List<String> subjects = new ArrayList<>(liege.subjectIds);
+            subjects.sort(String::compareTo);
+
+            for (String subjectId : subjects) {
+                Character vassalRuler = ruler(subjectId);
+                if (vassalRuler == null) continue;
+                TitleData.Realm vassal = d.realms.get(subjectId);
+                int loyalty = vassal != null && vassal.props.get("politics.vassal_loyalty") instanceof Number n
+                        ? Math.max(0, Math.min(100, n.intValue())) : 50;
+                double taxShare = realmShare(vassal, "tax_share");
+                double levyShare = realmShare(vassal, "levy_share");
+
+                // Personal opinion, the canonical Statecraft contract and its visible map projection
+                // all contribute to grievance. High obligations can trigger demands before secession.
+                double personalityPressure = (CharacterDevelopment.drive(vassalRuler, CharacterDevelopment.Drive.INDEPENDENCE) - 50) * 0.03
+                        + (CharacterDevelopment.temperament(vassalRuler, CharacterDevelopment.Temperament.AMBITION) - 50) * 0.02
+                        - (CharacterDevelopment.drive(vassalRuler, CharacterDevelopment.Drive.SECURITY) - 50) * 0.01;
+                Regency regency = regencies.get(liege.id);
+                Character regent = regency == null ? null : reg.get(regency.regent);
+                double regentInfluence = regent == null || !regent.alive ? 0
+                        : (CharacterStats.value(regent, "diplomacy") - 10) * 0.6
+                        + (CharacterStats.value(regent, "stewardship") - 10) * 0.2
+                        + (regencyCouncilSupport(liege.id, regent) - 2) * 2.5
+                        - (regency.crisisStage == 2 ? 12 : regency.crisisStage == 1 ? 5 : 0);
+                double adjustedOpinion = opinion(vassalRuler.id, liegeRuler.id) + councilBonus + personalityPressure + regentInfluence
+                        + (loyalty - 50) * 0.5
+                        - Math.max(0, taxShare - 0.20) * 70.0
+                        - Math.max(0, levyShare - 0.30) * 50.0;
+                String desiredType = adjustedOpinion <= -55 || loyalty <= 15 ? "independence"
+                        : adjustedOpinion <= -25 || loyalty <= 35 ? "demands" : "";
+
+                Faction current = factionOf(liege.id, subjectId);
+                if (current != null && !current.type.equals(desiredType)) {
+                    current.members.remove(subjectId);
+                    if (current.leader.equals(subjectId))
+                        current.leader = current.members.isEmpty() ? "" : current.members.get(0);
+                    current = null;
+                }
+                if (desiredType.isEmpty()) continue;
+                if (current != null) continue;
+                if (cooldown.getOrDefault("faction|" + liege.id + "|" + subjectId, 0) > year()) continue;
+
+                Faction faction = factionFor(liege.id, desiredType);
+                if (faction == null) {
+                    faction = new Faction(nextId++, desiredType, liege.id, (int) day);
+                    factions.put(faction.id, faction);
+                    say(realmName(subjectId) + (desiredType.equals("independence")
+                            ? " требует независимости от " : " объединяет требования против ") + realmName(liege.id));
+                }
+                faction.members.add(subjectId);
+                if (faction.leader.isEmpty()) faction.leader = subjectId;
+            }
+
+            for (Faction faction : new ArrayList<>(factions.values())) {
+                if (!faction.liege.equals(liege.id)) continue;
+                faction.members.removeIf(member -> !subjects.contains(member) || ruler(member) == null);
+                if (faction.members.isEmpty()) {
+                    factions.remove(faction.id);
+                    continue;
+                }
+                double factionWeight = 0, totalWeight = weight(liege.id);
+                for (String subjectId : subjects) {
+                    double subjectWeight = weight(subjectId);
+                    totalWeight += subjectWeight;
+                    if (faction.members.contains(subjectId)) factionWeight += subjectWeight;
+                }
+                faction.power = totalWeight <= 0 ? 0 : factionWeight / totalWeight;
+                faction.progress = Math.min(100, faction.progress + 2 + faction.power * 25
+                        + (faction.members.size() >= 2 ? 2 : 0));
+                if (faction.progress >= 100 && faction.power >= 0.2) strike(faction);
+            }
+        }
+        factions.values().removeIf(faction -> faction.members.isEmpty());
+    }
+
+    private void strike(Faction faction) {
+        if ("demands".equals(faction.type)) {
+            List<String> members = List.copyOf(faction.members);
+            if (!hooks.vassalDemands(faction.liege, members)) {
+                faction.progress = 95;
+                say("Требования вассалов " + realmName(faction.liege)
+                        + " пока не получили подтверждения политической системы");
+                return;
+            }
+            factions.remove(faction.id);
+            for (String member : members)
+                cooldown.put("faction|" + faction.liege + "|" + member, year() + 3);
+            say("Сюзерен " + realmName(faction.liege)
+                    + " уступил требованиям вассалов: феодальные обязательства пересмотрены");
+            return;
+        }
+
+        factions.remove(faction.id);
+        for (String member : faction.members)
+            cooldown.put("faction|" + faction.liege + "|" + member, year() + 10);
+        say("Вассалы " + realmName(faction.liege) + " поднимают восстание: "
+                + faction.members.size() + " государств");
+        for (String member : faction.members) hooks.independence(member, faction.liege);
     }
 
     /** Одарить вассала: его мнение о правителе растёт на 5 лет. */
@@ -350,16 +617,27 @@ public final class CourtSim {
         Character o = reg.get(s.owner), t = reg.get(s.target);
         if (o == null || t == null) return 0;
         double def = council(realmOf(t)).getOrDefault("plot_defense", 0.0) / 100.0;
-        return Math.max(0.05, Math.min(0.95, s.kind.base + 0.04 * (CharacterStats.value(o, "intrigue") - CharacterStats.value(t, "intrigue")) - def));
+        double daring = (CharacterDevelopment.temperament(o, CharacterDevelopment.Temperament.RISK) - 50) * 0.0015;
+        double ambition = (CharacterDevelopment.temperament(o, CharacterDevelopment.Temperament.AMBITION) - 50) * 0.001;
+        double guile = o.traits.contains("deceitful") || o.traits.contains("shrewd") || o.traits.contains("ambitious_schemer") ? 0.035 : 0.0;
+        double vigilance = (CharacterDevelopment.drive(t, CharacterDevelopment.Drive.SECURITY) - 50) * 0.001
+                + (t.traits.contains("paranoid") || t.traits.contains("observant") ? 0.035 : 0.0);
+        return Math.max(0.05, Math.min(0.95, s.kind.base
+                + 0.04 * (CharacterStats.value(o, "intrigue") - CharacterStats.value(t, "intrigue"))
+                + daring + ambition + guile - vigilance - def));
     }
 
     private void stepSchemes() {
         for (Scheme s : new ArrayList<>(schemes.values())) {
             Character o = reg.get(s.owner);
             if (o == null || !o.alive) { schemes.remove(s.id); continue; }
-            double speed = 1 + 0.05 * (CharacterStats.value(o, "intrigue") - 10) + council(s.ownerRealm).getOrDefault("scheme_power", 0.0) * 0.05;
+            double speed = 1 + 0.05 * (CharacterStats.value(o, "intrigue") - 10)
+                    + (CharacterDevelopment.temperament(o, CharacterDevelopment.Temperament.AMBITION) - 50) * 0.004
+                    + (CharacterDevelopment.temperament(o, CharacterDevelopment.Temperament.DISCIPLINE) - 50) * 0.002
+                    + council(s.ownerRealm).getOrDefault("scheme_power", 0.0) * 0.05;
             s.progress += Math.max(0.3, speed);
-            s.secrecy = Math.max(0.05, s.secrecy - 0.003);
+            double concealment = o.traits.contains("deceitful") || o.traits.contains("ambitious_schemer") ? 0.001 : 0.0;
+            s.secrecy = Math.max(0.05, Math.min(1.0, s.secrecy - 0.003 + concealment));
             if (s.progress >= s.kind.days) { schemes.remove(s.id); finishScheme(s); }
         }
     }
@@ -373,7 +651,14 @@ public final class CourtSim {
         Character tr = ruler(s.ownerRealm);
         switch (s.kind) {
             case BEFRIEND -> {
-                if (ok) { opinions.add(t.id, o.id, "Дружба", 25, 0); opinions.add(o.id, t.id, "Дружба", 25, 0); s.result = "успех: теперь они друзья"; }
+                if (ok) {
+                    opinions.add(t.id, o.id, "Дружба", 25, 0); opinions.add(o.id, t.id, "Дружба", 25, 0);
+                    CharacterDevelopment.remember(o, "court:befriend:" + s.id, "court_friendship", t.globalId,
+                            "успешное сближение", 35, day * 1440L);
+                    CharacterDevelopment.remember(t, "court:befriend:" + s.id, "court_friendship", o.globalId,
+                            "успешное сближение", 35, day * 1440L);
+                    s.result = "успех: теперь они друзья";
+                }
                 else s.result = "неудача: цель осталась равнодушной";
             }
             case SWAY -> {
@@ -381,12 +666,25 @@ public final class CourtSim {
                 else s.result = "неудача";
             }
             case MURDER -> {
-                if (ok) { die(t, exposed ? "убит" : "погиб при странных обстоятельствах"); s.result = "успех: цель мертва"; }
+                if (ok) {
+                    CharacterDevelopment.recordConduct(o, CharacterDevelopment.Conduct.CRUELTY, t,
+                            "court:assassination:" + s.id, day * 1440L);
+                    CharacterDevelopment.remember(t, "court:assassination:" + s.id, "assassination_attempt",
+                            o.globalId, "покушение на жизнь", -100, day * 1440L);
+                    die(t, exposed ? "убит" : "погиб при странных обстоятельствах");
+                    s.result = "успех: цель мертва";
+                }
                 else s.result = "неудача: цель жива";
             }
         }
         if (exposed) {
             s.exposed = true;
+            CharacterDevelopment.recordConduct(o, CharacterDevelopment.Conduct.BETRAYAL, t,
+                    "court:scheme-exposed:" + s.id, day * 1440L);
+            CharacterDevelopment.recordExperience(t, CharacterDevelopment.Experience.BETRAYED,
+                    "court:betrayal:" + s.id, "раскрытые козни " + o.name, day * 1440L, 2);
+            CharacterDevelopment.remember(t, "court:scheme:" + s.id, "court_betrayal", o.globalId,
+                    s.kind.title, -70, day * 1440L);
             opinions.add(t.id, o.id, "Раскрытые козни: " + s.kind.title.toLowerCase(), -50, year() + 20);
             Character trr = ruler(realmOf(t));
             if (trr != null && trr != t) opinions.add(trr.id, o.id, "Раскрытые козни против двора", -40, year() + 20);
@@ -517,7 +815,74 @@ public final class CourtSim {
                 double v = Math.round(e.getValue() * 10) / 10.0;
                 ed.setDerivedProp(r.id, "council." + e.getKey(), v);
             }
-            ed.setDerivedProp(r.id, "people.ties", String.join(",", Marriages.ties(this, r.id)));
+            Set<String> dynasticTies = Marriages.ties(this, r.id);
+            ed.setDerivedProp(r.id, "people.ties", String.join(",", dynasticTies));
+            ed.setDerivedProp(r.id, "politics.dynastic_ties", dynasticTies.size());
+
+            List<Faction> realmFactions = factions.values().stream().filter(f -> f.liege.equals(r.id)).toList();
+            double factionPressure = Math.min(1.0, realmFactions.stream().mapToDouble(f -> Math.max(0, f.power)).sum());
+            ed.setDerivedProp(r.id, "politics.faction_pressure", Math.round(factionPressure * 1000) / 1000.0);
+            ed.setDerivedProp(r.id, "politics.faction_count", realmFactions.size());
+            Regency activeRegency = regencies.get(r.id);
+            Character regent = activeRegency == null ? null : reg.get(activeRegency.regent);
+            ed.setDerivedProp(r.id, "politics.regency.active",
+                    activeRegency != null && regent != null && regent.alive ? 1 : 0);
+            ed.setDerivedProp(r.id, "politics.regency.heir",
+                    activeRegency == null ? "" : activeRegency.heir);
+            ed.setDerivedProp(r.id, "politics.regency.regent",
+                    regent == null || !regent.alive ? "" : regent.globalId);
+            ed.setDerivedProp(r.id, "politics.regency.started_year",
+                    activeRegency == null ? 0 : startYear + (int) (activeRegency.startedDay / 365));
+            ed.setDerivedProp(r.id, "politics.regency.council_support",
+                    regent == null || !regent.alive ? 0 : regencyCouncilSupport(r.id, regent));
+            ed.setDerivedProp(r.id, "politics.regency.crisis", activeRegency == null ? 0 : activeRegency.crisis);
+            ed.setDerivedProp(r.id, "politics.regency.crisis_stage", activeRegency == null ? 0 : activeRegency.crisisStage);
+
+            long activeSchemes = schemes.values().stream().filter(sc -> {
+                Character target = reg.get(sc.target);
+                return sc.ownerRealm.equals(r.id) || (target != null && realmOf(target).equals(r.id));
+            }).count();
+            double intriguePressure = Math.min(1.0, activeSchemes / 3.0);
+            ed.setDerivedProp(r.id, "politics.intrigue_pressure", Math.round(intriguePressure * 1000) / 1000.0);
+
+            Character sovereign = ruler(r.id);
+            if (sovereign != null) {
+                // The ruler's actual Character Registry attributes and traits shape the realm's
+                // strategic preferences. These are derived projections, never a second ruler profile.
+                for (String attribute : CharacterStats.ATTRS)
+                    ed.setDerivedProp(r.id, "politics.ruler_" + attribute,
+                            CharacterStats.value(sovereign, attribute) / 20.0);
+                Set<String> rulerTraits = new HashSet<>(CharacterStats.traits(sovereign));
+                for (String trait : List.of("greedy", "generous", "just", "cruel", "ambitious",
+                        "content", "brave", "craven", "patient", "wroth", "scholar", "shrewd",
+                        "honorable", "opportunistic", "loyal", "fickle", "protective", "callous",
+                        "disciplined", "impulsive", "pragmatic", "idealistic", "charismatic", "awkward"))
+                    ed.setDerivedProp(r.id, "politics.ruler_trait_" + trait, rulerTraits.contains(trait) ? 1.0 : 0.0);
+                for (CharacterDevelopment.Drive drive : CharacterDevelopment.Drive.values())
+                    ed.setDerivedProp(r.id, "politics.ruler_drive_" + drive.name().toLowerCase(Locale.ROOT),
+                            CharacterDevelopment.drive(sovereign, drive) / 100.0);
+                for (CharacterDevelopment.Temperament facet : CharacterDevelopment.Temperament.values())
+                    ed.setDerivedProp(r.id, "politics.ruler_temperament_" + facet.name().toLowerCase(Locale.ROOT),
+                            CharacterDevelopment.temperament(sovereign, facet) / 100.0);
+                TitleData.Title highest = null;
+                for (String key : r.titleKeys) {
+                    TitleData.Title candidate = d.findTitle(key);
+                    if (candidate != null && (highest == null || candidate.tier > highest.tier
+                            || candidate.tier == highest.tier && candidate.key.compareTo(highest.key) < 0))
+                        highest = candidate;
+                }
+                if (highest != null && !sovereign.globalId.equals(highest.props.get("holderCharacterId")))
+                    ed.setProp(highest.id, "holderCharacterId", sovereign.globalId);
+            }
+
+            // Publish the canonical ruler-to-ruler opinion to wf-realms through the shared
+            // realm property bus; wf-realms consumes it for its monthly vassal contract review.
+            Character vassalRuler = ruler(r.id);
+            String liegeId = r.overlord == null ? "" : r.overlord.id;
+            Character liegeRuler = liegeId.isEmpty() ? null : ruler(liegeId);
+            int liegeOpinion = vassalRuler == null || liegeRuler == null ? 0
+                    : opinion(vassalRuler.id, liegeRuler.id);
+            ed.setDerivedProp(r.id, "politics.liege_opinion", liegeOpinion);
         }
     }
 
@@ -533,6 +898,7 @@ public final class CourtSim {
         if (!mine.isEmpty() && reg.get(mine) != null) ids.add(mine);
         for (TitleData.Realm r : d.realmList()) { Character c = ruler(r.id); if (c != null) ids.add(c.id); }
         for (Council.Seat st : Council.seats(reg, defs, realm)) if (st.holder != null) ids.add(st.holder.id);
+        for (Character candidate : regencyCandidates(realm)) { if (ids.size() > 48) break; ids.add(candidate.id); }
         Character me = ruler(realm);
         for (Scheme sc : schemes.values()) if (me != null && sc.owner.equals(me.id)) { ids.add(sc.owner); ids.add(sc.target); }
         for (Pending p : pending) if (p.realm.equals(realm)) ids.add(p.character);
@@ -549,6 +915,13 @@ public final class CourtSim {
         v.me = mine;
         for (Opinions.Modifier m : opinions.mods) if (ids.contains(m.from) && ids.contains(m.to)) v.opinions.mods.add(m);
         for (Faction f : factions.values()) if (f.liege.equals(realm) || f.members.contains(realm)) v.factions.put(f.id, f);
+        Regency regency = regencies.get(realm);
+        if (regency != null) {
+            Regency snapshot = new Regency(regency.realm, regency.heir, regency.regent, regency.startedDay);
+            snapshot.crisis = regency.crisis;
+            snapshot.crisisStage = regency.crisisStage;
+            v.regencies.put(realm, snapshot);
+        }
         for (Scheme sc : schemes.values()) if (me != null && sc.owner.equals(me.id)) v.schemes.put(sc.id, sc);
         for (Pending p : pending) if (p.realm.equals(realm)) v.pending.add(p);
         int from = Math.max(0, news.size() - 80);
@@ -575,6 +948,10 @@ public final class CourtSim {
             fl.add(m);
         }
         root.put("factions", fl);
+        List<Object> rl = new ArrayList<>();
+        for (Regency r : regencies.values())
+            rl.add(new ArrayList<Object>(List.of(r.realm, r.heir, r.regent, r.startedDay, r.crisis, r.crisisStage)));
+        root.put("regencies", rl);
         List<Object> sl = new ArrayList<>();
         for (Scheme s : schemes.values()) sl.add(new ArrayList<Object>(List.of(s.id, s.kind.name(), s.owner, s.target, s.ownerRealm, s.progress, s.secrecy)));
         root.put("schemes", sl);
@@ -590,7 +967,7 @@ public final class CourtSim {
         Map<String, Object> root = (Map<String, Object>) Json.parse(json);
         if (!"wf-court/1".equals(root.get("format"))) throw new IllegalArgumentException("Неверный формат двора");
         day = ((Number) root.get("day")).longValue(); nextId = ((Number) root.get("next")).intValue();
-        humans.clear(); cooldown.clear(); opinions.mods.clear(); factions.clear(); schemes.clear(); pending.clear(); news.clear();
+        humans.clear(); cooldown.clear(); opinions.mods.clear(); factions.clear(); regencies.clear(); schemes.clear(); pending.clear(); news.clear();
         for (Object o : (List<Object>) root.get("humans")) humans.add((String) o);
         players.clear();
         if (root.get("players") instanceof Map<?, ?> pm) for (var e : pm.entrySet()) players.put(String.valueOf(e.getKey()), String.valueOf(e.getValue()));
@@ -603,6 +980,14 @@ public final class CourtSim {
             for (Object x : (List<Object>) m.get("members")) f.members.add((String) x);
             f.power = ((Number) m.get("power")).doubleValue(); f.leader = (String) m.get("leader"); f.progress = ((Number) m.get("progress")).doubleValue();
             factions.put(f.id, f);
+        }
+        if (root.get("regencies") instanceof List<?> savedRegencies) for (Object o : savedRegencies) {
+            List<Object> values = (List<Object>) o;
+            Regency regency = new Regency((String) values.get(0), (String) values.get(1),
+                    (String) values.get(2), ((Number) values.get(3)).longValue());
+            if (values.size() > 4) regency.crisis = ((Number) values.get(4)).intValue();
+            if (values.size() > 5) regency.crisisStage = ((Number) values.get(5)).intValue();
+            regencies.put(regency.realm, regency);
         }
         for (Object o : (List<Object>) root.get("schemes")) {
             List<Object> l = (List<Object>) o;

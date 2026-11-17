@@ -3,8 +3,12 @@ package dev.worldforge.settle;
 import dev.worldforge.mod.Json;
 import dev.worldforge.mod.economy.TreasuryService;
 import dev.worldforge.mod.economy.TreasuryLedger;
+import dev.worldforge.mod.api.DomainMutationRevisions;
+import dev.worldforge.mod.api.WorldForgeApi;
 
 import java.util.*;
+import java.util.function.Supplier;
+import java.util.function.Consumer;
 
 /**
  * Поселение как числа: склад, здания, рабочие. Считается шагами {@link #tick}, поэтому тянет сотни поселений на сервере;
@@ -15,6 +19,8 @@ public final class Settlement {
     /** Persisted departures bridge settlement population changes to the canonical Character registry. */
     public record WorkerDeparture(String personId, String name, String reason) { }
     public final List<WorkerDeparture> departures = new ArrayList<>();
+    /** Durable idempotency receipts for autonomous placement requests. */
+    private final Map<String, String> placementReceipts = new TreeMap<>();
 
     public static final double BASE_CAP = 100, EAT = 0.02, GROW_EVERY = 45, STARVE_EVERY = 30, MAX_STEP = 2, MAX_TICK = 86400;
     public static final int BASE_HOUSING = 4, LOG_MAX = 60;
@@ -65,6 +71,79 @@ public final class Settlement {
     public final Flow flow = new Flow();
     public final ResidentTaskGraph taskGraph = new ResidentTaskGraph();
     private double growTimer, starveTimer, leaveTimer;
+    /** -1 keeps legacy worker-count semantics; >=0 is the authoritative canonical resident count. */
+    private int canonicalPopulation = -1;
+
+    private static final ThreadLocal<IdentityHashMap<Settlement, MutationState>> ACTIVE_MUTATIONS =
+            ThreadLocal.withInitial(IdentityHashMap::new);
+
+    private static final class MutationState {
+        final Settlement owner;
+        final DomainMutationRevisions.Mutation revision;
+        int depth = 1;
+        boolean dirty;
+        MutationState(Settlement owner) {
+            this.owner = owner;
+            this.revision = WorldForgeApi.revisions().begin(DomainMutationRevisions.Domain.SETTLEMENTS);
+        }
+    }
+
+    private final class MutationBatch implements AutoCloseable {
+        private final MutationState state;
+        private boolean closed;
+        MutationBatch(MutationState state) { this.state = state; }
+        @Override public void close() {
+            if (closed) return;
+            closed = true;
+            if (--state.depth != 0) return;
+            IdentityHashMap<Settlement, MutationState> active = ACTIVE_MUTATIONS.get();
+            active.remove(state.owner);
+            if (active.isEmpty()) ACTIVE_MUTATIONS.remove();
+            try {
+                if (state.dirty) state.revision.commit();
+            } finally {
+                state.revision.close();
+            }
+        }
+    }
+
+    private MutationBatch beginMutationBatch() {
+        IdentityHashMap<Settlement, MutationState> active = ACTIVE_MUTATIONS.get();
+        MutationState state = active.get(this);
+        if (state == null) {
+            state = new MutationState(this);
+            active.put(this, state);
+        } else {
+            state.depth++;
+        }
+        return new MutationBatch(state);
+    }
+
+    private void markMutation() {
+        MutationState state = ACTIVE_MUTATIONS.get().get(this);
+        if (state == null)
+            throw new IllegalStateException("Settlement mutation escaped its canonical writer scope");
+        state.dirty = true;
+    }
+
+    private <T> T mutate(Supplier<T> action) {
+        try (MutationBatch ignored = beginMutationBatch()) {
+            return action.get();
+        }
+    }
+
+    public int population() { return canonicalPopulation >= 0 ? canonicalPopulation : workers.size(); }
+    public boolean hasCanonicalPopulation() { return canonicalPopulation >= 0; }
+    public void setCanonicalPopulation(int residents) {
+        if (residents < 0 || residents > 100_000) throw new IllegalArgumentException("canonical population out of range");
+        if (canonicalPopulation == residents) return;
+        mutate(() -> {
+            canonicalPopulation = residents;
+            growTimer = 0;
+            markMutation();
+            return null;
+        });
+    }
 
     // ---- времена года и набеги
     public static final double SEASON_LEN = 5475;                   // 91.25 world days at 60 simulation seconds/day
@@ -72,8 +151,13 @@ public final class Settlement {
     private int externalWorldYear = -1;
     public void setWorldCalendar(long worldMinute, int worldYear) {
         if (worldMinute < 0 || worldYear < 1) throw new IllegalArgumentException("invalid world calendar");
-        externalWorldMinute = worldMinute;
-        externalWorldYear = worldYear;
+        if (externalWorldMinute == worldMinute && externalWorldYear == worldYear) return;
+        mutate(() -> {
+            externalWorldMinute = worldMinute;
+            externalWorldYear = worldYear;
+            markMutation();
+            return null;
+        });
     }
     public long worldMinute() { return externalWorldMinute >= 0 ? externalWorldMinute : Math.max(0L, (long) Math.floor(time * 24.0)); }
     public static final String[] SEASONS = {"Весна", "Лето", "Осень", "Зима"};
@@ -154,7 +238,7 @@ public final class Settlement {
 
     public Settlement(String id, String name, Defs defs) { this.id = id; this.name = name; this.defs = defs; }
 
-    public void setLedgerScope(String scope) { ledgerScope = scope == null ? "" : scope.trim(); }
+    public void setLedgerScope(String scope) { mutate(() -> { String next = scope == null ? "" : scope.trim(); if (!Objects.equals(ledgerScope, next)) { ledgerScope = next; markMutation(); } return null; }); }
     public String ledgerOwnerId() { return ledgerScope.isBlank() ? id : ledgerScope + ":" + id; }
     public String ledgerAccountId(String resource) { return accountId(resource); }
 
@@ -197,6 +281,12 @@ public final class Settlement {
 
     private void syncResourceMirror(String resource) { stock.put(resource, resourceAccount(resource).balance); }
 
+    /** Refresh a settlement projection after another canonical ledger account posts a transfer into it. */
+    public void refreshResourceMirror(String resource) {
+        if (resource == null || resource.isBlank()) return;
+        mutate(() -> { double before = stock.getOrDefault(resource, Double.NaN); syncResourceMirror(resource); if (Double.compare(before, stock.getOrDefault(resource, Double.NaN)) != 0) markMutation(); return null; });
+    }
+
     private void syncAllResourceMirrors() {
         Set<String> resources = new TreeSet<>(stock.keySet());
         resources.add(Defs.SILVER);
@@ -204,6 +294,23 @@ public final class Settlement {
     }
 
     public double amount(String resource) {
+        if (resource == null || resource.isBlank()) return 0;
+        return mutate(() -> {
+            TreasuryLedger ledger = TreasuryService.current();
+            long beforeVersion = ledger.mutationVersion();
+            double beforeMirror = stock.getOrDefault(resource, Double.NaN);
+            boolean beforeChecked = stockReconciliationChecked;
+            boolean beforeReconcile = reconcileStockMirror;
+            double value = amountInternal(resource);
+            if (ledger.mutationVersion() != beforeVersion
+                    || Double.compare(beforeMirror, stock.getOrDefault(resource, Double.NaN)) != 0
+                    || beforeChecked != stockReconciliationChecked
+                    || beforeReconcile != reconcileStockMirror) markMutation();
+            return value;
+        });
+    }
+
+    private double amountInternal(String resource) {
         if (resource == null || resource.isBlank()) return 0;
         TreasuryLedger ledger = TreasuryService.current();
         String sourceAccountId = accountId(resource);
@@ -215,20 +322,16 @@ public final class Settlement {
             } else {
                 // Legacy snapshots have no sequence marker. Keep their old one-time mirror
                 // reconciliation unless a durable army food transfer proves the ledger is newer.
-                reconcileStockMirror = ledger.journal().stream().noneMatch(entry ->
-                        entry.accountId().equals(sourceAccountId) && !entry.credit()
-                                && entry.kind() == TreasuryLedger.Kind.LOGISTICS
-                                && entry.category().equals("army-field-rations"));
+                reconcileStockMirror = !ledger.hasArmyFieldRationDebit(sourceAccountId);
             }
             stockReconciliationChecked = true;
         }
 
         TreasuryLedger.Account account = resourceAccount(resource);
         Double legacyMirror = stock.get(resource);
-        boolean committedArmyFoodTransfer = ledger.journal().stream().anyMatch(entry ->
-                entry.accountId().equals(sourceAccountId) && !entry.credit()
-                        && entry.kind() == TreasuryLedger.Kind.LOGISTICS
-                        && entry.category().equals("army-field-rations"));
+        // The journal is append-only; TreasuryLedger maintains this predicate as an index.
+        // Never scan the full world-wide journal on every resource read/tick.
+        boolean committedArmyFoodTransfer = ledger.hasArmyFieldRationDebit(sourceAccountId);
         if (reconcileStockMirror && !committedArmyFoodTransfer
                 && legacyMirror != null && Double.isFinite(legacyMirror)
                 && Math.abs(legacyMirror - account.balance) > 1e-9) {
@@ -253,6 +356,10 @@ public final class Settlement {
         boolean ok = TreasuryService.current().withdraw(accountId(resource), value, kind, category, reference,
                 worldMinute(), category);
         syncResourceMirror(resource);
+        // Retire task-graph provenance only after the canonical stock debit commits.
+        // Construction and recipe inputs keep their richer stage-specific receipts below.
+        if (ok && !"construction".equals(category) && !"production-input".equals(category))
+            taskGraph.consumeStock(resource, value);
         return ok;
     }
 
@@ -279,19 +386,54 @@ public final class Settlement {
     /** Atomic fractional withdrawal for individual Character actions and production inputs. */
     public boolean consumeResource(String resource, double quantity) {
         if (resource == null || resource.isBlank() || !Double.isFinite(quantity) || quantity < 0) return false;
-        if (amount(resource) + 1e-9 < quantity) return false;
-        if (quantity == 0) return true;
-        if (!debitResource(resource, quantity, Defs.SILVER.equals(resource)
-                ? TreasuryLedger.Kind.WITHDRAWAL : TreasuryLedger.Kind.CONSUMPTION,
-                "consumption", "settlement-consumption")) return false;
-        flow.record(time, resource, quantity, false);
-        return true;
+        return mutate(() -> {
+            if (amount(resource) + 1e-9 < quantity) return false;
+            if (quantity == 0) return true;
+            if (!debitResource(resource, quantity, Defs.SILVER.equals(resource)
+                    ? TreasuryLedger.Kind.WITHDRAWAL : TreasuryLedger.Kind.CONSUMPTION,
+                    "consumption", "settlement-consumption")) return false;
+            flow.record(time, resource, quantity, false);
+            markMutation();
+            return true;
+        });
     }
 
     /** Deposits output or income into the shared resource ledger, respecting physical stock capacity. */
     public double add(String resource, double quantity) {
-        return addResourceWithKind(resource, quantity, Defs.SILVER.equals(resource)
-                ? TreasuryLedger.Kind.DEPOSIT : TreasuryLedger.Kind.IMPORT, "settlement-stock-in", "settlement:" + id);
+        return mutate(() -> {
+            double accepted = addResourceWithKind(resource, quantity, Defs.SILVER.equals(resource)
+                    ? TreasuryLedger.Kind.DEPOSIT : TreasuryLedger.Kind.IMPORT, "settlement-stock-in", "settlement:" + id);
+            if (accepted > 0) markMutation();
+            return accepted;
+        });
+    }
+
+    /**
+     * Crash-safe one-time endowment for autonomous settlement founding.
+     * The TreasuryLedger receipt is authoritative, so retries cannot mint the
+     * same founding stock twice even when the settlement snapshot is replayed.
+     */
+    public boolean addOnce(String resource, double quantity, String operationId) {
+        return mutate(() -> {
+            if (resource == null || resource.isBlank() || operationId == null
+                    || !operationId.matches("[A-Za-z0-9_.:-]{1,128}")
+                    || !Double.isFinite(quantity) || quantity <= 0) return false;
+            amount(resource);
+            String reference = "worldgen:" + id + ":" + operationId + ":" + resource;
+            TreasuryLedger ledger = TreasuryService.current();
+            long beforeVersion = ledger.mutationVersion();
+            boolean alreadyPosted = ledger.hasTransaction(accountId(resource), Defs.SILVER.equals(resource)
+                    ? TreasuryLedger.Kind.DEPOSIT : TreasuryLedger.Kind.IMPORT, reference);
+            boolean accepted = ledger.depositOnce(accountId(resource), quantity,
+                    Defs.SILVER.equals(resource) ? TreasuryLedger.Kind.DEPOSIT : TreasuryLedger.Kind.IMPORT,
+                    "autonomous-settlement-founding", reference, worldMinute(),
+                    "one-time founding endowment for " + id);
+            if (!accepted) return false;
+            syncResourceMirror(resource);
+            if (!alreadyPosted) flow.record(time, resource, quantity, true);
+            if (ledger.mutationVersion() != beforeVersion) markMutation();
+            return true;
+        });
     }
 
     private double addResourceWithKind(String resource, double quantity, TreasuryLedger.Kind kind, String category, String reference) {
@@ -312,29 +454,61 @@ public final class Settlement {
 
     /** Receive physical goods into canonical settlement stock and record the inbound flow. */
     public double receiveResource(String resource, double quantity) {
-        double accepted = add(resource, quantity);
-        if (accepted > 0) flow.record(time, resource, accepted, true);
-        return accepted;
+        return mutate(() -> {
+            double accepted = add(resource, quantity);
+            if (accepted > 0) { flow.record(time, resource, accepted, true); markMutation(); }
+            return accepted;
+        });
+    }
+
+    /** Publish trade-flow changes through the Settlement revision boundary. */
+    public void recordTradeFlow(String resource, double quantity, boolean inbound) {
+        if (resource == null || resource.isBlank() || !Double.isFinite(quantity) || quantity <= 0) return;
+        mutate(() -> { flow.recordTrade(time, resource, quantity, inbound); markMutation(); return null; });
+    }
+
+    /**
+     * Reconciles the settlement's persisted treasury projection after an external
+     * canonical ledger operation (for example, realm tax remittance).
+     */
+    public void applyTreasuryProjection(double remitted, double silverBalance) {
+        if (!Double.isFinite(remitted) || remitted < 0
+                || !Double.isFinite(silverBalance) || silverBalance < 0)
+            throw new IllegalArgumentException("Invalid settlement treasury projection");
+        mutate(() -> {
+            double previousSilver = stock.getOrDefault(Defs.SILVER, Double.NaN);
+            if (Double.compare(remittedSilver, remitted) != 0
+                    || Double.compare(previousSilver, silverBalance) != 0) {
+                remittedSilver = remitted;
+                stock.put(Defs.SILVER, silverBalance);
+                markMutation();
+            }
+            return null;
+        });
     }
 
     /** Double-entry transfer of a commodity between settlement accounts. */
     public boolean transferResourceTo(Settlement recipient, String resource, double quantity, String category, String reference) {
-        if (recipient == null || recipient == this || resource == null || resource.isBlank()
-                || !Double.isFinite(quantity) || quantity < 0
-                || amount(resource) + 1e-9 < quantity
-                || recipient.capacity(resource) - recipient.amount(resource) + 1e-9 < quantity) return false;
-        resourceAccount(resource);
-        recipient.resourceAccount(resource);
-        boolean ok = TreasuryService.current().transfer(accountId(resource), recipient.accountId(resource), quantity,
-                TreasuryLedger.Kind.TRADE, category, reference, worldMinute(),
-                "settlement-to-settlement commodity transfer");
-        syncResourceMirror(resource);
-        recipient.syncResourceMirror(resource);
-        if (ok && quantity > 0) {
-            flow.record(time, resource, quantity, false);
-            recipient.flow.record(recipient.time, resource, quantity, true);
-        }
-        return ok;
+        if (recipient == null || recipient == this) return false;
+        return mutate(() -> recipient.mutate(() -> {
+            if (resource == null || resource.isBlank() || !Double.isFinite(quantity) || quantity < 0
+                    || amount(resource) + 1e-9 < quantity
+                    || recipient.capacity(resource) - recipient.amount(resource) + 1e-9 < quantity) return false;
+            resourceAccount(resource);
+            recipient.resourceAccount(resource);
+            boolean ok = TreasuryService.current().transfer(accountId(resource), recipient.accountId(resource), quantity,
+                    TreasuryLedger.Kind.TRADE, category, reference, worldMinute(),
+                    "settlement-to-settlement commodity transfer");
+            syncResourceMirror(resource);
+            recipient.syncResourceMirror(resource);
+            if (ok && quantity > 0) {
+                flow.recordTrade(time, resource, quantity, false);
+                recipient.recordTradeFlow(resource, quantity, true);
+                markMutation();
+                recipient.markMutation();
+            }
+            return ok;
+        }));
     }
 
     public boolean transferSilverTo(Settlement recipient, double quantity, String category, String reference) {
@@ -349,6 +523,19 @@ public final class Settlement {
     public boolean transferResourceToAccount(String resource, String targetAccountId, String targetOwnerId,
                                              double quantity, TreasuryLedger.Kind kind,
                                              String category, String reference) {
+        return mutate(() -> {
+            TreasuryLedger ledger = TreasuryService.current();
+            long beforeVersion = ledger.mutationVersion();
+            boolean transferred = transferResourceToAccountInternal(resource, targetAccountId, targetOwnerId,
+                    quantity, kind, category, reference);
+            if (ledger.mutationVersion() != beforeVersion) markMutation();
+            return transferred;
+        });
+    }
+
+    private boolean transferResourceToAccountInternal(String resource, String targetAccountId, String targetOwnerId,
+                                                       double quantity, TreasuryLedger.Kind kind,
+                                                       String category, String reference) {
         if (resource == null || resource.isBlank() || targetAccountId == null || targetAccountId.isBlank()
                 || targetOwnerId == null || targetOwnerId.isBlank() || !Double.isFinite(quantity)
                 || quantity < 0 || kind == null || category == null || category.isBlank()
@@ -356,13 +543,11 @@ public final class Settlement {
         String sourceId = accountId(resource);
         String cleanCategory = category.trim(), cleanReference = reference.trim();
         TreasuryLedger ledger = TreasuryService.current();
-        List<TreasuryLedger.Entry> debits = ledger.journal().stream()
-                .filter(entry -> entry.accountId().equals(sourceId) && !entry.credit()
-                        && entry.kind() == kind && entry.reference().equals(cleanReference)).toList();
+        List<TreasuryLedger.Entry> debits = ledger.entriesForReference(sourceId, kind, cleanReference).stream()
+                .filter(entry -> !entry.credit()).toList();
         if (!debits.isEmpty()) {
-            List<TreasuryLedger.Entry> credits = ledger.journal().stream()
-                    .filter(entry -> entry.accountId().equals(targetAccountId) && entry.credit()
-                            && entry.kind() == kind && entry.reference().equals(cleanReference)).toList();
+            List<TreasuryLedger.Entry> credits = ledger.entriesForReference(targetAccountId, kind, cleanReference).stream()
+                    .filter(TreasuryLedger.Entry::credit).toList();
             if (debits.size() != 1 || credits.size() != 1) return false;
             TreasuryLedger.Entry debit = debits.get(0), credit = credits.get(0);
             boolean match = debit.counterpartyId().equals(targetAccountId)
@@ -384,39 +569,151 @@ public final class Settlement {
         boolean transferred = ledger.transferOnce(sourceId, targetAccountId, quantity, kind,
                 cleanCategory, cleanReference, worldMinute(), "settlement resource transfer to external account");
         syncResourceMirror(resource);
-        if (transferred && quantity > 0) flow.record(time, resource, quantity, false);
+        if (transferred && quantity > 0) {
+            if ("shipment-cargo-escrow".equals(cleanCategory))
+                flow.recordTrade(time, resource, quantity, false);
+            else flow.record(time, resource, quantity, false);
+        }
         return transferred;
     }
 
     /** Transfer settlement silver to a realm, army or other canonical treasury account. */
     public boolean transferSilverToAccount(String targetAccountId, double quantity, TreasuryLedger.Kind kind,
-                                            String category, String reference) {
-        if (targetAccountId == null || targetAccountId.isBlank() || !Double.isFinite(quantity) || quantity < 0) return false;
-        amount(Defs.SILVER);
-        boolean ok = TreasuryService.current().transfer(accountId(Defs.SILVER), targetAccountId, quantity,
-                kind, category, reference, worldMinute(),
-                "settlement treasury transfer");
-        syncResourceMirror(Defs.SILVER);
-        if (ok && quantity > 0) flow.record(time, Defs.SILVER, quantity, false);
-        return ok;
+                                             String category, String reference) {
+        return mutate(() -> {
+            TreasuryLedger ledger = TreasuryService.current();
+            long beforeVersion = ledger.mutationVersion();
+            if (targetAccountId == null || targetAccountId.isBlank() || !Double.isFinite(quantity) || quantity < 0) return false;
+            amount(Defs.SILVER);
+            boolean ok = ledger.transfer(accountId(Defs.SILVER), targetAccountId, quantity,
+                    kind, category, reference, worldMinute(), "settlement treasury transfer");
+            syncResourceMirror(Defs.SILVER);
+            if (ok && quantity > 0) flow.record(time, Defs.SILVER, quantity, false);
+            if (ok && ledger.mutationVersion() != beforeVersion) markMutation();
+            return ok;
+        });
     }
 
     /** Book market fees and other external charges against settlement cash. */
     public boolean chargeSilver(double quantity, String category, String reference) {
-        if (!debitSilver(quantity, TreasuryLedger.Kind.TRADE, category, reference)) return false;
-        if (quantity > 0) flow.record(time, Defs.SILVER, quantity, false);
-        return true;
+        return mutate(() -> {
+            if (!debitSilver(quantity, TreasuryLedger.Kind.TRADE, category, reference)) return false;
+            if (quantity > 0) { flow.record(time, Defs.SILVER, quantity, false); markMutation(); }
+            return true;
+        });
     }
 
     public boolean canPay(Map<String, Integer> cost) {
-        for (Map.Entry<String, Integer> e : cost.entrySet()) if (amount(e.getKey()) + 1e-9 < e.getValue()) return false;
+        if (cost == null || cost.size() > 64) return false;
+        for (Map.Entry<String, Integer> e : cost.entrySet()) {
+            if (e.getKey() == null || e.getKey().isBlank() || e.getKey().length() > 64
+                    || e.getValue() == null || e.getValue() < 0 || e.getValue() > 1_000_000_000)
+                return false;
+        }
+        for (Map.Entry<String, Integer> e : cost.entrySet())
+            if (amount(e.getKey()) + 1e-9 < e.getValue()) return false;
         return true;
     }
 
     /** Atomic resource withdrawal used by recruitment and other settlement services. */
     public boolean spend(Map<String, Integer> cost) {
-        if (cost == null || !canPay(cost)) return false;
-        return pay(cost);
+        if (cost == null) return false;
+        return mutate(() -> {
+            TreasuryLedger ledger = TreasuryService.current();
+            long beforeVersion = ledger.mutationVersion();
+            boolean spent = canPay(cost) && pay(cost);
+            if (ledger.mutationVersion() != beforeVersion) markMutation();
+            return spent;
+        });
+    }
+
+    /**
+     * Crash-replay-safe resource debit for a named domain operation.
+     * Each resource has its own immutable TreasuryLedger receipt, allowing a retry to
+     * finish a partially persisted multi-resource debit without charging completed legs twice.
+     * The operation owner must keep its own durable intent until every leg and dependent
+     * domain snapshot has been committed.
+     */
+    public synchronized boolean spendOnce(Map<String, Integer> cost, String operationId) {
+        return mutate(() -> {
+            TreasuryLedger ledger = TreasuryService.current();
+            long beforeVersion = ledger.mutationVersion();
+            boolean spent = spendOnceInternal(cost, operationId);
+            if (ledger.mutationVersion() != beforeVersion) markMutation();
+            return spent;
+        });
+    }
+
+    private boolean spendOnceInternal(Map<String, Integer> cost, String operationId) {
+        if (operationId == null || !operationId.matches("[A-Za-z0-9_.:-]{1,96}")
+                || cost == null || cost.size() > 64) return false;
+
+        TreeMap<String, Integer> normalized = new TreeMap<>();
+        for (Map.Entry<String, Integer> entry : cost.entrySet()) {
+            String resource = entry.getKey();
+            Integer quantity = entry.getValue();
+            if (resource == null || !resource.matches("[a-z0-9_.:-]{1,64}")
+                    || quantity == null || quantity < 0 || quantity > 1_000_000_000)
+                return false;
+            normalized.put(resource, quantity);
+        }
+
+        // Bind every resource leg to the complete operation payload. Without this manifest,
+        // replaying an operation ID with an added/removed resource could silently debit a
+        // different basket while each individual resource receipt still looked valid.
+        StringBuilder payload = new StringBuilder("settlement-spend-v1:");
+        for (Map.Entry<String, Integer> entry : normalized.entrySet())
+            payload.append(entry.getKey()).append('=').append(entry.getValue()).append(';');
+        String payloadFingerprint = payload.toString();
+
+        TreasuryLedger ledger = TreasuryService.current();
+        String operationPrefix = "settlement-spend:" + operationId + ":";
+        Map<String, String> references = new LinkedHashMap<>();
+        Map<String, Integer> existingLegs = new HashMap<>();
+        for (TreasuryLedger.Entry receipt : ledger.journal()) {
+            if (!receipt.reference().startsWith(operationPrefix)) continue;
+            String resource = receipt.reference().substring(operationPrefix.length());
+            Integer expected = normalized.get(resource);
+            TreasuryLedger.Kind expectedKind = Defs.SILVER.equals(resource)
+                    ? TreasuryLedger.Kind.WITHDRAWAL : TreasuryLedger.Kind.CONSUMPTION;
+            if (expected == null || expected <= 0 || receipt.credit()
+                    || !receipt.accountId().equals(accountId(resource))
+                    || !receipt.counterpartyId().equals("external")
+                    || !receipt.currency().equals(resource) || receipt.kind() != expectedKind
+                    || !receipt.category().equals(payloadFingerprint)
+                    || Math.abs(receipt.amount() - expected) > 1e-8
+                    || existingLegs.putIfAbsent(resource, 1) != null) return false;
+        }
+
+        for (Map.Entry<String, Integer> entry : normalized.entrySet()) {
+            if (entry.getValue() == 0) continue;
+            String resource = entry.getKey();
+            TreasuryLedger.Kind kind = Defs.SILVER.equals(resource)
+                    ? TreasuryLedger.Kind.WITHDRAWAL : TreasuryLedger.Kind.CONSUMPTION;
+            String reference = operationPrefix + resource;
+            String account = accountId(resource);
+            amount(resource);
+            resourceAccount(resource);
+            references.put(resource, reference);
+            if (!ledger.hasTransaction(account, kind, reference)
+                    && ledger.balance(account) + 1e-9 < entry.getValue()) return false;
+        }
+
+        for (Map.Entry<String, Integer> entry : normalized.entrySet()) {
+            int quantity = entry.getValue();
+            if (quantity == 0) continue;
+            String resource = entry.getKey();
+            TreasuryLedger.Kind kind = Defs.SILVER.equals(resource)
+                    ? TreasuryLedger.Kind.WITHDRAWAL : TreasuryLedger.Kind.CONSUMPTION;
+            String account = accountId(resource);
+            String reference = references.get(resource);
+            boolean alreadyPosted = ledger.hasTransaction(account, kind, reference);
+            if (!ledger.withdrawOnce(account, quantity, kind, payloadFingerprint, reference,
+                    worldMinute(), "idempotent settlement resource debit")) return false;
+            syncResourceMirror(resource);
+            if (!alreadyPosted) flow.record(time, resource, quantity, false);
+        }
+        return true;
     }
 
     private boolean pay(Map<String, Integer> cost) { return pay(cost, "settlement-spend", "resource-cost"); }
@@ -482,6 +779,62 @@ public final class Settlement {
         return null;
     }
 
+    /**
+     * Apply an adapter-side update to a resident projection under the settlement revision boundary.
+     * The exact worker instance must still belong to this settlement; no-op updates do not advance
+     * the revision. Character identity/lifecycle mutations remain owned by CharacterRegistry.
+     */
+    public boolean updateWorker(Worker worker, Consumer<Worker> update) {
+        if (worker == null || update == null) throw new IllegalArgumentException("worker update is required");
+        if (workers.stream().noneMatch(current -> current == worker)) return false;
+        return mutate(() -> {
+            List<Object> before = workerMutationState(worker);
+            try {
+                update.accept(worker);
+            } finally {
+                if (!before.equals(workerMutationState(worker))) markMutation();
+            }
+            return true;
+        });
+    }
+
+    private static List<Object> workerMutationState(Worker worker) {
+        List<Object> state = new ArrayList<>(25);
+        state.add(worker.name);
+        state.add(worker.profession);
+        state.add(worker.person);
+        state.add(worker.assignedProfession);
+        state.add(worker.building);
+        state.add(worker.status);
+        state.add(worker.x);
+        state.add(worker.z);
+        state.add(worker.jobPrio == null ? null : new TreeMap<>(worker.jobPrio));
+        state.add(worker.manualOrder);
+        state.add(worker.manualFollow);
+        state.add(worker.manualFollowOwner);
+        state.add(worker.orderX);
+        state.add(worker.orderZ);
+        state.add(new ArrayList<>(worker.orderQueue));
+        state.add(worker.lifeAction);
+        state.add(worker.lifeTargetX);
+        state.add(worker.lifeTargetZ);
+        state.add(worker.lifeActionUntil);
+        state.add(worker.lifeActionStage);
+        state.add(worker.lifeSocialTarget);
+        state.add(worker.lifeActionDuration);
+        state.add(worker.haulProgress);
+        state.add(worker.manualHauler);
+        return state;
+    }
+
+    private static void clearLifeAction(Worker worker) {
+        worker.lifeAction = "";
+        worker.lifeActionStage = "";
+        worker.lifeSocialTarget = "";
+        worker.lifeActionDuration = 0;
+        worker.lifeActionUntil = 0;
+    }
+
     public int count(String defId, boolean doneOnly) {
         int n = 0;
         for (Building b : buildings) if (b.def.id.equals(defId) && (!doneOnly || b.state == Building.State.DONE)) n++;
@@ -541,10 +894,13 @@ public final class Settlement {
     }
 
     public Worker addWorker(String name) {
-        int id = nextWorker++;
-        Worker w = new Worker(id, name == null ? "Поселенец " + id : name);
-        workers.add(w);
-        return w;
+        return mutate(() -> {
+            int id = nextWorker++;
+            Worker w = new Worker(id, name == null ? "Поселенец " + id : name);
+            workers.add(w);
+            markMutation();
+            return w;
+        });
     }
 
     private void removeWorker(Worker worker, String reason) {
@@ -556,18 +912,39 @@ public final class Settlement {
     /** Removes a worker by canonical Character ID and persists the reason for lifecycle reconciliation. */
     public boolean removeWorkerByPerson(String personId, String reason) {
         if (personId == null || personId.isBlank() || reason == null || reason.isBlank()) return false;
-        for (Worker worker : new ArrayList<>(workers)) {
-            if (personId.equals(worker.person)) {
-                removeWorker(worker, reason);
-                return true;
+        return mutate(() -> {
+            for (Worker worker : new ArrayList<>(workers)) {
+                if (personId.equals(worker.person)) {
+                    removeWorker(worker, reason);
+                    markMutation();
+                    return true;
+                }
             }
-        }
-        return false;
+            return false;
+        });
+    }
+
+    /**
+     * Removes an already-dead canonical resident from the settlement projection.
+     * Unlike removeWorkerByPerson this does not enqueue another lifecycle transition.
+     */
+    public boolean removeWorkerProjectionByPerson(String personId) {
+        if (personId == null || personId.isBlank()) return false;
+        return mutate(() -> {
+            for (Worker worker : new ArrayList<>(workers)) {
+                if (personId.equals(worker.person)) {
+                    if (!workers.remove(worker)) return false;
+                    markMutation();
+                    return true;
+                }
+            }
+            return false;
+        });
     }
 
     /** Drained only after the owning CharacterRegistry confirms the lifecycle transition. */
     public List<WorkerDeparture> pendingDepartures() { return Collections.unmodifiableList(departures); }
-    public void acknowledgeDeparture(WorkerDeparture departure) { departures.remove(departure); }
+    public void acknowledgeDeparture(WorkerDeparture departure) { mutate(() -> { if (departures.remove(departure)) markMutation(); return null; }); }
 
     /**
      * Cancels a stale departure after the same canonical person has been reattached.
@@ -575,9 +952,7 @@ public final class Settlement {
      */
     public int acknowledgeDepartureForPerson(String personId, String reason) {
         if (personId == null || personId.isBlank() || reason == null || reason.isBlank()) return 0;
-        int before = departures.size();
-        departures.removeIf(event -> personId.equals(event.personId()) && reason.equals(event.reason()));
-        return before - departures.size();
+        return mutate(() -> { int before = departures.size(); departures.removeIf(event -> personId.equals(event.personId()) && reason.equals(event.reason())); int changed = before - departures.size(); if (changed > 0) markMutation(); return changed; });
     }
 
     // ------------------------------------------------------------------ приказы
@@ -603,7 +978,9 @@ public final class Settlement {
     public String typeId = "";
 
     /** Выбирает лучший вид по числу жителей, зданиям, местности и расам; возвращает id вида (пусто - нет подходящего). */
-    public String refreshType(int pop, Map<String, Double> terrain, Map<String, Double> races) {
+    public String refreshType(int pop, Map<String, Double> terrain, Map<String, Double> races) { return mutate(() -> { String before = typeId; String result = refreshTypeInternal(pop, terrain, races); if (!Objects.equals(before, typeId)) markMutation(); return result; }); }
+
+    private String refreshTypeInternal(int pop, Map<String, Double> terrain, Map<String, Double> races) {
         if (types == null) return typeId;
         List<String> built = new ArrayList<>();
         for (Building b : buildings) if (b.state == Building.State.DONE) built.add(b.def.id);
@@ -615,18 +992,100 @@ public final class Settlement {
     }
 
     public Building place(String defId, int x, int z) {
-        String err = placeError(defId, x, z);
-        if (err != null) throw new OrderException(err);
-        Defs.Building d = defs.buildings.get(defId);
-        Building b = new Building(nextBuilding++, d, x, z);
-        b.status = "ждёт материалов";
-        buildings.add(b);
-        say("Заложено: " + d.name);
-        return b;
+        return mutate(() -> {
+            String err = placeError(defId, x, z);
+            if (err != null) throw new OrderException(err);
+            Defs.Building d = defs.buildings.get(defId);
+            Building b = new Building(nextBuilding++, d, x, z);
+            b.status = "ждёт материалов";
+            buildings.add(b);
+            say("Заложено: " + d.name);
+            markMutation();
+            return b;
+        });
+    }
+
+    /** Replay-safe placement; receipt and building are written in the same settlement snapshot. */
+    public Building placeOnce(String requestId, String defId, int x, int z) {
+        return mutate(() -> {
+        if (requestId == null || !requestId.matches("[A-Za-z0-9_.:-]{1,128}"))
+            throw new OrderException("Некорректный идентификатор строительного приказа");
+        String fingerprint = defId + "|" + x + "|" + z;
+        String prior = placementReceipts.get(requestId);
+        if (prior != null) {
+            int separator = prior.lastIndexOf('|');
+            if (separator < 0 || !prior.substring(0, separator).equals(fingerprint))
+                throw new IllegalStateException("Settlement placement request ID collision: " + requestId);
+            int uid;
+            try { uid = Integer.parseInt(prior.substring(separator + 1)); }
+            catch (NumberFormatException error) { throw new IllegalStateException("Corrupt settlement placement receipt", error); }
+            Building existing = building(uid);
+            if (existing == null) throw new IllegalStateException("Placement receipt references missing building " + uid);
+            return existing;
+        }
+        if (placementReceipts.size() >= 10000)
+            throw new IllegalStateException("Settlement placement receipt limit reached");
+        Building created = place(defId, x, z);
+        placementReceipts.put(requestId, fingerprint + "|" + created.uid);
+        markMutation();
+        return created;
+        });
+    }
+
+    public boolean hasPlacementReceipt(String requestId) { return placementReceipts.containsKey(requestId); }
+
+    /** Resolve a committed placement so later terrain scans cannot move its blueprint. */
+    public Building placement(String requestId) {
+        String prior = placementReceipts.get(requestId);
+        if (prior == null) return null;
+        int separator = prior.lastIndexOf('|');
+        if (separator < 0) throw new IllegalStateException("Corrupt settlement placement receipt: " + requestId);
+        int uid;
+        try { uid = Integer.parseInt(prior.substring(separator + 1)); }
+        catch (NumberFormatException error) { throw new IllegalStateException("Corrupt settlement placement receipt: " + requestId, error); }
+        Building existing = building(uid);
+        if (existing == null) throw new IllegalStateException("Placement receipt references missing building " + requestId);
+        return existing;
+    }
+
+    /** Register an existing physical building without charging resources or placing a blueprint. */
+    public Building adoptExistingBuilding(String requestId, String defId, int x, int z) { return mutate(() -> { Building result = adoptExistingBuildingInternal(requestId, defId, x, z); markMutation(); return result; }); }
+
+    private Building adoptExistingBuildingInternal(String requestId, String defId, int x, int z) {
+        if (requestId == null || !requestId.matches("[A-Za-z0-9_.:-]{1,128}"))
+            throw new OrderException("Некорректный идентификатор существующего здания");
+        Defs.Building definition = defs.buildings.get(defId);
+        if (definition == null) throw new OrderException("Неизвестный тип здания: " + defId);
+        String fingerprint = "existing|" + defId + "|" + x + "|" + z;
+        String prior = placementReceipts.get(requestId);
+        if (prior != null) {
+            int separator = prior.lastIndexOf('|');
+            if (separator < 0 || !prior.substring(0, separator).equals(fingerprint))
+                throw new IllegalStateException("Settlement adoption request ID collision: " + requestId);
+            int uid;
+            try { uid = Integer.parseInt(prior.substring(separator + 1)); }
+            catch (NumberFormatException error) { throw new IllegalStateException("Corrupt settlement adoption receipt", error); }
+            Building existing = building(uid);
+            if (existing == null) throw new IllegalStateException("Adoption receipt references missing building " + uid);
+            return existing;
+        }
+        if (placementReceipts.size() >= 10000)
+            throw new IllegalStateException("Settlement placement receipt limit reached");
+        Building adopted = new Building(nextBuilding++, definition, x, z);
+        adopted.state = Building.State.DONE;
+        adopted.progress = definition.work;
+        adopted.externallyMaterialized = true;
+        adopted.status = "существующее сооружение Minecraft подключено к симуляции";
+        buildings.add(adopted);
+        placementReceipts.put(requestId, fingerprint + "|" + adopted.uid);
+        say("Подключено существующее здание: " + definition.name);
+        return adopted;
     }
 
     /** Отмена стройки или снос. Возврат: не начатое 100%, строящееся 50%, готовое 25%. */
-    public void cancel(int uid) {
+    public void cancel(int uid) { mutate(() -> { cancelInternal(uid); markMutation(); return null; }); }
+
+    private void cancelInternal(int uid) {
         Building b = building(uid);
         if (b == null) throw new OrderException("Нет здания " + uid);
         if (b.state == Building.State.DONE) {
@@ -644,7 +1103,9 @@ public final class Settlement {
     public void assign(int workerId, int uid) { assign(workerId, uid, null); }
 
     /** Assigns a resident to one exact role when requested by a direct dialogue/RTS order. */
-    public void assign(int workerId, int uid, String requestedRole) {
+    public void assign(int workerId, int uid, String requestedRole) { mutate(() -> { assignInternal(workerId, uid, requestedRole); markMutation(); return null; }); }
+
+    private void assignInternal(int workerId, int uid, String requestedRole) {
         Worker w = worker(workerId);
         Building b = building(uid);
         if (w == null) throw new OrderException("Нет рабочего " + workerId);
@@ -656,7 +1117,7 @@ public final class Settlement {
                 + " или нет свободных мест в " + b.def.name);
         w.assignedProfession = role;
         w.manualHauler = false;
-        w.lifeAction = "";
+        clearLifeAction(w);
         w.building = uid;
         w.manualFollow = false;
         w.manualFollowOwner = "";
@@ -665,13 +1126,15 @@ public final class Settlement {
         w.status = "";
     }
 
-    public void unassign(int workerId) {
+    public void unassign(int workerId) { mutate(() -> { unassignInternal(workerId); markMutation(); return null; }); }
+
+    private void unassignInternal(int workerId) {
         Worker w = worker(workerId);
         if (w == null) throw new OrderException("Нет рабочего " + workerId);
         w.building = 0;
         w.assignedProfession = "";
         w.manualHauler = false;
-        w.lifeAction = "";
+        clearLifeAction(w);
         w.manualFollow = false;
         w.manualFollowOwner = "";
         w.manualOrder = false;
@@ -683,7 +1146,9 @@ public final class Settlement {
     public void moveTo(int workerId,double x,double z){moveTo(workerId,x,z,false);}
 
     /** Queue appends a bounded waypoint; otherwise the current manual route is replaced. */
-    public void moveTo(int workerId,double x,double z,boolean queue) {
+    public void moveTo(int workerId,double x,double z,boolean queue) { mutate(() -> { moveToInternal(workerId, x, z, queue); markMutation(); return null; }); }
+
+    private void moveToInternal(int workerId,double x,double z,boolean queue) {
         Worker w=worker(workerId);
         if(w==null)throw new OrderException("Нет рабочего "+workerId);
         if(!Double.isFinite(x)||!Double.isFinite(z)||Math.abs(x)>100000||Math.abs(z)>100000)
@@ -695,14 +1160,16 @@ public final class Settlement {
         }
         w.orderQueue.clear();
         w.manualHauler = false;
-        w.lifeAction = "";
+        clearLifeAction(w);
         w.manualFollow=false;
         w.manualFollowOwner="";
         w.building=0;w.manualOrder=true;w.orderX=x;w.orderZ=z;w.status="приказ: движение";
     }
 
     /** Called by the physical worker after reaching its active waypoint. */
-    public boolean advanceManualOrder(int workerId) {
+    public boolean advanceManualOrder(int workerId) { return mutate(() -> { Worker current = worker(workerId); boolean hadManualOrder = current != null && current.manualOrder; boolean changed = advanceManualOrderInternal(workerId); if (hadManualOrder) markMutation(); return changed; }); }
+
+    private boolean advanceManualOrderInternal(int workerId) {
         Worker w=worker(workerId);
         if(w==null||!w.manualOrder)return false;
         Worker.ManualOrder next=w.orderQueue.pollFirst();
@@ -712,20 +1179,24 @@ public final class Settlement {
     }
 
     /** Stop means hold here and discard all queued waypoints. */
-    public void holdAt(int workerId,double x,double z) {
+    public void holdAt(int workerId,double x,double z) { mutate(() -> { moveTo(workerId, x, z, false); Worker w = worker(workerId); w.status = "приказ: удерживать позицию"; markMutation(); return null; }); }
+
+    private void holdAtInternal(int workerId,double x,double z) {
         moveTo(workerId,x,z,false);
         Worker w=worker(workerId);
         w.status="приказ: удерживать позицию";
     }
 
-    public void setProfession(int workerId, String profession) {
+    public void setProfession(int workerId, String profession) { mutate(() -> { setProfessionInternal(workerId, profession); markMutation(); return null; }); }
+
+    private void setProfessionInternal(int workerId, String profession) {
         Worker w = worker(workerId);
         if (w == null) throw new OrderException("Нет рабочего " + workerId);
         if (!defs.professions.containsKey(profession)) throw new OrderException("Нет профессии " + profession);
         w.profession = profession;
         w.assignedProfession = "";
         w.manualHauler = false;
-        w.lifeAction = "";
+        clearLifeAction(w);
         w.building = 0;
         w.manualFollow = false;
         w.manualFollowOwner = "";
@@ -735,7 +1206,9 @@ public final class Settlement {
     }
 
     /** Пауза производства. Только для готового здания; на паузе здание не берёт сырьё, не даёт товар и не зовёт новых работников. */
-    public void setPaused(int uid, boolean paused) {
+    public void setPaused(int uid, boolean paused) { mutate(() -> { Building before = building(uid); boolean wasPaused = before != null && before.paused; setPausedInternal(uid, paused); if (before != null && wasPaused != before.paused) markMutation(); return null; }); }
+
+    private void setPausedInternal(int uid, boolean paused) {
         Building b = building(uid);
         if (b == null) throw new OrderException("Нет здания " + uid);
         if (b.state != Building.State.DONE) throw new OrderException(b.def.name + ": пауза только для готового здания");
@@ -744,7 +1217,9 @@ public final class Settlement {
     }
 
     /** Отправляет нескольких рабочих в здание; кому места не хватило или профессия не подошла - пропускаются. Возвращает, сколько назначено; 0 - ошибка с причиной первого отказа. */
-    public int assignMany(Collection<Integer> workerIds, int uid) {
+    public int assignMany(Collection<Integer> workerIds, int uid) { return mutate(() -> { int changed = assignManyInternal(workerIds, uid); if (changed > 0) markMutation(); return changed; }); }
+
+    private int assignManyInternal(Collection<Integer> workerIds, int uid) {
         if (building(uid) == null) throw new OrderException("Нет здания " + uid);
         int n = 0;
         String first = null;
@@ -756,7 +1231,9 @@ public final class Settlement {
     }
 
     /** Меняет профессию нескольким рабочим (они становятся свободными). Неизвестные номера пропускаются; возвращает число изменённых. */
-    public int setProfessionMany(Collection<Integer> workerIds, String profession) {
+    public int setProfessionMany(Collection<Integer> workerIds, String profession) { return mutate(() -> { int changed = setProfessionManyInternal(workerIds, profession); if (changed > 0) markMutation(); return changed; }); }
+
+    private int setProfessionManyInternal(Collection<Integer> workerIds, String profession) {
         if (!defs.professions.containsKey(profession)) throw new OrderException("Нет профессии " + profession);
         int n = 0;
         for (int id : new LinkedHashSet<>(workerIds)) if (worker(id) != null) { setProfession(id, profession); n++; }
@@ -765,7 +1242,9 @@ public final class Settlement {
     }
 
     /** Снимает всех работников со здания; возвращает сколько. */
-    public int unassignAll(int uid) {
+    public int unassignAll(int uid) { return mutate(() -> { int changed = unassignAllInternal(uid); if (changed > 0) markMutation(); return changed; }); }
+
+    private int unassignAllInternal(int uid) {
         if (building(uid) == null) throw new OrderException("Нет здания " + uid);
         int n = 0;
         for (Worker w : assigned(uid)) { unassign(w.id); n++; }
@@ -792,7 +1271,9 @@ public final class Settlement {
         return out;
     }
 
-    public void setPriority(int uid, int p) {
+    public void setPriority(int uid, int p) { mutate(() -> { Building before = building(uid); int old = before == null ? Integer.MIN_VALUE : before.priority; setPriorityInternal(uid, p); if (before != null && old != before.priority) markMutation(); return null; }); }
+
+    private void setPriorityInternal(int uid, int p) {
         Building b = building(uid);
         if (b == null) throw new OrderException("Нет здания " + uid);
         b.priority = Math.max(1, Math.min(9, p));
@@ -803,11 +1284,16 @@ public final class Settlement {
     public void tick(double dt) {
         if (!Double.isFinite(dt) || dt <= 0) return;
         if (dt > MAX_TICK) throw new IllegalArgumentException("За один вызов можно обработать не более " + (int) MAX_TICK + " секунд симуляции");
-        while (dt > 0) {
-            double step = Math.min(dt, MAX_STEP);
-            step(step);
-            dt -= step;
-        }
+        mutate(() -> {
+            markMutation();
+            double remaining = dt;
+            while (remaining > 0) {
+                double step = Math.min(remaining, MAX_STEP);
+                step(step);
+                remaining -= step;
+            }
+            return null;
+        });
     }
 
     private void step(double dt) {
@@ -826,8 +1312,9 @@ public final class Settlement {
     }
 
     private void eat(double dt) {
-        double need = workers.size() * EAT * dt, have = amount("food");
-        if (workers.isEmpty()) { starveTimer = 0; return; }
+        int residents = population();
+        double need = residents * EAT * dt, have = amount("food");
+        if (residents == 0) { starveTimer = 0; return; }
         if (have >= need) {
             debitResource("food", need, TreasuryLedger.Kind.CONSUMPTION, "population-food", "daily-rations");
             flow.record(time, "food", need, false);
@@ -839,13 +1326,18 @@ public final class Settlement {
         starveTimer += dt;
         if (starveTimer >= STARVE_EVERY) {
             starveTimer = 0;
-            Worker w = workers.get(workers.size() - 1);
-            removeWorker(w, "death:starvation");
-            say(w.name + " умер от голода");
+            // Only an actual adult Worker can be removed here. Non-working canonical residents
+            // remain in the people registry and are reconciled by the world population engine.
+            if (!workers.isEmpty()) {
+                Worker w = workers.get(workers.size() - 1);
+                removeWorker(w, "death:starvation");
+                say(w.name + " умер от голода");
+            }
         }
     }
 
     private void grow(double dt) {
+        if (hasCanonicalPopulation()) { growTimer = 0; leaveTimer = 0; return; }
         if (approval() < APPROVAL_LEAVE_BELOW && !workers.isEmpty()) {
             leaveTimer += dt;
             if (leaveTimer >= LEAVE_EVERY) {
@@ -952,7 +1444,9 @@ public final class Settlement {
     }
 
     /** Explicit management command for a porter/general worker. */
-    public void assignHauler(int workerId, int buildingId) {
+    public void assignHauler(int workerId, int buildingId) { mutate(() -> { assignHaulerInternal(workerId, buildingId); markMutation(); return null; }); }
+
+    private void assignHaulerInternal(int workerId, int buildingId) {
         Worker worker = worker(workerId);
         Building source = building(buildingId);
         if (worker == null || source == null) throw new OrderException("Нет рабочего или здания");
@@ -1015,7 +1509,7 @@ public final class Settlement {
             }
             if (pick != null) {
                 pick.assignedProfession = "builder";
-                pick.lifeAction = "";
+                clearLifeAction(pick);
                 pick.building = site.uid;
                 pick.status = "";
             }
@@ -1035,7 +1529,7 @@ public final class Settlement {
                 b.progress = b.def.work;
                 b.status = b.def.produces() ? "работает" : "готово";
                 taskGraph.built(b.uid, workerForRole(b.uid, Set.of("builder")), time);
-                for (Worker w : assigned(b.uid)) { w.building = 0; w.assignedProfession = ""; w.lifeAction = ""; w.status = "свободен"; }
+                for (Worker w : assigned(b.uid)) { w.building = 0; w.assignedProfession = ""; clearLifeAction(w); w.status = "свободен"; }
                 say("Построено: " + b.def.name);
             }
         }
@@ -1104,7 +1598,7 @@ public final class Settlement {
     public int priceTrend(String res) { double p = pressure.getOrDefault(res, 0.0); return p > 0.03 ? 1 : p < -0.03 ? -1 : 0; }
 
     /** Сдвиг цены внешней торговлей: n>0 - товар уходит (дорожает), n<0 - приходит (дешевеет). */
-    public void shiftDemand(String res, double n) { moveDemand(res, n); }
+    public void shiftDemand(String res, double n) { if (!Double.isFinite(n) || n == 0) return; mutate(() -> { double before = pressure.getOrDefault(res, 0.0); moveDemand(res, n); if (Double.compare(before, pressure.getOrDefault(res, 0.0)) != 0) markMutation(); return null; }); }
 
     private void moveDemand(String res, double n) { pressure.merge(res, n * PRESSURE_STEP, Double::sum); pressure.put(res, Math.max(-0.5, Math.min(0.5, pressure.get(res)))); }
 
@@ -1121,7 +1615,9 @@ public final class Settlement {
 
     public double sellPrice(String res) { return price(res) * (1 - TRADE_MARGIN); }
 
-    public void setTax(int level) {
+    public void setTax(int level) { mutate(() -> { int before = taxLevel; setTaxInternal(level); if (before != taxLevel) markMutation(); return null; }); }
+
+    private void setTaxInternal(int level) {
         if (level < 0 || level > 3) throw new OrderException("Налог: 0..3");
         taxLevel = level;
     }
@@ -1134,7 +1630,9 @@ public final class Settlement {
         if (n > tradeLeft + 1e-9) throw new OrderException("Рынок успевает ещё " + (int) tradeLeft + " ед.");
     }
 
-    public void buy(String res, int n) {
+    public void buy(String res, int n) { mutate(() -> { buyInternal(res, n); markMutation(); return null; }); }
+
+    private void buyInternal(String res, int n) {
         checkTrade(res, n);
         double cost = buyPrice(res) * n;
         if (amount(Defs.SILVER) < cost) throw new OrderException("Не хватает серебра: " + (int) amount(Defs.SILVER) + " из " + (int) Math.ceil(cost));
@@ -1147,7 +1645,9 @@ public final class Settlement {
         say("Куплено " + n + " " + resourceName(res).toLowerCase() + " за " + Math.round(cost) + " серебра");
     }
 
-    public void sell(String res, int n) {
+    public void sell(String res, int n) { mutate(() -> { sellInternal(res, n); markMutation(); return null; }); }
+
+    private void sellInternal(String res, int n) {
         checkTrade(res, n);
         if (amount(res) < n) throw new OrderException("Нет столько: " + (int) amount(res));
         double gain = sellPrice(res) * n;
@@ -1160,7 +1660,9 @@ public final class Settlement {
     }
 
     /** Правило автоторговли: mode "sell" - продавать всё выше порога, "buy" - докупать до порога, "off" - убрать. */
-    public void setAutoTrade(String res, String mode, int threshold) {
+    public void setAutoTrade(String res, String mode, int threshold) { mutate(() -> { Map<String, Integer> beforeSell = new TreeMap<>(autoSell), beforeBuy = new TreeMap<>(autoBuy); setAutoTradeInternal(res, mode, threshold); if (!beforeSell.equals(autoSell) || !beforeBuy.equals(autoBuy)) markMutation(); return null; }); }
+
+    private void setAutoTradeInternal(String res, String mode, int threshold) {
         if (!defs.resourceNames.containsKey(res)) throw new OrderException("Нет ресурса " + res);
         autoSell.remove(res); autoBuy.remove(res);
         switch (mode) {
@@ -1176,9 +1678,15 @@ public final class Settlement {
 
     /** Налоги в минуту при текущем уровне (для окна бюджета). */
     public double taxPerMin() {
-        double t = 0;
-        for (Worker w : workers) t += TAX_PER_MIN * (w.building == 0 ? 0.5 : 1);
-        return t * TAX_MULT[taxLevel];
+        double t;
+        if (hasCanonicalPopulation()) {
+            t = population() * 0.5;
+            for (Worker worker : workers) if (worker.building != 0) t += 0.5;
+        } else {
+            t = 0;
+            for (Worker worker : workers) t += worker.building == 0 ? 0.5 : 1.0;
+        }
+        return t * TAX_PER_MIN * TAX_MULT[taxLevel];
     }
 
     /** Содержание зданий в минуту. */
@@ -1205,7 +1713,7 @@ public final class Settlement {
             int lack = (int) Math.min(e.getValue() - amount(e.getKey()), tradeLeft);
             if (lack >= 1 && price(e.getKey()) > 0 && tradePerMin() > 0) { try { buy(e.getKey(), Math.min(lack, 5)); } catch (OrderException ignored) { } }
         }
-        int n = workers.size();
+        int n = population();
         for (var e : defs.comfort.entrySet()) {
             double c = Math.min(amount(e.getKey()), e.getValue().rate * n * dt);
             if (c > 0) {
@@ -1245,7 +1753,9 @@ public final class Settlement {
         return 1;
     }
 
-    public void setWorkPriority(int workerId, String prof, int n) {
+    public void setWorkPriority(int workerId, String prof, int n) { mutate(() -> { Worker w = worker(workerId); Map<String,Integer> before = w == null || w.jobPrio == null ? Map.of() : new TreeMap<>(w.jobPrio); setWorkPriorityInternal(workerId, prof, n); if (w != null && !before.equals(w.jobPrio)) markMutation(); return null; }); }
+
+    private void setWorkPriorityInternal(int workerId, String prof, int n) {
         Worker w = worker(workerId);
         if (w == null) throw new OrderException("Нет рабочего " + workerId);
         if (!defs.professions.containsKey(prof)) throw new OrderException("Нет профессии " + prof);
@@ -1324,7 +1834,7 @@ public final class Settlement {
     /** Текущие тревоги поселения, самые важные первыми. */
     public List<Alert> alerts() {
         List<Alert> l = new ArrayList<>();
-        int n = workers.size();
+        int n = population();
         if (n > 0 && amount("food") < 1) l.add(new Alert(2, "starving", "Голод: еда закончилась, жители умирают", 0));
         else {
             double sec = suppliesSeconds();
@@ -1434,7 +1944,7 @@ public final class Settlement {
      */
     public List<Factor> approvalBreakdown() {
         List<Factor> l = new ArrayList<>();
-        int n = workers.size();
+        int n = population();
         l.add(new Factor("Базовое настроение", APPROVAL_BASE));
         int food = 0;
         if (n > 0) food = amount("food") < 1 ? -30 : clamp((int) Math.round((amount("food") / n - 5) * 2), -30, 15);
@@ -1442,7 +1952,7 @@ public final class Settlement {
         int over = n - housing(), spare = housing() - n;
         l.add(over > 0 ? new Factor("Теснота в домах", -Math.min(20, over * 5)) : new Factor("Жильё", spare >= 2 ? 5 : 0));
         int emp = 0;
-        if (n > 0) emp = (int) Math.round(10 - 20.0 * idleWorkers().size() / n);
+        if (!workers.isEmpty()) emp = (int) Math.round(10 - 20.0 * idleWorkers().size() / workers.size());
         l.add(new Factor(emp < 0 ? "Безработица" : "Занятость", emp));
         int guards = 0;
         for (Worker w : workers) if (w.profession.equals("guard")) guards++;
@@ -1471,6 +1981,7 @@ public final class Settlement {
         root.put("format", "wf-settlement/2");
         root.put("schema_version", 2);
         root.put("id", id); root.put("name", name); root.put("ledger_scope", ledgerScope); root.put("time", time); root.put("auto", auto);
+        root.put("canonical_population", canonicalPopulation);
         root.put("next_building", nextBuilding); root.put("next_worker", nextWorker); root.put("grow", growTimer); root.put("starve", starveTimer); root.put("leave", leaveTimer);
         root.put("flow", flow.save());
         root.put("resident_task_graph", taskGraph.toJson());
@@ -1484,7 +1995,7 @@ public final class Settlement {
         for (Building b : buildings) {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("uid", b.uid); m.put("def", b.def.id); m.put("x", b.x); m.put("z", b.z); m.put("state", b.state.name());
-            m.put("progress", b.progress); m.put("cycle", b.cycleTime); m.put("priority", b.priority); m.put("status", b.status); m.put("paused", b.paused);
+            m.put("progress", b.progress); m.put("cycle", b.cycleTime); m.put("priority", b.priority); m.put("status", b.status); m.put("paused", b.paused); m.put("external", b.externallyMaterialized);
             m.put("local_stock", new LinkedHashMap<>(b.localStock));
             bs.add(m);
         }
@@ -1494,7 +2005,9 @@ public final class Settlement {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("id", w.id); m.put("name", w.name); m.put("profession", w.profession); m.put("assigned_profession", w.assignedProfession); m.put("person", w.person); m.put("building", w.building); m.put("status", w.status); m.put("x", w.x); m.put("z", w.z);
             m.put("life_action", w.lifeAction); m.put("life_target_x", w.lifeTargetX); m.put("life_target_z", w.lifeTargetZ);
-            m.put("life_action_until", w.lifeActionUntil); m.put("haul_progress", w.haulProgress);
+            m.put("life_action_until", w.lifeActionUntil); m.put("life_action_stage", w.lifeActionStage);
+            m.put("life_social_target", w.lifeSocialTarget); m.put("life_action_duration", w.lifeActionDuration);
+            m.put("haul_progress", w.haulProgress);
             m.put("manual_hauler", w.manualHauler);
             m.put("manual_order", w.manualOrder); m.put("manual_follow", w.manualFollow); m.put("manual_follow_owner", w.manualFollowOwner); m.put("order_x", w.orderX); m.put("order_z", w.orderZ);
             List<Object> queuedOrders=new ArrayList<>();
@@ -1511,6 +2024,7 @@ public final class Settlement {
             ds.add(m);
         }
         root.put("departures", ds);
+        root.put("placement_receipts", new TreeMap<>(placementReceipts));
         root.put("log", new ArrayList<Object>(log));
         return Json.write(root);
     }
@@ -1528,6 +2042,10 @@ public final class Settlement {
         s.setLedgerScope(scope != null && !scope.isBlank() ? scope : savedScope instanceof String v ? v : "");
         s.time = ((Number) root.get("time")).doubleValue();
         s.auto = Boolean.TRUE.equals(root.get("auto"));
+        if (root.get("canonical_population") instanceof Number population) {
+            int savedPopulation = population.intValue();
+            s.canonicalPopulation = savedPopulation < 0 ? -1 : Math.min(100_000, savedPopulation);
+        }
         s.nextBuilding = ((Number) root.get("next_building")).intValue();
         s.nextWorker = ((Number) root.get("next_worker")).intValue();
         s.growTimer = ((Number) root.get("grow")).doubleValue();
@@ -1562,7 +2080,7 @@ public final class Settlement {
             Building b = new Building(((Number) m.get("uid")).intValue(), d, ((Number) m.get("x")).intValue(), ((Number) m.get("z")).intValue());
             b.state = Building.State.valueOf((String) m.get("state"));
             b.progress = ((Number) m.get("progress")).doubleValue(); b.cycleTime = ((Number) m.get("cycle")).doubleValue();
-            b.priority = ((Number) m.get("priority")).intValue(); b.status = (String) m.get("status"); b.paused = Boolean.TRUE.equals(m.get("paused"));
+            b.priority = ((Number) m.get("priority")).intValue(); b.status = (String) m.get("status"); b.paused = Boolean.TRUE.equals(m.get("paused")); b.externallyMaterialized = Boolean.TRUE.equals(m.get("external"));
             if (m.get("local_stock") instanceof Map<?, ?> local)
                 for (Map.Entry<?, ?> entry : local.entrySet())
                     if (entry.getKey() instanceof String resource && entry.getValue() instanceof Number quantity
@@ -1583,9 +2101,14 @@ public final class Settlement {
             if (m.get("life_target_x") instanceof Number lx) w.lifeTargetX = lx.doubleValue();
             if (m.get("life_target_z") instanceof Number lz) w.lifeTargetZ = lz.doubleValue();
             if (m.get("life_action_until") instanceof Number lu && Double.isFinite(lu.doubleValue())) w.lifeActionUntil = lu.doubleValue();
+            w.lifeActionStage = m.get("life_action_stage") instanceof String stage
+                    && Set.of("", "travelling", "performing").contains(stage) ? stage : "";
+            w.lifeSocialTarget = m.get("life_social_target") instanceof String target ? target : "";
+            if (m.get("life_action_duration") instanceof Number duration && Double.isFinite(duration.doubleValue()))
+                w.lifeActionDuration = Math.max(0, Math.min(1440, duration.doubleValue()));
             if (m.get("haul_progress") instanceof Number hp && Double.isFinite(hp.doubleValue())) w.haulProgress = Math.max(0, Math.min(100, hp.doubleValue()));
             w.manualHauler = Boolean.TRUE.equals(m.get("manual_hauler"));
-            if (!Set.of("", "sleeping", "eating", "fleeing", "defending", "socializing").contains(w.lifeAction)) w.lifeAction = "";
+            if (!Set.of("", "sleeping", "eating", "fleeing", "defending", "socializing").contains(w.lifeAction)) clearLifeAction(w);
             w.manualOrder = Boolean.TRUE.equals(m.get("manual_order")); w.manualFollow = Boolean.TRUE.equals(m.get("manual_follow")); w.manualFollowOwner = m.get("manual_follow_owner") instanceof String fo ? fo : "";
             if (m.get("order_x") instanceof Number ox) w.orderX = ox.doubleValue();
             if (m.get("order_z") instanceof Number oz) w.orderZ = oz.doubleValue();
@@ -1601,6 +2124,16 @@ public final class Settlement {
             if (m.get("prio") instanceof Map<?, ?> pm) { w.jobPrio = new TreeMap<>(); for (var e : pm.entrySet()) w.jobPrio.put(String.valueOf(e.getKey()), ((Number) e.getValue()).intValue()); }
             if (w.building != 0 && s.building(w.building) == null) w.building = 0;
             s.workers.add(w);
+        }
+        if (root.get("placement_receipts") instanceof Map<?, ?> receipts) {
+            for (Map.Entry<?, ?> entry : receipts.entrySet()) {
+                if (!(entry.getKey() instanceof String request) || !request.matches("[A-Za-z0-9_.:-]{1,128}")
+                        || !(entry.getValue() instanceof String receipt) || receipt.length() > 256)
+                    throw new IllegalArgumentException("Malformed settlement placement receipt");
+                s.placementReceipts.put(request, receipt);
+            }
+            if (s.placementReceipts.size() > 10000)
+                throw new IllegalArgumentException("Settlement placement receipt limit exceeded");
         }
         if (root.get("departures") instanceof List<?> ds) for (Object o : ds) {
             if (!(o instanceof Map<?, ?> m)) continue;

@@ -2,6 +2,8 @@ package dev.worldforge.tests;
 
 import dev.worldforge.settle.*;
 import dev.worldforge.mod.economy.TreasuryService;
+import dev.worldforge.mod.api.DomainMutationRevisions;
+import dev.worldforge.mod.api.WorldForgeApi;
 
 import java.nio.file.*;
 import java.util.*;
@@ -9,6 +11,13 @@ import java.util.*;
 public class TradeNetTest {
     static int fails;
     static void ok(boolean c, String what) { System.out.println((c ? "ok   " : "FAIL ") + what); if (!c) fails++; }
+
+    static long domainRevision(DomainMutationRevisions.Domain domain) {
+        return WorldForgeApi.revisions().snapshot(domain).orElseThrow().revision(domain);
+    }
+
+    static long economyRevision() { return domainRevision(DomainMutationRevisions.Domain.ECONOMY_TRADE); }
+    static long settlementRevision() { return domainRevision(DomainMutationRevisions.Domain.SETTLEMENTS); }
 
     static Settlement city(String id, Defs d) {
         Settlement s = new Settlement(id, id, d);
@@ -27,9 +36,183 @@ public class TradeNetTest {
         cs.put("A", A); cs.put("B", B);
         A.stock.put("wood", 150.0); B.stock.put("wood", 12.0);
         ok(A.price("wood") < B.price("wood"), "в A дрова дешевле: " + A.price("wood") + " < " + B.price("wood"));
+        TradeNetwork revisionNet = new TradeNetwork();
+        Settlement revisionSource = new Settlement("revision-source", "revision-source", d);
+        Settlement revisionTarget = new Settlement("revision-target", "revision-target", d);
+        revisionSource.add("wood", 100);
+        revisionTarget.add("wood", 10);
+        Map<String, Settlement> revisionCities = Map.of(
+                revisionSource.id, revisionSource, revisionTarget.id, revisionTarget);
+        long revisionBeforeAdd = economyRevision();
+        var revisionRoute = revisionNet.add(revisionCities, revisionSource.id, revisionTarget.id, "wood", 2.0);
+        ok(economyRevision() == revisionBeforeAdd + 1,
+                "canonical route creation publishes one ECONOMY_TRADE revision");
+        long revisionBeforeDuty = economyRevision();
+        revisionNet.setDuty(revisionRoute.id, "revision-realm", 0.05);
+        ok(economyRevision() == revisionBeforeDuty + 1,
+                "customs policy change publishes one ECONOMY_TRADE revision");
+        long revisionBeforeNoopDuty = economyRevision();
+        revisionNet.setDuty(revisionRoute.id, "revision-realm", 0.05);
+        ok(economyRevision() == revisionBeforeNoopDuty,
+                "idempotent customs policy does not churn the revision");
+        long revisionBeforeInvalidTick = economyRevision();
+        revisionNet.tick(revisionCities, Double.NaN);
+        ok(economyRevision() == revisionBeforeInvalidTick,
+                "invalid trade tick does not publish a revision");
+        long revisionBeforeTick = economyRevision();
+        revisionNet.tick(revisionCities, 1.0);
+        ok(economyRevision() == revisionBeforeTick + 1,
+                "trade simulation tick publishes one coalesced revision");
+        long revisionBeforeRemove = economyRevision();
+        revisionNet.remove(revisionRoute.id);
+        ok(economyRevision() == revisionBeforeRemove + 1,
+                "canonical route removal publishes one ECONOMY_TRADE revision");
+
+        Settlement revisionSettlement = new Settlement("revision-settlement", "revision-settlement", d);
+        long beforeSettlementTick = settlementRevision();
+        revisionSettlement.tick(1.0);
+        ok(settlementRevision() == beforeSettlementTick + 1,
+                "settlement simulation tick publishes one SETTLEMENTS revision");
+        long beforeInvalidSettlementTick = settlementRevision();
+        revisionSettlement.tick(Double.NaN);
+        ok(settlementRevision() == beforeInvalidSettlementTick,
+                "invalid settlement tick does not publish a revision");
+        long beforePopulation = settlementRevision();
+        revisionSettlement.setCanonicalPopulation(5);
+        ok(settlementRevision() == beforePopulation + 1,
+                "canonical resident count change publishes one SETTLEMENTS revision");
+        long beforePopulationNoop = settlementRevision();
+        revisionSettlement.setCanonicalPopulation(5);
+        ok(settlementRevision() == beforePopulationNoop,
+                "unchanged canonical resident count does not churn the revision");
+        long beforeWorker = settlementRevision();
+        Worker revisionWorker = revisionSettlement.addWorker("revision-worker");
+        ok(settlementRevision() == beforeWorker + 1,
+                "worker creation publishes one SETTLEMENTS revision");
+        Worker deadProjectionWorker = revisionSettlement.addWorker("already-dead-worker");
+        deadProjectionWorker.person = "dead-character-uuid";
+        long beforeDeadProjectionRemoval = settlementRevision();
+        ok(revisionSettlement.removeWorkerProjectionByPerson("dead-character-uuid"),
+                "already-dead Character is removed from the settlement projection");
+        ok(settlementRevision() == beforeDeadProjectionRemoval + 1,
+                "dead resident projection removal publishes one SETTLEMENTS revision");
+        ok(revisionSettlement.pendingDepartures().stream()
+                        .noneMatch(departure -> "dead-character-uuid".equals(departure.personId())),
+                "already-dead projection removal does not enqueue a duplicate lifecycle transition");
+        long beforeTreasuryProjection = settlementRevision();
+        revisionSettlement.applyTreasuryProjection(12.5, 87.5);
+        ok(settlementRevision() == beforeTreasuryProjection + 1,
+                "external treasury reconciliation publishes one SETTLEMENTS revision");
+        long beforeTreasuryProjectionNoop = settlementRevision();
+        revisionSettlement.applyTreasuryProjection(12.5, 87.5);
+        ok(settlementRevision() == beforeTreasuryProjectionNoop,
+                "unchanged treasury projection does not churn the SETTLEMENTS revision");
+        long beforeManualOrder = settlementRevision();
+        revisionSettlement.moveTo(revisionWorker.id, 12.0, -4.0);
+        ok(settlementRevision() == beforeManualOrder + 1,
+                "manual worker movement order publishes one SETTLEMENTS revision");
+        long beforeOrderAdvance = settlementRevision();
+        revisionSettlement.advanceManualOrder(revisionWorker.id);
+        ok(settlementRevision() == beforeOrderAdvance + 1,
+                "manual worker order completion publishes one SETTLEMENTS revision");
+        long beforePriority = settlementRevision();
+        String revisionProfession = revisionWorker.profession;
+        revisionSettlement.setWorkPriority(revisionWorker.id, revisionProfession, 2);
+        ok(settlementRevision() == beforePriority + 1,
+                "worker profession priority publishes one SETTLEMENTS revision");
+        long beforeTax = settlementRevision();
+        revisionSettlement.setTax(3);
+        ok(settlementRevision() == beforeTax + 1,
+                "tax policy change publishes one SETTLEMENTS revision");
+        long beforeTaxNoop = settlementRevision();
+        revisionSettlement.setTax(3);
+        ok(settlementRevision() == beforeTaxNoop,
+                "unchanged tax policy does not churn the revision");
+        long beforeAutoTrade = settlementRevision();
+        revisionSettlement.setAutoTrade("wood", "sell", 20);
+        ok(settlementRevision() == beforeAutoTrade + 1,
+                "auto-trade policy change publishes one SETTLEMENTS revision");
+        long beforeDemand = settlementRevision();
+        revisionSettlement.shiftDemand("wood", 1.0);
+        ok(settlementRevision() == beforeDemand + 1,
+                "external market demand shift publishes one SETTLEMENTS revision");
+        long beforeFlow = settlementRevision();
+        revisionSettlement.recordTradeFlow("wood", 2.0, true);
+        ok(settlementRevision() == beforeFlow + 1,
+                "settlement trade-flow projection publishes one SETTLEMENTS revision");
+        Settlement transferSource = new Settlement("revision-transfer-source", "source", d);
+        Settlement transferTarget = new Settlement("revision-transfer-target", "target", d);
+        transferSource.add("wood", 20);
+        transferTarget.amount("wood"); // pre-open the destination stock account outside the measured transfer
+        long beforeSourceTransfer = settlementRevision();
+        long beforeTransferEconomy = economyRevision();
+        ok(transferSource.transferResourceTo(transferTarget, "wood", 5, "revision-test", "revision-transfer-1"),
+                "cross-settlement transfer succeeds");
+        ok(settlementRevision() == beforeSourceTransfer + 2,
+                "cross-settlement transfer invalidates both Settlement projections");
+        ok(economyRevision() == beforeTransferEconomy + 1,
+                "cross-settlement transfer publishes one canonical Treasury revision");
+
         TradeNetwork n = new TradeNetwork();
         var sug = TradeNetwork.suggestions(cs, 3);
+        TradeNetwork autonomous = new TradeNetwork();
+        int autonomousCreated = autonomous.ensureAutonomousRoutes(cs, 1, 2, 2.0);
+        ok(autonomousCreated == 1 && autonomous.routes.size() == 1,
+                "autonomous supply links are created only between staffed markets");
+        var autonomousRoute = autonomous.routes.values().iterator().next();
+        ok(autonomous.routes.values().stream().filter(route -> route.from.equals(autonomousRoute.from)
+                        || route.to.equals(autonomousRoute.from)).count() <= 1
+                        && autonomous.routes.values().stream().filter(route -> route.from.equals(autonomousRoute.to)
+                        || route.to.equals(autonomousRoute.to)).count() <= 1,
+                "autonomous trade participation respects per-settlement hub limits");
+        ok(autonomous.ensureAutonomousRoutes(cs, 1, 2, 2.0) == 0,
+                "autonomous route review is idempotent when supply capacity is already linked");
+        Settlement rich = city("rich", d), richer = city("richer", d);
+        rich.stock.put("wood", 30.0); richer.stock.put("wood", 120.0);
+        // Demand pressure makes the stocked destination more expensive, so the candidate
+        // direction is deliberately rich -> richer; stock checks must still reject it.
+        rich.pressure.put("wood", -0.8); richer.pressure.put("wood", 0.8);
+        ok(TradeNetwork.suggestions(Map.of("rich", rich, "richer", richer), 4).stream()
+                        .noneMatch(route -> route[0].equals("rich") && route[1].equals("richer")
+                                && route[2].equals("wood")),
+                "trade panel hides a price-spread route when the destination is already stocked");
+        TradeNetwork noDemand = new TradeNetwork();
+        noDemand.ensureAutonomousRoutes(Map.of("rich", rich, "richer", richer), 2, 2, 2.0);
+        ok(noDemand.routes.values().stream().noneMatch(route -> route.from.equals("rich")
+                        && route.to.equals("richer") && route.res.equals("wood")),
+                "autonomous supply network does not create a route toward a stocked destination");
+        Settlement reserve = city("reserve", d), needy = city("needy", d);
+        reserve.stock.put("wood", TradeNetwork.RESERVE + 1); needy.stock.put("wood", 0.0);
+        reserve.pressure.put("wood", -0.8); needy.pressure.put("wood", 0.8);
+        ok(TradeNetwork.suggestions(Map.of("reserve", reserve, "needy", needy), 4).stream()
+                        .noneMatch(route -> route[0].equals("reserve") && route[1].equals("needy")
+                                && route[2].equals("wood")),
+                "trade panel hides a route that would consume the source reserve");
+        TradeNetwork noExport = new TradeNetwork();
+        noExport.ensureAutonomousRoutes(Map.of("reserve", reserve, "needy", needy), 2, 2, 2.0);
+        ok(noExport.routes.values().stream().noneMatch(route -> route.from.equals("reserve")
+                        && route.to.equals("needy") && route.res.equals("wood")),
+                "autonomous supply network protects the source settlement reserve");
         ok(!sug.isEmpty() && sug.get(0)[0].equals("A") && sug.get(0)[1].equals("B") && sug.get(0)[2].equals("wood"), "подсказка: возить дрова из A в B");
+        List<CityRow> projected = CityRow.fromJson(CityRow.toJson(List.of(CityRow.of(A), CityRow.of(B))));
+        ok(TradeNetwork.suggestions(projected, 3).stream().anyMatch(route ->
+                        route[0].equals("A") && route[1].equals("B") && route[2].equals("wood")),
+                "settlement panel projection preserves supply-aware route candidates");
+        ok(projected.get(0).capacity.containsKey("wood") && projected.get(0).consumption.containsKey("wood")
+                        && projected.get(0).tradeRate > 0,
+                "city panel projection includes market, stock capacity and consumption data");
+        Flow domesticFlow = new Flow();
+        SettlementTestAccess.flowRecord(domesticFlow,10, "wood", 4, false);
+        SettlementTestAccess.flowRecordTrade(domesticFlow,10, "wood", 30, false);
+        ok(Math.abs(domesticFlow.perMinute(10, "wood", false) - 24) < 1e-9,
+                "outbound trade does not inflate domestic consumption statistics");
+        ok(Math.abs(domesticFlow.tradePerMinute(10, "wood", false) - 180) < 1e-9,
+                "trade throughput remains separately observable");
+        Flow restoredFlow = new Flow();
+        SettlementTestAccess.flowLoad(restoredFlow,domesticFlow.save());
+        ok(Math.abs(restoredFlow.perMinute(10, "wood", false) - 24) < 1e-9
+                        && Math.abs(restoredFlow.tradePerMinute(10, "wood", false) - 180) < 1e-9,
+                "domestic and trade flow channels survive save/reload");
         try { n.add(cs, "A", "A", "wood", 5); ok(false, "в себя нельзя"); } catch (TradeNetwork.TradeException e) { ok(true, "в себя нельзя"); }
         try { n.add(cs, "A", "B", "silver", 5); ok(false, "серебро не возят"); } catch (TradeNetwork.TradeException e) { ok(true, "серебро не возят"); }
         try { n.add(cs, "A", "B", "wood", Double.NaN); ok(false, "NaN скорость запрещена"); } catch (TradeNetwork.TradeException e) { ok(true, "NaN скорость запрещена"); }
@@ -45,15 +228,45 @@ public class TradeNetTest {
         double sa = A.amount("silver"), sb = B.amount("silver"), spread0 = B.price("wood") / A.price("wood");
         double dutyBefore = TreasuryService.current().balance("realm:north");
         double wa = A.amount("wood"), wb = B.amount("wood");
+        A.tradeLeft = 100; B.tradeLeft = 100;
+        Map<String, TradeNetwork.Location> anchors = Map.of(
+                "A", new TradeNetwork.Location("minecraft:overworld", 0, 0),
+                "B", new TradeNetwork.Location("minecraft:overworld", 80, 0));
+        n.tick(cs, 30, anchors, (from, to, origin, destination) ->
+                new double[][]{{0,0},{20,10},{60,10},{80,0}});
+        var firstShipment = n.shipments.values().stream().filter(shipment -> shipment.routeId == r.id).findFirst().orElse(null);
+        ok(firstShipment != null && firstShipment.status.equals("в пути")
+                        && A.amount("wood") < wa && Math.abs(B.amount("wood") - wb) < 1e-9,
+                "dispatch reserves source goods in transit without instantly crediting the destination");
+        ok(firstShipment != null && TreasuryService.current().balance(TradeNetwork.cargoEscrow(firstShipment.id)) > 0,
+                "shipment cargo is held in a canonical TreasuryLedger escrow account");
+        TradeNetwork inTransitReload = TradeNetwork.fromJson(n.toJson());
+        ok(inTransitReload.shipments.size() == n.shipments.size()
+                        && inTransitReload.shipments.get(firstShipment.id).status.equals("в пути")
+                        && Math.abs(inTransitReload.shipments.get(firstShipment.id).quantity - firstShipment.quantity) < 1e-9,
+                "in-flight cargo, route identity and progress state survive save/reload");
+        ok(firstShipment.path().length == 4
+                        && inTransitReload.shipments.get(firstShipment.id).path().length == 4
+                        && Math.abs(firstShipment.path()[1][0] - 20) < 1e-9,
+                "province-road polyline is persisted with the shipment and survives reload");
         for (int i = 0; i < 20; i++) { A.tradeLeft = 100; B.tradeLeft = 100; n.tick(cs, 30); }
-        ok(r.carried > 0 && A.amount("wood") < wa && B.amount("wood") > wb, "караван возит: " + (int) r.carried + " ед.");
+        ok(r.carried > 0 && A.amount("wood") < wa && B.amount("wood") > wb, "караван доставляет: " + (int) r.carried + " ед.");
+        double protectedWoodReserve = Math.max(TradeNetwork.RESERVE * 2, A.consumedPerMin("wood") * 120.0);
+        ok(A.amount("wood") + 1e-9 >= protectedWoodReserve,
+                "trade route never drains the supplier below its two-day domestic-consumption reserve");
+        ok(A.flow.tradePerMinute(A.time, "wood", false) > 0,
+                "outbound trade is tracked separately from domestic consumption");
+        ok(B.flow.tradePerMinute(B.time, "wood", true) > 0,
+                "inbound trade is tracked separately from local production");
         ok(A.amount("silver") > sa - 1 && r.profit > 0, "обе стороны в плюсе, прибыль " + Math.round(r.profit));
         ok(TreasuryService.current().balance("realm:north") > dutyBefore,
                 "customs duty is transferred into the destination realm treasury");
         double spread1 = B.price("wood") / A.price("wood");
         ok(spread1 < spread0, "цены сближаются: x" + Math.round(spread0 * 100) / 100.0 + " -> x" + Math.round(spread1 * 100) / 100.0);
         for (int i = 0; i < 60; i++) { A.tradeLeft = 100; B.tradeLeft = 100; n.tick(cs, 30); }
-        ok(r.status.equals("нет разницы") || r.status.equals("нет товара") || r.status.equals("нет места"), "когда разница исчезла, караван встаёт: " + r.status);
+        ok(r.status.equals("нет разницы") || r.status.equals("нет товара") || r.status.equals("нет места")
+                        || r.status.equals("защита резерва"),
+                "когда торговля исчерпывает выгоду или защищённый запас, маршрут останавливается: " + r.status);
         // без рынка
         Settlement C = new Settlement("C", "C", d); C.add("wood", 100); cs.put("C", C);
         var r2 = n.add(cs, "C", "B", "wood", 5);
@@ -64,6 +277,17 @@ public class TradeNetTest {
         ok(back.routes.size() == n.routes.size() && back.toJson().equals(n.toJson())
                         && back.routes.get(r.id).dutyRate == 0.05 && back.routes.get(r.id).dutyRealm.equals("north"),
                 "маршруты и параметры пошлин сохраняются");
+        Settlement unanchoredA = city("unanchored-A", d), unanchoredB = city("unanchored-B", d);
+        unanchoredA.stock.put("wood", 150.0); unanchoredB.stock.put("wood", 12.0);
+        TradeNetwork unanchored = new TradeNetwork();
+        unanchored.add(Map.of("unanchored-A", unanchoredA, "unanchored-B", unanchoredB),
+                "unanchored-A", "unanchored-B", "wood", 10);
+        unanchoredA.tradeLeft = 100; unanchoredB.tradeLeft = 100;
+        unanchored.tick(Map.of("unanchored-A", unanchoredA, "unanchored-B", unanchoredB), 30);
+        TradeNetwork unanchoredReload = TradeNetwork.fromJson(unanchored.toJson());
+        ok(unanchored.shipments.values().stream().allMatch(shipment -> shipment.path().length == 0)
+                        && unanchoredReload.toJson().equals(unanchored.toJson()),
+                "strategic-only shipments without world anchors remain pathless after save/reload");
         n.remove(r.id);
         ok(n.routes.size() == 1, "маршрут можно убрать");
         System.out.println(fails == 0 ? "ALL OK" : fails + " FAILED");

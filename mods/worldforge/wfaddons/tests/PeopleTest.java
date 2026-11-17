@@ -119,6 +119,52 @@ public class PeopleTest {
         boolean sons = kids.stream().anyMatch(k -> k.gender.equals("m"));
         Character expected = kids.stream().sorted(Comparator.comparingInt((Character c) -> c.gender.equals("m") ? 0 : 1).thenComparingInt(c -> c.birthYear)).findFirst().get();
         ok(res.size() == 1 && nw == expected && !res.get(0).usurper && d4.realms.get(heirRealm).ruler.startsWith(nw.name), "наследник по примогенитуре (" + (sons ? "сын" : "дочь") + "), запись государства обновлена");
+        // Representation inheritance: a deceased firstborn's living child precedes a younger sibling.
+        CharacterRegistry line = new CharacterRegistry();
+        String linePlace = Courts.realmPlace(d4.realmList().get(0).id);
+        Character sovereign = line.create("Монарх", "house_line", "test_culture", "m", 250);
+        Character firstborn = line.create("Первенец", "house_line", "test_culture", "m", 270);
+        Character younger = line.create("Младший", "house_line", "test_culture", "m", 272);
+        Character grandchild = line.create("Внук", "house_line", "test_culture", "m", 290);
+        sovereign.children.add(firstborn.id); sovereign.children.add(younger.id);
+        firstborn.children.add(grandchild.id);
+        firstborn.father = sovereign.id; younger.father = sovereign.id; grandchild.father = firstborn.id;
+        firstborn.alive = false;
+        line.appoint(sovereign.id, "ruler", linePlace);
+        List<Succession.Result> represented = Succession.onDeath(line, defs, d4, null, names, 99L,
+                sovereign.id, 310, "primogeniture");
+        ok(represented.size() == 1 && represented.get(0).heir == grandchild,
+                "наследование по представительству сохраняет линию умершего первенца");
+        // Representation must survive more than one deceased generation.
+        CharacterRegistry deepLine = new CharacterRegistry();
+        Character deepSovereign = deepLine.create("Династ", "house_deep", "test_culture", "m", 200);
+        Character deadFirstborn = deepLine.create("Умерший первенец", "house_deep", "test_culture", "m", 220);
+        Character livingYounger = deepLine.create("Младший наследник", "house_deep", "test_culture", "m", 225);
+        Character deadGrandchild = deepLine.create("Умерший внук", "house_deep", "test_culture", "m", 240);
+        Character greatGrandchild = deepLine.create("Правнук", "house_deep", "test_culture", "m", 260);
+        deepSovereign.children.add(deadFirstborn.id); deepSovereign.children.add(livingYounger.id);
+        deadFirstborn.children.add(deadGrandchild.id); deadFirstborn.father = deepSovereign.id;
+        livingYounger.father = deepSovereign.id; deadGrandchild.father = deadFirstborn.id;
+        deadGrandchild.children.add(greatGrandchild.id); greatGrandchild.father = deadGrandchild.id;
+        deadFirstborn.alive = false; deadGrandchild.alive = false;
+        deepLine.appoint(deepSovereign.id, "ruler", linePlace);
+        List<Succession.Result> deepRepresented = Succession.onDeath(deepLine, defs, d4, null, names, 101L,
+                deepSovereign.id, 311, "primogeniture");
+        ok(deepRepresented.size() == 1 && deepRepresented.get(0).heir == greatGrandchild,
+                "наследование по представительству проходит через несколько умерших поколений");
+        TitleData.Title hereditaryTitle = d4.allTitles().get(0);
+        hereditaryTitle.props.put("holderCharacterId", sovereign.globalId);
+        CharacterRegistry mapLine = new CharacterRegistry();
+        Character mapRuler = mapLine.create("Старый владыка", "house_map", "test_culture", "m", 220);
+        Character mapHeir = mapLine.create("Новый владыка", "house_map", "test_culture", "m", 245);
+        mapRuler.children.add(mapHeir.id); mapHeir.father = mapRuler.id;
+        mapLine.appoint(mapRuler.id, "ruler", linePlace);
+        hereditaryTitle.props.put("holderCharacterId", mapRuler.globalId);
+        Succession.onDeath(mapLine, defs, d4, e4, names, 100L, mapRuler.id, 311, "primogeniture");
+        ok(mapHeir.globalId.equals(hereditaryTitle.props.get("holderCharacterId"))
+                        && mapRuler.globalId.equals(hereditaryTitle.props.get("succession.last_deceased")),
+                "смена правителя обновляет держателя титула в общей политической карте по global Character ID");
+
         Character lone = r4.holder("ruler", Courts.realmPlace(d4.realmList().get(2).id));
         for (String k : new ArrayList<>(lone.children)) r4.get(k).alive = false;
         for (Character c : r4.all()) if (c != lone && c.alive && !lone.father.isEmpty() && lone.father.equals(c.father)) c.alive = false;
@@ -164,10 +210,14 @@ public class PeopleTest {
         Character carrier = journal.create("Переносчик", "", "", "m", 1);
         int[] lifecycleCallbacks = {0, 0};
         journal.addListener(new CharacterRegistry.Listener() {
-            @Override public void lifecycle(Character person, CharacterRegistry.LifecycleEvent event) { lifecycleCallbacks[0]++; }
+            @Override public void lifecycle(Character person, CharacterRegistry.LifecycleEvent event) {
+                if ("Житель журнала".equals(person.name)) lifecycleCallbacks[0]++;
+            }
         });
         journal.addListener(new CharacterRegistry.Listener() {
-            @Override public void lifecycle(Character person, CharacterRegistry.LifecycleEvent event) { lifecycleCallbacks[1]++; }
+            @Override public void lifecycle(Character person, CharacterRegistry.LifecycleEvent event) {
+                if ("Житель журнала".equals(person.name)) lifecycleCallbacks[1]++;
+            }
         });
         Character journalPerson = journal.create("Житель журнала", "", "", "m", 1);
         CharacterInventory.add(journalPerson,"minecraft:bread",8);
@@ -185,6 +235,35 @@ public class PeopleTest {
         CharacterDevelopment.setMilitaryMorale(journalPerson, 15);
         journalPerson.props.put("wf_unit_kind", "soldier");
         int baseMartial = CharacterStats.value(journalPerson, "martial");
+        List<String> generatedTraits = CharacterStats.traits(journalPerson);
+        ok(generatedTraits.size() >= 3 && generatedTraits.size() <= 5
+                        && CharacterStats.compatibleTraits(generatedTraits)
+                        && generatedTraits.equals(CharacterStats.traits(journalPerson)),
+                "personality generation yields 3-5 deterministic, internally compatible traits");
+        Character personality = journal.create("Последовательный", "", "", "m", 1);
+        personality.traits.add("brave");
+        ok(!CharacterStats.addTrait(personality, "craven")
+                        && CharacterStats.traits(personality).equals(List.of("brave")),
+                "adding a contradictory personality trait is rejected without replacing established traits");
+        Character legacyPersonality = journal.create("Старый профиль", "", "", "m", 1);
+        legacyPersonality.traits.add("brave");
+        legacyPersonality.traits.add("craven");
+        CharacterStats.ensure(journal);
+        ok(legacyPersonality.traits.equals(Set.of("brave")),
+                "legacy contradictory trait combinations are normalized deterministically on ensure");
+        ok(CharacterStats.allTraits().size() >= 50
+                        && CharacterStats.trait("paranoid") != null
+                        && CharacterStats.trait("honest") != null
+                        && CharacterStats.trait("adaptable") != null,
+                "expanded personality catalog exposes broad social, ethical and emotional dimensions");
+        ok(CharacterStats.allSkills().size() >= 25
+                        && CharacterStats.skill("swordsmanship").governingAttribute().equals("martial")
+                        && CharacterStats.skill("persuasion").governingAttribute().equals("diplomacy"),
+                "skill catalog maps specialized abilities to the five core attributes");
+        int ranksBefore = PopulationSimulation.skillRank(journalPerson, "swordsmanship");
+        ok(CharacterStats.trainSkill(journalPerson, "swordsmanship", 250) == 2
+                        && PopulationSimulation.skillRank(journalPerson, "swordsmanship") == ranksBefore + 2,
+                "character skill growth uses the existing PopulationSimulation rank and XP store");
         ok(CharacterDevelopment.militaryMorale(journalPerson) == 15
                         && CharacterDevelopment.effectiveAttribute(journalPerson, "martial", 0) == Math.max(0, baseMartial - 3),
                 "soldier morale is persisted on canonical Character and affects effective martial ability");

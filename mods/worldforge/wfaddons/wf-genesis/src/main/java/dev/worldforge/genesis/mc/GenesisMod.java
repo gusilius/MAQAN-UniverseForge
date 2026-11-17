@@ -81,7 +81,7 @@ public class GenesisMod {
     /** Changes once per server process so a restart can resume an interrupted, idempotent Genesis operation. */
     private static volatile String ACTION_SESSION_ID = "";
 
-    public GenesisMod() { MinecraftForge.EVENT_BUS.register(this); }
+    public GenesisMod() { GENESIS.sharedNameBank(() -> PeopleMod.NAMES); MinecraftForge.EVENT_BUS.register(this); }
 
     public static String owner(ServerPlayer p) { return "p:" + p.getUUID(); }
 

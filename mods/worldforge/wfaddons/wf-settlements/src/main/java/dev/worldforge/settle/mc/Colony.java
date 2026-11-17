@@ -42,6 +42,8 @@ public final class Colony {
         public int overlay = 2;
     }
     public final Map<Integer, WorkOrder> workOrders = new LinkedHashMap<>();
+    /** Canonical wf-people global UUIDs residing in this settlement; Workers are only job projections. */
+    public final Set<String> residentCharacterIds = new LinkedHashSet<>();
     /** Temporary access scaffolds placed by workers; persisted so reloads cannot leave orphan blocks. */
     public final Map<BlockPos, String> temporaryScaffolds = new LinkedHashMap<>();
 
@@ -52,6 +54,8 @@ public final class Colony {
     public SettlementMap map = new SettlementMap();
     /** UUID игрока-правителя (пусто - поселение без правителя-игрока). Правитель управляет своим поселением без прав оператора. */
     public String owner = "";
+    /** Autonomous polity ownership; empty for settlements still outside a realm. */
+    public String realmId = "";
     /** Stable origin operation that created this colony; empty for ordinary settlements. */
     public String genesisOperationId = "";
     /** Provisioning is guarded across retries; an interrupted phase requires reconciliation, never replay. */
@@ -59,6 +63,10 @@ public final class Colony {
     /** Durable cursor and immutable input fingerprint for resumable Genesis provisioning. */
     public int genesisProvisioningStep;
     public String genesisProvisioningSpec = "";
+    /** Population snapshot used to keep founding endowments stable across retries. */
+    public int autonomousFoundingPopulation;
+    /** Loaded physical chunks already reconciled into this village. */
+    public final Set<String> vanillaInfrastructureChunks = new LinkedHashSet<>();
     /** Runtime-only poison flag: do not retry unsaved mutations until the last durable snapshot is reloaded. */
     public transient boolean genesisProvisioningRuntimeBlocked;
     /** Runtime-only freeze after a settlement action changed state but could not persist its receipt-side snapshot. */
@@ -140,11 +148,15 @@ public final class Colony {
         m.put("cx", cx);
         m.put("cz", cz);
         m.put("owner", owner);
+        m.put("realmId", realmId);
         m.put("genesisOperationId", genesisOperationId);
+        m.put("residentCharacterIds", new ArrayList<>(residentCharacterIds));
         m.put("genesisProvisioningStarted", genesisProvisioningStarted);
         m.put("genesisProvisioned", genesisProvisioned);
         m.put("genesisProvisioningStep", genesisProvisioningStep);
         m.put("genesisProvisioningSpec", genesisProvisioningSpec);
+        m.put("autonomousFoundingPopulation", autonomousFoundingPopulation);
+        m.put("vanillaInfrastructureChunks", new ArrayList<>(vanillaInfrastructureChunks));
         m.put("settlement", Json.parse(s.toJson()));
         List<Object> l = new ArrayList<>();
         for (Map.Entry<Integer, Site> e : sites.entrySet()) {
@@ -183,11 +195,18 @@ public final class Colony {
         Colony c = new Colony(s, (String) m.get("dim"), ((Number) m.get("cx")).intValue(), ((Number) m.get("cz")).intValue());
         if (m.get("map") instanceof Map<?, ?> mapData) c.map = SettlementMap.fromJson(Json.write(mapData));
         if (m.get("owner") instanceof String ow) c.owner = ow;
+        if (m.get("realmId") instanceof String realm) c.realmId = realm;
         if (m.get("genesisOperationId") instanceof String operationId) c.genesisOperationId = operationId;
+        if (m.get("residentCharacterIds") instanceof List<?> residents) for (Object id : residents)
+            if (id instanceof String value && !value.isBlank()) c.residentCharacterIds.add(value);
         c.genesisProvisioningStarted = Boolean.TRUE.equals(m.get("genesisProvisioningStarted"));
         c.genesisProvisioned = Boolean.TRUE.equals(m.get("genesisProvisioned"));
         if (m.get("genesisProvisioningStep") instanceof Number step) c.genesisProvisioningStep = Math.max(0, step.intValue());
         if (m.get("genesisProvisioningSpec") instanceof String spec) c.genesisProvisioningSpec = spec;
+        if (m.get("autonomousFoundingPopulation") instanceof Number population)
+            c.autonomousFoundingPopulation = Math.max(0, Math.min(1_000_000, population.intValue()));
+        if (m.get("vanillaInfrastructureChunks") instanceof List<?> scanned)
+            for (Object value : scanned) if (value instanceof String key && key.length() <= 64) c.vanillaInfrastructureChunks.add(key);
         if (m.get("workOrders") instanceof List<?> orders) {
             for (Object raw : orders) {
                 if (!(raw instanceof Map<?, ?> row)) continue;

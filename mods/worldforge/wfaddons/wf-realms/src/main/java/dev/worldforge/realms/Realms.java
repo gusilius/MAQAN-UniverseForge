@@ -19,6 +19,8 @@ public final class Realms {
         /** Доли рас среди жителей. */
         default Map<String, Double> races(String realm) { return dev.worldforge.mod.api.DemoApi.races(realm); }
         default boolean flag(String realm, String flag) { return false; }
+        /** Normalized, live political pressures supplied by the owning game systems (0..1). */
+        default Map<String, Double> policySignals(String realm) { return Map.of(); }
         default int today() { return 0; }
     }
 
@@ -29,6 +31,8 @@ public final class Realms {
         public final Set<String> nodes = new LinkedHashSet<>();
         public final Map<String, String> laws = new LinkedHashMap<>();
         public final Map<String, Integer> lawChanged = new HashMap<>();
+        /** Signal snapshot at the time each law was adopted; used to evaluate observed outcomes. */
+        public final Map<String, Map<String, Double>> lawSignalBaselines = new LinkedHashMap<>();
         public int lastTick = -1;
     }
 
@@ -109,6 +113,7 @@ public final class Realms {
         s.gov = id;
         s.govChanged = hooks.today();
         s.laws.clear();
+        s.lawSignalBaselines.clear();
         s.nodes.removeIf(k -> { RealmDefs.Node n = defs.node(k); return n != null && !nodeGovOk(n, id); });
         return true;
     }
@@ -116,11 +121,12 @@ public final class Realms {
     /** Лучший доступный строй для ИИ-государства: по подгонке, с детерминированной случайностью. */
     public String suggest(String realm, long seed) {
         Random rng = new Random(seed);
+        Map<String, Double> signals = hooks.policySignals(realm);
         String best = "";
         double bs = -1e9;
         for (RealmDefs.Gov g : defs.govs.values()) {
             if (!why(realm, g).isEmpty()) continue;
-            double sc = fit(realm, g) + rng.nextDouble() * 15;
+            double sc = fit(realm, g) + policyUtility(g.mods(), signals) * 0.35 + rng.nextDouble() * 5;
             if (sc > bs) { bs = sc; best = g.id(); }
         }
         return best;
@@ -194,6 +200,11 @@ public final class Realms {
         if (left > 0) return fail("менять закон можно через " + left + " дн.");
         s.laws.put(law, option);
         s.lawChanged.put(law, hooks.today());
+        Map<String, Double> baseline = new LinkedHashMap<>();
+        Map<String, Double> currentSignals = hooks.policySignals(realm);
+        for (String key : List.of("unrest", "fiscal_stress", "vassal_discontent", "faction_pressure", "court_intrigue"))
+            baseline.put(key, signal(currentSignals, key));
+        s.lawSignalBaselines.put(law, baseline);
         return true;
     }
 
@@ -221,16 +232,158 @@ public final class Realms {
 
     // ---------- ИИ ----------
 
-    /** Простое развитие для государств без игрока: строй по подгонке, доктрины и законы по дешёвизне. */
+    private static double signal(Map<String, Double> signals, String key) {
+        if (signals == null) return 0;
+        double value = signals.getOrDefault(key, 0.0);
+        return Double.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
+    }
+
+    /**
+     * Scores a policy by its actual effects against the realm's live pressures.
+     * Signals are supplied by wf-war, wf-court, Statecraft and the shared map/demography APIs;
+     * this class does not create a parallel war, treasury, population or unrest model.
+     */
+    private static double policyUtility(Map<String, Double> effects, Map<String, Double> signals) {
+        double war = signal(signals, "war");
+        double fiscal = signal(signals, "fiscal_stress");
+        double vassal = signal(signals, "vassal_discontent");
+        double trade = signal(signals, "trade_access");
+        double diversity = signal(signals, "cultural_diversity");
+        double unrest = signal(signals, "unrest");
+        double faction = signal(signals, "faction_pressure");
+        double intrigue = signal(signals, "court_intrigue");
+        double dynastic = signal(signals, "dynastic_ties");
+        double councilAccept = signal(signals, "council_ai_accept");
+        double diplomacy = signal(signals, "ruler_diplomacy");
+        double martial = signal(signals, "ruler_martial");
+        double intrigueSkill = signal(signals, "ruler_intrigue");
+        double stewardship = signal(signals, "ruler_stewardship");
+        double learning = signal(signals, "ruler_learning");
+        double greedy = signal(signals, "ruler_trait_greedy");
+        double generous = signal(signals, "ruler_trait_generous");
+        double just = signal(signals, "ruler_trait_just");
+        double cruel = signal(signals, "ruler_trait_cruel");
+        double ambitious = signal(signals, "ruler_trait_ambitious");
+        double content = signal(signals, "ruler_trait_content");
+        double brave = signal(signals, "ruler_trait_brave");
+        double craven = signal(signals, "ruler_trait_craven");
+        double scholar = signal(signals, "ruler_trait_scholar");
+        double shrewd = signal(signals, "ruler_trait_shrewd");
+        double score = 0;
+        // Policies are evaluated through the current ruler, not only through a generic realm template.
+        score += effects.getOrDefault("levy_pct", 0.0) * (0.01 + war * (0.75 + martial * 1.05 + brave * 0.25 - craven * 0.20));
+        score += effects.getOrDefault("melee_dmg_pct", 0.0) * war * 1.20;
+        score += effects.getOrDefault("ranged_dmg_pct", 0.0) * war * 0.80;
+        score += effects.getOrDefault("siege_pct", 0.0) * war * 1.35;
+        score += effects.getOrDefault("defense_pct", 0.0) * war * 0.70;
+        score -= effects.getOrDefault("upkeep_pct", 0.0) * (war * 0.50 + fiscal * 0.35);
+        score += effects.getOrDefault("tax_pct", 0.0) * (0.10 + fiscal * (0.80 + stewardship * 0.65 + greedy * 0.35)
+                - vassal * (0.25 + diplomacy * 0.30 + just * 0.20)
+                - unrest * (0.20 + diplomacy * 0.35 + generous * 0.15) - faction * (0.65 + diplomacy * 0.35));
+        score += effects.getOrDefault("trade_pct", 0.0) * (0.15 + trade * (0.90 + diplomacy * 0.45 + stewardship * 0.25));
+        score += effects.getOrDefault("discount_pct", 0.0) * trade * 0.70;
+        score += effects.getOrDefault("opinion", 0.0) * (0.20 + vassal * (1.10 + diplomacy * 0.55 + generous * 0.25)
+                + unrest * (1.00 + just * 0.35) + faction * (0.90 + diplomacy * 0.45));
+        score += effects.getOrDefault("vassal_opinion", 0.0) * (vassal * (1.20 + diplomacy * 0.55 + generous * 0.20)
+                + faction * (1.35 + diplomacy * 0.45));
+        score -= effects.getOrDefault("unrest_pct", 0.0) * (vassal + unrest * (0.75 + diplomacy * 0.25));
+        score += effects.getOrDefault("xp_gain_pct", 0.0) * diversity * 1.50;
+        score += effects.getOrDefault("heal_pct", 0.0) * diversity * 0.20;
+        score += effects.getOrDefault("cultural_tolerance_pct", 0.0) * diversity * 2.0;
+        score += effects.getOrDefault("plot_defense", 0.0) * intrigue * (0.65 + intrigueSkill * 0.75 + shrewd * 0.25 + cruel * 0.10);
+        score += effects.getOrDefault("ai_accept", 0.0) * (0.15 + dynastic * (0.55 + diplomacy * 0.35)
+                + councilAccept * (0.45 + just * 0.25 + content * 0.15));
+        score += effects.getOrDefault("trade_pct", 0.0) * dynastic * 0.25;
+        score += effects.getOrDefault("doctrine_pct", 0.0) * (0.15 + fiscal * 0.15 + learning * 0.45 + scholar * 0.30);
+        // Ambitious rulers tolerate disruptive reforms; content rulers prefer preserving a stable order.
+        score += effects.getOrDefault("reform_pct", 0.0) * (ambitious * 0.8 - content * 0.45);
+        score += effects.getOrDefault("cultural_tolerance_pct", 0.0) * (diplomacy * 0.25 + just * 0.30 + cruel * -0.20);
+        return score;
+    }
+
+    private RealmDefs.Node bestAvailableDoctrine(String realm, Map<String, Double> signals) {
+        State state = state(realm);
+        if (state.nodes.size() >= doctrineSlots(realm)) return null;
+        List<RealmDefs.Node> candidates = new ArrayList<>();
+        for (RealmDefs.Branch branch : defs.branches.values())
+            for (RealmDefs.Node node : branch.nodes())
+                if (canUnlock(realm, node.key())) candidates.add(node);
+        candidates.sort(Comparator
+                .comparingDouble((RealmDefs.Node node) -> policyUtility(node.mods(), signals) - node.cost() * 0.10)
+                .reversed()
+                .thenComparing(RealmDefs.Node::key));
+        return candidates.isEmpty() ? null : candidates.get(0);
+    }
+
+    /** A policy is not judged only by its intended modifier: the AI also remembers what happened after adoption. */
+    private static double observedOutcomeAdjustment(State state, String lawId, RealmDefs.LawOption option,
+                                                    Map<String, Double> signals) {
+        if (!option.id().equals(state.laws.get(lawId))) return 0;
+        Map<String, Double> baseline = state.lawSignalBaselines.get(lawId);
+        if (baseline == null || baseline.isEmpty()) return 0;
+        Map<String, Double> effects = option.mods();
+        double change = 0;
+        // Only attribute an observed outcome to a policy when that policy actually affects
+        // the corresponding domain. This prevents unrelated fiscal recovery from making
+        // emergency conscription look successful after a war has already ended.
+        boolean affectsStability = effects.containsKey("opinion") || effects.containsKey("vassal_opinion")
+                || effects.containsKey("unrest_pct");
+        if (affectsStability) {
+            change += (signal(signals, "unrest") - baseline.getOrDefault("unrest", 0.0)) * 22.0;
+            change += (signal(signals, "vassal_discontent") - baseline.getOrDefault("vassal_discontent", 0.0)) * 24.0;
+            change += (signal(signals, "faction_pressure") - baseline.getOrDefault("faction_pressure", 0.0)) * 28.0;
+        }
+        if (effects.containsKey("tax_pct") || effects.containsKey("upkeep_pct"))
+            change += (signal(signals, "fiscal_stress") - baseline.getOrDefault("fiscal_stress", 0.0)) * 18.0;
+        if (effects.containsKey("plot_defense"))
+            change += (signal(signals, "court_intrigue") - baseline.getOrDefault("court_intrigue", 0.0)) * 12.0;
+        return Math.max(-35.0, Math.min(35.0, -change));
+    }
+
+    private RealmDefs.LawOption bestLawOption(String realm, RealmDefs.Law law, Map<String, Double> signals) {
+        State state = state(realm);
+        RealmDefs.LawOption best = null;
+        double bestScore = -Double.MAX_VALUE;
+        for (RealmDefs.LawOption option : law.options()) {
+            if (level(realm) < option.minLevel()) continue;
+            double score = policyUtility(option.mods(), signals)
+                    + observedOutcomeAdjustment(state, law.id(), option, signals);
+            if (best == null || score > bestScore || score == bestScore && option.id().compareTo(best.id()) < 0) {
+                best = option;
+                bestScore = score;
+            }
+        }
+        return best;
+    }
+
+    /**
+     * Autonomous government development is strategic rather than cheapest-first/random:
+     * choose a regime compatible with population/terrain, invest in the most useful available
+     * doctrine, and select laws that answer current war, fiscal, trade and vassal pressures.
+     * All effects still flow through the existing Realms modifiers and Statecraft/Treasury APIs.
+     */
     public void autoDevelop(String realm, long seed) {
-        State s = state(realm);
-        if (s.gov.isEmpty()) { String g = suggest(realm, seed); if (!g.isEmpty()) setGov(realm, g, true); }
+        State state = state(realm);
+        Map<String, Double> signals = hooks.policySignals(realm);
+        if (state.gov.isEmpty()) {
+            String government = suggest(realm, seed);
+            if (!government.isEmpty()) setGov(realm, government, true);
+        }
         tick(realm);
-        List<String> keys = new ArrayList<>();
-        for (RealmDefs.Branch b : defs.branches.values()) for (RealmDefs.Node n : b.nodes()) keys.add(n.key());
-        keys.sort(Comparator.comparingInt(k -> defs.node(k).cost()));
-        for (String k : keys) if (canUnlock(realm, k)) unlock(realm, k);
-        for (RealmDefs.Law l : defs.laws.values()) if (!s.laws.containsKey(l.id())) setLaw(realm, l.id(), l.options().get((int) Math.floorMod(seed + l.id().hashCode(), l.options().size())).id());
+
+        while (state.nodes.size() < doctrineSlots(realm)) {
+            RealmDefs.Node next = bestAvailableDoctrine(realm, signals);
+            if (next == null || !unlock(realm, next.key())) break;
+        }
+
+        for (RealmDefs.Law law : defs.laws.values()) {
+            boolean alreadyActive = state.laws.containsKey(law.id());
+            if (!alreadyActive && state.laws.size() >= lawSlots(realm)) continue;
+            RealmDefs.LawOption option = bestLawOption(realm, law, signals);
+            if (option == null || option.id().equals(state.laws.get(law.id()))) continue;
+            // setLaw enforces the law's own cooldown; changing pressure cannot bypass it.
+            setLaw(realm, law.id(), option.id());
+        }
     }
 
     // ---------- вид и сохранение ----------
@@ -255,6 +408,7 @@ public final class Realms {
         root.put("govs", gl);
         root.put("nodes", new ArrayList<>(s.nodes));
         root.put("laws", new LinkedHashMap<>(s.laws));
+        root.put("policyMemory", new LinkedHashMap<>(s.lawSignalBaselines));
         root.put("mods", mods(realm));
         return Json.write(root);
     }
@@ -266,6 +420,7 @@ public final class Realms {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("gov", s.gov); m.put("points", s.points); m.put("govChanged", s.govChanged); m.put("lastTick", s.lastTick);
             m.put("nodes", new ArrayList<>(s.nodes)); m.put("laws", new LinkedHashMap<>(s.laws)); m.put("lawChanged", new LinkedHashMap<>(s.lawChanged));
+            m.put("lawSignalBaselines", new LinkedHashMap<>(s.lawSignalBaselines));
             root.put(e.getKey(), m);
         }
         return Json.write(root);
@@ -284,6 +439,13 @@ public final class Realms {
             if (m.get("nodes") instanceof List<?> l) for (Object o : l) s.nodes.add(String.valueOf(o));
             if (m.get("laws") instanceof Map<?, ?> lm) for (var x : lm.entrySet()) s.laws.put(String.valueOf(x.getKey()), String.valueOf(x.getValue()));
             if (m.get("lawChanged") instanceof Map<?, ?> lm) for (var x : lm.entrySet()) s.lawChanged.put(String.valueOf(x.getKey()), ((Number) x.getValue()).intValue());
+            if (m.get("lawSignalBaselines") instanceof Map<?, ?> baselines) for (var lawEntry : baselines.entrySet()) {
+                if (!(lawEntry.getValue() instanceof Map<?, ?> values)) continue;
+                Map<String, Double> snapshot = new LinkedHashMap<>();
+                for (var value : values.entrySet()) if (value.getValue() instanceof Number n)
+                    snapshot.put(String.valueOf(value.getKey()), Math.max(0, Math.min(1, n.doubleValue())));
+                s.lawSignalBaselines.put(String.valueOf(lawEntry.getKey()), snapshot);
+            }
         }
     }
 }

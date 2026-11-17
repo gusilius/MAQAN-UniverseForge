@@ -342,6 +342,42 @@ pub unsafe extern "system" fn Java_com_maqan_galacticnavigator_navigation_Naviga
     result
 }
 
+
+#[no_mangle]
+pub unsafe extern "system" fn Java_com_maqan_galacticnavigator_navigation_NavigatorNativeBridge_nativeRouteExploredSurface(
+    env: JNIEnvPtr, _class: JObject, explored: JObject, start_x: i32, start_z: i32,
+    goal_x: i32, goal_z: i32, mode: i32, max_expansions: i32,
+) -> JObject {
+    if env.is_null() || explored.is_null() { return std::ptr::null_mut(); }
+    let table=*env;if table.is_null(){return std::ptr::null_mut();}
+    let get_len:extern "system" fn(JNIEnvPtr,JObject)->i32=mem::transmute(*table.add(171));
+    let get_region:extern "system" fn(JNIEnvPtr,JObject,i32,i32,*mut i32)=mem::transmute(*table.add(203));
+    let new_array:extern "system" fn(JNIEnvPtr,i32)->JObject=mem::transmute(*table.add(179));
+    let set_region:extern "system" fn(JNIEnvPtr,JObject,i32,i32,*const i32)=mem::transmute(*table.add(211));
+    let exception:extern "system" fn(JNIEnvPtr)->u8=mem::transmute(*table.add(228));
+    let length=get_len(env,explored);
+    if length<0||length%4!=0||length>8_000_000{return std::ptr::null_mut();}
+    let Some(mode)=crate::surface_route::Mode::from_code(mode)else{return std::ptr::null_mut();};
+    let mut values=vec![0_i32;length as usize];
+    if length>0{get_region(env,explored,0,length,values.as_mut_ptr());}
+    if exception(env)!=0{return std::ptr::null_mut();}
+    let cells:Vec<crate::surface_route::Cell>=values.chunks_exact(4).map(|v|crate::surface_route::Cell{
+        x:v[0],z:v[1],height:v[2],biome:v[3].clamp(0,3) as u8
+    }).collect();
+    let result=crate::surface_route::find(&cells,(start_x,start_z),(goal_x,goal_z),mode,
+        max_expansions.clamp(1,250_000) as usize);
+    let cost_bits=result.cost.to_bits();
+    let mut packed=Vec::with_capacity(4+result.points.len()*2);
+    packed.push(if result.found{1}else{0});
+    packed.push(result.expanded.min(i32::MAX as usize) as i32);
+    packed.push(cost_bits as u32 as i32);
+    packed.push((cost_bits>>32) as u32 as i32);
+    for (x,z) in result.points{packed.push(x);packed.push(z);}
+    let array=new_array(env,packed.len() as i32);if array.is_null(){return std::ptr::null_mut();}
+    set_region(env,array,0,packed.len() as i32,packed.as_ptr());
+    if exception(env)!=0{return std::ptr::null_mut();}array
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

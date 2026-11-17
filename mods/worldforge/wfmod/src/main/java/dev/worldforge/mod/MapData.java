@@ -33,9 +33,10 @@ public final class MapData {
     public final RegionData regions;         // политическая карта (может быть null)
     public final byte[] regionMap;           // 128x128 байт для карты-предмета (может быть null)
     public final TitleData titles;           // иерархия титулов и государства (может быть null)
+    public final PlanetWorldProfile planetProfile; // optional Atlas/WorldForge generation contract
     public final Map<String, byte[]> mapItems; // карты-предметы по уровням и "realms"
 
-    private static final String[] FILES = {"meta.json", "biomes.png", "height16.png", "rivers.png", "regions.png", "regions.json", "regionmap.bin", "provinces.png", "titles.json", "realms.json"};
+    private static final String[] FILES = {"meta.json", "biomes.png", "height16.png", "rivers.png", "regions.png", "regions.json", "regionmap.bin", "provinces.png", "titles.json", "realms.json", "generation-profile.json"};
 
     private final short[] height;
     private final byte[] biome;
@@ -45,7 +46,7 @@ public final class MapData {
 
     private MapData(String name, int w, int h, double bpp, int sea, int minY, int maxY, String[] keys, int[] biomeRgb,
                     String[][] cand, double[] spawn, short[] height, byte[] biome, byte[] river, short[] riverLevel,
-                    RegionData regions, byte[] regionMap, TitleData titles, Map<String, byte[]> mapItems) {
+                    RegionData regions, byte[] regionMap, TitleData titles, PlanetWorldProfile planetProfile, Map<String, byte[]> mapItems) {
         this.name = name;
         this.w = w;
         this.h = h;
@@ -64,6 +65,7 @@ public final class MapData {
         this.regions = regions;
         this.regionMap = regionMap;
         this.titles = titles;
+        this.planetProfile = planetProfile;
         this.mapItems = mapItems;
     }
 
@@ -224,7 +226,9 @@ public final class MapData {
                 if (b != null && b.length == 16384) mapItems.put(n, b);
             }
         }
-        return new MapData(name, w, h, bpp, sea, minY, maxY, keys, rgb, cand, spawn, height, biome, river, rl, regions, regionMap, titles, mapItems);
+        PlanetWorldProfile planetProfile = PlanetWorldProfile.parse(files.get("generation-profile.json"));
+        return new MapData(name, w, h, bpp, sea, minY, maxY, keys, rgb, cand, spawn, height, biome, river, rl,
+                regions, regionMap, titles, planetProfile, mapItems);
     }
 
     private static Raster decode(byte[] png, int w, int h, String what) throws IOException {
@@ -267,6 +271,12 @@ public final class MapData {
         int pz = clampZ((int) Math.floor((bz + wz) / bpp + h * 0.5));
         return pz * w + px;
     }
+
+    /** True only when the source package actually supplied rivers.png. */
+    public boolean hasRiverLayer() { return river != null; }
+
+    /** Political/administrative overlays are metadata, never geographic input to a map-first campaign. */
+    public boolean hasPoliticalLayers() { return titles != null || regions != null; }
 
     /** Индекс биома в точке мира; границы слегка «дрожат», чтобы не было квадратов по пикселям. */
     public int biomeIndexAt(double bx, double bz) {

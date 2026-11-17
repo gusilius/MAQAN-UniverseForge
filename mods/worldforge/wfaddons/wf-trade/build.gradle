@@ -51,6 +51,8 @@ dependencies {
     compileOnly fileTree(dir: '../wf-dialogue/build/libs', include: ['wf_dialogue-*.jar'])
     compileOnly fileTree(dir: 'libs', include: ['wf_army-*.jar'])
     compileOnly fileTree(dir: '../wf-army/build/libs', include: ['wf_army-*.jar'])
+    compileOnly fileTree(dir: 'libs', include: ['wf_realms-*.jar'])
+    compileOnly fileTree(dir: '../wf-realms/build/libs', include: ['wf_realms-*.jar'])
 }
 
 tasks.named('processResources', ProcessResources).configure {

@@ -1,0 +1,113 @@
+name: WorldForge image-to-world blueprint proof
+
+on:
+  push:
+    branches: [test/worldforge-image-blueprint]
+    paths:
+      - "mods/worldforge/wfaddons/tools/image-worldgen/**"
+      - "map.png"
+      - "mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/**"
+      - "mods/worldforge/wfmod/tools/SmokeTest.java"
+      - ".github/workflows/worldforge-image-worldgen.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: worldforge-image-worldgen-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image-blueprint:
+    name: PNG image -> deterministic World Blueprint -> WorldForge package (Windows x64)
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install image decoder dependency
+        run: python -m pip install --disable-pip-version-check Pillow==11.3.0 numpy==2.3.2 scipy==1.16.1
+
+      - name: Test semantic image classifier and seeded relief
+        shell: pwsh
+        run: |
+          $tool = "mods/worldforge/wfaddons/tools/image-worldgen"
+          python -m unittest discover -s $tool -p "test_*.py" -v
+          if ($LASTEXITCODE -ne 0) { throw "Semantic image analysis tests failed" }
+          $fixture = Join-Path $env:RUNNER_TEMP "maqan-semantic-fixture.png"
+          $out = Join-Path $env:RUNNER_TEMP "maqan-semantic-preview"
+          python -c "from PIL import Image,ImageDraw; i=Image.new('RGB',(256,192),(0,74,119)); d=ImageDraw.Draw(i); d.ellipse((15,10,235,180),fill=(150,180,80)); d.polygon([(30,80),(80,20),(130,65),(100,140)],fill=(35,90,35)); d.polygon([(100,40),(150,15),(190,80),(140,100)],fill=(110,100,90)); d.rectangle((160,100,220,160),fill=(225,185,100)); d.rectangle((20,10,75,45),fill=(225,235,240)); d.line((110,50,125,90,150,130),fill=(0,145,210),width=4); i.save(r'$fixture')"
+          python $tool/image_map_analysis.py --input $fixture --output $out --seed 424242
+          if ($LASTEXITCODE -ne 0) { throw "Semantic image fixture analysis failed" }
+
+      - name: Generate image-based world twice with the same seed and once with a different seed
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP "maqan-image-worldgen"
+          python mods/worldforge/wfaddons/tools/image-worldgen/image_worldgen.py self-test --output-dir $out
+          if ($LASTEXITCODE -ne 0) { throw "Image-to-world deterministic proof failed" }
+          if (!(Test-Path (Join-Path $out "image-world-seed-424242.worldmap"))) { throw "WorldForge package was not created" }
+          if (!(Test-Path (Join-Path $out "world-blueprint.json"))) { throw "World Blueprint was not created" }
+
+      - name: Generate and compare all seven settlement profiles from the real map.png
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP "maqan-image-worldgen"
+          $suite = Join-Path $out "seven-profile-suite"
+          Copy-Item "map.png" (Join-Path $out "source-map.png") -Force
+          python mods/worldforge/wfaddons/tools/image-worldgen/image_map_analysis.py --input "map.png" --output $out --seed 424242
+          if ($LASTEXITCODE -ne 0) { throw "Original map semantic analysis failed" }
+          python mods/worldforge/wfaddons/tools/image-worldgen/image_worldgen.py profile-suite --input "map.png" --output-dir $suite --seed 424242 --blocks-per-pixel 16
+          if ($LASTEXITCODE -ne 0) { throw "Seven-profile map generation or QA failed" }
+          Copy-Item (Join-Path $suite "level-4/map-level-4-seed-424242.worldmap") (Join-Path $out "image-world-seed-424242.worldmap") -Force
+          Copy-Item (Join-Path $suite "level-4/terrain-preview.png") (Join-Path $out "terrain-preview.png") -Force
+          Copy-Item (Join-Path $suite "level-4/political-preview.png") (Join-Path $out "political-preview.png") -Force
+          Copy-Item (Join-Path $suite "level-4/image-analysis-report.json") (Join-Path $out "source-map-analysis-report.json") -Force
+          if (!(Test-Path (Join-Path $suite "seven-profile-comparison.json"))) { throw "Seven-profile comparison report missing" }
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Compile existing WorldForge map loader and terrain sampler
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP "maqan-image-worldgen"
+          $classes = Join-Path $out "classes"
+          New-Item -ItemType Directory -Force -Path $classes | Out-Null
+          javac -encoding UTF-8 -d $classes `
+            mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/Json.java `
+            mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/Noise.java `
+            mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/RegionData.java `
+            mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/TitleData.java `
+            mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/PlanetWorldProfile.java `
+            mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/MapData.java `
+            mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/TerrainSampler.java `
+            mods/worldforge/wfmod/tools/SmokeTest.java `
+            mods/worldforge/wfaddons/tools/image-worldgen/ImageWorldMapCompatibilityTest.java
+          if ($LASTEXITCODE -ne 0) { throw "WorldForge map compatibility compile failed" }
+
+      - name: Load generated package with production MapData and sample terrain
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP "maqan-image-worldgen"
+          $classes = Join-Path $out "classes"
+          java -cp $classes dev.worldforge.mod.ImageWorldMapCompatibilityTest $out image-world-seed-424242
+          if ($LASTEXITCODE -ne 0) { throw "Generated package is incompatible with production MapData" }
+          java -cp $classes SmokeTest $out image-world-seed-424242 (Join-Path $out "terrain-preview.png")
+          if ($LASTEXITCODE -ne 0) { throw "Terrain sampling failed" }
+
+      - name: Upload seven-profile worlds, previews, source image and QA reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: maqan-image-worldgen-proof
+          path: ${{ runner.temp }}/maqan-image-worldgen/
+          if-no-files-found: error
+          retention-days: 30

@@ -21,6 +21,7 @@ public final class WarClient {
         try {
             if (ClientState.state == null || ClientState.state.titles == null) return;
             Map<String, Object> m = (Map<String, Object>) Json.parse(payload);
+            dev.worldforge.mod.RealmProjectionCodec.apply(ClientState.state.titles, m.get("realm_projections"));
             WarEngine e = new WarEngine(new TitleEditor(ClientState.state.titles));
             for (Object o : (List<Object>) m.get("raw")) e.loadCasusBelli((String) o);
             e.fromJson((String) m.get("war"));

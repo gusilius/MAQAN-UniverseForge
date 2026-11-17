@@ -46,8 +46,10 @@ import dev.worldforge.mod.economy.TreasuryService;
 import dev.worldforge.mod.identity.WorldId;
 import dev.worldforge.mod.identity.WorldIdentityStore;
 
+import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.Files;
 import java.util.List;
@@ -76,6 +78,7 @@ public class WorldForgeMod {
     private static volatile boolean actionExecutionLoadFailed;
     private static volatile WorldId worldId;
     private static long treasuryTicks;
+    private static volatile long persistedTreasuryVersion = -1L;
 
     public WorldForgeMod() {
         IEventBus bus = FMLJavaModLoadingContext.get().getModEventBus();
@@ -147,10 +150,12 @@ public class WorldForgeMod {
         Path file = treasuryFile(server);
         try {
             TreasuryService.replace(Files.isRegularFile(file) ? TreasuryLedger.fromJson(Files.readString(file)) : new TreasuryLedger());
-            LOGGER.info("WorldForge treasury: loaded {} accounts and {} journal entries", TreasuryService.current().accounts().size(), TreasuryService.current().journal().size());
+            persistedTreasuryVersion = TreasuryService.current().mutationVersion();
+            LOGGER.info("WorldForge treasury: loaded {} accounts and {} journal entries", TreasuryService.current().accountCount(), TreasuryService.current().journalSize());
         } catch (Exception ex) {
             LOGGER.error("WorldForge treasury load failed; refusing to overwrite the existing ledger: {}", ex.toString());
             treasuryLoadFailed = true;
+            persistedTreasuryVersion = -1L;
             TreasuryService.replace(new TreasuryLedger());
         }
     }
@@ -158,25 +163,42 @@ public class WorldForgeMod {
     /** Flushes the canonical ledger after addons have migrated their legacy balances during shutdown. */
     public static boolean saveTreasuryNow(MinecraftServer server) { return saveTreasury(server); }
 
-    private static boolean saveTreasury(MinecraftServer server) {
+    private static synchronized boolean saveTreasury(MinecraftServer server) {
         if (server == null || treasuryLoadFailed) {
             LOGGER.error("WorldForge treasury save skipped because the previous load failed; preserving the original file");
             return false;
         }
-        Path file = treasuryFile(server);
-        try {
-            Files.createDirectories(file.getParent());
-            Path temp = file.resolveSibling(file.getFileName() + ".tmp");
-            Files.writeString(temp, TreasuryService.current().toJson());
-            try { Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE); }
-            catch (java.nio.file.AtomicMoveNotSupportedException ignored) { Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING); }
-            return true;
-        } catch (IOException ex) {
-            LOGGER.error("WorldForge treasury save failed: {}", ex.toString());
-            return false;
+        TreasuryLedger ledger = TreasuryService.current();
+        // Hold the canonical ledger monitor across dirty-check, snapshot and atomic replacement.
+        // Otherwise a concurrent writer could mutate immediately after a no-op check and receive
+        // a false durable acknowledgement before the next autosave.
+        synchronized (ledger) {
+            if (ledger.mutationVersion() == persistedTreasuryVersion) return true;
+            Path file = treasuryFile(server);
+            long startedNanos = System.nanoTime();
+            long writtenVersion;
+            try {
+                Files.createDirectories(file.getParent());
+                Path temp = file.resolveSibling(file.getFileName() + ".tmp");
+                try (BufferedWriter writer = Files.newBufferedWriter(temp, StandardCharsets.UTF_8)) {
+                    writtenVersion = ledger.writeJsonVersioned(writer);
+                }
+                try { Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE); }
+                catch (java.nio.file.AtomicMoveNotSupportedException ignored) { Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING); }
+                persistedTreasuryVersion = writtenVersion;
+                long elapsedMillis = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos);
+                int accounts = ledger.accountCount(), entries = ledger.journalSize();
+                LOGGER.info("WorldForge treasury: durable snapshot accounts={} journalEntries={} mutationVersion={} elapsedMs={}",
+                        accounts, entries, writtenVersion, elapsedMillis);
+                if (elapsedMillis >= 1000)
+                    LOGGER.warn("WorldForge treasury snapshot exceeded 1s; journalEntries={} elapsedMs={}", entries, elapsedMillis);
+                return true;
+            } catch (IOException ex) {
+                LOGGER.error("WorldForge treasury save failed; canonical ledger remains dirty for retry: {}", ex.toString());
+                return false;
+            }
         }
     }
-
     public static Map<String, MapData> loadedMaps() {
         return MAPS;
     }
@@ -236,6 +258,8 @@ public class WorldForgeMod {
     @SubscribeEvent
     public void onServerAboutToStart(ServerAboutToStartEvent e) {
         biomes = e.getServer().registryAccess().registryOrThrow(Registries.BIOME);
+        treasuryTicks = 0;
+        persistedTreasuryVersion = -1L;
         MAPS.clear();
         try {
             Path identityFile = e.getServer().getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
@@ -263,6 +287,8 @@ public class WorldForgeMod {
     @SubscribeEvent
     public void onServerStopped(ServerStoppedEvent e) {
         EditorManager.forget();
+        treasuryTicks = 0;
+        persistedTreasuryVersion = -1L;
         worldId = null;
         dev.worldforge.mod.api.WorldForgeApi.resetActionExecution();
         actionExecutionLoadFailed = false;

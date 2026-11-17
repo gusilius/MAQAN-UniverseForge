@@ -1,6 +1,7 @@
 package dev.worldforge.settle;
 
 import dev.worldforge.people.Character;
+import dev.worldforge.people.CharacterDevelopment;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -35,12 +36,27 @@ public final class ResidentSocial {
         return next;
     }
 
+    /** Canonical world-level identity is the only key for Character-to-Character relationships. */
+    private static String globalId(Character person) {
+        if (person == null || person.globalId == null || person.globalId.isBlank())
+            throw new IllegalStateException("Social relationships require a canonical Character global UUID");
+        return person.globalId;
+    }
+
+
     /** Trait/culture compatibility shapes the result of an actual conversation. */
     public static int interactionDelta(Character first, Character second) {
         if (first == null || second == null) return 0;
         int delta = 1;
         if (first.traits.contains("kind") || first.traits.contains("generous")) delta++;
         if (second.traits.contains("kind") || second.traits.contains("generous")) delta++;
+        int empathy = (CharacterDevelopment.temperament(first, CharacterDevelopment.Temperament.EMPATHY)
+                + CharacterDevelopment.temperament(second, CharacterDevelopment.Temperament.EMPATHY)) / 2;
+        int sociability = (CharacterDevelopment.temperament(first, CharacterDevelopment.Temperament.SOCIABILITY)
+                + CharacterDevelopment.temperament(second, CharacterDevelopment.Temperament.SOCIABILITY)) / 2;
+        if (empathy >= 70) delta++;
+        if (empathy <= 25) delta--;
+        if (sociability >= 75) delta++;
         if (first.traits.contains("aggressive") || first.traits.contains("cruel")
                 || first.traits.contains("arrogant") || second.traits.contains("aggressive")
                 || second.traits.contains("cruel") || second.traits.contains("arrogant")) delta -= 3;
@@ -52,11 +68,59 @@ public final class ResidentSocial {
     /** A real resident-to-resident interaction updates both sides of the relationship. */
     public static int socialize(Character first, Character second, int delta) {
         if (first == null || second == null || first == second || !first.alive || !second.alive) return 0;
-        int a = adjust(first, second.id, delta);
-        int b = adjust(second, first.id, delta);
-        updateBond(first, second.id, a);
-        updateBond(second, first.id, b);
+        String firstKey = globalId(first);
+        String secondKey = globalId(second);
+        int a = adjust(first, secondKey, delta);
+        int b = adjust(second, firstKey, delta);
+        updateBond(first, secondKey, a);
+        updateBond(second, firstKey, b);
         return Math.min(a, b);
+    }
+
+    /**
+     * Replay-safe conversation effect. Each Character stores its own receipt beside its
+     * relationship mutation, so a crash between the two Character saves can be resumed
+     * without applying the first participant's opinion delta twice.
+     */
+    public static int socializeOnce(Character first, Character second, int delta, String operationId) {
+        if (first == null || second == null || first == second || !first.alive || !second.alive) return 0;
+        if (operationId == null || !operationId.matches("[A-Za-z0-9_.:-]{1,128}"))
+            throw new IllegalArgumentException("A stable social interaction operation ID is required");
+        applyInteractionOnce(first, second, delta, operationId);
+        applyInteractionOnce(second, first, delta, operationId);
+        return Math.min(score(first, globalId(second)), score(second, globalId(first)));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void applyInteractionOnce(Character person, Character other, int delta, String operationId) {
+        final String receiptKey = "social.interaction_receipts";
+        Map<String, Object> receipts = new LinkedHashMap<>();
+        Object raw = person.props.get(receiptKey);
+        if (raw instanceof Map<?, ?> map) {
+            for (Map.Entry<?, ?> entry : map.entrySet())
+                if (entry.getKey() instanceof String key && entry.getValue() instanceof String value)
+                    receipts.put(key, value);
+        }
+        String counterpartId = globalId(other);
+        String payload = counterpartId + "|" + delta;
+        Object prior = receipts.get(operationId);
+        if (prior != null) {
+            if (!payload.equals(prior))
+                throw new IllegalStateException("Social interaction ID collision: " + operationId);
+            return;
+        }
+        if (receipts.size() >= 10000)
+            throw new IllegalStateException("Social interaction receipt limit reached; refusing unsafe replay");
+        adjust(person, counterpartId, delta);
+        updateBond(person, counterpartId, score(person, counterpartId));
+        CharacterDevelopment.remember(person, "social:" + operationId,
+                delta >= 0 ? "social_positive" : "social_conflict", counterpartId,
+                "relationship_delta=" + delta, delta * 5, 0);
+        CharacterDevelopment.remember(other, "social:" + operationId,
+                delta >= 0 ? "social_positive" : "social_conflict", globalId(person),
+                "relationship_delta=" + delta, delta * 5, 0);
+        receipts.put(operationId, payload);
+        person.props.put(receiptKey, receipts);
     }
 
     /** Stable social labels are derived from the durable score, not stored as a second source of truth. */

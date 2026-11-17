@@ -29,6 +29,9 @@ public final class CharacterAuthorityTest {
         authority.registerMap("north", north);
         authority.registerMap("south", south);
         check(authority.size() == 2 && authority.mapCount() == 2, "global authority indexes both map partitions");
+        var firstIdentitySnapshot = authority.identities();
+        check(firstIdentitySnapshot == authority.identities(),
+                "sorted global identity snapshot is cached while registry membership is unchanged");
         CharacterIdentity aIdentity = new CharacterIdentity(world, "north", "c1", a.globalId);
         CharacterIdentity bIdentity = new CharacterIdentity(world, "south", "c1", b.globalId);
         check(authority.get(aIdentity) == a && authority.get(bIdentity) == b,
@@ -54,6 +57,8 @@ public final class CharacterAuthorityTest {
         Character late = north.create("Late arrival", "", "", "m", 1);
         check(authority.getGlobal(late.globalId) == late,
                 "characters created after map registration are indexed without a second registration");
+        check(firstIdentitySnapshot != authority.identities() && authority.identities().size() == 3,
+                "identity snapshot cache is invalidated when a registered partition gains a Character");
 
         CharacterRegistry reload = new CharacterRegistry();
         Character beforeReload = reload.create("Before reload", "", "", "m", 1);

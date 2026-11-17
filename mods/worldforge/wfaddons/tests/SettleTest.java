@@ -9,6 +9,10 @@ import java.util.*;
 public class SettleTest {
     static int fails;
 
+    private static void okGraphDelivery(double actual, double expected) {
+        if (Math.abs(actual - expected) > 1e-9) throw new AssertionError("Unexpected task graph quantity: " + actual);
+    }
+
     static void ok(boolean c, String what) { System.out.println((c ? "ok   " : "FAIL ") + what); if (!c) fails++; }
     static String firstDiff(Object a, Object b, String path) {
         if (Objects.equals(a, b)) return "";
@@ -99,16 +103,75 @@ public class SettleTest {
         ok(supply.spend(Map.of("wood", 10, "stone", 5))
                 && supply.amount("wood") == supplyWood - 10 && supply.amount("stone") == supplyStone - 5,
                 "снабжение военного найма списывается одной атомарной операцией");
+        double invalidWood = supply.amount("wood"), invalidStone = supply.amount("stone");
+        ok(!supply.spend(Map.of("wood", 1, "stone", -1))
+                        && supply.amount("wood") == invalidWood && supply.amount("stone") == invalidStone,
+                "отрицательная стоимость отклоняется до списания любого ресурса");
+
+        Settlement replaySupply = fresh(d, 0);
+        Map<String, Integer> replayCost = Map.of("wood", 12, "stone", 4);
+        double replayWood = replaySupply.amount("wood"), replayStone = replaySupply.amount("stone");
+        ok(replaySupply.spendOnce(replayCost, "army-muster-test-1")
+                        && replaySupply.amount("wood") == replayWood - 12
+                        && replaySupply.amount("stone") == replayStone - 4,
+                "именованная операция списывает все ресурсы с durable ledger receipts");
+        int replayJournalSize = dev.worldforge.mod.economy.TreasuryService.current().journal().size();
+        ok(replaySupply.spendOnce(replayCost, "army-muster-test-1")
+                        && replaySupply.amount("wood") == replayWood - 12
+                        && replaySupply.amount("stone") == replayStone - 4
+                        && dev.worldforge.mod.economy.TreasuryService.current().journal().size() == replayJournalSize,
+                "повтор после частичного/неподтверждённого ответа не списывает ресурсы повторно");
+        ok(!replaySupply.spendOnce(Map.of("wood", 13, "stone", 4), "army-muster-test-1")
+                        && replaySupply.amount("wood") == replayWood - 12
+                        && replaySupply.amount("stone") == replayStone - 4,
+                "повтор operation ID с изменённой стоимостью блокируется");
+        var treasurySnapshot = dev.worldforge.mod.economy.TreasuryLedger.fromJson(
+                dev.worldforge.mod.economy.TreasuryService.current().toJson());
+        dev.worldforge.mod.economy.TreasuryService.replace(treasurySnapshot);
+        int restoredJournalSize = treasurySnapshot.journal().size();
+        ok(replaySupply.spendOnce(replayCost, "army-muster-test-1")
+                        && treasurySnapshot.journal().size() == restoredJournalSize
+                        && replaySupply.amount("wood") == replayWood - 12,
+                "receipt ресурсов восстанавливается из treasury JSON и переживает reload");
+
+        Settlement founding = new Settlement("settle_founding_receipt_test", "Founding receipt", d);
+        double foundingWood = founding.amount("wood");
+        int foundingJournal = dev.worldforge.mod.economy.TreasuryService.current().journal().size();
+        ok(founding.addOnce("wood", 35, "founding-core")
+                        && founding.addOnce("wood", 35, "founding-core")
+                        && founding.amount("wood") == foundingWood + 35
+                        && dev.worldforge.mod.economy.TreasuryService.current().journal().size() == foundingJournal + 1,
+                "автономное основание повторно подтверждает тот же стартовый запас без двойного начисления");
+        ok(!founding.addOnce("wood", 36, "founding-core")
+                        && founding.amount("wood") == foundingWood + 35,
+                "идемпотентный запас основания блокирует повтор ID с изменённым количеством");
+
+        Settlement adoptedSettlement = new Settlement("settle_adoption_receipt_test", "Adopted village", d);
+        Building adoptedHouse = adoptedSettlement.adoptExistingBuilding("mc.village.house.0.0", "house", 0, 0);
+        int adoptedCount = adoptedSettlement.buildings.size();
+        ok(adoptedHouse.state == Building.State.DONE && adoptedHouse.externallyMaterialized
+                        && adoptedSettlement.adoptExistingBuilding("mc.village.house.0.0", "house", 0, 0).uid == adoptedHouse.uid
+                        && adoptedSettlement.buildings.size() == adoptedCount,
+                "существующий физический дом становится завершённым зданием симуляции без дубликата");
+        Settlement adoptedReload = Settlement.fromJson(adoptedSettlement.toJson(), d);
+        Building restoredAdoption = adoptedReload.placement("mc.village.house.0.0");
+        ok(restoredAdoption != null && restoredAdoption.externallyMaterialized
+                        && restoredAdoption.state == Building.State.DONE,
+                "связь физического здания и симуляции сохраняется после перезагрузки");
+        boolean adoptionCollision = false;
+        try { adoptedReload.adoptExistingBuilding("mc.village.house.0.0", "house", 4, 0); }
+        catch (IllegalStateException expected) { adoptionCollision = true; }
+        ok(adoptionCollision, "повторный ID усыновления с другими координатами блокируется");
 
         Flow flow = new Flow();
-        flow.record(1, "wood", 5, true);
+        SettlementTestAccess.flowRecord(flow,1, "wood", 5, true);
         double validFlow = flow.perMinute(2, "wood", true);
-        flow.record(Double.NaN, "wood", 100, true);
-        flow.record(Double.POSITIVE_INFINITY, "wood", 100, true);
-        flow.record(2, "wood", Double.NaN, true);
-        flow.record(2, "wood", Double.POSITIVE_INFINITY, true);
-        flow.record(2, "wood", -1, true);
-        flow.record(2, "", 100, true);
+        SettlementTestAccess.flowRecord(flow,Double.NaN, "wood", 100, true);
+        SettlementTestAccess.flowRecord(flow,Double.POSITIVE_INFINITY, "wood", 100, true);
+        SettlementTestAccess.flowRecord(flow,2, "wood", Double.NaN, true);
+        SettlementTestAccess.flowRecord(flow,2, "wood", Double.POSITIVE_INFINITY, true);
+        SettlementTestAccess.flowRecord(flow,2, "wood", -1, true);
+        SettlementTestAccess.flowRecord(flow,2, "", 100, true);
         ok(flow.perMinute(2, "wood", true) == validFlow, "невалидные события не портят статистику производства");
         ok(flow.perMinute(Double.NaN, "wood", true) == 0 && flow.perMinute(Double.POSITIVE_INFINITY, "wood", true) == 0, "некорректное время запроса статистики безопасно");
         List<Object> corruptedFlow = new ArrayList<>();
@@ -117,10 +180,26 @@ public class SettleTest {
         corruptedFlow.add("broken-entry");
         corruptedFlow.add(Map.of("t", 3L, "r", "food", "p", 4.0, "c", 1.0));
         Flow restoredFlow = new Flow();
-        restoredFlow.load(corruptedFlow);
+        SettlementTestAccess.flowLoad(restoredFlow,corruptedFlow);
         ok(restoredFlow.resources().equals(Set.of("food")) && restoredFlow.perMinute(4, "food", true) > 0, "загрузка статистики пропускает повреждённые записи");
 
         Settlement s = fresh(d, 4);
+        Worker lifeResident = s.workers.get(0);
+        lifeResident.lifeAction = "sleeping";
+        lifeResident.lifeActionStage = "travelling";
+        lifeResident.lifeTargetX = 14.5;
+        lifeResident.lifeTargetZ = -8.25;
+        lifeResident.lifeActionDuration = 480;
+        lifeResident.lifeSocialTarget = "character:family-member";
+        Settlement lifeRestored = Settlement.fromJson(s.toJson(), d);
+        Worker restoredLifeResident = lifeRestored.worker(lifeResident.id);
+        ok(restoredLifeResident.lifeAction.equals("sleeping")
+                        && restoredLifeResident.lifeActionStage.equals("travelling")
+                        && restoredLifeResident.lifeTargetX == 14.5
+                        && restoredLifeResident.lifeTargetZ == -8.25
+                        && restoredLifeResident.lifeActionDuration == 480
+                        && restoredLifeResident.lifeSocialTarget.equals("character:family-member"),
+                "resident life action target, phase, duration and social counterpart survive settlement reload");
         String unchanged = s.toJson();
         s.tick(Double.NaN);
         s.tick(Double.POSITIVE_INFINITY);
@@ -236,6 +315,44 @@ public class SettleTest {
         ok(manualHaulerBack.worker(newHauler.id).manualHauler
                         && manualHaulerBack.worker(newHauler.id).workRole().equals("hauler"),
                 "ручное назначение носильщика сохраняется после перезапуска поселения");
+
+        // долгоживущий граф задач: компактизация сохраняет активную цепочку происхождения,
+        // но не даёт завершённой истории бесконечно заполнять журнал.
+        ResidentTaskGraph durableGraph = new ResidentTaskGraph();
+        for (int i = 0; i < 6000; i++) {
+            SettlementTestAccess.residentExtract(durableGraph,1, 1, "wood", 1, i);
+            okGraphDelivery(SettlementTestAccess.residentDeliver(durableGraph,1, 2, "wood", 1, i), 1);
+            okGraphDelivery(SettlementTestAccess.residentConsume(durableGraph,ResidentTaskGraph.Stage.PROCESSED, 2, 3, "wood", 1, i), 1);
+        }
+        ResidentTaskGraph graphRestored = new ResidentTaskGraph();
+        SettlementTestAccess.residentLoad(graphRestored,durableGraph.toJson());
+        ok(graphRestored.nextId() == durableGraph.nextId()
+                        && graphRestored.receipts().size() < 10,
+                "долгий цикл добычи/переноса/потребления компактизирует завершённую историю, сохраняя монотонный ID");
+        ResidentTaskGraph stockConsumptionGraph = new ResidentTaskGraph();
+        for (int i = 0; i < 6000; i++) {
+            SettlementTestAccess.residentExtract(stockConsumptionGraph,1, 1, "food", 1, i);
+            okGraphDelivery(SettlementTestAccess.residentDeliver(stockConsumptionGraph,1, 2, "food", 1, i), 1);
+            okGraphDelivery(SettlementTestAccess.residentConsumeStock(stockConsumptionGraph,"food", 1), 1);
+        }
+        ok(stockConsumptionGraph.receipts().size() < 10,
+                "long-running stock debits retire consumed provenance without exhausting the active-lot journal");
+
+        ResidentTaskGraph activeGraph = new ResidentTaskGraph();
+        SettlementTestAccess.residentExtract(activeGraph,7, 4, "stone", 3, 1);
+        ResidentTaskGraph activeRestored = new ResidentTaskGraph();
+        SettlementTestAccess.residentLoad(activeRestored,activeGraph.toJson());
+        ok(activeRestored.count(ResidentTaskGraph.Stage.EXTRACTED) == 1,
+                "активный складской лот сохраняет свою квитанцию происхождения при компактизации и перезапуске");
+        boolean missingProvenanceRejected = false;
+        try {
+            SettlementTestAccess.residentLoad(activeRestored,Json.write(Map.of(
+                    "format", "wf-resident-task-graph/1", "next", 2, "receipts", List.of(),
+                    "local", Map.of("7|stone", List.of(Map.of("receipt", 1, "quantity", 3))),
+                    "stored", Map.of())));
+        } catch (IllegalArgumentException expected) { missingProvenanceRejected = true; }
+        ok(missingProvenanceRejected,
+                "загрузка отклоняет активный складской лот со ссылкой на отсутствующую квитанцию");
 
         // зависимости и лимиты
         ok(throwsOrder(() -> s.place("granary", 30, 30)), "амбар требует лесопилку");
@@ -381,6 +498,27 @@ public class SettleTest {
         try { manual.moveTo(commanded.id, Double.NaN, 0); } catch (Settlement.OrderException expectedMove) { badMoveRejected = true; }
         ok(badMoveRejected && commanded.manualOrder, "некорректные координаты не сбрасывают действующий приказ");
 
+        // Adapter-side Worker projection updates must participate in the SETTLEMENTS lane.
+        dev.worldforge.mod.api.WorldForgeApi.resetForTests();
+        Settlement workerBoundary = fresh(d, 1);
+        Worker boundaryWorker = workerBoundary.workers.get(0);
+        var workerRevision0 = dev.worldforge.mod.api.WorldForgeApi.revisions().snapshot().orElseThrow();
+        ok(workerBoundary.updateWorker(boundaryWorker, current -> current.status = current.status),
+                "worker projection accepts an update for its exact owning settlement");
+        var workerRevisionNoOp = dev.worldforge.mod.api.WorldForgeApi.revisions().snapshot().orElseThrow();
+        ok(workerRevisionNoOp.revision(dev.worldforge.mod.api.DomainMutationRevisions.Domain.SETTLEMENTS)
+                        == workerRevision0.revision(dev.worldforge.mod.api.DomainMutationRevisions.Domain.SETTLEMENTS),
+                "no-op Worker projection update does not advance the Settlement revision");
+        workerBoundary.updateWorker(boundaryWorker, current -> current.status = "adapter update");
+        var workerRevisionChanged = dev.worldforge.mod.api.WorldForgeApi.revisions().snapshot().orElseThrow();
+        ok(workerRevisionChanged.revision(dev.worldforge.mod.api.DomainMutationRevisions.Domain.SETTLEMENTS)
+                        == workerRevisionNoOp.revision(dev.worldforge.mod.api.DomainMutationRevisions.Domain.SETTLEMENTS) + 1,
+                "one changed Worker projection update advances exactly one Settlement revision");
+        Settlement foreignSettlement = fresh(d, 1);
+        ok(!workerBoundary.updateWorker(foreignSettlement.workers.get(0), current -> current.status = "foreign")
+                        && workerBoundary.workers.get(0).status.equals("adapter update"),
+                "foreign Worker instances cannot be mutated through another Settlement boundary");
+
         // детерминизм и сохранение
         Settlement x = fresh(d, 5), y = fresh(d, 5);
         for (Settlement t : new Settlement[]{x, y}) { t.place("house", 0, 0); t.place("lumber_camp", 10, 0); t.place("farm", 20, 0); t.tick(500); }
@@ -445,6 +583,74 @@ public class SettleTest {
         ok(Math.abs(sourceRestored.amount("food") - 30) < 1e-8
                         && Math.abs(dev.worldforge.mod.economy.TreasuryService.current().balance(armyFoodAccount) - 20) < 1e-8,
                 "settlement food and army field rations reconcile after independent snapshot reloads");
+
+        // A settlement spend receipt is bound to the entire resource basket, not only individual legs.
+        dev.worldforge.mod.economy.TreasuryService.replace(new dev.worldforge.mod.economy.TreasuryLedger());
+        dev.worldforge.settle.Settlement spendOnce = new dev.worldforge.settle.Settlement("spend_once", "Spend Once", d);
+        spendOnce.setLedgerScope("minecraft:overworld");
+        spendOnce.add("wood", 20);
+        spendOnce.add("stone", 20);
+        Map<String, Integer> recruitmentCost = Map.of("wood", 3, "stone", 4);
+        ok(spendOnce.spendOnce(recruitmentCost, "recruitment:test:one")
+                        && Math.abs(spendOnce.amount("wood") - 17) < 1e-8
+                        && Math.abs(spendOnce.amount("stone") - 16) < 1e-8,
+                "named settlement spend debits every recruitment resource exactly once");
+        ok(spendOnce.spendOnce(recruitmentCost, "recruitment:test:one")
+                        && Math.abs(spendOnce.amount("wood") - 17) < 1e-8
+                        && Math.abs(spendOnce.amount("stone") - 16) < 1e-8,
+                "replaying the same complete settlement spend does not debit resources twice");
+        ok(!spendOnce.spendOnce(Map.of("wood", 3, "stone", 4, "food", 1), "recruitment:test:one")
+                        && Math.abs(spendOnce.amount("food")) < 1e-8,
+                "reusing a spend ID with an added resource fails before any new debit");
+        ok(!spendOnce.spendOnce(Map.of("wood", 3), "recruitment:test:one")
+                        && Math.abs(spendOnce.amount("wood") - 17) < 1e-8,
+                "reusing a spend ID with an omitted resource fails closed");
+        String spendLedger = dev.worldforge.mod.economy.TreasuryService.current().toJson();
+        dev.worldforge.mod.economy.TreasuryService.replace(
+                dev.worldforge.mod.economy.TreasuryLedger.fromJson(spendLedger));
+        ok(spendOnce.spendOnce(recruitmentCost, "recruitment:test:one")
+                        && Math.abs(spendOnce.amount("wood") - 17) < 1e-8
+                        && Math.abs(spendOnce.amount("stone") - 16) < 1e-8,
+                "complete settlement spend receipts survive treasury reload");
+
+        // Emergent settlements hold a canonical resident count distinct from their adult workforce.
+        dev.worldforge.mod.economy.TreasuryService.replace(new dev.worldforge.mod.economy.TreasuryLedger());
+        Settlement canonicalPopulation = new Settlement("canonical_population", "Canonical Population", d);
+        canonicalPopulation.setLedgerScope("minecraft:overworld");
+        canonicalPopulation.add("food", 100);
+        canonicalPopulation.setCanonicalPopulation(20);
+        ok(canonicalPopulation.population() == 20 && canonicalPopulation.workers.isEmpty(),
+                "canonical residents are counted without fabricating adult Worker projections");
+        double canonicalFood = canonicalPopulation.amount("food");
+        canonicalPopulation.tick(10);
+        ok(Math.abs(canonicalPopulation.amount("food") - (canonicalFood - 4.0)) < 1e-8,
+                "food consumption is calculated from all canonical residents, not only employed adults");
+        ok(canonicalPopulation.workers.isEmpty(),
+                "settlement growth does not create duplicate residents when canonical population simulation owns demography");
+        ok(Math.abs(canonicalPopulation.taxPerMin() - 6.0) < 1e-8,
+                "basic settlement tax uses the full resident population while retaining a separate workforce");
+        String canonicalPopulationSnapshot = canonicalPopulation.toJson();
+        Settlement canonicalPopulationReloaded = Settlement.fromJson(canonicalPopulationSnapshot, d);
+        ok(canonicalPopulationReloaded.hasCanonicalPopulation()
+                        && canonicalPopulationReloaded.population() == 20
+                        && canonicalPopulationReloaded.workers.isEmpty(),
+                "canonical resident population projection survives settlement reload");
+        dev.worldforge.settle.CityRow canonicalCityRow = dev.worldforge.settle.CityRow.of(canonicalPopulation);
+        ok(canonicalCityRow.pop == 20 && canonicalCityRow.workforce == 0,
+                "city register reports total residents separately from the active workforce");
+        dev.worldforge.settle.CityRow cityRowReloaded = dev.worldforge.settle.CityRow
+                .fromJson(dev.worldforge.settle.CityRow.toJson(List.of(canonicalCityRow))).get(0);
+        ok(cityRowReloaded.pop == 20 && cityRowReloaded.workforce == 0,
+                "city population and workforce remain separate in the client data contract");
+        dev.worldforge.settle.ResidentRow residentRow = new dev.worldforge.settle.ResidentRow();
+        residentRow.id = "00000000-0000-0000-0000-000000000001";
+        residentRow.name = "Resident Test"; residentRow.age = 12; residentRow.stage = "CHILD";
+        residentRow.profession = ""; residentRow.working = false;
+        dev.worldforge.settle.ResidentRow residentRowReloaded = dev.worldforge.settle.ResidentRow
+                .fromJson(dev.worldforge.settle.ResidentRow.toJson(List.of(residentRow))).get(0);
+        ok(residentRowReloaded.id.equals(residentRow.id) && residentRowReloaded.age == 12
+                        && residentRowReloaded.stage.equals("CHILD") && !residentRowReloaded.working,
+                "canonical resident roster preserves identity, age stage and non-worker status across UI transport");
 
         System.out.println(fails == 0 ? "ALL OK" : fails + " FAILED");
         if (fails > 0) System.exit(1);

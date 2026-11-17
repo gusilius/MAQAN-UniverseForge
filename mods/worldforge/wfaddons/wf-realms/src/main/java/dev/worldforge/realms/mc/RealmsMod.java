@@ -4,12 +4,21 @@ import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.logging.LogUtils;
 import dev.worldforge.mod.TitleData;
+import dev.worldforge.mod.MapData;
+import dev.worldforge.mod.TitleEditor;
+import dev.worldforge.mod.EditorManager;
+import dev.worldforge.mod.AtomicFileBatch;
 import dev.worldforge.mod.WorldForgeMod;
 import dev.worldforge.mod.api.DemoApi;
+import dev.worldforge.mod.api.ActionContext;
+import dev.worldforge.mod.api.ActionResult;
 import dev.worldforge.mod.api.WorldForgeApi;
 import dev.worldforge.realms.RealmDefs;
 import dev.worldforge.realms.Realms;
 import dev.worldforge.realms.Statecraft;
+import dev.worldforge.people.Character;
+import dev.worldforge.people.CharacterRegistry;
+import dev.worldforge.people.mc.PeopleMod;
 import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.arguments.BoolArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
@@ -54,6 +63,8 @@ public class RealmsMod {
     public static final Realms REALMS = new Realms(DEFS);
     /** Persistent political state; Character IDs always resolve through wf-people. */
     public static final Statecraft POLITICS = new Statecraft();
+    /** Runtime realm projections reconstructed from the persisted map-first emergence state. */
+    private static final Map<String, TitleData.Realm> AUTONOMOUS_REALMS = new java.util.concurrent.ConcurrentHashMap<>();
     private static long ticks;
     private static final Random RNG = new Random();
 
@@ -64,21 +75,450 @@ public class RealmsMod {
             DemoApi.registerRaces("realm_props", id -> { TitleData.Realm r = realm(id); return r == null ? Map.of() : DemoApi.shares(DemoApi.parse(r.props.get("races"))); });
         }));
         MinecraftForge.EVENT_BUS.register(this);
+        WorldForgeApi.addGuard((action, context) -> {
+            if (!"war_declare".equals(action.id) || context.realmId == null || context.args.isEmpty()) return null;
+            String defender = context.args.get(0);
+            return POLITICS.hasTreaty(context.realmId, defender, Statecraft.Treaty.NON_AGGRESSION)
+                    || POLITICS.hasTreaty(context.realmId, defender, Statecraft.Treaty.ALLIANCE)
+                    ? "Дипломатический договор запрещает объявлять войну" : null;
+        });
+        if (WorldForgeApi.action("vassal_demands") == null) {
+            WorldForgeApi.registerAction(new dev.worldforge.mod.api.MapAction(
+                    "vassal_demands", "Уступить требованиям вассалов",
+                    dev.worldforge.mod.api.MapAction.Scope.REALM, dev.worldforge.mod.api.MapAction.Perm.OP,
+                    List.of("vassal_realm_ids"), "Пересматривает феодальные обязательства всех участников фракции.",
+                    context -> {
+                        if (context.realmId == null || context.args.isEmpty())
+                            return dev.worldforge.mod.api.ActionResult.fail("Не указаны сюзерен или участники фракции");
+                        List<String> members = Arrays.stream(context.args.get(0).split(","))
+                                .map(String::trim).filter(value -> !value.isEmpty()).distinct().toList();
+                        if (!POLITICS.concedeVassalDemands(context.realmId, members))
+                            return dev.worldforge.mod.api.ActionResult.fail(POLITICS.lastError);
+                        syncPoliticalMapState();
+                        return dev.worldforge.mod.api.ActionResult.ok("Требования вассалов приняты");
+                    }));
+        }
         REALMS.hooks = new Realms.Hooks() {
-            @Override public int provinces(String realm) { TitleData.Realm r = realm(realm); return r == null ? 1 : Math.max(1, r.titleKeys.size()); }
+            @Override public int provinces(String realm) {
+                TitleData.Realm r = realm(realm);
+                if (r == null) return 1;
+                if (Boolean.TRUE.equals(r.props.get("emergence.virtual"))) {
+                    Object provinces = r.props.get("emergence.province_count");
+                    if (provinces instanceof Number n) return Math.max(0, n.intValue());
+                    Object settlements = r.props.get("emergence.settlement_count");
+                    return Math.max(0, settlements instanceof Number n ? n.intValue() : 0);
+                }
+                return Math.max(1, r.titleKeys.size());
+            }
             @Override public int prestige(String realm) { TitleData.Realm r = realm(realm); return r != null && r.props.get("prestige") instanceof Number n ? n.intValue() : 0; }
             @Override public boolean flag(String realm, String flag) { TitleData.Realm r = realm(realm); return r != null && Boolean.parseBoolean(String.valueOf(r.props.get("flag." + flag))); }
+            @Override public Map<String, Double> policySignals(String realmId) {
+                TitleData.Realm current = realm(realmId);
+                if (current == null) return Map.of();
+                Map<String, Double> signals = new LinkedHashMap<>();
+
+                Object warState = current.props.get("war.state");
+                String war = warState == null ? "" : String.valueOf(warState);
+                signals.put("war", !war.isBlank() && !war.equalsIgnoreCase("peace") ? 1.0 : 0.0);
+
+                Statecraft.Treasury treasury = POLITICS.treasury(realmId);
+                double debt = POLITICS.realmDebt(realmId);
+                double balance = Math.max(0, treasury.balance);
+                double fiscalStress = debt <= 0 ? 0 : debt / (debt + balance + 1.0);
+                if (POLITICS.realmBankrupt(realmId)) fiscalStress = 1.0;
+                signals.put("fiscal_stress", Math.max(0, Math.min(1, fiscalStress)));
+
+                List<Statecraft.VassalContract> vassals = new ArrayList<>(POLITICS.vassalsOf(realmId));
+                double averageLoyalty = vassals.stream().mapToInt(v -> v.loyalty).average().orElse(100.0);
+                signals.put("vassal_discontent", Math.max(0, Math.min(1, 1.0 - averageLoyalty / 100.0)));
+
+                Map<String, Double> terrain = REALMS.hooks.terrain(realmId);
+                signals.put("trade_access", Math.max(0, Math.min(1, terrain.getOrDefault("coast", 0.0))));
+
+                Map<String, Double> races = REALMS.hooks.races(realmId);
+                double totalPopulationShare = races.values().stream().filter(v -> v != null && Double.isFinite(v))
+                        .mapToDouble(v -> Math.max(0, v)).sum();
+                double dominantRaceShare = totalPopulationShare <= 0 ? 0 : races.values().stream()
+                        .filter(v -> v != null && Double.isFinite(v)).mapToDouble(v -> Math.max(0, v)).max().orElse(0)
+                        / totalPopulationShare;
+                signals.put("cultural_diversity", totalPopulationShare <= 0 ? 0
+                        : Math.max(0, Math.min(1, 1.0 - dominantRaceShare)));
+
+                Object unrestValue = current.props.get("politics.unrest");
+                double unrest = unrestValue instanceof Number n ? n.doubleValue() / 100.0 : 0.0;
+                signals.put("unrest", Math.max(0, Math.min(1, unrest)));
+                signals.put("faction_pressure", normalizedProp(current, "politics.faction_pressure"));
+                signals.put("court_intrigue", normalizedProp(current, "politics.intrigue_pressure"));
+                Object ties = current.props.get("politics.dynastic_ties");
+                double tieCount = ties instanceof Number n ? n.doubleValue()
+                        : current.props.get("people.ties") == null ? 0
+                        : String.valueOf(current.props.get("people.ties")).isBlank() ? 0
+                        : String.valueOf(current.props.get("people.ties")).split(",").length;
+                signals.put("dynastic_ties", Math.max(0, Math.min(1, tieCount / 3.0)));
+                Object councilAccept = current.props.get("council.ai_accept");
+                double accept = councilAccept instanceof Number n ? (n.doubleValue() + 20.0) / 40.0 : 0.5;
+                signals.put("council_ai_accept", Math.max(0, Math.min(1, accept)));
+
+                // Ruler profile is published by CourtSim from the canonical Character Registry.
+                // Missing values from legacy saves remain neutral instead of inventing traits.
+                for (String attribute : List.of("diplomacy", "martial", "intrigue", "stewardship", "learning"))
+                    signals.put("ruler_" + attribute, normalizedProp(current, "politics.ruler_" + attribute));
+                for (String trait : List.of("greedy", "generous", "just", "cruel", "ambitious",
+                        "content", "brave", "craven", "patient", "wroth", "scholar", "shrewd"))
+                    signals.put("ruler_trait_" + trait,
+                            normalizedProp(current, "politics.ruler_trait_" + trait));
+                return signals;
+            }
             @Override public int today() { return (int) WorldForgeApi.clock().dayNumber(); }
         };
     }
 
-    static List<TitleData.Realm> realms() {
+    /** All political actors, including polities that emerged without a pre-authored title overlay. */
+    public static List<TitleData.Realm> realms() {
         List<TitleData.Realm> l = new ArrayList<>();
-        for (var m : WorldForgeMod.loadedMaps().values()) if (m.titles != null) l.addAll(m.titles.realmList());
+        Set<String> seen = new HashSet<>();
+        for (var m : WorldForgeMod.loadedMaps().values()) if (m.titles != null)
+            for (TitleData.Realm realm : m.titles.realmList()) if (seen.add(realm.id)) l.add(realm);
+        for (TitleData.Realm realm : AUTONOMOUS_REALMS.values()) if (seen.add(realm.id)) l.add(realm);
         return l;
     }
 
-    static TitleData.Realm realm(String id) { for (TitleData.Realm r : realms()) if (r.id.equals(id)) return r; return null; }
+    public static TitleData.Realm realm(String id) {
+        for (TitleData.Realm r : realms()) if (r.id.equals(id)) return r;
+        return null;
+    }
+
+    public static List<TitleData.Realm> emergentRealms() {
+        return List.copyOf(AUTONOMOUS_REALMS.values());
+    }
+
+    /** Rebuilds a virtual realm projection without fabricating map provinces or title overlays. */
+    public static TitleData.Realm registerEmergentRealm(String id, String name, String mapId,
+            String rulerGlobalId, long population, int stability, int settlementCount,
+            Collection<String> neighbors, String biomeSummary) {
+        return registerEmergentRealm(id, name, mapId, rulerGlobalId, population, stability,
+                settlementCount, neighbors, biomeSummary, Map.of());
+    }
+
+    public static TitleData.Realm registerEmergentRealm(String id, String name, String mapId,
+            String rulerGlobalId, long population, int stability, int settlementCount,
+            Collection<String> neighbors, String biomeSummary, Map<String, Double> raceShares) {
+        if (id == null || !id.matches("[A-Za-z0-9_.:-]{3,96}"))
+            throw new IllegalArgumentException("Invalid emergent realm id");
+        MapData ownerMap = mapId == null ? null : WorldForgeMod.loadedMaps().get(mapId);
+        TitleData.Realm realm;
+        if (ownerMap != null && ownerMap.titles != null) {
+            TitleData.Realm existing = ownerMap.titles.realms.get(id);
+            if (existing != null && !Boolean.TRUE.equals(existing.props.get("emergence.virtual")))
+                throw new IllegalStateException("Emergent realm id collides with an authored map realm: " + id);
+            realm = existing == null ? new TitleData.Realm() : existing;
+        } else {
+            realm = AUTONOMOUS_REALMS.getOrDefault(id, new TitleData.Realm());
+        }
+        realm.id = id;
+        realm.name = name == null || name.isBlank() ? id : name;
+        realm.ruler = rulerGlobalId == null ? "" : rulerGlobalId;
+        // Preserve Statecraft's current feudal relationship; TitleData.recompute rebuilds subjectIds.
+        realm.titleKeys.clear();
+        realm.props.put("emergence.virtual", true);
+        realm.props.put("emergence.map_id", mapId == null ? "" : mapId);
+        realm.props.put("emergence.settlement_count", Math.max(0, settlementCount));
+        realm.props.put("emergence.neighbors", neighbors == null ? "" : String.join(",", new TreeSet<>(neighbors)));
+        realm.props.put("emergence.biomes", biomeSummary == null ? "" : biomeSummary);
+        Map<String, Double> biomeCounts = new LinkedHashMap<>();
+        if (biomeSummary != null) for (String entry : biomeSummary.split(",")) {
+            String[] pair = entry.split(":", 2);
+            if (pair.length == 2) try { biomeCounts.put(pair[0], Math.max(0, Double.parseDouble(pair[1]))); }
+            catch (NumberFormatException ignored) { }
+        }
+        double totalBiomes = biomeCounts.values().stream().mapToDouble(Double::doubleValue).sum();
+        Map<String, Double> terrainShares = new LinkedHashMap<>();
+        if (totalBiomes > 0) for (RealmDefs.Terrain terrain : DEFS.terrains.values()) {
+            double count = terrain.biomes().stream().mapToDouble(biome ->
+                    biomeCounts.entrySet().stream()
+                            .filter(entry -> entry.getKey().equals(biome)
+                                    || entry.getKey().endsWith(":" + biome)
+                                    || biome.endsWith(":" + entry.getKey()))
+                            .mapToDouble(Map.Entry::getValue).sum()).sum();
+            if (count > 0) terrainShares.put(terrain.id(), count / totalBiomes);
+        }
+        realm.props.put("terrain", terrainShares.entrySet().stream()
+                .map(entry -> entry.getKey() + ":" + entry.getValue())
+                .collect(java.util.stream.Collectors.joining(",")));
+        Map<String, Double> normalizedRaces = new TreeMap<>();
+        if (raceShares != null) raceShares.forEach((race, share) -> {
+            if (race != null && !race.isBlank() && share != null && Double.isFinite(share) && share > 0)
+                normalizedRaces.put(race, share);
+        });
+        double totalRaces = normalizedRaces.values().stream().mapToDouble(Double::doubleValue).sum();
+        if (totalRaces > 0) normalizedRaces.replaceAll((race, share) -> share / totalRaces);
+        realm.props.put("races", normalizedRaces.entrySet().stream()
+                .map(entry -> entry.getKey() + ":" + entry.getValue())
+                .collect(java.util.stream.Collectors.joining(",")));
+        // Rust emergence supplies stable IDs and geography, never a parallel naming
+        // vocabulary. Replace its technical placeholder with the canonical race/culture
+        // NameBank entry; authored names remain untouched.
+        realm.name = resolveGeneratedRealmName(realm.name, id, normalizedRaces);
+        realm.props.put("population", Math.max(0L, population));
+        realm.props.put("stability", Math.max(0, Math.min(100, stability)));
+        realm.props.put("prestige", (int) Math.min(100_000L, Math.max(0L, population / 10L)));
+        realm.props.put("taxable_base", Math.max(0.0, population * 0.05));
+        if (ownerMap != null && ownerMap.titles != null)
+            ownerMap.titles.registerRealmProjection(realm);
+        AUTONOMOUS_REALMS.put(id, realm);
+        REALMS.state(id);
+        POLITICS.treasury(id);
+        return realm;
+    }
+
+    private static String resolveGeneratedRealmName(String supplied, String stableId,
+            Map<String, Double> raceShares) {
+        String current = supplied == null ? "" : supplied.trim();
+        boolean generatedPlaceholder = current.isEmpty() || current.equals(stableId)
+                || current.endsWith(" Confederation") || current.startsWith("polity_");
+        if (!generatedPlaceholder) return current;
+        if (raceShares == null || raceShares.isEmpty()) return current.isEmpty() ? stableId : current;
+        String dominantRace = raceShares.entrySet().stream()
+                .max(Map.Entry.<String, Double>comparingByValue().thenComparing(Map.Entry::getKey))
+                .map(Map.Entry::getKey).orElse("");
+        if (dominantRace.isBlank()) return current.isEmpty() ? stableId : current;
+        try {
+            String culture = PeopleMod.NAMES.culture(dominantRace);
+            long seed = 0xcbf29ce484222325L;
+            for (int i = 0; i < stableId.length(); i++) {
+                seed ^= stableId.charAt(i);
+                seed *= 0x100000001b3L;
+            }
+            return PeopleMod.NAMES.generate(dominantRace, culture, "realms", new Random(seed));
+        } catch (RuntimeException missingPackData) {
+            return current.isEmpty() ? stableId : current;
+        }
+    }
+
+    /** Remove runtime market actors whose polities have genuinely dissolved. Their historical records remain in Statecraft. */
+    public static void reconcileEmergentRealms(Set<String> activeIds) {
+        Set<String> keep = activeIds == null ? Set.of() : new HashSet<>(activeIds);
+        AUTONOMOUS_REALMS.keySet().retainAll(keep);
+        for (var map : WorldForgeMod.loadedMaps().values()) {
+            if (map == null || map.titles == null) continue;
+            for (String id : new ArrayList<>(map.titles.realms.keySet()))
+                if (!keep.contains(id)) map.titles.removeRealmProjection(id);
+        }
+    }
+
+    /** Publishes the canonical Realms development state onto the shared realm projection for map/UI consumers. */
+    private static void syncDevelopmentProjection(TitleData.Realm realm) {
+        if (realm == null) return;
+        Realms.State state = REALMS.state(realm.id);
+        RealmDefs.Gov government = DEFS.govs.get(state.gov);
+        realm.props.put("politics.government_id", state.gov);
+        realm.props.put("politics.government", government == null ? "Не определён" : government.name());
+        realm.props.put("politics.government_category", government == null ? "" : government.category());
+        RealmDefs.Level level = DEFS.levels.isEmpty() ? null : REALMS.levelDef(realm.id);
+        int doctrineSlots = DEFS.levels.isEmpty() ? 0 : REALMS.doctrineSlots(realm.id);
+        int lawSlots = DEFS.levels.isEmpty() ? 0 : REALMS.lawSlots(realm.id);
+        realm.props.put("politics.realm_level", level == null ? "" : level.name());
+        realm.props.put("politics.doctrine_count", state.nodes.size());
+        realm.props.put("politics.doctrine_slots", doctrineSlots);
+        realm.props.put("politics.law_count", state.laws.size());
+        realm.props.put("politics.law_slots", lawSlots);
+        realm.props.put("politics.doctrines", String.join(", ", state.nodes));
+        realm.props.put("politics.laws", state.laws.entrySet().stream()
+                .map(entry -> entry.getKey() + ":" + entry.getValue()).sorted()
+                .collect(java.util.stream.Collectors.joining(", ")));
+        realm.props.put("politics.development_points", Math.round(state.points * 10.0) / 10.0);
+        realm.props.put("politics.succession_law", POLITICS.successionLawForPeople(realm.id));
+
+        int today = REALMS.hooks.today();
+        int governmentCooldown = Math.max(0, Realms.GOV_COOLDOWN - (today - state.govChanged));
+        List<String> governmentOptions = new ArrayList<>();
+        for (RealmDefs.Gov option : DEFS.govs.values()) {
+            String reason = option.id().equals(state.gov) ? "Уже действует" : REALMS.why(realm.id, option);
+            if (reason.isEmpty() && governmentCooldown > 0)
+                reason = "Смена строя через " + governmentCooldown + " дн.";
+            governmentOptions.add(option.id() + "|" + option.name() + "|" + reason);
+        }
+        realm.props.put("politics.government_options", String.join(";", governmentOptions));
+
+        List<String> lawOptions = new ArrayList<>();
+        int currentLevel = REALMS.level(realm.id);
+        for (RealmDefs.Law law : DEFS.laws.values()) for (RealmDefs.LawOption option : law.options()) {
+            String reason = "";
+            if (state.laws.getOrDefault(law.id(), "").equals(option.id())) reason = "Уже действует";
+            else if (currentLevel < option.minLevel()) reason = "Нужен уровень " + option.minLevel();
+            else if (!state.laws.containsKey(law.id()) && state.laws.size() >= lawSlots)
+                reason = "Нет свободной ячейки закона";
+            else {
+                int left = law.cooldownDays() - (today - state.lawChanged.getOrDefault(law.id(), -9999));
+                if (left > 0) reason = "Смена через " + left + " дн.";
+            }
+            lawOptions.add(law.id() + "|" + law.name() + "|" + option.id() + "|" + option.name() + "|" + reason);
+        }
+        realm.props.put("politics.law_options", String.join(";", lawOptions));
+
+        List<String> doctrineOptions = new ArrayList<>();
+        for (RealmDefs.Branch branch : DEFS.branches.values()) for (RealmDefs.Node node : branch.nodes()) {
+            String reason = state.nodes.contains(node.key()) ? "Уже изучено"
+                    : REALMS.canUnlock(realm.id, node.key()) ? "" : REALMS.lastError;
+            doctrineOptions.add(node.key() + "|" + node.name() + "|" + node.cost() + "|" + reason);
+        }
+        realm.props.put("politics.doctrine_options", String.join(";", doctrineOptions));
+    }
+
+    private static String characterText(Object character, String field) {
+        try {
+            Object value = character.getClass().getField(field).get(character);
+            return value == null ? "" : String.valueOf(value);
+        } catch (ReflectiveOperationException | SecurityException ignored) {
+            return "";
+        }
+    }
+
+    private static String characterPropText(Object character, String key) {
+        try {
+            Object value = character.getClass().getField("props").get(character);
+            if (value instanceof Map<?, ?> props) {
+                Object property = props.get(key);
+                return property == null ? "" : String.valueOf(property);
+            }
+        } catch (ReflectiveOperationException | SecurityException ignored) { }
+        return "";
+    }
+
+    private static String characterDynastyId(Object character, String mapId) {
+        String explicit = characterPropText(character, "emergence.dynasty_id");
+        String house = explicit.isBlank() ? characterText(character, "house") : explicit;
+        return Statecraft.stableDynastyId(mapId, characterText(character, "culture"), house);
+    }
+
+    private static int characterNumber(Object character, String field) {
+        try {
+            Object value = character.getClass().getField(field).get(character);
+            return value instanceof Number number ? number.intValue() : 0;
+        } catch (ReflectiveOperationException | SecurityException ignored) {
+            return 0;
+        }
+    }
+
+    private static double normalizedProp(TitleData.Realm realm, String key) {
+        Object value = realm.props.get(key);
+        if (!(value instanceof Number n) || !Double.isFinite(n.doubleValue())) return 0;
+        return Math.max(0, Math.min(1, n.doubleValue()));
+    }
+
+    /** Statecraft owns feudal contract terms; the map owns the visible realm hierarchy and CourtSim reads it. */
+    private static void syncPoliticalMapState() {
+        for (var map : WorldForgeMod.loadedMaps().values()) {
+            if (map.titles == null) continue;
+            TitleEditor editor = EditorManager.editorFor(map);
+            if (editor == null) continue;
+            boolean changed = false;
+            CharacterRegistry people = PeopleMod.registry(map);
+            if (people != null) {
+                // wf-realms is intentionally compiled against the stable people API jar, which can
+                // lag the source module in the addon build order. Read optional dynasty metadata
+                // reflectively so this bridge remains binary-compatible without copying Character.
+                Map<String, String> founders = new LinkedHashMap<>();
+                Map<String, Integer> founderYears = new LinkedHashMap<>();
+                for (Object character : people.all()) {
+                    String house = characterDynastyId(character, map.name);
+                    if (house.isBlank()) continue;
+                    int birthYear = characterNumber(character, "birthYear");
+                    if (!founders.containsKey(house) || birthYear < founderYears.getOrDefault(house, Integer.MAX_VALUE)) {
+                        founders.put(house, characterText(character, "globalId"));
+                        founderYears.put(house, birthYear);
+                    }
+                }
+                for (Object character : people.all()) {
+                    String house = characterDynastyId(character, map.name);
+                    String globalId = characterText(character, "globalId");
+                    if (house.isBlank() || globalId.isBlank()) continue;
+                    String founderId = founders.get(house);
+                    if (founderId != null && POLITICS.dynasty(house) == null)
+                        POLITICS.registerDynasty(house, founderId);
+                    POLITICS.addDynastyMember(house, globalId);
+                }
+            }
+            for (TitleData.Title title : map.titles.allTitles()) {
+                Statecraft.Title political = POLITICS.title(Statecraft.mapTitleId(map.name, title.key));
+                String holder = political == null ? "" : political.holderCharacterId;
+                String claimants = political == null ? "" : String.join(";", new TreeSet<>(political.claims));
+                int count = political == null ? 0 : political.claims.size();
+                changed |= editor.setDerivedTitleProp(title.id, "politics.holder_character", holder);
+                changed |= editor.setDerivedTitleProp(title.id, "politics.claimants", claimants);
+                changed |= editor.setDerivedTitleProp(title.id, "politics.claim_count", count);
+                changed |= editor.setDerivedTitleProp(title.id, "politics.contested", count > 0);
+            }
+            for (TitleData.Realm realm : map.titles.realmList()) {
+                // Establish diplomatic contact only where title provinces actually share a border.
+                for (String key : realm.titleKeys) {
+                    TitleData.Title title = map.titles.byKey(key);
+                    if (title == null) continue;
+                    for (int neighborId : title.neighbors) {
+                        TitleData.Realm other = map.titles.realmOf(map.titles.get(neighborId));
+                        if (other != null && !other.id.equals(realm.id))
+                            POLITICS.relationOf(realm.id, other.id);
+                    }
+                }
+                Statecraft.VassalContract contract = POLITICS.vassalage(realm.id);
+                String desiredLiege = contract == null ? null : contract.liegeRealm;
+                if (!Objects.equals(realm.overlordId, desiredLiege)) {
+                    try { editor.setOverlord(realm.id, desiredLiege, null); changed = true; }
+                    catch (RuntimeException ex) {
+                        LOGGER.warn("wf_realms: cannot project vassal contract {} -> {} onto map {}: {}",
+                                realm.id, desiredLiege, map.name, ex.getMessage());
+                        continue;
+                    }
+                }
+                changed |= editor.setDerivedProp(realm.id, "tax_share", contract == null ? null : contract.taxShare);
+                changed |= editor.setDerivedProp(realm.id, "levy_share", contract == null ? null : contract.levyShare);
+                changed |= editor.setDerivedProp(realm.id, "politics.vassal_loyalty", contract == null ? null : contract.loyalty);
+                changed |= editor.setDerivedProp(realm.id, "politics.subject_type", contract == null ? null : contract.subjectType.name().toLowerCase(Locale.ROOT));
+                changed |= editor.setDerivedProp(realm.id, "politics.autonomy", contract == null ? null : contract.autonomy);
+                int contested = 0;
+                for (String key : realm.titleKeys) {
+                    TitleData.Title title = map.titles.byKey(key);
+                    if (title != null && Boolean.TRUE.equals(title.props.get("politics.contested"))) contested++;
+                }
+                changed |= editor.setDerivedProp(realm.id, "politics.contested_titles", contested);
+                Object unrest = realm.props.get("politics.unrest");
+                int unrestValue = unrest instanceof Number n ? Math.max(0, Math.min(100, n.intValue())) : 0;
+                boolean rebellion = unrestValue >= 70 || Boolean.TRUE.equals(realm.props.get("politics.rebellion"));
+                changed |= editor.setDerivedProp(realm.id, "politics.rebellion", rebellion);
+                List<String> diplomatic = new ArrayList<>();
+                for (Statecraft.Relation relation : POLITICS.relations()) {
+                    if (!relation.realmA.equals(realm.id) && !relation.realmB.equals(realm.id)) continue;
+                    String other = relation.realmA.equals(realm.id) ? relation.realmB : relation.realmA;
+                    TitleData.Realm otherRealm = map.titles.realms.get(other);
+                    String treaties = relation.treaties.stream().map(Enum::name).sorted().collect(java.util.stream.Collectors.joining(","));
+                    diplomatic.add(other + "|" + (otherRealm == null ? other : otherRealm.name) + "|"
+                            + relation.opinion + "|" + treaties + "|" + relation.truceUntilDay);
+                }
+                changed |= editor.setDerivedProp(realm.id, "politics.diplomacy_options", String.join(";", diplomatic));
+                String activeWars = POLITICS.wars().stream()
+                        .filter(w -> w.status == Statecraft.WarStatus.ACTIVE
+                                && (w.attackerRealm.equals(realm.id) || w.defenderRealm.equals(realm.id)))
+                        .map(w -> w.id + "|" + w.attackerRealm + "|" + w.defenderRealm + "|" + w.casusBelli + "|" + w.warScore)
+                        .collect(java.util.stream.Collectors.joining(";"));
+                changed |= editor.setDerivedProp(realm.id, "politics.active_wars", activeWars);
+            }
+            if (changed) EditorManager.touch(map);
+        }
+    }
+
+    private static ActionResult runWarDomainAction(CommandSourceStack source, String realmId,
+                                                   String actionId, List<String> args, String requestId) {
+        for (var map : WorldForgeMod.loadedMaps().values()) {
+            if (map.titles == null || !map.titles.realms.containsKey(realmId)) continue;
+            TitleEditor editor = EditorManager.editorFor(map);
+            if (editor == null) return ActionResult.fail("Редактор карты недоступен");
+            String actor = source.getEntity() instanceof ServerPlayer player
+                    ? player.getUUID().toString() : "console";
+            return WorldForgeApi.run(actionId, new ActionContext(editor, actor, source.hasPermission(2),
+                    realmId, 0, args, requestId));
+        }
+        return ActionResult.fail("Государство не найдено на загруженной карте: " + realmId);
+    }
 
     static boolean rules(ServerPlayer p, String realm) {
         if (p.hasPermissions(2)) return true;
@@ -110,6 +550,7 @@ public class RealmsMod {
 
     @SubscribeEvent
     public void onStarted(ServerStartedEvent e) {
+        AUTONOMOUS_REALMS.clear();
         try {
             Path f = file(e.getServer());
             if (Files.exists(f)) REALMS.fromJson(Files.readString(f));
@@ -118,6 +559,7 @@ public class RealmsMod {
             int importedTitles = 0;
             for (var map : WorldForgeMod.loadedMaps().values())
                 if (map.titles != null) importedTitles += POLITICS.syncMapTitles(map.name, map.titles);
+            syncPoliticalMapState();
             if (importedTitles > 0) LOGGER.info("wf_realms: imported {} political titles from world maps", importedTitles);
             int treasuryAccounts = 0;
             for (TitleData.Realm realm : realms()) {
@@ -128,11 +570,23 @@ public class RealmsMod {
         } catch (Exception ex) { LOGGER.error("wf_realms: не удалось прочитать состояние: {}", ex.toString()); }
     }
 
-    private static void save(MinecraftServer s) {
+    public static synchronized boolean persistNow(MinecraftServer server) {
+        if (server == null) return false;
         try {
-            Path f = file(s); Files.createDirectories(f.getParent()); Files.writeString(f, REALMS.toJson());
-            Files.writeString(politicsFile(s), POLITICS.toJson());
-        } catch (Exception ex) { LOGGER.error("wf_realms: не удалось сохранить: {}", ex.toString()); }
+            Path root = server.getWorldPath(LevelResource.ROOT).resolve("worldforge");
+            Map<Path, byte[]> writes = new LinkedHashMap<>();
+            writes.put(file(server), REALMS.toJson().getBytes(StandardCharsets.UTF_8));
+            writes.put(politicsFile(server), POLITICS.toJson().getBytes(StandardCharsets.UTF_8));
+            AtomicFileBatch.commit(root, writes);
+            return true;
+        } catch (Exception ex) {
+            LOGGER.error("wf_realms: atomic political checkpoint failed: {}", ex.toString(), ex);
+            return false;
+        }
+    }
+
+    private static void save(MinecraftServer s) {
+        if (!persistNow(s)) LOGGER.error("wf_realms: political checkpoint remains dirty");
     }
 
     @SubscribeEvent
@@ -142,13 +596,29 @@ public class RealmsMod {
         try {
             if (ticks % 200 == 0) {
                 int days = WorldForgeApi.clock().pull("wf_realms");
-                for (TitleData.Realm r : realms()) {
+                syncPoliticalMapState();
+                List<TitleData.Realm> currentRealms = realms();
+                if (days > 0) {
+                    Map<String, Integer> rulerOpinions = new LinkedHashMap<>();
+                    for (TitleData.Realm r : currentRealms) {
+                        Object rawOpinion = r.props.get("politics.liege_opinion");
+                        rulerOpinions.put(r.id, rawOpinion instanceof Number n ? n.intValue() : 0);
+                    }
+                    POLITICS.advanceVassalPolitics((int) WorldForgeApi.clock().dayNumber(), rulerOpinions);
+                    for (TitleData.Realm realm : currentRealms) {
+                        Statecraft.VassalContract contract = POLITICS.vassalage(realm.id);
+                        if (contract != null) realm.props.put("politics.vassal_loyalty", contract.loyalty);
+                        realm.props.put("politics.succession_law", POLITICS.successionLawForPeople(realm.id));
+                    }
+                }
+                for (TitleData.Realm r : currentRealms) {
                     Object taxableBase = r.props.get("taxable_base");
                     if (days > 0 && taxableBase instanceof Number base && base.doubleValue() > 0) {
                         POLITICS.collectTaxes(REALMS, r.id, base.doubleValue(), days);
                     }
                     if (days > 0 && !r.props.containsKey("player")) REALMS.autoDevelop(r.id, r.id.hashCode() + WorldForgeApi.clock().dayNumber());
                     else REALMS.tick(r.id);
+                    syncDevelopmentProjection(r);
                 }
             }
             if (ticks % 6000 == 0) save(e.getServer());
@@ -164,7 +634,9 @@ public class RealmsMod {
                 .then(Commands.literal("info").then(Commands.argument("realm", StringArgumentType.word()).executes(c -> info(c.getSource(), StringArgumentType.getString(c, "realm")))))
                 .then(Commands.literal("gov").then(Commands.argument("id", StringArgumentType.word()).executes(c -> act(c.getSource(), "gov", StringArgumentType.getString(c, "id"), ""))))
                 .then(Commands.literal("unlock").then(Commands.argument("key", StringArgumentType.word()).executes(c -> act(c.getSource(), "unlock", StringArgumentType.getString(c, "key"), ""))))
-                .then(Commands.literal("law").then(Commands.argument("law", StringArgumentType.word()).then(Commands.argument("option", StringArgumentType.word()).executes(c -> act(c.getSource(), "law", StringArgumentType.getString(c, "law"), StringArgumentType.getString(c, "option")))))));
+                .then(Commands.literal("law").then(Commands.argument("law", StringArgumentType.word()).then(Commands.argument("option", StringArgumentType.word()).executes(c -> act(c.getSource(), "law", StringArgumentType.getString(c, "law"), StringArgumentType.getString(c, "option"))))))
+                .then(Commands.literal("succession").then(Commands.argument("law", StringArgumentType.word())
+                        .executes(c -> act(c.getSource(), "succession", StringArgumentType.getString(c, "law"), "")))));
     }
 
     /** Operator-only bootstrap surface for the political simulation. */
@@ -243,6 +715,12 @@ public class RealmsMod {
                                         .executes(c -> politics(c.getSource(), "succession",
                                                 StringArgumentType.getString(c, "realm"),
                                                 StringArgumentType.getString(c, "law"), "", ""))))));
+        d.register(Commands.literal("wfsubject").requires(s -> s.hasPermission(2))
+                .then(Commands.argument("realm", StringArgumentType.word())
+                        .then(Commands.argument("type", StringArgumentType.word())
+                                .executes(ctx -> politics(ctx.getSource(), "subject",
+                                        StringArgumentType.getString(ctx, "realm"),
+                                        StringArgumentType.getString(ctx, "type"), "", "")))));
         d.register(Commands.literal("wfinherit").requires(s -> s.hasPermission(2))
                 .then(Commands.argument("title", StringArgumentType.word())
                         .then(Commands.argument("deceased", StringArgumentType.word())
@@ -277,7 +755,7 @@ public class RealmsMod {
         String actor = source.getEntity() instanceof ServerPlayer player
                 ? player.getUUID().toString() : "console";
         String payload = String.join("|", action, a, b, c, d);
-        return executePoliticalMutation(source, action, a, payload, () -> {
+        return executePoliticalMutation(source, action, a, payload, requestId -> {
             try {
                 switch (action) {
                     case "title_create" -> POLITICS.createTitle(a, b, Statecraft.Rank.valueOf(c.toUpperCase(Locale.ROOT)), d);
@@ -286,15 +764,31 @@ public class RealmsMod {
                     case "vassal" -> { if (!POLITICS.setVassalage(a, b, Double.parseDouble(c), Double.parseDouble(d))) throw new IllegalArgumentException(POLITICS.lastError); }
                     case "tax" -> POLITICS.setTaxRate(a, Double.parseDouble(b));
                     case "opinion" -> POLITICS.setOpinion(a, b, Integer.parseInt(c));
-                    case "treaty" -> POLITICS.setTreaty(a, b, Statecraft.Treaty.valueOf(c.toUpperCase(Locale.ROOT)), Boolean.parseBoolean(d));
-                    case "war" -> POLITICS.declareWar(a, b, c, d, (int) WorldForgeApi.clock().dayNumber());
+                    case "treaty" -> {
+                        Statecraft.Treaty treaty = Statecraft.Treaty.valueOf(c.toUpperCase(Locale.ROOT));
+                        boolean active = Boolean.parseBoolean(d);
+                        if (treaty == Statecraft.Treaty.ALLIANCE) {
+                            ActionResult domain = runWarDomainAction(source, a, active ? "ally" : "ally_break",
+                                    List.of(b), requestId);
+                            if (!domain.ok) throw new IllegalArgumentException(domain.message);
+                        } else POLITICS.setTreaty(a, b, treaty, active);
+                    }
+                    case "war" -> {
+                        ActionResult domain = runWarDomainAction(source, a, "war_declare", List.of(b, c, ""), requestId);
+                        if (!domain.ok) throw new IllegalArgumentException(domain.message);
+                    }
                     case "succession" -> POLITICS.setInheritanceLaw(a, Statecraft.InheritanceLaw.valueOf(b.toUpperCase(Locale.ROOT)));
+                    case "subject" -> {
+                        if (!POLITICS.setSubjectType(a, Statecraft.SubjectType.valueOf(b.toUpperCase(Locale.ROOT))))
+                            throw new IllegalArgumentException(POLITICS.lastError);
+                    }
                     case "dynasty" -> POLITICS.registerDynasty(a, b);
                     case "dynasty_member" -> { if (!POLITICS.addDynastyMember(a, b)) throw new IllegalArgumentException(POLITICS.lastError); }
                     case "plot" -> POLITICS.createPlot(a, b, c, Statecraft.PlotKind.valueOf(d.toUpperCase(Locale.ROOT)));
                     case "inherit" -> { if (!POLITICS.inheritTitle(a, b, c)) throw new IllegalArgumentException(POLITICS.lastError); }
                     default -> { return dev.worldforge.mod.api.ActionResult.fail("Неизвестная политическая операция"); }
                 }
+                syncPoliticalMapState();
                 save(source.getServer());
                 return dev.worldforge.mod.api.ActionResult.ok("Политическое состояние обновлено: " + action);
             } catch (Exception ex) {
@@ -305,7 +799,7 @@ public class RealmsMod {
 
     private static int executePoliticalMutation(CommandSourceStack source, String action, String target,
                                                 String payload,
-                                                java.util.function.Supplier<dev.worldforge.mod.api.ActionResult> operation,
+                                                java.util.function.Function<String, dev.worldforge.mod.api.ActionResult> operation,
                                                 java.util.function.Supplier<String> domainAuthorization,
                                                 boolean operatorOnly) {
         String actor = source.getEntity() instanceof ServerPlayer player
@@ -324,7 +818,7 @@ public class RealmsMod {
                             return "Нужны права оператора";
                         return domainAuthorization.get();
                     },
-                    (req, attempt) -> operation.get(), null, minute,
+                    (req, attempt) -> operation.apply(req.requestId()), null, minute,
                     WorldForgeMod.actionExecutionFile(source.getServer()));
             if (task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.SUCCEEDED) {
                 source.sendSuccess(() -> Component.literal(task.message()), true);
@@ -362,13 +856,19 @@ public class RealmsMod {
         if (realm.isEmpty()) { source.sendFailure(Component.literal("Вы не правите государством.")); return 0; }
         String actor = player.getUUID().toString();
         String payload = what + "|" + realm + "|" + a + "|" + b;
-        int result = executePoliticalMutation(source, "realm_" + what, realm, payload, () -> {
+        int result = executePoliticalMutation(source, "realm_" + what, realm, payload, requestId -> {
             boolean ok = switch (what) {
                 case "gov" -> REALMS.setGov(realm, a, false);
                 case "unlock" -> REALMS.unlock(realm, a);
+                case "succession" -> {
+                    try { POLITICS.setInheritanceLaw(realm, Statecraft.InheritanceLaw.valueOf(a.toUpperCase(Locale.ROOT))); yield true; }
+                    catch (IllegalArgumentException ex) { REALMS.lastError = "Неизвестный закон наследования"; yield false; }
+                }
                 default -> REALMS.setLaw(realm, a, b);
             };
             if (!ok) return dev.worldforge.mod.api.ActionResult.fail(REALMS.lastError);
+            syncDevelopmentProjection(RealmsMod.realm(realm));
+            save(source.getServer());
             return dev.worldforge.mod.api.ActionResult.ok("Готово.");
         }, () -> rules(player, realm) ? null : "Это решение правителя.", false);
         if (result == 0) return 0;

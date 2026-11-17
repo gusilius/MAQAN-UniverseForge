@@ -9,8 +9,24 @@ import java.util.*;
  */
 public final class LifeSimulation {
     public enum Action { EAT, SLEEP, SEEK_SAFETY, SOCIALIZE, WORK, TRAIN, RECREATE, IDLE }
-    public enum Outcome { SUCCESS, BLOCKED, RETRY }
+    public enum Outcome { SUCCESS, IN_PROGRESS, BLOCKED, RETRY }
     public enum LOD { ACTIVE, SETTLEMENT, REGIONAL, REMOTE }
+
+    /**
+     * Confirms that a persisted settlement-side physical action represents the Character AI action
+     * currently being completed. A mismatch must fail closed: never grant sleep/food/social effects
+     * for a different action merely because some worker animation is still in progress.
+     */
+    public static boolean matchesPhysicalAction(Action action, String workerAction) {
+        if (action == null || workerAction == null) return false;
+        return switch (action) {
+            case EAT -> "eating".equals(workerAction);
+            case SLEEP -> "sleeping".equals(workerAction);
+            case SOCIALIZE -> "socializing".equals(workerAction);
+            case SEEK_SAFETY -> "fleeing".equals(workerAction);
+            case WORK, TRAIN, RECREATE, IDLE -> false;
+        };
+    }
 
     public record Context(long worldMinute, boolean foodAvailable, boolean shelterAvailable,
                           boolean safe, boolean socialAvailable, boolean workAvailable,
@@ -49,6 +65,31 @@ public final class LifeSimulation {
             return new Decision(Action.IDLE, Outcome.BLOCKED, 0, "dead-or-missing", List.of(), context.worldMinute());
 
         long now = context.worldMinute();
+        Object pendingRaw = character.props.get("population.ai.pending_action");
+        if (pendingRaw instanceof String pendingName && !pendingName.isBlank()) {
+            try {
+                Action pending = Action.valueOf(pendingName);
+                Outcome pendingOutcome = executor.execute(character, pending, context);
+                if (pendingOutcome == Outcome.SUCCESS) {
+                    completePending(character);
+                    character.props.put("population.ai.next_think_minute", now + 1);
+                    return new Decision(pending, Outcome.SUCCESS, utility(character, context, pending),
+                            "authoritative-action-completed", List.of(pending), now + 1);
+                }
+                if (pendingOutcome == Outcome.BLOCKED || pendingOutcome == Outcome.RETRY) {
+                    cancelPending(character, executor.failureReason(character, pending, context, pendingOutcome));
+                    return new Decision(pending, pendingOutcome, utility(character, context, pending),
+                            "pending-action-interrupted", List.of(pending), now + 1);
+                }
+                long pendingMinute = number(character.props.get("population.ai.pending_minute"), now);
+                return new Decision(pending, Outcome.IN_PROGRESS, utility(character, context, pending),
+                        "action-in-progress", List.of(pending), pendingMinute + 1);
+            } catch (IllegalArgumentException invalidPending) {
+                character.props.remove("population.ai.pending_action");
+                character.props.remove("population.ai.pending_minute");
+                character.props.remove("population.ai.pending_token");
+            }
+        }
         long next = number(character.props.get("population.ai.next_think_minute"), Long.MIN_VALUE);
         if (now < next) return new Decision(Action.IDLE, Outcome.RETRY, 0, "thinking-cooldown", List.of(), next);
 
@@ -88,6 +129,17 @@ public final class LifeSimulation {
             lastAction = candidate;
             lastOutcome = executor.execute(character, candidate, context);
             if (lastOutcome == null) lastOutcome = Outcome.BLOCKED;
+            if (lastOutcome == Outcome.IN_PROGRESS) {
+                String token = candidate.name() + ":" + now;
+                character.props.put("population.ai.pending_action", candidate.name());
+                character.props.put("population.ai.pending_minute", now);
+                character.props.put("population.ai.pending_token", token);
+                character.props.put("population.ai.last_action", candidate.name().toLowerCase(Locale.ROOT));
+                character.props.put("population.ai.last_outcome", "in_progress");
+                character.props.put("population.ai.last_reason", "awaiting-authoritative-completion");
+                return new Decision(candidate, Outcome.IN_PROGRESS, utility(character, context, candidate),
+                        "awaiting-authoritative-completion", plan, now + interval);
+            }
             if (lastOutcome == Outcome.SUCCESS) {
                 applyEffects(character, candidate);
                 character.props.put("population.ai.last_action", candidate.name().toLowerCase(Locale.ROOT));
@@ -215,29 +267,124 @@ public final class LifeSimulation {
         if (action == Action.RECREATE && minute >= 1140 && minute < 1320) value += 24;
         if (x.urgentWorldEvent() && action == Action.SEEK_SAFETY) value += 45;
         if (action == Action.SEEK_SAFETY && !x.safe()) value += 20;
+
+        // Stable character psychology shapes priorities; it never overrides survival preconditions.
+        int discipline = CharacterDevelopment.temperament(c, CharacterDevelopment.Temperament.DISCIPLINE);
+        int sociability = CharacterDevelopment.temperament(c, CharacterDevelopment.Temperament.SOCIABILITY);
+        int curiosity = CharacterDevelopment.temperament(c, CharacterDevelopment.Temperament.CURIOSITY);
+        int risk = CharacterDevelopment.temperament(c, CharacterDevelopment.Temperament.RISK);
+        int stability = CharacterDevelopment.temperament(c, CharacterDevelopment.Temperament.STABILITY);
+        int stress = CharacterDevelopment.stress(c);
+        switch (action) {
+            case WORK -> value += discipline * 0.16
+                    + CharacterDevelopment.drive(c, CharacterDevelopment.Drive.DUTY) * 0.12
+                    - stress * 0.10;
+            case TRAIN -> value += curiosity * 0.18
+                    + CharacterDevelopment.drive(c, CharacterDevelopment.Drive.KNOWLEDGE) * 0.16
+                    + CharacterDevelopment.drive(c, CharacterDevelopment.Drive.PRESTIGE) * 0.05
+                    - stress * 0.06;
+            case SOCIALIZE -> value += sociability * 0.18
+                    + CharacterDevelopment.drive(c, CharacterDevelopment.Drive.COMMUNITY) * 0.14
+                    + CharacterDevelopment.drive(c, CharacterDevelopment.Drive.FAMILY) * 0.04;
+            case RECREATE -> value += (100 - stability) * 0.08 + stress * 0.18
+                    + CharacterDevelopment.drive(c, CharacterDevelopment.Drive.ADVENTURE) * 0.06;
+            case SLEEP -> value += stress * 0.10 + (100 - stability) * 0.04;
+            case SEEK_SAFETY -> value += (100 - risk) * 0.12
+                    + CharacterDevelopment.drive(c, CharacterDevelopment.Drive.SECURITY) * 0.10;
+            case EAT -> value += CharacterDevelopment.drive(c, CharacterDevelopment.Drive.SECURITY) * 0.02;
+            case IDLE -> { }
+        }
+
+        // Temporary moods modify decisions, but expire independently from permanent traits.
+        CharacterDevelopment.Mood mood = CharacterDevelopment.mood(c, x.worldMinute());
+        value += switch (mood) {
+            case ANGRY -> action == Action.SOCIALIZE ? -12 : action == Action.WORK ? 3 : 0;
+            case AFRAID -> action == Action.SEEK_SAFETY ? 18 : action == Action.WORK ? -8 : 0;
+            case STRESSED -> action == Action.SLEEP || action == Action.RECREATE ? 10 : action == Action.WORK ? -8 : 0;
+            case EXHAUSTED -> action == Action.SLEEP ? 18 : action == Action.WORK || action == Action.TRAIN ? -15 : 0;
+            case SAD -> action == Action.SOCIALIZE ? 5 : action == Action.RECREATE ? 4 : 0;
+            case INSPIRED -> action == Action.TRAIN ? 12 : action == Action.WORK ? 5 : 0;
+            case HAPPY, NEUTRAL -> 0;
+        };
         return value;
+    }
+
+    /**
+     * Completes the pending action only after its authoritative adapter confirms completion.
+     * The token makes replay after save/load idempotent for the same in-flight action.
+     */
+    public static boolean completePending(Character character) {
+        if (character == null || !character.alive) return false;
+        Object rawAction = character.props.get("population.ai.pending_action");
+        Object rawToken = character.props.get("population.ai.pending_token");
+        if (!(rawAction instanceof String actionName) || !(rawToken instanceof String token)
+                || actionName.isBlank() || token.isBlank()) return false;
+        if (token.equals(character.props.get("population.ai.last_completed_token"))) {
+            clearPending(character);
+            return false;
+        }
+        final Action action;
+        try { action = Action.valueOf(actionName); }
+        catch (IllegalArgumentException invalid) { clearPending(character); return false; }
+        applyEffects(character, action);
+        character.props.put("population.ai.last_completed_token", token);
+        character.props.put("population.ai.last_action", action.name().toLowerCase(Locale.ROOT));
+        character.props.put("population.ai.last_outcome", "success");
+        character.props.put("population.ai.last_reason", "authoritative-action-completed");
+        clearPending(character);
+        return true;
+    }
+
+    /** Cancels an interrupted action without granting its need, skill or relationship effects. */
+    public static boolean cancelPending(Character character, String reason) {
+        if (character == null || !(character.props.get("population.ai.pending_action") instanceof String)) return false;
+        character.props.put("population.ai.last_outcome", "blocked");
+        character.props.put("population.ai.last_reason", safeReason(reason));
+        clearPending(character);
+        return true;
+    }
+
+    private static void clearPending(Character character) {
+        character.props.remove("population.ai.pending_action");
+        character.props.remove("population.ai.pending_minute");
+        character.props.remove("population.ai.pending_token");
     }
 
     private static void applyEffects(Character c, Action action) {
         switch (action) {
-            case EAT -> PopulationSimulation.changeNeed(c, PopulationSimulation.Need.HUNGER, -70);
-            case SLEEP -> PopulationSimulation.changeNeed(c, PopulationSimulation.Need.REST, -75);
-            case SEEK_SAFETY -> PopulationSimulation.changeNeed(c, PopulationSimulation.Need.SAFETY, -60);
-            case SOCIALIZE -> PopulationSimulation.changeNeed(c, PopulationSimulation.Need.SOCIAL, -60);
+            case EAT -> {
+                PopulationSimulation.changeNeed(c, PopulationSimulation.Need.HUNGER, -70);
+                CharacterDevelopment.changeStress(c, -2);
+            }
+            case SLEEP -> {
+                PopulationSimulation.changeNeed(c, PopulationSimulation.Need.REST, -75);
+                CharacterDevelopment.changeStress(c, -14);
+            }
+            case SEEK_SAFETY -> {
+                PopulationSimulation.changeNeed(c, PopulationSimulation.Need.SAFETY, -60);
+                CharacterDevelopment.changeStress(c, -8);
+            }
+            case SOCIALIZE -> {
+                PopulationSimulation.changeNeed(c, PopulationSimulation.Need.SOCIAL, -60);
+                CharacterDevelopment.changeStress(c, -5);
+            }
             case WORK -> {
                 PopulationSimulation.changeNeed(c, PopulationSimulation.Need.PURPOSE, -20);
                 PopulationSimulation.changeNeed(c, PopulationSimulation.Need.REST, 8);
                 PopulationSimulation.changeNeed(c, PopulationSimulation.Need.HUNGER, 6);
+                CharacterDevelopment.changeStress(c, 3);
             }
             case TRAIN -> {
                 PopulationSimulation.changeNeed(c, PopulationSimulation.Need.PURPOSE, -16);
                 PopulationSimulation.changeNeed(c, PopulationSimulation.Need.REST, 5);
+                CharacterDevelopment.changeStress(c, 1);
                 String skill = PopulationSimulation.trainingTarget(c);
                 if (!skill.isBlank()) PopulationSimulation.train(c, skill, 5);
             }
             case RECREATE -> {
                 PopulationSimulation.changeNeed(c, PopulationSimulation.Need.LEISURE, -65);
                 PopulationSimulation.changeNeed(c, PopulationSimulation.Need.SOCIAL, -10);
+                CharacterDevelopment.changeStress(c, -12);
             }
             case IDLE -> { }
         }

@@ -3,6 +3,7 @@ package dev.worldforge.tests;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.settle.ResidentSocial;
+import dev.worldforge.people.CharacterDevelopment;
 import java.util.Map;
 
 public final class ResidentSocialTest {
@@ -44,11 +45,29 @@ public final class ResidentSocialTest {
                 "kind personalities improve the outcome of social encounters");
         check(ResidentSocial.interactionDelta(aggressive, resident) < 0,
                 "aggressive personalities and cultural difference can create rivalry");
-        check(ResidentSocial.socialize(aggressive, resident,
-                        ResidentSocial.interactionDelta(aggressive, resident)) < 0
-                        && ResidentSocial.score(resident, aggressive.id) < 0,
+        check(ResidentSocial.socializeOnce(aggressive, resident,
+                        ResidentSocial.interactionDelta(aggressive, resident), "life:aggressive:resident:initial") < 0
+                        && ResidentSocial.score(resident, aggressive.globalId) < 0,
                 "negative resident encounters create reciprocal rivalry/enmity");
 
+
+        CharacterRegistry migratedPartition = new CharacterRegistry();
+        Character partitionPeer = migratedPartition.create("Partition Peer", "", "north", "f", 1);
+        CharacterRegistry collidingPartition = new CharacterRegistry();
+        Character collidingPeer = collidingPartition.create("Colliding Peer", "", "south", "m", 1);
+        Map<String, Object> legacyRelationships = new java.util.LinkedHashMap<>();
+        legacyRelationships.put(partitionPeer.id, 12);
+        aggressive.props.put("social.relationships", legacyRelationships);
+        ResidentSocial.socializeOnce(aggressive, partitionPeer, 3, "life:cross-partition:one");
+        ResidentSocial.socializeOnce(aggressive, collidingPeer, 7, "life:cross-partition:two");
+        check(ResidentSocial.score(aggressive, partitionPeer.globalId) == 3
+                        && ResidentSocial.score(aggressive, collidingPeer.globalId) == 7
+                        && ((Number) ((Map<?, ?>) aggressive.props.get("social.relationships")).get(partitionPeer.id)).intValue() == 12,
+                "ambiguous legacy local relationship data stays untouched while new links use distinct global UUIDs");
+
+        check(CharacterDevelopment.memories(aggressive, 10).stream().anyMatch(m -> "social_conflict".equals(m.get("kind")))
+                        && CharacterDevelopment.memories(resident, 10).stream().anyMatch(m -> "social_conflict".equals(m.get("kind"))),
+                "both participants remember the concrete negative social encounter");
         System.out.println("ResidentSocialTest: " + (failures == 0 ? "OK" : failures + " failure(s)"));
         if (failures > 0) throw new AssertionError("ResidentSocialTest failed: " + failures);
     }

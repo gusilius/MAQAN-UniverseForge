@@ -28,10 +28,27 @@ public class OriginsTest {
             @Override public boolean flag(String owner, String f) { return f.equals("quest:trial_of_arms") && owner.equals("p:1"); }
         };
         o.publish();
+        dev.worldforge.mod.api.WorldForgeApi.revisions().resetForTests();
         String P = "p:1";
         double hp0 = pr.get(P, "max_health");
+        long originRevisionBeforeRace = dev.worldforge.mod.api.WorldForgeApi.revisions().snapshot().orElseThrow()
+                .revision(dev.worldforge.mod.api.DomainMutationRevisions.Domain.ORIGINS);
         ok(o.setRace(P, "orc") && pr.get(P, "max_health") > hp0 + 5, "раса меняет здоровье через общую шину: " + hp0 + " → " + pr.get(P, "max_health"));
+        long originRevisionAfterRace = dev.worldforge.mod.api.WorldForgeApi.revisions().snapshot().orElseThrow()
+                .revision(dev.worldforge.mod.api.DomainMutationRevisions.Domain.ORIGINS);
+        ok(originRevisionAfterRace == originRevisionBeforeRace + 1, "выбор расы продвигает ORIGINS revision ровно один раз");
         ok(!o.setRace(P, "elf"), "раса выбирается один раз");
+        ok(dev.worldforge.mod.api.WorldForgeApi.revisions().snapshot().orElseThrow()
+                .revision(dev.worldforge.mod.api.DomainMutationRevisions.Domain.ORIGINS) == originRevisionAfterRace,
+                "отклонённый выбор расы не меняет revision");
+        Origins.Build detached = o.build(P);
+        detached.race = "elf";
+        detached.history.add("untracked");
+        ok("orc".equals(o.peek(P).race) && o.peek(P).history.isEmpty(),
+                "публичные Build getters возвращают detached snapshot, обход writer API невозможен");
+        Origins.Build missing = o.build("p:missing");
+        missing.race = "human";
+        ok(o.peek("p:missing") == null, "чтение отсутствующего владельца не материализует запись");
         ok(StatApi.tag(P, "race").equals("orc"), "метка расы в шине");
 
         // классы
@@ -67,19 +84,47 @@ public class OriginsTest {
         ok(n1.race.equals(n2.race) && n1.history.equals(n2.history), "NPC детерминированы по сиду");
         ok(n1.prof.containsKey("smith") && !n1.history.isEmpty(), "NPC 30 уровня: профессия и класс " + n1.history);
         Origins.Build n1Again = o.assign("n:a", 999, "trade", 55);
-        ok(n1Again == n1 && n1Again.history.equals(n1.history) && n1Again.prof.equals(n1.prof),
-                "повторное назначение NPC не перезаписывает его развитие");
+        ok(n1Again != n1 && n1Again.history.equals(n1.history) && n1Again.prof.equals(n1.prof),
+                "повторное назначение NPC сохраняет развитие и возвращает detached snapshot");
+        n1Again.history.clear();
+        n1Again.prof.clear();
+        ok(o.build("n:a").history.equals(n1.history) && o.build("n:a").prof.equals(n1.prof),
+                "изменение результата assign не обходит канонический Origins writer");
         ok(n3.history.isEmpty(), "новичок без класса");
         // сохранение
         Origins o2 = new Origins(d);
+        dev.worldforge.mod.api.WorldForgeApi.revisions().resetForTests();
         o2.fromJson(o.toJson());
         ok(o2.build(P).history.equals(o.build(P).history) && o2.build(P).prof.equals(o.build(P).prof) && o2.mods(P).equals(o.mods(P)), "save/load сохраняет историю, профессии и рассчитанные бонусы");
         String validOriginsSave = o.toJson();
-        String corruptOriginsSave = validOriginsSave.replace("\"race\":\"orc\"", "\"race\":\"unknown_race\"");
+        long restoredRevision = dev.worldforge.mod.api.WorldForgeApi.revisions().snapshot().orElseThrow()
+                .revision(dev.worldforge.mod.api.DomainMutationRevisions.Domain.ORIGINS);
+        o2.fromJson(validOriginsSave);
+        long repeatedRestoreRevision = dev.worldforge.mod.api.WorldForgeApi.revisions().snapshot().orElseThrow()
+                .revision(dev.worldforge.mod.api.DomainMutationRevisions.Domain.ORIGINS);
+        ok(repeatedRestoreRevision == restoredRevision, "повторное восстановление идентичного snapshot не продвигает revision");
+        String corruptOriginsSave = validOriginsSave.replace("\"race\":\"orc\"", "\"race\":7");
         boolean invalidOriginsRejected = false;
         try { o2.fromJson(corruptOriginsSave); } catch (IllegalArgumentException invalidSave) { invalidOriginsRejected = true; }
-        ok(invalidOriginsRejected && o2.toJson().equals(validOriginsSave),
-                "неизвестная раса отклоняется без очистки действующего прогресса");
+        long rejectedRestoreRevision = dev.worldforge.mod.api.WorldForgeApi.revisions().snapshot().orElseThrow()
+                .revision(dev.worldforge.mod.api.DomainMutationRevisions.Domain.ORIGINS);
+        ok(invalidOriginsRejected && o2.toJson().equals(validOriginsSave) && rejectedRestoreRevision == restoredRevision,
+                "некорректный тип расы отклоняется без изменения состояния и revision");
+
+        // Datapack removal must not make a previously valid world save unloadable.
+        OriginDefs temporarilyEmpty = new OriginDefs();
+        Origins dormant = new Origins(temporarilyEmpty);
+        dormant.fromJson(validOriginsSave);
+        ok(dormant.toJson().equals(validOriginsSave)
+                        && dormant.build(P).race.equals(o.build(P).race)
+                        && dormant.build(P).history.equals(o.build(P).history)
+                        && dormant.build(P).prof.equals(o.build(P).prof),
+                "удалённые datapack IDs сохраняются как dormant progression без потери истории и XP");
+        Origins reactivated = new Origins(d);
+        reactivated.fromJson(dormant.toJson());
+        ok(reactivated.toJson().equals(validOriginsSave)
+                        && reactivated.mods(P).equals(o.mods(P)),
+                "возвращение прежних datapack definitions реактивирует сохранённый прогресс");
 
         ok(o.viewJson(P).contains("champion") || o.viewJson(P).contains("professions"), "viewJson");
 
@@ -145,18 +190,31 @@ public class OriginsTest {
         ok(duplicateRaceRejected && duplicateDefs.races.size() == 1
                 && duplicateDefs.races.get("human").name().equals("Human"),
                 "повторное определение расы отклоняется без частичной перезаписи датапака");
+        OriginDefs.Snapshot previousDefinitions = duplicateDefs.snapshot();
+        boolean publishedMapsAreReadOnly = false;
+        try { duplicateDefs.races.put("intruder", previousDefinitions.races().get("human")); }
+        catch (UnsupportedOperationException expected) { publishedMapsAreReadOnly = true; }
+        boolean nestedMapsAreReadOnly = false;
+        try { previousDefinitions.races().get("human").mods().put("max_health", 999.0); }
+        catch (UnsupportedOperationException expected) { nestedMapsAreReadOnly = true; }
+        ok(publishedMapsAreReadOnly && nestedMapsAreReadOnly,
+                "опубликованный OriginDefs snapshot и вложенные maps неизменяемы");
         OriginDefs replacementSource = new OriginDefs();
         replacementSource.load("{\"races\":[{\"id\":\"elf\",\"name\":\"Elf\"}]}");
         duplicateDefs.replaceWith(replacementSource);
+        ok(previousDefinitions.races().containsKey("human") && !duplicateDefs.snapshot().races().containsKey("human")
+                        && duplicateDefs.snapshot().generation() > previousDefinitions.generation(),
+                "читатель старого snapshot сохраняет согласованную версию после атомарной замены");
         ok(duplicateDefs.races.size() == 1 && duplicateDefs.races.containsKey("elf")
                 && !duplicateDefs.races.containsKey("human"),
                 "перезагрузка определений заменяет удалённые записи, не накапливая устаревшие расы");
         OriginDefs invalidReplacement = new OriginDefs();
         invalidReplacement.load("{\"races\":[{\"id\":\"child\",\"parent\":\"missing\"}]}");
+        long validGeneration = duplicateDefs.snapshot().generation();
         boolean invalidReplacementRejected = false;
         try { duplicateDefs.replaceWith(invalidReplacement); } catch (IllegalArgumentException expected) { invalidReplacementRejected = true; }
-        ok(invalidReplacementRejected && duplicateDefs.races.containsKey("elf")
-                && !duplicateDefs.races.containsKey("child"),
+        ok(invalidReplacementRejected && duplicateDefs.snapshot().generation() == validGeneration
+                && duplicateDefs.races.containsKey("elf") && !duplicateDefs.races.containsKey("child"),
                 "некорректный набор не заменяет последнюю корректную версию");
         // специализации: взаимоисключающие, по классам
         Origins o6 = new Origins(d); o6.hooks = new Origins.Hooks() {};
@@ -197,6 +255,41 @@ public class OriginsTest {
         ok(o8.chooseClass("p:v", "blood_knight"), "с вампиризмом открыт: " + o8.lastError);
         flags.clear(); o8.setRace("p:h", "human"); o8.chooseClass("p:h", "ranger"); o8.chooseClass("p:h", "night_hunter"); flags.add("form:vampire");
         ok(!o8.chooseClass("p:h", "witch_hunter") && o8.lastError.contains("Несовместимо"), "охотник на ведьм не может быть вампиром: " + o8.lastError);
+
+        // Concurrent commands must not both win the one-time race selection.
+        dev.worldforge.mod.api.WorldForgeApi.revisions().resetForTests();
+        Origins concurrent = new Origins(d);
+        java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicInteger winners = new java.util.concurrent.atomic.AtomicInteger();
+        Thread raceA = new Thread(() -> { try { start.await(); if (concurrent.setRace("p:race-race", "human")) winners.incrementAndGet(); } catch (InterruptedException ex) { Thread.currentThread().interrupt(); } });
+        Thread raceB = new Thread(() -> { try { start.await(); if (concurrent.setRace("p:race-race", "orc")) winners.incrementAndGet(); } catch (InterruptedException ex) { Thread.currentThread().interrupt(); } });
+        raceA.start(); raceB.start(); start.countDown(); raceA.join(); raceB.join();
+        long raceRevision = dev.worldforge.mod.api.WorldForgeApi.revisions().snapshot().orElseThrow()
+                .revision(dev.worldforge.mod.api.DomainMutationRevisions.Domain.ORIGINS);
+        ok(winners.get() == 1 && raceRevision == 1
+                        && Set.of("human", "orc").contains(concurrent.build("p:race-race").race),
+                "параллельный выбор расы сериализован: один победитель и одна revision");
+        // Removed prerequisite definitions must block gracefully, never dereference null.
+        OriginDefs missingPrerequisites = new OriginDefs();
+        missingPrerequisites.load("{\"races\":[{\"id\":\"r\"}],\"classes\":[{\"id\":\"requires_prof\",\"req_prof\":{\"required_prof\":0}}],\"professions\":[{\"id\":\"specialist\",\"from\":\"root_prof\",\"ranks\":[{\"xp\":0}]},{\"id\":\"needs_class\",\"req_classes\":[\"base\"],\"ranks\":[{\"xp\":0}]}]}");
+        Origins missingPrerequisiteOrigins = new Origins(missingPrerequisites);
+        String missingClassRequirement = null, missingProfessionParent = null, missingClassProfessionRequirement = null;
+        try {
+            missingPrerequisiteOrigins.setRace("p:missing-prereq", "r");
+            missingClassRequirement = missingPrerequisiteOrigins.canLearn("p:missing-prereq", "needs_class");
+            missingProfessionParent = missingPrerequisiteOrigins.canLearn("p:missing-prereq", "specialist");
+            missingPrerequisiteOrigins.fromJson("{\"p:missing-prq\":{\"race\":\"r\",\"class\":\"\",\"history\":[],\"prof\":{\"required_prof\":0}}}".replace("missing-prq", "missing-prereq"));
+            missingClassProfessionRequirement = missingPrerequisiteOrigins.options("p:missing-prereq").values().stream()
+                    .filter(Objects::nonNull).findFirst().orElse("");
+        } catch (RuntimeException failure) {
+            failure.printStackTrace(System.err);
+            ok(false, "dormant prerequisite runtime path threw " + failure.getClass().getSimpleName());
+        }
+        ok(missingClassRequirement != null && missingClassRequirement.contains("временно отсутствует")
+                        && missingProfessionParent != null && missingProfessionParent.contains("временно отсутствует")
+                        && missingClassProfessionRequirement != null && missingClassProfessionRequirement.contains("временно отсутствует"),
+                "удалённые prerequisite definitions дают безопасный отказ вместо NullPointerException");
+
         System.out.println(fails == 0 ? "ALL OK" : fails + " FAIL");
         if (fails > 0) System.exit(1);
     }

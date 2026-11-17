@@ -5,14 +5,35 @@ import java.awt.image.BufferedImage;
 import java.awt.image.Raster;
 import java.awt.image.WritableRaster;
 import java.io.IOException;
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /** Сохранение правок в папку мира (titles.json, realms.json, provinces.png) и загрузка их поверх карты. */
 public final class TitleStore {
     private TitleStore() {}
+
+    /** Produces all political map overlay files in memory so they can join a cross-file transaction. */
+    public static Map<Path, byte[]> snapshotFiles(MapData m, Path dir) throws IOException {
+        TitleData d = m.titles;
+        if (d == null) throw new IOException("У карты нет титулов");
+        Map<Path, byte[]> files = new LinkedHashMap<>();
+        files.put(dir.resolve("titles.json"), d.titlesJson().getBytes(StandardCharsets.UTF_8));
+        files.put(dir.resolve("realms.json"), d.realmsJson().getBytes(StandardCharsets.UTF_8));
+        BufferedImage image = new BufferedImage(d.w, d.h, BufferedImage.TYPE_USHORT_GRAY);
+        WritableRaster raster = image.getRaster();
+        short[] pixels = d.pixels();
+        for (int z = 0; z < d.h; z++)
+            for (int x = 0; x < d.w; x++) raster.setSample(x, z, 0, pixels[z * d.w + x] & 0xFFFF);
+        ByteArrayOutputStream png = new ByteArrayOutputStream();
+        if (!ImageIO.write(image, "png", png)) throw new IOException("Не удалось сформировать provinces.png");
+        files.put(dir.resolve("provinces.png"), png.toByteArray());
+        return files;
+    }
 
     public static void save(MapData m, Path dir) throws IOException {
         TitleData d = m.titles;

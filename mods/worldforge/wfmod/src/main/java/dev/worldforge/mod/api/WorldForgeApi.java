@@ -29,6 +29,8 @@ public final class WorldForgeApi {
         String check(MapAction action, ActionContext ctx);
     }
 
+    private static final DomainMutationRevisions REVISIONS = new DomainMutationRevisions();
+    private static final WorldForgeComputeRuntime COMPUTE_RUNTIME = new WorldForgeComputeRuntime();
     private static final Map<String, MapAction> ACTIONS = new LinkedHashMap<>();
     private static final List<Guard> GUARDS = new CopyOnWriteArrayList<>();
     private static final List<Consumer<MapChange>> LISTENERS = new CopyOnWriteArrayList<>();
@@ -59,6 +61,12 @@ public final class WorldForgeApi {
     /** Общие часы мира: пауза, скорость, календарь; все симуляции берут дни отсюда (GameClock.pull). */
     public static GameClock clock() { return CLOCK; }
 
+    /** Shared canonical-domain revision vector; lanes are advanced by authoritative writers only. */
+    public static DomainMutationRevisions revisions() { return REVISIONS; }
+
+    /** One process-wide bounded worker shared by every native compute domain. */
+    public static WorldForgeComputeRuntime computeRuntime() { return COMPUTE_RUNTIME; }
+
     /** Shared durable action queue. WorldForgeMod loads/saves it with the active world. */
     public static ActionExecutionService actionExecution() { return ACTION_EXECUTION; }
     public static synchronized void resetActionExecution() { ACTION_EXECUTION = new ActionExecutionService(); }
@@ -87,7 +95,7 @@ public final class WorldForgeApi {
             MapAction candidate = action(req.actionId());
             if (candidate == null) return "Действие больше не зарегистрировано: " + req.actionId();
             if (candidate.perm == MapAction.Perm.OP && !base.operator) return "Нужны права оператора";
-            ActionContext context = actionContext(base, candidate, req.targetId(), req.args());
+            ActionContext context = actionContext(base, candidate, req.targetId(), req.args(), req.requestId());
             for (Guard guard : GUARDS) {
                 String denied = guard.check(candidate, context);
                 if (denied != null) return denied;
@@ -96,21 +104,22 @@ public final class WorldForgeApi {
         }, (req, attempt) -> {
             MapAction candidate = action(req.actionId());
             if (candidate == null) return ActionResult.fail("Действие не найдено: " + req.actionId());
-            ActionContext context = actionContext(base, candidate, req.targetId(), req.args());
+            ActionContext context = actionContext(base, candidate, req.targetId(), req.args(), req.requestId());
             ActionResult result = candidate.handler.run(context);
             if (result.ok) fireChange(new MapChange(context.data(), "action", candidate.id));
             return result;
         }, replanner, worldMinute, journalFile);
     }
 
-    private static ActionContext actionContext(ActionContext base, MapAction action, String target, List<String> args) {
+    private static ActionContext actionContext(ActionContext base, MapAction action, String target,
+                                               List<String> args, String requestId) {
         String realmId = action.scope == MapAction.Scope.REALM ? target : null;
         int titleId = 0;
         if (action.scope == MapAction.Scope.TITLE) {
             try { titleId = Integer.parseInt(target); }
             catch (NumberFormatException ex) { throw new TitleEditor.EditException("Для действия нужен корректный ID титула"); }
         }
-        return new ActionContext(base.editor, base.actor, base.operator, realmId, titleId, args);
+        return new ActionContext(base.editor, base.actor, base.operator, realmId, titleId, args, requestId);
     }
 
     /** Общий журнал событий мира (аддоны пишут сюда войны, браки, стройки; клиент показывает всплывающие сообщения и окно журнала). */
@@ -144,6 +153,7 @@ public final class WorldForgeApi {
         LISTENERS.clear();
         REPLANNERS.clear();
         EVENTS.clear();
+        REVISIONS.resetForTests();
         builtinsDone = false;
     }
 

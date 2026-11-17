@@ -13,14 +13,23 @@ public final class ActionContext {
     public final String realmId;         // null, если действие не над государством
     public final int titleId;            // 0, если действие не над титулом
     public final List<String> args;
+    /** Stable ID from ActionExecutionService; domain receipts must reuse it on every retry. */
+    public final String requestId;
 
+    /** Source-compatible constructor for legacy integrations without a durable request identity. */
     public ActionContext(TitleEditor editor, String actor, boolean operator, String realmId, int titleId, List<String> args) {
+        this(editor, actor, operator, realmId, titleId, args, "");
+    }
+
+    public ActionContext(TitleEditor editor, String actor, boolean operator, String realmId, int titleId,
+                         List<String> args, String requestId) {
         this.editor = editor;
         this.actor = actor;
         this.operator = operator;
         this.realmId = realmId;
         this.titleId = titleId;
         this.args = List.copyOf(args);
+        this.requestId = requestId == null ? "" : requestId.trim();
     }
 
     public TitleData data() { return editor.data(); }

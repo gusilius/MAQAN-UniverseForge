@@ -67,6 +67,7 @@ public class CourtMod {
 
     /** Двор карты: события из датапаков, состояние - wf_court.json; связи с войнами идут через действия карты и свойства государств. */
     public static CourtSim court(MapData m) {
+        if (m == null || m.titles == null) return null;
         CharacterRegistry reg = PeopleMod.registry(m);
         if (reg == null) return null;
         return COURTS.computeIfAbsent(m, k -> {
@@ -84,6 +85,16 @@ public class CourtMod {
                 @Override public void independence(String realm, String liege) {
                     var ctx = new dev.worldforge.mod.api.ActionContext(ed, "court", true, realm, 0, java.util.List.of());
                     if (dev.worldforge.mod.api.WorldForgeApi.action("war_independence") != null) dev.worldforge.mod.api.WorldForgeApi.run("war_independence", ctx);
+                }
+
+                @Override public boolean vassalDemands(String liege, List<String> vassals) {
+                    if (dev.worldforge.mod.api.WorldForgeApi.action("vassal_demands") == null) return false;
+                    var ctx = new dev.worldforge.mod.api.ActionContext(ed, "court", true, liege, 0,
+                            List.of(String.join(",", vassals)));
+                    var result = dev.worldforge.mod.api.WorldForgeApi.run("vassal_demands", ctx);
+                    if (!result.ok) LOGGER.warn("wf_court: vassal demands for {} were not applied: {}",
+                            liege, result.message);
+                    return result.ok;
                 }
 
                 @Override public void news(String text) { dev.worldforge.mod.api.WorldForgeApi.postEvent("court", text, java.util.List.of()); }
@@ -113,16 +124,25 @@ public class CourtMod {
         });
     }
 
-    static void saveAll(MinecraftServer server) {
-        for (Map.Entry<MapData, CourtSim> en : COURTS.entrySet()) {
-            try {
-                Path dir = EditorManager.overlayDir(server, en.getKey());
-                Files.createDirectories(dir);
-                Files.writeString(dir.resolve("wf_court.json"), en.getValue().toJson());
-            } catch (Exception ex) {
-                LOGGER.error("wf_court: не удалось сохранить двор карты '{}': {}", en.getKey().name, ex.toString());
-            }
+    /** Persist one court through the shared crash-recoverable worldforge file transaction. */
+    public static boolean persistNow(MinecraftServer server, MapData map) {
+        if (server == null || map == null) return false;
+        CourtSim court = COURTS.get(map);
+        if (court == null) return false;
+        try {
+            Path root = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT).resolve("worldforge");
+            Path target = EditorManager.overlayDir(server, map).resolve("wf_court.json");
+            dev.worldforge.mod.AtomicFileBatch.commit(root, Map.of(
+                    target, court.toJson().getBytes(StandardCharsets.UTF_8)));
+            return true;
+        } catch (Exception ex) {
+            LOGGER.error("wf_court: не удалось атомарно сохранить двор карты '{}': {}", map.name, ex.toString(), ex);
+            return false;
         }
+    }
+
+    static void saveAll(MinecraftServer server) {
+        for (MapData map : COURTS.keySet()) persistNow(server, map);
     }
 
     @SubscribeEvent

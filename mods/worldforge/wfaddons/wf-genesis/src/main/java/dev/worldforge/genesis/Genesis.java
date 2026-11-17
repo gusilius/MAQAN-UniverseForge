@@ -3,8 +3,10 @@ package dev.worldforge.genesis;
 import dev.worldforge.mod.Json;
 import dev.worldforge.origins.OriginDefs;
 import dev.worldforge.progress.ProgressDefs;
+import dev.worldforge.people.NameBank;
 
 import java.util.*;
+import java.util.function.Supplier;
 
 /**
  * Мастер создания персонажа (чистая логика, без Minecraft): раса, внешность, старт, поселение правителя, профессии, атрибуты, класс и навыки.
@@ -14,11 +16,15 @@ public final class Genesis {
     public final GenesisDefs defs;
     public final OriginDefs origins;
     public final ProgressDefs progress;
+    private Supplier<NameBank> sharedNames = () -> null;
     private final Map<String, Draft> drafts = new LinkedHashMap<>();
     /** Завершённые персонажи: владелец -> облик (для рендера у всех игроков). */
     private final Map<String, Draft> finished = new LinkedHashMap<>();
 
     public Genesis(GenesisDefs defs, OriginDefs origins, ProgressDefs progress) { this.defs = defs; this.origins = origins; this.progress = progress; }
+
+    /** The provider is resolved at use time because wf-people replaces its bank on datapack reload. */
+    public void sharedNameBank(Supplier<NameBank> provider) { sharedNames = provider == null ? () -> null : provider; }
 
     public Draft draft(String owner) { return drafts.computeIfAbsent(owner, Draft::new); }
 
@@ -152,9 +158,28 @@ public final class Genesis {
     public String rulerTitle(Draft d, String tier) { return defs.style(chainLeafFirst(d.race), "ruler_" + tier, "Правитель"); }
 
     public String randomName(Draft d, Random rng) {
-        List<String> pool = null;
-        for (String r : chainLeafFirst(d.race)) if (defs.namePool.containsKey(r) && !defs.namePool.get(r).isEmpty()) { pool = defs.namePool.get(r); break; }
-        if (pool == null) pool = defs.namePool.getOrDefault("_default", List.of("Новый Дом"));
+        Objects.requireNonNull(rng, "rng");
+        NameBank bank = sharedNames.get();
+        if (bank != null) {
+            try {
+                String culture = bank.culture(d.race);
+                return bank.generate(d.race, culture, "settlements", rng);
+            } catch (IllegalStateException | IllegalArgumentException missingSharedPool) {
+                // Old worlds/datapacks may not yet define settlement names in wf_people.
+                // Keep the Genesis name_pool as a migration-compatible fallback.
+            }
+        }
+        LinkedHashSet<String> inherited = new LinkedHashSet<>();
+        for (String race : chainLeafFirst(d.race)) {
+            List<String> names = defs.namePool.get(race);
+            if (names != null) for (String name : names)
+                if (name != null && !name.isBlank()) inherited.add(name.trim());
+        }
+        if (inherited.isEmpty()) {
+            List<String> fallback = defs.namePool.getOrDefault("_default", List.of("Новый Дом"));
+            inherited.addAll(fallback);
+        }
+        List<String> pool = new ArrayList<>(inherited);
         return pool.get(rng.nextInt(pool.size()));
     }
 

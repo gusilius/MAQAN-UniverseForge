@@ -44,6 +44,10 @@ public final class Worker {
     public String lifeAction = "";
     public double lifeTargetX, lifeTargetZ;
     public double lifeActionUntil;
+    /** Physical lifecycle for an autonomous action: travelling -> performing -> completion by the authoritative adapter. */
+    public String lifeActionStage = "";
+    public String lifeSocialTarget = "";
+    public double lifeActionDuration;
     public double haulProgress;
     public boolean manualHauler;
 

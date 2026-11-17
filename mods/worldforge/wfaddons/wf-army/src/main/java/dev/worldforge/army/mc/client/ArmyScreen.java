@@ -124,6 +124,15 @@ public class ArmyScreen extends Screen {
         Army cur = null;
         for (Army a : mine) if (a.id == selArmy) cur = a;
         if (cur == null && !mine.isEmpty()) cur = mine.get(0);
+        if (cur != null) {
+            dev.worldforge.mod.client.PlatformWorkspaceBridge.publish("wf_army",
+                    "army:" + realm + ":" + cur.id, "army", cur.name,
+                    "Men " + cur.men() + " · supply " + Math.round(cur.supply * 100)
+                            + "% · morale " + Math.round(cur.morale * 100)
+                            + "% · location " + ar.title(cur.location));
+        } else {
+            dev.worldforge.mod.client.PlatformWorkspaceBridge.clear("wf_army");
+        }
         int ry = top + 18;
         for (Army a : mine) {
             if (ry > top + h - 14) break;

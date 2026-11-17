@@ -195,6 +195,38 @@ public final class ActionExecutionTest {
                         && afterRestart.receipts().size() == 1 && replayed[0] == 0,
                 "interrupted queued task is reconciled to FAILED with receipt and is never replayed automatically");
 
+        ActionExecutionService interruptedApplied = new ActionExecutionService();
+        interruptedApplied.loadJson(interrupted.toJson());
+        ActionExecutionService.Task unknown = interruptedApplied.reconcileInterrupted("request-interrupted",
+                ActionExecutionService.Reconciliation.UNKNOWN, "not enough evidence", 112, null);
+        check(unknown.status() == ActionExecutionService.Status.FAILED,
+                "UNKNOWN reconciliation keeps the interrupted action fail-closed");
+        ActionExecutionService.Task appliedResolution = interruptedApplied.reconcileInterrupted("request-interrupted",
+                ActionExecutionService.Reconciliation.APPLIED, "domain receipt found", 112, null);
+        int[] mustNotReplay = {0};
+        ActionExecutionService.Task appliedDuplicate = interruptedApplied.execute(new ActionExecutionService.Request(
+                "request-interrupted", "settlement.build", "player-1", "settlement-4", List.of("house"), 110),
+                r -> null, (r, attempt) -> { mustNotReplay[0]++; return ActionResult.fail("must not run"); },
+                null, 113, null);
+        check(appliedResolution.status() == ActionExecutionService.Status.SUCCEEDED
+                        && appliedDuplicate.status() == ActionExecutionService.Status.SUCCEEDED
+                        && mustNotReplay[0] == 0,
+                "verified applied effect becomes SUCCEEDED and is never replayed");
+
+        ActionExecutionService interruptedNotApplied = new ActionExecutionService();
+        interruptedNotApplied.loadJson(interrupted.toJson());
+        ActionExecutionService.Task retryQueued = interruptedNotApplied.reconcileInterrupted("request-interrupted",
+                ActionExecutionService.Reconciliation.NOT_APPLIED, "domain confirms no effect", 112, null);
+        int[] safeRetry = {0};
+        ActionExecutionService.Task retryCompleted = interruptedNotApplied.execute(new ActionExecutionService.Request(
+                "request-interrupted", "settlement.build", "player-1", "settlement-4", List.of("house"), 110),
+                r -> null, (r, attempt) -> { safeRetry[0]++; return ActionResult.ok("recovered"); },
+                null, 113, null);
+        check(retryQueued.status() == ActionExecutionService.Status.QUEUED
+                        && retryCompleted.status() == ActionExecutionService.Status.SUCCEEDED && safeRetry[0] == 1
+                        && interruptedNotApplied.receipts().size() == 1,
+                "verified absent effect is durably re-queued and safely executed once");
+
         if (failures > 0) throw new AssertionError(failures + " action execution tests failed");
         System.out.println("ActionExecution: ALL OK");
     }

@@ -139,6 +139,15 @@ public final class SettlementMap {
     }
 
     public List<Node> findRoad(int startX, int startZ, int endX, int endZ) {
+        return findRoad(startX, startZ, endX, endZ, false);
+    }
+
+    /** Infrastructure routes avoid already planned building footprints. */
+    public List<Node> findInfrastructureRoad(int startX, int startZ, int endX, int endZ) {
+        return findRoad(startX, startZ, endX, endZ, true);
+    }
+
+    private List<Node> findRoad(int startX, int startZ, int endX, int endZ, boolean avoidBuildings) {
         Node start = new Node(grid(startX), grid(startZ)), goal = new Node(grid(endX), grid(endZ));
         Cell a = cell(start.gx, start.gz), b = cell(goal.gx, goal.gz);
         if (a == null || b == null) throw new IllegalArgumentException("Road endpoints are outside the sampled settlement map");
@@ -154,7 +163,8 @@ public final class SettlementMap {
             for (int[] d : new int[][]{{1,0},{-1,0},{0,1},{0,-1}}) {
                 Node next = new Node(current.gx + d[0], current.gz + d[1]);
                 Cell c = cell(next.gx, next.gz);
-                if (c == null || c.water || c.slope > MAX_ROAD_SLOPE) continue;
+                if (c == null || c.water || c.slope > MAX_ROAD_SLOPE
+                        || (avoidBuildings && intersectsBuildingPlan(next))) continue;
                 double step = 1.0 + c.slope * 0.45 + Math.max(0, 0.5 - c.fertility) * 0.15;
                 double candidate = base + step;
                 if (candidate < cost.getOrDefault(next, Double.POSITIVE_INFINITY)) {
@@ -177,10 +187,38 @@ public final class SettlementMap {
     }
 
     public Road addRoad(int startX, int startZ, int endX, int endZ) {
-        List<Node> path = findRoad(startX, startZ, endX, endZ);
+        return addRoadPath(findRoad(startX, startZ, endX, endZ));
+    }
+
+    /** Adds a route for autonomous settlement access, avoiding all existing building plans. */
+    public Road addInfrastructureRoad(int startX, int startZ, int endX, int endZ) {
+        return addRoadPath(findRoad(startX, startZ, endX, endZ, true));
+    }
+
+    private Road addRoadPath(List<Node> path) {
         Road road = new Road(nextRoad++, path);
         roads.put(road.id, road);
         return road;
+    }
+
+    public boolean hasRoadBetween(int startX, int startZ, int endX, int endZ) {
+        Node start = new Node(grid(startX), grid(startZ));
+        Node end = new Node(grid(endX), grid(endZ));
+        for (Road road : roads.values()) {
+            if (road.path.size() < 2) continue;
+            Node first = road.path.get(0), last = road.path.get(road.path.size() - 1);
+            if ((first.equals(start) && last.equals(end)) || (first.equals(end) && last.equals(start))) return true;
+        }
+        return false;
+    }
+
+    private boolean intersectsBuildingPlan(Node node) {
+        int x = node.gx * CELL_SIZE, z = node.gz * CELL_SIZE;
+        for (ConstructionPlan plan : plans.values()) {
+            if (x < plan.x + plan.width && x + CELL_SIZE > plan.x
+                    && z < plan.z + plan.depth && z + CELL_SIZE > plan.z) return true;
+        }
+        return false;
     }
 
     public boolean isRoad(int gx, int gz) {

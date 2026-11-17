@@ -17,6 +17,13 @@ public final class Formations {
     }
 
     public record Slot(double x, double z) {}
+    public record Plan(List<Slot> slots, List<double[]> world, int[] assignment) {}
+    public static Plan plan(Type type, int n, double spacing, List<String> roles, List<double[]> currentLocal, double cx, double cz, double yaw) {
+        Plan nativePlan = TroopCompute.formationPlan(type, n, spacing, roles, currentLocal, cx, cz, yaw);
+        if (nativePlan != null) return nativePlan;
+        List<Slot> local = slots(type, n, spacing);
+        return new Plan(List.copyOf(local), List.copyOf(place(local, cx, cz, yaw)), roles == null || roles.isEmpty() ? new int[0] : assign(roles, local, currentLocal));
+    }
 
     /** n мест в строю; spacing - расстояние между солдатами, блоки. Передние ряды первыми (z больше). */
     public static List<Slot> slots(Type type, int n, double spacing) {

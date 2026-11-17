@@ -196,7 +196,7 @@ public class WFWorker extends PathfinderMob {
                     w.getNavigation().stop();
                     repath = 0;
                     stuckTicks = 0;
-                    wk.status = "застрял: перестраивает маршрут";
+                    c.s.updateWorker(wk, current -> current.status = "застрял: перестраивает маршрут");
                 }
             } else {
                 stuckTicks = 0;
@@ -205,7 +205,8 @@ public class WFWorker extends PathfinderMob {
             Building b = wk.building == 0 ? null : c.s.building(wk.building);
             BlockPos target;
             boolean working = false;
-            Colony.WorkOrder area = c.workOrders.get(wk.id);
+            Colony.WorkOrder area = ("travelling".equals(wk.lifeActionStage) || "performing".equals(wk.lifeActionStage))
+                    ? null : c.workOrders.get(wk.id);
             BlockPos resourceTarget = null;
             if (area != null) {
                 if (--workScan <= 0 || cachedWorkTarget == null
@@ -229,7 +230,7 @@ public class WFWorker extends PathfinderMob {
                     }
                     if (cachedApproachTarget == null) {
                         target = w.blockPosition();
-                        wk.status = "нет прямого доступа: ищет обход или безопасную опору";
+                        c.s.updateWorker(wk, current -> current.status = "нет прямого доступа: ищет обход или безопасную опору");
                     } else {
                         target = cachedApproachTarget;
                         working = true;
@@ -238,14 +239,14 @@ public class WFWorker extends PathfinderMob {
                     BlockPos waypoint = workWaypoint(w, area);
                     if (waypoint == null) {
                         target = w.blockPosition();
-                        wk.status = "участок обработан";
+                        c.s.updateWorker(wk, current -> current.status = "участок обработан");
                     } else {
                         int tx = waypoint.getX(), tz = waypoint.getZ();
                         int ty = w.level().hasChunkAt(new BlockPos(tx, w.getBlockY(), tz))
                                 ? w.level().getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, tx, tz)
                                 : w.getBlockY();
                         target = new BlockPos(tx, ty, tz);
-                        wk.status = "проверяет назначенный участок";
+                        c.s.updateWorker(wk, current -> current.status = "проверяет назначенный участок");
                     }
                 }
             } else if (wk.manualFollow) {
@@ -269,6 +270,17 @@ public class WFWorker extends PathfinderMob {
                         ? w.level().getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, tx, tz)
                         : w.getBlockY();
                 target = new BlockPos(tx, ty, tz);
+            } else if ("travelling".equals(wk.lifeActionStage)) {
+                int tx = c.cx + (int) Math.floor(wk.lifeTargetX);
+                int tz = c.cz + (int) Math.floor(wk.lifeTargetZ);
+                BlockPos probe = new BlockPos(tx, w.getBlockY(), tz);
+                int ty = w.level().hasChunkAt(probe)
+                        ? w.level().getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, tx, tz)
+                        : w.getBlockY();
+                target = new BlockPos(tx, ty, tz);
+                working = false;
+            } else if ("performing".equals(wk.lifeActionStage)) {
+                target = w.blockPosition();
             } else if (b != null) {
                 target = b.state == Building.State.BUILDING || b.status.startsWith("строится: укладка")
                         ? BuildingSite.builderWorkPoint((net.minecraft.server.level.ServerLevel) w.level(), c, b, w)
@@ -315,7 +327,7 @@ public class WFWorker extends PathfinderMob {
                         activeDetour = detour.immutable();
                         detourFor = target.immutable();
                         route = detour;
-                        wk.status = "обходит препятствие по безопасному маршруту";
+                        c.s.updateWorker(wk, current -> current.status = "обходит препятствие по безопасному маршруту");
                     }
                 }
                     if (path != null && path.canReach()) {
@@ -326,7 +338,7 @@ public class WFWorker extends PathfinderMob {
                         // cooldown so a temporary obstruction can clear without pathfinding every tick.
                         w.getNavigation().stop();
                         lastNavigationTarget = route.immutable();
-                        wk.status = "нет безопасного пути: ждёт и повторно ищет обход";
+                        c.s.updateWorker(wk, current -> current.status = "нет безопасного пути: ждёт и повторно ищет обход");
                         repath = 40;
                     }
                 }
@@ -334,6 +346,18 @@ public class WFWorker extends PathfinderMob {
             if (arrived) {
                 w.getNavigation().stop();
                 lastNavigationTarget = null;
+                if ("travelling".equals(wk.lifeActionStage)) {
+                    c.s.updateWorker(wk, current -> {
+                        current.lifeActionStage = "performing";
+                        current.lifeActionUntil = c.s.worldMinute() + Math.max(1.0, current.lifeActionDuration);
+                        current.status = switch (current.lifeAction) {
+                        case "eating" -> "принимает пищу";
+                        case "sleeping" -> "отдыхает";
+                        case "socializing" -> "общается";
+                            default -> "выполняет личное дело";
+                        };
+                    });
+                }
                 if (area != null && !area.complete && resourceTarget == null && workScan > 0) {
                     BlockPos waypoint = workWaypoint(w, area);
                     if (waypoint == null || w.distanceToSqr(waypoint.getX() + 0.5, w.getY(), waypoint.getZ() + 0.5) < 6.25) {
@@ -355,7 +379,7 @@ public class WFWorker extends PathfinderMob {
                         cachedApproachFor = null;
                         cachedApproachTarget = null;
                         workScan = 0;
-                        wk.status = switch (area.mode) {
+                        c.s.updateWorker(wk, current -> current.status = switch (area.mode) {
                             case "wood" -> "вырубает целое дерево";
                             case "stone" -> "добывает камень";
                             case "ore" -> "добывает руду";
@@ -365,7 +389,7 @@ public class WFWorker extends PathfinderMob {
                             case "honey" -> "собирает мёд";
                             case "herbs" -> "собирает лекарственные растения";
                             default -> "работает на участке";
-                        };
+                        });
                         if (++swing >= 8) { swing = 0; w.swing(InteractionHand.MAIN_HAND); }
                     }
                 } else if (area == null && wk.manualOrder) c.s.advanceManualOrder(wk.id);
@@ -653,7 +677,7 @@ public class WFWorker extends PathfinderMob {
                 if (!isMatureHarvest(state)) return false;
                 if (colony.s.amount("food") + 1 > colony.s.capacity("food")) {
                     Worker resident = colony.s.worker(worker.workerId);
-                    if (resident != null) resident.status = "склад еды заполнен";
+                    if (resident != null) colony.s.updateWorker(resident, current -> current.status = "склад еды заполнен");
                     return false;
                 }
                 if (!level.setBlock(pos, resetHarvestBlock(state), 3)) return false;
@@ -676,7 +700,11 @@ public class WFWorker extends PathfinderMob {
             String resource = "wood".equals(order.mode) ? "wood" : "stone".equals(order.mode) ? "stone" : oreResource(state);
             if (resource == null || !colony.s.defs.resourceNames.containsKey(resource)) resource = "stone";
             if (colony.s.amount(resource) + 1 > colony.s.capacity(resource)) {
-                colony.s.worker(worker.workerId).status = "склад заполнен: " + resource;
+                Worker resident = colony.s.worker(worker.workerId);
+                final String resourceName = resource;
+                if (resident != null) {
+                    colony.s.updateWorker(resident, current -> current.status = "склад заполнен: " + resourceName);
+                }
                 return false;
             }
             if (!level.destroyBlock(pos, false, worker)) return false;
@@ -714,7 +742,7 @@ public class WFWorker extends PathfinderMob {
                     Math.floor(colony.s.capacity(resource) - colony.s.amount(resource)));
             if (freeCapacity < logs.size()) {
                 Worker resident = colony.s.worker(worker.workerId);
-                if (resident != null) resident.status = "нужно место на складе для всего дерева (" + logs.size() + " древесины)";
+                if (resident != null) colony.s.updateWorker(resident, current -> current.status = "нужно место на складе для всего дерева (" + logs.size() + " древесины)");
                 return false;
             }
             int felled = 0;

@@ -1,0 +1,19 @@
+{
+  "format": "maqan-worldforge-generation-config/1",
+  "default_seed": 424242,
+  "default_width_px": 512,
+  "default_height_px": 256,
+  "default_blocks_per_pixel": 16,
+  "default_settlement_level": 4,
+  "image_input_dir": "config/worldforge/images",
+  "dimensions": {
+    "example:temperate_world": {
+      "seed": 424242,
+      "settlement_level": 5,
+      "width_px": 1024,
+      "height_px": 512,
+      "blocks_per_pixel": 16,
+      "image": null
+    }
+  }
+}
