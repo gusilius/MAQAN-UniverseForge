@@ -173,7 +173,6 @@ public final class VanillaVillageAdapter {
 
     private static void adopt(ServerLevel level, int x, int z, String structureType) {
         if (SettleMod.DEFS == null || !net.minecraftforge.fml.ModList.get().isLoaded("wf_people")) return;
-        MapData map = EditorManager.dataFor(level);
         CharacterRegistry registry = PeopleMod.registryFor(level);
         if (registry == null) return;
 
@@ -184,9 +183,9 @@ public final class VanillaVillageAdapter {
         String id = "vanilla_village_" + stableLocationId;
         String operation = "minecraft:village:" + dimension + ":" + x + ":" + z;
         boolean created = !SettleMod.COLONIES.containsKey(id);
-        TitleData.Title province = map == null || map.titles == null ? null : map.provinceAt(x, z);
-        TitleData.Realm realm = province == null || map == null || map.titles == null ? null : map.titles.realmOf(province);
-        String settlementName = generatedVillageName(map, realm, id, dimension, x, z);
+        // A physical village is a geographic observation, not evidence of pre-authored
+        // sovereignty. Political ownership is assigned only by the shared emergence pass.
+        String settlementName = generatedVillageName(null, null, id, dimension, x, z);
         Colony colony;
         try {
             colony = SettleMod.foundEmergentInMemory(level.getServer(), dimension, id,
@@ -197,11 +196,10 @@ public final class VanillaVillageAdapter {
             return;
         }
 
-        if (realm != null) colony.realmId = realm.id;
         if (created) {
             WorldForgeApi.postEvent("settlement",
                     "Vanilla village discovered and linked to the UniverseForge settlement registry: " + colony.s.name,
-                    realm == null ? List.of() : List.of(realm.id), WorldForgeApi.clock().worldMinute());
+                    List.of(), WorldForgeApi.clock().worldMinute());
         }
         reconcileResidents(level, colony);
         // Infrastructure scans are queued by ChunkEvent.Load and drained on later ticks;
