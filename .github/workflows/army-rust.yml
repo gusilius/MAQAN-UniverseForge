@@ -1,23 +1,6 @@
 name: WorldForge Army / Troops / Population / Settlements / Trade targeted validation
 
 on:
-  push:
-    branches: [feature/autonomous-world-simulation-engine]
-    paths:
-      - ".github/workflows/army-rust.yml"
-      - "mods/worldforge/wfaddons/wf-army/**"
-      - "mods/worldforge/wfaddons/wf-troops/**"
-      - "mods/worldforge/wfaddons/wf-settlements/**"
-      - "mods/worldforge/wfaddons/wf-war/**"
-      - "mods/worldforge/wfaddons/wf-worldsim/**"
-      - "mods/worldforge/wfaddons/wf-people/**"
-      - "mods/worldforge/wfaddons/tests/**"
-      - "mods/worldforge/wfaddons/tools/build-selected-addons.sh"
-      - "mods/worldforge/wfaddons/tools/build_order.py"
-      - "mods/worldforge/native/worldforge-worldsim/**"
-      - "shared/contracts/population-*.md"
-      - "shared/contracts/population-*.json"
-      - "shared/contracts/worldforge-population-*.md"
   workflow_dispatch:
 
 permissions:
