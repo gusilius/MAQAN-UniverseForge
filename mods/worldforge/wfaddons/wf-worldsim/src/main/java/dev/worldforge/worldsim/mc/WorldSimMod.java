@@ -818,11 +818,28 @@ public final class WorldSimMod {
                         }).count());
             report.addProperty("vassal_contracts", RealmsMod.emergentRealms().stream()
                     .filter(realm -> RealmsMod.POLITICS.vassalage(realm.id) != null).count());
+            Map<String, Long> livingRaceCounts = campaignPeople.all().stream()
+                    .filter(person -> person.alive)
+                    .collect(java.util.stream.Collectors.groupingBy(person -> {
+                        Object raw = person.props.get("origin.race");
+                        String race = raw == null ? "" : String.valueOf(raw).trim();
+                        return race.isBlank() ? "unclassified" : race;
+                    }, TreeMap::new, java.util.stream.Collectors.counting()));
+            long livingPopulation = livingRaceCounts.values().stream().mapToLong(Long::longValue).sum();
+            JsonObject racePopulation = new JsonObject();
+            for (Map.Entry<String, Long> entry : livingRaceCounts.entrySet()) {
+                JsonObject race = new JsonObject();
+                race.addProperty("count", entry.getValue());
+                race.addProperty("share", livingPopulation == 0 ? 0.0 : entry.getValue() / (double) livingPopulation);
+                racePopulation.add(entry.getKey(), race);
+            }
             report.addProperty("origin_race_characters", campaignPeople.all().stream()
                     .filter(person -> person.props.containsKey("origin.race")).count());
-            report.addProperty("origin_distinct_races", campaignPeople.all().stream()
-                    .map(person -> String.valueOf(person.props.getOrDefault("origin.race", "")))
-                    .filter(value -> !value.isBlank()).distinct().count());
+            report.addProperty("origin_distinct_races", livingRaceCounts.keySet().stream()
+                    .filter(value -> !value.equals("unclassified")).count());
+            report.addProperty("living_population_with_race_stats", livingPopulation);
+            report.add("living_population_by_race", racePopulation);
+            report.addProperty("unclassified_living_characters", livingRaceCounts.getOrDefault("unclassified", 0L));
             report.addProperty("origin_class_characters", campaignPeople.all().stream()
                     .filter(person -> person.props.containsKey("origin.class")).count());
             report.addProperty("origin_profession_characters", campaignPeople.all().stream()
