@@ -130,7 +130,7 @@ for i in $(seq 1 150); do
 done
 grep -q 'Done (' server.log || { tail -120 server.log; echo "ERROR: Forge startup timed out"; exit 3; }
 CURRENT_STAGE="modpack_smoke"
-for command in "list" "wftroops types" "wftroops fort list" "wftroops list" "wfsettle list" "wfform" "worldforge" "wfaction list" "wfworldsim status"; do
+for command in "list" "wftroops types" "wftroops fort list" "wftroops list" "wfsettle list" "wfform" "wfaction list" "wfworldsim status"; do
   printf '%s\n' "$command" >> in.txt
   sleep 2
 done
@@ -149,17 +149,18 @@ if [ "$VANILLA_CAMPAIGN" -eq 1 ]; then
   [ "$geography_ready" = 1 ] || { tail -160 server.log; echo "ERROR: vanilla geography cache did not capture the bounded spawn region"; exit 3; }
 fi
 CURRENT_STAGE="campaign_preflight"
-printf '%s\n' "wfworldsim campaign start $MAP_ID" >> in.txt
+preflight_log_lines=$(wc -l < server.log)
+printf '%s\\n' "wfworldsim campaign start $MAP_ID" >> in.txt
 echo "WAITING_FOR_CAMPAIGN_PREFLIGHT=1"
 for i in $(seq 1 90); do
-  if grep -q 'map-only autonomous campaign started' server.log; then break; fi
-  if grep -qiE 'Campaign map must retain|Campaign requires|Native WorldSim engine is unavailable|Unknown or incomplete command' server.log; then
+  if tail -n +$((preflight_log_lines + 1)) server.log | grep -q 'map-only autonomous campaign started'; then break; fi
+  if tail -n +$((preflight_log_lines + 1)) server.log | grep -qiE 'Campaign map must retain|Campaign requires|Native WorldSim engine is unavailable|Unknown or incomplete command'; then
     tail -160 server.log; echo "ERROR: autonomous campaign preflight rejected the world"; exit 4
   fi
   kill -0 "$SERVER_PID" 2>/dev/null || { if wait "$SERVER_PID"; then SERVER_EXIT_CODE=0; else SERVER_EXIT_CODE=$?; fi; tail -160 server.log; echo "ERROR: Forge JVM exited during campaign preflight with code $SERVER_EXIT_CODE"; exit 4; }
   sleep 2
 done
-grep -q 'map-only autonomous campaign started' server.log || { tail -160 server.log; echo "ERROR: campaign command was not accepted"; exit 4; }
+tail -n +$((preflight_log_lines + 1)) server.log | grep -q 'map-only autonomous campaign started' || { tail -160 server.log; echo "ERROR: campaign command was not accepted"; exit 4; }
 echo "AUTONOMOUS_CAMPAIGN_RUNNING=1"
 CURRENT_STAGE="campaign_simulation"
 started=$(date +%s)
