@@ -56,6 +56,31 @@ public final class ResidentTaskGraphTest {
             bounded.fromJson("{\"format\":\"wf-resident-task-graph/1\",\"next\":2,\"receipts\":[{\"id\":1,\"stage\":\"UNKNOWN\",\"building\":1,\"worker\":1,\"resource\":\"wood\",\"quantity\":1,\"parent\":0,\"time\":1}],\"local\":{},\"stored\":{}}");
         } catch (RuntimeException expected) { rejectedCorrupt = true; }
         check(rejectedCorrupt, "corrupt receipt stages fail closed instead of being silently discarded");
+        ResidentTaskGraph indexed = new ResidentTaskGraph();
+        indexed.extract(1, 1, "wood", 10, 1);
+        indexed.consume(ResidentTaskGraph.Stage.PROCESSED, 1, 1, "wood", 2, 2);
+        ResidentTaskGraph.Receipt firstOutput = indexed.produce(1, 1, "planks", 2, 2.5);
+        indexed.extract(2, 2, "stone", 10, 3);
+        indexed.consume(ResidentTaskGraph.Stage.PROCESSED, 2, 2, "stone", 3, 4);
+        ResidentTaskGraph.Receipt secondOutput = indexed.produce(2, 2, "bricks", 3, 4.5);
+        ResidentTaskGraph.Receipt laterOutput = indexed.produce(1, 1, "planks", 1, 5);
+        check(firstOutput.parentReceiptId() > 0 && secondOutput.parentReceiptId() > 0
+                        && laterOutput.parentReceiptId() == firstOutput.parentReceiptId(),
+                "latest processed receipt is indexed independently per building");
+        check(indexed.count(ResidentTaskGraph.Stage.PRODUCED) == 3
+                        && indexed.count(ResidentTaskGraph.Stage.PROCESSED) == 2,
+                "stage counters return exact counts without scanning receipt history");
+        ResidentTaskGraph indexedReload = new ResidentTaskGraph();
+        indexedReload.fromJson(indexed.toJson());
+        ResidentTaskGraph.Receipt afterReload = indexedReload.produce(1, 1, "planks", 1, 6);
+        check(afterReload.parentReceiptId() == firstOutput.parentReceiptId()
+                        && indexedReload.count(ResidentTaskGraph.Stage.PRODUCED) == 4,
+                "receipt indexes rebuild consistently after save and reload");
+        ResidentTaskGraph boundedHistory = new ResidentTaskGraph();
+        for (int i = 0; i < 5_100; i++) boundedHistory.extract(i % 7, i % 13, "wood", 1, i + 1);
+        check(boundedHistory.receipts().size() == 5_000
+                        && boundedHistory.count(ResidentTaskGraph.Stage.EXTRACTED) == 5_000,
+                "bounded receipt history keeps O(1) counters correct after eviction");
         if (failures > 0) throw new AssertionError(failures + " resident task graph tests failed");
     }
 }
