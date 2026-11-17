@@ -1317,10 +1317,19 @@ public final class WorldSimMod {
                             settlementBindingsChanged = true;
                         }
                     }
-                    if (colony != null && colony.sourceMapId.isBlank()
-                            && colony.s != null && (colony.s.name == null || colony.s.name.isBlank()
-                                || colony.s.name.equals(colony.s.id))) {
-                        colony.s.name = emergentSettlementName(source, bandId, residents);
+                    if (colony != null && colony.sourceMapId.isBlank() && colony.s != null) {
+                        String currentSettlementName = colony.s.name == null ? "" : colony.s.name.trim();
+                        String normalizedSettlementName = currentSettlementName.replaceAll("\\s+", " ")
+                                .toLowerCase(Locale.ROOT);
+                        boolean duplicateSettlementName = SettleMod.COLONIES.values().stream()
+                                .anyMatch(other -> other != null && other != colony && other.s != null
+                                        && other.s.name != null
+                                        && other.s.name.trim().replaceAll("\\s+", " ")
+                                                .equalsIgnoreCase(normalizedSettlementName));
+                        if (currentSettlementName.isBlank() || currentSettlementName.equals(colony.s.id)
+                                || duplicateSettlementName) {
+                            colony.s.name = emergentSettlementName(source, bandId, residents);
+                        }
                     }
                     List<String> residentIds = residents.stream().filter(person -> person.alive)
                             .map(person -> person.globalId).toList();
