@@ -404,6 +404,27 @@ public class SettleMod {
 
     public static Colony colony(String id) { return COLONIES.get(id); }
 
+    /** Finds an already-adopted vanilla village near a generated founding site. */
+    public static Colony nearbyVanillaVillage(String dimension, int x, int z, int radius) {
+        if (dimension == null || dimension.isBlank() || radius < 0) return null;
+        long limit = (long) radius * radius;
+        return COLONIES.values().stream()
+                .filter(colony -> colony != null && dimension.equals(colony.dim)
+                        && colony.genesisOperationId != null
+                        && colony.genesisOperationId.startsWith("minecraft:village:"))
+                .filter(colony -> {
+                    long dx = (long) colony.cx - x, dz = (long) colony.cz - z;
+                    return dx * dx + dz * dz <= limit;
+                })
+                .min(java.util.Comparator
+                        .comparingLong((Colony colony) -> {
+                            long dx = (long) colony.cx - x, dz = (long) colony.cz - z;
+                            return dx * dx + dz * dz;
+                        })
+                        .thenComparing(colony -> colony.s.id))
+                .orElse(null);
+    }
+
     private record PersonBinding(CharacterRegistry registry, Character character) {}
 
     /** Resolve a resident body to the Character and the persistence partition that actually owns that person. */

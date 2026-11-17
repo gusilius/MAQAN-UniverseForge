@@ -134,7 +134,7 @@ fn bootstrap(map: &GeographicMap, seed: u64, bands: &mut Vec<EmergentBand>, even
     if map.cells.is_empty() { return; }
     let spacing = map_scale(map);
     let mut candidates = map.cells.iter()
-        .filter(|c| c.land && c.suitability >= 48 && c.owner_realm_id.trim().is_empty())
+        .filter(|c| c.land && c.suitability >= 48)
         .collect::<Vec<_>>();
     candidates.sort_by(|a,b| {
         b.suitability.cmp(&a.suitability)
@@ -202,10 +202,10 @@ fn maybe_form_polity(map: &GeographicMap, cells: &CellIndex<'_>, seed: u64, year
     // Legacy/persisted bands are rechecked against the live political raster before
     // they can become sovereign. A settlement on another realm's land is not a
     // legal seed for a new independent polity.
+    // Sovereignty is generated downstream; geographic viability alone gates settlement.
     let mut settled = bands.iter().filter(|b| {
         b.map_id == map.map_id && b.settled
-            && cell_at(cells, b.x, b.z).is_some_and(|cell|
-                cell.land && cell.owner_realm_id.trim().is_empty())
+            && cell_at(cells, b.x, b.z).is_some_and(|cell| cell.land)
     }).collect::<Vec<_>>();
     settled.sort_by(|a,b| a.id.cmp(&b.id));
     for anchor in &settled {
@@ -242,33 +242,12 @@ fn maybe_form_polity(map: &GeographicMap, cells: &CellIndex<'_>, seed: u64, year
 }
 
 fn update_polities(seed: u64, year: u64, bands: &[EmergentBand],
-    cells_by_map: &HashMap<&str, CellIndex<'_>>,
+    _cells_by_map: &HashMap<&str, CellIndex<'_>>,
     polities: &mut Vec<EmergentPolity>, events: &mut Vec<EmergenceEvent>) {
-    // This index is scoped to this yearly reduction and points into the canonical bands.
+    // Input-map ownership is not authoritative. Political changes are handled only
+    // by generated realm/statecraft systems after world formation.
     let bands_by_id: HashMap<&str, &EmergentBand> = bands.iter().map(|band| (band.id.as_str(), band)).collect();
     for polity in polities.iter_mut() {
-        // If a province is transferred to an established realm, its settlement
-        // leaves the emergent polity's sovereign core. Existing physical colonies
-        // remain and are reconciled by the canonical map-ownership listener.
-        if let Some(cells) = cells_by_map.get(polity.map_id.as_str()) {
-            let own_realm_id = format!("emergent-{}", polity.id);
-            let absorbed = polity.settlement_ids.iter().filter_map(|settlement_id| {
-                let band = bands_by_id.get(settlement_id.as_str()).copied()?;
-                let cell = cell_at(cells, band.x, band.z)?;
-                let owner = cell.owner_realm_id.trim();
-                if !owner.is_empty() && owner != own_realm_id.as_str() {
-                    Some((settlement_id.clone(), owner.to_owned()))
-                } else { None }
-            }).collect::<Vec<_>>();
-            for (settlement_id, owner) in absorbed {
-                polity.settlement_ids.retain(|id| id != &settlement_id);
-                events.push(EmergenceEvent {
-                    year, kind: "settlement_absorbed".into(), subject_id: settlement_id.clone(),
-                    text: format!("Settlement {} is brought under the authority of {} after a territorial change",
-                        settlement_id, owner),
-                });
-            }
-        }
         // Resolve only this polity's canonical settlement IDs. Scanning every band
         // and linearly searching settlement_ids made this O(all_bands × polity_members)
         // for every polity on every simulated year.
@@ -421,7 +400,7 @@ mod tests {
     }
 
     #[test]
-    fn occupied_territory_cannot_bootstrap_or_form_a_new_polity() {
+    fn political_overlay_does_not_block_geographic_emergence() {
         let mut geography = map();
         for cell in &mut geography.cells {
             cell.owner_realm_id = "established-kingdom".into();
@@ -430,23 +409,23 @@ mod tests {
         let mut bands = Vec::new();
         let mut events = Vec::new();
         bootstrap(&geography, 8128, &mut bands, &mut events);
-        assert!(bands.is_empty(), "owned provinces must not generate new autonomous founding bands");
+        assert!(!bands.is_empty(), "political overlays must not suppress viable founding sites");
 
         let make_band = |index: u32| EmergentBand {
             id: format!("legacy-settlement-{index}"), map_id: "planetos".into(),
-            x: 10 + index * 4, z: 10, population: 30, food_reserve: 4,
+            x: 10 + index * 2, z: 10, population: 30, food_reserve: 4,
             settled: true, founded_year: 20, hardship_years: 0, origin_year: 0,
         };
         let legacy_bands = vec![make_band(0), make_band(1), make_band(2), make_band(3)];
         let mut polities = Vec::new();
         let cells = index_cells(&geography);
         maybe_form_polity(&geography, &cells, 8128, 41, &legacy_bands, &mut polities, &mut events);
-        assert!(polities.is_empty(), "persisted settlements inside an established realm cannot declare new statehood");
-        assert!(events.is_empty(), "blocked founding must not emit a false state-founding event");
+        assert_eq!(polities.len(), 1, "statehood depends on viable settlement clusters, not image sovereignty");
+        assert!(events.iter().any(|event| event.kind == "state_founded"));
     }
 
     #[test]
-    fn transferred_settlement_leaves_emergent_polity_core() {
+    fn political_overlay_cannot_absorb_an_emergent_settlement() {
         let mut geography = map();
         let occupied = geography.cells.iter_mut().find(|cell| cell.x == 10 && cell.z == 10).unwrap();
         occupied.owner_realm_id = "established-kingdom".into();
@@ -469,10 +448,9 @@ mod tests {
             maps.iter().map(|map| (map.map_id.as_str(), index_cells(map))).collect();
         update_polities(8128, 41, &bands, &cells_by_map, &mut polities, &mut events);
         assert_eq!(polities.len(), 1);
-        assert_eq!(polities[0].settlement_ids, vec!["remaining".to_string()]);
-        assert_eq!(polities[0].population, 40);
-        assert!(events.iter().any(|event| event.kind == "settlement_absorbed"
-            && event.subject_id == "transferred"));
+        assert_eq!(polities[0].settlement_ids, vec!["transferred".to_string(), "remaining".to_string()]);
+        assert_eq!(polities[0].population, 70);
+        assert!(!events.iter().any(|event| event.kind == "settlement_absorbed"));
     }
 
     #[test]

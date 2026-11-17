@@ -8,12 +8,10 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Deterministic geographic evidence extracted from a WorldForge map package.
- *
- * This class reads only the canonical realm owner at each sampled province pixel
- * as a territorial exclusion signal. It does not copy titles or political entities
- * into the emergence model. Climate and fertility are biome-derived proxies because
- * the .worldmap format has no separate climate or resource raster.
+ * Deterministic natural-geography evidence extracted from a WorldForge map package.
+ * Political/title layers are deliberately not read: an image map is a terrain source,
+ * not a pre-existing sovereignty source. Climate and fertility are biome-derived
+ * proxies because .worldmap has no separate climate or resource raster.
  */
 public final class MapGeography {
     private static final int MAX_SAMPLES = 4096;
@@ -49,13 +47,8 @@ public final class MapGeography {
                 cell.put("river", river);
                 cell.put("land", isLand);
                 cell.put("suitability", suitability);
-                String ownerRealmId = "";
-                if (map.titles != null) {
-                    var province = map.titles.provinceAtPixelPublic(x, z);
-                    var owner = province == null ? null : map.titles.realmOf(province);
-                    if (owner != null && owner.id != null) ownerRealmId = owner.id;
-                }
-                cell.put("owner_realm_id", ownerRealmId);
+                // Keep the legacy schema field empty: sovereignty is generated downstream.
+                cell.put("owner_realm_id", "");
                 cell.put("climate_proxy", climateProxy(biome));
                 cells.add(cell);
             }
@@ -69,8 +62,8 @@ public final class MapGeography {
         result.put("height_px", map.h);
         result.put("blocks_per_pixel_milli", Math.max(1L, Math.round(map.bpp * 1000.0)));
         result.put("political_layers_present", map.hasPoliticalLayers());
-        result.put("political_layers_ignored", false);
-        result.put("political_ownership_included", true);
+        result.put("political_layers_ignored", true);
+        result.put("political_ownership_included", false);
         result.put("sample_stride", stride);
         result.put("sampled_cells", cells.size());
         result.put("land_samples", land);

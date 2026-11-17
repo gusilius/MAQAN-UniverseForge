@@ -1152,28 +1152,28 @@ public final class WorldSimMod {
                 }
                 if (bandProgress.settlementReconciled) continue;
 
-                String settlementId = "emg_" + bandId;
+                String settlementId = settlementIdForBand(band);
                 try {
                     int[] position = source.blockPosition(band.get("x").getAsInt(), band.get("z").getAsInt());
                     int x = position[0], z = position[1];
-                    if (SettleMod.colony(settlementId) == null && source.map != null) {
-                        TitleData.Title province = source.map.provinceAt(x, z);
-                        TitleData.Realm owner = province == null || source.map.titles == null
-                                ? null : source.map.titles.realmOf(province);
-                        if (owner != null) {
-                            band.addProperty("territory_blocked_by", owner.id);
-                            LOGGER.info("wf_worldsim: deferred legacy settlement {} on territory owned by {}",
-                                    settlementId, owner.id);
-                            bandProgress.settlementReconciled = true;
-                            continue;
-                        }
-                    }
                     String display = "Settlement " + bandId.substring(0, Math.min(8, bandId.length()));
                     String settlementDimension = source.settlementDimension(server);
                     if (settlementDimension == null || settlementDimension.isBlank())
                         throw new IllegalStateException("No loaded physical dimension for emergence source " + source.id);
-                    Colony colony = SettleMod.foundEmergentInMemory(server,
-                            settlementDimension, settlementId, display, x, z, "worldsim:settlement:" + bandId);
+                    Colony colony = SettleMod.colony(settlementId);
+                    if (colony == null) {
+                        // Adopt an existing vanilla village instead of materializing a duplicate.
+                        colony = SettleMod.nearbyVanillaVillage(settlementDimension, x, z, 64);
+                        if (colony != null) {
+                            settlementId = colony.s.id;
+                            band.addProperty("physical_settlement_id", settlementId);
+                        } else {
+                            settlementId = "emg_" + bandId;
+                            colony = SettleMod.foundEmergentInMemory(server,
+                                    settlementDimension, settlementId, display, x, z, "worldsim:settlement:" + bandId);
+                            band.addProperty("physical_settlement_id", settlementId);
+                        }
+                    }
                     List<String> residentIds = residents.stream().filter(person -> person.alive)
                             .map(person -> person.globalId).toList();
                     if (!SettleMod.replaceCanonicalResidentsInMemory(colony.s.id, residentIds))
@@ -1225,9 +1225,24 @@ public final class WorldSimMod {
         return complete;
     }
 
+    private static String settlementIdForBand(JsonObject band) {
+        if (band != null && band.has("physical_settlement_id") && !band.get("physical_settlement_id").isJsonNull()) {
+            String id = band.get("physical_settlement_id").getAsString();
+            if (!id.isBlank()) return id;
+        }
+        return "emg_" + (band != null && band.has("id") ? band.get("id").getAsString() : "unknown");
+    }
+
+    private static String settlementIdForBand(JsonArray bands, String bandId) {
+        if (bands != null) for (var item : bands) {
+            if (!item.isJsonObject()) continue;
+            JsonObject band = item.getAsJsonObject();
+            if (bandId.equals(band.has("id") ? band.get("id").getAsString() : "")) return settlementIdForBand(band);
+        }
+        return "emg_" + bandId;
+    }
+
     private static Set<String> emergentNeighbors(JsonObject polity, JsonArray polities, JsonArray bands, EmergenceSource source) {
-        if (source.map != null)
-            return emergentNeighbors(polity, polities, bands, source.map);
         Set<String> own = new HashSet<>();
         for (var id : polity.getAsJsonArray("settlement_ids")) own.add(id.getAsString());
         Map<String, JsonObject> samples = new HashMap<>();
@@ -1275,55 +1290,58 @@ public final class WorldSimMod {
     }
 
     private static int emergentProvinceCount(Set<String> bandIds, JsonArray bands, EmergenceSource source) {
-        return source.map == null ? 0 : emergentProvinceCount(bandIds, bands, source.map);
+        if (bandIds == null || bandIds.isEmpty() || bands == null) return 0;
+        Set<String> cells = new HashSet<>();
+        for (var item : bands) if (item.isJsonObject()) {
+            JsonObject band = item.getAsJsonObject();
+            if (!source.id.equals(band.get("map_id").getAsString()) || !bandIds.contains(band.get("id").getAsString())) continue;
+            int[] p = source.blockPosition(band.get("x").getAsInt(), band.get("z").getAsInt());
+            cells.add(Math.floorDiv(p[0], 512) + ":" + Math.floorDiv(p[1], 512));
+        }
+        return cells.size();
     }
 
-    private static Set<String> emergentNeighbors(JsonObject polity, JsonArray polities, JsonArray bands, MapData map) {
+    private static int emergentRegionCount(Set<String> bandIds, JsonArray bands, EmergenceSource source) {
+        if (bandIds == null || bandIds.isEmpty() || bands == null) return 0;
+        Set<String> cells = new HashSet<>();
+        for (var item : bands) if (item.isJsonObject()) {
+            JsonObject band = item.getAsJsonObject();
+            if (!source.id.equals(band.get("map_id").getAsString()) || !bandIds.contains(band.get("id").getAsString())) continue;
+            int[] p = source.blockPosition(band.get("x").getAsInt(), band.get("z").getAsInt());
+            cells.add(Math.floorDiv(p[0], 2048) + ":" + Math.floorDiv(p[1], 2048));
+        }
+        return cells.size();
+    }
+
+    /** Neighbours come from physical proximity, never imported political borders. */
+    private static Set<String> emergentNeighbors(JsonObject polity, JsonArray polities, JsonArray bands, EmergenceSource source) {
         Set<String> own = new HashSet<>();
         if (polity.has("settlement_ids") && polity.get("settlement_ids").isJsonArray())
             for (var id : polity.getAsJsonArray("settlement_ids")) own.add(id.getAsString());
         Map<String, JsonObject> samples = new HashMap<>();
         for (var item : bands) if (item.isJsonObject()) {
             JsonObject band = item.getAsJsonObject();
-            if (map.name.equals(band.get("map_id").getAsString())) samples.put(band.get("id").getAsString(), band);
+            if (source.id.equals(band.get("map_id").getAsString())) samples.put(band.get("id").getAsString(), band);
         }
-        double maxDistanceSq = Math.pow(Math.min(map.w, map.h) / 4.0, 2.0);
+        double radiusBlocks = source.map == null ? 64.0
+                : Math.max(64.0, Math.min(source.width, source.height) * source.blocksPerPixel / 4.0);
+        double maxDistanceSq = radiusBlocks * radiusBlocks;
         Set<String> neighbors = new TreeSet<>();
-        // Emergent settlement clusters inherit the real political borders of the map
-        // provinces they occupy or touch. This bridges new settlements into authored
-        // countries without inventing raster provinces or a parallel territory registry.
-        for (String bandId : own) {
-            JsonObject band = samples.get(bandId);
-            if (band == null) continue;
-            int px = Math.max(0, Math.min(map.w - 1, band.get("x").getAsInt()));
-            int pz = Math.max(0, Math.min(map.h - 1, band.get("z").getAsInt()));
-            TitleData.Title province = map.titles == null ? null : map.titles.provinceAtPixelPublic(px, pz);
-            if (province == null || map.titles == null) continue;
-            TitleData.Realm occupying = map.titles.realmOf(province);
-            if (occupying != null && !occupying.id.equals("emergent-" + polity.get("id").getAsString()))
-                neighbors.add(occupying.id);
-            for (int adjacentProvinceId : province.neighbors) {
-                TitleData.Title adjacentProvince = map.titles.get(adjacentProvinceId);
-                TitleData.Realm adjacentRealm = adjacentProvince == null ? null : map.titles.realmOf(adjacentProvince);
-                if (adjacentRealm != null && !adjacentRealm.id.equals("emergent-" + polity.get("id").getAsString()))
-                    neighbors.add(adjacentRealm.id);
-            }
-        }
         for (var item : polities) {
             if (!item.isJsonObject()) continue;
             JsonObject other = item.getAsJsonObject();
             String otherId = other.get("id").getAsString();
-            if (otherId.equals(polity.get("id").getAsString()) || !map.name.equals(other.get("map_id").getAsString())) continue;
-            if (!other.has("settlement_ids") || !other.get("settlement_ids").isJsonArray()) continue;
+            if (otherId.equals(polity.get("id").getAsString()) || !source.id.equals(other.get("map_id").getAsString())) continue;
             boolean adjacent = false;
-            for (var a : polity.getAsJsonArray("settlement_ids")) {
-                JsonObject first = samples.get(a.getAsString());
+            for (String firstId : own) {
+                JsonObject first = samples.get(firstId);
                 if (first == null) continue;
-                for (var b : other.getAsJsonArray("settlement_ids")) {
-                    JsonObject second = samples.get(b.getAsString());
+                int[] a = source.blockPosition(first.get("x").getAsInt(), first.get("z").getAsInt());
+                for (var secondId : other.getAsJsonArray("settlement_ids")) {
+                    JsonObject second = samples.get(secondId.getAsString());
                     if (second == null) continue;
-                    double dx = first.get("x").getAsDouble() - second.get("x").getAsDouble();
-                    double dz = first.get("z").getAsDouble() - second.get("z").getAsDouble();
+                    int[] b = source.blockPosition(second.get("x").getAsInt(), second.get("z").getAsInt());
+                    double dx = a[0] - b[0], dz = a[1] - b[1];
                     if (dx * dx + dz * dz <= maxDistanceSq) { adjacent = true; break; }
                 }
                 if (adjacent) break;
@@ -1331,21 +1349,6 @@ public final class WorldSimMod {
             if (adjacent) neighbors.add("emergent-" + otherId);
         }
         return neighbors;
-    }
-
-    /** Counts distinct canonical map provinces occupied by the polity's settlement network. */
-    private static int emergentProvinceCount(Set<String> bandIds, JsonArray bands, MapData map) {
-        if (bandIds == null || bandIds.isEmpty() || bands == null || map == null || map.titles == null) return 0;
-        Set<Integer> provinceIds = new HashSet<>();
-        for (var item : bands) if (item.isJsonObject()) {
-            JsonObject band = item.getAsJsonObject();
-            if (!map.name.equals(band.get("map_id").getAsString()) || !bandIds.contains(band.get("id").getAsString())) continue;
-            int x = Math.max(0, Math.min(map.w - 1, band.get("x").getAsInt()));
-            int z = Math.max(0, Math.min(map.h - 1, band.get("z").getAsInt()));
-            TitleData.Title province = map.titles.provinceAtPixelPublic(x, z);
-            if (province != null) provinceIds.add(province.id);
-        }
-        return provinceIds.size();
     }
 
     private static String emergentBiomeSummary(Set<String> bandIds, JsonArray bands, MapData map) {
@@ -1464,6 +1467,9 @@ public final class WorldSimMod {
                         bandIds.size(), neighbors, biomes, emergentRaceShares(members));
                 initialProjection.props.put("emergence.province_count", emergentProvinceCount(
                         bandIds, state.getAsJsonArray("bands"), source));
+                initialProjection.props.put("emergence.region_count", emergentRegionCount(
+                        bandIds, state.getAsJsonArray("bands"), source));
+                initialProjection.props.put("emergence.territory_grid", "512-block-provinces/2048-block-regions");
                 if (members.isEmpty()) continue;
                 if (polityName.equals(polityId + " Confederation") || polityName.startsWith("band_")) {
                     String generatedName = emergentRealmName(polityId, members, polityName);
@@ -1620,7 +1626,7 @@ public final class WorldSimMod {
                 List<String> physicalSettlementNames = new ArrayList<>();
                 List<String> physicalSettlementCenters = new ArrayList<>();
                 for (String bandId : bandIds) {
-                    String settlementId = "emg_" + bandId;
+                    String settlementId = settlementIdForBand(state.getAsJsonArray("bands"), bandId);
                     Colony physical = SettleMod.colony(settlementId);
                     if (physical == null) continue;
                     if (!realmId.equals(SettleMod.realmOf(physical))
@@ -1644,7 +1650,7 @@ public final class WorldSimMod {
                 politicalActor.props.put("emergence.settlement_centers", settlementCentersProjection);
                 politicalActor.props.put("emergence.ruler_global_id", ruler.globalId);
                 for (String bandId : bandIds) {
-                    String settlementId = "emg_" + bandId;
+                    String settlementId = settlementIdForBand(state.getAsJsonArray("bands"), bandId);
                     if (SettleMod.colony(settlementId) != null
                             && !SettleMod.bindEmergentRealmInMemory(settlementId, realmId))
                         LOGGER.error("wf_worldsim: could not bind settlement {} to emergent polity {}",
@@ -1662,10 +1668,13 @@ public final class WorldSimMod {
             }
             // Fill the ordinary council, steward, marshal, chancellor and household offices
             // for newly emerged realms through the existing deterministic Courts.ensure pipeline.
-            int newCourtPositions = source.map == null || source.map.titles == null ? 0
-                    : dev.worldforge.people.Courts.ensure(source.map.titles,
+            int newCourtPositions = dev.worldforge.people.Courts.ensureRealm(
+                    politicalActor, registry, PeopleMod.ROLES, PeopleMod.NAMES, source.seed, year);
+            if (source.map != null && source.map.titles != null) {
+                newCourtPositions += dev.worldforge.people.Courts.ensure(source.map.titles,
                         EditorManager.editorFor(source.map), registry, PeopleMod.ROLES, PeopleMod.NAMES,
                         source.seed, year);
+            }
             if (newCourtPositions > 0) changed = true;
             if (changed) {
                 dev.worldforge.people.Character durable = registry.all().stream()

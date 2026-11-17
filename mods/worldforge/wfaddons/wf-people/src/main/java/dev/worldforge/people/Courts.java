@@ -30,6 +30,41 @@ public final class Courts {
         }
     }
 
+    /** Fills realm-level offices for generated polities without requiring map titles. */
+    public static int ensureRealm(TitleData.Realm realm, CharacterRegistry reg,
+                                  RoleDefs defs, NameBank names, long seed, int year) {
+        if (realm == null || reg == null || defs == null || names == null) return 0;
+        try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
+            TerritorialIdentity.syncNameHierarchy(names);
+            String place = realmPlace(realm.id);
+            String race = text(realm.props.get("race"));
+            if (race.isBlank()) race = dominantRace(realm.props.get("races"));
+            String culture = text(realm.props.get("culture"));
+            if (culture.isBlank()) culture = names.culture(race);
+            Map<String, Integer> holders = new HashMap<>();
+            Set<String> usedHouses = new HashSet<>();
+            for (Character character : reg.all()) {
+                if (!character.house.isEmpty()) usedHouses.add(character.house);
+                if (!character.alive) continue;
+                for (Character.Post post : character.posts)
+                    holders.merge(holderKey(post.role, post.place), 1, Integer::sum);
+            }
+            int created = 0;
+            for (Role role : defs.all()) {
+                if (!"realm".equals(role.per)) continue;
+                String key = holderKey(role.id, place);
+                int have = holders.getOrDefault(key, 0);
+                for (int i = have; i < role.count; i++) {
+                    create(null, null, reg, defs, names, role, place, culture, realm.id, race,
+                            new Random(mix(seed, place, role.id, i)), year, usedHouses);
+                    holders.merge(key, 1, Integer::sum);
+                    created++;
+                }
+            }
+            return created;
+        }
+    }
+
     private static int ensureBatched(TitleData d, TitleEditor ed, CharacterRegistry reg, RoleDefs defs, NameBank names, long seed, int year) {
         TerritorialIdentity.syncNameHierarchy(names);
         int created = 0;
@@ -186,7 +221,7 @@ public final class Courts {
         String house = role.ruler ? unusedHouse(pool, r, usedHouses) : role.noble ? pick(pool.houses, r) : "";
         if (!house.isEmpty()) usedHouses.add(house);
         int age = role.ruler ? 25 + r.nextInt(31) : 20 + r.nextInt(41);
-        TitleData.Realm realm = place.startsWith("realm:") ? d.realms.get(place.substring(6)) : null;
+        TitleData.Realm realm = d != null && place.startsWith("realm:") ? d.realms.get(place.substring(6)) : null;
         String preset = realm != null && role.ruler && realm.ruler != null && !realm.ruler.isBlank() ? realm.ruler : null;   // правитель, заданный вручную, остаётся
         Character c = reg.create(preset != null ? preset : first, house, culture, male ? "m" : "f", year - age);
         if (!characterRace.isBlank()) c.props.put("origin.race", characterRace);
