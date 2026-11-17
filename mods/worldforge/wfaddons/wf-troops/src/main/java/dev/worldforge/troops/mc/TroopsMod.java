@@ -334,6 +334,7 @@ public class TroopsMod {
             return;
         }
         LIVE.put(entityId, t);
+        dev.worldforge.mod.MaqanPerformanceTelemetry.troopSpawned();
         if (!t.deferCharacterBinding) syncPerson(t); // legacy saved entities migrate once; new recruits bind after payment commits
         if (SQUADS.squadOf(entityId) == null) {
             Squads.Squad squad = SQUADS.create(t.ownerId(), null, List.of(entityId));
@@ -641,7 +642,7 @@ public class TroopsMod {
             person.props.remove("wf_veteran_rank");
         }
         String id = troop.getUUID().toString();
-        LIVE.remove(id);
+        if (LIVE.remove(id) != null) dev.worldforge.mod.MaqanPerformanceTelemetry.troopDespawned();
         SQUADS.remove(id);
         troop.discard();
     }
