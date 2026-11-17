@@ -373,7 +373,7 @@ if int(report.get("preauthored_map_realms", -1)) != 0 or int(report.get("preauth
 if report.get("map_geography_only") is not True:
     raise SystemExit("Loaded image map exposes political layers instead of neutral geography")
 target_generations = int(report.get("target_dynasty_generations", 0))
-if report.get("status") != "PASS" or target_generations < 1:
+if report.get("status") != "PASS" or target_generations < 4:
     raise SystemExit("Campaign report does not confirm the configured canonical ruler-generation target")
 if int(report.get("canonical_ruler_generations_verified", 0)) != int(report.get("stable_states", 0)):
     raise SystemExit("Not every surviving state has the configured number of verified canonical ruler generations")
