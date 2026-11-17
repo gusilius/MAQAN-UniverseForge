@@ -2067,7 +2067,8 @@ public final class WorldSimMod {
                     RealmsMod.POLITICS.addDynastyMember(dynastyId, ruler.globalId);
                 }
                 for (dev.worldforge.people.Character member : members) {
-                    if (member.house != null && member.house.equals(dynastyId))
+                    if (member.house != null && !member.house.isBlank()
+                            && member.house.equals(ruler.house))
                         RealmsMod.POLITICS.addDynastyMember(dynastyId, member.globalId);
                 }
                 TitleData.Realm politicalActor = RealmsMod.registerEmergentRealm(realmId,
