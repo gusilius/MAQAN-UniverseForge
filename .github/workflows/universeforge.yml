@@ -53,7 +53,7 @@ jobs:
           node-version: "20"
 
       - name: Install virtual player client
-        run: npm install --no-save --prefix mods/worldforge/wfaddons mineflayer@4
+        run: npm install --no-save --package-lock=false --prefix mods/worldforge/wfaddons mineflayer@4
 
       - name: Install image-to-worldmap dependencies
         shell: pwsh
