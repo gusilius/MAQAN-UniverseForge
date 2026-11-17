@@ -3,7 +3,7 @@ import unittest
 from image_worldgen import (
     allocate_counts, select_independent_islands, aggregate_realm_regions,
     classify_realm_scale, select_wilderness_mask, SETTLEMENT_PROFILES, partition,
-    create_test_image, convert_image, apply_province_aligned_wilderness,
+    create_test_image, convert_image, apply_province_aligned_wilderness, validate_package,
 )
 
 
