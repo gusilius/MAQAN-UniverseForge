@@ -254,6 +254,11 @@ print("AUTONOMOUS_CAMPAIGN_STATUS=PASS")
 for key in ("map", "physical_world_dimension", "elapsed_years", "stable_states", "characters", "settlements", "materialized_settlements", "completed_buildings", "canonical_ruler_generations_verified", "origin_race_characters", "origin_distinct_races", "origin_class_characters", "origin_profession_characters", "living_population_with_race_stats", "unclassified_living_characters", "duplicate_emergent_realm_names", "duplicate_settlement_names", "duplicate_dynasty_names", "duplicate_family_house_names", "duplicate_statecraft_title_names", "world_events", "chronicle_entries"):
     print(f"AUTONOMOUS_CAMPAIGN_{key.upper()}={report.get(key)}")
 print(f"AUTONOMOUS_CAMPAIGN_ADDON_JARS={len(inventory)}")
+for race, values in sorted(race_distribution.items()):
+    print(f"AUTONOMOUS_CAMPAIGN_RACE={race};count={int(values.get('count', 0))};share={float(values.get('share', 0.0)):.6f}")
+for polity_id, distribution in sorted(polity_races.items()):
+    for race, values in sorted(distribution.items()):
+        print(f"AUTONOMOUS_CAMPAIGN_POLITY_RACE={polity_id};race={race};count={int(values.get('count', 0))};share={float(values.get('share', 0.0)):.6f}")
 PY
 # Reopen the exact same save with the exact same modpack and verify durable world state.
 CURRENT_STAGE="save_reload_validation"
