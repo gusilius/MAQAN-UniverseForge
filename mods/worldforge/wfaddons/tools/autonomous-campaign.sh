@@ -288,10 +288,20 @@ if [ -s "world/worldforge/autonomous-campaign/performance-profile.json" ]; then
   cp "world/worldforge/autonomous-campaign/performance-profile.json" "$OUTPUT/performance-profile.json"
 fi
 cp server.log "$OUTPUT/server.log"
-python3 - "$OUTPUT/campaign-report.json" "$OUTPUT/addon-inventory.json" "$JARS" <<'PY'
+python3 - "$OUTPUT/campaign-report.json" "$OUTPUT/addon-inventory.json" "$JARS" "$MAP_ID" "$VANILLA_CAMPAIGN" <<'PY'
 import json, pathlib, sys
 report_path, inventory_path, jars_dir = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3])
+expected_map_id, vanilla_campaign = sys.argv[4], sys.argv[5] == "1"
 report = json.loads(report_path.read_text(encoding="utf-8"))
+expected_image_maps = 0 if vanilla_campaign else 1
+if report.get("map") != expected_map_id:
+    raise SystemExit(f"Campaign used the wrong source map: expected={expected_map_id}, actual={report.get('map')}")
+if int(report.get("image_map_count", -1)) != expected_image_maps:
+    raise SystemExit(f"World source isolation failed: expected image maps={expected_image_maps}, actual={report.get('image_map_count')}")
+if int(report.get("preauthored_map_realms", -1)) != 0 or int(report.get("preauthored_state_titles", -1)) != 0:
+    raise SystemExit("Image geography contains pre-authored realms or sovereign state titles")
+if report.get("map_geography_only") is not True:
+    raise SystemExit("Loaded image map exposes political layers instead of neutral geography")
 target_generations = int(report.get("target_dynasty_generations", 0))
 if report.get("status") != "PASS" or target_generations < 1:
     raise SystemExit("Campaign report does not confirm the configured canonical ruler-generation target")
@@ -305,7 +315,7 @@ if int(report.get("physically_completed_buildings", 0)) < int(report.get("settle
     raise SystemExit("The physical building count is below the one-building-per-settlement acceptance threshold")
 if not report.get("physical_world_dimension"):
     raise SystemExit("Campaign did not run in a registered physical world dimension")
-for key in ("stable_states", "characters", "settlements", "materialized_settlements", "completed_buildings", "physically_completed_buildings", "physically_built_settlements", "canonical_ruler_generations_verified", "named_realms", "canonical_rulers", "statecraft_titles", "territorial_titles", "title_hierarchy_links", "barony_titles", "county_titles", "duchy_titles", "kingdom_titles", "named_dynasties", "vassal_contracts", "political_ownership_samples", "origin_race_characters", "origin_distinct_races", "origin_class_characters", "origin_profession_characters", "culture_characters", "distinct_cultures", "geography_regions", "geography_samples", "world_events", "chronicle_entries"):
+for key in ("stable_states", "characters", "settlements", "materialized_settlements", "completed_buildings", "physically_completed_buildings", "physically_built_settlements", "canonical_ruler_generations_verified", "named_realms", "canonical_rulers", "statecraft_titles", "territorial_titles", "title_hierarchy_links", "barony_titles", "county_titles", "duchy_titles", "kingdom_titles", "named_dynasties", "vassal_contracts", "political_ownership_samples", "origin_race_characters", "origin_distinct_races", "origin_class_characters", "origin_profession_characters", "culture_characters", "distinct_cultures", "geography_regions", "geography_samples", "image_map_count", "preauthored_map_realms", "preauthored_state_titles", "world_events", "chronicle_entries"):
     if int(report.get(key, 0)) <= 0:
         raise SystemExit(f"Campaign report is missing required generated data: {key}")
 if int(report.get("canonical_rulers", 0)) < int(report.get("stable_states", 0)):
