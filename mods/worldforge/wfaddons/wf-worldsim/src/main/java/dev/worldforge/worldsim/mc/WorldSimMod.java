@@ -1166,12 +1166,12 @@ public final class WorldSimMod {
                         colony = SettleMod.nearbyVanillaVillage(settlementDimension, x, z, 64);
                         if (colony != null) {
                             settlementId = colony.s.id;
-                            band.addProperty("physical_settlement_id", settlementId);
+                            bindPhysicalSettlement(bandId, settlementId);
                         } else {
                             settlementId = "emg_" + bandId;
                             colony = SettleMod.foundEmergentInMemory(server,
                                     settlementDimension, settlementId, display, x, z, "worldsim:settlement:" + bandId);
-                            band.addProperty("physical_settlement_id", settlementId);
+                            bindPhysicalSettlement(bandId, settlementId);
                         }
                     }
                     List<String> residentIds = residents.stream().filter(person -> person.alive)
@@ -1225,12 +1225,21 @@ public final class WorldSimMod {
         return complete;
     }
 
+    private static String settlementBindingKey(String bandId) { return "settlement:" + bandId; }
+
     private static String settlementIdForBand(JsonObject band) {
-        if (band != null && band.has("physical_settlement_id") && !band.get("physical_settlement_id").isJsonNull()) {
-            String id = band.get("physical_settlement_id").getAsString();
-            if (!id.isBlank()) return id;
+        String bandId = band != null && band.has("id") ? band.get("id").getAsString() : "unknown";
+        String key = settlementBindingKey(bandId);
+        if (emergenceBindings.has(key) && emergenceBindings.get(key).isJsonPrimitive()) {
+            String bound = emergenceBindings.get(key).getAsString();
+            if (!bound.isBlank()) return bound;
         }
-        return "emg_" + (band != null && band.has("id") ? band.get("id").getAsString() : "unknown");
+        return "emg_" + bandId;
+    }
+
+    private static void bindPhysicalSettlement(String bandId, String settlementId) {
+        if (bandId == null || bandId.isBlank() || settlementId == null || settlementId.isBlank()) return;
+        emergenceBindings.addProperty(settlementBindingKey(bandId), settlementId);
     }
 
     private static String settlementIdForBand(JsonArray bands, String bandId) {
