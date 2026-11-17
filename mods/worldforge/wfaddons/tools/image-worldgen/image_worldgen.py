@@ -1384,52 +1384,62 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
     geography_preview.save(geography_buffer, format="PNG", optimize=False)
 
     source_hash = hashlib.sha256(input_path.read_bytes()).hexdigest() if generation_mode == "image" else None
+    region_areas = [int(meta["area"]) for meta in region_meta.values()]
+    region_aggregation = {
+        "initial_regions": int(aggregation_report["initial_regions"]),
+        "merged_regions": int(aggregation_report["merged_regions"]),
+        "region_area_pixels": aggregation_report.get("realm_area_pixels", {}),
+    }
     blueprint = {
         "format": "maqan-world-blueprint/2", "generator": GENERATOR_VERSION,
         "planet_id": planet_id, "generation_mode": generation_mode,
         "settlement_level": settlement_level, "settlement_profile": settlement_profile,
         "seed": seed, "source_image_sha256": source_hash, "size_px": [width, height],
         "blocks_per_pixel": blocks_per_pixel, "land_pixels": land_count,
-        "politically_unclaimed_land_pixels": unclaimed_land_pixels,
-        "realm_count": len(realms), "province_count": len(province_meta),
-        "region_count": len(region_meta), "settlement_count": len(settlements), "realms": realms,
-        # Runtime timings are deliberately excluded from the deterministic
-        # world artifact. They belong in CI telemetry, not seeded world data.
-        "territories": [{"id": pid, "realm_id": f"realm_{meta['realm'] + 1:02d}",
-                         "capital_pixel": [meta["seed"] % width, meta["seed"] // width],
-                         "area_pixels": meta["area"], "neighbors": sorted(province_neighbors[pid])}
-                        for pid, meta in sorted(province_meta.items())],
+        "wilderness_land_pixels": unclaimed_land_pixels,
+        "province_count": len(province_meta), "region_count": len(region_meta),
+        "settlement_count": len(settlements),
+        # Stable geography IDs and adjacency only. No state/realm/ruler identities
+        # are serialized into the world package.
+        "provinces": [{"id": pid, "region_id": region_for_province[pid],
+                       "capital_pixel": [meta["seed"] % width, meta["seed"] // width],
+                       "area_pixels": meta["area"], "neighbors": sorted(province_neighbors[pid])}
+                      for pid, meta in sorted(province_meta.items())],
+        "regions": [{"id": region_id, "key": f"region_{region_id}",
+                     "province_ids": list(meta["province_ids"]),
+                     "seed_province": int(meta["seed_province"]),
+                     "area_pixels": int(meta["area"]),
+                     "neighbors": sorted(region_neighbors.get(region_id, set()))}
+                    for region_id, meta in sorted(region_meta.items())],
         "settlements": settlements,
         "generation_policy": {
             "chunk_materialization": "deferred",
-            "territory_partition": "terrain-aware-organic-watershed",
+            "geographic_partition": "terrain-aware-organic-watershed",
             "partition_numba_accelerated": NUMBA_ACCELERATED,
             "boundary_model": "coherent-noise-plus-biome-edge-watershed",
             "wilderness_model": wilderness_report["model"],
             "wilderness_alignment": wilderness_report,
             "major_land_components": len(major_components),
             "minor_land_components": len(minor_components),
-            "initial_seeded_realms": aggregation_report["initial_regions"],
-            "final_connected_realms": aggregation_report["merged_regions"],
+            "initial_geographic_regions": region_aggregation["initial_regions"],
+            "final_geographic_regions": len(region_meta),
             "minor_island_provinces": island_province_count,
-            "independent_island_realms": independent_island_realm_count,
-            "independent_island_minimum_pixels": max(64, minimum_territory_pixels // 16),
-            "realm_aggregation": aggregation_report,
-            "identity_assignment": "external_political_mod",
+            "isolated_island_regions": independent_island_realm_count,
+            "isolated_island_minimum_pixels": max(64, minimum_territory_pixels // 16),
+            "geographic_region_aggregation": region_aggregation,
             "unclaimed_land_pixels": unclaimed_land_pixels,
             "unclaimed_land_percent": round(100.0 * unclaimed_land_pixels / max(1, land_count), 4),
-            "realm_area_pixels": {
-                "min": min(sum(province_meta[pid]["area"] for pid in pids) for pids in realm_provinces.values()),
-                "max": max(sum(province_meta[pid]["area"] for pid in pids) for pids in realm_provinces.values()),
-                "mean": round(sum(sum(province_meta[pid]["area"] for pid in pids) for pids in realm_provinces.values()) / max(1, len(realm_provinces)), 2),
+            "region_area_pixels": {
+                "min": min(region_areas) if region_areas else 0,
+                "max": max(region_areas) if region_areas else 0,
+                "mean": round(sum(region_areas) / max(1, len(region_areas)), 2),
             },
-            "political_seed": seed, "source_semantics": "maqan-image-analysis/2",
-            "minimum_territory_pixels": minimum_territory_pixels,
+            "geography_seed": seed, "source_semantics": "maqan-image-analysis/2",
+            "minimum_region_pixels": minimum_territory_pixels,
             "wilderness_share_target": settlement_profile["wilderness_share"],
             "wilderness_pixels": int(wilderness_mask.sum()),
             "wilderness_percent_of_land": round(100.0 * int(wilderness_mask.sum()) / max(1, land_count), 4),
-            "political_land_pixels": int(political_land_mask.sum()),
-            "government_and_identity": "assigned_by_external_political_mod",
+            "land_pixels_after_wilderness": int(political_land_mask.sum()),
             "geography_classifier": analysis_report["classifier"],
             "unknown_percent": analysis_report["unknown_percent"],
         },
@@ -1448,7 +1458,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, realm_count: i
         "provinces.png": image_bytes(width, height, province_ids, "I;16"),
         "wilderness.png": image_bytes(
             width, height, (wilderness_mask.ravel().astype(np.uint8) * 255).tolist(), "L"),
-        "political-preview.png": political_buffer.getvalue(),
+        "province-preview.png": geography_buffer.getvalue(),
         "terrain-preview.png": terrain_buffer.getvalue(),
         "titles.json": json.dumps(titles_doc, sort_keys=True, separators=(",", ":")).encode(),
         "realms.json": json.dumps(realms_doc, sort_keys=True, separators=(",", ":")).encode(),
