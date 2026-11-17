@@ -28,6 +28,15 @@ public class RealmsTest {
                         .equals("house_0123456789abcdef"),
                 "existing generated canonical house IDs remain unchanged");
 
+        Statecraft identityPolitics = new Statecraft();
+        identityPolitics.registerDynasty("house_alpha", "character-alpha", "House of the Northern Coast");
+        identityPolitics.registerDynasty("house_beta", "character-beta", "House of the Eastern Reach");
+        ok(!identityPolitics.setDynastyName("house_beta", "House of the Northern Coast")
+                        && identityPolitics.lastError.contains("already reserved"),
+                "a second dynasty cannot claim another house's display name");
+        ok(identityPolitics.dynasties().size() == 2,
+                "canonical dynasty registry exposes one stable identity per house");
+
         StatApi.resetForTests();
         Realms r = new Realms(d);
         final int[] prov = {1}, pres = {0};
