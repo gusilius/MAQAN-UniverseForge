@@ -222,6 +222,23 @@ for key in ("stable_states", "characters", "settlements", "materialized_settleme
         raise SystemExit(f"Campaign report is missing required generated data: {key}")
 if int(report.get("canonical_rulers", 0)) < int(report.get("stable_states", 0)):
     raise SystemExit("At least one surviving realm is not bound to a canonical wf-people Character")
+for key in ("duplicate_emergent_realm_names", "duplicate_settlement_names", "duplicate_dynasty_names", "duplicate_statecraft_title_names"):
+    if int(report.get(key, -1)) != 0:
+        raise SystemExit(f"World identity uniqueness check failed: {key}={report.get(key)}")
+race_distribution = report.get("living_population_by_race")
+if not isinstance(race_distribution, dict) or not race_distribution:
+    raise SystemExit("Campaign report has no living population breakdown by race")
+race_total = sum(int(value.get("count", 0)) for value in race_distribution.values())
+if race_total != int(report.get("living_population_with_race_stats", -1)):
+    raise SystemExit("Living race counts do not reconcile with the reported population total")
+if int(report.get("unclassified_living_characters", -1)) != 0:
+    raise SystemExit("Some living Characters have no assigned race")
+polity_races = report.get("living_population_by_polity_and_race")
+if not isinstance(polity_races, dict) or not polity_races:
+    raise SystemExit("Campaign report has no per-polity race breakdown")
+for polity_id, distribution in polity_races.items():
+    if not distribution or abs(sum(float(value.get("share", 0.0)) for value in distribution.values()) - 1.0) > 0.000001:
+        raise SystemExit(f"Race shares do not sum to one for polity {polity_id}")
 if int(report.get("title_hierarchy_links", 0)) <= 0:
     raise SystemExit("Political map has no materialized liege hierarchy")
 book = inventory_path.with_name("chronicle-book.md")
@@ -234,7 +251,7 @@ inventory_path.write_text(json.dumps({
     "runtime": "Forge server campaign; see campaign-report.json and server.log"
 }, ensure_ascii=False, indent=2), encoding="utf-8")
 print("AUTONOMOUS_CAMPAIGN_STATUS=PASS")
-for key in ("map", "physical_world_dimension", "elapsed_years", "stable_states", "characters", "settlements", "materialized_settlements", "completed_buildings", "canonical_ruler_generations_verified", "origin_race_characters", "origin_distinct_races", "origin_class_characters", "origin_profession_characters", "world_events", "chronicle_entries"):
+for key in ("map", "physical_world_dimension", "elapsed_years", "stable_states", "characters", "settlements", "materialized_settlements", "completed_buildings", "canonical_ruler_generations_verified", "origin_race_characters", "origin_distinct_races", "origin_class_characters", "origin_profession_characters", "living_population_with_race_stats", "unclassified_living_characters", "duplicate_emergent_realm_names", "duplicate_settlement_names", "duplicate_dynasty_names", "duplicate_statecraft_title_names", "world_events", "chronicle_entries"):
     print(f"AUTONOMOUS_CAMPAIGN_{key.upper()}={report.get(key)}")
 print(f"AUTONOMOUS_CAMPAIGN_ADDON_JARS={len(inventory)}")
 PY
