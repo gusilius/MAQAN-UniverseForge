@@ -1677,13 +1677,10 @@ public final class WorldSimMod {
             }
             // Fill the ordinary council, steward, marshal, chancellor and household offices
             // for newly emerged realms through the existing deterministic Courts.ensure pipeline.
+            // The same realm-level court materializer runs for image and vanilla worlds.
+            // Do not backfill offices from pre-authored political overlays on an image map.
             int newCourtPositions = dev.worldforge.people.Courts.ensureRealm(
                     politicalActor, registry, PeopleMod.ROLES, PeopleMod.NAMES, source.seed, year);
-            if (source.map != null && source.map.titles != null) {
-                newCourtPositions += dev.worldforge.people.Courts.ensure(source.map.titles,
-                        EditorManager.editorFor(source.map), registry, PeopleMod.ROLES, PeopleMod.NAMES,
-                        source.seed, year);
-            }
             if (newCourtPositions > 0) changed = true;
             if (changed) {
                 dev.worldforge.people.Character durable = registry.all().stream()
