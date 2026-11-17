@@ -22,7 +22,7 @@ public final class Bodies {
     public static String key(String colony, int worker) { return colony + "#" + worker; }
 
     public static void tick(MinecraftServer server) {
-        int spawnBudget = dev.worldforge.mod.MaqanPerformanceConfig.maxWorkerSpawnsPerTick();
+        int spawnBudget = dev.worldforge.mod.MaqanPerformanceConfig.maxWorkerSpawnsPerPass();
         int spawned = 0;
         for (Colony c : SettleMod.COLONIES.values()) {
             ServerLevel lv = c.level(server);
