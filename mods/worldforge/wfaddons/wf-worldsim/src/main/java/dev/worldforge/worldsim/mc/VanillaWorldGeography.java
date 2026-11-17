@@ -86,6 +86,11 @@ public final class VanillaWorldGeography {
         return minX == Integer.MAX_VALUE ? null : new WorldBounds(minX, minZ, maxX, maxZ);
     }
 
+    /** Explicit political causes allowed to change already established sovereignty. */
+    public enum PoliticalTransferCause {
+        WAR, ANNEXATION, VASSALAGE, TREATY, GRANT, DISSOLUTION
+    }
+
     /** A canonical settled community used to construct persistent political borders. */
     public static final class PoliticalSeed {
         public final int x, z;
@@ -316,6 +321,55 @@ public final class VanillaWorldGeography {
         }
         if (changed) dirty = true;
         return owned;
+    }
+
+    /**
+     * Atomically transfers already-owned vanilla geography after a durable political event.
+     * Ordinary simulation and chunk discovery must use applyPoliticalOwnership(), never this API.
+     * The event ID is written into every changed cell, making replay idempotent.
+     */
+    public static synchronized int transferOwnership(String mapId, Set<Long> cellKeys,
+            String expectedOwner, String newOwner, PoliticalTransferCause cause, String eventId) {
+        if (mapId == null || mapId.isBlank() || cellKeys == null || cellKeys.isEmpty()
+                || expectedOwner == null || expectedOwner.isBlank()
+                || newOwner == null || newOwner.isBlank() || expectedOwner.equals(newOwner)
+                || cause == null || eventId == null || eventId.isBlank())
+            throw new IllegalArgumentException("A complete political transfer event is required");
+        Region region = REGIONS.get(mapId);
+        if (region == null) throw new IllegalArgumentException("Unknown geography region: " + mapId);
+        List<JsonObject> targets = new ArrayList<>();
+        boolean allAlreadyApplied = true;
+        for (Long key : cellKeys) {
+            if (key == null) throw new IllegalArgumentException("Null geography cell key");
+            JsonObject cell = region.cells.get(key);
+            if (cell == null) throw new IllegalArgumentException("Unknown geography cell: " + key);
+            String owner = cell.has("owner_realm_id") ? cell.get("owner_realm_id").getAsString() : "";
+            String previousEvent = cell.has("ownership_event_id")
+                    ? cell.get("ownership_event_id").getAsString() : "";
+            if (newOwner.equals(owner) && eventId.equals(previousEvent)) {
+                targets.add(cell);
+                continue;
+            }
+            allAlreadyApplied = false;
+            if (!expectedOwner.equals(owner))
+                throw new IllegalStateException("Political transfer conflict at cell " + key
+                        + ": expected " + expectedOwner + " but found " + owner);
+            if (!cell.has("land") || !cell.get("land").getAsBoolean())
+                throw new IllegalStateException("Political transfer cannot claim water cell " + key);
+            targets.add(cell);
+        }
+        if (allAlreadyApplied) return 0;
+        for (JsonObject cell : targets) {
+            cell.addProperty("owner_realm_id", newOwner);
+            cell.addProperty("ownership_event_id", eventId);
+            cell.addProperty("ownership_event_cause", cause.name().toLowerCase(java.util.Locale.ROOT));
+        }
+        dirty = true;
+        MinecraftServer server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
+        if (server == null)
+            throw new IllegalStateException("Cannot durably commit political transfer without an active server");
+        persist(server);
+        return targets.size();
     }
 
     public static synchronized String biomeAt(String mapId, int x, int z) {
