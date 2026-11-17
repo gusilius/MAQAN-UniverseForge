@@ -193,7 +193,7 @@ level-name=world
 level-type=minecraft\:normal
 level-seed=$MAP_SEED
 generate-structures=true
-view-distance=12
+view-distance=10
 simulation-distance=6
 spawn-protection=0
 enable-command-block=false
@@ -235,8 +235,8 @@ if [ "$VANILLA_CAMPAIGN" -eq 1 ]; then
   [[ "$TEST_CHUNKS" =~ ^[0-9]+$ ]] && [ "$TEST_CHUNKS" -ge 16 ] && [ "$TEST_CHUNKS" -le 420 ] || {
     echo "ERROR: WF_VANILLA_TEST_CHUNKS must be between 16 and 420"; exit 3;
   }
-  STEP_CHUNKS=24
-  VIEW_RADIUS=12
+  STEP_CHUNKS=20
+  VIEW_RADIUS=10
   GRID_COUNT=$(((TEST_CHUNKS - 1) / STEP_CHUNKS + 1))
   MIN_CHUNK=$(( -(TEST_CHUNKS / 2) ))
   MAX_CHUNK=$(( MIN_CHUNK + TEST_CHUNKS - 1 ))
