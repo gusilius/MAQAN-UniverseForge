@@ -94,13 +94,14 @@ final class TroopController {
                         Entity owner = ownerId == null ? null : server.getPlayerList().getPlayer(ownerId);
                         destination = owner == null ? new double[]{cx, cz} : new double[]{owner.getX(), owner.getZ()};
                     }
-                    List<Formations.Slot> slots = Formations.slots(s.formation, alive.size(), SPACING);
+                    int count = alive.size();
+                    Formations.Workspace workspace = FORMATION_WORKSPACE;
+                    Formations.slotsInto(s.formation, count, SPACING, workspace);
                     double yaw = Formations.yawTo(cx, cz, destination[0], destination[1]);
-                    List<double[]> world = Formations.place(slots, destination[0], destination[1], yaw);
-                    for (int i = 0; i < alive.size(); i++) {
+                    Formations.placeInto(workspace, count, destination[0], destination[1], yaw);
+                    for (int i = 0; i < count; i++) {
                         TroopEntity t = alive.get(i);
-                        double[] point = world.get(i);
-                        t.hasDest = true; t.destX = point[0]; t.destZ = point[1];
+                        t.hasDest = true; t.destX = workspace.worldX[i]; t.destZ = workspace.worldZ[i];
                         t.destYaw = yaw; t.forced = null; t.engage = TroopEntity.Engage.NONE;
                     }
                     if (Math.hypot(destination[0] - cx, destination[1] - cz) < 3.0)
@@ -116,12 +117,16 @@ final class TroopController {
                     UUID targetId = safeUuid(o.target().isEmpty() ? s.owner : o.target());
                     Entity target = targetId == null ? null : TroopsMod.find(targetId);
                     if (target == null) { TroopsMod.SQUADS.completeCurrent(s.id); break; }
-                    List<Formations.Slot> slots = Formations.slots(s.formation, alive.size(), SPACING);
+                    int count = alive.size();
+                    Formations.Workspace workspace = FORMATION_WORKSPACE;
+                    Formations.slotsInto(s.formation, count, SPACING, workspace);
                     double yaw = target.getYRot() + 180;
-                    List<double[]> world = Formations.place(slots, target.getX(), target.getZ() - 0, yaw);
-                    for (int i = 0; i < alive.size(); i++) {
+                    Formations.placeInto(workspace, count, target.getX(), target.getZ(), yaw);
+                    double offsetX = Math.sin(Math.toRadians(yaw)) * 3;
+                    double offsetZ = -Math.cos(Math.toRadians(yaw)) * 3;
+                    for (int i = 0; i < count; i++) {
                         TroopEntity t = alive.get(i);
-                        t.hasDest = true; t.destX = world.get(i)[0] + Math.sin(Math.toRadians(yaw)) * 3; t.destZ = world.get(i)[1] - Math.cos(Math.toRadians(yaw)) * 3;
+                        t.hasDest = true; t.destX = workspace.worldX[i] + offsetX; t.destZ = workspace.worldZ[i] + offsetZ;
                         t.destYaw = Double.NaN; t.forced = null; t.engage = defaultEngage;
                     }
                 }
