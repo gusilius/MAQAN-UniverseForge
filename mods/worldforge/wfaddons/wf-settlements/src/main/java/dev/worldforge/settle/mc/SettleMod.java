@@ -646,6 +646,21 @@ public class SettleMod {
                 + ". Основание поселения требует разрешения владельца или законного изменения границы.");
     }
 
+    private static String normalizeSettlementName(String name) {
+        return name == null ? "" : name.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
+    }
+
+    /** Enforces one canonical settlement display name across every dimension in this save. */
+    private static void requireUniqueSettlementName(String name, String exceptId) {
+        String normalized = normalizeSettlementName(name);
+        if (normalized.isBlank()) throw new IllegalArgumentException("Settlement name is required");
+        for (Colony existing : COLONIES.values()) {
+            if (existing == null || existing.s == null || Objects.equals(existing.s.id, exceptId)) continue;
+            if (normalized.equals(normalizeSettlementName(existing.s.name)))
+                throw new IllegalStateException("Settlement name is already reserved: " + name);
+        }
+    }
+
     /** Закладывает поселение: 4 рабочих, склад дерево 60 / еда 40 / камень 10. */
     public static Colony found(ServerLevel lv, String name, BlockPos p) {
         return foundInternal(lv, name, p, "");
@@ -670,6 +685,7 @@ public class SettleMod {
         // Check only after idempotent replay has been resolved: a committed founding
         // remains recoverable even if borders changed after the original operation.
         requireFoundingTerritoryPermission(lv, name, p);
+        requireUniqueSettlementName(name, null);
         String base = name.toLowerCase(Locale.ROOT).replaceAll("[^\\p{L}\\p{N}]+", "_").replaceAll("^_+|_+$", "");
         if (base.isEmpty()) base = "settlement";
         String id = base;
@@ -712,7 +728,9 @@ public class SettleMod {
                 throw new IllegalStateException("Emergent settlement identity collision: " + id);
             return existing;
         }
-        Settlement settlement = new Settlement(id, name == null || name.isBlank() ? id : name, DEFS);
+        String canonicalName = name == null ? "" : name.trim();
+        requireUniqueSettlementName(canonicalName, id);
+        Settlement settlement = new Settlement(id, canonicalName, DEFS);
         settlement.setLedgerScope(dim);
         settlement.types = TYPES;
         Colony colony = new Colony(settlement, dim, x, z);
