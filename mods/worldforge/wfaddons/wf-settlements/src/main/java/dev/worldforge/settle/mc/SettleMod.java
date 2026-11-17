@@ -116,8 +116,8 @@ public class SettleMod {
         MinecraftForge.EVENT_BUS.register(new TaxService());
         MinecraftForge.EVENT_BUS.register(new VanillaVillageAdapter());
         MinecraftForge.EVENT_BUS.register(new SettlementCaravans());
-        // Political title transfers must update the same physical settlement records.
-        dev.worldforge.mod.api.WorldForgeApi.addChangeListener(SettleMod::reconcilePoliticalOwnership);
+        // Settlement sovereignty is changed only by canonical realm grants (bindEmergentRealm*).
+        // Generic map edit/action notifications are not an ownership authority.
     }
 
     @net.minecraftforge.fml.common.Mod.EventBusSubscriber(modid = MOD_ID,
