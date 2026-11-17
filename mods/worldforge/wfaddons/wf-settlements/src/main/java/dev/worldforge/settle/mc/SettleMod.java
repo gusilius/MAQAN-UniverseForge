@@ -1769,7 +1769,14 @@ public class SettleMod {
             try {
                 int staged = 0;
                 Set<String> blueprintIds = new HashSet<>();
+                // Names are unique across the whole saved world, not just this blueprint batch.
+                // Preserve an existing colony's name on retries so import remains idempotent.
                 Set<String> usedNames = new HashSet<>();
+                for (Colony existingColony : COLONIES.values()) {
+                    if (existingColony != null && existingColony.s != null
+                            && !existingColony.s.name.isBlank())
+                        usedNames.add(existingColony.s.name);
+                }
 
                 for (dev.worldforge.mod.MapData.SettlementSeed seed : map.settlementSeeds) {
                     if (seed == null || seed.id() == null || !blueprintIds.add(seed.id()))
@@ -1789,18 +1796,19 @@ public class SettleMod {
                             realm.props.getOrDefault("race", "")));
                     if (culture.isBlank() && realm != null) culture = String.valueOf(realm.props.getOrDefault("identity.culture",
                             realm.props.getOrDefault("culture", "")));
-                    String settlementName = seed.name();
-                    // Use the canonical race/culture settlement pool when available; keep the
-                    // image generator's deterministic name as a safe fallback for partial packs.
-                    try {
-                        settlementName = PeopleMod.NAMES.generate(race, culture, NameBank.settlementCategory(seed.type()),
-                                new java.util.Random(Objects.hash(map.name, seed.id())));
-                    } catch (RuntimeException missingSettlementPool) { /* blueprint name is already stable */ }
-                    String uniqueName = settlementName;
-                    if (!usedNames.add(uniqueName.toLowerCase(Locale.ROOT))) {
-                        String suffix = Integer.toUnsignedString(Objects.hash(map.name, seed.id()), 36);
-                        uniqueName = settlementName + " · " + suffix.substring(0, Math.min(5, suffix.length()));
-                        usedNames.add(uniqueName.toLowerCase(Locale.ROOT));
+                    Colony existingColony = COLONIES.get(id);
+                    String uniqueName;
+                    if (existingColony != null && map.name.equals(existingColony.sourceMapId)
+                            && seed.id().equals(existingColony.blueprintSettlementId)
+                            && existingColony.s != null && !existingColony.s.name.isBlank()) {
+                        uniqueName = existingColony.s.name;
+                        usedNames.add(uniqueName);
+                    } else {
+                        // Names come exclusively from the race/culture datapack pools.
+                        // Exhaustion is a hard preflight failure, never a fabricated suffix or image fallback.
+                        uniqueName = PeopleMod.NAMES.generateUnique(race, culture,
+                                NameBank.settlementCategory(seed.type()),
+                                new java.util.Random(Objects.hash(map.name, seed.id())), usedNames);
                     }
                     Colony colony = foundEmergentInMemory(server, dimension, id, uniqueName,
                             seed.blockX(), seed.blockZ(), operationId);
