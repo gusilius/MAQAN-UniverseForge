@@ -162,6 +162,7 @@ public class PeopleMod {
         load(e.getServer(), "wf_professions", professions::add);
         ROLES_RAW = rawRoles;
         load(e.getServer(), "wf_names", names::add);
+        names.validate();
         ROLES = roles;
         PROFESSIONS = professions;
         NAMES = names;
