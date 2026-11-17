@@ -1805,8 +1805,9 @@ public final class WorldSimMod {
 
     /** A deterministic culture/race-aware name is stored in the canonical emergence state once. */
     private static String emergentRealmName(String polityId, List<dev.worldforge.people.Character> members,
-            String fallback) {
-        if (members == null || members.isEmpty()) return fallback;
+            Set<String> reservedNames) {
+        if (members == null || members.isEmpty())
+            throw new IllegalStateException("Cannot name a polity without canonical population: " + polityId);
         Map<String, Long> races = members.stream().map(person -> String.valueOf(person.props.getOrDefault("origin.race", "")))
                 .filter(value -> !value.isBlank()).collect(java.util.stream.Collectors.groupingBy(value -> value, TreeMap::new, java.util.stream.Collectors.counting()));
         Map<String, Long> cultures = members.stream().map(person -> person.culture == null ? "" : person.culture)
@@ -1815,11 +1816,6 @@ public final class WorldSimMod {
                 .thenComparing(Map.Entry::getKey, Comparator.reverseOrder())).map(Map.Entry::getKey).orElse("");
         String culture = cultures.entrySet().stream().max(Map.Entry.<String, Long>comparingByValue()
                 .thenComparing(Map.Entry::getKey, Comparator.reverseOrder())).map(Map.Entry::getKey).orElse("");
-        Set<String> reservedNames = RealmsMod.realms().stream()
-                .filter(realm -> realm != null && !("emergent-" + polityId).equals(realm.id))
-                .map(realm -> realm.name).filter(name -> name != null && !name.isBlank())
-                .filter(name -> !name.startsWith("band_") && !name.endsWith(" Confederation"))
-                .collect(java.util.stream.Collectors.toCollection(HashSet::new));
         return PeopleMod.NAMES.generateUnique(race, culture, "realms",
                 new Random(polityId.hashCode()), reservedNames);
     }
@@ -1830,6 +1826,10 @@ public final class WorldSimMod {
         Set<String> activeRealmIds = new HashSet<>();
         for (var element : state.getAsJsonArray("polities")) if (element.isJsonObject())
             activeRealmIds.add("emergent-" + element.getAsJsonObject().get("id").getAsString());
+        Set<String> reservedRealmNames = RealmsMod.realms().stream()
+                .filter(realm -> realm != null && !Boolean.TRUE.equals(realm.props.get("emergence.virtual")))
+                .map(realm -> realm.name).filter(name -> name != null && !name.isBlank())
+                .collect(java.util.stream.Collectors.toCollection(HashSet::new));
         Map<CharacterRegistry, EmergentPopulationIndex> populationIndexes = new IdentityHashMap<>();
         for (EmergenceSource source : emergenceSources()) {
             var registry = source.registry;
@@ -1869,12 +1869,18 @@ public final class WorldSimMod {
                 initialProjection.props.put("emergence.territory_grid", territoryProvinceScale
                         + "-block-provinces/" + (territoryProvinceScale * 2) + "-block-regions");
                 if (members.isEmpty()) continue;
-                if (polityName.equals(polityId + " Confederation") || polityName.startsWith("band_")) {
-                    String generatedName = emergentRealmName(polityId, members, polityName);
-                    if (!generatedName.equals(polityName)) {
-                        polityName = generatedName;
-                        polity.addProperty("name", polityName);
-                    }
+                String normalizedPolityName = polityName == null ? ""
+                        : polityName.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
+                boolean managedName = polity.has("name_source")
+                        && "wf-people".equals(polity.get("name_source").getAsString());
+                boolean duplicateManagedName = managedName && !reservedRealmNames.add(normalizedPolityName);
+                if (!managedName || duplicateManagedName || normalizedPolityName.isBlank()) {
+                    String generatedName = emergentRealmName(polityId, members, reservedRealmNames);
+                    polityName = generatedName;
+                    polity.addProperty("name", polityName);
+                    polity.addProperty("name_source", "wf-people");
+                    reservedRealmNames.add(polityName.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT));
+                    changed = true;
                 }
                 JsonObject binding = emergenceBindings.has(polityId) && emergenceBindings.get(polityId).isJsonObject()
                         ? emergenceBindings.getAsJsonObject(polityId) : new JsonObject();
