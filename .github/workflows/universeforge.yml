@@ -35,7 +35,7 @@ jobs:
   two-world-acceptance:
     name: Build once; test vanilla and image-map servers sequentially
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
 
@@ -47,6 +47,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install virtual player client
+        run: npm install --no-save --prefix mods/worldforge/wfaddons mineflayer@4
 
       - name: Install image-to-worldmap dependencies
         shell: pwsh
@@ -109,7 +116,9 @@ jobs:
         working-directory: mods/worldforge/wfaddons
         shell: bash
         env:
-          WF_CAMPAIGN_TIMEOUT_SECONDS: "600"
+          WF_CAMPAIGN_TIMEOUT_SECONDS: "3600"
+          WF_VANILLA_TEST_CHUNKS: "420"
+          WF_SURVEY_USERNAME: "MaqanSurveyor"
           WF_VANILLA_SEED: "424242"
         run: |
           bash tools/autonomous-campaign.sh vanilla dist "$RUNNER_TEMP/maqan-vanilla-acceptance"
@@ -118,7 +127,7 @@ jobs:
         working-directory: mods/worldforge/wfaddons
         shell: bash
         env:
-          WF_CAMPAIGN_TIMEOUT_SECONDS: "600"
+          WF_CAMPAIGN_TIMEOUT_SECONDS: "3600"
           WF_CAMPAIGN_MAP_ID: "real-map"
         run: |
           bash tools/autonomous-campaign.sh "$RUNNER_TEMP/maqan-two-world-map/real-map.worldmap" dist "$RUNNER_TEMP/maqan-image-map-acceptance"
