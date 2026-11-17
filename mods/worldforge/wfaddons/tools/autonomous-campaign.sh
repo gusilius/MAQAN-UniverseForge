@@ -254,7 +254,7 @@ if [ "$VANILLA_CAMPAIGN" -eq 1 ]; then
     sleep 2
   done
   [ "$bot_ready" = 1 ] || { cat "$OUTPUT/survey-bot.log"; echo "ERROR: virtual survey player did not join the Forge server"; exit 3; }
-  printf '%s\n' "gamemode spectator $BOT_NAME" >> in.txt
+  printf '%s\n' "gamemode creative $BOT_NAME" >> in.txt
   sleep 2
   previous_samples=0
   waypoint=0
