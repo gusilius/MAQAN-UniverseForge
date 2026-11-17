@@ -150,7 +150,7 @@ if [ "$VANILLA_CAMPAIGN" -eq 1 ]; then
 fi
 CURRENT_STAGE="campaign_preflight"
 preflight_log_lines=$(wc -l < server.log)
-printf '%s\\n' "wfworldsim campaign start $MAP_ID" >> in.txt
+printf '%s\n' "wfworldsim campaign start $MAP_ID" >> in.txt
 echo "WAITING_FOR_CAMPAIGN_PREFLIGHT=1"
 for i in $(seq 1 90); do
   if tail -n +$((preflight_log_lines + 1)) server.log | grep -q 'map-only autonomous campaign started'; then break; fi
