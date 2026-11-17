@@ -854,18 +854,34 @@ public class TroopsMod {
         }
         String actor = p.getUUID().toString();
         long minute = dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute();
-        String requestId = "troop:" + java.util.UUID.nameUUIDFromBytes(
-                (actor + ":" + o.requestId()).getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        var request = new dev.worldforge.mod.api.ActionExecutionService.Request(
-                requestId, "military.client_order", actor, "selection", List.of(o.toString()), minute);
+        boolean hasWorkers = ModList.get().isLoaded("wf_settle") && WorkerControl.anyWorker(p, o);
+        boolean hasTroops = !troopIds(o).isEmpty();
+        dev.worldforge.mod.api.CommandIntent.Domain domain = hasWorkers && hasTroops
+                ? dev.worldforge.mod.api.CommandIntent.Domain.MIXED
+                : hasWorkers ? dev.worldforge.mod.api.CommandIntent.Domain.SETTLEMENT
+                : o.action() == OrderPacket.BUILD || o.action() == OrderPacket.WORK_AREA
+                    ? dev.worldforge.mod.api.CommandIntent.Domain.CONSTRUCTION
+                    : dev.worldforge.mod.api.CommandIntent.Domain.MILITARY;
+        List<String> intentArgs = List.of("packet_action=" + o.action(),
+                "kind=" + o.kind(), "arg=" + o.arg(), "target=" + o.target(), "queue=" + o.queue());
+        dev.worldforge.mod.api.CommandIntent intent;
         try {
-            var task = dev.worldforge.mod.api.WorldForgeApi.actionExecution().execute(request,
+            intent = new dev.worldforge.mod.api.CommandIntent(o.requestId(), actor,
+                    dev.worldforge.mod.api.CommandIntent.Source.RTS, domain, "command.issue",
+                    o.ids(), o.target(), o.x(), o.z(), o.queue(), intentArgs);
+        } catch (IllegalArgumentException invalid) {
+            p.displayClientMessage(Component.literal("Некорректный приказ: " + invalid.getMessage()), true);
+            return;
+        }
+        try {
+            var task = dev.worldforge.mod.api.WorldForgeApi.executeCommandIntent(intent,
+                    dev.worldforge.mod.WorldForgeMod.actionExecutionFile(p.server), minute,
                     req -> {
                         if (p.server.getPlayerList().getPlayer(p.getUUID()) == null)
                             return "Игрок отключился до исполнения приказа";
                         if (actionPersistenceBlocked)
                             return "Военные приказы заблокированы после ошибки сохранения; требуется перезапуск и сверка";
-                        if (ModList.get().isLoaded("wf_settle") && WorkerControl.anyWorker(p, o)
+                        if (ModList.get().isLoaded("wf_settle") && hasWorkers
                                 && dev.worldforge.settle.mc.SettleMod.actionsBlocked())
                             return "Изменения поселений заблокированы после ошибки сохранения; требуется перезапуск и сверка";
                         return null;
@@ -883,14 +899,13 @@ public class TroopsMod {
                             return ActionResult.fail("Приказ применён в памяти, но военные снимки не сохранены; дальнейшие приказы заблокированы до сверки");
                         }
                         if (ModList.get().isLoaded("wf_settle")
-                                && (o.action() == OrderPacket.BUILD || WorkerControl.anyWorker(p, o))
+                                && (o.action() == OrderPacket.BUILD || hasWorkers)
                                 && !dev.worldforge.settle.mc.SettleMod.persistActionMutation(p.server)) {
                             actionPersistenceBlocked = true;
                             return ActionResult.fail("Приказ изменил состояние поселения в памяти, но снимок не сохранён; военные и поселения заблокированы до сверки");
                         }
                         return result;
-                    }, null, minute,
-                    dev.worldforge.mod.WorldForgeMod.actionExecutionFile(p.server));
+                    });
             if (task.status() == dev.worldforge.mod.api.ActionExecutionService.Status.FAILED)
                 p.displayClientMessage(Component.literal("Приказ отклонён: " + task.message()), true);
         } catch (RuntimeException ex) {
