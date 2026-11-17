@@ -156,3 +156,22 @@
 Повторный аудит выявил важный edge case: исполнитель уже отклонял BlockEntity и неразрушаемые блоки, но поиск цели мог выбрать такой блок первым. Это создавало бесполезные повторные подходы к цели. Теперь фильтр безопасности применяется на этапе сканирования кандидатов, до pathfinding: блоки с BlockEntity и отрицательной destroy speed вообще не попадают в список целей. Также координата Y теперь корректно допускает нижнюю границу build height.
 
 First-person Alt radial wheel уже существует для боевых приказов (MOVE/ATTACK/HOLD/PATROL/FOLLOW/GUARD/RETREAT), но аудит подтвердил, что рабочие/строительные операции в него пока не подключены. Диалоги жителей и их bridge-модули также существуют; общая точка выдачи тех же WorkOrder через диалог/радиальное меню остаётся следующим интеграционным этапом. Не считать first-person строительные приказы реализованными.
+
+## Canonical command intent layer (RTS / first-person / radial foundation)
+
+Добавлен transport-independent контракт `CommandIntent` в `wfmod`:
+- нормализует actor, source, domain, action, выбранные Character/entity UUID, target, координаты, очередь и аргументы;
+- удаляет повторяющиеся subject IDs с сохранением порядка;
+- ограничивает число субъектов (200), аргументов и размеры строк, отклоняет некорректные UUID/координаты;
+- формирует стабильный bounded payload для существующего `ActionExecutionService`, с детерминированным journal request ID из actor + client request ID;
+- не выполняет игровых мутаций и не заменяет проверки прав доменных модулей.
+
+В `WorldForgeApi` добавлен `executeCommandIntent`: единая точка подачи intent в существующий durable/idempotent execution journal. Военный/поселенческий packet handler `TroopsMod.handleOrder` переведён на этот контракт. Таким образом RTS, first-person G и Alt radial, которые используют тот же OrderPacket/handler, теперь проходят через общий intent envelope и тот же journal; доменные действия всё ещё исполняются существующим `handleOrderDirect` / `WorkerControl`.
+
+Границы текущего этапа:
+- поле source пока передаётся как RTS, поскольку текущий сетевой OrderPacket не несёт достоверную классификацию источника; дальнейшее расширение протокола должно маркировать RTS/FIRST_PERSON/RADIAL без доверия к этой метке как к полномочию.
+- диалог `wfresident open` пока открывает диалог, но ещё не отправляет WorkOrder через этот intent API.
+- `CommandIntent` пока является общим envelope и journal ingress, а не новым универсальным исполнительным движком. Военные, строительные и поселенческие владельцы данных остаются authoritative.
+- Rust compute не затрагивался: переносить в Rust нужно поиск целей/планирование/оценку областей и массовые вычисления, не сетевую авторизацию, Character registry или фактические Minecraft mutations.
+
+Добавлены unit checks для дедупликации субъектов, канонического durable mapping и отклонения некорректных subject IDs. Сборка и тесты в этой сессии не запускались; наличие CI check-runs не подтверждено.
