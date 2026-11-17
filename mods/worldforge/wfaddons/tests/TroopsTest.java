@@ -469,6 +469,51 @@ public class TroopsTest {
         check(!Wars.atWar("red", "red", "red", "red") && !Wars.atWar("", "red", "red", "") && !Wars.atWar("red", null, "blue", null), "не воюют: одно государство, без государства, пустые списки");
         check(Wars.listed(" a , b ", "b") && !Wars.listed("ab", "b"), "разбор списка");
 
+        // reusable primitive formation workspace parity and capacity reuse
+        Formations.Workspace workspace = new Formations.Workspace();
+        for (Formations.Type type : Formations.Type.values()) {
+            for (int count : new int[]{0, 1, 5, 17, 40, 256}) {
+                List<Formations.Slot> expectedSlots = Formations.slots(type, count, 1.7);
+                Formations.slotsInto(type, count, 1.7, workspace);
+                check(expectedSlots.size() == count, "legacy formation size " + type + "/" + count);
+                for (int i = 0; i < count; i++) {
+                    check(Math.abs(expectedSlots.get(i).x() - workspace.slotX[i]) < 1e-9
+                                    && Math.abs(expectedSlots.get(i).z() - workspace.slotZ[i]) < 1e-9,
+                            "workspace geometry parity " + type + "/" + count + "/" + i);
+                }
+                Formations.placeInto(workspace, count, 120.5, -73.25, 37.0);
+                List<double[]> expectedWorld = Formations.place(expectedSlots, 120.5, -73.25, 37.0);
+                for (int i = 0; i < count; i++) {
+                    check(Math.abs(expectedWorld.get(i)[0] - workspace.worldX[i]) < 1e-9
+                                    && Math.abs(expectedWorld.get(i)[1] - workspace.worldZ[i]) < 1e-9,
+                            "workspace world transform parity " + type + "/" + count + "/" + i);
+                }
+            }
+        }
+        List<Formations.Slot> workspaceSlots = Formations.slots(Formations.Type.BLOCK, 40, 1.7);
+        List<String> workspaceRoles = new ArrayList<>();
+        List<double[]> workspaceLocal = new ArrayList<>();
+        workspace.ensureCapacity(40);
+        for (int i = 0; i < 40; i++) {
+            String role = switch (i % 4) { case 0 -> "melee"; case 1 -> "cavalry"; case 2 -> "ranged"; default -> "support"; };
+            workspaceRoles.add(role);
+            workspaceLocal.add(new double[]{(i % 7) - 3, 0});
+            workspace.roleRank[i] = switch (role) { case "melee" -> 0; case "cavalry" -> 1; case "ranged" -> 2; default -> 3; };
+            workspace.localX[i] = workspaceLocal.get(i)[0];
+        }
+        int[] expectedAssignment = Formations.assign(workspaceRoles, workspaceSlots, workspaceLocal);
+        Formations.assignInto(workspace, 40);
+        boolean sameAssignment = true;
+        for (int i = 0; i < 40; i++) sameAssignment &= expectedAssignment[i] == workspace.assignment[i];
+        check(sameAssignment, "primitive assignment matches legacy role and lateral ordering");
+        int capacityBeforeReuse = workspace.slotX.length;
+        Formations.slotsInto(Formations.Type.LINE, 24, 1.7, workspace);
+        check(workspace.slotX.length == capacityBeforeReuse, "formation workspace reuses capacity for smaller squads");
+        boolean negativeCountRejected = false;
+        try { Formations.slotsInto(Formations.Type.LINE, -1, 1.7, workspace); }
+        catch (IllegalArgumentException expected) { negativeCountRejected = true; }
+        check(negativeCountRejected, "formation workspace rejects negative squad size");
+
         System.out.println(fails == 0 ? "ALL OK" : fails + " FAIL");
         if (fails > 0) System.exit(1);
     }
