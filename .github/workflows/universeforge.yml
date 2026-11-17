@@ -15,14 +15,9 @@ on:
       - ".github/workflows/**"
       - "!mods/worldforge/wfaddons/wf-army/**"
       - "!mods/worldforge/wfaddons/wf-troops/**"
-      - "!mods/worldforge/wfaddons/wf-settlements/**"
       - "!mods/worldforge/wfaddons/wf-war/**"
-      - "!mods/worldforge/wfaddons/wf-worldsim/**"
-      - "!mods/worldforge/wfaddons/tests/**"
-      - "!mods/worldforge/native/worldforge-worldsim/**"
       - "!mods/worldforge/wfaddons/tools/build-selected-addons.sh"
       - "!mods/worldforge/wfaddons/tools/build_order.py"
-      - "!.github/workflows/**"
   pull_request:
     branches: [main]
     paths:
