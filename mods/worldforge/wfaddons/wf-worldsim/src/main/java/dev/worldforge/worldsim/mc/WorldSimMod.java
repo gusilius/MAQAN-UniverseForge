@@ -1353,6 +1353,16 @@ public final class WorldSimMod {
             addCatalogEntry(catalogEntries, "wf_troops", "runtime_state", "military",
                     "Physical military state and durable ledgers", troopSnapshot);
         }
+        // CourtSim remains the owner of schemes, regencies, factions, pending events,
+        // council opinions and court news; WorldSim reads its complete persisted state.
+        for (MapData map : WorldForgeMod.loadedMaps().values()) {
+            if (map == null || map.titles == null) continue;
+            CourtSim court = CourtMod.court(map);
+            if (court != null) {
+                JsonElement courtState = com.google.gson.JsonParser.parseString(court.toJson());
+                addCatalogEntry(catalogEntries, "wf_court", "court_states", map.name, map.name, courtState);
+            }
+        }
         // wf-war owns active campaigns, casus belli, occupation, peace terms and truces.
         for (MapData map : WorldForgeMod.loadedMaps().values()) {
             if (map == null || map.titles == null) continue;
