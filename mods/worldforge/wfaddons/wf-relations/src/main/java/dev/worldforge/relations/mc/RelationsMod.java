@@ -61,7 +61,7 @@ public class RelationsMod {
                     int totalInteractions = 0;
                     for (int day = firstDay; day <= currentDay; day++) {
                         RelationsMc.REL.tick(day);
-                        int year = WorldForgeApi.clock().year() - Math.max(0, currentDay - day) / 365;
+                        int year = WorldForgeApi.clock().startYear + day / 365;
                         totalInteractions += NpcSocialSimulation.advance(RelationsMc.REL, day, year);
                     }
                     if (totalInteractions > 0 && currentDay % 30 < elapsedDays)
