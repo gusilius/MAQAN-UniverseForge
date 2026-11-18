@@ -1560,6 +1560,24 @@ public final class WorldSimMod {
     }
 
 
+    private static String troopRecruitmentBuilding(String armyUnitId) {
+        if (!net.minecraftforge.fml.ModList.get().isLoaded("wf_troops")) return "barracks";
+        try {
+            Class<?> owner = Class.forName("dev.worldforge.troops.mc.TroopsMod");
+            Object definitions = owner.getField("DEFS").get(null);
+            @SuppressWarnings("unchecked")
+            Map<String, String> armyTypes = (Map<String, String>) definitions.getClass().getMethod("armyTypes").invoke(definitions);
+            String physicalType = armyTypes.getOrDefault(armyUnitId, "");
+            if (physicalType.isBlank()) return "barracks";
+            Object building = definitions.getClass().getMethod("recruitmentBuilding", String.class)
+                    .invoke(definitions, physicalType);
+            return building instanceof String value && !value.isBlank() ? value : "barracks";
+        } catch (ReflectiveOperationException | LinkageError error) {
+            LOGGER.warn("wf_worldsim: could not resolve wf-troops recruitment building for {}: {}", armyUnitId, error.toString());
+            return "barracks";
+        }
+    }
+
     private static JsonObject exportOptionalModuleSnapshot(String moduleId, String className, String methodName) {
         if (!net.minecraftforge.fml.ModList.get().isLoaded(moduleId)) return null;
         try {
@@ -3560,18 +3578,20 @@ public final class WorldSimMod {
                     army.resumeRecruitmentWithPersistence(requestId);
                     return true;
                 }
+                String requestedType = action.has("unit_role") ? action.get("unit_role").getAsString() : "";
+                UnitType selected = requestedType.isBlank() ? null : army.types.get(requestedType);
+                if (selected == null) return false;
+                String recruitmentBuilding = troopRecruitmentBuilding(selected.id);
                 Colony trainingColony = SettleMod.COLONIES.values().stream()
                         .filter(c -> c != null && c.s != null && realm.equals(SettleMod.realmOf(c)))
-                        .filter(c -> c.s.buildings.stream().anyMatch(b -> "barracks".equals(b.def.id)
+                        .filter(c -> c.s.buildings.stream().anyMatch(b -> recruitmentBuilding.equals(b.def.id)
                                 && b.state == Building.State.DONE && !b.paused
                                 && c.s.assigned(b.uid).stream().anyMatch(worker -> worker.lifeAction.isBlank() && "trainer".equals(worker.workRole()))))
                         .findFirst().orElse(null);
                 if (trainingColony == null) return false;
-                UnitType levy = army.types.values().stream().filter(unit -> unit.levy)
-                        .sorted(Comparator.comparing(unit -> unit.id)).findFirst().orElse(null);
                 int count = (int) Math.min(wanted, Math.floor(army.pool(realm)));
-                if (levy == null || count <= 0) return false;
-                army.recruitWithPersistence(requestId, "raise", realm, levy.id, count);
+                if (count <= 0) return false;
+                army.recruitWithPersistence(requestId, "raise", realm, selected.id, count);
                 return true;
             }
             return false;
