@@ -228,7 +228,6 @@ fn bootstrap_vanilla_initial_civilizations(
     let mut occupied = bands.iter().filter(|band| band.map_id == map.map_id)
         .map(|band| (band.x, band.z)).collect::<Vec<_>>();
     let separation_sq = separation.saturating_mul(separation);
-    let mut founded_polities = 0usize;
 
     // Several bounded regional cohorts can found independent states in one world.
     // A settlement is assigned to at most one polity; new frontier observations can
@@ -285,7 +284,6 @@ fn bootstrap_vanilla_initial_civilizations(
             dynasty_id, dynasty_generations: 1, ruler_global_id: None, last_succession_year: 0,
             years_in_generation: 0, succession_pressure: 0, weak_years: 0,
         });
-        founded_polities += 1;
         events.push(EmergenceEvent { year: 0, kind: "state_founded".into(), subject_id: polity_id,
             text: format!("{} emerges from an independent regional settlement cluster", name) });
     }
@@ -916,6 +914,27 @@ mod tests {
         let mut starving_polities = Vec::new();
         maybe_form_polity(&geography, &cells, 8128, 42, &starving, &mut starving_polities, &mut Vec::new());
         assert!(starving_polities.is_empty(), "a starving regional cluster cannot found a viable state");
+    }
+
+    #[test]
+    fn authored_map_bootstrap_produces_many_small_independent_polities() {
+        let geography = map();
+        let mut bands = Vec::new();
+        let mut polities = Vec::new();
+        let mut events = Vec::new();
+        bootstrap_initial_civilizations(&geography, 8128, &mut bands, &mut polities, &mut events);
+        assert!(polities.len() >= 12,
+            "a large authored map must be fragmented into multiple local sovereign states");
+        assert!(polities.iter().all(|polity| polity.settlement_ids.len() <= 8),
+            "initial states must not absorb oversized settlement catchments");
+        let mut assigned = BTreeSet::new();
+        for polity in &polities {
+            for settlement_id in &polity.settlement_ids {
+                assert!(assigned.insert(settlement_id.as_str()),
+                    "each settlement belongs to at most one sovereign state");
+            }
+        }
+        assert_eq!(assigned.len(), polities.iter().map(|polity| polity.settlement_ids.len()).sum());
     }
 
     #[test]
