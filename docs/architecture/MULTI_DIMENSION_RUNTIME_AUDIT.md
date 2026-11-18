@@ -60,18 +60,6 @@ This is a local-identity partition, not a second universe. Global Character UUID
 
 `WorldForgeMod.loadedMaps()`, map Character registries, `EmergenceSource.authored(map)` and blueprint Colony IDs are keyed by map package name. Different map packages work as separate sources; loading the same package into two dimensions is not yet a supported independent-planet case. The next registry must key runtime planet instances by DimensionKey/PlanetId, not only by map package name.
 
-### C. Race assignment needs environmental/population context for emergent worlds
-
-The 46 race/subrace definitions are present and loaded. Authored map realms receive origin-backed demographic mixes through `TerritorialIdentity.ensureDemographics`. Newly emergent populations call `Origins.assign` without a realm/population mix, so initial race choice is weighted from the global race catalog rather than the local planet/biome/culture ecology. The definitions exist; dimension-aware race distribution still needs to be connected.
-
-### D. Same Genesis lifecycle must be explicitly coordinated per planet
-
-The map-backed path has a map identity/court bootstrap and settlement blueprint import. Vanilla dimensions are observed incrementally as chunks load and then enter the shared emergence engine. These are different terrain adapters, which is correct, but acceptance must prove that each produces its own geography, population, settlement and polity projections with no cross-dimension leakage. Do not create a second political-generation implementation.
-
-### E. Cross-dimension travel is not yet proven
-
-Global CharacterAuthority and transaction infrastructure exist, but no completed end-to-end acceptance currently proves a player/Character can move between the map planet and vanilla planet, restart mid-transfer, and recover without duplicate bodies, inventory, family or ownership records.
-
 ### F. Strategic army/war/court services are still MapData-scoped
 
 The audit of addon entry points found:
