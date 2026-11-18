@@ -482,6 +482,38 @@ fn recruitment_choice(snapshot: &WorldSnapshot, settlement_id: &str, realm_id: &
 }
 
 
+fn effective_army_power(snapshot: &WorldSnapshot, realm_id: &str) -> Option<f64> {
+    let mut strategic = 0.0;
+    for army in snapshot.armies.iter().filter(|army| army.realm_id == realm_id) {
+        strategic += army.power * army.morale.clamp(0.0, 1.0) * army.supply.clamp(0.0, 1.0);
+    }
+    if strategic <= 0.0 { return None; }
+    let physical = snapshot.catalog_entries.iter().find(|entry|
+        entry.module_id == "wf_troops" && entry.catalog_id == "runtime_state"
+            && entry.entry_id == "military")
+        .and_then(|entry| entry.payload.get("live_troops"))
+        .and_then(serde_json::Value::as_array);
+    if let Some(troops) = physical {
+        let readiness = troops.iter().filter(|troop|
+            troop.get("realm_id").and_then(serde_json::Value::as_str) == Some(realm_id))
+            .map(|troop| {
+                let health = troop.get("health").and_then(serde_json::Value::as_f64).unwrap_or(1.0);
+                let maximum = troop.get("max_health").and_then(serde_json::Value::as_f64).unwrap_or(health.max(1.0));
+                let morale = troop.get("morale").and_then(serde_json::Value::as_f64).unwrap_or(100.0) / 100.0;
+                let injury = troop.get("injury_combat_multiplier").and_then(serde_json::Value::as_f64).unwrap_or(1.0);
+                let supply = troop.get("supply_combat_multiplier").and_then(serde_json::Value::as_f64).unwrap_or(1.0);
+                let health_ratio = if maximum > 0.0 { (health / maximum).clamp(0.0, 1.0) } else { 1.0 };
+                health_ratio * morale.clamp(0.0, 1.0) * injury.clamp(0.0, 1.0) * supply.clamp(0.0, 1.0)
+            }).collect::<Vec<_>>();
+        if !readiness.is_empty() {
+            let average = readiness.iter().sum::<f64>() / readiness.len() as f64;
+            return Some(strategic * average.clamp(0.0, 1.0));
+        }
+    }
+    Some(strategic)
+}
+
+
 
 impl WorldSnapshot {
     pub fn validate(&self) -> Result<(), SimError> {
@@ -681,8 +713,10 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
         snapshot.capabilities.len(), snapshot.diplomatic_relations.len(), snapshot.vassal_contracts.len(),
         snapshot.wars.len(), snapshot.armies.len(), snapshot.social_relations.len(), snapshot.named_entities.len()));
     let mut actual_army_power: BTreeMap<&str, f64> = BTreeMap::new();
-    for army in &snapshot.armies {
-        *actual_army_power.entry(army.realm_id.as_str()).or_default() += army.power;
+    for realm in &snapshot.realms {
+        if let Some(power) = effective_army_power(snapshot, &realm.id) {
+            actual_army_power.insert(realm.id.as_str(), power);
+        }
     }
     for (map_id, count) in &titles_by_map {
         let tiers = snapshot.titles.iter().filter(|title| title.map_id == *map_id)
