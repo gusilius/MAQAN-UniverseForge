@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Ordinary Forge world startup/runtime smoke only. Never inject runtimes or scenarios.
+# Ordinary Forge world startup/runtime smoke; no campaign, goals or scripted outcomes.
+# CI accelerates only the shared calendar so autonomous generations can be observed.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MAP_SOURCE="${1:?usage: autonomous-runtime.sh <vanilla|worldmap> <addon-jar-dir> <output-dir>}"
@@ -221,7 +222,8 @@ for i in $(seq 1 150); do
 done
 grep -q 'Done (' server.log || { tail -120 server.log; echo "ERROR: Forge startup timed out"; exit 3; }
 # Acceptance is an ordinary world startup/runtime smoke test.
-# No runtime, scenario, goals, time acceleration, or forced outcomes.
+# No campaign runtime, scenario, goals or forced outcomes. The bounded shared-clock
+  # multiplier is a test harness setting; every domain system still advances normally.
 if [ "${WF_ACCEPTANCE_MODE:-}" = "dual-world" ]; then
   CURRENT_STAGE="same_server_dual_world_genesis"
   # Load real chunks in the ordinary Overworld and the image-backed dimension.
