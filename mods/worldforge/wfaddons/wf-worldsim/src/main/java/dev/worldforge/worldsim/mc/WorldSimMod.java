@@ -2346,25 +2346,92 @@ public final class WorldSimMod {
                 grantEmergentTerritoryHolder(politicalTitle.id, nearestBand,
                         populationIndex, year, fallback);
             }
-            // Crown titles sit immediately above the highest imported map tier.
+            // Extend the imported geographic province -> region tree into a real
+            // political hierarchy. Static map packages deliberately contain geography,
+            // not pre-authored sovereigns; the runtime creates duchies and kingdoms from
+            // connected region clusters and keeps every intermediate title in Statecraft.
             for (var entry : realms.entrySet()) {
                 String realmId = entry.getKey();
                 String polityId = realmId.substring("emergent-".length());
                 String crownId = "emergent-title-" + polityId;
                 var crown = RealmsMod.POLITICS.title(crownId);
                 if (crown == null) continue;
-                List<dev.worldforge.realms.Statecraft.Title> topTitles = importedIds.entrySet().stream()
-                        .filter(item -> realmId.equals(item.getValue()))
-                        .map(item -> RealmsMod.POLITICS.title(item.getKey()))
-                        .filter(Objects::nonNull)
-                        .filter(title -> title.liegeTitleId.isBlank()).toList();
-                int highestRank = topTitles.stream().mapToInt(title -> title.rank.ordinal()).max().orElse(-1);
-                if (highestRank >= 0 && highestRank < dev.worldforge.realms.Statecraft.Rank.EMPIRE.ordinal()) {
-                    var required = dev.worldforge.realms.Statecraft.Rank.values()[highestRank + 1];
+                List<TitleData.Title> topMapRegions = map.titles.allTitles().stream()
+                        .filter(title -> title != null && title.tier == 1)
+                        .filter(title -> importedIds.containsKey(
+                                dev.worldforge.realms.Statecraft.mapTitleId(map.name, title.key))
+                                && realmId.equals(importedIds.get(
+                                dev.worldforge.realms.Statecraft.mapTitleId(map.name, title.key))))
+                        .sorted(Comparator.comparingInt((TitleData.Title title) -> title.id)).toList();
+                List<String> realmBands = bandsByRealm.getOrDefault(realmId, List.of());
+                String fallbackHolder = String.valueOf(entry.getValue().props
+                        .getOrDefault("emergence.ruler_global_id", ""));
+                List<List<TitleData.Title>> regionGroups = connectedTitleGroups(topMapRegions, 3);
+                List<String> duchyIds = new ArrayList<>();
+                int duchySerial = 0;
+                for (List<TitleData.Title> group : regionGroups) {
+                    if (group.size() < 2) continue;
+                    duchySerial++;
+                    String groupKey = group.stream().map(title -> Integer.toString(title.id))
+                            .sorted().collect(java.util.stream.Collectors.joining("|"));
+                    String duchyId = emergentTerritoryTitleId("duchy", polityId, groupKey);
+                    double centerX = group.stream().mapToInt(title -> title.capX).average().orElse(0);
+                    double centerZ = group.stream().mapToInt(title -> title.capZ).average().orElse(0);
+                    String capitalBand = nearestEmergentBand(centerX, centerZ, realmBands, bands,
+                            EmergenceSource.authored(map));
+                    String duchyName = populationIndex == null
+                            ? entry.getValue().name + " Duchy " + duchySerial
+                            : uniqueTerritorialName(duchyId, "regions", capitalBand,
+                                    populationIndex, polityId + "|duchy|" + groupKey);
+                    ensureEmergentTerritoryTitle(duchyId, realmId,
+                            dev.worldforge.realms.Statecraft.Rank.DUCHY, duchyName);
+                    if (populationIndex != null)
+                        grantEmergentTerritoryHolder(duchyId, capitalBand, populationIndex, year, fallbackHolder);
+                    for (TitleData.Title region : group) {
+                        String regionTitleId = dev.worldforge.realms.Statecraft.mapTitleId(map.name, region.key);
+                        linkEmergentTerritoryTitle(regionTitleId, duchyId);
+                    }
+                    importedIds.put(duchyId, realmId);
+                    duchyIds.add(duchyId);
+                }
+
+                List<String> kingdomIds = new ArrayList<>();
+                int kingdomSerial = 0;
+                List<String> sortedDuchies = duchyIds.stream().sorted().toList();
+                for (int offset = 0; offset < sortedDuchies.size(); offset += 3) {
+                    List<String> group = sortedDuchies.subList(offset, Math.min(sortedDuchies.size(), offset + 3));
+                    if (group.size() < 2) continue;
+                    kingdomSerial++;
+                    String groupKey = String.join("|", group);
+                    String kingdomId = emergentTerritoryTitleId("kingdom", polityId, groupKey);
+                    String capitalBand = realmBands.isEmpty() ? "" : realmBands.get(
+                            Math.floorMod(groupKey.hashCode(), realmBands.size()));
+                    String kingdomName = populationIndex == null
+                            ? entry.getValue().name + " Kingdom " + kingdomSerial
+                            : uniqueTerritorialName(kingdomId, "realms", capitalBand,
+                                    populationIndex, polityId + "|kingdom|" + groupKey);
+                    ensureEmergentTerritoryTitle(kingdomId, realmId,
+                            dev.worldforge.realms.Statecraft.Rank.KINGDOM, kingdomName);
+                    if (populationIndex != null)
+                        grantEmergentTerritoryHolder(kingdomId, capitalBand, populationIndex, year, fallbackHolder);
+                    for (String duchyId : group) linkEmergentTerritoryTitle(duchyId, kingdomId);
+                    importedIds.put(kingdomId, realmId);
+                    kingdomIds.add(kingdomId);
+                }
+
+                List<String> crownChildren = !kingdomIds.isEmpty() ? kingdomIds
+                        : !duchyIds.isEmpty() ? duchyIds
+                        : topMapRegions.stream().map(title ->
+                                dev.worldforge.realms.Statecraft.mapTitleId(map.name, title.key)).toList();
+                if (!crownChildren.isEmpty()) {
+                    var required = !kingdomIds.isEmpty()
+                            ? dev.worldforge.realms.Statecraft.Rank.EMPIRE
+                            : !duchyIds.isEmpty()
+                                ? dev.worldforge.realms.Statecraft.Rank.KINGDOM
+                                : dev.worldforge.realms.Statecraft.Rank.DUCHY;
                     if (crown.rank.ordinal() < required.ordinal())
                         RealmsMod.POLITICS.setTitleRank(crownId, required);
-                    for (var topTitle : topTitles)
-                        linkEmergentTerritoryTitle(topTitle.id, crownId);
+                    for (String childId : crownChildren) linkEmergentTerritoryTitle(childId, crownId);
                 }
             }
             for (var entry : realms.entrySet()) {
@@ -2380,6 +2447,48 @@ public final class WorldSimMod {
                     imported, map.name);
             if (changed) dev.worldforge.mod.PoliticalMapRenderer.regenerateAll(map);
         }
+    }
+
+    /** Deterministic connected grouping of geographic titles into higher political tiers. */
+    private static List<List<TitleData.Title>> connectedTitleGroups(
+            List<TitleData.Title> titles, int maximumGroupSize) {
+        Map<Integer, TitleData.Title> remaining = new TreeMap<>();
+        for (TitleData.Title title : titles) remaining.put(title.id, title);
+        List<List<TitleData.Title>> groups = new ArrayList<>();
+        while (!remaining.isEmpty()) {
+            TitleData.Title first = remaining.remove(remaining.keySet().iterator().next());
+            List<TitleData.Title> group = new ArrayList<>();
+            ArrayDeque<TitleData.Title> queue = new ArrayDeque<>();
+            queue.add(first);
+            while (!queue.isEmpty() && group.size() < maximumGroupSize) {
+                TitleData.Title current = queue.removeFirst();
+                group.add(current);
+                int[] neighbors = current.neighbors == null ? new int[0] : current.neighbors;
+                Arrays.stream(neighbors).sorted().forEach(id -> {
+                    TitleData.Title next = remaining.remove(id);
+                    if (next != null && queue.size() + group.size() < maximumGroupSize)
+                        queue.addLast(next);
+                    else if (next != null) remaining.put(id, next);
+                });
+            }
+            groups.add(group);
+        }
+        return groups;
+    }
+
+    private static String nearestEmergentBand(double x, double z, List<String> bandIds,
+            Map<String, JsonObject> bands, EmergenceSource source) {
+        String nearest = "";
+        double best = Double.MAX_VALUE;
+        for (String bandId : bandIds) {
+            JsonObject band = bands.get(bandId);
+            if (band == null) continue;
+            int[] position = source.blockPosition(band.get("x").getAsInt(), band.get("z").getAsInt());
+            double dx = x - position[0], dz = z - position[1];
+            double distance = dx * dx + dz * dz;
+            if (distance < best) { best = distance; nearest = bandId; }
+        }
+        return nearest;
     }
 
     /** Small neighbouring polities may become dependent on a stable, materially stronger realm. */
