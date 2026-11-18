@@ -534,7 +534,7 @@ fn kinship_distance(a: &Character, b: &Character, characters: &BTreeMap<&str, &C
     }
     let first = ancestors(a, characters);
     let second = ancestors(b, characters);
-    first.iter().filter_map(|(id, distance)| second.get(id).map(|other| distance + other))
+    first.iter().filter_map(|(id, distance)| second.get(id).map(|other| *distance + *other))
         .min().unwrap_or(u32::MAX)
 }
 
