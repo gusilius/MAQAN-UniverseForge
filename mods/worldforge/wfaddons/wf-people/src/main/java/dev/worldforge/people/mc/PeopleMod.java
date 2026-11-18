@@ -3,6 +3,7 @@ package dev.worldforge.people.mc;
 import com.mojang.logging.LogUtils;
 import dev.worldforge.mod.EditorManager;
 import dev.worldforge.mod.MapData;
+import dev.worldforge.mod.Json;
 import dev.worldforge.mod.TitleData;
 import dev.worldforge.mod.TitleEditor;
 import dev.worldforge.mod.WorldForgeMod;
@@ -193,6 +194,7 @@ public class PeopleMod {
         if (WorldForgeMod.worldId() != null) AUTHORITY.beginWorld(WorldForgeMod.worldId());
         MinecraftServer server = e.getServer();
         try {
+            recoverRegistryJournal(server);
             String worldKey = WorldForgeMod.worldId() == null
                     ? server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT).toAbsolutePath().normalize().toString()
                     : WorldForgeMod.worldId().toString();
@@ -524,6 +526,80 @@ public class PeopleMod {
     }
 
     /** Persist canonical Character ledgers after a changed player inventory snapshot. */
+    /**
+     * Replays a world-scoped write-ahead journal before any Character partition is loaded.
+     * This makes cross-registry succession durable even when estate dependencies form a cycle.
+     */
+    private static void recoverRegistryJournal(MinecraftServer server) throws Exception {
+        Path root = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT).toAbsolutePath().normalize();
+        Path journalFile = root.resolve("worldforge").resolve("wf_people_registry_journal.json");
+        if (!Files.exists(journalFile)) return;
+        Object parsed = Json.parse(Files.readString(journalFile));
+        if (!(parsed instanceof Map<?, ?> journal)
+                || !"wf-people-registry-journal/1".equals(journal.get("format"))
+                || !(journal.get("files") instanceof List<?> files))
+            throw new IllegalStateException("Character registry write-ahead journal is malformed");
+        for (Object item : files) {
+            if (!(item instanceof Map<?, ?> record)
+                    || !(record.get("path") instanceof String relative)
+                    || !(record.get("content") instanceof String content))
+                throw new IllegalStateException("Character registry write-ahead journal entry is malformed");
+            Path target = root.resolve(relative).normalize();
+            if (!target.startsWith(root) || target.equals(journalFile))
+                throw new IllegalStateException("Character registry journal contains an unsafe target path");
+            writeAtomic(target, content);
+        }
+        Files.deleteIfExists(journalFile);
+        LOGGER.warn("wf_people: recovered interrupted cross-registry Character save from write-ahead journal");
+    }
+
+    private static boolean persistRegistriesWithJournal(MinecraftServer server,
+            List<CharacterRegistry> registries,
+            java.util.IdentityHashMap<CharacterRegistry, MapData> mapOwners,
+            java.util.IdentityHashMap<CharacterRegistry, String> dimensionOwners) {
+        try {
+            Path root = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT).toAbsolutePath().normalize();
+            List<Map<String, Object>> files = new ArrayList<>();
+            java.util.Set<CharacterRegistry> seen = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+            for (CharacterRegistry registry : registries) {
+                if (!seen.add(registry)) continue;
+                Path target;
+                if (registry == PLAYER_REGISTRY) {
+                    target = root.resolve("worldforge").resolve("wf_players.json");
+                } else if (registry == WORLD_REGISTRY) {
+                    target = root.resolve("worldforge").resolve("wf_people_world.json");
+                } else if (dimensionOwners.containsKey(registry)) {
+                    target = dimensionRegistryFile(server, dimensionOwners.get(registry));
+                } else {
+                    MapData map = mapOwners.get(registry);
+                    if (map == null) throw new IllegalStateException("Character registry has no durable owner");
+                    target = EditorManager.overlayDir(server, map).resolve("wf_people.json");
+                }
+                target = target.toAbsolutePath().normalize();
+                if (!target.startsWith(root)) throw new IllegalStateException("Character registry path escapes world save");
+                Map<String, Object> entry = new LinkedHashMap<>();
+                entry.put("path", root.relativize(target).toString().replace('\\\\', '/'));
+                entry.put("content", registry.toJson());
+                files.add(entry);
+            }
+            Map<String, Object> journal = new LinkedHashMap<>();
+            journal.put("format", "wf-people-registry-journal/1");
+            journal.put("files", files);
+            Path journalFile = root.resolve("worldforge").resolve("wf_people_registry_journal.json");
+            writeAtomic(journalFile, Json.write(journal));
+            for (Map<String, Object> entry : files) {
+                Path target = root.resolve(String.valueOf(entry.get("path"))).normalize();
+                writeAtomic(target, String.valueOf(entry.get("content")));
+            }
+            Files.deleteIfExists(journalFile);
+            LOGGER.warn("wf_people: cross-registry estate dependency cycle resolved with durable journaled snapshot");
+            return true;
+        } catch (Exception ex) {
+            LOGGER.error("wf_people: journaled Character save failed; recovery journal is retained when available: {}", ex.toString(), ex);
+            return false;
+        }
+    }
+
     static boolean persistAllRegistries(MinecraftServer server) {
         if (server == null || !playerRegistryAvailable) return false;
 
@@ -598,8 +674,8 @@ public class PeopleMod {
             }
         }
         if (ordered.size() != registries.size()) {
-            LOGGER.error("wf_people: estate persistence dependency cycle detected; refusing a potentially partial cross-registry save");
-            return false;
+            LOGGER.warn("wf_people: estate persistence graph contains a cycle; switching to write-ahead journal");
+            return persistRegistriesWithJournal(server, registries, mapOwners, dimensionOwners);
         }
 
         for (CharacterRegistry registry : ordered) {
