@@ -1431,7 +1431,9 @@ public final class WorldSimMod {
                 item.addProperty("realm_id", realmId);
                 item.addProperty("age", Math.max(0, WorldForgeApi.clock().year() - person.birthYear));
                 item.addProperty("alive", person.alive);
-                item.addProperty("married", person.spouse != null && !person.spouse.isBlank());
+                String spouseGlobalId = canonicalFamilyId(source.registry,
+                        person.props.get("family.spouse_global_id"), person.spouse);
+                item.addProperty("married", !spouseGlobalId.isBlank());
                 item.addProperty("gender", "m".equals(person.gender) ? 0 : 1);
                 item.addProperty("fertility", (int) number(person.props.get("fertility"), 50));
                 item.addProperty("prestige", (int) number(person.props.get("prestige"), 0));
@@ -1452,17 +1454,22 @@ public final class WorldSimMod {
                 JsonArray traits = new JsonArray();
                 for (String trait : new TreeSet<>(person.traits)) traits.add(trait);
                 item.add("trait_ids", traits);
-                dev.worldforge.people.Character father = source.registry.get(person.father);
-                dev.worldforge.people.Character mother = source.registry.get(person.mother);
-                dev.worldforge.people.Character spouse = source.registry.get(person.spouse);
-                item.addProperty("father_id", father == null ? "" : father.globalId);
-                item.addProperty("mother_id", mother == null ? "" : mother.globalId);
-                item.addProperty("spouse_id", spouse == null ? "" : spouse.globalId);
+                item.addProperty("father_id", canonicalFamilyId(source.registry,
+                        person.props.get("family.father_global_id"), person.father));
+                item.addProperty("mother_id", canonicalFamilyId(source.registry,
+                        person.props.get("family.mother_global_id"), person.mother));
+                item.addProperty("spouse_id", spouseGlobalId);
                 JsonArray children = new JsonArray();
+                Set<String> childGlobalIds = new TreeSet<>();
+                Object globalChildren = person.props.get("family.child_global_ids");
+                if (globalChildren instanceof Collection<?> ids)
+                    for (Object childId : ids) if (childId instanceof String id && !id.isBlank())
+                        childGlobalIds.add(canonicalFamilyId(source.registry, id, id));
                 for (String childId : person.children) {
-                    dev.worldforge.people.Character child = source.registry.get(childId);
-                    if (child != null) children.add(child.globalId);
+                    String globalChild = canonicalFamilyId(source.registry, null, childId);
+                    if (!globalChild.isBlank()) childGlobalIds.add(globalChild);
                 }
+                childGlobalIds.forEach(children::add);
                 item.add("child_ids", children);
                 JsonArray roles = new JsonArray(), heldTitles = new JsonArray();
                 Set<String> roleIds = new TreeSet<>(), titleIds = new TreeSet<>();
@@ -1597,6 +1604,17 @@ public final class WorldSimMod {
             LOGGER.warn("wf_worldsim: optional module {} snapshot unavailable: {}", moduleId, error.toString());
             return null;
         }
+    }
+
+    private static String canonicalFamilyId(CharacterRegistry registry, Object globalValue, String localValue) {
+        String candidate = globalValue instanceof String value && !value.isBlank()
+                ? value.trim() : localValue == null ? "" : localValue.trim();
+        if (candidate.isBlank()) return "";
+        dev.worldforge.people.Character character = PeopleMod.authority().getGlobal(candidate);
+        if (character == null && registry != null) character = registry.get(candidate);
+        if (character != null) return character.globalId;
+        try { return java.util.UUID.fromString(candidate).toString(); }
+        catch (IllegalArgumentException ignored) { return ""; }
     }
 
     private static int exportSocialRelations(JsonArray target, Set<String> snapshotCharacterIds) {
