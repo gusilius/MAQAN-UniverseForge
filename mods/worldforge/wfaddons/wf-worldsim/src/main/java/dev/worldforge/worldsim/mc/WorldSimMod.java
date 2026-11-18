@@ -1243,6 +1243,61 @@ public final class WorldSimMod {
         }
         addCatalogEntry(catalogEntries, "wf_people", "name_pools", "all_pools", "Cultural and racial naming pools",
                 GSON.toJsonTree(PeopleMod.NAMES.catalogSnapshot()));
+        JsonObject troopSnapshot = exportOptionalModuleSnapshot("wf_troops",
+                "dev.worldforge.troops.mc.TroopsMod", "worldSnapshotJson");
+        if (troopSnapshot != null) {
+            root.add("military_runtime", troopSnapshot);
+            JsonObject unitDefinitions = troopSnapshot.has("unit_definitions")
+                    ? troopSnapshot.getAsJsonObject("unit_definitions") : new JsonObject();
+            for (var entry : unitDefinitions.entrySet()) {
+                String unitId = entry.getKey();
+                String unitName = entry.getValue().isJsonObject() && entry.getValue().getAsJsonObject().has("name")
+                        ? entry.getValue().getAsJsonObject().get("name").getAsString() : unitId;
+                addCatalogEntry(catalogEntries, "wf_troops", "physical_unit_types", unitId, unitName, entry.getValue());
+                addNamedEntity(namedEntities, unitId, "troop_type", unitName, "", "");
+            }
+            JsonArray liveTroops = troopSnapshot.has("live_troops") ? troopSnapshot.getAsJsonArray("live_troops") : new JsonArray();
+            for (var element : liveTroops) if (element.isJsonObject()) {
+                JsonObject troop = element.getAsJsonObject();
+                String entityId = troop.has("entity_id") ? troop.get("entity_id").getAsString() : "";
+                String unitId = troop.has("unit_id") ? troop.get("unit_id").getAsString() : "";
+                String unitName = unitDefinitions.has(unitId) && unitDefinitions.getAsJsonObject(unitId).has("name")
+                        ? unitDefinitions.getAsJsonObject(unitId).get("name").getAsString() : unitId;
+                addNamedEntity(namedEntities, entityId, "physical_troop", unitName, "", troop.has("realm_id") ? troop.get("realm_id").getAsString() : "");
+            }
+            JsonArray squadRows = troopSnapshot.has("squads") ? troopSnapshot.getAsJsonArray("squads") : new JsonArray();
+            for (var element : squadRows) if (element.isJsonObject()) {
+                JsonObject squad = element.getAsJsonObject();
+                addNamedEntity(namedEntities, squad.get("id").getAsString(), "squad",
+                        squad.get("name").getAsString(), "", squad.has("realm") ? squad.get("realm").getAsString() : "");
+            }
+            addCatalogEntry(catalogEntries, "wf_troops", "runtime_state", "military",
+                    "Physical military state and durable ledgers", troopSnapshot);
+        }
+        // wf-war owns active campaigns, casus belli, occupation, peace terms and truces.
+        for (MapData map : WorldForgeMod.loadedMaps().values()) {
+            if (map == null || map.titles == null) continue;
+            WarEngine warEngine = WarMod.engine(map);
+            for (var cb : warEngine.cbs.values())
+                addCatalogEntry(catalogEntries, "wf_war", "casus_belli", cb.id, cb.name, GSON.toJsonTree(cb));
+            for (var war : warEngine.wars.values()) {
+                JsonObject warData = new JsonObject();
+                warData.addProperty("id", war.id); warData.addProperty("attacker", war.attacker);
+                warData.addProperty("defender", war.defender); warData.addProperty("casus_belli", war.cb);
+                warData.addProperty("score", finite(war.score)); warData.addProperty("start_day", war.startDay);
+                warData.addProperty("end_day", war.endDay); warData.addProperty("active", war.active);
+                warData.addProperty("result", war.result);
+                warData.add("attacker_members", GSON.toJsonTree(war.members(dev.worldforge.war.War.Side.ATTACKER)));
+                warData.add("defender_members", GSON.toJsonTree(war.members(dev.worldforge.war.War.Side.DEFENDER)));
+                warData.add("goals", GSON.toJsonTree(war.goals)); warData.add("occupied", GSON.toJsonTree(war.occupied));
+                warData.add("log", GSON.toJsonTree(war.log));
+                addCatalogEntry(catalogEntries, "wf_war", "war_instances",
+                        map.name + ":" + war.id, "War " + war.id, warData);
+                addNamedEntity(namedEntities, map.name + ":" + war.id, "war", "War " + war.id, "", war.attacker);
+            }
+            addCatalogEntry(catalogEntries, "wf_war", "truces", map.name, map.name,
+                    GSON.toJsonTree(warEngine.truces));
+        }
         if (SettleMod.DEFS != null) {
             for (var building : SettleMod.DEFS.buildings.values()) {
                 addCatalogEntry(catalogEntries, "wf_settlements", "buildings", building.id, building.name, GSON.toJsonTree(building));
@@ -1454,6 +1509,9 @@ public final class WorldSimMod {
         addCapability(capabilities, "wf_settlements", 1, true, SettleMod.TYPES.types.size(), SettleMod.COLONIES.size());
         addCapability(capabilities, "wf_army", 1, true, ArmyMod.loadedEngines().stream().mapToInt(engine -> engine.types.size()).sum(),
                 armies.size());
+        addCapability(capabilities, "wf_troops", 1, net.minecraftforge.fml.ModList.get().isLoaded("wf_troops"),
+                troopSnapshot != null && troopSnapshot.has("unit_definitions") ? troopSnapshot.getAsJsonObject("unit_definitions").size() : 0,
+                troopSnapshot != null && troopSnapshot.has("live_troops") ? troopSnapshot.getAsJsonArray("live_troops").size() : 0);
         addCapability(capabilities, "wf_people", 1, true, PeopleMod.PROFESSIONS.all().size(), characters.size());
         addCapability(capabilities, "wf_relations", 1, net.minecraftforge.fml.ModList.get().isLoaded("wf_relations"), 0, exportedSocialRelations);
         addCapability(capabilities, "wf_origins", 1, true, OriginsMod.DEFS.races.size()
@@ -1462,7 +1520,7 @@ public final class WorldSimMod {
         addCapability(capabilities, "wf_court", 1, net.minecraftforge.fml.ModList.get().isLoaded("wf_court"), 0, 0);
         addCapability(capabilities, "wf_war", 1, net.minecraftforge.fml.ModList.get().isLoaded("wf_war"), 0, wars.size());
         addCapability(capabilities, "wf_trade", 1, net.minecraftforge.fml.ModList.get().isLoaded("wf_trade"), 0, 0);
-        for (String optionalModule : List.of("wf_troops", "wf_rts", "wf_genesis", "wf_progress", "wf_reputation"))
+        for (String optionalModule : List.of("wf_rts", "wf_genesis", "wf_progress", "wf_reputation"))
             addCapability(capabilities, optionalModule, 1, net.minecraftforge.fml.ModList.get().isLoaded(optionalModule), 0, 0);
         sortObjects(catalogEntries, Comparator.comparing((JsonObject item) -> item.get("module_id").getAsString())
                 .thenComparing(item -> item.get("catalog_id").getAsString()).thenComparing(item -> item.get("entry_id").getAsString()));
@@ -1487,6 +1545,21 @@ public final class WorldSimMod {
         return root;
     }
 
+
+    private static JsonObject exportOptionalModuleSnapshot(String moduleId, String className, String methodName) {
+        if (!net.minecraftforge.fml.ModList.get().isLoaded(moduleId)) return null;
+        try {
+            Class<?> owner = Class.forName(className);
+            Object raw = owner.getMethod(methodName).invoke(null);
+            if (!(raw instanceof String json)) return null;
+            JsonElement parsed = com.google.gson.JsonParser.parseString(json);
+            if (!parsed.isJsonObject()) throw new IllegalStateException("Module snapshot must be a JSON object: " + moduleId);
+            return parsed.getAsJsonObject();
+        } catch (ReflectiveOperationException | LinkageError | com.google.gson.JsonParseException error) {
+            LOGGER.warn("wf_worldsim: optional module {} snapshot unavailable: {}", moduleId, error.toString());
+            return null;
+        }
+    }
 
     private static int exportSocialRelations(JsonArray target, Set<String> snapshotCharacterIds) {
         if (!net.minecraftforge.fml.ModList.get().isLoaded("wf_relations")) return 0;
