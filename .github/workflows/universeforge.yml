@@ -1,4 +1,4 @@
-name: MAQAN UniverseForge — two-world acceptance (Windows x64)
+name: MAQAN UniverseForge — world runtime acceptance (Windows x64)
 
 on:
   push:
@@ -28,11 +28,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: universeforge-two-world-acceptance-${{ github.ref }}
+  group: universeforge-world-runtime-acceptance-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  two-world-acceptance:
+  world-runtime-acceptance:
     name: Build once; test vanilla and image-map servers sequentially
     runs-on: windows-latest
     timeout-minutes: 360
@@ -100,7 +100,7 @@ jobs:
         shell: pwsh
         run: |
           if (!(Test-Path "map.png")) { throw "The repository map.png source is missing" }
-          $out = Join-Path $env:RUNNER_TEMP "maqan-two-world-map"
+          $out = Join-Path $env:RUNNER_TEMP "maqan-world-runtime-map"
           New-Item -ItemType Directory -Force -Path $out | Out-Null
           $testMap = Join-Path $env:RUNNER_TEMP "maqan-test-map-1000x1000.png"
           python -c "from PIL import Image; Image.open('map.png').convert('RGB').resize((1000,1000), Image.Resampling.LANCZOS).save(r'$testMap')"
@@ -113,7 +113,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Actual map package validation failed" }
 
       - name: Start and smoke-test an ordinary vanilla world
-        id: vanilla_campaign
+        id: vanilla_world_smoke
         continue-on-error: true
         working-directory: mods/worldforge/wfaddons
         shell: bash
@@ -121,25 +121,25 @@ jobs:
           WF_ACCEPTANCE_MODE: "smoke"
           WF_VANILLA_SEED: "424242"
         run: |
-          bash tools/autonomous-campaign.sh vanilla dist "$RUNNER_TEMP/maqan-vanilla-acceptance"
+          bash tools/world-runtime-smoke.sh vanilla dist "$RUNNER_TEMP/maqan-vanilla-runtime"
 
       - name: Start and smoke-test the image-derived world
-        id: image_map_campaign
+        id: mapped_world_smoke
         continue-on-error: true
         working-directory: mods/worldforge/wfaddons
         shell: bash
         env:
           WF_ACCEPTANCE_MODE: "smoke"
-          WF_CAMPAIGN_MAP_ID: "real-map"
+          WF_MAP_ID: "real-map"
         run: |
-          bash tools/autonomous-campaign.sh "$RUNNER_TEMP/maqan-two-world-map/real-map.worldmap" dist "$RUNNER_TEMP/maqan-image-map-acceptance"
+          bash tools/world-runtime-smoke.sh "$RUNNER_TEMP/maqan-world-runtime-map/real-map.worldmap" dist "$RUNNER_TEMP/maqan-mapped-runtime"
 
       - name: Aggregate independent world acceptance results
         if: always()
         shell: pwsh
         env:
-          VANILLA_OUTCOME: ${{ steps.vanilla_campaign.outcome }}
-          IMAGE_MAP_OUTCOME: ${{ steps.image_map_campaign.outcome }}
+          VANILLA_OUTCOME: ${{ steps.vanilla_world_smoke.outcome }}
+          IMAGE_MAP_OUTCOME: ${{ steps.mapped_world_smoke.outcome }}
         run: |
           "VANILLA_WORLD_SMOKE_OUTCOME=$env:VANILLA_OUTCOME" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
           "IMAGE_MAP_WORLD_SMOKE_OUTCOME=$env:IMAGE_MAP_OUTCOME" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
@@ -151,10 +151,10 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: maqan-two-world-server-acceptance
+          name: maqan-world-runtime-server-acceptance
           path: |
-            ${{ runner.temp }}/maqan-vanilla-acceptance/
-            ${{ runner.temp }}/maqan-image-map-acceptance/
-            ${{ runner.temp }}/maqan-two-world-map/
+            ${{ runner.temp }}/maqan-vanilla-runtime/
+            ${{ runner.temp }}/maqan-mapped-runtime/
+            ${{ runner.temp }}/maqan-world-runtime-map/
           if-no-files-found: warn
           retention-days: 30
