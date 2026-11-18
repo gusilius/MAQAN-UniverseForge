@@ -89,13 +89,17 @@ public class ReputationMod {
             current.name(target, "Репутация в государстве " + polityId);
         if (witnesses == null || witnesses.length == 0 || scope != ReputationStore.Scope.POLITY) return;
 
-        List<String> orderedWitnesses = new java.util.TreeSet<>(java.util.Arrays.asList(witnesses)).stream()
-                .filter(id -> id != null && !id.isBlank() && !id.equals(characterGlobalId)).limit(8).toList();
+        List<String> orderedWitnesses = java.util.Arrays.stream(witnesses)
+                .filter(id -> id != null && !id.isBlank() && !id.equals(characterGlobalId))
+                .distinct().sorted().limit(8).toList();
         for (String witness : orderedWitnesses) {
             current.observe(witness, characterGlobalId, scope, scopeId, worldTime, reason);
         }
-        for (String witness : orderedWitnesses) {
-            RumorNetwork.spread(current, witness, characterGlobalId, scope, scopeId, worldTime,
+        // One origin witness per event prevents a same-pass rumor cascade. Later daily
+        // observations can propagate the fact again, bounded by RumorNetwork depth/confidence.
+        if (!orderedWitnesses.isEmpty()) {
+            String origin = orderedWitnesses.get(0);
+            RumorNetwork.spread(current, origin, characterGlobalId, scope, scopeId, worldTime,
                     witnessId -> npcContacts(witnessId, polityId),
                     (recipientId, organizationId) -> npcMember(recipientId, organizationId));
         }
