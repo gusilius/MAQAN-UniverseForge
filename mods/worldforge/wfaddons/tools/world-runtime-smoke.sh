@@ -242,7 +242,8 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "dual-world" ]; then
     if grep -E 'MAQAN_WORLD_GENESIS source=vanilla-world:minecraft:overworld .*communities=[1-9][0-9]*' server.log \
       && grep -E "MAQAN_WORLD_GENESIS source=$MAP_ID .*communities=[1-9][0-9]*" server.log \
       && grep -Fq 'wf_court: autonomous virtual court attached dimension=minecraft:overworld' server.log \
-      && grep -Fq 'wf_relations: autonomous social event kind=' server.log \
+      && grep -Fq 'wf_relations: autonomous social event kind=friendship' server.log \
+      && grep -Fq 'wf_relations: autonomous social event kind=marriage' server.log \
       && grep -Fq 'wf_reputation: autonomous NPC reputation events=' server.log; then
       break
     fi
@@ -274,10 +275,15 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "dual-world" ]; then
     echo "ERROR: vanilla Overworld has no autonomous virtual court"
     exit 10
   }
-  grep -Fq 'wf_relations: autonomous social event kind=' server.log || {
+  grep -Fq 'wf_relations: autonomous social event kind=friendship' server.log || {
     tail -200 server.log
-    echo "ERROR: autonomous NPC friendship/rivalry/marriage produced no events"
+    echo "ERROR: autonomous NPC friendship produced no events"
     exit 11
+  }
+  grep -Fq 'wf_relations: autonomous social event kind=marriage' server.log || {
+    tail -200 server.log
+    echo "ERROR: autonomous NPC marriage produced no events"
+    exit 13
   }
   grep -Fq 'wf_reputation: autonomous NPC reputation events=' server.log || {
     tail -200 server.log
