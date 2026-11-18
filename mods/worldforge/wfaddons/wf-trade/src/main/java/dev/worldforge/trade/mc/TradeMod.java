@@ -231,6 +231,57 @@ public class TradeMod {
 
     // ------------------------------------------------------------------ жизненный цикл
 
+    /** Read-only export of all market, caravan and trade-shock state for the common WorldSim. */
+    public static String worldSnapshotJson() {
+        Map<String, Object> root = new LinkedHashMap<>();
+        Map<String, Object> goods = new TreeMap<>();
+        for (var entry : DEFS.goods.entrySet()) {
+            TradeDefs.Good good = entry.getValue();
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("id", good.id()); row.put("name", good.name()); row.put("category", good.category());
+            row.put("base_price", good.base()); row.put("need", good.need()); row.put("weight", good.weight());
+            row.put("item_id", good.item()); row.put("terrain_modifiers", good.terrain());
+            row.put("race_demand", good.races()); row.put("seasonal_production", good.season());
+            row.put("contraband", good.contraband()); goods.put(entry.getKey(), row);
+        }
+        root.put("goods", goods);
+        Map<String, Object> markets = new TreeMap<>();
+        for (var entry : TRADE.markets.entrySet()) {
+            Trade.Market market = entry.getValue();
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("stock", new TreeMap<>(market.stock)); row.put("tariff", market.tariff);
+            row.put("embargo", new TreeSet<>(market.embargo)); row.put("tariff_income", market.tariffIncome);
+            row.put("guild_income", market.guildIncome); row.put("trade_volume", market.tradeVolume);
+            row.put("auto_trade", market.autoTrade); markets.put(entry.getKey(), row);
+        }
+        root.put("markets", markets);
+        List<Object> caravans = new ArrayList<>();
+        for (var caravan : TRADE.caravans.values()) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("id", caravan.id); row.put("owner", caravan.owner); row.put("from", caravan.from);
+            row.put("to", caravan.to); row.put("status", caravan.status); row.put("cargo", new TreeMap<>(caravan.cargo));
+            row.put("spent", caravan.spent); row.put("revenue", caravan.revenue); row.put("guards", caravan.guards);
+            row.put("total_days", caravan.total); row.put("days_left", caravan.left); row.put("started_day", caravan.started);
+            caravans.add(row);
+        }
+        root.put("caravans", caravans);
+        List<Object> ambushes = new ArrayList<>();
+        for (var ambush : TRADE.ambushes.values()) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("id", ambush.id); row.put("caravan_id", ambush.caravan); row.put("strength", ambush.strength);
+            row.put("expires_day", ambush.expires); row.put("slain", ambush.slain); row.put("progress", ambush.progress);
+            row.put("spent", ambush.spent); row.put("owner", ambush.owner); row.put("from", ambush.from);
+            row.put("to", ambush.to); row.put("cargo", new TreeMap<>(ambush.cargo)); ambushes.add(row);
+        }
+        root.put("ambushes", ambushes);
+        List<Object> shocks = new ArrayList<>();
+        for (var shock : TRADE.shocks) shocks.add(Map.of("realm_id", shock.realm, "good_id", shock.good,
+                "factor", shock.factor, "days_left", shock.days));
+        root.put("shocks", shocks); root.put("merchant_capital", new TreeMap<>(TRADE.capital));
+        root.put("chronicle", List.copyOf(TRADE.chronicle));
+        return dev.worldforge.mod.Json.write(root);
+    }
+
     private static Path file(MinecraftServer s) { return s.getWorldPath(LevelResource.ROOT).resolve("worldforge").resolve("wf_trade.json"); }
 
     private static void loadDefs(ResourceManager rm) {
