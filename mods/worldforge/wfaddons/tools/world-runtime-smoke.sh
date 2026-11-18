@@ -269,10 +269,12 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "dual-world" ]; then
 import json, pathlib, re, sys
 out, map_id = pathlib.Path(sys.argv[1]), sys.argv[2]
 log = pathlib.Path("server.log").read_text(encoding="utf-8", errors="replace")
-pattern = re.compile(r"MAQAN_WORLD_GENESIS source=(\S+) dimension=(\S+) geography_cells=(\d+) communities=(\d+) settled=(\d+) settlements=(\d+) emergent_settlements=(\d+) map_anchors=(\d+) living_characters=(\d+) court_offices=(\d+) polities=(\d+) canonical_rulers=(\d+) dynasties=(\d+) titles=(\d+) governments=(\d+) race_kinds=(\d+)")
+pattern = re.compile(r"MAQAN_WORLD_GENESIS source=(\S+) dimension=(\S+) geography_cells=(\d+) communities=(\d+) settled=(\d+) settlements=(\d+) emergent_settlements=(\d+) map_anchors=(\d+) living_characters=(\d+) court_offices=(\d+) polities=(\d+) canonical_rulers=(\d+) dynasties=(\d+) titles=(\d+) governments=(\d+) race_kinds=(\d+) settlement_types=(\{[^}]*\})")
 rows = {}
 for match in pattern.finditer(log):
-    rows[match.group(1)] = dict(zip(("source","dimension","geography_cells","communities","settled","settlements","emergent_settlements","map_anchors","living_characters","court_offices","polities","canonical_rulers","dynasties","titles","governments","race_kinds"), match.groups()))
+    values = dict(zip(("source","dimension","geography_cells","communities","settled","settlements","emergent_settlements","map_anchors","living_characters","court_offices","polities","canonical_rulers","dynasties","titles","governments","race_kinds"), match.groups()[:-1]))
+    values["settlement_types"] = json.loads(match.group(17))
+    rows[match.group(1)] = values
 expected = {"vanilla-world:minecraft:overworld", map_id}
 missing = expected - rows.keys()
 if missing:
@@ -286,6 +288,9 @@ for key in sorted(expected):
         raise SystemExit(f"{key}: initial civilization must contain at least four real communities/settlements")
     if int(row["race_kinds"]) < 2:
         raise SystemExit(f"{key}: expected at least two actual race identities, got {row['race_kinds']}")
+    classified = sum(count for kind, count in row["settlement_types"].items() if kind != "unclassified")
+    if classified <= 0:
+        raise SystemExit(f"{key}: Genesis did not assign any existing data-pack settlement type: {row['settlement_types']}")
     if key == map_id and int(row["map_anchors"]) <= 0:
         raise SystemExit(f"{key}: image-map settlements were not reused/materialized as canonical anchors")
 (out / "same-server-world-genesis.json").write_text(json.dumps({key: rows[key] for key in sorted(expected)}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
