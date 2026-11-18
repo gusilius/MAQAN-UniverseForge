@@ -985,6 +985,10 @@ public final class Settlement {
         List<String> built = new ArrayList<>();
         for (Building b : buildings) if (b.state == Building.State.DONE) built.add(b.def.id);
         SettleTypes.Type t = types.best(pop, built, terrain, races);
+        // Genesis colonies start as canonical settlements before their first buildings
+        // are physically materialized. Give them a valid founding form now; later ordinary
+        // refreshes upgrade them only when the full building requirements are satisfied.
+        if (t == null) t = types.bestFounding(pop, terrain, races);
         String old = typeId;
         typeId = t == null ? "" : t.id();
         if (!typeId.equals(old) && t != null) say("Вид поселения: " + t.name());
