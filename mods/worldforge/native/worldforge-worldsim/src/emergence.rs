@@ -600,6 +600,36 @@ mod tests {
     }
 
     #[test]
+    fn same_coordinates_on_different_dimensions_remain_independent_world_spaces() {
+        let first = map();
+        let second = GeographicMap {
+            map_id: "vanilla-world:minecraft:overworld".into(),
+            ..map()
+        };
+        let snapshot = WorldSnapshot {
+            world_id: "single-universe-two-worlds".into(),
+            seed: 8128,
+            day: 0,
+            realms: vec![], borders: vec![], settlements: vec![],
+            characters: vec![], workforce: vec![],
+            geography: vec![first, second],
+        };
+        let frame = advance(EmergenceRequest { snapshot, state: None }).unwrap();
+        let first_ids = frame.state.bands.iter()
+            .filter(|band| band.map_id == "planetos")
+            .map(|band| band.id.as_str()).collect::<BTreeSet<_>>();
+        let second_ids = frame.state.bands.iter()
+            .filter(|band| band.map_id == "vanilla-world:minecraft:overworld")
+            .map(|band| band.id.as_str()).collect::<BTreeSet<_>>();
+        assert!(!first_ids.is_empty(), "mapped planet must receive its own founding communities");
+        assert!(!second_ids.is_empty(), "vanilla planet must receive its own founding communities");
+        assert!(first_ids.is_disjoint(&second_ids),
+            "equal local coordinates in different dimensions must never share a Band identity");
+        assert!(frame.state.bands.iter().all(|band|
+            band.map_id == "planetos" || band.map_id == "vanilla-world:minecraft:overworld"));
+    }
+
+    #[test]
     fn no_viable_geography_does_not_invent_population_or_states() {
         let mut r = request(365 * 300, None);
         for c in &mut r.snapshot.geography[0].cells { c.land = false; c.suitability = 0; }
