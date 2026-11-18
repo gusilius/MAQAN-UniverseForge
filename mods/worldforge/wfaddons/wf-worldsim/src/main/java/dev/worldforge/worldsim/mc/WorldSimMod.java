@@ -127,8 +127,10 @@ public final class WorldSimMod {
             this.blocksPerPixel = blocksPerPixel; this.seed = seed; this.dimension = dimension;
         }
         static EmergenceSource authored(MapData map) {
+            MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+            String dimension = mapDimension(server, map);
             return new EmergenceSource(map.name, map, PeopleMod.registry(map), map.w, map.h, map.bpp,
-                    PeopleMod.seed(map), "");
+                    PeopleMod.seed(map), dimension == null ? "" : dimension);
         }
         static EmergenceSource vanilla(String id, CharacterRegistry registry) {
             String dimension = VanillaWorldGeography.dimensionFromMapId(id);
@@ -146,7 +148,7 @@ public final class WorldSimMod {
             };
         }
         String settlementDimension(MinecraftServer server) {
-            return map == null ? dimension : mapDimension(server, map);
+            return dimension.isBlank() && map != null ? mapDimension(server, map) : dimension;
         }
     }
 
