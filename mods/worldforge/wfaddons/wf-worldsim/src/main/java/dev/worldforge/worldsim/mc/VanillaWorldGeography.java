@@ -351,8 +351,10 @@ public final class VanillaWorldGeography {
                     // One-time sanitation of legacy invalid water ownership.
                     owner = "";
                 } else if (land && previous.isBlank() && !seeds.isEmpty()) {
-                    int x = WORLD_COORDINATE_OFFSET + address.x * REGION_BLOCKS + cell.get("x").getAsInt();
-                    int z = WORLD_COORDINATE_OFFSET + address.z * REGION_BLOCKS + cell.get("z").getAsInt();
+                    // PoliticalSeed positions are Minecraft block coordinates, not
+                    // unsigned WorldSim snapshot coordinates.
+                    int x = address.x * REGION_BLOCKS + cell.get("x").getAsInt();
+                    int z = address.z * REGION_BLOCKS + cell.get("z").getAsInt();
                     long bestDistance = Long.MAX_VALUE;
                     for (PoliticalSeed seed : seeds) {
                         if (seed.realmId.isBlank()) continue;
