@@ -9,7 +9,6 @@ import dev.worldforge.mod.TitleData;
 import dev.worldforge.mod.WorldForgeMod;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
-import dev.worldforge.mod.WorldForgeMod;
 import net.minecraft.world.level.storage.LevelResource;
 import dev.worldforge.people.mc.PeopleMod;
 import net.minecraft.resources.ResourceLocation;
