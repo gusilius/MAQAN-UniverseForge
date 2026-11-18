@@ -875,7 +875,7 @@ public final class WorldSimMod {
         // Both image and vanilla sources contribute only canonical emergent realms created
         // by the shared geography pipeline; this also prevents map realms being counted twice.
         Set<String> threatenedRealms = new HashSet<>();
-        for (TitleData.Realm realm : RealmsMod.emergentRealms()) {
+        for (TitleData.Realm realm : RealmsMod.realms()) {
             JsonObject item = new JsonObject();
             item.addProperty("id", realm.id);
             long population = (long) number(realm.props.get("population"), 0);
@@ -962,7 +962,7 @@ public final class WorldSimMod {
                 if (emittedPoliticalTitleIds.add(titleId)) politicalTitles.add(title);
             }
         }
-        for (TitleData.Realm realm : RealmsMod.emergentRealms()) {
+        for (TitleData.Realm realm : RealmsMod.realms()) {
             Object raw = realm.props.get("emergence.neighbors");
             if (raw == null) continue;
             for (String neighbor : String.valueOf(raw).split(",")) {
