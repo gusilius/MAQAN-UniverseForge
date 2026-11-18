@@ -861,6 +861,7 @@ public final class WorldSimMod {
         root.addProperty("seed", server.getWorldData().worldGenOptions().seed() & Long.MAX_VALUE);
         root.addProperty("day", day);
         JsonArray realms = new JsonArray(), borders = new JsonArray(), settlements = new JsonArray(), characters = new JsonArray(), workforce = new JsonArray();
+        JsonArray politicalTitles = new JsonArray();
         JsonArray geography = new JsonArray();
         List<EmergenceSource> sources = emergenceSources();
         // Geography is sampled independently of political overlays. A map with no titles/realms
@@ -900,6 +901,67 @@ public final class WorldSimMod {
             realms.add(item);
         }
         Set<String> emittedEmergentBorders = new TreeSet<>();
+        // Export the complete authored-map title graph to Rust. This includes every
+        // tier, neutral title, parent edge, real liege, holder, claim and province border.
+        // The native engine must reason over the same canonical title registry as Java.
+        Set<String> emittedPoliticalTitleIds = new HashSet<>();
+        Set<String> emittedMapBorders = new TreeSet<>();
+        for (MapData map : WorldForgeMod.loadedMaps().values()) {
+            if (map == null || map.titles == null) continue;
+            for (TitleData.Title sourceTitle : map.titles.allTitles()) {
+                String titleId = dev.worldforge.realms.Statecraft.mapTitleId(map.name, sourceTitle.key);
+                var political = RealmsMod.POLITICS.title(titleId);
+                String realmId = political == null ? "unclaimed:" + map.name : political.realmId;
+                JsonObject title = new JsonObject();
+                title.addProperty("id", titleId);
+                title.addProperty("map_id", map.name);
+                title.addProperty("key", sourceTitle.key);
+                title.addProperty("name", sourceTitle.name == null ? "" : sourceTitle.name);
+                title.addProperty("realm_id", realmId);
+                title.addProperty("tier_index", Math.max(0, sourceTitle.tier));
+                title.addProperty("tier_key", sourceTitle.tier >= 0 && sourceTitle.tier < map.titles.tiers.size()
+                        ? map.titles.tiers.get(sourceTitle.tier).key : "tier_" + sourceTitle.tier);
+                String parentId = sourceTitle.parent > 0 && map.titles.get(sourceTitle.parent) != null
+                        ? dev.worldforge.realms.Statecraft.mapTitleId(map.name,
+                                map.titles.get(sourceTitle.parent).key) : "";
+                title.addProperty("parent_title_id", parentId);
+                title.addProperty("liege_title_id", political == null ? "" : political.liegeTitleId);
+                title.addProperty("holder_character_id", political == null ? "" : political.holderCharacterId);
+                title.addProperty("area_blocks", sourceTitle.areaBlocks);
+                JsonArray claims = new JsonArray();
+                if (political != null) for (String claimant : new TreeSet<>(political.claims)) claims.add(claimant);
+                title.add("claims", claims);
+                JsonArray neighbors = new JsonArray();
+                if (sourceTitle.neighbors != null) {
+                    for (int neighborId : Arrays.stream(sourceTitle.neighbors).sorted().toArray()) {
+                        TitleData.Title neighbor = map.titles.get(neighborId);
+                        if (neighbor == null) continue;
+                        String neighborTitleId = dev.worldforge.realms.Statecraft.mapTitleId(map.name, neighbor.key);
+                        neighbors.add(neighborTitleId);
+                        if (sourceTitle.tier == 0 && political != null) {
+                            var otherPolitical = RealmsMod.POLITICS.title(neighborTitleId);
+                            if (otherPolitical == null || otherPolitical.realmId.equals(political.realmId)
+                                    || otherPolitical.realmId.startsWith("unclaimed:")) continue;
+                            String a = political.realmId.compareTo(otherPolitical.realmId) < 0
+                                    ? political.realmId : otherPolitical.realmId;
+                            String b = political.realmId.compareTo(otherPolitical.realmId) < 0
+                                    ? otherPolitical.realmId : political.realmId;
+                            if (!emittedMapBorders.add(a + "|" + b)) continue;
+                            JsonObject border = new JsonObject();
+                            border.addProperty("a", a); border.addProperty("b", b);
+                            border.addProperty("contested_claim", !political.claims.isEmpty()
+                                    || !otherPolitical.claims.isEmpty());
+                            border.addProperty("strategic_value", (int) Math.max(1,
+                                    Math.min(100, (sourceTitle.areaPct + neighbor.areaPct) * 2)));
+                            border.addProperty("distance_cost", 0);
+                            borders.add(border);
+                        }
+                    }
+                }
+                title.add("neighbors", neighbors);
+                if (emittedPoliticalTitleIds.add(titleId)) politicalTitles.add(title);
+            }
+        }
         for (TitleData.Realm realm : RealmsMod.emergentRealms()) {
             Object raw = realm.props.get("emergence.neighbors");
             if (raw == null) continue;
@@ -1050,13 +1112,14 @@ public final class WorldSimMod {
         // Canonical JSON ordering is part of the native simulation contract:
         // identical authoritative state must yield identical Rust input bytes.
         sortObjects(realms, Comparator.comparing(item -> item.get("id").getAsString()));
+        sortObjects(politicalTitles, Comparator.comparing(item -> item.get("id").getAsString()));
         sortObjects(borders, Comparator.comparing((JsonObject item) -> item.get("a").getAsString())
                 .thenComparing(item -> item.get("b").getAsString()));
         sortObjects(settlements, Comparator.comparing(item -> item.get("id").getAsString()));
         sortObjects(characters, Comparator.comparing(item -> item.get("id").getAsString()));
         sortObjects(workforce, Comparator.comparing(item -> item.get("settlement_id").getAsString()));
         root.add("geography", geography);
-        root.add("realms", realms); root.add("borders", borders); root.add("settlements", settlements);
+        root.add("realms", realms); root.add("titles", politicalTitles); root.add("borders", borders); root.add("settlements", settlements);
         root.add("characters", characters); root.add("workforce", workforce);
         return root;
     }
