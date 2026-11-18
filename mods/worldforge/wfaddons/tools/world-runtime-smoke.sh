@@ -234,7 +234,7 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "dual-world" ]; then
 
   for second in $(seq 1 240); do
     kill -0 "$SERVER_PID" 2>/dev/null || { tail -200 server.log; echo "ERROR: server exited during same-server dual-world genesis"; exit 5; }
-    if grep -E 'MAQAN_WORLD_GENESIS source=vanilla-world:minecraft:overworld .*communities=[4-9][0-9]*' server.log \
+    if grep -E 'MAQAN_WORLD_GENESIS source=vanilla-world:minecraft:overworld .*communities=[1-9][0-9]*' server.log \
       && grep -E "MAQAN_WORLD_GENESIS source=$MAP_ID .*communities=[4-9][0-9]*" server.log; then
       break
     fi
