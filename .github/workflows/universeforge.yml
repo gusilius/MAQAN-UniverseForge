@@ -2,7 +2,7 @@ name: MAQAN UniverseForge — world runtime acceptance (Windows x64)
 
 on:
   push:
-    branches: [main, feature/autonomous-world-simulation-engine, feature/two-planet-runtime-from-2335]
+    branches: [main, feature/autonomous-world-simulation-engine, feature/two-planet-runtime-from-2335, feature/native-world-genesis-bootstrap]
     paths:
       - "mods/worldforge/**"
       - "map.png"
@@ -33,7 +33,7 @@ concurrency:
 
 jobs:
   world-runtime-acceptance:
-    name: Build once; test vanilla and image-map servers sequentially
+    name: Build once; test vanilla Overworld and image dimension in one server
     runs-on: windows-latest
     timeout-minutes: 360
     steps:
@@ -112,39 +112,27 @@ jobs:
           python -c "import sys,json; from pathlib import Path; sys.path.insert(0,'mods/worldforge/wfaddons/tools/image-worldgen'); from image_worldgen import validate_package; print(json.dumps(validate_package(Path(r'$out')/'real-map.worldmap'),ensure_ascii=False,indent=2))"
           if ($LASTEXITCODE -ne 0) { throw "Actual map package validation failed" }
 
-      - name: Start and smoke-test an ordinary vanilla world
-        id: vanilla_world_smoke
+      - name: Start one server with normal vanilla Overworld and image-derived dimension
+        id: dual_world_smoke
         continue-on-error: true
         working-directory: mods/worldforge/wfaddons
         shell: bash
         env:
-          WF_ACCEPTANCE_MODE: "smoke"
-          WF_VANILLA_SEED: "424242"
-        run: |
-          bash tools/world-runtime-smoke.sh vanilla dist "$RUNNER_TEMP/maqan-vanilla-runtime"
-
-      - name: Start and smoke-test the image-derived world
-        id: mapped_world_smoke
-        continue-on-error: true
-        working-directory: mods/worldforge/wfaddons
-        shell: bash
-        env:
-          WF_ACCEPTANCE_MODE: "smoke"
+          WF_ACCEPTANCE_MODE: "dual-world"
           WF_MAP_ID: "real-map"
+          WF_RUNTIME_TIMEOUT_SECONDS: "3300"
         run: |
-          bash tools/world-runtime-smoke.sh "$RUNNER_TEMP/maqan-world-runtime-map/real-map.worldmap" dist "$RUNNER_TEMP/maqan-mapped-runtime"
+          bash tools/world-runtime-smoke.sh "$RUNNER_TEMP/maqan-world-runtime-map/real-map.worldmap" dist "$RUNNER_TEMP/maqan-dual-world-runtime"
 
-      - name: Aggregate independent world acceptance results
+      - name: Aggregate same-server world genesis acceptance
         if: always()
         shell: pwsh
         env:
-          VANILLA_OUTCOME: ${{ steps.vanilla_world_smoke.outcome }}
-          IMAGE_MAP_OUTCOME: ${{ steps.mapped_world_smoke.outcome }}
+          DUAL_WORLD_OUTCOME: ${{ steps.dual_world_smoke.outcome }}
         run: |
-          "VANILLA_WORLD_SMOKE_OUTCOME=$env:VANILLA_OUTCOME" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
-          "IMAGE_MAP_WORLD_SMOKE_OUTCOME=$env:IMAGE_MAP_OUTCOME" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
-          if ($env:VANILLA_OUTCOME -ne "success" -or $env:IMAGE_MAP_OUTCOME -ne "success") {
-            throw "One or both ordinary-world startup smoke tests failed; inspect diagnostics artifacts."
+          "SAME_SERVER_DUAL_WORLD_OUTCOME=$env:DUAL_WORLD_OUTCOME" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          if ($env:DUAL_WORLD_OUTCOME -ne "success") {
+            throw "Same-server dual-world genesis acceptance failed; inspect the runtime artifact."
           }
 
       - name: Upload both server worlds and acceptance diagnostics
@@ -153,8 +141,8 @@ jobs:
         with:
           name: maqan-world-runtime-server-acceptance
           path: |
-            ${{ runner.temp }}/maqan-vanilla-runtime/
-            ${{ runner.temp }}/maqan-mapped-runtime/
+            ${{ runner.temp }}/maqan-dual-world-runtime/
+            
             ${{ runner.temp }}/maqan-world-runtime-map/
           if-no-files-found: warn
           retention-days: 30
