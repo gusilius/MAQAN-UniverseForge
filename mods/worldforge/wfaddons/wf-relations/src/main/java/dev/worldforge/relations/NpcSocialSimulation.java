@@ -121,6 +121,8 @@ public final class NpcSocialSimulation {
                             polity.isBlank() ? List.of() : List.of(polity), Math.max(0L, (long) day * 1440L));
                     reputation(a, polity, 4, day, "marriage", witnesses);
                     reputation(b, polity, 4, day, "marriage", witnesses);
+                    RelationsMod.LOGGER.info("wf_relations: autonomous social event kind=marriage a={} b={} day={}",
+                            a.globalId, b.globalId, day);
                 } catch (RuntimeException ignored) {
                     // A concurrent court/settlement marriage wins; the canonical registry remains authoritative.
                 }
@@ -136,6 +138,8 @@ public final class NpcSocialSimulation {
                     polity.isBlank() ? List.of() : List.of(polity), Math.max(0L, (long) day * 1440L));
             reputation(a, polity, 1, day, "friendship", witnesses);
             reputation(b, polity, 1, day, "friendship", witnesses);
+            RelationsMod.LOGGER.info("wf_relations: autonomous social event kind=friendship a={} b={} day={}",
+                    a.globalId, b.globalId, day);
         } else if (oldAffinity > -30 && ab.affinity <= -30) {
             String polity = polityOf(a);
             String message = a.name + " и " + b.name + " стали соперниками";
@@ -145,6 +149,8 @@ public final class NpcSocialSimulation {
                     polity.isBlank() ? List.of() : List.of(polity), Math.max(0L, (long) day * 1440L));
             reputation(a, polity, -2, day, "rivalry", witnesses);
             reputation(b, polity, -2, day, "rivalry", witnesses);
+            RelationsMod.LOGGER.info("wf_relations: autonomous social event kind=rivalry a={} b={} day={}",
+                    a.globalId, b.globalId, day);
         }
     }
 
