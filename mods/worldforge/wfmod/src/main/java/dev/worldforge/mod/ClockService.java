@@ -33,11 +33,11 @@ public final class ClockService {
             if (Files.exists(f)) WorldForgeApi.clock().load(Files.readString(f));
             Path t = ledgerFile(e.getServer());
             if (Files.exists(t)) loadLedger(Files.readString(t));
-            // CI campaign worlds opt into a bounded shared multiplier. Normal worlds remain x1.
-            int campaignMultiplier = Integer.getInteger("wf.campaign.tick-multiplier", 1);
-            WorldForgeApi.clock().setSimulationTickMultiplier(campaignMultiplier);
-            if (campaignMultiplier > 1)
-                WorldForgeMod.LOGGER.warn("WorldForge campaign clock acceleration enabled: {} shared tick multiplier", campaignMultiplier);
+            // Optional bounded acceleration for automated simulation tests. Ordinary saves remain x1.
+            int simulationMultiplier = Integer.getInteger("wf.simulation.tick-multiplier", 1);
+            WorldForgeApi.clock().setSimulationTickMultiplier(simulationMultiplier);
+            if (simulationMultiplier > 1)
+                WorldForgeMod.LOGGER.warn("WorldForge accelerated simulation test enabled: {} shared tick multiplier", simulationMultiplier);
         } catch (Exception ex) {
             WorldForgeMod.LOGGER.error("WorldForge: отказ запуска — сохранённое время мира не удалось проверить: {}", ex.toString());
             throw new IllegalStateException("WorldForge cannot start with an unreadable or invalid world clock; refusing to reset world time", ex);
