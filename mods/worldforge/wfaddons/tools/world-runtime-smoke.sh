@@ -240,7 +240,10 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "dual-world" ]; then
   for second in $(seq 1 900); do
     kill -0 "$SERVER_PID" 2>/dev/null || { tail -200 server.log; echo "ERROR: server exited during same-server dual-world genesis"; exit 5; }
     if grep -E 'MAQAN_WORLD_GENESIS source=vanilla-world:minecraft:overworld .*communities=[1-9][0-9]*' server.log \
-      && grep -E "MAQAN_WORLD_GENESIS source=$MAP_ID .*communities=[4-9][0-9]*" server.log; then
+      && grep -E "MAQAN_WORLD_GENESIS source=$MAP_ID .*communities=[1-9][0-9]*" server.log \
+      && grep -Fq 'wf_court: autonomous virtual court attached dimension=minecraft:overworld' server.log \
+      && grep -Fq 'wf_relations: autonomous social event kind=' server.log \
+      && grep -Fq 'wf_reputation: autonomous NPC reputation events=' server.log; then
       break
     fi
     sleep 1
@@ -265,6 +268,21 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "dual-world" ]; then
     tail -200 server.log
     echo "ERROR: image dimension did not produce native WorldGenesis evidence"
     exit 9
+  }
+  grep -Fq 'wf_court: autonomous virtual court attached dimension=minecraft:overworld' server.log || {
+    tail -200 server.log
+    echo "ERROR: vanilla Overworld has no autonomous virtual court"
+    exit 10
+  }
+  grep -Fq 'wf_relations: autonomous social event kind=' server.log || {
+    tail -200 server.log
+    echo "ERROR: autonomous NPC friendship/rivalry/marriage produced no events"
+    exit 11
+  }
+  grep -Fq 'wf_reputation: autonomous NPC reputation events=' server.log || {
+    tail -200 server.log
+    echo "ERROR: autonomous NPC events did not update scoped reputation"
+    exit 12
   }
 
   python3 - "$OUTPUT" "$MAP_ID" <<'PY'
