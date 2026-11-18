@@ -429,6 +429,59 @@ fn settlement_allows_building(snapshot: &WorldSnapshot, settlement_id: &str, bui
     true
 }
 
+fn recruitment_choice(snapshot: &WorldSnapshot, settlement_id: &str, realm_id: &str) -> Option<(String, u32)> {
+    let instance = snapshot.catalog_entries.iter().find(|entry|
+        entry.module_id == "wf_settlements" && entry.catalog_id == "settlement_instances"
+            && entry.entry_id == settlement_id)?;
+    let economy = snapshot.catalog_entries.iter().find(|entry|
+        entry.module_id == "wf_army" && entry.catalog_id == "realm_economy"
+            && entry.entry_id == realm_id)?;
+    let pool = economy.payload.get("manpower_pool").and_then(serde_json::Value::as_u64).unwrap_or(0);
+    let gold = economy.payload.get("gold").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+    if pool < 10 || !gold.is_finite() || gold < 0.0 { return None; }
+
+    let runtime = snapshot.catalog_entries.iter().find(|entry|
+        entry.module_id == "wf_troops" && entry.catalog_id == "runtime_state"
+            && entry.entry_id == "military");
+    let army_map = runtime.and_then(|entry| entry.payload.get("army_type_map"));
+    let recruitment_buildings = runtime.and_then(|entry| entry.payload.get("recruitment_buildings"));
+    let physical_defs = runtime.and_then(|entry| entry.payload.get("unit_definitions"));
+    let trainer_counts = instance.payload.get("trainer_counts");
+    let completed = instance.payload.get("completed_building_counts");
+
+    let mut choices = Vec::new();
+    for entry in snapshot.catalog_entries.iter().filter(|entry|
+        entry.module_id == "wf_army" && entry.catalog_id == "unit_types") {
+        let payload = &entry.payload;
+        let levy = payload.get("levy").and_then(serde_json::Value::as_bool).unwrap_or(false);
+        let cost = payload.get("cost").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+        if !cost.is_finite() || cost < 0.0 { continue; }
+        let physical_type = army_map.and_then(|mapping| mapping.get(&entry.entry_id))
+            .and_then(serde_json::Value::as_str).unwrap_or(&entry.entry_id);
+        if physical_defs.is_some() && physical_defs.and_then(|defs| defs.get(physical_type)).is_none() { continue; }
+        let building = recruitment_buildings.and_then(|mapping| mapping.get(physical_type))
+            .and_then(serde_json::Value::as_str).unwrap_or("barracks");
+        let trainers = trainer_counts.and_then(|counts| counts.get(building))
+            .and_then(serde_json::Value::as_u64).unwrap_or(0);
+        let built = completed.and_then(|counts| counts.get(building))
+            .and_then(serde_json::Value::as_u64).unwrap_or(0);
+        if trainers == 0 || built == 0 { continue; }
+        let gold_capacity = if cost <= f64::EPSILON { pool }
+            else { ((gold / cost).floor().max(0.0) as u64).saturating_mul(10) };
+        let men = pool.min(trainers.saturating_mul(10)).min(gold_capacity);
+        let count = (men / 10).saturating_mul(10).min(u32::MAX as u64) as u32;
+        if count < 10 { continue; }
+        let attack = payload.get("attack").and_then(serde_json::Value::as_f64).unwrap_or(1.0);
+        let defense = payload.get("defense").and_then(serde_json::Value::as_f64).unwrap_or(1.0);
+        let siege = payload.get("siege").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+        let score = attack + defense + siege + if levy { 0.05 } else { 0.0 };
+        choices.push((entry.entry_id.clone(), count, score));
+    }
+    choices.sort_by(|a, b| b.2.total_cmp(&a.2).then_with(|| a.0.cmp(&b.0)));
+    choices.into_iter().next().map(|(unit_id, count, _)| (unit_id, count))
+}
+
+
 
 impl WorldSnapshot {
     pub fn validate(&self) -> Result<(), SimError> {
@@ -803,15 +856,17 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
     for s in recruitment_settlements {
         let Some(r) = realms.get(s.realm_id.as_str()) else { continue; };
         let threatened = contested_realms.contains(r.id.as_str());
-        if threatened && s.barracks > 0 && r.treasury >= 250 && s.food > (s.population as i64) {
-            proposals.push(Proposal {
-                id: proposal_id(snapshot.seed, snapshot.day, "recruit", &r.id, &s.id),
-                day: snapshot.day,
-                kind: ProposalKind::Recruit {
-                    realm: r.id.clone(), settlement: s.id.clone(), unit_role: "militia".into(), count: 10,
-                    reason: "contested frontier and sufficient treasury, food and barracks".into(),
-                },
-            });
+        if threatened && r.treasury >= 250 && s.food > (s.population as i64) {
+            if let Some((unit_role, count)) = recruitment_choice(snapshot, &s.id, &r.id) {
+                proposals.push(Proposal {
+                    id: proposal_id(snapshot.seed, snapshot.day, "recruit", &r.id, &s.id),
+                    day: snapshot.day,
+                    kind: ProposalKind::Recruit {
+                        realm: r.id.clone(), settlement: s.id.clone(), unit_role, count,
+                        reason: "contested frontier; selected from registered levy/recruitment catalogs, staffed building, manpower and treasury".into(),
+                    },
+                });
+            }
         }
     }
 
