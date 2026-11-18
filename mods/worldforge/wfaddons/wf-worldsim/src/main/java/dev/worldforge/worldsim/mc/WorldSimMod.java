@@ -2352,9 +2352,18 @@ public final class WorldSimMod {
             }
             return adult;
         }
+        // Founding populations need a realistic adult base, not one married couple
+        // surrounded by newborns. Most generated residents are independent adults who
+        // can form their own households; a bounded minority are children of the founding
+        // family, with a deterministic 0-17 year age distribution.
+        if (Math.floorMod(ordinal, 4) != 0) {
+            String gender = ordinal % 2 == 0 ? "m" : "f";
+            return createEmergentAdult(registry, source, bandId, gender, year, ordinal);
+        }
         String gender = ordinal % 2 == 0 ? "m" : "f";
         String name = emergentName(source, bandId, father.culture, gender, ordinal, year);
-        dev.worldforge.people.Character child = registry.addChild(father, mother, name, gender, year);
+        int childAge = Math.floorMod((int) (source.seed ^ bandId.hashCode() ^ (long) ordinal * 0x9E3779B97F4A7C15L), 18);
+        dev.worldforge.people.Character child = registry.addChild(father, mother, name, gender, year - childAge);
         tagEmergentResident(child, bandId, source);
         return child;
     }
