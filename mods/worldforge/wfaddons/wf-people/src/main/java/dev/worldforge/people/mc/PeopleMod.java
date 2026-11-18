@@ -224,7 +224,7 @@ public class PeopleMod {
                 CharacterRegistry dimensionRegistry = new CharacterRegistry();
                 Path dimensionFile = dimensionRegistryFile(server, dimension);
                 if (Files.exists(dimensionFile))
-                    dimensionRegistry.fromJson(Files.readString(dimensionFile), world + "|dimension|" + dimension);
+                    dimensionRegistry.fromJson(Files.readString(dimensionFile), WorldForgeMod.worldId() + "|dimension|" + dimension);
                 String partitionId = dimensionPartitionId(dimension);
                 AUTHORITY.registerMap(partitionId, dimensionRegistry);
                 DIMENSION_REGISTRIES.put(dimension, dimensionRegistry);
