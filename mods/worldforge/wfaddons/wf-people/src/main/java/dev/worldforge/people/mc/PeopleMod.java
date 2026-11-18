@@ -578,7 +578,7 @@ public class PeopleMod {
                 target = target.toAbsolutePath().normalize();
                 if (!target.startsWith(root)) throw new IllegalStateException("Character registry path escapes world save");
                 Map<String, Object> entry = new LinkedHashMap<>();
-                entry.put("path", root.relativize(target).toString().replace('\\\\', '/'));
+                entry.put("path", root.relativize(target).toString().replace('\\', '/'));
                 entry.put("content", registry.toJson());
                 files.add(entry);
             }
