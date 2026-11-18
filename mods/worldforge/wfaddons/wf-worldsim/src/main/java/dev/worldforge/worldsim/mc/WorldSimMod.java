@@ -2258,9 +2258,35 @@ public final class WorldSimMod {
             }
             if (strongest == null) continue;
             String liegeId = "emergent-" + strongest.get("id").getAsString();
-            if (RealmsMod.POLITICS.setVassalage(vassalId, liegeId, 0.10, 0.12))
-                LOGGER.info("wf_worldsim: {} entered a feudal vassal contract with {}",
-                        vassalId, liegeId);
+            if (RealmsMod.POLITICS.setVassalage(vassalId, liegeId, 0.10, 0.12)) {
+                RealmDefs.Gov subjectGovernment = RealmsMod.DEFS.govs.get(RealmsMod.REALMS.state(vassalId).gov);
+                RealmDefs.Gov liegeGovernment = RealmsMod.DEFS.govs.get(RealmsMod.REALMS.state(liegeId).gov);
+                String subjectCategory = subjectGovernment == null ? "" : subjectGovernment.category().toLowerCase(Locale.ROOT);
+                String liegeCategory = liegeGovernment == null ? "" : liegeGovernment.category().toLowerCase(Locale.ROOT);
+                dev.worldforge.realms.Statecraft.SubjectType subjectType;
+                if (liegeCategory.contains("confederation")) {
+                    subjectType = dev.worldforge.realms.Statecraft.SubjectType.CONFEDERATION_MEMBER;
+                } else if (subjectCategory.contains("tribal") || subjectCategory.contains("nomad")
+                        || subjectCategory.contains("clan")) {
+                    subjectType = dev.worldforge.realms.Statecraft.SubjectType.TRIBUTARY;
+                } else if (subjectCategory.contains("republic") || vassal.get("stability").getAsInt() < 70) {
+                    subjectType = dev.worldforge.realms.Statecraft.SubjectType.PROTECTORATE;
+                } else {
+                    subjectType = dev.worldforge.realms.Statecraft.SubjectType.FEUDAL_VASSAL;
+                }
+                RealmsMod.POLITICS.setSubjectType(vassalId, subjectType);
+                var contract = RealmsMod.POLITICS.vassalage(vassalId);
+                if (contract != null) {
+                    switch (subjectType) {
+                        case TRIBUTARY -> { contract.taxShare = 0.20; contract.levyShare = 0.05; contract.autonomy = 55; }
+                        case PROTECTORATE -> { contract.taxShare = 0.08; contract.levyShare = 0.04; contract.autonomy = 70; }
+                        case CONFEDERATION_MEMBER -> { contract.taxShare = 0.05; contract.levyShare = 0.08; contract.autonomy = 85; }
+                        default -> { contract.taxShare = 0.10; contract.levyShare = 0.12; contract.autonomy = 35; }
+                    }
+                }
+                LOGGER.info("wf_worldsim: {} entered {} contract with {}",
+                        vassalId, subjectType.name().toLowerCase(Locale.ROOT), liegeId);
+            }
         }
     }
 
