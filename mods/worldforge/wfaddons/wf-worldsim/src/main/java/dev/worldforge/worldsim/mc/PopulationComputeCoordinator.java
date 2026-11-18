@@ -123,6 +123,7 @@ public final class PopulationComputeCoordinator {
     private static List<CharacterRegistry> registries(){
         List<CharacterRegistry> result=new ArrayList<>(PeopleMod.registries().values());
         result.add(PeopleMod.worldRegistry());
+        result.addAll(PeopleMod.dimensionRegistries().values());
         result.add(PeopleMod.playerRegistry());
         return result;
     }
