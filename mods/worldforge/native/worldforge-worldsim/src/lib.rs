@@ -237,7 +237,9 @@ impl WorldSnapshot {
             if c.id.trim().is_empty() { return Err(SimError::InvalidSnapshot("empty-character-id".into())); }
             if !characters.insert(c.id.as_str()) { return Err(SimError::DuplicateCharacter(c.id.clone())); }
             if !realms.contains(c.realm_id.as_str()) { return Err(SimError::UnknownRealm(c.realm_id.clone())); }
-            if c.age > 120 { return Err(SimError::InvalidSnapshot(format!("implausible-character-age:{}:{}", c.id, c.age))); }
+            // MAQAN supports fantasy species with multi-century lifespans. Keep a hard
+            // corruption bound, but do not reject valid long-lived canonical Characters.
+            if c.age > 1_000 { return Err(SimError::InvalidSnapshot(format!("implausible-character-age:{}:{}", c.id, c.age))); }
         }
         let mut workforce = BTreeSet::new();
         for w in &self.workforce {
@@ -488,6 +490,15 @@ mod tests {
         permuted.workforce.reverse();
 
         assert_eq!(expected, decide(&permuted).unwrap());
+    }
+
+    #[test] fn long_lived_fantasy_characters_are_valid_but_corrupt_ages_are_rejected() {
+        let mut s = base();
+        s.characters.push(Character{id:"ancient-elf".into(),realm_id:"north".into(),age:306,alive:true,married:false,
+            gender:0,fertility:10,prestige:500,opinion:50,house_id:"Eldergrove".into()});
+        assert!(s.validate().is_ok(), "multi-century lifespans are valid in MAQAN");
+        s.characters[0].age = 1_001;
+        assert!(matches!(s.validate(), Err(SimError::InvalidSnapshot(message)) if message.contains("implausible-character-age")));
     }
 
     #[test] fn decisions_are_deterministic_and_idempotently_identified() {
