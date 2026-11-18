@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MAP_SOURCE="${1:?usage: autonomous-runtime.sh <vanilla|worldmap> <addon-jar-dir> <output-dir>}"
 JARS="${2:?addon jar directory required}"
 OUTPUT="${3:?output directory required}"
-MAP_ID="${WF_RUNTIME_MAP_ID:-maqan-world}"
+MAP_ID="${WF_MAP_ID:-${WF_RUNTIME_MAP_ID:-maqan-world}}"
 FORGE="1.20.1-47.3.0"
 VANILLA_RUNTIME=0
 if [ "$MAP_SOURCE" = "vanilla" ]; then
@@ -207,7 +207,6 @@ java -Xms2G -Xmx8G \
   -XX:HeapDumpPath="$JAVA_WORK/java_pid%p.hprof" \
   -XX:ErrorFile="$JAVA_WORK/hs_err_pid%p.log" \
   -Xlog:gc*:file="$JAVA_WORK/gc-%p.log":time,uptime,level,tags \
-  -Dworldforge.runtime.empty-bootstrap=true \
   @user_jvm_args.txt @libraries/net/minecraftforge/forge/$FORGE/win_args.txt nogui \
   < <(tail -n +1 -f in.txt) > server.log 2>&1 &
 SERVER_PID=$!
