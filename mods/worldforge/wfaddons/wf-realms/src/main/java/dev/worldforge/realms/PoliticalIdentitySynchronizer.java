@@ -3,13 +3,12 @@ package dev.worldforge.realms;
 import dev.worldforge.mod.TitleData;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
+import dev.worldforge.people.Role;
+import dev.worldforge.people.RoleDefs;
 
 import java.util.*;
 
-/**
- * Shared, deterministic bridge between map-generated court rulers and canonical Statecraft title holders.
- * It never creates Characters, never replaces an established holder, and reports unresolved references.
- */
+/** Deterministic bridge from canonical wf-people courts to Statecraft title holders. */
 public final class PoliticalIdentitySynchronizer {
     private PoliticalIdentitySynchronizer() {}
 
@@ -17,8 +16,15 @@ public final class PoliticalIdentitySynchronizer {
         public Report { problems = List.copyOf(problems); }
     }
 
+    /** Backwards-compatible crown-only entry point. */
     public static Report synchronizeRulers(String mapId, TitleData map,
                                             CharacterRegistry people, Statecraft politics) {
+        return synchronizeRulers(mapId, map, people, politics, null);
+    }
+
+    public static Report synchronizeRulers(String mapId, TitleData map,
+                                            CharacterRegistry people, Statecraft politics,
+                                            RoleDefs roleDefs) {
         Objects.requireNonNull(mapId, "map id");
         Objects.requireNonNull(map, "title map");
         Objects.requireNonNull(people, "character registry");
@@ -34,7 +40,9 @@ public final class PoliticalIdentitySynchronizer {
             if (previous != null && previous != character)
                 problems.add("Duplicate global Character ID " + character.globalId);
         }
+
         int linked = 0, already = 0;
+        Set<Integer> crownTitleIds = new HashSet<>();
         for (TitleData.Realm realm : map.realmList()) {
             String rulerId = String.valueOf(realm.props.getOrDefault("rulerCharacterId", "")).trim();
             if (rulerId.isBlank()) continue;
@@ -47,46 +55,113 @@ public final class PoliticalIdentitySynchronizer {
                 problems.add("Realm " + realm.id + " references deceased ruler " + rulerId);
                 continue;
             }
-            TitleData.Title crown = null;
-            for (String key : realm.titleKeys) {
-                TitleData.Title candidate = map.byKey(key);
-                if (candidate == null) continue;
-                if (crown == null || candidate.tier > crown.tier
-                        || (candidate.tier == crown.tier && candidate.key.compareTo(crown.key) < 0))
-                    crown = candidate;
-            }
+            TitleData.Title crown = crown(map, realm);
             if (crown == null) {
                 problems.add("Realm " + realm.id + " has no canonical crown title key");
                 continue;
             }
-            String titleId = Statecraft.mapTitleId(mapId, crown.key);
-            Statecraft.Title title = politics.title(titleId);
+            crownTitleIds.add(crown.id);
+            Statecraft.Title title = politics.title(Statecraft.mapTitleId(mapId, crown.key));
             if (title == null) {
-                problems.add("Statecraft title was not imported: " + titleId);
+                problems.add("Statecraft title was not imported: " + Statecraft.mapTitleId(mapId, crown.key));
                 continue;
             }
-            if (title.holderCharacterId == null || title.holderCharacterId.isBlank()) {
-                if (politics.grantTitle(titleId, rulerId)) linked++;
-                else problems.add("Could not assign ruler " + rulerId + " to " + titleId + ": " + politics.lastError);
-            } else if (title.holderCharacterId.equals(rulerId)) {
-                already++;
-            } else {
-                Character previousHolder = byGlobalId.get(title.holderCharacterId);
-                if (previousHolder == null) {
-                    problems.add("Title " + titleId + " has orphan holder Character ID " + title.holderCharacterId);
-                } else if (!previousHolder.alive && ruler.alive) {
-                    // A canonical court succession has already replaced the ruler on the map.
-                    // Retire the deceased holder rather than leaving the crown permanently stale.
-                    if (politics.grantTitle(titleId, rulerId)) linked++;
-                    else problems.add("Could not reconcile succession for " + titleId + ": " + politics.lastError);
-                } else {
-                    problems.add("Title " + titleId + " holder " + title.holderCharacterId
-                            + " conflicts with map ruler " + rulerId + "; living title holder preserved");
-                }
+            int result = reconcileHolder(title, ruler, byGlobalId, politics, "realm " + realm.id);
+            if (result > 0) linked++;
+            else if (result == 0) already++;
+            else problems.add(politics.lastError);
+        }
+
+        // wf-people owns territorial offices. Match each ruler role to the actual map
+        // tier key, then bind its living office holder to that exact canonical title.
+        if (roleDefs != null) {
+            Map<String, List<Role>> rulerRolesByTier = new LinkedHashMap<>();
+            for (Role role : roleDefs.all()) {
+                if (!role.ruler || role.per == null || role.per.equals("realm")) continue;
+                rulerRolesByTier.computeIfAbsent(role.per, ignored -> new ArrayList<>()).add(role);
             }
-            // A title stores exactly one holder. Existing holders are intentionally not overwritten:
-            // inheritance, conquest and player grants must survive subsequent synchronization ticks.
+            for (TitleData.Title sourceTitle : map.allTitles()) {
+                if (crownTitleIds.contains(sourceTitle.id)) continue;
+                if (sourceTitle.tier < 0 || sourceTitle.tier >= map.tiers.size()) continue;
+                TitleData.Title province = sourceTitle;
+                while (province != null && province.tier > 0)
+                    province = province.parent > 0 ? map.get(province.parent) : null;
+                TitleData.Realm owner = province == null ? null : map.realmOf(province);
+                if (owner == null) continue;
+                String tierKey = map.tiers.get(sourceTitle.tier).key;
+                List<Role> roles = rulerRolesByTier.getOrDefault(tierKey, List.of());
+                if (roles.isEmpty()) continue;
+                String place = "title:" + sourceTitle.id;
+                List<Character> officeHolders = new ArrayList<>();
+                for (Character character : people.all()) {
+                    if (!character.alive) continue;
+                    for (Character.Post post : character.posts) {
+                        if (post.place.equals(place) && roles.stream().anyMatch(role -> role.id.equals(post.role)))
+                            officeHolders.add(character);
+                    }
+                }
+                officeHolders.sort(Comparator.comparing(character -> character.globalId));
+                Statecraft.Title politicalTitle = politics.title(Statecraft.mapTitleId(mapId, sourceTitle.key));
+                if (politicalTitle == null) {
+                    problems.add("Owned map title was not imported into Statecraft: " + sourceTitle.key);
+                    continue;
+                }
+                if (officeHolders.isEmpty()) {
+                    problems.add("No living wf-people ruler office holder for " + tierKey + " title " + sourceTitle.key);
+                    continue;
+                }
+                if (officeHolders.size() > 1) {
+                    problems.add("Multiple living ruler office holders for title " + sourceTitle.key
+                            + ": " + officeHolders.stream().map(character -> character.globalId).toList());
+                    continue;
+                }
+                int result = reconcileHolder(politicalTitle, officeHolders.get(0), byGlobalId, politics,
+                        tierKey + " title " + sourceTitle.key);
+                if (result > 0) linked++;
+                else if (result == 0) already++;
+                else problems.add(politics.lastError);
+            }
         }
         return new Report(linked, already, problems);
+    }
+
+    private static TitleData.Title crown(TitleData map, TitleData.Realm realm) {
+        TitleData.Title crown = null;
+        for (String key : realm.titleKeys) {
+            TitleData.Title candidate = map.byKey(key);
+            if (candidate == null) continue;
+            if (crown == null || candidate.tier > crown.tier
+                    || (candidate.tier == crown.tier && candidate.key.compareTo(crown.key) < 0))
+                crown = candidate;
+        }
+        return crown;
+    }
+
+    /** 1=linked, 0=already correct, -1=conflict/error. */
+    private static int reconcileHolder(Statecraft.Title title, Character desired,
+                                        Map<String, Character> byGlobalId, Statecraft politics,
+                                        String scope) {
+        String currentId = title.holderCharacterId == null ? "" : title.holderCharacterId;
+        if (currentId.isBlank()) {
+            if (politics.grantTitle(title.id, desired.globalId)) return 1;
+            politics.lastError = "Could not assign " + scope + " ruler " + desired.globalId
+                    + " to " + title.id + ": " + politics.lastError;
+            return -1;
+        }
+        if (currentId.equals(desired.globalId)) return 0;
+        Character previous = byGlobalId.get(currentId);
+        if (previous == null) {
+            politics.lastError = "Title " + title.id + " has orphan holder Character ID " + currentId;
+            return -1;
+        }
+        if (!previous.alive && desired.alive) {
+            if (politics.grantTitle(title.id, desired.globalId)) return 1;
+            politics.lastError = "Could not reconcile succession for " + scope + ": " + politics.lastError;
+            return -1;
+        }
+        politics.lastError = "Title " + title.id + " holder " + currentId
+                + " conflicts with " + scope + " office holder " + desired.globalId
+                + "; living title holder preserved";
+        return -1;
     }
 }
