@@ -238,10 +238,19 @@ fn bootstrap_vanilla_initial_civilizations(
         if selected.len() >= 4 || separation <= minimum_spacing { break; }
         separation = (separation / 2).max(minimum_spacing);
     }
-    if selected.is_empty() && occupied.is_empty() {
+    // A newly created vanilla world may expose only a compact spawn-area patch.
+    // If the preferred spacing leaves one to three candidates, do not leave the
+    // dimension permanently without a polity: fill the minimum founding cohort from
+    // distinct viable cells, relaxing spacing only for this initial bootstrap.
+    if selected.len() < 4 {
         for cell in &candidates {
+            let point = (cell.x, cell.z);
+            if occupied.iter().any(|other| *other == point)
+                || selected.iter().any(|other| (other.x, other.z) == point) {
+                continue;
+            }
             selected.push(cell);
-            if selected.len() == 4 { break; }
+            if selected.len() >= 4 { break; }
         }
     }
     for cell in selected {
@@ -716,6 +725,36 @@ mod tests {
         assert!(bands.len() >= 4, "sparse observed chunks should still seed several communities");
         assert_eq!(polities.len(), 1, "initial communities across explored spawn terrain should form a polity");
         assert!(polities[0].settlement_ids.len() >= 4);
+    }
+
+    #[test]
+    fn compact_vanilla_patch_relaxes_spacing_only_to_complete_initial_founders() {
+        let cells = (0..4_u32).map(|index| GeographicCell {
+            x: 30_000_000 + index * 4,
+            z: 30_000_000,
+            biome: "minecraft:plains".into(),
+            elevation: 70,
+            river: 0,
+            land: true,
+            suitability: 90,
+            owner_realm_id: String::new(),
+            discovered_year: 0,
+        }).collect();
+        let map = GeographicMap {
+            map_id: "vanilla-world:minecraft:overworld".into(),
+            width_px: 60_000_001,
+            height_px: 60_000_001,
+            blocks_per_pixel_milli: 1000,
+            political_layers_present: false,
+            sample_stride: 4,
+            cells,
+        };
+        let mut bands = Vec::new();
+        let mut polities = Vec::new();
+        bootstrap_initial_civilizations(&map, 424242, &mut bands, &mut polities, &mut Vec::new());
+        assert_eq!(bands.iter().filter(|band| band.settled).count(), 4);
+        assert_eq!(polities.len(), 1, "four distinct viable cells must complete the initial polity");
+        assert_eq!(polities[0].settlement_ids.len(), 4);
     }
 
     #[test]
