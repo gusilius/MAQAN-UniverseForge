@@ -161,6 +161,7 @@ public final class EventLog {
                     Object rawScopes = m.get("scopes");
                     if (rawScopes instanceof List) for (Object x : (List<Object>) rawScopes)
                         if (x != null && !String.valueOf(x).isBlank()) scopes.add(String.valueOf(x));
+                    scopes.add("world");
                     for (String realm : ids) if (!scopes.contains("realm:" + realm)) scopes.add("realm:" + realm);
                     buf.addLast(new Event(seq, Category.parse(m.get("category") == null ? null : m.get("category").toString()),
                             m.get("text") == null ? "" : m.get("text").toString(), List.copyOf(ids),
