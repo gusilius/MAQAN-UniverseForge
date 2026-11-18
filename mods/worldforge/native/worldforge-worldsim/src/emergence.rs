@@ -680,7 +680,7 @@ mod tests {
     }
     fn request(day: u64, state: Option<EmergentWorld>) -> EmergenceRequest {
         EmergenceRequest { snapshot:WorldSnapshot { world_id:"map-only".into(),seed:8128,day,
-            realms:vec![],borders:vec![],settlements:vec![],characters:vec![],workforce:vec![],geography:vec![map()] }, state }
+            realms:vec![],titles:vec![],government_definitions:vec![],realm_governments:vec![],borders:vec![],settlements:vec![],characters:vec![],workforce:vec![],geography:vec![map()] }, state }
     }
 
     #[test]
@@ -809,8 +809,8 @@ mod tests {
             world_id: "one-server-two-worlds".into(),
             seed: 8128,
             day: 0,
-            realms: vec![], borders: vec![], settlements: vec![],
-            characters: vec![], workforce: vec![],
+            realms: vec![], titles: vec![], government_definitions: vec![], realm_governments: vec![],
+            borders: vec![], settlements: vec![], characters: vec![], workforce: vec![],
             geography: vec![first, second],
         };
         let frame = advance(EmergenceRequest { snapshot, state: None }).unwrap();
@@ -1029,7 +1029,8 @@ mod tests {
         partial.cells.truncate(64 * 128);
         let first_snapshot = WorldSnapshot {
             world_id: "incremental-vanilla".into(), seed: 8128, day: 0,
-            realms: vec![], borders: vec![], settlements: vec![], characters: vec![], workforce: vec![],
+            realms: vec![], titles: vec![], government_definitions: vec![], realm_governments: vec![],
+            borders: vec![], settlements: vec![], characters: vec![], workforce: vec![],
             geography: vec![partial],
         };
         let first = advance(EmergenceRequest { snapshot: first_snapshot, state: None }).unwrap();
@@ -1037,7 +1038,8 @@ mod tests {
 
         let expanded_snapshot = WorldSnapshot {
             world_id: "incremental-vanilla".into(), seed: 8128, day: 0,
-            realms: vec![], borders: vec![], settlements: vec![], characters: vec![], workforce: vec![],
+            realms: vec![], titles: vec![], government_definitions: vec![], realm_governments: vec![],
+            borders: vec![], settlements: vec![], characters: vec![], workforce: vec![],
             geography: vec![map()],
         };
         let expanded = advance(EmergenceRequest { snapshot: expanded_snapshot.clone(), state: Some(first.state) }).unwrap();
@@ -1072,7 +1074,7 @@ mod tests {
         let mut first = advance(request(365 * 120, None)).unwrap().state;
         let second_map = GeographicMap { map_id:"late-map".into(), ..map() };
         let snapshot = WorldSnapshot { world_id:"map-only".into(),seed:8128,day:365 * 121,
-            realms:vec![],borders:vec![],settlements:vec![],characters:vec![],workforce:vec![],
+            realms:vec![],titles:vec![],government_definitions:vec![],realm_governments:vec![],borders:vec![],settlements:vec![],characters:vec![],workforce:vec![],
             geography:vec![map(), second_map] };
         let frame = advance(EmergenceRequest { snapshot, state:Some(first.clone()) }).unwrap();
         assert!(frame.state.bands.iter().any(|band| band.map_id == "late-map"));
@@ -1109,8 +1111,8 @@ mod tests {
             world_id: "single-universe-two-worlds".into(),
             seed: 8128,
             day: 0,
-            realms: vec![], borders: vec![], settlements: vec![],
-            characters: vec![], workforce: vec![],
+            realms: vec![], titles: vec![], government_definitions: vec![], realm_governments: vec![],
+            borders: vec![], settlements: vec![], characters: vec![], workforce: vec![],
             geography: vec![first, second],
         };
         let frame = advance(EmergenceRequest { snapshot, state: None }).unwrap();
