@@ -537,14 +537,6 @@ public final class WorldSimMod {
     public void onCommands(RegisterCommandsEvent event) {
         CommandDispatcher<CommandSourceStack> dispatcher = event.getDispatcher();
         dispatcher.register(Commands.literal("wfworldsim")
-                .then(Commands.literal("campaign")
-                        .then(Commands.literal("start")
-                                .then(Commands.argument("map", StringArgumentType.word())
-                                        .executes(context -> startCampaign(context.getSource().getServer(),
-                                                StringArgumentType.getString(context, "map"), context.getSource()))))
-                        .then(Commands.literal("status").executes(context -> campaignStatus(context.getSource())))
-                        .then(Commands.literal("stop").executes(context -> stopCampaign(context.getSource())))));
-        dispatcher.register(Commands.literal("wfworldsim")
                 .then(Commands.literal("status").executes(context -> {
                     MinecraftServer server = context.getSource().getServer();
                     context.getSource().sendSuccess(() -> Component.literal(
