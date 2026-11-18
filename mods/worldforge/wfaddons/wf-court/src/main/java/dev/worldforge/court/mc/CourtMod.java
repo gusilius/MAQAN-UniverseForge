@@ -7,7 +7,10 @@ import dev.worldforge.mod.EditorManager;
 import dev.worldforge.mod.MapData;
 import dev.worldforge.mod.TitleData;
 import dev.worldforge.mod.WorldForgeMod;
+import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
+import dev.worldforge.mod.WorldForgeMod;
+import net.minecraft.world.level.storage.LevelResource;
 import dev.worldforge.people.mc.PeopleMod;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
@@ -37,6 +40,9 @@ public class CourtMod {
     public static final Logger LOGGER = LogUtils.getLogger();
     public static final int COURT_STEP = 100, SAVE_EVERY = 6000;
     private static final Map<MapData, CourtSim> COURTS = new ConcurrentHashMap<>();
+    /** Autonomous courts for vanilla/non-map dimensions, backed by the same canonical CharacterRegistry. */
+    private static final Map<String, CourtSim> VIRTUAL_COURTS = new ConcurrentHashMap<>();
+    private static final Map<String, TitleData> VIRTUAL_DATA = new ConcurrentHashMap<>();
     /** Исходные JSON событий: уходят клиенту вместе со срезом двора. */
     private static volatile List<String> EVENT_JSON = List.of();
     private static long ticks;
@@ -52,6 +58,8 @@ public class CourtMod {
     @SubscribeEvent
     public void onAboutToStart(ServerAboutToStartEvent e) {
         COURTS.clear();
+        VIRTUAL_COURTS.clear();
+        VIRTUAL_DATA.clear();
         ticks = 0;
         List<String> evs = new ArrayList<>();
         Map<ResourceLocation, Resource> found = new TreeMap<>(e.getServer().getResourceManager().listResources("wf_events", rl -> rl.getPath().endsWith(".json")));
@@ -143,10 +151,88 @@ public class CourtMod {
 
     static void saveAll(MinecraftServer server) {
         for (MapData map : COURTS.keySet()) persistNow(server, map);
+        if (server == null) return;
+        for (Map.Entry<String, CourtSim> entry : VIRTUAL_COURTS.entrySet()) {
+            try {
+                Path root = server.getWorldPath(LevelResource.ROOT).resolve("worldforge");
+                Files.createDirectories(root);
+                Files.writeString(virtualCourtFile(server, entry.getKey()), entry.getValue().toJson());
+            } catch (Exception ex) {
+                LOGGER.error("wf_court: не удалось сохранить автономный двор измерения {}: {}",
+                        entry.getKey(), ex.toString(), ex);
+            }
+        }
+    }
+
+    private static Path virtualCourtFile(MinecraftServer server, String dimension) {
+        String key = UUID.nameUUIDFromBytes(dimension.getBytes(StandardCharsets.UTF_8)).toString();
+        return server.getWorldPath(LevelResource.ROOT).resolve("worldforge")
+                .resolve("wf_court_dimension_" + key + ".json");
+    }
+
+    private static TitleData virtualTitleData(String dimension) {
+        return VIRTUAL_DATA.computeIfAbsent(dimension, ignored -> TitleData.create(
+                "{\\"format\\":\\"worldforge-titles/1\\",\\"blocks_per_pixel\\":1,\\"tiers\\":[],\\"titles\\":[]}",
+                "{\\"format\\":\\"worldforge-realms/1\\",\\"realms\\":[]}",
+                new short[0], 0, 0));
+    }
+
+    /** Refreshes the virtual realm index from canonical ruler offices, never creating duplicate people or titles. */
+    private static CourtSim virtualCourt(MinecraftServer server, String dimension, CharacterRegistry registry) {
+        if (server == null || registry == null) return null;
+        TitleData data = virtualTitleData(dimension);
+        int added = 0;
+        for (Character person : registry.all()) {
+            if (!person.alive || !person.props.containsKey("emergence.polity_id")) continue;
+            for (Character.Post post : person.posts) {
+                if (!post.place.startsWith("realm:")) continue;
+                String realmId = post.place.substring("realm:".length());
+                if (realmId.isBlank()) continue;
+                TitleData.Realm realm = data.realms.computeIfAbsent(realmId, id -> {
+                    TitleData.Realm created = new TitleData.Realm();
+                    created.id = id;
+                    created.name = String.valueOf(person.props.getOrDefault("emergence.polity_name", id));
+                    created.ruler = person.globalId;
+                    created.rgb = 0x777777;
+                    created.overlordId = "";
+                    created.relation = "";
+                    created.areaBlocks = 0;
+                    return created;
+                });
+                realm.ruler = person.globalId;
+                Object name = person.props.get("emergence.polity_name");
+                if (name instanceof String text && !text.isBlank()) realm.name = text;
+                added++;
+            }
+        }
+        data.refreshRealmIndex();
+        if (data.realmList().isEmpty()) return null;
+        CourtSim sim = VIRTUAL_COURTS.computeIfAbsent(dimension, key -> {
+            long seed = WorldForgeMod.worldId() == null ? key.hashCode()
+                    : WorldForgeMod.worldId().toString().hashCode() ^ key.hashCode();
+            CourtSim created = new CourtSim(data, null, registry, PeopleMod.ROLES,
+                    PeopleMod.NAMES, seed, PeopleMod.YEAR);
+            for (String json : EVENT_JSON) {
+                try { created.addEvent(json); }
+                catch (Exception ex) { LOGGER.error("wf_court: ошибка события автономного двора: {}", ex.toString()); }
+            }
+            Path file = virtualCourtFile(server, key);
+            try { if (Files.exists(file)) created.fromJson(Files.readString(file)); }
+            catch (Exception ex) { LOGGER.error("wf_court: не удалось прочитать автономный двор {}: {}", key, ex.toString()); }
+            LOGGER.info("wf_court: autonomous virtual court attached dimension={} realms={} canonical_characters={}",
+                    key, data.realmList().size(), registry.size());
+            return created;
+        });
+        return sim;
     }
 
     @SubscribeEvent
-    public void onStopping(ServerStoppingEvent e) { saveAll(e.getServer()); COURTS.clear(); }
+    public void onStopping(ServerStoppingEvent e) {
+        saveAll(e.getServer());
+        COURTS.clear();
+        VIRTUAL_COURTS.clear();
+        VIRTUAL_DATA.clear();
+    }
 
     @SubscribeEvent
     public void onTick(TickEvent.ServerTickEvent e) {
@@ -155,7 +241,20 @@ public class CourtMod {
         try {
             if (ticks % COURT_STEP == 0) {
                 int days = dev.worldforge.mod.api.WorldForgeApi.clock().pull("wf_court");
-                if (days > 0) for (MapData m : WorldForgeMod.loadedMaps().values()) { CourtSim cs = m.titles == null ? null : court(m); if (cs != null) cs.tick(days); }
+                if (days > 0) {
+                    for (MapData m : WorldForgeMod.loadedMaps().values()) {
+                        CourtSim cs = m.titles == null ? null : court(m);
+                        if (cs != null) cs.tick(days);
+                    }
+                    // Vanilla and other non-map dimensions previously had no CourtSim:
+                    // their NPCs received offices, but autonomous marriage, births,
+                    // succession pressure and court AI never advanced. Attach the same
+                    // CourtSim engine to each canonical dimension registry.
+                    for (Map.Entry<String, CharacterRegistry> entry : PeopleMod.dimensionRegistries().entrySet()) {
+                        CourtSim cs = virtualCourt(e.getServer(), entry.getKey(), entry.getValue());
+                        if (cs != null) cs.tick(days);
+                    }
+                }
             }
             if (ticks % SAVE_EVERY == 0) saveAll(e.getServer());
         } catch (Exception ex) { LOGGER.error("wf_court: ошибка тика: {}", ex.toString()); }
