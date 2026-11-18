@@ -155,13 +155,26 @@ public final class WorldSimMod {
     private static List<EmergenceSource> emergenceSources() {
         List<EmergenceSource> sources = new ArrayList<>();
         boolean vanillaCampaign = campaignRunning && "vanilla".equals(campaignMapId);
-        for (MapData map : WorldForgeMod.loadedMaps().values()) {
-            if (map == null || (campaignRunning && (vanillaCampaign || !map.name.equals(campaignMapId)))) continue;
+        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+        Set<String> registeredMapSources = new HashSet<>();
+        // Enumerate the actual loaded ServerLevels, not only maps already touched by a
+        // generated chunk or command. This bootstraps a map planet's strategic geography
+        // from its complete .worldmap package even before a player visits that dimension.
+        if (server != null) for (ServerLevel level : server.getAllLevels()) {
+            if (!(level.getChunkSource().getGenerator() instanceof MapChunkGenerator generator)) continue;
+            MapData map;
+            try { map = generator.data(); }
+            catch (RuntimeException unavailable) {
+                LOGGER.error("wf_worldsim: map geography source unavailable for dimension {}: {}",
+                        level.dimension().location(), unavailable.toString());
+                continue;
+            }
+            if (map == null || !registeredMapSources.add(map.name)
+                    || (campaignRunning && (vanillaCampaign || !map.name.equals(campaignMapId)))) continue;
             CharacterRegistry registry = PeopleMod.registry(map);
             if (registry != null) sources.add(EmergenceSource.authored(map));
         }
         if (!campaignRunning || vanillaCampaign) {
-            MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
             if (server != null) for (String id : VanillaWorldGeography.simulationMapIds()) {
                 String dimension = VanillaWorldGeography.dimensionFromMapId(id);
                 for (ServerLevel level : server.getAllLevels()) {
