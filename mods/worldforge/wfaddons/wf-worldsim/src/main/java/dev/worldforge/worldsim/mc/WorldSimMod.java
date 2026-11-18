@@ -2542,6 +2542,34 @@ public final class WorldSimMod {
                 entry.getValue().props.put("emergence.statecraft_title_ids", String.join(",", realmTitleIds));
                 entry.getValue().props.put("emergence.title_count", realmTitleIds.size());
             }
+            // Materialize courts only after the political ownership overlay has been
+            // reconciled. This second pass fills every now-owned map title using the
+            // map's complete data-driven tier catalogue; it does not invent a parallel
+            // five-rank title tree or assign offices to neutral geography.
+            CharacterRegistry courtRegistry = PeopleMod.registry(map);
+            if (courtRegistry != null) {
+                int generatedRoles = PeopleMod.ROLES.ensureTerritorialRulers(map.titles);
+                int generatedCourts = dev.worldforge.people.Courts.ensure(map.titles,
+                        EditorManager.editorFor(map), courtRegistry, PeopleMod.ROLES, PeopleMod.NAMES,
+                        PeopleMod.seed(map), PeopleMod.YEAR);
+                var officeSync = dev.worldforge.realms.PoliticalIdentitySynchronizer.synchronizeRulers(
+                        map.name, map.titles, courtRegistry, RealmsMod.POLITICS, PeopleMod.ROLES);
+                LOGGER.info("wf_worldsim: full title-tree integration map={} sourceTitles={} importedTitles={} "
+                                + "tiers={} dynamicRulerRoles={} courtCharacters={} linkedTitleHolders={} unresolved={}",
+                        map.name, map.titles.allTitles().size(), RealmsMod.POLITICS.titles().stream()
+                                .filter(title -> title.id.startsWith("map:")).count(),
+                        map.titles.tiers.size(), generatedRoles, generatedCourts,
+                        officeSync.linked() + officeSync.alreadyLinked(), officeSync.problems().size());
+                for (String problem : officeSync.problems())
+                    LOGGER.warn("wf_worldsim: title court integration map={} {}", map.name, problem);
+                if (generatedCourts > 0 && !PeopleMod.persistAllNow(
+                        net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer()))
+                    LOGGER.error("wf_worldsim: could not persist generated courts for map {}", map.name);
+            } else {
+                LOGGER.error("wf_worldsim: canonical Character registry unavailable; title courts were not fabricated map={}",
+                        map.name);
+            }
+            RealmsMod.syncPoliticalMapState();
             LOGGER.info("wf_worldsim: imported {} native image-map titles and bound generated province ownership on {}",
                     imported, map.name);
             if (changed) dev.worldforge.mod.PoliticalMapRenderer.regenerateAll(map);
