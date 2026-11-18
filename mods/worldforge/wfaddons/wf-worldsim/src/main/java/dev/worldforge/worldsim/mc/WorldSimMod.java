@@ -1284,6 +1284,37 @@ public final class WorldSimMod {
         }
         addCatalogEntry(catalogEntries, "wf_people", "name_pools", "all_pools", "Cultural and racial naming pools",
                 GSON.toJsonTree(PeopleMod.NAMES.catalogSnapshot()));
+        JsonObject tradeSnapshot = exportOptionalModuleSnapshot("wf_trade",
+                "dev.worldforge.trade.mc.TradeMod", "worldSnapshotJson");
+        if (tradeSnapshot != null) {
+            root.add("trade_runtime", tradeSnapshot);
+            JsonObject goods = tradeSnapshot.has("goods") ? tradeSnapshot.getAsJsonObject("goods") : new JsonObject();
+            for (var entry : goods.entrySet()) {
+                String goodId = entry.getKey();
+                String goodName = entry.getValue().isJsonObject() && entry.getValue().getAsJsonObject().has("name")
+                        ? entry.getValue().getAsJsonObject().get("name").getAsString() : goodId;
+                addCatalogEntry(catalogEntries, "wf_trade", "goods", goodId, goodName, entry.getValue());
+                addNamedEntity(namedEntities, goodId, "trade_good", goodName, "", "");
+            }
+            JsonObject markets = tradeSnapshot.has("markets") ? tradeSnapshot.getAsJsonObject("markets") : new JsonObject();
+            for (var entry : markets.entrySet())
+                addCatalogEntry(catalogEntries, "wf_trade", "markets", entry.getKey(), entry.getKey(), entry.getValue());
+            JsonArray caravans = tradeSnapshot.has("caravans") ? tradeSnapshot.getAsJsonArray("caravans") : new JsonArray();
+            for (var element : caravans) if (element.isJsonObject()) {
+                JsonObject caravan = element.getAsJsonObject();
+                String id = caravan.get("id").getAsString();
+                addCatalogEntry(catalogEntries, "wf_trade", "caravans", id, "Caravan " + id, caravan);
+                addNamedEntity(namedEntities, id, "caravan", "Caravan " + id, "", caravan.has("owner") ? caravan.get("owner").getAsString() : "");
+            }
+            JsonArray ambushes = tradeSnapshot.has("ambushes") ? tradeSnapshot.getAsJsonArray("ambushes") : new JsonArray();
+            for (var element : ambushes) if (element.isJsonObject()) {
+                JsonObject ambush = element.getAsJsonObject();
+                String id = ambush.get("id").getAsString();
+                addCatalogEntry(catalogEntries, "wf_trade", "ambushes", id, "Ambush " + id, ambush);
+            }
+            addCatalogEntry(catalogEntries, "wf_trade", "runtime_state", "trade",
+                    "Markets, caravans, ambushes and trade shocks", tradeSnapshot);
+        }
         JsonObject troopSnapshot = exportOptionalModuleSnapshot("wf_troops",
                 "dev.worldforge.troops.mc.TroopsMod", "worldSnapshotJson");
         if (troopSnapshot != null) {
@@ -1575,7 +1606,8 @@ public final class WorldSimMod {
         addCapability(capabilities, "wf_war", 1, net.minecraftforge.fml.ModList.get().isLoaded("wf_war"),
                 catalogEntryCount(catalogEntries, "wf_war"), wars.size());
         addCapability(capabilities, "wf_trade", 1, net.minecraftforge.fml.ModList.get().isLoaded("wf_trade"),
-                catalogEntryCount(catalogEntries, "wf_trade"), 0);
+                catalogEntryCount(catalogEntries, "wf_trade"),
+                tradeSnapshot != null && tradeSnapshot.has("caravans") ? tradeSnapshot.getAsJsonArray("caravans").size() : 0);
         for (String optionalModule : List.of("wf_rts", "wf_genesis", "wf_progress", "wf_reputation"))
             addCapability(capabilities, optionalModule, 1, net.minecraftforge.fml.ModList.get().isLoaded(optionalModule), 0, 0);
         sortObjects(catalogEntries, Comparator.comparing((JsonObject item) -> item.get("module_id").getAsString())
