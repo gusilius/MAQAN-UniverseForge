@@ -359,6 +359,50 @@ fn proposal_id(seed: u64, day: Day, domain: &str, a: &str, b: &str) -> String {
 
 fn clamp_score(v: i64) -> i32 { v.clamp(-100, 100) as i32 }
 
+
+fn realm_policy_modifier(snapshot: &WorldSnapshot, realm_id: &str, key: &str) -> f64 {
+    let Some(selection) = snapshot.realm_governments.iter().find(|selection| selection.realm_id == realm_id) else {
+        return 0.0;
+    };
+    let mut total = snapshot.government_definitions.iter()
+        .find(|definition| definition.id == selection.government_id)
+        .and_then(|definition| definition.mods.get(key)).copied().unwrap_or(0.0);
+    if let Some(level) = snapshot.catalog_entries.iter().find(|entry|
+        entry.module_id == "wf_realms" && entry.catalog_id == "government_levels"
+            && entry.entry_id == selection.level_id) {
+        total += level.payload.get("mods").and_then(|mods| mods.get(key))
+            .and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+    }
+    for doctrine in &selection.doctrine_ids {
+        let (branch_id, node_id) = doctrine.split_once(':').unwrap_or(("", doctrine.as_str()));
+        for branch in snapshot.catalog_entries.iter().filter(|entry|
+            entry.module_id == "wf_realms" && entry.catalog_id == "doctrine_branches"
+                && (branch_id.is_empty() || entry.entry_id == branch_id)) {
+            if let Some(nodes) = branch.payload.get("nodes").and_then(serde_json::Value::as_array) {
+                if let Some(node) = nodes.iter().find(|node|
+                    node.get("id").and_then(serde_json::Value::as_str) == Some(node_id)) {
+                    total += node.get("mods").and_then(|mods| mods.get(key))
+                        .and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+                    break;
+                }
+            }
+        }
+    }
+    for (law_id, option_id) in &selection.laws {
+        if let Some(law) = snapshot.catalog_entries.iter().find(|entry|
+            entry.module_id == "wf_realms" && entry.catalog_id == "laws" && entry.entry_id == *law_id) {
+            if let Some(options) = law.payload.get("options").and_then(serde_json::Value::as_array) {
+                if let Some(option) = options.iter().find(|option|
+                    option.get("id").and_then(serde_json::Value::as_str) == Some(option_id.as_str())) {
+                    total += option.get("mods").and_then(|mods| mods.get(key))
+                        .and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+                }
+            }
+        }
+    }
+    if total.is_finite() { total } else { 0.0 }
+}
+
 fn has_treaty(snapshot: &WorldSnapshot, a: &str, b: &str, treaty: &str) -> bool {
     snapshot.diplomatic_relations.iter().any(|relation|
         ((relation.realm_a == a && relation.realm_b == b)
@@ -807,12 +851,9 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
             let subject_penalty = snapshot.vassal_contracts.iter()
                 .find(|contract| contract.vassal_realm == attacker.id)
                 .map(|contract| (100 - contract.loyalty) / 4).unwrap_or(0);
-            let government_modifier = snapshot.realm_governments.iter()
-                .find(|selection| selection.realm_id == attacker.id)
-                .and_then(|selection| snapshot.government_definitions.iter()
-                    .find(|definition| definition.id == selection.government_id))
-                .map(|definition| definition.mods.get("war_score").or_else(|| definition.mods.get("military"))
-                    .copied().unwrap_or(0.0).round() as i64).unwrap_or(0);
+            let government_modifier = ["war_score", "military", "warfare", "expansion"]
+                .iter().map(|key| realm_policy_modifier(snapshot, &attacker.id, key))
+                .sum::<f64>().round() as i64;
             let score = clamp_score(
                 attacker.expansion_pressure as i64 / 2
                 + if border.contested_claim { 28 } else { 0 }
@@ -947,10 +988,14 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
             if kinship <= 2 || social.married || social.relationship < 35 || social.love < 20 { continue; }
             let social_bonus = social.relationship / 5 + social.love / 10;
             let kinship_penalty = if (3..=5).contains(&kinship) { 10 } else { 0 };
+            let dynastic_policy = (realm_policy_modifier(snapshot, &a.realm_id, "marriage")
+                + realm_policy_modifier(snapshot, &b.realm_id, "marriage")
+                + realm_policy_modifier(snapshot, &a.realm_id, "diplomacy")
+                + realm_policy_modifier(snapshot, &b.realm_id, "diplomacy")).round() as i64;
             let score = clamp_score(25_i64 + ((a.opinion + b.opinion) / 4) as i64
                 + ((a.prestige + b.prestige) / 8) as i64
                 + if a.house_id != b.house_id { 10 } else { 0 }
-                + social_bonus as i64
+                + social_bonus as i64 + dynastic_policy
                 - kinship_penalty as i64
                 - (a.age as i32 - b.age as i32).abs() as i64);
             if score >= 35 && best.map(|(_, current)| score > current).unwrap_or(true) { best = Some((b, score)); }
