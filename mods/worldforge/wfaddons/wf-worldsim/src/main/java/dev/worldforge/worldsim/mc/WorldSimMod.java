@@ -569,6 +569,16 @@ public final class WorldSimMod {
                     .count();
             long livingCharacters = source.registry == null ? 0 : source.registry.all().stream()
                     .filter(person -> person.alive).count();
+            long namedCharacters = source.registry == null ? 0 : source.registry.all().stream()
+                    .filter(person -> person.alive && person.name != null && !person.name.isBlank()).count();
+            long namedPolities = realms.stream()
+                    .filter(realm -> realm.name != null && !realm.name.isBlank()).count();
+            long namedTitles = RealmsMod.POLITICS.titles().stream()
+                    .filter(title -> realms.stream().anyMatch(realm -> realm.id.equals(title.realmId)))
+                    .filter(title -> title.name != null && !title.name.isBlank()).count();
+            long namedSettlements = SettleMod.COLONIES.values().stream()
+                    .filter(colony -> colony != null && colony.s != null && source.dimension.equals(colony.dim))
+                    .filter(colony -> colony.s.name != null && !colony.s.name.isBlank()).count();
             long courtOffices = source.registry == null ? 0 : source.registry.all().stream()
                     .filter(person -> person.alive)
                     .flatMap(person -> person.posts.stream())
@@ -604,12 +614,13 @@ public final class WorldSimMod {
                             && realms.stream().anyMatch(realm -> Objects.equals(
                                     String.valueOf(realm.props.getOrDefault("emergence.dynasty_id", "")), dynasty.houseId)))
                     .count();
-            LOGGER.info("MAQAN_WORLD_GENESIS source={} dimension={} geography_cells={} communities={} settled={} settlements={} emergent_settlements={} map_anchors={} living_characters={} court_offices={} polities={} canonical_rulers={} dynasties={} titles={} governments={} race_kinds={} settlement_types={} government_types={} vassal_contracts={} subject_types={} title_ranks={}",
+            LOGGER.info("MAQAN_WORLD_GENESIS source={} dimension={} geography_cells={} communities={} settled={} settlements={} emergent_settlements={} map_anchors={} living_characters={} named_characters={} named_settlements={} polities={} named_polities={} canonical_rulers={} dynasties={} titles={} named_titles={} governments={} race_kinds={} settlement_types={} government_types={} vassal_contracts={} subject_types={} title_ranks={}",
                     source.id, source.dimension,
                     source.map == null ? VanillaWorldGeography.sampledCellCount() : source.map.w * source.map.h,
-                    bands, settled, settlements, emergentSettlements, mapAnchors, livingCharacters, courtOffices,
-                    realms.size(), rulers, dynasties, titles, governments, raceIds.size(), GSON.toJson(settlementTypeCounts),
-                    GSON.toJson(governmentTypes), vassalContracts.size(), GSON.toJson(subjectTypes), GSON.toJson(titleRanks));
+                    bands, settled, settlements, emergentSettlements, mapAnchors, livingCharacters, namedCharacters,
+                    namedSettlements, realms.size(), namedPolities, rulers, dynasties, titles, namedTitles,
+                    governments, raceIds.size(), GSON.toJson(settlementTypeCounts), GSON.toJson(governmentTypes),
+                    vassalContracts.size(), GSON.toJson(subjectTypes), GSON.toJson(titleRanks));
             if (source.map == null) {
                 int cells = 0, landCells = 0, viable36 = 0, viable48 = 0, maxSuitability = 0;
                 Map<String, Integer> biomeCounts = new TreeMap<>();
