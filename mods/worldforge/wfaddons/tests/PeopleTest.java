@@ -84,7 +84,7 @@ public class PeopleTest {
                 "датапак загружает правителей каждого территориального уровня от барона до короля: " + defs.all().size());
         int generatedTierRoles = defs.ensureTerritorialRulers(d);
         boolean everyMapTierHasRulerRole = d.tiers.stream().allMatch(tier -> defs.all().stream()
-                .anyMatch(role -> role.ruler && tier.key.equals(role.per)));
+                .anyMatch(role -> role.ruler && role.family && tier.key.equals(role.per)));
         ok(everyMapTierHasRulerRole,
                 "каждый реальный уровень карты получает должность правителя без фиксированного списка рангов; generated="
                         + generatedTierRoles + ", tiers=" + d.tiers.size());
