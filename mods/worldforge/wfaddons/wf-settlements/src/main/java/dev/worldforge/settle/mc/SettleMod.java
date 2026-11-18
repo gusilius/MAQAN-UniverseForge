@@ -1593,12 +1593,11 @@ public class SettleMod {
                         }
                         int opinion = dev.worldforge.settle.ResidentSocial.interactionDelta(character, companionPerson);
                         dev.worldforge.settle.ResidentSocial.socializeOnce(character, companionPerson, opinion, operationId);
-                        // Persist both canonical Character partitions before completing the
-                        // physical action. If the second write fails, keep the same pending
-                        // token: the first participant's receipt makes the retry idempotent.
-                        if (!PeopleMod.persistCharacter(character, server)
-                                || !PeopleMod.persistCharacter(companionPerson, server))
-                            return LifeSimulation.Outcome.IN_PROGRESS;
+                        // Both participants belong to this settlement's canonical registry.
+                        // The durable receipt is part of each Character snapshot and is committed
+                        // by PeopleMod's bounded registry checkpoint/shutdown save. Never serialize
+                        // every world registry synchronously for each ordinary conversation:
+                        // estate-transfer journals are reserved for actual ownership transactions.
                         settlement.updateWorker(companion, current -> current.status = "общался: " + character.name);
                     }
                     settlement.updateWorker(worker, current -> {
