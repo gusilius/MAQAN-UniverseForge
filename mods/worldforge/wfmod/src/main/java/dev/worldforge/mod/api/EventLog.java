@@ -67,6 +67,7 @@ public final class EventLog {
             synchronized (this) {
                 List<String> ids = realmIds == null ? List.of() : List.copyOf(new ArrayList<>(realmIds));
                 java.util.LinkedHashSet<String> scopes = new java.util.LinkedHashSet<>();
+                scopes.add("world");
                 for (String realm : ids) if (realm != null && !realm.isBlank()) scopes.add("realm:" + realm);
                 if (scopeIds != null) for (String scope : scopeIds)
                     if (scope != null && !scope.isBlank()) scopes.add(scope.trim());
