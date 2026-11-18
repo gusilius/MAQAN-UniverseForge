@@ -858,6 +858,40 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn active_alliance_prevents_autonomous_war_proposal() {
+        let mut snapshot = base();
+        snapshot.diplomatic_relations.push(DiplomaticRelation {
+            realm_a: "north".into(), realm_b: "south".into(), opinion: 80,
+            treaties: vec!["ALLIANCE".into()], truce_until_day: 0,
+        });
+        let frame = decide(&snapshot).unwrap();
+        assert!(!frame.proposals.iter().any(|proposal|
+            matches!(proposal.kind, ProposalKind::DeclareWar { .. })));
+    }
+
+    #[test]
+    fn settlement_type_and_building_catalogs_constrain_projects() {
+        let mut snapshot = base();
+        snapshot.catalog_entries.push(CatalogEntry {
+            module_id: "wf_settlements".into(), catalog_id: "settlement_instances".into(),
+            entry_id: "village".into(), name: "Village".into(),
+            payload: serde_json::json!({"type_id":"hamlet","building_counts":{},"completed_building_counts":{},"resource_stock":{}}),
+        });
+        snapshot.catalog_entries.push(CatalogEntry {
+            module_id: "wf_settlements".into(), catalog_id: "settlement_types".into(),
+            entry_id: "hamlet".into(), name: "Hamlet".into(),
+            payload: serde_json::json!({"allowBuildings":["market"]}),
+        });
+        snapshot.catalog_entries.push(CatalogEntry {
+            module_id: "wf_settlements".into(), catalog_id: "buildings".into(),
+            entry_id: "farm".into(), name: "Farm".into(),
+            payload: serde_json::json!({"category":"food","cost":{},"requires":[]}),
+        });
+        assert!(!settlement_allows_building(&snapshot, "village", "farm"));
+        assert!(settlement_allows_building(&snapshot, "village", "market") == false);
+    }
+
     fn realm(id: &str, army: u64) -> Realm {
         Realm { id:id.into(), population:1000, treasury:1000, army_strength:army, stability:60,
             prestige:50, expansion_pressure:100, at_war:false, last_war_day:0 }
