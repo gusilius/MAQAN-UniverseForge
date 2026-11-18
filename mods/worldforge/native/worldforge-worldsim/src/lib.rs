@@ -693,6 +693,50 @@ mod tests {
         assert!(snapshot.validate().is_err());
     }
 
+    #[test]
+    fn complete_title_tree_and_government_catalogue_reach_native_decisions() {
+        let mut snapshot = base();
+        let mut titles = Vec::new();
+        for tier in 0..7u32 {
+            titles.push(PoliticalTitle {
+                id: format!("title-{tier}"), map_id: "authored-world".into(),
+                key: format!("tier-{tier}"), name: format!("Tier {tier}"),
+                realm_id: "north".into(), tier_index: tier, tier_key: format!("tier-{tier}"),
+                parent_title_id: if tier < 6 { format!("title-{}", tier + 1) } else { String::new() },
+                liege_title_id: if tier < 6 { format!("title-{}", tier + 1) } else { String::new() },
+                holder_character_id: format!("holder-{tier}"), claims: vec![],
+                area_blocks: 100, neighbors: vec![],
+            });
+        }
+        titles.push(PoliticalTitle {
+            id: "neutral".into(), map_id: "authored-world".into(), key: "neutral".into(),
+            name: "Neutral".into(), realm_id: "unclaimed:authored-world".into(),
+            tier_index: 0, tier_key: "province".into(), parent_title_id: String::new(),
+            liege_title_id: String::new(), holder_character_id: String::new(),
+            claims: vec![], area_blocks: 1, neighbors: vec![],
+        });
+        snapshot.titles = titles;
+        snapshot.government_definitions = vec![GovernmentDefinition {
+            id: "merchant_republic".into(), name: "Merchant Republic".into(),
+            category: "republic".into(), succession: "elective".into(), min_level: 0,
+            req_races: vec![], forbid_races: vec![], req_flags: vec![],
+            req_terrain: BTreeMap::new(), aff_races: BTreeMap::new(),
+            aff_terrain: BTreeMap::new(), mods: BTreeMap::new(),
+            doctrine_slots: 3, law_slots: 4,
+        }];
+        snapshot.realm_governments = vec![RealmGovernment {
+            realm_id: "north".into(), government_id: "merchant_republic".into(),
+            level_id: "city_league".into(), doctrine_ids: vec!["trade:charters".into()],
+            laws: BTreeMap::from([("succession".into(), "elective".into())]),
+        }];
+        assert_eq!(snapshot.validate(), Ok(()));
+        let frame = decide(&snapshot).unwrap();
+        assert!(frame.diagnostics.iter().any(|line|
+            line.contains("political_titles:authored-world:count=8:tiers=7")));
+        assert!(frame.diagnostics.iter().any(|line|
+            line.contains("government_catalog:definitions=1:realm_selections=1")));
+    }
+
     #[test] fn duplicate_realms_are_rejected() {
         let mut s=base(); s.realms.push(s.realms[0].clone());
         assert_eq!(s.validate(),Err(SimError::DuplicateRealm("north".into())));
