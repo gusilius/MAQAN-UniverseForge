@@ -58,9 +58,10 @@ public final class SettleTypes {
     /** Почему вид недоступен (пустая строка - подходит). built - id построенных зданий (с повторами). */
     public String why(Type t, int pop, List<String> built, Map<String, Double> terrain, Map<String, Double> races) {
         if (pop < t.minPop()) return "нужно жителей: " + t.minPop();
+        if (pop > t.maxPop()) return "слишком много жителей для этого вида (максимум " + t.maxPop() + ")";
         for (var e : t.reqBuildings().entrySet()) if (Collections.frequency(built, e.getKey()) < e.getValue()) return "нужно здание: " + e.getKey() + " x" + e.getValue();
         for (var e : t.reqTerrain().entrySet()) if (terrain.getOrDefault(e.getKey(), 0.0) < e.getValue()) return "нужно " + Math.round(e.getValue() * 100) + "% местности " + e.getKey();
-        if (!t.reqRaces().isEmpty()) { double s = 0; for (String r : t.reqRaces()) s += races.getOrDefault(r, 0.0); if (s < 0.4) return "нужно 40% жителей: " + String.join("/", t.reqRaces()); }
+        if (!t.reqRaces().isEmpty()) { double s = 0; for (String r : t.reqRaces()) s += races.getOrDefault(r, 0.0); if (s < 0.20) return "нужно 20% жителей: " + String.join("/", t.reqRaces()); }
         return "";
     }
 
@@ -97,7 +98,7 @@ public final class SettleTypes {
             if (!t.reqRaces().isEmpty()) {
                 double share = 0;
                 for (String race : t.reqRaces()) share += races.getOrDefault(race, 0.0);
-                if (share < 0.4) continue;
+                if (share < 0.20) continue;
             }
             double score = t.tier() * 1000.0 + fit(t, terrain, races);
             // Prefer a viable founding form with fewer deferred infrastructure requirements
