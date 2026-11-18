@@ -52,7 +52,16 @@ public class RelationsMod {
         if (e.phase != TickEvent.Phase.END) return;
         ticks++;
         try {
-            if (ticks % STEP == 0 && WorldForgeApi.clock().pull("wf_relations") > 0) RelationsMc.REL.tick(RelationsMc.dayNumber());
+            if (ticks % STEP == 0) {
+                int elapsedDays = WorldForgeApi.clock().pull("wf_relations");
+                if (elapsedDays > 0) {
+                    int day = RelationsMc.dayNumber();
+                    RelationsMc.REL.tick(day);
+                    int interactions = NpcSocialSimulation.advance(RelationsMc.REL, day, WorldForgeApi.clock().year());
+                    if (interactions > 0 && day % 30 == 0)
+                        LOGGER.info("wf_relations: autonomous NPC interactions={} day={}", interactions, day);
+                }
+            }
             if (ticks % SAVE_EVERY == 0) RelationsMc.save(e.getServer());
         } catch (Exception ex) { LOGGER.error("wf_relations: ошибка тика: {}", ex.toString()); }
     }
