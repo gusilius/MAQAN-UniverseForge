@@ -36,6 +36,7 @@ public final class RoleDefs {
             definition.put("per", tier.key);
             definition.put("count", 1);
             definition.put("noble", true);
+            definition.put("family", true);
             definition.put("ruler", true);
             add(dev.worldforge.mod.Json.write(definition));
             added++;
