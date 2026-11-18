@@ -468,29 +468,33 @@ fn advance_band(band: &mut EmergentBand, cell: &GeographicCell, seed: u64, year:
 
 fn maybe_form_polity(map: &GeographicMap, cells: &CellIndex<'_>, seed: u64, year: u64, bands: &[EmergentBand],
     polities: &mut Vec<EmergentPolity>, events: &mut Vec<EmergenceEvent>) {
-    let spacing = observed_map_scale(map) * 3;
-    // Legacy/persisted bands are rechecked against the live political raster before
-    // they can become sovereign. A settlement on another realm's land is not a
-    // legal seed for a new independent polity.
-    // Sovereignty is generated downstream; geographic viability alone gates settlement.
+    // Founding catchments must stay local. Using three times the whole-map scale
+    // collapsed distant communities into a few oversized states on authored maps.
+    let spacing = (observed_map_scale(map) * 2).max(u64::from(map.sample_stride.max(1)) * 3);
+    const MAX_FOUNDING_COMMUNITIES: usize = 8;
     let mut settled = bands.iter().filter(|b| {
         b.map_id == map.map_id && b.settled
             && cell_at(cells, b.x, b.z).is_some_and(|cell| cell.land)
     }).collect::<Vec<_>>();
     settled.sort_by(|a,b| a.id.cmp(&b.id));
+
+    // Persisted sovereign assignments are immutable here. New states may only claim
+    // currently unassigned communities; no pass may silently merge existing realms.
+    let mut assigned = polities.iter().filter(|p| p.map_id == map.map_id)
+        .flat_map(|p| p.settlement_ids.iter().cloned()).collect::<BTreeSet<_>>();
+
     for anchor in &settled {
-        if polities.iter().any(|p| p.settlement_ids.contains(&anchor.id)) { continue; }
-        let mut cluster = settled.iter().filter(|b| distance_sq((anchor.x,anchor.z),(b.x,b.z)) <= spacing*spacing)
+        if assigned.contains(&anchor.id) { continue; }
+        let mut cluster = settled.iter()
+            .filter(|b| !assigned.contains(&b.id)
+                && distance_sq((anchor.x,anchor.z),(b.x,b.z)) <= spacing.saturating_mul(spacing))
             .map(|b| (*b).clone()).collect::<Vec<_>>();
-        cluster.sort_by(|a,b| a.id.cmp(&b.id));
+        cluster.sort_by(|a,b| distance_sq((anchor.x, anchor.z), (a.x, a.z))
+            .cmp(&distance_sq((anchor.x, anchor.z), (b.x, b.z)))
+            .then_with(|| a.id.cmp(&b.id)));
         cluster.dedup_by(|a,b| a.id == b.id);
+        cluster.truncate(MAX_FOUNDING_COMMUNITIES);
         let population = cluster.iter().map(|b| b.population).sum::<u64>();
-        // A village or a tiny cluster is not automatically a sovereign state.
-        // The first polity requires a durable regional base: at least four settled
-        // communities, a meaningful combined population, no single starving member,
-        // and a cluster whose aggregate food position is not in sustained collapse.
-        // These are founding gates, not permanent size caps: later growth is handled
-        // by the canonical realm/government systems.
         let food_position = cluster.iter().map(|b| b.food_reserve).sum::<i64>();
         let viable_communities = cluster.iter().filter(|b| b.population >= 20 && b.hardship_years <= 4).count();
         if cluster.len() < 4 || population < 120 || viable_communities < 4 || food_position < -12 {
@@ -498,16 +502,16 @@ fn maybe_form_polity(map: &GeographicMap, cells: &CellIndex<'_>, seed: u64, year
         }
         let ids = cluster.iter().map(|b| b.id.clone()).collect::<Vec<_>>();
         let id = format!("polity_{:016x}", roll(seed, "polity-id", &map.map_id, &ids.join("|"), year));
-        if polities.iter().any(|p| p.id == id || p.settlement_ids.iter().any(|s| ids.contains(s))) { continue; }
+        if polities.iter().any(|p| p.id == id) { continue; }
         let dynasty_id = format!("house_{:016x}", roll(seed, "founding-house", &id, "", year));
         let name = format!("{} Confederation", anchor.id.chars().take(8).collect::<String>());
         polities.push(EmergentPolity { id: id.clone(), map_id: map.map_id.clone(), name: name.clone(),
-            settlement_ids: ids, population, founded_year: year, stability: 55, dynasty_id,
+            settlement_ids: ids.clone(), population, founded_year: year, stability: 55, dynasty_id,
             dynasty_generations: 1, ruler_global_id: None, last_succession_year: year,
             years_in_generation: 0, succession_pressure: 0, weak_years: 0 });
+        assigned.extend(ids);
         events.push(EmergenceEvent { year, kind: "state_founded".into(), subject_id: id,
             text: format!("{} forms through the association of neighbouring settlements (population {})", name, population) });
-        break;
     }
 }
 
@@ -909,6 +913,44 @@ mod tests {
         let mut starving_polities = Vec::new();
         maybe_form_polity(&geography, &cells, 8128, 42, &starving, &mut starving_polities, &mut Vec::new());
         assert!(starving_polities.is_empty(), "a starving regional cluster cannot found a viable state");
+    }
+
+    #[test]
+    fn independent_regional_clusters_found_separate_non_overlapping_polities_in_one_pass() {
+        let geography = map();
+        let mut bands = Vec::new();
+        for (region, (base_x, base_z)) in [(10_u32, 10_u32), (70, 10), (10, 70)] {
+            for index in 0..4_u32 {
+                bands.push(EmergentBand {
+                    id: format!("region-{base_x}-{base_z}-{index}"),
+                    map_id: "planetos".into(),
+                    x: base_x + index * 3,
+                    z: base_z,
+                    population: 35,
+                    food_reserve: 8,
+                    settled: true,
+                    founded_year: 0,
+                    hardship_years: 0,
+                    origin_year: 0,
+                });
+            }
+        }
+        let cells = index_cells(&geography);
+        let mut polities = Vec::new();
+        let mut events = Vec::new();
+        maybe_form_polity(&geography, &cells, 8128, 1, &bands, &mut polities, &mut events);
+        assert_eq!(polities.len(), 3,
+            "three geographically separate viable cohorts must not be collapsed into one state");
+        let mut assigned = BTreeSet::new();
+        for polity in &polities {
+            assert_eq!(polity.settlement_ids.len(), 4);
+            for settlement_id in &polity.settlement_ids {
+                assert!(assigned.insert(settlement_id.as_str()),
+                    "a community cannot belong to two newly founded sovereign states");
+            }
+        }
+        assert_eq!(assigned.len(), 12);
+        assert_eq!(events.iter().filter(|event| event.kind == "state_founded").count(), 3);
     }
 
     #[test]
