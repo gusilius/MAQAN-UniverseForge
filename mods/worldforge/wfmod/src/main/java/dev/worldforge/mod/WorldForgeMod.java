@@ -227,7 +227,7 @@ public class WorldForgeMod {
                     d = MapData.load(n, mapsDir());
                 }
                 EditorManager.applySaved(ServerLifecycleHooks.getCurrentServer(), d);
-                LOGGER.info("WorldForge: загружена карта '{}' {}x{} px, {} блоков/px", n, d.w, d.h, d.bpp);
+                LOGGER.info("WorldForge: planet={} dimension_map_id={} image={} size={}x{} blocks_per_pixel={}", d.displayName, n, n, d.w, d.h, d.bpp);
                 return d;
             } catch (IOException | RuntimeException e) {
                 LOGGER.error("WorldForge: explicit map '{}' is unavailable; refusing to substitute synthetic terrain from a fallback map. Expected source under {}",
