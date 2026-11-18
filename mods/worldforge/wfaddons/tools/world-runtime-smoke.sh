@@ -289,15 +289,15 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "dual-world" ]; then
 import json, pathlib, re, sys
 out, map_id = pathlib.Path(sys.argv[1]), sys.argv[2]
 log = pathlib.Path("server.log").read_text(encoding="utf-8", errors="replace")
-pattern = re.compile(r"MAQAN_WORLD_GENESIS source=(\S+) dimension=(\S+) geography_cells=(\d+) communities=(\d+) settled=(\d+) settlements=(\d+) emergent_settlements=(\d+) map_anchors=(\d+) living_characters=(\d+) court_offices=(\d+) polities=(\d+) canonical_rulers=(\d+) dynasties=(\d+) titles=(\d+) governments=(\d+) race_kinds=(\d+) settlement_types=(\{[^}]*\}) government_types=(\{[^}]*\}) vassal_contracts=(\d+) subject_types=(\{[^}]*\}) title_ranks=(\{[^}]*\})")
+pattern = re.compile(r"MAQAN_WORLD_GENESIS source=(\S+) dimension=(\S+) geography_cells=(\d+) communities=(\d+) settled=(\d+) settlements=(\d+) emergent_settlements=(\d+) map_anchors=(\d+) living_characters=(\d+) named_characters=(\d+) named_settlements=(\d+) polities=(\d+) named_polities=(\d+) canonical_rulers=(\d+) dynasties=(\d+) titles=(\d+) named_titles=(\d+) governments=(\d+) race_kinds=(\d+) settlement_types=(\{[^}]*\}) government_types=(\{[^}]*\}) vassal_contracts=(\d+) subject_types=(\{[^}]*\}) title_ranks=(\{[^}]*\})")
 rows = {}
 for match in pattern.finditer(log):
-    values = dict(zip(("source","dimension","geography_cells","communities","settled","settlements","emergent_settlements","map_anchors","living_characters","court_offices","polities","canonical_rulers","dynasties","titles","governments","race_kinds"), match.groups()[:16]))
-    values["settlement_types"] = json.loads(match.group(17))
-    values["government_types"] = json.loads(match.group(18))
-    values["vassal_contracts"] = int(match.group(19))
-    values["subject_types"] = json.loads(match.group(20))
-    values["title_ranks"] = json.loads(match.group(21))
+    values = dict(zip(("source","dimension","geography_cells","communities","settled","settlements","emergent_settlements","map_anchors","living_characters","named_characters","named_settlements","polities","named_polities","canonical_rulers","dynasties","titles","named_titles","governments","race_kinds"), match.groups()[:19]))
+    values["settlement_types"] = json.loads(match.group(20))
+    values["government_types"] = json.loads(match.group(21))
+    values["vassal_contracts"] = int(match.group(22))
+    values["subject_types"] = json.loads(match.group(23))
+    values["title_ranks"] = json.loads(match.group(24))
     rows[match.group(1)] = values
 expected = {"vanilla-world:minecraft:overworld", map_id}
 missing = expected - rows.keys()
@@ -314,6 +314,10 @@ for key in sorted(expected):
         raise SystemExit(f"{key}: expected at least two actual race identities, got {row['race_kinds']}")
     if int(row["governments"]) < int(row["polities"]) or not row["government_types"]:
         raise SystemExit(f"{key}: every emergent polity must have an assigned data-pack government: {row['government_types']}")
+    for total, named in (("living_characters","named_characters"), ("settlements","named_settlements"),
+                         ("polities","named_polities"), ("titles","named_titles")):
+        if int(row[named]) < int(row[total]):
+            raise SystemExit(f"{key}: {named}={row[named]} is below {total}={row[total]}; generated objects must receive stable names")
     if int(row["vassal_contracts"]) > 0 and not row["subject_types"]:
         raise SystemExit(f"{key}: vassal contracts exist but no subject types were reported")
     classified = sum(count for kind, count in row["settlement_types"].items() if kind != "unclassified")
