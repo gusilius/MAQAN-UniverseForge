@@ -273,7 +273,13 @@ public class RealmsMod {
                 .collect(java.util.stream.Collectors.joining(",")));
         realm.props.put("population", Math.max(0L, population));
         realm.props.put("stability", Math.max(0, Math.min(100, stability)));
-        realm.props.put("prestige", (int) Math.min(100_000L, Math.max(0L, population / 10L)));
+        // Prestige must let a viable multi-settlement founding realm reach its
+        // constitutional stage. population/10 kept every initial polity at level 1,
+        // which made monarchies and republics impossible regardless of race or terrain.
+        long settlementPrestige = Math.max(0, settlementCount) * 10L;
+        long populationPrestige = Math.max(0L, population / 2L);
+        realm.props.put("prestige", (int) Math.min(100_000L,
+                Math.max(0L, populationPrestige + settlementPrestige)));
         realm.props.put("taxable_base", Math.max(0.0, population * 0.05));
         if (ownerMap != null && ownerMap.titles != null)
             ownerMap.titles.registerRealmProjection(realm);
