@@ -2282,8 +2282,16 @@ public final class WorldSimMod {
                 RealmDefs.Gov liegeGovernment = RealmsMod.DEFS.govs.get(RealmsMod.REALMS.state(liegeId).gov);
                 String subjectCategory = subjectGovernment == null ? "" : subjectGovernment.category().toLowerCase(Locale.ROOT);
                 String liegeCategory = liegeGovernment == null ? "" : liegeGovernment.category().toLowerCase(Locale.ROOT);
+                TitleData.Realm subjectRealm = RealmsMod.realm(vassalId);
+                TitleData.Realm suzerainRealm = RealmsMod.realm(liegeId);
+                String subjectDynasty = subjectRealm == null ? "" : String.valueOf(
+                        subjectRealm.props.getOrDefault("emergence.dynasty_id", ""));
+                String suzerainDynasty = suzerainRealm == null ? "" : String.valueOf(
+                        suzerainRealm.props.getOrDefault("emergence.dynasty_id", ""));
                 dev.worldforge.realms.Statecraft.SubjectType subjectType;
-                if (liegeCategory.contains("confederation")) {
+                if (!subjectDynasty.isBlank() && subjectDynasty.equals(suzerainDynasty)) {
+                    subjectType = dev.worldforge.realms.Statecraft.SubjectType.PERSONAL_UNION;
+                } else if (liegeCategory.contains("confederation")) {
                     subjectType = dev.worldforge.realms.Statecraft.SubjectType.CONFEDERATION_MEMBER;
                 } else if (subjectCategory.contains("tribal") || subjectCategory.contains("nomad")
                         || subjectCategory.contains("clan")) {
@@ -2300,6 +2308,7 @@ public final class WorldSimMod {
                         case TRIBUTARY -> { contract.taxShare = 0.20; contract.levyShare = 0.05; contract.autonomy = 55; }
                         case PROTECTORATE -> { contract.taxShare = 0.08; contract.levyShare = 0.04; contract.autonomy = 70; }
                         case CONFEDERATION_MEMBER -> { contract.taxShare = 0.05; contract.levyShare = 0.08; contract.autonomy = 85; }
+                        case PERSONAL_UNION -> { contract.taxShare = 0.03; contract.levyShare = 0.05; contract.autonomy = 90; }
                         default -> { contract.taxShare = 0.10; contract.levyShare = 0.12; contract.autonomy = 35; }
                     }
                 }
