@@ -989,6 +989,47 @@ mod tests {
         assert!(settlement_allows_building(&snapshot, "village", "market"));
     }
 
+    #[test]
+    fn recruitment_uses_registered_unit_mapping_and_real_staffed_building_capacity() {
+        let mut snapshot = base();
+        snapshot.catalog_entries.extend(vec![
+            CatalogEntry { module_id:"wf_settlements".into(), catalog_id:"settlement_instances".into(),
+                entry_id:"village".into(), name:"Village".into(),
+                payload:serde_json::json!({"trainer_counts":{"training_hall":2},
+                    "completed_building_counts":{"training_hall":1}}) },
+            CatalogEntry { module_id:"wf_army".into(), catalog_id:"realm_economy".into(),
+                entry_id:"north".into(), name:"North".into(),
+                payload:serde_json::json!({"manpower_pool":100,"gold":0}) },
+            CatalogEntry { module_id:"wf_army".into(), catalog_id:"unit_types".into(),
+                entry_id:"levy".into(), name:"Levy".into(),
+                payload:serde_json::json!({"levy":true,"cost":0,"attack":1.0,"defense":1.0,"siege":0.0}) },
+            CatalogEntry { module_id:"wf_troops".into(), catalog_id:"runtime_state".into(),
+                entry_id:"military".into(), name:"Military".into(),
+                payload:serde_json::json!({"army_type_map":{"levy":"spear"},
+                    "recruitment_buildings":{"spear":"training_hall"},
+                    "unit_definitions":{"spear":{"role":"melee"}}}) },
+        ]);
+        assert_eq!(recruitment_choice(&snapshot, "village", "north"), Some(("levy".into(), 20)));
+    }
+
+    #[test]
+    fn physical_troop_condition_reduces_effective_strategic_army_power() {
+        let mut snapshot = base();
+        snapshot.armies.push(ArmyFormation {
+            id:"north:1".into(), realm_id:"north".into(), name:"Army".into(),
+            commander_id:"".into(), martial:0, men:100, morale:1.0, supply:0.5,
+            location_title_id:"".into(), unit_counts:BTreeMap::new(), power:100.0,
+        });
+        snapshot.catalog_entries.push(CatalogEntry {
+            module_id:"wf_troops".into(), catalog_id:"runtime_state".into(),
+            entry_id:"military".into(), name:"Military".into(),
+            payload:serde_json::json!({"live_troops":[{"realm_id":"north","health":50.0,"max_health":100.0,
+                "morale":50,"injury_combat_multiplier":0.8,"supply_combat_multiplier":0.7}]}),
+        });
+        let power = effective_army_power(&snapshot, "north").unwrap();
+        assert!((power - 10.0).abs() < 1e-9);
+    }
+
     fn realm(id: &str, army: u64) -> Realm {
         Realm { id:id.into(), population:1000, treasury:1000, army_strength:army, stability:60,
             prestige:50, expansion_pressure:100, at_war:false, last_war_day:0 }
