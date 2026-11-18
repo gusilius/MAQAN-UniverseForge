@@ -464,7 +464,11 @@ public final class WorldSimMod {
                 List<String> affected = kind.equals("state_founded") || kind.equals("state_dissolved")
                         ? List.of("emergent-" + (emergenceEvent.has("subject_id")
                                 ? emergenceEvent.get("subject_id").getAsString() : "unknown")) : List.of();
-                WorldForgeApi.postEvent(eventCategory, "[" + kind + "] " + subject, affected, eventDay * 1440L);
+                String subjectId = emergenceEvent.has("subject_id")
+                        ? emergenceEvent.get("subject_id").getAsString() : "";
+                List<String> eventScopes = emergencePlanetScope(candidateEmergenceState, subjectId);
+                WorldForgeApi.postEventScoped(eventCategory, "[" + kind + "] " + subject,
+                        affected, eventScopes, eventDay * 1440L);
             }
         }
 
@@ -1030,6 +1034,33 @@ public final class WorldSimMod {
         return root;
     }
 
+
+    /** Resolve the planet scope from the canonical polity/band that emitted an emergence fact. */
+    private static List<String> emergencePlanetScope(JsonObject state, String subjectId) {
+        if (state == null || subjectId == null || subjectId.isBlank()) return List.of();
+        if (state.has("polities") && state.get("polities").isJsonArray()) {
+            for (var item : state.getAsJsonArray("polities")) if (item.isJsonObject()) {
+                JsonObject polity = item.getAsJsonObject();
+                boolean matches = subjectId.equals(polity.get("id").getAsString());
+                if (!matches && polity.has("settlement_ids") && polity.get("settlement_ids").isJsonArray())
+                    for (var band : polity.getAsJsonArray("settlement_ids"))
+                        if (band.isJsonPrimitive() && subjectId.equals(band.getAsString())) { matches = true; break; }
+                if (matches) {
+                    String mapId = polity.has("map_id") ? polity.get("map_id").getAsString() : "";
+                    return mapId.isBlank() ? List.of() : List.of("planet:" + mapId);
+                }
+            }
+        }
+        if (state.has("bands") && state.get("bands").isJsonArray()) {
+            for (var item : state.getAsJsonArray("bands")) if (item.isJsonObject()) {
+                JsonObject band = item.getAsJsonObject();
+                if (!subjectId.equals(band.get("id").getAsString())) continue;
+                String mapId = band.has("map_id") ? band.get("map_id").getAsString() : "";
+                return mapId.isBlank() ? List.of() : List.of("planet:" + mapId);
+            }
+        }
+        return List.of();
+    }
 
     /**
      * Materializes canonical people incrementally. The native frame remains pending until every
