@@ -2368,6 +2368,8 @@ public final class WorldSimMod {
                         .getOrDefault("emergence.ruler_global_id", ""));
                 List<List<TitleData.Title>> regionGroups = connectedTitleGroups(topMapRegions, 3);
                 List<String> duchyIds = new ArrayList<>();
+                Set<String> groupedRegionTitleIds = new HashSet<>();
+                Set<String> kingdomedDuchyIds = new HashSet<>();
                 int duchySerial = 0;
                 for (List<TitleData.Title> group : regionGroups) {
                     if (group.size() < 2) continue;
@@ -2390,6 +2392,7 @@ public final class WorldSimMod {
                     for (TitleData.Title region : group) {
                         String regionTitleId = dev.worldforge.realms.Statecraft.mapTitleId(map.name, region.key);
                         linkEmergentTerritoryTitle(regionTitleId, duchyId);
+                        groupedRegionTitleIds.add(regionTitleId);
                     }
                     importedIds.put(duchyId, realmId);
                     duchyIds.add(duchyId);
@@ -2414,15 +2417,21 @@ public final class WorldSimMod {
                             dev.worldforge.realms.Statecraft.Rank.KINGDOM, kingdomName);
                     if (populationIndex != null)
                         grantEmergentTerritoryHolder(kingdomId, capitalBand, populationIndex, year, fallbackHolder);
-                    for (String duchyId : group) linkEmergentTerritoryTitle(duchyId, kingdomId);
+                    for (String duchyId : group) {
+                        linkEmergentTerritoryTitle(duchyId, kingdomId);
+                        kingdomedDuchyIds.add(duchyId);
+                    }
                     importedIds.put(kingdomId, realmId);
                     kingdomIds.add(kingdomId);
                 }
 
-                List<String> crownChildren = !kingdomIds.isEmpty() ? kingdomIds
-                        : !duchyIds.isEmpty() ? duchyIds
-                        : topMapRegions.stream().map(title ->
-                                dev.worldforge.realms.Statecraft.mapTitleId(map.name, title.key)).toList();
+                List<String> crownChildren = new ArrayList<>(kingdomIds);
+                for (String duchyId : duchyIds)
+                    if (!kingdomedDuchyIds.contains(duchyId)) crownChildren.add(duchyId);
+                for (TitleData.Title region : topMapRegions) {
+                    String regionTitleId = dev.worldforge.realms.Statecraft.mapTitleId(map.name, region.key);
+                    if (!groupedRegionTitleIds.contains(regionTitleId)) crownChildren.add(regionTitleId);
+                }
                 if (!crownChildren.isEmpty()) {
                     var required = !kingdomIds.isEmpty()
                             ? dev.worldforge.realms.Statecraft.Rank.EMPIRE
