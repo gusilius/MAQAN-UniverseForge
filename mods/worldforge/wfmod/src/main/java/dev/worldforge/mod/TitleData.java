@@ -154,6 +154,9 @@ public final class TitleData {
     }
 
     /** Переразрешает сюзеренов и строит таблицу «провинция -> государство» (побеждает самый конкретный титул). */
+    /** Rebuilds the ordered realm view after runtime systems add or update virtual realms. */
+    public void refreshRealmIndex() { rebuildRealmIndex(); }
+
     private void rebuildRealmIndex() {
         realmList.clear();
         realmList.addAll(realms.values());
