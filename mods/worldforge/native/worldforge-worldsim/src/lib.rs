@@ -939,7 +939,7 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
         if used.contains(a.id.as_str()) { continue; }
         let mut best: Option<(&Character, i32)> = None;
         for b in &eligible {
-            if a.id == b.id || a.realm_id == b.realm_id || a.gender == b.gender || used.contains(b.id.as_str()) { continue; }
+            if a.id == b.id || a.realm_id == b.realm_id || a.map_id != b.map_id || a.gender == b.gender || used.contains(b.id.as_str()) { continue; }
             let Some(social) = snapshot.social_relations.iter().find(|relation|
                 (relation.character_a == a.id && relation.character_b == b.id)
                     || (relation.character_a == b.id && relation.character_b == a.id)) else { continue; };
