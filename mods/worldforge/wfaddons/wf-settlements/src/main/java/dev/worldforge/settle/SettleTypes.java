@@ -75,6 +75,42 @@ public final class SettleTypes {
         return best;
     }
 
+    /**
+     * Initial Genesis classification before infrastructure exists. Population, terrain and
+     * race requirements remain authoritative; building requirements are deferred until the
+     * settlement has had time to construct its founding infrastructure. Ordinary upgrades
+     * continue to use best(), which enforces every building requirement.
+     */
+    public Type bestFounding(int pop, Map<String, Double> terrain, Map<String, Double> races) {
+        Type best = null;
+        double bestScore = Double.NEGATIVE_INFINITY;
+        for (Type t : types.values()) {
+            if (pop < t.minPop() || pop > t.maxPop()) continue;
+            boolean terrainEligible = true;
+            for (var requirement : t.reqTerrain().entrySet()) {
+                if (terrain.getOrDefault(requirement.getKey(), 0.0) < requirement.getValue()) {
+                    terrainEligible = false;
+                    break;
+                }
+            }
+            if (!terrainEligible) continue;
+            if (!t.reqRaces().isEmpty()) {
+                double share = 0;
+                for (String race : t.reqRaces()) share += races.getOrDefault(race, 0.0);
+                if (share < 0.4) continue;
+            }
+            double score = t.tier() * 1000.0 + fit(t, terrain, races);
+            // Prefer a viable founding form with fewer deferred infrastructure requirements
+            // when two definitions have the same tier and environmental fit.
+            score -= t.reqBuildings().size() * 0.01;
+            if (score > bestScore) {
+                bestScore = score;
+                best = t;
+            }
+        }
+        return best;
+    }
+
     /** Подгонка вида к местности и жителям: от -50 до +50 процентов к его бонусам. */
     public double fit(Type t, Map<String, Double> terrain, Map<String, Double> races) {
         double s = 0;
