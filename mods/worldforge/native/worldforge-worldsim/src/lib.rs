@@ -354,6 +354,36 @@ fn proposal_id(seed: u64, day: Day, domain: &str, a: &str, b: &str) -> String {
 
 fn clamp_score(v: i64) -> i32 { v.clamp(-100, 100) as i32 }
 
+fn has_treaty(snapshot: &WorldSnapshot, a: &str, b: &str, treaty: &str) -> bool {
+    snapshot.diplomatic_relations.iter().any(|relation|
+        ((relation.realm_a == a && relation.realm_b == b)
+            || (relation.realm_a == b && relation.realm_b == a))
+            && relation.treaties.iter().any(|value| value == treaty))
+}
+
+fn settlement_allows_building(snapshot: &WorldSnapshot, settlement_id: &str, building: &str) -> bool {
+    let type_id = snapshot.catalog_entries.iter()
+        .find(|entry| entry.module_id == "wf_settlements"
+            && entry.catalog_id == "settlement_instances" && entry.entry_id == settlement_id)
+        .and_then(|entry| entry.payload.get("type_id"))
+        .and_then(serde_json::Value::as_str).unwrap_or("");
+    if type_id.is_empty() { return true; }
+    let definition = snapshot.catalog_entries.iter()
+        .find(|entry| entry.module_id == "wf_settlements"
+            && entry.catalog_id == "settlement_types" && entry.entry_id == type_id);
+    let Some(payload) = definition.map(|entry| &entry.payload) else { return true; };
+    let banned = payload.get("ban_buildings").or_else(|| payload.get("ban"))
+        .and_then(serde_json::Value::as_array);
+    if banned.map(|values| values.iter().any(|value| value.as_str() == Some(building))).unwrap_or(false) {
+        return false;
+    }
+    let allowed = payload.get("allow_buildings").or_else(|| payload.get("allow"))
+        .and_then(serde_json::Value::as_array);
+    allowed.map(|values| values.is_empty() || values.iter().any(|value| value.as_str() == Some(building)))
+        .unwrap_or(true)
+}
+
+
 impl WorldSnapshot {
     pub fn validate(&self) -> Result<(), SimError> {
         if self.world_id.trim().is_empty() { return Err(SimError::EmptyWorldId); }
@@ -456,6 +486,68 @@ impl WorldSnapshot {
                 return Err(SimError::InvalidSnapshot(format!("duplicate-workforce:{}", w.settlement_id)));
             }
         }
+        let mut capability_ids = BTreeSet::new();
+        for capability in &self.capabilities {
+            if capability.module_id.trim().is_empty() || capability.schema_version == 0
+                || !capability_ids.insert(capability.module_id.as_str()) {
+                return Err(SimError::InvalidSnapshot(format!("invalid-or-duplicate-capability:{}", capability.module_id)));
+            }
+        }
+        let mut catalog_keys = BTreeSet::new();
+        for entry in &self.catalog_entries {
+            if entry.module_id.trim().is_empty() || entry.catalog_id.trim().is_empty() || entry.entry_id.trim().is_empty()
+                || !catalog_keys.insert((entry.module_id.as_str(), entry.catalog_id.as_str(), entry.entry_id.as_str())) {
+                return Err(SimError::InvalidSnapshot(format!("invalid-or-duplicate-catalog-entry:{}:{}:{}", entry.module_id, entry.catalog_id, entry.entry_id)));
+            }
+        }
+        for relation in &self.diplomatic_relations {
+            if relation.realm_a == relation.realm_b || !realms.contains(relation.realm_a.as_str())
+                || !realms.contains(relation.realm_b.as_str()) {
+                return Err(SimError::InvalidSnapshot(format!("invalid-diplomatic-relation:{}:{}", relation.realm_a, relation.realm_b)));
+            }
+        }
+        let mut vassals = BTreeSet::new();
+        for contract in &self.vassal_contracts {
+            if contract.vassal_realm == contract.liege_realm || !realms.contains(contract.vassal_realm.as_str())
+                || !realms.contains(contract.liege_realm.as_str()) || !vassals.insert(contract.vassal_realm.as_str())
+                || !contract.tax_share.is_finite() || !contract.levy_share.is_finite()
+                || !(0.0..=1.0).contains(&contract.tax_share) || !(0.0..=1.0).contains(&contract.levy_share)
+                || !(0..=100).contains(&contract.loyalty) || !(0..=100).contains(&contract.autonomy) {
+                return Err(SimError::InvalidSnapshot(format!("invalid-vassal-contract:{}", contract.vassal_realm)));
+            }
+        }
+        let mut war_ids = BTreeSet::new();
+        for war in &self.wars {
+            if war.id.trim().is_empty() || !war_ids.insert(war.id.as_str())
+                || !realms.contains(war.attacker_realm.as_str()) || !realms.contains(war.defender_realm.as_str())
+                || war.attacker_realm == war.defender_realm {
+                return Err(SimError::InvalidSnapshot(format!("invalid-war:{}", war.id)));
+            }
+        }
+        let mut army_ids = BTreeSet::new();
+        for army in &self.armies {
+            if army.id.trim().is_empty() || !army_ids.insert(army.id.as_str())
+                || !realms.contains(army.realm_id.as_str()) || !army.morale.is_finite()
+                || !army.supply.is_finite() || !army.power.is_finite()
+                || !(0.0..=1.0).contains(&army.morale) || !(0.0..=1.0).contains(&army.supply)
+                || army.power < 0.0 || army.unit_counts.values().any(|count| *count == 0) {
+                return Err(SimError::InvalidSnapshot(format!("invalid-army-formation:{}", army.id)));
+            }
+        }
+        for relation in &self.social_relations {
+            if relation.character_a == relation.character_b || !characters.contains(relation.character_a.as_str())
+                || !characters.contains(relation.character_b.as_str()) || !(-100..=100).contains(&relation.relationship)
+                || !(0..=100).contains(&relation.love) {
+                return Err(SimError::InvalidSnapshot(format!("invalid-social-relation:{}:{}", relation.character_a, relation.character_b)));
+            }
+        }
+        let mut named_ids = BTreeSet::new();
+        for entity in &self.named_entities {
+            if entity.id.trim().is_empty() || entity.kind.trim().is_empty() || entity.name.trim().is_empty()
+                || !named_ids.insert((entity.kind.as_str(), entity.id.as_str())) {
+                return Err(SimError::InvalidSnapshot(format!("invalid-or-duplicate-named-entity:{}:{}", entity.kind, entity.id)));
+            }
+        }
         Ok(())
     }
 }
@@ -478,6 +570,20 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
     }
     diagnostics.push(format!("government_catalog:definitions={}:realm_selections={}",
         snapshot.government_definitions.len(), snapshot.realm_governments.len()));
+    let mut catalog_counts: BTreeMap<(&str, &str), usize> = BTreeMap::new();
+    for entry in &snapshot.catalog_entries {
+        *catalog_counts.entry((&entry.module_id, &entry.catalog_id)).or_default() += 1;
+    }
+    for ((module, catalog), count) in &catalog_counts {
+        diagnostics.push(format!("catalog:{}:{}:entries={}", module, catalog, count));
+    }
+    diagnostics.push(format!("world_capabilities:{} diplomacy:{} vassals:{} wars:{} armies:{} social_relations:{} named_entities:{}",
+        snapshot.capabilities.len(), snapshot.diplomatic_relations.len(), snapshot.vassal_contracts.len(),
+        snapshot.wars.len(), snapshot.armies.len(), snapshot.social_relations.len(), snapshot.named_entities.len()));
+    let mut actual_army_power: BTreeMap<&str, f64> = BTreeMap::new();
+    for army in &snapshot.armies {
+        *actual_army_power.entry(army.realm_id.as_str()).or_default() += army.power;
+    }
     for (map_id, count) in &titles_by_map {
         let tiers = snapshot.titles.iter().filter(|title| title.map_id == *map_id)
             .map(|title| title.tier_index).collect::<BTreeSet<_>>().len();
@@ -521,16 +627,40 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
         let b = realms[border.b.as_str()];
         for (attacker, defender) in [(a, b), (b, a)] {
             if attacker.at_war || defender.at_war || snapshot.day.saturating_sub(attacker.last_war_day) < 180
-                || attacker.treasury < 100 || attacker.stability < 20 { continue; }
-            let power = if defender.army_strength == 0 { 100 } else {
-                ((attacker.army_strength as i64 * 100) / defender.army_strength as i64).clamp(0, 200) as i32
-            };
+                || attacker.treasury < 100 || attacker.stability < 20
+                || has_treaty(snapshot, &attacker.id, &defender.id, "ALLIANCE")
+                || has_treaty(snapshot, &attacker.id, &defender.id, "DEFENSIVE_PACT")
+                || snapshot.wars.iter().any(|war| war.status == "ACTIVE"
+                    && ((war.attacker_realm == attacker.id && war.defender_realm == defender.id)
+                        || (war.attacker_realm == defender.id && war.defender_realm == attacker.id))) { continue; }
+            let attacker_power = actual_army_power.get(attacker.id.as_str()).copied()
+                .unwrap_or(attacker.army_strength as f64);
+            let defender_power = actual_army_power.get(defender.id.as_str()).copied()
+                .unwrap_or(defender.army_strength as f64);
+            let power = if defender_power <= 0.0 { if attacker_power > 0.0 { 100 } else { 50 } }
+                else { ((attacker_power * 100.0 / defender_power).round() as i64).clamp(0, 200) as i32 };
+            let diplomatic_opinion = snapshot.diplomatic_relations.iter()
+                .find(|relation| (relation.realm_a == attacker.id && relation.realm_b == defender.id)
+                    || (relation.realm_a == defender.id && relation.realm_b == attacker.id))
+                .map(|relation| relation.opinion).unwrap_or(0);
+            let subject_penalty = snapshot.vassal_contracts.iter()
+                .find(|contract| contract.vassal_realm == attacker.id)
+                .map(|contract| (100 - contract.loyalty) / 4).unwrap_or(0);
+            let government_modifier = snapshot.realm_governments.iter()
+                .find(|selection| selection.realm_id == attacker.id)
+                .and_then(|selection| snapshot.government_definitions.iter()
+                    .find(|definition| definition.id == selection.government_id))
+                .map(|definition| definition.mods.get("war_score").or_else(|| definition.mods.get("military"))
+                    .copied().unwrap_or(0.0).round() as i64).unwrap_or(0);
             let score = clamp_score(
                 attacker.expansion_pressure as i64 / 2
                 + if border.contested_claim { 28 } else { 0 }
                 + border.strategic_value as i64 / 3
                 + power as i64 / 4
                 + attacker.prestige as i64 / 5
+                + government_modifier
+                + diplomatic_opinion as i64 / 10
+                - subject_penalty as i64
                 + (titles_by_realm.get(attacker.id.as_str()).copied().unwrap_or(0).min(40) / 4) as i64
                 + (claims_by_realm.get(attacker.id.as_str()).copied().unwrap_or(0).min(20) / 2) as i64
                 - defender.stability as i64 / 4
@@ -539,8 +669,8 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
             );
             let roll = (stable_hash(snapshot.seed, "war", &attacker.id, &defender.id, snapshot.day) % 100) as i32;
             if score >= 45 && roll < (score - 35).clamp(0, 65) {
-                let reason = format!("expansion pressure; border value {}; claim={}; power ratio={}%; stability={}",
-                    border.strategic_value, border.contested_claim, power, attacker.stability);
+                let reason = format!("expansion pressure; border value {}; claim={}; actual army power ratio={}%; diplomacy opinion={}; government modifier={}",
+                    border.strategic_value, border.contested_claim, power, diplomatic_opinion, government_modifier);
                 proposals.push(Proposal {
                     id: proposal_id(snapshot.seed, snapshot.day, "war", &attacker.id, &defender.id),
                     day: snapshot.day,
@@ -579,6 +709,10 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
             diagnostics.push(format!("settlement:{} no urgent project", s.id));
             continue;
         };
+        if !settlement_allows_building(snapshot, &s.id, building) {
+            diagnostics.push(format!("settlement:{} catalog forbids or does not allow building:{}", s.id, building));
+            continue;
+        }
         let adjusted = priority + (100 - food_ratio as i32).max(0).min(20);
         proposals.push(Proposal {
             id: proposal_id(snapshot.seed, snapshot.day, "build", &s.id, building),
@@ -643,9 +777,17 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
         let mut best: Option<(&Character, i32)> = None;
         for b in &eligible {
             if a.id == b.id || a.realm_id == b.realm_id || a.gender == b.gender || used.contains(b.id.as_str()) { continue; }
+            let social = snapshot.social_relations.iter().find(|relation|
+                (relation.character_a == a.id && relation.character_b == b.id)
+                    || (relation.character_a == b.id && relation.character_b == a.id));
+            let social_bonus = social.map(|relation| relation.relationship / 5 + relation.love / 10).unwrap_or(0);
+            let kinship_penalty = if a.father_id == b.id || a.mother_id == b.id || b.father_id == a.id || b.mother_id == a.id
+                || a.child_ids.contains(&b.id) || b.child_ids.contains(&a.id) { 100 } else { 0 };
             let score = clamp_score(25_i64 + ((a.opinion + b.opinion) / 4) as i64
                 + ((a.prestige + b.prestige) / 8) as i64
                 + if a.house_id != b.house_id { 10 } else { 0 }
+                + social_bonus as i64
+                - kinship_penalty as i64
                 - (a.age as i32 - b.age as i32).abs() as i64);
             if score >= 35 && best.map(|(_, current)| score > current).unwrap_or(true) { best = Some((b, score)); }
         }
@@ -656,7 +798,7 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
                 proposals.push(Proposal {
                     id: proposal_id(snapshot.seed, snapshot.day, "marriage", &a.id, &b.id),
                     day: snapshot.day,
-                    kind: ProposalKind::DynasticMarriage { first: a.id.clone(), second: b.id.clone(), score, reason: "highest available cross-realm dynastic compatibility".into() },
+                    kind: ProposalKind::DynasticMarriage { first: a.id.clone(), second: b.id.clone(), score, reason: format!("cross-realm dynastic compatibility; social bond contribution={}", social_bonus) },
                 });
             }
         }
