@@ -1211,17 +1211,17 @@ public final class WorldSimMod {
                         nodes.add(point);
                     }
                     roadData.add("path", nodes);
-                    addCatalogEntry(catalogEntries, "wf_settlements", "road_network",
+                    addCatalogEntry(catalogEntries, "wf_settle", "road_network",
                             s.id + ":road:" + road.id, "Road " + road.id, roadData);
                 }
                 for (var plan : colony.map.plans.values())
-                    addCatalogEntry(catalogEntries, "wf_settlements", "construction_plans",
+                    addCatalogEntry(catalogEntries, "wf_settle", "construction_plans",
                             s.id + ":plan:" + plan.buildingUid, plan.buildingId, GSON.toJsonTree(plan));
                 for (var warehouse : colony.map.warehouses.values())
-                    addCatalogEntry(catalogEntries, "wf_settlements", "warehouses",
+                    addCatalogEntry(catalogEntries, "wf_settle", "warehouses",
                             s.id + ":warehouse:" + warehouse.id, warehouse.id, GSON.toJsonTree(warehouse));
                 for (var job : colony.map.logistics.values())
-                    addCatalogEntry(catalogEntries, "wf_settlements", "logistics_jobs",
+                    addCatalogEntry(catalogEntries, "wf_settle", "logistics_jobs",
                             s.id + ":logistics:" + job.id, job.resource, GSON.toJsonTree(job));
             }
             JsonObject settlementIdentity = new JsonObject();
@@ -1254,7 +1254,7 @@ public final class WorldSimMod {
             settlementIdentity.add("building_counts", GSON.toJsonTree(buildingCounts));
             settlementIdentity.add("completed_building_counts", GSON.toJsonTree(completedBuildingCounts));
             settlementIdentity.add("resource_stock", GSON.toJsonTree(new TreeMap<>(s.stock)));
-            addCatalogEntry(catalogEntries, "wf_settlements", "settlement_instances", s.id, s.name, settlementIdentity);
+            addCatalogEntry(catalogEntries, "wf_settle", "settlement_instances", s.id, s.name, settlementIdentity);
             item.addProperty("local_pressure", Math.max(0, residentPopulation - s.housing()));
             item.addProperty("last_project_day", lastProjectDay.getOrDefault(s.id, Math.max(0, day - 365)));
             settlements.add(item);
@@ -1396,18 +1396,18 @@ public final class WorldSimMod {
         }
         if (SettleMod.DEFS != null) {
             for (var building : SettleMod.DEFS.buildings.values()) {
-                addCatalogEntry(catalogEntries, "wf_settlements", "buildings", building.id, building.name, GSON.toJsonTree(building));
+                addCatalogEntry(catalogEntries, "wf_settle", "buildings", building.id, building.name, GSON.toJsonTree(building));
                 addNamedEntity(namedEntities, building.id, "building_definition", building.name, "", "");
             }
             for (var profession : SettleMod.DEFS.professions.values())
-                addCatalogEntry(catalogEntries, "wf_settlements", "building_professions", profession.id, profession.name, GSON.toJsonTree(profession));
+                addCatalogEntry(catalogEntries, "wf_settle", "building_professions", profession.id, profession.name, GSON.toJsonTree(profession));
             for (var resource : SettleMod.DEFS.resourceNames.entrySet())
-                addCatalogEntry(catalogEntries, "wf_settlements", "resources", resource.getKey(), resource.getValue(),
+                addCatalogEntry(catalogEntries, "wf_settle", "resources", resource.getKey(), resource.getValue(),
                         GSON.toJsonTree(Map.of("name", resource.getValue(),
                                 "base_price", SettleMod.DEFS.prices.getOrDefault(resource.getKey(), 0.0))));
         }
         for (var type : SettleMod.TYPES.types.values()) {
-            addCatalogEntry(catalogEntries, "wf_settlements", "settlement_types", type.id(), type.name(), GSON.toJsonTree(type));
+            addCatalogEntry(catalogEntries, "wf_settle", "settlement_types", type.id(), type.name(), GSON.toJsonTree(type));
             addNamedEntity(namedEntities, type.id(), "settlement_type", type.name(), "", "");
         }
         // Export all loaded profession definitions and all configured race/class/origin
@@ -1619,8 +1619,8 @@ public final class WorldSimMod {
         addCapability(capabilities, "wf_worldsim", 1, true, 0, 1);
         addCapability(capabilities, "wf_realms", 1, true,
                 governmentDefinitions.size() + catalogEntryCount(catalogEntries, "wf_realms"), RealmsMod.realms().size());
-        addCapability(capabilities, "wf_settlements", 1, true,
-                catalogEntryCount(catalogEntries, "wf_settlements"), SettleMod.COLONIES.size());
+        addCapability(capabilities, "wf_settle", 1, true,
+                catalogEntryCount(catalogEntries, "wf_settle"), SettleMod.COLONIES.size());
         addCapability(capabilities, "wf_army", 1, true,
                 catalogEntryCount(catalogEntries, "wf_army"), armies.size());
         addCapability(capabilities, "wf_troops", 1, net.minecraftforge.fml.ModList.get().isLoaded("wf_troops"),
