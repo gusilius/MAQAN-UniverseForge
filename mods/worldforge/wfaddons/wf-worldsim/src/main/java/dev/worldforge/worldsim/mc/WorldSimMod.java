@@ -1500,8 +1500,16 @@ public final class WorldSimMod {
                     }
                     if (!polityId.isBlank()) realmId = "emergent-" + polityId;
                 }
-                if (realmId.isBlank() || RealmsMod.realm(realmId) == null
-                        || !emittedCharacterIds.add(person.globalId)) continue;
+                if (realmId.isBlank() || RealmsMod.realm(realmId) == null) {
+                    realmId = "";
+                    boolean hasAutonomousLifeState = person.props.keySet().stream()
+                            .anyMatch(key -> key.startsWith("population.") || key.startsWith("life.")
+                                    || key.startsWith("origin.profession"));
+                    // Authored court templates without a living population record are not
+                    // world inhabitants. Vanilla and tracked unaffiliated NPCs are included.
+                    if (source.map != null && !hasAutonomousLifeState) continue;
+                }
+                if (!emittedCharacterIds.add(person.globalId)) continue;
                 JsonObject item = new JsonObject();
                 item.addProperty("id", person.globalId);
                 item.addProperty("realm_id", realmId);
