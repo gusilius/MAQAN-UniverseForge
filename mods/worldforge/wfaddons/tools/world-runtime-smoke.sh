@@ -289,15 +289,15 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "dual-world" ]; then
 import json, pathlib, re, sys
 out, map_id = pathlib.Path(sys.argv[1]), sys.argv[2]
 log = pathlib.Path("server.log").read_text(encoding="utf-8", errors="replace")
-pattern = re.compile(r"MAQAN_WORLD_GENESIS source=(\S+) dimension=(\S+) geography_cells=(\d+) communities=(\d+) settled=(\d+) settlements=(\d+) emergent_settlements=(\d+) map_anchors=(\d+) living_characters=(\d+) named_characters=(\d+) named_settlements=(\d+) polities=(\d+) named_polities=(\d+) canonical_rulers=(\d+) dynasties=(\d+) titles=(\d+) named_titles=(\d+) governments=(\d+) race_kinds=(\d+) settlement_types=(\{[^}]*\}) government_types=(\{[^}]*\}) vassal_contracts=(\d+) subject_types=(\{[^}]*\}) title_ranks=(\{[^}]*\})")
+pattern = re.compile(r"MAQAN_WORLD_GENESIS source=(\S+) dimension=(\S+) geography_cells=(\d+) communities=(\d+) settled=(\d+) settlements=(\d+) emergent_settlements=(\d+) map_anchors=(\d+) living_characters=(\d+) named_characters=(\d+) named_settlements=(\d+) court_offices=(\d+) polities=(\d+) named_polities=(\d+) canonical_rulers=(\d+) dynasties=(\d+) titles=(\d+) named_titles=(\d+) governments=(\d+) race_kinds=(\d+) settlement_types=(\{[^}]*\}) government_types=(\{[^}]*\}) vassal_contracts=(\d+) subject_types=(\{[^}]*\}) title_ranks=(\{[^}]*\})")
 rows = {}
 for match in pattern.finditer(log):
-    values = dict(zip(("source","dimension","geography_cells","communities","settled","settlements","emergent_settlements","map_anchors","living_characters","named_characters","named_settlements","polities","named_polities","canonical_rulers","dynasties","titles","named_titles","governments","race_kinds"), match.groups()[:19]))
-    values["settlement_types"] = json.loads(match.group(20))
-    values["government_types"] = json.loads(match.group(21))
-    values["vassal_contracts"] = int(match.group(22))
-    values["subject_types"] = json.loads(match.group(23))
-    values["title_ranks"] = json.loads(match.group(24))
+    values = dict(zip(("source","dimension","geography_cells","communities","settled","settlements","emergent_settlements","map_anchors","living_characters","named_characters","named_settlements","court_offices","polities","named_polities","canonical_rulers","dynasties","titles","named_titles","governments","race_kinds"), match.groups()[:20]))
+    values["settlement_types"] = json.loads(match.group(21))
+    values["government_types"] = json.loads(match.group(22))
+    values["vassal_contracts"] = int(match.group(23))
+    values["subject_types"] = json.loads(match.group(24))
+    values["title_ranks"] = json.loads(match.group(25))
     rows[match.group(1)] = values
 expected = {"vanilla-world:minecraft:overworld", map_id}
 missing = expected - rows.keys()
