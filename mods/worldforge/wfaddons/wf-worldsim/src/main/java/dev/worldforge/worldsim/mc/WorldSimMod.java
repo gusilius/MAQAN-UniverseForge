@@ -1116,9 +1116,25 @@ public final class WorldSimMod {
                 for (dev.worldforge.people.Character.Post post : person.posts) {
                     if (post.place == null || !post.place.startsWith("realm:")) continue;
                     String candidate = post.place.substring("realm:".length());
-                    if (candidate.startsWith("emergent-") && RealmsMod.realm(candidate) != null) {
+                    if (RealmsMod.realm(candidate) != null) {
                         realmId = candidate;
                         break;
+                    }
+                }
+                if (realmId.isBlank() && source.map != null && source.map.titles != null) {
+                    for (dev.worldforge.people.Character.Post post : person.posts) {
+                        if (post.place == null || !post.place.startsWith("title:")) continue;
+                        try {
+                            int localTitleId = Integer.parseInt(post.place.substring("title:".length()));
+                            TitleData.Title mapTitle = source.map.titles.get(localTitleId);
+                            if (mapTitle == null) continue;
+                            var politicalTitle = RealmsMod.POLITICS.title(
+                                    dev.worldforge.realms.Statecraft.mapTitleId(source.map.name, mapTitle.key));
+                            if (politicalTitle != null && RealmsMod.realm(politicalTitle.realmId) != null) {
+                                realmId = politicalTitle.realmId;
+                                break;
+                            }
+                        } catch (NumberFormatException ignored) { }
                     }
                 }
                 if (realmId.isBlank()) {
@@ -1130,7 +1146,7 @@ public final class WorldSimMod {
                     }
                     if (!polityId.isBlank()) realmId = "emergent-" + polityId;
                 }
-                if (!realmId.startsWith("emergent-") || RealmsMod.realm(realmId) == null
+                if (realmId.isBlank() || RealmsMod.realm(realmId) == null
                         || !emittedCharacterIds.add(person.globalId)) continue;
                 JsonObject item = new JsonObject();
                 item.addProperty("id", person.globalId);
@@ -2508,35 +2524,12 @@ public final class WorldSimMod {
             // territorial hierarchy for image worlds; Statecraft imports it directly.
             int imported = RealmsMod.POLITICS.syncMapTitles(map.name, map.titles);
             CharacterRegistry registry = PeopleMod.registry(map);
-            EmergentPopulationIndex populationIndex = registry == null
-                    ? null : new EmergentPopulationIndex(registry.all());
             Map<String, String> importedIds = new TreeMap<>();
             for (TitleData.Title mapTitle : map.titles.allTitles()) {
                 var politicalTitle = RealmsMod.POLITICS.title(
                         dev.worldforge.realms.Statecraft.mapTitleId(map.name, mapTitle.key));
                 if (politicalTitle == null || !realms.containsKey(politicalTitle.realmId)) continue;
                 importedIds.put(politicalTitle.id, politicalTitle.realmId);
-                if (populationIndex == null) continue;
-                List<String> realmBands = bandsByRealm.getOrDefault(politicalTitle.realmId, List.of());
-                String nearestBand = "";
-                double nearestDistance = Double.MAX_VALUE;
-                for (String bandId : realmBands) {
-                    JsonObject band = bands.get(bandId);
-                    if (band == null) continue;
-                    int[] position = EmergenceSource.authored(map).blockPosition(
-                            band.get("x").getAsInt(), band.get("z").getAsInt());
-                    double dx = mapTitle.capX - position[0], dz = mapTitle.capZ - position[1];
-                    double distance = dx * dx + dz * dz;
-                    if (distance < nearestDistance) {
-                        nearestDistance = distance;
-                        nearestBand = bandId;
-                    }
-                }
-                String fallback = String.valueOf(realms.get(politicalTitle.realmId).props
-                        .getOrDefault("emergence.ruler_global_id", ""));
-                // The authoritative wf-people title office is assigned after this
-                // complete ownership pass; do not pre-fill the holder with a random
-                // resident or it would mask the canonical office-holder identity.
             }
             // Extend the imported geographic province -> region tree into a real
             // political hierarchy. Static map packages deliberately contain geography,
