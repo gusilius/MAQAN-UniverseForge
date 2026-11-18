@@ -159,10 +159,16 @@ public final class WorldSimMod {
             if (registry != null) sources.add(EmergenceSource.authored(map));
         }
         if (!campaignRunning || vanillaCampaign) {
-            CharacterRegistry vanillaRegistry = PeopleMod.worldRegistry();
-            if (vanillaRegistry != null) {
-                for (String id : VanillaWorldGeography.simulationMapIds())
-                    sources.add(EmergenceSource.vanilla(id, vanillaRegistry));
+            MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
+            if (server != null) for (String id : VanillaWorldGeography.simulationMapIds()) {
+                String dimension = VanillaWorldGeography.dimensionFromMapId(id);
+                for (ServerLevel level : server.getAllLevels()) {
+                    if (!dimension.equals(level.dimension().location().toString())) continue;
+                    CharacterRegistry dimensionRegistry = PeopleMod.registryFor(level);
+                    if (dimensionRegistry != null)
+                        sources.add(EmergenceSource.vanilla(id, dimensionRegistry));
+                    break;
+                }
             }
         }
         sources.sort(Comparator.comparing(source -> source.id));
