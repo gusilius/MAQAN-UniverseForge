@@ -156,7 +156,7 @@ public final class WorldSimMod {
         List<EmergenceSource> sources = new ArrayList<>();
         boolean vanillaCampaign = campaignRunning && "vanilla".equals(campaignMapId);
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
-        Set<String> registeredMapSources = new HashSet<>();
+        Map<String, String> registeredMapSources = new HashMap<>();
         // Enumerate the actual loaded ServerLevels, not only maps already touched by a
         // generated chunk or command. This bootstraps a map planet's strategic geography
         // from its complete .worldmap package even before a player visits that dimension.
@@ -169,8 +169,15 @@ public final class WorldSimMod {
                         level.dimension().location(), unavailable.toString());
                 continue;
             }
-            if (map == null || !registeredMapSources.add(map.name)
-                    || (campaignRunning && (vanillaCampaign || !map.name.equals(campaignMapId)))) continue;
+            if (map == null || (campaignRunning && (vanillaCampaign || !map.name.equals(campaignMapId)))) continue;
+            String dimension = level.dimension().location().toString();
+            String previousDimension = registeredMapSources.putIfAbsent(map.name, dimension);
+            if (previousDimension != null) {
+                if (!previousDimension.equals(dimension))
+                    LOGGER.error("wf_worldsim: map package '{}' is mounted in both {} and {}; map-scoped identity cannot represent two independent planets. Use a unique map ID per dimension until PlanetId scoping is enabled.",
+                            map.name, previousDimension, dimension);
+                continue;
+            }
             CharacterRegistry registry = PeopleMod.registry(map);
             if (registry != null) sources.add(EmergenceSource.authored(map));
         }
