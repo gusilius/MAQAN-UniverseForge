@@ -531,7 +531,8 @@ fn recruitment_choice(snapshot: &WorldSnapshot, settlement_id: &str, realm_id: &
     let economy = snapshot.catalog_entries.iter().find(|entry|
         entry.module_id == "wf_army" && entry.catalog_id == "realm_economy"
             && entry.entry_id == realm_id)?;
-    let pool = economy.payload.get("manpower_pool").and_then(serde_json::Value::as_u64).unwrap_or(0);
+    let pool = economy.payload.get("manpower_pool").and_then(serde_json::Value::as_f64)
+        .filter(|value| value.is_finite() && *value > 0.0).map(|value| value.floor() as u64).unwrap_or(0);
     let gold = economy.payload.get("gold").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
     if pool < 10 || !gold.is_finite() || gold < 0.0 { return None; }
 
