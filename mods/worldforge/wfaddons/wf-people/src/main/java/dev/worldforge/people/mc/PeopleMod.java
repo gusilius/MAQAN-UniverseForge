@@ -85,6 +85,8 @@ public class PeopleMod {
     /** Canonical population partition for ordinary Minecraft dimensions without an image-map source. */
     private static final CharacterRegistry WORLD_REGISTRY = new CharacterRegistry();
     private static final String WORLD_PARTITION_ID = "__world__";
+    /** Each non-map Minecraft dimension owns a separate local Character partition under the shared universe authority. */
+    private static final Map<String, CharacterRegistry> DIMENSION_REGISTRIES = new ConcurrentHashMap<>();
     private static final CharacterAuthority AUTHORITY = new CharacterAuthority();
     private static final CharacterRegistry PLAYER_REGISTRY = new CharacterRegistry();
     private static final Map<String, Character> PLAYER_CHARACTERS = new ConcurrentHashMap<>();
@@ -143,6 +145,7 @@ public class PeopleMod {
     public void onAboutToStart(ServerAboutToStartEvent e) {
         identityPartitionsReady = false;
         REGS.clear();
+        DIMENSION_REGISTRIES.clear();
         WORLD_REGISTRY.fromJson("{\"format\":\"wf-people/3\",\"schema_version\":3,\"next\":1,\"characters\":[]}");
         PLAYER_CHARACTERS.clear();
         INVALID_REGS.clear();
@@ -212,6 +215,22 @@ public class PeopleMod {
             }
             if (WorldForgeMod.worldId() == null) throw new IllegalStateException("WorldId is unavailable for world Character identity partition");
             AUTHORITY.registerMap(WORLD_PARTITION_ID, WORLD_REGISTRY);
+            // The Overworld keeps its legacy partition/file for save compatibility. Every
+            // additional non-image dimension gets an independent durable Character partition.
+            for (ServerLevel level : server.getAllLevels()) {
+                if (level.getChunkSource().getGenerator() instanceof dev.worldforge.mod.MapChunkGenerator) continue;
+                String dimension = level.dimension().location().toString();
+                if ("minecraft:overworld".equals(dimension)) continue;
+                CharacterRegistry dimensionRegistry = new CharacterRegistry();
+                Path dimensionFile = dimensionRegistryFile(server, dimension);
+                if (Files.exists(dimensionFile))
+                    dimensionRegistry.fromJson(Files.readString(dimensionFile), world + "|dimension|" + dimension);
+                String partitionId = dimensionPartitionId(dimension);
+                AUTHORITY.registerMap(partitionId, dimensionRegistry);
+                DIMENSION_REGISTRIES.put(dimension, dimensionRegistry);
+                LOGGER.info("wf_people: loaded dimension Character partition dimension={} characters={}",
+                        dimension, dimensionRegistry.size());
+            }
             Path playerFile = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
                     .resolve("worldforge").resolve("wf_players.json");
             if (Files.exists(playerFile)) {
@@ -233,7 +252,7 @@ public class PeopleMod {
 
     private static boolean allIdentityPartitionsLoaded() {
         if (!playerRegistryAvailable || AUTHORITY.registry("__players__") != PLAYER_REGISTRY) return false;
-        int expected = 2; // Dedicated player and ordinary-world Character partitions.
+        int expected = 2 + DIMENSION_REGISTRIES.size(); // Player, legacy Overworld and every additional non-map dimension.
         for (MapData map : WorldForgeMod.loadedMaps().values())
             if (map != null) expected++;
         try {
@@ -385,16 +404,32 @@ public class PeopleMod {
         MapData map = EditorManager.dataFor(level);
         if (level.getChunkSource().getGenerator() instanceof dev.worldforge.mod.MapChunkGenerator)
             return map == null ? null : registry(map);
-        return WORLD_REGISTRY;
+        String dimension = level.dimension().location().toString();
+        if ("minecraft:overworld".equals(dimension)) return WORLD_REGISTRY;
+        return DIMENSION_REGISTRIES.get(dimension);
     }
 
-    /** Реестр без создания (для сущностей, которые тикают до загрузки карты). */
+    /** Registry lookup without allocation; a non-map dimension never falls back to another dimension's people. */
     public static CharacterRegistry peek(ServerLevel level) {
         if (level == null) return null;
         MapData map = EditorManager.dataFor(level);
         if (level.getChunkSource().getGenerator() instanceof dev.worldforge.mod.MapChunkGenerator)
             return map == null ? null : REGS.get(map);
-        return WORLD_REGISTRY;
+        String dimension = level.dimension().location().toString();
+        if ("minecraft:overworld".equals(dimension)) return WORLD_REGISTRY;
+        return DIMENSION_REGISTRIES.get(dimension);
+    }
+
+    private static String dimensionPartitionId(String dimension) {
+        if (dimension == null || dimension.isBlank() || dimension.length() > 256)
+            throw new IllegalArgumentException("Invalid Character dimension partition key");
+        return "__dimension__:" + dimension;
+    }
+
+    private static Path dimensionRegistryFile(MinecraftServer server, String dimension) {
+        String token = UUID.nameUUIDFromBytes(dimension.getBytes(StandardCharsets.UTF_8)).toString().replace("-", "");
+        return server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
+                .resolve("worldforge").resolve("wf_people_dimensions").resolve(token + ".json");
     }
 
     private static void writeAtomic(Path file, String content) throws java.io.IOException {
