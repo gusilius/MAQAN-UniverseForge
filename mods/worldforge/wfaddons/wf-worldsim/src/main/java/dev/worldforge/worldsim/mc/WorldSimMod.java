@@ -901,7 +901,8 @@ public final class WorldSimMod {
                         ? dev.worldforge.realms.Statecraft.mapTitleId(map.name, map.titles.get(army.location).key) : "");
                 formation.add("unit_counts", GSON.toJsonTree(new TreeMap<>(army.units)));
                 formation.addProperty("power", finite(power));
-                armies.add(formation);
+                addNamedEntity(namedEntities, map.name + ":" + army.id, "army", army.name, "", army.realm);
+                if (RealmsMod.realm(army.realm) != null) armies.add(formation);
             }
             for (var unit : engine.types.values()) {
                 JsonObject definition = new JsonObject();
@@ -1076,7 +1077,10 @@ public final class WorldSimMod {
                     }
                 }
                 title.add("neighbors", neighbors);
-                if (emittedPoliticalTitleIds.add(titleId)) politicalTitles.add(title);
+                if (emittedPoliticalTitleIds.add(titleId)) {
+                    politicalTitles.add(title);
+                    addNamedEntity(namedEntities, titleId, "title", sourceTitle.name, parentId, realmId);
+                }
             }
         }
         // Include Statecraft-native titles too (e.g. generated duchies/kingdoms
@@ -1106,6 +1110,7 @@ public final class WorldSimMod {
             title.add("claims", claims);
             title.add("neighbors", new JsonArray());
             politicalTitles.add(title);
+            addNamedEntity(namedEntities, political.id, "title", political.name, parent, political.realmId);
         }
         for (TitleData.Realm realm : RealmsMod.realms()) {
             Object raw = realm.props.get("emergence.neighbors");
@@ -1191,6 +1196,8 @@ public final class WorldSimMod {
             w.addProperty("stone_output", fixed(s.flow.perMinute(s.time, "stone", true)));
             workforce.add(w);
         }
+        addCatalogEntry(catalogEntries, "wf_people", "name_pools", "all_pools", "Cultural and racial naming pools",
+                GSON.toJsonTree(PeopleMod.NAMES.catalogSnapshot()));
         for (var type : SettleMod.TYPES.types.values())
             addCatalogEntry(catalogEntries, "wf_settlements", "settlement_types", type.id(), type.name(), GSON.toJsonTree(type));
         // Export all loaded profession definitions and all configured race/class/origin
@@ -1365,6 +1372,7 @@ public final class WorldSimMod {
             int separator = key.indexOf('|');
             if (separator <= 0 || separator == key.length() - 1) continue;
             String first = key.substring(0, separator), second = key.substring(separator + 1);
+            if (!emittedCharacterIds.contains(first) || !emittedCharacterIds.contains(second)) continue;
             var a = PeopleMod.authority().getGlobal(first);
             var b = PeopleMod.authority().getGlobal(second);
             if (a == null || b == null || !a.alive || !b.alive) continue;
@@ -1425,6 +1433,12 @@ public final class WorldSimMod {
     private static void addCatalogEntry(JsonArray target, String moduleId, String catalogId,
                                         String entryId, String name, com.google.gson.JsonElement payload) {
         if (entryId == null || entryId.isBlank()) return;
+        for (var existing : target) if (existing.isJsonObject()) {
+            JsonObject row = existing.getAsJsonObject();
+            if (moduleId.equals(row.get("module_id").getAsString())
+                    && catalogId.equals(row.get("catalog_id").getAsString())
+                    && entryId.equals(row.get("entry_id").getAsString())) return;
+        }
         JsonObject item = new JsonObject();
         item.addProperty("module_id", moduleId); item.addProperty("catalog_id", catalogId);
         item.addProperty("entry_id", entryId); item.addProperty("name", name == null ? "" : name);
@@ -1435,6 +1449,10 @@ public final class WorldSimMod {
     private static void addNamedEntity(JsonArray target, String id, String kind, String name,
                                        String parentId, String ownerId) {
         if (id == null || id.isBlank()) return;
+        for (var existing : target) if (existing.isJsonObject()) {
+            JsonObject row = existing.getAsJsonObject();
+            if (kind.equals(row.get("kind").getAsString()) && id.equals(row.get("id").getAsString())) return;
+        }
         JsonObject item = new JsonObject();
         item.addProperty("id", id); item.addProperty("kind", kind);
         item.addProperty("name", name == null ? "" : name);
