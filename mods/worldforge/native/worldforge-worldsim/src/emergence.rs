@@ -655,7 +655,9 @@ mod tests {
     fn map_only_world_emerges_without_preseeded_entities() {
         let frame = advance(request(365 * 220, None)).unwrap();
         assert!(!frame.state.bands.is_empty());
-        assert!(frame.state.polities.is_empty() || frame.state.polities.iter().all(|p| p.founded_year > 0));
+        assert!(frame.state.polities.iter().all(|p| p.founded_year <= frame.state.last_year));
+        assert!(frame.state.polities.iter().any(|p| p.founded_year == 0),
+            "new worlds receive their initial polity baseline without waiting for elapsed years");
         assert!(frame.events.iter().any(|e| e.kind == "population_origin"));
         assert!(frame.events.iter().any(|e| e.kind == "settlement_founded"));
         assert!(frame.state.polities.iter().all(|p| p.settlement_ids.len() >= 2));
@@ -668,7 +670,8 @@ mod tests {
         let polity = state.polities.first().expect("statehood should emerge from map-only conditions");
         let polity_id = polity.id.clone();
         let founded = polity.founded_year;
-        assert!(founded > 0 && founded < state.last_year);
+        assert!(founded <= state.last_year,
+            "the first polity may be present at world creation and must never be future-dated");
         for generation in 1..=4 {
             let ruler_id = format!("00000000-0000-0000-0000-{generation:012}");
             let event = record_ruler_succession(&mut state, &polity_id, &ruler_id, founded + generation as u64 * 28).unwrap();
