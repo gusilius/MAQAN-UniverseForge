@@ -82,6 +82,12 @@ public class PeopleTest {
                         && List.of("baron", "count", "duke", "king").stream().allMatch(id ->
                         defs.get(id) != null && defs.get(id).ruler),
                 "датапак загружает правителей каждого территориального уровня от барона до короля: " + defs.all().size());
+        int generatedTierRoles = defs.ensureTerritorialRulers(d);
+        boolean everyMapTierHasRulerRole = d.tiers.stream().allMatch(tier -> defs.all().stream()
+                .anyMatch(role -> role.ruler && tier.key.equals(role.per)));
+        ok(everyMapTierHasRulerRole,
+                "каждый реальный уровень карты получает должность правителя без фиксированного списка рангов; generated="
+                        + generatedTierRoles + ", tiers=" + d.tiers.size());
         List<TerritorialIdentity.RaceWeight> originRaces = List.of(
                 new TerritorialIdentity.RaceWeight("human", "", 50),
                 new TerritorialIdentity.RaceWeight("northman", "", 18),
