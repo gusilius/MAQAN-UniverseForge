@@ -337,8 +337,12 @@ public final class Statecraft {
             return fail("liege title must have a higher rank");
         }
         if (!title.realmId.equals(liege.realmId)) return fail("feudal titles must belong to the same realm");
-        for (Title cursor = liege; cursor != null && !cursor.liegeTitleId.isEmpty(); cursor = titles.get(cursor.liegeTitleId))
+        Set<String> visited = new HashSet<>();
+        for (Title cursor = liege; cursor != null;
+             cursor = cursor.liegeTitleId.isEmpty() ? null : titles.get(cursor.liegeTitleId)) {
             if (cursor.id.equals(titleId)) return fail("title hierarchy cycle");
+            if (!visited.add(cursor.id)) return fail("existing title hierarchy cycle");
+        }
         title.liegeTitleId = liegeTitleId;
         return true;
     }
