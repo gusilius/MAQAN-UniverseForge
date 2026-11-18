@@ -3071,12 +3071,42 @@ public final class WorldSimMod {
         String reason = action.has("reason") ? action.get("reason").getAsString() : "";
         // A rejected proposal is an AI diagnostic, not a historical event.
         if (applied) {
-            WorldForgeApi.postEvent(type.equals("declare_war") ? "war"
+            WorldForgeApi.postEventScoped(type.equals("declare_war") ? "war"
                             : (type.equals("dynastic_marriage") ? "people"
                             : (type.equals("build") || type.equals("reassign_profession") ? "settlement" : "diplomacy")),
                     outcome + ": " + subject + (reason.isBlank() ? "" : ". Причина: " + reason),
-                    affectedRealms, Math.max(0L, day * 1440L));
+                    affectedRealms, actionEventScopes(action), Math.max(0L, day * 1440L));
         }
+    }
+
+    /** Entity scopes for confirmed autonomous actions, resolved from canonical IDs. */
+    private static List<String> actionEventScopes(JsonObject action) {
+        Set<String> scopes = new LinkedHashSet<>();
+        String type = action.has("type") ? action.get("type").getAsString() : "";
+        if (type.equals("build") || type.equals("reassign_profession")) {
+            String settlementId = action.has("settlement") ? action.get("settlement").getAsString() : "";
+            if (!settlementId.isBlank()) scopes.add("settlement:" + settlementId);
+        }
+        if (type.equals("dynastic_marriage")) {
+            for (String key : List.of("first", "second")) {
+                if (!action.has(key) || action.get(key).isJsonNull()) continue;
+                String characterId = action.get(key).getAsString();
+                if (characterId.isBlank()) continue;
+                scopes.add("character:" + characterId);
+                for (EmergenceSource source : emergenceSources()) {
+                    if (source.registry == null) continue;
+                    for (dev.worldforge.people.Character person : source.registry.all()) {
+                        if (!characterId.equals(person.globalId)) continue;
+                        if (person.house != null && !person.house.isBlank())
+                            scopes.add("dynasty:" + person.house);
+                        Object planet = person.props.get("emergence.world_space_id");
+                        if (planet != null && !String.valueOf(planet).isBlank())
+                            scopes.add("planet:" + planet);
+                    }
+                }
+            }
+        }
+        return List.copyOf(scopes);
     }
 
     private static Path stateFile(MinecraftServer server) {
