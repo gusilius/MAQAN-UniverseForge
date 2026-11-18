@@ -233,7 +233,9 @@ fn bootstrap_vanilla_initial_civilizations(
     // Several bounded regional cohorts can found independent states in one world.
     // A settlement is assigned to at most one polity; new frontier observations can
     // later create additional states without rewriting existing sovereign identities.
-    for ((_region_x, _region_z), regional_candidates) in groups {
+    for ((region_x, region_z), regional_candidates) in groups {
+        let target_communities = 4 + (roll(seed, "vanilla-polity-size", &map.map_id,
+            &format!("{region_x}:{region_z}"), 0) % 5) as usize;
         let mut selected: Vec<&GeographicCell> = Vec::new();
         for cell in regional_candidates {
             let point = (cell.x, cell.z);
@@ -242,7 +244,7 @@ fn bootstrap_vanilla_initial_civilizations(
                 continue;
             }
             selected.push(cell);
-            if selected.len() == 8 { break; }
+            if selected.len() == target_communities { break; }
         }
 
         let mut settlement_ids = Vec::new();
@@ -351,6 +353,8 @@ fn bootstrap_initial_civilizations(
                 .then_with(|| a.x.cmp(&b.x))
         });
 
+        let target_communities = 4 + (roll(seed, "authored-polity-size", &map.map_id,
+            &format!("{group_x}:{group_z}"), 0) % 5) as usize;
         let mut selected: Vec<&GeographicCell> = Vec::new();
         for cell in candidates {
             if occupied.iter().any(|point| distance_sq(*point, (cell.x, cell.z)) < separation_sq)
@@ -359,7 +363,7 @@ fn bootstrap_initial_civilizations(
                 continue;
             }
             selected.push(cell);
-            if selected.len() == 6 { break; }
+            if selected.len() == target_communities { break; }
         }
         // A sovereign polity needs a real regional population base, not a single village.
         if selected.len() < 4 { continue; }
@@ -926,8 +930,10 @@ mod tests {
         bootstrap_initial_civilizations(&geography, 8128, &mut bands, &mut polities, &mut events);
         assert!(polities.len() >= 12,
             "a large authored map must be fragmented into multiple local sovereign states");
-        assert!(polities.iter().all(|polity| polity.settlement_ids.len() <= 8),
-            "initial states must not absorb oversized settlement catchments");
+        assert!(polities.iter().all(|polity| (4..=8).contains(&polity.settlement_ids.len())),
+            "initial states must remain within bounded regional cohort sizes");
+        assert!(polities.iter().map(|polity| polity.settlement_ids.len()).collect::<BTreeSet<_>>().len() > 1,
+            "founding populations should vary instead of giving every realm an identical fixed size");
         let mut assigned = BTreeSet::new();
         for polity in &polities {
             for settlement_id in &polity.settlement_ids {
