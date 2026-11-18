@@ -73,7 +73,7 @@ public final class PoliticalIdentitySynchronizerTest {
             if (territorial == null) continue;
             String tierKey = titles.tiers.get(tierIndex).key;
             String roleId = "office_ruler_" + tierKey.replaceAll("[^a-z0-9_]", "_");
-            roleDefs.add("{\\"id\\":\\""+roleId+"\\",\\"name\\":\\""+tierKey+" ruler\\",\\"per\\":\\""+tierKey+"\\",\\"ruler\\":true}");
+            roleDefs.add("{\"id\":\"" + roleId + "\",\"name\":\"" + tierKey + " ruler\",\"per\":\"" + tierKey + "\",\"ruler\":true}");
             Character localRuler = people.create("Local ruler " + tierKey, "House " + tierKey, "human", "m", 260);
             people.appoint(localRuler.id, roleId, "title:" + territorial.id);
             territorialOfficeIds.put(tierKey, Statecraft.mapTitleId(map.name, territorial.key));
