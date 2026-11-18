@@ -69,6 +69,69 @@ public class ReputationMod {
     /** Хранилище текущего мира; null, когда сервер не запущен. */
     public static ReputationStore store() { return store; }
 
+    /**
+     * Reputation adapter for autonomous NPC events. The subject is a canonical global
+     * Character UUID; witnesses receive only the exact scoped fact they observed, then
+     * the existing bounded RumorNetwork may pass it through trusted NPC relationships.
+     */
+    public static void recordAutonomous(String characterGlobalId, String polityId, int delta,
+                                        long worldTime, String reason, String[] witnesses) {
+        ReputationStore current = store;
+        if (current == null || characterGlobalId == null || characterGlobalId.isBlank()
+                || worldTime < 0 || delta == 0) return;
+        ReputationStore.Scope scope = polityId == null || polityId.isBlank()
+                ? ReputationStore.Scope.WORLD : ReputationStore.Scope.POLITY;
+        String scopeId = scope == ReputationStore.Scope.WORLD ? null : polityId;
+        String target = ReputationStore.target(scope, scopeId);
+        current.add(characterGlobalId, scope, scopeId, delta,
+                reason == null || reason.isBlank() ? "autonomous_npc_event" : reason);
+        if (scope == ReputationStore.Scope.POLITY)
+            current.name(target, "Репутация в государстве " + polityId);
+        if (witnesses == null || witnesses.length == 0 || scope != ReputationStore.Scope.POLITY) return;
+
+        List<String> orderedWitnesses = new java.util.TreeSet<>(java.util.Arrays.asList(witnesses)).stream()
+                .filter(id -> id != null && !id.isBlank() && !id.equals(characterGlobalId)).limit(8).toList();
+        for (String witness : orderedWitnesses) {
+            current.observe(witness, characterGlobalId, scope, scopeId, worldTime, reason);
+        }
+        for (String witness : orderedWitnesses) {
+            RumorNetwork.spread(current, witness, characterGlobalId, scope, scopeId, worldTime,
+                    witnessId -> npcContacts(witnessId, polityId),
+                    (recipientId, organizationId) -> npcMember(recipientId, organizationId));
+        }
+    }
+
+    private static java.util.Collection<RumorNetwork.Contact> npcContacts(String witnessId, String polityId) {
+        try {
+            Class<?> type = Class.forName("dev.worldforge.relations.NpcSocialSimulation");
+            Object raw = type.getMethod("contactsOf", String.class, String.class).invoke(null, witnessId, polityId);
+            if (!(raw instanceof java.util.Collection<?> contacts)) return java.util.List.of();
+            java.util.List<RumorNetwork.Contact> result = new java.util.ArrayList<>();
+            for (Object contact : contacts) {
+                Class<?> c = contact.getClass();
+                result.add(new RumorNetwork.Contact(
+                        String.valueOf(c.getMethod("characterId").invoke(contact)),
+                        ((Number) c.getMethod("relationship").invoke(contact)).intValue(),
+                        String.valueOf(c.getMethod("organizationId").invoke(contact)),
+                        (Boolean) c.getMethod("canCommunicate").invoke(contact),
+                        (Boolean) c.getMethod("sameOrganization").invoke(contact)));
+            }
+            return result;
+        } catch (ReflectiveOperationException | LinkageError ignored) {
+            return java.util.List.of();
+        }
+    }
+
+    private static boolean npcMember(String characterId, String polityId) {
+        try {
+            Class<?> type = Class.forName("dev.worldforge.relations.NpcSocialSimulation");
+            return Boolean.TRUE.equals(type.getMethod("isMember", String.class, String.class)
+                    .invoke(null, characterId, polityId));
+        } catch (ReflectiveOperationException | LinkageError ignored) {
+            return false;
+        }
+    }
+
     // ------------------------------------------------------------------ жизненный цикл
 
     private static Path file(MinecraftServer server) {
