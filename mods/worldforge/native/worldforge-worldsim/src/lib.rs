@@ -408,6 +408,26 @@ fn catalog_entry<'a>(snapshot: &'a WorldSnapshot, module: &str, catalog: &str, i
         entry.module_id == module && entry.catalog_id == catalog && entry.entry_id == id)
 }
 
+fn realm_treasury_balance(snapshot: &WorldSnapshot, realm_id: &str) -> Option<f64> {
+    catalog_entry(snapshot, "wf_realms", "realm_treasuries", realm_id)
+        .and_then(|entry| entry.payload.get("balance"))
+        .and_then(serde_json::Value::as_f64)
+        .filter(|value| value.is_finite() && *value >= 0.0)
+}
+
+fn realm_intrigue_pressure(snapshot: &WorldSnapshot, realm_id: &str) -> i64 {
+    snapshot.catalog_entries.iter().filter(|entry|
+        entry.module_id == "wf_realms" && entry.catalog_id == "intrigue_plots")
+        .filter(|entry| entry.payload.get("realm_id").and_then(serde_json::Value::as_str) == Some(realm_id))
+        .filter(|entry| matches!(entry.payload.get("status").and_then(serde_json::Value::as_str),
+            Some("GATHERING" | "ACTIVE")))
+        .map(|entry| {
+            let progress = entry.payload.get("progress").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+            let backers = entry.payload.get("backers").and_then(serde_json::Value::as_array).map(Vec::len).unwrap_or(0);
+            (progress / 20.0).round() as i64 + backers.min(10) as i64
+        }).sum::<i64>()
+}
+
 fn has_treaty(snapshot: &WorldSnapshot, a: &str, b: &str, treaty: &str) -> bool {
     snapshot.diplomatic_relations.iter().any(|relation|
         ((relation.realm_a == a && relation.realm_b == b)
@@ -891,8 +911,10 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
         let a = realms[border.a.as_str()];
         let b = realms[border.b.as_str()];
         for (attacker, defender) in [(a, b), (b, a)] {
+            let treasury = realm_treasury_balance(snapshot, &attacker.id).unwrap_or(attacker.treasury as f64);
+            let intrigue_penalty = realm_intrigue_pressure(snapshot, &attacker.id);
             if attacker.at_war || defender.at_war || snapshot.day.saturating_sub(attacker.last_war_day) < 180
-                || attacker.treasury < 100 || attacker.stability < 20
+                || treasury < 100.0 || attacker.stability < 20
                 || has_treaty(snapshot, &attacker.id, &defender.id, "ALLIANCE")
                 || has_treaty(snapshot, &attacker.id, &defender.id, "DEFENSIVE_PACT")
                 || snapshot.wars.iter().any(|war| war.status == "ACTIVE"
@@ -922,6 +944,7 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
                 + attacker.prestige as i64 / 5
                 + government_modifier
                 + diplomatic_opinion as i64 / 10
+                - intrigue_penalty
                 - subject_penalty as i64
                 + (titles_by_realm.get(attacker.id.as_str()).copied().unwrap_or(0).min(40) / 4) as i64
                 + (claims_by_realm.get(attacker.id.as_str()).copied().unwrap_or(0).min(20) / 2) as i64
