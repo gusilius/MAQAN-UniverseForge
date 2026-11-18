@@ -137,7 +137,9 @@ public final class WorldForgeApi {
     }
 
     public static EventLog.Event postEvent(String category, String text, List<String> realmIds) {
-        return EVENTS.post(category, text, realmIds, System.currentTimeMillis());
+        // EventLog time is measured in world minutes, never wall-clock milliseconds.
+        return EVENTS.post(category, text, realmIds,
+                Math.max(0L, WorldForgeApi.clock().dayNumber() * 1440L));
     }
 
     public static void addGuard(Guard g) { GUARDS.add(g); }
