@@ -81,8 +81,41 @@ public final class NpcSocialSimulation {
                     interactions++;
                 }
             }
+
+            // Traders and diplomatic envoys can establish ties beyond their home settlement.
+            // Keep this bounded and deterministic; ordinary residents never receive this bypass.
+            List<Character> adults = registry.all().stream()
+                    .filter(person -> person.alive && year - person.birthYear >= 18
+                            && person.props.containsKey("emergence.polity_id"))
+                    .sorted(Comparator.comparing(person -> person.globalId)).toList();
+            for (Character traveler : adults) {
+                if (!hasTravelRole(traveler) || adults.size() < 2) continue;
+                long travelEpoch = Math.floorDiv(day, 30);
+                int start = Math.floorMod((int) mix(seed ^ traveler.globalId.hashCode() ^ travelEpoch), adults.size());
+                for (int offset = 0; offset < adults.size(); offset++) {
+                    Character candidate = adults.get((start + offset) % adults.size());
+                    if (candidate == traveler) continue;
+                    String homeBand = String.valueOf(traveler.props.getOrDefault("emergence.band_id", ""));
+                    String otherBand = String.valueOf(candidate.props.getOrDefault("emergence.band_id", ""));
+                    if (homeBand.equals(otherBand)) continue;
+                    boolean samePolity = Objects.equals(polityOf(traveler), polityOf(candidate));
+                    if (!samePolity && !hasDiplomaticRole(traveler)) continue;
+                    interact(relations, registry, traveler, candidate,
+                            "travel:" + homeBand + ":" + otherBand, adults, day, year);
+                    interactions++;
+                    break;
+                }
+            }
         }
         return interactions;
+    }
+
+    private static boolean hasDiplomaticRole(Character person) {
+        for (String role : List.of("diplomat", "envoy", "ambassador"))
+            if (person.hasRole(role)) return true;
+        Object role = person.props.get("emergence.polity_role");
+        return role instanceof String value && List.of("diplomat", "envoy", "ambassador")
+                .contains(value.toLowerCase(Locale.ROOT));
     }
 
     private static boolean canMeetLocally(Character a, Character b) {
