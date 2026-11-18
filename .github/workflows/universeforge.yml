@@ -28,7 +28,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: universeforge-world-runtime-acceptance-${{ github.ref }}
+  group: universeforge-world-runtime-acceptance-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
 jobs:
