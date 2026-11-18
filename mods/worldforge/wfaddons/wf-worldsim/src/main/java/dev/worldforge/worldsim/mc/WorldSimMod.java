@@ -24,6 +24,7 @@ import dev.worldforge.origins.Origins;
 import dev.worldforge.origins.mc.OriginsMod;
 import dev.worldforge.people.PopulationSimulation;
 import dev.worldforge.people.mc.PeopleMod;
+import dev.worldforge.realms.RealmDefs;
 import dev.worldforge.realms.mc.RealmsMod;
 import dev.worldforge.war.WarEngine;
 import dev.worldforge.army.ArmyEngine;
