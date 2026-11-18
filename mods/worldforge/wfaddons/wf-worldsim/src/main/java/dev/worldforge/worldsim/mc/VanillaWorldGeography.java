@@ -12,6 +12,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.levelgen.Heightmap;
 import dev.worldforge.mod.api.WorldForgeApi;
+import dev.worldforge.mod.MapChunkGenerator;
 import net.minecraftforge.event.level.ChunkEvent;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.server.ServerStartedEvent;
@@ -107,6 +108,7 @@ public final class VanillaWorldGeography {
     public void onChunkLoad(ChunkEvent.Load event) {
         if (!(event.getLevel() instanceof ServerLevel level)) return;
         load(level.getServer());
+        if (!isOrdinaryGeographyLevel(level)) return;
         enqueue(level, event.getChunk().getPos());
     }
 
@@ -117,6 +119,7 @@ public final class VanillaWorldGeography {
         if (server == null) return;
         int processed = 0;
         for (ServerLevel level : server.getAllLevels()) {
+            if (!isOrdinaryGeographyLevel(level)) continue;
             String dimension = level.dimension().location().toString();
             ArrayDeque<ChunkPos> queue = PENDING.get(dimension);
             if (queue == null) continue;
@@ -150,6 +153,7 @@ public final class VanillaWorldGeography {
     public static synchronized void capture(ServerLevel level, ChunkAccess chunk) {
         if (level == null || chunk == null) return;
         load(level.getServer());
+        if (!isOrdinaryGeographyLevel(level)) return;
         String dimension = level.dimension().location().toString();
         ChunkPos pos = chunk.getPos();
         int regionX = Math.floorDiv(pos.x, REGION_CHUNKS);
@@ -237,12 +241,17 @@ public final class VanillaWorldGeography {
     /** Stable lightweight index used by Java materialization; avoids cloning terrain cells every server tick. */
     public static synchronized java.util.List<String> regionIds() {
         return REGIONS.values().stream().filter(region -> !region.cells.isEmpty())
+                .filter(region -> {
+                    RegionAddress address = regionAddress(region.id);
+                    return address != null && !isImageMapDimension(address.dimension());
+                })
                 .map(region -> region.id).toList();
     }
 
     public static synchronized java.util.List<String> simulationMapIds() {
         return REGIONS.values().stream().filter(region -> !region.cells.isEmpty())
                 .map(region -> regionAddress(region.id)).filter(java.util.Objects::nonNull)
+                .filter(address -> !isImageMapDimension(address.dimension()))
                 .map(RegionAddress::dimension).distinct().sorted()
                 .map(dimension -> "vanilla-world:" + dimension).toList();
     }
@@ -257,17 +266,48 @@ public final class VanillaWorldGeography {
         return world == null ? REGION_BLOCKS : world.height();
     }
 
+    /**
+     * Image-backed dimensions already have a complete, authoritative MapGeography source.
+     * Sampling their chunks here would feed the same planet into WorldSim twice (once from
+     * the map package and once from observed chunks), duplicating bands, settlements and polities.
+     */
+    public static boolean isOrdinaryGeographyLevel(ServerLevel level) {
+        return level != null && !(level.getChunkSource().getGenerator() instanceof MapChunkGenerator);
+    }
+
+    private static boolean isImageMapDimension(String dimension) {
+        if (dimension == null || dimension.isBlank()) return false;
+        MinecraftServer server = activeServer;
+        if (server == null) return false;
+        for (ServerLevel level : server.getAllLevels()) {
+            if (dimension.equals(level.dimension().location().toString())
+                    && level.getChunkSource().getGenerator() instanceof MapChunkGenerator) return true;
+        }
+        return false;
+    }
+
     /** Diagnostic counters used by runtime acceptance tests and the in-game status command. */
     public static synchronized int sampledCellCount() {
-        return REGIONS.values().stream().mapToInt(region -> region.cells.size()).sum();
+        return REGIONS.values().stream().filter(region -> {
+            RegionAddress address = regionAddress(region.id);
+            return address != null && !isImageMapDimension(address.dimension());
+        }).mapToInt(region -> region.cells.size()).sum();
     }
 
     public static synchronized int capturedRegionCount() {
-        return (int) REGIONS.values().stream().filter(region -> !region.cells.isEmpty()).count();
+        return (int) REGIONS.values().stream().filter(region -> !region.cells.isEmpty())
+                .filter(region -> {
+                    RegionAddress address = regionAddress(region.id);
+                    return address != null && !isImageMapDimension(address.dimension());
+                }).count();
     }
 
     public static synchronized int politicallyOwnedCellCount() {
         return (int) REGIONS.values().stream()
+                .filter(region -> {
+                    RegionAddress address = regionAddress(region.id);
+                    return address != null && !isImageMapDimension(address.dimension());
+                })
                 .flatMap(region -> region.cells.values().stream())
                 .filter(cell -> cell.has("owner_realm_id")
                         && !cell.get("owner_realm_id").getAsString().isBlank())
@@ -291,7 +331,7 @@ public final class VanillaWorldGeography {
         long maxDistanceSquared = 512L * 512L;
         for (Region region : REGIONS.values()) {
             RegionAddress address = regionAddress(region.id);
-            if (address == null) continue;
+            if (address == null || isImageMapDimension(address.dimension())) continue;
             List<PoliticalSeed> seeds = seedsByWorld == null ? List.of()
                     : seedsByWorld.getOrDefault("vanilla-world:" + address.dimension, List.of());
             for (JsonObject cell : region.cells.values()) {
@@ -336,6 +376,9 @@ public final class VanillaWorldGeography {
                 || newOwner == null || newOwner.isBlank() || expectedOwner.equals(newOwner)
                 || cause == null || eventId == null || eventId.isBlank())
             throw new IllegalArgumentException("A complete political transfer event is required");
+        RegionAddress address = regionAddress(mapId);
+        if (address != null && isImageMapDimension(address.dimension()))
+            throw new IllegalArgumentException("Image-map dimensions are described by MapGeography, not VanillaWorldGeography: " + address.dimension());
         Region region = REGIONS.get(mapId);
         if (region == null) throw new IllegalArgumentException("Unknown geography region: " + mapId);
         List<JsonObject> targets = new ArrayList<>();
@@ -523,6 +566,7 @@ public final class VanillaWorldGeography {
 
     public static synchronized String biomeAtWorldPosition(String mapId, int worldX, int worldZ) {
         String dimension = dimensionFromMapId(mapId);
+        if (isImageMapDimension(dimension)) return "";
         if (dimension.isBlank()) return "";
         int regionX = Math.floorDiv(worldX, REGION_BLOCKS), regionZ = Math.floorDiv(worldZ, REGION_BLOCKS);
         Region region = REGIONS.get(mapId(dimension, regionX, regionZ));
