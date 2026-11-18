@@ -18,7 +18,7 @@ public final class GameClock {
     private double elapsed;                 // игровых дней с начала
     private int speed = 1;
     private int lastSpeed = 1;              // скорость до паузы
-    // Test/campaign acceleration is applied at the shared clock, so every consumer observes the same elapsed days.
+    // Bounded test acceleration is applied at the shared clock, so every consumer observes the same elapsed days.
     private int simulationTickMultiplier = 1;
     public int startYear = 300;
     private final Map<String, Long> pulled = new HashMap<>();
