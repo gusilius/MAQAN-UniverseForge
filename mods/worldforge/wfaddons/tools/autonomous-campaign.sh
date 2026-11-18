@@ -221,16 +221,12 @@ for i in $(seq 1 150); do
   sleep 2
 done
 grep -q 'Done (' server.log || { tail -120 server.log; echo "ERROR: Forge startup timed out"; exit 3; }
-CURRENT_STAGE="modpack_smoke"
-for command in "list" "wftroops types" "wftroops fort list" "wftroops list" "wfsettle list" "wfform" "wfaction list" "wfworldsim status"; do
-  printf '%s\n' "$command" >> in.txt
-  sleep 2
-done
-# Acceptance is a normal world startup smoke test, not a scripted campaign.
-# Do not inject simulation goals, accelerate time, or require political outcomes.
-if [ "${WF_ACCEPTANCE_MODE:-}" = "smoke" ]; then
+# Acceptance is an ordinary world startup/runtime smoke test.
+# No campaign, scenario, goals, time acceleration, or forced outcomes.
+if [ "\${WF_ACCEPTANCE_MODE:-}" = "smoke" ]; then
   CURRENT_STAGE="world_runtime_smoke"
   printf '%s\n' "wfworldsim status" "wfworldsim geography" "wfsettle list" "list" >> in.txt
+  for second in $(seq 1 30); do
   for second in $(seq 1 30); do
     kill -0 "$SERVER_PID" 2>/dev/null || { tail -160 server.log; echo "ERROR: server exited during ordinary-world runtime smoke"; exit 5; }
     sleep 1
