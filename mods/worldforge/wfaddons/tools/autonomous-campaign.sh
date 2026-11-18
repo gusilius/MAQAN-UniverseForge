@@ -230,7 +230,7 @@ done
 # Do not inject simulation goals, accelerate time, or require political outcomes.
 if [ "${WF_ACCEPTANCE_MODE:-}" = "smoke" ]; then
   CURRENT_STAGE="world_runtime_smoke"
-  printf '%s\\n' "wfworldsim status" "wfworldsim geography" "wfsettle list" "list" >> in.txt
+  printf '%s\n' "wfworldsim status" "wfworldsim geography" "wfsettle list" "list" >> in.txt
   for second in $(seq 1 30); do
     kill -0 "$SERVER_PID" 2>/dev/null || { tail -160 server.log; echo "ERROR: server exited during ordinary-world runtime smoke"; exit 5; }
     sleep 1
