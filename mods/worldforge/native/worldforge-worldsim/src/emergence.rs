@@ -130,9 +130,34 @@ fn map_scale(map: &GeographicMap) -> u64 {
     (u64::from(map.width_px.min(map.height_px)) / 12).max(u64::from(map.sample_stride) * 3).max(1)
 }
 
+/// A fully authored image map exposes its whole extent immediately, while a vanilla
+/// dimension exposes only chunks the player has generated. Using the eventual vanilla
+/// region bounds here makes local communities hundreds of blocks apart and prevents
+/// any polity from forming until an unrealistic amount of terrain has been explored.
+/// Scale settlement spacing to the currently observed viable land footprint instead.
+fn observed_map_scale(map: &GeographicMap) -> u64 {
+    let mut min_x = u32::MAX;
+    let mut min_z = u32::MAX;
+    let mut max_x = 0_u32;
+    let mut max_z = 0_u32;
+    let mut found = false;
+    for cell in map.cells.iter().filter(|cell| cell.land && cell.suitability >= 48) {
+        found = true;
+        min_x = min_x.min(cell.x);
+        min_z = min_z.min(cell.z);
+        max_x = max_x.max(cell.x);
+        max_z = max_z.max(cell.z);
+    }
+    if !found { return map_scale(map); }
+    let observed_span = u64::from(max_x.saturating_sub(min_x).max(max_z.saturating_sub(min_z)).saturating_add(1));
+    let minimum_spacing = u64::from(map.sample_stride.max(1)) * 2;
+    map_scale(map).min((observed_span / 12).max(minimum_spacing))
+        .max(minimum_spacing).max(1)
+}
+
 fn bootstrap(map: &GeographicMap, seed: u64, bands: &mut Vec<EmergentBand>, events: &mut Vec<EmergenceEvent>) {
     if map.cells.is_empty() { return; }
-    let spacing = map_scale(map);
+    let spacing = observed_map_scale(map);
     let mut candidates = map.cells.iter()
         .filter(|c| c.land && c.suitability >= 48)
         .collect::<Vec<_>>();
@@ -172,10 +197,7 @@ fn bootstrap_initial_civilizations(
     polities: &mut Vec<EmergentPolity>,
     events: &mut Vec<EmergenceEvent>,
 ) {
-    if map.cells.is_empty()
-        || bands.iter().any(|band| band.map_id == map.map_id && band.settled)
-        || polities.iter().any(|polity| polity.map_id == map.map_id)
-    {
+    if map.cells.is_empty() || polities.iter().any(|polity| polity.map_id == map.map_id) {
         return;
     }
 
@@ -184,22 +206,17 @@ fn bootstrap_initial_civilizations(
     // in full. Scale spacing to the currently observed land footprint, not the eventual
     // map dimensions, otherwise a small vanilla observation window can never found four
     // communities and the world remains politically empty forever.
-    let min_x = map.cells.iter().filter(|cell| cell.land && cell.suitability >= 48)
-        .map(|cell| cell.x).min();
-    let max_x = map.cells.iter().filter(|cell| cell.land && cell.suitability >= 48)
-        .map(|cell| cell.x).max();
-    let min_z = map.cells.iter().filter(|cell| cell.land && cell.suitability >= 48)
-        .map(|cell| cell.z).min();
-    let max_z = map.cells.iter().filter(|cell| cell.land && cell.suitability >= 48)
-        .map(|cell| cell.z).max();
+    let min_x = map.cells.iter().filter(|cell| cell.land && cell.suitability >= 48).map(|cell| cell.x).min();
+    let max_x = map.cells.iter().filter(|cell| cell.land && cell.suitability >= 48).map(|cell| cell.x).max();
+    let min_z = map.cells.iter().filter(|cell| cell.land && cell.suitability >= 48).map(|cell| cell.z).min();
+    let max_z = map.cells.iter().filter(|cell| cell.land && cell.suitability >= 48).map(|cell| cell.z).max();
     let observed_span = match (min_x, max_x, min_z, max_z) {
         (Some(x0), Some(x1), Some(z0), Some(z1)) =>
             u64::from((x1 - x0).max(z1 - z0).saturating_add(1)),
         _ => return,
     };
     let minimum_spacing = u64::from(map.sample_stride.max(1)) * 2;
-    let separation = map_scale(map).min((observed_span / 6).max(minimum_spacing))
-        .max(minimum_spacing).max(4);
+    let separation = observed_map_scale(map).max(minimum_spacing).max(1);
     let bucket = (separation.saturating_mul(4).min(u64::from(u32::MAX)) as u32).max(1);
     let separation_sq = separation.saturating_mul(separation);
     let mut groups: BTreeMap<(u32, u32), Vec<&GeographicCell>> = BTreeMap::new();
@@ -343,7 +360,7 @@ fn advance_band(band: &mut EmergentBand, cell: &GeographicCell, seed: u64, year:
 
 fn maybe_form_polity(map: &GeographicMap, cells: &CellIndex<'_>, seed: u64, year: u64, bands: &[EmergentBand],
     polities: &mut Vec<EmergentPolity>, events: &mut Vec<EmergenceEvent>) {
-    let spacing = map_scale(map) * 3;
+    let spacing = observed_map_scale(map) * 3;
     // Legacy/persisted bands are rechecked against the live political raster before
     // they can become sovereign. A settlement on another realm's land is not a
     // legal seed for a new independent polity.
