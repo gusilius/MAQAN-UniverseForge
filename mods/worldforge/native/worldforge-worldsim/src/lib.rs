@@ -120,6 +120,20 @@ pub struct Character {
     pub prestige: i32,
     pub opinion: i32,
     pub house_id: String,
+    #[serde(default)] pub display_name: String,
+    #[serde(default)] pub race_id: String,
+    #[serde(default)] pub culture_id: String,
+    #[serde(default)] pub class_id: String,
+    #[serde(default)] pub profession_id: String,
+    #[serde(default)] pub trait_ids: Vec<String>,
+    #[serde(default)] pub father_id: String,
+    #[serde(default)] pub mother_id: String,
+    #[serde(default)] pub spouse_id: String,
+    #[serde(default)] pub child_ids: Vec<String>,
+    #[serde(default)] pub role_ids: Vec<String>,
+    #[serde(default)] pub title_ids: Vec<String>,
+    #[serde(default)] pub skills: BTreeMap<String, i32>,
+    #[serde(default)] pub needs: BTreeMap<String, i32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
