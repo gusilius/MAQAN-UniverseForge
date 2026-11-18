@@ -98,8 +98,8 @@ public final class NpcSocialSimulation {
                     String homeBand = String.valueOf(traveler.props.getOrDefault("emergence.band_id", ""));
                     String otherBand = String.valueOf(candidate.props.getOrDefault("emergence.band_id", ""));
                     if (homeBand.equals(otherBand)) continue;
-                    boolean samePolity = Objects.equals(polityOf(traveler), polityOf(candidate));
-                    if (!samePolity && !hasDiplomaticRole(traveler)) continue;
+                    // Trade routes and diplomatic missions both cross political borders;
+                    // ordinary residents never enter this inter-settlement contact path.
                     interact(relations, registry, traveler, candidate,
                             "travel:" + homeBand + ":" + otherBand, adults, day, year);
                     interactions++;
