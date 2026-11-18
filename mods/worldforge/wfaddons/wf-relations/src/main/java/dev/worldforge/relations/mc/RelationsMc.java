@@ -144,6 +144,11 @@ public final class RelationsMc {
 
     private static Path file(MinecraftServer s) { return s.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT).resolve("wf_relations.json"); }
 
+    /** Complete read-only relationship graph and social-history export for the common world snapshot. */
+    public static String worldSnapshotJson() {
+        return REL.toJson();
+    }
+
     public static void load(MinecraftServer s) {
         REL.hooks = HOOKS;
         try { if (Files.exists(file(s))) REL.fromJson(Files.readString(file(s))); }
