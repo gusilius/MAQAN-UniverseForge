@@ -2053,6 +2053,25 @@ public final class WorldSimMod {
                 new Random(polityId.hashCode()), reservedNames);
     }
 
+    /**
+     * The sovereign title must always outrank its direct territorial vassals.
+     * Realm development may still report its initial barony-level baseline after
+     * the territory tree has already promoted the crown to duchy/kingdom/empire.
+     * Never downgrade a crown title during routine reconciliation.
+     */
+    private static dev.worldforge.realms.Statecraft.Rank requiredEmergentCrownRank(
+            String crownTitleId, dev.worldforge.realms.Statecraft.Rank baseline) {
+        var current = RealmsMod.POLITICS.title(crownTitleId);
+        int required = Math.max(baseline.ordinal(), current == null ? 0 : current.rank.ordinal());
+        for (var title : RealmsMod.POLITICS.titles()) {
+            if (title == null || !crownTitleId.equals(title.liegeTitleId)) continue;
+            required = Math.max(required, Math.min(
+                    dev.worldforge.realms.Statecraft.Rank.values().length - 1,
+                    title.rank.ordinal() + 1));
+        }
+        return dev.worldforge.realms.Statecraft.Rank.values()[required];
+    }
+
     /** Binds emergent polities to canonical rulers; succession follows actual Character identity. */
     private static void syncEmergentPolities(MinecraftServer server, JsonObject state, int year) {
         if (server == null || state == null || !state.has("polities") || !state.get("polities").isJsonArray()) return;
@@ -2223,8 +2242,11 @@ public final class WorldSimMod {
                     RealmsMod.POLITICS.setInheritanceLaw(realmId,
                             dev.worldforge.realms.Statecraft.InheritanceLaw.PRIMOGENITURE);
                 } else {
-                    if (!RealmsMod.POLITICS.setTitleRank(titleId, emergentTitleRank(realmId))) {
-                        LOGGER.warn("wf_worldsim: deferred rank change for {}: {}", titleId, RealmsMod.POLITICS.lastError);
+                    var requiredRank = requiredEmergentCrownRank(titleId, emergentTitleRank(realmId));
+                    if (politicalTitle.rank != requiredRank
+                            && !RealmsMod.POLITICS.setTitleRank(titleId, requiredRank)) {
+                        LOGGER.warn("wf_worldsim: deferred rank change for {} to {}: {}",
+                                titleId, requiredRank, RealmsMod.POLITICS.lastError);
                     }
                     politicalTitle.name = polityName;
                 }
