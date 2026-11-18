@@ -49,7 +49,7 @@ runtime_exit() {
     if wait "$SERVER_PID"; then SERVER_EXIT_CODE=0; else SERVER_EXIT_CODE=$?; fi
     echo "RUNTIME_JVM_EXIT_CODE=$SERVER_EXIT_CODE"
   fi
-  python3 "$SCRIPT_DIR/runtime-diagnostics.py" --work "$WORK" --output "$OUTPUT" --exit-code "$exit_code" --stage "$CURRENT_STAGE" --run-id "${GITHUB_RUN_ID:-local}" --commit "${GITHUB_SHA:-unknown}" --seed "$MAP_SEED" --map "$MAP_ID" || true
+  python3 "$SCRIPT_DIR/world-runtime-diagnostics.py" --work "$WORK" --output "$OUTPUT" --exit-code "$exit_code" --stage "$CURRENT_STAGE" --run-id "${GITHUB_RUN_ID:-local}" --commit "${GITHUB_SHA:-unknown}" --seed "$MAP_SEED" --map "$MAP_ID" || true
   rm -rf "$WORK"
   exit "$exit_code"
 }
@@ -234,8 +234,8 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "dual-world" ]; then
 
   for second in $(seq 1 240); do
     kill -0 "$SERVER_PID" 2>/dev/null || { tail -200 server.log; echo "ERROR: server exited during same-server dual-world genesis"; exit 5; }
-    if grep -q 'MAQAN_WORLD_GENESIS source=vanilla-world:minecraft:overworld' server.log \
-      && grep -q "MAQAN_WORLD_GENESIS source=$MAP_ID" server.log; then
+    if grep -E 'MAQAN_WORLD_GENESIS source=vanilla-world:minecraft:overworld .*communities=[4-9][0-9]*' server.log \
+      && grep -E "MAQAN_WORLD_GENESIS source=$MAP_ID .*communities=[4-9][0-9]*" server.log; then
       break
     fi
     sleep 1
