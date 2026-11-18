@@ -408,6 +408,30 @@ fn catalog_entry<'a>(snapshot: &'a WorldSnapshot, module: &str, catalog: &str, i
         entry.module_id == module && entry.catalog_id == catalog && entry.entry_id == id)
 }
 
+fn trade_conflict_penalty(snapshot: &WorldSnapshot, first: &str, second: &str) -> i64 {
+    let Some(runtime) = catalog_entry(snapshot, "wf_trade", "runtime_state", "trade") else { return 0; };
+    runtime.payload.get("caravans").and_then(serde_json::Value::as_array)
+        .map(|caravans| caravans.iter().filter(|caravan| {
+            let from = caravan.get("from").and_then(serde_json::Value::as_str).unwrap_or("");
+            let to = caravan.get("to").and_then(serde_json::Value::as_str).unwrap_or("");
+            let status = caravan.get("status").and_then(serde_json::Value::as_str).unwrap_or("");
+            status == "в пути" && ((from == first && to == second) || (from == second && to == first))
+        }).map(|caravan| {
+            let cargo = caravan.get("cargo").and_then(serde_json::Value::as_object)
+                .map(|items| items.values().filter_map(serde_json::Value::as_u64).sum::<u64>())
+                .unwrap_or(0);
+            5 + (cargo / 20).min(20) as i64
+        }).sum()).unwrap_or(0)
+}
+
+fn market_fragility_penalty(snapshot: &WorldSnapshot, realm_id: &str) -> i64 {
+    let Some(market) = catalog_entry(snapshot, "wf_trade", "markets", realm_id) else { return 0; };
+    let Some(stock) = market.payload.get("stock").and_then(serde_json::Value::as_object) else { return 0; };
+    if stock.is_empty() { return 0; }
+    let empty = stock.values().filter(|value| value.as_f64().unwrap_or(0.0) <= 0.0).count();
+    ((empty * 20) / stock.len()).min(20) as i64
+}
+
 fn realm_treasury_balance(snapshot: &WorldSnapshot, realm_id: &str) -> Option<f64> {
     catalog_entry(snapshot, "wf_realms", "realm_treasuries", realm_id)
         .and_then(|entry| entry.payload.get("balance"))
@@ -913,6 +937,9 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
         for (attacker, defender) in [(a, b), (b, a)] {
             let treasury = realm_treasury_balance(snapshot, &attacker.id).unwrap_or(attacker.treasury as f64);
             let intrigue_penalty = realm_intrigue_pressure(snapshot, &attacker.id);
+            let trade_penalty = trade_conflict_penalty(snapshot, &attacker.id, &defender.id)
+                + if has_treaty(snapshot, &attacker.id, &defender.id, "TRADE_PACT") { 12 } else { 0 }
+                + market_fragility_penalty(snapshot, &attacker.id);
             if attacker.at_war || defender.at_war || snapshot.day.saturating_sub(attacker.last_war_day) < 180
                 || treasury < 100.0 || attacker.stability < 20
                 || has_treaty(snapshot, &attacker.id, &defender.id, "ALLIANCE")
