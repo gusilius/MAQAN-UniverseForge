@@ -482,9 +482,19 @@ public class RealmsMod {
             for (TitleData.Title title : map.titles.allTitles()) {
                 Statecraft.Title political = POLITICS.title(Statecraft.mapTitleId(map.name, title.key));
                 String holder = political == null ? "" : political.holderCharacterId;
+                String holderName = "";
+                if (!holder.isBlank() && people != null) {
+                    for (Character character : people.all()) {
+                        if (holder.equals(character.globalId)) {
+                            holderName = character.name == null ? "" : character.name;
+                            break;
+                        }
+                    }
+                }
                 String claimants = political == null ? "" : String.join(";", new TreeSet<>(political.claims));
                 int count = political == null ? 0 : political.claims.size();
                 changed |= editor.setDerivedTitleProp(title.id, "politics.holder_character", holder);
+                changed |= editor.setDerivedTitleProp(title.id, "politics.holder_name", holderName);
                 changed |= editor.setDerivedTitleProp(title.id, "politics.claimants", claimants);
                 changed |= editor.setDerivedTitleProp(title.id, "politics.claim_count", count);
                 changed |= editor.setDerivedTitleProp(title.id, "politics.contested", count > 0);
