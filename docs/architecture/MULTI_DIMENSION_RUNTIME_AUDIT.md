@@ -48,6 +48,8 @@ The working branch now:
 
 This is a local-identity partition, not a second universe. Global Character UUIDs and cross-partition transactions remain under one CharacterAuthority.
 
+**Migration caveat:** earlier builds stored Characters from all non-map dimensions in the legacy `wf_people_world.json` partition. The new code preserves that file as the Overworld legacy partition and creates empty per-dimension partitions for additional dimensions. A migration for any pre-existing non-Overworld Characters must use durable dimension/location evidence; it must not guess their destination. This is required before upgrading a save that already materialized NPC populations outside the Overworld.
+
 ## 5. Remaining integration blockers — do not call complete yet
 
 ### A. Political runtime IDs need explicit dimension/map scope
