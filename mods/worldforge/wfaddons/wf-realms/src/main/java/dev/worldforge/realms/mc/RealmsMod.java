@@ -414,7 +414,7 @@ public class RealmsMod {
     }
 
     /** Statecraft owns feudal contract terms; the map owns the visible realm hierarchy and CourtSim reads it. */
-    private static void syncPoliticalMapState() {
+    public static void syncPoliticalMapState() {
         for (var map : WorldForgeMod.loadedMaps().values()) {
             if (map.titles == null) continue;
             TitleEditor editor = EditorManager.editorFor(map);
