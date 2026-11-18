@@ -589,6 +589,29 @@ public final class WorldSimMod {
                     source.map == null ? VanillaWorldGeography.sampledCellCount() : source.map.w * source.map.h,
                     bands, settled, settlements, emergentSettlements, mapAnchors, livingCharacters, courtOffices,
                     realms.size(), rulers, dynasties, titles, governments, raceIds.size());
+            if (source.map == null) {
+                int cells = 0, landCells = 0, viable36 = 0, viable48 = 0, maxSuitability = 0;
+                Map<String, Integer> biomeCounts = new TreeMap<>();
+                for (JsonObject geographyMap : VanillaWorldGeography.snapshot()) {
+                    if (!source.id.equals(geographyMap.has("map_id") ? geographyMap.get("map_id").getAsString() : "")) continue;
+                    if (!geographyMap.has("cells") || !geographyMap.get("cells").isJsonArray()) continue;
+                    for (var cellElement : geographyMap.getAsJsonArray("cells")) {
+                        if (!cellElement.isJsonObject()) continue;
+                        JsonObject cell = cellElement.getAsJsonObject();
+                        cells++;
+                        boolean land = cell.has("land") && cell.get("land").getAsBoolean();
+                        int suitability = cell.has("suitability") ? cell.get("suitability").getAsInt() : 0;
+                        if (land) landCells++;
+                        if (land && suitability >= 36) viable36++;
+                        if (land && suitability >= 48) viable48++;
+                        maxSuitability = Math.max(maxSuitability, suitability);
+                        String biome = cell.has("biome") ? cell.get("biome").getAsString() : "unknown";
+                        biomeCounts.merge(biome, 1, Integer::sum);
+                    }
+                }
+                LOGGER.info("MAQAN_VANILLA_GEOGRAPHY source={} cells={} land={} viable36={} viable48={} max_suitability={} biomes={}",
+                        source.id, cells, landCells, viable36, viable48, maxSuitability, GSON.toJson(biomeCounts));
+            }
         }
     }
 
