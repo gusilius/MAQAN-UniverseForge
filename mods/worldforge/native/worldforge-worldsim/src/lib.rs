@@ -169,7 +169,7 @@ pub struct GeographicMap {
     pub cells: Vec<GeographicCell>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct WorldSnapshot {
     pub world_id: String,
     pub seed: u64,
