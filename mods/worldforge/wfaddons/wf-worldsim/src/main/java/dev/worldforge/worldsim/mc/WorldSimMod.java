@@ -1531,23 +1531,27 @@ public final class WorldSimMod {
         // Capabilities distinguish absent optional modules from present-but-empty catalogs.
         addCapability(capabilities, "worldforge", 1, net.minecraftforge.fml.ModList.get().isLoaded("worldforge"), 0, sources.size());
         addCapability(capabilities, "wf_worldsim", 1, true, 0, 1);
-        addCapability(capabilities, "wf_realms", 1, true, RealmsMod.DEFS.govs.size()
-                + RealmsMod.DEFS.levels.size() + RealmsMod.DEFS.terrains.size()
-                + RealmsMod.DEFS.branches.size() + RealmsMod.DEFS.laws.size(), RealmsMod.realms().size());
-        addCapability(capabilities, "wf_settlements", 1, true, SettleMod.TYPES.types.size(), SettleMod.COLONIES.size());
-        addCapability(capabilities, "wf_army", 1, true, ArmyMod.loadedEngines().stream().mapToInt(engine -> engine.types.size()).sum(),
-                armies.size());
+        addCapability(capabilities, "wf_realms", 1, true,
+                governmentDefinitions.size() + catalogEntryCount(catalogEntries, "wf_realms"), RealmsMod.realms().size());
+        addCapability(capabilities, "wf_settlements", 1, true,
+                catalogEntryCount(catalogEntries, "wf_settlements"), SettleMod.COLONIES.size());
+        addCapability(capabilities, "wf_army", 1, true,
+                catalogEntryCount(catalogEntries, "wf_army"), armies.size());
         addCapability(capabilities, "wf_troops", 1, net.minecraftforge.fml.ModList.get().isLoaded("wf_troops"),
-                troopSnapshot != null && troopSnapshot.has("unit_definitions") ? troopSnapshot.getAsJsonObject("unit_definitions").size() : 0,
+                catalogEntryCount(catalogEntries, "wf_troops"),
                 troopSnapshot != null && troopSnapshot.has("live_troops") ? troopSnapshot.getAsJsonArray("live_troops").size() : 0);
-        addCapability(capabilities, "wf_people", 1, true, PeopleMod.PROFESSIONS.all().size(), characters.size());
-        addCapability(capabilities, "wf_relations", 1, net.minecraftforge.fml.ModList.get().isLoaded("wf_relations"), 0, exportedSocialRelations);
-        addCapability(capabilities, "wf_origins", 1, true, OriginsMod.DEFS.races.size()
-                + OriginsMod.DEFS.classes.size() + OriginsMod.DEFS.professions.size()
-                + OriginsMod.DEFS.synergies.size(), characters.size());
-        addCapability(capabilities, "wf_court", 1, net.minecraftforge.fml.ModList.get().isLoaded("wf_court"), 0, 0);
-        addCapability(capabilities, "wf_war", 1, net.minecraftforge.fml.ModList.get().isLoaded("wf_war"), 0, wars.size());
-        addCapability(capabilities, "wf_trade", 1, net.minecraftforge.fml.ModList.get().isLoaded("wf_trade"), 0, 0);
+        addCapability(capabilities, "wf_people", 1, true,
+                catalogEntryCount(catalogEntries, "wf_people"), characters.size());
+        addCapability(capabilities, "wf_relations", 1, net.minecraftforge.fml.ModList.get().isLoaded("wf_relations"),
+                catalogEntryCount(catalogEntries, "wf_relations"), exportedSocialRelations);
+        addCapability(capabilities, "wf_origins", 1, true,
+                catalogEntryCount(catalogEntries, "wf_origins"), characters.size());
+        addCapability(capabilities, "wf_court", 1, net.minecraftforge.fml.ModList.get().isLoaded("wf_court"),
+                catalogEntryCount(catalogEntries, "wf_court"), 0);
+        addCapability(capabilities, "wf_war", 1, net.minecraftforge.fml.ModList.get().isLoaded("wf_war"),
+                catalogEntryCount(catalogEntries, "wf_war"), wars.size());
+        addCapability(capabilities, "wf_trade", 1, net.minecraftforge.fml.ModList.get().isLoaded("wf_trade"),
+                catalogEntryCount(catalogEntries, "wf_trade"), 0);
         for (String optionalModule : List.of("wf_rts", "wf_genesis", "wf_progress", "wf_reputation"))
             addCapability(capabilities, optionalModule, 1, net.minecraftforge.fml.ModList.get().isLoaded(optionalModule), 0, 0);
         sortObjects(catalogEntries, Comparator.comparing((JsonObject item) -> item.get("module_id").getAsString())
@@ -1653,6 +1657,13 @@ public final class WorldSimMod {
 
     private static double finite(double value) {
         return Double.isFinite(value) ? value : 0.0;
+    }
+
+    private static int catalogEntryCount(JsonArray entries, String moduleId) {
+        int count = 0;
+        for (var element : entries) if (element.isJsonObject()
+                && moduleId.equals(element.getAsJsonObject().get("module_id").getAsString())) count++;
+        return count;
     }
 
     private static void addCapability(JsonArray target, String moduleId, int schemaVersion,
