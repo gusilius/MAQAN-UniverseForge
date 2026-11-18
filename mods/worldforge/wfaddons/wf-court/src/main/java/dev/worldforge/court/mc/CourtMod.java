@@ -7,6 +7,7 @@ import dev.worldforge.mod.EditorManager;
 import dev.worldforge.mod.MapData;
 import dev.worldforge.mod.TitleData;
 import dev.worldforge.mod.WorldForgeMod;
+import dev.worldforge.mod.api.WorldForgeApi;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
 import net.minecraft.world.level.storage.LevelResource;
@@ -243,6 +244,18 @@ public class CourtMod {
                     : WorldForgeMod.worldId().toString().hashCode() ^ key.hashCode();
             CourtSim created = new CourtSim(data, null, registry, PeopleMod.ROLES,
                     PeopleMod.NAMES, seed, PeopleMod.YEAR);
+            created.hooks = new CourtSim.Hooks() {
+                @Override public void news(String text) {
+                    if (text != null && text.startsWith("MAQAN_AUTONOMOUS_BIRTH"))
+                        LOGGER.info("wf_court: {}", text);
+                    List<String> realmIds = data.realmList().stream().map(realm -> realm.id).toList();
+                    WorldForgeApi.postEvent("court", text, realmIds, WorldForgeApi.clock().worldMinute());
+                }
+                @Override public void marriage(String realmA, String realmB) {
+                    WorldForgeApi.postEvent("court", "Династический брак между " + realmA + " и " + realmB,
+                            List.of(realmA, realmB), WorldForgeApi.clock().worldMinute());
+                }
+            };
             for (String json : EVENT_JSON) {
                 try { created.addEvent(json); }
                 catch (Exception ex) { LOGGER.error("wf_court: ошибка события автономного двора: {}", ex.toString()); }
