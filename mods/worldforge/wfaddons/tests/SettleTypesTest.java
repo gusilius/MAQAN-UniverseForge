@@ -23,6 +23,14 @@ public class SettleTypesTest {
         ok(st.best(3, List.of(), plains, none).id().equals("camp"), "малый лагерь - стоянка");
         ok(st.bestFounding(35, plains, none).id().equals("village"),
                 "Genesis assigns a founding settlement type before houses/farms are built");
+        ok(st.best(35, List.of(), plains, none) == null,
+                "camp and hamlet population ceilings prevent them from swallowing larger settlements");
+        Settlement genesis = new Settlement("genesis-village", "Genesis village", defs);
+        genesis.types = st;
+        ok(genesis.refreshType(35, plains, none).equals("village"),
+                "runtime refresh falls back to a valid village founding form when camp/hamlet are over capacity");
+        ok(st.why(st.types.get("mining_town"), 40, List.of(), mount, Map.of("dwarf", 0.20)).isEmpty(),
+                "a meaningful 20% ancestry share can qualify a specialized settlement form");
         ok(st.bestFounding(40, coast, none).id().equals("port"),
                 "founding type respects coastal terrain even before port buildings exist");
         ok(st.best(10, List.of("house", "house"), plains, none).id().equals("hamlet"), "два дома - хутор");
