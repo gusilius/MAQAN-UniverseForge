@@ -227,8 +227,8 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "dual-world" ]; then
   # Load real chunks in the ordinary Overworld and the image-backed dimension.
   # These are normal Minecraft world-generation requests, not a campaign or a
   # synthetic data fixture; the mods observe the generated terrain themselves.
-  printf '%s\n' "execute in minecraft:overworld run forceload add -16 -16 32 32" >> in.txt
-  printf 'execute in worldforge:%s run forceload add -16 -16 32 32\n' "$MAP_ID" >> in.txt
+  printf '%s\n' "execute in minecraft:overworld run forceload add 0 0 64 64" >> in.txt
+  printf 'execute in worldforge:%s run forceload add 0 0 64 64\n' "$MAP_ID" >> in.txt
   printf 'execute in worldforge:%s run say MAQAN_MAPPED_DIMENSION_PRESENT=%s\n' "$MAP_ID" "$MAP_ID" >> in.txt
   printf '%s\n' "wfworldsim status" "wfworldsim geography" "wfsettle list" "list" >> in.txt
 
