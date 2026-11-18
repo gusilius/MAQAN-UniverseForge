@@ -312,7 +312,7 @@ public class PeopleMod {
             // The autonomous campaign runs in a dedicated, disposable server process.
             // It must begin from geography only; ordinary Minecraft launches retain the
             // normal Courts.ensure bootstrap because this property is absent by default.
-            boolean emptyCampaignBootstrap = Boolean.getBoolean("worldforge.campaign.empty-bootstrap");
+            boolean emptyCampaignBootstrap = Boolean.getBoolean("worldforge.acceptance.empty-bootstrap");
             TitleEditor identityEditor = m.titles == null ? null : EditorManager.editorFor(m);
             if (m.titles != null && !emptyCampaignBootstrap && identityEditor != null) {
                 TerritorialIdentity.DemographicResult demographics =
