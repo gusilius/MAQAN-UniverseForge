@@ -1114,6 +1114,7 @@ public final class WorldSimMod {
         }
         for (var dynasty : RealmsMod.POLITICS.dynasties()) {
             addNamedEntity(namedEntities, dynasty.houseId, "dynasty", dynasty.name, "", "");
+            addNamedEntity(namedEntities, dynasty.houseId, "house_or_dynasty", dynasty.name, "", "");
             JsonObject dynastyData = new JsonObject();
             dynastyData.addProperty("founder_character_id", dynasty.founderCharacterId);
             dynastyData.addProperty("prestige", dynasty.prestige);
@@ -1243,8 +1244,10 @@ public final class WorldSimMod {
         addCatalogEntry(catalogEntries, "wf_people", "name_pools", "all_pools", "Cultural and racial naming pools",
                 GSON.toJsonTree(PeopleMod.NAMES.catalogSnapshot()));
         if (SettleMod.DEFS != null) {
-            for (var building : SettleMod.DEFS.buildings.values())
+            for (var building : SettleMod.DEFS.buildings.values()) {
                 addCatalogEntry(catalogEntries, "wf_settlements", "buildings", building.id, building.name, GSON.toJsonTree(building));
+                addNamedEntity(namedEntities, building.id, "building_definition", building.name, "", "");
+            }
             for (var profession : SettleMod.DEFS.professions.values())
                 addCatalogEntry(catalogEntries, "wf_settlements", "building_professions", profession.id, profession.name, GSON.toJsonTree(profession));
             for (var resource : SettleMod.DEFS.resourceNames.entrySet())
@@ -1252,16 +1255,22 @@ public final class WorldSimMod {
                         GSON.toJsonTree(Map.of("name", resource.getValue(),
                                 "base_price", SettleMod.DEFS.prices.getOrDefault(resource.getKey(), 0.0))));
         }
-        for (var type : SettleMod.TYPES.types.values())
+        for (var type : SettleMod.TYPES.types.values()) {
             addCatalogEntry(catalogEntries, "wf_settlements", "settlement_types", type.id(), type.name(), GSON.toJsonTree(type));
+            addNamedEntity(namedEntities, type.id(), "settlement_type", type.name(), "", "");
+        }
         // Export all loaded profession definitions and all configured race/class/origin
         // definitions from their owning modules, preserving their complete JSON shape.
         for (var profession : PeopleMod.PROFESSIONS.all())
             addCatalogEntry(catalogEntries, "wf_people", "professions", profession.id, profession.name, GSON.toJsonTree(profession));
-        for (var race : OriginsMod.ORIGINS.defs.races.values())
+        for (var race : OriginsMod.ORIGINS.defs.races.values()) {
             addCatalogEntry(catalogEntries, "wf_origins", "races", race.id(), race.name(), GSON.toJsonTree(race));
-        for (var cls : OriginsMod.ORIGINS.defs.classes.values())
+            addNamedEntity(namedEntities, race.id(), "race", race.name(), race.parent(), "");
+        }
+        for (var cls : OriginsMod.ORIGINS.defs.classes.values()) {
             addCatalogEntry(catalogEntries, "wf_origins", "classes", cls.id(), cls.name(), GSON.toJsonTree(cls));
+            addNamedEntity(namedEntities, cls.id(), "character_class", cls.name(), "", "");
+        }
         for (var profession : OriginsMod.DEFS.professions.values())
             addCatalogEntry(catalogEntries, "wf_origins", "origin_professions", profession.id(), profession.name(), GSON.toJsonTree(profession));
         for (var synergy : OriginsMod.DEFS.synergies.values())
@@ -1355,8 +1364,6 @@ public final class WorldSimMod {
                 item.addProperty("house_id", person.house == null ? "" : person.house);
                 item.addProperty("display_name", person.name == null ? "" : person.name);
                 addNamedEntity(namedEntities, person.globalId, "character", person.name, "", realmId);
-                if (person.house != null && !person.house.isBlank())
-                    addNamedEntity(namedEntities, person.house, "house_or_dynasty", person.house, "", realmId);
                 Origins.Build origin = OriginsMod.ORIGINS.peek("n:" + person.globalId);
                 item.addProperty("race_id", origin != null && origin.race != null ? origin.race
                         : String.valueOf(person.props.getOrDefault("origin.race", "")));
