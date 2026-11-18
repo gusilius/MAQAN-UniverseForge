@@ -28,20 +28,19 @@ public final class RoleDefs {
             if (suffix.isBlank()) suffix = Integer.toString(tier.index);
             String id = "wf_tier_ruler_" + suffix;
             if (id.length() > 48) id = id.substring(0, 48);
-            // Avoid collisions after sanitization while remaining deterministic.
             if (roles.containsKey(id) && !tier.key.equals(roles.get(id).per))
                 id = "wf_tier_" + tier.index + "_ruler";
-            String json = "{\\"id\\":\\"" + id + "\\",\\"name\\":\\"Правитель: "
-                    + escape(tier.name) + "\\",\\"per\\":\\"" + escape(tier.key)
-                    + "\\",\\"count\\":1,\\"noble\\":true,\\"ruler\\":true}";
-            add(json);
+            Map<String, Object> definition = new LinkedHashMap<>();
+            definition.put("id", id);
+            definition.put("name", "Правитель: " + tier.name);
+            definition.put("per", tier.key);
+            definition.put("count", 1);
+            definition.put("noble", true);
+            definition.put("ruler", true);
+            add(dev.worldforge.mod.Json.write(definition));
             added++;
         }
         return added;
-    }
-
-    private static String escape(String value) {
-        return value == null ? "" : value.replace("\\\\", "\\\\\\\\").replace("\\\"", "\\\\\"");
     }
 
     public Role get(String id) { return roles.get(id); }
