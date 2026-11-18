@@ -863,6 +863,9 @@ public final class WorldSimMod {
         JsonArray realms = new JsonArray(), borders = new JsonArray(), settlements = new JsonArray(), characters = new JsonArray(), workforce = new JsonArray();
         JsonArray politicalTitles = new JsonArray();
         JsonArray governmentDefinitions = new JsonArray(), realmGovernments = new JsonArray();
+        JsonArray capabilities = new JsonArray(), catalogEntries = new JsonArray();
+        JsonArray diplomaticRelations = new JsonArray(), vassalContracts = new JsonArray(), wars = new JsonArray();
+        JsonArray armies = new JsonArray(), socialRelations = new JsonArray(), namedEntities = new JsonArray();
         JsonArray geography = new JsonArray();
         List<EmergenceSource> sources = emergenceSources();
         // Geography is sampled independently of political overlays. A map with no titles/realms
@@ -876,14 +879,53 @@ public final class WorldSimMod {
         // Both image and vanilla sources contribute only canonical emergent realms created
         // by the shared geography pipeline; this also prevents map realms being counted twice.
         Set<String> threatenedRealms = new HashSet<>();
+        Map<String, Double> actualArmyPower = new HashMap<>();
+        // wf-army owns its rosters and unit definitions. WorldSim reads every loaded map
+        // through the module API; it never estimates an army from civilian population.
+        for (MapData map : WorldForgeMod.loadedMaps().values()) {
+            if (map == null || map.titles == null) continue;
+            ArmyEngine engine = ArmyMod.armies(map);
+            for (var army : engine.armies.values()) {
+                double power = Math.max(0.0, army.power(engine.types));
+                actualArmyPower.merge(army.realm, power, Double::sum);
+                JsonObject formation = new JsonObject();
+                formation.addProperty("id", map.name + ":" + army.id);
+                formation.addProperty("realm_id", army.realm);
+                formation.addProperty("name", army.name == null ? "" : army.name);
+                formation.addProperty("commander_id", army.commander == null ? "" : army.commander);
+                formation.addProperty("martial", army.martial);
+                formation.addProperty("men", Math.max(0, army.men()));
+                formation.addProperty("morale", finite(army.morale));
+                formation.addProperty("supply", finite(army.supply));
+                formation.addProperty("location_title_id", army.location > 0 && map.titles.get(army.location) != null
+                        ? dev.worldforge.realms.Statecraft.mapTitleId(map.name, map.titles.get(army.location).key) : "");
+                formation.add("unit_counts", GSON.toJsonTree(new TreeMap<>(army.units)));
+                formation.addProperty("power", finite(power));
+                armies.add(formation);
+            }
+            for (var unit : engine.types.values()) {
+                JsonObject definition = new JsonObject();
+                definition.addProperty("name", unit.name);
+                definition.addProperty("attack", finite(unit.attack));
+                definition.addProperty("defense", finite(unit.defense));
+                definition.addProperty("speed", finite(unit.speed));
+                definition.addProperty("siege", finite(unit.siege));
+                definition.addProperty("cost", finite(unit.cost));
+                definition.addProperty("upkeep", finite(unit.upkeep));
+                definition.addProperty("levy", unit.levy);
+                definition.add("counters", GSON.toJsonTree(unit.counters));
+                addCatalogEntry(catalogEntries, "wf_army", "unit_types", unit.id, unit.name, definition);
+            }
+        }
         for (TitleData.Realm realm : RealmsMod.realms()) {
+            addNamedEntity(namedEntities, realm.id, "realm", realm.name, "", realm.id);
             JsonObject item = new JsonObject();
             item.addProperty("id", realm.id);
             long population = (long) number(realm.props.get("population"), 0);
             item.addProperty("population", Math.max(0L, population));
             item.addProperty("treasury", fixed(RealmsMod.POLITICS.treasury(realm.id).balance));
             // Population-backed mobilization potential is strategic capacity, not a spawned army.
-            item.addProperty("army_strength", Math.max(0L, population / 12L));
+            item.addProperty("army_strength", Math.max(0L, Math.round(actualArmyPower.getOrDefault(realm.id, 0.0))));
             item.addProperty("stability", (int) number(realm.props.get("stability"), 50));
             item.addProperty("prestige", (int) number(realm.props.get("prestige"), 0));
             item.addProperty("expansion_pressure", (int) Math.max(0, Math.min(100, 20 + population / 10)));
@@ -901,6 +943,44 @@ public final class WorldSimMod {
             item.addProperty("last_war_day", lastWarDay);
             realms.add(item);
         }
+        // Export the complete authoritative Statecraft graph, not just at_war flags.
+        for (var relation : RealmsMod.POLITICS.relations()) {
+            JsonObject row = new JsonObject();
+            row.addProperty("realm_a", relation.realmA); row.addProperty("realm_b", relation.realmB);
+            row.addProperty("opinion", relation.opinion);
+            JsonArray treaties = new JsonArray();
+            relation.treaties.stream().map(Enum::name).sorted().forEach(treaties::add);
+            row.add("treaties", treaties); row.addProperty("truce_until_day", relation.truceUntilDay);
+            diplomaticRelations.add(row);
+        }
+        for (var contract : RealmsMod.POLITICS.vassalsOf("") ) { /* no global liege query; exported below from all realm roots */ }
+        Set<String> exportedVassals = new HashSet<>();
+        for (TitleData.Realm realm : RealmsMod.realms()) for (var contract : RealmsMod.POLITICS.vassalsOf(realm.id)) {
+            if (!exportedVassals.add(contract.vassalRealm)) continue;
+            JsonObject row = new JsonObject();
+            row.addProperty("vassal_realm", contract.vassalRealm); row.addProperty("liege_realm", contract.liegeRealm);
+            row.addProperty("subject_type", contract.subjectType.name()); row.addProperty("tax_share", finite(contract.taxShare));
+            row.addProperty("levy_share", finite(contract.levyShare)); row.addProperty("loyalty", contract.loyalty);
+            row.addProperty("autonomy", contract.autonomy); row.addProperty("protected_by_liege", contract.protectedByLiege);
+            vassalContracts.add(row);
+        }
+        for (var war : RealmsMod.POLITICS.wars()) {
+            JsonObject row = new JsonObject();
+            row.addProperty("id", war.id); row.addProperty("attacker_realm", war.attackerRealm);
+            row.addProperty("defender_realm", war.defenderRealm); row.addProperty("casus_belli", war.casusBelli);
+            row.addProperty("declared_by_character_id", war.declaredByCharacterId); row.addProperty("war_score", war.warScore);
+            row.addProperty("start_day", war.startDay); row.addProperty("status", war.status.name());
+            row.addProperty("outcome", war.outcome == null ? "" : war.outcome);
+            wars.add(row);
+        }
+        for (var government : RealmsMod.DEFS.levels)
+            addCatalogEntry(catalogEntries, "wf_realms", "government_levels", government.id(), government.name(), GSON.toJsonTree(government));
+        for (var terrain : RealmsMod.DEFS.terrains.values())
+            addCatalogEntry(catalogEntries, "wf_realms", "government_terrains", terrain.id(), terrain.name(), GSON.toJsonTree(terrain));
+        for (var branch : RealmsMod.DEFS.branches.values())
+            addCatalogEntry(catalogEntries, "wf_realms", "doctrine_branches", branch.id(), branch.name(), GSON.toJsonTree(branch));
+        for (var law : RealmsMod.DEFS.laws.values())
+            addCatalogEntry(catalogEntries, "wf_realms", "laws", law.id(), law.name(), GSON.toJsonTree(law));
         // Shared pair set prevents exact province-adjacency borders from being
         // duplicated by the coarser emergence-neighbour projection below.
         // Export the complete data-pack government catalogue and each realm's
@@ -1073,7 +1153,18 @@ public final class WorldSimMod {
             item.addProperty("barracks", staffedBarracks ? 1 : 0);
             item.addProperty("watch_posts", s.count("watch_post", true));
             item.addProperty("threatened", threatenedRealms.contains(settlementRealm));
-            item.addProperty("roads", 0);
+            int roadSegments = s == null || colony.map == null ? 0 : colony.map.roads.values().stream()
+                    .mapToInt(road -> Math.max(0, road.builtSegments)).sum();
+            item.addProperty("roads", roadSegments);
+            addNamedEntity(namedEntities, s.id, "settlement", s.name, "", settlementRealm);
+            JsonObject settlementIdentity = new JsonObject();
+            settlementIdentity.addProperty("type_id", colony.settlementType == null ? "" : colony.settlementType);
+            settlementIdentity.addProperty("source_map_id", colony.sourceMapId == null ? "" : colony.sourceMapId);
+            settlementIdentity.addProperty("blueprint_settlement_id", colony.blueprintSettlementId == null ? "" : colony.blueprintSettlementId);
+            settlementIdentity.addProperty("race_id", colony.identityRace == null ? "" : colony.identityRace);
+            settlementIdentity.addProperty("culture_id", colony.identityCulture == null ? "" : colony.identityCulture);
+            settlementIdentity.addProperty("government_id", colony.governmentId == null ? "" : colony.governmentId);
+            addCatalogEntry(catalogEntries, "wf_settlements", "settlement_instances", s.id, s.name, settlementIdentity);
             item.addProperty("local_pressure", Math.max(0, residentPopulation - s.housing()));
             item.addProperty("last_project_day", lastProjectDay.getOrDefault(s.id, Math.max(0, day - 365)));
             settlements.add(item);
@@ -1101,6 +1192,16 @@ public final class WorldSimMod {
             w.addProperty("stone_output", fixed(s.flow.perMinute(s.time, "stone", true)));
             workforce.add(w);
         }
+        for (var type : SettleMod.TYPES.types.values())
+            addCatalogEntry(catalogEntries, "wf_settlements", "settlement_types", type.id(), type.name(), GSON.toJsonTree(type));
+        // Export all loaded profession definitions and all configured race/class/origin
+        // definitions from their owning modules, preserving their complete JSON shape.
+        for (var profession : PeopleMod.PROFESSIONS.all())
+            addCatalogEntry(catalogEntries, "wf_people", "professions", profession.id(), profession.name(), GSON.toJsonTree(profession));
+        for (var race : OriginsMod.ORIGINS.defs.races.values())
+            addCatalogEntry(catalogEntries, "wf_origins", "races", race.id(), race.name(), GSON.toJsonTree(race));
+        for (var cls : OriginsMod.ORIGINS.defs.classes.values())
+            addCatalogEntry(catalogEntries, "wf_origins", "classes", cls.id(), cls.name(), GSON.toJsonTree(cls));
         // Resolve band -> polity from the last committed emergence frame. Residents from
         // either geography source then enter the same Character snapshot by canonical UUID.
         Map<String, String> polityByBand = new HashMap<>();
@@ -1189,6 +1290,9 @@ public final class WorldSimMod {
                 item.addProperty("opinion", (int) number(person.props.get("opinion"), 0));
                 item.addProperty("house_id", person.house == null ? "" : person.house);
                 item.addProperty("display_name", person.name == null ? "" : person.name);
+                addNamedEntity(namedEntities, person.globalId, "character", person.name, "", realmId);
+                if (person.house != null && !person.house.isBlank())
+                    addNamedEntity(namedEntities, person.house, "house_or_dynasty", person.house, "", realmId);
                 Origins.Build origin = OriginsMod.ORIGINS.peek("n:" + person.globalId);
                 item.addProperty("race_id", origin != null && origin.race != null ? origin.race
                         : String.valueOf(person.props.getOrDefault("origin.race", "")));
@@ -1256,6 +1360,48 @@ public final class WorldSimMod {
         sortObjects(settlements, Comparator.comparing(item -> item.get("id").getAsString()));
         sortObjects(characters, Comparator.comparing(item -> item.get("id").getAsString()));
         sortObjects(workforce, Comparator.comparing(item -> item.get("settlement_id").getAsString()));
+        // NPC-to-NPC bonds are canonical UUID relationships. Ignore player-facing bonds
+        // unless both endpoints resolve to canonical world Characters.
+        for (String key : dev.worldforge.relations.mc.RelationsMc.REL.keys()) {
+            int separator = key.indexOf('|');
+            if (separator <= 0 || separator == key.length() - 1) continue;
+            String first = key.substring(0, separator), second = key.substring(separator + 1);
+            var a = PeopleMod.authority().getGlobal(first);
+            var b = PeopleMod.authority().getGlobal(second);
+            if (a == null || b == null || !a.alive || !b.alive) continue;
+            var bond = dev.worldforge.relations.mc.RelationsMc.REL.peek(first, second);
+            if (bond == null) continue;
+            JsonObject row = new JsonObject();
+            row.addProperty("character_a", first); row.addProperty("character_b", second);
+            row.addProperty("relationship", bond.affinity); row.addProperty("love", bond.love);
+            row.addProperty("married", bond.married); row.addProperty("dating", bond.dating);
+            row.addProperty("employed", bond.employed);
+            row.addProperty("last_contact_day", Math.max(0, bond.lastContact));
+            socialRelations.add(row);
+        }
+        // Capabilities distinguish absent optional modules from present-but-empty catalogs.
+        addCapability(capabilities, "wf_realms", 1, true, RealmsMod.DEFS.govs.size()
+                + RealmsMod.DEFS.levels.size() + RealmsMod.DEFS.laws.size(), RealmsMod.realms().size());
+        addCapability(capabilities, "wf_settlements", 1, true, SettleMod.TYPES.types.size(), SettleMod.COLONIES.size());
+        addCapability(capabilities, "wf_army", 1, true, ArmyMod.loadedEngines().stream().mapToInt(engine -> engine.types.size()).sum(),
+                armies.size());
+        addCapability(capabilities, "wf_people", 1, true, PeopleMod.PROFESSIONS.all().size(), characters.size());
+        addCapability(capabilities, "wf_relations", 1, true, 0, socialRelations.size());
+        sortObjects(catalogEntries, Comparator.comparing((JsonObject item) -> item.get("module_id").getAsString())
+                .thenComparing(item -> item.get("catalog_id").getAsString()).thenComparing(item -> item.get("entry_id").getAsString()));
+        sortObjects(diplomaticRelations, Comparator.comparing((JsonObject item) -> item.get("realm_a").getAsString())
+                .thenComparing(item -> item.get("realm_b").getAsString()));
+        sortObjects(vassalContracts, Comparator.comparing(item -> item.get("vassal_realm").getAsString()));
+        sortObjects(wars, Comparator.comparing(item -> item.get("id").getAsString()));
+        sortObjects(armies, Comparator.comparing(item -> item.get("id").getAsString()));
+        sortObjects(socialRelations, Comparator.comparing((JsonObject item) -> item.get("character_a").getAsString())
+                .thenComparing(item -> item.get("character_b").getAsString()));
+        sortObjects(namedEntities, Comparator.comparing((JsonObject item) -> item.get("kind").getAsString())
+                .thenComparing(item -> item.get("id").getAsString()));
+        root.add("capabilities", capabilities); root.add("catalog_entries", catalogEntries);
+        root.add("diplomatic_relations", diplomaticRelations); root.add("vassal_contracts", vassalContracts);
+        root.add("wars", wars); root.add("armies", armies); root.add("social_relations", socialRelations);
+        root.add("named_entities", namedEntities);
         root.add("geography", geography);
         root.add("realms", realms); root.add("titles", politicalTitles);
         root.add("government_definitions", governmentDefinitions); root.add("realm_governments", realmGovernments);
@@ -1264,6 +1410,39 @@ public final class WorldSimMod {
         return root;
     }
 
+
+    private static double finite(double value) {
+        return Double.isFinite(value) ? value : 0.0;
+    }
+
+    private static void addCapability(JsonArray target, String moduleId, int schemaVersion,
+                                      boolean available, int catalogCount, int entityCount) {
+        JsonObject item = new JsonObject();
+        item.addProperty("module_id", moduleId); item.addProperty("schema_version", schemaVersion);
+        item.addProperty("available", available); item.addProperty("catalog_count", Math.max(0, catalogCount));
+        item.addProperty("entity_count", Math.max(0, entityCount)); target.add(item);
+    }
+
+    private static void addCatalogEntry(JsonArray target, String moduleId, String catalogId,
+                                        String entryId, String name, com.google.gson.JsonElement payload) {
+        if (entryId == null || entryId.isBlank()) return;
+        JsonObject item = new JsonObject();
+        item.addProperty("module_id", moduleId); item.addProperty("catalog_id", catalogId);
+        item.addProperty("entry_id", entryId); item.addProperty("name", name == null ? "" : name);
+        item.add("payload", payload == null ? new JsonObject() : payload.deepCopy());
+        target.add(item);
+    }
+
+    private static void addNamedEntity(JsonArray target, String id, String kind, String name,
+                                       String parentId, String ownerId) {
+        if (id == null || id.isBlank()) return;
+        JsonObject item = new JsonObject();
+        item.addProperty("id", id); item.addProperty("kind", kind);
+        item.addProperty("name", name == null ? "" : name);
+        item.addProperty("parent_id", parentId == null ? "" : parentId);
+        item.addProperty("owner_id", ownerId == null ? "" : ownerId);
+        target.add(item);
+    }
 
     /** Resolve the planet scope from the canonical polity/band that emitted an emergence fact. */
     private static List<String> emergencePlanetScope(JsonObject state, String subjectId) {
