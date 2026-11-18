@@ -146,7 +146,7 @@ public final class NpcSocialSimulation {
         Object role = person.props.get("emergence.polity_role");
         if (role instanceof String value && List.of("trader", "merchant", "diplomat", "envoy", "ambassador")
                 .contains(value.toLowerCase(Locale.ROOT))) return true;
-        Set<String> traits = CharacterStats.traits(person);
+        List<String> traits = CharacterStats.traits(person);
         return traits.contains("trader") || traits.contains("diplomat") || traits.contains("merchant");
     }
 
