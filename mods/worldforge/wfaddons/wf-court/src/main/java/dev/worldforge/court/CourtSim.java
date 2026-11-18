@@ -252,11 +252,11 @@ public final class CourtSim {
         // Character lifecycle event, regardless of which domain clock reaches the year first.
         mother.props.put("family.last_birth_year", year());
         father.props.put("family.last_birth_year", year());
+        String realm = realmOf(father);
         hooks.news("MAQAN_AUTONOMOUS_BIRTH realm=" + realm + " father=" + father.globalId
                 + " mother=" + mother.globalId + " child=" + kid.globalId);
         mother.props.put("family.last_event", "child-born:" + kid.id);
         father.props.put("family.last_event", "child-born:" + kid.id);
-        String realm = realmOf(father);
         if (!realm.isEmpty() && ruler(realm) == father) say("В доме " + realmName(realm) + " родился " + (m ? "наследник " : "ребёнок ") + kid.name);
     }
 
