@@ -108,7 +108,7 @@ pub struct Settlement {
     pub last_project_day: Day,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Character {
     pub id: String,
     pub realm_id: String,
@@ -604,9 +604,9 @@ mod tests {
         ];
         original.characters = vec![
             Character{id:"person-a".into(),realm_id:"north".into(),age:22,alive:true,married:false,
-                gender:0,fertility:50,prestige:50,opinion:50,house_id:"A".into()},
+                gender:0,fertility:50,prestige:50,opinion:50,house_id:"A".into(),..Default::default()},
             Character{id:"person-b".into(),realm_id:"south".into(),age:23,alive:true,married:false,
-                gender:1,fertility:50,prestige:50,opinion:50,house_id:"B".into()},
+                gender:1,fertility:50,prestige:50,opinion:50,house_id:"B".into(),..Default::default()},
         ];
 
         let expected = decide(&original).unwrap();
@@ -624,7 +624,7 @@ mod tests {
     #[test] fn long_lived_fantasy_characters_are_valid_but_corrupt_ages_are_rejected() {
         let mut s = base();
         s.characters.push(Character{id:"ancient-elf".into(),realm_id:"north".into(),age:306,alive:true,married:false,
-            gender:0,fertility:10,prestige:500,opinion:50,house_id:"Eldergrove".into()});
+            gender:0,fertility:10,prestige:500,opinion:50,house_id:"Eldergrove".into(),..Default::default()});
         assert!(s.validate().is_ok(), "multi-century lifespans are valid in MAQAN");
         s.characters[0].age = 1_001;
         assert!(matches!(s.validate(), Err(SimError::InvalidSnapshot(message)) if message.contains("implausible-character-age")));
@@ -662,8 +662,8 @@ mod tests {
 
     #[test] fn marriage_requires_two_distinct_realms() {
         let mut s=base(); s.seed=0; s.characters=vec![
-            Character{id:"a".into(),realm_id:"north".into(),age:22,alive:true,married:false,gender:0,fertility:10,prestige:50,opinion:50,house_id:"A".into()},
-            Character{id:"b".into(),realm_id:"south".into(),age:23,alive:true,married:false,gender:1,fertility:10,prestige:50,opinion:50,house_id:"B".into()}
+            Character{id:"a".into(),realm_id:"north".into(),age:22,alive:true,married:false,gender:0,fertility:10,prestige:50,opinion:50,house_id:"A".into(),..Default::default()},
+            Character{id:"b".into(),realm_id:"south".into(),age:23,alive:true,married:false,gender:1,fertility:10,prestige:50,opinion:50,house_id:"B".into(),..Default::default()}
         ];
         assert!(decide(&s).unwrap().proposals.iter().any(|p| matches!(p.kind,ProposalKind::DynasticMarriage{..})));
     }
@@ -704,14 +704,14 @@ mod tests {
     #[test] fn duplicate_global_character_ids_are_rejected() {
         let mut s=base();
         let person=Character{id:"global-person-1".into(),realm_id:"north".into(),age:24,alive:true,married:false,
-            gender:0,fertility:50,prestige:0,opinion:0,house_id:"North".into()};
+            gender:0,fertility:50,prestige:0,opinion:0,house_id:"North".into(),..Default::default()};
         s.characters=vec![person.clone(),person];
         assert_eq!(s.validate(),Err(SimError::DuplicateCharacter("global-person-1".into())));
     }
     #[test] fn character_cannot_reference_an_unknown_realm() {
         let mut s=base();
         s.characters.push(Character{id:"global-person-2".into(),realm_id:"missing".into(),age:24,alive:true,married:false,
-            gender:0,fertility:50,prestige:0,opinion:0,house_id:"North".into()});
+            gender:0,fertility:50,prestige:0,opinion:0,house_id:"North".into(),..Default::default()});
         assert_eq!(s.validate(),Err(SimError::UnknownRealm("missing".into())));
     }
     #[test] fn workforce_requires_one_known_settlement_partition() {
