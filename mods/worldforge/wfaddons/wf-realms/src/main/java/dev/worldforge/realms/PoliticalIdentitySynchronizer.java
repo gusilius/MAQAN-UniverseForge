@@ -80,6 +80,19 @@ public final class PoliticalIdentitySynchronizer {
                 if (!role.ruler || role.per == null || role.per.equals("realm")) continue;
                 rulerRolesByTier.computeIfAbsent(role.per, ignored -> new ArrayList<>()).add(role);
             }
+            Set<String> rulerRoleIds = rulerRolesByTier.values().stream().flatMap(Collection::stream)
+                    .map(role -> role.id).collect(java.util.stream.Collectors.toSet());
+            Map<String, List<Character>> officeHoldersByPost = new HashMap<>();
+            for (Character character : people.all()) {
+                if (!character.alive) continue;
+                for (Character.Post post : character.posts) {
+                    if (rulerRoleIds.contains(post.role))
+                        officeHoldersByPost.computeIfAbsent(post.place + "#" + post.role,
+                                ignored -> new ArrayList<>()).add(character);
+                }
+            }
+            for (List<Character> holders : officeHoldersByPost.values())
+                holders.sort(Comparator.comparing(character -> character.globalId));
             for (TitleData.Title sourceTitle : map.allTitles()) {
                 if (crownTitleIds.contains(sourceTitle.id)) continue;
                 if (sourceTitle.tier < 0 || sourceTitle.tier >= map.tiers.size()) continue;
@@ -93,14 +106,10 @@ public final class PoliticalIdentitySynchronizer {
                 if (roles.isEmpty()) continue;
                 String place = "title:" + sourceTitle.id;
                 List<Character> officeHolders = new ArrayList<>();
-                for (Character character : people.all()) {
-                    if (!character.alive) continue;
-                    for (Character.Post post : character.posts) {
-                        if (post.place.equals(place) && roles.stream().anyMatch(role -> role.id.equals(post.role)))
-                            officeHolders.add(character);
-                    }
-                }
-                officeHolders.sort(Comparator.comparing(character -> character.globalId));
+                for (Role role : roles)
+                    officeHolders.addAll(officeHoldersByPost.getOrDefault(place + "#" + role.id, List.of()));
+                officeHolders = officeHolders.stream().distinct()
+                        .sorted(Comparator.comparing(character -> character.globalId)).toList();
                 Statecraft.Title politicalTitle = politics.title(Statecraft.mapTitleId(mapId, sourceTitle.key));
                 if (politicalTitle == null) {
                     problems.add("Owned map title was not imported into Statecraft: " + sourceTitle.key);
