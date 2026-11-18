@@ -2610,7 +2610,7 @@ public final class WorldSimMod {
         String gender = ordinal % 2 == 0 ? "m" : "f";
         String name = emergentName(source, bandId, father.culture, gender, ordinal, year);
         dev.worldforge.people.Character child = registry.addChild(father, mother, name, gender, year);
-        tagEmergentResident(child, bandId);
+        tagEmergentResident(child, bandId, source);
         return child;
     }
 
@@ -2628,7 +2628,7 @@ public final class WorldSimMod {
                 new Random(source.seed ^ bandId.hashCode() ^ ordinal), reservedHouseNames);
         dev.worldforge.people.Character person = registry.create(name, house, culture, gender,
                 year - (18 + Math.floorMod(bandId.hashCode() + ordinal * 13, 24)));
-        tagEmergentResident(person, bandId);
+        tagEmergentResident(person, bandId, source);
         person.props.put("identity.source", "autonomous-emergence");
         return person;
     }
@@ -2669,11 +2669,15 @@ public final class WorldSimMod {
         }
     }
 
-    private static void tagEmergentResident(dev.worldforge.people.Character person, String bandId) {
+    private static void tagEmergentResident(dev.worldforge.people.Character person, String bandId,
+            EmergenceSource source) {
         person.props.put("emergence.band_id", bandId);
         person.props.put("emergence.household_id", bandId);
         person.props.put("population.location", bandId);
         person.props.put("emergence.origin", "shared-world-simulation");
+        person.props.put("emergence.world_space_id", source.id);
+        if (source.dimension != null && !source.dimension.isBlank())
+            person.props.put("emergence.dimension", source.dimension);
     }
 
     private static String emergentName(EmergenceSource source, String bandId, String culture, String gender, int ordinal, int year) {
