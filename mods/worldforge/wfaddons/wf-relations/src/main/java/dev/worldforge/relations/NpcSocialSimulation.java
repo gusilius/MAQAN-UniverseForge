@@ -76,13 +76,84 @@ public final class NpcSocialSimulation {
                             }
                         }
                     }
-                    if (a == b || !a.alive || !b.alive) continue;
+                    if (a == b || !a.alive || !b.alive || !canMeetLocally(a, b)) continue;
                     interact(relations, registry, a, b, group.getKey(), members, day, year);
                     interactions++;
                 }
             }
         }
         return interactions;
+    }
+
+    private static boolean canMeetLocally(Character a, Character b) {
+        if (hasTravelRole(a) || hasTravelRole(b)) return true;
+        Double ax = coordinate(a, "x"), az = coordinate(a, "z");
+        Double bx = coordinate(b, "x"), bz = coordinate(b, "z");
+        if (ax != null && az != null && bx != null && bz != null) {
+            double dx = ax - bx, dz = az - bz;
+            return dx * dx + dz * dz <= 256.0 * 256.0;
+        }
+        return Objects.equals(a.props.get("emergence.band_id"), b.props.get("emergence.band_id"));
+    }
+
+    private static Double coordinate(Character person, String axis) {
+        for (String key : List.of("world." + axis, "position." + axis, "emergence." + axis,
+                "population." + axis, "settlement." + axis)) {
+            Object value = person.props.get(key);
+            if (value instanceof Number number) return number.doubleValue();
+        }
+        return null;
+    }
+
+    private static boolean hasTravelRole(Character person) {
+        for (String role : List.of("trader", "merchant", "diplomat", "envoy", "ambassador"))
+            if (person.hasRole(role)) return true;
+        Object role = person.props.get("emergence.polity_role");
+        if (role instanceof String value && List.of("trader", "merchant", "diplomat", "envoy", "ambassador")
+                .contains(value.toLowerCase(Locale.ROOT))) return true;
+        Set<String> traits = CharacterStats.traits(person);
+        return traits.contains("trader") || traits.contains("diplomat") || traits.contains("merchant");
+    }
+
+    private static int kinshipDistance(Character a, Character b) {
+        if (a.globalId.equals(b.globalId)) return 0;
+        Map<String, Integer> aa = ancestors(a), bb = ancestors(b);
+        int best = Integer.MAX_VALUE;
+        for (Map.Entry<String, Integer> entry : aa.entrySet()) {
+            Integer other = bb.get(entry.getKey());
+            if (other != null) best = Math.min(best, entry.getValue() + other);
+        }
+        return best;
+    }
+
+    private static Map<String, Integer> ancestors(Character person) {
+        Map<String, Integer> result = new HashMap<>();
+        ArrayDeque<Map.Entry<String, Integer>> queue = new ArrayDeque<>();
+        addParents(queue, person);
+        while (!queue.isEmpty()) {
+            Map.Entry<String, Integer> entry = queue.removeFirst();
+            if (entry.getValue() > 6 || result.putIfAbsent(entry.getKey(), entry.getValue()) != null) continue;
+            Character parent = PeopleMod.authority().getGlobal(entry.getKey());
+            if (parent != null) addParents(queue, parent, entry.getValue() + 1);
+        }
+        return result;
+    }
+
+    private static void addParents(Deque<Map.Entry<String, Integer>> queue, Character person) {
+        addParents(queue, person, 1);
+    }
+
+    private static void addParents(Deque<Map.Entry<String, Integer>> queue, Character person, int distance) {
+        for (String key : List.of("family.father_global_id", "family.mother_global_id")) {
+            Object value = person.props.get(key);
+            if (value instanceof String id && !id.isBlank()) queue.add(Map.entry(id, distance));
+        }
+        for (String id : List.of(person.father, person.mother)) {
+            if (id == null || id.isBlank()) continue;
+            Character parent = PeopleMod.authority().registryForGlobal(person.globalId) == null
+                    ? null : PeopleMod.authority().getGlobal(id);
+            if (parent != null) queue.add(Map.entry(parent.globalId, distance));
+        }
     }
 
     private static void interact(Relations relations, CharacterRegistry registry, Character a, Character b,
@@ -111,11 +182,16 @@ public final class NpcSocialSimulation {
             ab.dating = ba.dating = false;
         }
 
-        boolean eligibleRomance = !a.gender.equals(b.gender) && a.spouse.isEmpty() && b.spouse.isEmpty()
+        int kinship = kinshipDistance(a, b);
+        // Parents, children and siblings are excluded from romance; distant kin are not
+        // categorically blocked, but courtship develops more cautiously.
+        boolean eligibleRomance = kinship > 2 && !a.gender.equals(b.gender)
+                && a.spouse.isEmpty() && b.spouse.isEmpty()
                 && year - a.birthYear >= 18 && year - b.birthYear >= 18
-                && year - a.birthYear <= 45 && year - b.birthYear <= 55;
+                && year - a.birthYear <= 70 && year - b.birthYear <= 70;
         if (eligibleRomance && ab.affinity >= 25) {
             int loveDelta = ta.contains("shy") || tb.contains("shy") ? 1 : 2;
+            if (kinship >= 3 && kinship <= 5) loveDelta = Math.max(1, loveDelta - 1);
             if (ta.contains("gregarious") || tb.contains("gregarious")) loveDelta++;
             ab.love = clamp(ab.love + loveDelta, 0, 100);
             ba.love = clamp(ba.love + loveDelta, 0, 100);
