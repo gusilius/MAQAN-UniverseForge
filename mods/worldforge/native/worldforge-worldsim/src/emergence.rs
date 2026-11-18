@@ -151,7 +151,9 @@ fn observed_map_scale(map: &GeographicMap) -> u64 {
     if !found { return map_scale(map); }
     let observed_span = u64::from(max_x.saturating_sub(min_x).max(max_z.saturating_sub(min_z)).saturating_add(1));
     let minimum_spacing = u64::from(map.sample_stride.max(1)) * 2;
-    map_scale(map).min((observed_span / 12).max(minimum_spacing))
+    map_scale(map)
+        .min((observed_span / 12).max(minimum_spacing))
+        .min(256_u64.max(minimum_spacing))
         .max(minimum_spacing).max(1)
 }
 
@@ -663,6 +665,26 @@ mod tests {
     fn request(day: u64, state: Option<EmergentWorld>) -> EmergenceRequest {
         EmergenceRequest { snapshot:WorldSnapshot { world_id:"map-only".into(),seed:8128,day,
             realms:vec![],borders:vec![],settlements:vec![],characters:vec![],workforce:vec![],geography:vec![map()] }, state }
+    }
+
+    #[test]
+    fn observed_vanilla_frontier_spacing_stays_bounded_as_the_world_expands() {
+        let map = GeographicMap {
+            map_id: "vanilla-world:minecraft:overworld".into(),
+            width_px: 60_000_001, height_px: 60_000_001,
+            blocks_per_pixel_milli: 1000, political_layers_present: false,
+            sample_stride: 4,
+            cells: vec![
+                GeographicCell { x: 30_000_000, z: 30_000_000, biome: "minecraft:plains".into(),
+                    elevation: 70, river: 0, land: true, suitability: 90,
+                    owner_realm_id: String::new(), discovered_year: 0 },
+                GeographicCell { x: 30_900_000, z: 30_900_000, biome: "minecraft:forest".into(),
+                    elevation: 72, river: 0, land: true, suitability: 88,
+                    owner_realm_id: String::new(), discovered_year: 0 },
+            ],
+        };
+        assert!(observed_map_scale(&map) <= 256,
+            "exploring more of a planet must not make new settlements thousands of blocks apart");
     }
 
     #[test]

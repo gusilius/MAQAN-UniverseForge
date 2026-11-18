@@ -1,22 +1,24 @@
-# Character Creation, Origins and Campaign Start
+# Character Creation, Origins and Optional Sandbox Start Profiles
 
-This document defines the integrated character-start flow for WorldForge. It extends the existing wf-genesis, wf-origins, wf-progress, wf-forms, wf-people, wf-settlements, wf-realms, wf-quests and military addons. It is not a replacement for those modules.
+This document defines the optional player character-creation flow for WorldForge. It extends the existing wf-genesis, wf-origins, wf-progress, wf-forms, wf-people, wf-settlements, wf-realms, wf-quests and military addons. It is not a replacement for those modules.
+
+**Base-world rule:** WorldForge ships no built-in campaigns, story scenarios, mandatory objectives or campaign-start requirement. A world is always created as a free sandbox and its civilizations evolve through the ordinary simulations. This document describes character creation and optional player-start profiles only. Any future campaign/scenario content must be a separate optional addon and must never gate or replace sandbox generation.
 
 ## Product principle
 
-Character creation is a campaign initialization pipeline, not a cosmetic wizard. The resulting character, origin, social status, starting location, profession, attributes, class, abilities and leadership role must be persisted as actual game state and used by simulation systems.
+Character creation is a character initialization pipeline, not a cosmetic wizard. The resulting character, origin, social status, starting location, profession, attributes, class, abilities and leadership role must be persisted as actual game state and used by simulation systems.
 
 The future cosmic-origin module is deliberately left as an extension point. The first implementation targets supported WorldForge worlds and settlement locations; it must not invent a space system or create a hard dependency on Atlas.
 
 ## Guided flow
 
-1. Campaign/world selection and rules.
+1. Choose an existing sandbox world and optional character-start profile (free sandbox start is the default).
 2. Race and subrace.
 3. Body and appearance.
 4. Innate traits, acquired traits and forms.
 5. Origin, culture, heritage and biography.
 6. Social background, family and starting status.
-7. Starting location and campaign scenario.
+7. Starting location and optional start profile.
 8. Optional leadership start and settlement founding/setup.
 9. Starting professions and specializations.
 10. Attribute allocation.
@@ -39,7 +41,7 @@ Race selection must read from wf-origins content definitions. Race and subrace c
 
 The 3D preview is a live player-model preview with orbit, zoom, lighting presets and animation preview. Appearance editing includes body type, stature, proportions, face shape, brow, eyes, iris, nose, mouth, jaw, ears, hair, facial hair, skin/material tone, markings, scars, tattoos, accessories, voice profile and outfit. Each race declares supported slots and constraints. No human-only assumptions in the editor.
 
-Race grants and appearance are separate: changing appearance must not alter gameplay stats. Race changes after creation are restricted by campaign rules and forms/transformations.
+Race grants and appearance are separate: changing appearance must not alter gameplay stats. Race changes after creation are restricted by world/addon rules and forms/transformations.
 
 ## Traits and forms
 
@@ -61,9 +63,9 @@ Origin describes where and how the character was formed socially and historicall
 
 Origin choices affect starting contacts, reputation, languages, knowledge, legal status, available professions, claims, debts and faction relations only when corresponding systems exist. Store the selected origin as structured data and a readable biography.
 
-## Starting scenarios and location
+## Optional player-start profiles and location
 
-Starting scenario examples:
+Optional player-start profile examples (not built-in scenarios):
 - resident of a village or rural settlement;
 - resident of a town or major city;
 - capital/court resident;
@@ -124,7 +126,7 @@ Magic aptitude, control, knowledge, resistance, faith, ritual, attunement. These
 
 Attributes need definitions, ranges, derivation rules, soft caps, modifiers, UI explanations and owning source. Distinguish base attributes, derived values, temporary modifiers and skills. Do not use one attribute as a duplicate of another system's skill.
 
-Point allocation uses campaign-defined budgets, min/max rules, race/background modifiers and clear validation. The system must show the consequences and derived-stat preview before confirmation.
+Point allocation uses selected profile budgets, min/max rules, race/background modifiers and clear validation. The system must show the consequences and derived-stat preview before confirmation.
 
 ## Classes, subclasses and abilities
 
@@ -141,7 +143,7 @@ Use wf-origins for class content definitions where already implemented and wf-pr
 
 ## Final validation and initialization
 
-Before campaign start validate:
+Before the character-creation transaction validate:
 - all required selections and point budgets;
 - race/model/appearance slot compatibility;
 - origin and scenario prerequisites;
@@ -151,7 +153,7 @@ Before campaign start validate:
 - conflicts between traits, forms and selected content;
 - addon availability and optional dependency state.
 
-Initialization must be atomic or recoverable. Generate the player entity, character profile, inventory/equipment, relationships, reputation, spawn location and any ruler/settlement state as one campaign-start operation. If a required addon is missing, disable only the affected scenario/capability with a clear explanation.
+Initialization must be atomic or recoverable. Generate the player entity, character profile, inventory/equipment, relationships, reputation, spawn location and any ruler/settlement state as one character-creation transaction. If a required addon is missing, disable only the affected scenario/capability with a clear explanation.
 
 ## UI workspaces
 

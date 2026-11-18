@@ -360,7 +360,7 @@ public final class WorldSimMod {
         }
 
         long day = WorldForgeApi.clock().dayNumber();
-        // The first world frame is a creation-time operation, not a campaign and not
+        // The first world frame is a creation-time operation, not a scenario and not
         // something that waits thirty in-game days. Do not submit an empty snapshot:
         // ordinary vanilla dimensions become eligible as soon as real chunks have
         // been observed by VanillaWorldGeography.
@@ -522,10 +522,7 @@ public final class WorldSimMod {
         saveState(server);
         PROFILER.record("worldsim.save_state", System.nanoTime() - phaseStarted);
         LOGGER.info("wf_worldsim: day={} realms={} settlements={} proposals={} applied={} rejected={} compute=async",
-                day, snapshot.has("realms") && snapshot.get("realms").isJsonArray()
-                        ? snapshot.getAsJsonArray("realms").size() : 0,
-                snapshot.has("settlements") && snapshot.get("settlements").isJsonArray()
-                        ? snapshot.getAsJsonArray("settlements").size() : 0,
+                day, RealmsMod.realms().size(), SettleMod.COLONIES.size(),
                 frame.getAsJsonArray("proposals").size(), accepted, rejected);
         return true;
     }
@@ -553,9 +550,24 @@ public final class WorldSimMod {
                     raceIds.add(String.valueOf(race));
             }
             long settlements = SettleMod.COLONIES.values().stream()
+                    .filter(colony -> colony != null && colony.s != null && source.dimension.equals(colony.dim))
+                    .count();
+            long emergentSettlements = SettleMod.COLONIES.values().stream()
                     .filter(colony -> colony != null && colony.s != null && source.dimension.equals(colony.dim)
                             && colony.genesisOperationId != null
                             && colony.genesisOperationId.startsWith("worldsim:settlement:"))
+                    .count();
+            long mapAnchors = source.map == null ? 0 : SettleMod.COLONIES.values().stream()
+                    .filter(colony -> colony != null && source.dimension.equals(colony.dim)
+                            && source.map.name.equals(colony.sourceMapId)
+                            && colony.blueprintSettlementId != null && !colony.blueprintSettlementId.isBlank())
+                    .count();
+            long livingCharacters = source.registry == null ? 0 : source.registry.all().stream()
+                    .filter(person -> person.alive).count();
+            long courtOffices = source.registry == null ? 0 : source.registry.all().stream()
+                    .filter(person -> person.alive)
+                    .flatMap(person -> person.posts.stream())
+                    .filter(post -> post.place != null && post.place.startsWith("realm:"))
                     .count();
             long rulers = realms.stream().filter(realm -> {
                 Object id = realm.props.get("emergence.ruler_global_id");
@@ -572,10 +584,11 @@ public final class WorldSimMod {
                             && realms.stream().anyMatch(realm -> Objects.equals(
                                     String.valueOf(realm.props.getOrDefault("emergence.dynasty_id", "")), dynasty.houseId)))
                     .count();
-            LOGGER.info("MAQAN_WORLD_GENESIS source={} dimension={} geography_cells={} communities={} settled={} settlements={} polities={} canonical_rulers={} dynasties={} titles={} governments={} race_kinds={}",
+            LOGGER.info("MAQAN_WORLD_GENESIS source={} dimension={} geography_cells={} communities={} settled={} settlements={} emergent_settlements={} map_anchors={} living_characters={} court_offices={} polities={} canonical_rulers={} dynasties={} titles={} governments={} race_kinds={}",
                     source.id, source.dimension,
                     source.map == null ? VanillaWorldGeography.sampledCellCount() : source.map.w * source.map.h,
-                    bands, settled, settlements, realms.size(), rulers, dynasties, titles, governments, raceIds.size());
+                    bands, settled, settlements, emergentSettlements, mapAnchors, livingCharacters, courtOffices,
+                    realms.size(), rulers, dynasties, titles, governments, raceIds.size());
         }
     }
 
@@ -608,8 +621,8 @@ public final class WorldSimMod {
                     MinecraftServer server = context.getSource().getServer();
                     context.getSource().sendSuccess(() -> Component.literal(
                             "WorldSim: native=" + NativeWorldSimulation.load()
-                                    + ", realms=" + WorldForgeMod.loadedMaps().values().stream().filter(m -> m.titles != null)
-                                    .mapToInt(m -> m.titles.realmList().size()).sum()
+                                    + ", dimensions=" + server.getAllLevels().size()
+                                    + ", realms=" + RealmsMod.realms().size()
                                     + ", settlements=" + SettleMod.COLONIES.size()
                                     + ", proposal_records=" + journal.size()
                                     + ", world_events=" + WorldForgeApi.events().size()
@@ -964,9 +977,18 @@ public final class WorldSimMod {
                         throw new IllegalStateException("No loaded physical dimension for emergence source " + source.id);
                     Colony colony = SettleMod.colony(settlementId);
                     if (colony == null) {
-                        // Adopt an existing vanilla village instead of materializing a duplicate.
-                        colony = SettleMod.nearbyVanillaVillage(settlementDimension, x, z, 64,
-                                emergenceBoundSettlementIds());
+                        // Reuse an authored image-map settlement anchor when the emergent
+                        // population site falls nearby. Vanilla worlds instead adopt real
+                        // generated villages. Both paths preserve one canonical Colony ID.
+                        if (source.map != null) {
+                            int anchorRadius = (int) Math.max(64, Math.min(512,
+                                    Math.round(96.0 * Math.max(0.001, source.blocksPerPixel))));
+                            colony = SettleMod.nearbyBlueprintSettlement(settlementDimension,
+                                    source.map.name, x, z, anchorRadius, emergenceBoundSettlementIds());
+                        } else {
+                            colony = SettleMod.nearbyVanillaVillage(settlementDimension, x, z, 64,
+                                    emergenceBoundSettlementIds());
+                        }
                         if (colony != null) {
                             settlementId = colony.s.id;
                             bindPhysicalSettlement(bandId, settlementId);

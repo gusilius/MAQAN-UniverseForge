@@ -426,6 +426,33 @@ public class SettleMod {
                 .orElse(null);
     }
 
+    /** Finds the nearest named settlement anchor imported from this exact image-map package.
+     * WorldSim binds a generated population band to this canonical Colony instead of creating
+     * a second settlement beside the authored map anchor.
+     */
+    public static Colony nearbyBlueprintSettlement(String dimension, String mapId, int x, int z, int radius,
+                                                    java.util.Set<String> excludedSettlementIds) {
+        if (dimension == null || dimension.isBlank() || mapId == null || mapId.isBlank() || radius < 0) return null;
+        java.util.Set<String> excluded = excludedSettlementIds == null ? java.util.Set.of() : excludedSettlementIds;
+        long limit = (long) radius * radius;
+        return COLONIES.values().stream()
+                .filter(colony -> colony != null && colony.s != null && dimension.equals(colony.dim)
+                        && mapId.equals(colony.sourceMapId)
+                        && colony.blueprintSettlementId != null && !colony.blueprintSettlementId.isBlank()
+                        && !excluded.contains(colony.s.id))
+                .filter(colony -> {
+                    long dx = (long) colony.cx - x, dz = (long) colony.cz - z;
+                    return dx * dx + dz * dz <= limit;
+                })
+                .min(java.util.Comparator
+                        .comparingLong((Colony colony) -> {
+                            long dx = (long) colony.cx - x, dz = (long) colony.cz - z;
+                            return dx * dx + dz * dz;
+                        })
+                        .thenComparing(colony -> colony.s.id))
+                .orElse(null);
+    }
+
     /** Finds an emergent colony when vanilla structure discovery arrives after emergence. */
     public static Colony nearbyEmergentSettlement(String dimension, int x, int z, int radius) {
         if (dimension == null || dimension.isBlank() || radius < 0) return null;
