@@ -106,6 +106,17 @@ public class RelationsTest {
         int af = r2.bond("z", n.id).affinity;
         ok(af < 20 && af >= 0, "без общения симпатия остывает до нуля, но не ниже (" + af + ")");
 
+        // NPC-to-NPC bonds use global Character UUID keys and survive the same relations save.
+        Relations npcSocial = new Relations();
+        Relations.Bond npcBond = npcSocial.bond("npc:global-a", "npc:global-b");
+        npcBond.affinity = 52; npcBond.love = 61; npcBond.dating = true; npcBond.met = 12;
+        Relations npcReload = new Relations();
+        npcReload.fromJson(npcSocial.toJson());
+        ok(npcReload.peek("npc:global-a", "npc:global-b") != null
+                        && npcReload.peek("npc:global-a", "npc:global-b").affinity == 52
+                        && npcReload.peek("npc:global-a", "npc:global-b").dating,
+                "NPC-to-NPC global-identity bonds persist through wf_relations save/load");
+
         // сохранение
         Relations.Request q3 = r.offerRequest(w, 100, new Random(8));
         Relations r3 = new Relations(); r3.fromJson(r.toJson());
