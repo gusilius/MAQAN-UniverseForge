@@ -34,6 +34,8 @@ public final class Statecraft {
         /** Exact map tier identity. -1 means a manually-created/non-map title. */
         public int sourceTierIndex = -1;
         public String sourceTierKey = "";
+        /** Full source-map parent edge, retained even when ownership changes or the parent is unclaimed. */
+        public String sourceParentTitleId = "";
         public String name;
         public String holderCharacterId = "";
         public String liegeTitleId = "";
@@ -243,8 +245,10 @@ public final class Statecraft {
         Map<Integer, String> ids = new LinkedHashMap<>();
         int imported = 0;
         for (TitleData.Title source : sourceTitles) {
-            String realmId = ownerBySourceId.get(source.id);
-            if (realmId == null) continue; // unclaimed/neutral titles are not assigned by proximity
+            // Import every geographic title, including neutral/unclaimed cells. Neutral
+            // titles are visible to the political simulation but are never fabricated
+            // into sovereign territory by proximity.
+            String realmId = ownerBySourceId.getOrDefault(source.id, "unclaimed:" + namespace);
             String id = mapTitleId(namespace, source.key);
             ids.put(source.id, id);
             Title target = titles.get(id);
@@ -264,6 +268,8 @@ public final class Statecraft {
             target.sourceTierIndex = source.tier;
             target.sourceTierKey = source.tier >= 0 && source.tier < data.tiers.size()
                     ? data.tiers.get(source.tier).key : "tier_" + source.tier;
+            target.sourceParentTitleId = source.parent > 0 && sourceById.containsKey(source.parent)
+                    ? mapTitleId(namespace, sourceById.get(source.parent).key) : "";
             Object holder = source.props.get("holderCharacterId");
             if (holder instanceof String characterId && !characterId.isBlank())
                 target.holderCharacterId = clean(characterId, "holder Character ID");
@@ -759,7 +765,7 @@ public final class Statecraft {
         root.put("version",1); root.put("sequence",sequence);
         root.put("lastVassalReviewDay", lastVassalReviewDay);
         List<Object> ts=new ArrayList<>();
-        for (Title t:titles.values()) { Map<String,Object> m=new LinkedHashMap<>(); m.put("id",t.id);m.put("realm",t.realmId);m.put("rank",t.rank.name());m.put("sourceTierIndex",t.sourceTierIndex);m.put("sourceTierKey",t.sourceTierKey);m.put("name",t.name);m.put("holder",t.holderCharacterId);m.put("liege",t.liegeTitleId);m.put("claims",new ArrayList<>(t.claims));ts.add(m); }
+        for (Title t:titles.values()) { Map<String,Object> m=new LinkedHashMap<>(); m.put("id",t.id);m.put("realm",t.realmId);m.put("rank",t.rank.name());m.put("sourceTierIndex",t.sourceTierIndex);m.put("sourceTierKey",t.sourceTierKey);m.put("sourceParentTitleId",t.sourceParentTitleId);m.put("name",t.name);m.put("holder",t.holderCharacterId);m.put("liege",t.liegeTitleId);m.put("claims",new ArrayList<>(t.claims));ts.add(m); }
         root.put("titles",ts);
         List<Object> vs=new ArrayList<>();
         for (VassalContract v:vassals.values()) { Map<String,Object> m=new LinkedHashMap<>();m.put("vassal",v.vassalRealm);m.put("liege",v.liegeRealm);m.put("tax",v.taxShare);m.put("levy",v.levyShare);m.put("loyalty",v.loyalty);m.put("protected",v.protectedByLiege);m.put("subjectType",v.subjectType.name());m.put("autonomy",v.autonomy);vs.add(m); }
@@ -797,6 +803,7 @@ public final class Statecraft {
             Title t=next.createTitle(String.valueOf(m.get("id")),String.valueOf(m.get("realm")),Rank.valueOf(String.valueOf(m.get("rank"))),String.valueOf(m.get("name")));
             t.sourceTierIndex=((Number)value(m,"sourceTierIndex",-1)).intValue();
             t.sourceTierKey=String.valueOf(value(m,"sourceTierKey",""));
+            t.sourceParentTitleId=String.valueOf(value(m,"sourceParentTitleId",""));
             t.holderCharacterId=String.valueOf(value(m,"holder",""));
             t.liegeTitleId=String.valueOf(value(m,"liege",""));
             if(m.get("claims") instanceof List<?> claims) for(Object id:claims)t.claims.add(String.valueOf(id));
