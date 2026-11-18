@@ -1429,6 +1429,7 @@ public final class WorldSimMod {
                 JsonObject item = new JsonObject();
                 item.addProperty("id", person.globalId);
                 item.addProperty("realm_id", realmId);
+                item.addProperty("map_id", source.id);
                 item.addProperty("age", Math.max(0, WorldForgeApi.clock().year() - person.birthYear));
                 item.addProperty("alive", person.alive);
                 String spouseGlobalId = canonicalFamilyId(source.registry,
