@@ -32,9 +32,10 @@ public final class HistoricalChronicle {
         public final String category;
         public final String text;
         public final List<String> realms;
+        public final List<String> scopes;
 
         private Entry(String id, long day, int year, int epoch, int cycle,
-                      String category, String text, List<String> realms) {
+                      String category, String text, List<String> realms, List<String> scopes) {
             this.id = id;
             this.day = day;
             this.year = year;
@@ -43,6 +44,7 @@ public final class HistoricalChronicle {
             this.category = category;
             this.text = text;
             this.realms = List.copyOf(realms);
+            this.scopes = List.copyOf(scopes);
         }
     }
 
@@ -68,7 +70,8 @@ public final class HistoricalChronicle {
         int cycle = Math.max(0, (safeYear - startingYear) / YEARS_PER_CYCLE);
         Entry added = new Entry(id, Math.max(0L, worldDay), safeYear, epoch, cycle,
                 event.category == null ? "system" : event.category.id(),
-                event.text.trim(), event.realms == null ? List.of() : event.realms);
+                event.text.trim(), event.realms == null ? List.of() : event.realms,
+                event.scopes == null ? List.of() : event.scopes);
         // The normal path is chronological: append in O(1) instead of sorting the
         // complete history after every event. Delayed facts retain exact ordering via
         // binary search; only the exceptional insertion shifts the suffix.
@@ -116,6 +119,60 @@ public final class HistoricalChronicle {
         int logicalSize = entries.size() - firstEntryIndex;
         int from = requestedEntries <= 0 ? 0 : Math.max(0, logicalSize - requestedEntries);
         List<Entry> selected = entries.subList(firstEntryIndex + from, entries.size());
+        List<String> pages = new ArrayList<>();
+        pages.add("ЛЕТОПИСЬ ЖИВОГО МИРА");
+        pages.add("История, записанная не заранее, а прожитая самим миром.");
+        int previousEpoch = -1;
+        int previousCycle = -1;
+        for (Entry entry : selected) {
+            if (entry.epoch != previousEpoch) {
+                int firstYear = startingYear + entry.epoch * YEARS_PER_EPOCH;
+                pages.add("КНИГА " + roman(entry.epoch + 1) + " · ЭПОХА " + roman(entry.epoch + 1)
+                        + " · " + firstYear + "–" + (firstYear + YEARS_PER_EPOCH - 1));
+                previousEpoch = entry.epoch;
+                previousCycle = -1;
+            }
+            if (entry.cycle != previousCycle) {
+                int firstYear = startingYear + entry.cycle * YEARS_PER_CYCLE;
+                pages.add("Глава " + (entry.cycle + 1) + ". Пятилетие " + firstYear
+                        + "–" + (firstYear + YEARS_PER_CYCLE - 1));
+                previousCycle = entry.cycle;
+            }
+            pages.add(narrate(entry));
+        }
+        if (selected.isEmpty()) pages.add("Пока страницы чисты. История начнётся тогда, когда в мире произойдёт первое подтверждённое событие.");
+        return pages;
+    }
+
+    /** A filtered chronicle for one planet, realm, dynasty, settlement or Character. */
+    public synchronized List<String> bookForScope(String scopeId, int requestedEntries) {
+        String scope = scopeId == null ? "" : scopeId.trim();
+        List<Entry> matching = new ArrayList<>();
+        for (int i = firstEntryIndex; i < entries.size(); i++) {
+            Entry entry = entries.get(i);
+            if (entry.scopes.contains(scope)) matching.add(entry);
+        }
+        int from = requestedEntries <= 0 ? 0 : Math.max(0, matching.size() - requestedEntries);
+        return renderBook(matching.subList(from, matching.size()));
+    }
+
+    public List<String> bookForPlanet(String planetId, int requestedEntries) {
+        return bookForScope("planet:" + planetId, requestedEntries);
+    }
+    public List<String> bookForRealm(String realmId, int requestedEntries) {
+        return bookForScope("realm:" + realmId, requestedEntries);
+    }
+    public List<String> bookForDynasty(String dynastyId, int requestedEntries) {
+        return bookForScope("dynasty:" + dynastyId, requestedEntries);
+    }
+    public List<String> bookForSettlement(String settlementId, int requestedEntries) {
+        return bookForScope("settlement:" + settlementId, requestedEntries);
+    }
+    public List<String> bookForCharacter(String characterId, int requestedEntries) {
+        return bookForScope("character:" + characterId, requestedEntries);
+    }
+
+    private List<String> renderBook(List<Entry> selected) {
         List<String> pages = new ArrayList<>();
         pages.add("ЛЕТОПИСЬ ЖИВОГО МИРА");
         pages.add("История, записанная не заранее, а прожитая самим миром.");
@@ -190,6 +247,7 @@ public final class HistoricalChronicle {
             item.put("category", entry.category);
             item.put("text", entry.text);
             item.put("realms", new ArrayList<>(entry.realms));
+            item.put("scopes", new ArrayList<>(entry.scopes));
             serialized.add(item);
         }
         Map<String, Object> root = new LinkedHashMap<>();
@@ -222,8 +280,12 @@ public final class HistoricalChronicle {
             List<String> realms = new ArrayList<>();
             Object rawRealms = item.get("realms");
             if (rawRealms instanceof List<?> values) for (Object value : values) realms.add(String.valueOf(value));
+            List<String> scopes = new ArrayList<>();
+            Object rawScopes = item.get("scopes");
+            if (rawScopes instanceof List<?> values) for (Object value : values) scopes.add(String.valueOf(value));
+            for (String realm : realms) if (!scopes.contains("realm:" + realm)) scopes.add("realm:" + realm);
             restored.add(new Entry(id, day, year, Math.max(0, epoch), Math.max(0, cycle),
-                    category.isBlank() ? "system" : category, text, realms));
+                    category.isBlank() ? "system" : category, text, realms, scopes));
         }
         if (restored.size() > MAX_ENTRIES) restored = new ArrayList<>(restored.subList(restored.size() - MAX_ENTRIES, restored.size()));
         restored.sort(java.util.Comparator.comparingLong((Entry entry) -> entry.day)
