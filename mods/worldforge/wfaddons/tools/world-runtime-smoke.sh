@@ -223,31 +223,69 @@ done
 grep -q 'Done (' server.log || { tail -120 server.log; echo "ERROR: Forge startup timed out"; exit 3; }
 # Acceptance is an ordinary world startup/runtime smoke test.
 # No runtime, scenario, goals, time acceleration, or forced outcomes.
-if [ "${WF_ACCEPTANCE_MODE:-}" = "smoke" ]; then
-  CURRENT_STAGE="world_runtime_smoke"
+if [ "${WF_ACCEPTANCE_MODE:-}" = "dual-world" ]; then
+  CURRENT_STAGE="same_server_dual_world_genesis"
+  # Load real chunks in the ordinary Overworld and the image-backed dimension.
+  # These are normal Minecraft world-generation requests, not a campaign or a
+  # synthetic data fixture; the mods observe the generated terrain themselves.
+  printf '%s\n' "execute in minecraft:overworld run forceload add -16 -16 32 32" >> in.txt
+  printf 'execute in worldforge:%s run forceload add -16 -16 32 32\n' "$MAP_ID" >> in.txt
+  printf 'execute in worldforge:%s run say MAQAN_MAPPED_DIMENSION_PRESENT=%s\n' "$MAP_ID" "$MAP_ID" >> in.txt
   printf '%s\n' "wfworldsim status" "wfworldsim geography" "wfsettle list" "list" >> in.txt
-  if [ "$VANILLA_RUNTIME" -eq 0 ]; then
-    printf 'execute in worldforge:%s run forceload add 0 0\n' "$MAP_ID" >> in.txt
-    printf 'execute in worldforge:%s run say MAQAN_MAPPED_DIMENSION_PRESENT=%s\n' "$MAP_ID" "$MAP_ID" >> in.txt
-  fi
-  for second in $(seq 1 30); do
-    kill -0 "$SERVER_PID" 2>/dev/null || { tail -160 server.log; echo "ERROR: server exited during ordinary-world runtime smoke"; exit 5; }
+
+  for second in $(seq 1 240); do
+    kill -0 "$SERVER_PID" 2>/dev/null || { tail -200 server.log; echo "ERROR: server exited during same-server dual-world genesis"; exit 5; }
+    if grep -q 'MAQAN_WORLD_GENESIS source=vanilla-world:minecraft:overworld' server.log \
+      && grep -q "MAQAN_WORLD_GENESIS source=$MAP_ID" server.log; then
+      break
+    fi
     sleep 1
   done
-  if [ "$VANILLA_RUNTIME" -eq 0 ]; then
-    grep -Fq "MAQAN_MAPPED_DIMENSION_PRESENT=$MAP_ID" server.log || {
-      tail -160 server.log
-      echo "ERROR: mapped dimension was not resolved by the running Minecraft server"
-      exit 6
-    }
-    grep -Fq "MAQAN_MAP_CHUNK_GENERATED map=$MAP_ID" server.log || {
-      tail -160 server.log
-      echo "ERROR: mapped dimension did not generate a real chunk through MapChunkGenerator"
-      exit 7
-    }
-    printf 'execute in worldforge:%s run forceload query\n' "$MAP_ID" >> in.txt
-    sleep 2
-  fi
+
+  grep -Fq "MAQAN_MAPPED_DIMENSION_PRESENT=$MAP_ID" server.log || {
+    tail -200 server.log
+    echo "ERROR: image dimension was not resolved by the same running Minecraft server"
+    exit 6
+  }
+  grep -Fq "MAQAN_MAP_CHUNK_GENERATED map=$MAP_ID" server.log || {
+    tail -200 server.log
+    echo "ERROR: image dimension did not generate a real chunk through MapChunkGenerator"
+    exit 7
+  }
+  grep -Fq 'MAQAN_WORLD_GENESIS source=vanilla-world:minecraft:overworld' server.log || {
+    tail -200 server.log
+    echo "ERROR: vanilla Overworld did not produce native WorldGenesis evidence"
+    exit 8
+  }
+  grep -Fq "MAQAN_WORLD_GENESIS source=$MAP_ID" server.log || {
+    tail -200 server.log
+    echo "ERROR: image dimension did not produce native WorldGenesis evidence"
+    exit 9
+  }
+
+  python3 - "$OUTPUT" "$MAP_ID" <<'PY'
+import json, pathlib, re, sys
+out, map_id = pathlib.Path(sys.argv[1]), sys.argv[2]
+log = pathlib.Path("server.log").read_text(encoding="utf-8", errors="replace")
+pattern = re.compile(r"MAQAN_WORLD_GENESIS source=(\S+) dimension=(\S+) geography_cells=(\d+) communities=(\d+) settled=(\d+) settlements=(\d+) polities=(\d+) canonical_rulers=(\d+) dynasties=(\d+) titles=(\d+) governments=(\d+) race_kinds=(\d+)")
+rows = {}
+for match in pattern.finditer(log):
+    rows[match.group(1)] = dict(zip(("source","dimension","geography_cells","communities","settled","settlements","polities","canonical_rulers","dynasties","titles","governments","race_kinds"), match.groups()))
+expected = {"vanilla-world:minecraft:overworld", map_id}
+missing = expected - rows.keys()
+if missing:
+    raise SystemExit("Missing same-server genesis sources: " + ", ".join(sorted(missing)))
+for key in sorted(expected):
+    row = rows[key]
+    for field in ("geography_cells","communities","settled","settlements","polities","canonical_rulers","dynasties","titles","governments"):
+        if int(row[field]) <= 0:
+            raise SystemExit(f"{key}: required native genesis field {field} is {row[field]}")
+    if int(row["race_kinds"]) < 2:
+        raise SystemExit(f"{key}: expected at least two actual race identities, got {row['race_kinds']}")
+(out / "same-server-world-genesis.json").write_text(json.dumps({key: rows[key] for key in sorted(expected)}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+print("SAME_SERVER_DUAL_WORLD_GENESIS=PASS")
+for key in sorted(expected): print("WORLD_GENESIS=" + json.dumps(rows[key], ensure_ascii=False, sort_keys=True))
+PY
   printf '%s\n' "stop" >> in.txt
   for _ in $(seq 1 30); do kill -0 "$SERVER_PID" 2>/dev/null || break; sleep 1; done
   if kill -0 "$SERVER_PID" 2>/dev/null; then taskkill.exe //PID "$SERVER_PID" //T //F >/dev/null 2>&1 || kill "$SERVER_PID" 2>/dev/null || true; fi
@@ -255,9 +293,9 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "smoke" ]; then
   SERVER_PID=""
   cp server.log "$OUTPUT/server.log"
   echo "SMOKE_SERVER_SHUTDOWN_CODE=$SERVER_EXIT_CODE"
-  echo "ORDINARY_WORLD_RUNTIME_SMOKE=PASS"
-  echo "NO_RUNTIME_OR_SCENARIO=1"
-  CURRENT_STAGE="smoke_runtime_complete"
+  echo "SAME_SERVER_DUAL_WORLD_GENESIS=PASS"
+  echo "NO_CAMPAIGN_OR_SCENARIO=1"
+  CURRENT_STAGE="dual_world_genesis_complete"
   exit 0
 fi
 
