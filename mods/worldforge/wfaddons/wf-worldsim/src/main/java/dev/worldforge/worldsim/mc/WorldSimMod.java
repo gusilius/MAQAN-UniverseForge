@@ -1038,6 +1038,7 @@ public final class WorldSimMod {
     /** Resolve the planet scope from the canonical polity/band that emitted an emergence fact. */
     private static List<String> emergencePlanetScope(JsonObject state, String subjectId) {
         if (state == null || subjectId == null || subjectId.isBlank()) return List.of();
+        Set<String> scopes = new LinkedHashSet<>();
         if (state.has("polities") && state.get("polities").isJsonArray()) {
             for (var item : state.getAsJsonArray("polities")) if (item.isJsonObject()) {
                 JsonObject polity = item.getAsJsonObject();
@@ -1045,10 +1046,23 @@ public final class WorldSimMod {
                 if (!matches && polity.has("settlement_ids") && polity.get("settlement_ids").isJsonArray())
                     for (var band : polity.getAsJsonArray("settlement_ids"))
                         if (band.isJsonPrimitive() && subjectId.equals(band.getAsString())) { matches = true; break; }
-                if (matches) {
-                    String mapId = polity.has("map_id") ? polity.get("map_id").getAsString() : "";
-                    return mapId.isBlank() ? List.of() : List.of("planet:" + mapId);
+                if (!matches) continue;
+                String mapId = polity.has("map_id") ? polity.get("map_id").getAsString() : "";
+                if (!mapId.isBlank()) scopes.add("planet:" + mapId);
+                String dynastyId = polity.has("dynasty_id") ? polity.get("dynasty_id").getAsString() : "";
+                if (!dynastyId.isBlank()) scopes.add("dynasty:" + dynastyId);
+                String rulerId = polity.has("ruler_global_id") ? polity.get("ruler_global_id").getAsString() : "";
+                if (!rulerId.isBlank()) scopes.add("character:" + rulerId);
+                if (state.has("bands") && state.get("bands").isJsonArray()) {
+                    for (var bandItem : state.getAsJsonArray("bands")) if (bandItem.isJsonObject()) {
+                        JsonObject band = bandItem.getAsJsonObject();
+                        if (!subjectId.equals(band.get("id").getAsString())) continue;
+                        String settlementId = settlementIdForBand(band);
+                        if (settlementId != null && !settlementId.isBlank())
+                            scopes.add("settlement:" + settlementId);
+                    }
                 }
+                return List.copyOf(scopes);
             }
         }
         if (state.has("bands") && state.get("bands").isJsonArray()) {
@@ -1056,7 +1070,11 @@ public final class WorldSimMod {
                 JsonObject band = item.getAsJsonObject();
                 if (!subjectId.equals(band.get("id").getAsString())) continue;
                 String mapId = band.has("map_id") ? band.get("map_id").getAsString() : "";
-                return mapId.isBlank() ? List.of() : List.of("planet:" + mapId);
+                if (!mapId.isBlank()) scopes.add("planet:" + mapId);
+                String settlementId = settlementIdForBand(band);
+                if (settlementId != null && !settlementId.isBlank())
+                    scopes.add("settlement:" + settlementId);
+                return List.copyOf(scopes);
             }
         }
         return List.of();
