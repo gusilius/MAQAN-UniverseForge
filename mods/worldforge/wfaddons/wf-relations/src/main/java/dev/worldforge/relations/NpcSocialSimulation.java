@@ -7,6 +7,8 @@ import dev.worldforge.people.CharacterIdentity;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.CharacterStats;
 import dev.worldforge.people.mc.PeopleMod;
+import dev.worldforge.relations.mc.RelationsMc;
+import dev.worldforge.relations.mc.RelationsMod;
 
 import java.lang.reflect.Method;
 import java.util.*;
