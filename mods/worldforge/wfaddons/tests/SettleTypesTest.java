@@ -29,8 +29,6 @@ public class SettleTypesTest {
         genesis.types = st;
         ok(genesis.refreshType(35, plains, none).equals("village"),
                 "runtime refresh falls back to a valid village founding form when camp/hamlet are over capacity");
-        ok(st.why(st.types.get("mining_town"), 40, List.of(), mount, Map.of("dwarf", 0.20)).isEmpty(),
-                "a meaningful 20% ancestry share can qualify a specialized settlement form");
         ok(st.bestFounding(40, coast, none).id().equals("port"),
                 "founding type respects coastal terrain even before port buildings exist");
         ok(st.best(10, List.of("house", "house"), plains, none).id().equals("hamlet"), "два дома - хутор");
@@ -41,6 +39,8 @@ public class SettleTypesTest {
         ok(st.best(100, port, coast, none).id().equals("port"), "на побережье склад + рынок дают порт: " + st.best(100, port, coast, none).id());
         ok(!st.best(100, port, plains, none).id().equals("port"), "порт не на равнине");
         List<String> mine = new ArrayList<>(Collections.nCopies(4, "house")); mine.addAll(List.of("farm", "iron_mine", "smithy"));
+        ok(st.why(st.types.get("mining_town"), 40, mine, mount, Map.of("dwarf", 0.20)).isEmpty(),
+                "a meaningful 20% ancestry share can qualify a specialized settlement form");
         ok(st.best(40, mine, mount, Map.of("dwarf", 1.0)).id().equals("mining_town"), "горный посёлок гномов");
         ok(!st.why(st.types.get("mining_town"), 40, mine, plains, none).isEmpty(), "горный посёлок не на равнине: " + st.why(st.types.get("mining_town"), 40, mine, plains, none));
 
