@@ -1202,6 +1202,16 @@ public final class WorldSimMod {
             settlementIdentity.addProperty("race_id", colony.identityRace == null ? "" : colony.identityRace);
             settlementIdentity.addProperty("culture_id", colony.identityCulture == null ? "" : colony.identityCulture);
             settlementIdentity.addProperty("government_id", colony.governmentId == null ? "" : colony.governmentId);
+            Map<String, Integer> buildingCounts = new TreeMap<>(), completedBuildingCounts = new TreeMap<>();
+            for (Building building : s.buildings) {
+                if (building == null || building.def == null || building.def.id == null) continue;
+                buildingCounts.merge(building.def.id, 1, Integer::sum);
+                if (building.state == Building.State.DONE)
+                    completedBuildingCounts.merge(building.def.id, 1, Integer::sum);
+            }
+            settlementIdentity.add("building_counts", GSON.toJsonTree(buildingCounts));
+            settlementIdentity.add("completed_building_counts", GSON.toJsonTree(completedBuildingCounts));
+            settlementIdentity.add("resource_stock", GSON.toJsonTree(new TreeMap<>(s.stock)));
             addCatalogEntry(catalogEntries, "wf_settlements", "settlement_instances", s.id, s.name, settlementIdentity);
             item.addProperty("local_pressure", Math.max(0, residentPopulation - s.housing()));
             item.addProperty("last_project_day", lastProjectDay.getOrDefault(s.id, Math.max(0, day - 365)));
