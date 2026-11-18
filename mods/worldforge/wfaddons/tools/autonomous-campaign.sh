@@ -231,12 +231,18 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "smoke" ]; then
   printf '%s\n' "execute in minecraft:overworld run time query daytime" "wfworldsim status" "wfworldsim geography" "wfsettle list" "list" >> in.txt
   if [ "$VANILLA_CAMPAIGN" -eq 0 ]; then
     printf 'execute in worldforge:%s run forceload add 0 0\n' "$MAP_ID" >> in.txt
+    printf 'execute in worldforge:%s run say MAQAN_MAPPED_DIMENSION_PRESENT=%s\n' "$MAP_ID" "$MAP_ID" >> in.txt
   fi
   for second in $(seq 1 20); do
     kill -0 "$SERVER_PID" 2>/dev/null || { tail -160 server.log; echo "ERROR: server exited during ordinary-world runtime smoke"; exit 5; }
     sleep 1
   done
   if [ "$VANILLA_CAMPAIGN" -eq 0 ]; then
+    grep -Fq "MAQAN_MAPPED_DIMENSION_PRESENT=$MAP_ID" server.log || {
+      tail -160 server.log
+      echo "ERROR: mapped dimension was not resolved by the running Minecraft server"
+      exit 6
+    }
     printf 'execute in worldforge:%s run forceload remove 0 0\n' "$MAP_ID" >> in.txt
     printf '%s\n' "wfworldsim geography" >> in.txt
   fi
