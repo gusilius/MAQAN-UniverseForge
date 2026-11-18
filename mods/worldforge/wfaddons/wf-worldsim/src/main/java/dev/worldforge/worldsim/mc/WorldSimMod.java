@@ -862,6 +862,7 @@ public final class WorldSimMod {
         root.addProperty("day", day);
         JsonArray realms = new JsonArray(), borders = new JsonArray(), settlements = new JsonArray(), characters = new JsonArray(), workforce = new JsonArray();
         JsonArray politicalTitles = new JsonArray();
+        JsonArray governmentDefinitions = new JsonArray(), realmGovernments = new JsonArray();
         JsonArray geography = new JsonArray();
         List<EmergenceSource> sources = emergenceSources();
         // Geography is sampled independently of political overlays. A map with no titles/realms
@@ -901,6 +902,42 @@ public final class WorldSimMod {
             realms.add(item);
         }
         Set<String> emittedEmergentBorders = new TreeSet<>();
+        // Export the complete data-pack government catalogue and each realm's
+        // selected government, development level, doctrines and laws.
+        for (var government : RealmsMod.DEFS.govs.values()) {
+            JsonObject definition = new JsonObject();
+            definition.addProperty("id", government.id());
+            definition.addProperty("name", government.name());
+            definition.addProperty("category", government.category());
+            definition.addProperty("succession", government.succession());
+            definition.addProperty("min_level", government.minLevel());
+            definition.add("req_races", GSON.toJsonTree(government.reqRaces()));
+            definition.add("forbid_races", GSON.toJsonTree(government.forbidRaces()));
+            definition.add("req_flags", GSON.toJsonTree(government.reqFlags()));
+            definition.add("req_terrain", GSON.toJsonTree(government.reqTerrain()));
+            definition.add("aff_races", GSON.toJsonTree(government.affRaces()));
+            definition.add("aff_terrain", GSON.toJsonTree(government.affTerrain()));
+            definition.add("mods", GSON.toJsonTree(government.mods()));
+            definition.addProperty("doctrine_slots", government.doctrineSlots());
+            definition.addProperty("law_slots", government.lawSlots());
+            governmentDefinitions.add(definition);
+        }
+        for (TitleData.Realm realm : RealmsMod.realms()) {
+            var policy = RealmsMod.REALMS.state(realm.id);
+            JsonObject selection = new JsonObject();
+            selection.addProperty("realm_id", realm.id);
+            selection.addProperty("government_id", policy.gov == null ? "" : policy.gov);
+            int levelIndex = RealmsMod.DEFS.levels.isEmpty() ? -1 : RealmsMod.REALMS.level(realm.id);
+            String levelId = levelIndex >= 0 && levelIndex < RealmsMod.DEFS.levels.size()
+                    ? RealmsMod.DEFS.levels.get(levelIndex).id() : "";
+            selection.addProperty("level_id", levelId);
+            JsonArray doctrines = new JsonArray();
+            for (String doctrine : new TreeSet<>(policy.nodes)) doctrines.add(doctrine);
+            selection.add("doctrine_ids", doctrines);
+            selection.add("laws", GSON.toJsonTree(new TreeMap<>(policy.laws)));
+            realmGovernments.add(selection);
+        }
+
         // Export the complete authored-map title graph to Rust. This includes every
         // tier, neutral title, parent edge, real liege, holder, claim and province border.
         // The native engine must reason over the same canonical title registry as Java.
@@ -1113,13 +1150,17 @@ public final class WorldSimMod {
         // identical authoritative state must yield identical Rust input bytes.
         sortObjects(realms, Comparator.comparing(item -> item.get("id").getAsString()));
         sortObjects(politicalTitles, Comparator.comparing(item -> item.get("id").getAsString()));
+        sortObjects(governmentDefinitions, Comparator.comparing(item -> item.get("id").getAsString()));
+        sortObjects(realmGovernments, Comparator.comparing(item -> item.get("realm_id").getAsString()));
         sortObjects(borders, Comparator.comparing((JsonObject item) -> item.get("a").getAsString())
                 .thenComparing(item -> item.get("b").getAsString()));
         sortObjects(settlements, Comparator.comparing(item -> item.get("id").getAsString()));
         sortObjects(characters, Comparator.comparing(item -> item.get("id").getAsString()));
         sortObjects(workforce, Comparator.comparing(item -> item.get("settlement_id").getAsString()));
         root.add("geography", geography);
-        root.add("realms", realms); root.add("titles", politicalTitles); root.add("borders", borders); root.add("settlements", settlements);
+        root.add("realms", realms); root.add("titles", politicalTitles);
+        root.add("government_definitions", governmentDefinitions); root.add("realm_governments", realmGovernments);
+        root.add("borders", borders); root.add("settlements", settlements);
         root.add("characters", characters); root.add("workforce", workforce);
         return root;
     }
