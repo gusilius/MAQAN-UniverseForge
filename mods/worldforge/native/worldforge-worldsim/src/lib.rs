@@ -826,7 +826,7 @@ mod tests {
             borders:vec![Border{a:"north".into(),b:"south".into(),contested_claim:true,strategic_value:100,distance_cost:0}],
             settlements:vec![Settlement{id:"village".into(),realm_id:"north".into(),population:40,food:10,food_capacity:100,
                 wood:30,stone:30,housing:100,housing_used:90,farms:0,foresters:0,quarries:0,workshops:0,barracks:1,watch_posts:0,threatened:false,roads:0,local_pressure:20,last_project_day:0}],
-            characters:vec![],workforce:vec![],geography:vec![] }
+            characters:vec![],workforce:vec![],capabilities:vec![],catalog_entries:vec![],diplomatic_relations:vec![],vassal_contracts:vec![],wars:vec![],armies:vec![],social_relations:vec![],named_entities:vec![],geography:vec![] }
     }
     #[test] fn decisions_are_invariant_to_snapshot_collection_and_border_order() {
         let mut original = base();
@@ -910,7 +910,7 @@ mod tests {
     fn map_first_geography_is_valid_without_preseeded_polities_or_settlements() {
         let mut snapshot = WorldSnapshot {
             world_id: "map-first".into(), seed: 9, day: 0,
-            realms: vec![], titles: vec![], government_definitions: vec![], realm_governments: vec![], borders: vec![], settlements: vec![], characters: vec![], workforce: vec![],
+            realms: vec![], titles: vec![], government_definitions: vec![], realm_governments: vec![], borders: vec![], settlements: vec![], characters: vec![], workforce: vec![], capabilities: vec![], catalog_entries: vec![], diplomatic_relations: vec![], vassal_contracts: vec![], wars: vec![], armies: vec![], social_relations: vec![], named_entities: vec![], capabilities: vec![], catalog_entries: vec![], diplomatic_relations: vec![], vassal_contracts: vec![], wars: vec![], armies: vec![], social_relations: vec![], named_entities: vec![],
             geography: vec![GeographicMap {
                 map_id: "planetos".into(), width_px: 128, height_px: 96,
                 blocks_per_pixel_milli: 16000, political_layers_present: true, sample_stride: 4,
