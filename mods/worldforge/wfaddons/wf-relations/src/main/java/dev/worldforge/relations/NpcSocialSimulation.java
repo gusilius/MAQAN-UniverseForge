@@ -53,7 +53,11 @@ public final class NpcSocialSimulation {
                 if (members.size() < 2) continue;
                 members.sort(Comparator.comparing(person -> person.globalId));
                 for (int slot = 0; slot < PAIRS_PER_GROUP_PER_DAY; slot++) {
-                    long hash = mix(seed ^ ((long) day << 32) ^ group.getKey().hashCode() ^ slot * 0x9E3779B97F4A7C15L);
+                    // Keep a small set of neighbours interacting regularly for a quarter-year,
+                    // then rotate the pairs so the whole settlement gradually builds social ties.
+                    long interactionEpoch = Math.floorDiv(day, 90);
+                    long hash = mix(seed ^ (interactionEpoch * 0xD6E8FEB86659FD93L)
+                            ^ group.getKey().hashCode() ^ slot * 0x9E3779B97F4A7C15L);
                     int first = Math.floorMod((int) hash, members.size());
                     int second = Math.floorMod((int) (hash >>> 32), members.size() - 1);
                     if (second >= first) second++;
