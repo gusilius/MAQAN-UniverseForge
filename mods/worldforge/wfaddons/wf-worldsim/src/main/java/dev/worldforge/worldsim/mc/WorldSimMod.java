@@ -1424,7 +1424,11 @@ public final class WorldSimMod {
         for (EmergenceSource source : emergenceSources()) {
             CharacterRegistry registry = source.registry;
             if (registry == null) { complete = false; continue; }
-            String progressPartition = source.map == null ? "__vanilla_world__" : source.id;
+            // Every dimension/map owns an independent materialization cursor and
+            // population index, even when several vanilla dimensions share the same
+            // server-level registry implementation. A single "__vanilla_world__"
+            // cursor silently routed later dimensions through the first dimension's index.
+            String progressPartition = source.id;
             EmergentMapProgress sourceProgress = emergentPeopleProgress.maps.computeIfAbsent(
                     progressPartition, ignored -> new EmergentMapProgress(registry));
             boolean hasSettledBands = false;
