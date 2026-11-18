@@ -373,8 +373,12 @@ public final class WorldSimMod {
         }
 
         long day = WorldForgeApi.clock().dayNumber();
-        if (day <= 0 || (lastDecisionDay != Long.MIN_VALUE
-                && day - lastDecisionDay < DECISION_INTERVAL_DAYS)) return;
+        // The first world frame is a creation-time operation, not a campaign and not
+        // something that waits thirty in-game days. Do not submit an empty snapshot:
+        // ordinary vanilla dimensions become eligible as soon as real chunks have
+        // been observed by VanillaWorldGeography.
+        if (lastDecisionDay != Long.MIN_VALUE
+                && day - lastDecisionDay < DECISION_INTERVAL_DAYS) return;
         if (!NativeWorldSimulation.load()) return;
         if (COMPUTE_SCHEDULER.busy()) {
             PROFILER.setGauge("worldsim.compute.busy", 1);
@@ -384,6 +388,11 @@ public final class WorldSimMod {
         try {
             long phaseStarted = System.nanoTime();
             JsonObject snapshot = snapshot(server, day);
+            if (!hasObservedGeography(snapshot)) {
+                PROFILER.setGauge("worldsim.genesis.waiting_for_geography", 1);
+                return;
+            }
+            PROFILER.setGauge("worldsim.genesis.waiting_for_geography", 0);
             byte[] input = GSON.toJson(snapshot).getBytes(StandardCharsets.UTF_8);
             JsonObject emergenceRequest = new JsonObject();
             emergenceRequest.addProperty("schema_version", NativeWorldSimulation.SNAPSHOT_SCHEMA_VERSION);
@@ -1140,6 +1149,18 @@ public final class WorldSimMod {
             forceCampaignSettlementChunks(server);
         }
         SimulationLod.publish(observers);
+    }
+
+    /** A newly created world is bootstrapped only from terrain actually supplied by its generators. */
+    private static boolean hasObservedGeography(JsonObject snapshot) {
+        if (snapshot == null || !snapshot.has("geography") || !snapshot.get("geography").isJsonArray()) return false;
+        for (var element : snapshot.getAsJsonArray("geography")) {
+            if (!element.isJsonObject()) continue;
+            JsonObject map = element.getAsJsonObject();
+            if (map.has("cells") && map.get("cells").isJsonArray() && !map.getAsJsonArray("cells").isEmpty())
+                return true;
+        }
+        return false;
     }
 
     private static JsonObject snapshot(MinecraftServer server, long day) {
