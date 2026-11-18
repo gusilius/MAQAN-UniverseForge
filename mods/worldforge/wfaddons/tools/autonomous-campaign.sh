@@ -226,6 +226,28 @@ for command in "list" "wftroops types" "wftroops fort list" "wftroops list" "wfs
   printf '%s\n' "$command" >> in.txt
   sleep 2
 done
+# Acceptance is a normal world startup smoke test, not a scripted campaign.
+# Do not inject simulation goals, accelerate time, or require political outcomes.
+if [ "${WF_ACCEPTANCE_MODE:-}" = "smoke" ]; then
+  CURRENT_STAGE="world_runtime_smoke"
+  printf '%s\\n' "wfworldsim status" "wfworldsim geography" "wfsettle list" "list" >> in.txt
+  for second in $(seq 1 30); do
+    kill -0 "$SERVER_PID" 2>/dev/null || { tail -160 server.log; echo "ERROR: server exited during ordinary-world runtime smoke"; exit 5; }
+    sleep 1
+  done
+  printf '%s\\n' "stop" >> in.txt
+  for _ in $(seq 1 30); do kill -0 "$SERVER_PID" 2>/dev/null || break; sleep 1; done
+  if kill -0 "$SERVER_PID" 2>/dev/null; then taskkill.exe //PID "$SERVER_PID" //T //F >/dev/null 2>&1 || kill "$SERVER_PID" 2>/dev/null || true; fi
+  if wait "$SERVER_PID"; then SERVER_EXIT_CODE=0; else SERVER_EXIT_CODE=$?; fi
+  SERVER_PID=""
+  cp server.log "$OUTPUT/server.log"
+  [ "$SERVER_EXIT_CODE" = "0" ] || { echo "ERROR: Forge server shutdown returned $SERVER_EXIT_CODE"; exit 5; }
+  echo "ORDINARY_WORLD_RUNTIME_SMOKE=PASS"
+  echo "NO_CAMPAIGN_OR_SCENARIO=1"
+  CURRENT_STAGE="smoke_runtime_complete"
+  exit 0
+fi
+
 CURRENT_STAGE="geography_preflight"
 if [ "$VANILLA_CAMPAIGN" -eq 1 ]; then
   # A real offline Minecraft client is used as a virtual explorer. Teleports are
