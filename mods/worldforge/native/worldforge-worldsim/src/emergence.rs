@@ -934,14 +934,14 @@ mod tests {
                     "each settlement belongs to at most one sovereign state");
             }
         }
-        assert_eq!(assigned.len(), polities.iter().map(|polity| polity.settlement_ids.len()).sum());
+        assert_eq!(assigned.len(), polities.iter().map(|polity| polity.settlement_ids.len()).sum::<usize>());
     }
 
     #[test]
     fn independent_regional_clusters_found_separate_non_overlapping_polities_in_one_pass() {
         let geography = map();
         let mut bands = Vec::new();
-        for (region, (base_x, base_z)) in [(10_u32, 10_u32), (70, 10), (10, 70)] {
+        for (base_x, base_z) in [(10_u32, 10_u32), (70, 10), (10, 70)] {
             for index in 0..4_u32 {
                 bands.push(EmergentBand {
                     id: format!("region-{base_x}-{base_z}-{index}"),
