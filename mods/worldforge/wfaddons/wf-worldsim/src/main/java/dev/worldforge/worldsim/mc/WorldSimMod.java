@@ -1363,8 +1363,9 @@ public final class WorldSimMod {
                 item.addProperty("culture_id", person.culture == null ? "" : person.culture);
                 item.addProperty("class_id", origin != null && origin.cls != null ? origin.cls
                         : String.valueOf(person.props.getOrDefault("origin.class", "")));
-                item.addProperty("profession_id", origin != null && !origin.prof.isEmpty()
-                        ? origin.prof.keySet().iterator().next()
+                String canonicalProfession = PopulationSimulation.profession(person);
+                item.addProperty("profession_id", !canonicalProfession.isBlank() ? canonicalProfession
+                        : origin != null && !origin.prof.isEmpty() ? origin.prof.keySet().iterator().next()
                         : String.valueOf(person.props.getOrDefault("origin.profession", "")));
                 JsonArray traits = new JsonArray();
                 for (String trait : new TreeSet<>(person.traits)) traits.add(trait);
@@ -1400,6 +1401,16 @@ public final class WorldSimMod {
                 item.add("role_ids", roles);
                 item.add("title_ids", heldTitles);
                 JsonObject skills = new JsonObject(), needs = new JsonObject();
+                for (var skill : PopulationSimulation.skillRanksSnapshot(person).entrySet())
+                    skills.addProperty(skill.getKey(), skill.getValue());
+                for (var need : PopulationSimulation.Need.values())
+                    needs.addProperty(need.name().toLowerCase(Locale.ROOT), PopulationSimulation.need(person, need));
+                JsonArray duties = new JsonArray();
+                for (String duty : new TreeSet<>(PopulationSimulation.duties(person))) duties.add(duty);
+                item.add("duty_ids", duties);
+                item.addProperty("life_stage", PopulationSimulation.lifeStage(person, WorldForgeApi.clock().year()).name());
+                item.addProperty("last_intent", PopulationSimulation.lastIntent(person).name());
+                item.add("profession_history", GSON.toJsonTree(PopulationSimulation.professionHistory(person)));
                 for (var property : person.props.entrySet()) {
                     if (!(property.getValue() instanceof Number value)) continue;
                     String key = property.getKey();
