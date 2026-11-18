@@ -199,9 +199,7 @@ fn bootstrap_vanilla_initial_civilizations(
     polities: &mut Vec<EmergentPolity>,
     events: &mut Vec<EmergenceEvent>,
 ) {
-    if map.cells.is_empty() || polities.iter().any(|polity| polity.map_id == map.map_id) {
-        return;
-    }
+    if map.cells.is_empty() { return; }
     let mut candidates = map.cells.iter()
         .filter(|cell| cell.land && cell.suitability >= 36)
         .collect::<Vec<_>>();
@@ -214,84 +212,83 @@ fn bootstrap_vanilla_initial_civilizations(
                 &format!("{}:{}", b.x, b.z), 0)))
             .then_with(|| a.z.cmp(&b.z)).then_with(|| a.x.cmp(&b.x))
     });
-    let occupied = bands.iter().filter(|band| band.map_id == map.map_id)
-        .map(|band| (band.x, band.z)).collect::<Vec<_>>();
-    let min_x = candidates.iter().map(|cell| cell.x).min().unwrap_or(0);
-    let max_x = candidates.iter().map(|cell| cell.x).max().unwrap_or(min_x);
-    let min_z = candidates.iter().map(|cell| cell.z).min().unwrap_or(0);
-    let max_z = candidates.iter().map(|cell| cell.z).max().unwrap_or(min_z);
-    let observed_span = u64::from(max_x.saturating_sub(min_x).max(max_z.saturating_sub(min_z)).saturating_add(1));
+
+    // Keep founding distance tied to the currently observed sample resolution.
+    // The previous world-span/6 rule spread a handful of communities over the
+    // whole explored area and then merged all of them into one sovereign state.
     let minimum_spacing = u64::from(map.sample_stride.max(1)) * 2;
-    let mut separation = (observed_span / 6).max(minimum_spacing).max(1);
-    let mut selected: Vec<&GeographicCell> = Vec::new();
-    loop {
-        selected.clear();
-        for cell in &candidates {
+    let separation = observed_map_scale(map).max(minimum_spacing).max(1);
+    let bucket_span = separation.saturating_mul(4).min(u64::from(u32::MAX)) as u32;
+    let bucket_span = bucket_span.max(1);
+    let mut groups: BTreeMap<(u32, u32), Vec<&GeographicCell>> = BTreeMap::new();
+    for cell in &candidates {
+        groups.entry((cell.x / bucket_span, cell.z / bucket_span)).or_default().push(*cell);
+    }
+    let mut occupied = bands.iter().filter(|band| band.map_id == map.map_id)
+        .map(|band| (band.x, band.z)).collect::<Vec<_>>();
+    let separation_sq = separation.saturating_mul(separation);
+    let mut founded_polities = 0usize;
+
+    // Several bounded regional cohorts can found independent states in one world.
+    // A settlement is assigned to at most one polity; new frontier observations can
+    // later create additional states without rewriting existing sovereign identities.
+    for ((_region_x, _region_z), regional_candidates) in groups {
+        if founded_polities >= 4 { break; }
+        let mut selected: Vec<&GeographicCell> = Vec::new();
+        for cell in regional_candidates {
             let point = (cell.x, cell.z);
-            if occupied.iter().any(|other| distance_sq(*other, point) < separation * separation)
-                || selected.iter().any(|other| distance_sq((other.x, other.z), point) < separation * separation) {
+            if occupied.iter().any(|other| distance_sq(*other, point) < separation_sq)
+                || selected.iter().any(|other| distance_sq((other.x, other.z), point) < separation_sq) {
                 continue;
             }
             selected.push(cell);
-            if selected.len() == 6 { break; }
+            if selected.len() == 8 { break; }
         }
-        if selected.len() >= 4 || separation <= minimum_spacing { break; }
-        separation = (separation / 2).max(minimum_spacing);
-    }
-    // A newly created vanilla world may expose only a compact spawn-area patch.
-    // If the preferred spacing leaves one to three candidates, do not leave the
-    // dimension permanently without a polity: fill the minimum founding cohort from
-    // distinct viable cells, relaxing spacing only for this initial bootstrap.
-    if selected.len() < 4 {
-        for cell in &candidates {
-            let point = (cell.x, cell.z);
-            if occupied.iter().any(|other| *other == point)
-                || selected.iter().any(|other| (other.x, other.z) == point) {
-                continue;
-            }
-            selected.push(cell);
-            if selected.len() >= 4 { break; }
+
+        let mut settlement_ids = Vec::new();
+        let mut population = 0u64;
+        for cell in selected {
+            let key = format!("{}:{}:{}", map.map_id, cell.x, cell.z);
+            let id = format!("band_{:016x}", roll(seed, "vanilla-initial-band-id", &key, "", 0));
+            if bands.iter().any(|band| band.id == id) { continue; }
+            let residents = 32 + roll(seed, "vanilla-initial-community-size", &key, "", 0) % 9;
+            bands.push(EmergentBand {
+                id: id.clone(), map_id: map.map_id.clone(), x: cell.x, z: cell.z,
+                population: residents, food_reserve: 18 + i64::from(cell.suitability) / 3,
+                settled: true, founded_year: 0, hardship_years: 0, origin_year: cell.discovered_year,
+            });
+            occupied.push((cell.x, cell.z));
+            population += residents;
+            settlement_ids.push(id.clone());
+            events.push(EmergenceEvent { year: 0, kind: "population_origin".into(), subject_id: id.clone(),
+                text: format!("A self-sustaining community emerges in {} terrain", cell.biome) });
+            events.push(EmergenceEvent { year: 0, kind: "settlement_founded".into(), subject_id: id,
+                text: format!("A permanent settlement is founded (initial population {})", residents) });
         }
-    }
-    for cell in selected {
-        let key = format!("{}:{}:{}", map.map_id, cell.x, cell.z);
-        let id = format!("band_{:016x}", roll(seed, "vanilla-initial-band-id", &key, "", 0));
-        if bands.iter().any(|band| band.id == id) { continue; }
-        let residents = 32 + roll(seed, "vanilla-initial-community-size", &key, "", 0) % 9;
-        bands.push(EmergentBand {
-            id: id.clone(), map_id: map.map_id.clone(), x: cell.x, z: cell.z,
-            population: residents, food_reserve: 18 + i64::from(cell.suitability) / 3,
-            settled: true, founded_year: 0, hardship_years: 0, origin_year: cell.discovered_year,
+        settlement_ids.sort();
+        settlement_ids.dedup();
+        if settlement_ids.len() < 4 || population < 120 { continue; }
+        if polities.iter().any(|polity| polity.map_id == map.map_id
+            && polity.settlement_ids.iter().any(|id| settlement_ids.contains(id))) {
+            continue;
+        }
+        let group_key = settlement_ids.join("|");
+        let polity_id = format!("polity_{:016x}",
+            roll(seed, "vanilla-initial-polity-id", &map.map_id, &group_key, 0));
+        if polities.iter().any(|polity| polity.id == polity_id) { continue; }
+        let dynasty_id = format!("house_{:016x}",
+            roll(seed, "vanilla-initial-founding-house", &polity_id, "", 0));
+        let name = format!("{} Realm", polity_id.chars().take(12).collect::<String>());
+        polities.push(EmergentPolity {
+            id: polity_id.clone(), map_id: map.map_id.clone(), name: name.clone(),
+            settlement_ids, population, founded_year: 0, stability: 65,
+            dynasty_id, dynasty_generations: 1, ruler_global_id: None, last_succession_year: 0,
+            years_in_generation: 0, succession_pressure: 0, weak_years: 0,
         });
-        events.push(EmergenceEvent { year: 0, kind: "population_origin".into(), subject_id: id.clone(),
-            text: format!("A self-sustaining community emerges in {} terrain", cell.biome) });
-        events.push(EmergenceEvent { year: 0, kind: "settlement_founded".into(), subject_id: id,
-            text: format!("A permanent settlement is founded (initial population {})", residents) });
+        founded_polities += 1;
+        events.push(EmergenceEvent { year: 0, kind: "state_founded".into(), subject_id: polity_id,
+            text: format!("{} emerges from an independent regional settlement cluster", name) });
     }
-    let mut settlement_ids = bands.iter()
-        .filter(|band| band.map_id == map.map_id && band.settled)
-        .map(|band| band.id.clone()).collect::<Vec<_>>();
-    settlement_ids.sort();
-    settlement_ids.dedup();
-    let population = bands.iter()
-        .filter(|band| band.map_id == map.map_id && band.settled)
-        .map(|band| band.population).sum::<u64>();
-    if settlement_ids.len() < 4 || population < 120 { return; }
-    let group_key = settlement_ids.join("|");
-    let polity_id = format!("polity_{:016x}",
-        roll(seed, "vanilla-initial-polity-id", &map.map_id, &group_key, 0));
-    if polities.iter().any(|polity| polity.id == polity_id) { return; }
-    let dynasty_id = format!("house_{:016x}",
-        roll(seed, "vanilla-initial-founding-house", &polity_id, "", 0));
-    let name = format!("{} Realm", polity_id.chars().take(12).collect::<String>());
-    polities.push(EmergentPolity {
-        id: polity_id.clone(), map_id: map.map_id.clone(), name: name.clone(),
-        settlement_ids, population, founded_year: 0, stability: 65,
-        dynasty_id, dynasty_generations: 1, ruler_global_id: None, last_succession_year: 0,
-        years_in_generation: 0, succession_pressure: 0, weak_years: 0,
-    });
-    events.push(EmergenceEvent { year: 0, kind: "state_founded".into(), subject_id: polity_id,
-        text: format!("{} emerges from the first settled frontier communities", name) });
 }
 
 /// Creates a playable, living baseline for a newly created world from geography alone.
@@ -722,15 +719,23 @@ mod tests {
         let mut polities = Vec::new();
         let mut events = Vec::new();
         bootstrap_initial_civilizations(&map, 424242, &mut bands, &mut polities, &mut events);
-        assert!(bands.len() >= 4, "sparse observed chunks should still seed several communities");
-        assert_eq!(polities.len(), 1, "initial communities across explored spawn terrain should form a polity");
-        assert!(polities[0].settlement_ids.len() >= 4);
+        assert!(bands.len() >= 8, "sparse observed chunks should seed multiple regional communities");
+        assert!(polities.len() >= 2,
+            "separated regional clusters must form multiple sovereign polities, not one world-sized state");
+        let mut owned = BTreeSet::new();
+        for polity in &polities {
+            assert!(polity.settlement_ids.len() >= 4, "every initial polity needs a viable local founding cohort");
+            for settlement_id in &polity.settlement_ids {
+                assert!(owned.insert(settlement_id.as_str()),
+                    "one settlement cannot be assigned to multiple sovereign polities");
+            }
+        }
     }
 
     #[test]
-    fn compact_vanilla_patch_relaxes_spacing_only_to_complete_initial_founders() {
+    fn compact_vanilla_patch_keeps_founders_spatially_separated() {
         let cells = (0..4_u32).map(|index| GeographicCell {
-            x: 30_000_000 + index * 4,
+            x: 30_000_000 + index * 8,
             z: 30_000_000,
             biome: "minecraft:plains".into(),
             elevation: 70,
@@ -753,7 +758,7 @@ mod tests {
         let mut polities = Vec::new();
         bootstrap_initial_civilizations(&map, 424242, &mut bands, &mut polities, &mut Vec::new());
         assert_eq!(bands.iter().filter(|band| band.settled).count(), 4);
-        assert_eq!(polities.len(), 1, "four distinct viable cells must complete the initial polity");
+        assert_eq!(polities.len(), 1, "four viable, spatially separated cells may form one compact polity");
         assert_eq!(polities[0].settlement_ids.len(), 4);
     }
 

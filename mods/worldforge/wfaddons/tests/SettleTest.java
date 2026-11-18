@@ -58,6 +58,17 @@ public class SettleTest {
     public static void main(String[] a) throws Exception {
         Defs d = defs();
         ok(d.validate().stream().noneMatch(m -> !m.startsWith("Предупреждение")), "набор данных без ошибок: " + d.validate());
+        SettleTypes settlementTypes = new SettleTypes();
+        settlementTypes.load(Files.readString(Path.of("wf-settlements/src/main/resources/data/wf_settle/wf_settle/types.json")));
+        Settlement emptyBlueprintSite = new Settlement("empty_blueprint_site", "Empty site", d);
+        emptyBlueprintSite.types = settlementTypes;
+        emptyBlueprintSite.refreshType(0, Map.of("plains", 1.0), Map.of());
+        ok(emptyBlueprintSite.typeId.isBlank(),
+                "empty geographic blueprint anchors are not misclassified as camp settlements");
+        emptyBlueprintSite.refreshType(35, Map.of("plains", 1.0), Map.of());
+        ok("village".equals(emptyBlueprintSite.typeId),
+                "a newly populated founding site receives a real settlement type before buildings exist");
+
         ok(d.buildings.size() >= 90 && d.professions.size() >= 46,
                 "единый каталог содержит сельские и городские постройки и полный набор профессий");
         ok(d.buildings.values().stream().noneMatch(b -> b.limit > 0),

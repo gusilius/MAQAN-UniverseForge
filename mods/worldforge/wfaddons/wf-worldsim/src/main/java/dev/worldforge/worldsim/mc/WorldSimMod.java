@@ -77,6 +77,8 @@ public final class WorldSimMod {
     private static long lastDecisionDay = Long.MIN_VALUE;
     private static long lodTicks;
     private static final Map<String, Long> lastProjectDay = new HashMap<>();
+    /** Avoid repeating unchanged world-census lines on every native compute frame. */
+    private static final Map<String, String> LAST_GENESIS_DIAGNOSTIC_FINGERPRINT = new HashMap<>();
     private static final Deque<String> journal = new ArrayDeque<>();
     private static JsonObject emergenceState;
     private static JsonObject emergenceBindings = new JsonObject();
@@ -247,6 +249,7 @@ public final class WorldSimMod {
     @SubscribeEvent
     public void onStarted(ServerStartedEvent event) {
         lifecycleEpoch++;
+        LAST_GENESIS_DIAGNOSTIC_FINGERPRINT.clear();
         COMPUTE_SCHEDULER.close();
         COMPUTE_SCHEDULER = new WorldSimComputeScheduler();
         pendingComputeRevision = Long.MIN_VALUE;
@@ -550,24 +553,55 @@ public final class WorldSimMod {
                 if (person.alive && race != null && !String.valueOf(race).isBlank())
                     raceIds.add(String.valueOf(race));
             }
-            long settlements = SettleMod.COLONIES.values().stream()
+            List<Colony> sourceColonies = SettleMod.COLONIES.values().stream()
                     .filter(colony -> colony != null && colony.s != null && source.dimension.equals(colony.dim))
-                    .count();
-            Map<String, Long> settlementTypeCounts = SettleMod.COLONIES.values().stream()
-                    .filter(colony -> colony != null && colony.s != null && source.dimension.equals(colony.dim))
+                    .sorted(Comparator.comparing(colony -> colony.s.id)).toList();
+            List<Colony> activeColonies = sourceColonies.stream()
+                    .filter(colony -> colony.s.population() > 0 || !colony.residentCharacterIds.isEmpty()
+                            || !colony.s.buildings.isEmpty() || !colony.s.workers.isEmpty()).toList();
+            long settlements = activeColonies.size();
+            Map<String, Long> settlementTypeCounts = activeColonies.stream()
                     .map(colony -> colony.s.typeId == null || colony.s.typeId.isBlank() ? "unclassified" : colony.s.typeId)
                     .collect(java.util.stream.Collectors.groupingBy(value -> value, TreeMap::new,
                             java.util.stream.Collectors.counting()));
-            long emergentSettlements = SettleMod.COLONIES.values().stream()
-                    .filter(colony -> colony != null && colony.s != null && source.dimension.equals(colony.dim)
-                            && colony.genesisOperationId != null
-                            && colony.genesisOperationId.startsWith("worldsim:settlement:"))
+            Map<String, Long> blueprintSiteTypeCounts = sourceColonies.stream()
+                    .filter(colony -> colony.blueprintSettlementId != null && !colony.blueprintSettlementId.isBlank())
+                    .map(colony -> colony.settlementType == null || colony.settlementType.isBlank()
+                            ? "unspecified" : colony.settlementType)
+                    .collect(java.util.stream.Collectors.groupingBy(value -> value, TreeMap::new,
+                            java.util.stream.Collectors.counting()));
+            long emergentSettlements = activeColonies.stream()
+                    .filter(colony -> colony.genesisOperationId != null
+                            && colony.genesisOperationId.startsWith("worldsim:settlement:")
+                            && (colony.blueprintSettlementId == null || colony.blueprintSettlementId.isBlank()))
                     .count();
-            long mapAnchors = source.map == null ? 0 : SettleMod.COLONIES.values().stream()
-                    .filter(colony -> colony != null && source.dimension.equals(colony.dim)
-                            && source.map.name.equals(colony.sourceMapId)
-                            && colony.blueprintSettlementId != null && !colony.blueprintSettlementId.isBlank())
+            long mapAnchors = sourceColonies.stream()
+                    .filter(colony -> colony.blueprintSettlementId != null && !colony.blueprintSettlementId.isBlank())
                     .count();
+            long emptyBlueprintAnchors = sourceColonies.stream()
+                    .filter(colony -> colony.blueprintSettlementId != null && !colony.blueprintSettlementId.isBlank())
+                    .filter(colony -> colony.s.population() <= 0 && colony.residentCharacterIds.isEmpty()
+                            && colony.s.buildings.isEmpty() && colony.s.workers.isEmpty()).count();
+            Map<String, Long> duplicateCenters = activeColonies.stream()
+                    .collect(java.util.stream.Collectors.groupingBy(colony -> colony.cx + ":" + colony.cz,
+                            java.util.stream.Collectors.counting()));
+            long duplicateSettlementCenters = duplicateCenters.values().stream()
+                    .mapToLong(count -> Math.max(0, count - 1)).sum();
+            final long overlapRadius = 128L;
+            final long overlapRadiusSq = overlapRadius * overlapRadius;
+            Map<String, List<Colony>> overlapBuckets = new HashMap<>();
+            long nearbySettlementConflicts = 0;
+            for (Colony colony : activeColonies) {
+                int bucketX = Math.floorDiv(colony.cx, (int) overlapRadius);
+                int bucketZ = Math.floorDiv(colony.cz, (int) overlapRadius);
+                for (int dx = -1; dx <= 1; dx++) for (int dz = -1; dz <= 1; dz++) {
+                    for (Colony other : overlapBuckets.getOrDefault((bucketX + dx) + ":" + (bucketZ + dz), List.of())) {
+                        long deltaX = (long) colony.cx - other.cx, deltaZ = (long) colony.cz - other.cz;
+                        if (deltaX * deltaX + deltaZ * deltaZ < overlapRadiusSq) nearbySettlementConflicts++;
+                    }
+                }
+                overlapBuckets.computeIfAbsent(bucketX + ":" + bucketZ, ignored -> new ArrayList<>()).add(colony);
+            }
             long livingCharacters = source.registry == null ? 0 : source.registry.all().stream()
                     .filter(person -> person.alive).count();
             long namedCharacters = source.registry == null ? 0 : source.registry.all().stream()
@@ -577,8 +611,7 @@ public final class WorldSimMod {
             long namedTitles = RealmsMod.POLITICS.titles().stream()
                     .filter(title -> realms.stream().anyMatch(realm -> realm.id.equals(title.realmId)))
                     .filter(title -> title.name != null && !title.name.isBlank()).count();
-            long namedSettlements = SettleMod.COLONIES.values().stream()
-                    .filter(colony -> colony != null && colony.s != null && source.dimension.equals(colony.dim))
+            long namedSettlements = activeColonies.stream()
                     .filter(colony -> colony.s.name != null && !colony.s.name.isBlank()).count();
             long courtOffices = source.registry == null ? 0 : source.registry.all().stream()
                     .filter(person -> person.alive)
@@ -615,13 +648,27 @@ public final class WorldSimMod {
                             && realms.stream().anyMatch(realm -> Objects.equals(
                                     String.valueOf(realm.props.getOrDefault("emergence.dynasty_id", "")), dynasty.houseId)))
                     .count();
-            LOGGER.info("MAQAN_WORLD_GENESIS source={} dimension={} geography_cells={} communities={} settled={} settlements={} emergent_settlements={} map_anchors={} living_characters={} named_characters={} named_settlements={} court_offices={} polities={} named_polities={} canonical_rulers={} dynasties={} titles={} named_titles={} governments={} race_kinds={} settlement_types={} government_types={} vassal_contracts={} subject_types={} title_ranks={}",
-                    source.id, source.dimension,
-                    source.map == null ? VanillaWorldGeography.sampledCellCount() : source.map.w * source.map.h,
-                    bands, settled, settlements, emergentSettlements, mapAnchors, livingCharacters, namedCharacters,
-                    namedSettlements, courtOffices, realms.size(), namedPolities, rulers, dynasties, titles, namedTitles,
-                    governments, raceIds.size(), GSON.toJson(settlementTypeCounts), GSON.toJson(governmentTypes),
-                    vassalContracts.size(), GSON.toJson(subjectTypes), GSON.toJson(titleRanks));
+            long geographyCells = source.map == null
+                    ? VanillaWorldGeography.sampledCellCount() : (long) source.map.w * source.map.h;
+            String fingerprint = geographyCells + "|" + bands + "|" + settled + "|" + sourceColonies.size()
+                    + "|" + settlements + "|" + emergentSettlements + "|" + mapAnchors + "|"
+                    + emptyBlueprintAnchors + "|" + duplicateSettlementCenters + "|" + nearbySettlementConflicts
+                    + "|" + livingCharacters + "|" + namedCharacters + "|" + namedSettlements + "|"
+                    + courtOffices + "|" + realms.size() + "|" + namedPolities + "|" + rulers + "|"
+                    + dynasties + "|" + titles + "|" + namedTitles + "|" + governments + "|"
+                    + raceIds + "|" + settlementTypeCounts + "|" + blueprintSiteTypeCounts + "|"
+                    + governmentTypes + "|" + vassalContracts.size() + "|" + subjectTypes + "|" + titleRanks;
+            String previousFingerprint = LAST_GENESIS_DIAGNOSTIC_FINGERPRINT.put(source.id, fingerprint);
+            if (!fingerprint.equals(previousFingerprint)) {
+                LOGGER.info("MAQAN_WORLD_GENESIS source={} dimension={} geography_cells={} communities={} settled={} settlements={} colony_records={} emergent_settlements={} blueprint_sites={} empty_blueprint_sites={} active_settlements={} living_characters={} named_characters={} named_settlements={} court_offices={} polities={} named_polities={} canonical_rulers={} dynasties={} titles={} named_titles={} governments={} race_kinds={} settlement_types={} blueprint_site_types={} government_types={} duplicate_centers={} nearby_center_conflicts={} vassal_contracts={} subject_types={} title_ranks={}",
+                        source.id, source.dimension, geographyCells, bands, settled, settlements, sourceColonies.size(),
+                        emergentSettlements, mapAnchors, emptyBlueprintAnchors, activeColonies.size(),
+                        livingCharacters, namedCharacters, namedSettlements, courtOffices, realms.size(),
+                        namedPolities, rulers, dynasties, titles, namedTitles, governments, raceIds.size(),
+                        GSON.toJson(settlementTypeCounts), GSON.toJson(blueprintSiteTypeCounts),
+                        GSON.toJson(governmentTypes), duplicateSettlementCenters, nearbySettlementConflicts,
+                        vassalContracts.size(), GSON.toJson(subjectTypes), GSON.toJson(titleRanks));
+            }
             if (source.map == null) {
                 int cells = 0, landCells = 0, viable36 = 0, viable48 = 0, maxSuitability = 0;
                 Map<String, Integer> biomeCounts = new TreeMap<>();
@@ -644,8 +691,13 @@ public final class WorldSimMod {
                         biomeCounts.merge(biome, 1, Integer::sum);
                     }
                 }
-                LOGGER.info("MAQAN_VANILLA_GEOGRAPHY source={} cells={} land={} viable36={} viable48={} max_suitability={} biomes={}",
-                        source.id, cells, landCells, viable36, viable48, maxSuitability, GSON.toJson(biomeCounts));
+                String geographyFingerprint = cells + "|" + landCells + "|" + viable36 + "|" + viable48
+                        + "|" + maxSuitability + "|" + biomeCounts;
+                String previousGeographyFingerprint = LAST_GENESIS_DIAGNOSTIC_FINGERPRINT.put(
+                        "vanilla-geography:" + source.id, geographyFingerprint);
+                if (!geographyFingerprint.equals(previousGeographyFingerprint))
+                    LOGGER.info("MAQAN_VANILLA_GEOGRAPHY source={} cells={} land={} viable36={} viable48={} max_suitability={} biomes={}",
+                            source.id, cells, landCells, viable36, viable48, maxSuitability, GSON.toJson(biomeCounts));
             }
         }
     }
@@ -1098,6 +1150,12 @@ public final class WorldSimMod {
                     if (!SettleMod.replaceCanonicalResidentsInMemory(colony.s.id, residentIds))
                         throw new IllegalStateException("Canonical residents could not be attached to settlement " + settlementId);
                     colony.s.setCanonicalPopulation(residentIds.size());
+                    // Classify only after canonical residents are attached. This avoids
+                    // zero-population camp placeholders and uses local terrain plus the
+                    // actual race mix of this settlement's residents.
+                    colony.s.types = SettleMod.TYPES;
+                    colony.s.refreshType(residentIds.size(), emergentSettlementTerrain(source, band),
+                            emergentRaceShares(residents.stream().filter(person -> person.alive).toList()));
                     for (Worker worker : new ArrayList<>(colony.s.workers)) {
                         if (worker.person == null || worker.person.isBlank() || residentIds.contains(worker.person)) continue;
                         dev.worldforge.people.Character former = PeopleMod.authority().getGlobal(worker.person);
@@ -1310,6 +1368,32 @@ public final class WorldSimMod {
                 .collect(java.util.stream.Collectors.toCollection(HashSet::new));
         return PeopleMod.NAMES.generateUnique(race, culture, "settlements",
                 new Random(source.seed ^ bandId.hashCode()), reserved);
+    }
+
+    /** Local terrain identity for settlement founding; do not copy a realm-wide biome mix to every town. */
+    private static Map<String, Double> emergentSettlementTerrain(EmergenceSource source, JsonObject band) {
+        if (source == null || band == null || !band.has("x") || !band.has("z")) return Map.of();
+        String biome = "";
+        int x = band.get("x").getAsInt(), z = band.get("z").getAsInt();
+        try {
+            if (source.map != null) {
+                biome = source.map.biomeKey(source.map.biomeAtPx(x, z));
+            } else {
+                int[] position = source.blockPosition(x, z);
+                biome = VanillaWorldGeography.biomeAtWorldPosition(source.id, position[0], position[1]);
+            }
+        } catch (RuntimeException unavailable) {
+            return Map.of();
+        }
+        String key = biome == null ? "" : biome.toLowerCase(Locale.ROOT);
+        if (key.contains("beach") || key.contains("coast")) return Map.of("coast", 1.0);
+        if (key.contains("mountain") || key.contains("peak") || key.contains("highlands")) return Map.of("mountains", 1.0);
+        if (key.contains("desert") || key.contains("badlands") || key.contains("wasteland")) return Map.of("desert", 1.0);
+        if (key.contains("swamp") || key.contains("marsh")) return Map.of("swamp", 1.0);
+        if (key.contains("snow") || key.contains("frozen") || key.contains("tundra")) return Map.of("tundra", 1.0);
+        if (key.contains("forest") || key.contains("taiga") || key.contains("jungle") || key.contains("wood")) return Map.of("forest", 1.0);
+        if (key.isBlank()) return Map.of();
+        return Map.of("plains", 1.0);
     }
 
     /** Race composition is sampled from the polity's canonical living Characters, not copied into a second population registry. */
@@ -2270,7 +2354,9 @@ public final class WorldSimMod {
                 if (candidate == null || !mapId.equals(candidate.get("map_id").getAsString())) continue;
                 long ownPopulation = Math.max(1L, vassal.get("population").getAsLong());
                 long candidatePopulation = candidate.get("population").getAsLong();
-                if (candidatePopulation < ownPopulation * 3L
+                // A two-to-one demographic advantage is a meaningful regional
+                // power imbalance; the former 3x threshold suppressed most hierarchies.
+                if (candidatePopulation < ownPopulation * 2L
                         || candidate.get("stability").getAsInt() < 60) continue;
                 if (strongest == null || candidatePopulation > strongest.get("population").getAsLong())
                     strongest = candidate;

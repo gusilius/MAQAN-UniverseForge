@@ -755,6 +755,27 @@ public class SettleMod {
                 throw new IllegalStateException("Emergent settlement identity collision: " + id);
             return existing;
         }
+        // Blueprint records are empty geographic candidates. Only a new physical
+        // emergent colony is subject to this active-settlement overlap guard.
+        if (id.startsWith("emg_")) {
+            final long minimumDistance = 128L;
+            final long minimumDistanceSq = minimumDistance * minimumDistance;
+            Colony conflict = COLONIES.values().stream()
+                    .filter(other -> other != null && other.s != null && dim.equals(other.dim))
+                    .filter(other -> other.s.population() > 0 || !other.residentCharacterIds.isEmpty()
+                            || !other.s.buildings.isEmpty() || !other.s.workers.isEmpty())
+                    .filter(other -> {
+                        long dx = (long) other.cx - x, dz = (long) other.cz - z;
+                        return dx * dx + dz * dz < minimumDistanceSq;
+                    })
+                    .min(Comparator.comparingLong(other -> {
+                        long dx = (long) other.cx - x, dz = (long) other.cz - z;
+                        return dx * dx + dz * dz;
+                    })).orElse(null);
+            if (conflict != null)
+                throw new IllegalStateException("Emergent settlement " + id + " would overlap active settlement "
+                        + conflict.s.id + " in " + dim + " (minimum center spacing 128 blocks)");
+        }
         String canonicalName = name == null ? "" : name.trim();
         requireUniqueSettlementName(canonicalName, id);
         Settlement settlement = new Settlement(id, canonicalName, DEFS);

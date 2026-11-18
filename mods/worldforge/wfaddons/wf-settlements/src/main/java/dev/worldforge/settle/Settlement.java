@@ -981,6 +981,9 @@ public final class Settlement {
     public String refreshType(int pop, Map<String, Double> terrain, Map<String, Double> races) { return mutate(() -> { String before = typeId; String result = refreshTypeInternal(pop, terrain, races); if (!Objects.equals(before, typeId)) markMutation(); return result; }); }
 
     private String refreshTypeInternal(int pop, Map<String, Double> terrain, Map<String, Double> races) {
+        // Imported map anchors are geographic candidates, not camps. An uninhabited
+        // site remains unclassified until canonical residents or infrastructure exist.
+        if (pop <= 0 && workers.isEmpty() && buildings.isEmpty()) return "";
         if (types == null) return typeId;
         List<String> built = new ArrayList<>();
         for (Building b : buildings) if (b.state == Building.State.DONE) built.add(b.def.id);
