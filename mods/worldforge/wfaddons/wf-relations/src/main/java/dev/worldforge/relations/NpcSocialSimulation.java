@@ -6,6 +6,7 @@ import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterIdentity;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.CharacterStats;
+import dev.worldforge.people.PopulationSimulation;
 import dev.worldforge.people.mc.PeopleMod;
 import dev.worldforge.relations.mc.RelationsMc;
 import dev.worldforge.relations.mc.RelationsMod;
