@@ -40,6 +40,33 @@ pub struct Border {
     pub distance_cost: i32,
 }
 
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct GovernmentDefinition {
+    pub id: String,
+    pub name: String,
+    pub category: String,
+    pub succession: String,
+    pub min_level: u32,
+    #[serde(default)] pub req_races: Vec<String>,
+    #[serde(default)] pub forbid_races: Vec<String>,
+    #[serde(default)] pub req_flags: Vec<String>,
+    #[serde(default)] pub req_terrain: BTreeMap<String, f64>,
+    #[serde(default)] pub aff_races: BTreeMap<String, f64>,
+    #[serde(default)] pub aff_terrain: BTreeMap<String, f64>,
+    #[serde(default)] pub mods: BTreeMap<String, f64>,
+    pub doctrine_slots: u32,
+    pub law_slots: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct RealmGovernment {
+    pub realm_id: String,
+    pub government_id: String,
+    pub level_id: String,
+    pub doctrine_ids: Vec<String>,
+    pub laws: BTreeMap<String, String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PoliticalTitle {
     pub id: String,
@@ -151,6 +178,11 @@ pub struct WorldSnapshot {
     /// Complete title tree from every loaded authored map, including neutral titles.
     #[serde(default)]
     pub titles: Vec<PoliticalTitle>,
+    /// Complete data-pack government catalogue and each realm's live policy selection.
+    #[serde(default)]
+    pub government_definitions: Vec<GovernmentDefinition>,
+    #[serde(default)]
+    pub realm_governments: Vec<RealmGovernment>,
     pub borders: Vec<Border>,
     pub settlements: Vec<Settlement>,
     pub characters: Vec<Character>,
@@ -236,6 +268,29 @@ impl WorldSnapshot {
             if r.id.trim().is_empty() { return Err(SimError::InvalidSnapshot("empty-realm-id".into())); }
             if !realms.insert(r.id.as_str()) { return Err(SimError::DuplicateRealm(r.id.clone())); }
         }
+        let mut government_ids = BTreeSet::new();
+        for government in &self.government_definitions {
+            if government.id.trim().is_empty() || !government_ids.insert(government.id.as_str()) {
+                return Err(SimError::InvalidSnapshot(format!("invalid-or-duplicate-government:{}", government.id)));
+            }
+            if government.mods.values().chain(government.req_terrain.values())
+                .chain(government.aff_races.values()).chain(government.aff_terrain.values())
+                .any(|value| !value.is_finite()) {
+                return Err(SimError::InvalidSnapshot(format!("non-finite-government-data:{}", government.id)));
+            }
+        }
+        let mut realm_government_ids = BTreeSet::new();
+        for selection in &self.realm_governments {
+            if !realms.contains(selection.realm_id.as_str()) {
+                return Err(SimError::UnknownRealm(selection.realm_id.clone()));
+            }
+            if !selection.government_id.is_empty() && !government_ids.contains(selection.government_id.as_str()) {
+                return Err(SimError::InvalidSnapshot(format!("unknown-government:{}:{}", selection.realm_id, selection.government_id)));
+            }
+            if !realm_government_ids.insert(selection.realm_id.as_str()) {
+                return Err(SimError::InvalidSnapshot(format!("duplicate-realm-government:{}", selection.realm_id)));
+            }
+        }
         let mut title_ids = BTreeSet::new();
         for title in &self.titles {
             if title.id.trim().is_empty() || title.map_id.trim().is_empty()
@@ -310,6 +365,8 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
         }
         *titles_by_map.entry(title.map_id.as_str()).or_default() += 1;
     }
+    diagnostics.push(format!("government_catalog:definitions={}:realm_selections={}",
+        snapshot.government_definitions.len(), snapshot.realm_governments.len()));
     for (map_id, count) in &titles_by_map {
         let tiers = snapshot.titles.iter().filter(|title| title.map_id == *map_id)
             .map(|title| title.tier_index).collect::<BTreeSet<_>>().len();
@@ -512,7 +569,7 @@ mod tests {
     fn base() -> WorldSnapshot {
         WorldSnapshot { world_id:"test-world".into(), seed:42, day:365,
             realms:vec![realm("north",200),realm("south",100)],
-            titles:vec![],
+            titles:vec![], government_definitions:vec![], realm_governments:vec![],
             borders:vec![Border{a:"north".into(),b:"south".into(),contested_claim:true,strategic_value:100,distance_cost:0}],
             settlements:vec![Settlement{id:"village".into(),realm_id:"north".into(),population:40,food:10,food_capacity:100,
                 wood:30,stone:30,housing:100,housing_used:90,farms:0,foresters:0,quarries:0,workshops:0,barracks:1,watch_posts:0,threatened:false,roads:0,local_pressure:20,last_project_day:0}],
@@ -600,7 +657,7 @@ mod tests {
     fn map_first_geography_is_valid_without_preseeded_polities_or_settlements() {
         let mut snapshot = WorldSnapshot {
             world_id: "map-first".into(), seed: 9, day: 0,
-            realms: vec![], titles: vec![], borders: vec![], settlements: vec![], characters: vec![], workforce: vec![],
+            realms: vec![], titles: vec![], government_definitions: vec![], realm_governments: vec![], borders: vec![], settlements: vec![], characters: vec![], workforce: vec![],
             geography: vec![GeographicMap {
                 map_id: "planetos".into(), width_px: 128, height_px: 96,
                 blocks_per_pixel_milli: 16000, political_layers_present: true, sample_stride: 4,
