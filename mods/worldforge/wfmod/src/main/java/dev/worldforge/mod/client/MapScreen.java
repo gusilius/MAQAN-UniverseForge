@@ -521,9 +521,15 @@ public class MapScreen extends Screen {
         if (p == null) return out;
         out.add(Component.literal(p.name).withStyle(Style.EMPTY.withColor(lighten(p.rgb)).withBold(true)));
         List<TitleData.Title> chain = d.chain(p);
-        for (int i = 1; i < chain.size(); i++) {
+        for (int i = 0; i < chain.size(); i++) {
             TitleData.Title t = chain.get(i);
-            out.add(Component.literal(d.tiers.get(t.tier).name + ": ").withStyle(ChatFormatting.GRAY).append(Component.literal(t.name).withStyle(Style.EMPTY.withColor(lighten(t.rgb)))));
+            if (i > 0) out.add(Component.literal(d.tiers.get(t.tier).name + ": ").withStyle(ChatFormatting.GRAY)
+                    .append(Component.literal(t.name).withStyle(Style.EMPTY.withColor(lighten(t.rgb)))));
+            Object holderName = t.props.get("politics.holder_name");
+            if (holderName instanceof String name && !name.isBlank()) {
+                String rankName = t.tier >= 0 && t.tier < d.tiers.size() ? d.tiers.get(t.tier).name : "Титул";
+                out.add(Component.literal("  " + rankName + " · правитель: " + name).withStyle(ChatFormatting.GRAY));
+            }
         }
         TitleData.Realm r = d.realmOf(p);
         if (r != null) {
