@@ -856,7 +856,7 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
     for s in recruitment_settlements {
         let Some(r) = realms.get(s.realm_id.as_str()) else { continue; };
         let threatened = contested_realms.contains(r.id.as_str());
-        if threatened && r.treasury >= 250 && s.food > (s.population as i64) {
+        if threatened && s.food > (s.population as i64) {
             if let Some((unit_role, count)) = recruitment_choice(snapshot, &s.id, &r.id) {
                 proposals.push(Proposal {
                     id: proposal_id(snapshot.seed, snapshot.day, "recruit", &r.id, &s.id),
