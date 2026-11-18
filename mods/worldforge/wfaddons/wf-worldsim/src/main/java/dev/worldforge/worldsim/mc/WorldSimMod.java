@@ -999,6 +999,34 @@ public final class WorldSimMod {
                 if (emittedPoliticalTitleIds.add(titleId)) politicalTitles.add(title);
             }
         }
+        // Include Statecraft-native titles too (e.g. generated duchies/kingdoms
+        // above an image-map's native province/region/state raster).
+        for (var political : RealmsMod.POLITICS.titles()) {
+            if (!emittedPoliticalTitleIds.add(political.id)) continue;
+            TitleData.Realm owner = RealmsMod.realm(political.realmId);
+            Object mapValue = owner == null ? null : owner.props.get("emergence.map_id");
+            JsonObject title = new JsonObject();
+            title.addProperty("id", political.id);
+            title.addProperty("map_id", mapValue == null ? "statecraft" : String.valueOf(mapValue));
+            title.addProperty("key", political.id);
+            title.addProperty("name", political.name == null ? political.id : political.name);
+            title.addProperty("realm_id", political.realmId);
+            title.addProperty("tier_index", political.sourceTierIndex >= 0
+                    ? political.sourceTierIndex : political.rank.ordinal());
+            title.addProperty("tier_key", political.sourceTierKey == null || political.sourceTierKey.isBlank()
+                    ? political.rank.name().toLowerCase(Locale.ROOT) : political.sourceTierKey);
+            String parent = political.sourceParentTitleId == null || political.sourceParentTitleId.isBlank()
+                    ? political.liegeTitleId : political.sourceParentTitleId;
+            title.addProperty("parent_title_id", parent == null ? "" : parent);
+            title.addProperty("liege_title_id", political.liegeTitleId == null ? "" : political.liegeTitleId);
+            title.addProperty("holder_character_id", political.holderCharacterId == null ? "" : political.holderCharacterId);
+            title.addProperty("area_blocks", 0L);
+            JsonArray claims = new JsonArray();
+            for (String claimant : new TreeSet<>(political.claims)) claims.add(claimant);
+            title.add("claims", claims);
+            title.add("neighbors", new JsonArray());
+            politicalTitles.add(title);
+        }
         for (TitleData.Realm realm : RealmsMod.realms()) {
             Object raw = realm.props.get("emergence.neighbors");
             if (raw == null) continue;
