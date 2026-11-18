@@ -460,10 +460,11 @@ public class RealmsMod {
                 }
                 // One canonical bridge owns the initial map-court -> Statecraft crown-holder link.
                 PoliticalIdentitySynchronizer.Report rulerSync =
-                        PoliticalIdentitySynchronizer.synchronizeRulers(map.name, map.titles, people, POLITICS);
+                        PoliticalIdentitySynchronizer.synchronizeRulers(map.name, map.titles, people, POLITICS, PeopleMod.ROLES);
                 if (rulerSync.linked() > 0 || !rulerSync.problems().isEmpty())
-                    LOGGER.info("wf_realms: ruler/title identity sync map={} linked={} unresolved={}",
-                            map.name, rulerSync.linked(), rulerSync.problems().size());
+                    LOGGER.info("wf_realms: ruler/title identity sync map={} linked={} already={} canonicalTitles={} unresolved={}",
+                            map.name, rulerSync.linked(), rulerSync.alreadyLinked(), POLITICS.titles().size(),
+                            rulerSync.problems().size());
                 for (String problem : rulerSync.problems())
                     LOGGER.warn("wf_realms: political identity validation: {}", problem);
                 // Keep the ruler's dynasty label on the realm projection as well as in Statecraft.
