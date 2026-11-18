@@ -1159,6 +1159,60 @@ public final class WorldSimMod {
                 item.addProperty("prestige", (int) number(person.props.get("prestige"), 0));
                 item.addProperty("opinion", (int) number(person.props.get("opinion"), 0));
                 item.addProperty("house_id", person.house == null ? "" : person.house);
+                item.addProperty("display_name", person.name == null ? "" : person.name);
+                Origins.Build origin = OriginsMod.ORIGINS.peek("n:" + person.globalId);
+                item.addProperty("race_id", origin != null && origin.race != null ? origin.race
+                        : String.valueOf(person.props.getOrDefault("origin.race", "")));
+                item.addProperty("culture_id", person.culture == null ? "" : person.culture);
+                item.addProperty("class_id", origin != null && origin.cls != null ? origin.cls
+                        : String.valueOf(person.props.getOrDefault("origin.class", "")));
+                item.addProperty("profession_id", origin != null && !origin.prof.isEmpty()
+                        ? origin.prof.keySet().iterator().next()
+                        : String.valueOf(person.props.getOrDefault("origin.profession", "")));
+                JsonArray traits = new JsonArray();
+                for (String trait : new TreeSet<>(person.traits)) traits.add(trait);
+                item.add("trait_ids", traits);
+                dev.worldforge.people.Character father = source.registry.get(person.father);
+                dev.worldforge.people.Character mother = source.registry.get(person.mother);
+                dev.worldforge.people.Character spouse = source.registry.get(person.spouse);
+                item.addProperty("father_id", father == null ? "" : father.globalId);
+                item.addProperty("mother_id", mother == null ? "" : mother.globalId);
+                item.addProperty("spouse_id", spouse == null ? "" : spouse.globalId);
+                JsonArray children = new JsonArray();
+                for (String childId : person.children) {
+                    dev.worldforge.people.Character child = source.registry.get(childId);
+                    if (child != null) children.add(child.globalId);
+                }
+                item.add("child_ids", children);
+                JsonArray roles = new JsonArray(), heldTitles = new JsonArray();
+                Set<String> roleIds = new TreeSet<>(), titleIds = new TreeSet<>();
+                for (dev.worldforge.people.Character.Post post : person.posts) {
+                    roleIds.add(post.role);
+                    if (post.place != null && post.place.startsWith("title:")
+                            && source.map != null && source.map.titles != null) {
+                        try {
+                            TitleData.Title mapTitle = source.map.titles.get(
+                                    Integer.parseInt(post.place.substring("title:".length())));
+                            if (mapTitle != null) titleIds.add(
+                                    dev.worldforge.realms.Statecraft.mapTitleId(source.map.name, mapTitle.key));
+                        } catch (NumberFormatException ignored) { }
+                    }
+                }
+                roleIds.forEach(roles::add);
+                titleIds.forEach(heldTitles::add);
+                item.add("role_ids", roles);
+                item.add("title_ids", heldTitles);
+                JsonObject skills = new JsonObject(), needs = new JsonObject();
+                for (var property : person.props.entrySet()) {
+                    if (!(property.getValue() instanceof Number value)) continue;
+                    String key = property.getKey();
+                    if (key.startsWith("skill."))
+                        skills.addProperty(key.substring("skill.".length()), value.intValue());
+                    else if (key.startsWith("needs."))
+                        needs.addProperty(key.substring("needs.".length()), value.intValue());
+                }
+                item.add("skills", skills);
+                item.add("needs", needs);
                 characters.add(item);
             }
         }
