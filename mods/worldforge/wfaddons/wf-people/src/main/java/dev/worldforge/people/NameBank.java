@@ -209,6 +209,16 @@ public final class NameBank {
         for (String race : races.keySet()) poolForRace(race, def);
     }
 
+    /** Complete immutable outer snapshot of every loaded cultural/racial naming pool and inheritance edge. */
+    public Map<String, Object> catalogSnapshot() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("default", def);
+        result.put("cultures", Collections.unmodifiableMap(new LinkedHashMap<>(cultures)));
+        result.put("races", Collections.unmodifiableMap(new LinkedHashMap<>(races)));
+        result.put("race_parents", Collections.unmodifiableMap(new LinkedHashMap<>(raceParents)));
+        return Collections.unmodifiableMap(result);
+    }
+
     public String culture(String wanted) { return cultures.containsKey(wanted) ? wanted : def; }
 
     public String pickGivenName(String race, String culture, String gender, Random random) {
