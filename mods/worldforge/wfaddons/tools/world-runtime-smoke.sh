@@ -244,6 +244,7 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "dual-world" ]; then
       && grep -Fq 'wf_court: autonomous virtual court attached dimension=minecraft:overworld' server.log \
       && grep -Fq 'wf_relations: autonomous social event kind=friendship' server.log \
       && grep -Fq 'wf_relations: autonomous social event kind=marriage' server.log \
+      && grep -Fq 'MAQAN_AUTONOMOUS_BIRTH' server.log \
       && grep -Fq 'wf_reputation: autonomous NPC reputation events=' server.log; then
       break
     fi
@@ -284,6 +285,11 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "dual-world" ]; then
     tail -200 server.log
     echo "ERROR: autonomous NPC marriage produced no events"
     exit 13
+  }
+  grep -Fq 'MAQAN_AUTONOMOUS_BIRTH' server.log || {
+    tail -200 server.log
+    echo "ERROR: autonomous court simulation produced no child births"
+    exit 14
   }
   grep -Fq 'wf_reputation: autonomous NPC reputation events=' server.log || {
     tail -200 server.log
