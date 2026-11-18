@@ -372,12 +372,12 @@ fn settlement_allows_building(snapshot: &WorldSnapshot, settlement_id: &str, bui
         .find(|entry| entry.module_id == "wf_settlements"
             && entry.catalog_id == "settlement_types" && entry.entry_id == type_id);
     let Some(payload) = definition.map(|entry| &entry.payload) else { return true; };
-    let banned = payload.get("ban_buildings").or_else(|| payload.get("ban"))
+    let banned = payload.get("ban_buildings").or_else(|| payload.get("banBuildings")).or_else(|| payload.get("ban"))
         .and_then(serde_json::Value::as_array);
     if banned.map(|values| values.iter().any(|value| value.as_str() == Some(building))).unwrap_or(false) {
         return false;
     }
-    let allowed = payload.get("allow_buildings").or_else(|| payload.get("allow"))
+    let allowed = payload.get("allow_buildings").or_else(|| payload.get("allowBuildings")).or_else(|| payload.get("allow"))
         .and_then(serde_json::Value::as_array);
     allowed.map(|values| values.is_empty() || values.iter().any(|value| value.as_str() == Some(building)))
         .unwrap_or(true)
@@ -519,7 +519,8 @@ impl WorldSnapshot {
         let mut war_ids = BTreeSet::new();
         for war in &self.wars {
             if war.id.trim().is_empty() || !war_ids.insert(war.id.as_str())
-                || !realms.contains(war.attacker_realm.as_str()) || !realms.contains(war.defender_realm.as_str())
+                || (war.status == "ACTIVE" && (!realms.contains(war.attacker_realm.as_str())
+                    || !realms.contains(war.defender_realm.as_str())))
                 || war.attacker_realm == war.defender_realm {
                 return Err(SimError::InvalidSnapshot(format!("invalid-war:{}", war.id)));
             }
@@ -543,7 +544,7 @@ impl WorldSnapshot {
         }
         let mut named_ids = BTreeSet::new();
         for entity in &self.named_entities {
-            if entity.id.trim().is_empty() || entity.kind.trim().is_empty() || entity.name.trim().is_empty()
+            if entity.id.trim().is_empty() || entity.kind.trim().is_empty()
                 || !named_ids.insert((entity.kind.as_str(), entity.id.as_str())) {
                 return Err(SimError::InvalidSnapshot(format!("invalid-or-duplicate-named-entity:{}:{}", entity.kind, entity.id)));
             }
