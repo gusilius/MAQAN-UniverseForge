@@ -1112,6 +1112,14 @@ public final class WorldSimMod {
             politicalTitles.add(title);
             addNamedEntity(namedEntities, political.id, "title", political.name, parent, political.realmId);
         }
+        for (var dynasty : RealmsMod.POLITICS.dynasties()) {
+            addNamedEntity(namedEntities, dynasty.houseId, "dynasty", dynasty.name, "", "");
+            JsonObject dynastyData = new JsonObject();
+            dynastyData.addProperty("founder_character_id", dynasty.founderCharacterId);
+            dynastyData.addProperty("prestige", dynasty.prestige);
+            dynastyData.add("member_character_ids", GSON.toJsonTree(new TreeSet<>(dynasty.members)));
+            addCatalogEntry(catalogEntries, "wf_realms", "dynasties", dynasty.houseId, dynasty.name, dynastyData);
+        }
         for (TitleData.Realm realm : RealmsMod.realms()) {
             Object raw = realm.props.get("emergence.neighbors");
             if (raw == null) continue;
@@ -1161,6 +1169,32 @@ public final class WorldSimMod {
                     .mapToInt(road -> Math.max(0, road.builtSegments)).sum();
             item.addProperty("roads", roadSegments);
             addNamedEntity(namedEntities, s.id, "settlement", s.name, "", settlementRealm);
+            // Export the actual infrastructure graph, not merely a road count.
+            if (colony.map != null) {
+                for (var road : colony.map.roads.values()) {
+                    JsonObject roadData = new JsonObject();
+                    roadData.addProperty("road_id", road.id); roadData.addProperty("surface", road.surface);
+                    roadData.addProperty("built_segments", Math.max(0, road.builtSegments));
+                    JsonArray nodes = new JsonArray();
+                    for (var node : road.path) {
+                        JsonObject point = new JsonObject();
+                        point.addProperty("x", node.gx()); point.addProperty("z", node.gz());
+                        nodes.add(point);
+                    }
+                    roadData.add("path", nodes);
+                    addCatalogEntry(catalogEntries, "wf_settlements", "road_network",
+                            s.id + ":road:" + road.id, "Road " + road.id, roadData);
+                }
+                for (var plan : colony.map.plans.values())
+                    addCatalogEntry(catalogEntries, "wf_settlements", "construction_plans",
+                            s.id + ":plan:" + plan.buildingUid, plan.buildingId, GSON.toJsonTree(plan));
+                for (var warehouse : colony.map.warehouses.values())
+                    addCatalogEntry(catalogEntries, "wf_settlements", "warehouses",
+                            s.id + ":warehouse:" + warehouse.id, warehouse.id, GSON.toJsonTree(warehouse));
+                for (var job : colony.map.logistics.values())
+                    addCatalogEntry(catalogEntries, "wf_settlements", "logistics_jobs",
+                            s.id + ":logistics:" + job.id, job.resource, GSON.toJsonTree(job));
+            }
             JsonObject settlementIdentity = new JsonObject();
             settlementIdentity.addProperty("type_id", colony.settlementType == null ? "" : colony.settlementType);
             settlementIdentity.addProperty("source_map_id", colony.sourceMapId == null ? "" : colony.sourceMapId);
@@ -1198,6 +1232,16 @@ public final class WorldSimMod {
         }
         addCatalogEntry(catalogEntries, "wf_people", "name_pools", "all_pools", "Cultural and racial naming pools",
                 GSON.toJsonTree(PeopleMod.NAMES.catalogSnapshot()));
+        if (SettleMod.DEFS != null) {
+            for (var building : SettleMod.DEFS.buildings.values())
+                addCatalogEntry(catalogEntries, "wf_settlements", "buildings", building.id, building.name, GSON.toJsonTree(building));
+            for (var profession : SettleMod.DEFS.professions.values())
+                addCatalogEntry(catalogEntries, "wf_settlements", "building_professions", profession.id, profession.name, GSON.toJsonTree(profession));
+            for (var resource : SettleMod.DEFS.resourceNames.entrySet())
+                addCatalogEntry(catalogEntries, "wf_settlements", "resources", resource.getKey(), resource.getValue(),
+                        GSON.toJsonTree(Map.of("name", resource.getValue(),
+                                "base_price", SettleMod.DEFS.prices.getOrDefault(resource.getKey(), 0.0))));
+        }
         for (var type : SettleMod.TYPES.types.values())
             addCatalogEntry(catalogEntries, "wf_settlements", "settlement_types", type.id(), type.name(), GSON.toJsonTree(type));
         // Export all loaded profession definitions and all configured race/class/origin
@@ -1208,6 +1252,10 @@ public final class WorldSimMod {
             addCatalogEntry(catalogEntries, "wf_origins", "races", race.id(), race.name(), GSON.toJsonTree(race));
         for (var cls : OriginsMod.ORIGINS.defs.classes.values())
             addCatalogEntry(catalogEntries, "wf_origins", "classes", cls.id(), cls.name(), GSON.toJsonTree(cls));
+        for (var profession : OriginsMod.DEFS.professions.values())
+            addCatalogEntry(catalogEntries, "wf_origins", "origin_professions", profession.id(), profession.name(), GSON.toJsonTree(profession));
+        for (var synergy : OriginsMod.DEFS.synergies.values())
+            addCatalogEntry(catalogEntries, "wf_origins", "synergies", synergy.id(), synergy.name(), GSON.toJsonTree(synergy));
         // Resolve band -> polity from the last committed emergence frame. Residents from
         // either geography source then enter the same Character snapshot by canonical UUID.
         Map<String, String> polityByBand = new HashMap<>();
@@ -1370,13 +1418,24 @@ public final class WorldSimMod {
         // WorldSim class remains loadable when that addon is not installed.
         int exportedSocialRelations = exportSocialRelations(socialRelations, emittedCharacterIds);
         // Capabilities distinguish absent optional modules from present-but-empty catalogs.
+        addCapability(capabilities, "worldforge", 1, net.minecraftforge.fml.ModList.get().isLoaded("worldforge"), 0, sources.size());
+        addCapability(capabilities, "wf_worldsim", 1, true, 0, 1);
         addCapability(capabilities, "wf_realms", 1, true, RealmsMod.DEFS.govs.size()
-                + RealmsMod.DEFS.levels.size() + RealmsMod.DEFS.laws.size(), RealmsMod.realms().size());
+                + RealmsMod.DEFS.levels.size() + RealmsMod.DEFS.terrains.size()
+                + RealmsMod.DEFS.branches.size() + RealmsMod.DEFS.laws.size(), RealmsMod.realms().size());
         addCapability(capabilities, "wf_settlements", 1, true, SettleMod.TYPES.types.size(), SettleMod.COLONIES.size());
         addCapability(capabilities, "wf_army", 1, true, ArmyMod.loadedEngines().stream().mapToInt(engine -> engine.types.size()).sum(),
                 armies.size());
         addCapability(capabilities, "wf_people", 1, true, PeopleMod.PROFESSIONS.all().size(), characters.size());
         addCapability(capabilities, "wf_relations", 1, net.minecraftforge.fml.ModList.get().isLoaded("wf_relations"), 0, exportedSocialRelations);
+        addCapability(capabilities, "wf_origins", 1, true, OriginsMod.DEFS.races.size()
+                + OriginsMod.DEFS.classes.size() + OriginsMod.DEFS.professions.size()
+                + OriginsMod.DEFS.synergies.size(), characters.size());
+        addCapability(capabilities, "wf_court", 1, net.minecraftforge.fml.ModList.get().isLoaded("wf_court"), 0, 0);
+        addCapability(capabilities, "wf_war", 1, net.minecraftforge.fml.ModList.get().isLoaded("wf_war"), 0, wars.size());
+        addCapability(capabilities, "wf_trade", 1, net.minecraftforge.fml.ModList.get().isLoaded("wf_trade"), 0, 0);
+        for (String optionalModule : List.of("wf_troops", "wf_rts", "wf_genesis", "wf_progress", "wf_reputation"))
+            addCapability(capabilities, optionalModule, 1, net.minecraftforge.fml.ModList.get().isLoaded(optionalModule), 0, 0);
         sortObjects(catalogEntries, Comparator.comparing((JsonObject item) -> item.get("module_id").getAsString())
                 .thenComparing(item -> item.get("catalog_id").getAsString()).thenComparing(item -> item.get("entry_id").getAsString()));
         sortObjects(diplomaticRelations, Comparator.comparing((JsonObject item) -> item.get("realm_a").getAsString())
