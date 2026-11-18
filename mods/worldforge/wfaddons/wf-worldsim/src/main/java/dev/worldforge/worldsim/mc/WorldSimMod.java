@@ -1078,7 +1078,8 @@ public final class WorldSimMod {
                 if (!mapId.isBlank()) scopes.add("planet:" + mapId);
                 String dynastyId = polity.has("dynasty_id") ? polity.get("dynasty_id").getAsString() : "";
                 if (!dynastyId.isBlank()) scopes.add("dynasty:" + dynastyId);
-                String rulerId = polity.has("ruler_global_id") ? polity.get("ruler_global_id").getAsString() : "";
+                String rulerId = polity.has("ruler_global_id") && !polity.get("ruler_global_id").isJsonNull()
+                        ? polity.get("ruler_global_id").getAsString() : "";
                 if (!rulerId.isBlank()) scopes.add("character:" + rulerId);
                 if (state.has("bands") && state.get("bands").isJsonArray()) {
                     for (var bandItem : state.getAsJsonArray("bands")) if (bandItem.isJsonObject()) {
