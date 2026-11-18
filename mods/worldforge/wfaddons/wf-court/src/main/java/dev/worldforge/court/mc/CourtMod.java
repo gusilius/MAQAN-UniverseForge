@@ -264,7 +264,7 @@ public class CourtMod {
             try { if (Files.exists(file)) created.fromJson(Files.readString(file)); }
             catch (Exception ex) { LOGGER.error("wf_court: не удалось прочитать автономный двор {}: {}", key, ex.toString()); }
             LOGGER.info("wf_court: autonomous virtual court attached dimension={} realms={} canonical_characters={}",
-                    key, data.realmList().size(), registry.size());
+                    key, data.realmList().size(), registry.all().size());
             return created;
         });
         return sim;
