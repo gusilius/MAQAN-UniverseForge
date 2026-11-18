@@ -62,6 +62,20 @@ public final class NpcSocialSimulation {
                     int second = Math.floorMod((int) (hash >>> 32), members.size() - 1);
                     if (second >= first) second++;
                     Character a = members.get(first), b = members.get(second);
+                    // Prefer a biologically compatible adult pair when one exists in the same
+                    // social band. The starting candidate remains deterministic; this avoids
+                    // starving marriage simulation merely because random slots keep pairing
+                    // same-gender neighbours in a small settlement.
+                    if (a.gender.equals(b.gender)) {
+                        for (int offset = 1; offset < members.size(); offset++) {
+                            Character candidate = members.get((second + offset) % members.size());
+                            if (!candidate.gender.equals(a.gender) && candidate.alive
+                                    && year - candidate.birthYear >= 18) {
+                                b = candidate;
+                                break;
+                            }
+                        }
+                    }
                     if (a == b || !a.alive || !b.alive) continue;
                     interact(relations, registry, a, b, group.getKey(), members, day, year);
                     interactions++;
@@ -107,7 +121,7 @@ public final class NpcSocialSimulation {
             ba.love = clamp(ba.love + loveDelta, 0, 100);
             if (ab.affinity >= 40 && ab.love >= 35) { ab.dating = true; ba.dating = true; }
             long marriageRoll = mix(a.globalId.hashCode() * 31L + b.globalId.hashCode() + day + groupId.hashCode());
-            if (ab.affinity >= 65 && ab.love >= 60 && Math.floorMod(marriageRoll, 24) == 0) {
+            if (ab.affinity >= 35 && ab.love >= 20 && Math.floorMod(marriageRoll, 8) == 0) {
                 try {
                     registry.marry(a.id, b.id, year);
                     ab.married = ba.married = true;
