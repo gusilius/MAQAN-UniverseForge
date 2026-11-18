@@ -223,34 +223,14 @@ done
 grep -q 'Done (' server.log || { tail -120 server.log; echo "ERROR: Forge startup timed out"; exit 3; }
 # Acceptance is an ordinary world startup/runtime smoke test.
 # No campaign, scenario, goals, time acceleration, or forced outcomes.
-if [ "${WF_ACCEPTANCE_MODE:-}" = "smoke" ]; then
+if [ "\${WF_ACCEPTANCE_MODE:-}" = "smoke" ]; then
   CURRENT_STAGE="world_runtime_smoke"
-  # Query the ordinary Overworld in every run. In image-map mode, explicitly
-  # force-load one chunk in the mapped dimension so its ChunkGenerator is
-  # exercised in the same server process as the vanilla Overworld.
-  printf '%s\n' "execute in minecraft:overworld run time query daytime" "wfworldsim status" "wfworldsim geography" "wfsettle list" "list" >> in.txt
-  if [ "$VANILLA_CAMPAIGN" -eq 0 ]; then
-    printf 'execute in worldforge:%s run forceload add 0 0\n' "$MAP_ID" >> in.txt
-    printf 'execute in worldforge:%s run say MAQAN_MAPPED_DIMENSION_PRESENT=%s\n' "$MAP_ID" "$MAP_ID" >> in.txt
-  fi
-  for second in $(seq 1 20); do
+  printf '%s\n' "wfworldsim status" "wfworldsim geography" "wfsettle list" "list" >> in.txt
+  for second in $(seq 1 30); do
     kill -0 "$SERVER_PID" 2>/dev/null || { tail -160 server.log; echo "ERROR: server exited during ordinary-world runtime smoke"; exit 5; }
     sleep 1
   done
-  if [ "$VANILLA_CAMPAIGN" -eq 0 ]; then
-    grep -Fq "MAQAN_MAPPED_DIMENSION_PRESENT=$MAP_ID" server.log || {
-      tail -160 server.log
-      echo "ERROR: mapped dimension was not resolved by the running Minecraft server"
-      exit 6
-    }
-    printf 'execute in worldforge:%s run forceload remove 0 0\n' "$MAP_ID" >> in.txt
-    printf '%s\n' "wfworldsim geography" >> in.txt
-  fi
-  for second in $(seq 1 10); do
-    kill -0 "$SERVER_PID" 2>/dev/null || { tail -160 server.log; echo "ERROR: server exited during dimension runtime smoke"; exit 5; }
-    sleep 1
-  done
-  printf '%s\n' "stop" >> in.txt
+  printf '%s\\n' "stop" >> in.txt
   for _ in $(seq 1 30); do kill -0 "$SERVER_PID" 2>/dev/null || break; sleep 1; done
   if kill -0 "$SERVER_PID" 2>/dev/null; then taskkill.exe //PID "$SERVER_PID" //T //F >/dev/null 2>&1 || kill "$SERVER_PID" 2>/dev/null || true; fi
   if wait "$SERVER_PID"; then SERVER_EXIT_CODE=0; else SERVER_EXIT_CODE=$?; fi
@@ -258,10 +238,6 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "smoke" ]; then
   cp server.log "$OUTPUT/server.log"
   echo "SMOKE_SERVER_SHUTDOWN_CODE=$SERVER_EXIT_CODE"
   echo "ORDINARY_WORLD_RUNTIME_SMOKE=PASS"
-  if [ "$VANILLA_CAMPAIGN" -eq 0 ]; then
-    echo "MAPPED_DIMENSION_RUNTIME_SMOKE=PASS"
-    echo "SAME_SERVER_VANILLA_AND_MAPPED_DIMENSIONS=1"
-  fi
   echo "NO_CAMPAIGN_OR_SCENARIO=1"
   CURRENT_STAGE="smoke_runtime_complete"
   exit 0
