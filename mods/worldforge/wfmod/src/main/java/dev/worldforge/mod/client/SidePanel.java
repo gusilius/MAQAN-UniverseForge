@@ -303,6 +303,11 @@ final class SidePanel {
         for (int i = chain.size() - 1; i >= 0; i--) {
             TitleData.Title t = chain.get(i);
             c.swatch(t.rgb, d.tiers.get(t.tier).name + ": " + t.name, i == 0 ? TX : MUTED, (chain.size() - 1 - i) * 4, null);
+            Object ruler = t.props.get("politics.holder_name");
+            if (ruler instanceof String name && !name.isBlank())
+                c.kv("Правитель", name);
+            else
+                c.kv("Правитель", "не назначен");
         }
         boolean any = false;
         for (Map.Entry<String, Object> e : p.props.entrySet()) {
