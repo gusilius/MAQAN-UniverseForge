@@ -2534,8 +2534,9 @@ public final class WorldSimMod {
                 }
                 String fallback = String.valueOf(realms.get(politicalTitle.realmId).props
                         .getOrDefault("emergence.ruler_global_id", ""));
-                grantEmergentTerritoryHolder(politicalTitle.id, nearestBand,
-                        populationIndex, year, fallback);
+                // The authoritative wf-people title office is assigned after this
+                // complete ownership pass; do not pre-fill the holder with a random
+                // resident or it would mask the canonical office-holder identity.
             }
             // Extend the imported geographic province -> region tree into a real
             // political hierarchy. Static map packages deliberately contain geography,
