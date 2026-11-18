@@ -184,6 +184,94 @@ pub struct GeographicMap {
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct CapabilityDescriptor {
+    pub module_id: String,
+    pub schema_version: u32,
+    pub available: bool,
+    #[serde(default)] pub catalog_count: u32,
+    #[serde(default)] pub entity_count: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct CatalogEntry {
+    pub module_id: String,
+    pub catalog_id: String,
+    pub entry_id: String,
+    #[serde(default)] pub name: String,
+    #[serde(default)] pub payload: serde_json::Value,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct DiplomaticRelation {
+    pub realm_a: String,
+    pub realm_b: String,
+    pub opinion: i32,
+    #[serde(default)] pub treaties: Vec<String>,
+    #[serde(default)] pub truce_until_day: Day,
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct VassalContract {
+    pub vassal_realm: String,
+    pub liege_realm: String,
+    pub subject_type: String,
+    pub tax_share: f64,
+    pub levy_share: f64,
+    pub loyalty: i32,
+    pub autonomy: i32,
+    pub protected_by_liege: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct WarState {
+    pub id: String,
+    pub attacker_realm: String,
+    pub defender_realm: String,
+    pub casus_belli: String,
+    pub declared_by_character_id: String,
+    pub war_score: i32,
+    pub start_day: Day,
+    pub status: String,
+    pub outcome: String,
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ArmyFormation {
+    pub id: String,
+    pub realm_id: String,
+    pub name: String,
+    pub commander_id: String,
+    pub martial: i32,
+    pub men: u32,
+    pub morale: f64,
+    pub supply: f64,
+    pub location_title_id: String,
+    #[serde(default)] pub unit_counts: BTreeMap<String, u32>,
+    pub power: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SocialRelation {
+    pub character_a: String,
+    pub character_b: String,
+    pub relationship: i32,
+    pub love: i32,
+    pub married: bool,
+    pub dating: bool,
+    pub employed: bool,
+    pub last_contact_day: Day,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct NamedEntity {
+    pub id: String,
+    pub kind: String,
+    pub name: String,
+    #[serde(default)] pub parent_id: String,
+    #[serde(default)] pub owner_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct WorldSnapshot {
     pub world_id: String,
     pub seed: u64,
@@ -201,6 +289,15 @@ pub struct WorldSnapshot {
     pub settlements: Vec<Settlement>,
     pub characters: Vec<Character>,
     pub workforce: Vec<Workforce>,
+    /// Module-owned capability and definition catalogs. Entries are never truncated by category.
+    #[serde(default)] pub capabilities: Vec<CapabilityDescriptor>,
+    #[serde(default)] pub catalog_entries: Vec<CatalogEntry>,
+    #[serde(default)] pub diplomatic_relations: Vec<DiplomaticRelation>,
+    #[serde(default)] pub vassal_contracts: Vec<VassalContract>,
+    #[serde(default)] pub wars: Vec<WarState>,
+    #[serde(default)] pub armies: Vec<ArmyFormation>,
+    #[serde(default)] pub social_relations: Vec<SocialRelation>,
+    #[serde(default)] pub named_entities: Vec<NamedEntity>,
     /// Optional, political-overlay-free geography. Missing in legacy snapshots.
     #[serde(default)]
     pub geography: Vec<GeographicMap>,
