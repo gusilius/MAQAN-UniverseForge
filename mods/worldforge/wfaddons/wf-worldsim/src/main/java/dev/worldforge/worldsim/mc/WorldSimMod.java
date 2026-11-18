@@ -2450,6 +2450,7 @@ public final class WorldSimMod {
                                 dev.worldforge.realms.Statecraft.mapTitleId(map.name, title.key))))
                         .sorted(Comparator.comparingInt((TitleData.Title title) -> title.id)).toList();
                 List<String> realmBands = bandsByRealm.getOrDefault(realmId, List.of());
+                EmergenceSource hierarchySource = EmergenceSource.authored(map);
                 String fallbackHolder = String.valueOf(entry.getValue().props
                         .getOrDefault("emergence.ruler_global_id", ""));
                 List<List<TitleData.Title>> regionGroups = connectedTitleGroups(topMapRegions, 3);
@@ -2463,10 +2464,12 @@ public final class WorldSimMod {
                     String groupKey = group.stream().map(title -> Integer.toString(title.id))
                             .sorted().collect(java.util.stream.Collectors.joining("|"));
                     String duchyId = emergentTerritoryTitleId("duchy", polityId, groupKey);
-                    double centerX = group.stream().mapToInt(title -> title.capX).average().orElse(0);
-                    double centerZ = group.stream().mapToInt(title -> title.capZ).average().orElse(0);
+                    double centerX = group.stream().mapToDouble(title ->
+                            hierarchySource.blockPosition(title.capX, title.capZ)[0]).average().orElse(0);
+                    double centerZ = group.stream().mapToDouble(title ->
+                            hierarchySource.blockPosition(title.capX, title.capZ)[1]).average().orElse(0);
                     String capitalBand = nearestEmergentBand(centerX, centerZ, realmBands, bands,
-                            EmergenceSource.authored(map));
+                            hierarchySource);
                     String duchyName = populationIndex == null
                             ? entry.getValue().name + " Duchy " + duchySerial
                             : uniqueTerritorialName(duchyId, "regions", capitalBand,
