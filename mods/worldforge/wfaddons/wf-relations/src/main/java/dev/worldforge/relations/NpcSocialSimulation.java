@@ -93,7 +93,8 @@ public final class NpcSocialSimulation {
             double dx = ax - bx, dz = az - bz;
             return dx * dx + dz * dz <= 256.0 * 256.0;
         }
-        return Objects.equals(a.props.get("emergence.band_id"), b.props.get("emergence.band_id"));
+        Object aBand = a.props.get("emergence.band_id"), bBand = b.props.get("emergence.band_id");
+        return aBand instanceof String band && !band.isBlank() && Objects.equals(aBand, bBand);
     }
 
     private static Double coordinate(Character person, String axis) {
@@ -128,6 +129,7 @@ public final class NpcSocialSimulation {
 
     private static Map<String, Integer> ancestors(Character person) {
         Map<String, Integer> result = new HashMap<>();
+        result.put(person.globalId, 0);
         ArrayDeque<Map.Entry<String, Integer>> queue = new ArrayDeque<>();
         addParents(queue, person);
         while (!queue.isEmpty()) {
