@@ -213,12 +213,13 @@ fn bootstrap_vanilla_initial_civilizations(
             .then_with(|| a.z.cmp(&b.z)).then_with(|| a.x.cmp(&b.x))
     });
 
-    // Keep founding distance tied to the currently observed sample resolution.
-    // The previous world-span/6 rule spread a handful of communities over the
-    // whole explored area and then merged all of them into one sovereign state.
+    // Keep local founding cohorts small and numerous. The former 256-cell
+    // spacing plus a four-times bucket span merged many independently viable
+    // frontier regions into at most four macro-polities.
     let minimum_spacing = u64::from(map.sample_stride.max(1)) * 2;
-    let separation = observed_map_scale(map).max(minimum_spacing).max(1);
-    let bucket_span = separation.saturating_mul(4).min(u64::from(u32::MAX)) as u32;
+    let observed_scale = observed_map_scale(map);
+    let separation = (observed_scale / 3).max(minimum_spacing).max(1);
+    let bucket_span = separation.saturating_mul(6).min(u64::from(u32::MAX)) as u32;
     let bucket_span = bucket_span.max(1);
     let mut groups: BTreeMap<(u32, u32), Vec<&GeographicCell>> = BTreeMap::new();
     for cell in &candidates {
@@ -233,7 +234,6 @@ fn bootstrap_vanilla_initial_civilizations(
     // A settlement is assigned to at most one polity; new frontier observations can
     // later create additional states without rewriting existing sovereign identities.
     for ((_region_x, _region_z), regional_candidates) in groups {
-        if founded_polities >= 4 { break; }
         let mut selected: Vec<&GeographicCell> = Vec::new();
         for cell in regional_candidates {
             let point = (cell.x, cell.z);
@@ -324,8 +324,11 @@ fn bootstrap_initial_civilizations(
         _ => return,
     };
     let minimum_spacing = u64::from(map.sample_stride.max(1)) * 2;
-    let separation = observed_map_scale(map).max(minimum_spacing).max(1);
-    let bucket = (separation.saturating_mul(4).min(u64::from(u32::MAX)) as u32).max(1);
+    // Image-backed worlds need many local sovereign catchments, not a few
+    // continent-sized founding buckets. Province-scale map geometry is retained;
+    // only the population bootstrap cohort size is reduced.
+    let separation = (observed_map_scale(map) / 3).max(minimum_spacing).max(1);
+    let bucket = (separation.saturating_mul(6).min(u64::from(u32::MAX)) as u32).max(1);
     let separation_sq = separation.saturating_mul(separation);
     let mut groups: BTreeMap<(u32, u32), Vec<&GeographicCell>> = BTreeMap::new();
     for cell in map.cells.iter().filter(|cell| cell.land && cell.suitability >= 48) {
