@@ -1218,12 +1218,18 @@ public final class WorldSimMod {
                     completedBuildingCounts.merge(building.def.id, 1, Integer::sum);
             }
             Set<String> trainerBuildings = new TreeSet<>();
+            Map<String, Integer> trainerCounts = new TreeMap<>();
             for (Building building : s.buildings) {
                 if (building == null || building.def == null || building.state != Building.State.DONE || building.paused) continue;
-                if (s.assigned(building.uid).stream().anyMatch(worker -> worker.lifeAction.isBlank()
-                        && "trainer".equals(worker.workRole()))) trainerBuildings.add(building.def.id);
+                int trainers = (int) s.assigned(building.uid).stream().filter(worker -> worker.lifeAction.isBlank()
+                        && "trainer".equals(worker.workRole())).count();
+                if (trainers > 0) {
+                    trainerBuildings.add(building.def.id);
+                    trainerCounts.put(building.def.id, trainers);
+                }
             }
             settlementIdentity.add("trainer_buildings", GSON.toJsonTree(trainerBuildings));
+            settlementIdentity.add("trainer_counts", GSON.toJsonTree(trainerCounts));
             settlementIdentity.add("building_counts", GSON.toJsonTree(buildingCounts));
             settlementIdentity.add("completed_building_counts", GSON.toJsonTree(completedBuildingCounts));
             settlementIdentity.add("resource_stock", GSON.toJsonTree(new TreeMap<>(s.stock)));
