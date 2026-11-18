@@ -172,8 +172,8 @@ public class CourtMod {
 
     private static TitleData virtualTitleData(String dimension) {
         return VIRTUAL_DATA.computeIfAbsent(dimension, ignored -> TitleData.create(
-                "{\\"format\\":\\"worldforge-titles/1\\",\\"blocks_per_pixel\\":1,\\"tiers\\":[],\\"titles\\":[]}",
-                "{\\"format\\":\\"worldforge-realms/1\\",\\"realms\\":[]}",
+                "{\"format\":\"worldforge-titles/1\",\"blocks_per_pixel\":1,\"tiers\":[],\"titles\":[]}",
+                "{\"format\":\"worldforge-realms/1\",\"realms\":[]}",
                 new short[0], 0, 0));
     }
 
