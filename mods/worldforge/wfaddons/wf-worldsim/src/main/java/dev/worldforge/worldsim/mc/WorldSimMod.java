@@ -1582,9 +1582,19 @@ public final class WorldSimMod {
             var currentHolder = PeopleMod.authority().getGlobal(existing.holderCharacterId);
             if (currentHolder != null && currentHolder.alive) return;
         }
+        Set<String> alreadyHoldingRealmTitles = RealmsMod.POLITICS.titles().stream()
+                .filter(title -> title != null && existing != null
+                        && existing.realmId.equals(title.realmId) && !title.id.equals(titleId))
+                .map(title -> title.holderCharacterId)
+                .filter(holder -> holder != null && !holder.isBlank())
+                .collect(java.util.stream.Collectors.toSet());
         var residents = populationIndex.livingResidents(bandId).stream()
                 .filter(person -> person.alive && PopulationSimulation.age(person, year) >= 18)
-                .sorted(Comparator.comparingInt((dev.worldforge.people.Character person) -> person.birthYear)
+                // Prefer a distinct local notable for each county/duchy/kingdom.
+                // Reuse an existing holder only when the local adult population is exhausted.
+                .sorted(Comparator.comparing((dev.worldforge.people.Character person) ->
+                                alreadyHoldingRealmTitles.contains(person.globalId))
+                        .thenComparingInt(person -> person.birthYear)
                         .thenComparing(person -> person.globalId)).toList();
         String holder = residents.isEmpty() ? fallbackHolder : residents.get(0).globalId;
         if (holder != null && !holder.isBlank()
@@ -2526,8 +2536,12 @@ public final class WorldSimMod {
                 long candidatePopulation = candidate.get("population").getAsLong();
                 // A two-to-one demographic advantage is a meaningful regional
                 // power imbalance; the former 3x threshold suppressed most hierarchies.
-                if (candidatePopulation < ownPopulation * 2L
-                        || candidate.get("stability").getAsInt() < 60) continue;
+                // A 2x threshold left almost every emergent polity sovereign in
+                // isolation. A 1.5x advantage plus stable institutions is enough for
+                // a voluntary/pressured regional dependency; the realm keeps its own
+                // ruler, dynasty, government, titles and treasury under the contract.
+                if (candidatePopulation * 2L < ownPopulation * 3L
+                        || candidate.get("stability").getAsInt() < 55) continue;
                 if (strongest == null || candidatePopulation > strongest.get("population").getAsLong())
                     strongest = candidate;
             }
