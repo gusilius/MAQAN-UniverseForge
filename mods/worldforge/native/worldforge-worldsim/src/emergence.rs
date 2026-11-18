@@ -703,8 +703,8 @@ mod tests {
     fn sparse_vanilla_spawn_samples_form_a_polity_without_bucket_alignment() {
         let mut cells = Vec::new();
         for index in 0..32_u32 {
-            let x = 128 + (index % 8) * 420;
-            let z = 128 + (index / 8) * 420;
+            let x = 128 + (index % 8) * 512;
+            let z = 128 + (index / 8) * 512;
             for dz in [0, 16, 32, 48] {
                 for dx in [0, 16, 32, 48] {
                     cells.push(GeographicCell {
