@@ -953,7 +953,6 @@ public final class WorldSimMod {
             row.add("treaties", treaties); row.addProperty("truce_until_day", relation.truceUntilDay);
             diplomaticRelations.add(row);
         }
-        for (var contract : RealmsMod.POLITICS.vassalsOf("") ) { /* no global liege query; exported below from all realm roots */ }
         Set<String> exportedVassals = new HashSet<>();
         for (TitleData.Realm realm : RealmsMod.realms()) for (var contract : RealmsMod.POLITICS.vassalsOf(realm.id)) {
             if (!exportedVassals.add(contract.vassalRealm)) continue;
@@ -1197,7 +1196,7 @@ public final class WorldSimMod {
         // Export all loaded profession definitions and all configured race/class/origin
         // definitions from their owning modules, preserving their complete JSON shape.
         for (var profession : PeopleMod.PROFESSIONS.all())
-            addCatalogEntry(catalogEntries, "wf_people", "professions", profession.id(), profession.name(), GSON.toJsonTree(profession));
+            addCatalogEntry(catalogEntries, "wf_people", "professions", profession.id, profession.name, GSON.toJsonTree(profession));
         for (var race : OriginsMod.ORIGINS.defs.races.values())
             addCatalogEntry(catalogEntries, "wf_origins", "races", race.id(), race.name(), GSON.toJsonTree(race));
         for (var cls : OriginsMod.ORIGINS.defs.classes.values())
