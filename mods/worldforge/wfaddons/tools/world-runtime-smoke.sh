@@ -227,12 +227,15 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "dual-world" ]; then
   # Load real chunks in the ordinary Overworld and the image-backed dimension.
   # These are normal Minecraft world-generation requests, not a campaign or a
   # synthetic data fixture; the mods observe the generated terrain themselves.
-  printf '%s\n' "execute in minecraft:overworld run forceload add 0 0 64 64" >> in.txt
-  printf 'execute in worldforge:%s run forceload add 0 0 64 64\n' "$MAP_ID" >> in.txt
+  # Sample a bounded 9x9 chunk window (81 chunks) in each dimension.
+  # This is enough terrain to test initial civilization bootstrap without
+  # pre-generating the planet or force-loading an unbounded world.
+  printf '%s\n' "execute in minecraft:overworld run forceload add 0 0 128 128" >> in.txt
+  printf 'execute in worldforge:%s run forceload add 0 0 128 128\n' "$MAP_ID" >> in.txt
   printf 'execute in worldforge:%s run say MAQAN_MAPPED_DIMENSION_PRESENT=%s\n' "$MAP_ID" "$MAP_ID" >> in.txt
   printf '%s\n' "wfworldsim status" "wfworldsim geography" "wfsettle list" "list" >> in.txt
 
-  for second in $(seq 1 240); do
+  for second in $(seq 1 900); do
     kill -0 "$SERVER_PID" 2>/dev/null || { tail -200 server.log; echo "ERROR: server exited during same-server dual-world genesis"; exit 5; }
     if grep -E 'MAQAN_WORLD_GENESIS source=vanilla-world:minecraft:overworld .*communities=[1-9][0-9]*' server.log \
       && grep -E "MAQAN_WORLD_GENESIS source=$MAP_ID .*communities=[4-9][0-9]*" server.log; then
@@ -279,6 +282,8 @@ for key in sorted(expected):
     for field in ("geography_cells","communities","settled","settlements","living_characters","court_offices","polities","canonical_rulers","dynasties","titles","governments"):
         if int(row[field]) <= 0:
             raise SystemExit(f"{key}: required native genesis field {field} is {row[field]}")
+    if int(row["communities"]) < 4 or int(row["settlements"]) < 4:
+        raise SystemExit(f"{key}: initial civilization must contain at least four real communities/settlements")
     if int(row["race_kinds"]) < 2:
         raise SystemExit(f"{key}: expected at least two actual race identities, got {row['race_kinds']}")
     if key == map_id and int(row["map_anchors"]) <= 0:
