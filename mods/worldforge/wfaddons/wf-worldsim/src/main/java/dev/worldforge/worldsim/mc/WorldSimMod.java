@@ -903,6 +903,24 @@ public final class WorldSimMod {
                     if (bandElement.isJsonPrimitive()) polityByBand.put(bandElement.getAsString(), polityId);
             }
         }
+        // Persist the band -> polity projection onto each canonical resident. Downstream
+        // relations, reputation, court and economy addons must not independently guess
+        // which state a person belongs to from a physical chunk or legacy local ID.
+        for (EmergenceSource source : sources) {
+            if (source.registry == null) continue;
+            for (dev.worldforge.people.Character person : source.registry.all()) {
+                if (person == null || !person.alive) continue;
+                Object rawBand = person.props.get("emergence.band_id");
+                String polityId = rawBand == null ? "" : polityByBand.getOrDefault(String.valueOf(rawBand), "");
+                if (polityId.isBlank()) {
+                    person.props.remove("emergence.polity_id");
+                    person.props.remove("emergence.realm_id");
+                } else {
+                    person.props.put("emergence.polity_id", polityId);
+                    person.props.put("emergence.realm_id", "emergent-" + polityId);
+                }
+            }
+        }
         Set<String> emittedCharacterIds = new HashSet<>();
         Set<CharacterRegistry> snapshotRegistries = Collections.newSetFromMap(new IdentityHashMap<>());
         for (EmergenceSource source : sources) {
