@@ -81,10 +81,6 @@ public final class WorldSimMod {
     private static JsonObject emergenceBindings = new JsonObject();
     private static boolean emergentRealmsRehydrated;
     private static final HistoricalChronicle HISTORICAL_CHRONICLE = new HistoricalChronicle();
-    private static boolean campaignRunning;
-    private static String campaignMapId = "";
-    private static long campaignStartedDay;
-    private static final Set<String> campaignForcedChunks = new HashSet<>();
     private static final int PEOPLE_MATERIALIZATION_BUDGET_PER_TICK = 256;
     private static WorldSimComputeScheduler.Result pendingApplyResult;
     private static JsonObject pendingCandidateEmergenceState;
@@ -154,7 +150,6 @@ public final class WorldSimMod {
 
     private static List<EmergenceSource> emergenceSources() {
         List<EmergenceSource> sources = new ArrayList<>();
-        boolean vanillaCampaign = campaignRunning && "vanilla".equals(campaignMapId);
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         Map<String, String> registeredMapSources = new HashMap<>();
         // Enumerate the actual loaded ServerLevels, not only maps already touched by a
@@ -169,7 +164,7 @@ public final class WorldSimMod {
                         level.dimension().location(), unavailable.toString());
                 continue;
             }
-            if (map == null || (campaignRunning && (vanillaCampaign || !map.name.equals(campaignMapId)))) continue;
+            if (map == null) continue;
             String dimension = level.dimension().location().toString();
             String previousDimension = registeredMapSources.putIfAbsent(map.name, dimension);
             if (previousDimension != null) {
@@ -181,7 +176,7 @@ public final class WorldSimMod {
             CharacterRegistry registry = PeopleMod.registry(map);
             if (registry != null) sources.add(EmergenceSource.authored(map));
         }
-        if (!campaignRunning || vanillaCampaign) {
+        {
             if (server != null) for (String id : VanillaWorldGeography.simulationMapIds()) {
                 String dimension = VanillaWorldGeography.dimensionFromMapId(id);
                 for (ServerLevel level : server.getAllLevels()) {
@@ -262,11 +257,6 @@ public final class WorldSimMod {
         emergenceState = null;
         emergenceBindings = new JsonObject();
         emergentRealmsRehydrated = false;
-        campaignRunning = false;
-        campaignMapId = "";
-        campaignStartedDay = 0;
-        WorldForgeApi.clock().setSimulationTickMultiplier(1);
-        releaseCampaignChunks(event.getServer());
         HISTORICAL_CHRONICLE.clear();
         HISTORICAL_CHRONICLE.setStartingYear(WorldForgeApi.clock().startYear);
         publishObservers(event.getServer());
@@ -295,9 +285,6 @@ public final class WorldSimMod {
             VanillaWorldGeography.persist(server);
             saveState(server);
         }
-        campaignRunning = false;
-        WorldForgeApi.clock().setSimulationTickMultiplier(1);
-        releaseCampaignChunks(server);
         lastDecisionDay = Long.MIN_VALUE;
         lodTicks = 0;
         emergentRealmsRehydrated = false;
@@ -540,7 +527,6 @@ public final class WorldSimMod {
                 snapshot.has("settlements") && snapshot.get("settlements").isJsonArray()
                         ? snapshot.getAsJsonArray("settlements").size() : 0,
                 frame.getAsJsonArray("proposals").size(), accepted, rejected);
-        updateCampaign(server, day);
         return true;
     }
 
@@ -668,397 +654,6 @@ public final class WorldSimMod {
                         }))));
     }
 
-    private static int startCampaign(MinecraftServer server, String mapId, CommandSourceStack source) {
-        if (campaignRunning) {
-            source.sendFailure(Component.literal("An autonomous campaign is already running"));
-            return 0;
-        }
-        if (!NativeWorldSimulation.load()) {
-            source.sendFailure(Component.literal("Native WorldSim engine is unavailable; campaign was not started"));
-            return 0;
-        }
-        boolean vanillaCampaign = "vanilla".equalsIgnoreCase(mapId);
-        MapData map = vanillaCampaign ? null : WorldForgeMod.map(mapId);
-        CharacterRegistry registry;
-        String campaignDimension;
-        if (vanillaCampaign) {
-            if (!WorldForgeMod.loadedMaps().isEmpty()) {
-                source.sendFailure(Component.literal("Vanilla campaign requires no image maps to be loaded"));
-                return 0;
-            }
-            registry = PeopleMod.worldRegistry();
-            List<String> regions = VanillaWorldGeography.regionIds();
-            if (registry == null || regions.isEmpty() || VanillaWorldGeography.sampledCellCount() <= 0) {
-                source.sendFailure(Component.literal("Vanilla campaign requires observed Minecraft chunks and a populated geography cache"));
-                return 0;
-            }
-            campaignDimension = VanillaWorldGeography.dimensionFromMapId(regions.get(0));
-            boolean dimensionLoaded = false;
-            for (ServerLevel level : server.getAllLevels()) {
-                if (level.dimension().location().toString().equals(campaignDimension)) {
-                    dimensionLoaded = true;
-                    break;
-                }
-            }
-            if (campaignDimension.isBlank() || !dimensionLoaded) {
-                source.sendFailure(Component.literal("Vanilla campaign geography dimension is not loaded"));
-                return 0;
-            }
-        } else {
-            if (map == null || map.titles == null || !map.titles.realmList().isEmpty()) {
-                source.sendFailure(Component.literal("Campaign map must retain province geography but contain no pre-authored realms"));
-                return 0;
-            }
-            campaignDimension = mapDimension(server, map);
-            if (campaignDimension == null) {
-                source.sendFailure(Component.literal("Campaign map dimension is not loaded; refusing data-only simulation"));
-                return 0;
-            }
-            if (WorldForgeMod.loadedMaps().size() != 1 || !WorldForgeMod.loadedMaps().containsValue(map)) {
-                source.sendFailure(Component.literal("Campaign requires exactly one loaded map: " + mapId));
-                return 0;
-            }
-            registry = PeopleMod.registry(map);
-        }
-        if (registry == null) {
-            source.sendFailure(Component.literal("Campaign Character registry is unavailable"));
-            return 0;
-        }
-        if (vanillaCampaign) {
-            // In a real vanilla world, generated village structures and their villagers are
-            // legitimate observations made by the world adapter, not authored campaign seeds.
-            // Accept only those provenance-tagged records; arbitrary Characters, hand-placed
-            // settlements and pre-existing emergent realms still block a clean bootstrap.
-            long nonVillageCharacters = registry.all().stream()
-                    .filter(person -> !person.props.containsKey("minecraft.villager_uuid")).count();
-            long nonVillageSettlements = SettleMod.COLONIES.values().stream()
-                    .filter(colony -> colony == null || colony.genesisOperationId == null
-                            || !colony.genesisOperationId.startsWith("minecraft:village:")).count();
-            long emergentRealms = RealmsMod.emergentRealms().size();
-            if (nonVillageCharacters > 0 || nonVillageSettlements > 0 || emergentRealms > 0) {
-                source.sendFailure(Component.literal("Vanilla campaign rejected non-native bootstrap data: characters="
-                        + registry.size() + ", non_village_characters=" + nonVillageCharacters
-                        + ", settlements=" + SettleMod.COLONIES.size()
-                        + ", non_village_settlements=" + nonVillageSettlements
-                        + ", emergent_realms=" + emergentRealms));
-                return 0;
-            }
-        } else {
-            // The image-map import intentionally creates geography-backed settlement anchors
-            // before the autonomous campaign begins. Those are valid bootstrap inputs, not
-            // pre-authored populations or polities. Reject only non-map Characters/colonies
-            // and pre-existing emergent realms; never require the map dimension to be empty.
-            long foreignSettlements = SettleMod.COLONIES.values().stream()
-                    .filter(colony -> colony == null || !map.name.equals(colony.sourceMapId)).count();
-            if (registry.size() != 0 || foreignSettlements != 0
-                    || !RealmsMod.emergentRealms().isEmpty()) {
-                source.sendFailure(Component.literal("Image campaign rejected non-map bootstrap data: characters="
-                        + registry.size() + ", foreign_settlements=" + foreignSettlements
-                        + ", emergent_realms=" + RealmsMod.emergentRealms().size()));
-                return 0;
-            }
-        }
-        campaignMapId = vanillaCampaign ? "vanilla" : map.name;
-        campaignForcedChunks.clear();
-        campaignStartedDay = WorldForgeApi.clock().dayNumber();
-        campaignRunning = true;
-        WorldForgeApi.clock().setSimulationTickMultiplier(1200);
-        lastDecisionDay = Long.MIN_VALUE;
-        source.sendSuccess(() -> Component.literal("Autonomous campaign started on " + campaignMapId
-                + "; map-only bootstrap, shared clock multiplier=1200x; target=stable states + four canonical ruler generations"), true);
-        LOGGER.info("wf_worldsim: map-only autonomous campaign started map={} day={} multiplier=1200x target=4 canonical generations",
-                campaignMapId, campaignStartedDay);
-        return 1;
-    }
-
-    private static int campaignTargetGenerations() { return Boolean.getBoolean("worldforge.campaign.acceptance") ? 1 : 4; }
-    private static long campaignMinimumMaturityYears() { return Boolean.getBoolean("worldforge.campaign.acceptance") ? 1L : 25L; }
-
-    private static int campaignStatus(CommandSourceStack source) {
-        JsonArray polities = emergenceState != null && emergenceState.has("polities")
-                && emergenceState.get("polities").isJsonArray() ? emergenceState.getAsJsonArray("polities") : new JsonArray();
-        int completed = 0;
-        for (var item : polities) if (item.isJsonObject()) {
-            JsonObject polity = item.getAsJsonObject();
-            if (canonicalGenerationCount(polity) >= campaignTargetGenerations()
-                    && polity.has("stability") && polity.get("stability").getAsInt() >= 50
-                    && polity.has("population") && polity.get("population").getAsLong() >= 120) completed++;
-        }
-        int total = polities.size();
-        int completedStates = completed;
-        source.sendSuccess(() -> Component.literal("Campaign=" + (campaignRunning ? "RUNNING" : "STOPPED")
-                + ", map=" + (campaignMapId.isBlank() ? "-" : campaignMapId)
-                + ", elapsed_days=" + Math.max(0L, WorldForgeApi.clock().dayNumber() - campaignStartedDay)
-                + ", stable_campaign_states=" + completedStates + "/" + total
-                + ", clock_multiplier=" + WorldForgeApi.clock().simulationTickMultiplier()
-                + ", materialized_settlements=" + materializedSettlementCount()
-                + ", completed_buildings=" + completedAutonomousBuildingCount()
-                + ", physically_built_settlements=" + physicallyBuiltAutonomousSettlementCount()
-                + ", events=" + WorldForgeApi.events().size()
-                + ", chronicle=" + HISTORICAL_CHRONICLE.size()), false);
-        return 1;
-    }
-
-    private static int stopCampaign(CommandSourceStack source) {
-        if (!campaignRunning) {
-            source.sendFailure(Component.literal("No autonomous campaign is running"));
-            return 0;
-        }
-        campaignRunning = false;
-        WorldForgeApi.clock().setSimulationTickMultiplier(1);
-        MinecraftServer server = source.getServer();
-        releaseCampaignChunks(server);
-        saveState(server);
-        source.sendSuccess(() -> Component.literal("Autonomous campaign stopped at " + WorldForgeApi.clock().dateText()), true);
-        return 1;
-    }
-
-    private static void updateCampaign(MinecraftServer server, long day) {
-        if (!campaignRunning || emergenceState == null || !emergenceState.has("polities")
-                || !emergenceState.get("polities").isJsonArray()) return;
-        JsonArray polities = emergenceState.getAsJsonArray("polities");
-        if (polities.isEmpty()) return;
-        long elapsedYear = emergenceState.has("last_year") ? emergenceState.get("last_year").getAsLong() : 0;
-        long latestFoundingYear = 0;
-        boolean allMature = true;
-        for (var item : polities) {
-            if (!item.isJsonObject()) { allMature = false; break; }
-            JsonObject polity = item.getAsJsonObject();
-            long founded = polity.has("founded_year") ? polity.get("founded_year").getAsLong() : elapsedYear;
-            latestFoundingYear = Math.max(latestFoundingYear, founded);
-            long population = polity.has("population") ? polity.get("population").getAsLong() : 0;
-            int stability = polity.has("stability") ? polity.get("stability").getAsInt() : 0;
-            int weakYears = polity.has("weak_years") ? polity.get("weak_years").getAsInt() : 0;
-            if (canonicalGenerationCount(polity) < campaignTargetGenerations() || population < 120 || stability < 50 || weakYears > 0
-                    || elapsedYear - founded < campaignMinimumMaturityYears()) allMature = false;
-        }
-        if (elapsedYear > 0 && elapsedYear % 5 == 0)
-            LOGGER.info("wf_worldsim: campaign progress map={} year={} states={} mature_four_generation_states={} events={}",
-                    campaignMapId, elapsedYear, polities.size(),
-                    polities.asList().stream().filter(item -> item.isJsonObject()
-                            && item.getAsJsonObject().has("dynasty_generations")
-                            && item.getAsJsonObject().get("dynasty_generations").getAsInt() >= 4).count(),
-                    WorldForgeApi.events().size());
-        int campaignSettlements = autonomousSettlementCount();
-        int materializedSettlements = materializedSettlementCount();
-        int completedBuildings = completedAutonomousBuildingCount();
-        int physicallyCompletedBuildings = physicallyCompletedBuildingCount();
-        int physicallyBuiltSettlements = physicallyBuiltAutonomousSettlementCount();
-        boolean physicalReady = campaignSettlements > 0
-                && materializedSettlements == campaignSettlements
-                && physicallyBuiltSettlements == campaignSettlements
-                && physicallyCompletedBuildings >= campaignSettlements;
-        if (!allMature || !physicalReady || elapsedYear - latestFoundingYear < campaignMinimumMaturityYears()) return;
-
-        campaignRunning = false;
-        WorldForgeApi.clock().setSimulationTickMultiplier(1);
-        releaseCampaignChunks(server);
-        WorldForgeApi.postEvent("system", "Autonomous map-only campaign completed: all surviving states are stable and have four canonical ruler generations",
-                List.of(), WorldForgeApi.clock().worldMinute());
-        saveState(server);
-        try {
-            Path output = server.getWorldPath(LevelResource.ROOT).resolve("worldforge").resolve("autonomous-campaign");
-            Files.createDirectories(output);
-            Files.writeString(output.resolve("chronicle-book.md"),
-                    String.join("\n\n", HISTORICAL_CHRONICLE.book(0)), StandardCharsets.UTF_8);
-            JsonObject report = new JsonObject();
-            report.addProperty("status", "PASS");
-            report.addProperty("map", campaignMapId);
-            report.addProperty("start_day", campaignStartedDay);
-            report.addProperty("end_day", day);
-            report.addProperty("elapsed_days", Math.max(0L, day - campaignStartedDay));
-            report.addProperty("elapsed_years", Math.max(0L, (day - campaignStartedDay) / 365L));
-            report.addProperty("target_dynasty_generations", campaignTargetGenerations());
-            report.addProperty("stable_states", polities.size());
-            report.addProperty("settlements", campaignSettlements);
-            report.addProperty("materialized_settlements", materializedSettlements);
-            report.addProperty("completed_buildings", completedBuildings);
-            report.addProperty("physically_completed_buildings", physicallyCompletedBuildings);
-            report.addProperty("physically_built_settlements", physicallyBuiltSettlements);
-            report.addProperty("canonical_ruler_generations_verified",
-                    polities.asList().stream().filter(item -> item.isJsonObject()
-                            && canonicalGenerationCount(item.getAsJsonObject()) >= campaignTargetGenerations()).count());
-            MapData campaignMap = WorldForgeMod.loadedMaps().get(campaignMapId);
-            report.addProperty("image_map_count", WorldForgeMod.loadedMaps().size());
-            report.addProperty("preauthored_map_realms", WorldForgeMod.loadedMaps().values().stream()
-                    .filter(map -> map != null && map.titles != null)
-                    .flatMap(map -> map.titles.realms.values().stream())
-                    .filter(realm -> realm != null && realm.id != null && !realm.id.startsWith("emergent-"))
-                    .count());
-            report.addProperty("preauthored_state_titles", WorldForgeMod.loadedMaps().values().stream()
-                    .filter(map -> map != null && map.titles != null)
-                    .flatMap(map -> map.titles.allTitles().stream())
-                    .filter(title -> title != null && title.tier >= 2).count());
-            report.addProperty("map_geography_only", WorldForgeMod.loadedMaps().values().stream()
-                    .allMatch(map -> map != null && !map.hasPoliticalLayers()));
-            String physicalDimension = campaignMap == null
-                    ? (VanillaWorldGeography.regionIds().isEmpty() ? "" :
-                        VanillaWorldGeography.dimensionFromMapId(VanillaWorldGeography.regionIds().get(0)))
-                    : mapDimension(server, campaignMap);
-            report.addProperty("physical_world_dimension", physicalDimension);
-            CharacterRegistry campaignPeople = campaignMap == null
-                    ? PeopleMod.worldRegistry() : PeopleMod.registry(campaignMap);
-            if (campaignPeople == null) throw new IllegalStateException("Campaign Character registry disappeared before report export");
-            report.addProperty("characters", campaignPeople.size());
-            report.addProperty("geography_regions", campaignMap == null
-                    ? VanillaWorldGeography.capturedRegionCount() : 1);
-            report.addProperty("geography_samples", campaignMap == null
-                    ? VanillaWorldGeography.sampledCellCount() : campaignMap.w * campaignMap.h);
-            report.addProperty("named_realms", RealmsMod.emergentRealms().stream()
-                    .filter(realm -> realm.name != null && !realm.name.isBlank()).count());
-            report.addProperty("canonical_rulers", RealmsMod.emergentRealms().stream()
-                    .map(realm -> String.valueOf(realm.props.getOrDefault("emergence.ruler_global_id", "")))
-                    .filter(id -> !id.isBlank() && PeopleMod.authority().getGlobal(id) != null).count());
-            report.addProperty("statecraft_titles", RealmsMod.POLITICS.titles().size());
-            report.addProperty("territorial_titles", RealmsMod.POLITICS.titles().stream()
-                    .filter(title -> title.realmId.startsWith("emergent-")).count());
-            report.addProperty("title_hierarchy_links", RealmsMod.POLITICS.titles().stream()
-                    .filter(title -> title.realmId.startsWith("emergent-") && !title.liegeTitleId.isBlank()).count());
-            report.addProperty("barony_titles", RealmsMod.POLITICS.titles().stream()
-                    .filter(title -> title.realmId.startsWith("emergent-")
-                            && title.rank == dev.worldforge.realms.Statecraft.Rank.BARONY).count());
-            report.addProperty("county_titles", RealmsMod.POLITICS.titles().stream()
-                    .filter(title -> title.realmId.startsWith("emergent-")
-                            && title.rank == dev.worldforge.realms.Statecraft.Rank.COUNTY).count());
-            report.addProperty("duchy_titles", RealmsMod.POLITICS.titles().stream()
-                    .filter(title -> title.realmId.startsWith("emergent-")
-                            && title.rank == dev.worldforge.realms.Statecraft.Rank.DUCHY).count());
-            report.addProperty("kingdom_titles", RealmsMod.POLITICS.titles().stream()
-                    .filter(title -> title.realmId.startsWith("emergent-")
-                            && title.rank == dev.worldforge.realms.Statecraft.Rank.KINGDOM).count());
-            report.addProperty("named_dynasties", java.util.stream.StreamSupport.stream(emergenceState.getAsJsonArray("polities").spliterator(), false)
-                    .filter(item -> item.isJsonObject())
-                    .map(item -> item.getAsJsonObject().get("dynasty_id").getAsString())
-                    .map(RealmsMod.POLITICS::dynasty)
-                    .filter(house -> house != null && house.name != null && !house.name.isBlank()
-                            && !house.name.startsWith("house_")).count());
-            report.addProperty("duplicate_emergent_realm_names", duplicateNameCount(
-                    RealmsMod.emergentRealms().stream().map(realm -> realm.name).toList()));
-            report.addProperty("duplicate_settlement_names", duplicateNameCount(
-                    SettleMod.COLONIES.values().stream().filter(colony -> colony != null && colony.s != null)
-                            .map(colony -> colony.s.name).toList()));
-            report.addProperty("duplicate_dynasty_names", duplicateNameCount(
-                    RealmsMod.POLITICS.dynasties().stream().map(dynasty -> dynasty.name).toList()));
-            Map<String, Set<String>> familyHouseOwners = new HashMap<>();
-            for (var dynasty : RealmsMod.POLITICS.dynasties()) {
-                for (String memberId : dynasty.members) {
-                    dev.worldforge.people.Character familyMember = PeopleMod.authority().getGlobal(memberId);
-                    if (familyMember == null || familyMember.house == null || familyMember.house.isBlank()) continue;
-                    String familyName = familyMember.house.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
-                    familyHouseOwners.computeIfAbsent(familyName, ignored -> new HashSet<>()).add(dynasty.houseId);
-                }
-            }
-            report.addProperty("duplicate_family_house_names",
-                    familyHouseOwners.values().stream().filter(owners -> owners.size() > 1).count());
-            report.addProperty("duplicate_statecraft_title_names", duplicateNameCount(
-                    RealmsMod.POLITICS.titles().stream().map(title -> title.name).toList()));
-            report.addProperty("unnamed_emergent_realms", RealmsMod.emergentRealms().stream()
-                    .filter(realm -> realm.name == null || realm.name.isBlank()
-                            || realm.name.equals(realm.id) || realm.name.startsWith("emergent-")).count());
-            report.addProperty("unnamed_settlements", SettleMod.COLONIES.values().stream()
-                    .filter(colony -> colony == null || colony.s == null || colony.s.name == null
-                            || colony.s.name.isBlank() || colony.s.name.equals(colony.s.id)).count());
-            report.addProperty("unnamed_dynasties", RealmsMod.POLITICS.dynasties().stream()
-                    .filter(dynasty -> dynasty.name == null || dynasty.name.isBlank()
-                            || dynasty.name.equals(dynasty.houseId) || dynasty.name.startsWith("house_")).count());
-            report.addProperty("unnamed_statecraft_titles", RealmsMod.POLITICS.titles().stream()
-                    .filter(title -> title.name == null || title.name.isBlank() || title.name.equals(title.id)).count());
-            report.addProperty("political_ownership_samples", campaignMap == null
-                    ? VanillaWorldGeography.politicallyOwnedCellCount()
-                    : campaignMap.titles == null ? 0 : campaignMap.titles.allTitles().stream()
-                        .filter(title -> title.tier == 0)
-                        .filter(title -> {
-                            TitleData.Realm owner = campaignMap.titles.realmOf(title);
-                            return owner != null && Boolean.TRUE.equals(owner.props.get("emergence.virtual"));
-                        }).count());
-            report.addProperty("vassal_contracts", RealmsMod.emergentRealms().stream()
-                    .filter(realm -> RealmsMod.POLITICS.vassalage(realm.id) != null).count());
-            Map<String, Long> livingRaceCounts = campaignPeople.all().stream()
-                    .filter(person -> person.alive)
-                    .collect(java.util.stream.Collectors.groupingBy(person -> {
-                        Object raw = person.props.get("origin.race");
-                        String race = raw == null ? "" : String.valueOf(raw).trim();
-                        return race.isBlank() ? "unclassified" : race;
-                    }, TreeMap::new, java.util.stream.Collectors.counting()));
-            long livingPopulation = livingRaceCounts.values().stream().mapToLong(Long::longValue).sum();
-            JsonObject racePopulation = new JsonObject();
-            for (Map.Entry<String, Long> entry : livingRaceCounts.entrySet()) {
-                JsonObject race = new JsonObject();
-                race.addProperty("count", entry.getValue());
-                race.addProperty("share", livingPopulation == 0 ? 0.0 : entry.getValue() / (double) livingPopulation);
-                racePopulation.add(entry.getKey(), race);
-            }
-            report.addProperty("origin_race_characters", campaignPeople.all().stream()
-                    .filter(person -> person.props.containsKey("origin.race")).count());
-            report.addProperty("origin_distinct_races", livingRaceCounts.keySet().stream()
-                    .filter(value -> !value.equals("unclassified")).count());
-            report.addProperty("living_population_with_race_stats", livingPopulation);
-            report.add("living_population_by_race", racePopulation);
-            report.addProperty("unclassified_living_characters", livingRaceCounts.getOrDefault("unclassified", 0L));
-
-            Map<String, String> polityByBand = new HashMap<>();
-            if (emergenceState != null && emergenceState.has("polities")
-                    && emergenceState.get("polities").isJsonArray()) {
-                for (var item : emergenceState.getAsJsonArray("polities")) {
-                    if (!item.isJsonObject()) continue;
-                    JsonObject polity = item.getAsJsonObject();
-                    String polityId = polity.get("id").getAsString();
-                    if (!polity.has("settlement_ids") || !polity.get("settlement_ids").isJsonArray()) continue;
-                    for (var band : polity.getAsJsonArray("settlement_ids"))
-                        polityByBand.put(band.getAsString(), polityId);
-                }
-            }
-            Map<String, Map<String, Long>> raceCountsByPolity = new TreeMap<>();
-            for (dev.worldforge.people.Character person : campaignPeople.all()) {
-                if (!person.alive) continue;
-                Object rawBand = person.props.get("emergence.band_id");
-                if (!(rawBand instanceof String bandId) || bandId.isBlank()) continue;
-                String polityId = polityByBand.get(bandId);
-                if (polityId == null) continue;
-                Object rawRace = person.props.get("origin.race");
-                String race = rawRace == null || String.valueOf(rawRace).isBlank()
-                        ? "unclassified" : String.valueOf(rawRace);
-                raceCountsByPolity.computeIfAbsent(polityId, ignored -> new TreeMap<>())
-                        .merge(race, 1L, Long::sum);
-            }
-            JsonObject racePopulationByPolity = new JsonObject();
-            for (Map.Entry<String, Map<String, Long>> polityEntry : raceCountsByPolity.entrySet()) {
-                long polityPopulation = polityEntry.getValue().values().stream().mapToLong(Long::longValue).sum();
-                JsonObject distribution = new JsonObject();
-                for (Map.Entry<String, Long> raceEntry : polityEntry.getValue().entrySet()) {
-                    JsonObject race = new JsonObject();
-                    race.addProperty("count", raceEntry.getValue());
-                    race.addProperty("share", polityPopulation == 0 ? 0.0
-                            : raceEntry.getValue() / (double) polityPopulation);
-                    distribution.add(raceEntry.getKey(), race);
-                }
-                racePopulationByPolity.add(polityEntry.getKey(), distribution);
-            }
-            report.add("living_population_by_polity_and_race", racePopulationByPolity);
-            report.addProperty("origin_class_characters", campaignPeople.all().stream()
-                    .filter(person -> person.props.containsKey("origin.class")).count());
-            report.addProperty("origin_profession_characters", campaignPeople.all().stream()
-                    .filter(person -> person.props.containsKey("origin.profession")).count());
-            report.addProperty("culture_characters", campaignPeople.all().stream()
-                    .filter(person -> person.culture != null && !person.culture.isBlank()).count());
-            report.addProperty("distinct_cultures", campaignPeople.all().stream()
-                    .map(person -> person.culture == null ? "" : person.culture)
-                    .filter(value -> !value.isBlank()).distinct().count());
-            report.addProperty("world_events", WorldForgeApi.events().size());
-            report.addProperty("chronicle_entries", HISTORICAL_CHRONICLE.size());
-            report.add("emergence_state", emergenceState.deepCopy());
-            JsonObject performanceProfile = PROFILER.snapshot();
-            report.add("performance_profile", performanceProfile);
-            Files.writeString(output.resolve("performance-profile.json"), GSON.toJson(performanceProfile), StandardCharsets.UTF_8);
-            Files.writeString(output.resolve("campaign-report.json"), GSON.toJson(report), StandardCharsets.UTF_8);
-            LOGGER.info("wf_worldsim: campaign PASS map={} years={} states={} settlements={} events={} chronicle={}",
-                    campaignMapId, report.get("elapsed_years").getAsLong(), polities.size(),
-                    SettleMod.COLONIES.size(), WorldForgeApi.events().size(), HISTORICAL_CHRONICLE.size());
-        } catch (Exception error) {
-            LOGGER.error("wf_worldsim: campaign reached its world-state target but report/book export failed", error);
-        }
-    }
-
     /** Returns the already registered physical dimension whose generator uses this exact map package. */
     private static String mapDimension(MinecraftServer server, MapData map) {
         if (server == null || map == null) return null;
@@ -1068,106 +663,6 @@ public final class WorldSimMod {
                 return level.dimension().location().toString();
         }
         return null;
-    }
-
-    private static long duplicateNameCount(Collection<String> names) {
-        Set<String> seen = new HashSet<>();
-        long duplicates = 0;
-        for (String name : names) {
-            if (name == null || name.isBlank()) continue;
-            String normalized = name.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
-            if (!seen.add(normalized)) duplicates++;
-        }
-        return duplicates;
-    }
-
-    private static int canonicalGenerationCount(JsonObject polity) {
-        if (polity == null || !polity.has("ruler_history") || !polity.get("ruler_history").isJsonArray()) return 0;
-        Set<String> unique = new HashSet<>();
-        for (var value : polity.getAsJsonArray("ruler_history")) {
-            if (!value.isJsonPrimitive()) continue;
-            String id = value.getAsString();
-            if (id.isBlank()) continue;
-            var canonical = PeopleMod.authority().getGlobal(id);
-            if (canonical != null) unique.add(id);
-        }
-        return unique.size();
-    }
-
-    private static int autonomousSettlementCount() {
-        return (int) SettleMod.COLONIES.values().stream().filter(colony -> colony != null
-                && colony.s != null && colony.genesisOperationId != null
-                && colony.genesisOperationId.startsWith("worldsim:settlement:")).count();
-    }
-
-    private static int materializedSettlementCount() {
-        return (int) SettleMod.COLONIES.values().stream().filter(colony -> colony != null
-                && colony.s != null && colony.genesisOperationId != null
-                && colony.genesisOperationId.startsWith("worldsim:settlement:")
-                && colony.autonomousFoundingPopulation > 0).count();
-    }
-
-    private static int physicallyCompletedBuildingCount() {
-        return SettleMod.COLONIES.values().stream().filter(colony -> colony != null
-                && colony.s != null && colony.genesisOperationId != null
-                && colony.genesisOperationId.startsWith("worldsim:settlement:"))
-                .mapToInt(colony -> (int) colony.s.buildings.stream()
-                        .filter(building -> building.state == Building.State.DONE)
-                        .filter(building -> {
-                            Colony.Site site = colony.sites.get(building.uid);
-                            return site != null && !site.physicalPending && site.placed > 0;
-                        }).count()).sum();
-    }
-
-    private static int physicallyBuiltAutonomousSettlementCount() {
-        return (int) SettleMod.COLONIES.values().stream().filter(colony -> colony != null
-                && colony.s != null && colony.genesisOperationId != null
-                && colony.genesisOperationId.startsWith("worldsim:settlement:")
-                && colony.s.buildings.stream().anyMatch(building -> building.state == Building.State.DONE
-                        && colony.sites.containsKey(building.uid)
-                        && !colony.sites.get(building.uid).physicalPending
-                        && colony.sites.get(building.uid).placed > 0)).count();
-    }
-
-    private static int completedAutonomousBuildingCount() {
-        return SettleMod.COLONIES.values().stream().filter(colony -> colony != null
-                && colony.s != null && colony.genesisOperationId != null
-                && colony.genesisOperationId.startsWith("worldsim:settlement:"))
-                .mapToInt(colony -> (int) colony.s.buildings.stream()
-                        .filter(building -> building.state == Building.State.DONE).count()).sum();
-    }
-
-    private static void forceCampaignSettlementChunks(MinecraftServer server) {
-        for (Colony colony : SettleMod.COLONIES.values()) {
-            if (colony == null || colony.s == null || colony.genesisOperationId == null
-                    || !colony.genesisOperationId.startsWith("worldsim:settlement:")) continue;
-            ServerLevel level = colony.level(server);
-            if (level == null) continue;
-            int centerX = colony.cx >> 4, centerZ = colony.cz >> 4;
-            // A 3x3 forced area lets ordinary terrain sampling and construction operate
-            // on real chunks without loading the whole Planetos map.
-            for (int dx = -1; dx <= 1; dx++) for (int dz = -1; dz <= 1; dz++) {
-                int chunkX = centerX + dx, chunkZ = centerZ + dz;
-                String key = colony.dim + "|" + chunkX + "|" + chunkZ;
-                if (campaignForcedChunks.add(key)) level.setChunkForced(chunkX, chunkZ, true);
-            }
-        }
-    }
-
-    private static void releaseCampaignChunks(MinecraftServer server) {
-        if (server != null) for (String key : new HashSet<>(campaignForcedChunks)) {
-            String[] parts = key.split("\\|", -1);
-            if (parts.length != 3) continue;
-            try {
-                int chunkX = Integer.parseInt(parts[1]), chunkZ = Integer.parseInt(parts[2]);
-                for (ServerLevel level : server.getAllLevels())
-                    if (level.dimension().location().toString().equals(parts[0])) {
-                        level.setChunkForced(chunkX, chunkZ, false);
-                        break;
-                    }
-            } catch (RuntimeException ignored) { }
-        }
-        campaignForcedChunks.clear();
     }
 
     private static int serverObserverCount(MinecraftServer server) {
@@ -1186,17 +681,6 @@ public final class WorldSimMod {
                 if (player.isSpectator()) continue;
                 observers.add(new SimulationLod.Observer(dimension, player.getX(), player.getZ()));
             }
-        }
-        if (campaignRunning) {
-            // The disposable acceptance world has no human player. Treat each emergent
-            // settlement as a temporary local observer so the real LOD/building pipeline
-            // can materialize it instead of silently testing data-only colonies.
-            for (Colony colony : SettleMod.COLONIES.values()) {
-                if (colony == null || colony.s == null || colony.genesisOperationId == null
-                        || !colony.genesisOperationId.startsWith("worldsim:settlement:")) continue;
-                observers.add(new SimulationLod.Observer(colony.dim, colony.cx, colony.cz));
-            }
-            forceCampaignSettlementChunks(server);
         }
         SimulationLod.publish(observers);
     }
@@ -1227,14 +711,11 @@ public final class WorldSimMod {
         List<EmergenceSource> sources = emergenceSources();
         // Geography is sampled independently of political overlays. A map with no titles/realms
         // is still a valid source of terrain, biome and river evidence for a future map-first world.
-        boolean vanillaCampaign = campaignRunning && "vanilla".equals(campaignMapId);
         for (EmergenceSource source : sources) {
             if (source.map != null) geography.add(GSON.toJsonTree(MapGeography.describe(source.map)));
         }
-        // During acceptance each server is isolated to exactly one source. Normal
-        // gameplay continues to combine every authored map and observed vanilla region.
-        if (!campaignRunning || vanillaCampaign)
-            for (var vanillaRegion : VanillaWorldGeography.snapshot()) geography.add(vanillaRegion);
+        // Every loaded vanilla-like dimension contributes its own observed geography.
+        for (var vanillaRegion : VanillaWorldGeography.snapshot()) geography.add(vanillaRegion);
         // WorldSim must never consume sovereignty or political borders from an image map.
         // Both image and vanilla sources contribute only canonical emergent realms created
         // by the shared geography pipeline; this also prevents map realms being counted twice.
