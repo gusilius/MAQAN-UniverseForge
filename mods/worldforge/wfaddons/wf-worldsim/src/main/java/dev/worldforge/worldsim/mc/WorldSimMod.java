@@ -1364,6 +1364,10 @@ public final class WorldSimMod {
                 warData.addProperty("offer_white", war.offerWhite);
                 warData.add("attacker_members", GSON.toJsonTree(war.members(dev.worldforge.war.War.Side.ATTACKER)));
                 warData.add("defender_members", GSON.toJsonTree(war.members(dev.worldforge.war.War.Side.DEFENDER)));
+                warData.add("sides", GSON.toJsonTree(war.sides));
+                warData.addProperty("winner", war.winner == null ? "" : war.winner.name());
+                warData.addProperty("peace_offer_from", war.offerFrom == null ? "" : war.offerFrom.name());
+                warData.addProperty("peace_offer_white", war.offerWhite);
                 warData.add("goals", GSON.toJsonTree(war.goals)); warData.add("occupied", GSON.toJsonTree(war.occupied));
                 warData.add("log", GSON.toJsonTree(war.log));
                 addCatalogEntry(catalogEntries, "wf_war", "war_instances",
