@@ -179,7 +179,27 @@ fn bootstrap_initial_civilizations(
         return;
     }
 
-    let separation = map_scale(map).max(u64::from(map.sample_stride) * 3).max(8);
+    // Vanilla geography is observed incrementally: the first useful sample may cover
+    // only a small patch around the spawn point, while an image-backed planet is known
+    // in full. Scale spacing to the currently observed land footprint, not the eventual
+    // map dimensions, otherwise a small vanilla observation window can never found four
+    // communities and the world remains politically empty forever.
+    let min_x = map.cells.iter().filter(|cell| cell.land && cell.suitability >= 48)
+        .map(|cell| cell.x).min();
+    let max_x = map.cells.iter().filter(|cell| cell.land && cell.suitability >= 48)
+        .map(|cell| cell.x).max();
+    let min_z = map.cells.iter().filter(|cell| cell.land && cell.suitability >= 48)
+        .map(|cell| cell.z).min();
+    let max_z = map.cells.iter().filter(|cell| cell.land && cell.suitability >= 48)
+        .map(|cell| cell.z).max();
+    let observed_span = match (min_x, max_x, min_z, max_z) {
+        (Some(x0), Some(x1), Some(z0), Some(z1)) =>
+            u64::from((x1 - x0).max(z1 - z0).saturating_add(1)),
+        _ => return,
+    };
+    let minimum_spacing = u64::from(map.sample_stride.max(1)) * 2;
+    let separation = map_scale(map).min((observed_span / 6).max(minimum_spacing))
+        .max(minimum_spacing).max(4);
     let bucket = (separation.saturating_mul(4).min(u64::from(u32::MAX)) as u32).max(1);
     let separation_sq = separation.saturating_mul(separation);
     let mut groups: BTreeMap<(u32, u32), Vec<&GeographicCell>> = BTreeMap::new();
@@ -526,6 +546,32 @@ mod tests {
     fn request(day: u64, state: Option<EmergentWorld>) -> EmergenceRequest {
         EmergenceRequest { snapshot:WorldSnapshot { world_id:"map-only".into(),seed:8128,day,
             realms:vec![],borders:vec![],settlements:vec![],characters:vec![],workforce:vec![],geography:vec![map()] }, state }
+    }
+
+    #[test]
+    fn small_incremental_vanilla_observation_can_found_a_polity() {
+        let mut cells = Vec::new();
+        for z in (2..=78).step_by(4) {
+            for x in (2..=78).step_by(4) {
+                cells.push(GeographicCell {
+                    x, z, biome: "minecraft:plains".into(), elevation: 70,
+                    river: 0, land: true, suitability: 90,
+                    owner_realm_id: String::new(), discovered_year: 0,
+                });
+            }
+        }
+        let map = GeographicMap {
+            map_id: "vanilla-world:minecraft:overworld".into(),
+            width_px: 256, height_px: 256, blocks_per_pixel_milli: 1000,
+            political_layers_present: false, sample_stride: 4, cells,
+        };
+        let mut bands = Vec::new();
+        let mut polities = Vec::new();
+        let mut events = Vec::new();
+        bootstrap_initial_civilizations(&map, 424242, &mut bands, &mut polities, &mut events);
+        assert!(bands.len() >= 4, "observed land patch should produce several real communities");
+        assert!(!polities.is_empty(), "a sufficiently large suitable land patch should found a polity");
+        assert!(polities[0].settlement_ids.len() >= 4);
     }
 
     #[test]
