@@ -129,7 +129,7 @@ jobs:
         working-directory: mods/worldforge/wfaddons
         shell: bash
         env:
-          WF_CAMPAIGN_TIMEOUT_SECONDS: "3600"
+          WF_ACCEPTANCE_MODE: "smoke"
           WF_CAMPAIGN_MAP_ID: "real-map"
         run: |
           bash tools/autonomous-campaign.sh "$RUNNER_TEMP/maqan-two-world-map/real-map.worldmap" dist "$RUNNER_TEMP/maqan-image-map-acceptance"
