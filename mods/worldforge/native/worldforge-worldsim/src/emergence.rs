@@ -213,13 +213,14 @@ fn bootstrap_vanilla_initial_civilizations(
             .then_with(|| a.z.cmp(&b.z)).then_with(|| a.x.cmp(&b.x))
     });
 
-    // Keep local founding cohorts small and numerous. The former 256-cell
-    // spacing plus a four-times bucket span merged many independently viable
-    // frontier regions into at most four macro-polities.
+    // Vanilla observations are sparse samples of a huge world. Keep founding
+    // cohorts local to the observed chunk neighbourhood, not to the eventual
+    // planet span; cap the distance so a newly explored frontier can still found
+    // several neighbouring communities and more than one independent polity.
     let minimum_spacing = u64::from(map.sample_stride.max(1)) * 2;
     let observed_scale = observed_map_scale(map);
-    let separation = (observed_scale / 3).max(minimum_spacing).max(1);
-    let bucket_span = separation.saturating_mul(6).min(u64::from(u32::MAX)) as u32;
+    let separation = (observed_scale / 3).min(32).max(minimum_spacing).max(1);
+    let bucket_span = separation.saturating_mul(4).min(u64::from(u32::MAX)) as u32;
     let bucket_span = bucket_span.max(1);
     let mut groups: BTreeMap<(u32, u32), Vec<&GeographicCell>> = BTreeMap::new();
     for cell in &candidates {
