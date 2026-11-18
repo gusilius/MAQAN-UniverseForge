@@ -904,6 +904,13 @@ public final class WorldSimMod {
                 addNamedEntity(namedEntities, map.name + ":" + army.id, "army", army.name, "", army.realm);
                 if (RealmsMod.realm(army.realm) != null) armies.add(formation);
             }
+            for (TitleData.Realm realm : map.titles.realms.values()) {
+                JsonObject economy = new JsonObject();
+                economy.addProperty("manpower_pool", Math.max(0, engine.pool(realm.id)));
+                economy.addProperty("gold", finite(engine.gold(realm.id)));
+                economy.addProperty("capital_title_id", engine.capital(realm.id));
+                addCatalogEntry(catalogEntries, "wf_army", "realm_economy", realm.id, realm.name, economy);
+            }
             for (var unit : engine.types.values()) {
                 JsonObject definition = new JsonObject();
                 definition.addProperty("name", unit.name);
@@ -1210,6 +1217,13 @@ public final class WorldSimMod {
                 if (building.state == Building.State.DONE)
                     completedBuildingCounts.merge(building.def.id, 1, Integer::sum);
             }
+            Set<String> trainerBuildings = new TreeSet<>();
+            for (Building building : s.buildings) {
+                if (building == null || building.def == null || building.state != Building.State.DONE || building.paused) continue;
+                if (s.assigned(building.uid).stream().anyMatch(worker -> worker.lifeAction.isBlank()
+                        && "trainer".equals(worker.workRole()))) trainerBuildings.add(building.def.id);
+            }
+            settlementIdentity.add("trainer_buildings", GSON.toJsonTree(trainerBuildings));
             settlementIdentity.add("building_counts", GSON.toJsonTree(buildingCounts));
             settlementIdentity.add("completed_building_counts", GSON.toJsonTree(completedBuildingCounts));
             settlementIdentity.add("resource_stock", GSON.toJsonTree(new TreeMap<>(s.stock)));
