@@ -283,6 +283,7 @@ public final class HistoricalChronicle {
             List<String> scopes = new ArrayList<>();
             Object rawScopes = item.get("scopes");
             if (rawScopes instanceof List<?> values) for (Object value : values) scopes.add(String.valueOf(value));
+            scopes.add("world");
             for (String realm : realms) if (!scopes.contains("realm:" + realm)) scopes.add("realm:" + realm);
             restored.add(new Entry(id, day, year, Math.max(0, epoch), Math.max(0, cycle),
                     category.isBlank() ? "system" : category, text, realms, scopes));
