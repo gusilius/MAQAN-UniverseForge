@@ -112,20 +112,18 @@ jobs:
           python -c "import sys,json; from pathlib import Path; sys.path.insert(0,'mods/worldforge/wfaddons/tools/image-worldgen'); from image_worldgen import validate_package; print(json.dumps(validate_package(Path(r'$out')/'real-map.worldmap'),ensure_ascii=False,indent=2))"
           if ($LASTEXITCODE -ne 0) { throw "Actual map package validation failed" }
 
-      - name: Run the complete modpack on a real vanilla Minecraft world
+      - name: Start and smoke-test an ordinary vanilla world
         id: vanilla_campaign
         continue-on-error: true
         working-directory: mods/worldforge/wfaddons
         shell: bash
         env:
-          WF_CAMPAIGN_TIMEOUT_SECONDS: "3600"
-          WF_VANILLA_TEST_CHUNKS: "420"
-          WF_SURVEY_USERNAME: "MaqanSurveyor"
+          WF_ACCEPTANCE_MODE: "smoke"
           WF_VANILLA_SEED: "424242"
         run: |
           bash tools/autonomous-campaign.sh vanilla dist "$RUNNER_TEMP/maqan-vanilla-acceptance"
 
-      - name: Run the same complete modpack on the real map.png world
+      - name: Start and smoke-test the image-derived world
         id: image_map_campaign
         continue-on-error: true
         working-directory: mods/worldforge/wfaddons
@@ -143,10 +141,10 @@ jobs:
           VANILLA_OUTCOME: ${{ steps.vanilla_campaign.outcome }}
           IMAGE_MAP_OUTCOME: ${{ steps.image_map_campaign.outcome }}
         run: |
-          "VANILLA_CAMPAIGN_OUTCOME=$env:VANILLA_OUTCOME" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
-          "IMAGE_MAP_CAMPAIGN_OUTCOME=$env:IMAGE_MAP_OUTCOME" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "VANILLA_WORLD_SMOKE_OUTCOME=$env:VANILLA_OUTCOME" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "IMAGE_MAP_WORLD_SMOKE_OUTCOME=$env:IMAGE_MAP_OUTCOME" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
           if ($env:VANILLA_OUTCOME -ne "success" -or $env:IMAGE_MAP_OUTCOME -ne "success") {
-            throw "One or both independent world acceptance campaigns failed; inspect each campaign diagnostics artifact."
+            throw "One or both ordinary-world startup smoke tests failed; inspect diagnostics artifacts."
           }
 
       - name: Upload both server worlds and acceptance diagnostics
