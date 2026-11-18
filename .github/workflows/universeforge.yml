@@ -48,10 +48,6 @@ jobs:
         with:
           python-version: "3.12"
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
       - name: Install image-to-worldmap dependencies
         shell: pwsh
         run: |
