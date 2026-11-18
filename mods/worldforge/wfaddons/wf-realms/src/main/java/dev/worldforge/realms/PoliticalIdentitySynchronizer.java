@@ -154,14 +154,12 @@ public final class PoliticalIdentitySynchronizer {
             politics.lastError = "Title " + title.id + " has orphan holder Character ID " + currentId;
             return -1;
         }
-        if (!previous.alive && desired.alive) {
-            if (politics.grantTitle(title.id, desired.globalId)) return 1;
-            politics.lastError = "Could not reconcile succession for " + scope + ": " + politics.lastError;
-            return -1;
-        }
-        politics.lastError = "Title " + title.id + " holder " + currentId
-                + " conflicts with " + scope + " office holder " + desired.globalId
-                + "; living title holder preserved";
+        // A live wf-people office appointment is authoritative for this exact
+        // title. Replace stale auto-generated/legacy holder projections; a manual
+        // holder without a corresponding office is never touched by this path.
+        if (politics.grantTitle(title.id, desired.globalId)) return 1;
+        politics.lastError = "Could not reconcile " + scope + " office holder " + desired.globalId
+                + ": " + politics.lastError;
         return -1;
     }
 }
