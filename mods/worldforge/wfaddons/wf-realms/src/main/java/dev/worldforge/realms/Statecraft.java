@@ -751,6 +751,10 @@ public final class Statecraft {
     }
     public War war(String id) { return wars.get(id); }
     public Collection<War> wars() { return Collections.unmodifiableCollection(wars.values()); }
+    public Collection<Plot> plots() { return Collections.unmodifiableCollection(plots.values()); }
+    public InheritanceLaw inheritanceLaw(String realmId) {
+        return inheritanceLaws.getOrDefault(realmId, InheritanceLaw.PRIMOGENITURE);
+    }
     public War activeWarBetween(String first, String second) {
         return wars.values().stream().filter(w -> w.status == WarStatus.ACTIVE
                 && ((w.attackerRealm.equals(first) && w.defenderRealm.equals(second))
