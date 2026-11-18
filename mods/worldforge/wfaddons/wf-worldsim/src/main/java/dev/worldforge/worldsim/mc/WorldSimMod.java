@@ -454,6 +454,7 @@ public final class WorldSimMod {
         phaseStarted = System.nanoTime();
         syncEmergentPolities(server, candidateEmergenceState, materializationYear);
         PROFILER.record("worldsim.sync_emergent_polities", System.nanoTime() - phaseStarted);
+        logWorldGenesisDiagnostics(server, candidateEmergenceState);
 
         if (emergenceFrame.has("events") && emergenceFrame.get("events").isJsonArray()) {
             for (var eventElement : emergenceFrame.getAsJsonArray("events")) {
@@ -541,6 +542,55 @@ public final class WorldSimMod {
                 frame.getAsJsonArray("proposals").size(), accepted, rejected);
         updateCampaign(server, day);
         return true;
+    }
+
+    /** Per-dimension runtime evidence; diagnostics are projections of canonical mod state. */
+    private static void logWorldGenesisDiagnostics(MinecraftServer server, JsonObject state) {
+        if (server == null || state == null || !state.has("bands") || !state.get("bands").isJsonArray()
+                || !state.has("polities") || !state.get("polities").isJsonArray()) return;
+        for (EmergenceSource source : emergenceSources()) {
+            long bands = state.getAsJsonArray("bands").asList().stream()
+                    .filter(JsonObject.class::isInstance).map(JsonObject.class::cast)
+                    .filter(band -> source.id.equals(band.has("map_id") ? band.get("map_id").getAsString() : ""))
+                    .count();
+            long settled = state.getAsJsonArray("bands").asList().stream()
+                    .filter(JsonObject.class::isInstance).map(JsonObject.class::cast)
+                    .filter(band -> source.id.equals(band.has("map_id") ? band.get("map_id").getAsString() : "")
+                            && band.has("settled") && band.get("settled").getAsBoolean()).count();
+            List<TitleData.Realm> realms = RealmsMod.emergentRealms().stream()
+                    .filter(realm -> source.id.equals(String.valueOf(realm.props.getOrDefault("emergence.map_id", ""))))
+                    .toList();
+            Set<String> raceIds = new TreeSet<>();
+            if (source.registry != null) for (dev.worldforge.people.Character person : source.registry.all()) {
+                Object race = person.props.get("origin.race");
+                if (person.alive && race != null && !String.valueOf(race).isBlank())
+                    raceIds.add(String.valueOf(race));
+            }
+            long settlements = SettleMod.COLONIES.values().stream()
+                    .filter(colony -> colony != null && colony.s != null && source.dimension.equals(colony.dim)
+                            && colony.genesisOperationId != null
+                            && colony.genesisOperationId.startsWith("worldsim:settlement:"))
+                    .count();
+            long rulers = realms.stream().filter(realm -> {
+                Object id = realm.props.get("emergence.ruler_global_id");
+                return id != null && PeopleMod.authority().getGlobal(String.valueOf(id)) != null;
+            }).count();
+            long governments = realms.stream().filter(realm -> {
+                var political = RealmsMod.REALMS.state(realm.id);
+                return political.gov != null && !political.gov.isBlank();
+            }).count();
+            long titles = RealmsMod.POLITICS.titles().stream()
+                    .filter(title -> realms.stream().anyMatch(realm -> realm.id.equals(title.realmId))).count();
+            long dynasties = RealmsMod.POLITICS.dynasties().stream()
+                    .filter(dynasty -> dynasty != null && dynasty.name != null && !dynasty.name.isBlank()
+                            && realms.stream().anyMatch(realm -> Objects.equals(
+                                    String.valueOf(realm.props.getOrDefault("emergence.dynasty_id", "")), dynasty.id)))
+                    .count();
+            LOGGER.info("MAQAN_WORLD_GENESIS source={} dimension={} geography_cells={} communities={} settled={} settlements={} polities={} canonical_rulers={} dynasties={} titles={} governments={} race_kinds={}",
+                    source.id, source.dimension,
+                    source.map == null ? VanillaWorldGeography.sampledCellCount() : source.map.w * source.map.h,
+                    bands, settled, settlements, realms.size(), rulers, dynasties, titles, governments, raceIds.size());
+        }
     }
 
     private static void requireNativeSuccess(JsonObject frame, String stage) {
