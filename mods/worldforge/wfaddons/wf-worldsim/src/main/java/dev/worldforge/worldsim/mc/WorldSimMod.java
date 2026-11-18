@@ -664,10 +664,20 @@ public final class WorldSimMod {
                         + ", emergent_realms=" + emergentRealms));
                 return 0;
             }
-        } else if (registry.size() != 0 || !SettleMod.COLONIES.isEmpty()
-                || !RealmsMod.emergentRealms().isEmpty()) {
-            source.sendFailure(Component.literal("Image campaign requires an empty isolated world: no pre-seeded Characters, settlements or emergent realms"));
-            return 0;
+        } else {
+            // The image-map import intentionally creates geography-backed settlement anchors
+            // before the autonomous campaign begins. Those are valid bootstrap inputs, not
+            // pre-authored populations or polities. Reject only non-map Characters/colonies
+            // and pre-existing emergent realms; never require the map dimension to be empty.
+            long foreignSettlements = SettleMod.COLONIES.values().stream()
+                    .filter(colony -> colony == null || !map.name.equals(colony.sourceMapId)).count();
+            if (registry.size() != 0 || foreignSettlements != 0
+                    || !RealmsMod.emergentRealms().isEmpty()) {
+                source.sendFailure(Component.literal("Image campaign rejected non-map bootstrap data: characters="
+                        + registry.size() + ", foreign_settlements=" + foreignSettlements
+                        + ", emergent_realms=" + RealmsMod.emergentRealms().size()));
+                return 0;
+            }
         }
         campaignMapId = vanillaCampaign ? "vanilla" : map.name;
         campaignForcedChunks.clear();
