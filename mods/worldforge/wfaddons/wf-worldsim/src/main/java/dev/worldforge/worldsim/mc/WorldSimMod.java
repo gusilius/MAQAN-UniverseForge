@@ -552,6 +552,11 @@ public final class WorldSimMod {
             long settlements = SettleMod.COLONIES.values().stream()
                     .filter(colony -> colony != null && colony.s != null && source.dimension.equals(colony.dim))
                     .count();
+            Map<String, Long> settlementTypeCounts = SettleMod.COLONIES.values().stream()
+                    .filter(colony -> colony != null && colony.s != null && source.dimension.equals(colony.dim))
+                    .map(colony -> colony.s.typeId == null || colony.s.typeId.isBlank() ? "unclassified" : colony.s.typeId)
+                    .collect(java.util.stream.Collectors.groupingBy(value -> value, TreeMap::new,
+                            java.util.stream.Collectors.counting()));
             long emergentSettlements = SettleMod.COLONIES.values().stream()
                     .filter(colony -> colony != null && colony.s != null && source.dimension.equals(colony.dim)
                             && colony.genesisOperationId != null
@@ -584,11 +589,11 @@ public final class WorldSimMod {
                             && realms.stream().anyMatch(realm -> Objects.equals(
                                     String.valueOf(realm.props.getOrDefault("emergence.dynasty_id", "")), dynasty.houseId)))
                     .count();
-            LOGGER.info("MAQAN_WORLD_GENESIS source={} dimension={} geography_cells={} communities={} settled={} settlements={} emergent_settlements={} map_anchors={} living_characters={} court_offices={} polities={} canonical_rulers={} dynasties={} titles={} governments={} race_kinds={}",
+            LOGGER.info("MAQAN_WORLD_GENESIS source={} dimension={} geography_cells={} communities={} settled={} settlements={} emergent_settlements={} map_anchors={} living_characters={} court_offices={} polities={} canonical_rulers={} dynasties={} titles={} governments={} race_kinds={} settlement_types={}",
                     source.id, source.dimension,
                     source.map == null ? VanillaWorldGeography.sampledCellCount() : source.map.w * source.map.h,
                     bands, settled, settlements, emergentSettlements, mapAnchors, livingCharacters, courtOffices,
-                    realms.size(), rulers, dynasties, titles, governments, raceIds.size());
+                    realms.size(), rulers, dynasties, titles, governments, raceIds.size(), GSON.toJson(settlementTypeCounts));
             if (source.map == null) {
                 int cells = 0, landCells = 0, viable36 = 0, viable48 = 0, maxSuitability = 0;
                 Map<String, Integer> biomeCounts = new TreeMap<>();
@@ -1845,6 +1850,14 @@ public final class WorldSimMod {
                     if (!realmId.equals(SettleMod.realmOf(physical))
                             && !SettleMod.bindEmergentRealmInMemory(settlementId, realmId)) continue;
                     if (!realmId.equals(SettleMod.realmOf(physical))) continue;
+                    // Attach the existing data-pack settlement classifier to every
+                    // Genesis-created colony immediately. Do not wait for the ordinary
+                    // low-frequency settlement tick: the initial political projection
+                    // already has canonical population, terrain and race composition.
+                    physical.s.types = SettleMod.TYPES;
+                    physical.s.refreshType(physical.s.population(),
+                            dev.worldforge.mod.api.DemoApi.terrain(realmId),
+                            dev.worldforge.mod.api.DemoApi.races(realmId));
                     physicalSettlementIds.add(settlementId);
                     physicalSettlementNames.add(physical.s.name);
                     physicalSettlementCenters.add(settlementId + "@" + physical.cx + "," + physical.cz);
