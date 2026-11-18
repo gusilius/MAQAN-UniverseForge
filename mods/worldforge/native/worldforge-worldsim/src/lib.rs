@@ -403,6 +403,11 @@ fn realm_policy_modifier(snapshot: &WorldSnapshot, realm_id: &str, key: &str) ->
     if total.is_finite() { total } else { 0.0 }
 }
 
+fn catalog_entry<'a>(snapshot: &'a WorldSnapshot, module: &str, catalog: &str, id: &str) -> Option<&'a CatalogEntry> {
+    snapshot.catalog_entries.iter().find(|entry|
+        entry.module_id == module && entry.catalog_id == catalog && entry.entry_id == id)
+}
+
 fn has_treaty(snapshot: &WorldSnapshot, a: &str, b: &str, treaty: &str) -> bool {
     snapshot.diplomatic_relations.iter().any(|relation|
         ((relation.realm_a == a && relation.realm_b == b)
@@ -695,10 +700,65 @@ impl WorldSnapshot {
             }
         }
         let mut catalog_keys = BTreeSet::new();
+        let mut actual_catalog_counts: BTreeMap<&str, u32> = BTreeMap::new();
         for entry in &self.catalog_entries {
             if entry.module_id.trim().is_empty() || entry.catalog_id.trim().is_empty() || entry.entry_id.trim().is_empty()
                 || !catalog_keys.insert((entry.module_id.as_str(), entry.catalog_id.as_str(), entry.entry_id.as_str())) {
                 return Err(SimError::InvalidSnapshot(format!("invalid-or-duplicate-catalog-entry:{}:{}:{}", entry.module_id, entry.catalog_id, entry.entry_id)));
+            }
+            *actual_catalog_counts.entry(entry.module_id.as_str()).or_default() += 1;
+        }
+        for (module, count) in &actual_catalog_counts {
+            let Some(capability) = self.capabilities.iter().find(|capability| capability.module_id == *module) else {
+                return Err(SimError::InvalidSnapshot(format!("catalog-without-capability:{module}")));
+            };
+            if !capability.available {
+                return Err(SimError::InvalidSnapshot(format!("catalog-from-unavailable-module:{module}")));
+            }
+            let expected = *count + if *module == "wf_realms" { self.government_definitions.len() as u32 } else { 0 };
+            if capability.catalog_count != expected {
+                return Err(SimError::InvalidSnapshot(format!("catalog-count-mismatch:{module}:declared={}:actual={expected}", capability.catalog_count)));
+            }
+        }
+        for capability in &self.capabilities {
+            let actual = actual_catalog_counts.get(capability.module_id.as_str()).copied().unwrap_or(0)
+                + if capability.module_id == "wf_realms" { self.government_definitions.len() as u32 } else { 0 };
+            if capability.catalog_count != actual {
+                return Err(SimError::InvalidSnapshot(format!("capability-catalog-count-mismatch:{}:declared={}:actual={actual}", capability.module_id, capability.catalog_count)));
+            }
+        }
+        let mut selected_realms = BTreeSet::new();
+        for selection in &self.realm_governments {
+            if !realms.contains(selection.realm_id.as_str()) || !selected_realms.insert(selection.realm_id.as_str()) {
+                return Err(SimError::InvalidSnapshot(format!("invalid-or-duplicate-realm-government:{}", selection.realm_id)));
+            }
+            if !selection.government_id.is_empty()
+                && !self.government_definitions.iter().any(|definition| definition.id == selection.government_id) {
+                return Err(SimError::InvalidSnapshot(format!("unknown-government:{}:{}", selection.realm_id, selection.government_id)));
+            }
+            if !selection.level_id.is_empty()
+                && self.catalog_entries.iter().any(|entry| entry.module_id == "wf_realms" && entry.catalog_id == "government_levels")
+                && catalog_entry(self, "wf_realms", "government_levels", &selection.level_id).is_none() {
+                return Err(SimError::InvalidSnapshot(format!("unknown-government-level:{}:{}", selection.realm_id, selection.level_id)));
+            }
+            for doctrine in &selection.doctrine_ids {
+                let (branch, node) = doctrine.split_once(':').unwrap_or(("", doctrine.as_str()));
+                let found = self.catalog_entries.iter().filter(|entry|
+                    entry.module_id == "wf_realms" && entry.catalog_id == "doctrine_branches"
+                        && (branch.is_empty() || entry.entry_id == branch))
+                    .any(|entry| entry.payload.get("nodes").and_then(serde_json::Value::as_array)
+                        .map(|nodes| nodes.iter().any(|value| value.get("id").and_then(serde_json::Value::as_str) == Some(node)))
+                        .unwrap_or(false));
+                if !found { return Err(SimError::InvalidSnapshot(format!("unknown-doctrine:{}:{}", selection.realm_id, doctrine))); }
+            }
+            for (law_id, option_id) in &selection.laws {
+                let found = catalog_entry(self, "wf_realms", "laws", law_id)
+                    .and_then(|entry| entry.payload.get("options"))
+                    .and_then(serde_json::Value::as_array)
+                    .map(|options| options.iter().any(|option|
+                        option.get("id").and_then(serde_json::Value::as_str) == Some(option_id.as_str())))
+                    .unwrap_or(false);
+                if !found { return Err(SimError::InvalidSnapshot(format!("unknown-law-option:{}:{}:{}", selection.realm_id, law_id, option_id))); }
             }
         }
         for relation in &self.diplomatic_relations {
