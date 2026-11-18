@@ -837,6 +837,10 @@ public final class CharacterInventory {
         write(deceased, List.of());
         writeEquipment(deceased, Map.of());
         deceased.props.remove(CONTAINERS_KEY);
+        Object pending = deceased.props.get("estate.transfer_pending");
+        if (pending instanceof String transferId && !transferId.isBlank())
+            deceased.props.put("estate.transfer_receipt", transferId);
+        deceased.props.remove("estate.transfer_pending");
         deceased.props.put("estate.recipient", heir.id);
         deceased.props.put("estate.recipient_global_id", heir.globalId);
         deceased.props.put("estate.status", "inherited");
@@ -855,13 +859,22 @@ public final class CharacterInventory {
                 Character deceased = authority.getGlobal(deceasedGlobalId);
                 if (deceased == null) continue;
                 String transferId = entry.getKey().substring("estate.incoming.".length());
+                if (transferId.equals(deceased.props.get("estate.transfer_receipt"))) continue;
+                boolean alreadyCommitted = !deceased.alive
+                        && Boolean.TRUE.equals(deceased.props.get("estate.settled"))
+                        && "inherited".equals(deceased.props.get("estate.status"))
+                        && heir.globalId.equals(deceased.props.get("estate.recipient_global_id"))
+                        && items(deceased).isEmpty() && equipment(deceased).isEmpty()
+                        && containers(deceased).isEmpty();
+                if (alreadyCommitted) {
+                    deceased.props.put("estate.transfer_receipt", transferId);
+                    deceased.props.remove("estate.transfer_pending");
+                    continue;
+                }
                 deceased.props.put("estate.transfer_pending", transferId);
                 deceased.props.put("estate.recipient_global_id", heir.globalId);
                 CharacterRegistry registry = authority.registryForGlobal(deceasedGlobalId);
-                if (registry != null && (deceased.alive || !Boolean.TRUE.equals(deceased.props.get("estate.settled"))
-                        || !items(deceased).isEmpty() || !equipment(deceased).isEmpty()
-                        || !containers(deceased).isEmpty()))
-                    registry.kill(deceased.id);
+                if (registry != null) registry.kill(deceased.id);
             }
         }
     }

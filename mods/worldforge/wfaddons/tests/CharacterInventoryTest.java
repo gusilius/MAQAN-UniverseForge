@@ -263,6 +263,10 @@ public final class CharacterInventoryTest {
                         && "inherited".equals(crossMapDeceased.props.get("estate.status"))
                         && playerHeir.globalId.equals(crossMapDeceased.props.get("estate.recipient_global_id")),
                 "death estate resolves a spouse in the separate global player registry");
+        CharacterInventory.reconcileEstates(worldAuthority);
+        ok(!crossMapDeceased.props.containsKey("estate.transfer_pending")
+                        && crossMapDeceased.props.get("estate.transfer_receipt") instanceof String,
+                "completed cross-registry estate retires its active marker while preserving a durable receipt");
 
         Character parent = settlementPeople.create("Parent", "", "north", "m", 180);
         CharacterRegistry secondHousehold = new CharacterRegistry();
@@ -312,8 +316,10 @@ public final class CharacterInventoryTest {
         Character recoveredHeir = recoveredRecipient.get(crashHeir.id);
         ok(!recoveredDeceased.alive && CharacterInventory.count(recoveredDeceased, "minecraft:diamond") == 0
                         && CharacterInventory.count(recoveredHeir, "minecraft:diamond") == 11
-                        && Boolean.TRUE.equals(recoveredDeceased.props.get("death.lifecycle.completed")),
-                "recipient-first estate commit recovers a crash between separate registry file saves without loss or duplication");
+                        && Boolean.TRUE.equals(recoveredDeceased.props.get("death.lifecycle.completed"))
+                        && !recoveredDeceased.props.containsKey("estate.transfer_pending")
+                        && recoveredDeceased.props.get("estate.transfer_receipt") instanceof String,
+                "recipient-first estate recovery completes once and retires the pending marker without loss or duplication");
         liveAuthority.clear();
         recoveredAuthority.clear();
 

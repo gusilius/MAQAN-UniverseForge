@@ -628,10 +628,17 @@ public class PeopleMod {
             indegree.put(registry, 0);
         }
         for (CharacterRegistry recipientRegistry : registries) {
-            for (Character character : recipientRegistry.all()) {
-                for (Map.Entry<String, Object> property : character.props.entrySet()) {
-                    if (!property.getKey().startsWith("estate.incoming.") || !(property.getValue() instanceof String sourceGlobalId))
-                        continue;
+            for (Character heir : recipientRegistry.all()) {
+                for (Map.Entry<String, Object> property : heir.props.entrySet()) {
+                    if (!property.getKey().startsWith("estate.incoming.")
+                            || !(property.getValue() instanceof String sourceGlobalId)) continue;
+                    String transferId = property.getKey().substring("estate.incoming.".length());
+                    Character deceased = AUTHORITY.getGlobal(sourceGlobalId);
+                    // Incoming markers are permanent replay receipts. Only an active source
+                    // transfer creates a write-order dependency between registry files.
+                    if (deceased == null
+                            || !transferId.equals(deceased.props.get("estate.transfer_pending"))
+                            || !heir.globalId.equals(deceased.props.get("estate.recipient_global_id"))) continue;
                     CharacterRegistry sourceRegistry = AUTHORITY.registryForGlobal(sourceGlobalId);
                     if (sourceRegistry != null && sourceRegistry != recipientRegistry
                             && outgoing.get(recipientRegistry).add(sourceRegistry))
@@ -675,8 +682,9 @@ public class PeopleMod {
             }
         }
         if (ordered.size() != registries.size()) {
-            LOGGER.warn("wf_people: estate persistence graph contains a cycle; switching to write-ahead journal");
-            return persistRegistriesWithJournal(server, registries, mapOwners, dimensionOwners);
+            LOGGER.warn("wf_people: active estate dependency cycle detected; committing one write-ahead registry snapshot");
+            if (!persistRegistriesWithJournal(server, registries, mapOwners, dimensionOwners)) return false;
+            return finalizeCommittedEstateTransfers(server, registries, mapOwners, dimensionOwners);
         }
 
         for (CharacterRegistry registry : ordered) {
@@ -710,6 +718,56 @@ public class PeopleMod {
                         LOGGER.error("wf_people: не удалось сохранить людей карты '{}': {}",
                                 map == null ? "unknown" : map.name, ex.toString());
                 }
+                return false;
+            }
+        }
+        return finalizeCommittedEstateTransfers(server, registries, mapOwners, dimensionOwners);
+    }
+
+    /** Retire pending estate markers only after every source and recipient snapshot is durable. */
+    private static boolean finalizeCommittedEstateTransfers(MinecraftServer server,
+            List<CharacterRegistry> registries,
+            java.util.IdentityHashMap<CharacterRegistry, MapData> mapOwners,
+            java.util.IdentityHashMap<CharacterRegistry, String> dimensionOwners) {
+        java.util.IdentityHashMap<CharacterRegistry, List<Character>> changed = new java.util.IdentityHashMap<>();
+        for (CharacterRegistry recipientRegistry : registries) {
+            for (Character heir : recipientRegistry.all()) {
+                for (Map.Entry<String, Object> property : heir.props.entrySet()) {
+                    if (!property.getKey().startsWith("estate.incoming.")
+                            || !(property.getValue() instanceof String sourceGlobalId)) continue;
+                    String transferId = property.getKey().substring("estate.incoming.".length());
+                    Character deceased = AUTHORITY.getGlobal(sourceGlobalId);
+                    if (deceased == null
+                            || !transferId.equals(deceased.props.get("estate.transfer_pending"))
+                            || !heir.globalId.equals(deceased.props.get("estate.recipient_global_id"))) continue;
+                    CharacterRegistry sourceRegistry = AUTHORITY.registryForGlobal(sourceGlobalId);
+                    if (sourceRegistry == null) return false;
+                    deceased.props.put("estate.transfer_receipt", transferId);
+                    deceased.props.remove("estate.transfer_pending");
+                    changed.computeIfAbsent(sourceRegistry, ignored -> new ArrayList<>()).add(deceased);
+                }
+            }
+        }
+        for (Map.Entry<CharacterRegistry, List<Character>> entry : changed.entrySet()) {
+            CharacterRegistry registry = entry.getKey();
+            try {
+                if (registry == PLAYER_REGISTRY) {
+                    Path file = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
+                            .resolve("worldforge").resolve("wf_players.json");
+                    writeAtomic(file, registry.toJson());
+                } else if (registry == WORLD_REGISTRY) {
+                    Path file = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
+                            .resolve("worldforge").resolve("wf_people_world.json");
+                    writeAtomic(file, registry.toJson());
+                } else if (dimensionOwners.containsKey(registry)) {
+                    writeAtomic(dimensionRegistryFile(server, dimensionOwners.get(registry)), registry.toJson());
+                } else {
+                    MapData map = mapOwners.get(registry);
+                    if (map == null) throw new IllegalStateException("Estate source registry has no durable owner");
+                    writeAtomic(EditorManager.overlayDir(server, map).resolve("wf_people.json"), registry.toJson());
+                }
+            } catch (Exception ex) {
+                LOGGER.error("wf_people: could not finalize committed estate receipts: {}", ex.toString(), ex);
                 return false;
             }
         }
