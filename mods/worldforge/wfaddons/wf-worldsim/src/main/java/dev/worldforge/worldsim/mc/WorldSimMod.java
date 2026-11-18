@@ -1284,6 +1284,13 @@ public final class WorldSimMod {
         }
         addCatalogEntry(catalogEntries, "wf_people", "name_pools", "all_pools", "Cultural and racial naming pools",
                 GSON.toJsonTree(PeopleMod.NAMES.catalogSnapshot()));
+        JsonObject relationsSnapshot = exportOptionalModuleSnapshot("wf_relations",
+                "dev.worldforge.relations.mc.RelationsMc", "worldSnapshotJson");
+        if (relationsSnapshot != null) {
+            root.add("relations_runtime", relationsSnapshot);
+            addCatalogEntry(catalogEntries, "wf_relations", "runtime_state", "relationships",
+                    "Canonical social bonds, requests and persistent history", relationsSnapshot);
+        }
         JsonObject tradeSnapshot = exportOptionalModuleSnapshot("wf_trade",
                 "dev.worldforge.trade.mc.TradeMod", "worldSnapshotJson");
         if (tradeSnapshot != null) {
