@@ -22,7 +22,10 @@ import java.util.zip.ZipInputStream;
  * Карта центрирована в точке мира (0, 0); за краем карты продолжается ближайший пиксель (обычно океан).
  */
 public final class MapData {
+    /** Stable map/planet resource ID referenced by worldforge:image. */
     public final String name;
+    /** Human-readable planet name from meta.json display_name; never used as an identifier. */
+    public final String displayName;
     public final int w, h;
     public final double bpp;                 // блоков на пиксель
     public final int seaLevel, minY, maxY;
@@ -47,11 +50,12 @@ public final class MapData {
     private final short[] riverLevel;        // уровень воды реки (как height16), 0 если не река
     private final Noise warp = new Noise(0x5EED1234L);
 
-    private MapData(String name, int w, int h, double bpp, int sea, int minY, int maxY, String[] keys, int[] biomeRgb,
+    private MapData(String name, String displayName, int w, int h, double bpp, int sea, int minY, int maxY, String[] keys, int[] biomeRgb,
                     String[][] cand, double[] spawn, short[] height, byte[] biome, byte[] river, short[] riverLevel,
                     RegionData regions, byte[] regionMap, TitleData titles, Map<String, byte[]> mapItems,
                     List<SettlementSeed> settlementSeeds) {
         this.name = name;
+        this.displayName = displayName == null || displayName.isBlank() ? name : displayName;
         this.w = w;
         this.h = h;
         this.bpp = bpp;
@@ -149,6 +153,10 @@ public final class MapData {
         double bpp = ((Number) meta.get("blocks_per_pixel")).doubleValue();
         int sea = ((Number) meta.get("sea_level")).intValue();
         int minY = ((Number) meta.get("min_y")).intValue(), maxY = ((Number) meta.get("max_y")).intValue();
+        String displayName = meta.get("display_name") instanceof String value && !value.isBlank() ? value : name;
+        Object configuredPlanetId = meta.get("planet_id");
+        if (configuredPlanetId instanceof String value && !value.isBlank() && !value.equals(name))
+            throw new IOException("Map planet_id '" + value + "' does not match dimension generator map id '" + name + "'");
 
         @SuppressWarnings("unchecked")
         List<Object> bl = (List<Object>) meta.get("biomes");
@@ -256,7 +264,7 @@ public final class MapData {
                 }
             }
         }
-        return new MapData(name, w, h, bpp, sea, minY, maxY, keys, rgb, cand, spawn, height, biome, river, rl, regions, regionMap, titles, mapItems, settlementSeeds);
+        return new MapData(name, displayName, w, h, bpp, sea, minY, maxY, keys, rgb, cand, spawn, height, biome, river, rl, regions, regionMap, titles, mapItems, settlementSeeds);
     }
 
     private static Raster decode(byte[] png, int w, int h, String what) throws IOException {
