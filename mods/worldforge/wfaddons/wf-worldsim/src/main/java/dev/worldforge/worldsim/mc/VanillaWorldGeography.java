@@ -44,6 +44,12 @@ public final class VanillaWorldGeography {
     private static final Gson GSON = new Gson();
     private static final int REGION_CHUNKS = 16;
     private static final int REGION_BLOCKS = REGION_CHUNKS * 16;
+    /** Fixed unsigned coordinate origin for the complete vanilla build-height-independent world plane.
+     * Never rebase discovered geography to the current chunk bounds: doing so moves existing
+     * communities whenever a player explores west or north and changes the snapshot bounds.
+     */
+    private static final int WORLD_COORDINATE_OFFSET = 30_000_000;
+    private static final int WORLD_COORDINATE_EXTENT = WORLD_COORDINATE_OFFSET * 2 + 1;
     private static final int SAMPLE_STEP = 4;
     private static final int SCHEMA = 1;
     private static final Map<String, Region> REGIONS = new TreeMap<>();
@@ -345,8 +351,8 @@ public final class VanillaWorldGeography {
                     // One-time sanitation of legacy invalid water ownership.
                     owner = "";
                 } else if (land && previous.isBlank() && !seeds.isEmpty()) {
-                    int x = address.x * REGION_BLOCKS + cell.get("x").getAsInt();
-                    int z = address.z * REGION_BLOCKS + cell.get("z").getAsInt();
+                    int x = WORLD_COORDINATE_OFFSET + address.x * REGION_BLOCKS + cell.get("x").getAsInt();
+                    int z = WORLD_COORDINATE_OFFSET + address.z * REGION_BLOCKS + cell.get("z").getAsInt();
                     long bestDistance = Long.MAX_VALUE;
                     for (PoliticalSeed seed : seeds) {
                         if (seed.realmId.isBlank()) continue;
@@ -439,8 +445,11 @@ public final class VanillaWorldGeography {
             if (world == null) continue;
             JsonObject map = new JsonObject();
             map.addProperty("map_id", mapId);
-            map.addProperty("width_px", world.width());
-            map.addProperty("height_px", world.height());
+            // Stable coordinates across all discoveries in this dimension. The current
+            // observed bounds are deliberately not used as an origin, because they grow
+            // when the player explores into a new region.
+            map.addProperty("width_px", WORLD_COORDINATE_EXTENT);
+            map.addProperty("height_px", WORLD_COORDINATE_EXTENT);
             map.addProperty("blocks_per_pixel_milli", 1000);
             map.addProperty("sample_stride", SAMPLE_STEP);
             JsonArray cells = new JsonArray();
@@ -450,8 +459,8 @@ public final class VanillaWorldGeography {
                 if (address == null || !dimension.equals(address.dimension)) continue;
                 for (JsonObject original : region.cells.values()) {
                     JsonObject cell = original.deepCopy();
-                    cell.addProperty("x", (address.x - world.minRegionX) * REGION_BLOCKS + original.get("x").getAsInt());
-                    cell.addProperty("z", (address.z - world.minRegionZ) * REGION_BLOCKS + original.get("z").getAsInt());
+                    cell.addProperty("x", WORLD_COORDINATE_OFFSET + address.x * REGION_BLOCKS + original.get("x").getAsInt());
+                    cell.addProperty("z", WORLD_COORDINATE_OFFSET + address.z * REGION_BLOCKS + original.get("z").getAsInt());
                     if (cell.has("owner_realm_id") && !cell.get("owner_realm_id").getAsString().isBlank()) political = true;
                     cells.add(cell);
                 }
@@ -554,10 +563,9 @@ public final class VanillaWorldGeography {
     public static synchronized int[] blockPosition(String mapId, int localX, int localZ) {
         if (mapId == null) return new int[]{0, 0};
         if (mapId.startsWith("vanilla-world:")) {
-            WorldBounds world = bounds(dimensionFromMapId(mapId));
-            return world == null ? new int[]{localX, localZ}
-                    : new int[]{world.minRegionX * REGION_BLOCKS + localX,
-                        world.minRegionZ * REGION_BLOCKS + localZ};
+            // Inverse of the stable snapshot transform above. Coordinates remain
+            // attached to their original Minecraft block positions as bounds expand.
+            return new int[]{localX - WORLD_COORDINATE_OFFSET, localZ - WORLD_COORDINATE_OFFSET};
         }
         RegionAddress address = regionAddress(mapId);
         return address == null ? new int[]{0, 0}
