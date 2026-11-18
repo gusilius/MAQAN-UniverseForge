@@ -294,6 +294,11 @@ public class CourtMod {
                     // their NPCs received offices, but autonomous marriage, births,
                     // succession pressure and court AI never advanced. Attach the same
                     // CourtSim engine to each canonical dimension registry.
+                    // Overworld retains its durable legacy Character partition and is
+                    // therefore not present in dimensionRegistries(). Attach it explicitly.
+                    CourtSim overworldCourt = virtualCourt(e.getServer(), "minecraft:overworld",
+                            PeopleMod.worldRegistry());
+                    if (overworldCourt != null) overworldCourt.tick(days);
                     for (Map.Entry<String, CharacterRegistry> entry : PeopleMod.dimensionRegistries().entrySet()) {
                         CourtSim cs = virtualCourt(e.getServer(), entry.getKey(), entry.getValue());
                         if (cs != null) cs.tick(days);
