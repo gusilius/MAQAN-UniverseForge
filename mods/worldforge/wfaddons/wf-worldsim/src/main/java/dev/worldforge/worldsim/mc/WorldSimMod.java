@@ -621,7 +621,7 @@ public final class WorldSimMod {
                     MinecraftServer server = context.getSource().getServer();
                     context.getSource().sendSuccess(() -> Component.literal(
                             "WorldSim: native=" + NativeWorldSimulation.load()
-                                    + ", dimensions=" + server.getAllLevels().size()
+                                    + ", dimensions=" + java.util.stream.StreamSupport.stream(server.getAllLevels().spliterator(), false).count()
                                     + ", realms=" + RealmsMod.realms().size()
                                     + ", settlements=" + SettleMod.COLONIES.size()
                                     + ", proposal_records=" + journal.size()
