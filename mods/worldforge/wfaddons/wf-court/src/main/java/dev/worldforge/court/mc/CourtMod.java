@@ -176,6 +176,35 @@ public class CourtMod {
                 new short[0], 0, 0));
     }
 
+    /** Copies the existing Statecraft realm hierarchy into the court's read-only political view. */
+    private static void syncVirtualStatecraftRealms(TitleData data, String dimension) {
+        try {
+            Class<?> realmsMod = Class.forName("dev.worldforge.realms.mc.RealmsMod");
+            Object raw = realmsMod.getMethod("emergentRealms").invoke(null);
+            if (!(raw instanceof Collection<?> realms)) return;
+            String sourceId = "vanilla-world:" + dimension;
+            for (Object value : realms) {
+                if (!(value instanceof TitleData.Realm source)
+                        || !sourceId.equals(String.valueOf(source.props.getOrDefault("emergence.map_id", "")))) continue;
+                TitleData.Realm target = data.realms.computeIfAbsent(source.id, ignored -> new TitleData.Realm());
+                target.id = source.id;
+                target.name = source.name;
+                target.ruler = source.ruler;
+                target.rgb = source.rgb;
+                target.overlordId = source.overlordId == null ? "" : source.overlordId;
+                target.relation = source.relation == null ? "" : source.relation;
+                target.subjectIds = new ArrayList<>(source.subjectIds);
+                target.titleKeys = new ArrayList<>(source.titleKeys);
+                target.areaBlocks = source.areaBlocks;
+                target.props = new LinkedHashMap<>(source.props);
+            }
+        } catch (ClassNotFoundException ignored) {
+            // wf-realms is optional; the canonical Character offices still provide a safe fallback.
+        } catch (ReflectiveOperationException | LinkageError ex) {
+            LOGGER.warn("wf_court: could not read Statecraft hierarchy for {}: {}", dimension, ex.toString());
+        }
+    }
+
     /** Refreshes the virtual realm index from canonical ruler offices, never creating duplicate people or titles. */
     private static CourtSim virtualCourt(MinecraftServer server, String dimension, CharacterRegistry registry) {
         if (server == null || registry == null) return null;
@@ -204,6 +233,9 @@ public class CourtMod {
                 added++;
             }
         }
+        // Preserve the real Statecraft vassal/suzerain contracts, subject types and realm names.
+        // The court keeps a lightweight view; Statecraft remains the sole authority.
+        syncVirtualStatecraftRealms(data, dimension);
         data.refreshRealmIndex();
         if (data.realmList().isEmpty()) return null;
         CourtSim sim = VIRTUAL_COURTS.computeIfAbsent(dimension, key -> {
