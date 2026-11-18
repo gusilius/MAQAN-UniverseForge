@@ -768,17 +768,44 @@ public final class WorldSimMod {
                             return recent.size();
                         })))
                 .then(Commands.literal("chronicle")
-                        .executes(context -> {
-                            List<String> pages = HISTORICAL_CHRONICLE.book(12);
-                            for (String page : pages) context.getSource().sendSuccess(() -> Component.literal(page), false);
-                            return HISTORICAL_CHRONICLE.size();
-                        })
+                        .executes(context -> sendChronicle(context.getSource(), HISTORICAL_CHRONICLE.book(12)))
                         .then(Commands.argument("count", IntegerArgumentType.integer(1, 50)).executes(context -> {
                             int count = IntegerArgumentType.getInteger(context, "count");
-                            List<String> pages = HISTORICAL_CHRONICLE.book(count);
-                            for (String page : pages) context.getSource().sendSuccess(() -> Component.literal(page), false);
-                            return Math.min(count, HISTORICAL_CHRONICLE.size());
-                        }))));
+                            return sendChronicle(context.getSource(), HISTORICAL_CHRONICLE.book(count));
+                        }))
+                        .then(chronicleScopeCommand("planet"))
+                        .then(chronicleScopeCommand("realm"))
+                        .then(chronicleScopeCommand("dynasty"))
+                        .then(chronicleScopeCommand("settlement"))
+                        .then(chronicleScopeCommand("character"))));
+    }
+
+    private static int sendChronicle(CommandSourceStack source, List<String> pages) {
+        for (String page : pages) source.sendSuccess(() -> Component.literal(page), false);
+        return pages.size();
+    }
+
+    private static List<String> scopedChronicle(String type, String id, int count) {
+        return switch (type) {
+            case "planet" -> HISTORICAL_CHRONICLE.bookForPlanet(id, count);
+            case "realm" -> HISTORICAL_CHRONICLE.bookForRealm(id, count);
+            case "dynasty" -> HISTORICAL_CHRONICLE.bookForDynasty(id, count);
+            case "settlement" -> HISTORICAL_CHRONICLE.bookForSettlement(id, count);
+            case "character" -> HISTORICAL_CHRONICLE.bookForCharacter(id, count);
+            default -> List.of("Неизвестный тип летописи: " + type);
+        };
+    }
+
+    private static com.mojang.brigadier.builder.LiteralArgumentBuilder<CommandSourceStack>
+            chronicleScopeCommand(String type) {
+        return Commands.literal(type)
+                .then(Commands.argument("id", StringArgumentType.word())
+                        .executes(context -> sendChronicle(context.getSource(),
+                                scopedChronicle(type, StringArgumentType.getString(context, "id"), 12)))
+                        .then(Commands.argument("count", IntegerArgumentType.integer(1, 50))
+                                .executes(context -> sendChronicle(context.getSource(),
+                                        scopedChronicle(type, StringArgumentType.getString(context, "id"),
+                                                IntegerArgumentType.getInteger(context, "count"))))));
     }
 
     /** Returns the already registered physical dimension whose generator uses this exact map package. */
