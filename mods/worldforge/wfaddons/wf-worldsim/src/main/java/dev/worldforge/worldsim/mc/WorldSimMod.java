@@ -1043,9 +1043,34 @@ public final class WorldSimMod {
         int budget = PEOPLE_MATERIALIZATION_BUDGET_PER_TICK;
         boolean complete = true;
         boolean settlementBindingsChanged = false;
+        Map<String, String> realmByBand = new HashMap<>();
+        Map<String, JsonObject> polityById = new HashMap<>();
+        if (state.has("polities") && state.get("polities").isJsonArray()) {
+            for (var item : state.getAsJsonArray("polities")) if (item.isJsonObject()) {
+                JsonObject polity = item.getAsJsonObject();
+                String polityId = polity.get("id").getAsString();
+                polityById.put(polityId, polity);
+                for (var band : polity.getAsJsonArray("settlement_ids"))
+                    realmByBand.put(band.getAsString(), "emergent-" + polityId);
+            }
+        }
         for (EmergenceSource source : emergenceSources()) {
             CharacterRegistry registry = source.registry;
             if (registry == null) { complete = false; continue; }
+            // Establish a provisional, deterministic racial composition before the
+            // first Origins assignment. Previously every new resident used global race
+            // weights because the realm was only registered after people materialized.
+            for (var entry : polityById.entrySet()) {
+                JsonObject polity = entry.getValue();
+                if (!source.id.equals(polity.get("map_id").getAsString())) continue;
+                String realmId = "emergent-" + entry.getKey();
+                if (RealmsMod.realm(realmId) != null) continue;
+                Map<String, Double> raceProfile = emergentFoundingRaceProfile(source.seed, entry.getKey());
+                RealmsMod.registerEmergentRealm(realmId,
+                        polity.get("name").getAsString(), source.id, "", polity.get("population").getAsLong(),
+                        polity.get("stability").getAsInt(), polity.getAsJsonArray("settlement_ids").size(),
+                        List.of(), "", raceProfile);
+            }
             // Every dimension/map owns an independent materialization cursor and
             // population index, even when several vanilla dimensions share the same
             // server-level registry implementation. A single "__vanilla_world__"
@@ -1066,7 +1091,7 @@ public final class WorldSimMod {
 
                 while (bandProgress.originCursor < residents.size() && budget > 0) {
                     int ordinal = bandProgress.originCursor++;
-                    ensureEmergentOrigin(residents.get(ordinal), source, year, ordinal);
+                    ensureEmergentOrigin(residents.get(ordinal), source, year, ordinal, realmByBand.getOrDefault(bandId, ""));
                     budget--;
                 }
                 while (residents.size() < target && budget > 0) {
@@ -1075,7 +1100,7 @@ public final class WorldSimMod {
                             registry, source, bandId, year, ordinal, bandProgress.parents);
                     if (created == null) break;
                     sourceProgress.index.add(created);
-                    ensureEmergentOrigin(created, source, year, ordinal);
+                    ensureEmergentOrigin(created, source, year, ordinal, realmByBand.getOrDefault(bandId, ""));
                     bandProgress.originCursor = residents.size();
                     budget--;
                 }
@@ -1396,6 +1421,28 @@ public final class WorldSimMod {
         return Map.of("plains", 1.0);
     }
 
+    /** Stable realm-level race profile used only to seed its first canonical residents. */
+    private static Map<String, Double> emergentFoundingRaceProfile(long worldSeed, String polityId) {
+        List<dev.worldforge.origins.OriginDefs.Race> roots = OriginsMod.DEFS.races.values().stream()
+                .filter(race -> race.parent() == null || race.parent().isBlank())
+                .sorted(Comparator.comparing(dev.worldforge.origins.OriginDefs.Race::id)).toList();
+        if (roots.isEmpty()) return Map.of();
+        int total = roots.stream().mapToInt(race -> Math.max(1, race.weight())).sum();
+        Random random = new Random(worldSeed ^ ((long) polityId.hashCode() * 0x9E3779B97F4A7C15L));
+        int pick = random.nextInt(total);
+        var dominant = roots.get(0);
+        for (var race : roots) {
+            pick -= Math.max(1, race.weight());
+            if (pick < 0) { dominant = race; break; }
+        }
+        Map<String, Double> profile = new LinkedHashMap<>();
+        profile.put(dominant.id(), 0.70);
+        int remainder = Math.max(1, total - Math.max(1, dominant.weight()));
+        for (var race : roots) if (!race.id().equals(dominant.id()))
+            profile.put(race.id(), 0.30 * Math.max(1, race.weight()) / remainder);
+        return profile;
+    }
+
     /** Race composition is sampled from the polity's canonical living Characters, not copied into a second population registry. */
     private static Map<String, Double> emergentRaceShares(
             List<dev.worldforge.people.Character> members) {
@@ -1403,7 +1450,12 @@ public final class WorldSimMod {
         for (dev.worldforge.people.Character person : members) {
             Object rawRace = person.props.get("origin.race");
             String race = rawRace == null ? "" : String.valueOf(rawRace).trim();
-            if (!race.isEmpty()) counts.merge(race, 1.0, Double::sum);
+            if (race.isEmpty()) continue;
+            // Count every subrace toward its full ancestry. Government and settlement
+            // requirements target base races (elf/dwarf/orc), while names and traits
+            // still retain the precise subrace on the canonical Character.
+            for (var ancestor : OriginsMod.ORIGINS.definitionSnapshot().raceChain(race))
+                counts.merge(ancestor.id(), 1.0, Double::sum);
         }
         double total = counts.values().stream().mapToDouble(Double::doubleValue).sum();
         if (total <= 0) return Map.of();
@@ -2474,7 +2526,7 @@ public final class WorldSimMod {
     }
 
     private static void ensureEmergentOrigin(dev.worldforge.people.Character person,
-            EmergenceSource source, int year, int ordinal) {
+            EmergenceSource source, int year, int ordinal, String realmId) {
         if (person == null || person.globalId == null || person.globalId.isBlank()) return;
         String owner = "n:" + person.globalId;
         try {
@@ -2488,7 +2540,8 @@ public final class WorldSimMod {
                 String hint = adult && !groups.isEmpty()
                         ? groups.get(Math.floorMod((int) seed, groups.size())) : "";
                 int level = adult ? Math.max(5, Math.min(60, PopulationSimulation.age(person, year) / 2)) : 1;
-                existing = OriginsMod.ORIGINS.assign(owner, seed, hint, level);
+                existing = OriginsMod.ORIGINS.assign(owner, seed, hint, level,
+                        realmId == null ? "" : realmId);
             }
             if (existing.race != null && !existing.race.isBlank()) {
                 person.props.put("origin.race", existing.race);
