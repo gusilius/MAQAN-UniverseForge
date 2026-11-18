@@ -615,11 +615,11 @@ public final class WorldSimMod {
                             && realms.stream().anyMatch(realm -> Objects.equals(
                                     String.valueOf(realm.props.getOrDefault("emergence.dynasty_id", "")), dynasty.houseId)))
                     .count();
-            LOGGER.info("MAQAN_WORLD_GENESIS source={} dimension={} geography_cells={} communities={} settled={} settlements={} emergent_settlements={} map_anchors={} living_characters={} named_characters={} named_settlements={} polities={} named_polities={} canonical_rulers={} dynasties={} titles={} named_titles={} governments={} race_kinds={} settlement_types={} government_types={} vassal_contracts={} subject_types={} title_ranks={}",
+            LOGGER.info("MAQAN_WORLD_GENESIS source={} dimension={} geography_cells={} communities={} settled={} settlements={} emergent_settlements={} map_anchors={} living_characters={} named_characters={} named_settlements={} court_offices={} polities={} named_polities={} canonical_rulers={} dynasties={} titles={} named_titles={} governments={} race_kinds={} settlement_types={} government_types={} vassal_contracts={} subject_types={} title_ranks={}",
                     source.id, source.dimension,
                     source.map == null ? VanillaWorldGeography.sampledCellCount() : source.map.w * source.map.h,
                     bands, settled, settlements, emergentSettlements, mapAnchors, livingCharacters, namedCharacters,
-                    namedSettlements, realms.size(), namedPolities, rulers, dynasties, titles, namedTitles,
+                    namedSettlements, courtOffices, realms.size(), namedPolities, rulers, dynasties, titles, namedTitles,
                     governments, raceIds.size(), GSON.toJson(settlementTypeCounts), GSON.toJson(governmentTypes),
                     vassalContracts.size(), GSON.toJson(subjectTypes), GSON.toJson(titleRanks));
             if (source.map == null) {
