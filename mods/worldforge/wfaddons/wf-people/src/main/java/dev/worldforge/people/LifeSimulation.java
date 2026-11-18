@@ -130,7 +130,8 @@ public final class LifeSimulation {
             lastOutcome = executor.execute(character, candidate, context);
             if (lastOutcome == null) lastOutcome = Outcome.BLOCKED;
             if (lastOutcome == Outcome.IN_PROGRESS) {
-                String token = candidate.name() + ":" + now;
+                String identity = character.globalId == null || character.globalId.isBlank() ? character.id : character.globalId;
+                String token = identity + ":" + candidate.name() + ":" + now;
                 character.props.put("population.ai.pending_action", candidate.name());
                 character.props.put("population.ai.pending_minute", now);
                 character.props.put("population.ai.pending_token", token);
