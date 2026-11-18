@@ -47,6 +47,9 @@ public final class VanillaVillageAdapter {
     private static final int MAX_INFRASTRUCTURE_CHUNKS_PER_TICK = 2;
     private static final Map<String, ArrayDeque<ChunkPos>> PENDING_INFRASTRUCTURE = new LinkedHashMap<>();
     private static final Set<String> PENDING_INFRASTRUCTURE_KEYS = new HashSet<>();
+    private static final Set<Colony> DIRTY_INFRASTRUCTURE_COLONIES = new LinkedHashSet<>();
+    private static final int INFRASTRUCTURE_SAVE_INTERVAL_TICKS = 100;
+    private static long lastInfrastructureSaveTick;
 
     @SubscribeEvent
     public void onChunkLoad(ChunkEvent.Load event) {
@@ -93,6 +96,22 @@ public final class VanillaVillageAdapter {
             }
             if (queue.isEmpty()) PENDING_INFRASTRUCTURE.remove(dimension);
             if (processed >= MAX_INFRASTRUCTURE_CHUNKS_PER_TICK) break;
+        }
+        // Chunk reconciliation can discover many existing vanilla buildings. Never serialize
+        // the entire settlement registry synchronously for each chunk: coalesce mutations
+        // and flush at a bounded cadence on the server thread.
+        long tick = server.getTickCount();
+        if (!DIRTY_INFRASTRUCTURE_COLONIES.isEmpty()
+                && tick - lastInfrastructureSaveTick >= INFRASTRUCTURE_SAVE_INTERVAL_TICKS) {
+            if (SettleMod.saveDurably(server)) {
+                DIRTY_INFRASTRUCTURE_COLONIES.clear();
+                lastInfrastructureSaveTick = tick;
+            } else {
+                for (Colony colony : DIRTY_INFRASTRUCTURE_COLONIES) colony.actionPersistenceBlocked = true;
+                SettleMod.LOGGER.error("wf_settle: deferred vanilla infrastructure batch could not be persisted; affected settlements frozen");
+                DIRTY_INFRASTRUCTURE_COLONIES.clear();
+                lastInfrastructureSaveTick = tick;
+            }
         }
     }
 
@@ -390,11 +409,7 @@ public final class VanillaVillageAdapter {
                 "Existing Minecraft village facilities linked to shared housing, production and storage simulation",
                 colony.realmId == null || colony.realmId.isBlank() ? List.of() : List.of(colony.realmId),
                 WorldForgeApi.clock().worldMinute());
-        if (!SettleMod.saveDurably(level.getServer())) {
-            colony.actionPersistenceBlocked = true;
-            SettleMod.LOGGER.error("wf_settle: infrastructure adoption for {} could not be persisted; settlement frozen for recovery",
-                    colony.s.id);
-        }
+        DIRTY_INFRASTRUCTURE_COLONIES.add(colony);
     }
 
     @SubscribeEvent
