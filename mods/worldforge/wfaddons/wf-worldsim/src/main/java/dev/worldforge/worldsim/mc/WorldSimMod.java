@@ -1146,12 +1146,12 @@ public final class WorldSimMod {
         root.addProperty("day", day);
         JsonArray realms = new JsonArray(), borders = new JsonArray(), settlements = new JsonArray(), characters = new JsonArray(), workforce = new JsonArray();
         JsonArray geography = new JsonArray();
+        List<EmergenceSource> sources = emergenceSources();
         // Geography is sampled independently of political overlays. A map with no titles/realms
         // is still a valid source of terrain, biome and river evidence for a future map-first world.
         boolean vanillaCampaign = campaignRunning && "vanilla".equals(campaignMapId);
-        for (MapData map : WorldForgeMod.loadedMaps().values()) {
-            if (!campaignRunning || (!vanillaCampaign && map.name.equals(campaignMapId)))
-                geography.add(GSON.toJsonTree(MapGeography.describe(map)));
+        for (EmergenceSource source : sources) {
+            if (source.map != null) geography.add(GSON.toJsonTree(MapGeography.describe(source.map)));
         }
         // During acceptance each server is isolated to exactly one source. Normal
         // gameplay continues to combine every authored map and observed vanilla region.
@@ -1275,7 +1275,7 @@ public final class WorldSimMod {
         }
         Set<String> emittedCharacterIds = new HashSet<>();
         Set<CharacterRegistry> snapshotRegistries = Collections.newSetFromMap(new IdentityHashMap<>());
-        for (EmergenceSource source : emergenceSources()) {
+        for (EmergenceSource source : sources) {
             CharacterRegistry registry = source.registry;
             if (registry == null || !snapshotRegistries.add(registry)) continue;
             for (dev.worldforge.people.Character person : registry.all()) {
