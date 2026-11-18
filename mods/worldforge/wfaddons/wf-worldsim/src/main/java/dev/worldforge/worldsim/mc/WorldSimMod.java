@@ -592,7 +592,9 @@ public final class WorldSimMod {
             if (source.map == null) {
                 int cells = 0, landCells = 0, viable36 = 0, viable48 = 0, maxSuitability = 0;
                 Map<String, Integer> biomeCounts = new TreeMap<>();
-                for (JsonObject geographyMap : VanillaWorldGeography.snapshot()) {
+                for (var geographyElement : VanillaWorldGeography.snapshot()) {
+                    if (!geographyElement.isJsonObject()) continue;
+                    JsonObject geographyMap = geographyElement.getAsJsonObject();
                     if (!source.id.equals(geographyMap.has("map_id") ? geographyMap.get("map_id").getAsString() : "")) continue;
                     if (!geographyMap.has("cells") || !geographyMap.get("cells").isJsonArray()) continue;
                     for (var cellElement : geographyMap.getAsJsonArray("cells")) {
