@@ -1137,7 +1137,7 @@ public final class WorldSimMod {
             CharacterRegistry registry = source.registry;
             if (registry == null || !snapshotRegistries.add(registry)) continue;
             for (dev.worldforge.people.Character person : registry.all()) {
-                if (person == null || !person.alive || person.globalId == null || person.globalId.isBlank()) continue;
+                if (person == null || person.globalId == null || person.globalId.isBlank()) continue;
                 String realmId = "";
                 // Realm office holders (rulers, stewards, marshals, councillors) are canonical
                 // Characters too; include them without admitting authored map-court characters.
