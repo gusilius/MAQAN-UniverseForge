@@ -29,6 +29,8 @@ import net.minecraft.world.level.levelgen.blending.Blender;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /** Генератор чанков: рельеф берётся из height16.png, биомы из biomes.png, реки из rivers.png. */
 public class MapChunkGenerator extends ChunkGenerator {
@@ -39,6 +41,7 @@ public class MapChunkGenerator extends ChunkGenerator {
     ).apply(i, i.stable(MapChunkGenerator::new)));
 
     private static final BlockState AIR = Blocks.AIR.defaultBlockState();
+    private static final Set<String> GENERATION_PROBES = ConcurrentHashMap.newKeySet();
 
     private final String mapName;
     private final boolean caves;
@@ -99,6 +102,10 @@ public class MapChunkGenerator extends ChunkGenerator {
         TerrainSampler ts = sampler();
         MapData m = ts.map();
         ChunkPos cp = chunk.getPos();
+        if (GENERATION_PROBES.add(mapName)) {
+            WorldForgeMod.LOGGER.info("MAQAN_MAP_CHUNK_GENERATED map={} first_chunk={},{}",
+                    mapName, cp.x, cp.z);
+        }
         int minY = chunk.getMinBuildHeight();
         int maxY = chunk.getMaxBuildHeight() - 1;
         Heightmap oceanFloor = chunk.getOrCreateHeightmapUnprimed(Heightmap.Types.OCEAN_FLOOR_WG);
