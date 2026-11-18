@@ -724,7 +724,7 @@ impl WorldSnapshot {
         for c in &self.characters {
             if c.id.trim().is_empty() { return Err(SimError::InvalidSnapshot("empty-character-id".into())); }
             if !characters.insert(c.id.as_str()) { return Err(SimError::DuplicateCharacter(c.id.clone())); }
-            if !realms.contains(c.realm_id.as_str()) { return Err(SimError::UnknownRealm(c.realm_id.clone())); }
+            if !c.realm_id.is_empty() && !realms.contains(c.realm_id.as_str()) { return Err(SimError::UnknownRealm(c.realm_id.clone())); }
             // MAQAN supports fantasy species with multi-century lifespans. Keep a hard
             // corruption bound, but do not reject valid long-lived canonical Characters.
             if c.age > 1_000 { return Err(SimError::InvalidSnapshot(format!("implausible-character-age:{}:{}", c.id, c.age))); }
@@ -1092,7 +1092,7 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
         if used.contains(a.id.as_str()) { continue; }
         let mut best: Option<(&Character, i32)> = None;
         for b in &eligible {
-            if a.id == b.id || a.realm_id == b.realm_id || a.map_id != b.map_id || a.gender == b.gender || used.contains(b.id.as_str()) { continue; }
+            if a.id == b.id || a.realm_id.is_empty() || b.realm_id.is_empty() || a.realm_id == b.realm_id || a.map_id != b.map_id || a.gender == b.gender || used.contains(b.id.as_str()) { continue; }
             let Some(social) = snapshot.social_relations.iter().find(|relation|
                 (relation.character_a == a.id && relation.character_b == b.id)
                     || (relation.character_a == b.id && relation.character_b == a.id)) else { continue; };
