@@ -2223,6 +2223,10 @@ public final class WorldSimMod {
                 politicalActor.props.put("emergence.form_stage_name", RealmsMod.DEFS.levels.isEmpty()
                         ? "Стоянка" : RealmsMod.DEFS.levels.get(politicalLevel).name());
                 politicalActor.props.put("emergence.title_rank", emergentTitleRank(realmId).name().toLowerCase(Locale.ROOT));
+                // Select a data-pack government immediately from this world's actual
+                // population mix, terrain and ruler signals. This uses the same Realms
+                // policy engine as later autonomous reforms; no scenario preset is involved.
+                RealmsMod.RealmsStateBootstrap.initialize(realmId, source.seed ^ polityId.hashCode());
                 // The political realm points at the same physically materialized colonies;
                 // this is a projection, not a second settlement/territory registry.
                 List<String> physicalSettlementIds = new ArrayList<>();
