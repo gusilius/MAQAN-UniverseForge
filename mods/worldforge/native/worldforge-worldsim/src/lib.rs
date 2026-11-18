@@ -134,6 +134,10 @@ pub struct Character {
     #[serde(default)] pub title_ids: Vec<String>,
     #[serde(default)] pub skills: BTreeMap<String, i32>,
     #[serde(default)] pub needs: BTreeMap<String, i32>,
+    #[serde(default)] pub duty_ids: Vec<String>,
+    #[serde(default)] pub life_stage: String,
+    #[serde(default)] pub last_intent: String,
+    #[serde(default)] pub profession_history: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
