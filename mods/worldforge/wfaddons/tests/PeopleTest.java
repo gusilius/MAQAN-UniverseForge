@@ -78,7 +78,10 @@ public class PeopleTest {
             String generated = minimalNames.generate("unknown-race", "missing-culture", category, new Random(19L));
             ok(!generated.isBlank(), "minimal third-party NameBank safely generates " + category + " names");
         }
-        ok(defs.all().size() == 7 && defs.ruler().id.equals("ruler"), "роли загружены из файлов датапака: " + defs.all().size());
+        ok(defs.all().size() == 11 && defs.ruler().id.equals("ruler")
+                        && List.of("baron", "count", "duke", "king").stream().allMatch(id ->
+                        defs.get(id) != null && defs.get(id).ruler),
+                "датапак загружает правителей каждого территориального уровня от барона до короля: " + defs.all().size());
         List<TerritorialIdentity.RaceWeight> originRaces = List.of(
                 new TerritorialIdentity.RaceWeight("human", "", 50),
                 new TerritorialIdentity.RaceWeight("northman", "", 18),
