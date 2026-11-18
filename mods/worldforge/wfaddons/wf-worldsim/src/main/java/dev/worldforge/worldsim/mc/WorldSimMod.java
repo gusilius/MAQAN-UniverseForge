@@ -901,7 +901,8 @@ public final class WorldSimMod {
             item.addProperty("last_war_day", lastWarDay);
             realms.add(item);
         }
-        Set<String> emittedEmergentBorders = new TreeSet<>();
+        // Shared pair set prevents exact province-adjacency borders from being
+        // duplicated by the coarser emergence-neighbour projection below.
         // Export the complete data-pack government catalogue and each realm's
         // selected government, development level, doctrines and laws.
         for (var government : RealmsMod.DEFS.govs.values()) {
@@ -1034,7 +1035,7 @@ public final class WorldSimMod {
                 if (neighbor.isBlank() || RealmsMod.realm(neighbor) == null) continue;
                 String a = realm.id.compareTo(neighbor) < 0 ? realm.id : neighbor;
                 String b = realm.id.compareTo(neighbor) < 0 ? neighbor : realm.id;
-                if (!emittedEmergentBorders.add(a + "|" + b)) continue;
+                if (!emittedMapBorders.add(a + "|" + b)) continue;
                 JsonObject border = new JsonObject();
                 border.addProperty("a", a); border.addProperty("b", b);
                 border.addProperty("contested_claim", false);
