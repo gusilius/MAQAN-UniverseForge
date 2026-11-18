@@ -557,6 +557,96 @@ public class TroopsMod {
     }
 
     /** Reassigns an existing settlement Character to a physical soldier without allocating a new identity. */
+    /**
+     * Read-only canonical military export for WorldSim. wf-troops remains the owner of
+     * physical troops, command hierarchy, readiness, equipment and durable military ledgers.
+     */
+    public static String worldSnapshotJson() {
+        Map<String, Object> root = new LinkedHashMap<>();
+        root.put("schema", "wf-troops-world-snapshot/1");
+        Map<String, Object> units = new TreeMap<>();
+        for (var entry : DEFS.units.entrySet()) {
+            var unit = entry.getValue();
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("id", unit.id()); row.put("name", unit.name()); row.put("role", unit.role());
+            row.put("hp", unit.hp()); row.put("damage", unit.dmg()); row.put("range", unit.range());
+            row.put("speed", unit.speed()); row.put("armor", unit.armor()); row.put("sight", unit.sight());
+            row.put("cost", unit.cost()); row.put("upkeep", unit.upkeep());
+            row.put("weapon", unit.weapon()); row.put("head", unit.head()); row.put("chest", unit.chest());
+            row.put("legs", unit.legs()); row.put("feet", unit.feet()); row.put("aura", unit.aura());
+            row.put("heal", unit.heal()); row.put("siege", unit.siege()); row.put("description", unit.desc());
+            units.put(entry.getKey(), row);
+        }
+        root.put("unit_definitions", units); root.put("army_type_map", DEFS.armyTypes());
+        root.put("recruitment_buildings", DEFS.recruitmentBuildings);
+        root.put("recruitment_costs", DEFS.recruitmentCosts);
+        root.put("squad_registry", dev.worldforge.mod.Json.parse(SQUADS.toJson()));
+        root.put("army_hierarchy", dev.worldforge.mod.Json.parse(HIERARCHY.toJson()));
+        root.put("operational_supply", dev.worldforge.mod.Json.parse(SUPPLY.toJson()));
+        root.put("military_death_outbox", dev.worldforge.mod.Json.parse(DEATHS.toJson()));
+        root.put("military_muster_ledger", dev.worldforge.mod.Json.parse(MUSTERS.toJson()));
+        root.put("military_transition_ledger", dev.worldforge.mod.Json.parse(TRANSITIONS.toJson()));
+
+        List<Object> squads = new ArrayList<>();
+        List<Squads.Squad> orderedSquads = new ArrayList<>(SQUADS.all());
+        orderedSquads.sort(Comparator.comparing(squad -> squad.id));
+        for (Squads.Squad squad : orderedSquads) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("id", squad.id); row.put("name", squad.name); row.put("owner", squad.owner);
+            row.put("realm", squad.realm); row.put("members", List.copyOf(squad.members));
+            row.put("formation", squad.formation.name()); row.put("stance", squad.stance.name());
+            row.put("leader_character_id", squad.leaderCharacterId); row.put("leader_hero", squad.leaderHero);
+            row.put("leadership_rank", squad.leadershipRank); row.put("initial", squad.initial);
+            row.put("morale", squad.morale); row.put("routed", squad.routed);
+            row.put("center", List.of(finiteSnapshot(squad.cx), finiteSnapshot(squad.cz), finiteSnapshot(squad.yaw)));
+            List<Object> orders = new ArrayList<>();
+            for (Squads.Order order : squad.queue) {
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.put("kind", order.kind().name()); item.put("x", order.x()); item.put("z", order.z());
+                item.put("target", order.target()); orders.add(item);
+            }
+            row.put("orders", orders); squads.add(row);
+        }
+        root.put("squads", squads);
+
+        List<Object> liveTroops = new ArrayList<>();
+        List<TroopEntity> orderedTroops = new ArrayList<>(LIVE.values());
+        orderedTroops.sort(Comparator.comparing(troop -> troop.getUUID().toString()));
+        for (TroopEntity troop : orderedTroops) {
+            if (troop == null || !troop.isAlive() || troop.level().isClientSide) continue;
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("entity_id", troop.getUUID().toString()); row.put("character_id", troop.characterId);
+            row.put("unit_id", troop.unitId()); row.put("strategic_unit_id", troop.strategicUnitId);
+            row.put("realm_id", troop.realm); row.put("army_id", troop.armyId); row.put("fort_id", troop.fortId);
+            row.put("owner_id", troop.ownerId()); row.put("squad_id", troop.squadId());
+            row.put("deployment_operation_id", troop.deploymentOperationId);
+            row.put("dimension", troop.level().dimension().location().toString());
+            row.put("x", troop.getX()); row.put("y", troop.getY()); row.put("z", troop.getZ());
+            row.put("health", troop.getHealth()); row.put("max_health", troop.getMaxHealth());
+            row.put("morale", troop.moralePct()); row.put("combat_xp", troop.combatXp());
+            row.put("veteran_rank", troop.veteranRank()); row.put("damage_multiplier", troop.dmgMult);
+            row.put("injury_combat_multiplier", injuryCombatMultiplier(troop));
+            row.put("supply_combat_multiplier", troop.supplyCombatMultiplier());
+            row.put("supply_movement_multiplier", troop.supplyMovementMultiplier());
+            Map<String, Object> equipment = new LinkedHashMap<>();
+            for (net.minecraft.world.entity.EquipmentSlot slot : net.minecraft.world.entity.EquipmentSlot.values()) {
+                net.minecraft.world.item.ItemStack stack = troop.getItemBySlot(slot);
+                if (stack.isEmpty()) continue;
+                Map<String, Object> item = new LinkedHashMap<>();
+                var key = net.minecraftforge.registries.ForgeRegistries.ITEMS.getKey(stack.getItem());
+                item.put("item_id", key == null ? "" : key.toString());
+                item.put("count", stack.getCount()); item.put("damage", stack.getDamageValue());
+                item.put("max_damage", stack.getMaxDamage()); equipment.put(slot.getName(), item);
+            }
+            row.put("equipment", equipment);
+            liveTroops.add(row);
+        }
+        root.put("live_troops", liveTroops);
+        return dev.worldforge.mod.Json.write(root);
+    }
+
+    private static double finiteSnapshot(double value) { return Double.isFinite(value) ? value : 0.0; }
+
     public static boolean assignExistingCharacter(TroopEntity troop, String characterId) {
         if (troop == null || troop.level().isClientSide || characterId == null || characterId.isBlank()
                 || !ModList.get().isLoaded("wf_people")) return false;
