@@ -4,6 +4,7 @@ import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.logging.LogUtils;
 import dev.worldforge.mod.WFNet;
 import dev.worldforge.mod.api.WorldForgeApi;
+import dev.worldforge.relations.NpcSocialSimulation;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.mc.PeopleMod;
 import net.minecraft.commands.CommandSourceStack;
