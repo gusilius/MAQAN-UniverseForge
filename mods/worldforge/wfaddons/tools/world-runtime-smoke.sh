@@ -266,21 +266,23 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "dual-world" ]; then
 import json, pathlib, re, sys
 out, map_id = pathlib.Path(sys.argv[1]), sys.argv[2]
 log = pathlib.Path("server.log").read_text(encoding="utf-8", errors="replace")
-pattern = re.compile(r"MAQAN_WORLD_GENESIS source=(\S+) dimension=(\S+) geography_cells=(\d+) communities=(\d+) settled=(\d+) settlements=(\d+) polities=(\d+) canonical_rulers=(\d+) dynasties=(\d+) titles=(\d+) governments=(\d+) race_kinds=(\d+)")
+pattern = re.compile(r"MAQAN_WORLD_GENESIS source=(\S+) dimension=(\S+) geography_cells=(\d+) communities=(\d+) settled=(\d+) settlements=(\d+) emergent_settlements=(\d+) map_anchors=(\d+) living_characters=(\d+) court_offices=(\d+) polities=(\d+) canonical_rulers=(\d+) dynasties=(\d+) titles=(\d+) governments=(\d+) race_kinds=(\d+)")
 rows = {}
 for match in pattern.finditer(log):
-    rows[match.group(1)] = dict(zip(("source","dimension","geography_cells","communities","settled","settlements","polities","canonical_rulers","dynasties","titles","governments","race_kinds"), match.groups()))
+    rows[match.group(1)] = dict(zip(("source","dimension","geography_cells","communities","settled","settlements","emergent_settlements","map_anchors","living_characters","court_offices","polities","canonical_rulers","dynasties","titles","governments","race_kinds"), match.groups()))
 expected = {"vanilla-world:minecraft:overworld", map_id}
 missing = expected - rows.keys()
 if missing:
     raise SystemExit("Missing same-server genesis sources: " + ", ".join(sorted(missing)))
 for key in sorted(expected):
     row = rows[key]
-    for field in ("geography_cells","communities","settled","settlements","polities","canonical_rulers","dynasties","titles","governments"):
+    for field in ("geography_cells","communities","settled","settlements","living_characters","court_offices","polities","canonical_rulers","dynasties","titles","governments"):
         if int(row[field]) <= 0:
             raise SystemExit(f"{key}: required native genesis field {field} is {row[field]}")
     if int(row["race_kinds"]) < 2:
         raise SystemExit(f"{key}: expected at least two actual race identities, got {row['race_kinds']}")
+    if key == map_id and int(row["map_anchors"]) <= 0:
+        raise SystemExit(f"{key}: image-map settlements were not reused/materialized as canonical anchors")
 (out / "same-server-world-genesis.json").write_text(json.dumps({key: rows[key] for key in sorted(expected)}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 print("SAME_SERVER_DUAL_WORLD_GENESIS=PASS")
 for key in sorted(expected): print("WORLD_GENESIS=" + json.dumps(rows[key], ensure_ascii=False, sort_keys=True))
