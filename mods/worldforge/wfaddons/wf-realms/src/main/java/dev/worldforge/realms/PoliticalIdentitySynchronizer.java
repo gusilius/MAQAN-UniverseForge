@@ -158,14 +158,9 @@ public final class PoliticalIdentitySynchronizer {
             return -1;
         }
         if (currentId.equals(desired.globalId)) return 0;
-        Character previous = byGlobalId.get(currentId);
-        if (previous == null) {
-            politics.lastError = "Title " + title.id + " has orphan holder Character ID " + currentId;
-            return -1;
-        }
-        // A live wf-people office appointment is authoritative for this exact
-        // title. Replace stale auto-generated/legacy holder projections; a manual
-        // holder without a corresponding office is never touched by this path.
+        // A wf-people appointment is authoritative for this exact title.
+        // It also repairs a stale holder reference left by a deleted/migrated
+        // Character partition; the new holder is still a canonical living person.
         if (politics.grantTitle(title.id, desired.globalId)) return 1;
         politics.lastError = "Could not reconcile " + scope + " office holder " + desired.globalId
                 + ": " + politics.lastError;
