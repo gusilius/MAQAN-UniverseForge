@@ -52,9 +52,6 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Install virtual player client
-        run: npm install --no-save --package-lock=false --prefix mods/worldforge/wfaddons mineflayer@4
-
       - name: Install image-to-worldmap dependencies
         shell: pwsh
         run: |
@@ -135,14 +132,13 @@ jobs:
             throw "Same-server dual-world genesis acceptance failed; inspect the runtime artifact."
           }
 
-      - name: Upload both server worlds and acceptance diagnostics
+      - name: Upload same-server dual-world and acceptance diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: maqan-world-runtime-server-acceptance
           path: |
             ${{ runner.temp }}/maqan-dual-world-runtime/
-            
             ${{ runner.temp }}/maqan-world-runtime-map/
           if-no-files-found: warn
           retention-days: 30
