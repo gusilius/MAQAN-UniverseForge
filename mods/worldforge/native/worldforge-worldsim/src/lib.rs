@@ -513,6 +513,32 @@ fn effective_army_power(snapshot: &WorldSnapshot, realm_id: &str) -> Option<f64>
 }
 
 
+fn kinship_distance(a: &Character, b: &Character, characters: &BTreeMap<&str, &Character>) -> u32 {
+    fn ancestors(person: &Character, characters: &BTreeMap<&str, &Character>) -> BTreeMap<String, u32> {
+        let mut result = BTreeMap::new();
+        let mut queue = std::collections::VecDeque::new();
+        result.insert(person.id.clone(), 0);
+        for parent in [&person.father_id, &person.mother_id] {
+            if !parent.is_empty() { queue.push_back((parent.clone(), 1_u32)); }
+        }
+        while let Some((id, distance)) = queue.pop_front() {
+            if distance > 6 || result.contains_key(&id) { continue; }
+            result.insert(id.clone(), distance);
+            if let Some(parent) = characters.get(id.as_str()) {
+                for ancestor in [&parent.father_id, &parent.mother_id] {
+                    if !ancestor.is_empty() { queue.push_back((ancestor.clone(), distance + 1)); }
+                }
+            }
+        }
+        result
+    }
+    let first = ancestors(a, characters);
+    let second = ancestors(b, characters);
+    first.iter().filter_map(|(id, distance)| second.get(id).map(|other| distance + other))
+        .min().unwrap_or(u32::MAX)
+}
+
+
 
 impl WorldSnapshot {
     pub fn validate(&self) -> Result<(), SimError> {
@@ -687,6 +713,7 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
     snapshot.validate()?;
     let realms: BTreeMap<&str, &Realm> = snapshot.realms.iter().map(|r| (r.id.as_str(), r)).collect();
     let settlements: BTreeMap<&str, &Settlement> = snapshot.settlements.iter().map(|s| (s.id.as_str(), s)).collect();
+    let characters: BTreeMap<&str, &Character> = snapshot.characters.iter().map(|character| (character.id.as_str(), character)).collect();
     let mut proposals = Vec::new();
     let mut diagnostics = Vec::new();
     let mut titles_by_realm: BTreeMap<&str, usize> = BTreeMap::new();
@@ -904,7 +931,7 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
     }
 
     // Marriage AI: candidates are ranked by cross-realm benefit, not hard-coded pairings.
-    let mut eligible = snapshot.characters.iter().filter(|c| c.alive && !c.married && c.age >= 16 && c.age <= 45).collect::<Vec<_>>();
+    let mut eligible = snapshot.characters.iter().filter(|c| c.alive && !c.married && c.age >= 18 && c.age <= 70).collect::<Vec<_>>();
     eligible.sort_by(|a, b| a.id.cmp(&b.id));
     let mut used = BTreeSet::new();
     for a in &eligible {
@@ -912,12 +939,13 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
         let mut best: Option<(&Character, i32)> = None;
         for b in &eligible {
             if a.id == b.id || a.realm_id == b.realm_id || a.gender == b.gender || used.contains(b.id.as_str()) { continue; }
-            let social = snapshot.social_relations.iter().find(|relation|
+            let Some(social) = snapshot.social_relations.iter().find(|relation|
                 (relation.character_a == a.id && relation.character_b == b.id)
-                    || (relation.character_a == b.id && relation.character_b == a.id));
-            let social_bonus = social.map(|relation| relation.relationship / 5 + relation.love / 10).unwrap_or(0);
-            let kinship_penalty = if a.father_id == b.id || a.mother_id == b.id || b.father_id == a.id || b.mother_id == a.id
-                || a.child_ids.contains(&b.id) || b.child_ids.contains(&a.id) { 100 } else { 0 };
+                    || (relation.character_a == b.id && relation.character_b == a.id)) else { continue; };
+            let kinship = kinship_distance(a, b, &characters);
+            if kinship <= 2 || social.married || social.relationship < 35 || social.love < 20 { continue; }
+            let social_bonus = social.relationship / 5 + social.love / 10;
+            let kinship_penalty = if (3..=5).contains(&kinship) { 10 } else { 0 };
             let score = clamp_score(25_i64 + ((a.opinion + b.opinion) / 4) as i64
                 + ((a.prestige + b.prestige) / 8) as i64
                 + if a.house_id != b.house_id { 10 } else { 0 }
