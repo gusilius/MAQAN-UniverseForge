@@ -462,18 +462,18 @@ fn has_treaty(snapshot: &WorldSnapshot, a: &str, b: &str, treaty: &str) -> bool 
 
 fn settlement_allows_building(snapshot: &WorldSnapshot, settlement_id: &str, building: &str) -> bool {
     let instance = snapshot.catalog_entries.iter()
-        .find(|entry| entry.module_id == "wf_settlements"
+        .find(|entry| entry.module_id == "wf_settle"
             && entry.catalog_id == "settlement_instances" && entry.entry_id == settlement_id);
     let Some(instance_payload) = instance.map(|entry| &entry.payload) else { return true; };
     let type_id = instance_payload.get("type_id").and_then(serde_json::Value::as_str).unwrap_or("");
     let definition = snapshot.catalog_entries.iter()
-        .find(|entry| entry.module_id == "wf_settlements"
+        .find(|entry| entry.module_id == "wf_settle"
             && entry.catalog_id == "settlement_types" && entry.entry_id == type_id);
     let building_definition = snapshot.catalog_entries.iter()
-        .find(|entry| entry.module_id == "wf_settlements"
+        .find(|entry| entry.module_id == "wf_settle"
             && entry.catalog_id == "buildings" && entry.entry_id == building);
     let has_building_catalog = snapshot.catalog_entries.iter().any(|entry|
-        entry.module_id == "wf_settlements" && entry.catalog_id == "buildings");
+        entry.module_id == "wf_settle" && entry.catalog_id == "buildings");
     let Some(building_payload) = building_definition.map(|entry| &entry.payload) else {
         return !has_building_catalog;
     };
@@ -526,7 +526,7 @@ fn settlement_allows_building(snapshot: &WorldSnapshot, settlement_id: &str, bui
 
 fn recruitment_choice(snapshot: &WorldSnapshot, settlement_id: &str, realm_id: &str) -> Option<(String, u32)> {
     let instance = snapshot.catalog_entries.iter().find(|entry|
-        entry.module_id == "wf_settlements" && entry.catalog_id == "settlement_instances"
+        entry.module_id == "wf_settle" && entry.catalog_id == "settlement_instances"
             && entry.entry_id == settlement_id)?;
     let economy = snapshot.catalog_entries.iter().find(|entry|
         entry.module_id == "wf_army" && entry.catalog_id == "realm_economy"
@@ -1152,22 +1152,22 @@ mod tests {
     fn settlement_type_and_building_catalogs_constrain_projects() {
         let mut snapshot = base();
         snapshot.catalog_entries.push(CatalogEntry {
-            module_id: "wf_settlements".into(), catalog_id: "settlement_instances".into(),
+            module_id: "wf_settle".into(), catalog_id: "settlement_instances".into(),
             entry_id: "village".into(), name: "Village".into(),
             payload: serde_json::json!({"type_id":"hamlet","building_counts":{},"completed_building_counts":{},"resource_stock":{}}),
         });
         snapshot.catalog_entries.push(CatalogEntry {
-            module_id: "wf_settlements".into(), catalog_id: "settlement_types".into(),
+            module_id: "wf_settle".into(), catalog_id: "settlement_types".into(),
             entry_id: "hamlet".into(), name: "Hamlet".into(),
             payload: serde_json::json!({"allowBuildings":["market"]}),
         });
         snapshot.catalog_entries.push(CatalogEntry {
-            module_id: "wf_settlements".into(), catalog_id: "buildings".into(),
+            module_id: "wf_settle".into(), catalog_id: "buildings".into(),
             entry_id: "farm".into(), name: "Farm".into(),
             payload: serde_json::json!({"category":"food","cost":{},"requires":[]}),
         });
         snapshot.catalog_entries.push(CatalogEntry {
-            module_id: "wf_settlements".into(), catalog_id: "buildings".into(),
+            module_id: "wf_settle".into(), catalog_id: "buildings".into(),
             entry_id: "market".into(), name: "Market".into(),
             payload: serde_json::json!({"category":"trade","cost":{},"requires":[]}),
         });
@@ -1179,7 +1179,7 @@ mod tests {
     fn recruitment_uses_registered_unit_mapping_and_real_staffed_building_capacity() {
         let mut snapshot = base();
         snapshot.catalog_entries.extend(vec![
-            CatalogEntry { module_id:"wf_settlements".into(), catalog_id:"settlement_instances".into(),
+            CatalogEntry { module_id:"wf_settle".into(), catalog_id:"settlement_instances".into(),
                 entry_id:"village".into(), name:"Village".into(),
                 payload:serde_json::json!({"trainer_counts":{"training_hall":2},
                     "completed_building_counts":{"training_hall":1}}) },
