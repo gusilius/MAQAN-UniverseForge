@@ -149,9 +149,9 @@ public final class NpcSocialSimulation {
         return traits.contains("trader") || traits.contains("diplomat") || traits.contains("merchant");
     }
 
-    private static int kinshipDistance(Character a, Character b) {
+    private static int kinshipDistance(Character a, Character b, CharacterRegistry registry) {
         if (a.globalId.equals(b.globalId)) return 0;
-        Map<String, Integer> aa = ancestors(a), bb = ancestors(b);
+        Map<String, Integer> aa = ancestors(a, registry), bb = ancestors(b, registry);
         int best = Integer.MAX_VALUE;
         for (Map.Entry<String, Integer> entry : aa.entrySet()) {
             Integer other = bb.get(entry.getKey());
@@ -160,35 +160,45 @@ public final class NpcSocialSimulation {
         return best;
     }
 
-    private static Map<String, Integer> ancestors(Character person) {
+    private static Map<String, Integer> ancestors(Character person, CharacterRegistry registry) {
         Map<String, Integer> result = new HashMap<>();
         result.put(person.globalId, 0);
         ArrayDeque<Map.Entry<String, Integer>> queue = new ArrayDeque<>();
-        addParents(queue, person);
+        addParents(queue, person, registry);
         while (!queue.isEmpty()) {
             Map.Entry<String, Integer> entry = queue.removeFirst();
             if (entry.getValue() > 6 || result.putIfAbsent(entry.getKey(), entry.getValue()) != null) continue;
             Character parent = PeopleMod.authority().getGlobal(entry.getKey());
-            if (parent != null) addParents(queue, parent, entry.getValue() + 1);
+            if (parent != null) addParents(queue, parent, registry, entry.getValue() + 1);
         }
         return result;
     }
 
-    private static void addParents(Deque<Map.Entry<String, Integer>> queue, Character person) {
-        addParents(queue, person, 1);
+    private static void addParents(Deque<Map.Entry<String, Integer>> queue, Character person,
+                                   CharacterRegistry registry) {
+        addParents(queue, person, registry, 1);
     }
 
-    private static void addParents(Deque<Map.Entry<String, Integer>> queue, Character person, int distance) {
+    private static void addParents(Deque<Map.Entry<String, Integer>> queue, Character person,
+                                   CharacterRegistry registry, int distance) {
         for (String key : List.of("family.father_global_id", "family.mother_global_id")) {
             Object value = person.props.get(key);
             if (value instanceof String id && !id.isBlank()) queue.add(Map.entry(id, distance));
         }
         for (String id : List.of(person.father, person.mother)) {
             if (id == null || id.isBlank()) continue;
-            Character parent = PeopleMod.authority().registryForGlobal(person.globalId) == null
-                    ? null : PeopleMod.authority().getGlobal(id);
+            Character parent = registry.get(id);
+            if (parent == null) parent = PeopleMod.authority().getGlobal(id);
             if (parent != null) queue.add(Map.entry(parent.globalId, distance));
         }
+    }
+
+    private static String identityValue(Character person, String... keys) {
+        for (String key : keys) {
+            Object value = person.props.get(key);
+            if (value instanceof String text && !text.isBlank()) return text.trim();
+        }
+        return "";
     }
 
     private static void interact(Relations relations, CharacterRegistry registry, Character a, Character b,
@@ -206,6 +216,36 @@ public final class NpcSocialSimulation {
         if ((ta.contains("cruel") && tb.contains("just")) || (tb.contains("cruel") && ta.contains("just"))) delta -= 3;
         if ((ta.contains("deceitful") && tb.contains("honorable")) || (tb.contains("deceitful") && ta.contains("honorable"))) delta -= 2;
         if (ta.contains("wroth") && tb.contains("wroth")) delta--;
+        // Social compatibility is multi-dimensional: culture, language, faith, occupation,
+        // house and political context influence affinity, but none of them is an absolute
+        // barrier to friendship, rivalry, courtship or diplomacy.
+        String cultureA = identityValue(a, "culture", "identity.culture", "emergence.culture_id");
+        String cultureB = identityValue(b, "culture", "identity.culture", "emergence.culture_id");
+        if (!cultureA.isBlank() && !cultureB.isBlank())
+            delta += cultureA.equalsIgnoreCase(cultureB) ? 1 : -1;
+        String languageA = identityValue(a, "language", "identity.language", "emergence.language_id");
+        String languageB = identityValue(b, "language", "identity.language", "emergence.language_id");
+        if (!languageA.isBlank() && !languageB.isBlank())
+            delta += languageA.equalsIgnoreCase(languageB) ? 1 : -1;
+        String faithA = identityValue(a, "religion", "faith", "identity.religion", "identity.faith");
+        String faithB = identityValue(b, "religion", "faith", "identity.religion", "identity.faith");
+        if (!faithA.isBlank() && !faithB.isBlank() && !faithA.equalsIgnoreCase(faithB)) {
+            boolean tolerant = ta.contains("tolerant") || tb.contains("tolerant");
+            boolean zealous = ta.contains("zealous") || tb.contains("zealous");
+            delta += tolerant ? 0 : zealous ? -2 : -1;
+        } else if (!faithA.isBlank() && faithA.equalsIgnoreCase(faithB)) delta++;
+        String professionA = PopulationSimulation.profession(a);
+        String professionB = PopulationSimulation.profession(b);
+        if (!professionA.isBlank() && professionA.equals(professionB)) delta++;
+        if (!a.house.isBlank() && a.house.equalsIgnoreCase(b.house)) delta++;
+        String classA = identityValue(a, "social.class", "population.social_class", "identity.class");
+        String classB = identityValue(b, "social.class", "population.social_class", "identity.class");
+        if (!classA.isBlank() && !classB.isBlank() && !classA.equalsIgnoreCase(classB)) {
+            if (ta.contains("egalitarian") || tb.contains("egalitarian")) delta++;
+            else if (ta.contains("proud") || tb.contains("proud")) delta--;
+        }
+        String polityA = polityOf(a), polityB = polityOf(b);
+        if (!polityA.isBlank() && !polityB.isBlank() && !polityA.equals(polityB)) delta--;
         delta = Math.max(-5, Math.min(5, delta));
         ab.affinity = clamp(ab.affinity + delta, -100, 100);
         ba.affinity = clamp(ba.affinity + delta, -100, 100);
@@ -217,7 +257,7 @@ public final class NpcSocialSimulation {
             ab.dating = ba.dating = false;
         }
 
-        int kinship = kinshipDistance(a, b);
+        int kinship = kinshipDistance(a, b, registry);
         // Parents, children and siblings are excluded from romance; distant kin are not
         // categorically blocked, but courtship develops more cautiously.
         boolean eligibleRomance = kinship > 2 && !a.gender.equals(b.gender)
