@@ -21,6 +21,10 @@ public class SettleTypesTest {
         Map<String, Double> plains = Map.of("plains", 1.0), coast = Map.of("coast", 0.6, "plains", 0.4), mount = Map.of("mountains", 0.7, "plains", 0.3);
         Map<String, Double> none = Map.of();
         ok(st.best(3, List.of(), plains, none).id().equals("camp"), "малый лагерь - стоянка");
+        ok(st.bestFounding(35, plains, none).id().equals("village"),
+                "Genesis assigns a founding settlement type before houses/farms are built");
+        ok(st.bestFounding(40, coast, none).id().equals("port"),
+                "founding type respects coastal terrain even before port buildings exist");
         ok(st.best(10, List.of("house", "house"), plains, none).id().equals("hamlet"), "два дома - хутор");
         ok(st.best(30, List.of("house", "house", "house", "house", "farm"), plains, none).id().equals("village"), "деревня");
         List<String> town = new ArrayList<>(Collections.nCopies(8, "house")); town.addAll(List.of("market", "tavern", "farm"));
