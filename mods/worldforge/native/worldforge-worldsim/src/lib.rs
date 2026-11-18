@@ -139,6 +139,7 @@ pub struct Character {
     #[serde(default)] pub life_stage: String,
     #[serde(default)] pub last_intent: String,
     #[serde(default)] pub profession_history: Vec<String>,
+    #[serde(default)] pub life_ai: serde_json::Value,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
