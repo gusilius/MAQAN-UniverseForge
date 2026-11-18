@@ -112,6 +112,7 @@ pub struct Settlement {
 pub struct Character {
     pub id: String,
     pub realm_id: String,
+    #[serde(default)] pub map_id: String,
     pub age: u16,
     pub alive: bool,
     pub married: bool,
