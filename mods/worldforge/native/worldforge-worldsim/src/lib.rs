@@ -41,6 +41,24 @@ pub struct Border {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PoliticalTitle {
+    pub id: String,
+    pub map_id: String,
+    pub key: String,
+    pub name: String,
+    /// Sovereign owner; unclaimed:<map_id> denotes neutral geography, not a realm.
+    pub realm_id: String,
+    pub tier_index: u32,
+    pub tier_key: String,
+    pub parent_title_id: String,
+    pub liege_title_id: String,
+    pub holder_character_id: String,
+    pub claims: Vec<String>,
+    pub area_blocks: u64,
+    pub neighbors: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Settlement {
     pub id: String,
     pub realm_id: String,
@@ -130,6 +148,9 @@ pub struct WorldSnapshot {
     pub seed: u64,
     pub day: Day,
     pub realms: Vec<Realm>,
+    /// Complete title tree from every loaded authored map, including neutral titles.
+    #[serde(default)]
+    pub titles: Vec<PoliticalTitle>,
     pub borders: Vec<Border>,
     pub settlements: Vec<Settlement>,
     pub characters: Vec<Character>,
@@ -215,6 +236,25 @@ impl WorldSnapshot {
             if r.id.trim().is_empty() { return Err(SimError::InvalidSnapshot("empty-realm-id".into())); }
             if !realms.insert(r.id.as_str()) { return Err(SimError::DuplicateRealm(r.id.clone())); }
         }
+        let mut title_ids = BTreeSet::new();
+        for title in &self.titles {
+            if title.id.trim().is_empty() || title.map_id.trim().is_empty()
+                || title.key.trim().is_empty() || title.tier_key.trim().is_empty()
+                || title.realm_id.trim().is_empty() {
+                return Err(SimError::InvalidSnapshot("invalid-political-title".into()));
+            }
+            if !title_ids.insert(title.id.as_str()) {
+                return Err(SimError::InvalidSnapshot(format!("duplicate-political-title:{}", title.id)));
+            }
+        }
+        for title in &self.titles {
+            if !title.parent_title_id.is_empty() && !title_ids.contains(title.parent_title_id.as_str()) {
+                return Err(SimError::InvalidSnapshot(format!("unknown-title-parent:{}:{}", title.id, title.parent_title_id)));
+            }
+            if !title.liege_title_id.is_empty() && !title_ids.contains(title.liege_title_id.as_str()) {
+                return Err(SimError::InvalidSnapshot(format!("unknown-title-liege:{}:{}", title.id, title.liege_title_id)));
+            }
+        }
         let mut border_pairs = BTreeSet::new();
         for b in &self.borders {
             if !realms.contains(b.a.as_str()) { return Err(SimError::UnknownRealm(b.a.clone())); }
@@ -260,6 +300,21 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
     let settlements: BTreeMap<&str, &Settlement> = snapshot.settlements.iter().map(|s| (s.id.as_str(), s)).collect();
     let mut proposals = Vec::new();
     let mut diagnostics = Vec::new();
+    let mut titles_by_realm: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut claims_by_realm: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut titles_by_map: BTreeMap<&str, usize> = BTreeMap::new();
+    for title in &snapshot.titles {
+        if !title.realm_id.starts_with("unclaimed:") {
+            *titles_by_realm.entry(title.realm_id.as_str()).or_default() += 1;
+            *claims_by_realm.entry(title.realm_id.as_str()).or_default() += title.claims.len();
+        }
+        *titles_by_map.entry(title.map_id.as_str()).or_default() += 1;
+    }
+    for (map_id, count) in &titles_by_map {
+        let tiers = snapshot.titles.iter().filter(|title| title.map_id == *map_id)
+            .map(|title| title.tier_index).collect::<BTreeSet<_>>().len();
+        diagnostics.push(format!("political_titles:{}:count={}:tiers={}", map_id, count, tiers));
+    }
     // Geography is observational input only in this integration pass: it is never
     // converted into pre-seeded realms, rulers, settlements or population counts.
     for map in &snapshot.geography {
@@ -308,6 +363,8 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
                 + border.strategic_value as i64 / 3
                 + power as i64 / 4
                 + attacker.prestige as i64 / 5
+                + (titles_by_realm.get(attacker.id.as_str()).copied().unwrap_or(0).min(40) / 4) as i64
+                + (claims_by_realm.get(attacker.id.as_str()).copied().unwrap_or(0).min(20) / 2) as i64
                 - defender.stability as i64 / 4
                 - border.distance_cost as i64
                 - 10
@@ -455,6 +512,7 @@ mod tests {
     fn base() -> WorldSnapshot {
         WorldSnapshot { world_id:"test-world".into(), seed:42, day:365,
             realms:vec![realm("north",200),realm("south",100)],
+            titles:vec![],
             borders:vec![Border{a:"north".into(),b:"south".into(),contested_claim:true,strategic_value:100,distance_cost:0}],
             settlements:vec![Settlement{id:"village".into(),realm_id:"north".into(),population:40,food:10,food_capacity:100,
                 wood:30,stone:30,housing:100,housing_used:90,farms:0,foresters:0,quarries:0,workshops:0,barracks:1,watch_posts:0,threatened:false,roads:0,local_pressure:20,last_project_day:0}],
@@ -542,7 +600,7 @@ mod tests {
     fn map_first_geography_is_valid_without_preseeded_polities_or_settlements() {
         let mut snapshot = WorldSnapshot {
             world_id: "map-first".into(), seed: 9, day: 0,
-            realms: vec![], borders: vec![], settlements: vec![], characters: vec![], workforce: vec![],
+            realms: vec![], titles: vec![], borders: vec![], settlements: vec![], characters: vec![], workforce: vec![],
             geography: vec![GeographicMap {
                 map_id: "planetos".into(), width_px: 128, height_px: 96,
                 blocks_per_pixel_milli: 16000, political_layers_present: true, sample_stride: 4,
