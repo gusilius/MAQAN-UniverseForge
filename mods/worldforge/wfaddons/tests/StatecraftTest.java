@@ -85,6 +85,64 @@ public final class StatecraftTest {
         check(conflictingOwnershipRejected,
                 "an imported province cannot silently change sovereign ownership without a transfer event");
 
+        // Deep custom map hierarchies must remain intact beyond the five broad CK rank buckets.
+        String deepTitlesJson = """
+                {"format":"worldforge-titles/1","blocks_per_pixel":1.0,
+                 "tiers":[
+                  {"index":0,"key":"province","name":"Province"},
+                  {"index":1,"key":"district","name":"District"},
+                  {"index":2,"key":"county","name":"County"},
+                  {"index":3,"key":"duchy","name":"Duchy"},
+                  {"index":4,"key":"kingdom","name":"Kingdom"},
+                  {"index":5,"key":"empire","name":"Empire"},
+                  {"index":6,"key":"super_empire","name":"Super Empire"}],
+                 "titles":[
+                  {"id":1,"key":"deep_0","name":"Deep 0","tier":0,"parent":2,"color":"#336699","area_blocks":1,"area_pct_of_land":100.0,"capital":{"nx":0.5,"ny":0.5,"x":0,"z":0,"province":1},"props":{}},
+                  {"id":2,"key":"deep_1","name":"Deep 1","tier":1,"parent":3,"color":"#336699","area_blocks":1,"area_pct_of_land":100.0,"capital":{"nx":0.5,"ny":0.5,"x":0,"z":0,"province":1},"props":{}},
+                  {"id":3,"key":"deep_2","name":"Deep 2","tier":2,"parent":4,"color":"#336699","area_blocks":1,"area_pct_of_land":100.0,"capital":{"nx":0.5,"ny":0.5,"x":0,"z":0,"province":1},"props":{}},
+                  {"id":4,"key":"deep_3","name":"Deep 3","tier":3,"parent":5,"color":"#336699","area_blocks":1,"area_pct_of_land":100.0,"capital":{"nx":0.5,"ny":0.5,"x":0,"z":0,"province":1},"props":{}},
+                  {"id":5,"key":"deep_4","name":"Deep 4","tier":4,"parent":6,"color":"#336699","area_blocks":1,"area_pct_of_land":100.0,"capital":{"nx":0.5,"ny":0.5,"x":0,"z":0,"province":1},"props":{}},
+                  {"id":6,"key":"deep_5","name":"Deep 5","tier":5,"parent":7,"color":"#336699","area_blocks":1,"area_pct_of_land":100.0,"capital":{"nx":0.5,"ny":0.5,"x":0,"z":0,"province":1},"props":{}},
+                  {"id":7,"key":"deep_6","name":"Deep 6","tier":6,"parent":0,"color":"#336699","area_blocks":1,"area_pct_of_land":100.0,"capital":{"nx":0.5,"ny":0.5,"x":0,"z":0,"province":1},"props":{}},
+                  {"id":8,"key":"neutral_island","name":"Neutral Island","tier":0,"parent":0,"color":"#888888","area_blocks":1,"area_pct_of_land":0.0,"capital":{"nx":0.9,"ny":0.9,"x":0,"z":0,"province":0},"props":{}}]}
+                """;
+        String deepRealmsJson = """
+                {"format":"worldforge-realms/1","realms":[
+                 {"id":"deep_realm","name":"Deep Realm","ruler":"","color":"#336699",
+                  "titles":["deep_6"],"subjects":[],"overlord":null,"relation":"","area_blocks":1,"props":{}}
+                ]}
+                """;
+        var deepMap = dev.worldforge.mod.TitleData.create(deepTitlesJson, deepRealmsJson,
+                new short[]{1}, 1, 1);
+        Statecraft deepPolitics = new Statecraft();
+        check(deepPolitics.syncMapTitles("deep-map", deepMap) == 8
+                        && deepPolitics.titles().size() == 8,
+                "Statecraft imports every title, including unclaimed neutral geography");
+        boolean deepHierarchyPreserved = true;
+        for (int tier = 0; tier < 7; tier++) {
+            var title = deepPolitics.title(Statecraft.mapTitleId("deep-map", "deep_" + tier));
+            deepHierarchyPreserved &= title != null && title.sourceTierIndex == tier
+                    && title.sourceTierKey.equals(deepMap.tiers.get(tier).key);
+            if (tier < 6) {
+                var parent = deepPolitics.title(Statecraft.mapTitleId("deep-map", "deep_" + (tier + 1)));
+                deepHierarchyPreserved &= title != null && parent != null
+                        && title.sourceParentTitleId.equals(parent.id)
+                        && title.liegeTitleId.equals(parent.id);
+            }
+        }
+        check(deepHierarchyPreserved,
+                "all seven source tiers retain exact tier keys, parent IDs and liege links without five-rank truncation");
+        var neutralTitle = deepPolitics.title(Statecraft.mapTitleId("deep-map", "neutral_island"));
+        check(neutralTitle != null && neutralTitle.realmId.equals("unclaimed:deep-map"),
+                "unclaimed map titles remain known to the simulator without being assigned to a realm");
+        Statecraft deepReload = new Statecraft();
+        deepReload.fromJson(deepPolitics.toJson());
+        check(deepReload.titles().size() == 8
+                        && deepReload.title(Statecraft.mapTitleId("deep-map", "deep_0")).sourceTierIndex == 0
+                        && deepReload.title(Statecraft.mapTitleId("deep-map", "deep_0")).sourceParentTitleId
+                        .equals(Statecraft.mapTitleId("deep-map", "deep_1")),
+                "full custom title hierarchy survives Statecraft persistence and reload");
+
         // Vassalage and feudal obligations
         check(state.setVassalage("north_duchy_realm", "north", 0.2, 0.35)
                 && state.setVassalage("winter_county_realm", "north_duchy_realm", 0.1, 0.2),
