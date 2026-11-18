@@ -1366,26 +1366,9 @@ public final class WorldSimMod {
         sortObjects(settlements, Comparator.comparing(item -> item.get("id").getAsString()));
         sortObjects(characters, Comparator.comparing(item -> item.get("id").getAsString()));
         sortObjects(workforce, Comparator.comparing(item -> item.get("settlement_id").getAsString()));
-        // NPC-to-NPC bonds are canonical UUID relationships. Ignore player-facing bonds
-        // unless both endpoints resolve to canonical world Characters.
-        for (String key : dev.worldforge.relations.mc.RelationsMc.REL.keys()) {
-            int separator = key.indexOf('|');
-            if (separator <= 0 || separator == key.length() - 1) continue;
-            String first = key.substring(0, separator), second = key.substring(separator + 1);
-            if (!emittedCharacterIds.contains(first) || !emittedCharacterIds.contains(second)) continue;
-            var a = PeopleMod.authority().getGlobal(first);
-            var b = PeopleMod.authority().getGlobal(second);
-            if (a == null || b == null || !a.alive || !b.alive) continue;
-            var bond = dev.worldforge.relations.mc.RelationsMc.REL.peek(first, second);
-            if (bond == null) continue;
-            JsonObject row = new JsonObject();
-            row.addProperty("character_a", first); row.addProperty("character_b", second);
-            row.addProperty("relationship", bond.affinity); row.addProperty("love", bond.love);
-            row.addProperty("married", bond.married); row.addProperty("dating", bond.dating);
-            row.addProperty("employed", bond.employed);
-            row.addProperty("last_contact_day", Math.max(0, bond.lastContact));
-            socialRelations.add(row);
-        }
+        // wf-relations is optional. Resolve its public domain API reflectively so the
+        // WorldSim class remains loadable when that addon is not installed.
+        int exportedSocialRelations = exportSocialRelations(socialRelations, emittedCharacterIds);
         // Capabilities distinguish absent optional modules from present-but-empty catalogs.
         addCapability(capabilities, "wf_realms", 1, true, RealmsMod.DEFS.govs.size()
                 + RealmsMod.DEFS.levels.size() + RealmsMod.DEFS.laws.size(), RealmsMod.realms().size());
@@ -1393,7 +1376,7 @@ public final class WorldSimMod {
         addCapability(capabilities, "wf_army", 1, true, ArmyMod.loadedEngines().stream().mapToInt(engine -> engine.types.size()).sum(),
                 armies.size());
         addCapability(capabilities, "wf_people", 1, true, PeopleMod.PROFESSIONS.all().size(), characters.size());
-        addCapability(capabilities, "wf_relations", 1, true, 0, socialRelations.size());
+        addCapability(capabilities, "wf_relations", 1, net.minecraftforge.fml.ModList.get().isLoaded("wf_relations"), 0, exportedSocialRelations);
         sortObjects(catalogEntries, Comparator.comparing((JsonObject item) -> item.get("module_id").getAsString())
                 .thenComparing(item -> item.get("catalog_id").getAsString()).thenComparing(item -> item.get("entry_id").getAsString()));
         sortObjects(diplomaticRelations, Comparator.comparing((JsonObject item) -> item.get("realm_a").getAsString())
@@ -1417,6 +1400,39 @@ public final class WorldSimMod {
         return root;
     }
 
+
+    private static int exportSocialRelations(JsonArray target, Set<String> snapshotCharacterIds) {
+        if (!net.minecraftforge.fml.ModList.get().isLoaded("wf_relations")) return 0;
+        int exported = 0;
+        try {
+            Class<?> bridge = Class.forName("dev.worldforge.relations.mc.RelationsMc");
+            Object relations = bridge.getField("REL").get(null);
+            java.lang.reflect.Method keys = relations.getClass().getMethod("keys");
+            java.lang.reflect.Method peek = relations.getClass().getMethod("peek", String.class, String.class);
+            for (Object rawKey : (Collection<?>) keys.invoke(relations)) {
+                String key = String.valueOf(rawKey);
+                int separator = key.indexOf('|');
+                if (separator <= 0 || separator == key.length() - 1) continue;
+                String first = key.substring(0, separator), second = key.substring(separator + 1);
+                if (!snapshotCharacterIds.contains(first) || !snapshotCharacterIds.contains(second)) continue;
+                Object bond = peek.invoke(relations, first, second);
+                if (bond == null) continue;
+                Class<?> type = bond.getClass();
+                JsonObject row = new JsonObject();
+                row.addProperty("character_a", first); row.addProperty("character_b", second);
+                row.addProperty("relationship", type.getField("affinity").getInt(bond));
+                row.addProperty("love", type.getField("love").getInt(bond));
+                row.addProperty("married", type.getField("married").getBoolean(bond));
+                row.addProperty("dating", type.getField("dating").getBoolean(bond));
+                row.addProperty("employed", type.getField("employed").getBoolean(bond));
+                row.addProperty("last_contact_day", Math.max(0, type.getField("lastContact").getInt(bond)));
+                target.add(row); exported++;
+            }
+        } catch (ReflectiveOperationException | LinkageError error) {
+            LOGGER.warn("wf_worldsim: wf-relations is installed but its social snapshot API could not be read: {}", error.toString());
+        }
+        return exported;
+    }
 
     private static double finite(double value) {
         return Double.isFinite(value) ? value : 0.0;
