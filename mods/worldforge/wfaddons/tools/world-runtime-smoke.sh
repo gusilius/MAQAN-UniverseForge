@@ -240,6 +240,11 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "smoke" ]; then
       echo "ERROR: mapped dimension was not resolved by the running Minecraft server"
       exit 6
     }
+    grep -Fq "MAQAN_MAP_CHUNK_GENERATED map=$MAP_ID" server.log || {
+      tail -160 server.log
+      echo "ERROR: mapped dimension did not generate a real chunk through MapChunkGenerator"
+      exit 7
+    }
     printf 'execute in worldforge:%s run forceload query\n' "$MAP_ID" >> in.txt
     sleep 2
   fi
