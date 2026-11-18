@@ -888,8 +888,13 @@ mod tests {
             entry_id: "farm".into(), name: "Farm".into(),
             payload: serde_json::json!({"category":"food","cost":{},"requires":[]}),
         });
+        snapshot.catalog_entries.push(CatalogEntry {
+            module_id: "wf_settlements".into(), catalog_id: "buildings".into(),
+            entry_id: "market".into(), name: "Market".into(),
+            payload: serde_json::json!({"category":"trade","cost":{},"requires":[]}),
+        });
         assert!(!settlement_allows_building(&snapshot, "village", "farm"));
-        assert!(settlement_allows_building(&snapshot, "village", "market") == false);
+        assert!(settlement_allows_building(&snapshot, "village", "market"));
     }
 
     fn realm(id: &str, army: u64) -> Realm {
