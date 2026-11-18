@@ -53,6 +53,7 @@ public class ReputationMod {
     private static volatile ReputationStore store;
     private static final Set<String> KNOWN = ConcurrentHashMap.newKeySet();
     private static long ticks;
+    private static long autonomousEvents;
 
     public ReputationMod() {
         FMLJavaModLoadingContext.get().getModEventBus().addListener((FMLCommonSetupEvent e) -> e.enqueueWork(ReputationMod::commonSetup));
@@ -85,6 +86,10 @@ public class ReputationMod {
         String target = ReputationStore.target(scope, scopeId);
         current.add(characterGlobalId, scope, scopeId, delta,
                 reason == null || reason.isBlank() ? "autonomous_npc_event" : reason);
+        long eventCount = ++autonomousEvents;
+        if (eventCount % 10 == 0)
+            LOGGER.info("wf_reputation: autonomous NPC reputation events={} last_subject={} scope={} reason={}",
+                    eventCount, characterGlobalId, target, reason);
         if (scope == ReputationStore.Scope.POLITY)
             current.name(target, "Репутация в государстве " + polityId);
         if (witnesses == null || witnesses.length == 0 || scope != ReputationStore.Scope.POLITY) return;
@@ -144,6 +149,8 @@ public class ReputationMod {
 
     @SubscribeEvent
     public void onAboutToStart(ServerAboutToStartEvent e) {
+        ticks = 0;
+        autonomousEvents = 0;
         ReputationStore s = new ReputationStore();
         s.addListener((player, target, oldV, newV, reason) -> notify(e.getServer(), s, player, target, oldV, newV));
         Path f = file(e.getServer());
