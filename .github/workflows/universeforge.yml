@@ -2,7 +2,7 @@ name: MAQAN UniverseForge — two-world acceptance (Windows x64)
 
 on:
   push:
-    branches: [main, feature/autonomous-world-simulation-engine]
+    branches: [main, feature/autonomous-world-simulation-engine, feature/two-planet-runtime-from-2335]
     paths:
       - "mods/worldforge/**"
       - "map.png"
