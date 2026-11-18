@@ -939,7 +939,28 @@ public final class WorldSimMod {
             item.addProperty("expansion_pressure", (int) Math.max(0, Math.min(100, 20 + population / 10)));
             long lastWarDay = 0;
             boolean atWar = false;
-            for (var war : RealmsMod.POLITICS.wars()) {
+            for (TitleData.Realm realm : RealmsMod.realms()) {
+            var treasury = RealmsMod.POLITICS.treasury(realm.id);
+            JsonObject balance = new JsonObject();
+            balance.addProperty("balance", finite(treasury.balance)); balance.addProperty("tax_rate", finite(treasury.taxRate));
+            balance.addProperty("last_income", finite(treasury.lastIncome)); balance.addProperty("last_expenses", finite(treasury.lastExpenses));
+            balance.addProperty("tax_days", treasury.taxDays);
+            addCatalogEntry(catalogEntries, "wf_realms", "realm_treasuries", realm.id, realm.name, balance);
+            addCatalogEntry(catalogEntries, "wf_realms", "inheritance_laws", realm.id, realm.name,
+                    GSON.toJsonTree(Map.of("law", RealmsMod.POLITICS.inheritanceLaw(realm.id).name())));
+        }
+        for (var plot : RealmsMod.POLITICS.plots()) {
+            JsonObject plotData = new JsonObject();
+            plotData.addProperty("id", plot.id); plotData.addProperty("realm_id", plot.realmId);
+            plotData.addProperty("sponsor_character_id", plot.sponsorCharacterId);
+            plotData.addProperty("target_character_id", plot.targetCharacterId);
+            plotData.addProperty("kind", plot.kind.name()); plotData.addProperty("status", plot.status.name());
+            plotData.addProperty("progress", finite(plot.progress)); plotData.addProperty("discovered", plot.discovered);
+            plotData.add("backers", GSON.toJsonTree(new TreeSet<>(plot.backers)));
+            addCatalogEntry(catalogEntries, "wf_realms", "intrigue_plots", plot.id, plot.kind.name(), plotData);
+            addNamedEntity(namedEntities, plot.id, "intrigue_plot", plot.kind.name(), "", plot.realmId);
+        }
+        for (var war : RealmsMod.POLITICS.wars()) {
                 if (!war.attackerRealm.equals(realm.id) && !war.defenderRealm.equals(realm.id)) continue;
                 lastWarDay = Math.max(lastWarDay, war.startDay);
                 if (war.status == dev.worldforge.realms.Statecraft.WarStatus.ACTIVE) {
@@ -1307,6 +1328,9 @@ public final class WorldSimMod {
                 warData.addProperty("score", finite(war.score)); warData.addProperty("start_day", war.startDay);
                 warData.addProperty("end_day", war.endDay); warData.addProperty("active", war.active);
                 warData.addProperty("result", war.result);
+                warData.addProperty("winner", war.winner == null ? "" : war.winner.name());
+                warData.addProperty("offer_from", war.offerFrom == null ? "" : war.offerFrom.name());
+                warData.addProperty("offer_white", war.offerWhite);
                 warData.add("attacker_members", GSON.toJsonTree(war.members(dev.worldforge.war.War.Side.ATTACKER)));
                 warData.add("defender_members", GSON.toJsonTree(war.members(dev.worldforge.war.War.Side.DEFENDER)));
                 warData.add("goals", GSON.toJsonTree(war.goals)); warData.add("occupied", GSON.toJsonTree(war.occupied));
