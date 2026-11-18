@@ -584,7 +584,7 @@ public final class WorldSimMod {
             long dynasties = RealmsMod.POLITICS.dynasties().stream()
                     .filter(dynasty -> dynasty != null && dynasty.name != null && !dynasty.name.isBlank()
                             && realms.stream().anyMatch(realm -> Objects.equals(
-                                    String.valueOf(realm.props.getOrDefault("emergence.dynasty_id", "")), dynasty.id)))
+                                    String.valueOf(realm.props.getOrDefault("emergence.dynasty_id", "")), dynasty.houseId)))
                     .count();
             LOGGER.info("MAQAN_WORLD_GENESIS source={} dimension={} geography_cells={} communities={} settled={} settlements={} polities={} canonical_rulers={} dynasties={} titles={} governments={} race_kinds={}",
                     source.id, source.dimension,
