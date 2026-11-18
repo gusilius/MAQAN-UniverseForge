@@ -497,6 +497,17 @@ public class PeopleMod {
                 return false;
             }
         }
+        for (Map.Entry<String, CharacterRegistry> entry : DIMENSION_REGISTRIES.entrySet()) {
+            if (entry.getValue() != owner) continue;
+            try {
+                writeAtomic(dimensionRegistryFile(server, entry.getKey()), owner.toJson());
+                return true;
+            } catch (Exception ex) {
+                LOGGER.error("wf_people: failed to persist Character {} in dimension {}: {}",
+                        character.globalId, entry.getKey(), ex.toString());
+                return false;
+            }
+        }
         for (Map.Entry<MapData, CharacterRegistry> entry : REGS.entrySet()) if (entry.getValue() == owner) {
             try {
                 Path file = EditorManager.overlayDir(server, entry.getKey()).resolve("wf_people.json");
@@ -519,6 +530,11 @@ public class PeopleMod {
         registries.add(PLAYER_REGISTRY);
         registries.add(WORLD_REGISTRY);
         java.util.IdentityHashMap<CharacterRegistry, MapData> mapOwners = new java.util.IdentityHashMap<>();
+        java.util.IdentityHashMap<CharacterRegistry, String> dimensionOwners = new java.util.IdentityHashMap<>();
+        for (Map.Entry<String, CharacterRegistry> entry : DIMENSION_REGISTRIES.entrySet()) {
+            registries.add(entry.getValue());
+            dimensionOwners.put(entry.getValue(), entry.getKey());
+        }
         for (Map.Entry<MapData, CharacterRegistry> entry : REGS.entrySet()) {
             registries.add(entry.getValue());
             mapOwners.put(entry.getValue(), entry.getKey());
@@ -595,6 +611,8 @@ public class PeopleMod {
                     Path worldFile = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT)
                             .resolve("worldforge").resolve("wf_people_world.json");
                     writeAtomic(worldFile, WORLD_REGISTRY.toJson());
+                } else if (dimensionOwners.containsKey(registry)) {
+                    writeAtomic(dimensionRegistryFile(server, dimensionOwners.get(registry)), registry.toJson());
                 } else {
                     MapData map = mapOwners.get(registry);
                     if (map == null) return false;
@@ -607,8 +625,12 @@ public class PeopleMod {
                     LOGGER.error("wf_people: failed to save player Character registry; further Genesis identity writes are disabled: {}", ex.toString());
                 } else {
                     MapData map = mapOwners.get(registry);
-                    LOGGER.error("wf_people: не удалось сохранить людей карты '{}': {}",
-                            map == null ? "unknown" : map.name, ex.toString());
+                    String dimension = dimensionOwners.get(registry);
+                    if (dimension != null)
+                        LOGGER.error("wf_people: failed to save Character partition for dimension '{}': {}", dimension, ex.toString());
+                    else
+                        LOGGER.error("wf_people: не удалось сохранить людей карты '{}': {}",
+                                map == null ? "unknown" : map.name, ex.toString());
                 }
                 return false;
             }
@@ -621,6 +643,7 @@ public class PeopleMod {
         identityPartitionsReady = false;
         saveAll(e.getServer());
         REGS.clear();
+        DIMENSION_REGISTRIES.clear();
         PLAYER_CHARACTERS.clear();
         WORLD_REGISTRY.fromJson("{\"format\":\"wf-people/3\",\"schema_version\":3,\"next\":1,\"characters\":[]}");
         PLAYER_REGISTRY.fromJson("{\"format\":\"wf-people/3\",\"schema_version\":3,\"next\":1,\"characters\":[]}");
@@ -642,6 +665,8 @@ public class PeopleMod {
                     || populationFallbackGeneration != registryGeneration)) {
                 long fallbackStartDay = populationBaselineDay == Long.MIN_VALUE ? currentWorldDay : populationBaselineDay;
                 for (CharacterRegistry registry : REGS.values())
+                    PopulationSimulation.advanceToWorldDay(registry, currentWorldDay, fallbackStartDay, YEAR);
+                for (CharacterRegistry registry : DIMENSION_REGISTRIES.values())
                     PopulationSimulation.advanceToWorldDay(registry, currentWorldDay, fallbackStartDay, YEAR);
                 PopulationSimulation.advanceToWorldDay(WORLD_REGISTRY, currentWorldDay, fallbackStartDay, YEAR);
                 PopulationSimulation.advanceToWorldDay(PLAYER_REGISTRY, currentWorldDay, fallbackStartDay, YEAR);
