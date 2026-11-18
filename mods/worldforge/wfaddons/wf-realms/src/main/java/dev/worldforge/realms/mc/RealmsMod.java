@@ -421,6 +421,7 @@ public class RealmsMod {
             if (editor == null) continue;
             boolean changed = false;
             CharacterRegistry people = PeopleMod.registry(map);
+            Map<String, String> characterNames = new HashMap<>();
             if (people != null) {
                 // wf-realms is intentionally compiled against the stable people API jar, which can
                 // lag the source module in the addon build order. Read optional dynasty metadata
@@ -431,6 +432,8 @@ public class RealmsMod {
                 Map<String, String> dynastyNames = new LinkedHashMap<>();
                 Map<String, String> characterHouses = new LinkedHashMap<>();
                 for (Object character : people.all()) {
+                    String globalId = characterText(character, "globalId");
+                    if (!globalId.isBlank()) characterNames.put(globalId, characterText(character, "name"));
                     String house = characterDynastyId(character, map.name);
                     if (house.isBlank()) continue;
                     int birthYear = characterNumber(character, "birthYear");
@@ -439,7 +442,6 @@ public class RealmsMod {
                         founderCharacters.put(house, character);
                         founderYears.put(house, birthYear);
                     }
-                    String globalId = characterText(character, "globalId");
                     if (!globalId.isBlank()) characterHouses.put(globalId, house);
                 }
                 for (Map.Entry<String, String> entry : founders.entrySet()) {
@@ -482,15 +484,7 @@ public class RealmsMod {
             for (TitleData.Title title : map.titles.allTitles()) {
                 Statecraft.Title political = POLITICS.title(Statecraft.mapTitleId(map.name, title.key));
                 String holder = political == null ? "" : political.holderCharacterId;
-                String holderName = "";
-                if (!holder.isBlank() && people != null) {
-                    for (Character character : people.all()) {
-                        if (holder.equals(character.globalId)) {
-                            holderName = character.name == null ? "" : character.name;
-                            break;
-                        }
-                    }
-                }
+                String holderName = characterNames.getOrDefault(holder, "");
                 String claimants = political == null ? "" : String.join(";", new TreeSet<>(political.claims));
                 int count = political == null ? 0 : political.claims.size();
                 changed |= editor.setDerivedTitleProp(title.id, "politics.holder_character", holder);
