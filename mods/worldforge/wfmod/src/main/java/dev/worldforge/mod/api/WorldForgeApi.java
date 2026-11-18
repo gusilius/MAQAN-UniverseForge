@@ -130,6 +130,12 @@ public final class WorldForgeApi {
         return EVENTS.post(category, text, realmIds, time);
     }
 
+    /** Append a confirmed event with additional planet/dynasty/settlement/character scopes. */
+    public static EventLog.Event postEventScoped(String category, String text, List<String> realmIds,
+                                                 List<String> scopes, long time) {
+        return EVENTS.postScoped(EventLog.Category.parse(category), text, realmIds, scopes, time);
+    }
+
     public static EventLog.Event postEvent(String category, String text, List<String> realmIds) {
         return EVENTS.post(category, text, realmIds, System.currentTimeMillis());
     }
