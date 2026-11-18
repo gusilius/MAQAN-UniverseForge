@@ -72,7 +72,39 @@ The map-backed path has a map identity/court bootstrap and settlement blueprint 
 
 Global CharacterAuthority and transaction infrastructure exist, but no completed end-to-end acceptance currently proves a player/Character can move between the map planet and vanilla planet, restart mid-transfer, and recover without duplicate bodies, inventory, family or ownership records.
 
-### F. Atlas still needs a canonical multi-planet registry contract
+### F. Strategic army/war/court services are still MapData-scoped
+
+The audit of addon entry points found:
+- `wf-army` keeps `ArmyEngine` instances in a `Map<MapData, ArmyEngine>` and resolves a realm to an engine by searching loaded map titles.
+- `wf-war` keeps `WarEngine` instances in a `Map<MapData, WarEngine>`; its persistence and tick loops iterate loaded maps.
+- `wf-court` keeps `CourtSim` instances per `MapData`.
+- Vanilla emergent realms live in `RealmsMod.AUTONOMOUS_REALMS` / shared Statecraft, but they do not have a MapData-backed ArmyEngine/WarEngine/CourtSim owner. Therefore the vanilla planet can form a polity, but the full map-backed strategic army/war/court pipeline is not yet attached to it.
+- `wf-troops` does carry physical DimensionKey and map scope in several identity/supply paths, but its strategic ArmyRef still needs a canonical world-space owner for non-map realms.
+
+This is a major blocker for parity between the two planets. The solution is not to create a second army/war implementation: refactor the existing engines to use a shared WorldSpace/PoliticalProjection adapter, with map-backed and vanilla-dimension-backed projections.
+
+### G. Trade is globally persisted but not yet truly inter-world
+
+`wf-trade` has a process-wide `Trade` state and its visible shops are stored with a dimension key. However, capital/province caravan routing resolves endpoints through loaded `MapData` title graphs; when two realms are on different maps, it falls back to a direct line, and vanilla emergent realms have no map capital projection. Cross-dimension shipments and interplanetary transfer legs therefore need explicit route/transfer providers. A shared trade database alone is not proof of inter-world trade.
+
+### H. Initial CK3-scale political bootstrap is not yet complete for every terrain provider
+
+- `TerritorialIdentity.ensureDemographics` classifies existing realms; it does not create a complete realm hierarchy from bare province/region geography.
+- `TerritorialIdentity.ensure` names/classifies existing realm/title records; it does not itself create the initial states.
+- The map acceptance preparation strips authored realm sovereignty. The shared Rust emergence engine can create populations and polities over simulation time, but this is not equivalent to proving a complete initial CK3-scale political world is generated immediately on new-world creation.
+- Vanilla geography is discovered incrementally from loaded chunks. This is appropriate for an infinite Overworld, but its strategic map is necessarily an observed/frontier model unless a bounded pre-generation or strategic sampling policy is configured.
+
+The missing piece is one idempotent WorldGenesis bootstrap coordinator that consumes each dimension's terrain/geography adapter, produces initial population and political projections using the existing definitions, and then hands ongoing changes to WorldSim. It must not create campaigns or player objectives.
+
+### I. Race assignment needs environmental/population context for emergent worlds
+
+The 46 race/subrace definitions are present and loaded. Authored map realms receive origin-backed demographic mixes through `TerritorialIdentity.ensureDemographics`. Newly emergent populations call `Origins.assign` without a realm/population mix, so initial race choice is weighted from the global race catalog rather than the local planet/biome/culture ecology. The definitions exist; dimension-aware race distribution still needs to be connected.
+
+### J. Cross-dimension travel is not yet proven
+
+Global CharacterAuthority and transaction infrastructure exist, but no completed end-to-end acceptance currently proves a player/Character can move between the map planet and vanilla planet, restart mid-transfer, and recover without duplicate bodies, inventory, family or ownership records.
+
+### K. Atlas still needs a canonical multi-planet registry contract
 
 Atlas and WorldForge must consume the same stable PlanetId ↔ DimensionKey ↔ terrain-provider mapping. A second independently maintained planet list is not acceptable.
 
