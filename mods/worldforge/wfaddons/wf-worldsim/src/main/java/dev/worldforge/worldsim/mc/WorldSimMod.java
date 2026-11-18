@@ -1560,6 +1560,16 @@ public final class WorldSimMod {
                 item.addProperty("life_stage", PopulationSimulation.lifeStage(person, WorldForgeApi.clock().year()).name());
                 item.addProperty("last_intent", PopulationSimulation.lastIntent(person).name());
                 item.add("profession_history", GSON.toJsonTree(PopulationSimulation.professionHistory(person)));
+                JsonObject lifeAi = new JsonObject();
+                for (String key : List.of("population.ai.last_action", "population.ai.last_outcome",
+                        "population.ai.last_reason", "population.ai.pending_action",
+                        "population.ai.pending_minute", "population.ai.next_think_minute",
+                        "population.ai.pending_token", "population.ai.failure_cooldowns",
+                        "population.ai.last_plan")) {
+                    Object value = person.props.get(key);
+                    if (value != null) lifeAi.add(key.substring("population.ai.".length()), GSON.toJsonTree(value));
+                }
+                item.add("life_ai", lifeAi);
                 for (var property : person.props.entrySet()) {
                     if (!(property.getValue() instanceof Number value)) continue;
                     String key = property.getKey();
