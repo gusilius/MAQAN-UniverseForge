@@ -312,6 +312,10 @@ for key in sorted(expected):
         raise SystemExit(f"{key}: initial civilization must contain at least four real communities/settlements")
     if int(row["race_kinds"]) < 2:
         raise SystemExit(f"{key}: expected at least two actual race identities, got {row['race_kinds']}")
+    if int(row["governments"]) < int(row["polities"]) or not row["government_types"]:
+        raise SystemExit(f"{key}: every emergent polity must have an assigned data-pack government: {row['government_types']}")
+    if int(row["vassal_contracts"]) > 0 and not row["subject_types"]:
+        raise SystemExit(f"{key}: vassal contracts exist but no subject types were reported")
     classified = sum(count for kind, count in row["settlement_types"].items() if kind != "unclassified")
     if classified <= 0:
         raise SystemExit(f"{key}: Genesis did not assign any existing data-pack settlement type: {row['settlement_types']}")
