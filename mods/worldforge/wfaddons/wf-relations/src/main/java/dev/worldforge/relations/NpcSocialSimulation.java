@@ -88,6 +88,10 @@ public final class NpcSocialSimulation {
         ab.lastContact = ba.lastContact = day;
         ab.met++; ba.met++;
         ab.talks++; ba.talks++;
+        if (a.spouse.equals(b.id) && b.spouse.equals(a.id)) {
+            ab.married = ba.married = true;
+            ab.dating = ba.dating = false;
+        }
 
         boolean eligibleRomance = !a.gender.equals(b.gender) && a.spouse.isEmpty() && b.spouse.isEmpty()
                 && year - a.birthYear >= 18 && year - b.birthYear >= 18
