@@ -1075,8 +1075,8 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
         }
     }
 
-    // Recruitment AI: only proposes recruitment when a settlement has barracks,
-    // realm is threatened and treasury/food stocks can support the force.
+    // Recruitment AI: requires the module-defined recruitment building, active trainers,
+    // actual manpower pool, registered unit type, treasury and food support.
     let mut recruitment_settlements = snapshot.settlements.iter().collect::<Vec<_>>();
     recruitment_settlements.sort_by(|a, b| a.id.cmp(&b.id));
     for s in recruitment_settlements {
@@ -1102,7 +1102,7 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
     let mut used = BTreeSet::new();
     for a in &eligible {
         if used.contains(a.id.as_str()) { continue; }
-        let mut best: Option<(&Character, i32)> = None;
+        let mut best: Option<(&Character, i32, i32)> = None;
         for b in &eligible {
             if a.id == b.id || a.realm_id.is_empty() || b.realm_id.is_empty() || a.realm_id == b.realm_id || a.map_id != b.map_id || a.gender == b.gender || used.contains(b.id.as_str()) { continue; }
             let Some(social) = snapshot.social_relations.iter().find(|relation|
@@ -1122,9 +1122,9 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
                 + social_bonus as i64 + dynastic_policy
                 - kinship_penalty as i64
                 - (a.age as i32 - b.age as i32).abs() as i64);
-            if score >= 35 && best.map(|(_, current)| score > current).unwrap_or(true) { best = Some((b, score)); }
+            if score >= 35 && best.map(|(_, current, _)| score > current).unwrap_or(true) { best = Some((b, score, social_bonus)); }
         }
-        if let Some((b, score)) = best {
+        if let Some((b, score, social_bonus)) = best {
             let roll = stable_hash(snapshot.seed, "marriage", &a.id, &b.id, snapshot.day) % 100;
             if roll < (score - 20).clamp(0, 70) as u64 {
                 used.insert(a.id.as_str()); used.insert(b.id.as_str());
