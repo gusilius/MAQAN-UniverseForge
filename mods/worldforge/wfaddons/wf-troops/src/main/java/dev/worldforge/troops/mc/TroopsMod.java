@@ -88,6 +88,8 @@ public class TroopsMod {
     public static volatile TroopDefs DEFS = load(null);
     public static final Squads SQUADS = new Squads();
     public static final ArmyHierarchy HIERARCHY = new ArmyHierarchy();
+    /** Per-squad delegation policy; player-direct remains the default for legacy saves. */
+    public static final dev.worldforge.troops.CommandDelegation DELEGATION = new dev.worldforge.troops.CommandDelegation();
     public static final Forts FORTS = new Forts();
     public static final Map<String, TroopEntity> LIVE = new ConcurrentHashMap<>();
 
@@ -210,6 +212,9 @@ public class TroopsMod {
             if (Files.exists(f)) SQUADS.fromJson(Files.readString(f));
             Path hf = dir(server).resolve("wf_army_hierarchy.json");
             if (Files.exists(hf)) HIERARCHY.fromJson(Files.readString(hf), WorldForgeMod.worldId(), TroopsMod::resolveLegacyArmyMap);
+            Path cf = dir(server).resolve("wf_command_delegation.json");
+            if (Files.exists(cf)) DELEGATION.fromJson(Files.readString(cf));
+            else DELEGATION.clear();
             Path ff = dir(server).resolve("wf_forts.json");
             if (Files.exists(ff)) FORTS.fromJson(Files.readString(ff));
             Path df = dir(server).resolve("wf_military_deaths.json");
@@ -245,6 +250,7 @@ public class TroopsMod {
         Path root = dir(server);
         snapshots.put(root.resolve("wf_squads.json"), SQUADS.toJson());
         snapshots.put(root.resolve("wf_army_hierarchy.json"), HIERARCHY.toJson());
+        snapshots.put(root.resolve("wf_command_delegation.json"), DELEGATION.toJson());
         snapshots.put(root.resolve("wf_forts.json"), FORTS.toJson());
         snapshots.put(root.resolve("wf_military_deaths.json"), DEATHS.toJson());
         snapshots.put(root.resolve("wf_military_transitions.json"), TRANSITIONS.toJson());
@@ -381,6 +387,7 @@ public class TroopsMod {
             }
         }
         HIERARCHY.pruneSquads(SQUADS);
+        DELEGATION.prune(SQUADS);
     }
 
     @SubscribeEvent
@@ -1656,6 +1663,8 @@ public class TroopsMod {
                 }
                 Squads.Squad squad = SQUADS.commandUnits(owner, selectedTroops, ord, o.queue());
                 if (squad != null) {
+                    // Direct player selection is an explicit takeover of this squad.
+                    DELEGATION.reclaim(squad.id);
                     String message = squad.name + " (" + squad.members.size() + "): " + ord.kind().title;
                     p.displayClientMessage(Component.literal(message), true);
                     return ActionResult.ok(workerResult != null && !workerResult.ok
