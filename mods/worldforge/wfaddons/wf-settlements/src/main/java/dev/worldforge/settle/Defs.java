@@ -32,7 +32,8 @@ public final class Defs {
         /** Optional data-driven identity metadata; empty lists preserve legacy universal behavior. */
         public String structureClass = "";
         public final Set<String> raceAllow = new LinkedHashSet<>(), raceDeny = new LinkedHashSet<>();
-        public final Set<String> cultureAllow = new LinkedHashSet<>(), governmentAllow = new LinkedHashSet<>(), settlementTypeAllow = new LinkedHashSet<>();
+        public final Set<String> subraceAllow = new LinkedHashSet<>(), cultureAllow = new LinkedHashSet<>(), cultureTags = new LinkedHashSet<>();
+        public final Set<String> architectureTags = new LinkedHashSet<>(), governmentAllow = new LinkedHashSet<>(), settlementTypeAllow = new LinkedHashSet<>();
         public final Map<String, Double> effects = new LinkedHashMap<>();
         public final Map<String, Integer> cost = new LinkedHashMap<>(), storage = new LinkedHashMap<>(), jobs = new LinkedHashMap<>(), in = new LinkedHashMap<>(), out = new LinkedHashMap<>();
         public final List<String> requires = new ArrayList<>();
@@ -136,9 +137,13 @@ public final class Defs {
                 if (m.get("structure_class") != null) b.structureClass = String.valueOf(m.get("structure_class"));
                 strings(b.raceAllow, m.get("race_compatibility"));
                 strings(b.raceDeny, m.get("race_incompatibility"));
+                strings(b.subraceAllow, m.get("subrace_compatibility"));
                 strings(b.cultureAllow, m.get("culture_compatibility"));
+                strings(b.cultureTags, m.get("culture_tags"));
+                strings(b.architectureTags, m.get("architecture_tags"));
                 strings(b.governmentAllow, m.get("government_compatibility"));
-                strings(b.settlementTypeAllow, m.get("settlement_type_compatibility"));
+                strings(b.settlementTypeAllow, m.get("settlement_types"));
+                if (m.get("settlement_type_compatibility") != null) strings(b.settlementTypeAllow, m.get("settlement_type_compatibility"));
                 if (m.get("effects") instanceof Map<?,?> effectMap) for (Map.Entry<?,?> effect : effectMap.entrySet()) {
                     if (effect.getKey() instanceof String key && effect.getValue() instanceof Number value) b.effects.put(key, value.doubleValue());
                 }
@@ -163,22 +168,25 @@ public final class Defs {
         }
     }
 
-    /** Runtime Genesis selection. Explicit incompatibilities are never overridden; legacy untagged definitions remain unchanged. */
+    /** Runtime Genesis selection. Empty result means explicit incompatibility with no safe replacement. */
     public String selectGenesisBuilding(String requestedId, String raceId, long seed) {
+        return selectIdentityBuilding(requestedId, raceId, null, null, null, seed);
+    }
+
+    /** Shared identity-aware selection API. Unknown IDs are neutral; explicit exclusions remain hard constraints. */
+    public String selectIdentityBuilding(String requestedId, String raceId, String subraceId, String cultureId,
+                                        String governmentId, String settlementTypeId, long seed) {
         Building requested = buildings.get(requestedId);
         if (requested == null) return requestedId;
-        if (compatible(requested, raceId, null, null)) return requestedId;
+        if (compatible(requested, raceId, subraceId, cultureId, governmentId, settlementTypeId)) return requestedId;
         List<Building> alternatives = buildings.values().stream()
                 .filter(candidate -> Objects.equals(candidate.category, requested.category))
                 .filter(candidate -> !candidate.id.equals(requested.id))
                 .filter(candidate -> hasIdentityMetadata(candidate))
-                .filter(candidate -> compatible(candidate, raceId, null, null))
+                .filter(candidate -> compatible(candidate, raceId, subraceId, cultureId, governmentId, settlementTypeId))
                 .sorted(Comparator.comparing(candidate -> candidate.id))
                 .toList();
-        if (alternatives.isEmpty()) {
-            // Explicitly incompatible structure: do not silently place it as a fallback.
-            return "";
-        }
+        if (alternatives.isEmpty()) return "";
         long mixed = seed ^ (seed >>> 33) ^ requestedId.hashCode() * 0x9E3779B97F4A7C15L;
         int pick = (int) Math.floorMod(mixed, alternatives.size());
         return alternatives.get(pick).id;
@@ -186,14 +194,18 @@ public final class Defs {
 
     private static boolean hasIdentityMetadata(Building building) {
         return !building.structureClass.isBlank() || !building.raceAllow.isEmpty() || !building.raceDeny.isEmpty()
-                || !building.cultureAllow.isEmpty() || !building.governmentAllow.isEmpty() || !building.settlementTypeAllow.isEmpty();
+                || !building.subraceAllow.isEmpty() || !building.cultureAllow.isEmpty() || !building.cultureTags.isEmpty()
+                || !building.architectureTags.isEmpty() || !building.governmentAllow.isEmpty() || !building.settlementTypeAllow.isEmpty();
     }
 
-    private static boolean compatible(Building building, String race, String culture, String government) {
+    private static boolean compatible(Building building, String race, String subrace, String culture,
+                                   String government, String settlementType) {
         if (race != null && building.raceDeny.contains(race)) return false;
         if (race != null && !building.raceAllow.isEmpty() && !building.raceAllow.contains(race)) return false;
+        if (subrace != null && !building.subraceAllow.isEmpty() && !building.subraceAllow.contains(subrace)) return false;
         if (culture != null && !building.cultureAllow.isEmpty() && !building.cultureAllow.contains(culture)) return false;
         if (government != null && !building.governmentAllow.isEmpty() && !building.governmentAllow.contains(government)) return false;
+        if (settlementType != null && !building.settlementTypeAllow.isEmpty() && !building.settlementTypeAllow.contains(settlementType)) return false;
         return true;
     }
 
