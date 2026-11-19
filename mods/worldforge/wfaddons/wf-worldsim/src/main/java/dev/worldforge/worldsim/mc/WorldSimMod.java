@@ -2,6 +2,7 @@ package dev.worldforge.worldsim.mc;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.mojang.logging.LogUtils;
 import dev.worldforge.mod.MapData;
@@ -941,15 +942,33 @@ public final class WorldSimMod {
             item.addProperty("expansion_pressure", (int) Math.max(0, Math.min(100, number(realm.props.get("expansion_pressure"), 0))));
             long lastWarDay = 0;
             boolean atWar = false;
-            for (TitleData.Realm realm : RealmsMod.realms()) {
-            var treasury = RealmsMod.POLITICS.treasury(realm.id);
+            for (var war : RealmsMod.POLITICS.wars()) {
+                if (!war.attackerRealm.equals(realm.id) && !war.defenderRealm.equals(realm.id)) continue;
+                lastWarDay = Math.max(lastWarDay, war.startDay);
+                if (war.status == dev.worldforge.realms.Statecraft.WarStatus.ACTIVE) {
+                    atWar = true;
+                    threatenedRealms.add(realm.id);
+                }
+            }
+            item.addProperty("at_war", atWar);
+            item.addProperty("last_war_day", lastWarDay);
+            realms.add(item);
+        }
+        // Treasury and inheritance state are exported independently of the realm
+        // census so every loaded realm is represented exactly once.
+        for (TitleData.Realm treasuryRealm : RealmsMod.realms()) {
+            var treasury = RealmsMod.POLITICS.treasury(treasuryRealm.id);
             JsonObject balance = new JsonObject();
-            balance.addProperty("balance", finite(treasury.balance)); balance.addProperty("tax_rate", finite(treasury.taxRate));
-            balance.addProperty("last_income", finite(treasury.lastIncome)); balance.addProperty("last_expenses", finite(treasury.lastExpenses));
+            balance.addProperty("balance", finite(treasury.balance));
+            balance.addProperty("tax_rate", finite(treasury.taxRate));
+            balance.addProperty("last_income", finite(treasury.lastIncome));
+            balance.addProperty("last_expenses", finite(treasury.lastExpenses));
             balance.addProperty("tax_days", treasury.taxDays);
-            addCatalogEntry(catalogEntries, "wf_realms", "realm_treasuries", realm.id, realm.name, balance);
-            addCatalogEntry(catalogEntries, "wf_realms", "inheritance_laws", realm.id, realm.name,
-                    GSON.toJsonTree(Map.of("law", RealmsMod.POLITICS.inheritanceLaw(realm.id).name())));
+            addCatalogEntry(catalogEntries, "wf_realms", "realm_treasuries",
+                    treasuryRealm.id, treasuryRealm.name, balance);
+            addCatalogEntry(catalogEntries, "wf_realms", "inheritance_laws",
+                    treasuryRealm.id, treasuryRealm.name,
+                    GSON.toJsonTree(Map.of("law", RealmsMod.POLITICS.inheritanceLaw(treasuryRealm.id).name())));
         }
         for (var plot : RealmsMod.POLITICS.plots()) {
             JsonObject plotData = new JsonObject();
@@ -961,18 +980,6 @@ public final class WorldSimMod {
             plotData.add("backers", GSON.toJsonTree(new TreeSet<>(plot.backers)));
             addCatalogEntry(catalogEntries, "wf_realms", "intrigue_plots", plot.id, plot.kind.name(), plotData);
             addNamedEntity(namedEntities, plot.id, "intrigue_plot", plot.kind.name(), "", plot.realmId);
-        }
-        for (var war : RealmsMod.POLITICS.wars()) {
-                if (!war.attackerRealm.equals(realm.id) && !war.defenderRealm.equals(realm.id)) continue;
-                lastWarDay = Math.max(lastWarDay, war.startDay);
-                if (war.status == dev.worldforge.realms.Statecraft.WarStatus.ACTIVE) {
-                    atWar = true;
-                    threatenedRealms.add(realm.id);
-                }
-            }
-            item.addProperty("at_war", atWar);
-            item.addProperty("last_war_day", lastWarDay);
-            realms.add(item);
         }
         // Export the complete authoritative Statecraft graph, not just at_war flags.
         for (var relation : RealmsMod.POLITICS.relations()) {
@@ -1238,6 +1245,9 @@ public final class WorldSimMod {
                 for (var job : colony.map.logistics.values())
                     addCatalogEntry(catalogEntries, "wf_settle", "logistics_jobs",
                             s.id + ":logistics:" + job.id, job.resource, GSON.toJsonTree(job));
+                for (var parcel : colony.map.parcels.values())
+                    addCatalogEntry(catalogEntries, "wf_settle", "land_parcels",
+                            s.id + ":parcel:" + parcel.id, parcel.id, GSON.toJsonTree(parcel));
             }
             JsonObject settlementIdentity = new JsonObject();
             settlementIdentity.addProperty("type_id", colony.settlementType == null ? "" : colony.settlementType);
@@ -1436,9 +1446,6 @@ public final class WorldSimMod {
                 addCatalogEntry(catalogEntries, "wf_settle", "comfort_goods", comfort.getKey(), comfort.getKey(), GSON.toJsonTree(comfort.getValue()));
             addCatalogEntry(catalogEntries, "wf_settle", "food_kinds", "all_food_kinds", "Settlement food resources",
                     GSON.toJsonTree(SettleMod.DEFS.foodKinds));
-            if (colony.map != null) for (var parcel : colony.map.parcels.values())
-                addCatalogEntry(catalogEntries, "wf_settle", "land_parcels",
-                        s.id + ":parcel:" + parcel.id, parcel.id, GSON.toJsonTree(parcel));
         }
         for (var type : SettleMod.TYPES.types.values()) {
             addCatalogEntry(catalogEntries, "wf_settle", "settlement_types", type.id(), type.name(), GSON.toJsonTree(type));
@@ -3071,6 +3078,9 @@ public final class WorldSimMod {
         }
         for (MapData map : WorldForgeMod.loadedMaps().values()) {
             if (map == null || map.titles == null) continue;
+            CharacterRegistry mapRegistry = PeopleMod.registry(map);
+            EmergentPopulationIndex populationIndex = mapRegistry == null
+                    ? null : new EmergentPopulationIndex(mapRegistry.all());
             boolean namesChanged = ensureImagePoliticalNames(map);
             Map<String, List<int[]>> seedsByRealm = new TreeMap<>();
             Map<String, List<String>> bandsByRealm = new TreeMap<>();
@@ -3317,7 +3327,7 @@ public final class WorldSimMod {
             // reconciled. This second pass fills every now-owned map title using the
             // map's complete data-driven tier catalogue; it does not invent a parallel
             // five-rank title tree or assign offices to neutral geography.
-            CharacterRegistry courtRegistry = PeopleMod.registry(map);
+            CharacterRegistry courtRegistry = mapRegistry;
             if (courtRegistry != null) {
                 int generatedRoles = PeopleMod.ROLES.ensureTerritorialRulers(map.titles);
                 int generatedCourts = dev.worldforge.people.Courts.ensure(map.titles,
