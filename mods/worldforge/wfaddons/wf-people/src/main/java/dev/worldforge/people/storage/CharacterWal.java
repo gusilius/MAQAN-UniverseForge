@@ -82,8 +82,22 @@ public final class CharacterWal implements AutoCloseable {
         Shard shard = shards[shardId];
         long sequence = shard.nextSequence;
         ByteBuffer frame = encode(sequence, id, payload);
-        writeFully(shard.channel, frame);
-        if (durable) shard.channel.force(true);
+        long start = shard.channel.size();
+        shard.channel.position(start);
+        try {
+            writeFully(shard.channel, frame);
+            if (durable) shard.channel.force(true);
+        } catch (IOException failure) {
+            // Never leave a partial frame before the next sequence. Roll back to the
+            // previous frame boundary so subsequent appends and recovery remain valid.
+            try {
+                shard.channel.truncate(start);
+                shard.channel.position(start);
+            } catch (IOException rollbackFailure) {
+                failure.addSuppressed(rollbackFailure);
+            }
+            throw failure;
+        }
         shard.nextSequence++;
         return new Record(shardId, sequence, globalId, payload);
     }
