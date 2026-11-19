@@ -47,6 +47,7 @@ public final class CharacterRegistry {
     private static final class MutationBatchState {
         int depth;
         boolean dirty;
+        final Set<CharacterRegistry> membershipChanged = Collections.newSetFromMap(new IdentityHashMap<>());
         final DomainMutationRevisions.Mutation mutation =
                 WorldForgeApi.revisions().begin(DomainMutationRevisions.Domain.CHARACTERS);
     }
@@ -65,6 +66,7 @@ public final class CharacterRegistry {
             if (--state.depth == 0) {
                 MUTATION_BATCH.remove();
                 try {
+                    for (CharacterRegistry registry : state.membershipChanged) registry.revision++;
                     if (state.dirty) state.mutation.commit();
                 } finally {
                     state.mutation.close();
@@ -118,7 +120,7 @@ public final class CharacterRegistry {
         // New Characters start at their creation day; they must not catch up before they existed.
         c.props.put("population.last_simulated_world_day", Long.toString(WorldForgeApi.clock().dayNumber()));
         byId.put(c.id, c);
-        revision++;
+        markMembershipMutation();
         for (Listener l : listeners) l.born(c);
         publish(c, new LifecycleEvent(LifecycleKind.BORN, c.id, "", "", birthYear));
         return c;
@@ -383,6 +385,12 @@ public final class CharacterRegistry {
     }
 
     /** Advances the shared lane after a canonical Character write has completed. */
+    private void markMembershipMutation() {
+        MutationBatchState batch = MUTATION_BATCH.get();
+        if (batch != null) batch.membershipChanged.add(this);
+        else revision++;
+    }
+
     private static void recordDomainMutation() {
         MutationBatchState batch = MUTATION_BATCH.get();
         if (batch != null) {
@@ -753,7 +761,7 @@ public final class CharacterRegistry {
         byId.clear();
         byId.putAll(loaded);
         next = safeNext;
-        revision++;
+        markMembershipMutation();
         recordDomainMutation();
         for (Character character : byId.values()) {
             LifecycleEvent restored = new LifecycleEvent(LifecycleKind.RESTORED, character.id, "", "", 0);

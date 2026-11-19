@@ -2367,6 +2367,7 @@ public final class WorldSimMod {
                     ensureEmergentOrigin(residents.get(ordinal), source, year, ordinal, realmByBand.getOrDefault(bandId, ""));
                     budget--;
                 }
+                try (CharacterRegistry.MutationBatch membershipBatch = CharacterRegistry.beginMutationBatch()) {
                 while (residents.size() < target && budget > 0) {
                     int ordinal = residents.size();
                     dev.worldforge.people.Character created = createEmergentResident(
@@ -2377,6 +2378,7 @@ public final class WorldSimMod {
                     ensureEmergentOrigin(created, source, year, ordinal, realmByBand.getOrDefault(bandId, ""));
                     bandProgress.originCursor = residents.size();
                     budget--;
+                }
                 }
 
                 boolean bandComplete = residents.size() >= target
