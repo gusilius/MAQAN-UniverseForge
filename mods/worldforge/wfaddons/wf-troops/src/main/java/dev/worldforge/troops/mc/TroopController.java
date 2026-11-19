@@ -16,6 +16,8 @@ final class TroopController {
     private TroopController() {}
 
     static final double SPACING = 1.7;
+    /** Reused server-thread spatial hash for commander auras and field-medics. */
+    private static final TroopSpatialIndex SPATIAL = new TroopSpatialIndex();
 
     private static UUID safeUuid(String value) {
         if (value == null || value.isBlank()) return null;
@@ -161,7 +163,17 @@ final class TroopController {
         s.lastAlive = n;
         s.morale = nextMorale;
         boolean near = frame.near();
-        List<TroopEntity> leaders = frame.leaders();
+        SPATIAL.rebuild(alive);
+        double[] auraByIndex = SPATIAL.auraBuffer();
+        boolean[] leaderByIndex = SPATIAL.leaderBuffer();
+        for (int i = 0; i < n; i++) {
+            TroopEntity troop = alive.get(i);
+            boolean appointed = !s.leaderCharacterId.isEmpty() && s.leaderCharacterId.equals(troop.characterId);
+            double aura = Leadership.aura(troop.def() == null ? 0 : troop.def().aura(),
+                    appointed, appointed && s.leaderHero, appointed ? s.leadershipRank : 0);
+            auraByIndex[i] = aura;
+            leaderByIndex[i] = aura > 0;
+        }
         boolean was = s.routed;
         s.routed = Morale.routed(was, s.morale, near);
         if (s.routed != was) {
@@ -169,13 +181,17 @@ final class TroopController {
             if (p != null) p.displayClientMessage(net.minecraft.network.chat.Component.literal(s.routed ? "Отряд «" + s.name + "» бежит с поля боя!" : "Отряд «" + s.name + "» пришёл в себя"), false);
             if (s.routed) s.queue.clear();
         }
-        for (TroopEntity t : alive) {
+        for (int i = 0; i < n; i++) {
+            TroopEntity t = alive.get(i);
             boolean led = false;
-            for (TroopEntity l : leaders) {
-                boolean appointed = !s.leaderCharacterId.isEmpty() && s.leaderCharacterId.equals(l.characterId);
-                double aura = Leadership.aura(l.def() == null ? 0 : l.def().aura(),
-                        appointed, appointed && s.leaderHero, appointed ? s.leadershipRank : 0);
-                if (t.distanceToSqr(l) <= aura * aura) { led = true; break; }
+            int nearby = SPATIAL.query(t.getX(), t.getZ(), Leadership.MAX_AURA);
+            for (int candidate = 0; candidate < nearby; candidate++) {
+                int leaderIndex = SPATIAL.candidate(candidate);
+                if (!leaderByIndex[leaderIndex]) continue;
+                TroopEntity leader = alive.get(leaderIndex);
+                double dx = t.getX() - leader.getX(), dy = t.getY() - leader.getY(), dz = t.getZ() - leader.getZ();
+                double aura = auraByIndex[leaderIndex];
+                if (dx * dx + dy * dy + dz * dz <= aura * aura) { led = true; break; }
             }
             t.setDamageMult(Morale.damage(s.morale, led));
             t.setMorale((int) Math.round(s.morale * 100));
@@ -195,14 +211,10 @@ final class TroopController {
                 troop.engage = TroopEntity.Engage.NONE;
             }
         }
-        for (TroopEntity h : alive) {
-            if (h.def() == null || h.def().heal() <= 0) continue;
-            List<TroopEntity> near2 = new ArrayList<>();
-            for (TroopEntity t : alive) if (t.distanceToSqr(h) <= Morale.HEAL_RANGE * Morale.HEAL_RANGE) near2.add(t);
-            double[] hp = new double[near2.size()], mx = new double[near2.size()];
-            for (int i = 0; i < hp.length; i++) { hp[i] = near2.get(i).getHealth(); mx[i] = near2.get(i).getMaxHealth(); }
-            double[] plan = Morale.healPlan(hp, mx, Morale.HEAL_TARGETS, h.def().heal() * 0.5);
-            for (int i = 0; i < plan.length; i++) if (plan[i] > 0) near2.get(i).heal((float) plan[i]);
+        for (int i = 0; i < n; i++) {
+            TroopEntity healer = alive.get(i);
+            if (healer.def() == null || healer.def().heal() <= 0) continue;
+            SPATIAL.healAround(alive, i, Morale.HEAL_RANGE, healer.def().heal() * 0.5, Morale.HEAL_TARGETS);
         }
         return s.routed;
     }
