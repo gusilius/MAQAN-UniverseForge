@@ -1,0 +1,238 @@
+{
+  "schema_version": 1,
+  "registry_id": "wf_settle:structure_catalog",
+  "description": "Authoritative metadata contract for physical settlement structures. Structure assets remain in wf-settlements/Blueprints and the built-in structure resource system; this file classifies and constrains selection rather than duplicating structure payloads.",
+  "generation_policy": {
+    "use_existing_blueprint_sources": true,
+    "native_assets_preferred": true,
+    "external_schematic_mod_optional": true,
+    "selection_order": [
+      "native_race_culture",
+      "compatible_local",
+      "adaptable_if_adaptation_available"
+    ],
+    "forbidden_is_hard_exclusion_for_initial_genesis": true,
+    "allow_foreign_structures_after_history_events": [
+      "migration",
+      "conquest",
+      "trade_acquisition",
+      "cultural_exchange",
+      "reconstruction"
+    ],
+    "fallback": "use compatible built-in assets or defer placement; never silently substitute a forbidden racial/cultural structure"
+  },
+  "structure_classes": {
+    "residential": [
+      "house",
+      "hut",
+      "dwelling",
+      "longhouse",
+      "tent",
+      "barracks_housing",
+      "apartment",
+      "hall"
+    ],
+    "agriculture": [
+      "farm",
+      "field",
+      "pasture",
+      "barn",
+      "granary",
+      "mill",
+      "orchard",
+      "fishery"
+    ],
+    "industry": [
+      "mine",
+      "quarry",
+      "forge",
+      "smithy",
+      "workshop",
+      "sawmill",
+      "kiln",
+      "foundry"
+    ],
+    "commerce": [
+      "market",
+      "shop",
+      "trading_post",
+      "inn",
+      "tavern",
+      "warehouse",
+      "caravanserai"
+    ],
+    "civic": [
+      "town_hall",
+      "administration",
+      "court",
+      "council",
+      "public_square",
+      "guildhall"
+    ],
+    "military": [
+      "wall",
+      "gate",
+      "tower",
+      "fort",
+      "fortress",
+      "barracks",
+      "armory",
+      "training_ground"
+    ],
+    "religious": [
+      "temple",
+      "shrine",
+      "chapel",
+      "monastery",
+      "sanctuary"
+    ],
+    "infrastructure": [
+      "road",
+      "bridge",
+      "dock",
+      "well",
+      "aqueduct",
+      "canal",
+      "utility"
+    ],
+    "cultural": [
+      "monument",
+      "library",
+      "school",
+      "theatre",
+      "bath",
+      "festival_site"
+    ],
+    "storage": [
+      "storehouse",
+      "stockpile",
+      "silo",
+      "vault"
+    ],
+    "special": [
+      "unique",
+      "landmark",
+      "magical",
+      "ritual",
+      "quest"
+    ]
+  },
+  "compatibility": {
+    "modes": [
+      "native",
+      "compatible",
+      "adaptable",
+      "forbidden"
+    ],
+    "default_mode": "compatible",
+    "rule_scope": [
+      "race",
+      "subrace",
+      "culture",
+      "architecture_style",
+      "settlement_type",
+      "government",
+      "biome",
+      "climate",
+      "terrain",
+      "technology_era"
+    ],
+    "race_matching": "Registry IDs and tags; no hardcoded list of races. Unknown race IDs use explicit tags and general compatibility, never guessed exclusions.",
+    "subrace_overrides_race": true,
+    "culture_overrides_architecture_style": true,
+    "forbidden_reason_required": true,
+    "foreign_use_requires_history_or_adaptation": true
+  },
+  "placement_constraints": {
+    "fields": [
+      "biome_tags",
+      "climate_tags",
+      "terrain_tags",
+      "slope_max",
+      "elevation_min",
+      "elevation_max",
+      "near_water",
+      "water_distance_min",
+      "water_distance_max",
+      "underground",
+      "surface",
+      "orientation",
+      "footprint_clearance",
+      "road_access",
+      "spacing",
+      "cluster_id"
+    ],
+    "unknown_constraint_policy": "reject candidate with diagnostic; do not silently ignore malformed constraints",
+    "avoid_chunk_force_loading": true,
+    "validate_terrain_and_collision_before_commit": true
+  },
+  "settlement_complexes": {
+    "support_nested_or_linked_groups": true,
+    "required_components_are_constraints": true,
+    "optional_components_are_weighted": true,
+    "placement_relationships": [
+      "near",
+      "adjacent",
+      "connected_by_road",
+      "inside_walls",
+      "outside_walls",
+      "elevated",
+      "underground",
+      "facing"
+    ],
+    "group_placement_is_atomic_or_recoverable": true
+  },
+  "asset_sources": {
+    "builtin_structure_nbt": "Minecraft StructureTemplate resources",
+    "settlement_blueprint": "wf-settlements native blueprint catalog",
+    "schematic_import": "wf-settlements schematic library",
+    "external_mod_import": "optional integration only",
+    "asset_source_priority": [
+      "native_registry",
+      "builtin_nbt",
+      "imported_schematic",
+      "procedural_fallback"
+    ],
+    "fallback_must_respect_compatibility_and_placement_constraints": true
+  },
+  "density_and_worldgen": {
+    "density_affects": [
+      "settlement_frequency",
+      "spacing",
+      "settlement_size",
+      "structure_count",
+      "complexity",
+      "population_capacity",
+      "road_network",
+      "regional_center_chance",
+      "wilderness_share"
+    ],
+    "density_does_not_force_continuous_urbanization": true,
+    "image_map_worlds_excluded_from_physical_territory_generation": true
+  },
+  "data_contract": {
+    "per_structure_metadata_file": "<structure_id>.json",
+    "optional_fields": [
+      "structure_class",
+      "race_compatibility",
+      "subrace_compatibility",
+      "culture_tags",
+      "architecture_tags",
+      "settlement_types",
+      "government_tags",
+      "biome_rules",
+      "climate_rules",
+      "terrain_rules",
+      "placement_rules",
+      "generation_weight",
+      "worldgen_enabled",
+      "source",
+      "complex_id",
+      "requires",
+      "excludes",
+      "adaptation"
+    ],
+    "unknown_metadata_fields_are_preserved_for_future_extensions": true,
+    "catalogs_are_data_driven": true
+  }
+}
