@@ -70,7 +70,8 @@ final class SettleBridge {
                 for (String requestedBuilding : tier.buildings()) {
                     String effectiveRace = c.identityRace == null || c.identityRace.isBlank() ? d.race : c.identityRace;
                     String b = s.defs.selectIdentityBuilding(requestedBuilding, effectiveRace, null,
-                            c.identityCulture, c.governmentId, c.settlementType, name.hashCode() * 31L + n);
+                            c.identityCulture, c.governmentId, c.settlementType, c.polityFormationId,
+                            c.architectureStyleId, name.hashCode() * 31L + n);
                     if (b.isEmpty()) {
                         SettleMod.LOGGER.warn("wf_settle: Genesis skipped incompatible building '{}' (race={}, culture={}, government={}, settlementType={})",
                                 requestedBuilding, effectiveRace, c.identityCulture, c.governmentId, c.settlementType);
