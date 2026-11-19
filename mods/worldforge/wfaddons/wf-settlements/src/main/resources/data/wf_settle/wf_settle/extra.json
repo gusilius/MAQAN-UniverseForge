@@ -309,6 +309,133 @@
         "stilt"
       ],
       "description": "Поднятое на сваях жилище для болотных поселений."
+    },
+    "hall_feudal": {
+      "name": "Феодальная палата",
+      "category": "civic",
+      "cost": {
+        "wood": 55,
+        "stone": 65
+      },
+      "work": 95,
+      "size": [
+        7,
+        7
+      ],
+      "blueprint": "",
+      "architecture_material": "stone",
+      "structure_class": "polity_administration",
+      "government_compatibility": [
+        "feudal_monarchy",
+        "elective_monarchy",
+        "empire_throne"
+      ],
+      "description": "Административный двор феодального правителя и его вассалов."
+    },
+    "hall_republic": {
+      "name": "Зал городского совета",
+      "category": "civic",
+      "cost": {
+        "wood": 65,
+        "stone": 35
+      },
+      "work": 90,
+      "size": [
+        7,
+        7
+      ],
+      "blueprint": "",
+      "architecture_material": "birch",
+      "structure_class": "polity_administration",
+      "government_compatibility": [
+        "merchant_republic",
+        "guild_league",
+        "sage_council"
+      ],
+      "description": "Зал выборного совета, гильдий и городских представителей."
+    },
+    "hall_tribal": {
+      "name": "Круг старейшин",
+      "category": "civic",
+      "cost": {
+        "wood": 45,
+        "stone": 20
+      },
+      "work": 70,
+      "size": [
+        7,
+        5
+      ],
+      "blueprint": "",
+      "architecture_material": "spruce",
+      "structure_class": "polity_administration",
+      "government_compatibility": [
+        "tribal_clans",
+        "horde",
+        "nomad_khanate",
+        "marsh_enclave"
+      ],
+      "description": "Открытый круг собраний кланов и старейшин."
+    },
+    "hall_theocracy": {
+      "name": "Святилище верховной власти",
+      "category": "civic",
+      "cost": {
+        "stone": 90,
+        "wood": 25
+      },
+      "work": 120,
+      "size": [
+        7,
+        9
+      ],
+      "blueprint": "",
+      "architecture_material": "sandstone",
+      "structure_class": "polity_administration",
+      "government_compatibility": [
+        "theocracy"
+      ],
+      "description": "Центр религиозного управления, обрядов и власти духовенства."
+    },
+    "hall_military": {
+      "name": "Штаб военного совета",
+      "category": "civic",
+      "cost": {
+        "stone": 65,
+        "wood": 45
+      },
+      "work": 100,
+      "size": [
+        7,
+        7
+      ],
+      "blueprint": "",
+      "architecture_material": "deepslate",
+      "structure_class": "polity_administration",
+      "government_compatibility": [
+        "military_junta"
+      ],
+      "description": "Штаб военного правления, командования и снабжения гарнизонов."
+    },
+    "hall_holdfast": {
+      "name": "Зал горного клана",
+      "category": "civic",
+      "cost": {
+        "stone": 100,
+        "wood": 25
+      },
+      "work": 115,
+      "size": [
+        7,
+        7
+      ],
+      "blueprint": "",
+      "architecture_material": "deepslate",
+      "structure_class": "polity_administration",
+      "government_compatibility": [
+        "holdfast"
+      ],
+      "description": "Каменный зал кланового совета горного оплота."
     }
   }
 }
