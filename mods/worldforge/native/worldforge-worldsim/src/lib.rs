@@ -1699,6 +1699,23 @@ mod tests {
             serde_json::json!({"mods":{}}));
         add_test_catalog(&mut snapshot, "wf_realms", "laws", "succession",
             serde_json::json!({"options":[{"id":"elective","mods":{}}]}));
+        for (catalog, id, payload) in [
+            ("doctrine_branches", "trade", serde_json::json!({"nodes":[{"id":"charters","mods":{"trade_pct":10.0}}]})),
+            ("government_levels", "city_league", serde_json::json!({"mods":{}})),
+            ("laws", "succession", serde_json::json!({"options":[{"id":"elective","mods":{}}]})),
+        ] {
+            snapshot.catalog_entries.push(CatalogEntry {
+                module_id: "wf_realms".into(), catalog_id: catalog.into(),
+                entry_id: id.into(), name: id.into(), payload,
+            });
+        }
+        snapshot.capabilities.push(CapabilityDescriptor {
+            module_id: "wf_realms".into(), schema_version: 1, available: true,
+            snapshot_received: true, simulation_consumed: true, apply_handler_available: true,
+            catalog_count: snapshot.catalog_entries.iter().filter(|entry| entry.module_id == "wf_realms").count() as u32
+                + snapshot.government_definitions.len() as u32,
+            entity_count: 0,
+        });
         snapshot.realm_governments = vec![RealmGovernment {
             realm_id: "north".into(), government_id: "merchant_republic".into(),
             level_id: "city_league".into(), doctrine_ids: vec!["trade:charters".into()],
