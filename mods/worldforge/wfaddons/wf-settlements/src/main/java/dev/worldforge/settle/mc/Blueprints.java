@@ -32,7 +32,12 @@ public final class Blueprints {
 
     public record Entry(int x, int y, int z, BlockState state) {}
 
-    public record Plan(int sx, int sy, int sz, List<Entry> blocks, boolean fromNbt) {}
+    public record Plan(int sx, int sy, int sz, List<Entry> blocks, boolean fromNbt, String error) {
+        public Plan(int sx, int sy, int sz, List<Entry> blocks, boolean fromNbt) {
+            this(sx, sy, sz, blocks, fromNbt, "");
+        }
+        public boolean valid() { return error == null || error.isBlank(); }
+    }
 
     private static final Map<String, Plan> CACHE = new ConcurrentHashMap<>();
 
@@ -44,8 +49,11 @@ public final class Blueprints {
         return CACHE.computeIfAbsent(key, k -> {
             Plan p = null;
             if (d.blueprint != null && d.blueprint.startsWith("schem:")) {
-                p = SchemLibrary.plan(d.blueprint.substring(6));
+                String schematicId = d.blueprint.substring(6);
+                p = SchemLibrary.plan(schematicId);
                 if (p != null) return p;
+                return new Plan(Math.max(1, d.sizeX), 1, Math.max(1, d.sizeZ),
+                        List.of(), true, "Схема не загружена: " + schematicId);
             }
             try {
                 p = fromStructure(level, d.blueprint);
