@@ -1351,13 +1351,16 @@ def convert_image(input_path: Path, output_path: Path, seed: int, region_count: 
     province_array = province_labels.reshape((height, width))
     province_palette = np.zeros((int(province_labels.max()) + 1, 3), dtype=np.uint8)
     region_lut = np.zeros(int(province_array.max()) + 1, dtype=np.int32)
+    state_lut = np.zeros(int(province_array.max()) + 1, dtype=np.int32)
     for province_id in province_meta:
         region_id = region_for_province[province_id]
         province_palette[province_id] = region_rgb[region_id]
         region_lut[province_id] = region_id
+        state_lut[province_id] = int(province_meta[province_id]["realm"]) + 1
     geography_rgb = province_palette[province_array]
     geography_rgb[wilderness_mask] = (104, 111, 83)
     region_grid = region_lut[province_array]
+    state_grid = state_lut[province_array]
     province_edge = np.zeros((height, width), dtype=bool)
     province_edge[:, 1:] |= (province_array[:, 1:] != province_array[:, :-1]) & (province_array[:, 1:] > 0) & (province_array[:, :-1] > 0)
     province_edge[1:, :] |= (province_array[1:, :] != province_array[:-1, :]) & (province_array[1:, :] > 0) & (province_array[:-1, :] > 0)
@@ -1366,8 +1369,13 @@ def convert_image(input_path: Path, output_path: Path, seed: int, region_count: 
     region_edge[1:, :] |= (region_grid[1:, :] != region_grid[:-1, :]) & (region_grid[1:, :] > 0) & (region_grid[:-1, :] > 0)
     from scipy import ndimage
     region_edge = ndimage.binary_dilation(region_edge, iterations=2)
+    state_edge = np.zeros((height, width), dtype=bool)
+    state_edge[:, 1:] |= (state_grid[:, 1:] != state_grid[:, :-1]) & (state_grid[:, 1:] > 0) & (state_grid[:, :-1] > 0)
+    state_edge[1:, :] |= (state_grid[1:, :] != state_grid[:-1, :]) & (state_grid[1:, :] > 0) & (state_grid[:-1, :] > 0)
+    state_edge = ndimage.binary_dilation(state_edge, iterations=3)
     geography_rgb[province_edge] = (63, 67, 72)
     geography_rgb[region_edge] = (20, 22, 28)
+    geography_rgb[state_edge] = (8, 10, 16)
     geography_preview = Image.fromarray(geography_rgb, "RGB")
     from io import BytesIO
     geography_buffer = BytesIO()
