@@ -417,7 +417,7 @@ fn court_opinion_modifier(snapshot: &WorldSnapshot, first: &str, second: &str) -
         .filter_map(|modifier| modifier.as_array())
         .filter(|values| values.len() >= 5
             && values[0].as_str() == Some(first) && values[1].as_str() == Some(second)
-            && values[4].as_u64().unwrap_or(0) >= snapshot.day)
+            && values[4].as_u64().unwrap_or(0) >= entry.payload.get("world_year").and_then(serde_json::Value::as_u64).unwrap_or(0))
         .map(|values| values[3].as_i64().unwrap_or(0))
         .sum()
 }
@@ -441,7 +441,7 @@ fn court_instability_pressure(snapshot: &WorldSnapshot, realm_id: &str) -> i64 {
                     let power = faction.get("power").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
                     let progress = faction.get("progress").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
                     if power.is_finite() && progress.is_finite() && progress > 0.0 {
-                        pressure += (power.max(0.0) * progress.clamp(0.0, 1.0) / 10.0).round() as i64;
+                        pressure += (power.max(0.0) * (progress / 100.0).clamp(0.0, 1.0) * 20.0).round() as i64;
                     }
                 }
             }
