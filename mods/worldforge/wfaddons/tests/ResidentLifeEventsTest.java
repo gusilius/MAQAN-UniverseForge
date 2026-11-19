@@ -18,6 +18,14 @@ public final class ResidentLifeEventsTest {
         else System.out.println("ok   " + message);
     }
 
+    private static final class CountingRegistry extends CharacterRegistry {
+        int refreshCalls;
+        @Override public void refreshLifeStages(int year) {
+            refreshCalls++;
+            super.refreshLifeStages(year);
+        }
+    }
+
     public static void main(String[] args) {
         CharacterRegistry registry = new CharacterRegistry();
         Character father = registry.create("Арен", "Дом Арен", "north", "m", 1980);
@@ -200,6 +208,21 @@ public final class ResidentLifeEventsTest {
         for (int year = 2015; year <= 2023; year++) ResidentLifeEvents.yearly(cousinRegistry, year);
         check(!cousinOne.props.containsKey("family.dating") && !cousinTwo.props.containsKey("family.dating"),
                 "close cousins sharing grandparents are excluded from autonomous dating");
+
+        CountingRegistry guardedRegistry = new CountingRegistry();
+        guardedRegistry.create("Один", "", "north", "m", 1990);
+        guardedRegistry.create("Два", "", "north", "f", 1991);
+        for (int call = 0; call < 100; call++) ResidentLifeEvents.yearly(guardedRegistry, 2030);
+        check(guardedRegistry.refreshCalls == 1,
+                "hundreds of settlement callbacks refresh one canonical registry only once per year");
+        Character lateResident = guardedRegistry.create("Поздний житель", "", "north", "f", 2010);
+        ResidentLifeEvents.yearly(guardedRegistry, 2030);
+        check(guardedRegistry.refreshCalls == 2
+                        && "adult".equals(lateResident.props.get("population.life_stage")),
+                "late same-year residents receive a stage refresh without replaying annual family events");
+        for (int call = 0; call < 100; call++) ResidentLifeEvents.yearly(guardedRegistry, 2030);
+        check(guardedRegistry.refreshCalls == 2,
+                "same-year callbacks after a population change do not trigger repeated full-registry refreshes");
 
         if (failures > 0) throw new AssertionError(failures + " resident life event tests failed");
     }
