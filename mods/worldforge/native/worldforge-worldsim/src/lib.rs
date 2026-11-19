@@ -410,16 +410,21 @@ fn catalog_entry<'a>(snapshot: &'a WorldSnapshot, module: &str, catalog: &str, i
 }
 
 fn court_opinion_modifier(snapshot: &WorldSnapshot, first: &str, second: &str) -> i64 {
-    snapshot.catalog_entries.iter().filter(|entry|
-        entry.module_id == "wf_court" && entry.catalog_id == "court_states")
-        .filter_map(|entry| entry.payload.get("mods").and_then(serde_json::Value::as_array))
-        .flat_map(|mods| mods.iter())
-        .filter_map(|modifier| modifier.as_array())
-        .filter(|values| values.len() >= 5
-            && values[0].as_str() == Some(first) && values[1].as_str() == Some(second)
-            && values[4].as_u64().unwrap_or(0) >= entry.payload.get("world_year").and_then(serde_json::Value::as_u64).unwrap_or(0))
-        .map(|values| values[3].as_i64().unwrap_or(0))
-        .sum()
+    let mut total = 0_i64;
+    for entry in snapshot.catalog_entries.iter().filter(|entry|
+        entry.module_id == "wf_court" && entry.catalog_id == "court_states") {
+        let world_year = entry.payload.get("world_year").and_then(serde_json::Value::as_u64).unwrap_or(0);
+        if let Some(modifiers) = entry.payload.get("mods").and_then(serde_json::Value::as_array) {
+            for modifier in modifiers {
+                let Some(values) = modifier.as_array() else { continue; };
+                if values.len() < 5 || values[0].as_str() != Some(first)
+                    || values[1].as_str() != Some(second)
+                    || values[4].as_u64().unwrap_or(0) < world_year { continue; }
+                total += values[3].as_i64().unwrap_or(0);
+            }
+        }
+    }
+    total
 }
 
 fn court_instability_pressure(snapshot: &WorldSnapshot, realm_id: &str) -> i64 {
