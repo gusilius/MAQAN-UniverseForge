@@ -158,12 +158,17 @@ public final class PoliticalIdentitySynchronizer {
             return -1;
         }
         if (currentId.equals(desired.globalId)) return 0;
-        // A wf-people appointment is authoritative for this exact title.
-        // It also repairs a stale holder reference left by a deleted/migrated
-        // Character partition; the new holder is still a canonical living person.
+        Character current = byGlobalId.get(currentId);
+        if (current != null && current.alive) {
+            politics.lastError = "Conflicting living holder for " + scope + ": "
+                    + currentId + " (requested " + desired.globalId + ")";
+            return -1;
+        }
+        // A missing/deceased holder is a stale reference and may be repaired;
+        // a different living canonical Character is a real political conflict.
         if (politics.grantTitle(title.id, desired.globalId)) return 1;
-        politics.lastError = "Could not reconcile " + scope + " office holder " + desired.globalId
-                + ": " + politics.lastError;
+        politics.lastError = "Could not repair stale " + scope + " office holder "
+                + desired.globalId + ": " + politics.lastError;
         return -1;
     }
 }
