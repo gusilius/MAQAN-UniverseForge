@@ -782,7 +782,7 @@ fn kinship_distance(a: &Character, b: &Character, characters: &BTreeMap<&str, &C
 }
 
 
-fn resource_category(snapshot: &WorldSnapshot, resource: &str) -> &str {
+fn resource_category<'a>(snapshot: &'a WorldSnapshot, resource: &str) -> &'a str {
     catalog_entry(snapshot, "wf_settle", "resources", resource)
         .and_then(|entry| entry.payload.get("category"))
         .and_then(serde_json::Value::as_str)
