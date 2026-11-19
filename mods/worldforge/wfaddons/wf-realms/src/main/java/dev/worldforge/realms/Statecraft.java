@@ -261,8 +261,17 @@ public final class Statecraft {
                 // generated polity may claim it; transfers between actual realms remain
                 // forbidden here and must go through an explicit political transfer.
                 if (target.realmId.startsWith("unclaimed:") && !realmId.startsWith("unclaimed:")) {
-                    target.realmId = realmId;
-                    target.liegeTitleId = "";
+                    // realmId is immutable on Title: replace the neutral placeholder
+                    // with a claimed copy while preserving source identity and claims.
+                    Title claimed = new Title(target.id, realmId, target.rank,
+                            source.name == null || source.name.isBlank() ? id : source.name);
+                    claimed.sourceTierIndex = target.sourceTierIndex;
+                    claimed.sourceTierKey = target.sourceTierKey;
+                    claimed.sourceParentTitleId = target.sourceParentTitleId;
+                    claimed.holderCharacterId = target.holderCharacterId;
+                    claimed.claims.addAll(target.claims);
+                    titles.put(id, claimed);
+                    target = claimed;
                 } else {
                     throw new IllegalStateException("imported title ownership changed for " + source.key
                             + "; explicit political transfer is required");
