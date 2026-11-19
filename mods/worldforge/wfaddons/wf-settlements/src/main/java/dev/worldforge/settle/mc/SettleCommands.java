@@ -47,6 +47,25 @@ public final class SettleCommands {
                             c.getSource().sendSuccess(() -> Component.literal("Схемы перечитаны: " + (rep.isEmpty() ? "файлов нет" : "\n" + String.join("\n", rep))), true);
                             return rep.size();
                         })))
+                .then(Commands.literal("identity").requires(SettleCommands::op)
+                        .then(Commands.literal("style")
+                                .then(Commands.argument("id", StringArgumentType.word()).executes(c -> order(c, colony -> {
+                                    String id = StringArgumentType.getString(c, "id");
+                                    colony.architectureStyleId = id;
+                                    return "Архитектурный стиль образования установлен: " + id
+                                            + ". Расовая архитектура остаётся отдельным слоем.";
+                                }))))
+                        .then(Commands.literal("formation")
+                                .then(Commands.argument("id", StringArgumentType.word()).executes(c -> order(c, colony -> {
+                                    String id = StringArgumentType.getString(c, "id");
+                                    colony.polityFormationId = id;
+                                    return "Форма образования установлена: " + id
+                                            + ". Политические постройки будут подбираться отдельно от расовых.";
+                                }))))
+                        .then(Commands.literal("show").executes(c -> order(c, colony ->
+                                "Раса=" + colony.identityRace + ", культура=" + colony.identityCulture
+                                        + ", правительство=" + colony.governmentId + ", форма=" + colony.polityFormationId
+                                        + ", стиль=" + colony.architectureStyleId + ", тип=" + colony.settlementType))))
                 .then(Commands.literal("build").requires(SettleCommands::op)
                         .then(Commands.argument("def", StringArgumentType.word())
                                 .suggests((c, b) -> SharedSuggestionProvider.suggest(SettleMod.DEFS == null ? java.util.List.of() : SettleMod.DEFS.buildings.keySet(), b))
