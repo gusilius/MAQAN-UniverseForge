@@ -311,8 +311,23 @@ public final class WorldSimMod {
         if (server == null) return;
         if (++lodTicks % 20 == 0) publishObservers(server);
         if (!emergentRealmsRehydrated && emergenceState != null) {
-            syncEmergentPolities(server, emergenceState, emergenceYear(emergenceState, WorldForgeApi.clock().year()));
+            int rehydrationYear = emergenceYear(emergenceState, WorldForgeApi.clock().year());
+            // Restored worlds must obey the same genesis dependency order as a fresh frame:
+            // establish canonical settlement sites, reconcile their Characters, then restore
+            // political ownership. Rehydrating realms first creates orphan political overlays.
+            if (!syncEmergentSettlementStructures(server, emergenceState)) {
+                PROFILER.setGauge("worldsim.genesis.rehydration_waiting_for_structures", 1);
+                return;
+            }
+            PROFILER.setGauge("worldsim.genesis.rehydration_waiting_for_structures", 0);
+            if (!syncEmergentPeople(server, emergenceState, rehydrationYear)) {
+                PROFILER.setGauge("worldsim.genesis.rehydration_waiting_for_people", 1);
+                return;
+            }
+            PROFILER.setGauge("worldsim.genesis.rehydration_waiting_for_people", 0);
+            syncEmergentPolities(server, emergenceState, rehydrationYear);
             emergentRealmsRehydrated = true;
+            LOGGER.info("wf_worldsim: restored genesis order complete: structures -> canonical people -> polities");
         }
 
         String worldId = worldIdentity(server);
