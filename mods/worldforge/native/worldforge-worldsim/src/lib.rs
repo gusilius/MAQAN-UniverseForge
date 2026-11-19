@@ -577,24 +577,6 @@ fn scoped_reputation(snapshot: &WorldSnapshot, character_id: &str, realm_id: &st
         .and_then(serde_json::Value::as_i64).unwrap_or(0)
 }
 
-fn court_opinion_modifier(snapshot: &WorldSnapshot, first: &str, second: &str) -> i64 {
-    let mut total = 0_i64;
-    for entry in snapshot.catalog_entries.iter().filter(|entry|
-        entry.module_id == "wf_court" && entry.catalog_id == "court_states") {
-        let world_year = entry.payload.get("world_year").and_then(serde_json::Value::as_u64).unwrap_or(0);
-        if let Some(modifiers) = entry.payload.get("mods").and_then(serde_json::Value::as_array) {
-            for modifier in modifiers {
-                let Some(values) = modifier.as_array() else { continue; };
-                if values.len() < 5 || values[0].as_str() != Some(first)
-                    || values[1].as_str() != Some(second)
-                    || values[4].as_u64().unwrap_or(0) < world_year { continue; }
-                total += values[3].as_i64().unwrap_or(0);
-            }
-        }
-    }
-    total
-}
-
 fn court_instability_pressure(snapshot: &WorldSnapshot, realm_id: &str) -> i64 {
     let mut pressure = 0_i64;
     for entry in snapshot.catalog_entries.iter().filter(|entry|
@@ -870,32 +852,6 @@ fn effective_army_power(snapshot: &WorldSnapshot, realm_id: &str) -> Option<f64>
         }
     }
     Some(strategic)
-}
-
-
-fn kinship_distance(a: &Character, b: &Character, characters: &BTreeMap<&str, &Character>) -> u32 {
-    fn ancestors(person: &Character, characters: &BTreeMap<&str, &Character>) -> BTreeMap<String, u32> {
-        let mut result = BTreeMap::new();
-        let mut queue = std::collections::VecDeque::new();
-        result.insert(person.id.clone(), 0);
-        for parent in [&person.father_id, &person.mother_id] {
-            if !parent.is_empty() { queue.push_back((parent.clone(), 1_u32)); }
-        }
-        while let Some((id, distance)) = queue.pop_front() {
-            if distance > 6 || result.contains_key(&id) { continue; }
-            result.insert(id.clone(), distance);
-            if let Some(parent) = characters.get(id.as_str()) {
-                for ancestor in [&parent.father_id, &parent.mother_id] {
-                    if !ancestor.is_empty() { queue.push_back((ancestor.clone(), distance + 1)); }
-                }
-            }
-        }
-        result
-    }
-    let first = ancestors(a, characters);
-    let second = ancestors(b, characters);
-    first.iter().filter_map(|(id, distance)| second.get(id).map(|other| *distance + *other))
-        .min().unwrap_or(u32::MAX)
 }
 
 
@@ -1506,51 +1462,6 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
         }
     }
 
-    // Marriage AI: candidates are ranked by cross-realm benefit, not hard-coded pairings.
-    let mut eligible = snapshot.characters.iter().filter(|c| c.alive && !c.married && c.age >= 18 && c.age <= 70).collect::<Vec<_>>();
-    eligible.sort_by(|a, b| a.id.cmp(&b.id));
-    let mut used = BTreeSet::new();
-    for a in &eligible {
-        if used.contains(a.id.as_str()) { continue; }
-        let mut best: Option<(&Character, i32, i32)> = None;
-        for b in &eligible {
-            if a.id == b.id || a.realm_id.is_empty() || b.realm_id.is_empty() || a.realm_id == b.realm_id || a.map_id != b.map_id || a.gender == b.gender || used.contains(b.id.as_str()) { continue; }
-            let Some(social) = snapshot.social_relations.iter().find(|relation|
-                (relation.character_a == a.id && relation.character_b == b.id)
-                    || (relation.character_a == b.id && relation.character_b == a.id)) else { continue; };
-            let kinship = kinship_distance(a, b, &characters);
-            if kinship <= 2 || social.married || social.relationship < 35 || social.love < 20 { continue; }
-            let social_bonus = social.relationship / 5 + social.love / 10;
-            let kinship_penalty = if (3..=5).contains(&kinship) { 10 } else { 0 };
-            let dynastic_policy = (realm_policy_modifier(snapshot, &a.realm_id, "marriage")
-                + realm_policy_modifier(snapshot, &b.realm_id, "marriage")
-                + realm_policy_modifier(snapshot, &a.realm_id, "diplomacy")
-                + realm_policy_modifier(snapshot, &b.realm_id, "diplomacy")).round() as i64;
-            let score = clamp_score(25_i64 + ((a.opinion + b.opinion) / 4) as i64
-                + ((a.prestige + b.prestige) / 8) as i64
-                + if a.house_id != b.house_id { 10 } else { 0 }
-                + social_bonus as i64 + dynastic_policy + court_opinion_modifier(snapshot, &a.id, &b.id)
-                + scoped_reputation(snapshot, &a.id, &a.realm_id) / 10
-                + scoped_reputation(snapshot, &b.id, &b.realm_id) / 10
-                + origin_modifier(snapshot, a, "marriage").round() as i64
-                + origin_modifier(snapshot, b, "marriage").round() as i64
-                - kinship_penalty as i64
-                - (a.age as i32 - b.age as i32).abs() as i64);
-            if score >= 35 && best.map(|(_, current, _)| score > current).unwrap_or(true) { best = Some((b, score, social_bonus)); }
-        }
-        if let Some((b, score, social_bonus)) = best {
-            let roll = stable_hash(snapshot.seed, "marriage", &a.id, &b.id, snapshot.day) % 100;
-            if roll < (score - 20).clamp(0, 70) as u64 {
-                used.insert(a.id.as_str()); used.insert(b.id.as_str());
-                proposals.push(Proposal {
-                    id: proposal_id(snapshot.seed, snapshot.day, "marriage", &a.id, &b.id),
-                    day: snapshot.day,
-                    kind: ProposalKind::DynasticMarriage { first: a.id.clone(), second: b.id.clone(), score, reason: format!("cross-realm dynastic compatibility; social bond contribution={}", social_bonus) },
-                });
-            }
-        }
-    }
-
     proposals.sort_by(|a, b| a.id.cmp(&b.id));
     diagnostics.sort();
     let mut unique = BTreeSet::new();
@@ -1830,8 +1741,9 @@ mod tests {
             "a realm without contested borders must not recruit from this rule");
     }
 
-    #[test] fn marriage_requires_two_distinct_realms() {
-        let mut s=base(); s.seed=0; s.characters=vec![
+    #[test] fn dynastic_marriage_is_owned_by_court_simulation_not_worldsim() {
+        let mut s=base();
+        s.characters=vec![
             Character{id:"a".into(),realm_id:"north".into(),age:22,alive:true,married:false,gender:0,fertility:10,prestige:50,opinion:50,house_id:"A".into(),..Default::default()},
             Character{id:"b".into(),realm_id:"south".into(),age:23,alive:true,married:false,gender:1,fertility:10,prestige:50,opinion:50,house_id:"B".into(),..Default::default()}
         ];
@@ -1839,7 +1751,9 @@ mod tests {
             character_a: "a".into(), character_b: "b".into(), relationship: 75, love: 65,
             married: false, dating: true, employed: false, last_contact_day: s.day,
         });
-        assert!(decide(&s).unwrap().proposals.iter().any(|p| matches!(p.kind,ProposalKind::DynasticMarriage{..})));
+        assert!(!decide(&s).unwrap().proposals.iter()
+            .any(|proposal| matches!(proposal.kind, ProposalKind::DynasticMarriage { .. })),
+            "wf-court already owns autonomous marriage evaluation and application");
     }
     #[test]
     fn map_first_geography_is_valid_without_preseeded_polities_or_settlements() {
