@@ -194,6 +194,9 @@ pub struct CapabilityDescriptor {
     pub module_id: String,
     pub schema_version: u32,
     pub available: bool,
+    #[serde(default)] pub snapshot_received: bool,
+    #[serde(default)] pub simulation_consumed: bool,
+    #[serde(default)] pub apply_handler_available: bool,
     #[serde(default)] pub catalog_count: u32,
     #[serde(default)] pub entity_count: u32,
 }
@@ -881,8 +884,8 @@ impl WorldSnapshot {
             let Some(capability) = self.capabilities.iter().find(|capability| capability.module_id == *module) else {
                 return Err(SimError::InvalidSnapshot(format!("catalog-without-capability:{module}")));
             };
-            if !capability.available {
-                return Err(SimError::InvalidSnapshot(format!("catalog-from-unavailable-module:{module}")));
+            if !capability.available || !capability.snapshot_received || !capability.simulation_consumed {
+                return Err(SimError::InvalidSnapshot(format!("catalog-not-transferred-or-consumed:{module}")));
             }
             let expected = *count + if *module == "wf_realms" { self.government_definitions.len() as u32 } else { 0 };
             if capability.catalog_count != expected {
@@ -890,6 +893,15 @@ impl WorldSnapshot {
             }
         }
         for capability in &self.capabilities {
+            if capability.snapshot_received && !capability.available {
+                return Err(SimError::InvalidSnapshot(format!("snapshot-from-unavailable-module:{}", capability.module_id)));
+            }
+            if capability.simulation_consumed && !capability.snapshot_received {
+                return Err(SimError::InvalidSnapshot(format!("consumed-without-snapshot:{}", capability.module_id)));
+            }
+            if capability.apply_handler_available && !capability.simulation_consumed {
+                return Err(SimError::InvalidSnapshot(format!("apply-handler-without-consumer:{}", capability.module_id)));
+            }
             let actual = actual_catalog_counts.get(capability.module_id.as_str()).copied().unwrap_or(0)
                 + if capability.module_id == "wf_realms" { self.government_definitions.len() as u32 } else { 0 };
             if capability.catalog_count != actual {
@@ -989,7 +1001,11 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
     let settlements: BTreeMap<&str, &Settlement> = snapshot.settlements.iter().map(|s| (s.id.as_str(), s)).collect();
     let characters: BTreeMap<&str, &Character> = snapshot.characters.iter().map(|character| (character.id.as_str(), character)).collect();
     let mut proposals = Vec::new();
-    let mut diagnostics = Vec::new();
+    let mut diagnostics = snapshot.capabilities.iter().map(|capability| format!(
+        "capability:{} available={} snapshot_received={} simulation_consumed={} apply_handler_available={} catalogs={} entities={}",
+        capability.module_id, capability.available, capability.snapshot_received,
+        capability.simulation_consumed, capability.apply_handler_available,
+        capability.catalog_count, capability.entity_count)).collect::<Vec<_>>();
     let mut titles_by_realm: BTreeMap<&str, usize> = BTreeMap::new();
     let mut claims_by_realm: BTreeMap<&str, usize> = BTreeMap::new();
     let mut titles_by_map: BTreeMap<&str, usize> = BTreeMap::new();
