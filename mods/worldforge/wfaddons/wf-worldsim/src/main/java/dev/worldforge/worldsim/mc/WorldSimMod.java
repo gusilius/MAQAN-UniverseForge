@@ -1594,7 +1594,16 @@ public final class WorldSimMod {
                         : origin != null && !origin.prof.isEmpty() ? origin.prof.keySet().iterator().next()
                         : String.valueOf(person.props.getOrDefault("origin.profession", "")));
                 JsonArray traits = new JsonArray();
-                for (String trait : new TreeSet<>(person.traits)) traits.add(trait);
+                Set<String> canonicalTraitIds = new TreeSet<>(person.traits);
+                Object genesisFeatures = person.props.get("genesis.features");
+                if (genesisFeatures instanceof Collection<?> values)
+                    for (Object value : values) if (value != null && !String.valueOf(value).isBlank())
+                        canonicalTraitIds.add(String.valueOf(value));
+                Object passiveNodes = person.props.get("progress.nodes");
+                if (passiveNodes instanceof Collection<?> values)
+                    for (Object value : values) if (value != null && !String.valueOf(value).isBlank())
+                        canonicalTraitIds.add(String.valueOf(value));
+                for (String trait : canonicalTraitIds) traits.add(trait);
                 item.add("trait_ids", traits);
                 item.addProperty("father_id", canonicalFamilyId(source.registry,
                         person.props.get("family.father_global_id"), person.father));
@@ -1631,9 +1640,23 @@ public final class WorldSimMod {
                 titleIds.forEach(heldTitles::add);
                 item.add("role_ids", roles);
                 item.add("title_ids", heldTitles);
-                JsonObject skills = new JsonObject(), needs = new JsonObject();
+                JsonObject skills = new JsonObject(), needs = new JsonObject(), attributes = new JsonObject();
                 for (var skill : PopulationSimulation.skillRanksSnapshot(person).entrySet())
                     skills.addProperty(skill.getKey(), skill.getValue());
+                Object genesisSkills = person.props.get("genesis.skills");
+                if (genesisSkills instanceof Map<?, ?> values) for (var entry : values.entrySet())
+                    if (entry.getValue() instanceof Number rank)
+                        skills.addProperty(String.valueOf(entry.getKey()), rank.intValue());
+                Object genesisAttributes = person.props.get("genesis.attributes");
+                if (genesisAttributes instanceof Map<?, ?> values) for (var entry : values.entrySet())
+                    if (entry.getValue() instanceof Number rank)
+                        attributes.addProperty(String.valueOf(entry.getKey()), rank.intValue());
+                for (var property : person.props.entrySet()) {
+                    if (!(property.getValue() instanceof Number value)) continue;
+                    String key = property.getKey();
+                    if (key.startsWith("attribute."))
+                        attributes.addProperty(key.substring("attribute.".length()), value.intValue());
+                }
                 for (var need : PopulationSimulation.Need.values())
                     needs.addProperty(need.name().toLowerCase(Locale.ROOT), PopulationSimulation.need(person, need));
                 JsonArray duties = new JsonArray();
@@ -1661,6 +1684,7 @@ public final class WorldSimMod {
                         needs.addProperty(key.substring("needs.".length()), value.intValue());
                 }
                 item.add("skills", skills);
+                item.add("attributes", attributes);
                 item.add("needs", needs);
                 characters.add(item);
             }
