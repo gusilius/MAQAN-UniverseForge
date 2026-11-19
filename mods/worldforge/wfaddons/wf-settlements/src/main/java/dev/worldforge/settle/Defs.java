@@ -36,6 +36,7 @@ public final class Defs {
         public final Set<String> raceAllow = new LinkedHashSet<>(), raceDeny = new LinkedHashSet<>();
         public final Set<String> subraceAllow = new LinkedHashSet<>(), cultureAllow = new LinkedHashSet<>(), cultureTags = new LinkedHashSet<>();
         public final Set<String> architectureTags = new LinkedHashSet<>(), governmentAllow = new LinkedHashSet<>(), settlementTypeAllow = new LinkedHashSet<>();
+        public final Set<String> governmentTags = new LinkedHashSet<>(), formationAllow = new LinkedHashSet<>(), architectureStyleAllow = new LinkedHashSet<>();
         public final Map<String, Double> effects = new LinkedHashMap<>();
         public final Map<String, Integer> cost = new LinkedHashMap<>(), storage = new LinkedHashMap<>(), jobs = new LinkedHashMap<>(), in = new LinkedHashMap<>(), out = new LinkedHashMap<>();
         public final List<String> requires = new ArrayList<>();
@@ -145,6 +146,11 @@ public final class Defs {
                 strings(b.cultureTags, m.get("culture_tags"));
                 strings(b.architectureTags, m.get("architecture_tags"));
                 strings(b.governmentAllow, m.get("government_compatibility"));
+                strings(b.governmentAllow, m.get("government_tags"));
+                strings(b.governmentTags, m.get("government_tags"));
+                strings(b.formationAllow, m.get("polity_formation_compatibility"));
+                strings(b.formationAllow, m.get("formation_compatibility"));
+                strings(b.architectureStyleAllow, m.get("architecture_style_compatibility"));
                 strings(b.settlementTypeAllow, m.get("settlement_types"));
                 if (m.get("settlement_type_compatibility") != null) strings(b.settlementTypeAllow, m.get("settlement_type_compatibility"));
                 if (m.get("effects") instanceof Map<?,?> effectMap) for (Map.Entry<?,?> effect : effectMap.entrySet()) {
@@ -179,58 +185,75 @@ public final class Defs {
     /** Shared identity-aware selection API. Unknown IDs are neutral; explicit exclusions remain hard constraints. */
     public String selectIdentityBuilding(String requestedId, String raceId, String subraceId, String cultureId,
                                         String governmentId, String settlementTypeId, long seed) {
+        return selectIdentityBuilding(requestedId, raceId, subraceId, cultureId, governmentId,
+                settlementTypeId, null, null, seed);
+    }
+
+    /** Full data-driven identity resolver; blank dimensions are neutral and explicit constraints are hard filters. */
+    public String selectIdentityBuilding(String requestedId, String raceId, String subraceId, String cultureId,
+                                        String governmentId, String settlementTypeId, String formationId,
+                                        String architectureStyleId, long seed) {
         Building requested = buildings.get(requestedId);
         if (requested == null) return requestedId;
-        boolean requestedCompatible = compatible(requested, raceId, subraceId, cultureId, governmentId, settlementTypeId);
-        // Explicit identity-authored structures can supersede generic legacy requests.
+        boolean requestedCompatible = compatible(requested, raceId, subraceId, cultureId, governmentId,
+                settlementTypeId, formationId, architectureStyleId);
         List<Building> alternatives = buildings.values().stream()
                 .filter(candidate -> Objects.equals(candidate.category, requested.category))
                 .filter(candidate -> !candidate.id.equals(requested.id))
-                .filter(candidate -> hasIdentityMetadata(candidate))
-                .filter(candidate -> compatible(candidate, raceId, subraceId, cultureId, governmentId, settlementTypeId))
-                .filter(candidate -> identityPreferenceScore(candidate, raceId, subraceId, cultureId, governmentId, settlementTypeId) > 0)
+                .filter(Defs::hasIdentityMetadata)
+                .filter(candidate -> compatible(candidate, raceId, subraceId, cultureId, governmentId,
+                        settlementTypeId, formationId, architectureStyleId))
+                .filter(candidate -> identityPreferenceScore(candidate, raceId, subraceId, cultureId, governmentId,
+                        settlementTypeId, formationId, architectureStyleId) > 0)
                 .sorted(Comparator.comparingInt((Building candidate) ->
-                        identityPreferenceScore(candidate, raceId, subraceId, cultureId, governmentId, settlementTypeId)).reversed()
+                        identityPreferenceScore(candidate, raceId, subraceId, cultureId, governmentId,
+                                settlementTypeId, formationId, architectureStyleId)).reversed()
                         .thenComparing(candidate -> candidate.id))
                 .toList();
         if (alternatives.isEmpty()) return requestedCompatible ? requestedId : "";
-        int bestScore = identityPreferenceScore(alternatives.get(0), raceId, subraceId, cultureId, governmentId, settlementTypeId);
+        int bestScore = identityPreferenceScore(alternatives.get(0), raceId, subraceId, cultureId, governmentId,
+                settlementTypeId, formationId, architectureStyleId);
         List<Building> best = alternatives.stream()
-                .filter(candidate -> identityPreferenceScore(candidate, raceId, subraceId, cultureId, governmentId, settlementTypeId) == bestScore)
-                .toList();
+                .filter(candidate -> identityPreferenceScore(candidate, raceId, subraceId, cultureId, governmentId,
+                        settlementTypeId, formationId, architectureStyleId) == bestScore).toList();
         long mixed = seed ^ (seed >>> 33) ^ requestedId.hashCode() * 0x9E3779B97F4A7C15L;
-        int pick = (int) Math.floorMod(mixed, best.size());
-        return best.get(pick).id;
+        return best.get((int) Math.floorMod(mixed, best.size())).id;
     }
 
-    /** Scores only explicit metadata; IDs are opaque data, never guessed from their spelling. */
-    private static int identityPreferenceScore(Building building, String race, String subrace, String culture,
-                                             String government, String settlementType) {
+    private static int identityPreferenceScore(Building b, String race, String subrace, String culture,
+                                               String government, String settlementType, String formation, String style) {
         int score = 0;
-        if (race != null && building.raceAllow.contains(race)) score += 100;
-        if (subrace != null && building.subraceAllow.contains(subrace)) score += 140;
-        if (culture != null && building.cultureAllow.contains(culture)) score += 120;
-        if (culture != null && building.cultureTags.contains(culture)) score += 45;
-        if (culture != null && building.architectureTags.contains(culture)) score += 60;
-        if (government != null && building.governmentAllow.contains(government)) score += 80;
-        if (settlementType != null && building.settlementTypeAllow.contains(settlementType)) score += 30;
+        if (race != null && b.raceAllow.contains(race)) score += 100;
+        if (subrace != null && b.subraceAllow.contains(subrace)) score += 140;
+        if (culture != null && b.cultureAllow.contains(culture)) score += 120;
+        if (culture != null && b.cultureTags.contains(culture)) score += 45;
+        if (government != null && b.governmentAllow.contains(government)) score += 80;
+        if (government != null && b.governmentTags.contains(government)) score += 80;
+        if (settlementType != null && b.settlementTypeAllow.contains(settlementType)) score += 30;
+        if (formation != null && b.formationAllow.contains(formation)) score += 110;
+        if (style != null && b.architectureStyleAllow.contains(style)) score += 90;
+        if (style != null && b.architectureTags.contains(style)) score += 50;
         return score;
     }
 
-    private static boolean hasIdentityMetadata(Building building) {
-        return !building.structureClass.isBlank() || !building.raceAllow.isEmpty() || !building.raceDeny.isEmpty()
-                || !building.subraceAllow.isEmpty() || !building.cultureAllow.isEmpty() || !building.cultureTags.isEmpty()
-                || !building.architectureTags.isEmpty() || !building.governmentAllow.isEmpty() || !building.settlementTypeAllow.isEmpty();
+    private static boolean hasIdentityMetadata(Building b) {
+        return !b.structureClass.isBlank() || !b.raceAllow.isEmpty() || !b.raceDeny.isEmpty()
+                || !b.subraceAllow.isEmpty() || !b.cultureAllow.isEmpty() || !b.cultureTags.isEmpty()
+                || !b.architectureTags.isEmpty() || !b.governmentAllow.isEmpty() || !b.governmentTags.isEmpty()
+                || !b.settlementTypeAllow.isEmpty() || !b.formationAllow.isEmpty() || !b.architectureStyleAllow.isEmpty();
     }
 
-    private static boolean compatible(Building building, String race, String subrace, String culture,
-                                   String government, String settlementType) {
-        if (race != null && building.raceDeny.contains(race)) return false;
-        if (race != null && !building.raceAllow.isEmpty() && !building.raceAllow.contains(race)) return false;
-        if (subrace != null && !building.subraceAllow.isEmpty() && !building.subraceAllow.contains(subrace)) return false;
-        if (culture != null && !building.cultureAllow.isEmpty() && !building.cultureAllow.contains(culture)) return false;
-        if (government != null && !building.governmentAllow.isEmpty() && !building.governmentAllow.contains(government)) return false;
-        if (settlementType != null && !building.settlementTypeAllow.isEmpty() && !building.settlementTypeAllow.contains(settlementType)) return false;
+    private static boolean compatible(Building b, String race, String subrace, String culture,
+                                      String government, String settlementType, String formation, String style) {
+        if (race != null && b.raceDeny.contains(race)) return false;
+        if (race != null && !b.raceAllow.isEmpty() && !b.raceAllow.contains(race)) return false;
+        if (subrace != null && !b.subraceAllow.isEmpty() && !b.subraceAllow.contains(subrace)) return false;
+        if (culture != null && !b.cultureAllow.isEmpty() && !b.cultureAllow.contains(culture)) return false;
+        if (government != null && !b.governmentAllow.isEmpty() && !b.governmentAllow.contains(government)
+                && !b.governmentTags.contains(government)) return false;
+        if (settlementType != null && !b.settlementTypeAllow.isEmpty() && !b.settlementTypeAllow.contains(settlementType)) return false;
+        if (formation != null && !b.formationAllow.isEmpty() && !b.formationAllow.contains(formation)) return false;
+        if (style != null && !b.architectureStyleAllow.isEmpty() && !b.architectureStyleAllow.contains(style)) return false;
         return true;
     }
 
