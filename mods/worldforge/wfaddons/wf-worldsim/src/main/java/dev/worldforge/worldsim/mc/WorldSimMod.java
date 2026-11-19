@@ -2223,15 +2223,15 @@ public final class WorldSimMod {
                 String bandId = band.get("id").getAsString();
                 String settlementId = settlementIdForBand(band);
                 Colony colony = SettleMod.colony(settlementId);
-                if (colony != null) continue;
+                boolean colonyCreated = false;
                 int[] position = source.blockPosition(band.get("x").getAsInt(), band.get("z").getAsInt());
                 int x = position[0], z = position[1];
-                if (source.map != null) {
+                if (colony == null && source.map != null) {
                     int anchorRadius = (int) Math.max(64, Math.min(512,
                             Math.round(96.0 * Math.max(0.001, source.blocksPerPixel))));
                     colony = SettleMod.nearbyBlueprintSettlement(dimension, source.map.name,
                             x, z, anchorRadius, emergenceBoundSettlementIds());
-                } else {
+                } else if (colony == null) {
                     colony = SettleMod.nearbyVanillaVillage(dimension, x, z, 64,
                             emergenceBoundSettlementIds());
                 }
@@ -2241,6 +2241,7 @@ public final class WorldSimMod {
                     // after residents are attached.
                     colony = SettleMod.foundEmergentInMemory(server, dimension, settlementId,
                             settlementId, x, z, "worldsim:settlement:" + bandId);
+                    colonyCreated = true;
                 } else {
                     settlementId = colony.s.id;
                 }
@@ -2252,6 +2253,7 @@ public final class WorldSimMod {
                 // attached. Settlement.refreshType uses bestFounding(), so infrastructure
                 // requirements are deferred until the existing construction system fulfils them.
                 colony.s.types = SettleMod.TYPES;
+                String previousType = colony.s.typeId;
                 String foundingPolityId = "";
                 if (state.has("polities") && state.get("polities").isJsonArray()) {
                     for (var polityElement : state.getAsJsonArray("polities")) {
@@ -2277,8 +2279,10 @@ public final class WorldSimMod {
                     LOGGER.warn("wf_worldsim: settlement {} has no eligible founding type for population={} biome={}",
                             bandId, foundingPopulation, emergentSettlementTerrain(source, band).keySet());
                 }
+                String priorBinding = settlementIdForBand(band);
                 bindPhysicalSettlement(bandId, settlementId);
-                changed = true;
+                changed |= colonyCreated || !Objects.equals(previousType, foundingType)
+                        || !Objects.equals(priorBinding, settlementId);
             }
         }
         if (changed && !SettleMod.saveDurably(server)) {
