@@ -1747,6 +1747,9 @@ public final class WorldSimMod {
                 catalogEntryCount(catalogEntries, "wf_reputation"), 0);
         addCapability(capabilities, "wf_rts", 1,
                 net.minecraftforge.fml.ModList.get().isLoaded("wf_rts"), 0, 0);
+        setConsumedCatalogs(capabilities, "wf_progress", List.of("attrs", "skills", "nodes"));
+        setConsumedCatalogs(capabilities, "wf_genesis", List.of("features"));
+        setConsumedCatalogs(capabilities, "wf_reputation", List.of("runtime_state"));
         sortObjects(catalogEntries, Comparator.comparing((JsonObject item) -> item.get("module_id").getAsString())
                 .thenComparing(item -> item.get("catalog_id").getAsString()).thenComparing(item -> item.get("entry_id").getAsString()));
         sortObjects(diplomaticRelations, Comparator.comparing((JsonObject item) -> item.get("realm_a").getAsString())
@@ -1953,6 +1956,18 @@ public final class WorldSimMod {
 
     private static double finite(double value) {
         return Double.isFinite(value) ? value : 0.0;
+    }
+
+    private static void setConsumedCatalogs(JsonArray capabilities, String moduleId,
+                                             List<String> catalogIds) {
+        for (var element : capabilities) {
+            if (!element.isJsonObject()) continue;
+            JsonObject capability = element.getAsJsonObject();
+            if (!moduleId.equals(capability.has("module_id")
+                    ? capability.get("module_id").getAsString() : "")) continue;
+            capability.add("consumed_catalogs", GSON.toJsonTree(catalogIds.stream().sorted().toList()));
+            return;
+        }
     }
 
     private static int catalogEntryCount(JsonArray entries, String moduleId) {
