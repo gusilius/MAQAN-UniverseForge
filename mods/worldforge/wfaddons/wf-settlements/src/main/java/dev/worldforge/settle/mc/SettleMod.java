@@ -78,6 +78,9 @@ public class SettleMod {
     public static volatile Defs DEFS;
     /** Виды поселений (types.json в датапаках). */
     public static volatile dev.worldforge.settle.SettleTypes TYPES = new dev.worldforge.settle.SettleTypes();
+    /** Data-driven structure classes and identity dimensions from structure_catalog.json. */
+    public static volatile dev.worldforge.settle.StructureCatalog STRUCTURE_CATALOG =
+            dev.worldforge.settle.StructureCatalog.empty();
     /** Исходные JSON описаний (в порядке загрузки): их отправляем клиенту вместе с поселением, чтобы окна собрали те же Defs. */
     public static volatile java.util.List<String> DEFS_RAW = java.util.List.of();
     static volatile java.util.List<String> BASE_RAW = java.util.List.of();
@@ -846,6 +849,12 @@ public class SettleMod {
         String selected = colony.s.defs.selectIdentityBuilding(requested, colony.identityRace, null,
                 colony.identityCulture, colony.governmentId, colony.settlementType,
                 colony.polityFormationId, colony.architectureStyleId, seed);
+        Defs.Building selectedDefinition = selected == null ? null : colony.s.defs.buildings.get(selected);
+        if (selectedDefinition != null && !STRUCTURE_CATALOG.recognizesStructure(selectedDefinition)) {
+            LOGGER.warn("wf_settle: building {} rejected: structure_class '{}' is absent from the active structure catalogue",
+                    selected, selectedDefinition.structureClass);
+            return "";
+        }
         if (selected == null || selected.isBlank()) {
             LOGGER.debug("wf_settle: no compatible structure candidate for {} (race={}, culture={}, government={}, type={})",
                     requested, colony.identityRace, colony.identityCulture, colony.governmentId, colony.settlementType);
@@ -1178,6 +1187,7 @@ public class SettleMod {
     static Defs loadDefs(MinecraftServer server) {
         Defs d = new Defs();
         dev.worldforge.settle.SettleTypes types = new dev.worldforge.settle.SettleTypes();
+        dev.worldforge.settle.StructureCatalog structureCatalog = dev.worldforge.settle.StructureCatalog.empty();
         java.util.List<String> raw = new java.util.ArrayList<>();
         var found = new java.util.TreeMap<ResourceLocation, Resource>(server.getResourceManager().listResources("wf_settle", rl -> rl.getPath().endsWith(".json")));
         for (Map.Entry<ResourceLocation, Resource> r : found.entrySet()) {
@@ -1185,6 +1195,10 @@ public class SettleMod {
                 String txt = new String(in.readAllBytes(), StandardCharsets.UTF_8);
                 d.add(txt);
                 try { types.load(txt); } catch (RuntimeException ex) { LOGGER.error("wf_settle: виды в {}: {}", r.getKey(), ex.toString()); }
+                if (r.getKey().getPath().endsWith("structure_catalog.json")) {
+                    try { structureCatalog = dev.worldforge.settle.StructureCatalog.load(txt); }
+                    catch (RuntimeException ex) { LOGGER.error("wf_settle: каталог структур {} не загружен: {}", r.getKey(), ex.toString()); }
+                }
                 raw.add(txt);
             } catch (Exception ex) {
                 LOGGER.error("wf_settle: ошибка в {}: {}", r.getKey(), ex.toString());
@@ -1194,9 +1208,13 @@ public class SettleMod {
         for (String line : SchemLibrary.loadAll(server, d, raw)) LOGGER.info("wf_settle: схема {}", line);
         DEFS_RAW = raw;
         for (String p : types.validate(d)) LOGGER.warn("wf_settle: {}", p);
+        for (String p : structureCatalog.validate(d)) LOGGER.warn("wf_settle: каталог структур: {}", p);
         TYPES = types;
+        STRUCTURE_CATALOG = structureCatalog;
         for (String p : d.validate()) LOGGER.warn("wf_settle: {}", p);
-        LOGGER.info("wf_settle: зданий {}, профессий {}", d.buildings.size(), d.professions.size());
+        LOGGER.info("wf_settle: зданий {}, профессий {}, видов поселений {}, классов структур {}, identity dimensions {}",
+                d.buildings.size(), d.professions.size(), types.types.size(),
+                structureCatalog.structureClasses().size(), structureCatalog.identityDimensions().size());
         return d;
     }
 
@@ -1293,6 +1311,7 @@ public class SettleMod {
         COLONIES.clear();
         IMPORTED_BLUEPRINTS.clear();
         DEFS = null;
+        STRUCTURE_CATALOG = dev.worldforge.settle.StructureCatalog.empty();
         Blueprints.clearCache();
     }
 
