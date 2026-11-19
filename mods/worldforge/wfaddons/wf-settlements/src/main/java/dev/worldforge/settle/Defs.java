@@ -31,6 +31,8 @@ public final class Defs {
         public String description = "";
         /** Optional data-driven identity metadata; empty lists preserve legacy universal behavior. */
         public String structureClass = "";
+        /** Procedural palette key; unknown values preserve legacy oak palette. */
+        public String architectureMaterial = "oak";
         public final Set<String> raceAllow = new LinkedHashSet<>(), raceDeny = new LinkedHashSet<>();
         public final Set<String> subraceAllow = new LinkedHashSet<>(), cultureAllow = new LinkedHashSet<>(), cultureTags = new LinkedHashSet<>();
         public final Set<String> architectureTags = new LinkedHashSet<>(), governmentAllow = new LinkedHashSet<>(), settlementTypeAllow = new LinkedHashSet<>();
@@ -135,6 +137,7 @@ public final class Defs {
                 if (m.get("category") != null) b.category = String.valueOf(m.get("category"));
                 if (m.get("description") != null) b.description = String.valueOf(m.get("description"));
                 if (m.get("structure_class") != null) b.structureClass = String.valueOf(m.get("structure_class"));
+                if (m.get("architecture_material") != null) b.architectureMaterial = String.valueOf(m.get("architecture_material")).trim().toLowerCase(Locale.ROOT);
                 strings(b.raceAllow, m.get("race_compatibility"));
                 strings(b.raceDeny, m.get("race_incompatibility"));
                 strings(b.subraceAllow, m.get("subrace_compatibility"));
