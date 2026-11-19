@@ -100,7 +100,7 @@ public final class ImageWorldIdentityTest {
                 TerritorialIdentity.ensure(map.name, titles, editor, people, names, seed);
 
         check(titles.realmList().isEmpty() && demographics.realmsClassified() == 0,
-                "image geography starts without pre-authored states; sovereignty is created by autonomous emergence");
+                "generated state boundaries remain unowned until autonomous emergence creates sovereign identities");
         Set<String> knownRaces = originDefs.snapshot().races().keySet();
         for (TitleData.Realm realm : titles.realmList()) {
             Map<String, Integer> mix = shares(realm.props.get("races"));
