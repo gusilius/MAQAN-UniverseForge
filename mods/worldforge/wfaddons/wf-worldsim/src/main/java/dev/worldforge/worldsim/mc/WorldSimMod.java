@@ -440,6 +440,14 @@ public final class WorldSimMod {
         JsonObject candidateEmergenceState = pendingCandidateEmergenceState;
         long phaseStarted = System.nanoTime();
         int materializationYear = emergenceYear(candidateEmergenceState, WorldForgeApi.clock().year());
+        // Phase 1: reserve/create canonical settlement structures from geography before
+        // any population, ruler, or political overlay is materialized. The following
+        // people pass attaches canonical Characters to these already-established sites.
+        phaseStarted = System.nanoTime();
+        boolean structuresComplete = syncEmergentSettlementStructures(server, candidateEmergenceState);
+        PROFILER.record("worldsim.sync_emergent_structures", System.nanoTime() - phaseStarted);
+        if (!structuresComplete) return false;
+        phaseStarted = System.nanoTime();
         boolean peopleComplete = syncEmergentPeople(server, candidateEmergenceState, materializationYear);
         PROFILER.record("worldsim.sync_emergent_people", System.nanoTime() - phaseStarted);
         if (!peopleComplete) return false;
@@ -2138,6 +2146,64 @@ public final class WorldSimMod {
      * Materializes canonical people incrementally. The native frame remains pending until every
      * resident and Origins record is reconciled; a large cohort can never monopolize one server tick.
      */
+    /**
+     * Establishes canonical settlement sites before creating residents or political overlays.
+     * The site is selected from existing map anchors / generated vanilla villages where possible;
+     * otherwise a durable empty Colony shell is created at the geography-derived location.
+     */
+    private static boolean syncEmergentSettlementStructures(MinecraftServer server, JsonObject state) {
+        if (server == null || state == null || !state.has("bands") || !state.get("bands").isJsonArray())
+            return true;
+        boolean changed = false;
+        for (EmergenceSource source : emergenceSources()) {
+            if (source.registry == null) continue;
+            String dimension = source.settlementDimension(server);
+            if (dimension == null || dimension.isBlank()) {
+                LOGGER.warn("wf_worldsim: structure phase waits for physical dimension {}", source.id);
+                return false;
+            }
+            for (var element : state.getAsJsonArray("bands")) {
+                if (!element.isJsonObject()) continue;
+                JsonObject band = element.getAsJsonObject();
+                if (!source.id.equals(band.has("map_id") ? band.get("map_id").getAsString() : "")
+                        || !band.has("settled") || !band.get("settled").getAsBoolean()) continue;
+                String bandId = band.get("id").getAsString();
+                String settlementId = settlementIdForBand(band);
+                Colony colony = SettleMod.colony(settlementId);
+                if (colony != null) continue;
+                int[] position = source.blockPosition(band.get("x").getAsInt(), band.get("z").getAsInt());
+                int x = position[0], z = position[1];
+                if (source.map != null) {
+                    int anchorRadius = (int) Math.max(64, Math.min(512,
+                            Math.round(96.0 * Math.max(0.001, source.blocksPerPixel))));
+                    colony = SettleMod.nearbyBlueprintSettlement(dimension, source.map.name,
+                            x, z, anchorRadius, emergenceBoundSettlementIds());
+                } else {
+                    colony = SettleMod.nearbyVanillaVillage(dimension, x, z, 64,
+                            emergenceBoundSettlementIds());
+                }
+                if (colony == null) {
+                    // The band ID is a temporary structural label, not a final display name.
+                    // syncEmergentPeople replaces it with the canonical race/culture name
+                    // after residents are attached.
+                    colony = SettleMod.foundEmergentInMemory(server, dimension, settlementId,
+                            settlementId, x, z, "worldsim:settlement:" + bandId);
+                } else {
+                    settlementId = colony.s.id;
+                }
+                if (colony == null || colony.s == null)
+                    throw new IllegalStateException("Could not establish canonical settlement site for " + bandId);
+                bindPhysicalSettlement(bandId, settlementId);
+                changed = true;
+            }
+        }
+        if (changed && !SettleMod.saveDurably(server)) {
+            LOGGER.error("wf_worldsim: canonical settlement structures could not be persisted; population phase remains blocked");
+            return false;
+        }
+        return true;
+    }
+
     private static boolean syncEmergentPeople(MinecraftServer server, JsonObject state, int year) {
         if (server == null || state == null || !state.has("bands") || !state.get("bands").isJsonArray()) return true;
         if (emergentPeopleProgress == null || emergentPeopleProgress.state != state || emergentPeopleProgress.year != year)
