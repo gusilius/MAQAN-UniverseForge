@@ -207,8 +207,8 @@ public final class Defs {
         // An explicitly tagged matching design is already the best identity match. Universal
         // base definitions may still resolve to a more specific catalog variant below.
         if (requestedCompatible && hasIdentityMetadata(requested)
-                && identityPreferenceScore(requested, raceId, subraceId, cultureId, governmentId,
-                        settlementTypeId, formationId, architectureStyleId) > 0) return requestedId;
+                && identityPreferenceScore(requested, race, subrace, culture, government,
+                        settlementType, formation, architectureStyle) > 0) return requestedId;
         List<Building> alternatives = buildings.values().stream()
                 .filter(candidate -> Objects.equals(candidate.category, requested.category))
                 .filter(candidate -> !candidate.id.equals(requested.id))
