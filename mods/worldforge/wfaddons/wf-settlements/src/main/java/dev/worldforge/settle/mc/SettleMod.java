@@ -97,8 +97,9 @@ public class SettleMod {
                         location -> location.getPath().endsWith("structure_catalog.json")));
         for (Map.Entry<ResourceLocation, Resource> entry : catalogueFiles.entrySet()) {
             try (InputStream input = entry.getValue().open()) {
-                StructureCatalog refreshed = StructureCatalog.load(
-                        new String(input.readAllBytes(), StandardCharsets.UTF_8));
+                dev.worldforge.settle.StructureCatalog refreshed =
+                        dev.worldforge.settle.StructureCatalog.load(
+                                new String(input.readAllBytes(), StandardCharsets.UTF_8));
                 List<String> problems = refreshed.validate(DEFS);
                 if (!problems.isEmpty()) {
                     rep.addAll(problems.stream().map(problem -> "Каталог: " + problem).toList());
