@@ -14,7 +14,7 @@ public final class ImageWorldMapCompatibilityTest {
             throw new AssertionError("Image package must retain unowned state candidates without preassigned sovereigns");
         String[] expectedTiers = {"province", "region", "state"};
         if (map.titles.tiers.size() != expectedTiers.length)
-            throw new AssertionError("Expected only neutral geographic tiers: province and region");
+            throw new AssertionError("Expected province, region and state-formation tiers");
         for (int i = 0; i < expectedTiers.length; i++) {
             if (!expectedTiers[i].equals(map.titles.tiers.get(i).key))
                 throw new AssertionError("Unexpected title tier at index " + i + ": " + map.titles.tiers.get(i).key);
@@ -48,8 +48,8 @@ public final class ImageWorldMapCompatibilityTest {
         }
         if (provinces == 0 || regions == 0 || states == 0)
             throw new AssertionError("Territorial hierarchy is incomplete: provinces=" + provinces + ", regions=" + regions + ", states=" + states);
-        if (map.settlementSeeds.isEmpty())
-            throw new AssertionError("Actual image blueprint has no geographic settlement-site candidates");
+        if (map.settlementSeeds.size() < provinces)
+            throw new AssertionError("Settlement opportunities must not be capped below viable province count");
         java.util.Set<String> settlementIds = new java.util.HashSet<>();
         for (MapData.SettlementSeed settlement : map.settlementSeeds) {
             if (settlement.id().isBlank() || !settlementIds.add(settlement.id()))
@@ -63,7 +63,7 @@ public final class ImageWorldMapCompatibilityTest {
                 throw new AssertionError("A geographic province unexpectedly has sovereign ownership: " + settlement.id());
         }
         System.out.println("Actual map unnamed settlement-site candidates: " + map.settlementSeeds.size()
-                + ", unique IDs: " + settlementIds.size());
+                + ", viable provinces: " + provinces + ", unique IDs: " + settlementIds.size());
         TerrainSampler sampler = new TerrainSampler(map, 1.0f);
         int[] spawn = sampler.findSpawn();
         TerrainSampler.Col column = sampler.sample(spawn[0], spawn[2]);
