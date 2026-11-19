@@ -249,6 +249,9 @@ public final class WorldSimMod {
 
     @SubscribeEvent
     public void onStarted(ServerStartedEvent event) {
+        // WorldSim chooses recruits from the registered settlement and physical-unit catalogs.
+        // Keep ArmyEngine's independent movement/war AI, but disable its legacy duplicate recruit pass.
+        ArmyMod.setWorldSimRecruitmentAuthority(true);
         lifecycleEpoch++;
         LAST_GENESIS_DIAGNOSTIC_FINGERPRINT.clear();
         COMPUTE_SCHEDULER.close();
@@ -316,6 +319,7 @@ public final class WorldSimMod {
 
     @SubscribeEvent
     public void onStopping(ServerStoppingEvent event) {
+        ArmyMod.setWorldSimRecruitmentAuthority(false);
         lifecycleEpoch++;
         COMPUTE_SCHEDULER.close();
         pendingComputeRevision = Long.MIN_VALUE;
