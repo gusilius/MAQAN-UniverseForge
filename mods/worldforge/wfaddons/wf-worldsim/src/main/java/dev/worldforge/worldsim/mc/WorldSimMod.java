@@ -3985,7 +3985,7 @@ public final class WorldSimMod {
                     new Random(source.seed ^ bandId.hashCode() ^ ordinal), reservedHouseNames)
                 : sharedHouse;
         dev.worldforge.people.Character person = registry.create(name, house, culture, gender,
-                year - (18 + Math.floorMod(bandId.hashCode() + ordinal * 13, 24)));
+                year - (24 + Math.floorMod(bandId.hashCode() + ordinal * 13, 22)));
         tagEmergentResident(person, bandId, source);
         person.props.put("identity.source", "autonomous-emergence");
         return person;
