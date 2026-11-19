@@ -55,6 +55,10 @@ public final class BuildingSite {
             if (!SimulationLod.shouldMaterializeSettlement(lv.dimension().location().toString(), wx, wz)) continue;
             Colony.Site site = c.sites.get(b.uid);
             Blueprints.Plan plan = Blueprints.get(lv, b.def);
+            if (plan == null || !plan.valid()) {
+                b.status = plan == null ? "ошибка: чертёж не загружен" : "ошибка схемы: " + plan.error();
+                continue;
+            }
             if (site == null) {
                 if (!lv.hasChunkAt(new BlockPos(wx, 64, wz))) continue;
                 site = new Colony.Site();
