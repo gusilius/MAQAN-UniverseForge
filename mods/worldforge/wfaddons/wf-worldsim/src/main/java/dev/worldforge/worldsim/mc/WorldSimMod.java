@@ -3891,7 +3891,8 @@ public final class WorldSimMod {
 
     private static dev.worldforge.people.Character createEmergentResident(
             dev.worldforge.people.CharacterRegistry registry, EmergenceSource source, String bandId,
-            int year, int ordinal, EmergentParents parents, Set<String> reservedHouseNames) {
+            int year, int ordinal, EmergentParents parents,
+            dev.worldforge.people.NameBank.NameReservations reservedHouseNames) {
         dev.worldforge.people.Character father = parents.father, mother = parents.mother;
         if (father != null && !father.spouse.isBlank() && (mother == null || !father.spouse.equals(mother.id)))
             parents.father = father = null;
@@ -3914,7 +3915,7 @@ public final class WorldSimMod {
         // family, with a deterministic 0-17 year age distribution.
         if (Math.floorMod(ordinal, 4) != 0) {
             String gender = ordinal % 2 == 0 ? "m" : "f";
-            return createEmergentAdult(registry, source, bandId, gender, year, ordinal);
+            return createEmergentAdult(registry, source, bandId, gender, year, ordinal, reservedHouseNames);
         }
         String gender = ordinal % 2 == 0 ? "m" : "f";
         String name = emergentName(source, bandId, father.culture, gender, ordinal, year);
@@ -3926,7 +3927,8 @@ public final class WorldSimMod {
 
     private static dev.worldforge.people.Character createEmergentAdult(
             dev.worldforge.people.CharacterRegistry registry, EmergenceSource source, String bandId,
-            String gender, int year, int ordinal, Set<String> reservedHouseNames) {
+            String gender, int year, int ordinal,
+            dev.worldforge.people.NameBank.NameReservations reservedHouseNames) {
         String culture = PeopleMod.NAMES.culture("");
         String name = emergentName(source, bandId, culture, gender, ordinal, year);
         String house = PeopleMod.NAMES.generateUnique("", culture, "houses",
