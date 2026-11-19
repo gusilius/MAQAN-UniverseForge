@@ -1587,6 +1587,9 @@ public final class WorldSimMod {
                 if (!emittedCharacterIds.add(person.globalId)) continue;
                 JsonObject item = new JsonObject();
                 item.addProperty("id", person.globalId);
+                item.addProperty("identity_owner_id", String.valueOf(
+                        person.props.getOrDefault("genesis.profile_owner",
+                                person.props.getOrDefault("progress.profile_owner", ""))));
                 item.addProperty("realm_id", realmId);
                 item.addProperty("map_id", source.id);
                 item.addProperty("age", Math.max(0, WorldForgeApi.clock().year() - person.birthYear));
