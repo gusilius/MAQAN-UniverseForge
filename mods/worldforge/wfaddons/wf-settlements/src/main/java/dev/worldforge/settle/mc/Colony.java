@@ -60,6 +60,8 @@ public final class Colony {
     public String sourceMapId = "", blueprintSettlementId = "", settlementType = "";
     public int provinceId;
     public String identityRace = "", identityCulture = "", governmentId = "";
+    /** Player-defined polity formation and architectural style; separate from race/culture identity. */
+    public String architectureStyleId = "", polityFormationId = "";
     /** Stable origin operation that created this colony; empty for ordinary settlements. */
     public String genesisOperationId = "";
     /** Provisioning is guarded across retries; an interrupted phase requires reconciliation, never replay. */
@@ -205,6 +207,8 @@ public final class Colony {
         m.put("identityRace", identityRace);
         m.put("identityCulture", identityCulture);
         m.put("governmentId", governmentId);
+        m.put("architectureStyleId", architectureStyleId);
+        m.put("polityFormationId", polityFormationId);
         m.put("genesisOperationId", genesisOperationId);
         m.put("residentCharacterIds", new ArrayList<>(residentCharacterIds));
         m.put("genesisProvisioningStarted", genesisProvisioningStarted);
@@ -259,6 +263,8 @@ public final class Colony {
         if (m.get("identityRace") instanceof String value) c.identityRace = value;
         if (m.get("identityCulture") instanceof String value) c.identityCulture = value;
         if (m.get("governmentId") instanceof String value) c.governmentId = value;
+        if (m.get("architectureStyleId") instanceof String value) c.architectureStyleId = value;
+        if (m.get("polityFormationId") instanceof String value) c.polityFormationId = value;
         if (m.get("genesisOperationId") instanceof String operationId) c.genesisOperationId = operationId;
         if (m.get("residentCharacterIds") instanceof List<?> residents) for (Object id : residents)
             if (id instanceof String value && !value.isBlank()) c.residentCharacterIds.add(value);
