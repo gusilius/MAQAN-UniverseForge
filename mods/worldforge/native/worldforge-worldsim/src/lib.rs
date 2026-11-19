@@ -844,9 +844,9 @@ fn choose_building_for_need(snapshot: &WorldSnapshot, settlement: &Settlement, t
             reason = "registered trade or industry building expands specialist production";
         } else { continue; }
         let output = outputs.map(|values| values.values()
-            .filter_map(serde_json::Value::as_i64).sum::<i64>()).unwrap_or(0);
+            .filter_map(serde_json::Value::as_f64).sum::<f64>()).unwrap_or(0.0);
         let work = payload.get("work").and_then(serde_json::Value::as_f64).unwrap_or(30.0).max(1.0);
-        let efficiency = output as f64 / work;
+        let efficiency = output / work;
         candidates.push((entry.entry_id.clone(), priority, reason.to_string(), efficiency));
     }
     candidates.sort_by(|a, b| b.1.cmp(&a.1)
