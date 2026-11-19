@@ -505,6 +505,21 @@ fn court_instability_pressure(snapshot: &WorldSnapshot, realm_id: &str) -> i64 {
     pressure
 }
 
+fn realm_in_active_campaign(snapshot: &WorldSnapshot, realm_id: &str) -> bool {
+    snapshot.catalog_entries.iter().filter(|entry|
+        entry.module_id == "wf_war" && entry.catalog_id == "war_instances")
+        .any(|entry| {
+            let war = &entry.payload;
+            if !war.get("active").and_then(serde_json::Value::as_bool).unwrap_or(false) { return false; }
+            if war.get("attacker").and_then(serde_json::Value::as_str) == Some(realm_id)
+                || war.get("defender").and_then(serde_json::Value::as_str) == Some(realm_id) { return true; }
+            ["attacker_members", "defender_members"].iter().any(|field|
+                war.get(*field).and_then(serde_json::Value::as_array)
+                    .map(|members| members.iter().any(|member| member.as_str() == Some(realm_id)))
+                    .unwrap_or(false))
+        })
+}
+
 fn trade_conflict_penalty(snapshot: &WorldSnapshot, first: &str, second: &str) -> i64 {
     let Some(runtime) = catalog_entry(snapshot, "wf_trade", "runtime_state", "trade") else { return 0; };
     runtime.payload.get("caravans").and_then(serde_json::Value::as_array)
@@ -1051,7 +1066,9 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
             let trade_penalty = trade_conflict_penalty(snapshot, &attacker.id, &defender.id)
                 + if has_treaty(snapshot, &attacker.id, &defender.id, "TRADE_PACT") { 12 } else { 0 }
                 + market_fragility_penalty(snapshot, &attacker.id);
-            if attacker.at_war || defender.at_war || snapshot.day.saturating_sub(attacker.last_war_day) < 180
+            if attacker.at_war || defender.at_war
+                || realm_in_active_campaign(snapshot, &attacker.id) || realm_in_active_campaign(snapshot, &defender.id)
+                || snapshot.day.saturating_sub(attacker.last_war_day) < 180
                 || treasury < 100.0 || attacker.stability < 20
                 || has_treaty(snapshot, &attacker.id, &defender.id, "ALLIANCE")
                 || has_treaty(snapshot, &attacker.id, &defender.id, "DEFENSIVE_PACT")
