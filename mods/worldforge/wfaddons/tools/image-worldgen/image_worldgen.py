@@ -1315,34 +1315,24 @@ def convert_image(input_path: Path, output_path: Path, seed: int, region_count: 
         "sea_level": 63, "min_y": -64, "max_y": 320,
         "biomes": BIOMES, "spawn": [(spawn_x + 0.5) / width, (spawn_z + 0.5) / height],
     }
-    # Image analysis supplies geography only. Province and region polygons are
-    # neutral administrative geography; states, rulers, dynasties and sovereignty
-    # are created later by the installed WorldForge mods in the running save.
-    titles = [item for item in titles if int(item["tier"]) in (0, 1)]
+    # Preserve the complete generated territorial skeleton. State-tier titles are
+    # unowned formation candidates: wf-realms assigns governments, rulers and
+    # sovereignty in the running world, but the generator must not erase their borders.
     for item in titles:
         item["name"] = ""
-        item["key"] = ("province_" if int(item["tier"]) == 0 else "region_") + str(int(item["id"]))
-        if int(item["tier"]) == 1:
-            item["parent"] = 0
-    realms = []
-    # Candidate points are geography hints, not instantiated/named settlements.
-    # wf-settlements chooses their actual type, name, residents and ownership.
-    settlements = []
-    for province_id, meta in sorted(province_meta.items()):
-        point = int(meta["seed"])
-        sx, sz = point % width, point // width
-        settlements.append({
-            "id": f"site_{province_id:06d}", "type": "site", "name": "",
-            "realm_id": "", "province_id": province_id,
-            "pixel": [sx, sz],
-            "block": [round((sx + 0.5 - width / 2) * blocks_per_pixel),
-                      round((sz + 0.5 - height / 2) * blocks_per_pixel)],
-        })
+    # Settlement seeds are geographic opportunities, not a one-per-province cap.
+    # Keep all terrain-derived anchors (capital/town/village/fortress/port locations),
+    # but leave final naming, settlement class and ownership to the authoritative mods.
+    for item in settlements:
+        item["name"] = ""
+        item["realm_id"] = ""
+        item["type"] = "site"
     titles_doc = {
         "format": "worldforge-titles/1", "size_px": [width, height],
         "blocks_per_pixel": blocks_per_pixel,
         "tiers": [{"index": 0, "key": "province", "name": "Province"},
-                  {"index": 1, "key": "region", "name": "Region"}],
+                  {"index": 1, "key": "region", "name": "Region"},
+                  {"index": 2, "key": "state", "name": "State"}],
         "titles": sorted(titles, key=lambda item: item["id"]),
     }
     titles_by_id = {int(item["id"]): item for item in titles}
@@ -1398,9 +1388,10 @@ def convert_image(input_path: Path, output_path: Path, seed: int, region_count: 
         "blocks_per_pixel": blocks_per_pixel, "land_pixels": land_count,
         "wilderness_land_pixels": unclaimed_land_pixels,
         "province_count": len(province_meta), "region_count": len(region_meta),
+        "state_candidate_count": len(realm_provinces),
         "settlement_count": len(settlements),
-        # Stable geography IDs and adjacency only. No state/realm/ruler identities
-        # are serialized into the world package.
+        # Stable geography and unowned state-formation boundaries are serialized;
+        # runtime profile mods remain authoritative for active realm identities.
         "provinces": [{"id": pid, "region_id": region_for_province[pid],
                        "capital_pixel": [meta["seed"] % width, meta["seed"] // width],
                        "area_pixels": meta["area"], "neighbors": sorted(province_neighbors[pid])}
@@ -1610,13 +1601,15 @@ def validate_package(path: Path) -> dict:
             if int(province_grid[cap_z, cap_x]) != pid:
                 raise AssertionError(f"province {pid} geographic anchor is outside its province")
         if realms.get("realms") != []:
-            raise AssertionError("image-derived worldmap must not contain pre-authored realms")
+            raise AssertionError("unowned state-formation candidates must not be imported as sovereign realms")
         if "realms" in blueprint or "realm_count" in blueprint:
-            raise AssertionError("world blueprint must not serialize canonical realm data")
-        if len(titles["tiers"]) != 2 or [int(t["index"]) for t in titles["tiers"]] != [0, 1]:
-            raise AssertionError("image worldmap must expose only province and region geography tiers")
-        if len(titles["titles"]) != blueprint["province_count"] + blueprint["region_count"]:
-            raise AssertionError("geographic title count does not match province/region blueprint")
+            raise AssertionError("world blueprint must not serialize canonical active realm identities")
+        expected_tiers = [0, 1, 2]
+        if [int(t["index"]) for t in titles["tiers"]] != expected_tiers:
+            raise AssertionError("image worldmap must retain province, region and state-candidate tiers")
+        if len(titles["titles"]) != (blueprint["province_count"] + blueprint["region_count"]
+                                     + blueprint["state_candidate_count"]):
+            raise AssertionError("territorial title count does not match province/region/state blueprint")
         by_id = {int(item["id"]): item for item in titles["titles"]}
         if len(by_id) != len(titles["titles"]):
             raise AssertionError("geographic title IDs are not globally unique")
@@ -1626,10 +1619,12 @@ def validate_package(path: Path) -> dict:
             tier, parent = int(item["tier"]), int(item["parent"])
             if tier == 0 and (parent not in by_id or int(by_id[parent]["tier"]) != 1):
                 raise AssertionError(f"province is not nested in a geographic region: {item['key']}")
-            if tier == 1 and parent != 0:
-                raise AssertionError(f"geographic region must not be nested in a sovereign state: {item['key']}")
-            if tier not in (0, 1):
-                raise AssertionError(f"unsupported pre-authored political title tier: {tier}")
+            if tier == 1 and (parent not in by_id or int(by_id[parent]["tier"]) != 2):
+                raise AssertionError(f"region is not nested in its state-formation boundary: {item['key']}")
+            if tier == 2 and parent != 0:
+                raise AssertionError(f"state-formation boundary must be a root title: {item['key']}")
+            if tier not in (0, 1, 2):
+                raise AssertionError(f"unsupported territorial title tier: {tier}")
         province_ids_set = {int(item["id"]) for item in blueprint["provinces"]}
         for settlement in blueprint["settlements"]:
             x, z = settlement["pixel"]
@@ -1641,8 +1636,13 @@ def validate_package(path: Path) -> dict:
                 raise AssertionError("settlement candidates must be unnamed and politically unassigned")
         if len(blueprint["settlements"]) != blueprint["settlement_count"]:
             raise AssertionError("settlement candidate count differs from the blueprint")
+        if blueprint["settlement_count"] < blueprint["province_count"]:
+            raise AssertionError("settlement opportunities must cover every viable province at minimum")
+        if blueprint["state_candidate_count"] <= 0:
+            raise AssertionError("image worldmap lost all state-formation boundaries")
         return {
             "worldmap": path.name, "realm_count": 0,
+            "state_candidate_count": blueprint["state_candidate_count"],
             "province_count": blueprint["province_count"],
             "region_count": blueprint["region_count"],
             "settlement_count": blueprint["settlement_count"],
