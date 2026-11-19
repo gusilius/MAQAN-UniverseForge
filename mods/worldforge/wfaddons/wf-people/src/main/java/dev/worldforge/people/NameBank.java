@@ -358,20 +358,7 @@ public final class NameBank {
     }
 
     private static String normalizeName(String value) {
-        String input = value.trim();
-        StringBuilder normalized = new StringBuilder(input.length());
-        boolean pendingSpace = false;
-        for (int i = 0; i < input.length(); i++) {
-            char ch = input.charAt(i);
-            if (Character.isWhitespace(ch)) {
-                pendingSpace = normalized.length() > 0;
-            } else {
-                if (pendingSpace) normalized.append(' ');
-                normalized.append(Character.toLowerCase(ch));
-                pendingSpace = false;
-            }
-        }
-        return normalized.toString().toLowerCase(Locale.ROOT);
+        return value.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
     }
 
     private static String pick(List<String> values, Random random) {
