@@ -71,7 +71,7 @@ def settlement_opportunities_for_area(area_pixels: int, population_density: floa
     area = max(0, int(area_pixels))
     density = min(1.0, max(0.0, float(population_density)))
     pixels_per_site = max(180.0, 1800.0 * (1.0 - 0.82 * density))
-    return max(1, min(12, int(math.ceil(area / pixels_per_site))))
+    return max(1, int(math.ceil(area / pixels_per_site)))
 
 
 def spread_settlement_points(cells: np.ndarray, anchor: int, count: int,
