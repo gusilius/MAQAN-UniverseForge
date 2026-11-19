@@ -1322,6 +1322,24 @@ public final class WorldSimMod {
                 "dev.worldforge.progress.mc.ProgressMod", "DEFS");
         int genesisDefinitionCount = exportDefinitionCatalogs(catalogEntries, "wf_genesis",
                 "dev.worldforge.genesis.mc.GenesisMod", "DEFS");
+        int formsDefinitionCount = exportDefinitionCatalogs(catalogEntries, "wf_forms",
+                "dev.worldforge.forms.mc.FormsMod", "DEFS");
+        int questsDefinitionCount = exportDefinitionCatalogs(catalogEntries, "wf_quests",
+                "dev.worldforge.quests.mc.QuestsMod", "DEFS");
+        JsonObject formsRuntime = exportOptionalFieldStoreSnapshot("wf_forms",
+                "dev.worldforge.forms.mc.FormsMod", "FORMS");
+        if (formsRuntime != null) {
+            root.add("forms_runtime", formsRuntime);
+            addCatalogEntry(catalogEntries, "wf_forms", "runtime_state", "forms",
+                    "Persisted character form and affliction state", formsRuntime);
+        }
+        JsonObject questsRuntime = exportOptionalFieldStoreSnapshot("wf_quests",
+                "dev.worldforge.quests.mc.QuestsMod", "QUESTS");
+        if (questsRuntime != null) {
+            root.add("quests_runtime", questsRuntime);
+            addCatalogEntry(catalogEntries, "wf_quests", "runtime_state", "quests",
+                    "Active quests, fired world events and durable quest history", questsRuntime);
+        }
         JsonObject reputationSnapshot = exportOptionalStoreSnapshot("wf_reputation",
                 "dev.worldforge.reputation.mc.ReputationMod", "store");
         if (reputationSnapshot != null) {
@@ -1745,6 +1763,14 @@ public final class WorldSimMod {
         addCapability(capabilities, "wf_reputation", 1, reputationAvailable,
                 reputationSnapshot != null, reputationSnapshot != null, false,
                 catalogEntryCount(catalogEntries, "wf_reputation"), 0);
+        boolean formsAvailable = net.minecraftforge.fml.ModList.get().isLoaded("wf_forms");
+        boolean questsAvailable = net.minecraftforge.fml.ModList.get().isLoaded("wf_quests");
+        addCapability(capabilities, "wf_forms", 1, formsAvailable,
+                formsAvailable && formsDefinitionCount > 0 || formsRuntime != null,
+                false, false, catalogEntryCount(catalogEntries, "wf_forms"), 0);
+        addCapability(capabilities, "wf_quests", 1, questsAvailable,
+                questsAvailable && questsDefinitionCount > 0 || questsRuntime != null,
+                false, false, catalogEntryCount(catalogEntries, "wf_quests"), 0);
         addCapability(capabilities, "wf_rts", 1,
                 net.minecraftforge.fml.ModList.get().isLoaded("wf_rts"), 0, 0);
         setConsumedCatalogs(capabilities, catalogEntries, "wf_progress", List.of("attrs", "skills", "nodes"));
@@ -1875,6 +1901,24 @@ public final class WorldSimMod {
             } catch (ReflectiveOperationException ignored) { }
         }
         return fallback;
+    }
+
+    private static JsonObject exportOptionalFieldStoreSnapshot(String moduleId, String ownerClassName,
+                                                               String fieldName) {
+        if (!net.minecraftforge.fml.ModList.get().isLoaded(moduleId)) return null;
+        try {
+            Class<?> owner = Class.forName(ownerClassName);
+            Object store = owner.getField(fieldName).get(null);
+            if (store == null) return null;
+            Object raw = store.getClass().getMethod("toJson").invoke(store);
+            if (!(raw instanceof String json)) return null;
+            JsonElement parsed = com.google.gson.JsonParser.parseString(json);
+            if (!parsed.isJsonObject()) throw new IllegalStateException("Module field snapshot must be a JSON object: " + moduleId);
+            return parsed.getAsJsonObject();
+        } catch (ReflectiveOperationException | LinkageError | com.google.gson.JsonParseException error) {
+            LOGGER.warn("wf_worldsim: optional module {} field snapshot unavailable: {}", moduleId, error.toString());
+            return null;
+        }
     }
 
     private static JsonObject exportOptionalStoreSnapshot(String moduleId, String ownerClassName,
