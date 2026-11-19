@@ -844,7 +844,8 @@ public class SettleMod {
     private static String identityStructure(Colony colony, String requested, long seed) {
         if (colony == null || colony.s == null) return requested;
         String selected = colony.s.defs.selectIdentityBuilding(requested, colony.identityRace, null,
-                colony.identityCulture, colony.governmentId, colony.settlementType, seed);
+                colony.identityCulture, colony.governmentId, colony.settlementType,
+                colony.polityFormationId, colony.architectureStyleId, seed);
         if (selected == null || selected.isBlank()) {
             LOGGER.debug("wf_settle: no compatible structure candidate for {} (race={}, culture={}, government={}, type={})",
                     requested, colony.identityRace, colony.identityCulture, colony.governmentId, colony.settlementType);
