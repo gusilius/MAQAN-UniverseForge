@@ -203,6 +203,112 @@
       "upkeep": 2,
       "safety": 2,
       "description": "Осадная инженерная мастерская: кузнецы и инженеры создают, обслуживают и готовят осадные машины."
+    },
+    "cottage_elf": {
+      "name": "Лесное родовое жилище",
+      "category": "housing",
+      "cost": {
+        "wood": 18,
+        "planks": 8
+      },
+      "work": 24,
+      "size": [
+        5,
+        5
+      ],
+      "housing": 4,
+      "blueprint": "",
+      "architecture_material": "birch",
+      "structure_class": "race_native_housing",
+      "race_compatibility": [
+        "elf",
+        "wood_elf",
+        "fae"
+      ],
+      "architecture_tags": [
+        "forest",
+        "arboreal"
+      ],
+      "description": "Жилище лесных народов из светлой древесины, вписанное в лесную среду."
+    },
+    "longhouse_orc": {
+      "name": "Орочий длинный дом",
+      "category": "housing",
+      "cost": {
+        "wood": 24,
+        "stone": 8
+      },
+      "work": 28,
+      "size": [
+        7,
+        5
+      ],
+      "housing": 6,
+      "blueprint": "",
+      "architecture_material": "spruce",
+      "structure_class": "race_native_housing",
+      "race_compatibility": [
+        "orc",
+        "steppe_orc",
+        "nomad"
+      ],
+      "architecture_tags": [
+        "steppe",
+        "clan"
+      ],
+      "description": "Просторный клановый длинный дом для орочьей общины."
+    },
+    "burrow_goblin": {
+      "name": "Гоблинская нора",
+      "category": "housing",
+      "cost": {
+        "wood": 12,
+        "stone": 16
+      },
+      "work": 30,
+      "size": [
+        5,
+        5
+      ],
+      "housing": 4,
+      "blueprint": "",
+      "architecture_material": "dark_oak",
+      "structure_class": "race_native_housing",
+      "race_compatibility": [
+        "goblin",
+        "halfling",
+        "hill_halfling"
+      ],
+      "architecture_tags": [
+        "burrow",
+        "hills"
+      ],
+      "description": "Низкое укреплённое жилище, приспособленное к склонам и холмам."
+    },
+    "stilt_saurian": {
+      "name": "Свайный дом ящеров",
+      "category": "housing",
+      "cost": {
+        "wood": 26
+      },
+      "work": 32,
+      "size": [
+        5,
+        5
+      ],
+      "housing": 4,
+      "blueprint": "",
+      "architecture_material": "warped",
+      "structure_class": "race_native_housing",
+      "race_compatibility": [
+        "saurian",
+        "marsh_saurian"
+      ],
+      "architecture_tags": [
+        "wetland",
+        "stilt"
+      ],
+      "description": "Поднятое на сваях жилище для болотных поселений."
     }
   }
 }
