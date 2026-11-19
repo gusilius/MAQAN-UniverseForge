@@ -268,16 +268,20 @@ if [ "${WF_ACCEPTANCE_MODE:-}" = "dual-world" ]; then
 import json, pathlib, re, sys
 out, map_id = pathlib.Path(sys.argv[1]), sys.argv[2]
 log = pathlib.Path("server.log").read_text(encoding="utf-8", errors="replace")
-pattern = re.compile(r"MAQAN_WORLD_GENESIS source=(\S+) dimension=(\S+) geography_cells=(\d+) communities=(\d+) settled=(\d+) settlements=(\d+) emergent_settlements=(\d+) map_anchors=(\d+) living_characters=(\d+) named_characters=(\d+) named_settlements=(\d+) court_offices=(\d+) polities=(\d+) named_polities=(\d+) canonical_rulers=(\d+) dynasties=(\d+) titles=(\d+) named_titles=(\d+) governments=(\d+) race_kinds=(\d+) settlement_types=(\{[^}]*\}) government_types=(\{[^}]*\}) vassal_contracts=(\d+) subject_types=(\{[^}]*\}) title_ranks=(\{[^}]*\})")
+pattern = re.compile(r"MAQAN_WORLD_GENESIS source=(?P<source>\\S+) dimension=(?P<dimension>\\S+) geography_cells=(?P<geography_cells>\\d+) communities=(?P<communities>\\d+) settled=(?P<settled>\\d+) settlements=(?P<settlements>\\d+) colony_records=(?P<colony_records>\\d+) emergent_settlements=(?P<emergent_settlements>\\d+) blueprint_sites=(?P<map_anchors>\\d+) empty_blueprint_sites=(?P<empty_blueprint_sites>\\d+) active_settlements=(?P<active_settlements>\\d+) living_characters=(?P<living_characters>\\d+) named_characters=(?P<named_characters>\\d+) named_settlements=(?P<named_settlements>\\d+) court_offices=(?P<court_offices>\\d+) polities=(?P<polities>\\d+) named_polities=(?P<named_polities>\\d+) canonical_rulers=(?P<canonical_rulers>\\d+) dynasties=(?P<dynasties>\\d+) titles=(?P<titles>\\d+) named_titles=(?P<named_titles>\\d+) governments=(?P<governments>\\d+) race_kinds=(?P<race_kinds>\\d+) settlement_types=(?P<settlement_types>\\{[^}]*\\}) blueprint_site_types=(?P<blueprint_site_types>\\{[^}]*\\}) government_types=(?P<government_types>\\{[^}]*\\}) duplicate_centers=(?P<duplicate_centers>\\d+) nearby_center_conflicts=(?P<nearby_center_conflicts>\\d+) vassal_contracts=(?P<vassal_contracts>\\d+) subject_types=(?P<subject_types>\\{[^}]*\\}) title_ranks=(?P<title_ranks>\\{[^}]*\\})")
 rows = {}
 for match in pattern.finditer(log):
-    values = dict(zip(("source","dimension","geography_cells","communities","settled","settlements","emergent_settlements","map_anchors","living_characters","named_characters","named_settlements","court_offices","polities","named_polities","canonical_rulers","dynasties","titles","named_titles","governments","race_kinds"), match.groups()[:20]))
-    values["settlement_types"] = json.loads(match.group(21))
-    values["government_types"] = json.loads(match.group(22))
-    values["vassal_contracts"] = int(match.group(23))
-    values["subject_types"] = json.loads(match.group(24))
-    values["title_ranks"] = json.loads(match.group(25))
-    rows[match.group(1)] = values
+    values = match.groupdict()
+    for field in ("geography_cells", "communities", "settled", "settlements", "colony_records",
+                  "emergent_settlements", "map_anchors", "empty_blueprint_sites", "active_settlements",
+                  "living_characters", "named_characters", "named_settlements", "court_offices",
+                  "polities", "named_polities", "canonical_rulers", "dynasties", "titles",
+                  "named_titles", "governments", "race_kinds", "duplicate_centers",
+                  "nearby_center_conflicts", "vassal_contracts"):
+        values[field] = int(values[field])
+    for field in ("settlement_types", "blueprint_site_types", "government_types", "subject_types", "title_ranks"):
+        values[field] = json.loads(values[field])
+    rows[values["source"]] = values
 expected = {"vanilla-world:minecraft:overworld", map_id}
 missing = expected - rows.keys()
 if missing:

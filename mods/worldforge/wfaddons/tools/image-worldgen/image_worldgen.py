@@ -74,23 +74,56 @@ def settlement_opportunities_for_area(area_pixels: int, population_density: floa
     return max(1, int(math.ceil(area / pixels_per_site)))
 
 
+def choose_spaced_settlement_point(cells: np.ndarray, preferred: int, width: int, seed: int,
+                                    reserved_points: list[int] | None = None,
+                                    minimum_distance: int = 6) -> int | None:
+    """Keep a province's anchor away from sites already placed elsewhere on the map."""
+    candidates = np.asarray(cells, dtype=np.int64)
+    if candidates.size == 0:
+        return None
+    reserved = np.asarray(reserved_points if reserved_points is not None else [], dtype=np.int64)
+    if reserved.size == 0:
+        return int(preferred) if np.any(candidates == int(preferred)) else int(candidates[0])
+    xs, zs = candidates % width, candidates // width
+    distances = np.full(candidates.size, np.iinfo(np.int64).max, dtype=np.int64)
+    for point in reserved:
+        px, pz = int(point) % width, int(point) // width
+        distances = np.minimum(distances, (xs - px) ** 2 + (zs - pz) ** 2)
+    minimum_squared = max(1, int(minimum_distance)) ** 2
+    preferred_index = np.flatnonzero(candidates == int(preferred))
+    if preferred_index.size and int(distances[preferred_index[0]]) >= minimum_squared:
+        return int(preferred)
+    farthest = int(distances.max())
+    # Small/fragmented provinces may not have a full spacing radius available.
+    # Retain the best distinct pixel rather than silently deleting their only anchor.
+    if farthest < 4:
+        return None
+    tied = candidates[distances == farthest]
+    return min((int(point) for point in tied),
+               key=lambda point: ((point * 2654435761 + seed) & 0xFFFFFFFF))
+
+
 def spread_settlement_points(cells: np.ndarray, anchor: int, count: int,
-                             width: int, seed: int) -> list[int]:
-    """Pick deterministic, spatially separated land pixels within one province."""
+                             width: int, seed: int, reserved_points: list[int] | None = None,
+                             minimum_distance: int = 6) -> list[int]:
+    """Pick deterministic, spatially separated land pixels, including across province borders."""
     candidates = np.asarray(cells, dtype=np.int64)
     if count <= 0 or candidates.size <= 1:
         return []
     selected = [int(anchor)]
+    reserved = np.asarray(reserved_points if reserved_points is not None else [], dtype=np.int64)
     xs = candidates % width
     zs = candidates // width
+    minimum_squared = max(1, int(minimum_distance)) ** 2
     for _ in range(count):
         distances = np.full(candidates.size, np.iinfo(np.int64).max, dtype=np.int64)
-        for point in selected:
-            px, pz = point % width, point // width
+        blocked = np.concatenate((reserved, np.asarray(selected, dtype=np.int64)))
+        for point in blocked:
+            px, pz = int(point) % width, int(point) // width
             distances = np.minimum(distances, (xs - px) ** 2 + (zs - pz) ** 2)
-        distances[np.isin(candidates, np.asarray(selected, dtype=np.int64))] = -1
+        distances[np.isin(candidates, blocked)] = -1
         farthest = int(distances.max())
-        if farthest < 36:  # Keep settlements at least six map pixels apart.
+        if farthest < minimum_squared:
             break
         tied = candidates[distances == farthest]
         chosen = min((int(point) for point in tied),
@@ -1194,6 +1227,12 @@ def convert_image(input_path: Path, output_path: Path, seed: int, region_count: 
     titles = []
     realms = []
     settlements = []
+    reserved_settlement_points = []
+    density = float(settlement_profile["population_density"])
+    pixels_per_site = max(180.0, 1800.0 * (1.0 - 0.82 * density))
+    minimum_spacing = max(8, int(round(math.sqrt(pixels_per_site) * 0.35)))
+    base_spacing = max(6, minimum_spacing // 2)
+    province_flat = province_labels.ravel()
     region_neighbors = {region_id: set() for region_id in region_meta}
     for pid, neighbors in province_neighbors.items():
         for neighbor in neighbors:
@@ -1304,46 +1343,60 @@ def convert_image(input_path: Path, output_path: Path, seed: int, region_count: 
             },
         })
 
-        def add_settlement(kind: str, point: int, serial: int) -> None:
-            sx, sz = point % width, point // width
+        def add_settlement(kind: str, point: int, serial: int,
+                           candidate_cells=None, minimum_distance: int = base_spacing) -> bool:
+            selected_point = int(point)
+            if candidate_cells is not None:
+                candidate = choose_spaced_settlement_point(
+                    candidate_cells, selected_point, width,
+                    seed ^ (rid * 0x9E3779B1) ^ (serial * 0x85EBCA77),
+                    reserved_settlement_points, minimum_distance)
+                if candidate is None:
+                    return False
+                selected_point = candidate
+            sx, sz = selected_point % width, selected_point // width
             settlements.append({
                 "id": f"{kind}_{rid + 1:02d}_{serial:02d}", "type": kind,
                 "name": stable_name(seed, rid * 100 + serial, " " + kind.title()),
                 "realm_id": f"realm_{rid + 1:02d}",
-                "province_id": province_labels[point],
+                "province_id": province_labels[selected_point],
                 "pixel": [sx, sz],
                 "block": [round((sx + 0.5 - width / 2) * blocks_per_pixel),
                           round((sz + 0.5 - height / 2) * blocks_per_pixel)],
             })
+            reserved_settlement_points.append(selected_point)
+            return True
 
-        add_settlement("capital", capital, 1)
+        capital_cells = np.flatnonzero(province_flat == capital_pid)
+        add_settlement("capital", capital, 1, capital_cells, base_spacing)
         for offset, pid in enumerate(pids[1:], 2):
+            province_cells = np.flatnonzero(province_flat == pid)
             add_settlement(("city", "town", "village")[(offset - 2) % 3],
-                           province_meta[pid]["seed"], offset)
+                           province_meta[pid]["seed"], offset, province_cells, base_spacing)
 
         # Province anchors are a floor, not the total settlement budget. Larger
         # provinces gain additional dispersed opportunities according to the selected
         # population-density profile; no fixed realm/province count caps this pass.
-        density = float(settlement_profile["population_density"])
-        province_flat = province_labels.ravel()
         for pid in pids:
             province = province_meta[pid]
             province_cells = np.flatnonzero(province_flat == pid)
             target_sites = settlement_opportunities_for_area(province["area"], density)
             extra_points = spread_settlement_points(
                 province_cells, int(province["seed"]), target_sites - 1,
-                width, seed ^ (rid * 0x9E3779B1) ^ (pid * 0x85EBCA77))
+                width, seed ^ (rid * 0x9E3779B1) ^ (pid * 0x85EBCA77),
+                reserved_points=reserved_settlement_points, minimum_distance=minimum_spacing)
             for extra_index, point in enumerate(extra_points):
                 add_settlement("village", point, 1000 + int(pid) * 16 + extra_index)
 
         mountain_code = ANALYSIS_CLASSES.index("mountains")
         mountain_cells = [i for i in realm_cells if analysis_flat[i] == mountain_code]
         if mountain_cells:
-            add_settlement("fortress", mountain_cells[len(mountain_cells) // 2], 20 + rid)
+            add_settlement("fortress", mountain_cells[len(mountain_cells) // 2],
+                           20 + rid, mountain_cells, base_spacing)
         coast_cells = [i for i in realm_cells if coast_mask[i]]
         if coast_cells:
             coast_cells.sort(key=lambda i: (i * 2654435761 + seed) & 0xFFFFFFFF)
-            add_settlement("port", coast_cells[0], 30 + rid)
+            add_settlement("port", coast_cells[0], 30 + rid, coast_cells, base_spacing)
         # Every polity needs at least a capital and one additional settlement
         # anchor, even when its territorial footprint is a single province.
         realm_settlement_count = sum(
@@ -1351,7 +1404,7 @@ def convert_image(input_path: Path, output_path: Path, seed: int, region_count: 
         if realm_settlement_count < 2:
             fallback_point = next((point for point in reversed(realm_cells)
                                    if point != capital), capital)
-            add_settlement("village", fallback_point, 90 + rid)
+            add_settlement("village", fallback_point, 90 + rid, realm_cells, base_spacing)
 
     geography_started = time.perf_counter()
     # Geographic layers come from the shared semantic classifier and seeded relief.

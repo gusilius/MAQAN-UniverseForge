@@ -3638,7 +3638,7 @@ public final class WorldSimMod {
                 Set<String> kingdomedDuchyIds = new HashSet<>();
                 int duchySerial = 0;
                 for (List<TitleData.Title> group : regionGroups) {
-                    if (group.size() < 2) continue;
+                    if (group.isEmpty()) continue;
                     duchySerial++;
                     String groupKey = group.stream().map(title -> Integer.toString(title.id))
                             .sorted().collect(java.util.stream.Collectors.joining("|"));
@@ -3664,6 +3664,66 @@ public final class WorldSimMod {
                     }
                     importedIds.put(duchyId, realmId);
                     duchyIds.add(duchyId);
+                }
+
+                // A fragmented polity may own provinces without owning an entire
+                // pre-authored region. Build a canonical county -> duchy layer over its
+                // owned provinces instead of leaving its political hierarchy flat.
+                if (duchyIds.isEmpty()) {
+                    List<TitleData.Title> ownedProvinces = map.titles.allTitles().stream()
+                            .filter(title -> title != null && title.tier == 0)
+                            .filter(title -> realmId.equals(importedIds.get(
+                                    dev.worldforge.realms.Statecraft.mapTitleId(map.name, title.key))))
+                            .sorted(Comparator.comparingInt(title -> title.id)).toList();
+                    Map<String, String> countyByProvinceKey = new TreeMap<>();
+                    for (TitleData.Title province : ownedProvinces) {
+                        String provinceTitleId = dev.worldforge.realms.Statecraft.mapTitleId(map.name, province.key);
+                        String countyId = emergentTerritoryTitleId("county", polityId, province.key);
+                        String capitalBand = nearestEmergentBand(province.capX, province.capZ,
+                                realmBands, bands, hierarchySource);
+                        String countyName = populationIndex == null
+                                ? (province.name == null || province.name.isBlank()
+                                    ? entry.getValue().name + " County" : province.name + " County")
+                                : uniqueTerritorialName(countyId, "provinces", capitalBand,
+                                        populationIndex, polityId + "|county|" + province.key);
+                        ensureEmergentTerritoryTitle(countyId, realmId,
+                                dev.worldforge.realms.Statecraft.Rank.COUNTY, countyName);
+                        if (populationIndex != null)
+                            grantEmergentTerritoryHolder(countyId, capitalBand, populationIndex, year, fallbackHolder);
+                        linkEmergentTerritoryTitle(provinceTitleId, countyId);
+                        importedIds.put(countyId, realmId);
+                        countyByProvinceKey.put(province.key, countyId);
+                    }
+                    List<List<TitleData.Title>> provinceGroups = connectedTitleGroups(ownedProvinces, 3);
+                    int fallbackDuchySerial = 0;
+                    for (List<TitleData.Title> group : provinceGroups) {
+                        if (group.isEmpty()) continue;
+                        List<String> countyIds = group.stream().map(province -> countyByProvinceKey.get(province.key))
+                                .filter(Objects::nonNull).sorted().toList();
+                        if (countyIds.isEmpty()) continue;
+                        fallbackDuchySerial++;
+                        String groupKey = group.stream().map(province -> province.key).sorted()
+                                .collect(java.util.stream.Collectors.joining("|"));
+                        double centerX = group.stream().mapToDouble(province ->
+                                hierarchySource.blockPosition(province.capX, province.capZ)[0]).average().orElse(0);
+                        double centerZ = group.stream().mapToDouble(province ->
+                                hierarchySource.blockPosition(province.capX, province.capZ)[1]).average().orElse(0);
+                        String capitalBand = nearestEmergentBand(centerX, centerZ, realmBands, bands,
+                                hierarchySource);
+                        String duchyId = emergentTerritoryTitleId("duchy", polityId, groupKey);
+                        String duchyName = populationIndex == null
+                                ? entry.getValue().name + " Duchy " + fallbackDuchySerial
+                                : uniqueTerritorialName(duchyId, "regions", capitalBand,
+                                        populationIndex, polityId + "|duchy|" + groupKey);
+                        ensureEmergentTerritoryTitle(duchyId, realmId,
+                                dev.worldforge.realms.Statecraft.Rank.DUCHY, duchyName);
+                        if (populationIndex != null)
+                            grantEmergentTerritoryHolder(duchyId, capitalBand, populationIndex, year, fallbackHolder);
+                        for (String countyId : countyIds) linkEmergentTerritoryTitle(countyId, duchyId);
+                        importedIds.put(duchyId, realmId);
+                        duchyCapitalBandById.put(duchyId, capitalBand);
+                        duchyIds.add(duchyId);
+                    }
                 }
 
                 List<String> kingdomIds = new ArrayList<>();

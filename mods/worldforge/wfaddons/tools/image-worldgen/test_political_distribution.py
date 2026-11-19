@@ -4,7 +4,7 @@ from image_worldgen import (
     allocate_counts, select_independent_islands, aggregate_realm_regions,
     classify_realm_scale, select_wilderness_mask, SETTLEMENT_PROFILES, partition,
     create_test_image, convert_image, apply_province_aligned_wilderness, validate_package,
-    settlement_opportunities_for_area, spread_settlement_points,
+    settlement_opportunities_for_area, spread_settlement_points, choose_spaced_settlement_point,
 )
 
 
@@ -31,6 +31,26 @@ class PoliticalDistributionTests(unittest.TestCase):
                 dx = point % 40 - other % 40
                 dz = point // 40 - other // 40
                 self.assertGreaterEqual(dx * dx + dz * dz, 36)
+
+    def test_extra_sites_respect_global_reserved_centers(self):
+        import numpy as np
+        cells = np.arange(40 * 40, dtype=np.int64)
+        reserved = [20 * 40 + 20, 10 * 40 + 10]
+        selected = spread_settlement_points(
+            cells, 0, 30, 40, 424242,
+            reserved_points=reserved, minimum_distance=10)
+        points = [0, *reserved, *selected]
+        for index, point in enumerate(points):
+            for other in points[index + 1:]:
+                dx = point % 40 - other % 40
+                dz = point // 40 - other // 40
+                self.assertGreaterEqual(dx * dx + dz * dz, 100)
+
+        relocated = choose_spaced_settlement_point(
+            cells, 1, 40, 424242, reserved_points=[0], minimum_distance=10)
+        self.assertIsNotNone(relocated)
+        dx, dz = relocated % 40, relocated // 40
+        self.assertGreaterEqual(dx * dx + dz * dz, 100)
 
     def test_settlement_profiles_do_not_define_political_budgets(self):
         for profile in SETTLEMENT_PROFILES.values():

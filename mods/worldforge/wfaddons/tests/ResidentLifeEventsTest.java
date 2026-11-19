@@ -18,11 +18,18 @@ public final class ResidentLifeEventsTest {
         else System.out.println("ok   " + message);
     }
 
-    private static final class CountingRegistry extends CharacterRegistry {
-        int refreshCalls;
-        @Override public void refreshLifeStages(int year) {
-            refreshCalls++;
-            super.refreshLifeStages(year);
+    private static int registryPassField(CharacterRegistry registry, String fieldName) {
+        try {
+            java.lang.reflect.Field passesField = ResidentLifeEvents.class.getDeclaredField("REGISTRY_PASSES");
+            passesField.setAccessible(true);
+            java.util.Map<?, ?> passes = (java.util.Map<?, ?>) passesField.get(null);
+            Object state = passes.get(registry);
+            if (state == null) return Integer.MIN_VALUE;
+            java.lang.reflect.Field valueField = state.getClass().getDeclaredField(fieldName);
+            valueField.setAccessible(true);
+            return valueField.getInt(state);
+        } catch (ReflectiveOperationException error) {
+            throw new AssertionError("could not inspect resident registry pass state", error);
         }
     }
 
@@ -209,20 +216,24 @@ public final class ResidentLifeEventsTest {
         check(!cousinOne.props.containsKey("family.dating") && !cousinTwo.props.containsKey("family.dating"),
                 "close cousins sharing grandparents are excluded from autonomous dating");
 
-        CountingRegistry guardedRegistry = new CountingRegistry();
+        CharacterRegistry guardedRegistry = new CharacterRegistry();
         guardedRegistry.create("Один", "", "north", "m", 1990);
         guardedRegistry.create("Два", "", "north", "f", 1991);
         for (int call = 0; call < 100; call++) ResidentLifeEvents.yearly(guardedRegistry, 2030);
-        check(guardedRegistry.refreshCalls == 1,
-                "hundreds of settlement callbacks refresh one canonical registry only once per year");
+        check(registryPassField(guardedRegistry, "stageYear") == 2030
+                        && registryPassField(guardedRegistry, "stageSize") == 2
+                        && registryPassField(guardedRegistry, "familyYear") == 2030,
+                "hundreds of settlement callbacks share one canonical registry/year pass");
         Character lateResident = guardedRegistry.create("Поздний житель", "", "north", "f", 2010);
         ResidentLifeEvents.yearly(guardedRegistry, 2030);
-        check(guardedRegistry.refreshCalls == 2
-                        && "adult".equals(lateResident.props.get("population.life_stage")),
-                "late same-year residents receive a stage refresh without replaying annual family events");
+        check(registryPassField(guardedRegistry, "stageSize") == 3
+                        && "adult".equals(lateResident.props.get("population.life_stage"))
+                        && registryPassField(guardedRegistry, "familyYear") == 2030,
+                "late same-year residents receive stage refresh without replaying annual family events");
         for (int call = 0; call < 100; call++) ResidentLifeEvents.yearly(guardedRegistry, 2030);
-        check(guardedRegistry.refreshCalls == 2,
-                "same-year callbacks after a population change do not trigger repeated full-registry refreshes");
+        check(registryPassField(guardedRegistry, "stageSize") == 3
+                        && registryPassField(guardedRegistry, "familyYear") == 2030,
+                "same-year callbacks after population changes do not repeat the global family pass");
 
         if (failures > 0) throw new AssertionError(failures + " resident life event tests failed");
     }
