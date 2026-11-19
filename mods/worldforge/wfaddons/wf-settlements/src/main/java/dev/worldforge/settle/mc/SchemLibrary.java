@@ -30,6 +30,8 @@ public final class SchemLibrary {
 
     private static final Map<String, Schematic> SCHEMS = new ConcurrentHashMap<>();
     private static final Map<String, Blueprints.Plan> PLANS = new ConcurrentHashMap<>();
+    /** IDs owned by the previous library scan; removed before reload so deleted files cannot leave ghost buildings. */
+    private static final Set<String> LOADED_BUILDING_IDS = ConcurrentHashMap.newKeySet();
 
     public static Path worldDir(MinecraftServer s) { return s.getWorldPath(LevelResource.ROOT).resolve("worldforge").resolve("schematics"); }
 
@@ -44,6 +46,9 @@ public final class SchemLibrary {
 
     /** Сканирует папки, добавляет здания в defs и их JSON в raw (его получают клиенты). Возвращает отчёт построчно. */
     public static List<String> loadAll(MinecraftServer server, Defs defs, List<String> raw) {
+        // Reconcile only entries previously owned by this file-backed library. Datapack buildings remain untouched.
+        for (String id : LOADED_BUILDING_IDS) defs.buildings.remove(id);
+        LOADED_BUILDING_IDS.clear();
         SCHEMS.clear();
         PLANS.clear();
         List<String> report = new ArrayList<>();
@@ -60,6 +65,7 @@ public final class SchemLibrary {
                         String json = SchemCost.buildingJson(b, s, sidecar);
                         defs.add(json);
                         raw.add(json);
+                        LOADED_BUILDING_IDS.add(SchemCost.idFor(b));
                         SCHEMS.put(b, s);
                         Defs.Building d = defs.buildings.get(SchemCost.idFor(b));
                         report.add(d.id + ": " + s.sx + "x" + s.sy + "x" + s.sz + ", блоков " + s.solidCount() + ", стоимость " + d.cost + ", работа " + (int) d.work + (d.housing > 0 ? ", жильё " + d.housing : ""));
