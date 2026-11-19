@@ -134,6 +134,7 @@ pub struct Character {
     #[serde(default)] pub role_ids: Vec<String>,
     #[serde(default)] pub title_ids: Vec<String>,
     #[serde(default)] pub skills: BTreeMap<String, i32>,
+    #[serde(default)] pub attributes: BTreeMap<String, i32>,
     #[serde(default)] pub needs: BTreeMap<String, i32>,
     #[serde(default)] pub duty_ids: Vec<String>,
     #[serde(default)] pub life_stage: String,
@@ -435,6 +436,20 @@ fn origin_modifier(snapshot: &WorldSnapshot, character: &Character, key: &str) -
     // Progress definitions are the same effective datapack rows used by wf-progress.
     // Canonical NPC skill ranks feed their registered per-rank modifiers; passive nodes
     // are represented by their canonical trait IDs, so no parallel NPC profile is invented.
+    for (attribute_id, rank) in &character.attributes {
+        if *rank <= 0 { continue; }
+        if let Some(attribute) = catalog_entry(snapshot, "wf_progress", "attrs", attribute_id) {
+            let per_point = attribute.payload.get("perPoint").or_else(|| attribute.payload.get("per_point"))
+                .and_then(serde_json::Value::as_object);
+            if let Some(modifiers) = per_point {
+                for (modifier, amount) in modifiers {
+                    if modifier == key {
+                        total += amount.as_f64().unwrap_or(0.0) * (*rank as f64);
+                    }
+                }
+            }
+        }
+    }
     for (skill_id, rank) in &character.skills {
         if *rank <= 0 { continue; }
         if let Some(skill) = catalog_entry(snapshot, "wf_progress", "skills", skill_id) {
