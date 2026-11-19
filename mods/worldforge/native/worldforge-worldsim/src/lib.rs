@@ -862,9 +862,10 @@ fn choose_building_for_need(snapshot: &WorldSnapshot, settlement: &Settlement, t
 
 
 fn registered_profession(snapshot: &WorldSnapshot, id: &str) -> bool {
-    // wf_people owns canonical profession identity; wf_settle only references these
-    // IDs from building job slots and may retain legacy local aliases.
+    // A job can be applied only when the canonical People profession exists and
+    // the settlement domain also declares it as a valid Worker assignment.
     catalog_entry(snapshot, "wf_people", "professions", id).is_some()
+        && catalog_entry(snapshot, "wf_settle", "building_professions", id).is_some()
 }
 
 fn choose_profession_for_output(snapshot: &WorldSnapshot, resource: &str) -> Option<String> {
