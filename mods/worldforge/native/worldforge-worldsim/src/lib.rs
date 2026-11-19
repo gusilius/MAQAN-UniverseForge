@@ -198,6 +198,9 @@ pub struct CapabilityDescriptor {
     #[serde(default)] pub snapshot_received: bool,
     #[serde(default)] pub simulation_consumed: bool,
     #[serde(default)] pub apply_handler_available: bool,
+    /// Exact catalog namespaces the native decision engine reads. Other transferred
+    /// catalogs remain available to the owning addon without being falsely reported consumed.
+    #[serde(default)] pub consumed_catalogs: Vec<String>,
     #[serde(default)] pub catalog_count: u32,
     #[serde(default)] pub entity_count: u32,
 }
@@ -1102,8 +1105,11 @@ impl WorldSnapshot {
             let Some(capability) = self.capabilities.iter().find(|capability| capability.module_id == *module) else {
                 return Err(SimError::InvalidSnapshot(format!("catalog-without-capability:{module}")));
             };
-            if !capability.available || !capability.snapshot_received || !capability.simulation_consumed {
-                return Err(SimError::InvalidSnapshot(format!("catalog-not-transferred-or-consumed:{module}")));
+            if !capability.available || !capability.snapshot_received {
+                return Err(SimError::InvalidSnapshot(format!("catalog-not-transferred:{module}")));
+            }
+            if capability.consumed_catalogs.is_empty() && !capability.simulation_consumed {
+                return Err(SimError::InvalidSnapshot(format!("catalog-not-consumed:{module}")));
             }
             let expected = *count + if *module == "wf_realms" { self.government_definitions.len() as u32 } else { 0 };
             if capability.catalog_count != expected {
@@ -1111,6 +1117,19 @@ impl WorldSnapshot {
             }
         }
         for capability in &self.capabilities {
+            let mut consumed = BTreeSet::new();
+            for catalog_id in &capability.consumed_catalogs {
+                if catalog_id.trim().is_empty() || !consumed.insert(catalog_id.as_str())
+                    || !self.catalog_entries.iter().any(|entry|
+                        entry.module_id == capability.module_id && entry.catalog_id == *catalog_id) {
+                    return Err(SimError::InvalidSnapshot(format!(
+                        "invalid-consumed-catalog:{}:{}", capability.module_id, catalog_id)));
+                }
+            }
+            if !capability.consumed_catalogs.is_empty() && !capability.simulation_consumed {
+                return Err(SimError::InvalidSnapshot(format!(
+                    "consumed-catalogs-without-consumer:{}", capability.module_id)));
+            }
             if capability.snapshot_received && !capability.available {
                 return Err(SimError::InvalidSnapshot(format!("snapshot-from-unavailable-module:{}", capability.module_id)));
             }
@@ -1684,7 +1703,7 @@ mod tests {
             snapshot.capabilities.push(CapabilityDescriptor {
                 module_id: module.into(), schema_version: 1, available: true,
                 snapshot_received: true, simulation_consumed: true,
-                apply_handler_available: true, catalog_count: count, entity_count: 0,
+                apply_handler_available: true, consumed_catalogs: vec![], catalog_count: count, entity_count: 0,
             });
         }
     }
