@@ -266,6 +266,7 @@ public final class WorldSimMod {
         HISTORICAL_CHRONICLE.setStartingYear(WorldForgeApi.clock().startYear);
         publishObservers(event.getServer());
         loadState(event.getServer());
+        auditStructureIdentityCoverage();
         VanillaWorldGeography.load(event.getServer());
         // Backfill the book from the persisted canonical journal. This also migrates
         // worlds saved before the chronicle projection existed; seq-based identities
@@ -274,6 +275,43 @@ public final class WorldSimMod {
         LOGGER.info("wf_worldsim: autonomous coordinator started; native Rust core={}, initial LOD observers={}",
                 NativeWorldSimulation.load() ? "available" : "unavailable",
                 serverObserverCount(event.getServer()));
+    }
+
+    /**
+     * Verifies that the shared identity resolver accepts every currently loaded race/subrace
+     * against every government definition. This is a runtime audit of the real datapack
+     * registries, not a hardcoded race/government allow-list.
+     */
+    private static void auditStructureIdentityCoverage() {
+        if (SettleMod.DEFS == null || !SettleMod.STRUCTURE_CATALOG.loaded()) {
+            LOGGER.error("wf_worldsim: structure identity audit blocked: settlement definitions/catalogue unavailable");
+            return;
+        }
+        Set<String> races = new TreeSet<>(OriginsMod.DEFS.races.keySet());
+        Set<String> governments = new TreeSet<>(RealmsMod.DEFS.govs.keySet());
+        if (races.isEmpty() || governments.isEmpty()) {
+            LOGGER.error("wf_worldsim: structure identity audit blocked: loaded races={} governments={}",
+                    races.size(), governments.size());
+            return;
+        }
+        int combinations = 0;
+        int missingFoundingHousing = 0;
+        for (String race : races) for (String government : governments) {
+            combinations++;
+            String selected = SettleMod.DEFS.selectIdentityBuilding("house", race, null, null,
+                    government, "village", null, null,
+                    Objects.hash(race, government, "structure-catalog-coverage"));
+            if (selected == null || selected.isBlank()) {
+                missingFoundingHousing++;
+                LOGGER.error("wf_worldsim: no compatible founding housing for race={} government={}",
+                        race, government);
+            }
+        }
+        LOGGER.info("wf_worldsim: structure identity coverage races={} governments={} combinations={} founding_housing_gaps={} building_definitions={} settlement_types={} structure_classes={} identity_dimensions={}",
+                races.size(), governments.size(), combinations, missingFoundingHousing,
+                SettleMod.DEFS.buildings.size(), SettleMod.TYPES.types.size(),
+                SettleMod.STRUCTURE_CATALOG.structureClasses().size(),
+                SettleMod.STRUCTURE_CATALOG.identityDimensions().size());
     }
 
     @SubscribeEvent
