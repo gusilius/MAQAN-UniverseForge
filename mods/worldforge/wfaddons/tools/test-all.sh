@@ -29,7 +29,7 @@ mapfile -t CANDIDATE_SRC < <(
 )
 SRC=()
 for source in "${CANDIDATE_SRC[@]}"; do
-  if grep -Eq '(^|[[:space:]])import[[:space:]]+(net\\.minecraft|net\\.minecraftforge|com\\.mojang\\.brigadier)(\\.|;)|net\\.minecraft\\.|net\\.minecraftforge\\.|com\\.mojang\\.brigadier\\.' "$source"; then
+  if grep -Eq '(^|[[:space:]])import[[:space:]]+(net\.minecraft|net\.minecraftforge|com\.mojang\.brigadier)(\.|;)|net\.minecraft\.|net\.minecraftforge\.|com\.mojang\.brigadier\.' "$source"; then
     continue
   fi
   SRC+=("$source")
