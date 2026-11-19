@@ -54,7 +54,10 @@ public final class ImageWorldIdentityTest {
         Path archive = Path.of(args[0]).toAbsolutePath();
         MapData map = MapData.load("real-map", archive.getParent());
         TitleData titles = map.titles;
-        if (titles == null) throw new AssertionError("Actual image map has no political titles");
+        if (titles == null) throw new AssertionError("Actual image map has no territorial titles");
+        long stateCandidates = titles.allTitles().stream().filter(title -> title.tier == 2).count();
+        check(stateCandidates > 0 && titles.realmList().isEmpty(),
+                "image map preserves state-formation borders without preassigning sovereign identities");
 
         Path originsDir = Path.of("wf-origins/src/main/resources/data/wf_origins/wf_origins");
         OriginDefs originDefs = new OriginDefs();
