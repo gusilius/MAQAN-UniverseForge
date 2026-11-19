@@ -389,6 +389,13 @@ public final class SettleCommands {
             ServerLevel lv = col.level(c.getSource().getServer());
             if (lv != null) col.captureTerrain(lv, x - 16, z - 16, x + 16, z + 16);
             dev.worldforge.settle.Defs.Building definition = SettleMod.DEFS.buildings.get(def);
+            if (definition != null && !col.s.defs.isIdentityCompatible(def, col.identityRace, null,
+                    col.identityCulture, col.governmentId, col.settlementType,
+                    col.polityFormationId, col.architectureStyleId)) {
+                throw new Settlement.OrderException("Постройка '" + definition.name
+                        + "' несовместима с идентичностью образования. Выберите подходящий вариант каталога "
+                        + "или измените стиль/форму образования.");
+            }
             if (definition != null && !col.map.cells().isEmpty())
                 col.map.validatePlacement(definition.category, x, z, definition.sizeX, definition.sizeZ);
             Building b = col.s.place(def, x, z);
