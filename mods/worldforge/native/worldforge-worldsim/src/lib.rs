@@ -409,6 +409,47 @@ fn catalog_entry<'a>(snapshot: &'a WorldSnapshot, module: &str, catalog: &str, i
         entry.module_id == module && entry.catalog_id == catalog && entry.entry_id == id)
 }
 
+fn court_opinion_modifier(snapshot: &WorldSnapshot, first: &str, second: &str) -> i64 {
+    snapshot.catalog_entries.iter().filter(|entry|
+        entry.module_id == "wf_court" && entry.catalog_id == "court_states")
+        .filter_map(|entry| entry.payload.get("mods").and_then(serde_json::Value::as_array))
+        .flat_map(|mods| mods.iter())
+        .filter_map(|modifier| modifier.as_array())
+        .filter(|values| values.len() >= 5
+            && values[0].as_str() == Some(first) && values[1].as_str() == Some(second)
+            && values[4].as_u64().unwrap_or(0) >= snapshot.day)
+        .map(|values| values[3].as_i64().unwrap_or(0))
+        .sum()
+}
+
+fn court_instability_pressure(snapshot: &WorldSnapshot, realm_id: &str) -> i64 {
+    let mut pressure = 0_i64;
+    for entry in snapshot.catalog_entries.iter().filter(|entry|
+        entry.module_id == "wf_court" && entry.catalog_id == "court_states") {
+        if let Some(regencies) = entry.payload.get("regencies").and_then(serde_json::Value::as_array) {
+            for regency in regencies.iter().filter_map(serde_json::Value::as_array) {
+                if regency.first().and_then(serde_json::Value::as_str) == Some(realm_id) {
+                    let crisis = regency.get(4).and_then(serde_json::Value::as_i64).unwrap_or(0);
+                    let stage = regency.get(5).and_then(serde_json::Value::as_i64).unwrap_or(0);
+                    pressure += (crisis / 5).max(0) + stage.max(0) * 5;
+                }
+            }
+        }
+        if let Some(factions) = entry.payload.get("factions").and_then(serde_json::Value::as_array) {
+            for faction in factions.iter() {
+                if faction.get("liege").and_then(serde_json::Value::as_str) == Some(realm_id) {
+                    let power = faction.get("power").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+                    let progress = faction.get("progress").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+                    if power.is_finite() && progress.is_finite() && progress > 0.0 {
+                        pressure += (power.max(0.0) * progress.clamp(0.0, 1.0) / 10.0).round() as i64;
+                    }
+                }
+            }
+        }
+    }
+    pressure
+}
+
 fn trade_conflict_penalty(snapshot: &WorldSnapshot, first: &str, second: &str) -> i64 {
     let Some(runtime) = catalog_entry(snapshot, "wf_trade", "runtime_state", "trade") else { return 0; };
     runtime.payload.get("caravans").and_then(serde_json::Value::as_array)
@@ -951,6 +992,7 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
         for (attacker, defender) in [(a, b), (b, a)] {
             let treasury = realm_treasury_balance(snapshot, &attacker.id).unwrap_or(attacker.treasury as f64);
             let intrigue_penalty = realm_intrigue_pressure(snapshot, &attacker.id);
+            let court_penalty = court_instability_pressure(snapshot, &attacker.id);
             let trade_penalty = trade_conflict_penalty(snapshot, &attacker.id, &defender.id)
                 + if has_treaty(snapshot, &attacker.id, &defender.id, "TRADE_PACT") { 12 } else { 0 }
                 + market_fragility_penalty(snapshot, &attacker.id);
@@ -1119,7 +1161,7 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
             let score = clamp_score(25_i64 + ((a.opinion + b.opinion) / 4) as i64
                 + ((a.prestige + b.prestige) / 8) as i64
                 + if a.house_id != b.house_id { 10 } else { 0 }
-                + social_bonus as i64 + dynastic_policy
+                + social_bonus as i64 + dynastic_policy + court_opinion_modifier(snapshot, &a.id, &b.id)
                 - kinship_penalty as i64
                 - (a.age as i32 - b.age as i32).abs() as i64);
             if score >= 35 && best.map(|(_, current, _)| score > current).unwrap_or(true) { best = Some((b, score, social_bonus)); }
