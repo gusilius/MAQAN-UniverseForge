@@ -57,6 +57,12 @@ public final class ArmyEngine {
         boolean persist();
     }
     private transient volatile PersistenceBridge persistenceBridge;
+    /** WorldSim is the sole strategic recruitment planner when its proposal pipeline is active. */
+    private volatile boolean autonomousRecruitmentEnabled = true;
+
+    public void setAutonomousRecruitmentEnabled(boolean enabled) {
+        autonomousRecruitmentEnabled = enabled;
+    }
 
     public void installPersistenceBridge(PersistenceBridge bridge) {
         if (bridge == null) throw new IllegalArgumentException("army persistence bridge is required");
@@ -1028,7 +1034,8 @@ public final class ArmyEngine {
     private void aiRealm(War w, String r) {
         War.Side me = w.sides.get(r);
         // 1. набор
-        if (armiesOf(r).stream().mapToInt(Army::men).sum() < 0.3 * levyCap(r)) {
+        if (autonomousRecruitmentEnabled
+                && armiesOf(r).stream().mapToInt(Army::men).sum() < 0.3 * levyCap(r)) {
             double availablePool = pool(r);
             int n = (int) Math.min(availablePool, levyCap(r) * 0.6);
             if (n >= 20) {
