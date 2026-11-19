@@ -1779,6 +1779,7 @@ public final class WorldSimMod {
         setConsumedCatalogs(capabilities, catalogEntries, "wf_progress", List.of("attrs", "skills", "nodes"));
         setConsumedCatalogs(capabilities, catalogEntries, "wf_genesis", List.of("features"));
         setConsumedCatalogs(capabilities, catalogEntries, "wf_reputation", List.of("runtime_state"));
+        setConsumedCatalogs(capabilities, catalogEntries, "wf_forms", List.of("forms", "runtime_state"));
         sortObjects(catalogEntries, Comparator.comparing((JsonObject item) -> item.get("module_id").getAsString())
                 .thenComparing(item -> item.get("catalog_id").getAsString()).thenComparing(item -> item.get("entry_id").getAsString()));
         sortObjects(diplomaticRelations, Comparator.comparing((JsonObject item) -> item.get("realm_a").getAsString())
