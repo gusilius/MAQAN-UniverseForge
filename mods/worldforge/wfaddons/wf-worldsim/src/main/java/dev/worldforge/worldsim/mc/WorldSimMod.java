@@ -2316,6 +2316,9 @@ public final class WorldSimMod {
         int budget = PEOPLE_MATERIALIZATION_BUDGET_PER_TICK;
         boolean complete = true;
         boolean settlementBindingsChanged = false;
+        // A source partition is checkpointed only after its resident/settlement batches finish.
+        // Persisting the entire Character registry every 256 residents was quadratic I/O.
+        boolean sourceComplete = true;
         Map<String, String> realmByBand = new HashMap<>();
         Map<String, JsonObject> polityById = new HashMap<>();
         if (state.has("polities") && state.get("polities").isJsonArray()) {
@@ -2386,6 +2389,7 @@ public final class WorldSimMod {
                 band.addProperty("materialized_population", residents.size());
                 band.addProperty("population_target_gap", target - residents.size());
                 if (!bandComplete) {
+                    sourceComplete = false;
                     complete = false;
                     if (budget == 0) break;
                     continue;
@@ -2481,25 +2485,32 @@ public final class WorldSimMod {
                     hasSettledBands = true;
                 } catch (IllegalStateException deferred) {
                     LOGGER.warn("wf_worldsim: settlement materialization deferred for band {}: {}", bandId, deferred.getMessage());
+                    sourceComplete = false;
                     complete = false;
                 }
                 if (budget == 0) break;
             }
 
-            List<dev.worldforge.people.Character> emergentResidents = sourceProgress.index.emergentResidents();
-            boolean peopleDurable = emergentResidents.isEmpty()
-                    || PeopleMod.persistCharacter(emergentResidents.get(0), server);
-            if (!peopleDurable) {
-                LOGGER.error("wf_worldsim: canonical residents for source {} could not be durably saved; materialization remains pending", source.id);
-                return false;
-            }
-            if (hasSettledBands && !SettleMod.saveDurably(server)) {
-                LOGGER.error("wf_worldsim: settlement/Worker batch for source {} could not be durably saved; materialization remains pending", source.id);
-                return false;
-            }
-            if (settlementBindingsChanged && !saveState(server)) {
-                LOGGER.error("wf_worldsim: physical settlement identity bindings for source {} could not be durably saved", source.id);
-                return false;
+            if (sourceComplete) {
+                List<dev.worldforge.people.Character> emergentResidents = sourceProgress.index.emergentResidents();
+                boolean peopleDurable = emergentResidents.isEmpty()
+                        || PeopleMod.persistCharacter(emergentResidents.get(0), server);
+                if (!peopleDurable) {
+                    LOGGER.error("wf_worldsim: canonical residents for source {} could not be durably saved; materialization remains pending", source.id);
+                    return false;
+                }
+                if (hasSettledBands && !SettleMod.saveDurably(server)) {
+                    LOGGER.error("wf_worldsim: settlement/Worker batch for source {} could not be durably saved; materialization remains pending", source.id);
+                    return false;
+                }
+                if (settlementBindingsChanged && !saveState(server)) {
+                    LOGGER.error("wf_worldsim: physical settlement identity bindings for source {} could not be durably saved", source.id);
+                    return false;
+                }
+            } else {
+                // Genesis progress is staged in-memory. Avoid rewriting the growing canonical
+                // people JSON and settlement files on every tick while batches are incomplete.
+                complete = false;
             }
             if (budget == 0) complete = false;
         }
