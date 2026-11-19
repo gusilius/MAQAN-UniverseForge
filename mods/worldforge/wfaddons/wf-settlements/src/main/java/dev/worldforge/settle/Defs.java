@@ -195,6 +195,13 @@ public final class Defs {
                                         String architectureStyleId, long seed) {
         Building requested = buildings.get(requestedId);
         if (requested == null) return requestedId;
+        raceId = identityValue(raceId);
+        subraceId = identityValue(subraceId);
+        cultureId = identityValue(cultureId);
+        governmentId = identityValue(governmentId);
+        settlementTypeId = identityValue(settlementTypeId);
+        formationId = identityValue(formationId);
+        architectureStyleId = identityValue(architectureStyleId);
         boolean requestedCompatible = compatible(requested, raceId, subraceId, cultureId, governmentId,
                 settlementTypeId, formationId, architectureStyleId);
         List<Building> alternatives = buildings.values().stream()
@@ -218,6 +225,10 @@ public final class Defs {
                         settlementTypeId, formationId, architectureStyleId) == bestScore).toList();
         long mixed = seed ^ (seed >>> 33) ^ requestedId.hashCode() * 0x9E3779B97F4A7C15L;
         return best.get((int) Math.floorMod(mixed, best.size())).id;
+    }
+
+    private static String identityValue(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 
     private static int identityPreferenceScore(Building b, String race, String subrace, String culture,
