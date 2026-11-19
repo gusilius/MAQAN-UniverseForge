@@ -1029,65 +1029,26 @@ public class SettleMod {
             boolean changed = false;
             // Establish the civic/storage spine first: dependent village facilities can
             // only be placed after the hall has a durable domain building record.
-            if (settlement.defs.buildings.containsKey("village_hall")
-                    && settlement.placement("wfworldgen.village-hall") == null) {
-                int[] site = findAutonomousBuildSite(colony, "village_hall", 0, 0, 20, false, false);
-                if (site != null) {
-                    int before = settlement.count("village_hall", false);
-                    settlement.placeOnce("wfworldgen.village-hall", "village_hall", site[0], site[1]);
-                    changed |= settlement.count("village_hall", false) > before;
-                }
-            }
-            if (settlement.defs.buildings.containsKey("village_granary")
-                    && settlement.placement("wfworldgen.village-granary") == null) {
-                int[] site = findAutonomousBuildSite(colony, "village_granary", 12, 8, 30, false, false);
-                if (site != null) {
-                    int before = settlement.count("village_granary", false);
-                    settlement.placeOnce("wfworldgen.village-granary", "village_granary", site[0], site[1]);
-                    changed |= settlement.count("village_granary", false) > before;
-                }
-            }
-            if (settlement.defs.buildings.containsKey("farm_district")
-                    && settlement.placement("wfworldgen.farm-district") == null) {
-                int[] site = findAutonomousBuildSite(colony, "farm_district", 30, 16, 44, true, false);
-                if (site != null) {
-                    int before = settlement.count("farm_district", false);
-                    settlement.placeOnce("wfworldgen.farm-district", "farm_district", site[0], site[1]);
-                    changed |= settlement.count("farm_district", false) > before;
-                }
-            }
+            changed |= placeAutonomousIdentityBuilding(colony, "wfworldgen.village-hall", "village_hall",
+                    0, 0, 20, false, false);
+            changed |= placeAutonomousIdentityBuilding(colony, "wfworldgen.village-granary", "village_granary",
+                    12, 8, 30, false, false);
+            changed |= placeAutonomousIdentityBuilding(colony, "wfworldgen.farm-district", "farm_district",
+                    30, 16, 44, true, false);
             if (settlement.defs.buildings.containsKey("house")) {
                 for (int i = 0; i < households; i++) {
                     String request = "wfworldgen.house." + i;
                     if (settlement.placement(request) != null) continue;
-                    int[] site = findAutonomousBuildSite(colony, "house",
-                            preferredHouses[i][0], preferredHouses[i][1], 24, false, false);
-                    if (site == null) continue;
                     if (!ensureFoundingStock(colony, "wood", 20, "house-stock-" + i,
                             TreasuryLedger.Kind.IMPORT, newlyPostedStock)) continue;
-                    int before = settlement.count("house", false);
-                    settlement.placeOnce(request, "house", site[0], site[1]);
-                    changed |= settlement.count("house", false) > before;
+                    changed |= placeAutonomousIdentityBuilding(colony, request, "house",
+                            preferredHouses[i][0], preferredHouses[i][1], 24, false, false);
                 }
             }
-            if (settlement.defs.buildings.containsKey("farm")
-                    && settlement.placement("wfworldgen.farm") == null) {
-                int[] site = findAutonomousBuildSite(colony, "farm", 24, 0, 44, true, false);
-                if (site != null) {
-                    int before = settlement.count("farm", false);
-                    settlement.placeOnce("wfworldgen.farm", "farm", site[0], site[1]);
-                    changed |= settlement.count("farm", false) > before;
-                }
-            }
-            if (settlement.defs.buildings.containsKey("lumber_camp")
-                    && settlement.placement("wfworldgen.lumber") == null) {
-                int[] site = findAutonomousBuildSite(colony, "lumber_camp", -24, 0, 44, false, true);
-                if (site != null) {
-                    int before = settlement.count("lumber_camp", false);
-                    settlement.placeOnce("wfworldgen.lumber", "lumber_camp", site[0], site[1]);
-                    changed |= settlement.count("lumber_camp", false) > before;
-                }
-            }
+            changed |= placeAutonomousIdentityBuilding(colony, "wfworldgen.farm", "farm",
+                    24, 0, 44, true, false);
+            changed |= placeAutonomousIdentityBuilding(colony, "wfworldgen.lumber", "lumber_camp",
+                    -24, 0, 44, false, true);
 
             // Demographic expansion uses canonical population and existing economy/housing definitions.
             changed |= ensureAutonomousHousingGrowth(colony);
