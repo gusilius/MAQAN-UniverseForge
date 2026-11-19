@@ -13,7 +13,7 @@ class PoliticalDistributionTests(unittest.TestCase):
             for key in ("realms", "provinces", "minimum_pixels", "merge_fraction", "realm_area_cap"):
                 self.assertNotIn(key, profile)
 
-    def test_all_density_profiles_emit_geography_without_canonical_polities(self):
+    def test_all_density_profiles_keep_unowned_state_boundaries_and_sites(self):
         from pathlib import Path
         import tempfile
         with tempfile.TemporaryDirectory() as tmp:
@@ -26,12 +26,16 @@ class PoliticalDistributionTests(unittest.TestCase):
                     seed=424242, settlement_level=level)
                 self.assertNotIn("realm_count", result)
                 self.assertNotIn("realms", result)
+                self.assertGreater(result["state_candidate_count"], 0)
                 self.assertEqual(result["province_count"], len(result["provinces"]))
                 self.assertEqual(result["region_count"], len(result["regions"]))
+                self.assertGreaterEqual(result["settlement_count"], result["province_count"])
                 self.assertTrue(all(not row["name"] for row in result["settlements"]))
                 self.assertTrue(all(not row["realm_id"] and row["type"] == "site"
                                     for row in result["settlements"]))
-                self.assertEqual(validate_package(root / f"level-{level}.worldmap")["realm_count"], 0)
+                validation = validate_package(root / f"level-{level}.worldmap")
+                self.assertEqual(validation["realm_count"], 0)
+                self.assertGreater(validation["state_candidate_count"], 0)
 
     def test_wilderness_reserves_whole_provinces_and_protects_realm_cores(self):
         import numpy as np
