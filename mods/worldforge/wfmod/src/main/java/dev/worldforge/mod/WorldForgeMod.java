@@ -86,6 +86,8 @@ public class WorldForgeMod {
         BIOME_SOURCES.register("image", () -> MapBiomeSource.CODEC);
         GENERATORS.register(bus);
         BIOME_SOURCES.register(bus);
+        net.minecraftforge.fml.ModLoadingContext.get().registerConfig(
+                net.minecraftforge.fml.config.ModConfig.Type.COMMON, MaqanPerformanceConfig.SPEC, "maqan-performance.toml");
         MinecraftForge.EVENT_BUS.register(this);
         MinecraftForge.EVENT_BUS.register(new RegionTracker());
         MinecraftForge.EVENT_BUS.register(new EditorEvents());
