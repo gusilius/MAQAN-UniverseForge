@@ -40,6 +40,8 @@ public final class Bodies {
     }
 
     public static void tick(MinecraftServer server) {
+        int spawnBudget = dev.worldforge.mod.MaqanPerformanceConfig.maxWorkerSpawnsPerPass();
+        if (spawnBudget <= 0) return;
         int spawned = 0;
         for (Colony c : SettleMod.COLONIES.values()) {
             ServerLevel lv = c.level(server);
@@ -59,13 +61,20 @@ public final class Bodies {
                 }
                 if (!keep || !alive) {
                     Entity body = lv.getEntity(e.getValue());
-                    if (body != null) body.discard();
+                    if (body != null) {
+                        body.discard();
+                        dev.worldforge.mod.MaqanPerformanceTelemetry.workerDespawned();
+                    }
                     it.remove();
                 }
             }
-            if (!spawn) continue;
+            if (!spawn || spawned >= spawnBudget) continue;
+            int colonyBodyCount = 0;
+            for (String liveKey : LIVE.keySet()) if (liveKey.startsWith(prefix)) colonyBodyCount++;
+            int colonyBodyLimit = dev.worldforge.mod.MaqanPerformanceConfig.maxActiveWorkerBodiesPerColony();
+            if (colonyBodyCount >= colonyBodyLimit) continue;
             for (Worker w : c.s.workers) {
-                if (spawned >= 4) return;                                          // не больше нескольких за проход
+                if (spawned >= spawnBudget || colonyBodyCount >= colonyBodyLimit) break;                                          // не больше нескольких за проход
                 String k = key(c.s.id, w.id);
                 UUID u = LIVE.get(k);
                 Entity body = u == null ? null : lv.getEntity(u);
@@ -85,8 +94,11 @@ public final class Bodies {
                 e.moveTo(x + 0.5, y, z + 0.5, lv.random.nextFloat() * 360f, 0f);
                 LIVE.put(k, e.getUUID());                                          // сначала запись, потом добавление: проверка тела пройдёт
                 e.refreshName();
-                lv.addFreshEntity(e);
-                spawned++;
+                if (lv.addFreshEntity(e)) {
+                    dev.worldforge.mod.MaqanPerformanceTelemetry.workerSpawned();
+                    spawned++;
+                    colonyBodyCount++;
+                } else LIVE.remove(k);
             }
         }
     }
