@@ -22,8 +22,8 @@ mkdir -p "$OUT/classes"
 # for compiling every adapter against the real Minecraft/Forge classpath.
 mapfile -t CANDIDATE_SRC < <(
   {
-    find "$CORE/src/main/java" -name '*.java'
-    find wf-*/src/main/java -name '*.java' \
+    find "$CORE/src/main/java" -name '*.java' -not -path '*/mc/*'
+    find wf-*/src/main/java -name '*.java' -not -path '*/mc/*' \
       ! -path 'wf-relations/src/main/java/dev/worldforge/relations/NpcSocialSimulation.java'
   } | sort -u
 )
