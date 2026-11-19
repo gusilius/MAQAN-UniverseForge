@@ -854,6 +854,67 @@ fn choose_building_for_need(snapshot: &WorldSnapshot, settlement: &Settlement, t
 }
 
 
+fn registered_profession(snapshot: &WorldSnapshot, id: &str) -> bool {
+    catalog_entry(snapshot, "wf_settle", "building_professions", id).is_some()
+        || catalog_entry(snapshot, "wf_people", "professions", id).is_some()
+}
+
+fn choose_profession_for_output(snapshot: &WorldSnapshot, resource: &str) -> Option<String> {
+    let mut choices = Vec::new();
+    for building in snapshot.catalog_entries.iter().filter(|entry|
+        entry.module_id == "wf_settle" && entry.catalog_id == "buildings") {
+        let outputs = building.payload.get("out").and_then(serde_json::Value::as_object);
+        let jobs = building.payload.get("jobs").and_then(serde_json::Value::as_object);
+        let output_match = outputs.map(|values| values.iter().any(|(good, amount)| {
+            if amount.as_i64().unwrap_or(0) <= 0 { return false; }
+            match resource {
+                "food" => resource_category(snapshot, good) == "food",
+                "wood" => good == "wood" || good.contains("wood") || good.contains("lumber"),
+                "stone" => good == "stone" || good.contains("stone"),
+                _ => false,
+            }
+        })).unwrap_or(false);
+        if !output_match { continue; }
+        let output = outputs.map(|values| values.iter().filter_map(|(good, amount)|
+            if resource == "food" && resource_category(snapshot, good) == "food"
+                || resource == "wood" && (good == "wood" || good.contains("wood") || good.contains("lumber"))
+                || resource == "stone" && (good == "stone" || good.contains("stone"))
+            { amount.as_i64() } else { None }).sum::<i64>()).unwrap_or(0);
+        if let Some(jobs) = jobs {
+            for (profession, slots) in jobs {
+                let capacity = slots.as_i64().unwrap_or(0);
+                if capacity <= 0 || !registered_profession(snapshot, profession) { continue; }
+                let work = building.payload.get("work").and_then(serde_json::Value::as_f64).unwrap_or(30.0).max(1.0);
+                choices.push((profession.clone(), output as f64 / (capacity as f64 * work)));
+            }
+        }
+    }
+    choices.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    choices.into_iter().next().map(|(profession, _)| profession)
+}
+
+fn choose_builder_profession(snapshot: &WorldSnapshot) -> Option<String> {
+    let mut candidates = Vec::new();
+    for building in snapshot.catalog_entries.iter().filter(|entry|
+        entry.module_id == "wf_settle" && entry.catalog_id == "buildings") {
+        if let Some(jobs) = building.payload.get("jobs").and_then(serde_json::Value::as_object) {
+            for (profession, slots) in jobs {
+                if slots.as_i64().unwrap_or(0) <= 0 || !registered_profession(snapshot, profession) { continue; }
+                let id_match = profession.to_ascii_lowercase().contains("builder")
+                    || profession.to_ascii_lowercase().contains("construction");
+                let group_match = catalog_entry(snapshot, "wf_people", "professions", profession)
+                    .and_then(|entry| entry.payload.get("group"))
+                    .and_then(serde_json::Value::as_str)
+                    .map(|group| group.to_ascii_lowercase().contains("construction"))
+                    .unwrap_or(false);
+                if id_match || group_match { candidates.push(profession.clone()); }
+            }
+        }
+    }
+    candidates.sort(); candidates.dedup(); candidates.into_iter().next()
+}
+
+
 
 impl WorldSnapshot {
     pub fn validate(&self) -> Result<(), SimError> {
@@ -1262,19 +1323,23 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
             continue;
         };
         if w.unemployed == 0 { continue; }
-        let target = if w.food_output < w.food_need { Some(("unemployed", "farmer", w.food_need - w.food_output)) }
-            else if w.wood_output < w.wood_need { Some(("unemployed", "lumberjack", w.wood_need - w.wood_output)) }
-            else if w.stone_output < w.stone_need { Some(("unemployed", "miner", w.stone_need - w.stone_output)) }
-            else if s.housing_used < s.housing && s.population > 10 && w.builders == 0 { Some(("unemployed", "builder", 1)) }
-            else { None };
-        if let Some((from, to, deficit)) = target {
+        let target = if w.food_output < w.food_need {
+                choose_profession_for_output(snapshot, "food").map(|to| (to, w.food_need - w.food_output))
+            } else if w.wood_output < w.wood_need {
+                choose_profession_for_output(snapshot, "wood").map(|to| (to, w.wood_need - w.wood_output))
+            } else if w.stone_output < w.stone_need {
+                choose_profession_for_output(snapshot, "stone").map(|to| (to, w.stone_need - w.stone_output))
+            } else if s.housing_used < s.housing && s.population > 10 && w.builders == 0 {
+                choose_builder_profession(snapshot).map(|to| (to, 1))
+            } else { None };
+        if let Some((to, deficit)) = target {
             proposals.push(Proposal {
-                id: proposal_id(snapshot.seed, snapshot.day, "profession", &w.settlement_id, to),
+                id: proposal_id(snapshot.seed, snapshot.day, "profession", &w.settlement_id, &to),
                 day: snapshot.day,
                 kind: ProposalKind::ReassignProfession {
-                    settlement: w.settlement_id.clone(), from: from.into(), to: to.into(),
+                    settlement: w.settlement_id.clone(), from: "unemployed".into(), to: to.clone(),
                     workers: if deficit > 0 { 1 } else { 0 },
-                    reason: format!("unemployed workforce assigned to cover {to} production deficit"),
+                    reason: format!("registered profession {to} selected from building job definitions to cover production deficit"),
                 },
             });
         }
