@@ -1683,6 +1683,35 @@ mod tests {
         assert_eq!(scoped_reputation(&snapshot, "leader-2", "north"), 0);
     }
 
+    #[test]
+    fn active_character_forms_apply_stage_shift_weakness_and_need_modifiers() {
+        let mut snapshot = base();
+        let character = Character {
+            id: "player-character".into(),
+            identity_owner_id: "p:player-uuid".into(),
+            race_id: "human".into(),
+            ..Default::default()
+        };
+        snapshot.catalog_entries.extend(vec![
+            CatalogEntry { module_id:"wf_forms".into(), catalog_id:"forms".into(),
+                entry_id:"lycanthropy".into(), name:"Lycanthropy".into(),
+                payload:serde_json::json!({
+                    "secret":false,"flagStage":1,"opinion":-10,
+                    "stages":[{"mods":{"military":2.0}},{"mods":{"military":3.0}}],
+                    "shiftMods":{"military":4.0},
+                    "weaknesses":[{"when":"silver","mods":{"military":5.0}}],
+                    "need":{"max":100.0,"belowPct":25.0,"starve":{"military":6.0}}
+                }) },
+            CatalogEntry { module_id:"wf_forms".into(), catalog_id:"runtime_state".into(),
+                entry_id:"forms".into(), name:"Forms".into(),
+                payload:serde_json::json!({"owners":{"p:player-uuid":{
+                    "lycanthropy":{"stage":1,"active":true,"exposed":true,"env":["silver"],"meter":10.0}
+                }}}) },
+        ]);
+        assert!((form_modifier(&snapshot, &character, "military") - 18.0).abs() < 1e-9);
+        assert!((form_modifier(&snapshot, &character, "opinion") + 10.0).abs() < 1e-9);
+    }
+
     fn realm(id: &str, army: u64) -> Realm {
         Realm { id:id.into(), population:1000, treasury:1000, army_strength:army, stability:60,
             prestige:50, expansion_pressure:100, at_war:false, last_war_day:0 }
