@@ -58,6 +58,9 @@ public class SettleTypesTest {
             for (int i = 0; i < l.size(); i++) { same &= Arrays.equals(l.get(i), l2.get(i)); for (int j = 0; j < i; j++) if (Arrays.equals(l.get(i), l.get(j))) dup = true; }
             ok(same && !dup, "схема " + sc + ": 20 участков, детерминирована, без совпадений");
         }
+        defs.registerCanonicalProfession("custom_scholar", "Учёный");
+        ok(defs.professions.containsKey("custom_scholar"),
+                "canonical wf-people professions become valid settlement Worker assignments without duplicate datapack definitions");
         Settlement se = new Settlement("s1", "Тест", defs);
         se.types = st;
         se.typeId = "camp";
