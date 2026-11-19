@@ -62,6 +62,43 @@ SETTLEMENT_PROFILES = {
     7: {"key": "planetary_civilization", "wilderness_share": 0.00, "population_density": 1.00},
 }
 
+def settlement_opportunities_for_area(area_pixels: int, population_density: float) -> int:
+    """Scale settlement opportunities with viable land area and the selected density profile.
+
+    One geographic anchor per province remains the minimum; large provinces gain
+    additional independent sites, and denser profiles lower the area needed per site.
+    """
+    area = max(0, int(area_pixels))
+    density = min(1.0, max(0.0, float(population_density)))
+    pixels_per_site = max(180.0, 1800.0 * (1.0 - 0.82 * density))
+    return max(1, min(12, int(math.ceil(area / pixels_per_site))))
+
+
+def spread_settlement_points(cells: np.ndarray, anchor: int, count: int,
+                             width: int, seed: int) -> list[int]:
+    """Pick deterministic, spatially separated land pixels within one province."""
+    candidates = np.asarray(cells, dtype=np.int64)
+    if count <= 0 or candidates.size <= 1:
+        return []
+    selected = [int(anchor)]
+    xs = candidates % width
+    zs = candidates // width
+    for _ in range(count):
+        distances = np.full(candidates.size, np.iinfo(np.int64).max, dtype=np.int64)
+        for point in selected:
+            px, pz = point % width, point // width
+            distances = np.minimum(distances, (xs - px) ** 2 + (zs - pz) ** 2)
+        distances[np.isin(candidates, np.asarray(selected, dtype=np.int64))] = -1
+        farthest = int(distances.max())
+        if farthest < 36:  # Keep settlements at least six map pixels apart.
+            break
+        tied = candidates[distances == farthest]
+        chosen = min((int(point) for point in tied),
+                     key=lambda point: ((point * 2654435761 + seed) & 0xFFFFFFFF))
+        selected.append(chosen)
+    return selected[1:]
+
+
 
 def stable_name(seed: int, index: int, suffix: str = "") -> str:
     rng = random.Random((seed & 0xFFFFFFFFFFFFFFFF) ^ (index * 0x9E3779B97F4A7C15))
@@ -1283,6 +1320,22 @@ def convert_image(input_path: Path, output_path: Path, seed: int, region_count: 
         for offset, pid in enumerate(pids[1:], 2):
             add_settlement(("city", "town", "village")[(offset - 2) % 3],
                            province_meta[pid]["seed"], offset)
+
+        # Province anchors are a floor, not the total settlement budget. Larger
+        # provinces gain additional dispersed opportunities according to the selected
+        # population-density profile; no fixed realm/province count caps this pass.
+        density = float(settlement_profile["population_density"])
+        province_flat = province_labels.ravel()
+        for pid in pids:
+            province = province_meta[pid]
+            province_cells = np.flatnonzero(province_flat == pid)
+            target_sites = settlement_opportunities_for_area(province["area"], density)
+            extra_points = spread_settlement_points(
+                province_cells, int(province["seed"]), target_sites - 1,
+                width, seed ^ (rid * 0x9E3779B1) ^ (pid * 0x85EBCA77))
+            for extra_index, point in enumerate(extra_points):
+                add_settlement("village", point, 1000 + int(pid) * 16 + extra_index)
+
         mountain_code = ANALYSIS_CLASSES.index("mountains")
         mountain_cells = [i for i in realm_cells if analysis_flat[i] == mountain_code]
         if mountain_cells:
