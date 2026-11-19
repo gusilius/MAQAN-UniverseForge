@@ -852,6 +852,8 @@ public final class WorldSimMod {
     }
 
     private static JsonObject snapshot(MinecraftServer server, long day) {
+        // Export the same canonical profession vocabulary that settlement Workers can apply.
+        SettleMod.syncCanonicalProfessions();
         JsonObject root = new JsonObject();
         var canonicalWorldId = WorldForgeMod.worldId();
         if (canonicalWorldId == null)
@@ -3702,6 +3704,7 @@ public final class WorldSimMod {
             return false;
         }
         if ("reassign_profession".equals(type)) {
+            SettleMod.syncCanonicalProfessions();
             String settlementId = action.get("settlement").getAsString();
             String from = action.get("from").getAsString(), to = action.get("to").getAsString();
             int wanted = action.get("workers").getAsInt();
