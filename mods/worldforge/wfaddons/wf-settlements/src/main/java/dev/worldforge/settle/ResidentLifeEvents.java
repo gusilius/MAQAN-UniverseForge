@@ -13,6 +13,21 @@ import java.util.*;
  * It never creates a second resident identity and records its year markers on Character props.
  */
 public final class ResidentLifeEvents {
+    private static final int MAX_RELATIONSHIP_CANDIDATES_PER_PERSON_PER_YEAR = 32;
+    /**
+     * Settlement life AI is invoked once per colony, but family events belong to the
+     * dimension's canonical Character registry. Without this registry/year gate, a world
+     * with hundreds of colonies repeated a full-registry pass hundreds of times per tick.
+     * Weak keys avoid retaining unloaded world registries.
+     */
+    private static final Map<CharacterRegistry, RegistryPassState> REGISTRY_PASSES = new WeakHashMap<>();
+
+    private static final class RegistryPassState {
+        int stageYear = Integer.MIN_VALUE;
+        int stageSize = -1;
+        int familyYear = Integer.MIN_VALUE;
+    }
+
     private ResidentLifeEvents() {}
 
     public static void yearly(CharacterRegistry registry, int year) {
@@ -22,16 +37,28 @@ public final class ResidentLifeEvents {
     /** Uses the shared data-pack name bank; the legacy overload remains for pure-domain callers. */
     public static void yearly(CharacterRegistry registry, int year, NameBank names) {
         if (registry == null || year < 1) return;
+
+        // Stage refresh is also needed for residents materialized later in the same year.
+        // A size change triggers one refresh; repeated colony calls with the same registry
+        // and size return in O(1). Family/social events themselves run only once per year.
+        int registrySize = registry.size();
+        boolean refreshStages;
+        boolean processFamily;
+        synchronized (REGISTRY_PASSES) {
+            RegistryPassState state = REGISTRY_PASSES.computeIfAbsent(registry, ignored -> new RegistryPassState());
+            refreshStages = state.stageYear != year || state.stageSize != registrySize;
+            if (refreshStages) {
+                state.stageYear = year;
+                state.stageSize = registrySize;
+            }
+            processFamily = state.familyYear != year;
+            if (processFamily) state.familyYear = year;
+        }
+        if (refreshStages) registry.refreshLifeStages(year);
+        if (!processFamily) return;
+
         List<Character> people = new ArrayList<>(registry.all());
         people.sort(Comparator.comparing(c -> c.id));
-        // A settlement may call this pass every simulation step. Refresh the full registry only
-        // once per world year, not once per colony tick.
-        boolean refreshStages = people.stream().anyMatch(person ->
-                number(person.props.get("population.life_stage_refresh_year"), 0) < year);
-        if (refreshStages) {
-            registry.refreshLifeStages(year);
-            for (Character person : people) person.props.put("population.life_stage_refresh_year", year);
-        }
         for (Character person : people) {
             if (!person.alive || year <= number(person.props.get("social.last_family_year"), 0)) continue;
             person.props.put("social.last_family_year", year);
@@ -108,16 +135,27 @@ public final class ResidentLifeEvents {
             }
         }
 
-        for (int i = 0; i < people.size(); i++) {
-            Character first = people.get(i);
-            if (!first.alive || first.spouse != null && !first.spouse.isBlank()
-                    || PopulationSimulation.age(first, year) < 18
-                    || year <= number(first.props.get("family.relationship_review_year"), 0)) continue;
+        // Pairing is a yearly social opportunity, not an exhaustive all-to-all scan.
+        // Deterministic rotating samples keep the work O(population * candidate budget),
+        // while changing the starting offset each year so compatible residents outside
+        // this year's sample are not permanently excluded.
+        List<Character> eligibleSingles = people.stream()
+                .filter(person -> person.alive && (person.spouse == null || person.spouse.isBlank())
+                        && PopulationSimulation.age(person, year) >= 18)
+                .toList();
+        for (int i = 0; i < eligibleSingles.size(); i++) {
+            Character first = eligibleSingles.get(i);
+            if (year <= number(first.props.get("family.relationship_review_year"), 0)) continue;
             first.props.put("family.relationship_review_year", year);
-            for (int j = i + 1; j < people.size(); j++) {
-                Character second = people.get(j);
+            int available = eligibleSingles.size() - i - 1;
+            if (available <= 0) continue;
+            int checks = Math.min(available, MAX_RELATIONSHIP_CANDIDATES_PER_PERSON_PER_YEAR);
+            int startOffset = Math.floorMod(Objects.hash(first.id, year, "relationship-review"), available);
+            for (int probe = 0; probe < checks; probe++) {
+                int j = i + 1 + ((startOffset + probe) % available);
+                Character second = eligibleSingles.get(j);
                 if (!second.alive || second.spouse != null && !second.spouse.isBlank()
-                        || PopulationSimulation.age(second, year) < 18 || closeFamily(registry, first, second)) continue;
+                        || closeFamily(registry, first, second)) continue;
                 int affinity = Math.min(ResidentSocial.score(first, second.globalId), ResidentSocial.score(second, first.globalId));
                 String firstDating = string(first.props.get("family.dating"));
                 String secondDating = string(second.props.get("family.dating"));
