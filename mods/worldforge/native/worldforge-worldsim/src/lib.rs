@@ -409,6 +409,56 @@ fn catalog_entry<'a>(snapshot: &'a WorldSnapshot, module: &str, catalog: &str, i
         entry.module_id == module && entry.catalog_id == catalog && entry.entry_id == id)
 }
 
+fn origin_modifier(snapshot: &WorldSnapshot, character: &Character, key: &str) -> f64 {
+    let mut total = 0.0;
+    for (catalog, id) in [("races", character.race_id.as_str()), ("classes", character.class_id.as_str())] {
+        if id.is_empty() { continue; }
+        if let Some(entry) = catalog_entry(snapshot, "wf_origins", catalog, id) {
+            total += entry.payload.get("mods").and_then(|mods| mods.get(key))
+                .and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+        }
+    }
+    if !character.profession_id.is_empty() {
+        if let Some(profession) = catalog_entry(snapshot, "wf_origins", "origin_professions", &character.profession_id) {
+            let rank = character.skills.get(&character.profession_id).copied().unwrap_or(0).max(0) as usize;
+            if let Some(ranks) = profession.payload.get("ranks").and_then(serde_json::Value::as_array) {
+                if let Some(selected) = rank.checked_sub(1).and_then(|index| ranks.get(index)) {
+                    total += selected.get("mods").and_then(|mods| mods.get(key))
+                        .and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+                }
+            }
+        }
+    }
+    for synergy in snapshot.catalog_entries.iter().filter(|entry|
+        entry.module_id == "wf_origins" && entry.catalog_id == "synergies") {
+        let races = synergy.payload.get("races").and_then(serde_json::Value::as_array);
+        let classes = synergy.payload.get("classes").and_then(serde_json::Value::as_array);
+        let race_match = races.map(|values| values.is_empty()
+            || values.iter().any(|value| value.as_str() == Some(character.race_id.as_str()))).unwrap_or(true);
+        let class_match = classes.map(|values| values.is_empty()
+            || values.iter().any(|value| value.as_str() == Some(character.class_id.as_str()))).unwrap_or(true);
+        let flags_match = synergy.payload.get("flags").and_then(serde_json::Value::as_array)
+            .map(|values| values.iter().filter_map(serde_json::Value::as_str)
+                .all(|flag| character.trait_ids.iter().any(|trait_id| trait_id == flag))).unwrap_or(true);
+        let professions_match = synergy.payload.get("profs").and_then(serde_json::Value::as_object)
+            .map(|required| required.iter().all(|(profession, rank)|
+                character.skills.get(profession).copied().unwrap_or(0) >= rank.as_i64().unwrap_or(0) as i32))
+            .unwrap_or(true);
+        if race_match && class_match && flags_match && professions_match {
+            total += synergy.payload.get("mods").and_then(|mods| mods.get(key))
+                .and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+        }
+    }
+    if total.is_finite() { total } else { 0.0 }
+}
+
+fn realm_leader<'a>(snapshot: &'a WorldSnapshot, realm_id: &str) -> Option<&'a Character> {
+    let title = snapshot.titles.iter().filter(|title|
+        title.realm_id == realm_id && !title.holder_character_id.is_empty())
+        .max_by_key(|title| title.tier_index)?;
+    snapshot.characters.iter().find(|character| character.id == title.holder_character_id)
+}
+
 fn court_opinion_modifier(snapshot: &WorldSnapshot, first: &str, second: &str) -> i64 {
     let mut total = 0_i64;
     for entry in snapshot.catalog_entries.iter().filter(|entry|
@@ -1024,6 +1074,9 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
             let government_modifier = ["war_score", "military", "warfare", "expansion"]
                 .iter().map(|key| realm_policy_modifier(snapshot, &attacker.id, key))
                 .sum::<f64>().round() as i64;
+            let leader_modifier = realm_leader(snapshot, &attacker.id).map(|leader|
+                origin_modifier(snapshot, leader, "war_score") + origin_modifier(snapshot, leader, "military"))
+                .unwrap_or(0.0).round() as i64;
             let score = clamp_score(
                 attacker.expansion_pressure as i64 / 2
                 + if border.contested_claim { 28 } else { 0 }
@@ -1031,6 +1084,7 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
                 + power as i64 / 4
                 + attacker.prestige as i64 / 5
                 + government_modifier
+                + leader_modifier
                 + diplomatic_opinion as i64 / 10
                 - intrigue_penalty
                 - subject_penalty as i64
@@ -1167,6 +1221,8 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
                 + ((a.prestige + b.prestige) / 8) as i64
                 + if a.house_id != b.house_id { 10 } else { 0 }
                 + social_bonus as i64 + dynastic_policy + court_opinion_modifier(snapshot, &a.id, &b.id)
+                + origin_modifier(snapshot, a, "marriage").round() as i64
+                + origin_modifier(snapshot, b, "marriage").round() as i64
                 - kinship_penalty as i64
                 - (a.age as i32 - b.age as i32).abs() as i64);
             if score >= 35 && best.map(|(_, current, _)| score > current).unwrap_or(true) { best = Some((b, score, social_bonus)); }
