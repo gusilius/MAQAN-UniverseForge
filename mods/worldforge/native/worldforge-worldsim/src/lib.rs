@@ -809,7 +809,7 @@ fn choose_building_for_need(snapshot: &WorldSnapshot, settlement: &Settlement, t
         let outputs = payload.get("out").and_then(serde_json::Value::as_object);
         let jobs = payload.get("jobs").and_then(serde_json::Value::as_object);
         let has_output = |needle: &str| outputs.map(|values| values.iter()
-            .any(|(resource, amount)| amount.as_i64().unwrap_or(0) > 0
+            .any(|(resource, amount)| amount.as_f64().unwrap_or(0.0) > 0.0
                 && (resource == needle || (needle == "food" && resource_category(snapshot, resource) == "food"))))
             .unwrap_or(false);
         let has_job = |needles: &[&str]| jobs.map(|values| values.iter()
@@ -880,13 +880,13 @@ fn choose_profession_for_output(snapshot: &WorldSnapshot, resource: &str) -> Opt
             if resource == "food" && resource_category(snapshot, good) == "food"
                 || resource == "wood" && (good == "wood" || good.contains("wood") || good.contains("lumber"))
                 || resource == "stone" && (good == "stone" || good.contains("stone"))
-            { amount.as_i64() } else { None }).sum::<i64>()).unwrap_or(0);
+            { amount.as_f64() } else { None }).sum::<f64>()).unwrap_or(0.0);
         if let Some(jobs) = jobs {
             for (profession, slots) in jobs {
-                let capacity = slots.as_i64().unwrap_or(0);
-                if capacity <= 0 || !registered_profession(snapshot, profession) { continue; }
+                let capacity = slots.as_f64().unwrap_or(0.0);
+                if capacity <= 0.0 || !registered_profession(snapshot, profession) { continue; }
                 let work = building.payload.get("work").and_then(serde_json::Value::as_f64).unwrap_or(30.0).max(1.0);
-                choices.push((profession.clone(), output as f64 / (capacity as f64 * work)));
+                choices.push((profession.clone(), output / (capacity * work)));
             }
         }
     }
