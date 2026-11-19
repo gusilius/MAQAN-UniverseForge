@@ -89,8 +89,18 @@ public final class SettleCommands {
                                             return "Рабочий #" + w + " отправлен в здание #" + uid;
                                         }))
                                         .then(Commands.argument("role", StringArgumentType.word())
-                                                .suggests((c, b) -> SharedSuggestionProvider.suggest(
-                                                        SettleMod.DEFS == null ? java.util.List.of() : SettleMod.DEFS.professions.keySet(), b))
+                                                .suggests((c, b) -> {
+                                                    CommandSourceStack source = c.getSource();
+                                                    Colony colony = SettleMod.nearest(source.getLevel(),
+                                                            source.getPosition().x, source.getPosition().z);
+                                                    if (colony == null) return b.buildFuture();
+                                                    Settlement.Building building = colony.s.building(
+                                                            IntegerArgumentType.getInteger(c, "uid"));
+                                                    if (building == null) return b.buildFuture();
+                                                    java.util.Set<String> roles = new java.util.TreeSet<>(building.def.jobs.keySet());
+                                                    if (building.state == Settlement.Building.State.BUILDING) roles.add("builder");
+                                                    return SharedSuggestionProvider.suggest(roles, b);
+                                                })
                                                 .executes(c -> order(c, col -> {
                                                     int w = IntegerArgumentType.getInteger(c, "worker"), uid = IntegerArgumentType.getInteger(c, "uid");
                                                     String role = StringArgumentType.getString(c, "role");
