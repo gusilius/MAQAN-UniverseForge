@@ -4,6 +4,7 @@ import dev.worldforge.mod.MapData;
 import dev.worldforge.mod.TitleData;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
+import dev.worldforge.people.RoleDefs;
 import dev.worldforge.realms.PoliticalIdentitySynchronizer;
 import dev.worldforge.realms.Statecraft;
 
