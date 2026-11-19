@@ -3649,16 +3649,31 @@ public final class WorldSimMod {
             String building = action.get("building").getAsString();
             Colony colony = SettleMod.colony(settlementId);
             if (colony == null || colony.s == null) return false;
-            int hash = requestId.hashCode();
-            for (int radius = 0; radius <= 48; radius += 4) {
-                for (int x = -radius; x <= radius; x += 4) for (int z = -radius; z <= radius; z += 4) {
-                    if (Math.max(Math.abs(x), Math.abs(z)) != radius) continue;
-                    if (colony.s.placeError(building, x + (hash & 7), z + ((hash >>> 3) & 7)) == null) {
-                        colony.s.placeOnce(requestId, building, x + (hash & 7), z + ((hash >>> 3) & 7));
-                        if (!SettleMod.saveDurably(server)) return false;
-                        lastProjectDay.put(settlementId, day);
-                        return true;
-                    }
+            if (colony.map == null) return false;
+            List<int[]> candidateSites = new ArrayList<>();
+            Set<Long> seenSites = new HashSet<>();
+            for (var cell : colony.map.cells()) {
+                int x = cell.x(), z = cell.z();
+                long key = (((long) x) << 32) ^ (z & 0xffffffffL);
+                if (seenSites.add(key)) candidateSites.add(new int[]{x, z});
+            }
+            for (var parcel : colony.map.parcels.values()) {
+                int x = parcel.x + parcel.width / 2, z = parcel.z + parcel.depth / 2;
+                long key = (((long) x) << 32) ^ (z & 0xffffffffL);
+                if (seenSites.add(key)) candidateSites.add(new int[]{x, z});
+            }
+            // Search the complete sampled settlement map and its actual zoning parcels.
+            // No arbitrary radius or fixed number of attempts can strand a valid build site.
+            candidateSites.sort(Comparator.comparingLong(site ->
+                    (long) site[0] * site[0] + (long) site[1] * site[1])
+                    .thenComparingInt(site -> site[0]).thenComparingInt(site -> site[1]));
+            for (int[] site : candidateSites) {
+                int x = site[0], z = site[1];
+                if (colony.s.placeError(building, x, z) == null) {
+                    colony.s.placeOnce(requestId, building, x, z);
+                    if (!SettleMod.saveDurably(server)) return false;
+                    lastProjectDay.put(settlementId, day);
+                    return true;
                 }
             }
             return false;
