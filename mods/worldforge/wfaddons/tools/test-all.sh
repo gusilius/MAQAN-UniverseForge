@@ -15,18 +15,30 @@ PACK="$OUT/worldforge-test.worldmap"
 python3 tests/create_world_fixture.py "$PACK"
 
 mkdir -p "$OUT/classes"
-mapfile -t SRC < <(
+# A source is eligible for this lightweight domain harness only when it has
+# no direct Minecraft, Forge, or Brigadier dependency. The previous path-only
+# filter missed core adapter classes because wfmod keeps them beside pure APIs
+# rather than in an /mc/ package. Full Gradle builds above remain responsible
+# for compiling every adapter against the real Minecraft/Forge classpath.
+mapfile -t CANDIDATE_SRC < <(
   {
-    find "$CORE/src/main/java" -name '*.java' -not -path '*/mc/*'
-    find wf-*/src/main/java -name '*.java' -not -path '*/mc/*' \
+    find "$CORE/src/main/java" -name '*.java'
+    find wf-*/src/main/java -name '*.java' \
       ! -path 'wf-relations/src/main/java/dev/worldforge/relations/NpcSocialSimulation.java'
   } | sort -u
 )
+SRC=()
+for source in "${CANDIDATE_SRC[@]}"; do
+  if grep -Eq '(^|[[:space:]])import[[:space:]]+(net\\.minecraft|net\\.minecraftforge|com\\.mojang\\.brigadier)(\\.|;)|net\\.minecraft\\.|net\\.minecraftforge\\.|com\\.mojang\\.brigadier\\.' "$source"; then
+    continue
+  fi
+  SRC+=("$source")
+done
 if [ "${#SRC[@]}" -eq 0 ]; then
   echo "ERROR: no framework-independent production sources discovered"
   exit 2
 fi
-echo "Compiling ${#SRC[@]} pure production sources and domain tests"
+echo "Compiling ${#SRC[@]} framework-independent production sources (excluded ${#CANDIDATE_SRC[@]} total candidates) and domain tests"
 javac -proc:none -encoding UTF-8 -d "$OUT/classes" "${SRC[@]}" tests/*.java tests/support/*.java
 
 if [ "${3:-}" = "--image-identity-only" ]; then
