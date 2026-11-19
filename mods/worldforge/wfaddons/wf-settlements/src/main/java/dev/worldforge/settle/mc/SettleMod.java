@@ -840,6 +840,32 @@ public class SettleMod {
         return best;
     }
 
+    /** Selects a structure against the settlement's immutable identity before site search/placement. */
+    private static String identityStructure(Colony colony, String requested, long seed) {
+        if (colony == null || colony.s == null) return requested;
+        String selected = colony.s.defs.selectIdentityBuilding(requested, colony.identityRace, null,
+                colony.identityCulture, colony.governmentId, colony.settlementType, seed);
+        if (selected == null || selected.isBlank()) {
+            LOGGER.debug("wf_settle: no compatible structure candidate for {} (race={}, culture={}, government={}, type={})",
+                    requested, colony.identityRace, colony.identityCulture, colony.governmentId, colony.settlementType);
+            return "";
+        }
+        return selected;
+    }
+
+    private static boolean placeAutonomousIdentityBuilding(Colony colony, String requestId, String requested,
+                                                         int preferredX, int preferredZ, int radius,
+                                                         boolean preferFertile, boolean preferForest) {
+        if (colony == null || colony.s == null || colony.s.placement(requestId) != null) return false;
+        String candidate = identityStructure(colony, requested, requestId.hashCode());
+        if (candidate.isBlank()) return false;
+        int[] site = findAutonomousBuildSite(colony, candidate, preferredX, preferredZ, radius, preferFertile, preferForest);
+        if (site == null) return false;
+        int before = colony.s.count(candidate, false);
+        colony.s.placeOnce(requestId, candidate, site[0], site[1]);
+        return colony.s.count(candidate, false) > before;
+    }
+
     /**
      * Adds one residential building only when canonical demographic pressure, food security,
      * public approval and the shared stock ledger all support expansion. Pending houses are
@@ -868,12 +894,8 @@ public class SettleMod {
                 {ring, -ring / 2}, {ring, ring / 2}, {ring / 2, ring},
                 {-ring / 2, ring}, {-ring, ring / 2}};
         int[] anchor = anchors[ordinal % anchors.length];
-        int[] site = findAutonomousBuildSite(colony, "house", anchor[0], anchor[1],
+        return placeAutonomousIdentityBuilding(colony, request, "house", anchor[0], anchor[1],
                 Math.max(36, ring + 20), false, false);
-        if (site == null) return false;
-        int before = settlement.count("house", false);
-        settlement.placeOnce(request, "house", site[0], site[1]);
-        return settlement.count("house", false) > before;
     }
 
     /**
@@ -916,12 +938,8 @@ public class SettleMod {
         if (candidate == null) return false;
         String requestId = "wfworldgen.specialization." + candidate;
         if (settlement.placement(requestId) != null) return false;
-        int[] site = findAutonomousBuildSite(colony, candidate, preferredX, preferredZ,
+        return placeAutonomousIdentityBuilding(colony, requestId, candidate, preferredX, preferredZ,
                 64, false, preferForest);
-        if (site == null) return false;
-        int before = settlement.count(candidate, false);
-        settlement.placeOnce(requestId, candidate, site[0], site[1]);
-        return settlement.count(candidate, false) > before;
     }
 
     /** Connects every autonomous building to the civic hub using the existing A* road graph. */
