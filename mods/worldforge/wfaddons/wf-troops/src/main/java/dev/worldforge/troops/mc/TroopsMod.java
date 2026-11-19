@@ -90,6 +90,11 @@ public class TroopsMod {
     public static final ArmyHierarchy HIERARCHY = new ArmyHierarchy();
     public static final Forts FORTS = new Forts();
     public static final Map<String, TroopEntity> LIVE = new ConcurrentHashMap<>();
+
+    private static void removeLive(String entityId) {
+        if (LIVE.remove(entityId) != null)
+            dev.worldforge.mod.MaqanPerformanceTelemetry.troopDespawned();
+    }
     /** Durable death outbox; a soldier body is retained until the canonical Character estate is committed. */
     private static final MilitaryDeathLedger DEATHS = new MilitaryDeathLedger();
     /** Durable strategic roster -> physical troop deployment journal. */
@@ -384,7 +389,7 @@ public class TroopsMod {
         String entityId = troop.getUUID().toString();
 
         if (TRANSITIONS.hasCompletedEntity(entityId)) {
-            LIVE.remove(entityId);
+            removeLive(entityId);
             SQUADS.remove(entityId);
             RETURNED_BODIES_PENDING.remove(entityId);
             troop.discard();
@@ -396,7 +401,7 @@ public class TroopsMod {
                 && troop.characterId != null && !troop.characterId.isBlank()) {
             Character existingCharacter = PeopleMod.authority().getGlobal(troop.characterId);
             if (existingCharacter != null && !existingCharacter.alive) {
-                LIVE.remove(entityId);
+                removeLive(entityId);
                 SQUADS.remove(entityId);
                 troop.discard();
                 return;
@@ -405,7 +410,7 @@ public class TroopsMod {
 
         if (troop.characterId != null && !troop.characterId.isBlank()
                 && TRANSITIONS.isCompleted(troop.characterId, entityId)) {
-            LIVE.remove(entityId);
+            removeLive(entityId);
             SQUADS.remove(entityId);
             troop.discard();
             return; // A committed non-lethal transition owns this exact physical body forever.
@@ -490,6 +495,7 @@ public class TroopsMod {
         }
 
         LIVE.put(entityId, troop);
+        dev.worldforge.mod.MaqanPerformanceTelemetry.troopSpawned();
         if (!troop.deferCharacterBinding) syncPerson(troop);
         if (SQUADS.squadOf(entityId) == null) {
             Squads.Squad squad = SQUADS.create(troop.ownerId(), null, List.of(entityId));
@@ -751,7 +757,7 @@ public class TroopsMod {
     @SubscribeEvent
     public void leave(EntityLeaveLevelEvent e) {
         if (e.getLevel().isClientSide || !(e.getEntity() instanceof TroopEntity t)) return;
-        LIVE.remove(t.getUUID().toString());
+        removeLive(t.getUUID().toString());
     }
 
     /**
@@ -762,7 +768,7 @@ public class TroopsMod {
         if (troop == null) return false;
         String entityId = troop.getUUID().toString();
         if (!ModList.get().isLoaded("wf_people")) {
-            LIVE.remove(entityId);
+            removeLive(entityId);
             SQUADS.remove(entityId);
             return true;
         }
@@ -877,7 +883,7 @@ public class TroopsMod {
                 return false;
             }
 
-            LIVE.remove(pending.troopEntityId());
+            removeLive(pending.troopEntityId());
             SQUADS.remove(pending.troopEntityId());
             if (discardPhysicalBody) discardPendingPhysicalBody(pending.troopEntityId());
             return true;
@@ -1007,7 +1013,7 @@ public class TroopsMod {
                 actionPersistenceBlocked = true;
                 return false;
             }
-            LIVE.remove(pending.troopEntityId());
+            removeLive(pending.troopEntityId());
             SQUADS.remove(pending.troopEntityId());
             body.discard();
             return true;
@@ -1075,7 +1081,7 @@ public class TroopsMod {
                 return false;
             }
             String id = pending.troopEntityId();
-            LIVE.remove(id);
+            removeLive(id);
             SQUADS.remove(id);
             body.discard();
             return true;
@@ -2580,7 +2586,7 @@ public class TroopsMod {
             person.props.remove("wf_veteran_rank");
         }
         String id = troop.getUUID().toString();
-        LIVE.remove(id);
+        removeLive(id);
         SQUADS.remove(id);
     }
 
@@ -2603,7 +2609,7 @@ public class TroopsMod {
             if (server == null || !PeopleMod.persistCharacter(person, server)) return false;
         }
         String id = troop.getUUID().toString();
-        LIVE.remove(id);
+        removeLive(id);
         SQUADS.remove(id);
         return true;
     }
