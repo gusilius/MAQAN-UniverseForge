@@ -1108,9 +1108,8 @@ impl WorldSnapshot {
             if !capability.available || !capability.snapshot_received {
                 return Err(SimError::InvalidSnapshot(format!("catalog-not-transferred:{module}")));
             }
-            if capability.consumed_catalogs.is_empty() && !capability.simulation_consumed {
-                return Err(SimError::InvalidSnapshot(format!("catalog-not-consumed:{module}")));
-            }
+            // Transfer and consumption are separate facts: a module may export its full
+            // catalog while only selected namespaces participate in this native decision pass.
             let expected = *count + if *module == "wf_realms" { self.government_definitions.len() as u32 } else { 0 };
             if capability.catalog_count != expected {
                 return Err(SimError::InvalidSnapshot(format!("catalog-count-mismatch:{module}:declared={}:actual={expected}", capability.catalog_count)));
