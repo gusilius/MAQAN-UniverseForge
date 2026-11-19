@@ -82,11 +82,21 @@ public final class SettleCommands {
                         }))))
                 .then(Commands.literal("assign").requires(SettleCommands::op)
                         .then(Commands.argument("worker", IntegerArgumentType.integer(1))
-                                .then(Commands.argument("uid", IntegerArgumentType.integer(1)).executes(c -> order(c, col -> {
-                                    int w = IntegerArgumentType.getInteger(c, "worker"), uid = IntegerArgumentType.getInteger(c, "uid");
-                                    col.s.assign(w, uid);
-                                    return "Рабочий #" + w + " отправлен в здание #" + uid;
-                                })))))
+                                .then(Commands.argument("uid", IntegerArgumentType.integer(1))
+                                        .executes(c -> order(c, col -> {
+                                            int w = IntegerArgumentType.getInteger(c, "worker"), uid = IntegerArgumentType.getInteger(c, "uid");
+                                            col.s.assign(w, uid);
+                                            return "Рабочий #" + w + " отправлен в здание #" + uid;
+                                        }))
+                                        .then(Commands.argument("role", StringArgumentType.word())
+                                                .suggests((c, b) -> SharedSuggestionProvider.suggest(
+                                                        SettleMod.DEFS == null ? java.util.List.of() : SettleMod.DEFS.professions.keySet(), b))
+                                                .executes(c -> order(c, col -> {
+                                                    int w = IntegerArgumentType.getInteger(c, "worker"), uid = IntegerArgumentType.getInteger(c, "uid");
+                                                    String role = StringArgumentType.getString(c, "role");
+                                                    col.s.assign(w, uid, role);
+                                                    return "Рабочий #" + w + " назначен на роль '" + role + "' в здании #" + uid;
+                                                }))))))
                 .then(Commands.literal("hauler").requires(SettleCommands::op)
                         .then(Commands.argument("worker", IntegerArgumentType.integer(1))
                                 .then(Commands.argument("uid", IntegerArgumentType.integer(1)).executes(c -> order(c, col -> {
