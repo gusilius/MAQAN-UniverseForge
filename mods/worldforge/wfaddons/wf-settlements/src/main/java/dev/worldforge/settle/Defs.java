@@ -90,6 +90,12 @@ public final class Defs {
         professions.put("builder", new Profession("builder", "Строитель"));
     }
 
+    /** Register a canonical wf-people profession as a valid settlement Worker assignment. */
+    public void registerCanonicalProfession(String id, String name) {
+        if (id == null || id.isBlank()) return;
+        professions.putIfAbsent(id, new Profession(id, name == null || name.isBlank() ? id : name));
+    }
+
     @SuppressWarnings("unchecked")
     public void add(String json) {
         Map<String, Object> root = (Map<String, Object>) Json.parse(json);

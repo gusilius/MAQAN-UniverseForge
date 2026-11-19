@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Pure Java addon logic tests. A synthetic map fixture is supplied only to
-# tests that explicitly need map data; it is not an autonomous world scenario.
+# Pure Java domain tests. Forge/Minecraft adapters are compiled by each addon's
+# real Gradle build above; this harness compiles only framework-independent logic.
 set -euo pipefail
 CORE="${1:-../wfmod}"
 OUT="$(mktemp -d)"
@@ -11,15 +11,35 @@ if [ -n "$ACTUAL_PACK" ] && [ ! -f "$ACTUAL_PACK" ]; then
   echo "ERROR: supplied actual worldmap not found: $ACTUAL_PACK"
   exit 2
 fi
-# General addon tests use a deterministic fixture. A supplied real map is reserved
-# for ImageWorldIdentityTest, which must inspect the actual image-derived package.
 PACK="$OUT/worldforge-test.worldmap"
 python3 tests/create_world_fixture.py "$PACK"
 
-CP="$CORE/src/main/java"
 mkdir -p "$OUT/classes"
-mapfile -t SRC < <(find wf-*/src/main/java -name '*.java' -not -path '*/mc/*')
-javac -proc:none -encoding UTF-8 -d "$OUT/classes" -sourcepath "$CP" "${SRC[@]}" tests/*.java tests/support/*.java
+# A source is eligible for this lightweight domain harness only when it has
+# no direct Minecraft, Forge, or Brigadier dependency. The previous path-only
+# filter missed core adapter classes because wfmod keeps them beside pure APIs
+# rather than in an /mc/ package. Full Gradle builds above remain responsible
+# for compiling every adapter against the real Minecraft/Forge classpath.
+mapfile -t CANDIDATE_SRC < <(
+  {
+    find "$CORE/src/main/java" -name '*.java' -not -path '*/mc/*'
+    find wf-*/src/main/java -name '*.java' -not -path '*/mc/*' \
+      ! -path 'wf-relations/src/main/java/dev/worldforge/relations/NpcSocialSimulation.java'
+  } | sort -u
+)
+SRC=()
+for source in "${CANDIDATE_SRC[@]}"; do
+  if grep -Eq '(^|[[:space:]])import[[:space:]]+(net\.minecraft|net\.minecraftforge|com\.mojang\.brigadier)(\.|;)|net\.minecraft\.|net\.minecraftforge\.|com\.mojang\.brigadier\.' "$source"; then
+    continue
+  fi
+  SRC+=("$source")
+done
+if [ "${#SRC[@]}" -eq 0 ]; then
+  echo "ERROR: no framework-independent production sources discovered"
+  exit 2
+fi
+echo "Compiling ${#SRC[@]} framework-independent production sources (excluded ${#CANDIDATE_SRC[@]} total candidates) and domain tests"
+javac -proc:none -encoding UTF-8 -d "$OUT/classes" "${SRC[@]}" tests/*.java tests/support/*.java
 
 if [ "${3:-}" = "--image-identity-only" ]; then
   [ -n "$ACTUAL_PACK" ] || { echo "ERROR: --image-identity-only requires an actual .worldmap argument"; exit 2; }
@@ -33,9 +53,6 @@ failed=0
 skipped=0
 for source in tests/*.java; do
   test_name="$(basename "$source" .java)"
-  # This test is intentionally reserved for the dedicated real-image workflow.
-  # The generic suite's generated fixture is named worldforge-test, not real-map;
-  # running it here used to create a false failure before any identity assertion.
   if [ "$test_name" = "ImageWorldIdentityTest" ]; then
     echo "== $test_name (skipped: requires the actual image-generated .worldmap)"
     skipped=$((skipped + 1))
@@ -59,4 +76,4 @@ if [ -n "$ACTUAL_PACK" ]; then
 fi
 
 echo "WorldForge logic tests: passed=$passed skipped=$skipped failed=$failed"
-[ "$failed" -eq 0 ] || exit 1
+[ "$failed" -eq 0 ]

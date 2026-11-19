@@ -41,9 +41,12 @@ public final class EventLog {
         public final Category category;
         public final String text;
         public final List<String> realms;
+        /** Explicit world/planet/dynasty/settlement/character scopes for filtered chronicles. */
+        public final List<String> scopes;
 
-        Event(long seq, Category category, String text, List<String> realms, long time) {
-            this.seq = seq; this.category = category; this.text = text; this.realms = realms; this.time = time;
+        Event(long seq, Category category, String text, List<String> realms, List<String> scopes, long time) {
+            this.seq = seq; this.category = category; this.text = text;
+            this.realms = realms; this.scopes = scopes; this.time = time;
         }
     }
 
@@ -52,12 +55,24 @@ public final class EventLog {
     private long seq;
 
     public Event post(Category c, String text, Collection<String> realmIds, long time) {
+        return postScoped(c, text, realmIds, List.of(), time);
+    }
+
+    /** Append an event with explicit entity scopes. Realm scopes are always added automatically. */
+    public Event postScoped(Category c, String text, Collection<String> realmIds,
+                            Collection<String> scopeIds, long time) {
         Event e;
         try (DomainMutationRevisions.Mutation mutation =
                      WorldForgeApi.revisions().begin(DomainMutationRevisions.Domain.EVENTS_ACTIONS)) {
             synchronized (this) {
                 List<String> ids = realmIds == null ? List.of() : List.copyOf(new ArrayList<>(realmIds));
-                e = new Event(++seq, c == null ? Category.SYSTEM : c, text == null ? "" : text, ids, time);
+                java.util.LinkedHashSet<String> scopes = new java.util.LinkedHashSet<>();
+                scopes.add("world");
+                for (String realm : ids) if (realm != null && !realm.isBlank()) scopes.add("realm:" + realm);
+                if (scopeIds != null) for (String scope : scopeIds)
+                    if (scope != null && !scope.isBlank()) scopes.add(scope.trim());
+                e = new Event(++seq, c == null ? Category.SYSTEM : c, text == null ? "" : text,
+                        ids, List.copyOf(scopes), time);
                 buf.addLast(e);
                 while (buf.size() > CAPACITY) buf.removeFirst();
             }
@@ -114,6 +129,7 @@ public final class EventLog {
             m.put("category", e.category.id());
             m.put("text", e.text);
             m.put("realms", new ArrayList<Object>(e.realms));
+            m.put("scopes", new ArrayList<Object>(e.scopes));
             arr.add(m);
         }
         Map<String, Object> root = new LinkedHashMap<>();
@@ -141,8 +157,15 @@ public final class EventLog {
                     Object t = m.get("time"), s = m.get("seq");
                     long sq = s instanceof Number ? ((Number) s).longValue() : seq + 1;
                     seq = Math.max(seq + 1, sq);
+                    List<String> scopes = new ArrayList<>();
+                    Object rawScopes = m.get("scopes");
+                    if (rawScopes instanceof List) for (Object x : (List<Object>) rawScopes)
+                        if (x != null && !String.valueOf(x).isBlank()) scopes.add(String.valueOf(x));
+                    scopes.add("world");
+                    for (String realm : ids) if (!scopes.contains("realm:" + realm)) scopes.add("realm:" + realm);
                     buf.addLast(new Event(seq, Category.parse(m.get("category") == null ? null : m.get("category").toString()),
-                            m.get("text") == null ? "" : m.get("text").toString(), List.copyOf(ids), t instanceof Number ? ((Number) t).longValue() : 0));
+                            m.get("text") == null ? "" : m.get("text").toString(), List.copyOf(ids),
+                            List.copyOf(scopes), t instanceof Number ? ((Number) t).longValue() : 0));
                     while (buf.size() > CAPACITY) buf.removeFirst();
                 }
             }

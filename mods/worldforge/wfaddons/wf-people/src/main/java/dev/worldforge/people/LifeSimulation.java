@@ -106,11 +106,17 @@ public final class LifeSimulation {
         Map<String,Long> cooldowns = failureCooldowns(character);
         List<Action> candidates = new ArrayList<>();
         if (emergency != Action.IDLE) candidates.add(emergency);
-        operators.stream().filter(Operator::available)
+        List<Action> rankedActions = operators.stream().filter(Operator::available)
                 .map(Operator::action).distinct()
                 .filter(action -> !isCoolingDown(cooldowns, action, now))
-                .sorted(Comparator.comparingDouble((Action action) -> utility(character, context, action)
-                        + (plan.contains(action) ? 8 : 0)).reversed())
+                .toList();
+        // Utility is expensive (needs, temperament, drives and traits). A sort
+        // comparator must not recompute it on every comparison.
+        Map<Action, Double> actionScores = new EnumMap<>(Action.class);
+        for (Action action : rankedActions)
+            actionScores.put(action, utility(character, context, action) + (plan.contains(action) ? 8 : 0));
+        rankedActions.stream()
+                .sorted(Comparator.comparingDouble(actionScores::get).reversed())
                 .forEach(candidates::add);
         candidates = new ArrayList<>(new LinkedHashSet<>(candidates));
         if (candidates.isEmpty()) {

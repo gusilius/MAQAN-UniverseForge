@@ -326,6 +326,15 @@ for key in sorted(expected):
         raise SystemExit(f"{key}: expected at least two actual race identities, got {row['race_kinds']}")
     if int(row["governments"]) < int(row["polities"]) or not row["government_types"]:
         raise SystemExit(f"{key}: every emergent polity must have an assigned data-pack government: {row['government_types']}")
+    if key == map_id:
+        if int(row["polities"]) < 10:
+            raise SystemExit(f"{key}: authored world must form a fragmented set of at least ten independent polities, got {row['polities']}")
+        if len(row["government_types"]) < 2:
+            raise SystemExit(f"{key}: racial/terrain conditions produced only one government form: {row['government_types']}")
+        if len(row["settlement_types"]) < 2:
+            raise SystemExit(f"{key}: geographic/racial settlement selection produced only one settlement type: {row['settlement_types']}")
+        if len(row["title_ranks"]) < 3:
+            raise SystemExit(f"{key}: runtime political hierarchy has fewer than three title ranks: {row['title_ranks']}")
     for total, named in (("living_characters","named_characters"), ("settlements","named_settlements"),
                          ("polities","named_polities"), ("titles","named_titles")):
         if int(row[named]) < int(row[total]):

@@ -1947,11 +1947,24 @@ public class SettleMod {
         }
     }
 
+    /** Synchronize the canonical People profession catalog into the settlement assignment vocabulary. */
+    public static void syncCanonicalProfessions() {
+        Defs definitions = DEFS;
+        if (definitions == null || !net.minecraftforge.fml.ModList.get().isLoaded("wf_people")) return;
+        try {
+            for (dev.worldforge.people.ProfessionDef profession : PeopleMod.PROFESSIONS.all())
+                definitions.registerCanonicalProfession(profession.id, profession.name);
+        } catch (LinkageError | RuntimeException error) {
+            LOGGER.error("wf_settle: canonical People profession synchronization failed: {}", error.toString(), error);
+        }
+    }
+
     @SubscribeEvent
     public void onTick(TickEvent.ServerTickEvent e) {
         if (e.phase != TickEvent.Phase.END || DEFS == null) return;
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server == null) return;
+        syncCanonicalProfessions();
         importWorldBlueprintSettlements(server);
         ticks++;
         if (ticks % 1200 == 0 && ticks != lastResidentAuditTick) {

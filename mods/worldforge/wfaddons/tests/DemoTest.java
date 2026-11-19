@@ -75,11 +75,16 @@ public class DemoTest {
         ok(bad.isEmpty() && st.types.size() >= 17, "виды поселений: " + st.types.size() + " " + bad);
         Map<String, Double> swamp = Map.of("swamp", 0.6, "plains", 0.4);
         ok(st.best(30, List.of("house", "house", "house", "farm"), swamp, DemoApi.races("marsh")).id().equals("stilt_village"), "ящеры в болоте - свайная деревня");
-        ok(!st.best(30, List.of("house", "house", "house", "farm"), swamp, Map.of()).id().equals("stilt_village") || true, "без демографии выбор тоже работает");
+        SettleTypes.Type withoutDemography = st.best(30, List.of("house", "house", "house", "farm"), swamp, Map.of());
+        // Race affinity is a bonus; absent demographic data must not make
+        // otherwise viable terrain/building/population selection crash.
+        ok(withoutDemography != null,
+                "settlement selection remains viable without demographic evidence");
         props.put("holdr.races", "dwarf:90,human:10");
         List<String> hold = new ArrayList<>(Collections.nCopies(10, "house")); hold.addAll(List.of("iron_mine", "iron_mine", "smithy", "smithy", "barracks"));
         ok(st.best(300, hold, Map.of("mountains", 0.8, "plains", 0.2), DemoApi.races("holdr")).id().equals("great_hold"), "гномы в горах - великий чертог");
-        ok(!st.best(300, hold, Map.of("mountains", 0.8, "plains", 0.2), DemoApi.races("gob")).id().equals("great_hold"), "не для гоблинов: чертог требует гномов");
+        SettleTypes.Type goblinHold = st.best(300, hold, Map.of("mountains", 0.8, "plains", 0.2), DemoApi.races("gob"));
+        ok(goblinHold == null || !goblinHold.id().equals("great_hold"), "не для гоблинов: чертог требует гномов");
         System.out.println(fails == 0 ? "ALL OK" : fails + " FAIL");
         if (fails > 0) System.exit(1);
     }

@@ -230,6 +230,7 @@ public final class CharacterStats {
         try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
             c.traits.clear();
             c.traits.addAll(next);
+            c.props.remove("people.derived_traits");
             CharacterRegistry.recordCharacterMutation();
         }
         return true;
@@ -238,7 +239,10 @@ public final class CharacterStats {
     public static boolean removeTrait(Character c, String id) {
         try (CharacterRegistry.MutationBatch ignored = CharacterRegistry.beginMutationBatch()) {
             boolean changed = c.traits.remove(id);
-            if (changed) CharacterRegistry.recordCharacterMutation();
+            if (changed) {
+                c.props.remove("people.derived_traits");
+                CharacterRegistry.recordCharacterMutation();
+            }
             return changed;
         }
     }
@@ -254,6 +258,12 @@ public final class CharacterStats {
                 if (compatibleTraits(attempt)) stored.add(id);
             }
             return stored;
+        }
+        Object cached = c.props.get("people.derived_traits");
+        if (cached instanceof List<?> values) {
+            List<String> restored = new ArrayList<>();
+            for (Object value : values) if (value instanceof String id && TRAITS.containsKey(id) && restored.size() < 5) restored.add(id);
+            if (restored.size() >= 3 && compatibleTraits(restored)) return List.copyOf(restored);
         }
         List<String> candidates = new ArrayList<>(TRAITS.keySet());
         candidates.remove("usurper");
@@ -272,7 +282,12 @@ public final class CharacterStats {
             if (out.size() >= target) break;
         }
         Collections.sort(out);
-        return out;
+        List<String> stable = List.copyOf(out);
+        // Traits are deterministic for a Character identity and the catalog is static.
+        // Store the derived profile once so life-AI utility scoring does not sort
+        // the entire trait catalog inside every comparator invocation.
+        c.props.put("people.derived_traits", stable);
+        return stable;
     }
 
     public static int bonus(Character c, String attr) {

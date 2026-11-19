@@ -45,6 +45,27 @@ public final class HistoricalChronicleTest {
                 "chronicle survives JSON save/restore without changing its pages");
         check(!restored.record(war, 12, 300), "restored event identity prevents replay duplicates");
 
+        EventLog scopedSource = new EventLog();
+        HistoricalChronicle scopedBook = new HistoricalChronicle();
+        scopedBook.setStartingYear(300);
+        scopedSource.addListener(event -> scopedBook.record(event, event.time / 1440L, 300));
+        scopedSource.postScoped(EventLog.Category.PEOPLE,
+                "Дом основателя поселился у реки и основал новую династию",
+                List.of("realm_river"), List.of("planet:real-map", "dynasty:house_river",
+                        "settlement:riverstead", "character:founder-uuid"), 3L * 1440L);
+        check(String.join("\\n", scopedBook.bookForPlanet("real-map", 10)).contains("основал новую династию")
+                        && String.join("\\n", scopedBook.bookForRealm("realm_river", 10)).contains("основал новую династию")
+                        && String.join("\\n", scopedBook.bookForDynasty("house_river", 10)).contains("основал новую династию")
+                        && String.join("\\n", scopedBook.bookForSettlement("riverstead", 10)).contains("основал новую династию")
+                        && String.join("\\n", scopedBook.bookForCharacter("founder-uuid", 10)).contains("основал новую династию"),
+                "planet, realm, dynasty, settlement and Character books filter the same confirmed event by scope");
+        check(!String.join("\\n", scopedBook.bookForPlanet("another-planet", 10)).contains("основал новую династию"),
+                "scoped chronicles do not leak events across planets");
+        HistoricalChronicle scopedRestored = new HistoricalChronicle();
+        scopedRestored.fromJson(scopedBook.toJson());
+        check(String.join("\\n", scopedRestored.bookForPlanet("real-map", 10)).contains("основал новую династию"),
+                "entity scopes survive chronicle save and restore");
+
         EventLog delayedSource = new EventLog();
         HistoricalChronicle delayedBook = new HistoricalChronicle();
         delayedBook.setStartingYear(300);

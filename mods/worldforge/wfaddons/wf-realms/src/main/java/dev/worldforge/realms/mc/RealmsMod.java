@@ -273,7 +273,13 @@ public class RealmsMod {
                 .collect(java.util.stream.Collectors.joining(",")));
         realm.props.put("population", Math.max(0L, population));
         realm.props.put("stability", Math.max(0, Math.min(100, stability)));
-        realm.props.put("prestige", (int) Math.min(100_000L, Math.max(0L, population / 10L)));
+        // Prestige must let a viable multi-settlement founding realm reach its
+        // constitutional stage. population/10 kept every initial polity at level 1,
+        // which made monarchies and republics impossible regardless of race or terrain.
+        long settlementPrestige = Math.max(0, settlementCount) * 10L;
+        long populationPrestige = Math.max(0L, population / 2L);
+        realm.props.put("prestige", (int) Math.min(100_000L,
+                Math.max(0L, populationPrestige + settlementPrestige)));
         realm.props.put("taxable_base", Math.max(0.0, population * 0.05));
         if (ownerMap != null && ownerMap.titles != null)
             ownerMap.titles.registerRealmProjection(realm);
@@ -408,13 +414,14 @@ public class RealmsMod {
     }
 
     /** Statecraft owns feudal contract terms; the map owns the visible realm hierarchy and CourtSim reads it. */
-    private static void syncPoliticalMapState() {
+    public static void syncPoliticalMapState() {
         for (var map : WorldForgeMod.loadedMaps().values()) {
             if (map.titles == null) continue;
             TitleEditor editor = EditorManager.editorFor(map);
             if (editor == null) continue;
             boolean changed = false;
             CharacterRegistry people = PeopleMod.registry(map);
+            Map<String, String> characterNames = new HashMap<>();
             if (people != null) {
                 // wf-realms is intentionally compiled against the stable people API jar, which can
                 // lag the source module in the addon build order. Read optional dynasty metadata
@@ -425,6 +432,8 @@ public class RealmsMod {
                 Map<String, String> dynastyNames = new LinkedHashMap<>();
                 Map<String, String> characterHouses = new LinkedHashMap<>();
                 for (Object character : people.all()) {
+                    String globalId = characterText(character, "globalId");
+                    if (!globalId.isBlank()) characterNames.put(globalId, characterText(character, "name"));
                     String house = characterDynastyId(character, map.name);
                     if (house.isBlank()) continue;
                     int birthYear = characterNumber(character, "birthYear");
@@ -433,7 +442,6 @@ public class RealmsMod {
                         founderCharacters.put(house, character);
                         founderYears.put(house, birthYear);
                     }
-                    String globalId = characterText(character, "globalId");
                     if (!globalId.isBlank()) characterHouses.put(globalId, house);
                 }
                 for (Map.Entry<String, String> entry : founders.entrySet()) {
@@ -454,10 +462,11 @@ public class RealmsMod {
                 }
                 // One canonical bridge owns the initial map-court -> Statecraft crown-holder link.
                 PoliticalIdentitySynchronizer.Report rulerSync =
-                        PoliticalIdentitySynchronizer.synchronizeRulers(map.name, map.titles, people, POLITICS);
+                        PoliticalIdentitySynchronizer.synchronizeRulers(map.name, map.titles, people, POLITICS, PeopleMod.ROLES);
                 if (rulerSync.linked() > 0 || !rulerSync.problems().isEmpty())
-                    LOGGER.info("wf_realms: ruler/title identity sync map={} linked={} unresolved={}",
-                            map.name, rulerSync.linked(), rulerSync.problems().size());
+                    LOGGER.info("wf_realms: ruler/title identity sync map={} linked={} already={} canonicalTitles={} unresolved={}",
+                            map.name, rulerSync.linked(), rulerSync.alreadyLinked(), POLITICS.titles().size(),
+                            rulerSync.problems().size());
                 for (String problem : rulerSync.problems())
                     LOGGER.warn("wf_realms: political identity validation: {}", problem);
                 // Keep the ruler's dynasty label on the realm projection as well as in Statecraft.
@@ -475,9 +484,11 @@ public class RealmsMod {
             for (TitleData.Title title : map.titles.allTitles()) {
                 Statecraft.Title political = POLITICS.title(Statecraft.mapTitleId(map.name, title.key));
                 String holder = political == null ? "" : political.holderCharacterId;
+                String holderName = characterNames.getOrDefault(holder, "");
                 String claimants = political == null ? "" : String.join(";", new TreeSet<>(political.claims));
                 int count = political == null ? 0 : political.claims.size();
                 changed |= editor.setDerivedTitleProp(title.id, "politics.holder_character", holder);
+                changed |= editor.setDerivedTitleProp(title.id, "politics.holder_name", holderName);
                 changed |= editor.setDerivedTitleProp(title.id, "politics.claimants", claimants);
                 changed |= editor.setDerivedTitleProp(title.id, "politics.claim_count", count);
                 changed |= editor.setDerivedTitleProp(title.id, "politics.contested", count > 0);

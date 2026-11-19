@@ -23,6 +23,12 @@ public class SettleTypesTest {
         ok(st.best(3, List.of(), plains, none).id().equals("camp"), "малый лагерь - стоянка");
         ok(st.bestFounding(35, plains, none).id().equals("village"),
                 "Genesis assigns a founding settlement type before houses/farms are built");
+        ok(st.best(35, List.of(), plains, none) == null,
+                "camp and hamlet population ceilings prevent them from swallowing larger settlements");
+        Settlement genesis = new Settlement("genesis-village", "Genesis village", defs);
+        genesis.types = st;
+        ok(genesis.refreshType(35, plains, none).equals("village"),
+                "runtime refresh falls back to a valid village founding form when camp/hamlet are over capacity");
         ok(st.bestFounding(40, coast, none).id().equals("port"),
                 "founding type respects coastal terrain even before port buildings exist");
         ok(st.best(10, List.of("house", "house"), plains, none).id().equals("hamlet"), "два дома - хутор");
@@ -33,6 +39,8 @@ public class SettleTypesTest {
         ok(st.best(100, port, coast, none).id().equals("port"), "на побережье склад + рынок дают порт: " + st.best(100, port, coast, none).id());
         ok(!st.best(100, port, plains, none).id().equals("port"), "порт не на равнине");
         List<String> mine = new ArrayList<>(Collections.nCopies(4, "house")); mine.addAll(List.of("farm", "iron_mine", "smithy"));
+        ok(st.why(st.types.get("mining_town"), 40, mine, mount, Map.of("dwarf", 0.20)).isEmpty(),
+                "a meaningful 20% ancestry share can qualify a specialized settlement form");
         ok(st.best(40, mine, mount, Map.of("dwarf", 1.0)).id().equals("mining_town"), "горный посёлок гномов");
         ok(!st.why(st.types.get("mining_town"), 40, mine, plains, none).isEmpty(), "горный посёлок не на равнине: " + st.why(st.types.get("mining_town"), 40, mine, plains, none));
 
@@ -50,6 +58,9 @@ public class SettleTypesTest {
             for (int i = 0; i < l.size(); i++) { same &= Arrays.equals(l.get(i), l2.get(i)); for (int j = 0; j < i; j++) if (Arrays.equals(l.get(i), l.get(j))) dup = true; }
             ok(same && !dup, "схема " + sc + ": 20 участков, детерминирована, без совпадений");
         }
+        defs.registerCanonicalProfession("custom_scholar", "Учёный");
+        ok(defs.professions.containsKey("custom_scholar"),
+                "canonical wf-people professions become valid settlement Worker assignments without duplicate datapack definitions");
         Settlement se = new Settlement("s1", "Тест", defs);
         se.types = st;
         se.typeId = "camp";

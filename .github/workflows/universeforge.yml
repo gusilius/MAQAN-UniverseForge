@@ -2,7 +2,7 @@ name: MAQAN UniverseForge — world runtime acceptance (Windows x64)
 
 on:
   push:
-    branches: [main, feature/autonomous-world-simulation-engine, feature/two-planet-runtime-from-2335, feature/native-world-genesis-bootstrap]
+    branches: [main, feature/autonomous-world-simulation-engine, feature/two-planet-runtime-from-2335, feature/native-world-genesis-bootstrap, fix/worldgen-fragmented-polities-and-diverse-genesis]
     paths:
       - "mods/worldforge/**"
       - "map.png"
@@ -28,7 +28,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: universeforge-world-runtime-acceptance-${{ github.ref }}
+  group: universeforge-world-runtime-acceptance-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -104,6 +104,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Actual map conversion failed" }
           python -c "import sys,json; from pathlib import Path; sys.path.insert(0,'mods/worldforge/wfaddons/tools/image-worldgen'); from image_worldgen import validate_package; print(json.dumps(validate_package(Path(r'$out')/'real-map.worldmap'),ensure_ascii=False,indent=2))"
           if ($LASTEXITCODE -ne 0) { throw "Actual map package validation failed" }
+
+      - name: Run every addon logic test and validate the actual generated map identity
+        working-directory: mods/worldforge/wfaddons
+        shell: bash
+        run: |
+          bash tools/test-all.sh ../wfmod "$RUNNER_TEMP/maqan-world-runtime-map/real-map.worldmap"
 
       - name: Start one server with normal vanilla Overworld and image-derived dimension
         id: dual_world_smoke

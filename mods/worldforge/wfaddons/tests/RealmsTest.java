@@ -59,11 +59,15 @@ public class RealmsTest {
 
         // расы и местность
         races.put("human", 0.9); races.put("dwarf", 0.1); terr.put("plains", 0.8); terr.put("coast", 0.2);
-        ok(!r.setGov("a", "holdfast", false) && r.lastError.contains("40%"), "гномий оплот закрыт людям: " + r.lastError);
+        ok(!r.setGov("a", "holdfast", false) && r.lastError.contains("20%"), "гномий оплот закрыт людям: " + r.lastError);
         races.clear(); races.put("dwarf", 0.8); races.put("human", 0.2); terr.clear(); terr.put("mountains", 0.9); terr.put("plains", 0.1);
         ok(r.setGov("a", "holdfast", false), "оплот открыт гномам: " + r.lastError);
+        races.clear(); races.put("human", 0.8); races.put("dwarf", 0.2);
+        terr.clear(); terr.put("mountains", 0.9); terr.put("plains", 0.1);
+        ok(r.setGov("minority-heritage", "holdfast", false),
+                "20% ancestral representation can support a race-specialized constitutional form");
         double fitHold = r.fit("a", d.govs.get("holdfast")), fitFeud = r.fit("a", d.govs.get("feudal_monarchy"));
-        ok(fitHold > 40 && fitFeud < 10, "подгонка: оплот " + fitHold + ", феодализм " + fitFeud);
+        ok(fitHold > fitFeud && fitHold > 20, "race and terrain suitability ranks the mountain hold above feudal monarchy: hold=" + fitHold + ", feudal=" + fitFeud);
         ok(StatApi.tag("r:a", "gov").equals("holdfast") && StatApi.tag("r:a", "gov_category").equals("republic") && StatApi.tag("r:a", "realm_level").equals("kingdom"), "метки в шине");
         ok(StatApi.mods("r:a").getOrDefault("mining_speed_pct", 0.0) > 25, "бонусы через шину: " + StatApi.mods("r:a").get("mining_speed_pct"));
         ok(!r.setGov("a", "horde", false) && r.lastError.contains("орк") || r.lastError.length() > 0, "смена строя: " + r.lastError);

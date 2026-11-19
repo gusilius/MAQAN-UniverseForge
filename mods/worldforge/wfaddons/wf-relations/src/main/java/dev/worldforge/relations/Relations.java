@@ -383,6 +383,7 @@ public final class Relations {
             bs.put(e.getKey(), m);
         }
         root.put("bonds", bs);
+        root.put("history", List.copyOf(history));
         List<Object> rs = new ArrayList<>();
         for (Request r : requests.values()) {
             Map<String, Object> m = new LinkedHashMap<>();
@@ -397,7 +398,7 @@ public final class Relations {
     private static int num(Object o) { return o instanceof Number n ? n.intValue() : 0; }
 
     public void fromJson(String json) {
-        bonds.clear(); requests.clear(); nextRequest = 1;
+        bonds.clear(); requests.clear(); history.clear(); nextRequest = 1;
         if (!(Json.parse(json) instanceof Map<?, ?> root)) return;
         if (root.get("bonds") instanceof Map<?, ?> bs) for (Map.Entry<?, ?> e : bs.entrySet()) {
             if (!(e.getValue() instanceof Map<?, ?> m)) continue;
@@ -416,6 +417,9 @@ public final class Relations {
             r.text = String.valueOf(m.get("text"));
             requests.put(r.id, r);
         }
+        if (root.get("history") instanceof List<?> savedHistory)
+            for (Object event : savedHistory) if (event instanceof String message && !message.isBlank()) history.add(message);
+        while (history.size() > 500) history.remove(0);
         nextRequest = Math.max(1, num(root.get("next")));
     }
 }

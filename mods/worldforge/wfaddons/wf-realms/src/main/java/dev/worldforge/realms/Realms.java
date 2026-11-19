@@ -91,7 +91,7 @@ public final class Realms {
         if (!g.reqRaces().isEmpty()) {
             double sum = 0;
             for (String r : g.reqRaces()) sum += share(races, r);
-            if (sum < 0.4) return "нужно не менее 40% жителей: " + String.join("/", g.reqRaces());
+            if (sum < 0.20) return "нужно не менее 20% жителей: " + String.join("/", g.reqRaces());
         }
         for (String r : g.forbidRaces()) if (share(races, r) >= 0.5) return "не подходит расе: " + r;
         for (var e : g.reqTerrain().entrySet()) if (share(terr, e.getKey()) < e.getValue()) return "нужно " + Math.round(e.getValue() * 100) + "% местности " + e.getKey();

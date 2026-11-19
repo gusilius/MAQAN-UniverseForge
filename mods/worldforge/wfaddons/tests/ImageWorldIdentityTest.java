@@ -80,16 +80,15 @@ public final class ImageWorldIdentityTest {
         boolean settlementsValid = !map.settlementSeeds.isEmpty();
         for (MapData.SettlementSeed settlement : map.settlementSeeds) {
             TitleData.Title province = titles.get(settlement.provinceId());
-            TitleData.Realm owner = province == null ? null : titles.realmOf(province);
             settlementsValid &= settlement.id() != null && !settlement.id().isBlank()
                     && settlementIds.add(settlement.id())
-                    && settlement.name() != null && !settlement.name().isBlank()
-                    && settlement.type() != null && !settlement.type().isBlank()
-                    && owner != null && owner.id.equals(settlement.realmId())
-                    && province.tier == 0;
+                    && settlement.name() != null && settlement.name().isBlank()
+                    && "site".equals(settlement.type())
+                    && settlement.realmId() != null && settlement.realmId().isBlank()
+                    && province != null && province.tier == 0;
         }
         check(settlementsValid,
-                "image blueprint settlements have stable unique IDs, names, types and province/state ownership");
+                "image blueprint emits stable unique neutral settlement sites bound to real provinces");
 
         TitleEditor editor = new TitleEditor(titles);
         long seed = 424242L;
@@ -100,8 +99,8 @@ public final class ImageWorldIdentityTest {
         TerritorialIdentity.Result identity =
                 TerritorialIdentity.ensure(map.name, titles, editor, people, names, seed);
 
-        check(demographics.realmsClassified() == titles.realmList().size(),
-                "every generated state receives an origin-backed population mix");
+        check(titles.realmList().isEmpty() && demographics.realmsClassified() == 0,
+                "image geography starts without pre-authored states; sovereignty is created by autonomous emergence");
         Set<String> knownRaces = originDefs.snapshot().races().keySet();
         for (TitleData.Realm realm : titles.realmList()) {
             Map<String, Integer> mix = shares(realm.props.get("races"));
@@ -181,10 +180,10 @@ public final class ImageWorldIdentityTest {
             }
         }
         check(allTerritoriesNamed, "all provinces, regions and state titles have stable names");
-        check(ownedTitles > 0 && allOwnedTerritoriesClassified,
-                "all owned administrative territories inherit race and culture identity");
-        check(created > 0 && people.all().stream().anyMatch(c -> !c.spouse.isBlank() || !c.children.isEmpty()),
-                "Courts creates canonical rulers and family relationships");
+        check(ownedTitles == 0 && titles.realmList().isEmpty(),
+                "neutral image geography is not falsely assigned to a sovereign before emergence");
+        check(created == 0 && people.all().isEmpty(),
+                "court population is not fabricated before an autonomous polity exists");
 
         Map<String, List<Character>> houses = new TreeMap<>();
         for (Character person : people.all()) if (!person.house.isBlank())

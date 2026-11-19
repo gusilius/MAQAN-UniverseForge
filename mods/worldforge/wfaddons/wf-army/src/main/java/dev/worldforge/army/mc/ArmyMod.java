@@ -69,6 +69,11 @@ public class ArmyMod {
         });
     }
 
+    /** Read-only strategic engines for cross-module world snapshots; ownership stays in wf-army. */
+    public static Collection<ArmyEngine> loadedEngines() {
+        return Collections.unmodifiableCollection(new ArrayList<>(ARMIES.values()));
+    }
+
     /** Армии карты поверх движка войн; создание ставит их водителем времени войн. */
     public static ArmyEngine armies(MapData m) {
         return ARMIES.computeIfAbsent(m, k -> {

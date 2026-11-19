@@ -324,8 +324,13 @@ public class PeopleMod {
                     LOGGER.info("wf_people: origin-backed demographics map='{}' realms={} rootRaces={}",
                             m.name, demographics.realmsClassified(), demographics.distinctRaces());
             }
+            int generatedTierRoles = m.titles == null || emptyCampaignBootstrap
+                    ? 0 : ROLES.ensureTerritorialRulers(m.titles);
             int created = m.titles == null || emptyCampaignBootstrap ? 0
                     : Courts.ensure(m.titles, identityEditor, reg, ROLES, NAMES, seed(m), YEAR);
+            if (generatedTierRoles > 0)
+                LOGGER.info("wf_people: generated {} data-driven ruler roles for all {} map title tiers",
+                        generatedTierRoles, m.titles.tiers.size());
             if (m.titles != null && !emptyCampaignBootstrap && identityEditor != null) {
                 TerritorialIdentity.Result identity = TerritorialIdentity.ensure(
                         m.name, m.titles, identityEditor, reg, NAMES, seed(m));

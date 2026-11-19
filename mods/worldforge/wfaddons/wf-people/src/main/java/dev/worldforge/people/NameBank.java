@@ -209,6 +209,16 @@ public final class NameBank {
         for (String race : races.keySet()) poolForRace(race, def);
     }
 
+    /** Complete immutable outer snapshot of every loaded cultural/racial naming pool and inheritance edge. */
+    public Map<String, Object> catalogSnapshot() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("default", def);
+        result.put("cultures", Collections.unmodifiableMap(new LinkedHashMap<>(cultures)));
+        result.put("races", Collections.unmodifiableMap(new LinkedHashMap<>(races)));
+        result.put("race_parents", Collections.unmodifiableMap(new LinkedHashMap<>(raceParents)));
+        return Collections.unmodifiableMap(result);
+    }
+
     public String culture(String wanted) { return cultures.containsKey(wanted) ? wanted : def; }
 
     public String pickGivenName(String race, String culture, String gender, Random random) {
@@ -237,6 +247,21 @@ public final class NameBank {
         if (values.isEmpty()) {
             Pool fallback = cultures.get(def);
             if (fallback != null) values = list(fallback, key);
+        }
+        // Third-party packs are allowed to provide only personal-name and house
+        // pools. Keep every generated entity name data-backed: use the configured
+        // default pool's existing names rather than inventing suffixes or failing
+        // an otherwise valid world bootstrap for an omitted optional category.
+        if (values.isEmpty()) {
+            Pool fallback = cultures.get(def);
+            if (fallback != null) {
+                values = switch (key) {
+                    case "houses", "dynasties", "clans", "surnames" ->
+                            !fallback.houses.isEmpty() ? fallback.houses : fallback.surnames;
+                    default -> !fallback.settlements.isEmpty() ? fallback.settlements
+                            : !fallback.houses.isEmpty() ? fallback.houses : fallback.male;
+                };
+            }
         }
         if (values.isEmpty())
             throw new IllegalStateException("Нет заполненного пула '" + category + "' для расы '" + race + "'");

@@ -4,6 +4,7 @@ import dev.worldforge.mod.MapData;
 import dev.worldforge.mod.TitleData;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
+import dev.worldforge.people.RoleDefs;
 import dev.worldforge.realms.PoliticalIdentitySynchronizer;
 import dev.worldforge.realms.Statecraft;
 
@@ -53,6 +54,40 @@ public final class PoliticalIdentitySynchronizerTest {
                 PoliticalIdentitySynchronizer.synchronizeRulers(map.name, titles, people, politics);
         check(repeated.linked() == 0 && repeated.alreadyLinked() == 1,
                 "repeated ruler synchronization does not create or replace title holders");
+
+        // Feed real role definitions for every subordinate tier and verify that
+        // canonical wf-people office holders become Statecraft title holders.
+        RoleDefs roleDefs = new RoleDefs();
+        Map<String, String> territorialOfficeIds = new LinkedHashMap<>();
+        for (int tierIndex = 0; tierIndex < crown.tier; tierIndex++) {
+            final int wantedTier = tierIndex;
+            TitleData.Title territorial = titles.allTitles().stream()
+                    .filter(candidate -> candidate.tier == wantedTier)
+                    .filter(candidate -> {
+                        for (TitleData.Title province : titles.allTitles()) {
+                            if (province.tier != 0 || titles.realmOf(province) == null
+                                    || !titles.realmOf(province).id.equals(realm.id)) continue;
+                            if (titles.chain(province).stream().anyMatch(parent -> parent.id == candidate.id)) return true;
+                        }
+                        return false;
+                    }).findFirst().orElse(null);
+            if (territorial == null) continue;
+            String tierKey = titles.tiers.get(tierIndex).key;
+            String roleId = "office_ruler_" + tierKey.replaceAll("[^a-z0-9_]", "_");
+            roleDefs.add("{\"id\":\"" + roleId + "\",\"name\":\"" + tierKey + " ruler\",\"per\":\"" + tierKey + "\",\"ruler\":true}");
+            Character localRuler = people.create("Local ruler " + tierKey, "House " + tierKey, "human", "m", 260);
+            people.appoint(localRuler.id, roleId, "title:" + territorial.id);
+            territorialOfficeIds.put(tierKey, Statecraft.mapTitleId(map.name, territorial.key));
+        }
+        PoliticalIdentitySynchronizer.Report territorialSync =
+                PoliticalIdentitySynchronizer.synchronizeRulers(map.name, titles, people, politics, roleDefs);
+        for (var office : territorialOfficeIds.entrySet()) {
+            Statecraft.Title title = politics.title(office.getValue());
+            check(title != null && !title.holderCharacterId.isBlank(),
+                    office.getKey() + " territorial ruler is linked to the canonical Statecraft title");
+        }
+        check(territorialSync.linked() >= territorialOfficeIds.size(),
+                "all available territorial office tiers are synchronized, linked=" + territorialSync.linked());
 
         people.kill(ruler.id);
         Character successor = people.create("Ruler Successor", "House Test", "human", "m", 275);
