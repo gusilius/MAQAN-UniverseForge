@@ -1315,6 +1315,20 @@ public final class WorldSimMod {
         if (namePools.has("races") && namePools.get("races").isJsonObject())
             for (var race : namePools.getAsJsonObject("races").entrySet())
                 addNamedEntity(namedEntities, race.getKey(), "race", race.getKey(), "", "");
+        // Feed native decisions from the full, already-loaded addon definitions.
+        // The owning addons remain authoritative; this is a read-only projection of their
+        // effective datapack registries, not a second set of hard-coded definitions.
+        int progressDefinitionCount = exportDefinitionCatalogs(catalogEntries, "wf_progress",
+                "dev.worldforge.progress.mc.ProgressMod", "DEFS");
+        int genesisDefinitionCount = exportDefinitionCatalogs(catalogEntries, "wf_genesis",
+                "dev.worldforge.genesis.mc.GenesisMod", "DEFS");
+        JsonObject reputationSnapshot = exportOptionalStoreSnapshot("wf_reputation",
+                "dev.worldforge.reputation.mc.ReputationMod", "store");
+        if (reputationSnapshot != null) {
+            root.add("reputation_runtime", reputationSnapshot);
+            addCatalogEntry(catalogEntries, "wf_reputation", "runtime_state", "reputation",
+                    "Canonical scoped reputation and witness knowledge", reputationSnapshot);
+        }
         JsonObject relationsSnapshot = exportOptionalModuleSnapshot("wf_relations",
                 "dev.worldforge.relations.mc.RelationsMc", "worldSnapshotJson");
         if (relationsSnapshot != null) {
@@ -1693,8 +1707,22 @@ public final class WorldSimMod {
                 net.minecraftforge.fml.ModList.get().isLoaded("wf_trade"), tradeSnapshot != null,
                 tradeSnapshot != null, false, catalogEntryCount(catalogEntries, "wf_trade"),
                 tradeSnapshot != null && tradeSnapshot.has("caravans") ? tradeSnapshot.getAsJsonArray("caravans").size() : 0);
-        for (String optionalModule : List.of("wf_rts", "wf_genesis", "wf_progress", "wf_reputation"))
-            addCapability(capabilities, optionalModule, 1, net.minecraftforge.fml.ModList.get().isLoaded(optionalModule), 0, 0);
+        boolean progressAvailable = net.minecraftforge.fml.ModList.get().isLoaded("wf_progress");
+        boolean genesisAvailable = net.minecraftforge.fml.ModList.get().isLoaded("wf_genesis");
+        boolean reputationAvailable = net.minecraftforge.fml.ModList.get().isLoaded("wf_reputation");
+        addCapability(capabilities, "wf_progress", 1, progressAvailable,
+                progressAvailable && progressDefinitionCount > 0,
+                progressAvailable && progressDefinitionCount > 0, false,
+                catalogEntryCount(catalogEntries, "wf_progress"), 0);
+        addCapability(capabilities, "wf_genesis", 1, genesisAvailable,
+                genesisAvailable && genesisDefinitionCount > 0,
+                genesisAvailable && genesisDefinitionCount > 0, false,
+                catalogEntryCount(catalogEntries, "wf_genesis"), 0);
+        addCapability(capabilities, "wf_reputation", 1, reputationAvailable,
+                reputationSnapshot != null, reputationSnapshot != null, false,
+                catalogEntryCount(catalogEntries, "wf_reputation"), 0);
+        addCapability(capabilities, "wf_rts", 1,
+                net.minecraftforge.fml.ModList.get().isLoaded("wf_rts"), 0, 0);
         sortObjects(catalogEntries, Comparator.comparing((JsonObject item) -> item.get("module_id").getAsString())
                 .thenComparing(item -> item.get("catalog_id").getAsString()).thenComparing(item -> item.get("entry_id").getAsString()));
         sortObjects(diplomaticRelations, Comparator.comparing((JsonObject item) -> item.get("realm_a").getAsString())
@@ -1734,6 +1762,109 @@ public final class WorldSimMod {
         } catch (ReflectiveOperationException | LinkageError error) {
             LOGGER.warn("wf_worldsim: could not resolve wf-troops recruitment building for {}: {}", armyUnitId, error.toString());
             return "barracks";
+        }
+    }
+
+    /**
+     * Exports every public definition collection from an owning addon DEFS object.
+     * Map keys are stable domain IDs; collection entries use their declared id when
+     * present and a deterministic ordinal only for genuinely anonymous rows.
+     */
+    private static int exportDefinitionCatalogs(JsonArray target, String moduleId,
+                                                String ownerClassName, String definitionsField) {
+        if (!net.minecraftforge.fml.ModList.get().isLoaded(moduleId)) return 0;
+        int exported = 0;
+        try {
+            Class<?> owner = Class.forName(ownerClassName);
+            Object definitions = owner.getField(definitionsField).get(null);
+            if (definitions == null) return 0;
+            for (java.lang.reflect.Field field : definitions.getClass().getFields()) {
+                if (java.lang.reflect.Modifier.isStatic(field.getModifiers())) continue;
+                Object value = field.get(definitions);
+                String catalogId = field.getName();
+                if (value instanceof Map<?, ?> map) {
+                    List<Map.Entry<?, ?>> entries = new ArrayList<>(map.entrySet());
+                    entries.sort(Comparator.comparing(entry -> String.valueOf(entry.getKey())));
+                    for (Map.Entry<?, ?> entry : entries) {
+                        String id = String.valueOf(entry.getKey());
+                        if (id.isBlank()) continue;
+                        String name = definitionName(entry.getValue(), id);
+                        addCatalogEntry(target, moduleId, catalogId, id, name, GSON.toJsonTree(entry.getValue()));
+                        exported++;
+                    }
+                } else if (value instanceof Collection<?> collection) {
+                    int ordinal = 0;
+                    for (Object entry : collection) {
+                        String id = definitionId(entry);
+                        if (id.isBlank()) id = String.format(Locale.ROOT, "%s:%06d", catalogId, ordinal);
+                        addCatalogEntry(target, moduleId, catalogId, id,
+                                definitionName(entry, id), GSON.toJsonTree(entry));
+                        ordinal++;
+                        exported++;
+                    }
+                } else if (value != null && (value instanceof Number || value instanceof Boolean
+                        || value instanceof String)) {
+                    JsonObject settings = new JsonObject();
+                    settings.addProperty(catalogId, String.valueOf(value));
+                    addCatalogEntry(target, moduleId, "settings", catalogId, catalogId, settings);
+                    exported++;
+                }
+            }
+            LOGGER.info("wf_worldsim: imported {} effective definition rows from {}", exported, moduleId);
+        } catch (ReflectiveOperationException | LinkageError | RuntimeException error) {
+            LOGGER.warn("wf_worldsim: could not export effective definitions from {}: {}",
+                    moduleId, error.toString());
+            return 0;
+        }
+        return exported;
+    }
+
+    private static String definitionId(Object value) {
+        if (value == null) return "";
+        try {
+            Object id = value.getClass().getMethod("id").invoke(value);
+            return id == null ? "" : String.valueOf(id);
+        } catch (ReflectiveOperationException ignored) {
+            try {
+                java.lang.reflect.Field id = value.getClass().getField("id");
+                Object raw = id.get(value);
+                return raw == null ? "" : String.valueOf(raw);
+            } catch (ReflectiveOperationException ignoredAgain) {
+                return "";
+            }
+        }
+    }
+
+    private static String definitionName(Object value, String fallback) {
+        if (value == null) return fallback;
+        for (String accessor : List.of("name", "title")) {
+            try {
+                Object name = value.getClass().getMethod(accessor).invoke(value);
+                if (name != null && !String.valueOf(name).isBlank()) return String.valueOf(name);
+            } catch (ReflectiveOperationException ignored) { }
+            try {
+                Object name = value.getClass().getField(accessor).get(value);
+                if (name != null && !String.valueOf(name).isBlank()) return String.valueOf(name);
+            } catch (ReflectiveOperationException ignored) { }
+        }
+        return fallback;
+    }
+
+    private static JsonObject exportOptionalStoreSnapshot(String moduleId, String ownerClassName,
+                                                          String accessorName) {
+        if (!net.minecraftforge.fml.ModList.get().isLoaded(moduleId)) return null;
+        try {
+            Class<?> owner = Class.forName(ownerClassName);
+            Object store = owner.getMethod(accessorName).invoke(null);
+            if (store == null) return null;
+            Object raw = store.getClass().getMethod("toJson").invoke(store);
+            if (!(raw instanceof String json)) return null;
+            JsonElement parsed = com.google.gson.JsonParser.parseString(json);
+            if (!parsed.isJsonObject()) throw new IllegalStateException("Module store snapshot must be a JSON object: " + moduleId);
+            return parsed.getAsJsonObject();
+        } catch (ReflectiveOperationException | LinkageError | com.google.gson.JsonParseException error) {
+            LOGGER.warn("wf_worldsim: optional module {} store snapshot unavailable: {}", moduleId, error.toString());
+            return null;
         }
     }
 
