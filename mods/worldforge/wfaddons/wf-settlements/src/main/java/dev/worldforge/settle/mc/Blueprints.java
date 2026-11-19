@@ -85,8 +85,19 @@ public final class Blueprints {
 
     static Plan procedural(Defs.Building d) {
         int sx = Math.max(3, d.sizeX), sz = Math.max(3, d.sizeZ), h = 3;
-        BlockState floor = Blocks.COBBLESTONE.defaultBlockState(), wall = Blocks.OAK_PLANKS.defaultBlockState(), corner = Blocks.OAK_LOG.defaultBlockState();
-        BlockState glass = Blocks.GLASS_PANE.defaultBlockState(), roof = Blocks.OAK_SLAB.defaultBlockState();
+        BlockState floor, wall, corner, glass, roof;
+        switch (d.architectureMaterial == null ? "oak" : d.architectureMaterial) {
+            case "spruce" -> { floor = Blocks.COBBLED_DEEPSLATE.defaultBlockState(); wall = Blocks.SPRUCE_PLANKS.defaultBlockState(); corner = Blocks.SPRUCE_LOG.defaultBlockState(); glass = Blocks.GLASS_PANE.defaultBlockState(); roof = Blocks.SPRUCE_SLAB.defaultBlockState(); }
+            case "birch" -> { floor = Blocks.SMOOTH_STONE.defaultBlockState(); wall = Blocks.BIRCH_PLANKS.defaultBlockState(); corner = Blocks.BIRCH_LOG.defaultBlockState(); glass = Blocks.GLASS_PANE.defaultBlockState(); roof = Blocks.BIRCH_SLAB.defaultBlockState(); }
+            case "dark_oak" -> { floor = Blocks.DEEPSLATE_BRICKS.defaultBlockState(); wall = Blocks.DARK_OAK_PLANKS.defaultBlockState(); corner = Blocks.DARK_OAK_LOG.defaultBlockState(); glass = Blocks.TINTED_GLASS.defaultBlockState(); roof = Blocks.DARK_OAK_SLAB.defaultBlockState(); }
+            case "stone" -> { floor = Blocks.STONE_BRICKS.defaultBlockState(); wall = Blocks.STONE_BRICKS.defaultBlockState(); corner = Blocks.CHISELED_STONE_BRICKS.defaultBlockState(); glass = Blocks.GLASS_PANE.defaultBlockState(); roof = Blocks.STONE_BRICK_SLAB.defaultBlockState(); }
+            case "sandstone" -> { floor = Blocks.CUT_SANDSTONE.defaultBlockState(); wall = Blocks.SANDSTONE.defaultBlockState(); corner = Blocks.CHISELED_SANDSTONE.defaultBlockState(); glass = Blocks.GLASS_PANE.defaultBlockState(); roof = Blocks.SANDSTONE_SLAB.defaultBlockState(); }
+            case "deepslate" -> { floor = Blocks.POLISHED_DEEPSLATE.defaultBlockState(); wall = Blocks.DEEPSLATE_BRICKS.defaultBlockState(); corner = Blocks.CHISELED_DEEPSLATE.defaultBlockState(); glass = Blocks.TINTED_GLASS.defaultBlockState(); roof = Blocks.DEEPSLATE_BRICK_SLAB.defaultBlockState(); }
+            case "mud_brick" -> { floor = Blocks.PACKED_MUD.defaultBlockState(); wall = Blocks.MUD_BRICKS.defaultBlockState(); corner = Blocks.MUD_BRICKS.defaultBlockState(); glass = Blocks.GLASS_PANE.defaultBlockState(); roof = Blocks.MUD_BRICK_SLAB.defaultBlockState(); }
+            case "crimson" -> { floor = Blocks.NETHER_BRICKS.defaultBlockState(); wall = Blocks.CRIMSON_PLANKS.defaultBlockState(); corner = Blocks.CRIMSON_STEM.defaultBlockState(); glass = Blocks.RED_STAINED_GLASS_PANE.defaultBlockState(); roof = Blocks.CRIMSON_SLAB.defaultBlockState(); }
+            case "warped" -> { floor = Blocks.PRISMARINE_BRICKS.defaultBlockState(); wall = Blocks.WARPED_PLANKS.defaultBlockState(); corner = Blocks.WARPED_STEM.defaultBlockState(); glass = Blocks.CYAN_STAINED_GLASS_PANE.defaultBlockState(); roof = Blocks.WARPED_SLAB.defaultBlockState(); }
+            default -> { floor = Blocks.COBBLESTONE.defaultBlockState(); wall = Blocks.OAK_PLANKS.defaultBlockState(); corner = Blocks.OAK_LOG.defaultBlockState(); glass = Blocks.GLASS_PANE.defaultBlockState(); roof = Blocks.OAK_SLAB.defaultBlockState(); }
+        }
         BlockState doorLow = Blocks.OAK_DOOR.defaultBlockState().setValue(DoorBlock.FACING, Direction.SOUTH);
         BlockState doorUp = doorLow.setValue(DoorBlock.HALF, DoubleBlockHalf.UPPER);
         int doorX = sx / 2, doorZ = sz - 1;
