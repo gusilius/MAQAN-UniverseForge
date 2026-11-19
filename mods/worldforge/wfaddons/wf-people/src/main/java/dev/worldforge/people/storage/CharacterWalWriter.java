@@ -34,7 +34,7 @@ public final class CharacterWalWriter implements AutoCloseable {
      * Enqueues a defensive copy without blocking. On false, no record was accepted.
      * Callers must retain dirty state until the returned future completes successfully.
      */
-    public boolean submit(String globalId, byte[] payload, CompletableFuture<CharacterWal.Record> durable) {
+    public synchronized boolean submit(String globalId, byte[] payload, CompletableFuture<CharacterWal.Record> durable) {
         Objects.requireNonNull(globalId, "globalId");
         Objects.requireNonNull(payload, "payload");
         Objects.requireNonNull(durable, "durable");
@@ -74,7 +74,7 @@ public final class CharacterWalWriter implements AutoCloseable {
     }
 
     /** Stops accepting writes and drains accepted records before returning. */
-    @Override public void close() throws IOException {
+    @Override public synchronized void close() throws IOException {
         accepting.set(false);
         try { worker.join(); }
         catch (InterruptedException ex) {
