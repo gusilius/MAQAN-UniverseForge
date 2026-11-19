@@ -1359,7 +1359,8 @@ public final class WorldSimMod {
             if (map == null || map.titles == null) continue;
             CourtSim court = CourtMod.court(map);
             if (court != null) {
-                JsonElement courtState = com.google.gson.JsonParser.parseString(court.toJson());
+                JsonObject courtState = com.google.gson.JsonParser.parseString(court.toJson()).getAsJsonObject();
+                courtState.addProperty("world_year", WorldForgeApi.clock().year());
                 addCatalogEntry(catalogEntries, "wf_court", "court_states", map.name, map.name, courtState);
             }
         }
