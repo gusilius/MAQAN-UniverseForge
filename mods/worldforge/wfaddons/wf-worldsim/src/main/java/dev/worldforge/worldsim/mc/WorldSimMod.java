@@ -2246,6 +2246,37 @@ public final class WorldSimMod {
                 }
                 if (colony == null || colony.s == null)
                     throw new IllegalStateException("Could not establish canonical settlement site for " + bandId);
+
+                // Classify the settlement from its founding population target and local
+                // geography now, before canonical residents and political ownership are
+                // attached. Settlement.refreshType uses bestFounding(), so infrastructure
+                // requirements are deferred until the existing construction system fulfils them.
+                colony.s.types = SettleMod.TYPES;
+                String foundingPolityId = "";
+                if (state.has("polities") && state.get("polities").isJsonArray()) {
+                    for (var polityElement : state.getAsJsonArray("polities")) {
+                        if (!polityElement.isJsonObject()) continue;
+                        JsonObject polity = polityElement.getAsJsonObject();
+                        if (!polity.has("settlement_ids") || !polity.get("settlement_ids").isJsonArray()) continue;
+                        for (var member : polity.getAsJsonArray("settlement_ids")) {
+                            if (member.isJsonPrimitive() && bandId.equals(member.getAsString())) {
+                                foundingPolityId = polity.has("id") ? polity.get("id").getAsString() : "";
+                                break;
+                            }
+                        }
+                        if (!foundingPolityId.isBlank()) break;
+                    }
+                }
+                Map<String, Double> foundingRaceProfile = emergentFoundingRaceProfile(
+                        source.seed, foundingPolityId.isBlank() ? bandId : foundingPolityId);
+                int foundingPopulation = (int) Math.max(1L, Math.min(100_000L,
+                        band.has("population") ? band.get("population").getAsLong() : 1L));
+                String foundingType = colony.s.refreshType(foundingPopulation,
+                        emergentSettlementTerrain(source, band), foundingRaceProfile);
+                if (foundingType.isBlank()) {
+                    LOGGER.warn("wf_worldsim: settlement {} has no eligible founding type for population={} biome={}",
+                            bandId, foundingPopulation, emergentSettlementTerrain(source, band).keySet());
+                }
                 bindPhysicalSettlement(bandId, settlementId);
                 changed = true;
             }
