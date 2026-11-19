@@ -620,14 +620,15 @@ fn settlement_allows_building(snapshot: &WorldSnapshot, settlement_id: &str, bui
         }
         let allowed = payload.get("allow_buildings").or_else(|| payload.get("allowBuildings")).or_else(|| payload.get("allow"))
             .and_then(serde_json::Value::as_array);
-        if allowed.map(|values| !values.is_empty() && !values.iter().any(|value| value.as_str() == Some(building))).unwrap_or(false) {
-            return false;
-        }
+        let explicitly_listed = allowed.map(|values|
+            values.iter().any(|value| value.as_str() == Some(building))).unwrap_or(false);
         let allowed_categories = payload.get("allow_categories").or_else(|| payload.get("allowCategories"))
             .and_then(serde_json::Value::as_array);
-        if let Some(categories) = allowed_categories.filter(|values| !values.is_empty()) {
-            let category = building_payload.get("category").and_then(serde_json::Value::as_str).unwrap_or("other");
-            if !categories.iter().any(|value| value.as_str() == Some(category)) { return false; }
+        if !explicitly_listed {
+            if let Some(categories) = allowed_categories.filter(|values| !values.is_empty()) {
+                let category = building_payload.get("category").and_then(serde_json::Value::as_str).unwrap_or("other");
+                if !categories.iter().any(|value| value.as_str() == Some(category)) { return false; }
+            }
         }
         if let Some(limit) = payload.get("limits").and_then(|limits| limits.get(building)).and_then(serde_json::Value::as_u64) {
             let count = instance_payload.get("building_counts").and_then(|counts| counts.get(building))
