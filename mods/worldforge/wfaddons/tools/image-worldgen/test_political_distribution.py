@@ -17,7 +17,7 @@ class PoliticalDistributionTests(unittest.TestCase):
         self.assertGreater(large, small)
         self.assertGreater(dense, sparse)
         self.assertGreaterEqual(small, 1)
-        self.assertLessEqual(dense, 12)
+        self.assertGreater(settlement_opportunities_for_area(100000, 1.0), 12)
 
     def test_extra_settlement_sites_are_deterministic_and_spread(self):
         import numpy as np
