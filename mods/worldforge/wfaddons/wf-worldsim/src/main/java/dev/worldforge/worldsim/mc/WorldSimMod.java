@@ -105,8 +105,14 @@ public final class WorldSimMod {
     private static final class EmergentMapProgress {
         final EmergentPopulationIndex index;
         final Map<String, EmergentBandProgress> bands = new HashMap<>();
+        final Set<String> reservedHouseNames = new HashSet<>();
         EmergentMapProgress(CharacterRegistry registry) {
-            this.index = new EmergentPopulationIndex(registry.all());
+            List<dev.worldforge.people.Character> existing = registry.all();
+            this.index = new EmergentPopulationIndex(existing);
+            for (dev.worldforge.people.Character person : existing)
+                if (person.house != null && !person.house.isBlank()) reservedHouseNames.add(person.house);
+            RealmsMod.POLITICS.dynasties().stream().map(dynasty -> dynasty.name)
+                    .filter(value -> value != null && !value.isBlank()).forEach(reservedHouseNames::add);
         }
     }
 
@@ -2362,7 +2368,8 @@ public final class WorldSimMod {
                 while (residents.size() < target && budget > 0) {
                     int ordinal = residents.size();
                     dev.worldforge.people.Character created = createEmergentResident(
-                            registry, source, bandId, year, ordinal, bandProgress.parents);
+                            registry, source, bandId, year, ordinal, bandProgress.parents,
+                            sourceProgress.reservedHouseNames);
                     if (created == null) break;
                     sourceProgress.index.add(created);
                     ensureEmergentOrigin(created, source, year, ordinal, realmByBand.getOrDefault(bandId, ""));
@@ -3882,7 +3889,7 @@ public final class WorldSimMod {
 
     private static dev.worldforge.people.Character createEmergentResident(
             dev.worldforge.people.CharacterRegistry registry, EmergenceSource source, String bandId,
-            int year, int ordinal, EmergentParents parents) {
+            int year, int ordinal, EmergentParents parents, Set<String> reservedHouseNames) {
         dev.worldforge.people.Character father = parents.father, mother = parents.mother;
         if (father != null && !father.spouse.isBlank() && (mother == null || !father.spouse.equals(mother.id)))
             parents.father = father = null;
@@ -3890,7 +3897,7 @@ public final class WorldSimMod {
             parents.mother = mother = null;
         if (father == null || mother == null || !father.spouse.equals(mother.id) || !mother.spouse.equals(father.id)) {
             String gender = father == null ? "m" : (mother == null ? "f" : (ordinal % 2 == 0 ? "m" : "f"));
-            dev.worldforge.people.Character adult = createEmergentAdult(registry, source, bandId, gender, year, ordinal);
+            dev.worldforge.people.Character adult = createEmergentAdult(registry, source, bandId, gender, year, ordinal, reservedHouseNames);
             if (adult == null) return null;
             if ("m".equals(gender)) parents.father = adult; else parents.mother = adult;
             father = parents.father; mother = parents.mother;
@@ -3917,14 +3924,9 @@ public final class WorldSimMod {
 
     private static dev.worldforge.people.Character createEmergentAdult(
             dev.worldforge.people.CharacterRegistry registry, EmergenceSource source, String bandId,
-            String gender, int year, int ordinal) {
+            String gender, int year, int ordinal, Set<String> reservedHouseNames) {
         String culture = PeopleMod.NAMES.culture("");
         String name = emergentName(source, bandId, culture, gender, ordinal, year);
-        Set<String> reservedHouseNames = registry.all().stream()
-                .map(person -> person.house).filter(value -> value != null && !value.isBlank())
-                .collect(java.util.stream.Collectors.toCollection(HashSet::new));
-        RealmsMod.POLITICS.dynasties().stream().map(dynasty -> dynasty.name)
-                .filter(value -> value != null && !value.isBlank()).forEach(reservedHouseNames::add);
         String house = PeopleMod.NAMES.generateUnique("", culture, "houses",
                 new Random(source.seed ^ bandId.hashCode() ^ ordinal), reservedHouseNames);
         dev.worldforge.people.Character person = registry.create(name, house, culture, gender,
