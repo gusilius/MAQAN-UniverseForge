@@ -1951,23 +1951,26 @@ public class SettleMod {
             lastResidentAuditTick = ticks;
             validateCanonicalResidentLinks();
         }
-        if (ticks % (STEP_TICKS * 10) == 0) VanillaVillageAdapter.reconcile(server);
+        if (ticks % (simulationInterval * 10L) == 0) VanillaVillageAdapter.reconcile(server);
         if (actionsBlocked()) return;
-        if (ticks % STEP_TICKS == 0) {
+        int simulationInterval = dev.worldforge.mod.MaqanPerformanceConfig.settlementSimulationIntervalTicks();
+        if (ticks % simulationInterval == 0) {
             double speed = dev.worldforge.mod.api.WorldForgeApi.clock().multiplier();
             for (Colony c : COLONIES.values()) {
                 if (speed <= 0) break;
                 try {
                     c.s.setWorldCalendar(dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute(),
                             dev.worldforge.mod.api.WorldForgeApi.clock().year());
-                    c.s.tick(speed);                                   // 1 симуляционная секунда = 20 тиков, 24 мировые минуты
+                    c.s.tick(speed * simulationInterval / (double) STEP_TICKS); // preserve elapsed world time when interval changes
                     remitCrownTaxes(c);
                     syncPeople(c, server);
                     if (c.genesisOperationId != null && c.genesisOperationId.startsWith("worldsim:settlement:"))
                         ensureAutonomousInfrastructure(server, c.s.id);
-                    runLifeAI(server, c);
+                    if (c.s.raidIncoming || (ticks / simulationInterval)
+                            % dev.worldforge.mod.MaqanPerformanceConfig.lifeAiIntervalSteps() == 0)
+                        runLifeAI(server, c);
                     c.map.tick(c.s, speed);                             // глобальная логистика не зависит от загруженности чанков
-                    if (ticks % (STEP_TICKS * 10) == 0) { c.s.types = TYPES; String rid = realmOf(c); c.s.refreshType(c.s.population(), rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.terrain(rid), rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.races(rid)); }
+                    if (ticks % (simulationInterval * 10L) == 0) { c.s.types = TYPES; String rid = realmOf(c); c.s.refreshType(c.s.population(), rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.terrain(rid), rid.isEmpty() ? java.util.Map.of() : dev.worldforge.mod.api.DemoApi.races(rid)); }
                 } catch (RuntimeException ex) {
                     LOGGER.error("wf_settle: ошибка симуляции поселения {}: {}", c.s.id, ex.toString());
                 }
@@ -2006,7 +2009,7 @@ public class SettleMod {
                         }
                     }
                     SettlementCaravans.tick(server, NETWORK.shipments.values());
-                    if (ticks % (STEP_TICKS * 10) == 0) {
+                    if (ticks % (simulationInterval * 10L) == 0) {
                         Set<Integer> routeIds = new LinkedHashSet<>(NETWORK.routes.keySet());
                         int created = NETWORK.ensureAutonomousRoutes(all, 2, Math.max(1, all.size() / 3), 2.0);
                         if (created > 0) {
