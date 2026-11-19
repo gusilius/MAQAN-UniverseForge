@@ -508,6 +508,27 @@ fn court_instability_pressure(snapshot: &WorldSnapshot, realm_id: &str) -> i64 {
     pressure
 }
 
+fn has_active_truce(snapshot: &WorldSnapshot, a: &str, b: &str) -> bool {
+    snapshot.diplomatic_relations.iter().any(|relation|
+        ((relation.realm_a == a && relation.realm_b == b)
+            || (relation.realm_a == b && relation.realm_b == a))
+            && relation.truce_until_day > snapshot.day)
+}
+
+fn has_subject_dependency(snapshot: &WorldSnapshot, a: &str, b: &str) -> bool {
+    snapshot.vassal_contracts.iter().any(|contract|
+        (contract.liege_realm == a && contract.vassal_realm == b)
+            || (contract.liege_realm == b && contract.vassal_realm == a))
+}
+
+fn blocks_autonomous_war(snapshot: &WorldSnapshot, a: &str, b: &str) -> bool {
+    ["NON_AGGRESSION", "ALLIANCE", "DEFENSIVE_PACT", "FEUDAL_VASSAL",
+        "TRIBUTARY", "PROTECTORATE", "OCCUPIED", "PERSONAL_UNION", "CONFEDERATION_MEMBER"]
+        .iter().any(|treaty| has_treaty(snapshot, a, b, treaty))
+        || has_active_truce(snapshot, a, b)
+        || has_subject_dependency(snapshot, a, b)
+}
+
 fn realm_in_active_campaign(snapshot: &WorldSnapshot, realm_id: &str) -> bool {
     snapshot.catalog_entries.iter().filter(|entry|
         entry.module_id == "wf_war" && entry.catalog_id == "war_instances")
@@ -1086,8 +1107,7 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
                 || realm_in_active_campaign(snapshot, &attacker.id) || realm_in_active_campaign(snapshot, &defender.id)
                 || snapshot.day.saturating_sub(attacker.last_war_day) < 180
                 || treasury < 100.0 || attacker.stability < 20
-                || has_treaty(snapshot, &attacker.id, &defender.id, "ALLIANCE")
-                || has_treaty(snapshot, &attacker.id, &defender.id, "DEFENSIVE_PACT")
+                || blocks_autonomous_war(snapshot, &attacker.id, &defender.id)
                 || snapshot.wars.iter().any(|war| war.status == "ACTIVE"
                     && ((war.attacker_realm == attacker.id && war.defender_realm == defender.id)
                         || (war.attacker_realm == defender.id && war.defender_realm == attacker.id))) { continue; }
