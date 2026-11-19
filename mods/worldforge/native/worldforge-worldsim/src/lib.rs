@@ -784,6 +784,11 @@ fn kinship_distance(a: &Character, b: &Character, characters: &BTreeMap<&str, &C
 
 
 fn resource_category<'a>(snapshot: &'a WorldSnapshot, resource: &str) -> &'a str {
+    let food_kinds = catalog_entry(snapshot, "wf_settle", "food_kinds", "all_food_kinds")
+        .and_then(|entry| entry.payload.as_array());
+    if food_kinds.map(|values| values.iter().any(|value| value.as_str() == Some(resource))).unwrap_or(false) {
+        return "food";
+    }
     catalog_entry(snapshot, "wf_settle", "resources", resource)
         .and_then(|entry| entry.payload.get("category"))
         .and_then(serde_json::Value::as_str)
