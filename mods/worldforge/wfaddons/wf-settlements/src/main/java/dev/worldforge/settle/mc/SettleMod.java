@@ -90,6 +90,27 @@ public class SettleMod {
         if (DEFS == null) return java.util.List.of("Поселения ещё не загружены");
         java.util.List<String> raw = new java.util.ArrayList<>(BASE_RAW);
         java.util.List<String> rep = SchemLibrary.loadAll(server, DEFS, raw);
+        // The same in-game admin reload refreshes catalogue metadata as well as schematic
+        // assets, so new structures can be added without restarting the world.
+        var catalogueFiles = new java.util.TreeMap<ResourceLocation, Resource>(
+                server.getResourceManager().listResources("wf_settle",
+                        location -> location.getPath().endsWith("structure_catalog.json")));
+        for (Map.Entry<ResourceLocation, Resource> entry : catalogueFiles.entrySet()) {
+            try (InputStream input = entry.getValue().open()) {
+                StructureCatalog refreshed = StructureCatalog.load(
+                        new String(input.readAllBytes(), StandardCharsets.UTF_8));
+                List<String> problems = refreshed.validate(DEFS);
+                if (!problems.isEmpty()) {
+                    rep.addAll(problems.stream().map(problem -> "Каталог: " + problem).toList());
+                    continue;
+                }
+                STRUCTURE_CATALOG = refreshed;
+                rep.add("Каталог структур обновлён: " + refreshed.structureClasses().size()
+                        + " классов, " + refreshed.identityDimensions().size() + " измерений совместимости");
+            } catch (Exception error) {
+                rep.add("Каталог структур не обновлён: " + entry.getKey() + " — " + error.getMessage());
+            }
+        }
         DEFS_RAW = raw;
         Blueprints.clearCache();
         return rep;
