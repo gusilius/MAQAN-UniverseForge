@@ -77,7 +77,7 @@ public class DemoTest {
         ok(st.best(30, List.of("house", "house", "house", "farm"), swamp, DemoApi.races("marsh")).id().equals("stilt_village"), "ящеры в болоте - свайная деревня");
         SettleTypes.Type withoutDemography = st.best(30, List.of("house", "house", "house", "farm"), swamp, Map.of());
         // Race affinity is a bonus; absent demographic data must not make
-        otherwise viable terrain/building/population settlement selection crash.
+        // otherwise viable terrain/building/population selection crash.
         ok(withoutDemography != null,
                 "settlement selection remains viable without demographic evidence");
         props.put("holdr.races", "dwarf:90,human:10");
