@@ -3664,7 +3664,7 @@ public final class WorldSimMod {
             }
             // Search the complete sampled settlement map and its actual zoning parcels.
             // No arbitrary radius or fixed number of attempts can strand a valid build site.
-            candidateSites.sort(Comparator.comparingLong(site ->
+            candidateSites.sort(Comparator.<int[]>comparingLong(site ->
                     (long) site[0] * site[0] + (long) site[1] * site[1])
                     .thenComparingInt(site -> site[0]).thenComparingInt(site -> site[1]));
             for (int[] site : candidateSites) {
