@@ -55,6 +55,16 @@ public class PeopleTest {
                         && NameBank.settlementCategory("city").equals("cities")
                         && NameBank.settlementCategory("tribal_community").equals("tribal_camps"),
                 "settlement type IDs resolve to specialized naming pools");
+        NameBank.NameReservations houseReservations = names.reservations(List.of("Existing House"));
+        Set<String> allocatedHouses = new HashSet<>();
+        boolean uniqueHouseBatch = true;
+        for (int i = 0; i < 96; i++) {
+            String house = names.generateUnique("human", "human", "houses",
+                    new Random(20261119L + i), houseReservations);
+            uniqueHouseBatch &= !house.isBlank() && allocatedHouses.add(house.toLowerCase(Locale.ROOT));
+        }
+        ok(uniqueHouseBatch && allocatedHouses.size() == 96,
+                "incremental house-name reservations allocate a large batch without rescanning or duplicate names");
         ok(names.poolForRace("elf", "elf").cities.size() >= 18
                         && names.poolForRace("dwarf", "dwarf").cities.size() >= 18
                         && names.poolForRace("clockwork", "human").male.size() >= 18,
