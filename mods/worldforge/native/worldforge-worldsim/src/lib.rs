@@ -782,6 +782,78 @@ fn kinship_distance(a: &Character, b: &Character, characters: &BTreeMap<&str, &C
 }
 
 
+fn resource_category(snapshot: &WorldSnapshot, resource: &str) -> &str {
+    catalog_entry(snapshot, "wf_settle", "resources", resource)
+        .and_then(|entry| entry.payload.get("category"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or(match resource {
+            "food" | "bread" | "fish" | "meat" | "grain" | "flour" => "food",
+            "wood" | "planks" | "stone" | "iron" | "wool" => "material",
+            "silver" => "money",
+            _ => "other",
+        })
+}
+
+fn choose_building_for_need(snapshot: &WorldSnapshot, settlement: &Settlement, threatened: bool)
+    -> Option<(String, i32, String)> {
+    let mut candidates = Vec::new();
+    for entry in snapshot.catalog_entries.iter().filter(|entry|
+        entry.module_id == "wf_settle" && entry.catalog_id == "buildings") {
+        if !settlement_allows_building(snapshot, &settlement.id, &entry.entry_id) { continue; }
+        let payload = &entry.payload;
+        let category = payload.get("category").and_then(serde_json::Value::as_str).unwrap_or("other");
+        let housing = payload.get("housing").and_then(serde_json::Value::as_i64).unwrap_or(0);
+        let safety = payload.get("safety").and_then(serde_json::Value::as_i64).unwrap_or(0);
+        let trade = payload.get("trade").and_then(serde_json::Value::as_i64).unwrap_or(0);
+        let outputs = payload.get("out").and_then(serde_json::Value::as_object);
+        let jobs = payload.get("jobs").and_then(serde_json::Value::as_object);
+        let has_output = |needle: &str| outputs.map(|values| values.iter()
+            .any(|(resource, amount)| amount.as_i64().unwrap_or(0) > 0
+                && (resource == needle || (needle == "food" && resource_category(snapshot, resource) == "food"))))
+            .unwrap_or(false);
+        let has_job = |needles: &[&str]| jobs.map(|values| values.iter()
+            .any(|(job, amount)| amount.as_i64().unwrap_or(0) > 0
+                && needles.iter().any(|needle| job.contains(needle))))
+            .unwrap_or(false);
+        let mut priority = 0_i32;
+        let reason;
+        if threatened && (category == "military" || safety > 0 || has_job(&["guard", "soldier", "trainer"])) {
+            priority = 88 + safety.clamp(0, 10) as i32;
+            reason = "registered military building improves frontier security";
+        } else if settlement.food < (settlement.population as i64 * 2)
+            && (category == "food" || has_output("food") || has_job(&["farmer", "fisher", "herder"])) {
+            priority = 95;
+            reason = "registered food production covers the settlement food deficit";
+        } else if settlement.housing > 0
+            && settlement.housing_used.saturating_mul(100) >= settlement.housing.saturating_mul(85)
+            && (housing > 0 || category == "housing") {
+            priority = 82 + housing.min(10) as i32;
+            reason = "registered housing capacity approaches saturation";
+        } else if settlement.wood < 20
+            && (has_output("wood") || has_job(&["lumber", "forester", "wood"])) {
+            priority = 72;
+            reason = "registered wood production covers the construction reserve";
+        } else if settlement.stone < 15 && settlement.population > 30
+            && (has_output("stone") || has_job(&["quarry", "miner", "stone"])) {
+            priority = 58;
+            reason = "registered stone production supports infrastructure";
+        } else if settlement.workshops == 0 && settlement.population > 15
+            && (category == "trade" || trade > 0 || category == "industry") {
+            priority = 38 + trade.clamp(0, 10) as i32;
+            reason = "registered trade or industry building expands specialist production";
+        } else { continue; }
+        let output = outputs.map(|values| values.values()
+            .filter_map(serde_json::Value::as_i64).sum::<i64>()).unwrap_or(0);
+        let work = payload.get("work").and_then(serde_json::Value::as_f64).unwrap_or(30.0).max(1.0);
+        let efficiency = output as f64 / work;
+        candidates.push((entry.entry_id.clone(), priority, reason.to_string(), efficiency));
+    }
+    candidates.sort_by(|a, b| b.1.cmp(&a.1)
+        .then_with(|| b.3.total_cmp(&a.3)).then_with(|| a.0.cmp(&b.0)));
+    candidates.into_iter().next().map(|(id, priority, reason, _)| (id, priority, reason))
+}
+
+
 
 impl WorldSnapshot {
     pub fn validate(&self) -> Result<(), SimError> {
@@ -1167,38 +1239,15 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
     ordered_settlements.sort_by(|a, b| a.id.cmp(&b.id));
     for s in ordered_settlements {
         if snapshot.day.saturating_sub(s.last_project_day) < 20 { continue; }
-        let food_ratio = if s.food_capacity == 0 { 0 } else { s.food.saturating_mul(100) / s.food_capacity };
-        let desired_farms = (s.population / 50).max(1) as u32;
-        let desired_foresters = (s.population / 80).max(1) as u32;
-        let desired_quarries = (s.population / 100).max(1) as u32;
-        let (building, priority, reason) = if s.threatened && s.watch_posts == 0 {
-            ("watch_post", 88, "frontier threat requires a completed watch post")
-        } else if s.threatened && s.watch_posts > 0 && s.barracks == 0 {
-            ("barracks", 84, "frontier threat requires a trained garrison")
-        } else if s.food < (s.population as i64 * 2) && s.farms < desired_farms {
-            ("farm", 95, "food reserve below two days of population demand")
-        } else if s.housing > 0 && s.housing_used.saturating_mul(100) >= s.housing.saturating_mul(85) {
-            ("house", 82, "housing capacity approaching saturation")
-        } else if s.wood < 20 && s.foresters < desired_foresters {
-            ("lumber_camp", 72, "wood reserve below construction threshold")
-        } else if s.stone < 15 && s.population > 30 && s.quarries < desired_quarries {
-            ("quarry", 58, "stone reserve limits infrastructure")
-        } else if s.workshops == 0 && s.population > 15 {
-            ("market", 38, "population can support a local exchange and specialist jobs")
+        if let Some((building, priority, reason)) = choose_building_for_need(snapshot, s, threatened) {
+            proposals.push(Proposal {
+                id: proposal_id(snapshot.seed, snapshot.day, "build", &s.id, &building),
+                day: snapshot.day,
+                kind: ProposalKind::Build { settlement: s.id.clone(), building, priority, reason },
+            });
         } else {
-            diagnostics.push(format!("settlement:{} no urgent project", s.id));
-            continue;
-        };
-        if !settlement_allows_building(snapshot, &s.id, building) {
-            diagnostics.push(format!("settlement:{} catalog forbids or does not allow building:{}", s.id, building));
-            continue;
+            diagnostics.push(format!("settlement:{} no registered project fits current needs and restrictions", s.id));
         }
-        let adjusted = priority + (100 - food_ratio as i32).max(0).min(20);
-        proposals.push(Proposal {
-            id: proposal_id(snapshot.seed, snapshot.day, "build", &s.id, building),
-            day: snapshot.day,
-            kind: ProposalKind::Build { settlement: s.id.clone(), building: building.into(), priority: adjusted, reason: reason.into() },
-        });
     }
 
     // Workforce AI: only reallocates unemployed workers, and never removes
