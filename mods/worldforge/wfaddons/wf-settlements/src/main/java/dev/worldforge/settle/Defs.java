@@ -170,7 +170,7 @@ public final class Defs {
 
     /** Runtime Genesis selection. Empty result means explicit incompatibility with no safe replacement. */
     public String selectGenesisBuilding(String requestedId, String raceId, long seed) {
-        return selectIdentityBuilding(requestedId, raceId, null, null, null, seed);
+        return selectIdentityBuilding(requestedId, raceId, null, null, null, null, seed);
     }
 
     /** Shared identity-aware selection API. Unknown IDs are neutral; explicit exclusions remain hard constraints. */
