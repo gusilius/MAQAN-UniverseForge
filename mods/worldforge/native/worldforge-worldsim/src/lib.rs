@@ -856,7 +856,7 @@ fn choose_building_for_need(snapshot: &WorldSnapshot, settlement: &Settlement, t
 
 fn registered_profession(snapshot: &WorldSnapshot, id: &str) -> bool {
     catalog_entry(snapshot, "wf_settle", "building_professions", id).is_some()
-        || catalog_entry(snapshot, "wf_people", "professions", id).is_some()
+        && catalog_entry(snapshot, "wf_people", "professions", id).is_some()
 }
 
 fn choose_profession_for_output(snapshot: &WorldSnapshot, resource: &str) -> Option<String> {
