@@ -67,6 +67,20 @@ public final class WorldForgeApi {
     /** One process-wide bounded worker shared by every native compute domain. */
     public static WorldForgeComputeRuntime computeRuntime() { return COMPUTE_RUNTIME; }
 
+    /**
+     * One canonical entry point for RTS, first-person, radial and dialogue commands.
+     * Domain adapters remain responsible for live authorization and execution semantics.
+     */
+    public static ActionExecutionService.Task executeCommandIntent(CommandIntent intent, Path journalFile,
+            long worldMinute, ActionExecutionService.Authorizer authorizer,
+            ActionExecutionService.Executor executor) {
+        java.util.Objects.requireNonNull(intent, "intent");
+        java.util.Objects.requireNonNull(authorizer, "authorizer");
+        java.util.Objects.requireNonNull(executor, "executor");
+        ActionExecutionService.Request request = intent.toActionRequest(worldMinute);
+        return ACTION_EXECUTION.execute(request, authorizer, executor, null, worldMinute, journalFile);
+    }
+
     /** Shared durable action queue. WorldForgeMod loads/saves it with the active world. */
     public static ActionExecutionService actionExecution() { return ACTION_EXECUTION; }
     public static synchronized void resetActionExecution() { ACTION_EXECUTION = new ActionExecutionService(); }
