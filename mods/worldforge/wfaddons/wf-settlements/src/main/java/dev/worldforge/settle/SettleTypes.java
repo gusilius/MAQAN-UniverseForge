@@ -123,8 +123,12 @@ public final class SettleTypes {
     /** Можно ли строить здание в поселении этого вида; пустая строка - можно. have - сколько уже есть таких зданий. */
     public String canBuild(Type t, Defs.Building b, int have) {
         if (t.banBuildings().contains(b.id)) return "в таком поселении это не строят";
-        boolean listed = t.allowBuildings().contains(b.id);
-        if (!listed && !t.allowCategories().isEmpty() && !t.allowCategories().contains(b.category)) return "не подходит виду поселения «" + t.name() + "»";
+        boolean hasBuildingAllowList = !t.allowBuildings().isEmpty();
+        boolean explicitlyListed = t.allowBuildings().contains(b.id);
+        boolean categoryAllowed = t.allowCategories().contains(b.category);
+        if ((hasBuildingAllowList || !t.allowCategories().isEmpty())
+                && !explicitlyListed && !categoryAllowed)
+            return "не подходит виду поселения «" + t.name() + "»";
         Integer lim = t.limits().get(b.id);
         if (lim != null && have >= lim) return "лимит для «" + t.name() + "»: " + lim;
         return "";
