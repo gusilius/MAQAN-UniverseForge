@@ -107,7 +107,7 @@ public final class WorldSimMod {
         final Map<String, EmergentBandProgress> bands = new HashMap<>();
         final dev.worldforge.people.NameBank.NameReservations reservedHouseNames;
         EmergentMapProgress(CharacterRegistry registry) {
-            List<dev.worldforge.people.Character> existing = registry.all();
+            List<dev.worldforge.people.Character> existing = new ArrayList<>(registry.all());
             this.index = new EmergentPopulationIndex(existing);
             List<String> reserved = new ArrayList<>();
             for (dev.worldforge.people.Character person : existing)
