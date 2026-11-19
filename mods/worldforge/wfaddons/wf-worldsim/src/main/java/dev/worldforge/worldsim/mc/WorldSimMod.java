@@ -1747,9 +1747,9 @@ public final class WorldSimMod {
                 catalogEntryCount(catalogEntries, "wf_reputation"), 0);
         addCapability(capabilities, "wf_rts", 1,
                 net.minecraftforge.fml.ModList.get().isLoaded("wf_rts"), 0, 0);
-        setConsumedCatalogs(capabilities, "wf_progress", List.of("attrs", "skills", "nodes"));
-        setConsumedCatalogs(capabilities, "wf_genesis", List.of("features"));
-        setConsumedCatalogs(capabilities, "wf_reputation", List.of("runtime_state"));
+        setConsumedCatalogs(capabilities, catalogEntries, "wf_progress", List.of("attrs", "skills", "nodes"));
+        setConsumedCatalogs(capabilities, catalogEntries, "wf_genesis", List.of("features"));
+        setConsumedCatalogs(capabilities, catalogEntries, "wf_reputation", List.of("runtime_state"));
         sortObjects(catalogEntries, Comparator.comparing((JsonObject item) -> item.get("module_id").getAsString())
                 .thenComparing(item -> item.get("catalog_id").getAsString()).thenComparing(item -> item.get("entry_id").getAsString()));
         sortObjects(diplomaticRelations, Comparator.comparing((JsonObject item) -> item.get("realm_a").getAsString())
@@ -1958,14 +1958,22 @@ public final class WorldSimMod {
         return Double.isFinite(value) ? value : 0.0;
     }
 
-    private static void setConsumedCatalogs(JsonArray capabilities, String moduleId,
-                                             List<String> catalogIds) {
+    private static void setConsumedCatalogs(JsonArray capabilities, JsonArray entries,
+                                             String moduleId, List<String> catalogIds) {
+        Set<String> present = new TreeSet<>();
+        for (var element : entries) if (element.isJsonObject()) {
+            JsonObject row = element.getAsJsonObject();
+            if (moduleId.equals(row.get("module_id").getAsString()))
+                present.add(row.get("catalog_id").getAsString());
+        }
+        List<String> consumed = catalogIds.stream().filter(present::contains).sorted().toList();
         for (var element : capabilities) {
             if (!element.isJsonObject()) continue;
             JsonObject capability = element.getAsJsonObject();
             if (!moduleId.equals(capability.has("module_id")
                     ? capability.get("module_id").getAsString() : "")) continue;
-            capability.add("consumed_catalogs", GSON.toJsonTree(catalogIds.stream().sorted().toList()));
+            capability.add("consumed_catalogs", GSON.toJsonTree(consumed));
+            capability.addProperty("simulation_consumed", !consumed.isEmpty());
             return;
         }
     }
