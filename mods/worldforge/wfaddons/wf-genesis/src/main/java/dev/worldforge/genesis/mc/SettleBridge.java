@@ -67,7 +67,8 @@ final class SettleBridge {
             }
             if (c.genesisProvisioningStep < 4) {
                 int n = 0;
-                for (String b : tier.buildings()) {
+                for (String requestedBuilding : tier.buildings()) {
+                    String b = s.defs.selectGenesisBuilding(requestedBuilding, d.race, name.hashCode() * 31L + n);
                     if (!s.defs.buildings.containsKey(b)) continue;
                     boolean placed = false;
                     for (int attempt = 0; attempt < 12; attempt++) {
