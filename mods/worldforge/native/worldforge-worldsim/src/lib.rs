@@ -1568,28 +1568,40 @@ mod tests {
         let mut s=base(); s.realms[0].stability=0;
         assert!(!decide(&s).unwrap().proposals.iter().any(|p| matches!(p.kind,ProposalKind::DeclareWar{..})));
     }
+    fn add_test_catalog(snapshot: &mut WorldSnapshot, module: &str, catalog: &str, id: &str, payload: serde_json::Value) {
+        snapshot.catalog_entries.push(CatalogEntry {
+            module_id: module.into(), catalog_id: catalog.into(), entry_id: id.into(),
+            name: id.into(), payload,
+        });
+        let count = snapshot.catalog_entries.iter().filter(|entry| entry.module_id == module).count() as u32
+            + if module == "wf_realms" { snapshot.government_definitions.len() as u32 } else { 0 };
+        if let Some(capability) = snapshot.capabilities.iter_mut().find(|item| item.module_id == module) {
+            capability.catalog_count = count;
+        } else {
+            snapshot.capabilities.push(CapabilityDescriptor {
+                module_id: module.into(), schema_version: 1, available: true,
+                snapshot_received: true, simulation_consumed: true,
+                apply_handler_available: true, catalog_count: count, entity_count: 0,
+            });
+        }
+    }
+
     #[test] fn settlement_selects_registered_food_building_from_food_shortage() {
         let mut snapshot = base();
-        snapshot.catalog_entries.push(CatalogEntry {
-            module_id: "wf_settle".into(), catalog_id: "buildings".into(),
-            entry_id: "farm".into(), name: "Farm".into(),
-            payload: serde_json::json!({"category":"food","out":{"food":5.0},"jobs":{"farmer":2.0},"work":10.0,"cost":{},"requires":[]}),
-        });
+        add_test_catalog(&mut snapshot, "wf_settle", "buildings", "farm",
+            serde_json::json!({"category":"food","out":{"food":5.0},"jobs":{"farmer":2.0},"work":10.0,"cost":{},"requires":[]}));
         let frame=decide(&snapshot).unwrap();
         assert!(frame.proposals.iter().any(|p| matches!(&p.kind,ProposalKind::Build{building,..} if building=="farm")));
     }
     #[test] fn workforce_uses_registered_profession_and_building_job_for_food_deficit() {
         let mut s=base();
         s.workforce.push(Workforce{settlement_id:"village".into(),farmers:0,lumberjacks:0,miners:0,builders:0,soldiers:0,unemployed:3,food_need:100,food_output:0,wood_need:0,wood_output:0,stone_need:0,stone_output:0});
-        s.catalog_entries.extend(vec![
-            CatalogEntry { module_id:"wf_settle".into(), catalog_id:"building_professions".into(),
-                entry_id:"farmer".into(), name:"Farmer".into(), payload:serde_json::json!({"id":"farmer","name":"Farmer"}) },
-            CatalogEntry { module_id:"wf_people".into(), catalog_id:"professions".into(),
-                entry_id:"farmer".into(), name:"Farmer".into(), payload:serde_json::json!({"id":"farmer","name":"Farmer","group":"agriculture"}) },
-            CatalogEntry { module_id:"wf_settle".into(), catalog_id:"buildings".into(),
-                entry_id:"farm".into(), name:"Farm".into(),
-                payload:serde_json::json!({"category":"food","out":{"food":5.0},"jobs":{"farmer":2.0},"work":10.0,"cost":{},"requires":[]}) },
-        ]);
+        add_test_catalog(&mut s, "wf_settle", "building_professions", "farmer",
+            serde_json::json!({"id":"farmer","name":"Farmer"}));
+        add_test_catalog(&mut s, "wf_people", "professions", "farmer",
+            serde_json::json!({"id":"farmer","name":"Farmer","group":"agriculture"}));
+        add_test_catalog(&mut s, "wf_settle", "buildings", "farm",
+            serde_json::json!({"category":"food","out":{"food":5.0},"jobs":{"farmer":2.0},"work":10.0,"cost":{},"requires":[]}));
         assert!(decide(&s).unwrap().proposals.iter().any(|p| matches!(&p.kind,ProposalKind::ReassignProfession{to,..} if to=="farmer")));
     }
     #[test] fn recruitment_uses_contested_border_membership() {
@@ -1597,15 +1609,12 @@ mod tests {
         s.settlements[0].barracks = 1;
         s.settlements[0].food = 100;
         s.realms[0].treasury = 500;
-        s.catalog_entries.extend(vec![
-            CatalogEntry { module_id:"wf_settle".into(), catalog_id:"settlement_instances".into(),
-                entry_id:"village".into(), name:"Village".into(),
-                payload:serde_json::json!({"trainer_counts":{"barracks":1},"completed_building_counts":{"barracks":1}}) },
-            CatalogEntry { module_id:"wf_army".into(), catalog_id:"realm_economy".into(),
-                entry_id:"north".into(), name:"North".into(), payload:serde_json::json!({"manpower_pool":100.0,"gold":500.0}) },
-            CatalogEntry { module_id:"wf_army".into(), catalog_id:"unit_types".into(),
-                entry_id:"levy".into(), name:"Levy".into(), payload:serde_json::json!({"levy":true,"cost":0.0,"attack":1.0,"defense":1.0,"siege":0.0}) },
-        ]);
+        add_test_catalog(&mut s, "wf_settle", "settlement_instances", "village",
+            serde_json::json!({"trainer_counts":{"barracks":1},"completed_building_counts":{"barracks":1}}));
+        add_test_catalog(&mut s, "wf_army", "realm_economy", "north",
+            serde_json::json!({"manpower_pool":100.0,"gold":500.0}));
+        add_test_catalog(&mut s, "wf_army", "unit_types", "levy",
+            serde_json::json!({"levy":true,"cost":0.0,"attack":1.0,"defense":1.0,"siege":0.0}));
         let frame = decide(&s).unwrap();
         assert!(frame.proposals.iter().any(|p| matches!(&p.kind,
             ProposalKind::Recruit { realm, settlement, .. } if realm == "north" && settlement == "village")));
@@ -1684,6 +1693,12 @@ mod tests {
             aff_terrain: BTreeMap::new(), mods: BTreeMap::new(),
             doctrine_slots: 3, law_slots: 4,
         }];
+        add_test_catalog(&mut snapshot, "wf_realms", "doctrine_branches", "trade",
+            serde_json::json!({"nodes":[{"id":"charters","mods":{"trade_pct":10.0}}]}));
+        add_test_catalog(&mut snapshot, "wf_realms", "government_levels", "city_league",
+            serde_json::json!({"mods":{}}));
+        add_test_catalog(&mut snapshot, "wf_realms", "laws", "succession",
+            serde_json::json!({"options":[{"id":"elective","mods":{}}]}));
         snapshot.realm_governments = vec![RealmGovernment {
             realm_id: "north".into(), government_id: "merchant_republic".into(),
             level_id: "city_league".into(), doctrine_ids: vec!["trade:charters".into()],
