@@ -1239,6 +1239,8 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
     ordered_settlements.sort_by(|a, b| a.id.cmp(&b.id));
     for s in ordered_settlements {
         if snapshot.day.saturating_sub(s.last_project_day) < 20 { continue; }
+        let threatened = realms.get(s.realm_id.as_str())
+            .map(|realm| contested_realms.contains(realm.id.as_str())).unwrap_or(false);
         if let Some((building, priority, reason)) = choose_building_for_need(snapshot, s, threatened) {
             proposals.push(Proposal {
                 id: proposal_id(snapshot.seed, snapshot.day, "build", &s.id, &building),
