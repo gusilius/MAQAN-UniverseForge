@@ -94,11 +94,11 @@ public final class SettleCommands {
                                                     Colony colony = SettleMod.nearest(source.getLevel(),
                                                             source.getPosition().x, source.getPosition().z);
                                                     if (colony == null) return b.buildFuture();
-                                                    Settlement.Building building = colony.s.building(
+                                                    Building building = colony.s.building(
                                                             IntegerArgumentType.getInteger(c, "uid"));
                                                     if (building == null) return b.buildFuture();
                                                     java.util.Set<String> roles = new java.util.TreeSet<>(building.def.jobs.keySet());
-                                                    if (building.state == Settlement.Building.State.BUILDING) roles.add("builder");
+                                                    if (building.state == Building.State.BUILDING) roles.add("builder");
                                                     return SharedSuggestionProvider.suggest(roles, b);
                                                 })
                                                 .executes(c -> order(c, col -> {
