@@ -10,6 +10,7 @@ import dev.worldforge.troops.mc.OrderPacket;
 import dev.worldforge.troops.mc.TroopEntity;
 import dev.worldforge.troops.mc.TroopsMod;
 import net.minecraft.client.CameraType;
+import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
@@ -265,7 +266,27 @@ public final class CommandMode {
     public static void openUnified() {
         Minecraft mc = Minecraft.getInstance();
         if (!active && mc.screen == null) enter(mc);
-        else if (active && !(mc.screen instanceof CommandScreen)) mc.setScreen(new CommandScreen());
+        else if (active && !(mc.screen instanceof CommandScreen) && !isPlatformWorkspace(mc.screen))
+            openCommandView(mc, new CommandScreen());
+    }
+
+    private static boolean isPlatformWorkspace(Screen screen) {
+        return screen != null && screen.getClass().getName().equals("dev.maqan.platform.client.PlatformShellScreen");
+    }
+
+    /**
+     * Host the existing RTS command screen inside MAQAN's shared workspace when
+     * Platform is installed. The troop addon remains optional and keeps its
+     * standalone screen when the host is absent.
+     */
+    private static void openCommandView(Minecraft mc, CommandScreen view) {
+        try {
+            Class<?> shell = Class.forName("dev.maqan.platform.client.PlatformShellScreen");
+            shell.getMethod("openProviderView", String.class, Screen.class)
+                    .invoke(null, "wf_troops", view);
+        } catch (ReflectiveOperationException | LinkageError unavailable) {
+            mc.setScreen(view);
+        }
     }
 
     static void enter(Minecraft mc) {
@@ -280,7 +301,7 @@ public final class CommandMode {
         lastFrame = System.nanoTime();
         frame(mc);
         mc.setCameraEntity(camEntity);
-        mc.setScreen(new CommandScreen());
+        openCommandView(mc, new CommandScreen());
         if (ModList.get().isLoaded("wf_settle")) mc.player.connection.sendCommand("wfsettle view hud");
     }
 
@@ -302,7 +323,8 @@ public final class CommandMode {
         double dt = Math.min(0.1, (now - lastFrame) / 1e9);
         lastFrame = now;
         long win = mc.getWindow().getWindow();
-        boolean ui = mc.screen instanceof CommandScreen;
+        // The same command workspace may be hosted by MAQAN Platform.
+        boolean ui = mc.screen instanceof CommandScreen || isPlatformWorkspace(mc.screen);
         double fwd = 0, right = 0;
         if (ui) {
             if (InputConstants.isKeyDown(win, GLFW.GLFW_KEY_W)) fwd += 1;
