@@ -195,15 +195,15 @@ public final class Defs {
                                         String architectureStyleId, long seed) {
         Building requested = buildings.get(requestedId);
         if (requested == null) return requestedId;
-        raceId = identityValue(raceId);
-        subraceId = identityValue(subraceId);
-        cultureId = identityValue(cultureId);
-        governmentId = identityValue(governmentId);
-        settlementTypeId = identityValue(settlementTypeId);
-        formationId = identityValue(formationId);
-        architectureStyleId = identityValue(architectureStyleId);
-        boolean requestedCompatible = compatible(requested, raceId, subraceId, cultureId, governmentId,
-                settlementTypeId, formationId, architectureStyleId);
+        final String race = identityValue(raceId);
+        final String subrace = identityValue(subraceId);
+        final String culture = identityValue(cultureId);
+        final String government = identityValue(governmentId);
+        final String settlementType = identityValue(settlementTypeId);
+        final String formation = identityValue(formationId);
+        final String architectureStyle = identityValue(architectureStyleId);
+        boolean requestedCompatible = compatible(requested, race, subrace, culture, government,
+                settlementType, formation, architectureStyle);
         // An explicitly tagged matching design is already the best identity match. Universal
         // base definitions may still resolve to a more specific catalog variant below.
         if (requestedCompatible && hasIdentityMetadata(requested)
@@ -213,21 +213,21 @@ public final class Defs {
                 .filter(candidate -> Objects.equals(candidate.category, requested.category))
                 .filter(candidate -> !candidate.id.equals(requested.id))
                 .filter(Defs::hasIdentityMetadata)
-                .filter(candidate -> compatible(candidate, raceId, subraceId, cultureId, governmentId,
-                        settlementTypeId, formationId, architectureStyleId))
-                .filter(candidate -> identityPreferenceScore(candidate, raceId, subraceId, cultureId, governmentId,
-                        settlementTypeId, formationId, architectureStyleId) > 0)
+                .filter(candidate -> compatible(candidate, race, subrace, culture, government,
+                        settlementType, formation, architectureStyle))
+                .filter(candidate -> identityPreferenceScore(candidate, race, subrace, culture, government,
+                        settlementType, formation, architectureStyle) > 0)
                 .sorted(Comparator.comparingInt((Building candidate) ->
-                        identityPreferenceScore(candidate, raceId, subraceId, cultureId, governmentId,
-                                settlementTypeId, formationId, architectureStyleId)).reversed()
+                        identityPreferenceScore(candidate, race, subrace, culture, government,
+                                settlementType, formation, architectureStyle)).reversed()
                         .thenComparing(candidate -> candidate.id))
                 .toList();
         if (alternatives.isEmpty()) return requestedCompatible ? requestedId : "";
-        int bestScore = identityPreferenceScore(alternatives.get(0), raceId, subraceId, cultureId, governmentId,
-                settlementTypeId, formationId, architectureStyleId);
+        int bestScore = identityPreferenceScore(alternatives.get(0), race, subrace, culture, government,
+                settlementType, formation, architectureStyle);
         List<Building> best = alternatives.stream()
-                .filter(candidate -> identityPreferenceScore(candidate, raceId, subraceId, cultureId, governmentId,
-                        settlementTypeId, formationId, architectureStyleId) == bestScore).toList();
+                .filter(candidate -> identityPreferenceScore(candidate, race, subrace, culture, government,
+                        settlementType, formation, architectureStyle) == bestScore).toList();
         long mixed = seed ^ (seed >>> 33) ^ requestedId.hashCode() * 0x9E3779B97F4A7C15L;
         return best.get((int) Math.floorMod(mixed, best.size())).id;
     }
