@@ -384,7 +384,7 @@ fn realm_policy_modifier(snapshot: &WorldSnapshot, realm_id: &str, key: &str) ->
                 && (branch_id.is_empty() || entry.entry_id == branch_id)) {
             if let Some(nodes) = branch.payload.get("nodes").and_then(serde_json::Value::as_array) {
                 if let Some(node) = nodes.iter().find(|node|
-                    node.get("id").and_then(serde_json::Value::as_str) == Some(node_id)) {
+                    node.get("key").or_else(|| node.get("id")).and_then(serde_json::Value::as_str) == Some(node_id)) {
                     total += node.get("mods").and_then(|mods| mods.get(key))
                         .and_then(serde_json::Value::as_f64).unwrap_or(0.0);
                     break;
@@ -1086,7 +1086,7 @@ impl WorldSnapshot {
                     entry.module_id == "wf_realms" && entry.catalog_id == "doctrine_branches"
                         && (branch.is_empty() || entry.entry_id == branch))
                     .any(|entry| entry.payload.get("nodes").and_then(serde_json::Value::as_array)
-                        .map(|nodes| nodes.iter().any(|value| value.get("id").and_then(serde_json::Value::as_str) == Some(node)))
+                        .map(|nodes| nodes.iter().any(|value| value.get("key").or_else(|| value.get("id")).and_then(serde_json::Value::as_str) == Some(node)))
                         .unwrap_or(false));
                 if !found { return Err(SimError::InvalidSnapshot(format!("unknown-doctrine:{}:{}", selection.realm_id, doctrine))); }
             }
@@ -1447,7 +1447,7 @@ mod tests {
         snapshot.catalog_entries.push(CatalogEntry {
             module_id: "wf_settle".into(), catalog_id: "settlement_types".into(),
             entry_id: "hamlet".into(), name: "Hamlet".into(),
-            payload: serde_json::json!({"allowBuildings":["market"]}),
+            payload: serde_json::json!({"allowBuildings":["market"],"allowCategories":["trade"]}),
         });
         snapshot.catalog_entries.push(CatalogEntry {
             module_id: "wf_settle".into(), catalog_id: "buildings".into(),
@@ -1566,12 +1566,28 @@ mod tests {
         let mut s=base(); s.realms[0].stability=0;
         assert!(!decide(&s).unwrap().proposals.iter().any(|p| matches!(p.kind,ProposalKind::DeclareWar{..})));
     }
-    #[test] fn settlement_selects_farm_from_food_shortage() {
-        let frame=decide(&base()).unwrap();
+    #[test] fn settlement_selects_registered_food_building_from_food_shortage() {
+        let mut snapshot = base();
+        snapshot.catalog_entries.push(CatalogEntry {
+            module_id: "wf_settle".into(), catalog_id: "buildings".into(),
+            entry_id: "farm".into(), name: "Farm".into(),
+            payload: serde_json::json!({"category":"food","out":{"food":5.0},"jobs":{"farmer":2.0},"work":10.0,"cost":{},"requires":[]}),
+        });
+        let frame=decide(&snapshot).unwrap();
         assert!(frame.proposals.iter().any(|p| matches!(&p.kind,ProposalKind::Build{building,..} if building=="farm")));
     }
-    #[test] fn workforce_moves_unemployed_into_food_deficit() {
-        let mut s=base(); s.workforce.push(Workforce{settlement_id:"village".into(),farmers:0,lumberjacks:0,miners:0,builders:0,soldiers:0,unemployed:3,food_need:100,food_output:0,wood_need:0,wood_output:0,stone_need:0,stone_output:0});
+    #[test] fn workforce_uses_registered_profession_and_building_job_for_food_deficit() {
+        let mut s=base();
+        s.workforce.push(Workforce{settlement_id:"village".into(),farmers:0,lumberjacks:0,miners:0,builders:0,soldiers:0,unemployed:3,food_need:100,food_output:0,wood_need:0,wood_output:0,stone_need:0,stone_output:0});
+        s.catalog_entries.extend(vec![
+            CatalogEntry { module_id:"wf_settle".into(), catalog_id:"building_professions".into(),
+                entry_id:"farmer".into(), name:"Farmer".into(), payload:serde_json::json!({"id":"farmer","name":"Farmer"}) },
+            CatalogEntry { module_id:"wf_people".into(), catalog_id:"professions".into(),
+                entry_id:"farmer".into(), name:"Farmer".into(), payload:serde_json::json!({"id":"farmer","name":"Farmer","group":"agriculture"}) },
+            CatalogEntry { module_id:"wf_settle".into(), catalog_id:"buildings".into(),
+                entry_id:"farm".into(), name:"Farm".into(),
+                payload:serde_json::json!({"category":"food","out":{"food":5.0},"jobs":{"farmer":2.0},"work":10.0,"cost":{},"requires":[]}) },
+        ]);
         assert!(decide(&s).unwrap().proposals.iter().any(|p| matches!(&p.kind,ProposalKind::ReassignProfession{to,..} if to=="farmer")));
     }
     #[test] fn recruitment_uses_contested_border_membership() {
@@ -1579,6 +1595,15 @@ mod tests {
         s.settlements[0].barracks = 1;
         s.settlements[0].food = 100;
         s.realms[0].treasury = 500;
+        s.catalog_entries.extend(vec![
+            CatalogEntry { module_id:"wf_settle".into(), catalog_id:"settlement_instances".into(),
+                entry_id:"village".into(), name:"Village".into(),
+                payload:serde_json::json!({"trainer_counts":{"barracks":1},"completed_building_counts":{"barracks":1}}) },
+            CatalogEntry { module_id:"wf_army".into(), catalog_id:"realm_economy".into(),
+                entry_id:"north".into(), name:"North".into(), payload:serde_json::json!({"manpower_pool":100.0,"gold":500.0}) },
+            CatalogEntry { module_id:"wf_army".into(), catalog_id:"unit_types".into(),
+                entry_id:"levy".into(), name:"Levy".into(), payload:serde_json::json!({"levy":true,"cost":0.0,"attack":1.0,"defense":1.0,"siege":0.0}) },
+        ]);
         let frame = decide(&s).unwrap();
         assert!(frame.proposals.iter().any(|p| matches!(&p.kind,
             ProposalKind::Recruit { realm, settlement, .. } if realm == "north" && settlement == "village")));
@@ -1594,6 +1619,10 @@ mod tests {
             Character{id:"a".into(),realm_id:"north".into(),age:22,alive:true,married:false,gender:0,fertility:10,prestige:50,opinion:50,house_id:"A".into(),..Default::default()},
             Character{id:"b".into(),realm_id:"south".into(),age:23,alive:true,married:false,gender:1,fertility:10,prestige:50,opinion:50,house_id:"B".into(),..Default::default()}
         ];
+        s.social_relations.push(SocialRelation {
+            character_a: "a".into(), character_b: "b".into(), relationship: 75, love: 65,
+            married: false, dating: true, employed: false, last_contact_day: s.day,
+        });
         assert!(decide(&s).unwrap().proposals.iter().any(|p| matches!(p.kind,ProposalKind::DynasticMarriage{..})));
     }
     #[test]
