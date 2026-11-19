@@ -49,7 +49,13 @@ public final class RoleDefs {
     public Collection<Role> all() { return roles.values(); }
 
     public Role ruler() {
-        for (Role r : roles.values()) if (r.ruler) return r;
+        // CourtSim's sovereign lookup is realm-scoped. A map may define many
+        // territorial ruler roles (baron, count, province, region, custom tiers);
+        // returning the first of those makes every realm appear rulerless.
+        for (Role role : roles.values())
+            if (role.ruler && "realm".equals(role.per)) return role;
+        // Preserve compatibility for packs that only define a single ruler role.
+        for (Role role : roles.values()) if (role.ruler) return role;
         return null;
     }
 }
