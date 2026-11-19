@@ -608,6 +608,60 @@ public final class CharacterRegistry {
 
     // ------------------------------------------------------------------ сохранение
 
+    /**
+     * Encode one canonical Character using the exact wf-people/3 record schema.
+     * This is the record codec boundary used by incremental persistence; it deliberately
+     * retains global identity, family links, posts, traits and every extension property.
+     */
+    public String toJsonRecord(Character c) {
+        Objects.requireNonNull(c, "character");
+        if (byId.get(c.id) != c) throw new IllegalArgumentException("Character does not belong to this registry: " + c.id);
+        Map<String, Object> record = new LinkedHashMap<>();
+        record.put("id", c.id); record.put("global_id", c.globalId); record.put("name", c.name);
+        record.put("house", c.house); record.put("culture", c.culture); record.put("gender", c.gender);
+        record.put("birth", c.birthYear); record.put("alive", c.alive);
+        record.put("father", c.father); record.put("mother", c.mother); record.put("spouse", c.spouse);
+        record.put("children", new ArrayList<Object>(c.children));
+        List<Object> posts = new ArrayList<>();
+        for (Character.Post post : c.posts) posts.add(new ArrayList<Object>(List.of(post.role, post.place)));
+        record.put("posts", posts);
+        record.put("traits", new ArrayList<Object>(c.traits));
+        record.put("props", new LinkedHashMap<>(c.props));
+        Map<String, Object> root = new LinkedHashMap<>();
+        root.put("format", "wf-people-record/1");
+        root.put("schema_version", 3);
+        root.put("next", next);
+        root.put("character", record);
+        return Json.write(root);
+    }
+
+    /**
+     * Restore/replace one record from the incremental journal. The normal wf-people/1..3
+     * parser remains the sole validator/migrator, so the record codec cannot drift from
+     * the legacy identity rules. Callers must replay records in per-shard sequence order.
+     */
+    public void applyJsonRecord(String json, String identityNamespace) {
+        Object parsed = Json.parse(json == null ? "" : json);
+        if (!(parsed instanceof Map<?, ?> root) || !"wf-people-record/1".equals(root.get("format"))
+                || !(root.get("character") instanceof Map<?, ?> rawCharacter))
+            throw new IllegalArgumentException("Invalid incremental Character record");
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("format", "wf-people/3");
+        snapshot.put("schema_version", 3);
+        snapshot.put("next", root.get("next") instanceof Number n ? n : next);
+        snapshot.put("characters", List.of(rawCharacter));
+        CharacterRegistry decoded = new CharacterRegistry();
+        decoded.fromJson(Json.write(snapshot), identityNamespace);
+        Character restored = decoded.all().iterator().next();
+        Character previous = byId.put(restored.id, restored);
+        if (restored.id.matches("c[0-9]+")) {
+            try { next = Math.max(next, Math.addExact(Integer.parseInt(restored.id.substring(1)), 1)); }
+            catch (NumberFormatException ignored) { /* non-numeric legacy id */ }
+        }
+        if (previous == null) markMembershipMutation();
+        recordDomainMutation();
+    }
+
     public String toJson() { return toJson(null); }
 
     /** Только перечисленные персонажи (null - все): для окон на клиенте, которым не нужен весь мир. */
