@@ -1642,21 +1642,24 @@ public final class WorldSimMod {
                 catalogEntryCount(catalogEntries, "wf_settle"), SettleMod.COLONIES.size());
         addCapability(capabilities, "wf_army", 1, true,
                 catalogEntryCount(catalogEntries, "wf_army"), armies.size());
-        addCapability(capabilities, "wf_troops", 1, net.minecraftforge.fml.ModList.get().isLoaded("wf_troops"),
-                catalogEntryCount(catalogEntries, "wf_troops"),
+        addCapability(capabilities, "wf_troops", 1,
+                net.minecraftforge.fml.ModList.get().isLoaded("wf_troops"), troopSnapshot != null,
+                troopSnapshot != null, troopSnapshot != null, catalogEntryCount(catalogEntries, "wf_troops"),
                 troopSnapshot != null && troopSnapshot.has("live_troops") ? troopSnapshot.getAsJsonArray("live_troops").size() : 0);
         addCapability(capabilities, "wf_people", 1, true,
                 catalogEntryCount(catalogEntries, "wf_people"), characters.size());
-        addCapability(capabilities, "wf_relations", 1, net.minecraftforge.fml.ModList.get().isLoaded("wf_relations"),
-                catalogEntryCount(catalogEntries, "wf_relations"), exportedSocialRelations);
+        addCapability(capabilities, "wf_relations", 1,
+                net.minecraftforge.fml.ModList.get().isLoaded("wf_relations"), relationsSnapshot != null,
+                relationsSnapshot != null, false, catalogEntryCount(catalogEntries, "wf_relations"), exportedSocialRelations);
         addCapability(capabilities, "wf_origins", 1, true,
                 catalogEntryCount(catalogEntries, "wf_origins"), characters.size());
         addCapability(capabilities, "wf_court", 1, net.minecraftforge.fml.ModList.get().isLoaded("wf_court"),
                 catalogEntryCount(catalogEntries, "wf_court"), 0);
         addCapability(capabilities, "wf_war", 1, net.minecraftforge.fml.ModList.get().isLoaded("wf_war"),
                 catalogEntryCount(catalogEntries, "wf_war"), wars.size());
-        addCapability(capabilities, "wf_trade", 1, net.minecraftforge.fml.ModList.get().isLoaded("wf_trade"),
-                catalogEntryCount(catalogEntries, "wf_trade"),
+        addCapability(capabilities, "wf_trade", 1,
+                net.minecraftforge.fml.ModList.get().isLoaded("wf_trade"), tradeSnapshot != null,
+                tradeSnapshot != null, false, catalogEntryCount(catalogEntries, "wf_trade"),
                 tradeSnapshot != null && tradeSnapshot.has("caravans") ? tradeSnapshot.getAsJsonArray("caravans").size() : 0);
         for (String optionalModule : List.of("wf_rts", "wf_genesis", "wf_progress", "wf_reputation"))
             addCapability(capabilities, optionalModule, 1, net.minecraftforge.fml.ModList.get().isLoaded(optionalModule), 0, 0);
@@ -1774,9 +1777,25 @@ public final class WorldSimMod {
 
     private static void addCapability(JsonArray target, String moduleId, int schemaVersion,
                                       boolean available, int catalogCount, int entityCount) {
+        boolean unsupportedOptional = Set.of("wf_rts", "wf_genesis", "wf_progress", "wf_reputation").contains(moduleId);
+        boolean snapshotReceived = available && !unsupportedOptional;
+        boolean simulationConsumed = snapshotReceived && Set.of("worldforge", "wf_worldsim", "wf_realms",
+                "wf_settle", "wf_army", "wf_people", "wf_origins", "wf_court", "wf_war").contains(moduleId);
+        boolean applyHandler = simulationConsumed && Set.of("wf_worldsim", "wf_realms", "wf_settle",
+                "wf_army", "wf_court", "wf_war").contains(moduleId);
+        addCapability(target, moduleId, schemaVersion, available, snapshotReceived,
+                simulationConsumed, applyHandler, catalogCount, entityCount);
+    }
+
+    private static void addCapability(JsonArray target, String moduleId, int schemaVersion,
+                                      boolean available, boolean snapshotReceived, boolean simulationConsumed,
+                                      boolean applyHandlerAvailable, int catalogCount, int entityCount) {
         JsonObject item = new JsonObject();
         item.addProperty("module_id", moduleId); item.addProperty("schema_version", schemaVersion);
-        item.addProperty("available", available); item.addProperty("catalog_count", Math.max(0, catalogCount));
+        item.addProperty("available", available); item.addProperty("snapshot_received", snapshotReceived);
+        item.addProperty("simulation_consumed", simulationConsumed);
+        item.addProperty("apply_handler_available", applyHandlerAvailable);
+        item.addProperty("catalog_count", Math.max(0, catalogCount));
         item.addProperty("entity_count", Math.max(0, entityCount)); target.add(item);
     }
 
