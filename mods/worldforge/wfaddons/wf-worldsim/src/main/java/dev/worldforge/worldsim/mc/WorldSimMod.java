@@ -1001,14 +1001,23 @@ public final class WorldSimMod {
             row.addProperty("outcome", war.outcome == null ? "" : war.outcome);
             wars.add(row);
         }
-        for (var government : RealmsMod.DEFS.levels)
+        for (var government : RealmsMod.DEFS.levels) {
             addCatalogEntry(catalogEntries, "wf_realms", "government_levels", government.id(), government.name(), GSON.toJsonTree(government));
+            addNamedEntity(namedEntities, government.id(), "government_level", government.name(), "", "");
+        }
         for (var terrain : RealmsMod.DEFS.terrains.values())
             addCatalogEntry(catalogEntries, "wf_realms", "government_terrains", terrain.id(), terrain.name(), GSON.toJsonTree(terrain));
-        for (var branch : RealmsMod.DEFS.branches.values())
-            addCatalogEntry(catalogEntries, "wf_realms", "doctrine_branches", branch.id(), branch.name(), GSON.toJsonTree(branch));
-        for (var law : RealmsMod.DEFS.laws.values())
+        for (var doctrineBranch : RealmsMod.DEFS.branches.values()) {
+            addCatalogEntry(catalogEntries, "wf_realms", "doctrine_branches", doctrineBranch.id(), doctrineBranch.name(), GSON.toJsonTree(doctrineBranch));
+            addNamedEntity(namedEntities, doctrineBranch.id(), "doctrine_branch", doctrineBranch.name(), "", "");
+            for (var node : doctrineBranch.nodes()) addNamedEntity(namedEntities, node.key(), "doctrine", node.name(), doctrineBranch.id(), "");
+        }
+        for (var law : RealmsMod.DEFS.laws.values()) {
             addCatalogEntry(catalogEntries, "wf_realms", "laws", law.id(), law.name(), GSON.toJsonTree(law));
+            addNamedEntity(namedEntities, law.id(), "law", law.name(), "", "");
+            for (var option : law.options()) addNamedEntity(namedEntities,
+                    law.id() + ":" + option.id(), "law_option", option.name(), law.id(), "");
+        }
         // Shared pair set prevents exact province-adjacency borders from being
         // duplicated by the coarser emergence-neighbour projection below.
         // Export the complete data-pack government catalogue and each realm's
@@ -1030,6 +1039,7 @@ public final class WorldSimMod {
             definition.addProperty("doctrine_slots", government.doctrineSlots());
             definition.addProperty("law_slots", government.lawSlots());
             governmentDefinitions.add(definition);
+            addNamedEntity(namedEntities, government.id(), "government_type", government.name(), "", "");
         }
         for (TitleData.Realm realm : RealmsMod.realms()) {
             var policy = RealmsMod.REALMS.state(realm.id);
@@ -1282,8 +1292,14 @@ public final class WorldSimMod {
             w.addProperty("stone_output", fixed(s.flow.perMinute(s.time, "stone", true)));
             workforce.add(w);
         }
-        addCatalogEntry(catalogEntries, "wf_people", "name_pools", "all_pools", "Cultural and racial naming pools",
-                GSON.toJsonTree(PeopleMod.NAMES.catalogSnapshot()));
+        JsonObject namePools = GSON.toJsonTree(PeopleMod.NAMES.catalogSnapshot()).getAsJsonObject();
+        addCatalogEntry(catalogEntries, "wf_people", "name_pools", "all_pools", "Cultural and racial naming pools", namePools);
+        if (namePools.has("cultures") && namePools.get("cultures").isJsonObject())
+            for (var culture : namePools.getAsJsonObject("cultures").entrySet())
+                addNamedEntity(namedEntities, culture.getKey(), "culture", culture.getKey(), "", "");
+        if (namePools.has("races") && namePools.get("races").isJsonObject())
+            for (var race : namePools.getAsJsonObject("races").entrySet())
+                addNamedEntity(namedEntities, race.getKey(), "race", race.getKey(), "", "");
         JsonObject relationsSnapshot = exportOptionalModuleSnapshot("wf_relations",
                 "dev.worldforge.relations.mc.RelationsMc", "worldSnapshotJson");
         if (relationsSnapshot != null) {
@@ -1400,8 +1416,10 @@ public final class WorldSimMod {
                 addCatalogEntry(catalogEntries, "wf_settle", "buildings", building.id, building.name, GSON.toJsonTree(building));
                 addNamedEntity(namedEntities, building.id, "building_definition", building.name, "", "");
             }
-            for (var profession : SettleMod.DEFS.professions.values())
+            for (var profession : SettleMod.DEFS.professions.values()) {
                 addCatalogEntry(catalogEntries, "wf_settle", "building_professions", profession.id, profession.name, GSON.toJsonTree(profession));
+                addNamedEntity(namedEntities, profession.id, "profession", profession.name, "", "");
+            }
             for (var resource : SettleMod.DEFS.resourceNames.entrySet()) {
                 addCatalogEntry(catalogEntries, "wf_settle", "resources", resource.getKey(), resource.getValue(),
                         GSON.toJsonTree(Map.of("name", resource.getValue(),
@@ -1423,8 +1441,10 @@ public final class WorldSimMod {
         }
         // Export all loaded profession definitions and all configured race/class/origin
         // definitions from their owning modules, preserving their complete JSON shape.
-        for (var profession : PeopleMod.PROFESSIONS.all())
+        for (var profession : PeopleMod.PROFESSIONS.all()) {
             addCatalogEntry(catalogEntries, "wf_people", "professions", profession.id, profession.name, GSON.toJsonTree(profession));
+            addNamedEntity(namedEntities, profession.id, "profession", profession.name, "", "");
+        }
         for (var race : OriginsMod.ORIGINS.defs.races.values()) {
             addCatalogEntry(catalogEntries, "wf_origins", "races", race.id(), race.name(), GSON.toJsonTree(race));
             addNamedEntity(namedEntities, race.id(), "race", race.name(), race.parent(), "");
