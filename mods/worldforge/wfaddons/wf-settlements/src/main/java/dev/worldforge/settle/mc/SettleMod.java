@@ -1947,13 +1947,13 @@ public class SettleMod {
         syncCanonicalProfessions();
         importWorldBlueprintSettlements(server);
         ticks++;
+        int simulationInterval = dev.worldforge.mod.MaqanPerformanceConfig.settlementSimulationIntervalTicks();
         if (ticks % 1200 == 0 && ticks != lastResidentAuditTick) {
             lastResidentAuditTick = ticks;
             validateCanonicalResidentLinks();
         }
         if (ticks % (simulationInterval * 10L) == 0) VanillaVillageAdapter.reconcile(server);
         if (actionsBlocked()) return;
-        int simulationInterval = dev.worldforge.mod.MaqanPerformanceConfig.settlementSimulationIntervalTicks();
         if (ticks % simulationInterval == 0) {
             double speed = dev.worldforge.mod.api.WorldForgeApi.clock().multiplier();
             for (Colony c : COLONIES.values()) {
