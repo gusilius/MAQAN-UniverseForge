@@ -178,18 +178,40 @@ public final class Defs {
                                         String governmentId, String settlementTypeId, long seed) {
         Building requested = buildings.get(requestedId);
         if (requested == null) return requestedId;
-        if (compatible(requested, raceId, subraceId, cultureId, governmentId, settlementTypeId)) return requestedId;
+        boolean requestedCompatible = compatible(requested, raceId, subraceId, cultureId, governmentId, settlementTypeId);
+        // Explicit identity-authored structures can supersede generic legacy requests.
         List<Building> alternatives = buildings.values().stream()
                 .filter(candidate -> Objects.equals(candidate.category, requested.category))
                 .filter(candidate -> !candidate.id.equals(requested.id))
                 .filter(candidate -> hasIdentityMetadata(candidate))
                 .filter(candidate -> compatible(candidate, raceId, subraceId, cultureId, governmentId, settlementTypeId))
-                .sorted(Comparator.comparing(candidate -> candidate.id))
+                .filter(candidate -> identityPreferenceScore(candidate, raceId, subraceId, cultureId, governmentId, settlementTypeId) > 0)
+                .sorted(Comparator.comparingInt((Building candidate) ->
+                        identityPreferenceScore(candidate, raceId, subraceId, cultureId, governmentId, settlementTypeId)).reversed()
+                        .thenComparing(candidate -> candidate.id))
                 .toList();
-        if (alternatives.isEmpty()) return "";
+        if (alternatives.isEmpty()) return requestedCompatible ? requestedId : "";
+        int bestScore = identityPreferenceScore(alternatives.get(0), raceId, subraceId, cultureId, governmentId, settlementTypeId);
+        List<Building> best = alternatives.stream()
+                .filter(candidate -> identityPreferenceScore(candidate, raceId, subraceId, cultureId, governmentId, settlementTypeId) == bestScore)
+                .toList();
         long mixed = seed ^ (seed >>> 33) ^ requestedId.hashCode() * 0x9E3779B97F4A7C15L;
-        int pick = (int) Math.floorMod(mixed, alternatives.size());
-        return alternatives.get(pick).id;
+        int pick = (int) Math.floorMod(mixed, best.size());
+        return best.get(pick).id;
+    }
+
+    /** Scores only explicit metadata; IDs are opaque data, never guessed from their spelling. */
+    private static int identityPreferenceScore(Building building, String race, String subrace, String culture,
+                                             String government, String settlementType) {
+        int score = 0;
+        if (race != null && building.raceAllow.contains(race)) score += 100;
+        if (subrace != null && building.subraceAllow.contains(subrace)) score += 140;
+        if (culture != null && building.cultureAllow.contains(culture)) score += 120;
+        if (culture != null && building.cultureTags.contains(culture)) score += 45;
+        if (culture != null && building.architectureTags.contains(culture)) score += 60;
+        if (government != null && building.governmentAllow.contains(government)) score += 80;
+        if (settlementType != null && building.settlementTypeAllow.contains(settlementType)) score += 30;
+        return score;
     }
 
     private static boolean hasIdentityMetadata(Building building) {
