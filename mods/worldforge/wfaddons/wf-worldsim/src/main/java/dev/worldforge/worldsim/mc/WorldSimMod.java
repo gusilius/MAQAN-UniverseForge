@@ -3533,7 +3533,13 @@ public final class WorldSimMod {
                     var persistedTitle = RealmsMod.POLITICS.title(
                             dev.worldforge.realms.Statecraft.mapTitleId(map.name, ancestor.key));
                     if (persistedTitle == null) continue;
-                    if (realms.containsKey(persistedTitle.realmId)) persistedOwner = persistedTitle.realmId;
+                    // Initial map import creates neutral placeholders for every
+                    // geographic title. Those placeholders must not block genesis
+                    // ownership; only a title previously held by a real realm is a
+                    // historical claim that requires an explicit transfer.
+                    String persistedRealm = persistedTitle.realmId == null ? "" : persistedTitle.realmId;
+                    if (persistedRealm.isBlank() || persistedRealm.startsWith("unclaimed:")) continue;
+                    if (realms.containsKey(persistedRealm)) persistedOwner = persistedRealm;
                     else historicalClaim = true;
                     break;
                 }
