@@ -1208,6 +1208,9 @@ public final class WorldSimMod {
                     .mapToInt(road -> Math.max(0, road.builtSegments)).sum();
             item.addProperty("roads", roadSegments);
             addNamedEntity(namedEntities, s.id, "settlement", s.name, "", settlementRealm);
+            for (Building building : s.buildings) if (building != null && building.def != null)
+                addNamedEntity(namedEntities, s.id + ":building:" + building.uid, "building",
+                        building.def.name, "", s.id);
             // Export the actual infrastructure graph, not merely a road count.
             if (colony.map != null) {
                 for (var road : colony.map.roads.values()) {
