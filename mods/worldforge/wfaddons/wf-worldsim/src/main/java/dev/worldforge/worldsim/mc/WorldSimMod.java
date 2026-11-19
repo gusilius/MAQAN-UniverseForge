@@ -250,8 +250,12 @@ public final class WorldSimMod {
     @SubscribeEvent
     public void onStarted(ServerStartedEvent event) {
         // WorldSim chooses recruits from the registered settlement and physical-unit catalogs.
-        // Keep ArmyEngine's independent movement/war AI, but disable its legacy duplicate recruit pass.
-        ArmyMod.setWorldSimRecruitmentAuthority(true);
+        // Keep ArmyEngine's independent movement/war AI, but disable its legacy duplicate recruit pass
+        // only when the native decision provider actually loaded; otherwise preserve the addon fallback.
+        boolean nativeRecruitmentPlanner = NativeWorldSimulation.load();
+        ArmyMod.setWorldSimRecruitmentAuthority(nativeRecruitmentPlanner);
+        LOGGER.info("wf_worldsim: strategic recruitment planner={} (native={})",
+                nativeRecruitmentPlanner ? "worldsim" : "wf-army fallback", nativeRecruitmentPlanner);
         lifecycleEpoch++;
         LAST_GENESIS_DIAGNOSTIC_FINGERPRINT.clear();
         COMPUTE_SCHEDULER.close();
