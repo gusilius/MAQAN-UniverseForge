@@ -8,9 +8,8 @@ import java.util.*;
 
 /**
  * Матрица приоритетов работ как в RimWorld: строка - рабочий, столбец - профессия, значение 0 (не делать), 1 (самое важное) .. 4 (в последнюю очередь).
- * Пока это ТОЛЬКО клиентская модель: сервер её не знает. Чтобы приоритеты что-то меняли, владельцу wf-settlements нужно добавить команду
- * {@code /wfsettle priority-work <worker> <prof> <n>} (n 0..4) и хранить значения у {@code Worker}; автоназначение должно брать для
- * свободного рабочего профессию с наименьшим ненулевым значением. Умолчание: своя профессия - 1, остальные - 0.
+ * Серверное состояние хранится в {@link Worker#jobPrio}; локальная карта содержит только оптимистичные значения до следующего
+ * подтверждённого снимка. Автоназначение и сохранение принадлежат {@code wf-settlements}, эта модель отвечает только за UI-цикл.
  */
 public final class WorkPriorities {
     public static final int MAX = 4;
@@ -18,20 +17,30 @@ public final class WorkPriorities {
     private final Map<Integer, Map<String, Integer>> values = new HashMap<>();
 
     public int get(Worker w, String prof) {
+        if (w == null || prof == null || !w.canPerform(prof)) return 0;
         Map<String, Integer> m = values.get(w.id);
         if (m != null && m.containsKey(prof)) return m.get(prof);
+        if (w.jobPrio != null && w.jobPrio.containsKey(prof)) {
+            Integer saved = w.jobPrio.get(prof);
+            return saved == null ? 0 : Math.max(0, Math.min(MAX, saved));
+        }
         return w.canPerform(prof) ? 1 : 0;
     }
 
     /** Установить значение (0..4); возвращает команду для сервера. */
     public String set(Worker w, String prof, int n) {
+        if (w == null || prof == null || !w.canPerform(prof)) return null;
         n = Math.max(0, Math.min(MAX, n));
         values.computeIfAbsent(w.id, k -> new HashMap<>()).put(prof, n);
         return Orders.priorityWorkCmd(w.id, prof, n);
     }
 
+    /** Discard optimistic UI values after a fresh server snapshot has been applied. */
+    public void clearOptimisticOverrides() { values.clear(); }
+
     /** Щелчок по ячейке: 0->1->2->3->4->0, назад при back (ПКМ). Возвращает команду. */
     public String cycle(Worker w, String prof, boolean back) {
+        if (w == null || !w.canPerform(prof)) return null;
         int v = get(w, prof);
         return set(w, prof, back ? (v + MAX) % (MAX + 1) : (v + 1) % (MAX + 1));
     }
@@ -40,8 +49,10 @@ public final class WorkPriorities {
     public List<String> cycleColumn(Settlement s, String prof) {
         List<String> out = new ArrayList<>();
         if (s.workers.isEmpty()) return out;
-        int next = (get(s.workers.get(0), prof) + 1) % (MAX + 1);
-        for (Worker w : s.workers) out.add(set(w, prof, next));
+        Worker firstCompatible = s.workers.stream().filter(w -> w.canPerform(prof)).findFirst().orElse(null);
+        if (firstCompatible == null) return out;
+        int next = (get(firstCompatible, prof) + 1) % (MAX + 1);
+        for (Worker w : s.workers) if (w.canPerform(prof)) out.add(set(w, prof, next));
         return out;
     }
 

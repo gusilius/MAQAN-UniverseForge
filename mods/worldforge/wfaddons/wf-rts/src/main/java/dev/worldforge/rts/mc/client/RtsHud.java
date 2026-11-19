@@ -66,7 +66,12 @@ public class RtsHud extends Screen {
         this.cmd = cmd;
     }
 
-    public void setModel(Settlement n) { this.s = n; }
+    public void setModel(Settlement n) {
+        this.s = n;
+        // A fresh server snapshot is authoritative; discard optimistic cell values so
+        // remote edits and persisted jobPrio values become visible immediately.
+        this.prio.clearOptimisticOverrides();
+    }
 
     private int refresh;
 
@@ -495,14 +500,19 @@ public class RtsHud extends Screen {
             g.drawString(font, font.plainSubstrByWidth(wk.name, nameW - 4), x + 12, ry + 2, WFUi.TX);
             for (int i = 0; i < profs.size(); i++) {
                 final String p = profs.get(i);
+                boolean compatible = wk.canPerform(p);
                 int v = prio.get(wk, p), cx = x + 12 + nameW + i * cw;
-                boolean hov = WFUi.over(mx, my, cx, ry - 1, cw - 2, rowH - 1);
-                WFUi.bevel(g, cx + 6, ry, cw - 14, rowH - 3, v > 0 && p.equals(wk.workRole()));
+                boolean hov = compatible && WFUi.over(mx, my, cx, ry - 1, cw - 2, rowH - 1);
+                WFUi.bevel(g, cx + 6, ry, cw - 14, rowH - 3, compatible && v > 0 && p.equals(wk.workRole()));
                 if (hov) g.fill(cx + 8, ry + 2, cx + cw - 10, ry + rowH - 5, WFUi.HOVER);
                 String t = v == 0 ? "-" : String.valueOf(v);
-                g.drawString(font, t, cx + (cw - 2 - font.width(t)) / 2, ry + 2, v == 0 ? 0xFF55575F : v == 1 ? WFUi.GOLD : v == 2 ? WFUi.TX : v == 3 ? WFUi.INFO : WFUi.MUTED);
+                int valueColor = !compatible ? 0xFF44464D : v == 0 ? 0xFF777982 : v == 1 ? WFUi.GOLD : v == 2 ? WFUi.TX : v == 3 ? WFUi.INFO : WFUi.MUTED;
+                g.drawString(font, t, cx + (cw - 2 - font.width(t)) / 2, ry + 2, valueColor);
                 final Worker ww = wk;
-                hit(cx, ry - 1, cw - 2, rowH - 1, () -> cmd.accept(prio.cycle(ww, p, false)), () -> cmd.accept(prio.cycle(ww, p, true)), null, null);
+                if (compatible)
+                    hit(cx, ry - 1, cw - 2, rowH - 1, () -> cmd.accept(prio.cycle(ww, p, false)), () -> cmd.accept(prio.cycle(ww, p, true)), null, null);
+                else
+                    hit(cx, ry - 1, cw - 2, rowH - 1, () -> { }, () -> { }, "Профессия недоступна", List.of("Этот рабочий не обучен такой работе"));
             }
             ry += rowH;
         }
