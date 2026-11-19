@@ -595,10 +595,22 @@ fn effective_army_power(snapshot: &WorldSnapshot, realm_id: &str) -> Option<f64>
             .map(|troop| {
                 let health = troop.get("health").and_then(serde_json::Value::as_f64).unwrap_or(1.0);
                 let maximum = troop.get("max_health").and_then(serde_json::Value::as_f64).unwrap_or(health.max(1.0));
-                let morale = troop.get("morale").and_then(serde_json::Value::as_f64).unwrap_or(100.0) / 100.0;
-                let injury = troop.get("injury_combat_multiplier").and_then(serde_json::Value::as_f64).unwrap_or(1.0);
+                // TroopEntity.dmgMult already combines commander morale and injury;
+                // supply is a separate attribute modifier and must not be counted twice.
+                let damage_multiplier = troop.get("damage_multiplier").and_then(serde_json::Value::as_f64).unwrap_or(1.0);
+                let supply = troop.get("supply_combat_multiplier").and_then(serde_json::Value::as_f64).unwrap_or(1.0);
                 let health_ratio = if maximum > 0.0 { (health / maximum).clamp(0.0, 1.0) } else { 1.0 };
-                health_ratio * morale.clamp(0.0, 1.0) * injury.clamp(0.0, 1.0)
+                let equipment = troop.get("equipment").and_then(serde_json::Value::as_object);
+                let equipment_factor = equipment.map(|items| {
+                    let durability = items.values().map(|item| {
+                        let damage = item.get("damage").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+                        let maximum = item.get("max_damage").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+                        if maximum > 0.0 { (1.0 - damage / maximum).clamp(0.0, 1.0) } else { 1.0 }
+                    }).collect::<Vec<_>>();
+                    if durability.is_empty() { 1.0 } else { durability.iter().sum::<f64>() / durability.len() as f64 }
+                }).unwrap_or(1.0);
+                health_ratio * damage_multiplier.clamp(0.0, 1.5)
+                    * supply.clamp(0.0, 1.0) * equipment_factor.clamp(0.0, 1.0)
             }).collect::<Vec<_>>();
         if !readiness.is_empty() {
             let average = readiness.iter().sum::<f64>() / readiness.len() as f64;
