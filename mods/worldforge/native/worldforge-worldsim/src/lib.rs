@@ -813,7 +813,7 @@ fn choose_building_for_need(snapshot: &WorldSnapshot, settlement: &Settlement, t
                 && (resource == needle || (needle == "food" && resource_category(snapshot, resource) == "food"))))
             .unwrap_or(false);
         let has_job = |needles: &[&str]| jobs.map(|values| values.iter()
-            .any(|(job, amount)| amount.as_i64().unwrap_or(0) > 0
+            .any(|(job, amount)| amount.as_f64().unwrap_or(0.0) > 0.0
                 && needles.iter().any(|needle| job.contains(needle))))
             .unwrap_or(false);
         let mut priority = 0_i32;
@@ -867,7 +867,7 @@ fn choose_profession_for_output(snapshot: &WorldSnapshot, resource: &str) -> Opt
         let outputs = building.payload.get("out").and_then(serde_json::Value::as_object);
         let jobs = building.payload.get("jobs").and_then(serde_json::Value::as_object);
         let output_match = outputs.map(|values| values.iter().any(|(good, amount)| {
-            if amount.as_i64().unwrap_or(0) <= 0 { return false; }
+            if amount.as_f64().unwrap_or(0.0) <= 0.0 { return false; }
             match resource {
                 "food" => resource_category(snapshot, good) == "food",
                 "wood" => good == "wood" || good.contains("wood") || good.contains("lumber"),
@@ -896,26 +896,24 @@ fn choose_profession_for_output(snapshot: &WorldSnapshot, resource: &str) -> Opt
 
 fn choose_builder_profession(snapshot: &WorldSnapshot) -> Option<String> {
     let mut candidates = Vec::new();
-    for building in snapshot.catalog_entries.iter().filter(|entry|
-        entry.module_id == "wf_settle" && entry.catalog_id == "buildings") {
-        if let Some(jobs) = building.payload.get("jobs").and_then(serde_json::Value::as_object) {
-            for (profession, slots) in jobs {
-                if slots.as_i64().unwrap_or(0) <= 0 || !registered_profession(snapshot, profession) { continue; }
-                let id_match = profession.to_ascii_lowercase().contains("builder")
-                    || profession.to_ascii_lowercase().contains("construction");
-                let group_match = catalog_entry(snapshot, "wf_people", "professions", profession)
-                    .and_then(|entry| entry.payload.get("group"))
-                    .and_then(serde_json::Value::as_str)
-                    .map(|group| group.to_ascii_lowercase().contains("construction"))
-                    .unwrap_or(false);
-                if id_match || group_match { candidates.push(profession.clone()); }
-            }
-        }
+    for entry in snapshot.catalog_entries.iter().filter(|entry|
+        (entry.module_id == "wf_people" && entry.catalog_id == "professions")
+            || (entry.module_id == "wf_settle" && entry.catalog_id == "building_professions")) {
+        let id = entry.entry_id.as_str();
+        if !registered_profession(snapshot, id) { continue; }
+        let name = entry.payload.get("name").and_then(serde_json::Value::as_str).unwrap_or("");
+        let group = entry.payload.get("group").and_then(serde_json::Value::as_str).unwrap_or("");
+        let id_match = id.to_ascii_lowercase().contains("builder")
+            || id.to_ascii_lowercase().contains("construction");
+        let name_match = name.to_ascii_lowercase().contains("builder")
+            || name.to_ascii_lowercase().contains("construction")
+            || name.to_ascii_lowercase().contains("строител");
+        let group_match = group.to_ascii_lowercase().contains("construction")
+            || group.to_ascii_lowercase().contains("builder");
+        if id_match || name_match || group_match { candidates.push(id.to_string()); }
     }
     candidates.sort(); candidates.dedup(); candidates.into_iter().next()
 }
-
-
 
 impl WorldSnapshot {
     pub fn validate(&self) -> Result<(), SimError> {
