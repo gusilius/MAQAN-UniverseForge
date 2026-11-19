@@ -29,6 +29,10 @@ public final class Defs {
     public static final class Building {
         public final String id, name, blueprint;
         public String description = "";
+        /** Optional data-driven identity metadata; empty lists preserve legacy universal behavior. */
+        public String structureClass = "";
+        public final Set<String> raceAllow = new LinkedHashSet<>(), raceDeny = new LinkedHashSet<>();
+        public final Set<String> cultureAllow = new LinkedHashSet<>(), governmentAllow = new LinkedHashSet<>(), settlementTypeAllow = new LinkedHashSet<>();
         public final Map<String, Double> effects = new LinkedHashMap<>();
         public final Map<String, Integer> cost = new LinkedHashMap<>(), storage = new LinkedHashMap<>(), jobs = new LinkedHashMap<>(), in = new LinkedHashMap<>(), out = new LinkedHashMap<>();
         public final List<String> requires = new ArrayList<>();
@@ -129,6 +133,12 @@ public final class Defs {
                 if (m.get("requires") instanceof List) for (Object o : (List<Object>) m.get("requires")) b.requires.add(String.valueOf(o));
                 if (m.get("category") != null) b.category = String.valueOf(m.get("category"));
                 if (m.get("description") != null) b.description = String.valueOf(m.get("description"));
+                if (m.get("structure_class") != null) b.structureClass = String.valueOf(m.get("structure_class"));
+                strings(b.raceAllow, m.get("race_compatibility"));
+                strings(b.raceDeny, m.get("race_incompatibility"));
+                strings(b.cultureAllow, m.get("culture_compatibility"));
+                strings(b.governmentAllow, m.get("government_compatibility"));
+                strings(b.settlementTypeAllow, m.get("settlement_type_compatibility"));
                 if (m.get("effects") instanceof Map<?,?> effectMap) for (Map.Entry<?,?> effect : effectMap.entrySet()) {
                     if (effect.getKey() instanceof String key && effect.getValue() instanceof Number value) b.effects.put(key, value.doubleValue());
                 }
@@ -145,6 +155,43 @@ public final class Defs {
                 buildings.put(b.id, b);
             }
         }
+    }
+
+    private static void strings(Set<String> target, Object raw) {
+        if (raw instanceof List<?> values) for (Object value : values) {
+            if (value instanceof String s && !s.isBlank()) target.add(s.trim());
+        }
+    }
+
+    /** Runtime Genesis selection. Explicit incompatibilities are never overridden; legacy untagged definitions remain unchanged. */
+    public String selectGenesisBuilding(String requestedId, String raceId, long seed) {
+        Building requested = buildings.get(requestedId);
+        if (requested == null) return requestedId;
+        if (compatible(requested, raceId, null, null)) return requestedId;
+        List<Building> alternatives = buildings.values().stream()
+                .filter(candidate -> Objects.equals(candidate.category, requested.category))
+                .filter(candidate -> !candidate.id.equals(requested.id))
+                .filter(candidate -> hasIdentityMetadata(candidate))
+                .filter(candidate -> compatible(candidate, raceId, null, null))
+                .sorted(Comparator.comparing(candidate -> candidate.id))
+                .toList();
+        if (alternatives.isEmpty()) return requestedId;
+        long mixed = seed ^ (seed >>> 33) ^ requestedId.hashCode() * 0x9E3779B97F4A7C15L;
+        int pick = (int) Math.floorMod(mixed, alternatives.size());
+        return alternatives.get(pick).id;
+    }
+
+    private static boolean hasIdentityMetadata(Building building) {
+        return !building.structureClass.isBlank() || !building.raceAllow.isEmpty() || !building.raceDeny.isEmpty()
+                || !building.cultureAllow.isEmpty() || !building.governmentAllow.isEmpty() || !building.settlementTypeAllow.isEmpty();
+    }
+
+    private static boolean compatible(Building building, String race, String culture, String government) {
+        if (race != null && building.raceDeny.contains(race)) return false;
+        if (race != null && !building.raceAllow.isEmpty() && !building.raceAllow.contains(race)) return false;
+        if (culture != null && !building.cultureAllow.isEmpty() && !building.cultureAllow.contains(culture)) return false;
+        if (government != null && !building.governmentAllow.isEmpty() && !building.governmentAllow.contains(government)) return false;
+        return true;
     }
 
     /** Ошибки в наборе (без префикса) и предупреждения (с префиксом «Предупреждение»): ссылки на неизвестные здания, профессии и ресурсы, циклы requires. */
