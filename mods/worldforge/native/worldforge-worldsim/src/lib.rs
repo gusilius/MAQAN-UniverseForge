@@ -432,6 +432,39 @@ fn origin_modifier(snapshot: &WorldSnapshot, character: &Character, key: &str) -
             }
         }
     }
+    // Progress definitions are the same effective datapack rows used by wf-progress.
+    // Canonical NPC skill ranks feed their registered per-rank modifiers; passive nodes
+    // are represented by their canonical trait IDs, so no parallel NPC profile is invented.
+    for (skill_id, rank) in &character.skills {
+        if *rank <= 0 { continue; }
+        if let Some(skill) = catalog_entry(snapshot, "wf_progress", "skills", skill_id) {
+            let per_rank = skill.payload.get("perRank").or_else(|| skill.payload.get("per_rank"))
+                .and_then(serde_json::Value::as_object);
+            if let Some(modifiers) = per_rank {
+                for (modifier, amount) in modifiers {
+                    if modifier == key {
+                        total += amount.as_f64().unwrap_or(0.0) * (*rank as f64);
+                    }
+                }
+            }
+        }
+    }
+    for trait_id in &character.trait_ids {
+        if let Some(node) = catalog_entry(snapshot, "wf_progress", "nodes", trait_id) {
+            total += node.payload.get("mods").and_then(|mods| mods.get(key))
+                .and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+        }
+        if let Some(feature) = catalog_entry(snapshot, "wf_genesis", "features", trait_id) {
+            let races = feature.payload.get("races").and_then(serde_json::Value::as_array);
+            let race_match = races.map(|values| values.is_empty()
+                || values.iter().any(|value| value.as_str() == Some(character.race_id.as_str())))
+                .unwrap_or(true);
+            if race_match {
+                total += feature.payload.get("mods").and_then(|mods| mods.get(key))
+                    .and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+            }
+        }
+    }
     for synergy in snapshot.catalog_entries.iter().filter(|entry|
         entry.module_id == "wf_origins" && entry.catalog_id == "synergies") {
         let races = synergy.payload.get("races").and_then(serde_json::Value::as_array);
@@ -460,6 +493,15 @@ fn realm_leader<'a>(snapshot: &'a WorldSnapshot, realm_id: &str) -> Option<&'a C
         title.realm_id == realm_id && !title.holder_character_id.is_empty())
         .max_by_key(|title| title.tier_index)?;
     snapshot.characters.iter().find(|character| character.id == title.holder_character_id)
+}
+
+fn scoped_reputation(snapshot: &WorldSnapshot, character_id: &str, realm_id: &str) -> i64 {
+    if character_id.is_empty() || realm_id.is_empty() { return 0; }
+    catalog_entry(snapshot, "wf_reputation", "runtime_state", "reputation")
+        .and_then(|entry| entry.payload.get("values"))
+        .and_then(|values| values.get(character_id))
+        .and_then(|scopes| scopes.get(format!("polity:{realm_id}")))
+        .and_then(serde_json::Value::as_i64).unwrap_or(0)
 }
 
 fn court_opinion_modifier(snapshot: &WorldSnapshot, first: &str, second: &str) -> i64 {
@@ -1270,6 +1312,8 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
             let leader_modifier = realm_leader(snapshot, &attacker.id).map(|leader|
                 origin_modifier(snapshot, leader, "war_score") + origin_modifier(snapshot, leader, "military"))
                 .unwrap_or(0.0).round() as i64;
+            let leader_reputation = realm_leader(snapshot, &attacker.id)
+                .map(|leader| scoped_reputation(snapshot, &leader.id, &attacker.id) / 5).unwrap_or(0);
             let score = clamp_score(
                 attacker.expansion_pressure as i64 / 2
                 + if border.contested_claim { 28 } else { 0 }
@@ -1278,6 +1322,7 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
                 + attacker.prestige as i64 / 5
                 + government_modifier
                 + leader_modifier
+                + leader_reputation
                 + diplomatic_opinion as i64 / 10
                 - intrigue_penalty
                 - subject_penalty as i64
@@ -1397,6 +1442,8 @@ pub fn decide(snapshot: &WorldSnapshot) -> Result<DecisionFrame, SimError> {
                 + ((a.prestige + b.prestige) / 8) as i64
                 + if a.house_id != b.house_id { 10 } else { 0 }
                 + social_bonus as i64 + dynastic_policy + court_opinion_modifier(snapshot, &a.id, &b.id)
+                + scoped_reputation(snapshot, &a.id, &a.realm_id) / 10
+                + scoped_reputation(snapshot, &b.id, &b.realm_id) / 10
                 + origin_modifier(snapshot, a, "marriage").round() as i64
                 + origin_modifier(snapshot, b, "marriage").round() as i64
                 - kinship_penalty as i64
