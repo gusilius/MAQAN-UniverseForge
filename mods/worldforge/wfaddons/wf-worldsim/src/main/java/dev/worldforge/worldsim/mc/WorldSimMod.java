@@ -936,7 +936,7 @@ public final class WorldSimMod {
             item.addProperty("army_strength", Math.max(0L, Math.round(actualArmyPower.getOrDefault(realm.id, 0.0))));
             item.addProperty("stability", (int) number(realm.props.get("stability"), 50));
             item.addProperty("prestige", (int) number(realm.props.get("prestige"), 0));
-            item.addProperty("expansion_pressure", (int) Math.max(0, Math.min(100, 20 + population / 10)));
+            item.addProperty("expansion_pressure", (int) Math.max(0, Math.min(100, number(realm.props.get("expansion_pressure"), 0))));
             long lastWarDay = 0;
             boolean atWar = false;
             for (TitleData.Realm realm : RealmsMod.realms()) {
