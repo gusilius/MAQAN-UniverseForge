@@ -248,6 +248,21 @@ public final class NameBank {
             Pool fallback = cultures.get(def);
             if (fallback != null) values = list(fallback, key);
         }
+        // Third-party packs are allowed to provide only personal-name and house
+        // pools. Keep every generated entity name data-backed: use the configured
+        // default pool's existing names rather than inventing suffixes or failing
+        // an otherwise valid world bootstrap for an omitted optional category.
+        if (values.isEmpty()) {
+            Pool fallback = cultures.get(def);
+            if (fallback != null) {
+                values = switch (key) {
+                    case "houses", "dynasties", "clans", "surnames" ->
+                            !fallback.houses.isEmpty() ? fallback.houses : fallback.surnames;
+                    default -> !fallback.settlements.isEmpty() ? fallback.settlements
+                            : !fallback.houses.isEmpty() ? fallback.houses : fallback.male;
+                };
+            }
+        }
         if (values.isEmpty())
             throw new IllegalStateException("Нет заполненного пула '" + category + "' для расы '" + race + "'");
         return pick(values, random);
