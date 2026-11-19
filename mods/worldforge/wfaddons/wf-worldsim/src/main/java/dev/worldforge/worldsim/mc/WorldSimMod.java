@@ -3727,7 +3727,6 @@ public final class WorldSimMod {
                             grantEmergentTerritoryHolder(duchyId, capitalBand, populationIndex, year, fallbackHolder);
                         for (String countyId : countyIds) linkEmergentTerritoryTitle(countyId, duchyId);
                         importedIds.put(duchyId, realmId);
-                        duchyCapitalBandById.put(duchyId, capitalBand);
                         duchyIds.add(duchyId);
                     }
                 }
