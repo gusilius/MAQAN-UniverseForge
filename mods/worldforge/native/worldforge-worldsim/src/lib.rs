@@ -111,6 +111,7 @@ pub struct Settlement {
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Character {
     pub id: String,
+    #[serde(default)] pub identity_owner_id: String,
     pub realm_id: String,
     #[serde(default)] pub map_id: String,
     pub age: u16,
@@ -501,6 +502,60 @@ fn origin_modifier(snapshot: &WorldSnapshot, character: &Character, key: &str) -
         if race_match && class_match && flags_match && professions_match {
             total += synergy.payload.get("mods").and_then(|mods| mods.get(key))
                 .and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+        }
+    }
+    total += form_modifier(snapshot, character, key);
+    if total.is_finite() { total } else { 0.0 }
+}
+
+fn form_modifier(snapshot: &WorldSnapshot, character: &Character, key: &str) -> f64 {
+    if character.identity_owner_id.is_empty() { return 0.0; }
+    let Some(runtime) = catalog_entry(snapshot, "wf_forms", "runtime_state", "forms") else { return 0.0; };
+    let Some(forms) = runtime.payload.get("owners")
+        .and_then(|owners| owners.get(&character.identity_owner_id))
+        .and_then(serde_json::Value::as_object) else { return 0.0; };
+    let mut total = 0.0;
+    for (form_id, affliction) in forms {
+        let Some(definition) = catalog_entry(snapshot, "wf_forms", "forms", form_id) else { continue; };
+        let stage = affliction.get("stage").and_then(serde_json::Value::as_u64).unwrap_or(0) as usize;
+        if let Some(stage_mods) = definition.payload.get("stages")
+            .and_then(serde_json::Value::as_array).and_then(|stages| stages.get(stage))
+            .and_then(|stage| stage.get("mods")).and_then(serde_json::Value::as_object) {
+            total += stage_mods.get(key).and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+        }
+        if affliction.get("active").and_then(serde_json::Value::as_bool).unwrap_or(false) {
+            total += definition.payload.get("shiftMods").or_else(|| definition.payload.get("shift_mods"))
+                .and_then(|shift| shift.get(key)).and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+        }
+        let environment = affliction.get("env").and_then(serde_json::Value::as_array);
+        if let Some(weaknesses) = definition.payload.get("weaknesses").and_then(serde_json::Value::as_array) {
+            for weakness in weaknesses {
+                let condition = weakness.get("when").and_then(serde_json::Value::as_str).unwrap_or("");
+                let active = environment.map(|values| values.iter().any(|value| value.as_str() == Some(condition)))
+                    .unwrap_or(false);
+                if active {
+                    total += weakness.get("mods").and_then(|mods| mods.get(key))
+                        .and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+                }
+            }
+        }
+        if let Some(need) = definition.payload.get("need") {
+            let meter = affliction.get("meter").and_then(serde_json::Value::as_f64).unwrap_or(-1.0);
+            let maximum = need.get("max").and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+            let below = need.get("belowPct").or_else(|| need.get("below_pct"))
+                .and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+            if meter >= 0.0 && maximum > 0.0 && meter < maximum * below / 100.0 {
+                total += need.get("starve").and_then(|mods| mods.get(key))
+                    .and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+            }
+        }
+        let secret = definition.payload.get("secret").and_then(serde_json::Value::as_bool).unwrap_or(false);
+        let exposed = affliction.get("exposed").and_then(serde_json::Value::as_bool).unwrap_or(false);
+        let stage_gate = definition.payload.get("flagStage").or_else(|| definition.payload.get("flag_stage"))
+            .and_then(serde_json::Value::as_u64).unwrap_or(1) as usize;
+        let opinion = definition.payload.get("opinion").and_then(serde_json::Value::as_i64).unwrap_or(0);
+        if key == "opinion" && stage >= stage_gate && (!secret || exposed) {
+            total += opinion as f64;
         }
     }
     if total.is_finite() { total } else { 0.0 }
