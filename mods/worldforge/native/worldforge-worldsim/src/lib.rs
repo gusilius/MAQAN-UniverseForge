@@ -1222,10 +1222,11 @@ mod tests {
             module_id:"wf_troops".into(), catalog_id:"runtime_state".into(),
             entry_id:"military".into(), name:"Military".into(),
             payload:serde_json::json!({"live_troops":[{"realm_id":"north","health":50.0,"max_health":100.0,
-                "morale":50,"injury_combat_multiplier":0.8,"supply_combat_multiplier":0.7}]}),
+                "morale":50,"damage_multiplier":0.8,"injury_combat_multiplier":0.8,
+                "supply_combat_multiplier":0.5,"equipment":{"mainhand":{"damage":5,"max_damage":10}}}]}),
         });
         let power = effective_army_power(&snapshot, "north").unwrap();
-        assert!((power - 10.0).abs() < 1e-9);
+        assert!((power - 5.0).abs() < 1e-9);
     }
 
     fn realm(id: &str, army: u64) -> Realm {
