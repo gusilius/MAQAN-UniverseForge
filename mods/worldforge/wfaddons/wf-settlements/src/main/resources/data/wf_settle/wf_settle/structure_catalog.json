@@ -115,6 +115,27 @@
       "magical",
       "ritual",
       "quest"
+    ],
+    "race_native_housing": [
+      "house",
+      "hut",
+      "dwelling",
+      "longhouse",
+      "tent",
+      "hall",
+      "cave_dwelling",
+      "tree_dwelling",
+      "cliff_dwelling"
+    ],
+    "polity_administration": [
+      "town_hall",
+      "administration",
+      "court",
+      "council",
+      "public_square",
+      "guildhall",
+      "palace",
+      "citadel"
     ]
   },
   "compatibility": {
