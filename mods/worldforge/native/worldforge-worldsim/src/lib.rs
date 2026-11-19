@@ -625,10 +625,11 @@ fn settlement_allows_building(snapshot: &WorldSnapshot, settlement_id: &str, bui
         let allowed_categories = payload.get("allow_categories").or_else(|| payload.get("allowCategories"))
             .and_then(serde_json::Value::as_array);
         if !explicitly_listed {
-            if let Some(categories) = allowed_categories.filter(|values| !values.is_empty()) {
-                let category = building_payload.get("category").and_then(serde_json::Value::as_str).unwrap_or("other");
-                if !categories.iter().any(|value| value.as_str() == Some(category)) { return false; }
-            }
+            let category = building_payload.get("category").and_then(serde_json::Value::as_str).unwrap_or("other");
+            let category_allowed = allowed_categories.map(|values|
+                values.iter().any(|value| value.as_str() == Some(category))).unwrap_or(false);
+            if allowed.is_some_and(|values| !values.is_empty()) && !category_allowed { return false; }
+            if allowed_categories.is_some_and(|values| !values.is_empty()) && !category_allowed { return false; }
         }
         if let Some(limit) = payload.get("limits").and_then(|limits| limits.get(building)).and_then(serde_json::Value::as_u64) {
             let count = instance_payload.get("building_counts").and_then(|counts| counts.get(building))
@@ -861,8 +862,9 @@ fn choose_building_for_need(snapshot: &WorldSnapshot, settlement: &Settlement, t
 
 
 fn registered_profession(snapshot: &WorldSnapshot, id: &str) -> bool {
-    catalog_entry(snapshot, "wf_settle", "building_professions", id).is_some()
-        && catalog_entry(snapshot, "wf_people", "professions", id).is_some()
+    // wf_people owns canonical profession identity; wf_settle only references these
+    // IDs from building job slots and may retain legacy local aliases.
+    catalog_entry(snapshot, "wf_people", "professions", id).is_some()
 }
 
 fn choose_profession_for_output(snapshot: &WorldSnapshot, resource: &str) -> Option<String> {
