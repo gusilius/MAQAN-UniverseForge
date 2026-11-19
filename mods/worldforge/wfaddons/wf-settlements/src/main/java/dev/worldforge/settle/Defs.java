@@ -175,7 +175,10 @@ public final class Defs {
                 .filter(candidate -> compatible(candidate, raceId, null, null))
                 .sorted(Comparator.comparing(candidate -> candidate.id))
                 .toList();
-        if (alternatives.isEmpty()) return requestedId;
+        if (alternatives.isEmpty()) {
+            // Explicitly incompatible structure: do not silently place it as a fallback.
+            return "";
+        }
         long mixed = seed ^ (seed >>> 33) ^ requestedId.hashCode() * 0x9E3779B97F4A7C15L;
         int pick = (int) Math.floorMod(mixed, alternatives.size());
         return alternatives.get(pick).id;
