@@ -1401,10 +1401,20 @@ public final class WorldSimMod {
             }
             for (var profession : SettleMod.DEFS.professions.values())
                 addCatalogEntry(catalogEntries, "wf_settle", "building_professions", profession.id, profession.name, GSON.toJsonTree(profession));
-            for (var resource : SettleMod.DEFS.resourceNames.entrySet())
+            for (var resource : SettleMod.DEFS.resourceNames.entrySet()) {
                 addCatalogEntry(catalogEntries, "wf_settle", "resources", resource.getKey(), resource.getValue(),
                         GSON.toJsonTree(Map.of("name", resource.getValue(),
-                                "base_price", SettleMod.DEFS.prices.getOrDefault(resource.getKey(), 0.0))));
+                                "base_price", SettleMod.DEFS.prices.getOrDefault(resource.getKey(), 0.0),
+                                "category", Defs.resourceCategory(resource.getKey()))));
+                addNamedEntity(namedEntities, resource.getKey(), "settlement_resource", resource.getValue(), "", "");
+            }
+            for (var comfort : SettleMod.DEFS.comfort.entrySet())
+                addCatalogEntry(catalogEntries, "wf_settle", "comfort_goods", comfort.getKey(), comfort.getKey(), GSON.toJsonTree(comfort.getValue()));
+            addCatalogEntry(catalogEntries, "wf_settle", "food_kinds", "all_food_kinds", "Settlement food resources",
+                    GSON.toJsonTree(SettleMod.DEFS.foodKinds));
+            for (var parcel : colony.map.parcels.values())
+                addCatalogEntry(catalogEntries, "wf_settle", "land_parcels",
+                        s.id + ":parcel:" + parcel.id, parcel.id, GSON.toJsonTree(parcel));
         }
         for (var type : SettleMod.TYPES.types.values()) {
             addCatalogEntry(catalogEntries, "wf_settle", "settlement_types", type.id(), type.name(), GSON.toJsonTree(type));
