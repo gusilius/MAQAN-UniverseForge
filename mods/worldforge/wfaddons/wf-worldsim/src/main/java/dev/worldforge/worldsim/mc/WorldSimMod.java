@@ -105,14 +105,16 @@ public final class WorldSimMod {
     private static final class EmergentMapProgress {
         final EmergentPopulationIndex index;
         final Map<String, EmergentBandProgress> bands = new HashMap<>();
-        final Set<String> reservedHouseNames = new HashSet<>();
+        final dev.worldforge.people.NameBank.NameReservations reservedHouseNames;
         EmergentMapProgress(CharacterRegistry registry) {
             List<dev.worldforge.people.Character> existing = registry.all();
             this.index = new EmergentPopulationIndex(existing);
+            List<String> reserved = new ArrayList<>();
             for (dev.worldforge.people.Character person : existing)
-                if (person.house != null && !person.house.isBlank()) reservedHouseNames.add(person.house);
+                if (person.house != null && !person.house.isBlank()) reserved.add(person.house);
             RealmsMod.POLITICS.dynasties().stream().map(dynasty -> dynasty.name)
-                    .filter(value -> value != null && !value.isBlank()).forEach(reservedHouseNames::add);
+                    .filter(value -> value != null && !value.isBlank()).forEach(reserved::add);
+            this.reservedHouseNames = PeopleMod.NAMES.reservations(reserved);
         }
     }
 
