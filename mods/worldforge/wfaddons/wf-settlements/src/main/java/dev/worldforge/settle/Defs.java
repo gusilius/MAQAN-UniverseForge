@@ -204,6 +204,11 @@ public final class Defs {
         architectureStyleId = identityValue(architectureStyleId);
         boolean requestedCompatible = compatible(requested, raceId, subraceId, cultureId, governmentId,
                 settlementTypeId, formationId, architectureStyleId);
+        // An explicitly tagged matching design is already the best identity match. Universal
+        // base definitions may still resolve to a more specific catalog variant below.
+        if (requestedCompatible && hasIdentityMetadata(requested)
+                && identityPreferenceScore(requested, raceId, subraceId, cultureId, governmentId,
+                        settlementTypeId, formationId, architectureStyleId) > 0) return requestedId;
         List<Building> alternatives = buildings.values().stream()
                 .filter(candidate -> Objects.equals(candidate.category, requested.category))
                 .filter(candidate -> !candidate.id.equals(requested.id))
@@ -225,6 +230,16 @@ public final class Defs {
                         settlementTypeId, formationId, architectureStyleId) == bestScore).toList();
         long mixed = seed ^ (seed >>> 33) ^ requestedId.hashCode() * 0x9E3779B97F4A7C15L;
         return best.get((int) Math.floorMod(mixed, best.size())).id;
+    }
+
+    /** Validate an explicitly requested design without silently replacing it with another catalog entry. */
+    public boolean isIdentityCompatible(String buildingId, String raceId, String subraceId, String cultureId,
+                                        String governmentId, String settlementTypeId, String formationId,
+                                        String architectureStyleId) {
+        Building building = buildings.get(buildingId);
+        return building != null && compatible(building, identityValue(raceId), identityValue(subraceId),
+                identityValue(cultureId), identityValue(governmentId), identityValue(settlementTypeId),
+                identityValue(formationId), identityValue(architectureStyleId));
     }
 
     private static String identityValue(String value) {
