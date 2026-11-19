@@ -1405,14 +1405,14 @@ public final class WorldSimMod {
                 addCatalogEntry(catalogEntries, "wf_settle", "resources", resource.getKey(), resource.getValue(),
                         GSON.toJsonTree(Map.of("name", resource.getValue(),
                                 "base_price", SettleMod.DEFS.prices.getOrDefault(resource.getKey(), 0.0),
-                                "category", Defs.resourceCategory(resource.getKey()))));
+                                "category", dev.worldforge.settle.Defs.resourceCategory(resource.getKey()))));
                 addNamedEntity(namedEntities, resource.getKey(), "settlement_resource", resource.getValue(), "", "");
             }
             for (var comfort : SettleMod.DEFS.comfort.entrySet())
                 addCatalogEntry(catalogEntries, "wf_settle", "comfort_goods", comfort.getKey(), comfort.getKey(), GSON.toJsonTree(comfort.getValue()));
             addCatalogEntry(catalogEntries, "wf_settle", "food_kinds", "all_food_kinds", "Settlement food resources",
                     GSON.toJsonTree(SettleMod.DEFS.foodKinds));
-            for (var parcel : colony.map.parcels.values())
+            if (colony.map != null) for (var parcel : colony.map.parcels.values())
                 addCatalogEntry(catalogEntries, "wf_settle", "land_parcels",
                         s.id + ":parcel:" + parcel.id, parcel.id, GSON.toJsonTree(parcel));
         }
