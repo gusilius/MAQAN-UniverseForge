@@ -1570,6 +1570,46 @@ mod tests {
         assert!((power - 5.0).abs() < 1e-9);
     }
 
+    #[test]
+    fn registered_progress_and_genesis_definitions_modify_canonical_character_decisions() {
+        let mut snapshot = base();
+        let mut character = Character {
+            id: "leader-1".into(), race_id: "human".into(),
+            skills: BTreeMap::from([("tactics".into(), 2)]),
+            attributes: BTreeMap::from([("strength".into(), 3)]),
+            trait_ids: vec!["veteran".into()],
+            ..Default::default()
+        };
+        snapshot.catalog_entries.extend(vec![
+            CatalogEntry { module_id:"wf_progress".into(), catalog_id:"attrs".into(),
+                entry_id:"strength".into(), name:"Strength".into(),
+                payload:serde_json::json!({"perPoint":{"military":2.0}}) },
+            CatalogEntry { module_id:"wf_progress".into(), catalog_id:"skills".into(),
+                entry_id:"tactics".into(), name:"Tactics".into(),
+                payload:serde_json::json!({"perRank":{"war_score":1.5}}) },
+            CatalogEntry { module_id:"wf_genesis".into(), catalog_id:"features".into(),
+                entry_id:"veteran".into(), name:"Veteran".into(),
+                payload:serde_json::json!({"races":["human"],"mods":{"war_score":4.0}}) },
+        ]);
+        assert!((origin_modifier(&snapshot, &character, "military") - 6.0).abs() < 1e-9);
+        assert!((origin_modifier(&snapshot, &character, "war_score") - 7.0).abs() < 1e-9);
+        character.race_id = "elf".into();
+        assert!((origin_modifier(&snapshot, &character, "war_score") - 3.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn scoped_reputation_changes_only_the_matching_polity_context() {
+        let mut snapshot = base();
+        snapshot.catalog_entries.push(CatalogEntry {
+            module_id:"wf_reputation".into(), catalog_id:"runtime_state".into(),
+            entry_id:"reputation".into(), name:"Reputation".into(),
+            payload:serde_json::json!({"values":{"leader-1":{"polity:north":50,"polity:south":-20}}}),
+        });
+        assert_eq!(scoped_reputation(&snapshot, "leader-1", "north"), 50);
+        assert_eq!(scoped_reputation(&snapshot, "leader-1", "south"), -20);
+        assert_eq!(scoped_reputation(&snapshot, "leader-2", "north"), 0);
+    }
+
     fn realm(id: &str, army: u64) -> Realm {
         Realm { id:id.into(), population:1000, treasury:1000, army_strength:army, stability:60,
             prestige:50, expansion_pressure:100, at_war:false, last_war_day:0 }
