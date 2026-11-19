@@ -75,7 +75,9 @@ public class DemoTest {
         ok(bad.isEmpty() && st.types.size() >= 17, "виды поселений: " + st.types.size() + " " + bad);
         Map<String, Double> swamp = Map.of("swamp", 0.6, "plains", 0.4);
         ok(st.best(30, List.of("house", "house", "house", "farm"), swamp, DemoApi.races("marsh")).id().equals("stilt_village"), "ящеры в болоте - свайная деревня");
-        ok(!st.best(30, List.of("house", "house", "house", "farm"), swamp, Map.of()).id().equals("stilt_village") || true, "без демографии выбор тоже работает");
+        SettleTypes.Type withoutDemography = st.best(30, List.of("house", "house", "house", "farm"), swamp, Map.of());
+        ok(withoutDemography == null || !withoutDemography.id().equals("stilt_village"),
+                "without demographic evidence, race-gated settlement forms are not selected");
         props.put("holdr.races", "dwarf:90,human:10");
         List<String> hold = new ArrayList<>(Collections.nCopies(10, "house")); hold.addAll(List.of("iron_mine", "iron_mine", "smithy", "smithy", "barracks"));
         ok(st.best(300, hold, Map.of("mountains", 0.8, "plains", 0.2), DemoApi.races("holdr")).id().equals("great_hold"), "гномы в горах - великий чертог");
