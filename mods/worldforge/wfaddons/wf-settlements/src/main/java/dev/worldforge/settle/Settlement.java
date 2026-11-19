@@ -1767,6 +1767,10 @@ public final class Settlement {
         if (w == null) throw new OrderException("Нет рабочего " + workerId);
         if (!defs.professions.containsKey(prof)) throw new OrderException("Нет профессии " + prof);
         if (n < 0 || n > 4) throw new OrderException("Приоритет 0..4");
+        // A specialist cannot be assigned work outside their permanent profession.
+        // Zero remains allowed so legacy/stale entries can be explicitly cleared.
+        if (n > 0 && !w.canPerform(prof))
+            throw new OrderException(w.name + " не может выполнять работу: " + prof);
         if (w.jobPrio == null) w.jobPrio = new TreeMap<>();
         w.jobPrio.put(prof, n);
     }
