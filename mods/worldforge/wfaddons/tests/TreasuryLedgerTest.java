@@ -46,6 +46,19 @@ public final class TreasuryLedgerTest {
                     && TreasuryLedger.fromJson(versionedSnapshot.toString()).accountCount() == 1,
                     "versioned streaming snapshot returns the exact revision represented by its bytes");
         } catch (java.io.IOException ex) { ok(false, "versioned streaming snapshot completes"); }
+        boolean rejectedConflictingSnapshotIndexes = false;
+        try {
+            TreasuryLedgerSnapshot.encode(new TreasuryLedgerSnapshot.State(1, 1, 0, List.of(),
+                    Set.of("same-key"), Set.of("same-key"), Set.of("same-key"), Set.of()));
+        } catch (IllegalArgumentException expected) { rejectedConflictingSnapshotIndexes = true; }
+        boolean rejectedUnknownRationAccount = false;
+        try {
+            TreasuryLedgerSnapshot.encode(new TreasuryLedgerSnapshot.State(1, 1, 0, List.of(),
+                    Set.of(), Set.of(), Set.of(), Set.of("missing:account")));
+        } catch (IllegalArgumentException expected) { rejectedUnknownRationAccount = true; }
+        ok(rejectedConflictingSnapshotIndexes && rejectedUnknownRationAccount,
+                "treasury snapshots reject contradictory debit/credit keys and orphaned ration indexes");
+
         StringWriter escapedString = new StringWriter();
         try {
             String fixture = "quote=\" slash=\\ line=\n tab=\t control=" + (char) 1;

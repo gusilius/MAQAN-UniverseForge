@@ -141,6 +141,12 @@ public final class TreasuryLedgerSnapshot {
         if (!state.postedReferences().containsAll(state.postedDebits())
                 || !state.postedReferences().containsAll(state.postedCredits()))
             throw new IllegalArgumentException("Treasury snapshot posting indexes are inconsistent");
+        Set<String> bothDirections = new LinkedHashSet<>(state.postedDebits());
+        bothDirections.retainAll(state.postedCredits());
+        if (!bothDirections.isEmpty())
+            throw new IllegalArgumentException("Treasury snapshot key cannot be both a debit and a credit");
+        if (!accountIds.containsAll(state.armyFieldRationDebitAccounts()))
+            throw new IllegalArgumentException("Treasury snapshot ration index references an unknown account");
     }
 
     private static String sha256(String value) {
