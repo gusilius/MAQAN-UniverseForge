@@ -47,12 +47,25 @@ public final class FamilyPlanningTest {
         Character fertile = registry.create("Fertile", "house-f", "culture", "f", year - 25);
         check(CharacterStats.addTrait(fertile, "fecund"), "rare fecund trait is a valid canonical character trait");
         check(CharacterStats.traits(fertile).contains("fecund"), "fecund trait persists in the character profile");
-        Character fertilePartner = registry.create("FertilePartner", "house-f", "culture", "m", year - 27);
-        registry.marry(fertile.id, fertilePartner.id, year);
-        boolean fertileConceived = false;
-        for (long seed = 1; seed < 30 && !fertileConceived; seed++)
-            fertileConceived = FamilyPlanning.tryConceive(fertile, fertilePartner, year, 50_000L, seed);
-        check(fertileConceived, "fecund trait materially improves conception chance");
+        int ordinaryConceptions = 0;
+        int fertileConceptions = 0;
+        for (int i = 0; i < 1000; i++) {
+            Character ordinaryMother = registry.create("OrdinaryMother" + i, "ordinary" + i, "culture", "f", year - 25);
+            Character ordinaryFather = registry.create("OrdinaryFather" + i, "ordinary" + i, "culture", "m", year - 27);
+            registry.marry(ordinaryMother.id, ordinaryFather.id, year);
+            if (FamilyPlanning.tryConceive(ordinaryMother, ordinaryFather, year, 50_000L, 91_000L + i))
+                ordinaryConceptions++;
+
+            Character fertileMother = registry.create("FertileMother" + i, "fertile" + i, "culture", "f", year - 25);
+            Character fertileFather = registry.create("FertileFather" + i, "fertile" + i, "culture", "m", year - 27);
+            CharacterStats.addTrait(fertileMother, "fecund");
+            registry.marry(fertileMother.id, fertileFather.id, year);
+            if (FamilyPlanning.tryConceive(fertileMother, fertileFather, year, 50_000L, 91_000L + i))
+                fertileConceptions++;
+        }
+        check(fertileConceptions > ordinaryConceptions + 80,
+                "fecund trait materially improves conception rate across independent couples: "
+                        + ordinaryConceptions + "/1000 vs " + fertileConceptions + "/1000");
 
         Character betrothedA = registry.create("BetrothedA", "house-b", "culture", "f", year - 22);
         Character betrothedB = registry.create("BetrothedB", "house-b", "culture", "m", year - 23);
