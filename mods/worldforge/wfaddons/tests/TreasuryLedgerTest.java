@@ -619,6 +619,10 @@ public final class TreasuryLedgerTest {
             migrationLedger.open("migration:merchant", "migration:merchant", "silver", 20);
             migrationLedger.open("migration:empty", "migration:empty", "silver", 0);
             migrationLedger.open("migration:borrower", "migration:borrower", "silver", 0);
+            boolean borrowerStateApplied = migrationLedger.setCreditLimit("migration:borrower", 105)
+                    && migrationLedger.borrow("migration:borrower", 100, 40, "migration:loan")
+                    && migrationLedger.accrueInterest("migration:borrower", 0.10, 41, "migration:interest")
+                    && migrationLedger.repayDebt("migration:borrower", 25, 42, "migration:repayment");
             boolean structuralEventsDurable = migrationLedger.journal().stream().anyMatch(e ->
                             e.kind() == TreasuryLedger.Kind.ACCOUNT_CREATED && e.accountId().equals("migration:empty")
                                     && e.amount() == 0)
@@ -627,10 +631,6 @@ public final class TreasuryLedgerTest {
                                     && e.accountId().equals("migration:borrower") && e.memo().equals("105.0"));
             ok(structuralEventsDurable,
                     "zero-balance account creation and credit-limit changes are represented as durable zero-value journal events");
-            boolean borrowerStateApplied = migrationLedger.setCreditLimit("migration:borrower", 105)
-                    && migrationLedger.borrow("migration:borrower", 100, 40, "migration:loan")
-                    && migrationLedger.accrueInterest("migration:borrower", 0.10, 41, "migration:interest")
-                    && migrationLedger.repayDebt("migration:borrower", 25, 42, "migration:repayment");
             ok(borrowerStateApplied, "migration fixture creates credit, interest and repayment state");
             migrationLedger.transfer("migration:treasury", "migration:merchant", 75,
                     TreasuryLedger.Kind.TRADE, "migration-test", "migration:transfer", 43, "migration transfer");
