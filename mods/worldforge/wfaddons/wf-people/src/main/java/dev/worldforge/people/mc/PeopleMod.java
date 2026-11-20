@@ -222,6 +222,7 @@ public class PeopleMod {
                 WORLD_REGISTRY.fromJson(Files.readString(worldFile), world + "|" + WORLD_PARTITION_ID);
             }
             if (WorldForgeMod.worldId() == null) throw new IllegalStateException("WorldId is unavailable for world Character identity partition");
+            openCharacterWal(server, WORLD_REGISTRY, "world", WorldForgeMod.worldId() + "|" + WORLD_PARTITION_ID);
             AUTHORITY.registerMap(WORLD_PARTITION_ID, WORLD_REGISTRY);
             // The Overworld keeps its legacy partition/file for save compatibility. Every
             // additional non-image dimension gets an independent durable Character partition.
@@ -233,6 +234,8 @@ public class PeopleMod {
                 Path dimensionFile = dimensionRegistryFile(server, dimension);
                 if (Files.exists(dimensionFile))
                     dimensionRegistry.fromJson(Files.readString(dimensionFile), WorldForgeMod.worldId() + "|dimension|" + dimension);
+                openCharacterWal(server, dimensionRegistry, "dimension|" + dimension,
+                        WorldForgeMod.worldId() + "|dimension|" + dimension);
                 String partitionId = dimensionPartitionId(dimension);
                 AUTHORITY.registerMap(partitionId, dimensionRegistry);
                 DIMENSION_REGISTRIES.put(dimension, dimensionRegistry);
@@ -246,6 +249,7 @@ public class PeopleMod {
                 if (world == null) throw new IllegalStateException("WorldId is unavailable for player identity migration");
                 PLAYER_REGISTRY.fromJson(Files.readString(playerFile), world + "|__players__");
             }
+            openCharacterWal(server, PLAYER_REGISTRY, "players", WorldForgeMod.worldId() + "|__players__");
             AUTHORITY.registerMap("__players__", PLAYER_REGISTRY);
             indexPlayerCharacters(PLAYER_REGISTRY);
         } catch (Exception ex) {
@@ -253,20 +257,6 @@ public class PeopleMod {
             LOGGER.error("wf_people: player Character registry failed to load; player identity creation and overwrite are disabled: {}", ex.toString());
         }
         for (MapData m : WorldForgeMod.loadedMaps().values()) registry(m);
-        try {
-            String worldNamespace = WorldForgeMod.worldId().toString();
-            openCharacterWal(server, PLAYER_REGISTRY, "players", worldNamespace + "|__players__");
-            openCharacterWal(server, WORLD_REGISTRY, "world", worldNamespace + "|" + WORLD_PARTITION_ID);
-            for (Map.Entry<String, CharacterRegistry> entry : DIMENSION_REGISTRIES.entrySet())
-                openCharacterWal(server, entry.getValue(), "dimension|" + entry.getKey(),
-                        worldNamespace + "|dimension|" + entry.getKey());
-            for (Map.Entry<MapData, CharacterRegistry> entry : REGS.entrySet())
-                openCharacterWal(server, entry.getValue(), "map|" + entry.getKey().name,
-                        worldNamespace + "|" + entry.getKey().name);
-        } catch (Exception walFailure) {
-            playerRegistryAvailable = false;
-            throw new IllegalStateException("wf_people cannot start: Character WAL recovery failed; identity data is locked", walFailure);
-        }
         reconcileIdentityPartitions(server);
         populationProcessedDay = WorldForgeApi.clock().dayNumber();
         populationRegistryGeneration = Math.incrementExact(populationRegistryGeneration);
