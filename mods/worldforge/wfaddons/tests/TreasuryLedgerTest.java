@@ -633,6 +633,17 @@ public final class TreasuryLedgerTest {
                             && close(restoredLedger.totalDebits("migration:treasury", TreasuryLedger.Kind.TRADE, "migration-test"),
                                     migrationLedger.totalDebits("migration:treasury", TreasuryLedger.Kind.TRADE, "migration-test")),
                     "checkpoint restore rebuilds balances, journal indexes, debit totals and idempotency keys");
+            double treasuryBeforeRetry = restoredLedger.balance("migration:treasury");
+            double merchantBeforeRetry = restoredLedger.balance("migration:merchant");
+            boolean sameTransferRetry = restoredLedger.transferOnce("migration:treasury", "migration:merchant", 75,
+                    TreasuryLedger.Kind.TRADE, "migration-test", "migration:transfer", 99, "replayed migration transfer");
+            boolean alteredTransferRejected = !restoredLedger.transferOnce("migration:treasury", "migration:merchant", 76,
+                    TreasuryLedger.Kind.TRADE, "migration-test", "migration:transfer", 100, "conflicting replay");
+            ok(sameTransferRetry && alteredTransferRejected
+                            && close(restoredLedger.balance("migration:treasury"), treasuryBeforeRetry)
+                            && close(restoredLedger.balance("migration:merchant"), merchantBeforeRetry)
+                            && restoredLedger.journalSize() == migrationLedger.journalSize(),
+                    "restored treasury treats an identical transfer retry as success and rejects changed payload without reposting");
             TreasuryLedger.Account restoredBorrower = restoredLedger.account("migration:borrower");
             TreasuryLedger.Account originalBorrower = migrationLedger.account("migration:borrower");
             ok(restoredLedger.hasAccount("migration:empty")
