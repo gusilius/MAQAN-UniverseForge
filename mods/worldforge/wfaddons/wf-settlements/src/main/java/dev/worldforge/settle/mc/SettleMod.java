@@ -153,6 +153,93 @@ public class SettleMod {
 
     /** Last shared-calendar minute simulated by each colony; runtime-only and rebuilt on server start. */
     private static final Map<String, Long> LAST_SIMULATED_WORLD_MINUTE = new HashMap<>();
+    /** Rotating per-colony resident cursor: only a bounded slice receives a life-AI decision per pass. */
+    private static final Map<String, Integer> LIFE_AI_CURSORS = new HashMap<>();
+    /** Short-lived resident indexes avoid repeated O(residents) companion searches for each resident. */
+    private static final Map<String, ResidentLifeIndex> RESIDENT_LIFE_INDEXES = new HashMap<>();
+    private static final int LIFE_AI_BATCH_SIZE = 96;
+    private static final int LIFE_AI_URGENT_BATCH_SIZE = 384;
+    private static final long RESIDENT_LIFE_INDEX_REFRESH_TICKS = 20L;
+
+    private static final class ResidentLifeIndex {
+        final int workerCount;
+        final long builtAtTick;
+        final boolean hasCompanion;
+        final boolean hasLeisure;
+        final Map<String, dev.worldforge.settle.Worker> byPerson;
+        final Map<Long, List<dev.worldforge.settle.Worker>> bySpatialCell;
+
+        ResidentLifeIndex(int workerCount, long builtAtTick, boolean hasCompanion, boolean hasLeisure,
+                          Map<String, dev.worldforge.settle.Worker> byPerson,
+                          Map<Long, List<dev.worldforge.settle.Worker>> bySpatialCell) {
+            this.workerCount = workerCount;
+            this.builtAtTick = builtAtTick;
+            this.hasCompanion = hasCompanion;
+            this.hasLeisure = hasLeisure;
+            this.byPerson = byPerson;
+            this.bySpatialCell = bySpatialCell;
+        }
+    }
+
+    private static long residentSpatialCell(double coordinate) {
+        return (long) Math.floor(coordinate / 32.0);
+    }
+
+    private static long residentSpatialKey(long x, long z) {
+        return (x << 32) ^ (z & 0xffffffffL);
+    }
+
+    private static ResidentLifeIndex residentLifeIndex(Colony colony, long serverTick) {
+        String id = colony.s.id;
+        List<dev.worldforge.settle.Worker> workers = colony.s.workers;
+        ResidentLifeIndex cached = RESIDENT_LIFE_INDEXES.get(id);
+        if (cached != null && cached.workerCount == workers.size()
+                && serverTick >= cached.builtAtTick
+                && serverTick - cached.builtAtTick < RESIDENT_LIFE_INDEX_REFRESH_TICKS) return cached;
+
+        Map<String, dev.worldforge.settle.Worker> byPerson = new HashMap<>();
+        Map<Long, List<dev.worldforge.settle.Worker>> byCell = new HashMap<>();
+        int eligible = 0;
+        for (dev.worldforge.settle.Worker worker : workers) {
+            if (worker.person == null || worker.person.isBlank()) continue;
+            eligible++;
+            byPerson.putIfAbsent(worker.person, worker);
+            long cellX = residentSpatialCell(worker.x), cellZ = residentSpatialCell(worker.z);
+            byCell.computeIfAbsent(residentSpatialKey(cellX, cellZ), ignored -> new ArrayList<>()).add(worker);
+        }
+        boolean hasLeisure = colony.s.buildings.stream().anyMatch(building ->
+                building.state == Building.State.DONE && !building.paused && building.def.category != null
+                        && (building.def.category.equalsIgnoreCase("leisure")
+                        || building.def.id.contains("tavern") || building.def.id.contains("inn")));
+        ResidentLifeIndex refreshed = new ResidentLifeIndex(workers.size(), serverTick, eligible > 1,
+                hasLeisure, byPerson, byCell);
+        RESIDENT_LIFE_INDEXES.put(id, refreshed);
+        return refreshed;
+    }
+
+    private static dev.worldforge.settle.Worker nearestResidentCompanion(
+            dev.worldforge.settle.Worker worker, ResidentLifeIndex index, CharacterRegistry registry) {
+        long cellX = residentSpatialCell(worker.x), cellZ = residentSpatialCell(worker.z);
+        double nearest = 32.0 * 32.0;
+        dev.worldforge.settle.Worker best = null;
+        for (long dx = -1; dx <= 1; dx++) for (long dz = -1; dz <= 1; dz++) {
+            List<dev.worldforge.settle.Worker> candidates =
+                    index.bySpatialCell.get(residentSpatialKey(cellX + dx, cellZ + dz));
+            if (candidates == null) continue;
+            for (dev.worldforge.settle.Worker other : candidates) {
+                if (other == worker || other.person == null || other.person.isBlank()) continue;
+                double offsetX = worker.x - other.x, offsetZ = worker.z - other.z;
+                double distance = offsetX * offsetX + offsetZ * offsetZ;
+                if (distance >= nearest) continue;
+                Character candidate = resolvePerson(registry, other.person);
+                if (candidate != null && candidate.alive) {
+                    nearest = distance;
+                    best = other;
+                }
+            }
+        }
+        return best;
+    }
     /** Phase buckets avoid scanning the complete colony registry on every server tick. */
     private static Map<Integer, List<Colony>> COLONY_SIMULATION_PHASES = Map.of();
     private static long colonySimulationIndexBuiltAt = Long.MIN_VALUE;
@@ -1600,10 +1687,26 @@ public class SettleMod {
         if (registry == null) return;
         Settlement settlement = colony.s;
         long worldMinute = settlement.worldMinute();
-        for (dev.worldforge.settle.Worker worker : new ArrayList<>(settlement.workers)) {
+        List<dev.worldforge.settle.Worker> workers = settlement.workers;
+        int workerCount = workers.size();
+        if (workerCount == 0) {
+            dev.worldforge.settle.ResidentLifeEvents.yearly(registry, settlement.year(), PeopleMod.NAMES);
+            return;
+        }
+        ResidentLifeIndex residentIndex = residentLifeIndex(colony, ticks);
+        int previousCursor = LIFE_AI_CURSORS.getOrDefault(settlement.id, 0);
+        int batchLimit = settlement.raidIncoming ? LIFE_AI_URGENT_BATCH_SIZE : LIFE_AI_BATCH_SIZE;
+        ResidentLifeBatch.Window window = ResidentLifeBatch.next(workerCount, previousCursor, batchLimit);
+        LIFE_AI_CURSORS.put(settlement.id, window.nextCursor());
+        for (int offset = 0; offset < window.count(); offset++) {
+            dev.worldforge.settle.Worker worker = workers.get((window.start() + offset) % workerCount);
             if (worker.person == null || worker.person.isBlank()) continue;
             Character person = resolvePerson(registry, worker.person);
             if (person == null || !person.alive) continue;
+            if (!settlement.raidIncoming && !(person.props.get("population.ai.pending_action") instanceof String)) {
+                Object nextThinkRaw = person.props.get("population.ai.next_think_minute");
+                if (nextThinkRaw instanceof Number nextThink && worldMinute < nextThink.longValue()) continue;
+            }
 
             // Explicit player/RTS orders always preempt autonomous life goals without granting their effects.
             if (worker.manualOrder || worker.manualFollow) {
@@ -1633,10 +1736,8 @@ public class SettleMod {
                 continue;
             }
             boolean hasTraining = !worker.generalist() && !PopulationSimulation.trainingTarget(person).isBlank();
-            boolean hasLeisure = settlement.buildings.stream().anyMatch(b -> b.state == Building.State.DONE
-                    && !b.paused && b.def.category != null
-                    && (b.def.category.equalsIgnoreCase("leisure") || b.def.id.contains("tavern") || b.def.id.contains("inn")));
-            boolean hasCompanion = settlement.workers.stream().anyMatch(other -> other != worker);
+            boolean hasLeisure = residentIndex.hasLeisure;
+            boolean hasCompanion = residentIndex.hasCompanion;
             LifeSimulation.Context context = new LifeSimulation.Context(
                     worldMinute,
                     settlement.amount("food") >= 1.0,
@@ -1669,9 +1770,7 @@ public class SettleMod {
                         return LifeSimulation.Outcome.BLOCKED;
                     }
                     if (action == LifeSimulation.Action.SOCIALIZE) {
-                        dev.worldforge.settle.Worker companion = settlement.workers.stream()
-                                .filter(other -> other.person != null && other.person.equals(worker.lifeSocialTarget))
-                                .findFirst().orElse(null);
+                        dev.worldforge.settle.Worker companion = residentIndex.byPerson.get(worker.lifeSocialTarget);
                         Character companionPerson = companion == null ? null : resolvePerson(registry, companion.person);
                         if (companion == null || companionPerson == null || !companionPerson.alive) {
                             settlement.updateWorker(worker, SettleMod::clearLifeAction);
@@ -1736,16 +1835,8 @@ public class SettleMod {
                         return LifeSimulation.Outcome.SUCCESS;
                     }
                     case SOCIALIZE -> {
-                        dev.worldforge.settle.Worker companion = null;
-                        double nearest = 32 * 32;
-                        for (dev.worldforge.settle.Worker other : settlement.workers) {
-                            if (other == worker || other.person == null || other.person.isBlank()) continue;
-                            double dx = worker.x - other.x, dz = worker.z - other.z;
-                            double distance = dx * dx + dz * dz;
-                            if (distance < nearest && resolvePerson(registry, other.person) != null) {
-                                nearest = distance; companion = other;
-                            }
-                        }
+                        dev.worldforge.settle.Worker companion =
+                                nearestResidentCompanion(worker, residentIndex, registry);
                         if (companion == null) return LifeSimulation.Outcome.BLOCKED;
                         String companionId = companion.person;
                         double companionX = companion.x, companionZ = companion.z;
