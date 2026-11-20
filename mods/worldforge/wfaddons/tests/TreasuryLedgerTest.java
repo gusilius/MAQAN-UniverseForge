@@ -354,6 +354,36 @@ public final class TreasuryLedgerTest {
                         && TreasuryApi.spendOnce("legacy-positive", 5, "army-test", "army-spend-once", 10)
                         && close(TreasuryApi.netBalance("legacy-positive"), 20),
                 "idempotent military spending cannot debit twice");
+        TreasuryLedger segmentSource = new TreasuryLedger();
+        segmentSource.open("segment:source", "segment:source", "silver", 100);
+        segmentSource.open("segment:target", "segment:target", "silver", 0);
+        segmentSource.transfer("segment:source", "segment:target", 17, TreasuryLedger.Kind.TRADE,
+                "archive-test", "segment-transfer-1", 100, "archived transfer");
+        String segmentJson = TreasuryJournalSegment.encode(segmentSource.journal());
+        TreasuryJournalSegment.Decoded decodedSegment = TreasuryJournalSegment.decode(segmentJson);
+        ok(decodedSegment.entries().size() == segmentSource.journalSize()
+                        && decodedSegment.firstSequence() == 1
+                        && decodedSegment.lastSequence() == segmentSource.journal().get(segmentSource.journalSize() - 1).sequence()
+                        && decodedSegment.entries().get(2).transactionId().equals(decodedSegment.entries().get(3).transactionId()),
+                "checksummed treasury segment round-trips the complete ordered double-entry audit");
+        boolean checksumRejected = false;
+        try {
+            TreasuryJournalSegment.decode(segmentJson.replace("archived transfer", "altered transfer"));
+        } catch (IllegalArgumentException expected) { checksumRejected = expected.getMessage().contains("checksum"); }
+        ok(checksumRejected, "treasury segment rejects payload tampering before archive replay");
+        boolean emptySegmentRejected = false;
+        try { TreasuryJournalSegment.encode(List.of()); }
+        catch (IllegalArgumentException expected) { emptySegmentRejected = true; }
+        ok(emptySegmentRejected, "treasury segment rejects empty archive ranges");
+        boolean sequenceGapRejected = false;
+        try {
+            TreasuryJournalSegment.encode(List.of(
+                    new TreasuryLedger.Entry(2, "tx:2", "a", "b", "silver", 1, false,
+                            TreasuryLedger.Kind.TRADE, "test", "gap", 1, 0, "")));
+            TreasuryJournalSegment.decode(segmentJson.replace("\\"lastSequence\\":4", "\\"lastSequence\\":5"));
+        } catch (IllegalArgumentException expected) { sequenceGapRejected = true; }
+        ok(sequenceGapRejected, "treasury segment rejects inconsistent sequence bounds");
+
         System.out.println(failures==0?"ALL OK":failures+" FAILED");
         if(failures>0) System.exit(1);
     }
