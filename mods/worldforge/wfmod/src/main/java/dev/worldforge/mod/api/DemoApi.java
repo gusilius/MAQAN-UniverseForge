@@ -81,8 +81,12 @@ public final class DemoApi {
                 System.err.println("WorldForge: пакетная демография " + provider.getKey() + ": " + ex);
             }
         }
+        Map<String, Function<String, Map<String, Double>>> legacySources = new LinkedHashMap<>(RACES);
+        // A source registered for batch census must not also be invoked through its
+        // single-realm adapter, otherwise its expensive population scan runs twice.
+        RACE_BATCH.keySet().forEach(legacySources::remove);
         for (String realm : requested) {
-            Map<String, Double> legacy = collect(RACES, realm);
+            Map<String, Double> legacy = collect(legacySources, realm);
             if (!legacy.isEmpty()) {
                 Map<String, Double> target = out.computeIfAbsent(realm, ignored -> new LinkedHashMap<>());
                 legacy.forEach((key, value) -> target.merge(key, value, Math::max));
