@@ -172,16 +172,22 @@ pub fn evaluate(
 /// Build once per immutable snapshot and reuse for many bounded social batches.
 /// It stores references, not cloned Characters or duplicate identity records.
 pub struct CharacterProfileIndex<'a> {
-    by_id: HashMap<&'a str, &'a crate::Character>,
+    // One pointer per canonical character; lower overhead than a million-entry
+    // hash table. Sorted once, then queried with allocation-free binary search.
+    by_id: Vec<&'a crate::Character>,
 }
 
 impl<'a> CharacterProfileIndex<'a> {
     pub fn new(characters: &'a [crate::Character]) -> Result<Self, Error> {
-        let mut by_id = HashMap::with_capacity(characters.len());
+        let mut by_id: Vec<&crate::Character> = Vec::with_capacity(characters.len());
         for character in characters {
             if character.id.trim().is_empty() { return Err(Error::EmptyId); }
-            if by_id.insert(character.id.as_str(), character).is_some() {
-                return Err(Error::DuplicateProfile(character.id.clone()));
+            by_id.push(character);
+        }
+        by_id.sort_unstable_by(|a, b| a.id.cmp(&b.id));
+        for pair in by_id.windows(2) {
+            if pair[0].id == pair[1].id {
+                return Err(Error::DuplicateProfile(pair[0].id.clone()));
             }
         }
         Ok(Self { by_id })
@@ -191,7 +197,8 @@ impl<'a> CharacterProfileIndex<'a> {
     pub fn is_empty(&self) -> bool { self.by_id.is_empty() }
 
     fn project(&self, id: &str) -> Option<Profile> {
-        let character = *self.by_id.get(id)?;
+        let position = self.by_id.binary_search_by(|character| character.id.as_str().cmp(id)).ok()?;
+        let character = self.by_id[position];
         if !character.alive { return None; }
         Some(Profile {
             id: character.id.clone(),
