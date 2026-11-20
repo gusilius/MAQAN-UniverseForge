@@ -27,73 +27,127 @@ final class NpcSpawner {
     private NpcSpawner() {}
 
     private record Target(Character c, String roleId, boolean noble, double x, double z, double dist2) {}
+    private record SpawnAnchor(double x, double z, List<Target> targets) {}
+
+    /** One title/realm traversal per level pass; each player queries only nearby spatial cells. */
+    private static final class TargetIndex {
+        private final NpcSpawnSpatialIndex<SpawnAnchor> cells = new NpcSpawnSpatialIndex<>();
+        private final Map<String, SpawnAnchor> anchors = new LinkedHashMap<>();
+
+        void add(Character character, Role role, double x, double z) {
+            if (character == null || !character.alive) return;
+            String key = Math.round(x) + ":" + Math.round(z);
+            SpawnAnchor anchor = anchors.computeIfAbsent(key, ignored -> {
+                SpawnAnchor created = new SpawnAnchor(x, z, new ArrayList<>());
+                cells.add(created, x, z);
+                return created;
+            });
+            anchor.targets().add(new Target(character, role.id, role.noble, x, z, 0));
+        }
+
+        List<Target> nearby(double x, double z, double radius) {
+            List<Target> result = new ArrayList<>();
+            Set<String> seen = new HashSet<>();
+            double radius2 = radius * radius;
+            for (SpawnAnchor anchor : cells.query(x, z, radius)) {
+                double distance = sq(anchor.x() - x, anchor.z() - z);
+                if (distance > radius2) continue;
+                for (Target target : anchor.targets()) {
+                    if (seen.add(target.c().id))
+                        result.add(new Target(target.c(), target.roleId(), target.noble(),
+                                target.x(), target.z(), distance));
+                }
+            }
+            return result;
+        }
+    }
+
+    private NpcSpawner() {}
 
     static void pass(MinecraftServer server) {
         for (ServerLevel level : server.getAllLevels()) {
             List<ServerPlayer> players = new ArrayList<>();
             for (ServerPlayer p : level.players()) if (!p.isSpectator()) players.add(p);
             if (players.isEmpty()) continue;
-            MapData m = EditorManager.dataFor(level);
-            if (m == null || m.titles == null) continue;
-            CharacterRegistry reg = PeopleMod.registry(m);
-            if (reg == null) continue;
+            MapData map = EditorManager.dataFor(level);
+            if (map == null || map.titles == null) continue;
+            CharacterRegistry registry = PeopleMod.registry(map);
+            if (registry == null) continue;
             try {
-                Courts.ensure(m.titles, EditorManager.editorFor(m), reg, PeopleMod.ROLES, PeopleMod.NAMES, PeopleMod.seed(m), PeopleMod.YEAR);   // заполняет освободившиеся должности
+                Courts.ensure(map.titles, EditorManager.editorFor(map), registry,
+                        PeopleMod.ROLES, PeopleMod.NAMES, PeopleMod.seed(map), PeopleMod.YEAR);
             } catch (Exception ex) {
                 PeopleMod.LOGGER.error("wf_people: Courts.ensure: {}", ex.toString());
             }
-            Map<String, WFNpc> bodies = new LinkedHashMap<>();                 // id персонажа -> тело
-            for (ServerPlayer p : players) {
-                for (WFNpc b : level.getEntitiesOfClass(WFNpc.class, p.getBoundingBox().inflate(FAR + 40))) {
-                    if (b.isRemoved()) continue;
-                    String id = b.characterId();
-                    if (id.isEmpty() || bodies.containsKey(id) && bodies.get(id) != b) b.discard();    // дубликат или бесхозное тело
-                    else bodies.put(id, b);
+
+            Map<String, WFNpc> bodies = new LinkedHashMap<>();
+            for (ServerPlayer player : players) {
+                for (WFNpc body : level.getEntitiesOfClass(WFNpc.class, player.getBoundingBox().inflate(FAR + 40))) {
+                    if (body.isRemoved()) continue;
+                    String id = body.characterId();
+                    if (id.isEmpty() || bodies.containsKey(id) && bodies.get(id) != body) body.discard();
+                    else bodies.put(id, body);
                 }
             }
-            for (ServerPlayer p : players) spawnFor(level, m, reg, p, bodies);
+
+            TargetIndex index = buildTargetIndex(level, map, registry);
+            for (ServerPlayer player : players) spawnFor(level, registry, player, bodies, index);
         }
     }
 
-    private static void spawnFor(ServerLevel level, MapData m, CharacterRegistry reg, ServerPlayer p, Map<String, WFNpc> bodies) {
-        TitleData d = m.titles;
-        Map<String, Integer> tiers = PeopleMod.tierIndex(d);
-        Map<String, List<Role>> perRoles = new HashMap<>();
-        for (Role r : PeopleMod.ROLES.all()) perRoles.computeIfAbsent(r.per, k -> new ArrayList<>()).add(r);
-        double px = p.getX(), pz = p.getZ();
-        Map<String, Target> targets = new LinkedHashMap<>();
+    private static TargetIndex buildTargetIndex(ServerLevel level, MapData map, CharacterRegistry registry) {
+        TitleData titles = map.titles;
+        Map<String, List<Role>> rolesByPlace = new HashMap<>();
+        for (Role role : PeopleMod.ROLES.all())
+            rolesByPlace.computeIfAbsent(role.per, ignored -> new ArrayList<>()).add(role);
+        Map<Integer, List<Role>> rolesByTier = new HashMap<>();
+        Map<String, Integer> tiers = PeopleMod.tierIndex(titles);
+        for (Map.Entry<String, Integer> tier : tiers.entrySet()) {
+            List<Role> roles = rolesByPlace.get(tier.getKey());
+            if (roles != null) rolesByTier.put(tier.getValue(), roles);
+        }
 
-        for (TitleData.Realm realm : d.realmList()) {                          // придворные при столице государства
-            List<Role> roles = perRoles.get("realm");
-            if (roles == null) break;
-            TitleData.Title cap = realmCapital(d, realm);
-            if (cap == null) continue;
-            double d2 = sq(cap.capX - px, cap.capZ - pz);
-            if (!SimulationLod.shouldSpawnPeople(level.dimension().location().toString(), cap.capX, cap.capZ)) continue;
-            for (Role r : roles) for (Character c : reg.holders(r.id, Courts.realmPlace(realm.id)))
-                addTargetAndFamily(targets, reg, c, r, cap.capX, cap.capZ, d2);
-        }
-        for (TitleData.Title t : d.allTitles()) {                              // носители должностей титулов (барон, жители...)
-            String key = null;
-            for (Map.Entry<String, Integer> e : tiers.entrySet()) if (e.getValue() == t.tier) key = e.getKey();
-            List<Role> roles = key == null ? null : perRoles.get(key);
+        TargetIndex index = new TargetIndex();
+        String dimension = level.dimension().location().toString();
+        for (TitleData.Realm realm : titles.realmList()) {
+            TitleData.Title capital = realmCapital(titles, realm);
+            if (capital == null || !SimulationLod.shouldSpawnPeople(dimension, capital.capX, capital.capZ)) continue;
+            List<Role> roles = rolesByPlace.get("realm");
             if (roles == null) continue;
-            double d2 = sq(t.capX - px, t.capZ - pz);
-            if (!SimulationLod.shouldSpawnPeople(level.dimension().location().toString(), t.capX, t.capZ)) continue;
-            for (Role r : roles) for (Character c : reg.holders(r.id, Courts.titlePlace(t.id)))
-                addTargetAndFamily(targets, reg, c, r, t.capX, t.capZ, d2);
+            for (Role role : roles)
+                for (Character character : registry.holders(role.id, Courts.realmPlace(realm.id)))
+                    index.add(character, role, capital.capX, capital.capZ);
         }
+
+        for (TitleData.Title title : titles.allTitles()) {
+            List<Role> roles = rolesByTier.get(title.tier);
+            if (roles == null || !SimulationLod.shouldSpawnPeople(dimension, title.capX, title.capZ)) continue;
+            for (Role role : roles)
+                for (Character character : registry.holders(role.id, Courts.titlePlace(title.id)))
+                    index.add(character, role, title.capX, title.capZ);
+        }
+        return index;
+    }
+
+    private static void spawnFor(ServerLevel level, CharacterRegistry registry, ServerPlayer player,
+                                 Map<String, WFNpc> bodies, TargetIndex index) {
+        double px = player.getX(), pz = player.getZ();
+        Map<String, Target> targets = new LinkedHashMap<>();
+        for (Target target : index.nearby(px, pz, NEAR))
+            addTargetAndFamily(targets, registry, target.c(), new Role(target.roleId(), target.noble()),
+                    target.x(), target.z(), target.dist2());
 
         List<Target> list = new ArrayList<>(targets.values());
         list.sort(Comparator.comparingDouble(Target::dist2));
         int near = 0;
-        for (WFNpc b : bodies.values()) if (sq(b.getX() - px, b.getZ() - pz) <= FAR * FAR) near++;
-        for (Target t : list) {
+        for (WFNpc body : bodies.values())
+            if (sq(body.getX() - px, body.getZ() - pz) <= FAR * FAR) near++;
+        for (Target target : list) {
             if (near >= PER_PLAYER) break;
-            if (bodies.containsKey(t.c().id)) continue;
-            WFNpc npc = spawn(level, t);
+            if (bodies.containsKey(target.c().id)) continue;
+            WFNpc npc = spawn(level, target);
             if (npc != null) {
-                bodies.put(t.c().id, npc);
+                bodies.put(target.c().id, npc);
                 near++;
             }
         }
