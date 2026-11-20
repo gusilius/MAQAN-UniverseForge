@@ -94,7 +94,6 @@ public final class PopulationComputeBridge {
             owners[left] = owners[right];
             owners[right] = owner;
         }
-        }
         private boolean matches(Collection<CharacterRegistry> source) {
             if (source.size() != registries.size()) return false;
             int i = 0;
