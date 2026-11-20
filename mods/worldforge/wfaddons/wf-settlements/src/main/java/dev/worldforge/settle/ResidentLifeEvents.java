@@ -36,9 +36,24 @@ public final class ResidentLifeEvents {
         }
     }
 
+    private static final class StageRefresh {
+        final int year, end;
+        final List<Character> people;
+        int cursor;
+        long lastAdvanceToken = Long.MIN_VALUE;
+        StageRefresh(CharacterRegistry registry, int year, int start, int end) {
+            this.year = year;
+            this.people = registry.all();
+            this.cursor = start;
+            this.end = end;
+        }
+    }
+
     private static final class RegistryPassState {
         int familyYear = Integer.MIN_VALUE;
+        int stageSize = -1;
         YearSession session;
+        StageRefresh stageRefresh;
     }
 
     private ResidentLifeEvents() {}
@@ -67,7 +82,8 @@ public final class ResidentLifeEvents {
         }
         YearSession session = state.session;
         if (session != null && session.year != year) year = session.year;
-        if (state.familyYear == year && session == null) return true;
+        if (state.familyYear == year && session == null)
+            return advanceStageRefresh(registry, state, year, residentBudget, tickToken);
         if (session == null) {
             session = new YearSession(registry, year);
             state.session = session;
@@ -78,11 +94,8 @@ public final class ResidentLifeEvents {
         int remaining = residentBudget;
         while (remaining > 0 && session.phase < 4) {
             if (session.phase == 0 && session.cursor >= session.initialSize) {
-                // Newborns are appended to the canonical registry and tracked separately;
-                // no population-sized snapshot or duplicate reference list is allocated.
-                for (Character newborn : session.newborns) {
-                    registry.refreshLifeStages(List.of(newborn), session.year);
-                }
+                // Newborns remain in the canonical registry. Their calendar-derived
+                // fields are refreshed in the bounded append-only catch-up after family phases.
                 session.phase = 1;
                 session.cursor = 0;
                 continue;
@@ -123,9 +136,35 @@ public final class ResidentLifeEvents {
         if (session.phase >= 4) {
             synchronized (REGISTRY_PASSES) {
                 state.familyYear = session.year;
+                state.stageSize = session.initialSize;
                 state.session = null;
+                state.stageRefresh = null;
             }
-            return true;
+            return advanceStageRefresh(registry, state, session.year, residentBudget, tickToken);
+        }
+        return false;
+    }
+
+    private static boolean advanceStageRefresh(CharacterRegistry registry, RegistryPassState state,
+                                                int year, int residentBudget, long tickToken) {
+        if (registry.size() <= state.stageSize) return true;
+        StageRefresh refresh = state.stageRefresh;
+        if (refresh == null || refresh.year != year || refresh.end < registry.size()) {
+            refresh = new StageRefresh(registry, year, state.stageSize, registry.size());
+            state.stageRefresh = refresh;
+        }
+        if (refresh.lastAdvanceToken == tickToken) return false;
+        refresh.lastAdvanceToken = tickToken;
+        int end = Math.min(refresh.end, refresh.cursor + residentBudget);
+        if (end > refresh.cursor) {
+            List<Character> batch = new ArrayList<>(refresh.people.subList(refresh.cursor, end));
+            registry.refreshLifeStages(batch, year);
+            refresh.cursor = end;
+        }
+        if (refresh.cursor >= refresh.end) {
+            state.stageSize = refresh.end;
+            state.stageRefresh = null;
+            return registry.size() <= state.stageSize;
         }
         return false;
     }
