@@ -16,12 +16,14 @@ public final class RasterTileLayerTest {
         BufferedImage biomes = new BufferedImage(width, height, BufferedImage.TYPE_BYTE_GRAY);
         BufferedImage rivers = new BufferedImage(width, height, BufferedImage.TYPE_BYTE_GRAY);
         BufferedImage wilderness = new BufferedImage(width, height, BufferedImage.TYPE_BYTE_GRAY);
+        BufferedImage regions = new BufferedImage(width, height, BufferedImage.TYPE_BYTE_GRAY);
         for (int z = 0; z < height; z++) {
             for (int x = 0; x < width; x++) {
                 heights.getRaster().setSample(x, z, 0, (x * 97 + z * 193) & 0xffff);
                 biomes.getRaster().setSample(x, z, 0, (x / 256 + z / 256) & 1);
                 rivers.getRaster().setSample(x, z, 0, (x == 256 && z == 256) ? 255 : 0);
                 wilderness.getRaster().setSample(x, z, 0, (x == 512 && z == 258) ? 255 : 0);
+                regions.getRaster().setSample(x, z, 0, (x >= 256 && z >= 256) ? 1 : 0);
             }
         }
         Map<String, byte[]> files = new HashMap<>();
@@ -35,6 +37,11 @@ public final class RasterTileLayerTest {
         files.put("biomes.png", png(biomes));
         files.put("rivers.png", png(rivers));
         files.put("wilderness.png", png(wilderness));
+        files.put("regions.png", png(regions));
+        files.put("regions.json", ("{\"regions\":[{\"id\":1,\"name\":\"Test Region\","
+                + "\"color\":\"#336699\",\"capital\":{\"x\":0,\"z\":0,\"nx\":0.5,\"ny\":0.5},"
+                + "\"area_blocks\":100,\"area_pct_of_land\":1.0,\"neighbors\":[],\"props\":{}}]}")
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8));
         MapData map = MapData.load("tile-raster-test", files::get);
         check(map.rawHeightPx(255, 255) == ((255 * 97 + 255 * 193) & 0xffff), "tile 0 edge sample");
         check(map.rawHeightPx(256, 256) == ((256 * 97 + 256 * 193) & 0xffff), "tile 1 edge sample");
@@ -45,6 +52,10 @@ public final class RasterTileLayerTest {
         check(map.riverAtPx(256, 256) == 255, "river layer tile sample");
         check(map.isWildernessPx(512, 258), "wilderness layer tile sample");
         check(map.hasRiverLayer() && map.hasWildernessLayer(), "optional raster layers remain available");
+        check(map.regionAt((256.5) * 16 - width * 8, (256.5) * 16 - height * 8) == 1,
+                "region raster lazy tile sample");
+        check(map.regionAt((255.5) * 16 - width * 8, (255.5) * 16 - height * 8) == 0,
+                "region raster first tile sample");
         System.out.println("RasterTileLayerTest: PASS");
     }
 

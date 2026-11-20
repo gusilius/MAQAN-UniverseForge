@@ -199,9 +199,7 @@ public final class MapData {
         RegionData regions = null;
         byte[] regionMap = null;
         if (files.containsKey("regions.png") && files.containsKey("regions.json")) {
-            Raster rr = decode(files.get("regions.png"), w, h, "regions.png");
-            byte[] labels = new byte[w * h];
-            for (int z = 0; z < h; z++) for (int x = 0; x < w; x++) labels[z * w + x] = (byte) rr.getSample(x, z, 0);
+            RasterTileLayer labels = RasterTileLayer.load(files.get("regions.png"), w, h, "regions.png");
             regions = new RegionData(new String(files.get("regions.json"), StandardCharsets.UTF_8), labels, w, h);
         }
         byte[] rm = files.get("regionmap.bin");
