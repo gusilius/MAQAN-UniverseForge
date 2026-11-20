@@ -245,7 +245,7 @@ public final class Colony {
             scaffolds.add(row);
         }
         m.put("temporaryScaffolds", scaffolds);
-        m.put("map", Json.parse(map.toJson()));
+        m.put("map", map.toMap());
         return m;
     }
 
