@@ -9,7 +9,8 @@ import java.util.Objects;
  */
 public final class FamilyPlanning {
     private static final String PREFIX = "family.pregnancy.";
-    private static final int MAX_CHILDREN = 4;
+    private static final int MAX_MOTHER_CHILDREN = 9;
+    private static final int MAX_FATHER_CHILDREN = 14;
     private static final long GESTATION_DAYS = 270L;
 
     private FamilyPlanning() {}
@@ -63,21 +64,25 @@ public final class FamilyPlanning {
         }
     }
 
-    /** Annual conception opportunity. Base probability is deliberately low. */
+    /** Annual conception opportunity; fertility is meaningful but bounded. */
     public static boolean tryConceive(Character mother, Character father, int year,
                                       long worldDay, long worldSeed) {
         if (!eligible(mother, father, year) || isPregnant(mother)) return false;
         if (number(mother.props.get("family.last_conception_year"), 0) >= year) return false;
         if (number(mother.props.get("family.last_birth_year"), 0) > 0
-                && year - number(mother.props.get("family.last_birth_year"), 0) < 3) return false;
+                && year - number(mother.props.get("family.last_birth_year"), 0) < 1) return false;
         if (Boolean.FALSE.equals(mother.props.get("family.wants_children"))
                 || Boolean.FALSE.equals(father.props.get("family.wants_children"))) return false;
 
         int age = year - mother.birthYear;
-        int baseChance = age <= 29 ? 700 : age <= 34 ? 500 : age <= 39 ? 250 : 75;
-        int fertility = clamp(number(mother.props.get("family.fertility"), 100L), 0, 200);
-        int modifier = clamp(number(mother.props.get("family.conception_modifier"), 100L), 0, 200);
-        long chance = (long) baseChance * fertility * modifier / 10_000L;
+        // One annual roll, meaningful but not guaranteed. Rare fertility traits
+        // improve the chance; hard caps prevent runaway population growth.
+        int baseChance = age <= 29 ? 2600 : age <= 34 ? 2200 : age <= 39 ? 1500 : age <= 42 ? 800 : 300;
+        int fertility = clamp(number(mother.props.get("family.fertility"), 100L), 0, 250);
+        int modifier = clamp(number(mother.props.get("family.conception_modifier"), 100L), 0, 250);
+        int traitModifier = CharacterStats.traits(mother).contains("fecund") ? 150 : 100;
+        long chance = (long) baseChance * fertility * modifier * traitModifier / 1_000_000L;
+        chance = Math.min(8500L, chance);
         long roll = Math.floorMod(stableHash(worldSeed, mother.globalId, father.globalId, year), 10_000L);
 
         mother.props.put("family.last_conception_year", year);
@@ -129,8 +134,8 @@ public final class FamilyPlanning {
         if (!"f".equalsIgnoreCase(mother.gender) || !"m".equalsIgnoreCase(father.gender)) return false;
         if (!father.id.equals(mother.spouse) || !mother.id.equals(father.spouse)) return false;
         int motherAge = year - mother.birthYear, fatherAge = year - father.birthYear;
-        if (motherAge < 18 || motherAge > 42 || fatherAge < 18 || fatherAge > 70) return false;
-        if (mother.children.size() >= MAX_CHILDREN || father.children.size() >= MAX_CHILDREN) return false;
+        if (motherAge < 18 || motherAge > 45 || fatherAge < 18 || fatherAge > 70) return false;
+        if (mother.children.size() >= MAX_MOTHER_CHILDREN || father.children.size() >= MAX_FATHER_CHILDREN) return false;
         return true;
     }
 
