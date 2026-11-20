@@ -1364,8 +1364,8 @@ public class SettleMod {
         Bodies.LIVE.clear();
         DEFS = loadDefs(e.getServer());
         load(e.getServer());
-        long initialWorldMinute = dev.worldforge.mod.api.WorldForgeApi.clock().worldMinute();
-        refreshColonySimulationIndex(dev.worldforge.mod.MaqanPerformanceConfig.settlementSimulationIntervalTicks(), 0L, initialWorldMinute);
+        // The shared clock is restored by ClockService on the same lifecycle event.
+        // Seed colony cursors on the first server tick, after every addon has loaded it.
     }
 
     @SubscribeEvent
