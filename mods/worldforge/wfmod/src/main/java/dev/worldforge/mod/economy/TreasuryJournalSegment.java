@@ -87,7 +87,7 @@ public final class TreasuryJournalSegment {
             long minute = requiredLong(m.get("minute"), "world minute");
             double balance = requiredNumber(m.get("balance"), "balance after");
             String memo = optionalString(m.get("memo"));
-            if (sequence != previous + 1 || sequence < 1 || amount <= 0 || balance < 0)
+            if (sequence != previous + 1 || sequence < 1 || (amount <= 0 && !(amount == 0 && (kind == TreasuryLedger.Kind.ACCOUNT_CREATED || kind == TreasuryLedger.Kind.CREDIT_LIMIT_CHANGED))) || balance < 0)
                 throw new IllegalArgumentException("Invalid treasury segment ordering or values at " + sequence);
             entries.add(new TreasuryLedger.Entry(sequence, tx, account, other, currency, amount,
                     credit, kind, category, reference, minute, balance, memo));

@@ -518,11 +518,12 @@ public final class TreasuryLedgerTest {
                 "archive-test", "segment-transfer-1", 100, "archived transfer");
         String segmentJson = TreasuryJournalSegment.encode(segmentSource.journal());
         TreasuryJournalSegment.Decoded decodedSegment = TreasuryJournalSegment.decode(segmentJson);
-        ok(decodedSegment.entries().size() == segmentSource.journalSize()
+        ok(decodedSegment.entries().equals(segmentSource.journal())
                         && decodedSegment.firstSequence() == 1
                         && decodedSegment.lastSequence() == segmentSource.journal().get(segmentSource.journalSize() - 1).sequence()
-                        && decodedSegment.entries().get(1).transactionId().equals(decodedSegment.entries().get(2).transactionId()),
-                "checksummed treasury segment round-trips the complete ordered double-entry audit");
+                        && decodedSegment.entries().stream().filter(e -> e.kind() == TreasuryLedger.Kind.TRADE)
+                                .map(TreasuryLedger.Entry::transactionId).distinct().count() == 1,
+                "checksummed treasury segment round-trips structural events and financial double-entry postings");
         boolean checksumRejected = false;
         try {
             TreasuryJournalSegment.decode(segmentJson.replace("archived transfer", "altered transfer"));

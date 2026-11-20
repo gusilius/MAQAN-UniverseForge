@@ -11,7 +11,7 @@ import java.util.*;
  * The ledger is independent of Minecraft so economy rules can be tested deterministically.
  */
 public final class TreasuryLedger {
-    public enum Kind { OPENING, DEPOSIT, WITHDRAWAL, TRANSFER_IN, TRANSFER_OUT, TAX, DUTY, UPKEEP, WAGE, ARMY_UPKEEP, TRADE, VASSAL_TRIBUTE, GRANT, LOAN, REPAYMENT, INTEREST, WRITE_OFF, PRODUCTION, CONSUMPTION, LOGISTICS, IMPORT, EXPORT }
+    public enum Kind { ACCOUNT_CREATED, CREDIT_LIMIT_CHANGED, OPENING, DEPOSIT, WITHDRAWAL, TRANSFER_IN, TRANSFER_OUT, TAX, DUTY, UPKEEP, WAGE, ARMY_UPKEEP, TRADE, VASSAL_TRIBUTE, GRANT, LOAN, REPAYMENT, INTEREST, WRITE_OFF, PRODUCTION, CONSUMPTION, LOGISTICS, IMPORT, EXPORT }
     public static final class Account {
         public final String id, ownerId, currency;
         public double balance, creditLimit, debt;
@@ -349,6 +349,8 @@ public final class TreasuryLedger {
             return existing;
         }
         Account a=new Account(id,ownerId,currency,opening); accounts.put(id,a); markMutation();
+        append("struct:"+transactionSequence++, id, "@treasury:structural", currency, 0, true,
+                Kind.ACCOUNT_CREATED, "account-created", id, 0, a.balance, ownerId);
         if(opening>0) append("opening:"+transactionSequence++,id,"",currency,opening,true,Kind.OPENING,"opening",id,0,a.balance,"opening balance");
         return a;
     
@@ -358,7 +360,11 @@ public final class TreasuryLedger {
         Account a=accounts.get(accountId); if(a==null) return fail("unknown account");
         double normalized = amount(limit);
         if (Double.compare(a.creditLimit, normalized) == 0) return true;
-        a.creditLimit=normalized; updateBankruptcy(a); markMutation(); return true;
+        a.creditLimit=normalized; updateBankruptcy(a);
+        append("struct:"+transactionSequence++, a.id, "@treasury:structural", a.currency, 0, true,
+                Kind.CREDIT_LIMIT_CHANGED, "credit-limit", "credit-limit:"+transactionSequence,
+                0, a.balance, Double.toString(normalized));
+        return true;
     
         }}
     public synchronized boolean deposit(String accountId,double value,Kind kind,String category,String reference,long worldMinute,String memo) {
@@ -632,7 +638,7 @@ public final class TreasuryLedger {
             String memo = optionalString(m.get("memo"));
             Account account = ledger.accounts.get(accountId);
             if (account == null || !account.currency.equals(currency)) throw new IllegalArgumentException("Journal references unknown or mismatched account: " + accountId);
-            if (seq <= previousSequence || seq < 1 || worldMinute < 0 || value <= 0 || balanceAfter < 0)
+            if (seq <= previousSequence || seq < 1 || worldMinute < 0 || (value <= 0 && !(value == 0 && (kind == Kind.ACCOUNT_CREATED || kind == Kind.CREDIT_LIMIT_CHANGED))) || balanceAfter < 0)
                 throw new IllegalArgumentException("Invalid journal ordering or amount at sequence " + seq);
             Entry entry = new Entry(seq, tx, accountId, other, currency, value, credit, kind,
                     category, reference, worldMinute, balanceAfter, memo);
