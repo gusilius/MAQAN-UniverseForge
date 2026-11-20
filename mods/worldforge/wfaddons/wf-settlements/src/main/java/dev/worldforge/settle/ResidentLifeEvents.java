@@ -67,38 +67,40 @@ public final class ResidentLifeEvents {
             Character mother = "f".equalsIgnoreCase(person.gender) ? person : "f".equalsIgnoreCase(spouse.gender) ? spouse : null;
             Character father = mother == person ? spouse : mother == spouse ? person : null;
             if (mother == null || father == null) continue;
-            int motherAge = PopulationSimulation.age(mother, year);
-            int fatherAge = PopulationSimulation.age(father, year);
-            if (motherAge < 18 || motherAge > 42 || fatherAge < 18 || fatherAge > 65) continue;
-            if (mother.children.size() >= 5 || father.children.size() >= 5) continue;
-            int lastBirth = number(mother.props.get("family.last_birth_year"), 0);
-            if (lastBirth > 0 && year - lastBirth < 2) continue;
-            if (Math.floorMod(Objects.hash(mother.id, father.id, year, "birth"), 7) != 0) continue;
-            String gender = Math.floorMod(Objects.hash(mother.id, father.id, year, "gender"), 2) == 0 ? "f" : "m";
+            long worldDay = dev.worldforge.mod.api.WorldForgeApi.clock().dayNumber();
+            String dueFatherId = FamilyPlanning.dueFatherId(mother, worldDay);
+            if (dueFatherId.isBlank()) {
+                FamilyPlanning.tryConceive(mother, father, year, worldDay,
+                        Objects.hash(mother.globalId, father.globalId));
+                continue;
+            }
+            Character biologicalFather = registry.get(dueFatherId);
+            if (biologicalFather == null || !biologicalFather.alive) {
+                FamilyPlanning.cancel(mother, biologicalFather, "father-unavailable", year);
+                continue;
+            }
+            String gender = Math.floorMod(Objects.hash(mother.id, biologicalFather.id, year, "gender"), 2) == 0 ? "f" : "m";
             String childName = "Дитя семьи " + (mother.house == null || mother.house.isBlank() ? mother.name : mother.house);
             if (names != null) {
                 String race = mother.props.get("origin.race") instanceof String mr && !mr.isBlank() ? mr
-                        : father.props.get("origin.race") instanceof String fr ? fr : "";
-                String culture = mother.culture == null || mother.culture.isBlank() ? father.culture : mother.culture;
+                        : biologicalFather.props.get("origin.race") instanceof String fr ? fr : "";
+                String culture = mother.culture == null || mother.culture.isBlank() ? biologicalFather.culture : mother.culture;
                 try {
                     childName = names.pickGivenName(race, culture, gender,
-                            new Random(Objects.hash(mother.globalId, father.globalId, year, "birth-name")));
+                            new Random(Objects.hash(mother.globalId, biologicalFather.globalId, year, "birth-name")));
                 } catch (IllegalStateException unavailablePool) {
                     // Keep the stable family fallback if a third-party data pack has no compatible pool.
                 }
             }
-            Character child = registry.addChild(father, mother, childName, gender, year);
+            Character child = registry.addChild(biologicalFather, mother, childName, gender, year);
             child.traits.add("curious");
-            child.props.put("family.father_name", father.name);
+            child.props.put("family.father_name", biologicalFather.name);
             child.props.put("family.mother_name", mother.name);
-            ResidentSocial.adjust(father, child.globalId, 35);
+            ResidentSocial.adjust(biologicalFather, child.globalId, 35);
             ResidentSocial.adjust(mother, child.globalId, 35);
-            ResidentSocial.adjust(child, father.globalId, 35);
+            ResidentSocial.adjust(child, biologicalFather.globalId, 35);
             ResidentSocial.adjust(child, mother.globalId, 35);
-            mother.props.put("family.last_birth_year", year);
-            father.props.put("family.last_birth_year", year);
-            mother.props.put("family.last_event", "child-born:" + child.id);
-            father.props.put("family.last_event", "child-born:" + child.id);
+            FamilyPlanning.complete(mother, biologicalFather, year, child.id);
         }
         advanceChildhood(registry, people, year);
 
