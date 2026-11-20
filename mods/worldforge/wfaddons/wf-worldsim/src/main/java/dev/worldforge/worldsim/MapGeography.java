@@ -102,21 +102,32 @@ public final class MapGeography {
 
         List<Map<String, Object>> cells = new ArrayList<>();
         int land = 0, rivers = 0, viable = 0, wildernessLand = 0, inhabitedLand = 0, foundingSites = 0;
-        for (int z = 0; z < map.h; z += stride) {
-            for (int x = 0; x < map.w; x += stride) {
-                boolean foundingSite = foundingPixels.remove(coordinateKey(x, z));
-                Map<String, Object> cell = geographyCell(map, x, z, stride, foundingSite);
-                cells.add(cell);
-                boolean isLand = Boolean.TRUE.equals(cell.get("land"));
-                boolean wilderness = Boolean.TRUE.equals(cell.get("wilderness"));
-                int river = ((Number) cell.get("river")).intValue();
-                int suitability = ((Number) cell.get("suitability")).intValue();
-                if (isLand) land++;
-                if (wilderness) wildernessLand++;
-                if (isLand && !wilderness) inhabitedLand++;
-                if (isLand && !wilderness && suitability >= 55) viable++;
-                if (river > 0) rivers++;
-                if (foundingSite) foundingSites++;
+        // Traverse tile-major rather than row-major. This preserves the same global
+        // sampling lattice while ensuring a bounded LRU does not repeatedly decode every
+        // horizontal tile for each successive raster row on very wide worlds.
+        for (int tileZ = 0; tileZ < map.h; tileZ += 256) {
+            int firstZ = ((tileZ + stride - 1) / stride) * stride;
+            int endZ = Math.min(map.h, tileZ + 256);
+            for (int tileX = 0; tileX < map.w; tileX += 256) {
+                int firstX = ((tileX + stride - 1) / stride) * stride;
+                int endX = Math.min(map.w, tileX + 256);
+                for (int z = firstZ; z < endZ; z += stride) {
+                    for (int x = firstX; x < endX; x += stride) {
+                        boolean foundingSite = foundingPixels.remove(coordinateKey(x, z));
+                        Map<String, Object> cell = geographyCell(map, x, z, stride, foundingSite);
+                        cells.add(cell);
+                        boolean isLand = Boolean.TRUE.equals(cell.get("land"));
+                        boolean wilderness = Boolean.TRUE.equals(cell.get("wilderness"));
+                        int river = ((Number) cell.get("river")).intValue();
+                        int suitability = ((Number) cell.get("suitability")).intValue();
+                        if (isLand) land++;
+                        if (wilderness) wildernessLand++;
+                        if (isLand && !wilderness) inhabitedLand++;
+                        if (isLand && !wilderness && suitability >= 55) viable++;
+                        if (river > 0) rivers++;
+                        if (foundingSite) foundingSites++;
+                    }
+                }
             }
         }
 
