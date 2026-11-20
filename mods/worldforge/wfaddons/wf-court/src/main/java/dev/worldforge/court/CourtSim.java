@@ -4,6 +4,7 @@ import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.CharacterStats;
 import dev.worldforge.people.CharacterDevelopment;
+import dev.worldforge.people.FamilyPlanning;
 import dev.worldforge.people.Courts;
 import dev.worldforge.people.NameBank;
 import dev.worldforge.people.Role;
@@ -230,14 +231,20 @@ public final class CourtSim {
             if (!c.alive || !c.gender.equals("f") || c.spouse.isEmpty()) continue;
             Character f = reg.get(c.spouse);
             int age = y - c.birthYear;
-            if (f == null || !f.alive || age < 18 || age > 40 || c.children.size() >= 6) continue;
-            // ResidentLifeEvents also advances local families on the shared CharacterRegistry.
-            // Both owners consult the same persisted marker so one calendar year cannot create
-            // two births for the same mother when settlement and court ticks run in either order.
-            Object lastBirthValue = c.props.get("family.last_birth_year");
-            int lastBirthYear = lastBirthValue instanceof Number n ? n.intValue() : 0;
-            if (lastBirthYear > 0 && y - lastBirthYear < 2) continue;
-            if (rnd("birth", c.id.hashCode() + day).nextDouble() < 0.24) bear(f, c);
+            if (age < 18 || age > 42) continue;
+            long dueDay = number(c.props.get("family.pregnancy.due_day"), -1L);
+            if (dueDay >= 0L && day >= dueDay) {
+                String fatherId = FamilyPlanning.dueFatherId(c, day);
+                Character biologicalFather = fatherId.isBlank() ? null : reg.get(fatherId);
+                if (biologicalFather == null || !biologicalFather.alive) {
+                    FamilyPlanning.cancel(c, biologicalFather, "father-unavailable", y);
+                } else {
+                    bear(biologicalFather, c);
+                }
+                continue;
+            }
+            if (f == null || !f.alive) continue;
+            FamilyPlanning.tryConceive(c, f, y, day, seed);
         }
     }
 
@@ -250,8 +257,7 @@ public final class CourtSim {
         Character kid = reg.addChild(father, mother, l.get(r.nextInt(l.size())), m ? "m" : "f", year());
         // Shared with wf-settlements' ResidentLifeEvents pass: birth is one canonical
         // Character lifecycle event, regardless of which domain clock reaches the year first.
-        mother.props.put("family.last_birth_year", year());
-        father.props.put("family.last_birth_year", year());
+        FamilyPlanning.complete(mother, father, year(), kid.id);
         String realm = realmOf(father);
         hooks.news("MAQAN_AUTONOMOUS_BIRTH realm=" + realm + " father=" + father.globalId
                 + " mother=" + mother.globalId + " child=" + kid.globalId);
