@@ -1,10 +1,26 @@
 package dev.worldforge.mod;
 
-/** Seeded, coordinate-stable planetary fields sampled lazily by virtual raster tiles. */
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
+
+/**
+ * Seeded, coordinate-stable planetary fields sampled lazily by virtual raster tiles.
+ *
+ * Height is the expensive shared primitive for the height, biome and river rasters.
+ * A bounded tile cache makes those independent raster requests reuse the same
+ * 256x256 height field instead of evaluating multi-octave continent noise three times.
+ */
 final class ProceduralPlanetTerrain {
+    private static final int TILE_SIZE = 256;
+    private static final int MAX_HEIGHT_TILES = 8;
+
     private final int width,height,seaLevel,minY,maxY,wildernessShare;
     private final Noise continents,relief,detail,climate,moisture,channels;
     private final long seed;
+    private final LinkedHashMap<Long, FutureTask<short[]>> heightTiles =
+            new LinkedHashMap<>(16, 0.75f, true);
 
     ProceduralPlanetTerrain(PlanetWorldProfile p) {
         width=p.widthPx; height=p.heightPx; seaLevel=p.seaLevel; minY=p.minY;
@@ -18,6 +34,59 @@ final class ProceduralPlanetTerrain {
     }
 
     int heightSample(int x,int z) {
+        int tileX=x/TILE_SIZE, tileZ=z/TILE_SIZE;
+        long key=((long)tileZ<<32)|(tileX&0xffff_ffffL);
+        FutureTask<short[]> task;
+        boolean run=false;
+        synchronized(heightTiles) {
+            task=heightTiles.get(key);
+            if(task==null) {
+                final int originX=tileX*TILE_SIZE, originZ=tileZ*TILE_SIZE;
+                task=new FutureTask<>(()->computeHeightTile(originX,originZ));
+                heightTiles.put(key,task);
+                run=true;
+            }
+            trimHeightTiles();
+        }
+        if(run) task.run();
+        try {
+            short[] samples=task.get();
+            int tileWidth=Math.min(TILE_SIZE,width-tileX*TILE_SIZE);
+            return samples[(z-tileZ*TILE_SIZE)*tileWidth+(x-tileX*TILE_SIZE)]&0xFFFF;
+        } catch(InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while sampling procedural planet height",interrupted);
+        } catch(ExecutionException failure) {
+            synchronized(heightTiles) { heightTiles.remove(key,task); }
+            Throwable cause=failure.getCause();
+            throw new IllegalStateException("Unable to compute procedural planet height tile",
+                    cause==null?failure:cause);
+        }
+    }
+
+    /** Evict completed tiles only; concurrent raster readers keep sharing in-flight work. */
+    private void trimHeightTiles() {
+        while(heightTiles.size()>MAX_HEIGHT_TILES) {
+            Long evict=null;
+            for(Map.Entry<Long,FutureTask<short[]>> entry:heightTiles.entrySet()) {
+                if(entry.getValue().isDone()) { evict=entry.getKey(); break; }
+            }
+            if(evict==null) return;
+            heightTiles.remove(evict);
+        }
+    }
+
+    private short[] computeHeightTile(int originX,int originZ) {
+        int tileWidth=Math.min(TILE_SIZE,width-originX);
+        int tileHeight=Math.min(TILE_SIZE,height-originZ);
+        short[] values=new short[tileWidth*tileHeight];
+        for(int z=0;z<tileHeight;z++)
+            for(int x=0;x<tileWidth;x++)
+                values[z*tileWidth+x]=(short)heightSampleRaw(originX+x,originZ+z);
+        return values;
+    }
+
+    private int heightSampleRaw(int x,int z) {
         double continent=continents.fbm2(x*0.00052,z*0.00052,5);
         double mass=continent+relief.noise2(x*0.0011,z*0.0011)*0.13;
         double elevation;

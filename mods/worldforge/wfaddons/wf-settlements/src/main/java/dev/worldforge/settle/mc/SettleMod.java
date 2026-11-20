@@ -121,6 +121,8 @@ public class SettleMod {
     private static final Set<String> IMPORTED_BLUEPRINTS = ConcurrentHashMap.newKeySet();
     public static dev.worldforge.settle.TradeNetwork NETWORK = new dev.worldforge.settle.TradeNetwork();
     private static long ticks;
+    /** Static profession definitions are synchronized once per server lifecycle, not every tick. */
+    private static boolean professionsSynced;
     /** Fail-closed gate when an army logistics transfer cannot persist its ledger/settlement checkpoint. */
     private static volatile boolean logisticsPersistenceBlocked;
     private static long lastResidentAuditTick = Long.MIN_VALUE;
@@ -1313,6 +1315,8 @@ public class SettleMod {
     @SubscribeEvent
     public void onStarting(ServerStartingEvent e) {
         ticks = 0;
+        professionsSynced = false;
+        ColonyInterestIndex.clear();
         IMPORTED_BLUEPRINTS.clear();
         lastResidentAuditTick = Long.MIN_VALUE;
         REPORTED_RESIDENT_LINK_ERRORS.clear();
@@ -1331,6 +1335,8 @@ public class SettleMod {
     @SubscribeEvent
     public void onStopped(ServerStoppedEvent e) {
         COLONIES.clear();
+        ColonyInterestIndex.clear();
+        professionsSynced = false;
         IMPORTED_BLUEPRINTS.clear();
         DEFS = null;
         STRUCTURE_CATALOG = dev.worldforge.settle.StructureCatalog.empty();
@@ -1985,9 +1991,14 @@ public class SettleMod {
         if (e.phase != TickEvent.Phase.END || DEFS == null) return;
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server == null) return;
-        syncCanonicalProfessions();
-        importWorldBlueprintSettlements(server);
         ticks++;
+        if (!professionsSynced) {
+            syncCanonicalProfessions();
+            professionsSynced = true;
+        }
+        // Blueprint packages are immutable during normal play; check for newly mounted maps
+        // on a coarse cadence instead of walking every ServerLevel on every server tick.
+        if (ticks % 100L == 1L) importWorldBlueprintSettlements(server);
         int simulationInterval = dev.worldforge.mod.MaqanPerformanceConfig.settlementSimulationIntervalTicks();
         if (ticks % 1200 == 0 && ticks != lastResidentAuditTick) {
             lastResidentAuditTick = ticks;
@@ -2071,7 +2082,10 @@ public class SettleMod {
             }
         }
         if (ticks % SITE_TICKS == 0) {
-            for (Colony c : COLONIES.values()) {
+            // Rebuild the spatial index every five seconds; each site pass then visits only
+            // settlements within the materialization radius of an actual player.
+            ColonyInterestIndex.refresh(COLONIES.values(), ticks);
+            for (Colony c : ColonyInterestIndex.nearby(server, SimulationLod.LOCAL_RADIUS)) {
                 ServerLevel lv = c.level(server);
                 if (lv == null) continue;
                 try {
