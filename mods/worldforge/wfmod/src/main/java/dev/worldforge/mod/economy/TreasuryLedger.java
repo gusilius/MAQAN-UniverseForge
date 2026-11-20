@@ -301,7 +301,7 @@ public final class TreasuryLedger {
                             throw new IllegalStateException("Treasury suffix produces invalid debt for " + account.id);
                         account.balance = nextBalance;
                         account.debt = Math.max(0, nextDebt);
-                        updateBankruptcy(account);
+                        restored.updateBankruptcy(account);
                     }
                 }
 

@@ -42,6 +42,7 @@ import net.minecraftforge.registries.DeferredRegister;
 import net.minecraftforge.server.ServerLifecycleHooks;
 import org.slf4j.Logger;
 import dev.worldforge.mod.economy.TreasuryLedger;
+import dev.worldforge.mod.economy.TreasuryArchiveStore;
 import dev.worldforge.mod.economy.TreasuryLedgerSnapshot;
 import dev.worldforge.mod.economy.TreasuryJournalArchive;
 import dev.worldforge.mod.economy.TreasuryCheckpointStore;
