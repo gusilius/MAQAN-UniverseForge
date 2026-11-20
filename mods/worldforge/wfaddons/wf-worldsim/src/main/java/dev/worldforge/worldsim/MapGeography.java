@@ -3,9 +3,11 @@ package dev.worldforge.worldsim;
 import dev.worldforge.mod.MapData;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Deterministic natural-geography evidence extracted from a WorldForge map package.
@@ -41,43 +43,52 @@ public final class MapGeography {
         long area = Math.multiplyExact((long) map.w, (long) map.h);
         int budget = sampleBudget();
         int stride = Math.max(1, (int) Math.ceil(Math.sqrt(area / (double) budget)));
-        List<Map<String, Object>> cells = new ArrayList<>();
-        int land = 0, rivers = 0, viable = 0, wildernessLand = 0, inhabitedLand = 0;
+        Set<Long> foundingPixels = new HashSet<>();
+        for (MapData.SettlementSeed seed : map.settlementSeeds) {
+            if (seed.pixelX() >= 0 && seed.pixelX() < map.w && seed.pixelZ() >= 0 && seed.pixelZ() < map.h)
+                foundingPixels.add(coordinateKey(seed.pixelX(), seed.pixelZ()));
+        }
 
+        List<Map<String, Object>> cells = new ArrayList<>();
+        int land = 0, rivers = 0, viable = 0, wildernessLand = 0, inhabitedLand = 0, foundingSites = 0;
         for (int z = 0; z < map.h; z += stride) {
             for (int x = 0; x < map.w; x += stride) {
-                int biomeIndex = map.biomeAtPx(x, z);
-                String biome = map.biomeKey(biomeIndex);
-                int rawHeight = map.rawHeightPx(x, z);
-                int elevation = (int) Math.round(map.minY + rawHeight / 65535.0 * (map.maxY - map.minY));
-                int river = map.riverAtPx(x, z);
-                boolean isLand = elevation >= map.seaLevel + 1 && !isWaterBiome(biome);
-                boolean wilderness = isLand && map.isWildernessPx(x, z);
-                int slope = localRelief(map, x, z, stride);
-                int suitability = suitability(biome, elevation, map.seaLevel, slope, river);
+                boolean foundingSite = foundingPixels.remove(coordinateKey(x, z));
+                Map<String, Object> cell = geographyCell(map, x, z, stride, foundingSite);
+                cells.add(cell);
+                boolean isLand = Boolean.TRUE.equals(cell.get("land"));
+                boolean wilderness = Boolean.TRUE.equals(cell.get("wilderness"));
+                int river = ((Number) cell.get("river")).intValue();
+                int suitability = ((Number) cell.get("suitability")).intValue();
                 if (isLand) land++;
                 if (wilderness) wildernessLand++;
                 if (isLand && !wilderness) inhabitedLand++;
                 if (isLand && !wilderness && suitability >= 55) viable++;
-
-                Map<String, Object> cell = new LinkedHashMap<>();
-                cell.put("x", x);
-                cell.put("z", z);
-                cell.put("biome", biome);
-                cell.put("elevation", elevation);
-                cell.put("river", river);
-                cell.put("land", isLand);
-                cell.put("wilderness", wilderness);
-                cell.put("suitability", suitability);
-                // Keep the legacy schema field empty: sovereignty is generated downstream.
-                cell.put("owner_realm_id", "");
-                cell.put("climate_proxy", climateProxy(biome));
-                cells.add(cell);
+                if (river > 0) rivers++;
+                if (foundingSite) foundingSites++;
             }
+        }
+
+        // Settlement anchors authored by image-worldgen are exact geographic opportunities.
+        // Add off-grid anchors to the same immutable native snapshot so the simulation can
+        // found them deterministically instead of silently dropping world-blueprint.json.
+        for (MapData.SettlementSeed seed : map.settlementSeeds) {
+            long key = coordinateKey(seed.pixelX(), seed.pixelZ());
+            if (!foundingPixels.remove(key)) continue;
+            Map<String, Object> cell = geographyCell(map, seed.pixelX(), seed.pixelZ(), stride, true);
+            if (!Boolean.TRUE.equals(cell.get("land")) || Boolean.TRUE.equals(cell.get("wilderness"))) continue;
+            cells.add(cell);
+            land++;
+            inhabitedLand++;
+            if (((Number) cell.get("suitability")).intValue() >= 55) viable++;
+            if (((Number) cell.get("river")).intValue() > 0) rivers++;
+            foundingSites++;
         }
 
         List<String> layers = new ArrayList<>(List.of("meta.json", "biomes.png", "height16.png"));
         if (map.hasRiverLayer()) layers.add("rivers.png");
+        if (map.hasWildernessLayer()) layers.add("wilderness.png");
+        if (map.planetProfile != null) layers.add("generation-profile.json");
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("map_id", map.name);
         result.put("width_px", map.w);
@@ -92,6 +103,7 @@ public final class MapGeography {
         result.put("wilderness_share_pct", map.planetProfile == null ? 0 : map.planetProfile.wildernessSharePct);
         result.put("wilderness_samples", wildernessLand);
         result.put("inhabited_land_samples", inhabitedLand);
+        result.put("founding_site_samples", foundingSites);
         result.put("sample_stride", stride);
         result.put("sample_budget", budget);
         result.put("world_area_pixels", area);
@@ -103,6 +115,36 @@ public final class MapGeography {
         result.put("missing_layers", List.of("climate raster", "resource raster"));
         result.put("cells", cells);
         return result;
+    }
+
+    private static long coordinateKey(int x, int z) {
+        return ((long) z << 32) | (x & 0xffff_ffffL);
+    }
+
+    private static Map<String, Object> geographyCell(
+            MapData map, int x, int z, int stride, boolean foundingSite) {
+        int biomeIndex = map.biomeAtPx(x, z);
+        String biome = map.biomeKey(biomeIndex);
+        int rawHeight = map.rawHeightPx(x, z);
+        int elevation = (int) Math.round(map.minY + rawHeight / 65535.0 * (map.maxY - map.minY));
+        int river = map.riverAtPx(x, z);
+        boolean isLand = elevation >= map.seaLevel + 1 && !isWaterBiome(biome);
+        boolean wilderness = isLand && map.isWildernessPx(x, z);
+        int slope = localRelief(map, x, z, stride);
+        int suitability = suitability(biome, elevation, map.seaLevel, slope, river);
+        Map<String, Object> cell = new LinkedHashMap<>();
+        cell.put("x", x);
+        cell.put("z", z);
+        cell.put("biome", biome);
+        cell.put("elevation", elevation);
+        cell.put("river", river);
+        cell.put("land", isLand);
+        cell.put("wilderness", wilderness);
+        cell.put("founding_site", foundingSite);
+        cell.put("suitability", suitability);
+        cell.put("owner_realm_id", "");
+        cell.put("climate_proxy", climateProxy(biome));
+        return cell;
     }
 
     private static int localRelief(MapData map, int x, int z, int stride) {

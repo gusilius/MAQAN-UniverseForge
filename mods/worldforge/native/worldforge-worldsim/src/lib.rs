@@ -182,6 +182,9 @@ pub struct GeographicCell {
     /// Profile-authored wilderness is land but is not an initial settlement site.
     #[serde(default)]
     pub wilderness: bool,
+    /// Exact terrain-derived settlement anchor from world-blueprint.json.
+    #[serde(default)]
+    pub founding_site: bool,
 }
 
 fn default_settlement_level() -> u8 { 4 }
@@ -1781,9 +1784,9 @@ mod tests {
             settlement_level: 4, population_density_pct: 38, wilderness_share_pct: 0,
                 cells: vec![
                     GeographicCell { x: 4, z: 8, biome: "plains".into(), elevation: 70,
-                        river: 0, land: true, suitability: 82, owner_realm_id: String::new(), discovered_year: 0, wilderness: false },
+                        river: 0, land: true, suitability: 82, owner_realm_id: String::new(), discovered_year: 0, wilderness: false, founding_site: false },
                     GeographicCell { x: 8, z: 8, biome: "forest".into(), elevation: 72,
-                        river: 255, land: true, suitability: 90, owner_realm_id: String::new(), discovered_year: 0, wilderness: false },
+                        river: 255, land: true, suitability: 90, owner_realm_id: String::new(), discovered_year: 0, wilderness: false, founding_site: false },
                 ],
             }],
         };

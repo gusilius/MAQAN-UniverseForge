@@ -178,15 +178,24 @@ fn bootstrap(map: &GeographicMap, seed: u64, bands: &mut Vec<EmergentBand>, even
         .map(|band| (band.x, band.z)).collect::<Vec<_>>();
     for cell in candidates {
         let density_scale = 20 + u64::from(map.population_density_pct.min(100)) * 80 / 100;
-        let chance = u64::from(cell.suitability.saturating_sub(42)) * 55 * density_scale / 100;
+        let chance = if cell.founding_site { 10_000 }
+            else { u64::from(cell.suitability.saturating_sub(42)) * 55 * density_scale / 100 };
         let key = format!("{}:{}:{}", map.map_id, cell.x, cell.z);
         if roll(seed, "founder-band", &key, &cell.biome, 0) % 10_000 >= chance { continue; }
-        if occupied.iter().any(|p| distance_sq(*p, (cell.x,cell.z)) < spacing * spacing) { continue; }
+        let minimum_spacing_sq = if cell.founding_site { 1 } else { spacing * spacing };
+        if occupied.iter().any(|p| distance_sq(*p, (cell.x,cell.z)) < minimum_spacing_sq) { continue; }
         let id = format!("band_{:016x}", roll(seed, "band-id", &key, "", 0));
         if bands.iter().any(|band| band.id == id) { continue; }
-        let population = 2 + roll(seed, "founder-size", &key, "", 0) % 5;
+        let density_bonus = u64::from(map.population_density_pct.min(100)) * 40 / 100;
+        let population = if cell.founding_site {
+            8 + density_bonus + roll(seed, "founder-size", &key, "", 0) % 9
+        } else {
+            2 + roll(seed, "founder-size", &key, "", 0) % 5
+        };
         bands.push(EmergentBand { id: id.clone(), map_id: map.map_id.clone(), x: cell.x, z: cell.z,
-            population, food_reserve: i64::from(cell.suitability) / 8, settled: false,
+            population, food_reserve: if cell.founding_site {
+                18 + i64::from(cell.suitability) / 3
+            } else { i64::from(cell.suitability) / 8 }, settled: cell.founding_site,
             founded_year: 0, hardship_years: 0, origin_year: cell.discovered_year });
         occupied.push((cell.x,cell.z));
         events.push(EmergenceEvent { year: 0, kind: "population_origin".into(), subject_id: id,
@@ -351,7 +360,8 @@ fn bootstrap_initial_civilizations(
         .map(|((x, z), cells)| (x, z, cells))
     {
         candidates.sort_by(|a, b| {
-            b.suitability.cmp(&a.suitability)
+            b.founding_site.cmp(&a.founding_site)
+                .then_with(|| b.suitability.cmp(&a.suitability)
                 .then_with(|| roll(seed, "initial-site-order", &map.map_id,
                     &format!("{}:{}", a.x, a.z), 0)
                     .cmp(&roll(seed, "initial-site-order", &map.map_id,
@@ -683,11 +693,12 @@ mod tests {
             for x in 0..128 {
                 cells.push(GeographicCell { x, z, biome: if (x / 16 + z / 16) % 2 == 0 { "plains" } else { "forest" }.into(),
                     elevation: 70, river: if x % 19 == 0 { 255 } else { 0 }, land: true, suitability: 92,
-                    owner_realm_id: String::new(), discovered_year: 0, wilderness: false });
+                    owner_realm_id: String::new(), discovered_year: 0, wilderness: false, founding_site: false });
             }
         }
         GeographicMap { map_id:"planetos".into(), width_px:128, height_px:128,
-            blocks_per_pixel_milli:16000, political_layers_present:false, sample_stride:1, cells }
+            blocks_per_pixel_milli:16000, political_layers_present:false, sample_stride:1,
+            settlement_level:4, population_density_pct:38, wilderness_share_pct:0, cells }
     }
     fn request(day: u64, state: Option<EmergentWorld>) -> EmergenceRequest {
         EmergenceRequest { snapshot:WorldSnapshot { world_id:"map-only".into(),seed:8128,day,
@@ -726,10 +737,10 @@ mod tests {
             cells: vec![
                 GeographicCell { x: 30_000_000, z: 30_000_000, biome: "minecraft:plains".into(),
                     elevation: 70, river: 0, land: true, suitability: 90,
-                    owner_realm_id: String::new(), discovered_year: 0, wilderness: false },
+                    owner_realm_id: String::new(), discovered_year: 0, wilderness: false, founding_site: false },
                 GeographicCell { x: 30_900_000, z: 30_900_000, biome: "minecraft:forest".into(),
                     elevation: 72, river: 0, land: true, suitability: 88,
-                    owner_realm_id: String::new(), discovered_year: 0, wilderness: false },
+                    owner_realm_id: String::new(), discovered_year: 0, wilderness: false, founding_site: false },
             ],
         };
         assert!(observed_map_scale(&map) <= 256,
@@ -747,7 +758,7 @@ mod tests {
                     cells.push(GeographicCell {
                         x: x + dx, z: z + dz, biome: "minecraft:plains".into(),
                         elevation: 70, river: 0, land: true, suitability: 90,
-                        owner_realm_id: String::new(), discovered_year: 0, wilderness: false,
+                        owner_realm_id: String::new(), discovered_year: 0, wilderness: false, founding_site: false,
                     });
                 }
             }
@@ -787,7 +798,7 @@ mod tests {
             land: true,
             suitability: 90,
             owner_realm_id: String::new(),
-            discovered_year: 0, wilderness: false,
+            discovered_year: 0, wilderness: false, founding_site: false,
         }).collect();
         let map = GeographicMap {
             map_id: "vanilla-world:minecraft:overworld".into(),
@@ -815,7 +826,7 @@ mod tests {
                 cells.push(GeographicCell {
                     x, z, biome: "minecraft:plains".into(), elevation: 70,
                     river: 0, land: true, suitability: 90,
-                    owner_realm_id: String::new(), discovered_year: 0, wilderness: false,
+                    owner_realm_id: String::new(), discovered_year: 0, wilderness: false, founding_site: false,
                 });
             }
         }
