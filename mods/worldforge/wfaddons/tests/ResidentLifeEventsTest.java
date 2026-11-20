@@ -1,6 +1,7 @@
 package dev.worldforge.tests;
 
 import dev.worldforge.people.Character;
+import dev.worldforge.mod.api.WorldForgeApi;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.PopulationSimulation;
 import dev.worldforge.people.NameBank;
@@ -44,8 +45,10 @@ public final class ResidentLifeEventsTest {
         check("друг".equals(ResidentSocial.bond(father, mother.globalId)),
                 "relationship score resolves to a stable friendship bond");
 
+        WorldForgeApi.clock().reset();
         boolean married = false;
         for (int year = 2000; year < 2040 && !married; year++) {
+            WorldForgeApi.clock().advance(365 * 1200);
             ResidentLifeEvents.yearly(registry, year);
             married = father.id.equals(mother.spouse) && mother.id.equals(father.spouse);
         }
@@ -60,7 +63,8 @@ public final class ResidentLifeEventsTest {
                 "family events retain the original Character identities");
 
         boolean childBorn = false;
-        for (int year = 2000; year < 2040 && !childBorn; year++) {
+        for (int year = 2040; year < 2080 && !childBorn; year++) {
+            WorldForgeApi.clock().advance(365 * 1200);
             ResidentLifeEvents.yearly(registry, year);
             childBorn = !mother.children.isEmpty() && !father.children.isEmpty();
         }
@@ -89,8 +93,11 @@ public final class ResidentLifeEventsTest {
         namedFather.props.put("origin.race", "deep_dwarf");
         namedMother.props.put("origin.race", "deep_dwarf");
         namedFamily.marry(namedFather.id, namedMother.id, 2000);
-        for (int year = 2000; year <= 2022 && namedMother.children.isEmpty(); year++)
+        WorldForgeApi.clock().reset();
+        for (int year = 2000; year <= 2040 && namedMother.children.isEmpty(); year++) {
+            WorldForgeApi.clock().advance(365 * 1200);
             ResidentLifeEvents.yearly(namedFamily, year, birthNames);
+        }
         Character namedChild = namedMother.children.isEmpty() ? null : namedFamily.get(namedMother.children.get(0));
         check(namedChild != null && List.of("Торин", "Двалин", "Диса", "Груна").contains(namedChild.name),
                 "natural births use the shared race-aware NameBank instead of generic placeholder names");
