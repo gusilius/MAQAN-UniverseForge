@@ -98,7 +98,7 @@ public final class ResidentLifeEvents {
             }
             int end = Math.min(workSize, session.cursor + remaining);
             if (session.phase == 0) {
-                List<Character> batch = session.people.subList(session.cursor, end);
+                List<Character> batch = new ArrayList<>(session.people.subList(session.cursor, end));
                 registry.refreshLifeStages(batch, session.year);
                 for (Character person : batch) {
                     indexChild(session, person);
