@@ -35,6 +35,7 @@ public final class ResidentLifeEventsTest {
     }
 
     public static void main(String[] args) {
+        System.setProperty("wf.test.traceResidentLife", "true");
         CharacterRegistry registry = new CharacterRegistry();
         Character father = registry.create("Арен", "Дом Арен", "north", "m", 1980);
         Character mother = registry.create("Мира", "Дом Мира", "north", "f", 1980);

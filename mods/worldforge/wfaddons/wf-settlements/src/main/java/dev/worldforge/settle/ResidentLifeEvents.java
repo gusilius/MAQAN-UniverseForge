@@ -61,6 +61,10 @@ public final class ResidentLifeEvents {
 
     private ResidentLifeEvents() {}
 
+    private static void trace(String message) {
+        if (Boolean.getBoolean("wf.test.traceResidentLife")) System.out.println("LIFE_TRACE " + message);
+    }
+
     public static void yearly(CharacterRegistry registry, int year) { yearly(registry, year, null); }
 
     /** Synchronous compatibility API for domain tests and non-server callers. */
@@ -116,11 +120,14 @@ public final class ResidentLifeEvents {
                 continue;
             }
             int end = Math.min(workSize, session.cursor + remaining);
+            trace("phase=" + session.phase + " cursor=" + session.cursor + " end=" + end + " size=" + workSize);
             if (session.phase == 0) {
                 List<Character> batch = new ArrayList<>(session.people.subList(session.cursor, end));
                 registry.refreshLifeStages(batch, session.year);
                 for (Character person : batch) {
+                    trace("pregnancy-check person=" + person.id + " year=" + session.year);
                     Character newborn = processPregnancy(registry, person, session.year, session.worldDay, names);
+                    trace("pregnancy-done person=" + person.id + " newborn=" + (newborn == null ? "none" : newborn.id));
                     if (newborn != null) session.newborns.add(newborn);
                     if (person.alive && (person.spouse == null || person.spouse.isBlank())
                             && PopulationSimulation.age(person, session.year) >= 18)
@@ -212,7 +219,9 @@ public final class ResidentLifeEvents {
                     // Preserve the stable fallback if a data pack has no compatible name pool.
                 }
             }
+            trace("birth-before-add mother=" + mother.id + " father=" + biologicalFather.id);
             Character child = registry.addChild(biologicalFather, mother, childName, gender, year);
+            trace("birth-after-add child=" + child.id);
             child.traits.add("curious");
             child.props.put("family.father_name", biologicalFather.name);
             child.props.put("family.mother_name", mother.name);
@@ -220,7 +229,9 @@ public final class ResidentLifeEvents {
             ResidentSocial.adjust(mother, child.globalId, 35);
             ResidentSocial.adjust(child, biologicalFather.globalId, 35);
             ResidentSocial.adjust(child, mother.globalId, 35);
+            trace("birth-before-complete child=" + child.id);
             FamilyPlanning.complete(mother, biologicalFather, year, child.id);
+            trace("birth-after-complete child=" + child.id);
             return child;
         }
         Character spouse = mother.spouse == null || mother.spouse.isBlank() ? null : registry.get(mother.spouse);
