@@ -619,6 +619,14 @@ public final class TreasuryLedgerTest {
             migrationLedger.open("migration:merchant", "migration:merchant", "silver", 20);
             migrationLedger.open("migration:empty", "migration:empty", "silver", 0);
             migrationLedger.open("migration:borrower", "migration:borrower", "silver", 0);
+            boolean structuralEventsDurable = migrationLedger.journal().stream().anyMatch(e ->
+                            e.kind() == TreasuryLedger.Kind.ACCOUNT_CREATED && e.accountId().equals("migration:empty")
+                                    && e.amount() == 0)
+                    && migrationLedger.journal().stream().anyMatch(e ->
+                            e.kind() == TreasuryLedger.Kind.CREDIT_LIMIT_CHANGED
+                                    && e.accountId().equals("migration:borrower") && e.memo().equals("105.0"));
+            ok(structuralEventsDurable,
+                    "zero-balance account creation and credit-limit changes are represented as durable zero-value journal events");
             boolean borrowerStateApplied = migrationLedger.setCreditLimit("migration:borrower", 105)
                     && migrationLedger.borrow("migration:borrower", 100, 40, "migration:loan")
                     && migrationLedger.accrueInterest("migration:borrower", 0.10, 41, "migration:interest")
@@ -667,6 +675,12 @@ public final class TreasuryLedgerTest {
                             && close(restoredLedger.balance("migration:merchant"), merchantBeforeRetry)
                             && restoredLedger.journalSize() == migrationLedger.journalSize(),
                     "restored treasury treats an identical transfer retry as success and rejects changed payload without reposting");
+            ok(restoredLedger.journal().stream().anyMatch(e ->
+                            e.kind() == TreasuryLedger.Kind.ACCOUNT_CREATED && e.accountId().equals("migration:empty"))
+                            && restoredLedger.journal().stream().anyMatch(e ->
+                            e.kind() == TreasuryLedger.Kind.CREDIT_LIMIT_CHANGED
+                                    && e.accountId().equals("migration:borrower") && e.memo().equals("105.0")),
+                    "checkpoint archive retains structural account events alongside financial postings");
             TreasuryLedger.Account restoredBorrower = restoredLedger.account("migration:borrower");
             TreasuryLedger.Account originalBorrower = migrationLedger.account("migration:borrower");
             ok(restoredLedger.hasAccount("migration:empty")
