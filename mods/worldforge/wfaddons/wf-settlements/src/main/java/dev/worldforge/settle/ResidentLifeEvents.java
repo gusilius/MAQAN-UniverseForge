@@ -58,8 +58,10 @@ public final class ResidentLifeEvents {
         if (refreshStages) registry.refreshLifeStages(year);
         if (!processFamily) return;
 
-        List<Character> people = new ArrayList<>(registry.all());
-        people.sort(Comparator.comparing(c -> c.id));
+        // CharacterRegistry preserves canonical insertion order (monotonic IDs and stable
+        // save/load order). Iterate its read-only view directly: copying and sorting a
+        // million references every year creates avoidable allocation and O(N log N) work.
+        Collection<Character> people = registry.all();
         for (Character person : people) {
             if (!person.alive || year <= number(person.props.get("social.last_family_year"), 0)) continue;
             person.props.put("social.last_family_year", year);
@@ -230,7 +232,7 @@ public final class ResidentLifeEvents {
         }
     }
 
-    private static void advanceChildhood(CharacterRegistry registry, List<Character> people, int year) {
+    private static void advanceChildhood(CharacterRegistry registry, Collection<Character> people, int year) {
         for (Character child : people) {
             if (!child.alive || year <= number(child.props.get("family.development_year"), 0)) continue;
             int age = PopulationSimulation.age(child, year);
