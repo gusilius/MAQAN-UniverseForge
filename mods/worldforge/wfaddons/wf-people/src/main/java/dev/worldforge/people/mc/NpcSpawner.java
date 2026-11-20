@@ -32,7 +32,7 @@ final class NpcSpawner {
         passCounter = 0;
     }
 
-    private record Target(Character c, Role role, double x, double z, double dist2) {}
+    private record Target(Character c, Role role, String spawnRoleId, double x, double z, double dist2) {}
     private record SpawnAnchor(double x, double z, List<Target> targets) {}
 
     /** One title/realm traversal per level pass; each player queries only nearby spatial cells. */
@@ -48,7 +48,7 @@ final class NpcSpawner {
                 cells.add(created, x, z);
                 return created;
             });
-            anchor.targets().add(new Target(character, role, x, z, 0));
+            anchor.targets().add(new Target(character, role, role.id, x, z, 0));
         }
 
         List<Target> nearby(double x, double z, double radius) {
@@ -60,7 +60,7 @@ final class NpcSpawner {
                 if (distance > radius2) continue;
                 for (Target target : anchor.targets()) {
                     if (seen.add(target.c().id))
-                        result.add(new Target(target.c(), target.role(), target.x(), target.z(), distance));
+                        result.add(new Target(target.c(), target.role(), target.spawnRoleId(), target.x(), target.z(), distance));
                 }
             }
             return result;
@@ -166,18 +166,18 @@ final class NpcSpawner {
     /** A title holder's immediate family shares the residence and becomes visible with it. */
     private static void addTargetAndFamily(Map<String, Target> targets, CharacterRegistry registry,
                                            Character head, Role role, double x, double z, double distanceSquared) {
-        targets.putIfAbsent(head.id, new Target(head, role, x, z, distanceSquared));
+        targets.putIfAbsent(head.id, new Target(head, role, role.id, x, z, distanceSquared));
         if (!role.family) return;
 
         if (head.spouse != null && !head.spouse.isBlank()) {
             Character spouse = registry.get(head.spouse);
             if (spouse != null && spouse.alive)
-                targets.putIfAbsent(spouse.id, new Target(spouse, role, x, z, distanceSquared + 0.01));
+                targets.putIfAbsent(spouse.id, new Target(spouse, role, role.id + ".family", x, z, distanceSquared + 0.01));
         }
         for (String childId : head.children) {
             Character child = registry.get(childId);
             if (child != null && child.alive)
-                targets.putIfAbsent(child.id, new Target(child, role, x, z, distanceSquared + 0.02));
+                targets.putIfAbsent(child.id, new Target(child, role, role.id + ".family", x, z, distanceSquared + 0.02));
         }
     }
 
@@ -191,7 +191,7 @@ final class NpcSpawner {
     }
 
     private static WFNpc spawn(ServerLevel level, Target t) {
-        Random rnd = new Random(t.c().id.hashCode() * 31L + t.role().id.hashCode());
+        Random rnd = new Random(t.c().id.hashCode() * 31L + t.spawnRoleId().hashCode());
         double ang = rnd.nextDouble() * Math.PI * 2;
         double rad = t.role().noble ? 2 + rnd.nextDouble() * 5 : 4 + rnd.nextDouble() * 16;
         int x = (int) Math.floor(t.x() + Math.cos(ang) * rad), z = (int) Math.floor(t.z() + Math.sin(ang) * rad);
