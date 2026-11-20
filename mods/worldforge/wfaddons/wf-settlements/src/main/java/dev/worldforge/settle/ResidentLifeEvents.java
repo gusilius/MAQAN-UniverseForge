@@ -137,8 +137,12 @@ public final class ResidentLifeEvents {
                 for (int index = session.cursor; index < end; index++)
                     advanceChildhoodPerson(registry, personAt(session, index), session.year);
             } else if (session.phase == 2) {
-                for (int index = session.cursor; index < end; index++)
-                    processMaritalConflict(registry, personAt(session, index), session.year);
+                for (int index = session.cursor; index < end; index++) {
+                    Character reviewed = personAt(session, index);
+                    trace("marital-before index=" + index + " person=" + reviewed.id);
+                    processMaritalConflict(registry, reviewed, session.year);
+                    trace("marital-after index=" + index + " person=" + reviewed.id);
+                }
             } else {
                 for (int i = session.cursor; i < end; i++)
                     processRelationshipReview(registry, session.eligibleSingles, i, session.year);
@@ -247,7 +251,9 @@ public final class ResidentLifeEvents {
         Character spouse = registry.get(person.spouse);
         if (spouse == null || !spouse.alive || !person.id.equals(spouse.spouse)
                 || year <= number(person.props.get("family.marital_review_year"), 0)) return;
+        trace("marital-score-before person=" + person.id + " spouse=" + spouse.id);
         int affinity = Math.min(ResidentSocial.score(person, spouse.globalId), ResidentSocial.score(spouse, person.globalId));
+        trace("marital-score-after person=" + person.id + " affinity=" + affinity);
         person.props.put("family.marital_review_year", year);
         spouse.props.put("family.marital_review_year", year);
         int conflictYears = number(person.props.get("family.marital_conflict_years"), 0);
