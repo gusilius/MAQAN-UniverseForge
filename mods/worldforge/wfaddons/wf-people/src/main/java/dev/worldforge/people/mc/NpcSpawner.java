@@ -26,7 +26,7 @@ final class NpcSpawner {
 
     private NpcSpawner() {}
 
-    private record Target(Character c, String roleId, boolean noble, double x, double z, double dist2) {}
+    private record Target(Character c, Role role, double x, double z, double dist2) {}
     private record SpawnAnchor(double x, double z, List<Target> targets) {}
 
     /** One title/realm traversal per level pass; each player queries only nearby spatial cells. */
@@ -42,7 +42,7 @@ final class NpcSpawner {
                 cells.add(created, x, z);
                 return created;
             });
-            anchor.targets().add(new Target(character, role.id, role.noble, x, z, 0));
+            anchor.targets().add(new Target(character, role, x, z, 0));
         }
 
         List<Target> nearby(double x, double z, double radius) {
@@ -54,8 +54,7 @@ final class NpcSpawner {
                 if (distance > radius2) continue;
                 for (Target target : anchor.targets()) {
                     if (seen.add(target.c().id))
-                        result.add(new Target(target.c(), target.roleId(), target.noble(),
-                                target.x(), target.z(), distance));
+                        result.add(new Target(target.c(), target.role(), target.x(), target.z(), distance));
                 }
             }
             return result;
@@ -134,7 +133,7 @@ final class NpcSpawner {
         double px = player.getX(), pz = player.getZ();
         Map<String, Target> targets = new LinkedHashMap<>();
         for (Target target : index.nearby(px, pz, NEAR))
-            addTargetAndFamily(targets, registry, target.c(), new Role(target.roleId(), target.noble()),
+            addTargetAndFamily(targets, registry, target.c(), target.role(),
                     target.x(), target.z(), target.dist2());
 
         List<Target> list = new ArrayList<>(targets.values());
@@ -181,9 +180,9 @@ final class NpcSpawner {
     }
 
     private static WFNpc spawn(ServerLevel level, Target t) {
-        Random rnd = new Random(t.c().id.hashCode() * 31L + t.roleId().hashCode());
+        Random rnd = new Random(t.c().id.hashCode() * 31L + t.role().id.hashCode());
         double ang = rnd.nextDouble() * Math.PI * 2;
-        double rad = t.noble() ? 2 + rnd.nextDouble() * 5 : 4 + rnd.nextDouble() * 16;
+        double rad = t.role().noble ? 2 + rnd.nextDouble() * 5 : 4 + rnd.nextDouble() * 16;
         int x = (int) Math.floor(t.x() + Math.cos(ang) * rad), z = (int) Math.floor(t.z() + Math.sin(ang) * rad);
         if (!level.hasChunkAt(new BlockPos(x, level.getMinBuildHeight() + 1, z))) return null;        // не грузим чанки ради людей
         int y = level.getHeight(Heightmap.Types.WORLD_SURFACE, x, z);
