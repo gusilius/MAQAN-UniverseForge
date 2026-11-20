@@ -228,13 +228,11 @@ public final class CourtSim {
             if (rnd("death", c.id.hashCode() + day).nextDouble() < p) die(c, "умер от старости или болезни");
         }
         for (Character c : all) {
-            if (!c.alive || !c.gender.equals("f") || c.spouse.isEmpty()) continue;
-            Character f = reg.get(c.spouse);
-            int age = y - c.birthYear;
-            if (age < 18 || age > 42) continue;
+            if (!c.alive || !c.gender.equals("f")) continue;
             Object dueValue = c.props.get("family.pregnancy.due_day");
             long dueDay = dueValue instanceof Number n ? n.longValue() : -1L;
-            if (dueDay >= 0L && day >= dueDay) {
+            if (dueDay >= 0L) {
+                if (day < dueDay) continue;
                 String fatherId = FamilyPlanning.dueFatherId(c, day);
                 Character biologicalFather = fatherId.isBlank() ? null : reg.get(fatherId);
                 if (biologicalFather == null || !biologicalFather.alive) {
@@ -244,7 +242,10 @@ public final class CourtSim {
                 }
                 continue;
             }
-            if (f == null || !f.alive) continue;
+            if (c.spouse.isEmpty()) continue;
+            Character f = reg.get(c.spouse);
+            int age = y - c.birthYear;
+            if (f == null || !f.alive || age < 18 || age > 42) continue;
             FamilyPlanning.tryConceive(c, f, y, day, seed);
         }
     }
