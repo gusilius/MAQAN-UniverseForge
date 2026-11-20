@@ -26,6 +26,7 @@ public final class MaqanPerformanceConfig {
     public static final ForgeConfigSpec.IntValue LIFE_AI_INTERVAL_STEPS;
     public static final ForgeConfigSpec.IntValue LIFE_AI_RESIDENTS_PER_PASS;
     public static final ForgeConfigSpec.IntValue LIFE_AI_URGENT_RESIDENTS_PER_PASS;
+    public static final ForgeConfigSpec.IntValue TRADE_WORK_ITEMS_PER_TICK;
     public static final ForgeConfigSpec.IntValue MAX_ACTIVE_WORKER_BODIES_PER_COLONY;
 
     public static final ForgeConfigSpec.IntValue ARMY_MAX_MATERIALIZED_BODIES;
@@ -74,6 +75,8 @@ public final class MaqanPerformanceConfig {
                 .defineInRange("lifeAiResidentsPerPass", 96, 1, 4096);
         LIFE_AI_URGENT_RESIDENTS_PER_PASS = BUILDER.comment("Maximum residents receiving urgent life-AI processing per raid/emergency pass.")
                 .defineInRange("lifeAiUrgentResidentsPerPass", 384, 1, 16384);
+        TRADE_WORK_ITEMS_PER_TICK = BUILDER.comment("Maximum realm/caravan work items advanced by the economic simulation per server tick. Does not limit world size or trade volume.")
+                .defineInRange("tradeWorkItemsPerTick", 64, 1, 4096);
 
         OVERRIDE_WORKER_SPAWN_RADIUS = BUILDER.define("overrideWorkerSpawnRadius", false);
         OVERRIDE_WORKER_DESPAWN_RADIUS = BUILDER.define("overrideWorkerDespawnRadius", false);
@@ -144,6 +147,7 @@ public final class MaqanPerformanceConfig {
     }
     public static int lifeAiResidentsPerPass() { return LIFE_AI_RESIDENTS_PER_PASS.get(); }
     public static int lifeAiUrgentResidentsPerPass() { return LIFE_AI_URGENT_RESIDENTS_PER_PASS.get(); }
+    public static int tradeWorkItemsPerTick() { return TRADE_WORK_ITEMS_PER_TICK.get(); }
     public static int armyMaxMaterializedBodies() {
         return preset(ARMY_MAX_MATERIALIZED_BODIES.get(), OVERRIDE_ARMY_MAX_BODIES.get(), 48, 96, 256);
     }

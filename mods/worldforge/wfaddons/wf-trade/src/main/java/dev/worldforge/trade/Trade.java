@@ -92,6 +92,28 @@ public final class Trade {
     private Map<String, Map<String, Double>> activeTickTerrain;
     private Map<String, Double> activeTickConsumption;
 
+    private static final class DaySession {
+        final int day;
+        final List<String> realms;
+        final List<Ambush> ambushes;
+        final List<Caravan> caravans;
+        final List<String> events = new ArrayList<>();
+        int phase;
+        int realmCursor;
+        int ambushCursor;
+        int caravanCursor;
+        int aiCursor;
+        boolean shocksAdvanced;
+        DaySession(int day, Collection<String> realms, Collection<Ambush> ambushes,
+                   Collection<Caravan> caravans) {
+            this.day = day;
+            this.realms = List.copyOf(realms);
+            this.ambushes = new ArrayList<>(ambushes);
+            this.caravans = new ArrayList<>(caravans);
+        }
+    }
+    private DaySession activeDay;
+
     public Trade(TradeDefs defs) { this.defs = defs; }
 
     public Market market(String realm) {
@@ -179,58 +201,154 @@ public final class Trade {
 
     // ---------- день ----------
 
+    /**
+     * Compatibility API: execute a complete economic day synchronously.
+     * Server integrations should use advanceDay() with a finite work budget.
+     */
     public List<String> tick(int day, Collection<String> realms) {
-        activeTickRaces = new HashMap<>(DemoApi.races(realms));
+        List<String> result;
+        do {
+            result = advanceDay(day, realms, Integer.MAX_VALUE);
+        } while (result == null);
+        return result;
+    }
+
+    /**
+     * Advances a deterministic economic day by at most workBudget realm/caravan items.
+     * The order is identical to tick(): production, expired ambushes, caravans, then AI trade.
+     * Returns null while work remains, otherwise the completed day's event list.
+     */
+    public List<String> advanceDay(int day, Collection<String> realms, int workBudget) {
+        if (workBudget <= 0) return null;
+        if (activeDay == null) beginDay(day, realms);
+        else if (activeDay.day != day)
+            throw new IllegalStateException("Trade day " + activeDay.day + " must finish before " + day);
+
+        int remaining = workBudget;
+        while (true) {
+            switch (activeDay.phase) {
+                case 0 -> {
+                    if (activeDay.realmCursor >= activeDay.realms.size()) {
+                        activeDay.phase = 1;
+                        continue;
+                    }
+                    if (remaining <= 0) return null;
+                    processRealm(activeDay.realms.get(activeDay.realmCursor++));
+                    remaining--;
+                }
+                case 1 -> {
+                    if (!activeDay.shocksAdvanced) {
+                        shocks.removeIf(shock -> --shock.days <= 0);
+                        activeDay.shocksAdvanced = true;
+                    }
+                    if (activeDay.ambushCursor >= activeDay.ambushes.size()) {
+                        activeDay.phase = 2;
+                        continue;
+                    }
+                    if (remaining <= 0) return null;
+                    processAmbush(activeDay.ambushes.get(activeDay.ambushCursor++), activeDay);
+                    remaining--;
+                }
+                case 2 -> {
+                    if (activeDay.caravanCursor >= activeDay.caravans.size()) {
+                        activeDay.phase = 3;
+                        continue;
+                    }
+                    if (remaining <= 0) return null;
+                    processCaravan(activeDay.caravans.get(activeDay.caravanCursor++), activeDay);
+                    remaining--;
+                }
+                case 3 -> {
+                    if (activeDay.aiCursor >= activeDay.realms.size()) {
+                        activeDay.phase = 4;
+                        continue;
+                    }
+                    if (remaining <= 0) return null;
+                    String realm = activeDay.realms.get(activeDay.aiCursor++);
+                    if (market(realm).autoTrade) {
+                        String event = aiTrade(realm, day);
+                        if (event != null) activeDay.events.add(event);
+                    }
+                    remaining--;
+                }
+                default -> {
+                    List<String> completed = List.copyOf(activeDay.events);
+                    activeDay = null;
+                    activeTickRaces = null;
+                    activeTickTerrain = null;
+                    activeTickConsumption = null;
+                    return completed;
+                }
+            }
+        }
+    }
+
+    public boolean hasPendingDay() { return activeDay != null; }
+
+    /** Drops transient scheduling state; persisted markets/caravans are never modified here. */
+    public void cancelPendingDay() {
+        activeDay = null;
+        activeTickRaces = null;
+        activeTickTerrain = null;
+        activeTickConsumption = null;
+    }
+
+    private void beginDay(int day, Collection<String> realms) {
+        List<String> realmSnapshot = realms == null ? List.of() : new ArrayList<>(realms);
+        activeTickRaces = new HashMap<>(DemoApi.races(realmSnapshot));
         // Mark empty censuses explicitly too: otherwise every good lookup would
-        // re-run the legacy provider for an uninhabited realm during this same tick.
-        if (realms != null) for (String realm : realms)
+        // re-run the legacy provider for an uninhabited realm during this same day.
+        for (String realm : realmSnapshot)
             if (realm != null && !realm.isBlank())
                 activeTickRaces.putIfAbsent(realm, Map.of("human", 1.0));
         activeTickTerrain = new HashMap<>();
         activeTickConsumption = new HashMap<>();
-        try {
-            return tickWithSnapshot(day, realms);
-        } finally {
-            activeTickRaces = null;
-            activeTickTerrain = null;
-            activeTickConsumption = null;
-        }
+        activeDay = new DaySession(day, realmSnapshot, ambushes.values(), caravans.values());
     }
 
-    private List<String> tickWithSnapshot(int day, Collection<String> realms) {
-        List<String> ev = new ArrayList<>();
-        for (String r : realms) {
-            Market m = market(r);
-            for (TradeDefs.Good g : defs.goods.values()) {
-                double cap = Math.max(60, consumption(r, g) * 40);
-                double v = m.stock.getOrDefault(g.id(), 0.0) + production(r, g) - consumption(r, g);
-                m.stock.put(g.id(), Math.max(0, Math.min(cap, v)));
-            }
-            capital.putIfAbsent(r, START_CAPITAL * hooks.size(r) / 100.0);
+    private void processRealm(String realm) {
+        Market market = market(realm);
+        for (TradeDefs.Good good : defs.goods.values()) {
+            double cap = Math.max(60, consumption(realm, good) * 40);
+            double value = market.stock.getOrDefault(good.id(), 0.0)
+                    + production(realm, good) - consumption(realm, good);
+            market.stock.put(good.id(), Math.max(0, Math.min(cap, value)));
         }
-        shocks.removeIf(s -> --s.days <= 0);
-        for (Ambush a : new ArrayList<>(ambushes.values())) {
-            if (day < a.expires) continue;
-            ambushes.remove(a.id);
-            log(day, "бандиты увезли добычу каравана " + a.caravan + ": груз пропал");
-            ev.add("ambush:" + a.id + ":expired");
+        capital.putIfAbsent(realm, START_CAPITAL * hooks.size(realm) / 100.0);
+    }
+
+    private void processAmbush(Ambush ambush, DaySession session) {
+        if (session.day < ambush.expires) return;
+        ambushes.remove(ambush.id);
+        log(session.day, "бандиты увезли добычу каравана " + ambush.caravan + ": груз пропал");
+        session.events.add("ambush:" + ambush.id + ":expired");
+    }
+
+    private void processCaravan(Caravan caravan, DaySession session) {
+        int day = session.day;
+        if (!caravan.status.equals("в пути")) {
+            if (day - caravan.started > caravan.total + 20) caravans.remove(caravan.id);
+            return;
         }
-        for (Caravan c : new ArrayList<>(caravans.values())) {
-            if (!c.status.equals("в пути")) { if (day - c.started > c.total + 20) caravans.remove(c.id); continue; }
-            if (hooks.atWar(c.from, c.to)) { returnHome(c, day, "война"); ev.add("caravan:" + c.id + ":war"); continue; }
-            double p = hooks.danger(c.from, c.to) * Math.max(0.2, 1 - c.guards * 0.08);
-            if (c.cargo.keySet().stream().anyMatch(id -> defs.goods.get(id) != null && defs.goods.get(id).contraband())) p *= 1.5;
-            if (rng.nextDouble() < p) {
-                Ambush a = rob(c, day);
-                ev.add("caravan:" + c.id + ":robbed");
-                if (a != null) ev.add("ambush:" + a.id + ":new");
-                continue;
-            }
-            if (c.guards > 0) spend(c.owner, c.from, c.guards * GUARD_COST);
-            if (--c.left <= 0) { arrive(c, day); ev.add("caravan:" + c.id + ":" + c.status); }
+        if (hooks.atWar(caravan.from, caravan.to)) {
+            returnHome(caravan, day, "война");
+            session.events.add("caravan:" + caravan.id + ":war");
+            return;
         }
-        for (String r : realms) if (market(r).autoTrade) { String s = aiTrade(r, day); if (s != null) ev.add(s); }
-        return ev;
+        double chance = hooks.danger(caravan.from, caravan.to) * Math.max(0.2, 1 - caravan.guards * 0.08);
+        if (caravan.cargo.keySet().stream().anyMatch(id -> defs.goods.get(id) != null
+                && defs.goods.get(id).contraband())) chance *= 1.5;
+        if (rng.nextDouble() < chance) {
+            Ambush ambush = rob(caravan, day);
+            session.events.add("caravan:" + caravan.id + ":robbed");
+            if (ambush != null) session.events.add("ambush:" + ambush.id + ":new");
+            return;
+        }
+        if (caravan.guards > 0) spend(caravan.owner, caravan.from, caravan.guards * GUARD_COST);
+        if (--caravan.left <= 0) {
+            arrive(caravan, day);
+            session.events.add("caravan:" + caravan.id + ":" + caravan.status);
+        }
     }
 
     private void log(int day, String text) { chronicle.add("День " + day + ": " + text); if (chronicle.size() > 120) chronicle.remove(0); }
