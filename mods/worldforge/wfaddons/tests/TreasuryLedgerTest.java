@@ -546,7 +546,7 @@ public final class TreasuryLedgerTest {
                     "treasury archive durably publishes a contiguous segment and advances its checkpoint");
             ok(archive.append(segmentSource.journal()) && archive.readAll().size() == segmentSource.journalSize(),
                     "treasury archive accepts an identical retry without duplicating history");
-            java.nio.file.Files.writeString(archiveDir.resolve(".treasury-segment-crash.tmp"), "{\\"format\\":");
+            java.nio.file.Files.writeString(archiveDir.resolve(".treasury-segment-crash.tmp"), "{\"format\":");
             TreasuryJournalArchive reopenedArchive = new TreasuryJournalArchive(archiveDir, 1);
             ok(reopenedArchive.nextSequence() == 4
                             && reopenedArchive.readAll().equals(segmentSource.journal()),
