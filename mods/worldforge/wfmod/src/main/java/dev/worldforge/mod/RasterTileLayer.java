@@ -14,6 +14,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
+import java.util.concurrent.Semaphore;
 
 /**
  * PNG-backed raster with on-demand rectangular decoding and a strictly bounded tile cache.
@@ -25,6 +26,8 @@ import java.util.concurrent.FutureTask;
 final class RasterTileLayer {
     private static final int TILE_SIZE = 256;
     private static final int MAX_CACHED_TILES = 12;
+    /** Chunk workers may request tiles concurrently; only two PNG decodes may consume CPU at once. */
+    private static final Semaphore DECODE_PERMITS = new Semaphore(2);
 
     private final byte[] png;
     private final int width;
@@ -78,23 +81,44 @@ final class RasterTileLayer {
                 task = new FutureTask<>(() -> decodeTile(originX, originZ));
                 cache.put(key, task);
                 run = true;
-                while (cache.size() > MAX_CACHED_TILES) {
-                    Long eldest = cache.keySet().iterator().next();
-                    cache.remove(eldest);
-                }
+            }
+            trimCompletedTiles();
+        }
+        if (run) {
+            DECODE_PERMITS.acquireUninterruptibly();
+            try {
+                task.run();
+            } finally {
+                DECODE_PERMITS.release();
             }
         }
-        if (run) task.run();
         try {
             Tile tile = task.get();
+            synchronized (cache) { trimCompletedTiles(); }
             return tile.samples[(z - tile.originZ) * tile.width + (x - tile.originX)] & 0xFFFF;
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Interrupted while decoding " + label, interrupted);
         } catch (ExecutionException failure) {
+            synchronized (cache) { cache.remove(key, task); }
             Throwable cause = failure.getCause();
             throw new IllegalStateException("Unable to decode tile from " + label,
                     cause == null ? failure : cause);
+        }
+    }
+
+    /** Evict only finished tiles. In-flight decodes remain shared by all requesting chunk workers. */
+    private void trimCompletedTiles() {
+        while (cache.size() > MAX_CACHED_TILES) {
+            Long removable = null;
+            for (Map.Entry<Long, FutureTask<Tile>> entry : cache.entrySet()) {
+                if (entry.getValue().isDone()) {
+                    removable = entry.getKey();
+                    break;
+                }
+            }
+            if (removable == null) return;
+            cache.remove(removable);
         }
     }
 

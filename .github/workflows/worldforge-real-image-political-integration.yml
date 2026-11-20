@@ -47,7 +47,7 @@ jobs:
           $out = Join-Path $env:RUNNER_TEMP "maqan-real-map"
           $classes = Join-Path $out "classes"
           New-Item -ItemType Directory -Force -Path $classes | Out-Null
-          javac -encoding UTF-8 -d $classes mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/Json.java mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/Noise.java mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/RegionData.java mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/TitleData.java mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/MapData.java mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/TerrainSampler.java mods/worldforge/wfaddons/tools/image-worldgen/ImageWorldMapCompatibilityTest.java
+          javac -encoding UTF-8 -d $classes mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/Json.java mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/Noise.java mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/RegionData.java mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/TitleData.java mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/MapData.java mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/RasterTileLayer.java mods/worldforge/wfmod/src/main/java/dev/worldforge/mod/TerrainSampler.java mods/worldforge/wfaddons/tools/image-worldgen/ImageWorldMapCompatibilityTest.java
           if ($LASTEXITCODE -ne 0) { throw "Production map compatibility compile failed" }
           java -cp $classes dev.worldforge.mod.ImageWorldMapCompatibilityTest $out real-map
           if ($LASTEXITCODE -ne 0) { throw "Actual map failed production MapData integration" }
