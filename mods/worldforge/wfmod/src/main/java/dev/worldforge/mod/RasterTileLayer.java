@@ -71,6 +71,10 @@ final class RasterTileLayer {
         int tileX = x / TILE_SIZE;
         int tileZ = z / TILE_SIZE;
         long key = ((long) tileZ << 32) | (tileX & 0xffff_ffffL);
+
+        // Reserve capacity BEFORE publishing a new in-flight task. Otherwise many chunk
+        // workers can enqueue an unbounded number of FutureTasks while only two decode.
+        DECODE_PERMITS.acquireUninterruptibly();
         FutureTask<Tile> task;
         boolean run = false;
         synchronized (cache) {
@@ -84,8 +88,9 @@ final class RasterTileLayer {
             }
             trimCompletedTiles();
         }
+        if (!run) DECODE_PERMITS.release();
+
         if (run) {
-            DECODE_PERMITS.acquireUninterruptibly();
             try {
                 task.run();
             } finally {
