@@ -270,10 +270,21 @@ public class WorldForgeMod {
             treasuryArchive.appendAll(ledger.entriesFromSequence(archiveNext));
         if (treasuryArchive.nextSequence() != ledger.nextSequence())
             throw new IOException("Treasury shadow archive did not reach the canonical ledger sequence");
-        treasuryCheckpoints.publish(TreasuryLedgerSnapshot.capture(ledger), treasuryArchive);
-        mirroredTreasuryVersion = ledger.mutationVersion();
-        LOGGER.info("WorldForge treasury: shadow archive synced nextSequence={} accounts={} mutationVersion={}",
-                treasuryArchive.nextSequence(), ledger.accountCount(), mirroredTreasuryVersion);
+        try {
+            long archiveNext = treasuryArchive.nextSequence();
+            if (archiveNext > ledger.nextSequence())
+                throw new IOException("Treasury shadow archive is ahead of the canonical ledger");
+            if (archiveNext < ledger.nextSequence())
+                treasuryArchive.appendAll(ledger.entriesFromSequence(archiveNext));
+            if (treasuryArchive.nextSequence() != ledger.nextSequence())
+                throw new IOException("Treasury shadow archive did not reach the canonical ledger sequence");
+            treasuryCheckpoints.publish(TreasuryLedgerSnapshot.capture(ledger), treasuryArchive);
+            mirroredTreasuryVersion = ledger.mutationVersion();
+            LOGGER.info("WorldForge treasury: shadow archive synced nextSequence={} accounts={} mutationVersion={}",
+                    treasuryArchive.nextSequence(), ledger.accountCount(), mirroredTreasuryVersion);
+        } catch (RuntimeException invalidState) {
+            throw new IOException("Treasury shadow synchronization rejected inconsistent ledger state", invalidState);
+        }
     }
 
     public static Map<String, MapData> loadedMaps() {
