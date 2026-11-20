@@ -3,6 +3,7 @@ package dev.worldforge.tests;
 import dev.worldforge.people.Character;
 import dev.worldforge.people.CharacterRegistry;
 import dev.worldforge.people.FamilyPlanning;
+import dev.worldforge.people.CharacterStats;
 
 /** Deterministic regression tests for low-growth, persisted pregnancy. */
 public final class FamilyPlanningTest {
@@ -26,8 +27,8 @@ public final class FamilyPlanningTest {
                 if (pregnantMother == null) { pregnantMother = mother; pregnantFather = father; }
             }
         }
-        check(conceptions >= 25 && conceptions <= 120,
-                "annual conception rate remains low and deterministic: " + conceptions + "/1000");
+        check(conceptions >= 350 && conceptions <= 500,
+                "annual conception rate is accessible and deterministic: " + conceptions + "/1000");
 
         check(pregnantMother != null, "at least one couple conceives in deterministic sample");
         Character mother = pregnantMother, father = pregnantFather;
@@ -42,6 +43,16 @@ public final class FamilyPlanningTest {
         check(!FamilyPlanning.isPregnant(mother), "pregnancy state is cleared after birth");
         check(((Number) mother.props.get("family.last_birth_year")).intValue() == year + 1,
                 "birth cooldown is persisted");
+
+        Character fertile = registry.create("Fertile", "house-f", "culture", "f", year - 25);
+        check(CharacterStats.addTrait(fertile, "fecund"), "rare fecund trait is a valid canonical character trait");
+        check(CharacterStats.traits(fertile).contains("fecund"), "fecund trait persists in the character profile");
+        Character fertilePartner = registry.create("FertilePartner", "house-f", "culture", "m", year - 27);
+        registry.marry(fertile.id, fertilePartner.id, year);
+        boolean fertileConceived = false;
+        for (long seed = 1; seed < 30 && !fertileConceived; seed++)
+            fertileConceived = FamilyPlanning.tryConceive(fertile, fertilePartner, year, 50_000L, seed);
+        check(fertileConceived, "fecund trait materially improves conception chance");
 
         Character betrothedA = registry.create("BetrothedA", "house-b", "culture", "f", year - 22);
         Character betrothedB = registry.create("BetrothedB", "house-b", "culture", "m", year - 23);
