@@ -396,7 +396,7 @@ public final class TreasuryLedgerTest {
                 "checksummed treasury segment round-trips the complete ordered double-entry audit");
         boolean checksumRejected = false;
         try {
-            TreasuryJournalSegment.decode(segmentJson.replace((char) 34 + "lastSequence" + (char) 34 + ":3", (char) 34 + "lastSequence" + (char) 34 + ":4"));
+            TreasuryJournalSegment.decode(segmentJson.replace("archived transfer", "altered transfer"));
         } catch (IllegalArgumentException expected) { checksumRejected = expected.getMessage().contains("checksum"); }
         ok(checksumRejected, "treasury segment rejects payload tampering before archive replay");
         boolean emptySegmentRejected = false;
@@ -405,7 +405,7 @@ public final class TreasuryLedgerTest {
         ok(emptySegmentRejected, "treasury segment rejects empty archive ranges");
         boolean sequenceGapRejected = false;
         try {
-            TreasuryJournalSegment.decode(segmentJson.replace("\\"lastSequence\\":3", "\\"lastSequence\\":4"));
+            TreasuryJournalSegment.decode(segmentJson.replace((char) 34 + "lastSequence" + (char) 34 + ":3", (char) 34 + "lastSequence" + (char) 34 + ":4"));
         } catch (IllegalArgumentException expected) { sequenceGapRejected = true; }
         ok(sequenceGapRejected, "treasury segment rejects altered sequence bounds");
 
