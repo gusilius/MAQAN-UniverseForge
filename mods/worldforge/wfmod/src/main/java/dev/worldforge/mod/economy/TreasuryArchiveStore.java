@@ -31,20 +31,54 @@ public final class TreasuryArchiveStore {
         Path manifest = root.resolve("checkpoints").resolve("CURRENT.json");
         if (Files.isRegularFile(manifest)) {
             TreasuryCheckpointStore.Checkpoint checkpoint = checkpoints.load(archive);
+            // During the old shadow period the legacy JSON could be committed while shadow
+            // synchronization failed. If that intact legacy ledger is ahead, import only
+            // its verified suffix instead of silently rolling those transactions back.
+            TreasuryLedger legacy;
+            try { legacy = readLegacyIfValid(legacyJson); }
+            catch (IOException invalidLegacyBackup) { legacy = null; }
+            if (legacy != null && legacy.nextSequence() > archive.nextSequence()) {
+                verifyLegacyPrefix(legacy, archive);
+                archive.appendAll(legacy.entriesFromSequence(archive.nextSequence()));
+                if (archive.nextSequence() != legacy.nextSequence())
+                    throw new IOException("Recovered legacy treasury suffix did not reach its sequence boundary");
+                checkpoints.publish(TreasuryLedgerSnapshot.capture(legacy), archive);
+                checkpoint = checkpoints.load(archive);
+            }
             return TreasuryLedger.restoreFromCheckpoint(checkpoint, archive);
         }
 
-        TreasuryLedger legacy;
-        try {
-            legacy = legacyJson != null && Files.isRegularFile(legacyJson)
-                    ? TreasuryLedger.fromJson(Files.readString(legacyJson))
-                    : new TreasuryLedger();
-        } catch (RuntimeException invalidLegacy) {
-            throw new IOException("Legacy treasury JSON is invalid; refusing to replace it", invalidLegacy);
-        }
+        TreasuryLedger legacy = readLegacyIfValid(legacyJson);
+        if (legacy == null) legacy = new TreasuryLedger();
         TreasuryArchiveMigration.migrate(legacy, archive, checkpoints);
         TreasuryCheckpointStore.Checkpoint committed = checkpoints.load(archive);
         return TreasuryLedger.restoreFromCheckpoint(committed, archive);
+    }
+
+    private static TreasuryLedger readLegacyIfValid(Path legacyJson) throws IOException {
+        if (legacyJson == null || !Files.isRegularFile(legacyJson)) return null;
+        try {
+            return TreasuryLedger.fromJson(Files.readString(legacyJson));
+        } catch (RuntimeException invalidLegacy) {
+            throw new IOException("Legacy treasury JSON is invalid; refusing to replace it", invalidLegacy);
+        }
+    }
+
+    private static void verifyLegacyPrefix(TreasuryLedger legacy, TreasuryJournalArchive archive) throws IOException {
+        java.util.Iterator<TreasuryLedger.Entry> expected = legacy.journal().iterator();
+        long[] compared = {0};
+        try {
+            archive.forEachEntryFrom(1, entry -> {
+                if (!expected.hasNext() || !expected.next().equals(entry))
+                    throw new IllegalStateException("Legacy treasury history conflicts with the committed archive prefix");
+                compared[0]++;
+            });
+        } catch (RuntimeException conflict) {
+            throw new IOException("Legacy treasury history does not match the committed archive prefix", conflict);
+        }
+        if (compared[0] != archive.nextSequence() - 1)
+            throw new IOException("Legacy treasury does not contain the complete committed archive prefix");
+    }
     }
 
     /** Appends only the not-yet-archived suffix and publishes CURRENT last. */

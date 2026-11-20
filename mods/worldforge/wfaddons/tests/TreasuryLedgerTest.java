@@ -791,15 +791,15 @@ public final class TreasuryLedgerTest {
                             && java.nio.file.Files.isRegularFile(storeRoot.resolve("treasury-store/checkpoints/CURRENT.json")),
                     "canonical treasury store migrates legacy JSON once and leaves the source untouched");
             migrated.open("store:later", "store:later", "silver", 40);
-            TreasuryJournalArchive storeArchive = new TreasuryJournalArchive(storeRoot.resolve("treasury-store/archive"), 1);
-            storeArchive.appendAll(migrated.entriesFromSequence(canonicalStore.nextSequence()));
+            String newerLegacyBytes = migrated.toJson();
+            java.nio.file.Files.writeString(legacyFile, newerLegacyBytes);
             TreasuryArchiveStore reopenedStore = new TreasuryArchiveStore(storeRoot.resolve("treasury-store"));
             TreasuryLedger reopenedLedger = reopenedStore.loadOrMigrate(legacyFile);
             ok(reopenedLedger.hasAccount("store:later")
                             && close(reopenedLedger.balance("store:later"), 40)
                             && reopenedLedger.accountCount() == 3
-                            && java.nio.file.Files.readString(legacyFile).equals(legacyBytes),
-                    "canonical treasury startup restores an archived suffix and never rereads legacy JSON");
+                            && java.nio.file.Files.readString(legacyFile).equals(newerLegacyBytes),
+                    "canonical treasury startup imports a newer legacy suffix after an interrupted shadow save");
             reopenedLedger.open("store:final", "store:final", "silver", 5);
             long committedVersion = reopenedStore.save(reopenedLedger);
             TreasuryLedger finalReload = new TreasuryArchiveStore(storeRoot.resolve("treasury-store"))
