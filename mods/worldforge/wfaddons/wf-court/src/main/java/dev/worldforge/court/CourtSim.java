@@ -232,7 +232,8 @@ public final class CourtSim {
             Character f = reg.get(c.spouse);
             int age = y - c.birthYear;
             if (age < 18 || age > 42) continue;
-            long dueDay = number(c.props.get("family.pregnancy.due_day"), -1L);
+            Object dueValue = c.props.get("family.pregnancy.due_day");
+            long dueDay = dueValue instanceof Number n ? n.longValue() : -1L;
             if (dueDay >= 0L && day >= dueDay) {
                 String fatherId = FamilyPlanning.dueFatherId(c, day);
                 Character biologicalFather = fatherId.isBlank() ? null : reg.get(fatherId);
