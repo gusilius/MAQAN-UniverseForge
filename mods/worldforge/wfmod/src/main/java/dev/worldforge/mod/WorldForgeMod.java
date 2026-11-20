@@ -263,13 +263,6 @@ public class WorldForgeMod {
             treasuryArchive = new TreasuryJournalArchive(root.resolve("archive"), 1);
         if (treasuryCheckpoints == null)
             treasuryCheckpoints = new TreasuryCheckpointStore(root.resolve("checkpoints"));
-        long archiveNext = treasuryArchive.nextSequence();
-        if (archiveNext > ledger.nextSequence())
-            throw new IOException("Treasury shadow archive is ahead of the canonical ledger");
-        if (archiveNext < ledger.nextSequence())
-            treasuryArchive.appendAll(ledger.entriesFromSequence(archiveNext));
-        if (treasuryArchive.nextSequence() != ledger.nextSequence())
-            throw new IOException("Treasury shadow archive did not reach the canonical ledger sequence");
         try {
             long archiveNext = treasuryArchive.nextSequence();
             if (archiveNext > ledger.nextSequence())
