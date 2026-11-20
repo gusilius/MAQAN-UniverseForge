@@ -24,8 +24,6 @@ final class NpcSpawner {
     static final double NEAR = SimulationLod.PEOPLE_SPAWN_RADIUS, FAR = SimulationLod.PEOPLE_RETAIN_RADIUS;
     static final int PER_PLAYER = 24;
 
-    private NpcSpawner() {}
-
     private record Target(Character c, Role role, double x, double z, double dist2) {}
     private record SpawnAnchor(double x, double z, List<Target> targets) {}
 
@@ -155,18 +153,18 @@ final class NpcSpawner {
     /** A title holder's immediate family shares the residence and becomes visible with it. */
     private static void addTargetAndFamily(Map<String, Target> targets, CharacterRegistry registry,
                                            Character head, Role role, double x, double z, double distanceSquared) {
-        targets.putIfAbsent(head.id, new Target(head, role.id, role.noble, x, z, distanceSquared));
+        targets.putIfAbsent(head.id, new Target(head, role, x, z, distanceSquared));
         if (!role.family) return;
 
         if (head.spouse != null && !head.spouse.isBlank()) {
             Character spouse = registry.get(head.spouse);
             if (spouse != null && spouse.alive)
-                targets.putIfAbsent(spouse.id, new Target(spouse, role.id + ".family", role.noble, x, z, distanceSquared + 0.01));
+                targets.putIfAbsent(spouse.id, new Target(spouse, role, x, z, distanceSquared + 0.01));
         }
         for (String childId : head.children) {
             Character child = registry.get(childId);
             if (child != null && child.alive)
-                targets.putIfAbsent(child.id, new Target(child, role.id + ".family", role.noble, x, z, distanceSquared + 0.02));
+                targets.putIfAbsent(child.id, new Target(child, role, x, z, distanceSquared + 0.02));
         }
     }
 
