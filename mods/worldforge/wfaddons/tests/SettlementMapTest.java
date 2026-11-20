@@ -118,6 +118,28 @@ public final class SettlementMapTest {
         catch (IllegalArgumentException expected) { disconnectedRejected = true; }
         ok(disconnectedRejected, "logistics cannot connect warehouses on separate road components");
 
+        TreasuryService.replace(new TreasuryLedger());
+        Settlement periodicEconomy = new Settlement("periodic_economy_test", "Periodic economy test", defs);
+        periodicEconomy.setCanonicalPopulation(100);
+        periodicEconomy.add(Defs.SILVER, 1000);
+        long journalBeforeAccrual = TreasuryService.current().journalSize();
+        periodicEconomy.tick(60); // one world day in the settlement clock
+        ok(TreasuryService.current().journalSize() == journalBeforeAccrual
+                        && Math.abs(TreasuryService.current().balance("settlement:periodic_economy_test") - 1000) < 1e-8,
+                "taxes and operating costs accrue without writing treasury entries every simulation step");
+        Settlement periodicReloaded = Settlement.fromJson(periodicEconomy.toJson(), defs);
+        periodicReloaded.tick(1742); // close the first 30-day accounting period
+        List<TreasuryLedger.Entry> periodicEntries = TreasuryService.current().entriesForAccount(
+                "settlement:periodic_economy_test");
+        ok(periodicEntries.size() == journalBeforeAccrual + 2
+                        && periodicEntries.stream().filter(entry -> entry.category().equals("population-tax")).count() == 1
+                        && periodicEntries.stream().filter(entry -> entry.category().startsWith("building-upkeep:")).count() == 1,
+                "one period produces one tax receipt and one aggregate upkeep receipt per settlement category");
+        ok(periodicReloaded.amount(Defs.SILVER) < 1000
+                        && periodicReloaded.amount(Defs.SILVER) > 0,
+                "periodic postings reconcile reserved operating expenses against the persisted treasury balance");
+
+        TreasuryService.replace(new TreasuryLedger());
         Settlement funded = new Settlement("treasury_settlement_test", "Treasury settlement test", defs);
         funded.add(Defs.SILVER, 100);
         ok(TreasuryService.current().balance("settlement:treasury_settlement_test") == 100,
