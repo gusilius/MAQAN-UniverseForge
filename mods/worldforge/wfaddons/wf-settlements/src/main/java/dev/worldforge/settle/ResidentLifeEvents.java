@@ -32,8 +32,8 @@ public final class ResidentLifeEvents {
         YearSession(CharacterRegistry registry, int year) {
             this.year = year;
             this.worldDay = dev.worldforge.mod.api.WorldForgeApi.clock().dayNumber();
-            this.people = new ArrayList<>(registry.all());
-            this.initialSize = people.size();
+            this.people = registry.all();
+            this.initialSize = registry.size();
         }
     }
 
@@ -79,9 +79,9 @@ public final class ResidentLifeEvents {
         int remaining = residentBudget;
         while (remaining > 0 && session.phase < 4) {
             if (session.phase == 0 && session.cursor >= session.initialSize) {
-                // Include births in the childhood pass, matching the previous full-year behavior.
+                // Newborns are appended to the canonical registry and tracked separately;
+                // no population-sized snapshot or duplicate reference list is allocated.
                 for (Character newborn : session.newborns) {
-                    session.people.add(newborn);
                     indexChild(session, newborn);
                     registry.refreshLifeStages(List.of(newborn), session.year);
                 }
@@ -89,15 +89,16 @@ public final class ResidentLifeEvents {
                 session.cursor = 0;
                 continue;
             }
-            List<Character> work = session.phase == 3 ? session.eligibleSingles : session.people;
-            if (session.cursor >= work.size()) {
+            int workSize = session.phase == 3 ? session.eligibleSingles.size()
+                    : session.initialSize + (session.phase >= 1 ? session.newborns.size() : 0);
+            if (session.cursor >= workSize) {
                 session.phase++;
                 session.cursor = 0;
                 continue;
             }
-            int end = Math.min(work.size(), session.cursor + remaining);
-            List<Character> batch = work.subList(session.cursor, end);
+            int end = Math.min(workSize, session.cursor + remaining);
             if (session.phase == 0) {
+                List<Character> batch = session.people.subList(session.cursor, end);
                 registry.refreshLifeStages(batch, session.year);
                 for (Character person : batch) {
                     indexChild(session, person);
@@ -108,10 +109,11 @@ public final class ResidentLifeEvents {
                         session.eligibleSingles.add(person);
                 }
             } else if (session.phase == 1) {
-                for (Character child : batch)
-                    advanceChildhoodPerson(registry, child, session.year, session.childrenByParent);
+                for (int index = session.cursor; index < end; index++)
+                    advanceChildhoodPerson(registry, personAt(session, index), session.year, session.childrenByParent);
             } else if (session.phase == 2) {
-                for (Character person : batch) processMaritalConflict(registry, person, session.year);
+                for (int index = session.cursor; index < end; index++)
+                    processMaritalConflict(registry, personAt(session, index), session.year);
             } else {
                 for (int i = session.cursor; i < end; i++)
                     processRelationshipReview(registry, session.eligibleSingles, i, session.year);
@@ -129,6 +131,11 @@ public final class ResidentLifeEvents {
             return true;
         }
         return false;
+    }
+
+    private static Character personAt(YearSession session, int index) {
+        return index < session.initialSize ? session.people.get(index)
+                : session.newborns.get(index - session.initialSize);
     }
 
     private static void indexChild(YearSession session, Character person) {

@@ -16,6 +16,9 @@ public final class ResidentLifeSchedulerTest {
                     i % 2 == 0 ? "m" : "f", 1980);
             person.props.put("population.birth_year", 1980);
         }
+        java.util.List<Character> liveView = registry.all();
+        registry.create("Late arrival", "House late", "test", "f", 1982);
+        check(liveView.size() == 12, "registry exposes a stable append-only view without copying the population");
         int calls = 0;
         boolean complete = false;
         while (!complete && calls < 100) {

@@ -25,6 +25,7 @@ public final class CharacterRegistry {
     }
 
     private final Map<String, Character> byId = new LinkedHashMap<>();
+    private final List<Character> ordered = new ArrayList<>();
     private final List<Listener> listeners = new ArrayList<>();
     private CharacterAuthority authority;
     private int next = 1;
@@ -95,10 +96,13 @@ public final class CharacterRegistry {
 
     public Character get(String id) { return byId.get(id); }
 
-    /** Read-only view: callers must use registry operations so lifecycle events cannot be bypassed. */
-    public Collection<Character> all() { return Collections.unmodifiableCollection(byId.values()); }
+    /**
+     * Read-only append-only insertion-order view. Existing entries never move or disappear;
+     * callers may retain this view and process a captured size in bounded batches.
+     */
+    public List<Character> all() { return Collections.unmodifiableList(ordered); }
 
-    public int size() { return byId.size(); }
+    public int size() { return ordered.size(); }
 
     public Character create(String name, String house, String culture, String gender, int birthYear) {
         try (MutationBatch ignored = beginMutationBatch()) {
@@ -120,6 +124,7 @@ public final class CharacterRegistry {
         // New Characters start at their creation day; they must not catch up before they existed.
         c.props.put("population.last_simulated_world_day", Long.toString(WorldForgeApi.clock().dayNumber()));
         byId.put(c.id, c);
+        ordered.add(c);
         markMembershipMutation();
         for (Listener l : listeners) l.born(c);
         publish(c, new LifecycleEvent(LifecycleKind.BORN, c.id, "", "", birthYear));
@@ -658,6 +663,12 @@ public final class CharacterRegistry {
         decoded.fromJson(Json.write(snapshot), identityNamespace);
         Character restored = decoded.all().iterator().next();
         Character previous = byId.put(restored.id, restored);
+        if (previous == null) ordered.add(restored);
+        else {
+            for (int index = 0; index < ordered.size(); index++) {
+                if (ordered.get(index) == previous) { ordered.set(index, restored); break; }
+            }
+        }
         if (restored.id.matches("c[0-9]+")) {
             try { next = Math.max(next, Math.addExact(Integer.parseInt(restored.id.substring(1)), 1)); }
             catch (NumberFormatException ignored) { /* non-numeric legacy id */ }
@@ -818,6 +829,8 @@ public final class CharacterRegistry {
         }
         byId.clear();
         byId.putAll(loaded);
+        ordered.clear();
+        ordered.addAll(loaded.values());
         next = safeNext;
         markMembershipMutation();
         recordDomainMutation();
